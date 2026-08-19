@@ -174,6 +174,7 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:block-face-neighbor
            #:block-face-tile
            #:*block-atlas-tile-domain*
+           #:*block-atlas-tile-capacity*
            #:block-atlas-tile-count
            #:block-atlas-tile-offset
            #:block-atlas-tile-at-offset

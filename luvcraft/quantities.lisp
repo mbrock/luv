@@ -27,6 +27,13 @@
 (math:define-quantity :texture-uv :kind :normalized-coordinate
   :character :point
   :components (:texture-u :texture-v))
+(math:define-quantity :tile-local-uv :kind :normalized-coordinate
+  :character :point
+  :components (:tile-local-u :tile-local-v))
+(math:define-quantity :atlas-tile-offset :kind :sample-count
+  :non-negative-p t)
+(math:define-quantity :atlas-texel-width :kind :sample-count
+  :non-negative-p t)
 (math:define-quantity :shadow-depth :kind :normalized-coordinate
   :character :point)
 (math:define-quantity :sun-disc-coordinate :kind :normalized-coordinate)
@@ -67,6 +74,8 @@
 ;;; in-plane boundaries.  Signed, because a concave edge and a convex one are
 ;;; opposite shapings of the same surface rather than different amounts of one.
 (math:define-quantity :edge-shaping :kind :control-signal)
+(math:define-quantity :packed-edge-shaping :kind :control-signal
+  :non-negative-p t)
 (math:define-quantity :shadow-filter-radius :kind :sample-count
   :non-negative-p t)
 (math:define-quantity :view-distance :kind :lattice-coordinate

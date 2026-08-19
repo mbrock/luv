@@ -113,6 +113,7 @@
     (ok (search "texture2d<float> block_atlas [[texture(0)]]" source))
     (ok (search "sampler block_sampler [[sampler(1)]]" source))
     (ok (search "constant FrameState& frame_state [[buffer(2)]]" source))
+    (ok (search "tile_offset_input [[user(locn8), flat]]" source))
     (ok (search "depth2d<float> shadow_map [[texture(3)]]" source))
     (ok (search "shadow_map.sample_compare" source))
     (ok (search "result.color_output = rgba;" source))))
@@ -304,6 +305,7 @@
          "result.clip_position = float4((clip).x, -(clip).y, (clip).z, (clip).w);"
          source))
     (ok (search "result.shadow_depth_output = shadow_depth;" source))
+    (ok (search "tile_offset_output [[user(locn8), flat]]" source))
     (ok (gethash expression
                  (msl:msl-document-expression-occurrences document)))))
 
@@ -362,7 +364,7 @@
          "World position is a point-valued vector in the lattice coordinate kind, measured in cell units, and dimensionless."
          source))
     (ok (search
-         "The xy lanes hold texture uv as a point-valued vector"
+         "The xy lanes hold tile local uv as a point-valued vector"
          source))
     (ok (search "This numeric value has no quantity annotation." source))
     (ok (search

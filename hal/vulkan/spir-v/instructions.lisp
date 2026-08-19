@@ -412,6 +412,7 @@
   (block 2)
   (array-stride 6)
   (built-in 11)
+  (flat 14)
   (non-writable 24)
   (per-primitive-ext 5271)
   (location 30)

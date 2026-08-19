@@ -281,7 +281,7 @@ reproduces the prior image byte for byte at
 duplicate tile name is an error at definition time rather than a silently
 overridden method; and =make smoke= renders the same image byte for byte.
 
-* TODO Compute atlas coordinates in the shader
+* DONE Compute atlas coordinates in the shader
 :PROPERTIES:
 :ID: YLZYQJ
 :END:
@@ -290,10 +290,21 @@ overridden method; and =make smoke= renders the same image byte for byte.
 in the block vertex, and move the atlas arithmetic of #4SIKJM into the block
 world shaders, with the atlas width as a uniform.
 
-*Evidence.* The capacity constant is baked into every vertex, so the atlas
-cannot grow without invalidating every mesh; the headroom scheme exists to
-avoid exactly that.  Greedy meshing, the largest available reduction in mesh
-size, is not expressible while atlas coordinates are baked.
+*Evidence.* The block vertex now carries tile-local UV, the dense tile offset
+under the atlas mapping, and one base-three scalar for its four edge classes.
+That packing shrinks the vertex from sixteen floats to fourteen.  The vertex
+shader reconstructs atlas UV from the inset tile-local coordinate, the tile
+offset, and the actual renderer-owned texture width in the frame uniform; the
+tile identity also crosses the stage boundary with explicit flat interpolation.
+
+Atlas capacity is a live materialization policy rather than a constant.
+=refresh-block-atlas= republishes paint in place when the extent agrees; after
+a capacity change it transactionally creates wider colour and normal textures,
+discards bind groups naming the old views, and publishes the replacements.
+Existing chunk meshes are untouched.  Both SPIR-V and Metal lower the new flat
+interface explicitly, all generated SPIR-V validates, and the full test suite
+passes.  =make smoke= remains byte-identical at
+=fa11abca777cb86907f660d180480f5476c68c315927e306cfe82b95bc59e785=.
 
 *Done when.* The atlas capacity can be raised in a running image and existing
 chunks keep rendering correctly; the vertex is no larger than the sixteen

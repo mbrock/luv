@@ -1584,12 +1584,15 @@
             (luv.arithmetic:value-declaration-for :frame-uniform-data)))
     (ok (typep data
                (luv.arithmetic:declaration-representation-type declaration)))
-    (ok (= 72 (luv.arithmetic:quantity-layout-extent host-layout)))
+    (ok (= 76 (luv.arithmetic:quantity-layout-extent host-layout)))
     (ok (luv.arithmetic:quantity-layout= host-layout shader-layout))
-    (ok (= 288 (luvcraft::block-world-camera-uniform-size session)))
+    (ok (= 304 (luvcraft::block-world-camera-uniform-size session)))
+    (ok (= (aref data 56)
+           (* luvcraft::+block-atlas-tile-size+
+              luvcraft::*block-atlas-tile-capacity*)))
     ;; Four dense matrix rows are representation for the declared
     ;; :WORLD-TO-SHADOW map, not sixteen falsely homogeneous quantities.
-    (loop for position from 56 below 72
+    (loop for position from 60 below 76
           do (ok (null (luv.arithmetic:project-quantity-layout
                         host-layout (list position)))))))
 
@@ -1661,14 +1664,14 @@
          (atlas (make-block-texture-atlas))
          (normal-atlas (make-block-normal-atlas)))
     (ok (equal (array-dimensions atlas)
-               (list 16 (* 16 luvcraft::+block-atlas-tile-capacity+))))
+               (list 16 (* 16 luvcraft::*block-atlas-tile-capacity*))))
     (ok (equal (array-dimensions normal-atlas)
-               (list 16 (* 16 luvcraft::+block-atlas-tile-capacity+))))
+               (list 16 (* 16 luvcraft::*block-atlas-tile-capacity*))))
     (ok (subtypep (array-element-type atlas) '(unsigned-byte 32)))
     (ok (subtypep (array-element-type normal-atlas) '(unsigned-byte 32)))
     ;; Painted tiles fill a prefix of the capacity; the headroom past them
     ;; stays zero, waiting for a live image to define a new material into it.
-    (ok (<= tile-count luvcraft::+block-atlas-tile-capacity+))
+    (ok (<= tile-count luvcraft::*block-atlas-tile-capacity*))
     (ok (zerop (aref atlas 8 (* 16 tile-count))))
     (ok (/= (aref atlas 8 8) (aref atlas 8 (+ 8 (* 3 16)))))
     (ok (/= (aref atlas 8 8) (aref atlas 8 (+ 8 (* 9 16)))))
@@ -1746,6 +1749,21 @@
       (ok (= (length (block-mesh-vertices mesh))
              (* luvcraft::+block-mesh-floats-per-vertex+
                 (block-mesh-vertex-count mesh)))))))
+
+(deftest block-atlas-capacity-is-a-live-materialization-policy
+  (let ((old-capacity luvcraft::*block-atlas-tile-capacity*))
+    (unwind-protect
+         (progn
+           (setf luvcraft::*block-atlas-tile-capacity* (1+ old-capacity))
+           (ok (equal (array-dimensions (make-block-texture-atlas))
+                      (list luvcraft::+block-atlas-tile-size+
+                            (* luvcraft::+block-atlas-tile-size+
+                               (1+ old-capacity)))))
+           (ok (equal (array-dimensions (make-block-normal-atlas))
+                      (list luvcraft::+block-atlas-tile-size+
+                            (* luvcraft::+block-atlas-tile-size+
+                               (1+ old-capacity))))))
+      (setf luvcraft::*block-atlas-tile-capacity* old-capacity))))
 
 (deftest little-world-has-readable-biome-materials
   (let ((source (make-instance 'little-world-source :seed 121))
@@ -2053,7 +2071,19 @@
       (ok (= (length vertices)
              (* (block-mesh-face-count mesh)
                 luvcraft::+block-mesh-floats-per-face+)))
-      (ok (= (array-total-size vertices) (length vertices))))
+      (ok (= (array-total-size vertices) (length vertices)))
+      (ok (= 14 luvcraft::+block-mesh-floats-per-vertex+))
+      ;; Vertex lanes are atlas-independent: local corner coordinates, the
+      ;; tile offset under the atlas mapping, and four base-three edge digits.
+      (loop for offset from 0 below (length vertices)
+            by luvcraft::+block-mesh-floats-per-vertex+
+            do (ok (member (aref vertices (+ offset 3))
+                           '(0.03125 0.96875)))
+               (ok (member (aref vertices (+ offset 4))
+                           '(0.03125 0.96875)))
+               (ok (= (aref vertices (+ offset 12))
+                      (block-atlas-tile-offset :stone)))
+               (ok (= (aref vertices (+ offset 13)) 80.0))))
     ;; Tools may still emit a single semantic face through the exported API;
     ;; the optimized neighborhood object remains an implementation detail.
     (let ((vertices

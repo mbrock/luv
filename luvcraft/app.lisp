@@ -105,14 +105,14 @@
    (title-base :initarg :title-base :initform "luvcraft"
                :reader luvcraft-session-title-base)
    (atlas-texture :initarg :atlas-texture
-                  :reader luvcraft-session-atlas-texture)
-   (atlas-view :initarg :atlas-view :reader luvcraft-session-atlas-view)
+                  :accessor luvcraft-session-atlas-texture)
+   (atlas-view :initarg :atlas-view :accessor luvcraft-session-atlas-view)
    (atlas-sampler :initarg :atlas-sampler
                   :reader luvcraft-session-atlas-sampler)
    (normal-atlas-texture :initarg :normal-atlas-texture
-                         :reader luvcraft-session-normal-atlas-texture)
+                         :accessor luvcraft-session-normal-atlas-texture)
    (normal-atlas-view :initarg :normal-atlas-view
-                      :reader luvcraft-session-normal-atlas-view)
+                      :accessor luvcraft-session-normal-atlas-view)
    ;; The attachments below are the frame's own size rather than the world's,
    ;; so a window resize replaces all of them together.  RENDER-EXTENT records
    ;; the size they were made for; a frame that finds the drawable disagreeing

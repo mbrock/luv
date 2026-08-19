@@ -231,9 +231,7 @@ the right; a positive pitch tips the top away from the viewer."
 
 The box's local x, y, z are those axes; RIGHT UP FORWARD must be a unit
 orthonormal frame, so the face normals come out unit too."
-  (let* ((tile (block-atlas-tile-offset tile))
-         (size +block-atlas-tile-size+)
-         (atlas-width (* size +block-atlas-tile-capacity+)))
+  (let ((tile (block-atlas-tile-offset tile)))
     (dolist (face *block-faces*)
       (let* ((normal (block-face-neighbor face))
              (nx (voxel-direction-dx normal))
@@ -261,13 +259,12 @@ orthonormal frame, so the face normals come out unit too."
                     (push-block-vertex-components
                      vertices
                      (vec3-x point) (vec3-y point) (vec3-z point)
-                     (/ (+ (* tile size) 0.5 (* tile-u (1- size)))
-                        atlas-width)
-                     (/ (+ 0.5 (* tile-v (1- size))) size)
+                     tile-u tile-v
                      shade
                      (vec3-x world-normal) (vec3-y world-normal)
                      (vec3-z world-normal)
                      sky-level block-level emission
+                     tile
                      +block-face-edge-flush+ +block-face-edge-flush+
                      +block-face-edge-flush+ +block-face-edge-flush+))))))))))
   vertices)
@@ -448,22 +445,19 @@ corners are rounded to RADIUS in the RIGHT/UP plane: two flat faces and a
 band of quads around the edge, all wearing TILE stretched once around."
   (let* ((tile (block-atlas-tile-offset tile))
          (outline (rounded-rectangle-outline half-x half-y radius segments))
-         (count (length outline))
-         (size +block-atlas-tile-size+)
-         (atlas-width (* size +block-atlas-tile-capacity+)))
-    (labels ((tile-u (u) (/ (+ (* tile size) 0.5 (* u (1- size))) atlas-width))
-             (tile-v (v) (/ (+ 0.5 (* v (1- size))) size))
-             (world-normal (nx ny nz)
+         (count (length outline)))
+    (labels ((world-normal (nx ny nz)
                (frame-point (make-vec3 0d0 0d0 0d0) right up forward nx ny nz))
              (vertex (x y z normal u v)
                (let ((point (frame-point origin right up forward x y z)))
                  (push-block-vertex-components
                   vertices
                   (vec3-x point) (vec3-y point) (vec3-z point)
-                  (tile-u u) (tile-v v)
+                  u v
                   (critter-face-shade (vec3-y normal))
                   (vec3-x normal) (vec3-y normal) (vec3-z normal)
                   sky-level block-level emission
+                  tile
                   +block-face-edge-flush+ +block-face-edge-flush+
                   +block-face-edge-flush+ +block-face-edge-flush+)))
              (face-uv (x y)

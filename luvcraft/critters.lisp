@@ -622,9 +622,7 @@ place a critter model meets world coordinates."
          (sin-yaw (sin yaw))
          (origin-x (vec3-x position))
          (origin-y (vec3-y position))
-         (origin-z (vec3-z position))
-         (size +block-atlas-tile-size+)
-         (atlas-width (* size +block-atlas-tile-capacity+)))
+         (origin-z (vec3-z position)))
     (dolist (face *block-faces*)
       (let* ((normal (block-face-neighbor face))
              (nx (voxel-direction-dx normal))
@@ -653,11 +651,10 @@ place a critter model meets world coordinates."
                      (+ origin-x (* local-x cos-yaw) (* local-z sin-yaw))
                      (+ origin-y local-y)
                      (+ origin-z (- (* local-z cos-yaw) (* local-x sin-yaw)))
-                     (/ (+ (* tile size) 0.5 (* tile-u (1- size)))
-                        atlas-width)
-                     (/ (+ 0.5 (* tile-v (1- size))) size)
+                     tile-u tile-v
                      shade world-nx ny world-nz
                      sky-level block-level 0.0
+                     tile
                      +block-face-edge-flush+ +block-face-edge-flush+
                      +block-face-edge-flush+ +block-face-edge-flush+))))))))))
   vertices)

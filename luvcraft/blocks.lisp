@@ -306,14 +306,11 @@ kinds through this vocabulary instead of printing CLOS object identities."
 
 (defconstant +block-atlas-tile-size+ 16)
 
-;;; The atlas textures are allocated once per renderer at full capacity,
-;;; while the painted tiles fill a prefix.  UV arithmetic everywhere uses
-;;; the capacity, which never changes over a session's life, so defining a
-;;; new material in a live image and calling REFRESH-BLOCK-ATLAS repaints
-;;; the running game's textures in place: no re-mesh, no new GPU resources,
-;;; no restart.
-(defconstant +block-atlas-tile-capacity+ 64
-  "How many tiles wide every block atlas texture is, painted or not.")
+;;; Painted tiles fill a prefix of a renderer-owned atlas.  Capacity is a live
+;;; policy rather than mesh meaning: REFRESH-BLOCK-ATLAS replaces textures when
+;;; this changes, while vertices retain their mapping-scoped tile offsets.
+(defparameter *block-atlas-tile-capacity* 64
+  "How many tiles wide a newly materialized block atlas texture is.")
 
 (defparameter *block-atlas-tile-domain*
   (domains:make-keyword-vocabulary-domain
@@ -1055,10 +1052,10 @@ zero, waiting for a material to claim them."
   (let* ((domain *block-atlas-tile-domain*)
          (*block-atlas-tile-domain* domain)
          (count (block-atlas-tile-count domain))
-         (width (* +block-atlas-tile-size+ +block-atlas-tile-capacity+))
+         (width (* +block-atlas-tile-size+ *block-atlas-tile-capacity*))
          (pixels (make-array (list +block-atlas-tile-size+ width)
                              :element-type '(unsigned-byte 32))))
-    (assert (<= count +block-atlas-tile-capacity+))
+    (assert (<= count *block-atlas-tile-capacity*))
     (dotimes (y +block-atlas-tile-size+)
       (dotimes (offset count)
         (let ((tile (block-atlas-tile-at-offset offset domain)))
@@ -1110,10 +1107,10 @@ it was derived.  This is a derived materialization, not an authored asset."
   (let* ((domain *block-atlas-tile-domain*)
          (*block-atlas-tile-domain* domain)
          (count (block-atlas-tile-count domain))
-         (width (* +block-atlas-tile-size+ +block-atlas-tile-capacity+))
+         (width (* +block-atlas-tile-size+ *block-atlas-tile-capacity*))
          (pixels (make-array (list +block-atlas-tile-size+ width)
                              :element-type '(unsigned-byte 32))))
-    (assert (<= count +block-atlas-tile-capacity+))
+    (assert (<= count *block-atlas-tile-capacity*))
     (dotimes (y +block-atlas-tile-size+)
       (dotimes (offset count)
         (let ((tile (block-atlas-tile-at-offset offset domain)))

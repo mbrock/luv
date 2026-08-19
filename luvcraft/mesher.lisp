@@ -149,27 +149,30 @@ cross the thread boundary, and the worker never observes live chunk storage."))
 (defgeneric mesh-block-snapshot (mesher snapshot))
 (defgeneric emit-block-face (mesher world vertices block face x y z))
 
-(defconstant +block-mesh-floats-per-vertex+ 16)
+(defconstant +block-mesh-floats-per-vertex+ 14)
 (defconstant +block-mesh-vertices-per-face+ 6)
 (defconstant +block-mesh-floats-per-face+
   (* +block-mesh-floats-per-vertex+ +block-mesh-vertices-per-face+))
 
 (declaim (inline push-block-vertex-components))
 (defun push-block-vertex-components
-    (vertices px py pz u v shade nx ny nz sky-level block-level emission
+    (vertices px py pz local-u local-v shade nx ny nz
+     sky-level block-level emission tile
      edge-u-low edge-u-high edge-v-low edge-v-high)
   "Append one interleaved vertex without constructing tuple objects.
 
 The fourth lane carries normalized raw light readings, not an
 art-directed bake: shader edits can change the response curve without
-remeshing the world.  The fifth carries the face's edge shaping: what the
-mesher knows about each of the face's four in-plane boundaries and the
-fragment stage cannot see."
+remeshing the world.  The final two scalars carry the atlas tile offset under
+the atlas mapping and the face's four ternary edge classifications.  Atlas UV
+resolution and edge unpacking belong to the shaders, not vertex producers."
   (vector-push (coerce px 'single-float) vertices)
   (vector-push (coerce py 'single-float) vertices)
   (vector-push (coerce pz 'single-float) vertices)
-  (vector-push (coerce u 'single-float) vertices)
-  (vector-push (coerce v 'single-float) vertices)
+  ;; The half-texel inset is local to a tile, independent of which atlas lane
+  ;; owns it or how wide the materialization is.
+  (vector-push (coerce (/ (+ 0.5 (* local-u 15)) 16) 'single-float) vertices)
+  (vector-push (coerce (/ (+ 0.5 (* local-v 15)) 16) 'single-float) vertices)
   (vector-push (coerce shade 'single-float) vertices)
   (vector-push (coerce nx 'single-float) vertices)
   (vector-push (coerce ny 'single-float) vertices)
@@ -177,10 +180,14 @@ fragment stage cannot see."
   (vector-push (coerce sky-level 'single-float) vertices)
   (vector-push (coerce block-level 'single-float) vertices)
   (vector-push (coerce emission 'single-float) vertices)
-  (vector-push (coerce edge-u-low 'single-float) vertices)
-  (vector-push (coerce edge-u-high 'single-float) vertices)
-  (vector-push (coerce edge-v-low 'single-float) vertices)
-  (vector-push (coerce edge-v-high 'single-float) vertices)
+  (vector-push (coerce tile 'single-float) vertices)
+  (vector-push
+   (coerce (+ (* (+ edge-u-low 1) 27)
+              (* (+ edge-u-high 1) 9)
+              (* (+ edge-v-low 1) 3)
+              (+ edge-v-high 1))
+           'single-float)
+   vertices)
   vertices)
 
 (defun block-color-variation (x y z)
@@ -495,17 +502,6 @@ normalized to 0..1."
         (values (/ sky-sum (* 15.0 count)) (/ block-sum (* 15.0 count)))
         (values 0.0 0.0))))
 
-(defun block-face-atlas-uv (block face corner)
-  (multiple-value-bind (local-u local-v) (block-face-local-uv face corner)
-    (let* ((tile (block-atlas-tile-offset (block-face-tile block face)))
-           (size +block-atlas-tile-size+)
-           (width (* size +block-atlas-tile-capacity+))
-           ;; Half-texel insets make bilinear bleed impossible even if a
-           ;; caller swaps the intentionally nearest-filtered sampler.
-           (u (/ (+ (* tile size) 0.5 (* local-u (1- size))) width))
-           (v (/ (+ 0.5 (* local-v (1- size))) size)))
-      (vector (coerce u 'single-float) (coerce v 'single-float)))))
-
 (defun emit-block-face-into
     (mesher samples vertices block face x y z)
   (let* ((corners (block-face-corners face))
@@ -514,8 +510,6 @@ normalized to 0..1."
          (ny (voxel-direction-dy normal))
          (nz (voxel-direction-dz normal))
          (tile (block-atlas-tile-offset (block-face-tile block face)))
-         (size +block-atlas-tile-size+)
-         (atlas-width (* size +block-atlas-tile-capacity+))
          (variation (block-color-variation x y z)))
     (multiple-value-bind (edge-u-low edge-u-high edge-v-low edge-v-high)
         (block-face-edge-shaping-components mesher samples nx ny nz x y z)
@@ -534,11 +528,11 @@ normalized to 0..1."
               (block-face-local-uv face corner)
             (push-block-vertex-components
              vertices (+ x cx) (+ y cy) (+ z cz)
-             (/ (+ (* tile size) 0.5 (* local-u (1- size))) atlas-width)
-             (/ (+ 0.5 (* local-v (1- size))) size)
+             local-u local-v
              shade nx ny nz
              sky-level block-level
              (block-surface-emission block)
+             tile
              edge-u-low edge-u-high edge-v-low edge-v-high))))))
     vertices))
 

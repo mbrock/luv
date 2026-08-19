@@ -24,13 +24,13 @@
             positions
             (luv.arithmetic:make-declared-quantity-specification options))))
     (luv.arithmetic:make-quantity-layout
-     16
+     14
      (list
       (projection '(0 1 2)
                   '(:quantity :world-position :unit :cell
                     :tensor-order 1))
       (projection '(3 4)
-                  '(:quantity :texture-uv :unit :one
+                  '(:quantity :tile-local-uv :unit :one
                     :tensor-order 1))
       (projection '(5) '(:quantity :ambient-occlusion :unit :one))
       (projection '(6 7 8)
@@ -38,8 +38,8 @@
       (projection '(9) '(:quantity :sky-light-level :unit :one))
       (projection '(10) '(:quantity :block-light-level :unit :one))
       (projection '(11) '(:quantity :material-emission :unit :one))
-      (projection '(12 13 14 15)
-                  '(:quantity :edge-shaping :unit :one :tensor-order 1))))))
+      (projection '(12) '(:quantity :atlas-tile-offset :unit :one))
+      (projection '(13) '(:quantity :packed-edge-shaping :unit :one))))))
 
 (defmethod luv.arithmetic:value-declaration-for
     ((name (eql :block-mesh-vertices)))
@@ -49,29 +49,30 @@
     :representation-type '(vector single-float)
     :quantity-layout
     (luv.arithmetic:make-repeated-quantity-layout
-     (make-block-mesh-vertex-product-layout) :stride 16)
+     (make-block-mesh-vertex-product-layout) :stride 14)
     :source-form
     '(block-mesh-vertices
       :type (vector single-float)
       :repeated-product
       ((0 1 2) world-position
-       (3 4) texture-uv
+       (3 4) tile-local-uv
        (5) ambient-occlusion
        (6 7 8) world-direction
        (9) sky-light-level
        (10) block-light-level
        (11) material-emission
-       (12 13 14 15) edge-shaping)
-      :stride 16))))
+       (12) atlas-tile-offset
+       (13) packed-edge-shaping)
+      :stride 14))))
 
 (defun make-frame-uniform-product-layout ()
-  "Describe the semantic lanes in luvcraft's fixed 72-float frame block."
+  "Describe the semantic lanes in luvcraft's fixed 76-float frame block."
   (flet ((projection (positions options)
            (luv.arithmetic:make-quantity-projection
             positions
             (luv.arithmetic:make-declared-quantity-specification options))))
     (luv.arithmetic:make-quantity-layout
-     72
+     76
      (list
       (projection '(0 1 2)
                   '(:quantity :world-position :unit :cell
@@ -117,7 +118,8 @@
       (projection '(52) '(:quantity :world-distance :unit :cell))
       (projection '(53) '(:quantity :world-distance :unit :cell))
       (projection '(54) '(:quantity :shadow-filter-radius :unit :one))
-      (projection '(55) '(:quantity :shadow-filter-radius :unit :one))))))
+      (projection '(55) '(:quantity :shadow-filter-radius :unit :one))
+      (projection '(56) '(:quantity :atlas-texel-width :unit :one))))))
 
 (defun make-camera-uniform-product-layout ()
   "Return the five-vec4 camera prefix of the full frame product."
@@ -147,11 +149,11 @@
   (declare (ignore name))
   (load-time-value
    (luv.arithmetic:make-represented-value-declaration
-    :representation-type '(simple-array single-float (72))
+    :representation-type '(simple-array single-float (76))
     :quantity-layout (make-frame-uniform-product-layout)
     :source-form
     '(frame-uniform-data
-      :type (simple-array single-float (72))
+      :type (simple-array single-float (76))
       :product
       ((0 1 2) world-position
        (4 5 6) right-direction
@@ -176,8 +178,9 @@
        (50 51) shadow-depth
        (52 53) shadow-world-distances
        (54 55) shadow-filter-radii
-       (56 57 58 59 60 61 62 63
-        64 65 66 67 68 69 70 71) representation-only-shadow-rows)))))
+       (56) atlas-texel-width
+       (60 61 62 63 64 65 66 67
+        68 69 70 71 72 73 74 75) representation-only-shadow-rows)))))
 
 (defun shader-input-product-layout (specification)
   "Flatten location-ordered shader inputs into one packed product layout."

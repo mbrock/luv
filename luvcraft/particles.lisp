@@ -148,7 +148,6 @@ fragment when the population is full."
          (ny (voxel-direction-dy normal))
          (nz (voxel-direction-dz normal))
          (tile (block-atlas-tile-offset (block-face-tile block face)))
-         (atlas-width (* +block-atlas-tile-size+ +block-atlas-tile-capacity+))
          (half-size (* 0.5 (block-particle-size particle))))
     (dolist (index '(0 1 2 0 2 3))
       (let* ((corner (nth index corners))
@@ -162,12 +161,9 @@ fragment when the population is full."
            (+ (block-particle-x particle) (* (- cx 0.5) (* 2.0 half-size)))
            (+ (block-particle-y particle) (* (- cy 0.5) (* 2.0 half-size)))
            (+ (block-particle-z particle) (* (- cz 0.5) (* 2.0 half-size)))
-           (/ (+ (* tile +block-atlas-tile-size+) 0.5
-                 (* local-u (1- +block-atlas-tile-size+)))
-              atlas-width)
-           (/ (+ 0.5 (* local-v (1- +block-atlas-tile-size+)))
-              +block-atlas-tile-size+)
+           local-u local-v
            shade nx ny nz 1.0 0.0 (block-surface-emission block)
+           tile
            ;; A tumbling fragment has no neighbours at all, so every edge of
            ;; every face is a convex one.
            +block-face-edge-convex+ +block-face-edge-convex+

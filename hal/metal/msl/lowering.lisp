@@ -1014,6 +1014,7 @@
   (let ((direction (spv:shader-interface-direction declaration))
         (location (spv:shader-interface-location declaration))
         (built-in (spv:shader-interface-built-in declaration))
+        (interpolation (spv:shader-interface-interpolation declaration))
         (source-form (spv:shader-object-source-form declaration)))
     (cond
       ((and (eq direction :output) (eq built-in :position))
@@ -1041,7 +1042,11 @@
       ((and (eq stage :fragment) (eq direction :output))
        (format nil "[[color(~D)]]" location))
       (t
-       (format nil "[[user(locn~D)]]" location)))))
+       (format nil "[[user(locn~D)~@[, ~A~]]]"
+               location
+               (case interpolation
+                 (:flat "flat")
+                 (otherwise nil)))))))
 
 (defun msl-interface-structure (name suffix stage declarations)
   (make-instance

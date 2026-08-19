@@ -324,7 +324,7 @@
          (fogged (binding-named 'fogged specification)))
     (ok (typep specification 'spv:shader-specification))
     (ok (eq (spv:shader-specification-stage specification) :fragment))
-    (ok (= (length (spv:shader-specification-inputs specification)) 8))
+    (ok (= (length (spv:shader-specification-inputs specification)) 9))
     (ok (= (length (spv:shader-specification-resources specification)) 7))
     (ok (typep (spv:shader-binding-expression sun-direction)
                'spv:shader-call))
@@ -412,7 +412,7 @@
     (ok (typep specification 'spv:shader-specification))
     (ok (eq (spv:shader-specification-stage specification) :vertex))
     (ok (= (length (spv:shader-specification-inputs specification)) 5))
-    (ok (= (length (spv:shader-specification-outputs specification)) 9))
+    (ok (= (length (spv:shader-specification-outputs specification)) 10))
     (ok (eq (spv:shader-interface-built-in clip-position) :position))
     (ok (typep resource 'spv:shader-uniform-block))
     (ok (= (spv:shader-resource-binding resource) 2))
@@ -425,13 +425,14 @@
                  "sun-vector" "sun-color-vector" "zenith-vector"
                  "horizon-vector" "ambient-vector" "fog-color-vector"
                  "shadow-control-vector" "shadow-filter-vector"
+                 "atlas-vector"
                  "shadow-row-x" "shadow-row-y"
                  "shadow-row-z" "shadow-row-w")))
     (ok (equal (mapcar #'spv:shader-uniform-member-offset
                        (spv:shader-uniform-block-members resource))
                '(0 16 32 48 64 80 96 112 128 144 160 176
-                 192 208 224 240 256 272)))
-    (ok (= (spv:shader-uniform-block-byte-size resource) 288))
+                 192 208 224 240 256 272 288)))
+    (ok (= (spv:shader-uniform-block-byte-size resource) 304))
     (let ((fog-call (spv:shader-binding-expression fog-amount)))
       (ok (typep fog-call 'spv:shader-function-call))
       (ok (eq
@@ -1141,6 +1142,7 @@
          (fog (fourth outputs))
          (shadow-uv (sixth outputs))
          (shadow-depth (seventh outputs))
+         (tile-offset (tenth outputs))
          (position-quantity
            (spv:shader-declaration-quantity-specification position)))
     (ok (spv:shader-type=
@@ -1167,6 +1169,10 @@
     (ok (eq :shadow-depth
             (math:quantity-specification-name
              (spv:shader-declaration-quantity-specification shadow-depth))))
+    (ok (eq :flat (spv:shader-interface-interpolation tile-offset)))
+    (ok (eq :atlas-tile-offset
+            (math:quantity-specification-name
+             (spv:shader-declaration-quantity-specification tile-offset))))
     (ok (signals
          (spv:parse-shader-specification
           'invalid-production-unit-mix
@@ -1532,7 +1538,7 @@
                    (equal (member-layout block) reference))
                  (rest blocks)))
       (ok (every (lambda (block)
-                   (= (spv:shader-uniform-block-byte-size block) 288))
+                   (= (spv:shader-uniform-block-byte-size block) 304))
                  blocks)))))
 
 (deftest the-sky-material-is-image-mathematics-over-environment-lanes

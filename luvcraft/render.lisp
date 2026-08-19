@@ -201,7 +201,7 @@ some other space; the environment lanes are packed the same either way."
                             (luvcraft-session-camera session) width height)))
          (sky (sky-frame-parameters (luvcraft-session-sky-clock session)
                                     (luvcraft-session-sky-profile session)))
-         (data (make-array (+ (length camera-lanes) 52)
+         (data (make-array (+ (length camera-lanes) 56)
                            :element-type 'single-float))
          (index (length camera-lanes)))
     (replace data camera-lanes)
@@ -244,6 +244,15 @@ some other space; the environment lanes are packed the same either way."
                  +luvcraft-shadow-map-size+)
               *luvcraft-shadow-minimum-filter-radius*
               *luvcraft-shadow-maximum-filter-radius*)
+        ;; The texture resource owns atlas extent.  Meshes retain only a tile
+        ;; offset under the mapping which painted that resource, so replacing
+        ;; it with a wider atlas needs no remesh.
+        (emit (if (slot-boundp session 'atlas-texture)
+                  (first (gpu-texture-size
+                          (luvcraft-session-atlas-texture session)))
+                  (* +block-atlas-tile-size+
+                     *block-atlas-tile-capacity*))
+              0.0 0.0 0.0)
         (apply #'emit (shadow-frame-rows
                        (luvcraft-session-camera session) sky))))
     (unless (= index (length data))
@@ -1376,27 +1385,79 @@ here -- so an unconsumed wheel event is simply the end of the matter."
   nil)
 
 (defun refresh-block-atlas (session)
-  "Repaint both block atlases into SESSION's live textures.
+  "Republish both block atlases into SESSION without invalidating its meshes.
 
-The textures were allocated at +BLOCK-ATLAS-TILE-CAPACITY+ and every mesh's
-UVs address that fixed width, so uploading fresh pixels is the whole job:
-after redefining a tile or adding a material in the running image, call
-this and the next frame samples the new paint."
+If *BLOCK-ATLAS-TILE-CAPACITY* changed, replace the renderer-owned textures
+and discard binding caches which name their old views.  Vertices carry only
+tile-local coordinates and mapping-scoped offsets; the next frame publishes
+the replacement texture's width through the frame uniform."
   (let* ((device (luvcraft-session-device session))
-         (width (* +block-atlas-tile-size+ +block-atlas-tile-capacity+))
+         (width (* +block-atlas-tile-size+ *block-atlas-tile-capacity*))
          (height +block-atlas-tile-size+)
          (layout (make-texture-data-layout
-                  :bytes-per-row (* width 4) :rows-per-image height)))
-    (write-texture (device-queue device)
-                   (make-texture-copy
-                    :texture (luvcraft-session-atlas-texture session))
-                   (make-block-texture-atlas)
-                   layout (list width height))
-    (write-texture (device-queue device)
-                   (make-texture-copy
-                    :texture (luvcraft-session-normal-atlas-texture session))
-                   (make-block-normal-atlas)
-                   layout (list width height)))
+                  :bytes-per-row (* width 4) :rows-per-image height))
+         (old-atlas (luvcraft-session-atlas-texture session))
+         (old-normal (luvcraft-session-normal-atlas-texture session))
+         (resize-p (not (equal (gpu-texture-size old-atlas)
+                               (list width height))))
+         (atlas (and (not resize-p) old-atlas))
+         (normal (and (not resize-p) old-normal))
+         (atlas-view nil)
+         (normal-view nil)
+         (made nil))
+    (unwind-protect
+         (progn
+           (when resize-p
+             (setf atlas
+                   (create
+                    device
+                    (make-texture-descriptor
+                     :label "block world texture atlas"
+                     :size (list width height) :dimensions :2d
+                     :format (ensure-block-atlas-sample-transfer
+                              +block-atlas-texture-format+)
+                     :usage '(:copy-dst :texture-binding)))
+                   normal
+                   (create
+                    device
+                    (make-texture-descriptor
+                     :label "block world normal atlas"
+                     :size (list width height) :dimensions :2d
+                     :format +block-normal-atlas-texture-format+
+                     :usage '(:copy-dst :texture-binding)))
+                   atlas-view
+                   (create device
+                           (make-texture-view-descriptor :texture atlas))
+                   normal-view
+                   (create device
+                           (make-texture-view-descriptor :texture normal))))
+           (write-texture (device-queue device)
+                          (make-texture-copy :texture atlas)
+                          (make-block-texture-atlas)
+                          layout (list width height))
+           (write-texture (device-queue device)
+                          (make-texture-copy :texture normal)
+                          (make-block-normal-atlas)
+                          layout (list width height))
+           (when resize-p
+             (let ((old-atlas-view (luvcraft-session-atlas-view session))
+                   (old-normal-view
+                     (luvcraft-session-normal-atlas-view session)))
+               (discard-luvcraft-frame-states session)
+               (setf (luvcraft-session-atlas-texture session) atlas
+                     (luvcraft-session-atlas-view session) atlas-view
+                     (luvcraft-session-normal-atlas-texture session) normal
+                     (luvcraft-session-normal-atlas-view session) normal-view)
+               (dolist (resource (list atlas normal atlas-view normal-view))
+                 (remember-luvcraft-resource session resource))
+               (dolist (resource (list old-atlas-view old-normal-view
+                                       old-atlas old-normal))
+                 (release-luvcraft-resource session resource))
+               (setf made t))))
+      (when (and resize-p (not made))
+        (dolist (resource
+                  (remove nil (list atlas-view normal-view atlas normal)))
+          (destroy resource)))))
   session)
 
 (defun start-luvcraft (&key
@@ -1557,7 +1618,7 @@ NIL to let the display choose a comfortable window."
                                      :mipmap-filter :nearest
                                      :compare :less-or-equal))))
                   (atlas-width
-                    (* +block-atlas-tile-size+ +block-atlas-tile-capacity+))
+                    (* +block-atlas-tile-size+ *block-atlas-tile-capacity*))
                   (atlas-height +block-atlas-tile-size+)
                   (atlas-data (make-block-texture-atlas))
                   (normal-atlas-data (make-block-normal-atlas))
@@ -1677,7 +1738,7 @@ NIL to let the display choose a comfortable window."
                              :label "block world pipeline"
                              :device device :layout layout
                              :vertex-buffers
-                             '((:array-stride 64
+                             '((:array-stride 56
                                 :attributes
                                 ((:shader-location 0 :offset 0
                                   :format :float32x3)
@@ -1688,7 +1749,7 @@ NIL to let the display choose a comfortable window."
                                  (:shader-location 3 :offset 36
                                   :format :float32x3)
                                  (:shader-location 4 :offset 48
-                                  :format :float32x4))))
+                                  :format :float32x2))))
                              :target-format +luvcraft-scene-color-format+
                              :primitive '(:topology :triangle-list)
                              :depth-stencil
@@ -1705,7 +1766,7 @@ NIL to let the display choose a comfortable window."
                              :label "block world shadow pipeline"
                              :device device :layout shadow-layout
                              :vertex-buffers
-                             '((:array-stride 64
+                             '((:array-stride 56
                                 :attributes
                                 ((:shader-location 0 :offset 0
                                   :format :float32x3)
@@ -1716,7 +1777,7 @@ NIL to let the display choose a comfortable window."
                                  (:shader-location 3 :offset 36
                                   :format :float32x3)
                                  (:shader-location 4 :offset 48
-                                  :format :float32x4))))
+                                  :format :float32x2))))
                              :target-format nil
                              :primitive '(:topology :triangle-list)
                              :depth-stencil

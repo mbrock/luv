@@ -245,6 +245,9 @@
                              (:y :quantity :world-distance :unit :cell)
                              (:z :quantity :shadow-filter-radius :unit :one)
                              (:w :quantity :shadow-filter-radius :unit :one)))
+      (atlas-vector :vec4       ; atlas texel width, remaining lanes reserved
+                    :components
+                    ((:x :quantity :atlas-texel-width :unit :one)))
       (shadow-row-x :vec4)      ; light-space clip x from world position
       (shadow-row-y :vec4)      ; light-space clip y from world position
       (shadow-row-z :vec4)      ; light-space depth from world position
@@ -258,9 +261,9 @@
      :inputs ((world-position :vec3 :location 0
                               :quantity :world-position
                               :unit :cell)
-              (uv-shade-input :vec3 :location 1
+              (local-uv-shade-input :vec3 :location 1
                               :components
-                              ((:xy :quantity :texture-uv :unit :one)
+                              ((:xy :quantity :tile-local-uv :unit :one)
                                (:z :quantity :ambient-occlusion :unit :one)))
               (normal-input :vec3 :location 2
                             :quantity :world-direction :unit :one)
@@ -269,15 +272,12 @@
                            ((:x :quantity :sky-light-level :unit :one)
                             (:y :quantity :block-light-level :unit :one)
                             (:z :quantity :material-emission :unit :one)))
-              ;; What the mesher knows about this face's four in-plane edges
-              ;; and the fragment stage cannot see: concave, flush, or convex.
-              (edge-shaping-input :vec4 :location 4
-                                  :quantity :edge-shaping :unit :one))
+              (tile-edge-input :vec2 :location 4
+                               :components
+                               ((:x :quantity :atlas-tile-offset :unit :one)
+                                (:y :quantity :packed-edge-shaping :unit :one))))
      :outputs ((clip-position :vec4 :built-in :position)
-               (uv-shade-output :vec3 :location 0
-                                :components
-                                ((:xy :quantity :texture-uv :unit :one)
-                                 (:z :quantity :ambient-occlusion :unit :one)))
+               (uv-shade-output :vec3 :location 0)
                (normal-output :vec3 :location 1
                               :quantity :world-direction :unit :one)
                (fog-output :float :location 2
@@ -299,8 +299,10 @@
                (world-position-output :vec3 :location 6
                                       :quantity :world-position
                                       :unit :cell)
-               (edge-shaping-output :vec4 :location 7
-                                    :quantity :edge-shaping :unit :one))
+               (edge-shaping-output :vec4 :location 7)
+               (tile-offset-output :float :location 8
+                                   :quantity :atlas-tile-offset :unit :one
+                                   :interpolation :flat))
      :resources
      ((frame-state :uniform-block :set 0 :binding 2
                    :members #.*frame-uniform-members*)))
@@ -340,16 +342,43 @@
                            shadow-row-z shadow-row-w)))
          ;; Projecting either field lowers the shared homogeneous map once.
          ;; Keeping depth first preserves the established instruction order.
-         (shadow-depth (swizzle shadow-projection :z)))
+         (shadow-depth (swizzle shadow-projection :z))
+         (local-uv (representation (swizzle local-uv-shade-input :xy)))
+         (tile-offset (representation (swizzle tile-edge-input :x)))
+         (atlas-width (representation (swizzle atlas-vector :x)))
+         ;; Resolve normalized atlas coordinates at vertex execution time.
+         ;; They are recomputed every draw from the renderer-owned width, but
+         ;; retain the old interpolation and exact half-texel endpoint values.
+         (atlas-uv
+           (vec2 (/ (+ tile-offset (swizzle local-uv :x))
+                    (/ atlas-width 16.0))
+                 (swizzle local-uv :y)))
+         (uv-shade
+           (vec3 (swizzle atlas-uv :x) (swizzle atlas-uv :y)
+                 (representation (swizzle local-uv-shade-input :z))))
+         ;; Four -1/0/1 edge classifications occupy one exact base-three
+         ;; scalar in the vertex stream.  Unpack before interpolation; each
+         ;; face supplies the same code at all of its vertices.
+         (packed (representation (swizzle tile-edge-input :y)))
+         (u-low-digit (floor (/ packed 27.0)))
+         (after-u-low (- packed (* u-low-digit 27.0)))
+         (u-high-digit (floor (/ after-u-low 9.0)))
+         (after-u-high (- after-u-low (* u-high-digit 9.0)))
+         (v-low-digit (floor (/ after-u-high 3.0)))
+         (v-high-digit (- after-u-high (* v-low-digit 3.0)))
+         (edge-shaping
+           (vec4 (- u-low-digit 1.0) (- u-high-digit 1.0)
+                 (- v-low-digit 1.0) (- v-high-digit 1.0))))
     (set-output clip-position clip)
-    (set-output uv-shade-output uv-shade-input)
+    (set-output uv-shade-output uv-shade)
     (set-output normal-output normal-input)
     (set-output fog-output fog-amount)
     (set-output light-output light-input)
     (set-output shadow-uv-output (swizzle shadow-projection :xy))
     (set-output shadow-depth-output shadow-depth)
     (set-output world-position-output world-position)
-    (set-output edge-shaping-output edge-shaping-input)))
+    (set-output edge-shaping-output edge-shaping)
+    (set-output tile-offset-output (swizzle tile-edge-input :x))))
 
 (defun block-world-vertex-specification ()
   (shader-specification-for :block-surface :vertex))
@@ -1209,8 +1238,10 @@ negative inside.  RADIUS is the corner radius in world cells."
                           :quantity :shadow-depth :unit :one)
       (world-position-input :vec3 :location 6
                             :quantity :world-position :unit :cell)
-      (edge-shaping-input :vec4 :location 7
-                          :quantity :edge-shaping :unit :one))
+      (edge-shaping-input :vec4 :location 7)
+      (tile-offset-input :float :location 8
+                         :quantity :atlas-tile-offset :unit :one
+                         :interpolation :flat))
      :outputs ((color-output :vec4 :location 0))
      :resources ((block-atlas :texture-2d :set 0 :binding 0
                               :sample-transfer :srgb-to-linear
@@ -1277,7 +1308,7 @@ negative inside.  RADIUS is the corner radius in world cells."
          ;; where the face simply continues into an identically oriented
          ;; neighbour -- leaves the surface alone.  Signs come straight from
          ;; the vertex lane, so the same ramp expression serves all three.
-         (edge (representation edge-shaping-input))
+         (edge edge-shaping-input)
          (edge-u-low (swizzle edge :x))
          (edge-u-high (swizzle edge :y))
          (edge-v-low (swizzle edge :z))

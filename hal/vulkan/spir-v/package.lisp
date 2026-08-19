@@ -106,6 +106,7 @@
            #:shader-interface-direction
            #:shader-interface-location
            #:shader-interface-built-in
+           #:shader-interface-interpolation
            #:shader-resource
            #:shader-resource-descriptor-set
            #:shader-resource-binding

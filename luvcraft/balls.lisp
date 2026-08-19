@@ -177,14 +177,12 @@ corner (-0.5..0.5), the tile-local UV, and the face normal, flat.")
            (optimize (speed 3) (safety 1)))
   (let* ((template (physics-cube-template))
          (kinds *body-kinds*)
-         (size (float +block-atlas-tile-size+ 0f0))
-         (atlas-width (* size (float +block-atlas-tile-capacity+ 0f0)))
          (limit +physics-render-body-limit+)
          (out 0)
          (drawn 0))
     (declare (type (simple-array single-float (*)) template)
              (type simple-vector kinds)
-             (single-float size atlas-width) (fixnum out drawn limit))
+             (fixnum out drawn limit))
     (dolist (columns (list (physics-world-awake physics) (physics-world-sleeping physics)))
       (records:with-columnar-buffer-storage
           ((count row (xs x) (ys y) (zs z) (radii radius)
@@ -235,9 +233,8 @@ corner (-0.5..0.5), the tile-local UV, and the face normal, flat.")
                   (setf (aref stream (+ out 0)) (+ cx (* m00 lx) (* m01 ly) (* m02 lz))
                         (aref stream (+ out 1)) (+ cy (* m10 lx) (* m11 ly) (* m12 lz))
                         (aref stream (+ out 2)) (+ cz (* m20 lx) (* m21 ly) (* m22 lz))
-                        (aref stream (+ out 3)) (/ (+ (* tile size) 0.5f0 (* u (- size 1f0)))
-                                                   atlas-width)
-                        (aref stream (+ out 4)) (/ (+ 0.5f0 (* vv (- size 1f0))) size)
+                        (aref stream (+ out 3)) (/ (+ 0.5f0 (* u 15f0)) 16f0)
+                        (aref stream (+ out 4)) (/ (+ 0.5f0 (* vv 15f0)) 16f0)
                         (aref stream (+ out 5)) shade
                         (aref stream (+ out 6)) nx
                         (aref stream (+ out 7)) ny
@@ -245,10 +242,9 @@ corner (-0.5..0.5), the tile-local UV, and the face normal, flat.")
                         (aref stream (+ out 9)) sky-level
                         (aref stream (+ out 10)) block-level
                         (aref stream (+ out 11)) emission
-                        (aref stream (+ out 12)) +block-face-edge-flush+
-                        (aref stream (+ out 13)) +block-face-edge-flush+
-                        (aref stream (+ out 14)) +block-face-edge-flush+
-                        (aref stream (+ out 15)) +block-face-edge-flush+)
+                        (aref stream (+ out 12)) tile
+                        ;; Four flush ternary digits, packed in base three.
+                        (aref stream (+ out 13)) 40f0)
                   (incf out +block-mesh-floats-per-vertex+))))
             (incf drawn)))))
     (* drawn +physics-vertices-per-body+)))

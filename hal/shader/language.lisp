@@ -230,7 +230,11 @@
    (built-in
     :initarg :built-in
     :initform nil
-    :reader shader-interface-built-in)))
+    :reader shader-interface-built-in)
+   (interpolation
+    :initarg :interpolation
+    :initform nil
+    :reader shader-interface-interpolation)))
 
 (defclass shader-resource (shader-variable-declaration)
   ((descriptor-set
@@ -2956,13 +2960,21 @@ NIL leaves the character to the named definition; T is the historical
 (defun parse-interface-declaration (form direction)
   (destructuring-bind
       (name type &key location built-in quantity dimension unit affine-p
-                       character components)
+                       character components interpolation)
       form
     (unless (or (and (typep location '(integer 0 *)) (null built-in))
                 (and (null location) built-in))
       (error 'shader-language-error
              :form form :reason :invalid-interface-decoration
              :details (list :location location :built-in built-in)))
+    (unless (member interpolation '(nil :flat))
+      (error 'shader-language-error
+             :form form :reason :invalid-interface-interpolation
+             :details interpolation))
+    (when (and interpolation built-in)
+      (error 'shader-language-error
+             :form form :reason :interpolation-on-built-in
+             :details built-in))
     (let* ((resolved-type (find-shader-type type form))
            (specification
              (parse-declaration-quantity-specification
@@ -2978,6 +2990,7 @@ NIL leaves the character to the named definition; T is the historical
                      :direction direction
                      :location location
                      :built-in built-in
+                     :interpolation interpolation
                      :source-form form))))
 
 (defun parse-resource-declaration (form)
@@ -4282,6 +4295,11 @@ Modules whose expressions use no extended mathematics never acquire one."
                         (shader-interface-built-in declaration)))
             (list 'decorate variable-id 'location
                   (shader-interface-location declaration))))
+       (when (shader-interface-interpolation declaration)
+         (append-context-form
+          'annotations context
+          (list 'decorate variable-id
+                (shader-interface-interpolation declaration))))
        (setf (context-interfaces context)
              (nconc (context-interfaces context) (list variable-id))))
       (shader-resource
@@ -4384,6 +4402,11 @@ Modules whose expressions use no extended mathematics never acquire one."
                      (shader-interface-built-in declaration)))
          (list 'decorate variable-id 'location
                (shader-interface-location declaration))))
+    (when (shader-interface-interpolation declaration)
+      (append-context-form
+       'annotations context
+       (list 'decorate variable-id
+             (shader-interface-interpolation declaration))))
     (when per-primitive-p
       (append-context-form 'annotations context
                            (list 'decorate variable-id 'per-primitive-ext)))
