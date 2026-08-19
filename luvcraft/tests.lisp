@@ -1986,14 +1986,68 @@
          (farther-camera
            (make-instance 'fly-camera
                           :position (make-vec3 0.25d0 0d0 0.25d0)))
-         (first-rows (luvcraft::shadow-frame-rows first-camera sky))
-         (nearby-rows (luvcraft::shadow-frame-rows nearby-camera sky))
-         (farther-rows (luvcraft::shadow-frame-rows farther-camera sky)))
+         (anchor nil)
+         (first-rows
+           (multiple-value-bind (rows new-anchor)
+               (luvcraft::shadow-frame-rows first-camera sky anchor)
+             (setf anchor new-anchor)
+             rows))
+         (nearby-rows
+           (multiple-value-bind (rows new-anchor)
+               (luvcraft::shadow-frame-rows nearby-camera sky anchor)
+             (setf anchor new-anchor)
+             rows))
+         (farther-rows
+           (multiple-value-bind (rows new-anchor)
+               (luvcraft::shadow-frame-rows farther-camera sky anchor)
+             (setf anchor new-anchor)
+             rows)))
     ;; The first two rows locate the orthographic footprint.  Translation
-    ;; smaller than one 0.0625-world-unit shadow texel cannot move it.
-    (ok (equal (subseq first-rows 0 8) (subseq nearby-rows 0 8)))
-    (ok (not (equal (subseq first-rows 0 8)
-                    (subseq farther-rows 0 8))))))
+    ;; smaller than one 0.0625-world-unit shadow texel cannot move it, to
+    ;; within the rounding of the anchor's own walk, which is a millionth
+    ;; of a texel against the texel's 1/1024 of the footprint.
+    (flet ((same-footprint-p (rows other)
+             (every (lambda (a b) (< (abs (- a b)) 1e-9))
+                    (subseq rows 0 8) (subseq other 0 8))))
+      (ok (same-footprint-p first-rows nearby-rows))
+      (ok (not (same-footprint-p first-rows farther-rows))))))
+
+(deftest shadow-lattice-turns-about-the-camera-not-the-origin
+  ;; A frame's texel lattice is the set of world points with integer
+  ;; light-space texel coordinates.  When the sun moves, the lattice has to
+  ;; turn, and it must do so about the eye: a point near the camera should
+  ;; see nearly the same texel coordinate before and after, however far the
+  ;; camera stands from the world origin.
+  (let* ((profile (make-default-sky-profile))
+         (camera (make-instance 'fly-camera
+                                :position (make-vec3 700d0 70d0 -300d0)))
+         (texels-per-unit (/ luvcraft::+luvcraft-shadow-map-size+
+                             (* 2.0 luvcraft::+luvcraft-shadow-half-extent+)))
+         (probe (list 702.3 71.1 -301.7)))
+    (flet ((probe-texel (day-fraction anchor)
+             (multiple-value-bind (rows anchor)
+                 (luvcraft::shadow-frame-rows
+                  camera
+                  (sky-frame-parameters
+                   (make-instance 'sky-clock :pinned-day-fraction day-fraction)
+                   profile)
+                  anchor)
+               (values
+                (loop for row in (list (subseq rows 0 4) (subseq rows 4 8))
+                      collect (* texels-per-unit
+                                 luvcraft::+luvcraft-shadow-half-extent+
+                                 (+ (nth 3 row)
+                                    (loop for index below 3
+                                          sum (* (nth index row)
+                                                 (nth index probe))))))
+                anchor))))
+      (multiple-value-bind (before anchor) (probe-texel 0.42 nil)
+        (let ((after (probe-texel 0.42003 anchor)))
+          ;; One frame of a ten-minute day turns the sun by 1.9e-4 radians;
+          ;; a probe three units from the eye may move a thousandth of a
+          ;; texel, not the tenth of a texel the origin pivot gave it.
+          (loop for b in before for a in after
+                do (ok (< (abs (- a b)) 0.05))))))))
 
 (deftest shadow-projection-is-continuous-through-old-up-axis-threshold
   (let* ((camera (make-instance 'fly-camera))

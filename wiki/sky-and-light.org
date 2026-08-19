@@ -1403,6 +1403,63 @@ ungraded again; both causes are separately measured at the hour that shows
 them; the day-long trade is stated rather than hidden; and contact remains
 attached.
 
+** DONE The shadow lattice turned about the world origin
+:PROPERTIES:
+:ID: QWTQ6R
+:END:
+
+Intent: play still reported every cast shadow flickering and jittering
+whenever the clock ran, at any day length, and calm only once the clock
+stopped.  #0604PY had already chosen the best roll for the light basis; the
+residue was too fast and too uniform to be roll.
+
+Evidence:
+
+- The live capture at day fraction 0.42, stepping the sun by one frame of a
+  ten-minute day (0.000028) with the camera fixed and the shadow-only
+  diagnostic on, showed a penumbra pixel of the big tree's shadow run
+  24, 23, 18, 10, 0, 0, 0, 12, 22 over nine frames: the sun moved one way
+  the whole time and the edge went back and forth.  Distant wall-foot
+  contact lines lit up in every frame difference.
+- The mechanism is the snap, not the roll.  SHADOW-FRAME-ROWS rounded the
+  camera's light-space position to whole texels, which makes the lattice
+  of texel boundaries the set of world points with p . right in t Z: a
+  family of planes through the world origin, rigidly attached to the
+  rotating basis.  A rotation by d turns that family about the origin, so
+  at a point p the lattice slides by |p_xy| d.  The camera stood at
+  x = 127, y = 7, about 144 units from the origin axis: 2.5 cm, 0.4 texel,
+  every frame of a ten-minute day -- a six-centimetre sawtooth at 24 Hz
+  under every shadow edge, and four times a second even at an hour per
+  day.  The amplitude is one texel whatever the day length; only the rate
+  scales, which is why slowing the clock never cured it.
+- The pivot is now a persistent anchor (luvcraft-session-shadow-anchor)
+  that walks toward the camera each frame by whole texels of that frame's
+  right and up, and freely along forward.  Whole-texel steps cannot move
+  the lattice, so translation stays exactly stable, and the sun's rotation
+  turns the lattice about a point within a texel of the eye.  The anchor
+  is kept in double precision so the walk does not itself wobble anything.
+- Same capture afterwards: the same penumbra pixel runs 6, 7, 8, 9, 9, 10,
+  11, 11, 12, 13 -- monotone, one level a frame, the shadow simply moving.
+  The distant contact lines are quiet except for the occasional single
+  texel step that a rotating lattice at thirty metres must still take.
+
+What remains is the irreducible part: the lattice still turns about the
+eye, so a shadow edge r units away sees a one-texel step every t / (r w)
+seconds -- at ten metres and a ten-minute day, one every 0.6 s; at an hour
+per day, one every 3.6 s.  Below that lies the quantization every
+rasterized shadow map has, a silhouette that can only move in texels.  The
+candidates from here are finer texels near the eye (a near cascade), a
+wider minimum filter so one texel is a smaller fraction of the penumbra,
+or a projection onto a fixed ground-plane lattice, which removes the
+rotation altogether for receivers at the reference height at the cost of
+redoing the receiver-plane gradient for a sheared basis.
+
+Done when: the frozen-camera, stepping-sun capture shows the penumbra
+moving monotonically; SHADOW-LATTICE-TURNS-ABOUT-THE-CAMERA-NOT-THE-ORIGIN
+holds a probe three units from an eye seven hundred units out to a
+hundredth of a texel across one frame of sun; and walking still leaves
+the footprint exactly still under sub-texel translation.
+
 ** DONE HDR crystal bloom
 :PROPERTIES:
 :ID: WLHDRB

@@ -192,6 +192,7 @@ offsets and of headers."
                "sdl3"
                "zpng"
                "zpb-ttf"
+               #+sbcl (:require #:sb-posix)
                (:feature :darwin "float-features")
                (:feature :darwin "trivial-main-thread"))
   :serial t

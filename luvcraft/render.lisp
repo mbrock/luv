@@ -194,14 +194,17 @@ the outline, the fill, and the shadow."
                         -1.0 3.0 0.5))
    :sky-vertices 3 (luvcraft.shaders:block-world-sky-vertex-specification)))
 
-(defun shadow-frame-rows (camera sky)
-  "Pack a texel-stable orthographic light-space transform as four vec4 rows."
+(defun shadow-frame-rows (camera sky &optional anchor)
+  "Pack a texel-stable orthographic light-space transform as four vec4 rows.
+
+Returns the rows and the ANCHOR to hand back next frame.  The anchor is the
+world point the light-space texel lattice is built around: it follows the
+camera in whole texels of the current light basis, so camera translation
+never moves the lattice by a fraction of a texel, and the sun's rotation
+turns the lattice about the camera rather than about the world origin.
+Without an anchor the camera position itself starts one."
   (let* ((center
-           ;; Preserve the original single-float shadow calculation before
-           ;; the packed frame ABI converts its result.
-           (make-vec3 (coerce (camera-x camera) 'single-float)
-                      (coerce (camera-y camera) 'single-float)
-                      (coerce (camera-z camera) 'single-float)))
+           (make-vec3 (camera-x camera) (camera-y camera) (camera-z camera)))
          (forward
            (vec3-scale
             (vec3-normalize (sky-frame-parameters-sun-direction sky))
@@ -224,23 +227,51 @@ the outline, the fill, and the shadow."
          (depth-radius +luvcraft-shadow-depth-radius+)
          (world-units-per-texel
            (/ (* 2.0 extent) +luvcraft-shadow-map-size+))
-         (center-right
-           (* (round (/ (vec3-dot center right) world-units-per-texel))
-              world-units-per-texel))
-         (center-up
-           (* (round (/ (vec3-dot center up) world-units-per-texel))
-              world-units-per-texel)))
+         ;; Rotation still slides the lattice under the world, by the angle
+         ;; times the distance from the pivot.  Snapping the camera to a
+         ;; lattice through the world origin put that pivot at the origin, so
+         ;; a player standing a few hundred units out watched every shadow
+         ;; edge vibrate a texel many times a second however slow the day.
+         ;; The pivot is instead a persistent anchor that walks toward the
+         ;; camera in whole texels of this frame's basis: the lattice never
+         ;; shifts under translation, and it rotates about a point within a
+         ;; texel of the eye.  The anchor is kept in double precision so that
+         ;; the walk does not itself wobble the lattice.  #QWTQ6R
+         (anchor
+           (let* ((start (or anchor center))
+                  (delta (make-vec3 (- (vec3-x center) (vec3-x start))
+                                    (- (vec3-y center) (vec3-y start))
+                                    (- (vec3-z center) (vec3-z start))))
+                  (along-right
+                    (* (round (/ (vec3-dot delta right) world-units-per-texel))
+                       world-units-per-texel))
+                  (along-up
+                    (* (round (/ (vec3-dot delta up) world-units-per-texel))
+                       world-units-per-texel))
+                  (along-forward (vec3-dot delta forward)))
+             (flet ((walk (axis)
+                      (coerce (+ (vec3-component start axis)
+                                 (* along-right (vec3-component right axis))
+                                 (* along-up (vec3-component up axis))
+                                 (* along-forward
+                                    (vec3-component forward axis)))
+                              'double-float)))
+               (make-vec3 (walk :x) (walk :y) (walk :z)))))
+         (center-right (vec3-dot anchor right))
+         (center-up (vec3-dot anchor up)))
     (flet ((lane (axis scale offset)
              (list (* (vec3-x axis) scale)
                    (* (vec3-y axis) scale)
                    (* (vec3-z axis) scale)
-                   offset)))
-      (append
-       (lane right (/ extent) (- (/ center-right extent)))
-       (lane up (/ extent) (- (/ center-up extent)))
-       (lane forward (/ (* 2.0 depth-radius))
-             (- 0.5 (/ (vec3-dot center forward) (* 2.0 depth-radius))))
-       '(0.0 0.0 0.0 1.0)))))
+                   (coerce offset 'single-float))))
+      (values
+       (append
+        (lane right (/ extent) (- (/ center-right extent)))
+        (lane up (/ extent) (- (/ center-up extent)))
+        (lane forward (/ (* 2.0 depth-radius))
+              (- 0.5 (/ (vec3-dot anchor forward) (* 2.0 depth-radius))))
+        '(0.0 0.0 0.0 1.0))
+       anchor))))
 
 (defun frame-uniform-data (session width height &key camera-lanes)
   "Pack the frame environment: camera lanes plus the evaluated sky.
@@ -306,8 +337,11 @@ some other space; the environment lanes are packed the same either way."
                   (* +block-atlas-tile-size+
                      *block-atlas-tile-capacity*))
               0.0 0.0 0.0)
-        (apply #'emit (shadow-frame-rows
-                       (luvcraft-session-camera session) sky))))
+        (multiple-value-bind (rows anchor)
+            (shadow-frame-rows (luvcraft-session-camera session) sky
+                               (luvcraft-session-shadow-anchor session))
+          (setf (luvcraft-session-shadow-anchor session) anchor)
+          (apply #'emit rows))))
     (unless (= index (length data))
       (error "Frame uniform packing emitted ~D of ~D lanes."
              index (length data)))

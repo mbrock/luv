@@ -69,6 +69,11 @@
                 :accessor luvcraft-session-sky-profile)
    (shadow-diagnostic-p :initarg :shadow-diagnostic-p :initform nil
                         :accessor luvcraft-session-shadow-diagnostic-p)
+   (shadow-anchor :initform nil
+                  :accessor luvcraft-session-shadow-anchor
+                  :documentation
+                  "The world point the shadow texel lattice pivots about;
+SHADOW-FRAME-ROWS walks it after the camera in whole texels.")
    (player :initarg :player :initform nil :reader luvcraft-session-player)
    (residency-radius :initarg :residency-radius :initform 4
                      :accessor luvcraft-session-residency-radius)
