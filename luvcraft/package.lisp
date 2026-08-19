@@ -640,7 +640,11 @@ compiler which closes a program over bound fields into a scalar loop.")
   (:use #:cl #:luv.spir-v)
   (:shadowing-import-from #:luv.spir-v #:step)
   (:documentation "Luvcraft's hot-replaceable mathematical shader definitions.")
-  (:export #:block-world-crosshair-fragment-module
+  (:export #:+luvcraft-cursor-corner-radius+
+           #:+luvcraft-cursor-outline-width+
+           #:luvcraft-cursor-extent
+           #:luvcraft-cursor-outline
+           #:block-world-crosshair-fragment-module
            #:block-world-crosshair-fragment-shader
            #:block-world-crosshair-fragment-specification
            #:block-world-crosshair-vertex-module

@@ -2687,27 +2687,111 @@ distribution overhead."
 ;;; The software cursor is one quad carrying a cursor-local coordinate; the
 ;;; arrow itself is a signed distance field the fragment stage evaluates.  A
 ;;; pointer is nearly all long diagonals, so triangle soup stairsteps badly at
-;;; any size, and its outline, its fill, and its drop shadow all fall out of
-;;; thresholds of the one distance.
-;;;
-;;; The outline is the classic desktop arrow, wound from the tip down the
-;;; vertical left edge and back up the diagonal right edge, in a design grid
-;;; the vertex stage scales into framebuffer pixels:
-;;;
-;;;   A (0.0,  0.0)   the hotspot, at the pointer position exactly
-;;;   B (0.0, 16.8)   foot of the vertical left edge
-;;;   C (3.2, 13.6)   where the tail leaves the head
-;;;   D (6.0, 20.2)   tail, outer corner
-;;;   E (10.5, 18.3)  tail, inner corner
-;;;   F (7.9, 11.6)   where the tail rejoins the head
-;;;   G (11.9, 11.6)  foot of the diagonal right edge
-;;;
-;;; C and F are reflex, so the distance is taken the general way -- nearest
-;;; point over every edge, sign from a crossing count -- rather than by
-;;; intersecting half planes, which would quietly shave the notch off.
+;;; any size, and its silhouette, its outline, its rounded corners and its
+;;; drop shadow all fall out of thresholds of the one distance.
+
+(defconstant +luvcraft-cursor-corner-radius+ 1.3
+  "How far the pointer's convex corners are rounded, in design units.")
+
+(defconstant +luvcraft-cursor-outline-width+ 0.8
+  "How wide the pointer's dark border is, in design units.
+
+Chosen against the corner radius rather than on its own: the white body is
+the silhouette inset by this much, so its corners keep whatever rounding the
+difference between the two leaves them.")
+
+(defun luvcraft-cursor-outline ()
+  "The pointer's visible corners, tip first, in its own design grid.
+
+The tip is the hotspot, so it sits at the origin exactly.  Rounding does not
+move any of these: a corner's arc is tangent to both its edges and reaches
+back out to the corner itself, which is why this table can be read as the
+shape you see rather than as a construction for it.
+
+  A  the tip, and the hotspot
+  B  the heel, foot of the vertical left edge
+  C  where the tail leaves the head
+  D  the tail's outer corner
+  E  the tail's inner corner
+  F  where the tail rejoins the head
+  G  foot of the diagonal right edge"
+  '((0.0   0.0)
+    (0.0  16.4)
+    (3.4  13.8)
+    (6.3  20.6)
+    (10.1 18.9)
+    (7.6  12.4)
+    (12.4 11.0)))
+
+(defun luvcraft-cursor-extent ()
+  "The design-grid rectangle the pointer is drawn inside, as WIDTH and HEIGHT."
+  (let ((outline (luvcraft-cursor-outline)))
+    (list (reduce #'max outline :key #'first)
+          (reduce #'max outline :key #'second))))
+
+(define-shader-abstraction cursor-outline-width ()
+  "The pointer's dark border, in design units."
+  +luvcraft-cursor-outline-width+)
+
+(define-shader-abstraction cursor-arrow-height ()
+  "How far down the design grid the pointer reaches."
+  (second (luvcraft-cursor-extent)))
+
+(defun cursor-outline-edge-normal (from to)
+  "The outward unit normal of the outline edge running FROM to TO."
+  (let* ((ex (- (first to) (first from)))
+         (ey (- (second to) (second from)))
+         (length (max (sqrt (+ (* ex ex) (* ey ey))) 1e-6)))
+    (list (/ (- ey) length) (/ ex length))))
+
+(defun inset-cursor-outline (outline radius)
+  "Move every edge of OUTLINE inward by RADIUS and meet the corners again.
+
+Growing the distance to this back by RADIUS restores OUTLINE with each convex
+corner replaced by an arc of that radius.  A reflex corner offsets outward
+instead and so stays crisp, which is what the notch between head and tail
+wants."
+  (loop with count = (length outline)
+        for index below count
+        for corner = (nth index outline)
+        for previous = (nth (mod (- index 1) count) outline)
+        for next = (nth (mod (+ index 1) count) outline)
+        for entering = (cursor-outline-edge-normal previous corner)
+        for leaving = (cursor-outline-edge-normal corner next)
+        for determinant = (- (* (first entering) (second leaving))
+                             (* (second entering) (first leaving)))
+        collect
+        (if (< (abs determinant) 1e-6)
+            ;; A straight-through corner has no bisector to solve for; both
+            ;; edges want the same offset, so take it directly.
+            (list (- (first corner) (* radius (first leaving)))
+                  (- (second corner) (* radius (second leaving))))
+            (list (+ (first corner)
+                     (/ (* (- radius) (- (second leaving) (second entering)))
+                        determinant))
+                  (+ (second corner)
+                     (/ (* (- radius) (- (first entering) (first leaving)))
+                        determinant))))))
+
+(defun cursor-outline-distance-form (point corners)
+  "Source for the exact signed distance from POINT to the polygon CORNERS.
+
+The pointer's notch is reflex, so the distance is taken the general way --
+nearest point over every edge, sign from a crossing count -- rather than by
+intersecting half planes, which would quietly shave the notch off."
+  (flet ((edges (operator)
+           (loop with count = (length corners)
+                 for index below count
+                 for corner = (nth index corners)
+                 for previous = (nth (mod (- index 1) count) corners)
+                 collect `(,operator ,point
+                                     ,(first corner) ,(second corner)
+                                     ,(first previous) ,(second previous)))))
+    `(* (* ,@(edges 'cursor-edge-crossing))
+        (sqrt (max (min ,@(edges 'cursor-edge-squared-distance)) 1e-12)))))
 
 (define-shader-function cursor-edge-squared-distance (point px py qx qy)
-  "Squared distance from POINT to the arrow edge between P and Q."
+  "Squared distance from POINT to the outline edge between P and Q."
   (let* ((ex (- qx px))
          (ey (- qy py))
          (wx (- (swizzle point :x) px))
@@ -2721,7 +2805,7 @@ distribution overhead."
     (+ (* bx bx) (* by by))))
 
 (define-shader-function cursor-edge-crossing (point px py qx qy)
-  "-1 when a ray from POINT crosses the arrow edge between P and Q, else 1.
+  "-1 when a ray from POINT crosses the outline edge between P and Q, else 1.
 
 Multiplying one of these per edge counts the crossings, so the product is
 negative exactly inside the outline however it winds."
@@ -2737,30 +2821,17 @@ negative exactly inside the outline however it winds."
               (* (- 1.0 past-p) (- 1.0 before-q) (- 1.0 left-of)))))
     (- 1.0 (* 2.0 crossing))))
 
-(define-shader-function cursor-arrow-distance (point)
-  "Signed distance from POINT to the arrow outline, negative inside."
-  (let* ((squared
-           (min (cursor-edge-squared-distance point 0.0 0.0 11.9 11.6)
-                (min (cursor-edge-squared-distance point 0.0 16.8 0.0 0.0)
-                     (min (cursor-edge-squared-distance point 3.2 13.6 0.0 16.8)
-                          (min (cursor-edge-squared-distance
-                                point 6.0 20.2 3.2 13.6)
-                               (min (cursor-edge-squared-distance
-                                     point 10.5 18.3 6.0 20.2)
-                                    (min (cursor-edge-squared-distance
-                                          point 7.9 11.6 10.5 18.3)
-                                         (cursor-edge-squared-distance
-                                          point 11.9 11.6 7.9 11.6))))))))
-         (sign
-           (* (cursor-edge-crossing point 0.0 0.0 11.9 11.6)
-              (* (cursor-edge-crossing point 0.0 16.8 0.0 0.0)
-                 (* (cursor-edge-crossing point 3.2 13.6 0.0 16.8)
-                    (* (cursor-edge-crossing point 6.0 20.2 3.2 13.6)
-                       (* (cursor-edge-crossing point 10.5 18.3 6.0 20.2)
-                          (* (cursor-edge-crossing point 7.9 11.6 10.5 18.3)
-                             (cursor-edge-crossing
-                              point 11.9 11.6 7.9 11.6)))))))))
-    (* sign (sqrt (max squared 1e-12)))))
+(define-shader-abstraction cursor-arrow-distance (point)
+  "Signed distance from POINT to the pointer, negative inside.
+
+The corners are rounded off by +LUVCRAFT-CURSOR-CORNER-RADIUS+, which is what
+keeps the heel, the shoulder and the tail from reading as the barbs of a fir
+tree, and what leaves the white body still curved once its dark outline has
+disappeared into a dark background."
+  (let ((radius +luvcraft-cursor-corner-radius+))
+    `(- ,(cursor-outline-distance-form
+          point (inset-cursor-outline (luvcraft-cursor-outline) radius))
+        ,radius)))
 
 (define-shader-method shader-specification-for
     luvcraft-cursor-vertex-specification
@@ -2794,14 +2865,25 @@ negative exactly inside the outline however it winds."
          (distance (cursor-arrow-distance cursor-input))
          ;; A soft shadow down and to the right lifts the arrow off bright sky
          ;; and pale inventory panels alike without a second silhouette.
-         (shadow-distance
-           (cursor-arrow-distance (- cursor-input (vec2 1.1 1.6))))
+         (shadow-point (- cursor-input (vec2 1.1 1.6)))
+         (shadow-distance (cursor-arrow-distance shadow-point))
          (shadow (* 0.40 (- 1.0 (smoothstep -0.4 2.8 shadow-distance))))
          ;; The silhouette, and the white body inset from it by the outline.
+         ;; The body keeps whatever rounding the outline width leaves it, so
+         ;; the two widths are chosen together.
          (body (- 1.0 (smoothstep (- pixel) pixel distance)))
-         (core (- 1.0 (smoothstep (- pixel) pixel (+ distance 1.15))))
+         (core
+           (- 1.0
+              (smoothstep (- pixel) pixel
+                          (+ distance (cursor-outline-width)))))
          (outline-ink (vec3 0.045 0.050 0.060))
-         (body-ink (vec3 0.965 0.970 0.980))
+         ;; The body is not flat white but carries a little light along its
+         ;; length: warm and bright at the tip, where the eye is meant to go,
+         ;; cooling as it falls back into the tail.
+         (sheen
+           (clamp (/ (swizzle cursor-input :y) (cursor-arrow-height)) 0.0 1.0))
+         (body-ink
+           (mix (vec3 0.985 0.976 0.952) (vec3 0.855 0.868 0.900) sheen))
          (ink (mix outline-ink body-ink core))
          ;; Premultiplied: the arrow covers its own share and the shadow only
          ;; darkens whatever the arrow itself left uncovered.

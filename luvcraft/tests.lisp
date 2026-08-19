@@ -119,6 +119,30 @@
     ;; The design-grid lanes describe the arrow, not where it is drawn.
     (ok (equalp (subseq center 3 5) (subseq top-left 3 5)))))
 
+(deftest cursor-corners-round-without-moving-the-outline
+  ;; The shader rounds by insetting the outline and growing the distance back,
+  ;; which only reads as the drawn shape if every inset corner sits exactly one
+  ;; radius inside both of the edges that meet there.
+  (let* ((radius 1.3)
+         (outline (luvcraft.shaders:luvcraft-cursor-outline))
+         (inset (luvcraft.shaders::inset-cursor-outline outline radius))
+         (count (length outline)))
+    (ok (= count (length inset)))
+    ;; The tip is the hotspot, so the design grid starts there.
+    (ok (equal '(0.0 0.0) (first outline)))
+    (ok (equal (luvcraft.shaders:luvcraft-cursor-extent)
+               (list (reduce #'max outline :key #'first)
+                     (reduce #'max outline :key #'second))))
+    (dotimes (index count)
+      (destructuring-bind (corner-x corner-y) (nth index inset)
+        (dolist (edge (list (- index 1) index))
+          (let* ((from (nth (mod edge count) outline))
+                 (to (nth (mod (+ edge 1) count) outline))
+                 (normal (luvcraft.shaders::cursor-outline-edge-normal from to))
+                 (depth (+ (* (first normal) (- corner-x (first from)))
+                           (* (second normal) (- corner-y (second from))))))
+            (ok (< (abs (+ radius depth)) 1e-4))))))))
+
 (deftest pointer-reports-coalesce-into-latest-frame-state
   (let ((session (make-instance 'luvcraft-session)))
     (setf (luvcraft::luvcraft-session-pointer-dirty-p session) nil)

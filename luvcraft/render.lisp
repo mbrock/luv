@@ -44,7 +44,7 @@
 
 (defconstant +block-world-crosshair-vertex-count+ 24)
 (defconstant +luvcraft-cursor-vertex-count+ 6)
-(defconstant +luvcraft-cursor-scale+ 1.75
+(defconstant +luvcraft-cursor-scale+ 1.8
   "Framebuffer pixels per unit of the cursor shader's design grid.")
 (defconstant +luvcraft-cursor-margin+ 5.0
   "Design-grid slack around the arrow for its shadow and antialiased edge.")
@@ -165,18 +165,21 @@ the outline, the fill, and the shadow."
                               local-x local-y))
                  (vector-push-extend (coerce component 'single-float)
                                      vertices))))
-      ;; The arrow occupies (0,0) to (11.9,20.2) of the design grid; the
-      ;; margin leaves room for the shadow cast down and to the right.
-      (let* ((left (- +luvcraft-cursor-margin+))
-             (top (- +luvcraft-cursor-margin+))
-             (right (+ 11.9 +luvcraft-cursor-margin+))
-             (bottom (+ 20.2 +luvcraft-cursor-margin+)))
-        (vertex left top)
-        (vertex right top)
-        (vertex right bottom)
-        (vertex left top)
-        (vertex right bottom)
-        (vertex left bottom)))
+      ;; The arrow starts at the design grid's origin and runs to the extent
+      ;; its own outline reaches; the margin leaves room for the antialiased
+      ;; edge and the shadow cast down and to the right.
+      (destructuring-bind (arrow-width arrow-height)
+          (luvcraft.shaders:luvcraft-cursor-extent)
+        (let* ((left (- +luvcraft-cursor-margin+))
+               (top (- +luvcraft-cursor-margin+))
+               (right (+ arrow-width +luvcraft-cursor-margin+))
+               (bottom (+ arrow-height +luvcraft-cursor-margin+)))
+          (vertex left top)
+          (vertex right top)
+          (vertex right bottom)
+          (vertex left top)
+          (vertex right bottom)
+          (vertex left bottom))))
     (ensure-vertex-product-contract
      vertices :cursor-vertices +luvcraft-cursor-vertex-count+
      (luvcraft.shaders::shader-specification-for :cursor :vertex))))
