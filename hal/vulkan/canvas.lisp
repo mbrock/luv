@@ -74,7 +74,6 @@ disagree would otherwise ask for a rebuild on every single frame.")
 
 (defconstant +vulkan-presentation-timing-capacity+ 4096)
 (defconstant +vulkan-presentation-timing-queue-size+ 256)
-(defconstant +vulkan-presentation-minimum-lead-seconds+ 0.012d0)
 
 (defclass vulkan-presentation-timeline ()
   ((status :initform :warming :accessor vulkan-presentation-timeline-status)
@@ -207,74 +206,42 @@ disagree would otherwise ask for a rebuild on every single frame.")
               actual-nanoseconds))
       t)))
 
-(defun predict-vulkan-presentation-target (timeline fallback-time now)
-  "Return one feedback-rebased host time and optional native display target."
+(defun predict-vulkan-presentation-target (timeline fallback-time)
+  "Return FALLBACK-TIME and the next native display beat when available.
+
+The selected Vulkan time domain may be opaque and unrelated to Lisp's
+monotonic clock.  Keep animation prediction in the host domain and advance
+native targets only from observed or already-scheduled native timestamps."
   (let* ((base-id (vulkan-presentation-timeline-latest-result-id timeline))
          (duration (vulkan-presentation-timeline-refresh-duration timeline))
-         (index (and (plusp base-id)
-                     (vulkan-presentation-timeline-index base-id))))
+         (previous-id
+           (1- (vulkan-presentation-timeline-next-present-id timeline)))
+         (previous-index
+           (and (plusp previous-id)
+                (vulkan-presentation-timeline-index previous-id)))
+         (previous-target
+           (and previous-index
+                (= previous-id
+                   (aref (vulkan-presentation-timeline-present-ids timeline)
+                         previous-index))
+                (aref (vulkan-presentation-timeline-target-nanoseconds timeline)
+                      previous-index))))
     (if (and (eq :recording
                  (vulkan-presentation-timeline-status timeline))
              (vulkan-presentation-timeline-absolute-time-p timeline)
              (plusp duration)
-             index
-             (= base-id
-                (aref (vulkan-presentation-timeline-present-ids timeline)
-                      index)))
-        (let* ((base-actual
-                 (vulkan-presentation-timeline-latest-result-nanoseconds
-                  timeline))
-               (base-predicted
-                 (aref
-                  (vulkan-presentation-timeline-predicted-seconds timeline)
-                  index))
-               (base-target
-                 (aref
-                  (vulkan-presentation-timeline-target-nanoseconds timeline)
-                  index))
-               ;; Once a scheduled present reports back, its native target
-               ;; error translates the logical host prediction onto the
-               ;; actually observed display beat.  The first unscheduled
-               ;; result is still a useful phase seed.
-               (base-host
-                 (if (plusp base-target)
-                     (+ base-predicted (/ (- base-actual base-target) 1d9))
-                     base-predicted))
-               (steps
-                 (- (vulkan-presentation-timeline-next-present-id timeline)
-                    base-id))
-               (target (+ base-actual (* steps duration)))
-               (host (+ base-host (/ (* steps duration) 1d9)))
-               (minimum
-                 (+ now +vulkan-presentation-minimum-lead-seconds+)))
-          (when (< host minimum)
-            (let ((skips (ceiling (/ (- minimum host) (/ duration 1d9)))))
-              (incf target (* skips duration))
-              (incf host (/ (* skips duration) 1d9))))
-          ;; Feedback commonly trails more than one queued frame.  If the
-          ;; lead-time adjustment skipped a beat for the previous submission,
-          ;; the ID-derived target can otherwise collide with that same beat.
-          (let* ((previous-id
-                   (1- (vulkan-presentation-timeline-next-present-id timeline)))
-                 (previous-index
-                   (and (plusp previous-id)
-                        (vulkan-presentation-timeline-index previous-id)))
-                 (previous-target
-                   (and previous-index
-                        (= previous-id
-                           (aref
-                            (vulkan-presentation-timeline-present-ids timeline)
-                            previous-index))
-                        (aref
-                         (vulkan-presentation-timeline-target-nanoseconds timeline)
-                         previous-index))))
-            (when (and previous-target (plusp previous-target)
-                       (<= target previous-target))
-              (let ((skips
-                      (1+ (floor (- previous-target target) duration))))
-                (incf target (* skips duration))
-                (incf host (/ (* skips duration) 1d9)))))
-          (values host target))
+             (or (plusp base-id)
+                 (and previous-target (plusp previous-target))))
+        ;; A completed result catches the schedule up after a genuinely missed
+        ;; target.  Otherwise queued frames march from the preceding target at
+        ;; exactly one refresh per present, even while feedback trails them.
+        (let ((native-base
+                (max (if (plusp base-id)
+                         (vulkan-presentation-timeline-latest-result-nanoseconds
+                          timeline)
+                         0)
+                     (or previous-target 0))))
+          (values fallback-time (+ native-base duration)))
         (values fallback-time nil))))
 
 (defun snapshot-vulkan-presentation-timeline (timeline)
@@ -1186,7 +1153,7 @@ surface still cannot supply an image and this frame should be skipped."
          (fallback (canvas-presentation-time canvas)))
     (if timeline
         (predict-vulkan-presentation-target
-         timeline fallback (monotonic-seconds))
+         timeline fallback)
         (values fallback nil))))
 
 (defun present-vulkan-canvas-image
