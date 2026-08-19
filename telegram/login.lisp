@@ -106,26 +106,27 @@ file.  FILE names one explicitly; otherwise TELEGRAM_ENV_FILE and then
 authorization key, which is the whole credential: anyone with the file is
 logged in as you.")
 
-(defun save-session (connection &optional (pathname *session-file*) &rest extra)
+(defun save-session (connection &optional (pathname *session-file*))
   "Write CONNECTION's authorization key and session identity where
-LOAD-SESSION will find them.  EXTRA is merged into the stored plist, which is
-how a login in progress remembers its phone number and code hash across a
-process boundary."
+LOAD-SESSION will find them.
+
+Only a finished login is written.  A login in progress lives in a
+CODE-LOGIN or QR-LOGIN object for as long as the process that started it,
+and no longer: a code is good for a minute or two, so a half-finished login
+that outlived a restart is not a login to resume but a dead end to forget."
   (let ((session (net:connection-session connection))
         (path (merge-pathnames pathname)))
     (with-open-file (stream path :direction :output :if-exists :supersede
                                  :if-does-not-exist :create
                                  :external-format :utf-8)
       (let ((*package* (find-package :keyword)))
-        (prin1 (append
-                extra
-                (list :dc-id (net:connection-dc-id connection)
-                      :test (net:connection-test-p connection)
-                      :auth-key (octets:octets-hex
-                                 (mt:auth-key-data (mt:session-key session)))
-                      :server-salt (mt:session-server-salt session)
-                      :time-offset (mt:session-time-offset session)
-                      :session-id (mt:session-id session)))
+        (prin1 (list :dc-id (net:connection-dc-id connection)
+                     :test (net:connection-test-p connection)
+                     :auth-key (octets:octets-hex
+                                (mt:auth-key-data (mt:session-key session)))
+                     :server-salt (mt:session-server-salt session)
+                     :time-offset (mt:session-time-offset session)
+                     :session-id (mt:session-id session))
                stream)
         (terpri stream)))
     ;; NAMESTRING would hand chmod a literal "~/", which it cannot resolve;
@@ -541,11 +542,18 @@ connection and user, and saves the resulting authorization key."
 ;;;; Logging in without a terminal
 ;;;;
 ;;;; LOG-IN reads the code from whoever is at the keyboard, which is no use
-;;;; to a script, a web form, or anything else where the code arrives minutes
-;;;; later and in another process.  Splitting it in two makes the wait
-;;;; somebody else's problem: BEGIN-LOGIN sends the code and writes the
-;;;; authorization key and the pending phone_code_hash to the session file,
-;;;; and COMPLETE-LOGIN picks both up again.
+;;;; to a UI, a web form, or anything else that has to go and do something
+;;;; else while the code arrives.  Splitting it in two makes the wait
+;;;; somebody else's problem: BEGIN-LOGIN sends the code and returns a
+;;;; CODE-LOGIN, and COMPLETE-LOGIN and COMPLETE-PASSWORD are handed that
+;;;; same object.
+;;;;
+;;;; Like QR-LOGIN, it owns a live connection and nothing on disk.  A login
+;;;; in progress is a conversation, not a record: the code expires in about a
+;;;; minute, so one that outlives its process is not something to resume.
+;;;; Persisting it only ever produced a session file that asked forever for a
+;;;; code Telegram had long since forgotten.  Let the object be lost with the
+;;;; process, and the next run starts cleanly.
 
 (defun connect-stored (stored &key dc-id test)
   "Open a connection, reusing a stored authorization key when it belongs to
@@ -565,31 +573,80 @@ fresh session over it costs one extra round trip and nothing else."
                            (or material (net:create-auth-key connection)))
     connection))
 
+(defclass code-login ()
+  ((connection :initarg :connection :accessor code-login-connection)
+   (application :initarg :application :reader code-login-application)
+   (session-file :initarg :session-file :reader code-login-session-file)
+   (phone-number :initarg :phone-number :reader code-login-phone-number)
+   (code-hash :initarg :code-hash :reader code-login-code-hash)
+   (sent :initarg :sent :reader code-login-sent)
+   (user :initform nil :accessor code-login-user))
+  (:documentation
+   "One pending Telegram code login: the connection that was sent the code,
+the phone_code_hash that answers it, and the auth.sentCode saying how it was
+delivered.  Live only for as long as the process that made it."))
+
+(defmethod print-object ((login code-login) stream)
+  (print-unreadable-object (login stream :type t)
+    (format stream "~A ~A~@[ as ~A~]"
+            (code-login-connection login) (code-login-phone-number login)
+            (and (code-login-user login) (user-label (code-login-user login))))))
+
+(defun code-login-delivery (login)
+  "How Telegram said it would deliver the code, as a keyword like :SMS."
+  (let ((name (string (tl:tl-name (tl:tl-value (code-login-sent login) :type)))))
+    (intern (subseq name (length "AUTH.SENT-CODE-TYPE-")) :keyword)))
+
+(defgeneric abandon-login (login)
+  (:documentation
+   "Give up on a login in progress and close whatever it was holding open.
+Safe to call on a login that already finished.")
+  (:method ((login code-login))
+    (let ((connection (code-login-connection login)))
+      (when (and connection (null (code-login-user login)))
+        (net:close-mtproto-connection connection)
+        (setf (code-login-connection login) nil)))
+    nil)
+  (:method ((login qr-login))
+    (let ((connection (qr-login-connection login)))
+      (when (and connection (null (qr-login-user login)))
+        (net:close-mtproto-connection connection)
+        (setf (qr-login-connection login) nil)))
+    nil)
+  (:method ((login null))
+    nil))
+
 (defun begin-login (phone-number &key (dc-id 2) test
                                       (application (or *application*
                                                        (application-from-environment)))
                                       (session-file *session-file*)
                                       (stream *standard-output*))
-  "Ask Telegram to send a login code to PHONE-NUMBER, and save everything
-COMPLETE-LOGIN will need.  Follows a PHONE_MIGRATE to the data centre that
-owns the number.  Returns the auth.sentCode."
+  "Ask Telegram to send a login code to PHONE-NUMBER, and return the
+CODE-LOGIN that COMPLETE-LOGIN finishes.  Follows a PHONE_MIGRATE to the data
+centre that owns the number.
+
+The returned login holds an open connection: finish it, or ABANDON-LOGIN it."
   (let* ((*application* application)
-         (connection nil))
+         (connection nil)
+         (login nil))
     (unwind-protect
          (loop
            (setf connection (connect-stored nil :dc-id dc-id :test test))
            (format stream "~&connected to ~A~%" connection)
            (handler-case
                (let ((sent (send-login-code phone-number connection)))
-                 (save-session connection session-file
-                               :pending-phone phone-number
-                               :pending-code-hash (tl:tl-value
-                                                   sent :phone-code-hash))
-                 (format stream "~&code sent by ~(~A~) to ~A~%~
-                                   session saved to ~A~%"
-                         (tl:tl-name (tl:tl-value sent :type)) phone-number
-                         (merge-pathnames session-file))
-                 (return sent))
+                 (setf login
+                       (make-instance 'code-login
+                                      :connection connection
+                                      :application application
+                                      :session-file session-file
+                                      :phone-number phone-number
+                                      :code-hash (tl:tl-value sent :phone-code-hash)
+                                      :sent sent))
+                 (setf connection nil)
+                 (format stream "~&code sent by ~(~A~) to ~A~%"
+                         (tl:tl-name (tl:tl-value sent :type)) phone-number)
+                 (return login))
              (mt:remote-rpc-error (error)
                (let ((elsewhere (migration-data-center
                                  (mt:remote-rpc-error-message error))))
@@ -601,75 +658,59 @@ owns the number.  Returns the auth.sentCode."
                  (setf connection nil)))))
       (when connection (net:close-mtproto-connection connection)))))
 
-(defun complete-password (password &key (application (or *application*
-                                                        (application-from-environment)))
-                                        (session-file *session-file*)
-                                        (stream *standard-output*))
-  "Answer a two-factor challenge and finish a login that stopped at
-SESSION_PASSWORD_NEEDED.
+(defun finish-code-login (login authorization stream)
+  "Adopt the authorization a completed code login earned."
+  (when (eq :auth.authorization-sign-up-required (tl:tl-name authorization))
+    (error 'login-failed :detail "this number has no account; sign-up is not
+implemented"))
+  (let ((user (tl:tl-value authorization :user))
+        (connection (code-login-connection login)))
+    (setf (code-login-user login) user)
+    (save-session connection (code-login-session-file login))
+    (setf *application* (code-login-application login))
+    (when stream (format stream "~&logged in as ~A~%" (user-label user)))
+    (values (make-current connection user) user)))
 
-The code has already been accepted at that point, so this needs no new one --
-only the stored authorization key, which is why it can run in its own
-process."
-  (let* ((*application* application)
-         (stored (or (load-session session-file)
-                     (error 'login-failed :detail "no login is in progress")))
-         (connection (connect-stored stored))
-         (user nil))
-    (unwind-protect
-         (let ((authorization (check-password password :connection connection)))
-           (setf user (tl:tl-value authorization :user))
-           (save-session connection session-file)
-           (format stream "~&logged in as ~A~%" (user-label user))
-           (values (make-current connection user) user))
-      (unless user (net:close-mtproto-connection connection)))))
-
-(defun complete-login (code &key password
-                                 (password-reader #'default-password-reader)
-                                 (application (or *application*
-                                                  (application-from-environment)))
-                                 (session-file *session-file*)
-                                 (stream *standard-output*))
+(defun complete-login (login code &key password
+                                       (password-reader #'default-password-reader)
+                                       (stream *standard-output*))
   "Finish the login BEGIN-LOGIN started, using CODE.  Returns the connection
 and the user.
 
 If the account has a password and none is given, PASSWORD-READER is asked
 for it with the account.password object; a NIL reader signals
 PASSWORD-REQUIRED instead, for a caller with no terminal that will come back
-through COMPLETE-PASSWORD."
-  (let* ((*application* application)
-         (stored (or (load-session session-file)
-                     (error 'login-failed :detail "no login is in progress")))
-         (phone-number (or (getf stored :pending-phone)
-                           (error 'login-failed
-                                  :detail "the stored session has no pending login")))
-         (connection (connect-stored stored))
-         (user nil))
-    (unwind-protect
-         (let ((authorization
-                 (handler-case
-                     (sign-in phone-number (getf stored :pending-code-hash)
-                              code connection)
-                   (mt:remote-rpc-error (error)
-                     (unless (string= "SESSION_PASSWORD_NEEDED"
-                                      (mt:remote-rpc-error-message error))
-                       (error error))
-                     (format stream "~&this account has a password~%")
-                     (let ((state (invoke connection :account.get-password)))
-                       (unless (or password password-reader)
-                         (error 'password-required
-                                :hint (tl:tl-value state :hint)))
-                       (check-password
-                        (or password (funcall password-reader state))
-                        :connection connection))))))
-           (when (eq :auth.authorization-sign-up-required
-                     (tl:tl-name authorization))
-             (error 'login-failed :detail "this number has no account"))
-           (setf user (tl:tl-value authorization :user))
-           (save-session connection session-file)
-           (format stream "~&logged in as ~A~%" (user-label user))
-           (values (make-current connection user) user))
-      (unless user (net:close-mtproto-connection connection)))))
+through COMPLETE-PASSWORD with the same LOGIN."
+  (let ((*application* (code-login-application login))
+        (connection (or (code-login-connection login)
+                        (error 'login-failed :detail "this login was abandoned"))))
+    (finish-code-login
+     login
+     (handler-case
+         (sign-in (code-login-phone-number login) (code-login-code-hash login)
+                  code connection)
+       (mt:remote-rpc-error (error)
+         (unless (string= "SESSION_PASSWORD_NEEDED"
+                          (mt:remote-rpc-error-message error))
+           (error error))
+         (when stream (format stream "~&this account has a password~%"))
+         (let ((state (invoke connection :account.get-password)))
+           (unless (or password password-reader)
+             (error 'password-required :hint (tl:tl-value state :hint)))
+           (check-password (or password (funcall password-reader state))
+                           :connection connection))))
+     stream)))
+
+(defun complete-password (login password &key (stream *standard-output*))
+  "Answer the two-factor challenge LOGIN stopped at, and finish it.
+
+The code has already been accepted at that point, so this needs no new one --
+only the connection the login is still holding."
+  (let ((*application* (code-login-application login))
+        (connection (or (code-login-connection login)
+                        (error 'login-failed :detail "this login was abandoned"))))
+    (finish-code-login login (check-password password :connection connection)
+                       stream)))
 
 (defun resume (&key (session-file *session-file*)
                     (application (or *application*

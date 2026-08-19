@@ -93,32 +93,47 @@ names other clients use — in the environment, in `$TELEGRAM_ENV_FILE`, or in
 one of `telegram.client:*credential-files*` (`./.env`, `~/.telegram.env`,
 `~/.env`).
 
-```sh
-scripts/telegram '(telegram.client:begin-login "+15551234567")'
-# connected to #<MTPROTO-CONNECTION 149.154.167.51:443 dc2>
-# PHONE_MIGRATE_4: moving to dc4
-# connected to #<MTPROTO-CONNECTION 149.154.167.91:443 dc4>
-# code sent by auth.sent-code-type-app to +15551234567
+For a caller that has to go away and come back — a UI, a web form, anything
+where the code arrives while the program is doing something else —
+`begin-login` and `complete-login` split the wait in two:
 
-scripts/telegram '(telegram.client:complete-login "29414")'
-# logged in as Mikael (@…) id …
+```lisp
+(defvar *login* (telegram.client:begin-login "+15551234567"))
+;; connected to #<MTPROTO-CONNECTION 149.154.167.51:443 dc2>
+;; PHONE_MIGRATE_4: moving to dc4
+;; connected to #<MTPROTO-CONNECTION 149.154.167.91:443 dc4>
+;; code sent by auth.sent-code-type-app to +15551234567
+
+(telegram.client:complete-login *login* "29414")
+;; logged in as Mikael (@…) id …
 ```
 
 `begin-login` follows a `PHONE_MIGRATE` to the data centre that owns the
-number, and writes the authorization key and the pending `phone_code_hash` to
-`~/.telegram-session`, so the code can arrive minutes later and in another
-process. If the account has two-factor auth, `complete-login` stops at
-`SESSION_PASSWORD_NEEDED` and `complete-password` answers it by SRP:
+number and returns a `code-login`, which owns the live connection the code
+was sent over. Nothing about a login in progress is written down: the code is
+good for about a minute, so a half-finished login is a conversation rather
+than a record, and one that outlived its process is a dead end rather than
+something to resume. Give up on one with `abandon-login`, which closes the
+connection; only the finished authorization key reaches `~/.telegram-session`.
 
-```sh
-scripts/telegram '(telegram.client:complete-password "…")'
+If the account has two-factor auth, `complete-login` stops at
+`SESSION_PASSWORD_NEEDED` and `complete-password` answers it by SRP over that
+same connection:
+
+```lisp
+(telegram.client:complete-password *login* "…")
 ```
 
-There is also `log-in`, which does the whole thing in one call and prompts
-for what it needs — password reading turns terminal echo off.  A caller with
-no terminal passes `:password-reader nil` to `complete-login` and gets a
-`password-required` condition instead of a prompt; that is how the in-game
-panel does it.
+One-shot from a shell, `log-in` does the whole thing in one call and prompts
+for what it needs — password reading turns terminal echo off:
+
+```sh
+scripts/telegram '(telegram.client:log-in :phone-number "+15551234567")'
+```
+
+A caller with no terminal passes `:password-reader nil` to `complete-login`
+and gets a `password-required` condition instead of a prompt; that is how the
+in-game panel does it.
 
 ### QR login
 

@@ -60,6 +60,13 @@ negotiation, and one INVOKE that turns a schema object into an answer.")
            #:begin-login
            #:complete-login
            #:complete-password
+           #:abandon-login
+           #:code-login
+           #:code-login-connection
+           #:code-login-phone-number
+           #:code-login-sent
+           #:code-login-delivery
+           #:code-login-user
            #:connect-stored
            #:log-out
            #:authorized-p

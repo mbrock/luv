@@ -293,7 +293,12 @@ can and mid-word when a word is longer than the whole line."
    ;; what has been gathered so far.  NIL means logged in, or trying to be.
    (login-stage :initform nil :accessor console-login-stage)
    (login-note :initform nil :accessor console-login-note)
-   (pending-api-id :initform nil :accessor console-pending-api-id))
+   (pending-api-id :initform nil :accessor console-pending-api-id)
+   ;; The code login in progress, when there is one.  It holds a live
+   ;; connection and lives only as long as this process, which is the whole
+   ;; point: a code is good for about a minute, so a login that outlived a
+   ;; restart is not one to resume.
+   (login :initform nil :accessor console-login))
   (:documentation
    "One Telegram connection and roster, driven on its own thread, publishing
 a finished view for a McCLIM frame to paint."))
@@ -410,14 +415,15 @@ a finished view for a McCLIM frame to paint."))
 
 ;;;; Logging in
 ;;;;
-;;;; The client library keeps a login as a file: BEGIN-LOGIN writes the key
-;;;; and the pending code hash to ~/.telegram-session, and COMPLETE-LOGIN and
-;;;; COMPLETE-PASSWORD pick it up, in this process or another.  So the panel
-;;;; needs no state of its own beyond which question it is asking, and a
-;;;; player who quits between the code being sent and typed just gets asked
-;;;; for the code again next time.  Credentials go the same way: the api_id
-;;;; and hash typed here are written to ~/.telegram.env, where the library
-;;;; already looks.
+;;;; BEGIN-LOGIN returns a CODE-LOGIN holding an open connection, and
+;;;; COMPLETE-LOGIN and COMPLETE-PASSWORD are handed it back.  The console
+;;;; keeps it in a slot, so the panel's state is which question it is asking
+;;;; and which login is asking it, and a player who quits between the code
+;;;; being sent and typed comes back to a clean phone rather than to a prompt
+;;;; for a code Telegram forgot about an hour ago.  Only the finished
+;;;; authorization key reaches the disk.  Credentials go their own way: the
+;;;; api_id and hash typed here are written to ~/.telegram.env, where the
+;;;; library already looks.
 
 (defparameter *communicator-credential-file* "~/.telegram.env")
 
@@ -452,7 +458,16 @@ a finished view for a McCLIM frame to paint."))
           "Password:")))
      (and note (list "" note)))))
 
+(defun forget-console-login (console)
+  "Drop any login in progress, closing the connection it was holding."
+  (telegram.client:abandon-login (console-login console))
+  (setf (console-login console) nil))
+
 (defun enter-login-stage (console stage &key note failure)
+  ;; Anything before :CODE means the login in hand is not the one being
+  ;; finished, so let go of its connection rather than leaking it.
+  (unless (member stage '(:code :password))
+    (forget-console-login console))
   (setf (console-login-stage console) stage
         (console-login-note console) note)
   (publish-console-view console :failure failure))
@@ -468,6 +483,7 @@ a finished view for a McCLIM frame to paint."))
   "The connection is current and authorized: load and show conversations."
   (setf (console-login-stage console) nil
         (console-login-note console) nil
+        (console-login console) nil
         (console-failure console) nil)
   ;; RESUME and COMPLETE-LOGIN bind the application identity only for their
   ;; own extent; INVOKE needs it for every call after, so give this thread
@@ -502,14 +518,13 @@ Each stage either moves to the next or, on failure, stays and says why."))
 (defmethod answer-console-login (console (stage (eql :phone)) answer)
   (publish-console-view console :status "sending code…")
   (handler-case
-      (let ((sent (telegram.client:begin-login
-                   answer :stream (make-broadcast-stream))))
+      (let ((login (telegram.client:begin-login
+                    answer :stream (make-broadcast-stream))))
+        (setf (console-login console) login)
         (enter-login-stage
          console :code
          :note (format nil "sent by ~(~A~) to ~A"
-                       (subseq (string (telegram.tl:tl-name
-                                        (telegram.tl:tl-value sent :type)))
-                               (length "AUTH.SENT-CODE-TYPE-"))
+                       (telegram.client:code-login-delivery login)
                        answer)))
     (error (condition)
       (let ((text (princ-to-string condition)))
@@ -524,7 +539,8 @@ Each stage either moves to the next or, on failure, stays and says why."))
   (handler-case
       (progn
         (telegram.client:complete-login
-         answer :password-reader nil :stream (make-broadcast-stream))
+         (console-login console) answer
+         :password-reader nil :stream (make-broadcast-stream))
         (finish-console-login console))
     (telegram.client:password-required (condition)
       (enter-login-stage
@@ -533,15 +549,23 @@ Each stage either moves to the next or, on failure, stays and says why."))
                  ((hint (telegram.client:password-required-hint condition)))
                (format nil "hint: ~A" hint))))
     (error (condition)
-      (enter-login-stage console :code
-                         :failure (princ-to-string condition)))))
+      (let ((text (princ-to-string condition)))
+        ;; An expired or already-spent code cannot be retyped: this login is
+        ;; over, so let it go and ask for the number again rather than
+        ;; keeping the player at a question with no right answer.
+        (enter-login-stage console
+                           (if (or (search "PHONE_CODE_EXPIRED" text)
+                                   (search "was abandoned" text))
+                               :phone
+                               :code)
+                           :failure text)))))
 
 (defmethod answer-console-login (console (stage (eql :password)) answer)
   (publish-console-view console :status "checking…")
   (handler-case
       (progn
         (telegram.client:complete-password
-         answer :stream (make-broadcast-stream))
+         (console-login console) answer :stream (make-broadcast-stream))
         (finish-console-login console))
     (error (condition)
       (enter-login-stage console :password
@@ -619,11 +643,6 @@ around the whole loop, so RESUME makes it current here and nowhere else."
        (enter-login-stage console :api-id))
       ((null stored)
        (enter-login-stage console :phone))
-      ((getf stored :pending-code-hash)
-       ;; A code was sent, in this run or an earlier one, and never typed.
-       (enter-login-stage console :code
-                          :note (format nil "for ~A"
-                                        (getf stored :pending-phone))))
       (t
        (handler-case
            (progn (telegram.client:resume)
@@ -693,6 +712,7 @@ pictures appearing over a second or two is the better failure."
                        :failure (princ-to-string condition))
                       (ignore-errors (telegram.client:disconnect))
                       (sleep 3))))
+      (ignore-errors (forget-console-login console))
       (ignore-errors (telegram.client:disconnect)))))
 
 (defun start-telegram-console (&rest initargs)
