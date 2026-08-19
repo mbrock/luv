@@ -259,16 +259,25 @@ to remove a block without a removal tool, used =eval= with =apropos= to find
 =response.append= to =response.create= with =previous_response_id= along the
 way.  Parameterized M-x is still open (#YPGXKI).
 
-* The gnome: a block that is an agent, and what it shows
+* The gnome is an agent occupying a cell, not a block
 :PROPERTIES:
 :ID: V9DHV5
 :END:
 
-The body (#5JDNKF) became a block kind: =gnome-block-kind= is a little pillar
-with a red hat, and =luvcraft/agent/gnome.lisp= gives each placed gnome a
-=gnome= object -- an overlay and a focus at once.  Focusing one (TAB on it,
-or activating it) steps the camera back to a conversational distance, aims
-it at the face with the focused field of view, and turns the keys into a
+The body (#5JDNKF) is now deliberately skew to the block field.  A =gnome=
+owns an integer =(x y z)= cell and belongs to =*agents*=, not =*critters*=;
+the cell is its authoritative place while its visible animation is derived
+presentation state.  =Spawn Agent= chooses an empty supported cell ahead of
+the player without editing terrain.  The old =gnome-block-kind= and its atlas
+tiles no longer exist.
+
+The first visible body is a retained McCLIM drawing replayed as a
+camera-facing world widget: a small red-hatted figure with a gentle visual
+bob.  This gives agents a scene render path independent of terrain without
+prematurely choosing a geometric or SDF body language.  Its upright world
+volume answers the view ray directly, and a nearer terrain hit occludes it.
+Focusing one with TAB steps the camera back to a conversational distance,
+aims it at the face with the focused field of view, and turns the keys into a
 prompt line; RET asks.
 
 What the gnome shows is the transcript in three registers:
@@ -296,7 +305,7 @@ observer posts notes to the gnome's mailbox; the gnome's own
 and lines.  Repainting a mirror from any other thread races the frame and
 faults; every repaint here happens at the frame boundary.
 
-* NEXT Parameterized M-x from the same parser walk, and a gnome that moves
+* NEXT Parameterized M-x and agents that take discrete steps
 :PROPERTIES:
 :ID: YPGXKI
 :END:
@@ -304,12 +313,14 @@ faults; every repaint here happens at the frame boundary.
 /Intent./ Two next bets.  First, finish what #0IF4TY promised: the command
 menu should offer commands with arguments, prompting through =accept= with
 the presentation types the agent already uses, so =place-block-at= is one
-definition reachable by key, M-x, and tool.  Second, the gnome is still a
-block: a =walk= command that moves its body (and its bubbles) would make the
-conversation a scene rather than a kiosk, and a =remove-block= command would
-spare the next gnome its trip through =apropos=.
+definition reachable by key, M-x, and tool.  Second, give an embodied agent a
+=step= command whose state transition is between integer cells.  The body and
+bubbles may interpolate between old and new cells, but continuous velocity is
+not part of the agent's authoritative state.
 
-/Evidence./ #V9DHV5 for what exists; the M-x gap is
+/Evidence./ #V9DHV5 records the 2026-08-19 unblocking: =*agents*=,
+=spawn-agent=, direct body targeting, and the independent world-widget body.
+The M-x gap is
 =command-menu-command-without-arguments-p= in
 =luvcraft/clim/command-menu.lisp=.
 

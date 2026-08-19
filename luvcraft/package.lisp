@@ -188,8 +188,6 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:block-inventory-carried-blocks
            ;; The tape and its films; luvcraft/tape.lisp.
            #:tape-block-kind
-           #:gnome-block-kind
-           #:*gnome-block*
            #:*tape-block*
            #:film-block-kind
            #:film-video-id

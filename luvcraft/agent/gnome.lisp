@@ -1,9 +1,11 @@
 (in-package #:luvcraft.agent)
 
-;;; The gnome: an agent with a body (#5JDNKF).
+;;; The gnome: an agent with a body (#5JDNKF), not a block (#V9DHV5).
 ;;;
-;;; A gnome is a block -- a little pillar with a red hat -- and focusing it is
-;;; how you talk to it: the view leans in the way it does for a wall, the
+;;; A gnome occupies a discrete world cell but is not a block.  The cell is
+;;; semantic state -- where this agent stands -- while its animated,
+;;; camera-facing figure is an independently rendered scene object.  Focusing
+;;; it is how you talk to it: the view leans in the way it does for a wall, the
 ;;; keys become a prompt line at the bottom of the screen, and RET asks.  The
 ;;; gnome then thinks, and its thinking shows above its head as a bubble: a
 ;;; matte rounded cassette standing in the world, drawn through McCLIM the way
@@ -14,6 +16,10 @@
 ;;; line is subtitled.
 
 (defparameter *gnome-name* "gnome")
+(defparameter *gnome-body-width* 240)
+(defparameter *gnome-body-height* 360)
+(defparameter *gnome-body-world-width* 0.82)
+(defparameter *gnome-body-world-height* 1.42)
 
 (defparameter +clear-ink+ (compose-in (make-rgb-color 0 0 0) (make-opacity 0.0))
   "A pane background that paints nothing: colour with zero opacity, which the
@@ -25,6 +31,7 @@ GPU medium spells as a fully transparent fill.")
    (y :initarg :y :reader gnome-y)
    (z :initarg :z :reader gnome-z)
    (agent :initform nil :accessor gnome-agent)
+   (body :initform nil :accessor gnome-body)
    (bubbles :initform '() :accessor gnome-bubbles
             :documentation "Bubble overlays, newest first.")
    (dialogue :initform nil :accessor gnome-dialogue
@@ -38,55 +45,98 @@ GPU medium spells as a fully transparent fill.")
           :reader gnome-notes
           :documentation "Transcript events waiting for the canvas thread.")
    (turn-finished-at :initform nil :accessor gnome-turn-finished-at))
-  (:documentation "One gnome block's life: its agent, its bubbles, its voice."))
+  (:documentation
+   "One embodied agent at a discrete cell: its thread, figure, and voice."))
 
 (defmethod print-object ((gnome gnome) stream)
   (print-unreadable-object (gnome stream :type t)
     (format stream "~D ~D ~D" (gnome-x gnome) (gnome-y gnome) (gnome-z gnome))))
 
-(defvar *gnomes* (make-hash-table :test #'equal)
-  "Every gnome by (SESSION X Y Z): a block's gnome outlives a focus.")
+(defvar *agents* '()
+  "The embodied agents in live sessions.
+
+These are semantic individuals, not members of the world's critter population
+and not readings of its block field.  Releasing their session overlays removes
+them from this registry.")
+
+(defun agents-in-session (session)
+  "Return SESSION's embodied agents, newest first."
+  (remove-if-not (lambda (agent) (eq session (gnome-session agent))) *agents*))
+
+(defun find-agent (session x y z &optional (make-p t))
+  "Find the embodied agent occupying integer cell X,Y,Z in SESSION.
+
+When MAKE-P is true, create and attach one if the cell is unoccupied."
+  (or (find-if (lambda (agent)
+                 (and (eq session (gnome-session agent))
+                      (= x (gnome-x agent))
+                      (= y (gnome-y agent))
+                      (= z (gnome-z agent))))
+               *agents*)
+      (and make-p
+           (let ((agent (make-instance 'gnome :session session :x x :y y :z z)))
+             (ensure-gnome-body agent)
+             (push agent *agents*)
+             (luvcraft:add-luvcraft-overlay session agent)
+             agent))))
 
 (defun find-gnome (session x y z &optional (make-p t))
-  (let ((key (list session x y z)))
-    (or (gethash key *gnomes*)
-        (and make-p
-             (let ((gnome (make-instance 'gnome :session session :x x :y y :z z)))
-               (setf (gethash key *gnomes*) gnome)
-               (luvcraft:add-luvcraft-overlay session gnome)
-               gnome)))))
+  "Compatibility name for FIND-AGENT."
+  (find-agent session x y z make-p))
 
 (defun gnome-head-position (gnome &optional (lift 0.0))
   "The point above the gnome's hat, LIFT blocks higher."
   (luvcraft::make-vec3 (+ (gnome-x gnome) 0.5)
-                       (+ (gnome-y gnome) 1.0 lift)
+                       (+ (gnome-y gnome) *gnome-body-world-height* lift)
                        (+ (gnome-z gnome) 0.5)))
 
 ;;; ---------------------------------------------------------------------
-;;; The gnome as an overlay and a focus
+;;; The embodied agent as an overlay and a focus
 
 (defmethod luvcraft:luvcraft-overlay-stage ((gnome gnome))
   (declare (ignore gnome))
   :hud)
 
 (defmethod luvcraft:luvcraft-focus-score ((gnome gnome) session)
-  "Targetable by TAB when the crosshair is on the gnome's own block."
-  (multiple-value-bind (hit status) (luvcraft::luvcraft-session-target session)
-    (declare (ignore status))
-    (when hit
-      (let ((c (luvcraft::block-ray-hit-coordinate hit)))
-        (when (and (= (luvcraft::world-coordinate-x c) (gnome-x gnome))
-                   (= (luvcraft::world-coordinate-y c) (gnome-y gnome))
-                   (= (luvcraft::world-coordinate-z c) (gnome-z gnome)))
-          (luvcraft::block-ray-hit-distance hit))))))
+  "Targetable by TAB when the view ray enters the agent before terrain."
+  (let ((camera (luvcraft:luvcraft-session-camera session)))
+    (multiple-value-bind (right up forward) (luvcraft:camera-basis camera)
+      (declare (ignore right up))
+      (let ((distance
+              (gnome-ray-distance gnome (luvcraft:camera-position camera)
+                                  forward luvcraft::+luvcraft-target-reach+)))
+        (when distance
+          (let ((hit (luvcraft::luvcraft-session-target
+                      session :max-distance luvcraft::+luvcraft-target-reach+)))
+            (unless (and hit (< (luvcraft::block-ray-hit-distance hit) distance))
+              distance)))))))
 
-(defmethod luvcraft::activate-luvcraft-target
-    ((block luvcraft:gnome-block-kind) (session luvcraft:luvcraft-session) hit)
-  (let ((c (luvcraft::block-ray-hit-coordinate hit)))
-    (find-gnome session
-                (luvcraft::world-coordinate-x c)
-                (luvcraft::world-coordinate-y c)
-                (luvcraft::world-coordinate-z c))))
+(defun gnome-ray-distance (gnome origin direction max-distance)
+  "Return where a ray enters GNOME's upright body, or NIL when it misses."
+  (let ((near 0d0)
+        (far (coerce max-distance 'double-float))
+        (half-width 0.34d0))
+    (flet ((slab (origin direction minimum maximum)
+             (let ((origin (coerce origin 'double-float))
+                   (direction (coerce direction 'double-float)))
+               (if (zerop direction)
+                   (<= minimum origin maximum)
+                   (let ((entering (/ (- minimum origin) direction))
+                         (leaving (/ (- maximum origin) direction)))
+                     (when (> entering leaving)
+                       (rotatef entering leaving))
+                     (setf near (max near entering)
+                           far (min far leaving))
+                     (<= near far))))))
+      (let ((center-x (+ (gnome-x gnome) 0.5d0))
+            (center-z (+ (gnome-z gnome) 0.5d0)))
+        (and (slab (luvcraft::vec3-x origin) (luvcraft::vec3-x direction)
+                   (- center-x half-width) (+ center-x half-width))
+             (slab (luvcraft::vec3-y origin) (luvcraft::vec3-y direction)
+                   (gnome-y gnome) (+ (gnome-y gnome) 1.45d0))
+             (slab (luvcraft::vec3-z origin) (luvcraft::vec3-z direction)
+                   (- center-z half-width) (+ center-z half-width))
+             near)))))
 
 (defparameter *gnome-audience-distance* 3.2
   "How far from the gnome the focused camera stands, in blocks.")
@@ -179,8 +229,8 @@ leave room above its hat for the bubbles."
 ;;; The agent behind the gnome
 
 (defparameter *gnome-instructions*
-  "You are a gnome: a small, cheerful, slightly gruff character standing as a
-little pillar in luvcraft, a block world running inside a live Common Lisp
+  "You are a gnome: a small, cheerful, slightly gruff embodied agent in
+luvcraft, a block world running inside a live Common Lisp
 image.  A player is talking to you.  Your tools are the game's own commands.
 Coordinates are integer block cells: x and z are horizontal, y is up; you
 stand at the cell given below.  To talk to the player you MUST use the say
@@ -385,6 +435,114 @@ title or bubble shows only what its pane draws."))
         ;; fill the frame's rectangle with its own white.
         (change-class (frame-top-level-sheet frame) 'clear-top-level-sheet-pane)
         frame))))
+
+;;; ---------------------------------------------------------------------
+;;; The visible body: a scene widget, not terrain.
+
+(defclass gnome-body-pane
+    (climi::never-repaint-background-mixin application-pane) ())
+
+(define-application-frame gnome-body-frame ()
+  ((gnome :initarg :gnome :reader body-frame-gnome))
+  (:menu-bar nil)
+  (:panes (sheet (make-pane 'gnome-body-pane :background +clear-ink+
+                            :width *gnome-body-width*
+                            :height *gnome-body-height*
+                            :min-width *gnome-body-width*
+                            :min-height *gnome-body-height*
+                            :max-width *gnome-body-width*
+                            :max-height *gnome-body-height*)))
+  (:layouts (default sheet)))
+
+(defmethod handle-repaint ((pane gnome-body-pane) region)
+  (declare (ignore region))
+  (with-sheet-medium (medium pane)
+    (when (typep medium 'mcluv:luv-raster-medium)
+      (mcluv::clear-raster-medium-reliefs medium)))
+  ;; Boots and coat are low and broad; the face and conical hat make the
+  ;; figure legible at the scale of an ordinary block without turning it back
+  ;; into one.  These retained drawing commands are rendered directly in the
+  ;; scene by the world-widget pipeline.
+  (draw-ellipse* pane 78 330 42 0 0 14 :filled t
+                 :ink (make-rgb-color 0.10 0.08 0.07))
+  (draw-ellipse* pane 162 330 42 0 0 14 :filled t
+                 :ink (make-rgb-color 0.10 0.08 0.07))
+  (mcluv:draw-analytic-rounded-rectangle*
+   pane 52 190 188 330 :radius 28 :ink (make-rgb-color 0.16 0.31 0.62))
+  (draw-ellipse* pane 120 174 56 0 0 54 :filled t
+                 :ink (make-rgb-color 0.91 0.70 0.55))
+  (draw-polygon* pane '((66 172) (174 172) (157 278) (120 303) (83 278))
+                 :filled t :ink (make-rgb-color 0.91 0.90 0.85))
+  (draw-ellipse* pane 99 171 6 0 0 7 :filled t
+                 :ink (make-rgb-color 0.07 0.08 0.11))
+  (draw-ellipse* pane 141 171 6 0 0 7 :filled t
+                 :ink (make-rgb-color 0.07 0.08 0.11))
+  (draw-polygon* pane '((120 14) (57 158) (183 158))
+                 :filled t :ink (make-rgb-color 0.80 0.16 0.13))
+  (mcluv:draw-analytic-rounded-rectangle*
+   pane 51 143 189 172 :radius 13 :ink (make-rgb-color 0.58 0.08 0.08)))
+
+(defclass gnome-body-overlay (mcluv:luvcraft-world-widget-overlay)
+  ((gnome :initarg :gnome :reader body-overlay-gnome)))
+
+(defmethod luvcraft:luvcraft-focus-score
+    ((overlay gnome-body-overlay) session)
+  (declare (ignore overlay session))
+  nil)
+
+(defun place-gnome-body (overlay session)
+  "Place OVERLAY at its agent's discrete cell, with a purely visual bob."
+  (let* ((gnome (body-overlay-gnome overlay))
+         (camera (luvcraft:luvcraft-session-camera session))
+         (phase (/ (get-internal-real-time)
+                   (float internal-time-units-per-second 1.0)))
+         (bob (* 0.025 (sin (* phase 2.2))))
+         (center (luvcraft::make-vec3
+                  (+ (gnome-x gnome) 0.5)
+                  (+ (gnome-y gnome) (/ *gnome-body-world-height* 2.0) bob)
+                  (+ (gnome-z gnome) 0.5)))
+         (half-width (/ *gnome-body-world-width* 2.0))
+         (half-height (/ *gnome-body-world-height* 2.0)))
+    (multiple-value-bind (right up forward) (luvcraft:camera-basis camera)
+      (declare (ignore up))
+      (let ((flat-right (luvcraft::make-vec3 (luvcraft::vec3-x right) 0.0
+                                             (luvcraft::vec3-z right))))
+        (setf (mcluv::widget-overlay-center overlay) center
+              (mcluv::widget-overlay-right-axis overlay)
+              (luvcraft::vec3-scale flat-right half-width)
+              (mcluv::widget-overlay-up-axis overlay)
+              (luvcraft::make-vec3 0.0 (- half-height) 0.0)
+              (mcluv::widget-overlay-normal-axis overlay)
+              (luvcraft::vec3-scale forward -1.0)))))
+  overlay)
+
+(defmethod luvcraft:encode-luvcraft-overlay
+    ((overlay gnome-body-overlay) session pass surface-texture)
+  (declare (ignore pass))
+  (place-gnome-body overlay session)
+  (let ((viewport-size
+          (luv:canvas-extent (luvcraft:luvcraft-session-context session))))
+    (mcluv:prepare-direct-widget-overlay
+     overlay session surface-texture
+     (mcluv::world-device-clip-state
+      overlay session (first viewport-size) (second viewport-size))))
+  overlay)
+
+(defun ensure-gnome-body (gnome)
+  (or (gnome-body gnome)
+      (let* ((session (gnome-session gnome))
+             (frame (make-embedded-frame session 'gnome-body-frame
+                                         :gnome gnome))
+             (mirror (sheet-direct-mirror (frame-top-level-sheet frame)))
+             (overlay (make-instance 'gnome-body-overlay
+                                     :session session :frame frame
+                                     :mirror mirror :gnome gnome)))
+        (setf (frame-pretty-name frame) "agent body"
+              (mcluv:mirror-compositor mirror) overlay
+              (gnome-body gnome) overlay)
+        (luvcraft:add-luvcraft-overlay session overlay)
+        (mcluv:repaint-gpu-mirror mirror)
+        overlay)))
 
 (defun ensure-gnome-dialogue (gnome)
   (or (gnome-dialogue gnome)
@@ -610,12 +768,22 @@ title or bubble shows only what its pane draws."))
       (clear-gnome-bubbles gnome)))
   gnome)
 
-;;; ---------------------------------------------------------------------
-;;; Placing one
+(defmethod luvcraft:release-luvcraft-overlay :after ((gnome gnome))
+  (setf *agents* (delete gnome *agents* :test #'eq))
+  (when (and (gnome-agent gnome) (gnome-observer gnome))
+    (remove-agent-observer (gnome-agent gnome) (gnome-observer gnome)))
+  (when (gnome-agent gnome)
+    (openai:close-agent (gnome-agent gnome))))
 
-(defun place-gnome (&key (session luvcraft:*session*) x y z)
-  "Put a gnome block at X Y Z -- by default two cells ahead of the player --
-and return its GNOME."
+;;; ---------------------------------------------------------------------
+;;; Spawning one
+
+(defun spawn-agent (&key (session luvcraft:*session*) x y z)
+  "Spawn an embodied agent at integer cell X,Y,Z and return it.
+
+With no coordinate, choose an empty cell a few steps ahead of the player and
+stand the agent on the first supporting block.  The cell is authoritative;
+the figure's bobbing and any future step interpolation are only presentation."
   (let* ((player (luvcraft:luvcraft-session-player session))
          (camera (luvcraft:luvcraft-session-camera session))
          (world (luvcraft:luvcraft-session-world session)))
@@ -629,8 +797,18 @@ and return its GNOME."
         (loop while (luvcraft:world-block-at world x y z) do (incf y))
         (loop while (and (> y 0) (null (luvcraft:world-block-at world x (1- y) z)))
               do (decf y))))
-    (luv:request-canvas-frame
-     (luvcraft:luvcraft-session-canvas session)
-     (lambda (ts) (declare (ignore ts))
-       (luvcraft:edit-block-at luvcraft:*gnome-block* world x y z)))
-    (find-gnome session x y z)))
+    (unless (and (integerp x) (integerp y) (integerp z))
+      (error "An agent needs an integer cell, got (~S ~S ~S)." x y z))
+    (when (luvcraft:world-block-at world x y z)
+      (error "Cell (~D ~D ~D) is occupied by terrain." x y z))
+    (find-agent session x y z)))
+
+(defun place-gnome (&rest arguments)
+  "Compatibility name for SPAWN-AGENT."
+  (apply #'spawn-agent arguments))
+
+(define-command (com-spawn-agent :command-table luvcraft.clim::luvcraft-world
+                                  :name "Spawn Agent")
+    ()
+  "Spawn a visible agent a few discrete cells ahead of the player."
+  (spawn-agent :session (luvcraft.clim::luvcraft-command-session)))

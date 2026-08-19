@@ -43,6 +43,8 @@
    ;; The wall
    #:agent-terminal-display #:open-agent-wall #:com-open-agent-wall
    #:ansi-view #:+ansi-view+
-   ;; The gnome
-   #:gnome #:find-gnome #:place-gnome #:gnome-say #:gnome-agent #:com-say
+   ;; Embodied agents (gnomes are the first visible form)
+   #:gnome #:*agents* #:agents-in-session #:find-agent #:spawn-agent
+   #:find-gnome #:place-gnome #:gnome-say #:gnome-agent #:com-say
+   #:com-spawn-agent
    #:*current-agent* #:world-agent-presence))
