@@ -275,7 +275,7 @@ twelve saturated bars fight each other and the filename loses."
     (when (<= 0 index)
       (nth index (terminal-film-browser-visible-entries frame)))))
 
-(defclass terminal-film-browser-overlay (luvcraft-widget-overlay)
+(defclass terminal-film-browser-overlay (luvcraft-world-widget-overlay)
   ((display :initarg :display :reader terminal-film-browser-overlay-display)))
 
 (defun displace-terminal-mode-overlay (display wanted-type)

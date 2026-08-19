@@ -2,9 +2,9 @@
 
 Luvcraft has grown a family of McCLIM instruments that live inside the block
 world: the hotbar, the inventory, the film chooser, a Telegram terminal, a
-sheet of PDF paper. They share one implementation path, and that path has a
-property nobody chose deliberately and everybody can see: the text on them is
-soft, while the text on a terminal wall standing beside them is not.
+sheet of PDF paper. They began with one implementation path, and that path had
+a property nobody chose deliberately and everybody could see: the text on
+them was soft, while the text on a terminal wall standing beside them was not.
 
 This page records what that path actually is, why the difference exists, and
 what redoing it would mean. It is a design note about presentation, not about
@@ -118,7 +118,7 @@ the aliasing of everything that legitimately stays a raster. They are not a
 substitute for the split: a mipmapped picture of type is still a picture of
 type.
 
-* NEXT Draw McCLIM text as world geometry
+* DONE Draw McCLIM text as world geometry
 :PROPERTIES:
 :ID: 6XLC0P
 :END:
@@ -137,3 +137,14 @@ obvious right answer.
 equally legible at the same distance, and the page's type no longer needs
 condensing to fit its measure, because it is set from the document's own
 glyph metrics rather than a substituted face's.
+
+Physical McCLIM gadgets now retain the backend's prepared semantic command
+stream. Their backing texture omits Slug text commands, while the world
+compositor replays the already-shaped 72-byte Slug vertices into the game's
+scene pass with the gadget's center/right/up transform. Outline coverage is
+therefore evaluated at the final framebuffer pixel; panels, gradients, and
+images remain in the sampled backing layer. The Telegram phone and film
+browser use this hybrid compositor, while HUD panes deliberately keep the
+ordinary texture path. The PDF sheet keeps its analogous document-specific
+world text run because its glyphs and metrics come from MuPDF rather than a
+McCLIM text command.

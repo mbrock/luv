@@ -29,6 +29,17 @@
 (defstruct gpu-prepared-text-command
   atlas first-vertex vertex-count clip)
 
+(defgeneric gpu-command-rasterized-p (compositor command)
+  (:documentation
+   "Whether COMPOSITOR wants prepared COMMAND in the mirror texture.
+
+A compositor which replays a command directly into its final render pass can
+return false, avoiding a lower-resolution copy underneath the direct draw."))
+
+(defmethod gpu-command-rasterized-p (compositor command)
+  (declare (ignore compositor command))
+  t)
+
 (defstruct surface-relief x1 y1 x2 y2 radius height)
 
 (defvar *gpu-medium-fallback-source* nil
@@ -1667,6 +1678,15 @@ family name adopted."
               (gethash key (gpu-mirror-frame-states mirror)) state))
     state))
 
+(defun gpu-mirror-retained-text-buffer (mirror)
+  "Return the uploaded Slug buffer for MIRROR's retained prepared commands."
+  (let* ((context (mirror-context mirror))
+         (surface (mirror-texture mirror))
+         (key (and context surface
+                   (luv:canvas-frame-resource-key context surface)))
+         (state (and key (gethash key (gpu-mirror-frame-states mirror)))))
+    (and state (gpu-frame-state-text-buffer state))))
+
 (defun ensure-gpu-frame-vertex-buffer (state device byte-count)
   (when (> byte-count (gpu-frame-state-vertex-capacity state))
     (let* ((capacity (ash 1 (integer-length (max 1 (1- byte-count)))))
@@ -2116,6 +2136,7 @@ family name adopted."
             (ensure-gpu-mirror-pipeline mirror context)
             (multiple-value-bind (commands text-data)
                 (prepare-gpu-frame-commands mirror medium)
+              (setf (gpu-mirror-prepared-commands mirror) commands)
               (call-with-gpu-mirror-target
                mirror context
                (lambda (surface encoder)
@@ -2182,7 +2203,9 @@ family name adopted."
                            (setf active-clip-visible-p
                                  (set-gpu-frame-scissor
                                   pass mirror surface clip))))
-                       (when active-clip-visible-p
+                       (when (and active-clip-visible-p
+                                  (gpu-command-rasterized-p
+                                   (mirror-compositor mirror) command))
                          (etypecase command
                            (gpu-solid-command
                             (luv:set-pipeline
@@ -2309,6 +2332,9 @@ family name adopted."
            (luv:destroy buffer)))))))
 
 (defmethod release-mirror-presentation ((mirror luv-gpu-mirror))
+  (release-raster-mirror-compositor (mirror-compositor mirror))
+  (setf (mirror-compositor mirror) nil
+        (gpu-mirror-prepared-commands mirror) nil)
   (release-gpu-mirror-pipeline mirror)
   (release-gpu-mirror-frame-states mirror)
   (alexandria:when-let ((texture (mirror-texture mirror)))

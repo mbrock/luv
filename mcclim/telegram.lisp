@@ -1098,7 +1098,7 @@ back, it holds its place instead of being dragged along by every arrival."
 
 ;;;; The overlay on the wall
 
-(defclass luvcraft-communicator-overlay (luvcraft-widget-overlay)
+(defclass luvcraft-communicator-overlay (luvcraft-world-widget-overlay)
   ((display :initarg :display :reader communicator-overlay-display)))
 
 (defmethod luvcraft:encode-luvcraft-overlay

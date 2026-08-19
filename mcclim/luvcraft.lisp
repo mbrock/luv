@@ -26,6 +26,179 @@
                            :accessor widget-overlay-relief-fragment-module)
    (relief-pipeline :initform nil :accessor widget-overlay-relief-pipeline)))
 
+(defclass luvcraft-world-widget-overlay (luvcraft-widget-overlay)
+  ((text-device :initform nil :accessor world-widget-text-device)
+   (text-layout :initform nil :accessor world-widget-text-layout)
+   (text-vertex-module :initform nil
+                       :accessor world-widget-text-vertex-module)
+   (text-fragment-module :initform nil
+                         :accessor world-widget-text-fragment-module)
+   (text-pipeline :initform nil :accessor world-widget-text-pipeline)
+   (text-target-format :initform nil
+                       :accessor world-widget-text-target-format)
+   (text-bind-groups
+    :initform (make-hash-table :test #'equal)
+    :reader world-widget-text-bind-groups))
+  (:documentation
+   "A physical McCLIM surface whose semantic GPU commands may enter the
+game's scene pass directly.  Its texture remains the backing layer for image
+and broad-area paint; Slug text is evaluated at the final framebuffer pixel."))
+
+(defmethod gpu-command-rasterized-p
+    ((overlay luvcraft-world-widget-overlay)
+     (command gpu-prepared-text-command))
+  (declare (ignore overlay command))
+  nil)
+
+(spv:define-shader world-widget-slug-vertex-specification
+    (:stage :vertex
+     :inputs ((position-alpha :vec3 :location 0)
+              (outline-horizontal :vec3 :location 1)
+              (atlas-vertical :vec3 :location 2)
+              (band-low :vec3 :location 3)
+              (band-high :vec3 :location 4)
+              (color-input :vec3 :location 5))
+     :resources
+     ((state :uniform-block :set 0 :binding 2
+             :members ((center :vec4) (right :vec4) (up :vec4))))
+     :outputs ((clip-position :vec4 :built-in :position)
+               (render-coordinate :vec2 :location 0)
+               (render-atlas-base :vec2 :location 1)
+               (render-band-bounds :vec4 :location 2)
+               (render-band-counts :vec2 :location 3)
+               (render-color :vec4 :location 4)))
+  (let* ((local-x (spv:swizzle position-alpha :x))
+         (local-y (spv:swizzle position-alpha :y)))
+    (spv:set-output clip-position
+                    (+ center (* right local-x) (* up local-y)))
+    (spv:set-output render-coordinate
+                    (spv:swizzle outline-horizontal :xy))
+    (spv:set-output render-atlas-base (spv:swizzle atlas-vertical :xy))
+    (spv:set-output render-band-bounds
+                    (spv:vec4 (spv:swizzle band-low :xy)
+                              (spv:swizzle band-high :xy)))
+    (spv:set-output render-band-counts
+                    (spv:vec2 (spv:swizzle outline-horizontal :z)
+                              (spv:swizzle atlas-vertical :z)))
+    (spv:set-output render-color
+                    (spv:vec4 color-input
+                              (spv:swizzle position-alpha :z)))))
+
+(defun clear-world-widget-text-resources (overlay)
+  (maphash (lambda (key group)
+             (declare (ignore key))
+             (luv:destroy group))
+           (world-widget-text-bind-groups overlay))
+  (clrhash (world-widget-text-bind-groups overlay))
+  (dolist (resource
+            (list (world-widget-text-pipeline overlay)
+                  (world-widget-text-fragment-module overlay)
+                  (world-widget-text-vertex-module overlay)
+                  (world-widget-text-layout overlay)))
+    (when resource (luv:destroy resource)))
+  (setf (world-widget-text-device overlay) nil
+        (world-widget-text-layout overlay) nil
+        (world-widget-text-pipeline overlay) nil
+        (world-widget-text-fragment-module overlay) nil
+        (world-widget-text-vertex-module overlay) nil
+        (world-widget-text-target-format overlay) nil)
+  overlay)
+
+(defmethod release-raster-mirror-compositor :before
+    ((overlay luvcraft-world-widget-overlay))
+  (clear-world-widget-text-resources overlay))
+
+(defun ensure-world-widget-text-pipeline (overlay target-format)
+  (let ((device (spinning-compositor-device overlay)))
+    (unless (and (eq device (world-widget-text-device overlay))
+                 (eq target-format
+                     (world-widget-text-target-format overlay))
+                 (world-widget-text-pipeline overlay))
+      (clear-world-widget-text-resources overlay)
+      (let ((layout nil) (vertex nil) (fragment nil) (pipeline nil)
+            (completed-p nil))
+        (unwind-protect
+             (progn
+               (setf layout
+                     (luv:create
+                      device
+                      (luv:make-bind-group-layout-descriptor
+                       :label "world McCLIM Slug layout"
+                       :entries '((:binding 0 :type :texture)
+                                  (:binding 1 :type :texture)
+                                  (:binding 2 :type :uniform-buffer))))
+                     vertex
+                     (luv:create
+                      device
+                      (luv:make-shader-module-descriptor
+                       :label "world McCLIM Slug vertex"
+                       :language :mathematical
+                       :code (world-widget-slug-vertex-specification)))
+                     fragment
+                     (luv:create
+                      device
+                      (luv:make-shader-module-descriptor
+                       :label "world McCLIM Slug fragment"
+                       :language :mathematical
+                       :code (luv.slug:slug-atlas-fragment-specification)))
+                     pipeline
+                     (luv:create
+                      device
+                      (luv:make-render-pipeline-descriptor
+                       :label "world McCLIM Slug text"
+                       :layout layout
+                       :vertex
+                       `(:module ,vertex
+                         :buffers
+                         ((:array-stride 72
+                           :attributes
+                           ((:shader-location 0 :offset 0 :format :float32x3)
+                            (:shader-location 1 :offset 12 :format :float32x3)
+                            (:shader-location 2 :offset 24 :format :float32x3)
+                            (:shader-location 3 :offset 36 :format :float32x3)
+                            (:shader-location 4 :offset 48 :format :float32x3)
+                            (:shader-location 5 :offset 60
+                             :format :float32x3)))))
+                       :fragment
+                       `(:module ,fragment
+                         :targets
+                         ((:format ,target-format
+                           :blend :premultiplied-alpha)))
+                       :depth-stencil
+                       '(:format :depth32-float
+                         :depth-write-enabled nil :depth-compare :less)
+                       :primitive '(:topology :triangle-list))))
+               (setf (world-widget-text-device overlay) device
+                     (world-widget-text-layout overlay) layout
+                     (world-widget-text-target-format overlay) target-format
+                     (world-widget-text-vertex-module overlay) vertex
+                     (world-widget-text-fragment-module overlay) fragment
+                     (world-widget-text-pipeline overlay) pipeline
+                     completed-p t))
+          (unless completed-p
+            (dolist (resource
+                      (remove nil (list pipeline fragment vertex layout)))
+              (ignore-errors (luv:destroy resource))))))))
+  overlay)
+
+(defun ensure-world-widget-text-bind-group
+    (overlay atlas surface-texture frame-state)
+  (let ((key (list atlas surface-texture)))
+    (or (gethash key (world-widget-text-bind-groups overlay))
+        (setf (gethash key (world-widget-text-bind-groups overlay))
+              (luv:create
+               (spinning-compositor-device overlay)
+               (luv:make-bind-group-descriptor
+                :label "world McCLIM Slug bindings"
+                :layout (world-widget-text-layout overlay)
+                :entries
+                `((:binding 0
+                   :resource ,(luv.slug:slug-glyph-atlas-band-view atlas))
+                  (:binding 1
+                   :resource ,(luv.slug:slug-glyph-atlas-curve-view atlas))
+                  (:binding 2
+                   :resource ,(spinning-frame-state-buffer frame-state)))))))))
+
 (spv:define-shader widget-relief-world-vertex-specification
     (:stage :vertex
      :inputs ((position :vec3 :location 0)
@@ -375,6 +548,93 @@ for a wall the answer is the same every frame and costs a few vector ops."
           (* height 0.5 (+ 1.0 (/ clip-y clip-w)))
           clip-w u v)))
 
+(defun set-world-widget-text-scissor
+    (pass overlay mirror surface-texture clip)
+  "Set a conservative framebuffer scissor for one pane-local CLIP."
+  (destructuring-bind (surface-width surface-height &rest ignored)
+      (luv:gpu-texture-size surface-texture)
+    (declare (ignore ignored))
+    (multiple-value-bind (logical-width logical-height)
+        (gpu-mirror-logical-size mirror)
+      (destructuring-bind (left top right bottom)
+          (or clip (list 0 0 logical-width logical-height))
+        (let* ((state (widget-overlay-render-state overlay))
+               (corners
+                 (mapcar
+                  (lambda (point)
+                    (projected-screen-vertex
+                     state surface-width surface-height
+                     (/ (first point) logical-width)
+                     (/ (second point) logical-height)))
+                  (list (list left top) (list right top)
+                        (list left bottom) (list right bottom)))))
+          ;; Crossing the camera plane makes the projected AABB unbounded.
+          ;; The full target is conservative and this case is rare for a
+          ;; focusable surface in front of the player.
+          (if (some (lambda (corner) (not (plusp (third corner)))) corners)
+              (progn
+                (luv:set-scissor-rect
+                 pass 0 0 surface-width surface-height)
+                t)
+              (let* ((x (max 0 (min surface-width
+                                    (floor (reduce #'min corners :key #'first)))))
+                     (y (max 0 (min surface-height
+                                    (floor (reduce #'min corners :key #'second)))))
+                     (right
+                       (max x (min surface-width
+                                   (ceiling
+                                    (reduce #'max corners :key #'first)))))
+                     (bottom
+                       (max y (min surface-height
+                                   (ceiling
+                                    (reduce #'max corners :key #'second)))))
+                     (width (- right x))
+                     (height (- bottom y)))
+                (when (and (plusp width) (plusp height))
+                  (luv:set-scissor-rect pass x y width height)
+                  t))))))))
+
+(defmethod luvcraft:encode-luvcraft-overlay :after
+    ((overlay luvcraft-world-widget-overlay) session pass surface-texture)
+  "Replay retained Slug commands on the physical surface at scene resolution."
+  (let* ((mirror (widget-overlay-mirror overlay))
+         (commands (gpu-mirror-prepared-commands mirror))
+         (text-buffer (gpu-mirror-retained-text-buffer mirror)))
+    (when (and commands text-buffer (widget-overlay-render-state overlay))
+      (let* ((target-format
+               (luv:gpu-texture-format
+                (luvcraft::luvcraft-session-color-texture session)))
+             (frame-state
+               (ensure-spinning-compositor-frame-state overlay surface-texture))
+             (active-clip (list :unset))
+             (clip-visible-p t))
+        (ensure-world-widget-text-pipeline overlay target-format)
+        (luv:set-pipeline pass (world-widget-text-pipeline overlay))
+        (luv:set-vertex-buffer pass 0 text-buffer)
+        (dolist (command commands)
+          (when (typep command 'gpu-prepared-text-command)
+            (let ((clip (gpu-prepared-text-command-clip command)))
+              (unless (equal clip active-clip)
+                (setf active-clip clip
+                      clip-visible-p
+                      (set-world-widget-text-scissor
+                       pass overlay mirror surface-texture clip))))
+            (when clip-visible-p
+              (luv:set-bind-group
+               pass 0
+               (ensure-world-widget-text-bind-group
+                overlay (gpu-prepared-text-command-atlas command)
+                surface-texture frame-state))
+              (luv:draw
+               pass (gpu-prepared-text-command-vertex-count command) 1
+               (gpu-prepared-text-command-first-vertex command)))))
+        ;; Overlay encoding continues in the same scene pass.
+        (destructuring-bind (width height &rest ignored)
+            (luv:gpu-texture-size surface-texture)
+          (declare (ignore ignored))
+          (luv:set-scissor-rect pass 0 0 width height)))))
+  overlay)
+
 (defun barycentric-coordinates (x y a b c)
   (destructuring-bind (ax ay &rest ignored-a) a
     (declare (ignore ignored-a))
@@ -545,7 +805,7 @@ for a wall the answer is the same every frame and costs a few vector ops."
       (declare (ignore ignored-up))
       (let ((overlay
               (make-instance
-               'luvcraft-widget-overlay
+               'luvcraft-world-widget-overlay
                :session session :frame frame :mirror mirror
                :center
                (add-scaled-vector camera-position
@@ -555,6 +815,10 @@ for a wall the answer is the same every frame and costs a few vector ops."
                (vec:make-vec3 0.0 (- (/ width aspect 2.0)) 0.0)
                :normal-axis (vec:vec3-scale forward -1.0))))
         (setf (mirror-compositor mirror) overlay)
+        ;; The frame was enabled before it acquired its world compositor.
+        ;; Repaint once so text is retained for the scene pass but omitted
+        ;; from the backing texture.
+        (repaint-gpu-mirror mirror)
         (luvcraft:add-luvcraft-overlay session overlay)
         overlay))))
 

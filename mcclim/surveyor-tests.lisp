@@ -45,6 +45,23 @@
            (allocate-instance
             (find-class 'mcluv:luvcraft-hotbar-overlay))))))
 
+(deftest physical-mcclim-text-replays-in-the-world-pass
+  (ok (subtypep 'mcluv::terminal-film-browser-overlay
+                'mcluv:luvcraft-world-widget-overlay))
+  (ok (not (subtypep 'mcluv:luvcraft-hotbar-overlay
+                     'mcluv:luvcraft-world-widget-overlay)))
+  (let ((overlay
+          (allocate-instance
+           (find-class 'mcluv:luvcraft-world-widget-overlay)))
+        (command (mcluv::make-gpu-prepared-text-command)))
+    (ok (not (mcluv::gpu-command-rasterized-p overlay command)))
+    (ok (mcluv::gpu-command-rasterized-p nil command)))
+  (let ((specification (mcluv::world-widget-slug-vertex-specification)))
+    (ok (> (length (spv:assemble-shader-specification specification)) 5))
+    (ok (search "using namespace metal"
+                (luv.msl:msl-document-source
+                 (luv.msl:compile-msl specification))))))
+
 (deftest inventory-is-a-modal-hud-with-stable-grid-hit-testing
   (ok (eq :hud
           (luvcraft:luvcraft-overlay-stage

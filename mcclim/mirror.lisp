@@ -91,7 +91,12 @@ mirror's identity: a later target may be a texture presented on a 3D quad."))
    (text-pipeline :initform nil :accessor gpu-mirror-text-pipeline)
    (text-bind-groups
     :initform (make-hash-table :test #'eq)
-    :reader gpu-mirror-text-bind-groups))
+    :reader gpu-mirror-text-bind-groups)
+   ;; The last immutable semantic stream prepared for presentation.  A world
+   ;; compositor can replay selected families (notably Slug text) into the
+   ;; game's actual scene pass instead of sampling their rasterized result.
+   (prepared-commands
+    :initform nil :accessor gpu-mirror-prepared-commands))
   (:documentation
    "A direct GPU target for an ordered LUV-GPU-MEDIUM drawing stream.
 
