@@ -310,6 +310,7 @@
         in {
           default = env.pkgs.mkShell ({
             packages = [
+              env.pkgs.bashInteractive
               env.lisp
               env.ffmpeg
               env.ffmpeg.dev
@@ -341,6 +342,10 @@
             # The real urbit runtime (vere), which an urbit wall boots.
             LUV_URBIT = "${env.pkgs.urbit}/bin/urbit";
             LUV_GHOSTTY_LIBRARY = env.libghosttyVtLibrary;
+            # Terminal walls need programmable completion for the user's
+            # ordinary interactive Bash startup files.  The stdenv Bash is
+            # deliberately built without it.
+            LUV_BASH = "${env.pkgs.bashInteractive}/bin/bash";
             LUV_SLYNK_DIR = "${env.slyRoot}/slynk";
             LUV_TRACY_CLIENT = env.tracyClientLibrary;
             LUV_TRACY_CAPTURE = "${env.tracyTools}/bin/tracy-capture";
@@ -367,6 +372,19 @@
                   /dev/tty[0-9]*) export SDL_VIDEODRIVER=kmsdrm ;;
                   *) export SDL_VIDEODRIVER=offscreen ;;
                 esac
+              fi
+
+              # SDL's KMSDRM backend sees physical scancodes but not the
+              # console/XKB character layout.  Carry the host's Dvorak
+              # variant into luv's scancode translator unless explicitly
+              # overridden by the caller.
+              if [ "''${SDL_VIDEODRIVER:-}" = kmsdrm ] \
+                && [ -z "''${LUV_KEYBOARD_LAYOUT+x}" ] \
+                && command -v localectl >/dev/null 2>&1 \
+                && [ "$(localectl status 2>/dev/null \
+                         | ${env.pkgs.gnused}/bin/sed -n \
+                             's/^[[:space:]]*X11 Variant:[[:space:]]*//p')" = dvorak ]; then
+                export LUV_KEYBOARD_LAYOUT=dvorak
               fi
 
               if [ -n "''${LUV_LAVAPIPE_ICD:-}" ] \

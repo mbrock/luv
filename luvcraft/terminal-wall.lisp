@@ -2009,10 +2009,9 @@ on, so a luvcraft started in it appears right here."
              session (terminal-display-name display) environment)))
     (attach-terminal-display-pty
      display
-     ;; The Nix dev shell supplies Bash through PATH; NixOS deliberately has
-     ;; no /bin/bash.  OPEN-PTY-DEVICE resolves a bare program name against
-     ;; the child environment before launching it.
-     :program "bash"
+     ;; The dev shell names its interactive Bash explicitly; outside it,
+     ;; OPEN-PTY-DEVICE resolves the fallback through the child environment.
+     :program (or (uiop:getenv "LUV_BASH") "bash")
      :directory (uiop:getcwd)
      :environment environment)))
 
