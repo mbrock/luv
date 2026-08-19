@@ -60,6 +60,10 @@
                (luvcraft-key-command session (key-press :f11))))
     (ok (equal '(com-toggle-tracy-capture)
                (luvcraft-key-command session (key-press :f9))))
+    (ok (equal '(luvcraft.clim::com-quit)
+               (luvcraft-key-command
+                session (key-press :q :character #\q
+                                      :modifiers '(:control)))))
     (ok (equal '(com-execute-command)
                (luvcraft-key-command
                 session (key-press :x :character #\x :modifiers '(:meta)))))
@@ -91,6 +95,7 @@
     (ok (assoc "Toggle Phone" entries :test #'string=))
     (ok (assoc "Place Block" entries :test #'string=))
     (ok (assoc "Toggle Tracy Capture" entries :test #'string=))
+    (ok (assoc "Export Presentation Timing" entries :test #'string=))
     ;; Commands needing arguments will join M-x when it can ask for them;
     ;; presenting them as executable before then would make a dishonest menu.
     (ok (null (assoc "Select Quickbar Slot" entries :test #'string=)))

@@ -62,6 +62,28 @@
     ()
   (luvcraft:unfocus-luvcraft-session (luvcraft-command-session)))
 
+(defparameter *presentation-timing-pathname*
+  #P"build/kms-presentation.csv"
+  "Where the in-game timing command writes its latest KMS presentation run.")
+
+(defun export-luvcraft-presentation-timing
+    (session &optional (pathname *presentation-timing-pathname*))
+  "Export SESSION's direct-display Vulkan timing data, when it has any."
+  (let ((context (luvcraft:luvcraft-session-context session)))
+    (when (typep context 'luv:vulkan-canvas-context)
+      (let ((snapshot (luv:vulkan-canvas-presentation-timing-snapshot context)))
+        (when (and snapshot
+                   (not (eq :not-direct-display
+                            (luv:presentation-timing-snapshot-reason snapshot))))
+          (luv:write-vulkan-canvas-presentation-timing-csv
+           context pathname))))))
+
+(define-command (com-export-presentation-timing
+                 :command-table luvcraft-window
+                 :name "Export Presentation Timing")
+    ()
+  (export-luvcraft-presentation-timing (luvcraft-command-session)))
+
 ;;; Control-Q quits from anywhere, including modal focus.  On a KMSDRM
 ;;; console there is no window manager to deliver a close request, so
 ;;; without a quit key the game owns the machine until someone kills it
@@ -74,8 +96,10 @@
                           :keystroke (#\q :control))
     ()
   (let ((session (luvcraft-command-session)))
-    (setf (luvcraft:luvcraft-session-running-p session) nil)
-    (luv:close-canvas (luvcraft:luvcraft-session-canvas session))))
+    (unwind-protect
+         (export-luvcraft-presentation-timing session)
+      (setf (luvcraft:luvcraft-session-running-p session) nil)
+      (luv:close-canvas (luvcraft:luvcraft-session-canvas session)))))
 
 ;;; Keyboard equivalents of the pointer buttons, for consoles and laptops
 ;;; without a working click.

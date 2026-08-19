@@ -33,6 +33,7 @@
            #:com-toggle-fullscreen
            #:com-toggle-tracy-capture
            #:com-toggle-focus
+           #:com-export-presentation-timing
            #:com-select-quickbar-slot
            #:com-leave-focus
            #:com-release-pointer

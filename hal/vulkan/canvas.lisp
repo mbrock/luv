@@ -348,6 +348,7 @@ disagree would otherwise ask for a rebuild on every single frame.")
          (origin (first completed)))
     (unless snapshot
       (error "No Vulkan presentation timeline exists for ~S." context))
+    (ensure-directories-exist pathname)
     (with-open-file (stream pathname :direction :output
                                      :if-exists :supersede
                                      :if-does-not-exist :create)
