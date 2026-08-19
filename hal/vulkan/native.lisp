@@ -482,7 +482,6 @@ advertised is never placed in the query chain and is returned as NIL."
          physical-device
          :present-timing-p present-timing-p
          :present-id-2-p present-id-2-p)
-      (declare (ignore present-at-absolute-time-p present-at-relative-time-p))
       (with-translated-values
           ((extension-names enabled-extension-names string-list))
         (let* ((families (remove-duplicates
@@ -537,8 +536,10 @@ advertised is never placed in the query chain and is returned as NIL."
                                                 base-features)
                                     :present-timing
                                     (if present-timing-feature-p 1 0)
-                                    :present-at-absolute-time 0
-                                    :present-at-relative-time 0)
+                                    :present-at-absolute-time
+                                    (if present-at-absolute-time-p 1 0)
+                                    :present-at-relative-time
+                                    (if present-at-relative-time-p 1 0))
                             (with-vk (create-info device-create-info
                                       :p-next
                                       (cond
@@ -2170,18 +2171,25 @@ entries as understood by FILL-SEMAPHORE-SUBMIT-INFOS."
 
 (defun present
     (queue swapchain image-index
-     &key (wait-semaphores #()) present-id present-stage time-domain-id)
+     &key (wait-semaphores #()) present-id present-stage time-domain-id
+       target-time target-time-domain-present-stage)
   (with-foreign-array (waits :pointer wait-semaphores)
     (with-foreign-array (swapchains :pointer (vector swapchain))
       (with-foreign-array (indices :uint32 (vector image-index))
         (cffi:with-foreign-object (present-ids :uint64)
           (setf (cffi:mem-ref present-ids :uint64) (or present-id 0))
           (with-vk (timing present-timing-info
-                    :flags nil :target-time 0
+                    :flags (if target-time
+                               '(:present-at-nearest-refresh-cycle)
+                               nil)
+                    :target-time (or target-time 0)
                     :time-domain-id (or time-domain-id 0)
                     :present-stage-queries
                     (if present-stage (list present-stage) nil)
-                    :target-time-domain-present-stage nil)
+                    :target-time-domain-present-stage
+                    (if target-time-domain-present-stage
+                        (list target-time-domain-present-stage)
+                        nil))
             (with-vk (timings present-timings-info
                       :swapchain-count 1 :p-timing-infos timing)
               (with-vk (id present-id-2

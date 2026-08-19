@@ -74,11 +74,15 @@ disagree would otherwise ask for a rebuild on every single frame.")
 
 (defconstant +vulkan-presentation-timing-capacity+ 4096)
 (defconstant +vulkan-presentation-timing-queue-size+ 256)
+(defconstant +vulkan-presentation-minimum-lead-seconds+ 0.012d0)
 
 (defclass vulkan-presentation-timeline ()
   ((status :initform :warming :accessor vulkan-presentation-timeline-status)
    (reason :initform nil :accessor vulkan-presentation-timeline-reason)
    (stage :initarg :stage :reader vulkan-presentation-timeline-stage)
+   (absolute-time-p
+    :initarg :absolute-time-p :initform nil
+    :reader vulkan-presentation-timeline-absolute-time-p)
    (time-domain :initform nil :accessor vulkan-presentation-timeline-time-domain)
    (time-domain-id :initform 0
                    :accessor vulkan-presentation-timeline-time-domain-id)
@@ -88,6 +92,11 @@ disagree would otherwise ask for a rebuild on every single frame.")
                      :accessor vulkan-presentation-timeline-refresh-interval)
    (next-present-id :initform 1
                     :accessor vulkan-presentation-timeline-next-present-id)
+   (latest-result-id :initform 0
+                     :accessor vulkan-presentation-timeline-latest-result-id)
+   (latest-result-nanoseconds
+    :initform 0
+    :accessor vulkan-presentation-timeline-latest-result-nanoseconds)
    (count :initform 0 :accessor vulkan-presentation-timeline-count)
    (dropped-count :initform 0
                   :accessor vulkan-presentation-timeline-dropped-count)
@@ -104,6 +113,11 @@ disagree would otherwise ask for a rebuild on every single frame.")
     :initform (make-array +vulkan-presentation-timing-capacity+
                           :element-type 'double-float :initial-element 0d0)
     :reader vulkan-presentation-timeline-submitted-seconds)
+   (target-nanoseconds
+    :initform (make-array +vulkan-presentation-timing-capacity+
+                          :element-type '(unsigned-byte 64)
+                          :initial-element 0)
+    :reader vulkan-presentation-timeline-target-nanoseconds)
    (actual-nanoseconds
     :initform (make-array +vulkan-presentation-timing-capacity+
                           :element-type '(unsigned-byte 64)
@@ -125,12 +139,13 @@ disagree would otherwise ask for a rebuild on every single frame.")
   (present-id 0 :type (unsigned-byte 64))
   (predicted-seconds 0d0 :type double-float)
   (submitted-seconds 0d0 :type double-float)
+  (target-nanoseconds 0 :type (unsigned-byte 64))
   (actual-nanoseconds 0 :type (unsigned-byte 64))
   actual-time-domain
   (actual-time-domain-id 0 :type (unsigned-byte 64)))
 
 (defstruct presentation-timing-snapshot
-  status reason stage time-domain
+  status reason stage time-domain absolute-time-p
   (time-domain-id 0 :type (unsigned-byte 64))
   (refresh-duration 0 :type (unsigned-byte 64))
   (refresh-interval 0 :type (unsigned-byte 64))
@@ -141,7 +156,8 @@ disagree would otherwise ask for a rebuild on every single frame.")
   (mod (1- present-id) +vulkan-presentation-timing-capacity+))
 
 (defun note-vulkan-presentation-submission
-    (timeline present-id predicted-seconds submitted-seconds)
+    (timeline present-id predicted-seconds submitted-seconds
+     &optional (target-nanoseconds 0))
   (let ((index (vulkan-presentation-timeline-index present-id)))
     (setf (aref (vulkan-presentation-timeline-present-ids timeline) index)
           present-id
@@ -149,6 +165,8 @@ disagree would otherwise ask for a rebuild on every single frame.")
           (float predicted-seconds 1d0)
           (aref (vulkan-presentation-timeline-submitted-seconds timeline) index)
           (float submitted-seconds 1d0)
+          (aref (vulkan-presentation-timeline-target-nanoseconds timeline) index)
+          target-nanoseconds
           (aref (vulkan-presentation-timeline-actual-nanoseconds timeline) index)
           0
           (aref (vulkan-presentation-timeline-actual-time-domains timeline) index)
@@ -178,7 +196,86 @@ disagree would otherwise ask for a rebuild on every single frame.")
              (vulkan-presentation-timeline-actual-time-domain-ids timeline)
              index)
             time-domain-id)
+      (when (and (> present-id
+                    (vulkan-presentation-timeline-latest-result-id timeline))
+                 (eq time-domain
+                     (vulkan-presentation-timeline-time-domain timeline))
+                 (= time-domain-id
+                    (vulkan-presentation-timeline-time-domain-id timeline)))
+        (setf (vulkan-presentation-timeline-latest-result-id timeline) present-id
+              (vulkan-presentation-timeline-latest-result-nanoseconds timeline)
+              actual-nanoseconds))
       t)))
+
+(defun predict-vulkan-presentation-target (timeline fallback-time now)
+  "Return one feedback-rebased host time and optional native display target."
+  (let* ((base-id (vulkan-presentation-timeline-latest-result-id timeline))
+         (duration (vulkan-presentation-timeline-refresh-duration timeline))
+         (index (and (plusp base-id)
+                     (vulkan-presentation-timeline-index base-id))))
+    (if (and (eq :recording
+                 (vulkan-presentation-timeline-status timeline))
+             (vulkan-presentation-timeline-absolute-time-p timeline)
+             (plusp duration)
+             index
+             (= base-id
+                (aref (vulkan-presentation-timeline-present-ids timeline)
+                      index)))
+        (let* ((base-actual
+                 (vulkan-presentation-timeline-latest-result-nanoseconds
+                  timeline))
+               (base-predicted
+                 (aref
+                  (vulkan-presentation-timeline-predicted-seconds timeline)
+                  index))
+               (base-target
+                 (aref
+                  (vulkan-presentation-timeline-target-nanoseconds timeline)
+                  index))
+               ;; Once a scheduled present reports back, its native target
+               ;; error translates the logical host prediction onto the
+               ;; actually observed display beat.  The first unscheduled
+               ;; result is still a useful phase seed.
+               (base-host
+                 (if (plusp base-target)
+                     (+ base-predicted (/ (- base-actual base-target) 1d9))
+                     base-predicted))
+               (steps
+                 (- (vulkan-presentation-timeline-next-present-id timeline)
+                    base-id))
+               (target (+ base-actual (* steps duration)))
+               (host (+ base-host (/ (* steps duration) 1d9)))
+               (minimum
+                 (+ now +vulkan-presentation-minimum-lead-seconds+)))
+          (when (< host minimum)
+            (let ((skips (ceiling (/ (- minimum host) (/ duration 1d9)))))
+              (incf target (* skips duration))
+              (incf host (/ (* skips duration) 1d9))))
+          ;; Feedback commonly trails more than one queued frame.  If the
+          ;; lead-time adjustment skipped a beat for the previous submission,
+          ;; the ID-derived target can otherwise collide with that same beat.
+          (let* ((previous-id
+                   (1- (vulkan-presentation-timeline-next-present-id timeline)))
+                 (previous-index
+                   (and (plusp previous-id)
+                        (vulkan-presentation-timeline-index previous-id)))
+                 (previous-target
+                   (and previous-index
+                        (= previous-id
+                           (aref
+                            (vulkan-presentation-timeline-present-ids timeline)
+                            previous-index))
+                        (aref
+                         (vulkan-presentation-timeline-target-nanoseconds timeline)
+                         previous-index))))
+            (when (and previous-target (plusp previous-target)
+                       (<= target previous-target))
+              (let ((skips
+                      (1+ (floor (- previous-target target) duration))))
+                (incf target (* skips duration))
+                (incf host (/ (* skips duration) 1d9)))))
+          (values host target))
+        (values fallback-time nil))))
 
 (defun snapshot-vulkan-presentation-timeline (timeline)
   (let* ((count (vulkan-presentation-timeline-count timeline))
@@ -197,6 +294,9 @@ disagree would otherwise ask for a rebuild on every single frame.")
                :submitted-seconds
                (aref (vulkan-presentation-timeline-submitted-seconds timeline)
                      index)
+               :target-nanoseconds
+               (aref (vulkan-presentation-timeline-target-nanoseconds timeline)
+                     index)
                :actual-nanoseconds
                (aref (vulkan-presentation-timeline-actual-nanoseconds timeline)
                      index)
@@ -211,6 +311,8 @@ disagree would otherwise ask for a rebuild on every single frame.")
      :status (vulkan-presentation-timeline-status timeline)
      :reason (vulkan-presentation-timeline-reason timeline)
      :stage (vulkan-presentation-timeline-stage timeline)
+     :absolute-time-p
+     (vulkan-presentation-timeline-absolute-time-p timeline)
      :time-domain (vulkan-presentation-timeline-time-domain timeline)
      :time-domain-id (vulkan-presentation-timeline-time-domain-id timeline)
      :refresh-duration (vulkan-presentation-timeline-refresh-duration timeline)
@@ -308,6 +410,8 @@ disagree would otherwise ask for a rebuild on every single frame.")
               (presentation-timing-snapshot-stage snapshot)
               (presentation-timing-snapshot-time-domain snapshot)
               (presentation-timing-snapshot-time-domain-id snapshot))
+      (format stream "  absolute display scheduling: ~:[unavailable~;enabled~]~%"
+              (presentation-timing-snapshot-absolute-time-p snapshot))
       (when (plusp duration)
         (format stream "  display: ~,6F ms (~,3F Hz), interval granularity ~,6F ms~%"
                 (/ duration 1d6) (/ 1d9 duration)
@@ -353,11 +457,13 @@ disagree would otherwise ask for a rebuild on every single frame.")
                                      :if-exists :supersede
                                      :if-does-not-exist :create)
       (format stream
-              "present_id,predicted_seconds,submitted_seconds,actual_nanoseconds,time_domain,time_domain_id,actual_interval_ms,prediction_drift_ms~%")
+              "present_id,predicted_seconds,submitted_seconds,target_nanoseconds,actual_nanoseconds,time_domain,time_domain_id,actual_interval_ms,prediction_drift_ms,target_error_ms~%")
       (loop with previous = nil
             for observation in observations
             for actual =
               (presentation-timing-observation-actual-nanoseconds observation)
+            for target =
+              (presentation-timing-observation-target-nanoseconds observation)
             for comparable-p =
               (and origin (plusp actual)
                    (eq (presentation-timing-observation-actual-time-domain origin)
@@ -387,19 +493,31 @@ disagree would otherwise ask for a rebuild on every single frame.")
                              observation)
                             (presentation-timing-observation-predicted-seconds
                              origin)))))
-            do (format stream "~D,~,9F,~,9F,~D,~A,~D,~:[~;~,9F~],~:[~;~,9F~]~%"
+            for target-error =
+              (and (plusp target)
+                   (plusp actual)
+                   (eq (presentation-timing-observation-actual-time-domain
+                        observation)
+                       (presentation-timing-snapshot-time-domain snapshot))
+                   (= (presentation-timing-observation-actual-time-domain-id
+                       observation)
+                      (presentation-timing-snapshot-time-domain-id snapshot))
+                   (/ (- actual target) 1d6))
+            do (format stream "~D,~,9F,~,9F,~D,~D,~A,~D,~:[~;~,9F~],~:[~;~,9F~],~:[~;~,9F~]~%"
                        (presentation-timing-observation-present-id observation)
                        (presentation-timing-observation-predicted-seconds
                         observation)
                        (presentation-timing-observation-submitted-seconds
                         observation)
+                       target
                        actual
                        (or (presentation-timing-observation-actual-time-domain
                             observation)
                            "")
                        (presentation-timing-observation-actual-time-domain-id
                         observation)
-                       interval interval drift drift)
+                       interval interval drift drift
+                       target-error target-error)
                (setf previous observation)))
     pathname))
 
@@ -565,32 +683,38 @@ disagree would otherwise ask for a rebuild on every single frame.")
              (lvk:physical-device-presentation-features
               (vulkan-canvas-physical-device context)
               :present-timing-p t :present-id-2-p t)
-           (declare (ignore absolute-p relative-p))
+           (declare (ignore relative-p))
            (unless timing-feature-p
              (return-from make-vulkan-canvas-presentation-timeline
                (unsupported :missing-present-timing-feature)))
            (unless id-feature-p
              (return-from make-vulkan-canvas-presentation-timeline
-               (unsupported :missing-present-id-2-feature))))
-         (let* ((capabilities
-                  (lvk:get-presentation-timing-surface-capabilities
-                   (vulkan-canvas-physical-device context)
-                   (vulkan-canvas-surface context)))
-                (stage
-                  (choose-vulkan-presentation-stage
-                   (lvk:presentation-timing-capabilities-stages
-                    capabilities))))
-           (cond
-             ((not (lvk:presentation-timing-capabilities-supported-p
-                    capabilities))
-              (unsupported :surface-does-not-support-present-timing))
-             ((not (lvk:presentation-timing-capabilities-present-id-2-p
-                    capabilities))
-              (unsupported :surface-does-not-support-present-id-2))
-             ((not stage)
-              (unsupported :surface-offers-no-presentation-stage))
-             (t
-              (make-instance 'vulkan-presentation-timeline :stage stage)))))))))
+               (unsupported :missing-present-id-2-feature)))
+           (let* ((capabilities
+                    (lvk:get-presentation-timing-surface-capabilities
+                     (vulkan-canvas-physical-device context)
+                     (vulkan-canvas-surface context)))
+                  (stage
+                    (choose-vulkan-presentation-stage
+                     (lvk:presentation-timing-capabilities-stages
+                      capabilities))))
+             (cond
+               ((not (lvk:presentation-timing-capabilities-supported-p
+                      capabilities))
+                (unsupported :surface-does-not-support-present-timing))
+               ((not (lvk:presentation-timing-capabilities-present-id-2-p
+                      capabilities))
+                (unsupported :surface-does-not-support-present-id-2))
+               ((not stage)
+                (unsupported :surface-offers-no-presentation-stage))
+               (t
+                (make-instance
+                 'vulkan-presentation-timeline
+                 :stage stage
+                 :absolute-time-p
+                 (and absolute-p
+                      (lvk:presentation-timing-capabilities-absolute-time-p
+                       capabilities))))))))))))
 
 (defun refresh-vulkan-presentation-timeline
     (timeline native-device swapchain)
@@ -1055,8 +1179,19 @@ surface still cannot supply an image and this frame should be skipped."
                 (values slot slot-index image-index))))))
     nil))
 
+(defun vulkan-canvas-presentation-target (context)
+  "Choose the display beat represented by CONTEXT's next frame."
+  (let* ((canvas (context-canvas context))
+         (timeline (vulkan-canvas-presentation-timeline context))
+         (fallback (canvas-presentation-time canvas)))
+    (if timeline
+        (predict-vulkan-presentation-target
+         timeline fallback (monotonic-seconds))
+        (values fallback nil))))
+
 (defun present-vulkan-canvas-image
-    (context queue image-index render-done predicted-presentation-time)
+    (context queue image-index render-done predicted-presentation-time
+     target-nanoseconds)
   "Present one image and opportunistically collect its display timestamp."
   (let* ((device (context-device context))
          (native-device (vulkan-handle device))
@@ -1074,7 +1209,13 @@ surface still cannot supply an image and this frame should be skipped."
                 :present-stage
                 (vulkan-presentation-timeline-stage timeline)
                 :time-domain-id
-                (vulkan-presentation-timeline-time-domain-id timeline))))
+                (vulkan-presentation-timeline-time-domain-id timeline)
+                :target-time target-nanoseconds
+                :target-time-domain-present-stage
+                (and target-nanoseconds
+                     (eq :present-stage-local-ext
+                         (vulkan-presentation-timeline-time-domain timeline))
+                     (vulkan-presentation-timeline-stage timeline)))))
       (cond
         ((and timeline
               (eq :recording
@@ -1095,7 +1236,7 @@ surface still cannot supply an image and this frame should be skipped."
                  (unless (eq result :error-out-of-date-khr)
                    (note-vulkan-presentation-submission
                     timeline present-id predicted-presentation-time
-                    submitted-seconds))
+                    submitted-seconds (or target-nanoseconds 0)))
                  (drain-vulkan-presentation-timeline
                   timeline native-device swapchain)
                  result))))
@@ -1116,7 +1257,8 @@ surface still cannot supply an image and this frame should be skipped."
          (queue (device-queue device))
          (encoder nil)
          (commands nil)
-         (predicted-presentation-time nil))
+         (predicted-presentation-time nil)
+         (target-nanoseconds nil))
     (multiple-value-bind (slot slot-index image-index)
           (acquire-vulkan-canvas-image context)
         (unless slot
@@ -1130,11 +1272,20 @@ surface still cannot supply an image and this frame should be skipped."
                        (create device (make-command-encoder-descriptor))
                        (vulkan-canvas-current-texture context) texture
                        (canvas-context-state context) :in-frame)
+                 (let ((timeline
+                         (vulkan-canvas-presentation-timeline context)))
+                   (when (and timeline
+                              (eq :recording
+                                  (vulkan-presentation-timeline-status
+                                   timeline)))
+                     (drain-vulkan-presentation-timeline
+                      timeline (vulkan-handle device)
+                      (vulkan-canvas-swapchain context))))
                  (with-cpu-trace-zone (:gpu/encode)
-                   (let ((presentation-time
-                           (canvas-presentation-time
-                            (context-canvas context))))
-                     (setf predicted-presentation-time presentation-time)
+                   (multiple-value-bind (presentation-time native-target)
+                       (vulkan-canvas-presentation-target context)
+                     (setf predicted-presentation-time presentation-time
+                           target-nanoseconds native-target)
                      (call-with-canvas-time
                       (context-canvas context) presentation-time
                       (lambda ()
@@ -1171,7 +1322,8 @@ surface still cannot supply an image and this frame should be skipped."
                            (with-cpu-trace-zone (:canvas/present)
                              (present-vulkan-canvas-image
                               context queue image-index render-done
-                              predicted-presentation-time)))
+                              predicted-presentation-time
+                              target-nanoseconds)))
                    ;; The image was presented to a surface that has already
                    ;; moved on.  Forgetting the size this swapchain was built
                    ;; for is what makes the next frame rebuild it, even when

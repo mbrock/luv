@@ -541,6 +541,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:presentation-timing-snapshot-stage
            #:presentation-timing-snapshot-time-domain
            #:presentation-timing-snapshot-time-domain-id
+           #:presentation-timing-snapshot-absolute-time-p
            #:presentation-timing-snapshot-refresh-duration
            #:presentation-timing-snapshot-refresh-interval
            #:presentation-timing-snapshot-dropped-count
@@ -549,6 +550,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:presentation-timing-observation-present-id
            #:presentation-timing-observation-predicted-seconds
            #:presentation-timing-observation-submitted-seconds
+           #:presentation-timing-observation-target-nanoseconds
            #:presentation-timing-observation-actual-nanoseconds
            #:presentation-timing-observation-actual-time-domain
            #:presentation-timing-observation-actual-time-domain-id

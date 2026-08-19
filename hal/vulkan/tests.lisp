@@ -231,6 +231,43 @@
                  intervals))
       (ok (< (abs (car (last drift))) 1d-3)))))
 
+(deftest presentation-prediction-rebases-on-display-feedback
+  (let ((timeline
+          (make-instance 'luv::vulkan-presentation-timeline
+                         :stage :image-first-pixel-visible
+                         :absolute-time-p t)))
+    (setf (luv::vulkan-presentation-timeline-status timeline) :recording
+          (luv::vulkan-presentation-timeline-time-domain timeline)
+          :present-stage-local-ext
+          (luv::vulkan-presentation-timeline-time-domain-id timeline) 7
+          (luv::vulkan-presentation-timeline-refresh-duration timeline)
+          16666667)
+    ;; Present 7 targeted 1.000 s but appeared one refresh later.  Its host
+    ;; prediction is corrected by the same native target error before the
+    ;; next display beat is derived.
+    (luv::note-vulkan-presentation-submission
+     timeline 7 10d0 9.99d0 1000000000)
+    (ok (luv::note-vulkan-presentation-result
+         timeline 7 1016666667 :present-stage-local-ext 7))
+    (multiple-value-bind (host target)
+        (luv::predict-vulkan-presentation-target timeline 99d0 10.005d0)
+      (ok (< (abs (- host 10.033333334d0)) 1d-12))
+      (ok (= target 1033333334)))
+    ;; With less than the rendering lead remaining, advance both clocks by
+    ;; one whole refresh rather than knowingly missing the imminent beat.
+    (multiple-value-bind (host target)
+        (luv::predict-vulkan-presentation-target timeline 99d0 10.030d0)
+      (ok (< (abs (- host 10.050000001d0)) 1d-12))
+      (ok (= target 1050000001))
+      (luv::note-vulkan-presentation-submission
+       timeline 8 host 10.030d0 target))
+    ;; Feedback for 7 may still be the newest result when frame 9 is queued.
+    ;; It must advance beyond frame 8's skipped target rather than collide.
+    (multiple-value-bind (host target)
+        (luv::predict-vulkan-presentation-target timeline 99d0 10.030d0)
+      (ok (< (abs (- host 10.066666668d0)) 1d-12))
+      (ok (= target 1066666668)))))
+
 (deftest presentation-timeline-ring-retains-only-its-newest-minute
   (let ((timeline
           (make-instance 'luv::vulkan-presentation-timeline
