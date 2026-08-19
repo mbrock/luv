@@ -250,7 +250,7 @@ or say what is wrong with it and keep asking."
     ((session luvcraft:luvcraft-session) x y z)
   "Create, attach, and focus the panel asking which video the tape at X,Y,Z
 should fetch."
-  (let* ((port (find-port :server-path '(:luv)))
+  (let* ((port (find-port :server-path '(:luv-gpu)))
          (manager (or (first (climi::frame-managers port))
                       (make-instance 'mcluv:luv-frame-manager :port port)))
          (frame

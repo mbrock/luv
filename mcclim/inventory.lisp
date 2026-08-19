@@ -385,7 +385,8 @@ every cell makes the word louder than the block it is about."
   (setf (inventory-visible-state frame) (inventory-visible-state-for frame))
   frame)
 
-(defclass luvcraft-inventory-overlay (luvcraft-widget-overlay) ())
+(defclass luvcraft-inventory-overlay (luvcraft-widget-overlay)
+  ((visible-p :initform t :accessor inventory-overlay-visible-p)))
 
 (defmethod luvcraft:encode-luvcraft-overlay :around
     ((hotbar luvcraft-hotbar-overlay) session pass surface-texture)
@@ -428,29 +429,33 @@ every cell makes the word louder than the block it is about."
 (defmethod luvcraft:encode-luvcraft-overlay
     ((overlay luvcraft-inventory-overlay) session pass surface-texture)
   (declare (ignore session))
-  (let* ((mirror (widget-overlay-mirror overlay))
-         (source (mirror-texture mirror)))
-    (when source
-      (ensure-spinning-compositor-resources
-       overlay (mirror-context mirror) source
-       :target-format (luv:gpu-texture-format surface-texture))
-      (let* ((state (inventory-screen-state overlay))
-             (frame-state
-               (ensure-spinning-compositor-frame-state overlay surface-texture)))
-        (setf (widget-overlay-render-state overlay) state)
-        (luv:write-buffer (spinning-frame-state-buffer frame-state) state)
-        (luv:set-pipeline pass (spinning-compositor-pipeline overlay))
-        (luv:set-bind-group pass 0 (spinning-frame-state-bind-group frame-state))
-        (luv:draw pass 4))))
+  (when (inventory-overlay-visible-p overlay)
+    (let* ((mirror (widget-overlay-mirror overlay))
+           (source (mirror-texture mirror)))
+      (when source
+        (ensure-spinning-compositor-resources
+         overlay (mirror-context mirror) source
+         :target-format (luv:gpu-texture-format surface-texture))
+        (let* ((state (inventory-screen-state overlay))
+               (frame-state
+                 (ensure-spinning-compositor-frame-state
+                  overlay surface-texture)))
+          (setf (widget-overlay-render-state overlay) state)
+          (luv:write-buffer (spinning-frame-state-buffer frame-state) state)
+          (luv:set-pipeline pass (spinning-compositor-pipeline overlay))
+          (luv:set-bind-group
+           pass 0 (spinning-frame-state-bind-group frame-state))
+          (luv:draw pass 4)))))
   overlay)
 
 (defmethod luvcraft:refresh-luvcraft-overlay
     ((overlay luvcraft-inventory-overlay) session)
   (declare (ignore session))
-  (let ((frame (widget-overlay-frame overlay)))
-    (unless (equal (inventory-visible-state-for frame)
-                   (inventory-visible-state frame))
-      (repaint-inventory frame)))
+  (when (inventory-overlay-visible-p overlay)
+    (let ((frame (widget-overlay-frame overlay)))
+      (unless (equal (inventory-visible-state-for frame)
+                     (inventory-visible-state frame))
+        (repaint-inventory frame))))
   overlay)
 
 (defun inventory-category-at (u v)
@@ -501,7 +506,8 @@ every cell makes the word louder than the block it is about."
     ((overlay luvcraft-inventory-overlay) session canvas
      (event luv:canvas-pointer-event))
   (declare (ignore canvas))
-  (alexandria:when-let
+  (when (inventory-overlay-visible-p overlay)
+    (alexandria:when-let
       ((uv (luvcraft-widget-texture-coordinate
             overlay
             (luv:canvas-pointer-event-x event)
@@ -543,7 +549,7 @@ every cell makes the word louder than the block it is about."
                        (position entry all-entries :test #'eq)))
                  (luvcraft:select-luvcraft-block session (1+ number))
                  (repaint-inventory frame))))))))
-    t))
+      t)))
 
 (defmethod luvcraft:handle-luvcraft-focus-event
     ((overlay luvcraft-inventory-overlay) session canvas
@@ -560,48 +566,54 @@ every cell makes the word louder than the block it is about."
 
 (defmethod luvcraft:luvcraft-focus-left
     ((overlay luvcraft-inventory-overlay) session)
-  (when (member overlay (luvcraft:luvcraft-session-overlays session)
-                :test #'eq)
-    (luvcraft:remove-luvcraft-overlay session overlay))
+  (declare (ignore session))
+  (setf (inventory-overlay-visible-p overlay) nil)
   overlay)
 
 (defun open-luvcraft-inventory (session &key (title "luvcraft inventory"))
   "Create, attach, and focus SESSION's modal McCLIM inventory view."
-  (let* ((port (find-port :server-path '(:luv)))
-         (manager (or (first (climi::frame-managers port))
-                      (make-instance 'luv-frame-manager :port port)))
-         (frame
-           (let ((*embedded-mirror-target*
-                   (luvcraft:luvcraft-session-canvas session))
-                 (*embedded-mirror-context*
-                   (luvcraft::luvcraft-session-context session))
-                 (*embedded-mirror-device*
-                   (luvcraft::luvcraft-session-device session)))
-             (make-application-frame
-              'luvcraft-inventory :frame-manager manager :enable t
-              :session session))))
-    (setf (frame-pretty-name frame) title
-          (inventory-visible-state frame) (inventory-visible-state-for frame))
-    (let* ((mirror (sheet-direct-mirror (frame-top-level-sheet frame)))
-           (overlay
-             (make-instance 'luvcraft-inventory-overlay
-                            :session session :frame frame :mirror mirror)))
-      (setf (mirror-compositor mirror) overlay)
-      (luvcraft:add-luvcraft-overlay session overlay)
-      (when (typep mirror 'luv-gpu-mirror)
-        (repaint-gpu-mirror mirror))
+  (alexandria:if-let
+      ((overlay
+         (find-if (lambda (candidate)
+                    (typep candidate 'luvcraft-inventory-overlay))
+                  (luvcraft:luvcraft-session-overlays session))))
+    (progn
+      (setf (inventory-overlay-visible-p overlay) t)
       (luvcraft:focus-luvcraft-session session overlay)
-      overlay)))
+      overlay)
+    (let* ((port (find-port :server-path '(:luv-gpu)))
+           (manager (or (first (climi::frame-managers port))
+                        (make-instance 'luv-frame-manager :port port)))
+           (frame
+             (let ((*embedded-mirror-target*
+                     (luvcraft:luvcraft-session-canvas session))
+                   (*embedded-mirror-context*
+                     (luvcraft::luvcraft-session-context session))
+                   (*embedded-mirror-device*
+                     (luvcraft::luvcraft-session-device session)))
+               (make-application-frame
+                'luvcraft-inventory :frame-manager manager :enable t
+                :session session))))
+      (setf (frame-pretty-name frame) title
+            (inventory-visible-state frame) (inventory-visible-state-for frame))
+      (let* ((mirror (sheet-direct-mirror (frame-top-level-sheet frame)))
+             (overlay
+               (make-instance 'luvcraft-inventory-overlay
+                              :session session :frame frame :mirror mirror)))
+        (setf (mirror-compositor mirror) overlay)
+        (luvcraft:add-luvcraft-overlay session overlay)
+        (when (typep mirror 'luv-gpu-mirror)
+          (repaint-gpu-mirror mirror))
+        (luvcraft:focus-luvcraft-session session overlay)
+        overlay))))
 
 (defun close-luvcraft-inventory (overlay)
   "Close an OPEN-LUVCRAFT-INVENTORY overlay."
   (check-type overlay luvcraft-inventory-overlay)
   (let ((session (widget-overlay-session overlay)))
-    (if (eq overlay (luvcraft:luvcraft-session-modal-focus session))
-        (luvcraft:unfocus-luvcraft-session session)
-        (when (member overlay (luvcraft:luvcraft-session-overlays session)
-                      :test #'eq)
-          (luvcraft:remove-luvcraft-overlay session overlay))))
+    (setf (inventory-overlay-visible-p overlay) nil)
+    (when (eq overlay (luvcraft:luvcraft-session-modal-focus session))
+      (luvcraft:unfocus-luvcraft-session session)))
   nil)
 
 (defmethod luvcraft:toggle-luvcraft-inventory
@@ -611,5 +623,15 @@ every cell makes the word louder than the block it is about."
          (find-if (lambda (candidate)
                     (typep candidate 'luvcraft-inventory-overlay))
                   (luvcraft:luvcraft-session-overlays session))))
-    (progn (close-luvcraft-inventory overlay) t)
+    (if (inventory-overlay-visible-p overlay)
+        (progn (close-luvcraft-inventory overlay) t)
+        (progn (open-luvcraft-inventory session) t))
     (progn (open-luvcraft-inventory session) t)))
+
+(defmethod luvcraft:attach-luvcraft-hud :after
+    ((session luvcraft:luvcraft-session))
+  ;; Build the durable inventory pane before the game window is published.
+  ;; Opening it later is then only focus/visibility state, with no shader or
+  ;; glyph-atlas compilation on the frame thread.
+  (open-luvcraft-inventory session)
+  (luvcraft:unfocus-luvcraft-session session))

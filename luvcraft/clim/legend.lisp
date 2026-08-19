@@ -305,7 +305,7 @@ were already looking at."
 
 (defun open-luvcraft-legend (session &key (title "luvcraft keys"))
   "Create, attach, and focus SESSION's keymap legend."
-  (let* ((port (find-port :server-path '(:luv)))
+  (let* ((port (find-port :server-path '(:luv-gpu)))
          (manager (or (first (climi::frame-managers port))
                       (make-instance 'mcluv:luv-frame-manager :port port)))
          (sections (luvcraft-legend-sections))

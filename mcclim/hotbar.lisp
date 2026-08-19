@@ -416,7 +416,7 @@ the slot that has none stop looking like the same kind of thing.")
 
 (defun open-luvcraft-hotbar (session &key (title "luvcraft block palette"))
   "Create and attach the screen-space McCLIM block palette for SESSION."
-  (let* ((port (find-port :server-path '(:luv)))
+  (let* ((port (find-port :server-path '(:luv-gpu)))
          (manager (or (first (climi::frame-managers port))
                       (make-instance 'luv-frame-manager :port port)))
          (frame

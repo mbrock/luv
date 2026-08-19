@@ -1309,7 +1309,7 @@ family name adopted."
                     device
                     (luv:make-render-pipeline-descriptor
                      :label "direct McCLIM analytic shapes"
-                     :layout nil
+                     :layout (gpu-mirror-layout mirror)
                      :vertex
                      `(:module ,vertex
                        :buffers
@@ -1354,7 +1354,7 @@ family name adopted."
                     device
                     (luv:make-render-pipeline-descriptor
                      :label "direct McCLIM analytical relief"
-                     :layout nil
+                     :layout (gpu-mirror-layout mirror)
                      :vertex
                      `(:module ,vertex
                        :buffers
@@ -1466,7 +1466,7 @@ family name adopted."
                     device
                     (luv:make-render-pipeline-descriptor
                      :label "direct McCLIM gradient analytic shapes"
-                     :layout nil
+                     :layout (gpu-mirror-layout mirror)
                      :vertex
                      `(:module ,vertex
                        :buffers
@@ -1961,7 +1961,7 @@ family name adopted."
       (:mcluv/prepare
        :tracy-value (length (gpu-medium-commands medium)))
     (multiple-value-bind (width height)
-        (luv:canvas-logical-size (mirror-target mirror))
+        (gpu-mirror-logical-size mirror)
       (let ((text-data
               (make-array 1024 :element-type 'single-float
                           :adjustable t :fill-pointer 0))
@@ -2006,7 +2006,7 @@ family name adopted."
       (luv:gpu-texture-size surface)
     (declare (ignore ignored))
     (multiple-value-bind (logical-width logical-height)
-        (luv:canvas-logical-size (mirror-target mirror))
+        (gpu-mirror-logical-size mirror)
       (destructuring-bind (left top right bottom)
           (or clip (list 0 0 logical-width logical-height))
         (let* ((scale-x (/ surface-width logical-width))
@@ -2022,6 +2022,73 @@ family name adopted."
           (when (and (plusp width) (plusp height))
             (luv:set-scissor-rect pass x y width height)
             t))))))
+
+(defun gpu-mirror-logical-size (mirror)
+  (if (mirror-embedded-p mirror)
+      (let ((sheet (mirror-sheet mirror)))
+        (values (max 1 (ceiling (bounding-rectangle-width sheet)))
+                (max 1 (ceiling (bounding-rectangle-height sheet)))))
+      (luv:canvas-logical-size (mirror-target mirror))))
+
+(defun release-gpu-mirror-frame-states (mirror)
+  (maphash
+   (lambda (key state)
+     (declare (ignore key))
+     (dolist (buffer
+               (list (gpu-frame-state-vertex-buffer state)
+                     (gpu-frame-state-analytic-buffer state)
+                     (gpu-frame-state-relief-buffer state)
+                     (gpu-frame-state-gradient-buffer state)
+                     (gpu-frame-state-image-buffer state)
+                     (gpu-frame-state-text-buffer state)))
+       (when buffer (luv:destroy buffer)))
+     (luv:destroy (gpu-frame-state-view state)))
+   (gpu-mirror-frame-states mirror))
+  (clrhash (gpu-mirror-frame-states mirror))
+  mirror)
+
+(defun ensure-embedded-gpu-mirror-texture (mirror context)
+  (multiple-value-bind (width height) (gpu-mirror-logical-size mirror)
+    (let ((texture (mirror-texture mirror))
+          (format (luv:canvas-format context))
+          (size (list width height)))
+      (unless (and texture
+                   (equal (luv:gpu-texture-size texture) (append size '(1)))
+                   (eq (luv:gpu-texture-format texture) format))
+        (when texture
+          (release-gpu-mirror-frame-states mirror)
+          (luv:destroy texture))
+        (setf (mirror-texture mirror)
+              (luv:create
+               (luv:context-device context)
+               (luv:make-texture-descriptor
+                :label "direct McCLIM embedded target"
+                :size size
+                :usage '(:render-attachment :texture-binding :copy-src)
+                :dimensions :2d
+                :format format))))
+      (mirror-texture mirror))))
+
+(defun call-with-gpu-mirror-target (mirror context function)
+  (if (mirror-embedded-p mirror)
+      (let* ((device (luv:context-device context))
+             (queue (luv:device-queue device))
+             (texture (ensure-embedded-gpu-mirror-texture mirror context))
+             (encoder nil)
+             (commands nil))
+        (unwind-protect
+             (progn
+               (setf encoder
+                     (luv:create
+                      device
+                      (luv:make-command-encoder-descriptor
+                       :label "direct embedded McCLIM frame")))
+               (funcall function texture encoder)
+               (setf commands (luv:finish encoder))
+               (luv:submit queue commands))
+          (when commands (luv:destroy commands))
+          (when encoder (luv:destroy encoder))))
+      (luv:present-canvas-frame context function)))
 
 (defun render-gpu-mirror-frame (mirror &key readback-buffer)
   (let ((medium (sheet-medium (mirror-sheet mirror))))
@@ -2049,8 +2116,8 @@ family name adopted."
             (ensure-gpu-mirror-pipeline mirror context)
             (multiple-value-bind (commands text-data)
                 (prepare-gpu-frame-commands mirror medium)
-              (luv:present-canvas-frame
-               context
+              (call-with-gpu-mirror-target
+               mirror context
                (lambda (surface encoder)
                  (let* ((state
                           (ensure-gpu-mirror-frame-state
@@ -2129,6 +2196,8 @@ family name adopted."
                            (gpu-analytic-command
                             (luv:set-pipeline
                              pass (gpu-mirror-analytic-pipeline mirror))
+                            (luv:set-bind-group
+                             pass 0 (gpu-mirror-bind-group mirror))
                             (luv:set-vertex-buffer pass 0 analytic-buffer)
                             (luv:draw
                              pass (gpu-analytic-command-vertex-count command) 1
@@ -2136,6 +2205,8 @@ family name adopted."
                            (gpu-relief-analytic-command
                             (luv:set-pipeline
                              pass (gpu-mirror-relief-pipeline mirror))
+                            (luv:set-bind-group
+                             pass 0 (gpu-mirror-bind-group mirror))
                             (luv:set-vertex-buffer pass 0 relief-buffer)
                             (luv:draw
                              pass
@@ -2147,6 +2218,8 @@ family name adopted."
                             (luv:set-pipeline
                              pass
                              (gpu-mirror-gradient-analytic-pipeline mirror))
+                            (luv:set-bind-group
+                             pass 0 (gpu-mirror-bind-group mirror))
                             (luv:set-vertex-buffer pass 0 gradient-buffer)
                             (luv:draw
                              pass
@@ -2237,22 +2310,8 @@ family name adopted."
 
 (defmethod release-mirror-presentation ((mirror luv-gpu-mirror))
   (release-gpu-mirror-pipeline mirror)
-  (maphash
-   (lambda (key state)
-     (declare (ignore key))
-     (alexandria:when-let ((buffer (gpu-frame-state-vertex-buffer state)))
-       (luv:destroy buffer))
-     (alexandria:when-let ((buffer (gpu-frame-state-analytic-buffer state)))
-       (luv:destroy buffer))
-     (alexandria:when-let ((buffer (gpu-frame-state-relief-buffer state)))
-       (luv:destroy buffer))
-     (alexandria:when-let ((buffer (gpu-frame-state-gradient-buffer state)))
-       (luv:destroy buffer))
-     (alexandria:when-let ((buffer (gpu-frame-state-image-buffer state)))
-       (luv:destroy buffer))
-     (alexandria:when-let ((buffer (gpu-frame-state-text-buffer state)))
-       (luv:destroy buffer))
-     (luv:destroy (gpu-frame-state-view state)))
-   (gpu-mirror-frame-states mirror))
-  (clrhash (gpu-mirror-frame-states mirror))
+  (release-gpu-mirror-frame-states mirror)
+  (alexandria:when-let ((texture (mirror-texture mirror)))
+    (luv:destroy texture)
+    (setf (mirror-texture mirror) nil))
   mirror)

@@ -431,7 +431,7 @@ pipelines and buffers, and the pass is no place to do that."
 A sheet of paper is not a screen bolted to a wall, so this does not go through
 the terminal's display modes: it is its own object, placed where the player is
 looking and focused with TAB like anything else."
-  (let* ((port (find-port :server-path '(:luv)))
+  (let* ((port (find-port :server-path '(:luv-gpu)))
          (manager (or (first (climi::frame-managers port))
                       (make-instance 'luv-frame-manager :port port)))
          (document (luv.mupdf:open-document pathname))

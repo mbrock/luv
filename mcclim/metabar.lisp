@@ -528,7 +528,7 @@ shader, the mark that turning it rebuilds one."
 
 (defun open-luvcraft-metabar (session &key (title "luvcraft metabar"))
   "Create, attach, slide in, and focus SESSION's metabar."
-  (let* ((port (find-port :server-path '(:luv)))
+  (let* ((port (find-port :server-path '(:luv-gpu)))
          (manager (or (first (climi::frame-managers port))
                       (make-instance 'luv-frame-manager :port port)))
          (frame

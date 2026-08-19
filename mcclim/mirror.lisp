@@ -40,7 +40,13 @@ mirror's identity: a later target may be a texture presented on a 3D quad."))
    "A luv mirror retaining McCLIM's CPU raster image for later upload."))
 
 (defclass luv-gpu-mirror (luv-mirror)
-  ((frame-states
+  ((texture
+    :initform nil
+    :accessor mirror-texture)
+   (compositor
+    :initform nil
+    :accessor mirror-compositor)
+   (frame-states
     :initform (make-hash-table :test #'equal)
     :reader gpu-mirror-frame-states)
    (vertex-module :initform nil :accessor gpu-mirror-vertex-module)
@@ -87,7 +93,10 @@ mirror's identity: a later target may be a texture presented on a 3D quad."))
     :initform (make-hash-table :test #'eq)
     :reader gpu-mirror-text-bind-groups))
   (:documentation
-   "A direct GPU target for an ordered LUV-GPU-MEDIUM drawing stream."))
+   "A direct GPU target for an ordered LUV-GPU-MEDIUM drawing stream.
+
+An embedded mirror renders into TEXTURE for the game to sample; a standalone
+mirror renders into its native canvas drawable."))
 
 (defmethod print-object ((mirror luv-mirror) stream)
   (print-unreadable-object (mirror stream :type t :identity t)

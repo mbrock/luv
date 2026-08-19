@@ -347,7 +347,7 @@ a Telegram console left running behind a film is a connection nobody closes."
 (defun open-terminal-film-browser (display)
   "Make one embedded McCLIM browser owned by DISPLAY's authored wall."
   (let* ((session (luvcraft::terminal-display-session display))
-         (port (find-port :server-path '(:luv)))
+         (port (find-port :server-path '(:luv-gpu)))
          (manager (or (first (climi::frame-managers port))
                       (make-instance 'luv-frame-manager :port port)))
          (frame

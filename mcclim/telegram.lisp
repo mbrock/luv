@@ -1342,7 +1342,7 @@ panel; the phone gets the tall one.  A new kind of surface adds a method.")
 (defun open-luvcraft-communicator (display &key console)
   "Mount a Telegram panel on DISPLAY's surface -- a wall, or the phone."
   (let* ((session (luvcraft::terminal-display-session display))
-         (port (find-port :server-path '(:luv)))
+         (port (find-port :server-path '(:luv-gpu)))
          (manager (or (first (climi::frame-managers port))
                       (make-instance 'luv-frame-manager :port port)))
          (geometry (communicator-geometry-for display))
