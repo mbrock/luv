@@ -1,10 +1,14 @@
 ;;; Turning resident block data into exposed-face triangle meshes.
 ;;;
 ;;; The result of meshing is deliberately mundane: interleaved position,
-;;; UV/shade, and normal triples of single floats.  Meshing can read the live
-;;; world, a preresolved 3x3x3 chunk neighborhood, or an immutable
-;;; BLOCK-MESH-SNAPSHOT copied for a worker thread; ambient occlusion and
-;;; face visibility sample through the same accessor in all three cases.
+;;; UV/shade, and normal triples of single floats.  Meshing always starts by
+;;; gathering: a chunk and its one-cell halo are copied into an immutable
+;;; BLOCK-MESH-SNAPSHOT of u16 palette indices and u8 light levels (whether
+;;; for a worker thread or for owner-side meshing), and the small closed block
+;;; vocabulary is projected through its protocol generics into flat per-index
+;;; tables once per job.  The dense loop then reads only those columns and
+;;; tables; no block object, face object, or generic function is consulted
+;;; per sample.
 
 (in-package #:luvcraft)
 
@@ -369,51 +373,6 @@ falling through to BLOCK-SOLID-P."))
         :resident))
       (:unavailable (values 0 0 :absent)))))
 
-(defun mesher-block-at (mesher samples x y z)
-  (multiple-value-bind (block status) (sample-block-at samples x y z)
-    (ecase status
-      (:resident block)
-      (:absent
-       (ecase (exposed-face-mesher-absent-neighbor-policy mesher)
-         (:air nil)
-         (:solid *stone-block*)
-         (:error
-          (error "Meshing reached absent terrain at (~D ~D ~D)." x y z)))))))
-
-(declaim (inline block-face-corner-occlusion-components))
-(defun block-face-corner-occlusion-components
-    (mesher samples nx ny nz cx cy cz x y z)
-  "Return corner AO using scalar offsets and no temporary axis/offset lists."
-  (flet ((occupied-p (ox oy oz)
-           (block-solid-p
-            (mesher-block-at mesher samples (+ x ox) (+ y oy) (+ z oz)))))
-    (multiple-value-bind (first-side second-side corner-block)
-        (cond
-          ((not (zerop nx))
-           (let ((sy (if (zerop cy) -1 1))
-                 (sz (if (zerop cz) -1 1)))
-             (values (occupied-p nx sy 0)
-                     (occupied-p nx 0 sz)
-                     (occupied-p nx sy sz))))
-          ((not (zerop ny))
-           (let ((sx (if (zerop cx) -1 1))
-                 (sz (if (zerop cz) -1 1)))
-             (values (occupied-p sx ny 0)
-                     (occupied-p 0 ny sz)
-                     (occupied-p sx ny sz))))
-          (t
-           (let ((sx (if (zerop cx) -1 1))
-                 (sy (if (zerop cy) -1 1)))
-             (values (occupied-p sx 0 nz)
-                     (occupied-p 0 sy nz)
-                     (occupied-p sx sy nz)))))
-      (if (and first-side second-side)
-          0.56
-          (- 1.0
-             (* 0.14 (+ (if first-side 1 0)
-                        (if second-side 1 0)
-                        (if corner-block 1 0))))))))
-
 ;;; What a fragment cannot know about its own face is what lies beyond its
 ;;; edges.  The mesher does know, so it classifies each of a face's four
 ;;; in-plane boundaries once and hands the answer to the surface shader.
@@ -432,195 +391,426 @@ falling through to BLOCK-SOLID-P."))
 (defconstant +block-face-edge-flush+ 0.0)
 (defconstant +block-face-edge-convex+ 1.0)
 
-(declaim (inline block-face-edge-shaping-components))
-(defun block-face-edge-shaping-components (mesher samples nx ny nz x y z)
-  "Classify the four in-plane edges of the face of (X Y Z) normal to N.
+;;; Gathering.
+;;;
+;;; The mesher starts by collecting everything it will ask of the block
+;;; vocabulary, once per job, into a few flat tables indexed by palette
+;;; position: occupancy, surface emission, and one atlas tile offset per
+;;; face.  The loop below then reads u16 palette indices and u8 light levels
+;;; straight out of the halo columns and never consults a block object, a
+;;; face object, or a generic function per sample.  The vocabulary is small
+;;; and closed -- it changes only when someone redefines a kind at the REPL
+;;; -- so the gathering is cheap and the protocol generics still decide what
+;;; each kind means.
 
-The two in-plane axes are chosen exactly as the fragment stage chooses
-them from the same normal, so U and V mean the same thing on both sides of
-the vertex ABI.  Returns (VALUES U-LOW U-HIGH V-LOW V-HIGH).
+(defstruct (block-mesh-kind-tables (:constructor %make-block-mesh-kind-tables))
+  "Per-palette-index answers the mesher gathered before its dense loop."
+  (solid (make-array 0 :element-type 'bit)
+   :type (simple-array bit (*)))
+  (emission (make-array 0 :element-type 'single-float)
+   :type (simple-array single-float (*)))
+  ;; Six tile offsets per palette index, in *BLOCK-FACES* order.
+  (tiles (make-array 0 :element-type '(unsigned-byte 16))
+   :type (simple-array (unsigned-byte 16) (*))))
 
-See #J19EBO for why this is the mesher's job and not the shader's."
-  (flet ((solid-p (ox oy oz)
-           (block-solid-p
-            (mesher-block-at mesher samples (+ x ox) (+ y oy) (+ z oz)))))
-    (let ((ux (if (zerop nx) 1 0))
-          (uz (if (zerop nx) 0 1))
-          (vy (if (zerop ny) 1 0))
-          (vz (if (zerop ny) 0 1)))
-      (flet ((edge (dx dy dz)
-               (cond ((solid-p (+ dx nx) (+ dy ny) (+ dz nz))
-                      +block-face-edge-concave+)
-                     ((solid-p dx dy dz) +block-face-edge-flush+)
+(defun gather-block-mesh-kind-tables (mesher palette)
+  "Project PALETTE through the block protocol into flat per-index tables.
+
+Palette index zero denotes an absent sample and takes its occupancy from the
+mesher's absent-neighbor policy.  Index one is resident air (NIL); every
+other entry is a block kind.  Faces are numbered in *BLOCK-FACES* order."
+  (let* ((count (length palette))
+         (solid (make-array count :element-type 'bit :initial-element 0))
+         (emission (make-array count :element-type 'single-float
+                                     :initial-element 0.0))
+         (tiles (make-array (* 6 count) :element-type '(unsigned-byte 16)
+                                        :initial-element 0))
+         (policy (exposed-face-mesher-absent-neighbor-policy mesher)))
+    (setf (sbit solid 0)
+          (ecase policy
+            (:air 0)
+            (:solid (if (block-solid-p *stone-block*) 1 0))
+            (:error 0)))
+    (loop for index from 1 below count
+          for block = (aref palette index)
+          do (when (block-solid-p block)
+               (setf (sbit solid index) 1))
+             (setf (aref emission index)
+                   (coerce (block-surface-emission block) 'single-float))
+             (when block
+               (loop for face in *block-faces*
+                     for face-index from 0
+                     do (setf (aref tiles (+ (* 6 index) face-index))
+                              (block-atlas-tile-offset
+                               (block-face-tile block face))))))
+    (%make-block-mesh-kind-tables :solid solid :emission emission
+                                  :tiles tiles)))
+
+(defstruct (block-mesh-face-table (:constructor %make-block-mesh-face-table))
+  "One face's geometry, gathered once from its BLOCK-FACE object."
+  (nx 0 :type fixnum) (ny 0 :type fixnum) (nz 0 :type fixnum)
+  ;; Four corners as (cx cy cz) triples, then local UV per corner.
+  (corners (make-array 12 :element-type 'fixnum)
+   :type (simple-array fixnum (12)))
+  (uvs (make-array 8 :element-type 'fixnum)
+   :type (simple-array fixnum (8))))
+
+(defun gather-block-mesh-face-tables ()
+  (map 'simple-vector
+       (lambda (face)
+         (let* ((normal (block-face-neighbor face))
+                (corners (make-array 12 :element-type 'fixnum))
+                (uvs (make-array 8 :element-type 'fixnum)))
+           (loop for corner in (block-face-corners face)
+                 for i from 0
+                 do (setf (aref corners (* 3 i)) (first corner)
+                          (aref corners (+ 1 (* 3 i))) (second corner)
+                          (aref corners (+ 2 (* 3 i))) (third corner))
+                    (multiple-value-bind (u v) (block-face-local-uv face corner)
+                      (setf (aref uvs (* 2 i)) u
+                            (aref uvs (+ 1 (* 2 i))) v)))
+           (%make-block-mesh-face-table
+            :nx (voxel-direction-dx normal)
+            :ny (voxel-direction-dy normal)
+            :nz (voxel-direction-dz normal)
+            :corners corners :uvs uvs)))
+       *block-faces*))
+
+(defvar *block-mesh-face-tables* nil
+  "Face geometry gathered from *BLOCK-FACES*; NIL until first gathered.")
+
+(defun block-mesh-face-tables ()
+  (or *block-mesh-face-tables*
+      (setf *block-mesh-face-tables* (gather-block-mesh-face-tables))))
+
+;;; The dense loop.
+
+(deftype block-mesh-halo-index () '(integer 0 #.(ash 1 24)))
+(deftype block-mesh-halo-extent () '(integer 0 256))
+(deftype block-mesh-halo-step () '(integer #.(- (ash 1 24)) #.(ash 1 24)))
+
+(declaim (inline block-mesh-corner-shade-and-light))
+(defun block-mesh-corner-shade-and-light
+    (solid indices sky block-light base nstep s1step s2step)
+  "Return (VALUES AO SKY BLOCK) for one vertex corner.
+
+BASE is the halo offset of the face's own cell; NSTEP steps across the face
+normal and S1STEP/S2STEP along the two in-plane directions the corner leans
+toward.  Occupancy and light averaging follow exactly the rules of the
+former per-sample accessors: a solid cell holds no light, an absent sample
+contributes nothing, and the diagonal is unreachable behind two sides."
+  (declare (type (simple-array bit (*)) solid)
+           (type (simple-array (unsigned-byte 16) (*)) indices)
+           (type (simple-array (unsigned-byte 8) (*)) sky block-light)
+           (type block-mesh-halo-index base)
+           (type block-mesh-halo-step nstep s1step s2step)
+           (optimize (speed 3) (safety 0)))
+  (let* ((n (+ base nstep))
+         (a (+ n s1step))
+         (b (+ n s2step))
+         (d (+ a s2step))
+         (ia (aref indices a))
+         (ib (aref indices b))
+         (id (aref indices d))
+         (in (aref indices n))
+         (solid-a (= 1 (sbit solid ia)))
+         (solid-b (= 1 (sbit solid ib)))
+         (solid-d (= 1 (sbit solid id)))
+         (sky-sum 0) (block-sum 0) (count 0))
+    (declare (type block-mesh-halo-index n a b d)
+             (type fixnum sky-sum block-sum count))
+    (flet ((consider (index offset)
+             (unless (zerop index)
+               (incf sky-sum (aref sky offset))
+               (incf block-sum (aref block-light offset))
+               (incf count))))
+      (declare (inline consider))
+      (consider in n)
+      (unless solid-a (consider ia a))
+      (unless solid-b (consider ib b))
+      (unless (and solid-a solid-b)
+        (unless solid-d (consider id d))))
+    (values (if (and solid-a solid-b)
+                0.56
+                (- 1.0 (* 0.14 (+ (if solid-a 1 0)
+                                  (if solid-b 1 0)
+                                  (if solid-d 1 0)))))
+            (if (plusp count) (/ sky-sum (* 15.0 count)) 0.0)
+            (if (plusp count) (/ block-sum (* 15.0 count)) 0.0))))
+
+(defun emit-block-mesh-face
+    (tables faces vertices fill solid indices sky block-light
+     width height depth base palette-index face-index x y z)
+  "Append one face's six vertices at FILL and return the new fill position.
+
+BASE is the halo offset of the cell at world (X Y Z); WIDTH/HEIGHT/DEPTH
+are the halo dimensions.  Vertex order and every lane value match what the
+per-sample accessors produced, so existing meshes and tests agree."
+  (declare (type block-mesh-kind-tables tables)
+           (type simple-vector faces)
+           (type (simple-array single-float (*)) vertices)
+           (type fixnum fill)
+           (type block-mesh-halo-index base)
+           (type (simple-array bit (*)) solid)
+           (type (simple-array (unsigned-byte 16) (*)) indices)
+           (type (simple-array (unsigned-byte 8) (*)) sky block-light)
+           (type block-mesh-halo-extent width height depth)
+           (type fixnum x y z)
+           (type (unsigned-byte 16) palette-index)
+           (type (integer 0 5) face-index)
+           (ignore depth)
+           (optimize (speed 3) (safety 0)))
+  (let* ((face (svref faces face-index))
+         (nx (block-mesh-face-table-nx face))
+         (ny (block-mesh-face-table-ny face))
+         (nz (block-mesh-face-table-nz face))
+         (corners (block-mesh-face-table-corners face))
+         (uvs (block-mesh-face-table-uvs face))
+         (xstep 1)
+         (ystep width)
+         (zstep (* width height))
+         (nstep (+ (* nx xstep) (* ny ystep) (* nz zstep)))
+         (tile (coerce (aref (block-mesh-kind-tables-tiles tables)
+                             (+ (* 6 palette-index) face-index))
+                       'single-float))
+         (emission (aref (block-mesh-kind-tables-emission tables)
+                         palette-index))
+         (variation (block-color-variation x y z))
+         ;; In-plane axes as the fragment stage chooses them: U is X unless
+         ;; the normal is X (then Z); V is Y unless the normal is Y (then Z).
+         (ustep (if (zerop nx) xstep zstep))
+         (vstep (if (zerop ny) ystep zstep))
+         ;; The two side axes a corner leans toward, in ascending axis order.
+         (s1step (if (zerop nx) xstep ystep))
+         (s2step (if (zerop nz) zstep ystep))
+         (s1axis (if (zerop nx) 0 1))
+         (s2axis (if (zerop nz) 2 1)))
+    (declare (type (simple-array fixnum (12)) corners)
+             (type (simple-array fixnum (8)) uvs)
+             (type (integer -1 1) nx ny nz)
+             (type block-mesh-halo-step xstep ystep zstep nstep ustep vstep
+                   s1step s2step)
+             (type single-float tile emission variation))
+    (flet ((solid-at (offset)
+             (declare (type block-mesh-halo-index offset))
+             (= 1 (sbit solid (aref indices offset))))
+           (emit (value)
+             (declare (type single-float value))
+             (setf (aref vertices fill) value)
+             (incf fill)))
+      (declare (inline solid-at emit))
+      (flet ((edge (step)
+               (declare (type block-mesh-halo-step step))
+               (cond ((solid-at (+ base step nstep)) +block-face-edge-concave+)
+                     ((solid-at (+ base step)) +block-face-edge-flush+)
                      (t +block-face-edge-convex+))))
-        (values (edge (- ux) 0 (- uz))
-                (edge ux 0 uz)
-                (edge 0 (- vy) (- vz))
-                (edge 0 vy vz))))))
+        (declare (inline edge))
+        (let* ((edge-u-low (edge (- ustep)))
+               (edge-u-high (edge ustep))
+               (edge-v-low (edge (- vstep)))
+               (edge-v-high (edge vstep))
+               (edge-code (coerce (+ (* (+ edge-u-low 1) 27)
+                                     (* (+ edge-u-high 1) 9)
+                                     (* (+ edge-v-low 1) 3)
+                                     (+ edge-v-high 1))
+                                  'single-float))
+               (fnx (coerce nx 'single-float))
+               (fny (coerce ny 'single-float))
+               (fnz (coerce nz 'single-float)))
+          (declare (type single-float edge-u-low edge-u-high
+                         edge-v-low edge-v-high edge-code))
+          (macrolet ((corner-vertex (i)
+                       `(let* ((cx (aref corners (* 3 ,i)))
+                               (cy (aref corners (+ 1 (* 3 ,i))))
+                               (cz (aref corners (+ 2 (* 3 ,i))))
+                               (c1 (ecase s1axis (0 cx) (1 cy)))
+                               (c2 (ecase s2axis (1 cy) (2 cz)))
+                               (sign1 (if (zerop c1) (- s1step) s1step))
+                               (sign2 (if (zerop c2) (- s2step) s2step))
+                               (local-u (aref uvs (* 2 ,i)))
+                               (local-v (aref uvs (+ 1 (* 2 ,i)))))
+                          (declare (type (integer 0 1) cx cy cz c1 c2
+                                         local-u local-v)
+                                   (type block-mesh-halo-step sign1 sign2))
+                          (multiple-value-bind (ao sky-level block-level)
+                              (block-mesh-corner-shade-and-light
+                               solid indices sky block-light
+                               base nstep sign1 sign2)
+                            (declare (type single-float ao sky-level
+                                           block-level))
+                            (emit (coerce (+ x cx) 'single-float))
+                            (emit (coerce (+ y cy) 'single-float))
+                            (emit (coerce (+ z cz) 'single-float))
+                            (emit (coerce (/ (+ 0.5 (* local-u 15)) 16)
+                                          'single-float))
+                            (emit (coerce (/ (+ 0.5 (* local-v 15)) 16)
+                                          'single-float))
+                            (emit (* variation ao))
+                            (emit fnx) (emit fny) (emit fnz)
+                            (emit sky-level)
+                            (emit block-level)
+                            (emit emission)
+                            (emit tile)
+                            (emit edge-code)))))
+            (corner-vertex 0) (corner-vertex 1) (corner-vertex 2)
+            (corner-vertex 0) (corner-vertex 2) (corner-vertex 3)))))
+    fill))
 
-(declaim (inline block-face-corner-light-components))
-(defun block-face-corner-light-components
-    (mesher samples nx ny nz cx cy cz x y z)
-  "Average the reachable face-adjacent light around one vertex corner.
+(defun mesh-block-halo
+    (mesher palette indices sky block-light width height depth
+     origin-x origin-y origin-z)
+  "Mesh the interior of one halo'd dense chunk.
 
-The four candidate cells mirror the ambient-occlusion neighborhood, but
-occupancy and light averaging remain separately named results.  A solid
-cell holds no air light; an absent or unlit sample contributes nothing
-rather than posing as open sky; and the diagonal cell is unreachable when
-both side cells occlude it.  Returns (VALUES SKY-LEVEL BLOCK-LEVEL)
-normalized to 0..1."
-  (let ((sky-sum 0) (block-sum 0) (count 0))
-    (flet ((solid-p (ox oy oz)
-             (block-solid-p
-              (mesher-block-at mesher samples (+ x ox) (+ y oy) (+ z oz))))
-           (consider (ox oy oz)
-             (multiple-value-bind (sky block status)
-                 (sample-light-at samples (+ x ox) (+ y oy) (+ z oz))
-               (when (eq status :resident)
-                 (incf sky-sum sky)
-                 (incf block-sum block)
-                 (incf count)))))
-      (multiple-value-bind (s1x s1y s1z s2x s2y s2z dx dy dz)
-          (cond ((not (zerop nx))
-                 (let ((sy (if (zerop cy) -1 1))
-                       (sz (if (zerop cz) -1 1)))
-                   (values nx sy 0 nx 0 sz nx sy sz)))
-                ((not (zerop ny))
-                 (let ((sx (if (zerop cx) -1 1))
-                       (sz (if (zerop cz) -1 1)))
-                   (values sx ny 0 0 ny sz sx ny sz)))
-                (t
-                 (let ((sx (if (zerop cx) -1 1))
-                       (sy (if (zerop cy) -1 1)))
-                   (values sx 0 nz 0 sy nz sx sy nz))))
-        (consider nx ny nz)
-        (unless (solid-p s1x s1y s1z) (consider s1x s1y s1z))
-        (unless (solid-p s2x s2y s2z) (consider s2x s2y s2z))
-        (unless (and (solid-p s1x s1y s1z) (solid-p s2x s2y s2z))
-          (unless (solid-p dx dy dz) (consider dx dy dz)))))
-    (if (plusp count)
-        (values (/ sky-sum (* 15.0 count)) (/ block-sum (* 15.0 count)))
-        (values 0.0 0.0))))
+INDICES, SKY and BLOCK-LIGHT are the halo columns whose dimensions are
+WIDTH x HEIGHT x DEPTH (the chunk plus one cell on every side); the origin is
+the world coordinate of the chunk's first interior cell."
+  (declare (type (simple-array (unsigned-byte 16) (*)) indices)
+           (type (simple-array (unsigned-byte 8) (*)) sky block-light)
+           (type block-mesh-halo-extent width height depth)
+           (type fixnum origin-x origin-y origin-z)
+           (optimize (speed 3) (safety 1)))
+  (when (eq :error (exposed-face-mesher-absent-neighbor-policy mesher))
+    (when (find 0 indices)
+      (error "Meshing reached absent terrain around chunk at (~D ~D ~D)."
+             origin-x origin-y origin-z)))
+  (let* ((tables (gather-block-mesh-kind-tables mesher palette))
+         (faces (block-mesh-face-tables))
+         (solid (block-mesh-kind-tables-solid tables))
+         (xstep 1)
+         (ystep width)
+         (zstep (* width height))
+         (interior (* (- width 2) (- height 2) (- depth 2)))
+         (masks (make-array interior :element-type '(unsigned-byte 8)
+                                     :initial-element 0))
+         (face-count 0))
+    (declare (type block-mesh-halo-step xstep ystep zstep)
+             (type fixnum interior face-count))
+    (flet ((solid-at (offset)
+             (declare (type block-mesh-halo-index offset))
+             (= 1 (sbit solid (aref indices offset)))))
+      (declare (inline solid-at))
+      ;; Pass one: exposed-face masks and the exact face count.
+      (let ((site 0))
+        (declare (type fixnum site))
+        (loop for lz of-type block-mesh-halo-extent from 1 below (1- depth) do
+          (loop for ly of-type block-mesh-halo-extent from 1 below (1- height) do
+            (loop for lx of-type block-mesh-halo-extent from 1 below (1- width) do
+              (let ((base (+ lx (* width (+ ly (* height lz))))))
+                (declare (type block-mesh-halo-index base))
+                (when (solid-at base)
+                  (let ((mask 0))
+                    (declare (type (unsigned-byte 8) mask))
+                    ;; *BLOCK-FACES* order: -x +x -y +y -z +z.
+                    (unless (solid-at (- base xstep)) (setf mask (logior mask 1)))
+                    (unless (solid-at (+ base xstep)) (setf mask (logior mask 2)))
+                    (unless (solid-at (- base ystep)) (setf mask (logior mask 4)))
+                    (unless (solid-at (+ base ystep)) (setf mask (logior mask 8)))
+                    (unless (solid-at (- base zstep)) (setf mask (logior mask 16)))
+                    (unless (solid-at (+ base zstep)) (setf mask (logior mask 32)))
+                    (incf face-count (logcount mask))
+                    (setf (aref masks site) mask))))
+              (incf site)))))
+      ;; Pass two: emit every exposed face into an exactly sized array.
+      (let ((vertices (make-array (* face-count +block-mesh-floats-per-face+)
+                                  :element-type 'single-float))
+            (fill 0)
+            (site 0))
+        (declare (type fixnum fill site))
+        (loop for lz of-type block-mesh-halo-extent from 1 below (1- depth) do
+          (loop for ly of-type block-mesh-halo-extent from 1 below (1- height) do
+            (loop for lx of-type block-mesh-halo-extent from 1 below (1- width) do
+              (let ((mask (aref masks site)))
+                (unless (zerop mask)
+                  (let ((base (+ lx (* width (+ ly (* height lz))))))
+                    (declare (type block-mesh-halo-index base))
+                    (dotimes (face-index 6)
+                      (when (logbitp face-index mask)
+                        (setf fill
+                              (emit-block-mesh-face
+                               tables faces vertices fill solid indices
+                               sky block-light width height depth
+                               base (aref indices base) face-index
+                               (+ origin-x (1- lx))
+                               (+ origin-y (1- ly))
+                               (+ origin-z (1- lz)))))))))
+              (incf site))))
+        (assert (= fill (length vertices)))
+        (make-instance 'block-mesh
+                       :vertices vertices
+                       :vertex-count (* face-count
+                                        +block-mesh-vertices-per-face+)
+                       :face-count face-count)))))
 
-(defun emit-block-face-into
-    (mesher samples vertices block face x y z)
-  (let* ((corners (block-face-corners face))
-         (normal (block-face-neighbor face))
-         (nx (voxel-direction-dx normal))
-         (ny (voxel-direction-dy normal))
-         (nz (voxel-direction-dz normal))
-         (tile (block-atlas-tile-offset (block-face-tile block face)))
-         (variation (block-color-variation x y z)))
-    (multiple-value-bind (edge-u-low edge-u-high edge-v-low edge-v-high)
-        (block-face-edge-shaping-components mesher samples nx ny nz x y z)
-     (dolist (index '(0 1 2 0 2 3))
-      (let* ((corner (nth index corners))
-             (cx (first corner))
-             (cy (second corner))
-             (cz (third corner))
-             (shade (* variation
-                       (block-face-corner-occlusion-components
-                        mesher samples nx ny nz cx cy cz x y z))))
-        (multiple-value-bind (sky-level block-level)
-            (block-face-corner-light-components
-             mesher samples nx ny nz cx cy cz x y z)
-          (multiple-value-bind (local-u local-v)
-              (block-face-local-uv face corner)
-            (push-block-vertex-components
-             vertices (+ x cx) (+ y cy) (+ z cz)
-             local-u local-v
-             shade nx ny nz
-             sky-level block-level
-             (block-surface-emission block)
-             tile
-             edge-u-low edge-u-high edge-v-low edge-v-high))))))
-    vertices))
+(defun mesh-block-snapshot-halo (mesher snapshot)
+  (let* ((domain (block-mesh-snapshot-domain snapshot))
+         (shape (voxel-space-chunk-shape (chunk-domain-space domain))))
+    (multiple-value-bind (origin-x origin-y origin-z)
+        (chunk-domain-world-components domain 0 0 0)
+      (mesh-block-halo
+       mesher
+       (block-mesh-snapshot-palette snapshot)
+       (block-mesh-snapshot-sample-indices snapshot)
+       (block-mesh-snapshot-sky-samples snapshot)
+       (block-mesh-snapshot-block-light-samples snapshot)
+       (+ 2 (chunk-shape-width shape))
+       (+ 2 (chunk-shape-height shape))
+       (+ 2 (chunk-shape-depth shape))
+       origin-x origin-y origin-z))))
+
+(defmethod mesh-block-snapshot
+    ((mesher exposed-face-mesher) (snapshot block-mesh-snapshot))
+  (mesh-block-snapshot-halo mesher snapshot))
+
+(defmethod mesh-block-chunk
+    ((mesher exposed-face-mesher) (world block-world) (chunk block-chunk))
+  "Mesh a live chunk by gathering it into a halo snapshot first.
+
+Owner-side and worker-side meshing share one dense loop, so they are equal
+by construction rather than by parallel maintenance."
+  (mesh-block-snapshot-halo
+   mesher (make-block-mesh-snapshot world chunk nil)))
 
 (defmethod emit-block-face
     ((mesher exposed-face-mesher) (world block-world) vertices
      (block block-kind) (face block-face) x y z)
-  "Compatibility entry point for tools emitting an individual world face."
-  (multiple-value-bind (chunk-x chunk-y chunk-z)
+  "Compatibility entry point for tools emitting an individual world face.
+
+The face is emitted as if BLOCK stood at (X Y Z) within the surrounding
+world, with neighbours and light read from a fresh snapshot of its chunk."
+  (multiple-value-bind (chunk-x chunk-y chunk-z local-x local-y local-z)
       (voxel-space-decompose-components (block-world-space world) x y z)
     (let ((chunk (world-chunk-at world chunk-x chunk-y chunk-z)))
       (unless chunk
         (error "Cannot emit a face from absent chunk (~D ~D ~D)."
                chunk-x chunk-y chunk-z))
-      (emit-block-face-into
-       mesher (make-block-mesh-neighborhood world chunk)
-       vertices block face x y z))))
-
-(defun block-storage-face-masks (mesher samples domain palette indices)
-  "Return one exposed-face bit mask per site and the exact face count."
-  (let* ((masks (make-array (chunk-domain-cardinality domain)
-                            :element-type '(unsigned-byte 8)
-                            :initial-element 0))
-         (face-count 0))
-    (do-chunk-domain-sites (offset local domain)
-      (when (block-solid-p (aref palette (aref indices offset)))
-        (let* ((coordinate (chunk-domain-world-coordinate domain local))
-               (x (world-coordinate-x coordinate))
-               (y (world-coordinate-y coordinate))
-               (z (world-coordinate-z coordinate))
-               (mask 0))
-          (declare (dynamic-extent coordinate))
-          (loop for face in *block-faces*
-                for bit from 0
-                for normal = (block-face-neighbor face)
-                unless (block-solid-p
-                        (mesher-block-at
-                         mesher samples
-                         (+ x (voxel-direction-dx normal))
-                         (+ y (voxel-direction-dy normal))
-                         (+ z (voxel-direction-dz normal))))
-                  do (setf mask (logior mask (ash 1 bit)))
-                     (incf face-count))
-          (setf (aref masks offset) mask))))
-    (values masks face-count)))
-
-(defun mesh-block-storage (mesher samples domain palette indices)
-  "Mesh one immutable or owner-borrowed dense chunk representation."
-  (multiple-value-bind (masks face-count)
-      (block-storage-face-masks mesher samples domain palette indices)
-    (let ((vertices
-            (make-array (* face-count +block-mesh-floats-per-face+)
-                        :element-type 'single-float :fill-pointer 0)))
-      (do-chunk-domain-sites (offset local domain)
-        (let ((mask (aref masks offset)))
-          (unless (zerop mask)
-            (let* ((block (aref palette (aref indices offset)))
-                   (coordinate
-                     (chunk-domain-world-coordinate domain local))
-                   (x (world-coordinate-x coordinate))
-                   (y (world-coordinate-y coordinate))
-                   (z (world-coordinate-z coordinate)))
-              (declare (dynamic-extent coordinate))
-              (loop for face in *block-faces*
-                    for bit from 0
-                    when (logbitp bit mask)
-                      do (emit-block-face-into
-                          mesher samples vertices block face x y z))))))
-      (assert (= (length vertices)
-                 (* face-count +block-mesh-floats-per-face+)))
-      (make-instance 'block-mesh
-                     :vertices vertices
-                     :vertex-count (* face-count
-                                      +block-mesh-vertices-per-face+)
-                     :face-count face-count))))
-
-(defmethod mesh-block-chunk
-    ((mesher exposed-face-mesher) (world block-world) (chunk block-chunk))
-  (let ((samples (make-block-mesh-neighborhood world chunk)))
-    (with-block-content-storage (domain palette indices) chunk
-      (mesh-block-storage mesher samples domain palette indices))))
-
-(defmethod mesh-block-snapshot
-    ((mesher exposed-face-mesher) (snapshot block-mesh-snapshot))
-  (mesh-block-storage
-   mesher snapshot
-   (block-mesh-snapshot-domain snapshot)
-   (block-mesh-snapshot-palette snapshot)
-   (block-mesh-snapshot-target-indices snapshot)))
+      (let* ((snapshot (make-block-mesh-snapshot world chunk nil))
+             (palette (block-mesh-snapshot-palette snapshot))
+             (palette-index
+               (or (position block palette :test #'eq)
+                   (progn (vector-push-extend block palette)
+                          (1- (length palette)))))
+             (domain (block-mesh-snapshot-domain snapshot))
+             (shape (voxel-space-chunk-shape (chunk-domain-space domain)))
+             (width (+ 2 (chunk-shape-width shape)))
+             (height (+ 2 (chunk-shape-height shape)))
+             (depth (+ 2 (chunk-shape-depth shape)))
+             (base (+ (1+ local-x)
+                      (* width (+ (1+ local-y) (* height (1+ local-z))))))
+             (tables (gather-block-mesh-kind-tables mesher palette))
+             (face-index (position face *block-faces*))
+             (scratch (make-array +block-mesh-floats-per-face+
+                                  :element-type 'single-float)))
+        (unless face-index
+          (error "~S is not one of the block faces." face))
+        (emit-block-mesh-face
+         tables (block-mesh-face-tables) scratch 0
+         (block-mesh-kind-tables-solid tables)
+         (block-mesh-snapshot-sample-indices snapshot)
+         (block-mesh-snapshot-sky-samples snapshot)
+         (block-mesh-snapshot-block-light-samples snapshot)
+         width height depth base palette-index face-index x y z)
+        (loop for value across scratch do (vector-push value vertices))
+        vertices))))
 
 (defun block-mesh-snapshot-palette-index (block palette indices)
   (or (gethash block indices)
@@ -632,7 +822,12 @@ normalized to 0..1."
         index)))
 
 (defun make-block-mesh-snapshot (world chunk dependency-stamp)
-  "Copy CHUNK and its one-cell halo into immutable worker-owned columns."
+  "Copy CHUNK and its one-cell halo into immutable worker-owned columns.
+
+The halo is gathered one resident neighbour at a time: each of the up to 27
+chunks contributes a dense slab copied by direct index arithmetic, with its
+palette translated into the snapshot's through a small per-chunk table.  No
+per-cell coordinate decomposition or block object lookup is involved."
   (let* ((domain (block-chunk-domain chunk))
          (halo-domain (make-block-mesh-halo-domain domain))
          (shape (voxel-space-chunk-shape (chunk-domain-space domain)))
@@ -642,10 +837,6 @@ normalized to 0..1."
          (sample-width (+ width 2))
          (sample-height (+ height 2))
          (sample-depth (+ depth 2))
-         (origin (chunk-domain-origin domain))
-         (origin-x (world-coordinate-x origin))
-         (origin-y (world-coordinate-y origin))
-         (origin-z (world-coordinate-z origin))
          ;; Index zero denotes an absent sample.  Index one denotes resident
          ;; air, whose semantic descriptor is also NIL.
          (palette (make-array 2 :adjustable t :fill-pointer 2
@@ -672,6 +863,8 @@ normalized to 0..1."
             :declarations `((sky-level . ,sky-definition)
                             (block-level . ,block-light-definition))))
          (neighborhood (make-block-mesh-neighborhood world chunk)))
+    (declare (type (integer 1 4096) width height depth
+                   sample-width sample-height sample-depth))
     (setf (gethash nil palette-indices) 1)
     (records:with-columnar-materialization-storage
         ((borrowed-domain extent row
@@ -682,41 +875,77 @@ normalized to 0..1."
       (declare (ignore row))
       (assert (eq borrowed-domain halo-domain))
       (assert (= extent (* sample-width sample-height sample-depth)))
-      (dotimes (sample-z sample-depth)
-        (dotimes (sample-y sample-height)
-          (dotimes (sample-x sample-width)
-            (let ((world-x (+ origin-x (1- sample-x)))
-                  (world-y (+ origin-y (1- sample-y)))
-                  (world-z (+ origin-z (1- sample-z))))
-              (let ((sample-offset
-                      (block-mesh-halo-offset-components
-                       halo-domain world-x world-y world-z)))
-                (assert sample-offset)
-                (multiple-value-bind (block status)
-                    (block-mesh-neighborhood-block-at
-                     neighborhood world-x world-y world-z)
-                  (let ((index
-                          (if (eq status :resident)
-                              (block-mesh-snapshot-palette-index
-                               block palette palette-indices)
-                              0)))
-                    (setf (aref sample-indices sample-offset) index)
-                    (when (and (<= 1 sample-x width)
-                               (<= 1 sample-y height)
-                               (<= 1 sample-z depth))
-                      (setf (aref target-indices
-                                  (chunk-domain-offset-components
-                                   domain
-                                   (1- sample-x)
-                                   (1- sample-y)
-                                   (1- sample-z)))
-                            index))))
-                (multiple-value-bind (sky block-light status)
-                    (sample-light-at neighborhood world-x world-y world-z)
-                  (declare (ignore status))
-                  (setf (aref sky-samples sample-offset) sky
-                        (aref block-light-samples sample-offset)
-                        block-light))))))))
+      (check-type sample-indices (simple-array (unsigned-byte 16) (*)))
+      (check-type sky-samples (simple-array (unsigned-byte 8) (*)))
+      (check-type block-light-samples (simple-array (unsigned-byte 8) (*)))
+      (flet ((slab (dx dy dz)
+               "Copy neighbour (DX DY DZ)'s cells that fall inside the halo."
+               (let ((neighbour
+                       (aref (block-mesh-neighborhood-chunks neighborhood)
+                             (block-mesh-neighborhood-index dx dy dz))))
+                 (when neighbour
+                   (with-block-content-storage
+                       (neighbour-domain neighbour-palette neighbour-indices)
+                       neighbour
+                     (declare (ignore neighbour-domain))
+                     (check-type neighbour-indices
+                                 (simple-array (unsigned-byte 16) (*)))
+                     (let* ((translation
+                              (make-array (length neighbour-palette)
+                                          :element-type '(unsigned-byte 16)))
+                            (field (block-chunk-light-field neighbour))
+                            (sky (and field (chunk-light-field-sky-levels field)))
+                            (block-light
+                              (and field (chunk-light-field-block-levels field)))
+                            ;; Which local range of the neighbour lands where.
+                            (lx0 (if (= dx -1) (1- width) 0))
+                            (lx1 (if (= dx 1) 0 (1- width)))
+                            (ly0 (if (= dy -1) (1- height) 0))
+                            (ly1 (if (= dy 1) 0 (1- height)))
+                            (lz0 (if (= dz -1) (1- depth) 0))
+                            (lz1 (if (= dz 1) 0 (1- depth)))
+                            ;; Halo sample coordinate of local (lx0 ly0 lz0).
+                            (sx0 (1+ (+ (* dx width) lx0)))
+                            (sy0 (1+ (+ (* dy height) ly0)))
+                            (sz0 (1+ (+ (* dz depth) lz0))))
+                       (declare (type (simple-array (unsigned-byte 16) (*))
+                                      translation)
+                                (type (or null (simple-array (unsigned-byte 8) (*)))
+                                      sky block-light)
+                                (type fixnum lx0 lx1 ly0 ly1 lz0 lz1 sx0 sy0 sz0))
+                       (loop for index from 0 below (length neighbour-palette)
+                             do (setf (aref translation index)
+                                      (block-mesh-snapshot-palette-index
+                                       (aref neighbour-palette index)
+                                       palette palette-indices)))
+                       (loop for lz of-type fixnum from lz0 to lz1
+                             for sz of-type fixnum from sz0 do
+                         (loop for ly of-type fixnum from ly0 to ly1
+                               for sy of-type fixnum from sy0 do
+                           (let ((source (+ lx0 (* width (+ ly (* height lz)))))
+                                 (target (+ sx0 (* sample-width
+                                                   (+ sy (* sample-height sz))))))
+                             (declare (type fixnum source target))
+                             (loop for lx of-type fixnum from lx0 to lx1 do
+                               (setf (aref sample-indices target)
+                                     (aref translation
+                                           (aref neighbour-indices source)))
+                               (when sky
+                                 (setf (aref sky-samples target)
+                                       (aref sky source)
+                                       (aref block-light-samples target)
+                                       (aref block-light source)))
+                               (incf source)
+                               (incf target)))))
+                       (when (and (zerop dx) (zerop dy) (zerop dz))
+                         (dotimes (offset (length neighbour-indices))
+                           (setf (aref target-indices offset)
+                                 (aref translation
+                                       (aref neighbour-indices offset)))))))))))
+        (loop for dz from -1 to 1 do
+          (loop for dy from -1 to 1 do
+            (loop for dx from -1 to 1 do
+              (slab dx dy dz))))))
     (make-instance
      'block-mesh-snapshot
      :key (block-chunk-key chunk) :dependency-stamp dependency-stamp
