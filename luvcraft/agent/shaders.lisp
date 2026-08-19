@@ -31,44 +31,47 @@
 ;;; actually turns out to be about -- the hat, the nose, the beard, the
 ;;; belly, and how far apart his eyes are set.
 
-(defparameter *gnome-stature* 1.0
-  "The whole figure's scale.  One is a gnome of about one and three quarter
-cells; the marcher works in figure units and this is the only place the
-world's scale enters, so his bounding sphere follows from it too.")
-(defparameter *gnome-hat-height* 1.70
+(defparameter *gnome-stature* 0.80
+  "The whole figure's scale, in world cells per figure unit.
+
+The marcher works in figure units and this is the only place the world's
+scale enters, so his bounding sphere follows from it too.  At four fifths he
+stands about a cell and a quarter: shorter than a player, which is rather
+the point of him.")
+(defparameter *gnome-hat-height* 1.56
   "How high the hat's tip stands above his feet.")
-(defparameter *gnome-hat-flare* 0.300
+(defparameter *gnome-hat-flare* 0.240
   "The radius of the hat's cone where it meets the brim.")
-(defparameter *gnome-hat-lean* 0.27
+(defparameter *gnome-hat-lean* 0.42
   "How far forward the hat's tip leans.  Zero is a traffic cone.")
-(defparameter *gnome-brim-width* 0.335
+(defparameter *gnome-brim-width* 0.400
   "The brim's radius.  Wider than about four tenths and it eats his face.")
-(defparameter *gnome-head-size* 0.25
+(defparameter *gnome-head-size* 0.265
   "The radius of the head the face is laid out on.")
-(defparameter *gnome-nose-size* 0.085
+(defparameter *gnome-nose-size* 0.120
   "The radius of the nose, the one feature of him nothing hides.")
-(defparameter *gnome-beard-width* 0.26
+(defparameter *gnome-beard-width* 0.305
   "How broad the beard hangs at the cheeks.")
-(defparameter *gnome-beard-length* 0.435
+(defparameter *gnome-beard-length* 0.450
   "The height of the beard's blunt point above his feet: lower is longer.")
-(defparameter *gnome-belly* 0.300
+(defparameter *gnome-belly* 0.255
   "The robe's radius at the hem.")
-(defparameter *gnome-shoulder* 0.210
+(defparameter *gnome-shoulder* 0.160
   "The robe's radius at the shoulders.")
-(defparameter *gnome-mitten-reach* 0.300
+(defparameter *gnome-mitten-reach* 0.230
   "How far out from the body his mitten hands rest.")
-(defparameter *gnome-eye-spread* 0.52
+(defparameter *gnome-eye-spread* 0.36
   "How far to the side the eyes sit on the head, as a direction component.")
-(defparameter *gnome-eye-height* 0.04
+(defparameter *gnome-eye-height* 0.10
   "How high the eyes sit on the head.  Too high and the brim hides them.")
-(defparameter *gnome-eye-size* 0.100
+(defparameter *gnome-eye-size* 0.120
   "The angular radius of a pupil on the head.")
-(defparameter *gnome-blush* 0.30
+(defparameter *gnome-blush* 0.35
   "How much colour there is in his cheeks.")
-(defparameter *gnome-grain* 1.0
+(defparameter *gnome-grain* 2.50
   "How strongly the beard's strands, the robe's weave and the hat's felt
 show.  Zero is flawless vinyl.")
-(defparameter *gnome-rim-light* 0.30
+(defparameter *gnome-rim-light* 0.14
   "The warm outline that separates him from whatever he stands in front of.")
 
 (macrolet

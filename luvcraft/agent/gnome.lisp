@@ -18,9 +18,9 @@
 (defparameter *gnome-name* "gnome")
 
 ;;; The lengths below, like everything in the shader that draws him, are in
-;;; figure units: the frame the gnome is laid out in, where he stands about
-;;; one and three quarters tall whatever his stature.  GNOME-STATURE is the
-;;; one place the world's scale enters, so it multiplies all of them.
+;;; figure units: the frame the gnome is laid out in, where his hat reaches
+;;; GNOME-HAT-HEIGHT whatever his stature.  GNOME-STATURE is the one place
+;;; the world's scale enters, so it multiplies all of them.
 
 (defparameter *gnome-body-centre* 0.85
   "The height above his feet of the centre of the gnome's bounding sphere.
