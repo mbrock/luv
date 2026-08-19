@@ -39,10 +39,18 @@
            #:com-stop-walking
            #:com-jump
            #:com-show-keymap
+           #:com-execute-command
            ;; The keymap legend, gathered from the tables rather than written.
            #:luvcraft-legend
            #:luvcraft-legend-overlay
            #:luvcraft-legend-sections
            #:open-luvcraft-legend
            #:close-luvcraft-legend
-           #:toggle-luvcraft-legend))
+           #:toggle-luvcraft-legend
+           ;; M-x: the searchable, executable command vocabulary.
+           #:luvcraft-command-menu
+           #:luvcraft-command-menu-overlay
+           #:luvcraft-command-menu-entries
+           #:open-luvcraft-command-menu
+           #:close-luvcraft-command-menu
+           #:toggle-luvcraft-command-menu))

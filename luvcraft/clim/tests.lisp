@@ -32,6 +32,7 @@
 
 (deftest modal-hud-panes-use-the-direct-presentation-compositor
   (dolist (class '(luvcraft.clim::luvcraft-legend-overlay
+                   luvcraft.clim::luvcraft-command-menu-overlay
                    luvcraft.clim::luvcraft-tape-prompt-overlay))
     (ok (subtypep class 'mcluv:luvcraft-hud-widget-overlay))))
 
@@ -57,11 +58,31 @@
                (luvcraft-key-command session (key-press :tab))))
     (ok (equal '(com-toggle-fullscreen)
                (luvcraft-key-command session (key-press :f11))))
+    (ok (equal '(com-execute-command)
+               (luvcraft-key-command
+                session (key-press :x :character #\x :modifiers '(:meta)))))
     (ok (equal '(com-start-walking :forward)
                (luvcraft-key-command session (key-press :w :character #\w))))
     ;; A key nothing binds is not a command and must not be mistaken for one:
     ;; LOOKUP-KEYSTROKE-COMMAND-ITEM answers with the gesture on a miss.
     (ok (null (luvcraft-key-command session (key-press :f9))))))
+
+(deftest m-x-searches-the-executable-command-vocabulary
+  (let ((entries (luvcraft-command-menu-entries)))
+    (ok (assoc "Toggle Phone" entries :test #'string=))
+    (ok (assoc "Place Block" entries :test #'string=))
+    ;; Commands needing arguments will join M-x when it can ask for them;
+    ;; presenting them as executable before then would make a dishonest menu.
+    (ok (null (assoc "Select Quickbar Slot" entries :test #'string=)))
+    (ok (equal '("Toggle Phone")
+               (mapcar #'car
+                       (luvcraft.clim::matching-command-menu-entries
+                        entries "phone"))))
+    ;; Words need not be adjacent, so the same finder scales to longer names.
+    (ok (equal '("Toggle Pointer Capture")
+               (mapcar #'car
+                       (luvcraft.clim::matching-command-menu-entries
+                        entries "pointer toggle"))))))
 
 (deftest a-digit-carries-its-slot-as-a-command-argument
   (let ((session (make-instance 'luvcraft:luvcraft-session)))
@@ -206,6 +227,7 @@
       (ok (equal '("Space") (keys-for "Moving" "jump")))
       (ok (equal '("I") (keys-for "In the world" "toggle inventory")))
       (ok (equal '("Esc") (keys-for "In the world" "show keys")))
+      (ok (equal '("Alt-X") (keys-for "In the world" "execute command")))
       (ok (equal '("F11") (keys-for "Any time" "toggle fullscreen")))
       ;; Modifiers are printed, and :ANY is not: it is noise on every row.
       (ok (equal '("Shift-Tab") (keys-for "Any time" "leave focus")))

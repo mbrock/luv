@@ -168,6 +168,7 @@
                              (:file "frame")
                              (:file "commands")
                              (:file "legend")
+                             (:file "command-menu")
                              (:file "tape")
                              (:file "input"))))
   :in-order-to ((test-op (test-op "luvcraft/core/test")
