@@ -593,6 +593,16 @@ standing in the middle of it stays dead straight, because the noise is the
 same everywhere and the grit is not.  The wandering happens in the lattice,
 so a world can be eroded and bent at once.
 
+[[file:images/luft-weathered.png]]
+
+The grotto of #6QZYNB under a lattice eroded by one cell, its chamfers
+ruled by stock.  The granite of the cliff has gone to rock, and the
+limestone ring of the arch has not: the stone that was quarried and laid
+keeps both its shape and its arris, and the stone that was never touched
+keeps neither.  Nothing in the scene says which is which -- the mason said
+=(with-stock (:limestone) (ring-arch ...))= and the rest follows from two
+numbers on the material.
+
 * A chamfer belongs to the crease, not to either face
 :PROPERTIES:
 :ID: K5MKUT
