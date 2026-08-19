@@ -332,7 +332,9 @@ everything it looks up in the lattice."
                 ;; keeps every present face and lets depth sort it out.
                 (scale ,(if deform
                             '(if present-p
-                                 (if (> (abs (swizzle deform-vector :y)) 0.0)
+                                 (if (> (+ (abs (swizzle deform-vector :y))
+                                           (abs (swizzle deform-vector :w)))
+                                        0.0)
                                      1.0
                                      (if facing-p 1.0 0.0))
                                  0.0)
@@ -514,19 +516,34 @@ everything it looks up in the lattice."
                                           (if inner-p normal mixed-normal))))))
                 (rest-point (+ anchor (* (- shaped anchor) scale)))
                 ,@(if deform
-                      '((deform-kind (swizzle deform-vector :x))
+                      `((deform-kind (swizzle deform-vector :x))
                         (deform-strength (swizzle deform-vector :y))
                         (deform-scale (swizzle deform-vector :z))
+                        (erode-strength (swizzle deform-vector :w))
                         (deform-centre (swizzle deform-centre-vector :xyz))
+                        (erode-grain (max (swizzle deform-centre-vector :w)
+                                          0.25))
+                        ;; How far the lattice may wander here: the grit of
+                        ;; the stock around this point, and how far out of
+                        ;; the boundary the point stands.  Both are fields,
+                        ;; so both are the same from every face that asks.
+                        ,@(lattice-sample-bindings 'ground 'rest-point)
+                        (exposure (smoothstep 0.80 0.30 ground-solid))
+                        (amplitude (* erode-strength
+                                      (* ground-grit
+                                         (mix 1.0 exposure 0.65))))
                         (point (deform-point rest-point deform-kind
                                              deform-strength deform-scale
-                                             deform-centre))
+                                             deform-centre amplitude
+                                             erode-grain))
                         (out-normal (deform-normal rest-point shaped-normal
                                                    deform-kind deform-strength
-                                                   deform-scale deform-centre))
+                                                   deform-scale deform-centre
+                                                   amplitude erode-grain))
                         (bent-face (deform-normal rest-point normal
                                                   deform-kind deform-strength
-                                                  deform-scale deform-centre)))
+                                                  deform-scale deform-centre
+                                                  amplitude erode-grain)))
                       '((point rest-point)
                         (out-normal shaped-normal)))
                 (clip (view-clip point camera

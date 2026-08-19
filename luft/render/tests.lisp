@@ -306,14 +306,14 @@ has somewhere to show it."
     (world-scene world)))
 
 (deftest a-site-width-and-a-bent-lattice-keep-the-surface-closed
-  ;; The two experiments of #V0YCZA, put to the same question the shaping
+  ;; The two experiments of #REZ0PU, put to the same question the shaping
   ;; rules were put to: straight down onto a floor, any sky inside it is a
   ;; crack.  A deformation cannot open one, because it is a function of
   ;; position alone and the faces incident to a site all hand it the same
   ;; position.  A per-site chamfer can, and did: a width taken from the
   ;; sign of the minority's dot with the /face's/ normal is coherent at an
   ;; edge and not at a mixed corner, and an inset that varies from site to
-  ;; site tears a seam even where the displacements agree.
+  ;; site tears a seam even where the displacements agree.  #HJ6YTC
   (let* ((width 220)
          (height 220)
          (*chamfer-width* 0.3)
@@ -344,7 +344,29 @@ has somewhere to show it."
                                                  width height #'sky-pixel-p
                                                  :from-row 25 :to-row 195))
                             (format nil "~A chamfers survive a ~A lattice"
-                                    rule kind))))))
+                                    rule kind))))
+             ;; And the noisy lattice, whose amplitude differs from cell to
+             ;; cell: a field, therefore the same from every face that asks
+             ;; about a point, therefore watertight.  The scene it is asked
+             ;; of has four stocks of four different grits in it.
+             (loop for (strength grain) in '((0.4 2.0) (1.0 3.0) (1.8 6.0))
+                   do (let ((*erode-strength* strength)
+                            (*erode-grain* grain))
+                        (ok (zerop (count-pixels (render-pixels renderer)
+                                                 width height #'sky-pixel-p
+                                                 :from-row 25 :to-row 195))
+                            (format nil "~A chamfers survive a lattice eroded ~
+by ~,1F cells" rule strength))))
+             ;; Eroded and bent at once, since the two compose.
+             (let ((*erode-strength* 0.8)
+                   (*erode-grain* 3.0)
+                   (*deformation* :twist)
+                   (*deform-strength* 0.05))
+               (ok (zerop (count-pixels (render-pixels renderer)
+                                        width height #'sky-pixel-p
+                                        :from-row 25 :to-row 195))
+                   (format nil "~A chamfers survive erosion and a twist"
+                           rule)))))
       (destroy-renderer renderer))))
 
 (deftest every-deformation-has-a-lane-and-none-moves-its-own-centre
@@ -354,12 +376,13 @@ has somewhere to show it."
   (ok (signals (luft.render.shaders:deformation-index :nonesuch) 'error))
   ;; The centre lane is the middle of the world's floor unless told
   ;; otherwise, because a deformation about a corner throws the world off
-  ;; the screen.
-  (let ((domain (luft:make-world-domain :horizontal-bits 6)))
-    (ok (equal '(32.0 32.0 0.0 0.0)
+  ;; the screen; its fourth component is the erosion's wavelength.
+  (let ((domain (luft:make-world-domain :horizontal-bits 6))
+        (luft.render::*erode-grain* 4.0))
+    (ok (equal '(32.0 32.0 0.0 4.0)
                (luft.render::deform-centre-lane domain)))
     (let ((luft.render::*deform-centre* '(1 2 3)))
-      (ok (equal '(1.0 2.0 3.0 0.0)
+      (ok (equal '(1.0 2.0 3.0 4.0)
                  (luft.render::deform-centre-lane domain))))))
 
 (deftest shaped-surfaces-are-watertight-from-above

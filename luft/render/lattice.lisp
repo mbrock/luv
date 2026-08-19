@@ -27,7 +27,7 @@
 ;;; concave one left nearly sharp), and the stocks of its solid cells (a
 ;;; timber post planed, the stone it stands on pecked).  Both are symmetric
 ;;; over the star, so both are coherent, and the watertightness test of
-;;; #RUAWR5 is what says so out loud.  #V0YCZA #NW1KEM
+;;; #RUAWR5 is what says so out loud.  #REZ0PU #K5MKUT
 
 (in-package #:luft.render.shaders)
 
@@ -49,15 +49,139 @@ sheet put eight of them side by side."))
   (or (position name *deformations*)
       (error "No deformation ~S; there is ~{~S~^, ~}." name *deformations*)))
 
-(define-shader-function deform-point (rest kind strength scale centre)
-  "Where the rest position REST goes under deformation KIND.
 
-Every branch is evaluated and one selected, which costs a few dozen ALU
+;;; ------------------------------------------------------------------------
+;;; A lattice that wanders, and what tells it how far
+;;;
+;;; The maps below are smooth and global.  The interesting one is neither:
+;;; a noise field that shakes the lattice loose, with an amplitude that
+;;; differs from place to place.  The temptation is to take that amplitude
+;;; from the cell a point sits in and from which face is asking -- and both
+;;; would tear the surface, because a surface point sits exactly on a cell
+;;; boundary, where FLOOR is a coin toss, and because the faces along a
+;;; crease belong to different cells.
+;;;
+;;; So the amplitude is a /field/: the grit of the stock, averaged over the
+;;; eight cells around the point and weighted by how solid they are and how
+;;; near they are.  That is a continuous function of position, so the faces
+;;; incident to a site all get the same number and the surface stays shut.
+;;; The same eight reads give the tent occupancy, which says how the point
+;;; stands in the boundary -- low on an arris that sticks out, high in a
+;;; cove that is sheltered -- and weather reaches the one and not the other.
+;;;
+;;; The result: granite goes to rubble, turf goes lumpy, and the oak post
+;;; standing in the middle of it stays dead straight, because the noise is
+;;; the same everywhere and the grit is not.
+
+(define-shader-function lattice-noise (point)
+  "A vector of value noise about zero, one component per axis."
+  (vec3 (- (paper-noise point) 0.5)
+        (- (paper-noise (+ point (vec3 37.1 11.7 5.3))) 0.5)
+        (- (paper-noise (+ point (vec3 3.9 71.3 19.1))) 0.5)))
+
+(define-shader-function lattice-turbulence (point)
+  "Two octaves of LATTICE-NOISE: a lump and a crumb.
+
+How far it is allowed to move a point is a field of the stocks around that
+point, not a property of any cell or face, which is what keeps it from
+tearing the surface it roughens.  #86IMVU"
+  (+ (lattice-noise point) (* (lattice-noise (* point 2.17)) 0.5)))
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun stock-grit-form (slot-form)
+    "A form reading the grit of the stock in SLOT-FORM: the ninth lane."
+    `(swizzle (buffer-element
+               stocks (+ (* (uint (+ ,slot-form 0.25))
+                            (uint ,(float +stock-lanes+)))
+                         (uint 8.0)))
+              :x))
+
+  (defun lattice-cell-bindings (name position-form)
+    "Solidity, stock slot, and grit of the cell at POSITION-FORM."
+    (append (cell-solid-bindings name position-form)
+            (cell-stock-bindings name position-form)
+            `((,(intern (format nil "~A-GRIT" name))
+               ,(stock-grit-form (intern (format nil "~A-SLOT" name)))))))
+
+  (defun lattice-sample-bindings (name point-form)
+    "Bindings giving NAME-SOLID and NAME-GRIT at POINT-FORM.
+
+The eight cells whose middles surround the point, trilinearly weighted:
+NAME-SOLID is the fraction of them that is solid and NAME-GRIT the mean
+grit of the solid part.  Continuity is the whole point -- C0 is enough,
+since all that coherence asks is that the amplitude be a function of where
+the point is and of nothing else.  #86IMVU"
+    (let ((p (intern (format nil "~A-P" name)))
+          (base (intern (format nil "~A-BASE" name)))
+          (frac (intern (format nil "~A-FRAC" name)))
+          (fx (intern (format nil "~A-FX" name)))
+          (fy (intern (format nil "~A-FY" name)))
+          (fz (intern (format nil "~A-FZ" name)))
+          (mass (intern (format nil "~A-SOLID" name)))
+          (grit (intern (format nil "~A-GRIT" name)))
+          (corners '((0 0 0) (1 0 0) (0 1 0) (1 1 0)
+                     (0 0 1) (1 0 1) (0 1 1) (1 1 1))))
+      (flet ((cell (c) (intern (format nil "~A-C~D~D~D" name
+                                       (first c) (second c) (third c))))
+             (weight (c)
+               `(* ,(if (= 1 (first c)) fx `(- 1.0 ,fx))
+                   (* ,(if (= 1 (second c)) fy `(- 1.0 ,fy))
+                      ,(if (= 1 (third c)) fz `(- 1.0 ,fz))))))
+        `((,p ,point-form)
+          (,base (floor (- ,p (vec3 0.5 0.5 0.5))))
+          (,frac (- (- ,p (vec3 0.5 0.5 0.5)) ,base))
+          (,fx (swizzle ,frac :x))
+          (,fy (swizzle ,frac :y))
+          (,fz (swizzle ,frac :z))
+          ,@(loop for c in corners
+                  append (lattice-cell-bindings
+                          (cell c)
+                          `(+ ,base (vec3 ,(float (first c))
+                                          ,(float (second c))
+                                          ,(float (third c))))))
+          (,mass (+ (+ (+ (* ,(weight (first corners)) ,(cell (first corners)))
+                          (* ,(weight (second corners))
+                             ,(cell (second corners))))
+                       (+ (* ,(weight (third corners)) ,(cell (third corners)))
+                          (* ,(weight (fourth corners))
+                             ,(cell (fourth corners)))))
+                    (+ (+ (* ,(weight (fifth corners)) ,(cell (fifth corners)))
+                          (* ,(weight (sixth corners))
+                             ,(cell (sixth corners))))
+                       (+ (* ,(weight (seventh corners))
+                             ,(cell (seventh corners)))
+                          (* ,(weight (eighth corners))
+                             ,(cell (eighth corners)))))))
+          (,grit
+           (/ ,(let ((terms (loop for c in corners
+                                  collect `(* ,(weight c)
+                                              (* ,(cell c)
+                                                 ,(intern
+                                                   (format nil "~A-GRIT"
+                                                           (cell c))))))))
+                 (reduce (lambda (a b) `(+ ,a ,b)) terms))
+              (max ,mass 0.2))))))))
+
+(define-shader-function deform-point
+    (rest kind strength scale centre amplitude grain)
+  "Where the rest position REST goes under deformation KIND.  #REZ0PU
+
+AMPLITUDE and GRAIN shake the lattice loose before the map bends it: the
+point wanders by AMPLITUDE cells along a turbulence of wavelength GRAIN,
+and whatever map follows carries the wandering with it.  The amplitude is
+passed in rather than sampled here because DEFORM-NORMAL evaluates this
+three times a hundredth of a cell apart, where the amplitude field has not
+changed and the noise has.
+
+Every map branch is evaluated and one selected, which costs a few dozen ALU
 operations a vertex and buys the ability to change the deformation without
 changing the pipeline.  Each map fixes CENTRE: at zero strength, and at the
 centre itself, every one of them is the identity, so nothing jumps when the
 knob leaves zero."
-  (let* ((d (- rest centre))
+  (let* ((jitter (* amplitude
+                    (lattice-turbulence (/ rest (max grain 0.001)))))
+         (rest (+ rest jitter))
+         (d (- rest centre))
          (dx (swizzle d :x))
          (dy (swizzle d :y))
          (dz (swizzle d :z))
@@ -120,7 +244,7 @@ knob leaves zero."
                             (if (< kind 6.5) billow globe)))))))))
 
 (define-shader-function deform-normal
-    (rest normal kind strength scale centre)
+    (rest normal kind strength scale centre amplitude grain)
   "The bent normal at REST, from three evaluations of the map.
 
 A frame is built in the rest surface's own tangent plane, its two vectors
@@ -134,11 +258,12 @@ right for whatever map DEFORM-POINT grows next."
          (tangent (normalize (cross-product normal away)))
          (bitangent (cross-product normal tangent))
          (step 0.01)
-         (origin (deform-point rest kind strength scale centre))
+         (origin (deform-point rest kind strength scale centre
+                               amplitude grain))
          (along (deform-point (+ rest (* tangent step))
-                              kind strength scale centre))
+                              kind strength scale centre amplitude grain))
          (across (deform-point (+ rest (* bitangent step))
-                               kind strength scale centre))
+                               kind strength scale centre amplitude grain))
          (bent (cross-product (- along origin) (- across origin)))
          (length (sqrt (dot bent bent))))
     (if (> length 0.000001)
@@ -185,7 +310,9 @@ more a corner cut in, and four is a saddle or a plane, which no rule moves."
     (if (< count 3.5) -1.0 (if (> count 4.5) 1.0 0.0))))
 
 (define-shader-function site-relief-width (relief radius convex concave)
-  "RADIUS scaled by CONVEX on an outward arris and CONCAVE on an inward one."
+  "RADIUS scaled by CONVEX on an outward arris and CONCAVE on an inward one.
+
+#K5MKUT"
   (if (< relief -0.5)
       (* radius convex)
       (if (> relief 0.5) (* radius concave) radius)))
@@ -307,28 +434,39 @@ one is the whole of it and the useful range is at most one.")
 Weather and hands reach an outside corner and not an inside one, so the
 one is planed and the other left nearly sharp.")
 
+(defparameter *erode-strength* 0.0
+  "How far the lattice wanders, in cells, where the stock is all grit.
+
+Independent of *DEFORMATION*: the wandering happens in the lattice and
+whatever map is in force carries it along, so a world can be both eroded
+and bent.  A tenth of a cell is a weathered edge; half a cell is rubble.")
+
+(defparameter *erode-grain* 3.0
+  "The wavelength of the wandering, in cells: how big the lumps are.")
+
 (defun deform-lane ()
-  "The frame block's deformation lane: index, strength, scale, spare."
+  "The frame block's deformation lane: index, strength, scale, erosion."
   (list (coerce (shaders:deformation-index *deformation*) 'single-float)
         (coerce *deform-strength* 'single-float)
         (coerce *deform-scale* 'single-float)
-        0.0))
+        (coerce *erode-strength* 'single-float)))
 
 (defun deform-centre-lane (domain)
   "The point every deformation fixes: the middle of DOMAIN's floor unless
 *DEFORM-CENTRE* names another."
-  (if *deform-centre*
-      (append (mapcar (lambda (x) (coerce x 'single-float)) *deform-centre*)
-              (list 0.0))
-      (list (if domain
-                (* 0.5 (coerce (luft:world-domain-x-period domain)
-                               'single-float))
-                0.0)
-            (if domain
-                (* 0.5 (coerce (luft:world-domain-y-period domain)
-                               'single-float))
-                0.0)
-            0.0 0.0)))
+  (let ((grain (coerce *erode-grain* 'single-float)))
+    (if *deform-centre*
+        (append (mapcar (lambda (x) (coerce x 'single-float)) *deform-centre*)
+                (list grain))
+        (list (if domain
+                  (* 0.5 (coerce (luft:world-domain-x-period domain)
+                                 'single-float))
+                  0.0)
+              (if domain
+                  (* 0.5 (coerce (luft:world-domain-y-period domain)
+                                 'single-float))
+                  0.0)
+              0.0 grain))))
 
 (defun arris-lane ()
   "The frame block's chamfer-rule lane: the rule, and the relief factors."

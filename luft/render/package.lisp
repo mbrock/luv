@@ -133,12 +133,15 @@ mesh shaders.")
            #:material-spacing
            #:material-courses
            #:material-chamfer
+           #:material-grit
            #:material-albedo
            #:*material*
            #:*deformation*
            #:*deform-strength*
            #:*deform-scale*
            #:*deform-centre*
+           #:*erode-strength*
+           #:*erode-grain*
            #:*chamfer-rule*
            #:*relief-convex*
            #:*relief-concave*

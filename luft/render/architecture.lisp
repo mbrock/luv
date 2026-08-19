@@ -270,7 +270,59 @@ is a model of a tree; both are what a tree is at this distance."
 
 (defun atelier-pieces ()
   "Every piece the atelier can build, in the order a sheet would show them."
-  '(:samples :arcade :turret :viaduct :grotto :headland :holm))
+  '(:samples :joinery :arcade :turret :viaduct :grotto :headland :holm))
+
+;;; The joinery: one thing made of several stocks, so that the creases
+;;; /between/ them can be looked at.  A per-stock chamfer rule says nothing
+;;; on an object cut from one stock; it says everything where a planed oak
+;;; post stands on a pecked granite plinth and a brick pier rises beside it,
+;;; and the arris where two of them meet has to belong to the crease rather
+;;; than to either face.
+
+(defmethod atelier-scene ((piece (eql :joinery)))
+  (let* ((world (make-world :horizontal-bits 5))
+         (grade 4))
+    (lay-ground world :height (lambda (x y)
+                                (+ grade (* 0.4 (sin (/ x 13.0))
+                                            (cos (/ y 11.0)))))
+                      :stock :granite)
+    (grass-the-flats world :flat 1 :depth 1)
+    ;; A granite plinth with an oak post standing on it and a brick pier
+    ;; against the post: three stocks, four kinds of crease between them.
+    (with-stock (:granite)
+      (fill-box world 10 20 12 20 grade (+ grade 1))
+      (fill-box world 11 19 13 19 (+ grade 2) (+ grade 2)))
+    (with-stock (:oak)
+      (fill-box world 13 16 15 17 (+ grade 3) (+ grade 9))
+      ;; A cap on the post, oversailing it, and a beam running off east.
+      (fill-box world 12 17 14 18 (+ grade 10) (+ grade 10))
+      (fill-box world 17 30 15 17 (+ grade 8) (+ grade 9)))
+    (with-stock (:brick)
+      (fill-box world 20 24 12 16 grade (+ grade 7))
+      (corbel world 20 24 12 16 (+ grade 8) 1))
+    (with-stock (:limestone)
+      ;; Steps up to the plinth, and a slab the beam lands on.
+      (loop for step from 0 below 3
+            do (fill-box world (- 9 step) (- 9 step) 12 20
+                         0 (+ grade (- 2 step))))
+      (fill-box world 28 31 13 19 grade (+ grade 8)))
+    (with-stock (:slate)
+      (fill-box world 27 32 12 20 (+ grade 9) (+ grade 9)))
+    (with-stock (:marble)
+      (fill-box world 11 19 13 19 (+ grade 2) (+ grade 2)))
+    (world-scene world)))
+
+(defmethod atelier-cameras ((piece (eql :joinery)))
+  (list
+   ;; Close on the foot of the post, where oak meets marble meets granite.
+   (cons :foot (studio-camera 6.0 4.0 10.0 :look-x 15.0 :look-y 16.0
+                              :look-z 7.0 :field-of-view 0.50))
+   ;; The whole assembly, so the stocks can be told apart.
+   (cons :whole (studio-camera 4.0 2.0 16.0 :look-x 22.0 :look-y 16.0
+                               :look-z 9.0 :field-of-view 0.72))
+   ;; Along the beam to the slab it lands on.
+   (cons :beam (studio-camera 9.0 26.0 14.0 :look-x 29.0 :look-y 15.0
+                              :look-z 12.0 :field-of-view 0.62))))
 
 ;;; The samples: one small object repeated in every stock there is.  A
 ;;; material sheet with one material a column tells you what each is; this

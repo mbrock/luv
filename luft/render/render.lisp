@@ -662,7 +662,9 @@ the palette repeat slot zero so a stale site can never read rubbish."
                 for colour = (material-albedo material face)
                 do (quad (list (vec3:vec3-x colour) (vec3:vec3-y colour)
                                (vec3:vec3-z colour) spare)))
-          (mapc #'quad (material-lanes material)))))))
+          (mapc #'quad (material-lanes material))
+          ;; The lattice lane: what this stock does to the shape.
+          (quad (list (material-grit material) 0.0 0.0 0.0)))))))
 
 (defun frame-uniform-data
     (camera width height &optional domain (surface-width *bevel-radius*)

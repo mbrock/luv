@@ -494,13 +494,14 @@ written with that in mind.
 [[lisp:luft.render:atelier-scene]] and [[lisp:luft.render:atelier-cameras]]
 are generic functions on a piece's name, so a sheet can ask for all of them
 without knowing any of them and a new piece is one method and one entry in
-[[lisp:luft.render:atelier-pieces]].  There are seven: =:samples=, ten
-stocks of one small object; =:arcade=, a wall of round-headed openings on a
-stylobate under a corbelled cornice; =:turret=, a machicolated round tower
-with a curtain wall and a bailey; =:viaduct=, piers in a box canyon carrying
-a road; =:grotto=, a hall cut into a cliff behind an arched mouth;
-=:headland=, which has no building on it at all and is the landscape the
-others are supposed to stand in; and =:holm=, which is the argument that
+[[lisp:luft.render:atelier-pieces]].  There are eight: =:samples=, every
+stock as one small object; =:joinery=, one object of several stocks, so the
+creases /between/ them can be looked at; =:arcade=, a wall of round-headed
+openings on a stylobate under a corbelled cornice; =:turret=, a machicolated
+round tower with a curtain wall and a bailey; =:viaduct=, piers in a box
+canyon carrying a road; =:grotto=, a hall cut into a cliff behind an arched
+mouth; =:headland=, which has no building on it at all and is the landscape
+the others are supposed to stand in; and =:holm=, which is the argument that
 they compose.
 
 [[file:images/luft-holm.png]]
@@ -522,6 +523,134 @@ much of the design as the geometry:
 column, [[lisp:luft.render:render-light-sheet]] crosses them with the hours
 of #KG0EG6, and [[lisp:luft.render:render-view]] renders one of them as a
 picture.
+
+* The lattice need not be square
+:PROPERTIES:
+:ID: REZ0PU
+:END:
+
+[[file:images/luft-lattice.png]]
+
+Every shaped point is placed in the lattice by a rule over its star
+(#6TEFOS, #RUAWR5, #TI9NJP) and only then turned into a clip position.  Put
+a smooth map $W$ between those two steps and the whole world bends, and not
+one rule changes.  Eight of them live in [[lisp:luft.render.shaders::deform-point]]
+-- a shear, a taper, a bend about a horizontal axis, a twist about a
+vertical one, a swirl in plan, a standing wave, and the whole plane wrapped
+onto a sphere -- chosen by a uniform rather than by a pipeline apiece, so a
+sheet can put them side by side and =*deformation*= is one more special for
+a contact-sheet column to bind.
+
+The surface stays watertight for exactly the reason it was watertight
+before: the faces incident to a site all compute the same rest point, and
+$W$ is a function of position alone, so they all land on the same bent
+point.  /A deformation cannot open a crack the lattice did not already
+have./
+
+The bent normal follows from $W$ by construction rather than from a
+Jacobian anyone had to write down.
+[[lisp:luft.render.shaders::deform-normal]] builds a frame in the rest
+surface's own tangent plane, pushes its two vectors through the map a
+hundredth of a cell away, and takes the cross product of the differences;
+that is $\det(J)\,J^{-\mathsf{T}} n$ for whatever map comes next, at the
+price of three evaluations.
+
+The fragment stage keeps the /rest/ position beside the bent one and looks
+the lattice up there: the occupancy field, the grain, the cell's own tone
+and the shadow ray all live in the lattice, and only the view -- the eye
+vector, the fog, the specular -- is taken from the bent world.  So the
+light bends with the geometry rather than being cast across it, which for a
+gentle bend is invisible and for a globe is a decision rather than a bug.
+
+** A lattice that wanders, modulated by what the cells are made of
+:PROPERTIES:
+:ID: 86IMVU
+:END:
+
+[[file:images/luft-erode.png]]
+
+The interesting map is neither smooth nor global: a noise field that shakes
+the lattice loose, with an amplitude that differs from place to place.  The
+temptation is to take that amplitude from the cell a point sits in, or from
+the stock of the face that is asking, and both tear the surface -- a
+surface point sits exactly /on/ a cell boundary, where =floor= is a coin
+toss, and the faces along a crease belong to different cells.
+
+So the amplitude is a field.  [[lisp:luft.render.shaders::lattice-sample-bindings]]
+reads the eight cells whose middles surround the point, weights them
+trilinearly, and returns two numbers: how solid they are, and the mean
+/grit/ of the solid part, grit being what each stock says it does to the
+shape of the world rather than to its surface.  Both are continuous in
+position, so every face that asks about a point gets the same answer, and
+C0 is all coherence needs.  The occupancy those same eight reads give is
+the boundary structure: low where the point stands out on an arris, high
+where it is sheltered in a cove, and weather reaches the one and not the
+other.
+
+The result is one noise doing different things in one world.  Granite goes
+to rubble, turf goes lumpy, conifers go windblown, and the oak post
+standing in the middle of it stays dead straight, because the noise is the
+same everywhere and the grit is not.  The wandering happens in the lattice,
+so a world can be eroded and bent at once.
+
+* A chamfer belongs to the crease, not to either face
+:PROPERTIES:
+:ID: K5MKUT
+:END:
+
+[[file:images/luft-arris.png]]
+
+The chamfer width of #RUAWR5 was one number for the whole world and need
+not be.  But it cannot be a property of a /face/: two faces meet along a
+crease, and if they disagree about how far to move the point they share,
+the surface tears.  It has to belong to the site, which means it has to be
+a function of the star -- the same four or eight cells every incident face
+already reads.  Two such functions are worth having.
+
+=:relief= asks the star its shape.  An outward arris is planed wide and an
+inward cove left nearly sharp, which is what weather and hands actually do
+to a building, and which also disposes of a long-standing artifact: the
+pale wedge where three coves meet at a re-entrant corner simply stops
+existing once the coves are narrow.
+
+=:stock= takes the least chamfer any solid cell of the star asks for.  A
+crease between a planed timber and a pecked stone comes out as sharp as the
+stone -- the sharper stock wins, which is what a mason does with a stone
+that will not take an arris.  A minimum over the star is symmetric in it,
+so every incident face computes the same width from the same cells,
+whichever of them it happens to be.
+
+** What the watertightness test caught
+:PROPERTIES:
+:ID: HJ6YTC
+:END:
+
+Both rules were wrong the first time, and the sky-through-the-floor test of
+#RUAWR5 said so before any picture did.
+
+First: classifying a crease by the sign of the minority's dot with the
+/face's/ outward normal is right at an edge, where that dot is exactly
+$\pm 1$ and the star determines which, and wrong at a mixed corner, where
+the same eight cells give one incident face a positive dot and another a
+negative one.  Counting fixes it.  An edge's four cells are a crease
+exactly when the two across it agree, and what they agree on says which
+kind; a vertex's eight are convex when three or fewer are solid and concave
+when five or more.
+
+Second, and less obvious: an inset that varies from site to site tears the
+seam /even where every displacement agrees/.  A face's boundary points
+along one edge are spaced by the insets of its /other/ edges, and the
+neighbour across that edge is spaced by different edges again; with one
+radius they coincide by accident, and with per-site radii they do not.  So
+=*chamfer-width*= became the band the grid reserves and no rule may exceed
+it, and each site takes up to all of it.  The facet is then not exactly
+forty-five degrees where a site takes less than the whole band, which is a
+price worth paying for a surface that is closed.
+
+The claims are in [[lisp:luft.render.tests::a-site-width-and-a-bent-lattice-keep-the-surface-closed]]:
+three chamfer rules against eight lattices, three erosions, and an erosion
+and a twist together, over a scene of four stocks with every kind of star
+in it -- and no sky anywhere inside the floor.
 
 * The studio: a world of stars under the same cameras
 :PROPERTIES:

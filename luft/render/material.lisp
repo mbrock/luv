@@ -400,6 +400,15 @@ reaches.")
    (grain-axis
     :initarg :grain-axis :initform '(0.0 0.0 1.0) :reader material-grain-axis
     :documentation "The direction the grain runs, as a list of three floats.")
+   (grit
+    :initarg :grit :initform 0.0 :reader material-grit
+    :documentation "How far the lattice wanders where this stock is.
+
+Zero leaves the lattice square.  A rock has grit and a planed board has
+none, so the same noise that turns granite into rubble leaves the timber
+standing in it dead straight.  The value is smoothed over the cells around
+a point before it is used, which is what keeps it a function of position
+and so keeps the surface closed.")
    (chamfer
     :initarg :chamfer :initform 1.0 :reader material-chamfer
     :documentation "What the :STOCK chamfer rule multiplies a crease by.
@@ -490,7 +499,8 @@ is the whole of what it is cut from.  #PWMCOL")
   ;; and a bright earth there turns a green hillside into a beige one.
   :top '(0.108 0.205 0.058) :side '(0.130 0.092 0.052)
   :bottom '(0.062 0.045 0.026)
-  :chamfer 0.32
+  :grit 0.75
+  :chamfer 0.2
   :gloss 0.02 :polish 12.0 :lift 1.06
   :mottle-scale 0.55 :mottle 0.34 :wear 0.35 :drift 0.10 :rim 0.05)
 
@@ -503,6 +513,7 @@ is the whole of what it is cut from.  #PWMCOL")
   ;; oiled rather than lacquered, its chamfer paler than its face.
   :top '(0.115 0.040 0.020) :side '(0.104 0.035 0.017)
   :bottom '(0.058 0.020 0.010)
+  :grit 0.06
   :chamfer 1.0
   :gloss 0.55 :polish 90.0 :lift 1.30
   :grain-axis '(0.0 1.0 0.0) :spacing 3.4 :rings 14.0
@@ -513,7 +524,8 @@ is the whole of what it is cut from.  #PWMCOL")
   ;; Paler, cooler, coarser: a floor rather than a table top.
   :top '(0.185 0.118 0.058) :side '(0.168 0.104 0.050)
   :bottom '(0.088 0.055 0.026)
-  :chamfer 0.95
+  :grit 0.1
+  :chamfer 1.0
   :gloss 0.22 :polish 45.0 :lift 1.22
   :grain-axis '(1.0 0.0 0.0) :spacing 3.9 :rings 10.0
   :ring-contrast 0.23 :wander 0.12
@@ -523,6 +535,7 @@ is the whole of what it is cut from.  #PWMCOL")
   ;; The dark stripe of the butcher block, nearly black in the latewood.
   :top '(0.052 0.026 0.015) :side '(0.046 0.023 0.013)
   :bottom '(0.026 0.013 0.007)
+  :grit 0.07
   :chamfer 1.0
   :gloss 0.42 :polish 70.0 :lift 1.50
   :grain-axis '(0.0 0.0 1.0) :spacing 3.1 :rings 12.0
@@ -536,7 +549,8 @@ is the whole of what it is cut from.  #PWMCOL")
   ;; A warm pale building stone, matte, weathered at every edge.
   :top '(0.322 0.280 0.203) :side '(0.290 0.250 0.180)
   :bottom '(0.146 0.126 0.090)
-  :chamfer 0.55
+  :grit 0.45
+  :chamfer 0.4
   :gloss 0.04 :polish 16.0 :lift 1.10
   :mottle-scale 1.3 :mottle 0.22 :wear 0.55 :drift 0.07
   :patina 0.22 :patina-color '(0.085 0.095 0.068) :rim 0.10)
@@ -546,7 +560,8 @@ is the whole of what it is cut from.  #PWMCOL")
   ;; facets read blue in the shade and near-white in the sun.
   :top '(0.178 0.178 0.184) :side '(0.152 0.152 0.158)
   :bottom '(0.074 0.074 0.078)
-  :chamfer 0.28
+  :grit 1.0
+  :chamfer 0.15
   :gloss 0.14 :polish 30.0 :lift 1.26
   :mottle-scale 2.2 :mottle 0.42 :wear 0.48 :drift 0.17 :rim 0.11)
 
@@ -556,7 +571,8 @@ is the whole of what it is cut from.  #PWMCOL")
   :bottom '(0.024 0.026 0.032)
   ;; No rings: bedding planes are not growth rings, and a wood figure laid
   ;; on a slate floor comes out as a target painted on the paving.
-  :chamfer 0.75
+  :grit 0.3
+  :chamfer 0.6
   :gloss 0.30 :polish 55.0 :lift 1.40
   :mottle-scale 1.8 :mottle 0.20 :wear 0.30 :drift 0.06 :rim 0.20)
 
@@ -566,7 +582,8 @@ is the whole of what it is cut from.  #PWMCOL")
   :top '(0.140 0.055 0.034) :side '(0.126 0.048 0.030)
   :bottom '(0.064 0.024 0.015)
   :courses 3.0
-  :chamfer 0.38
+  :grit 0.18
+  :chamfer 0.25
   :gloss 0.05 :polish 18.0 :lift 1.14
   :mottle-scale 3.2 :mottle 0.22 :wear 0.35 :drift 0.06 :rim 0.07)
 
@@ -575,7 +592,8 @@ is the whole of what it is cut from.  #PWMCOL")
   ;; turned up is veining: a pale stone with a dark seam wandering through.
   :top '(0.480 0.470 0.445) :side '(0.440 0.430 0.408)
   :bottom '(0.215 0.210 0.200)
-  :chamfer 0.85
+  :grit 0.05
+  :chamfer 0.8
   :gloss 0.75 :polish 150.0 :lift 1.20
   :grain-axis '(0.0 0.0 1.0) :spacing 9.0 :rings 2.0
   :ring-contrast 0.26 :wander 2.8 :fibre 0.04
@@ -585,7 +603,8 @@ is the whole of what it is cut from.  #PWMCOL")
   ;; Fired earth: warm, slightly chalky, lighter where it has been rubbed.
   :top '(0.185 0.068 0.036) :side '(0.166 0.060 0.032)
   :bottom '(0.086 0.031 0.016)
-  :chamfer 0.5
+  :grit 0.35
+  :chamfer 0.35
   :gloss 0.06 :polish 20.0 :lift 1.18
   :mottle-scale 1.1 :mottle 0.20 :wear 0.40 :drift 0.08 :rim 0.08)
 
@@ -595,7 +614,8 @@ is the whole of what it is cut from.  #PWMCOL")
   ;; metal, which is what makes a metal look like one.
   :top '(0.098 0.058 0.022) :side '(0.086 0.051 0.019)
   :bottom '(0.045 0.026 0.010)
-  :chamfer 0.95
+  :grit 0.04
+  :chamfer 1.0
   :gloss 1.80 :polish 120.0 :metallic 1.0 :lift 1.90
   :mottle-scale 1.6 :mottle 0.14 :wear 0.50
   :patina 0.70 :patina-color '(0.042 0.098 0.076) :rim 0.22)
@@ -606,7 +626,8 @@ is the whole of what it is cut from.  #PWMCOL")
   ;; that says where one branch layer ends and the next begins.
   :top '(0.036 0.072 0.042) :side '(0.026 0.054 0.032)
   :bottom '(0.013 0.026 0.016)
-  :chamfer 0.45
+  :grit 0.85
+  :chamfer 0.3
   :gloss 0.06 :polish 22.0 :lift 1.14
   :mottle-scale 2.8 :mottle 0.36 :wear 0.0 :drift 0.16 :rim 0.08)
 
@@ -614,7 +635,8 @@ is the whole of what it is cut from.  #PWMCOL")
   ;; A broadleaf crown: yellower, lighter, and more broken up than a fir.
   :top '(0.078 0.118 0.038) :side '(0.060 0.092 0.030)
   :bottom '(0.030 0.046 0.015)
-  :chamfer 0.45
+  :grit 1.0
+  :chamfer 0.3
   :gloss 0.05 :polish 18.0 :lift 1.12
   :mottle-scale 2.0 :mottle 0.46 :wear 0.0 :drift 0.20 :rim 0.08)
 
@@ -623,7 +645,8 @@ is the whole of what it is cut from.  #PWMCOL")
   ;; the one that shows what the light alone is doing.
   :top '(0.400 0.382 0.342) :side '(0.372 0.354 0.316)
   :bottom '(0.186 0.177 0.158)
-  :chamfer 0.65
+  :grit 0.15
+  :chamfer 0.5
   :gloss 0.03 :polish 14.0 :lift 1.05
   :mottle-scale 0.7 :mottle 0.10 :wear 0.25 :drift 0.05 :rim 0.06)
 

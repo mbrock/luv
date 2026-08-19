@@ -39,8 +39,11 @@ pipeline; the flat pipeline uses the same bricks at four vertices a face.")
 (defconstant +site-stock-shift+ 60)
 (defconstant +site-stock-bits+ 4)
 (defconstant +stock-slots+ (ash 1 +site-stock-bits+))
-(defconstant +stock-lanes+ 8
-  "Vec4 lanes a stock occupies in the table: three albedos, five materials.")
+(defconstant +stock-lanes+ 9
+  "Vec4 lanes a stock occupies in the table.
+
+Three albedos, five material lanes, and one for the lattice: what a stock
+does to the shape of the world rather than to its surface.")
 
 ;;; The focus pass reads a drawn frame rather than the world, and so binds a
 ;;; group of its own.
