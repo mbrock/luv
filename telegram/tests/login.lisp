@@ -229,6 +229,15 @@ QUOTED='single'
   (testing "and a file that is not there is not an error"
     (ok (null (client:read-dotenv "/nonexistent/.env")))))
 
+(deftest credentials-can-come-from-an-application-fallback
+  (let ((client:*credential-fallbacks*
+          (list (lambda (name)
+                  (and (string= name "LUV_TEST_TELEGRAM_CREDENTIAL")
+                       "from-lobby-cache")))))
+    (ok (string= "from-lobby-cache"
+                 (client:credential '("LUV_TEST_TELEGRAM_CREDENTIAL")
+                                    :file "/nonexistent/.env")))))
+
 (deftest stored-sessions-round-trip
   (let ((path (merge-pathnames "telegram-session-test"
                                (uiop:temporary-directory)))

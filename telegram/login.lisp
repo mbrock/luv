@@ -35,6 +35,11 @@ asked not to be prompted for it.  COMPLETE-PASSWORD finishes the login."))
   "Where APPLICATION-FROM-ENVIRONMENT looks when the environment itself is
 bare, in order.  TELEGRAM_ENV_FILE overrides the list entirely.")
 
+(defparameter *credential-fallbacks* '()
+  "Functions of one environment-variable name, consulted after the environment
+and dotenv files.  A fallback returns a non-empty string or NIL.  Applications
+can provide cached secret stores without making Telegram depend on them.")
+
 (defun read-dotenv (pathname)
   "Parse a dotenv file into an alist, or NIL if it is not there.  Understands
 the `export' prefix, `#' comments, and quoted values, because that is what
@@ -67,7 +72,8 @@ these files have in them."
 
 (defun credential (names &key file)
   "The first of NAMES set in the environment, or failing that in a dotenv
-file.  The environment wins so that one run can override what is on disk."
+file, or finally by a registered credential fallback.  The environment wins
+so that one run can override what is on disk."
   (or (loop for name in names
             thereis (let ((value (sb-ext:posix-getenv name)))
                       (when (and value (plusp (length value))) value)))
@@ -80,13 +86,18 @@ file.  The environment wins so that one run can override what is on disk."
             thereis (loop for name in names
                           for found = (cdr (assoc name bindings :test #'string=))
                           when (and found (plusp (length found)))
+                            return found))
+      (loop for fallback in *credential-fallbacks*
+            thereis (loop for name in names
+                          for found = (funcall fallback name)
+                          when (and (stringp found) (plusp (length found)))
                             return found))))
 
 (defun application-from-environment (&rest initargs &key file &allow-other-keys)
   "An application identity from TELEGRAM_API_ID and TELEGRAM_API_HASH, or the
 TDLIB_ names other clients use, taken from the environment or from a dotenv
 file.  FILE names one explicitly; otherwise TELEGRAM_ENV_FILE and then
-*CREDENTIAL-FILES* are searched."
+*CREDENTIAL-FILES* are searched.  Registered credential fallbacks are last."
   (let ((id (credential '("TELEGRAM_API_ID" "TDLIB_API_ID") :file file))
         (hash (credential '("TELEGRAM_API_HASH" "TDLIB_API_HASH") :file file)))
     (unless id

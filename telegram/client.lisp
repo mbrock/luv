@@ -45,6 +45,7 @@ negotiation, and one INVOKE that turns a schema object into an answer.")
            ;; credentials and stored sessions
            #:application-from-environment
            #:*credential-files*
+           #:*credential-fallbacks*
            #:read-dotenv
            #:credential
            #:*session-file*

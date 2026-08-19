@@ -710,6 +710,16 @@ around the whole loop, so RESUME makes it current here and nowhere else."
            (setf (console-failure console) (princ-to-string condition))
            (begin-console-qr-login console)))))))
 
+(defun adopt-late-console-credentials (console)
+  "Leave the manual API-ID prompt when credentials appeared asynchronously.
+The next console pass opens normally, using a stored session or QR login."
+  (when (and (eq :api-id (console-login-stage console))
+             (ignore-errors (telegram.client:application-from-environment)))
+    (setf (console-login-stage console) nil
+          (console-login-note console) nil
+          (console-failure console) nil)
+    t))
+
 (defun fetch-console-photos (console &key (limit 2))
   "Download and decode a few of the pictures the last view asked for.
 
@@ -736,6 +746,8 @@ pictures appearing over a second or two is the better failure."
 (defun advance-telegram-console (console)
   (unless (or telegram.client:*connection* (console-login-stage console))
     (open-console-connection console))
+  (when (adopt-late-console-credentials console)
+    (return-from advance-telegram-console))
   (when (console-login-stage console)
     ;; Nothing to poll while logging in -- except a QR code, which is waiting
     ;; on the phone rather than on the player.
