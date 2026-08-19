@@ -39,13 +39,14 @@
 ;;; back from whatever has taken it -- including a shell reading raw keys,
 ;;; which is exactly the surface that must not be able to swallow it.
 
-(define-command (com-start-tracy :command-table luvcraft-window
-                                 :name "Start Tracy")
+(define-command (com-toggle-tracy-capture :command-table luvcraft-window
+                                          :name "Toggle Tracy Capture"
+                                          :keystroke (:f9))
     ()
   ;; Commands run on the canvas thread.  START-TRACY initially calls whichever
   ;; thread invokes it "main", which is right during process startup but would
   ;; give this live-started lane the wrong ownership name.
-  (luvcraft:start-luvcraft-tracy-profiler)
+  (luvcraft:toggle-luvcraft-tracy-capture)
   (luv:name-tracy-thread "canvas"))
 
 (define-command (com-toggle-fullscreen :command-table luvcraft-window

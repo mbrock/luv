@@ -58,6 +58,8 @@
                (luvcraft-key-command session (key-press :tab))))
     (ok (equal '(com-toggle-fullscreen)
                (luvcraft-key-command session (key-press :f11))))
+    (ok (equal '(com-toggle-tracy-capture)
+               (luvcraft-key-command session (key-press :f9))))
     (ok (equal '(com-execute-command)
                (luvcraft-key-command
                 session (key-press :x :character #\x :modifiers '(:meta)))))
@@ -65,13 +67,13 @@
                (luvcraft-key-command session (key-press :w :character #\w))))
     ;; A key nothing binds is not a command and must not be mistaken for one:
     ;; LOOKUP-KEYSTROKE-COMMAND-ITEM answers with the gesture on a miss.
-    (ok (null (luvcraft-key-command session (key-press :f9))))))
+    (ok (null (luvcraft-key-command session (key-press :f8))))))
 
 (deftest m-x-searches-the-executable-command-vocabulary
   (let ((entries (luvcraft-command-menu-entries)))
     (ok (assoc "Toggle Phone" entries :test #'string=))
     (ok (assoc "Place Block" entries :test #'string=))
-    (ok (assoc "Start Tracy" entries :test #'string=))
+    (ok (assoc "Toggle Tracy Capture" entries :test #'string=))
     ;; Commands needing arguments will join M-x when it can ask for them;
     ;; presenting them as executable before then would make a dishonest menu.
     (ok (null (assoc "Select Quickbar Slot" entries :test #'string=)))
@@ -107,7 +109,7 @@
     (ok (execute-canvas-key-event-command frame (key-press :2 :character #\2)))
     (ok (eq (second blocks) (luvcraft:luvcraft-session-selected-block session)))
     ;; An unbound key changes nothing and says so.
-    (ok (not (execute-canvas-key-event-command frame (key-press :f9))))
+    (ok (not (execute-canvas-key-event-command frame (key-press :f8))))
     (ok (eq (second blocks)
             (luvcraft:luvcraft-session-selected-block session)))))
 
@@ -229,6 +231,7 @@
       (ok (equal '("I") (keys-for "In the world" "toggle inventory")))
       (ok (equal '("Esc") (keys-for "In the world" "show keys")))
       (ok (equal '("Alt-X") (keys-for "In the world" "execute command")))
+      (ok (equal '("F9") (keys-for "Any time" "toggle tracy capture")))
       (ok (equal '("F11") (keys-for "Any time" "toggle fullscreen")))
       ;; Modifiers are printed, and :ANY is not: it is noise on every row.
       (ok (equal '("Shift-Tab") (keys-for "Any time" "leave focus")))

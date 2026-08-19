@@ -74,27 +74,110 @@ is already running, and luvcraft's workers introduce themselves as they start."
   (setf *luvcraft-tracy-plots-described-p* nil)
   *tracy*)
 
-(defvar *luvcraft-tracy-profiler-process* nil
-  "The Tracy profiler window launched from luvcraft, while it remains open.")
-
-(defun luvcraft-tracy-profiler-program ()
-  "Return the exact-version Tracy profiler supplied by the dev environment."
-  (let ((configured (uiop:getenv "LUV_TRACY_PROFILER")))
+(defun luvcraft-tracy-program (variable description)
+  "Return the Tracy program named by environment VARIABLE, or explain its absence."
+  (let ((configured (uiop:getenv variable)))
     (or (and configured (plusp (length configured))
              (probe-file configured))
-        (error "No Tracy profiler GUI is available. Re-enter the luv Nix dev shell."))))
+        (error "No Tracy ~A is available. Re-enter the luv Nix dev shell."
+               description))))
 
-(defun start-luvcraft-tracy-profiler ()
-  "Start luvcraft's Tracy client and show a profiler connected to this image."
+(defun luvcraft-tracy-capture-program ()
+  (luvcraft-tracy-program "LUV_TRACY_CAPTURE" "capture tool"))
+
+(defun luvcraft-tracy-profiler-program ()
+  (luvcraft-tracy-program "LUV_TRACY_PROFILER" "profiler GUI"))
+
+(defvar *luvcraft-tracy-capture-process* nil
+  "The tracy-capture process currently recording luvcraft, including finalization.")
+
+(defvar *luvcraft-tracy-capture-pathname* nil
+  "The file being written by the current Tracy capture.")
+
+(defvar *luvcraft-tracy-profiler-processes* nil
+  "Profiler windows opened on completed captures and still owned by the OS.")
+
+(defun fresh-luvcraft-tracy-capture-pathname ()
+  "Return a timestamped, unused pathname beneath build/tracy/."
+  (multiple-value-bind (second minute hour date month year)
+      (get-decoded-time)
+    (let ((directory
+            (merge-pathnames "build/tracy/"
+                             (asdf:system-source-directory "luvcraft"))))
+      (ensure-directories-exist directory)
+      (loop for serial from 0
+            for pathname =
+              (merge-pathnames
+               (format nil "~A~A.tracy"
+                       (format nil "luvcraft-~4,'0D~2,'0D~2,'0D-~2,'0D~2,'0D~2,'0D"
+                               year month date hour minute second)
+                       (if (plusp serial) (format nil ".~D" serial) ""))
+               directory)
+            unless (probe-file pathname)
+              return pathname))))
+
+(defun open-luvcraft-tracy-capture (pathname)
+  "Open the completed trace at PATHNAME in the exact-version Tracy GUI."
+  (setf *luvcraft-tracy-profiler-processes*
+        (delete-if-not #'sb-ext:process-alive-p
+                       *luvcraft-tracy-profiler-processes*))
+  (push (sb-ext:run-program
+         (namestring (luvcraft-tracy-profiler-program))
+         (list (namestring pathname))
+         :input nil :output nil :error nil :wait nil)
+        *luvcraft-tracy-profiler-processes*))
+
+(defun luvcraft-tracy-capture-active-p ()
+  "Answer whether a capture is recording or saving its trace."
+  (and *luvcraft-tracy-capture-process*
+       (sb-ext:process-alive-p *luvcraft-tracy-capture-process*)))
+
+(defun start-luvcraft-tracy-capture ()
+  "Begin a quiet background capture, to be completed by STOP-LUVCRAFT-TRACY-CAPTURE."
+  (when (luvcraft-tracy-capture-active-p)
+    (return-from start-luvcraft-tracy-capture
+      *luvcraft-tracy-capture-pathname*))
   (start-luvcraft-tracy)
-  (unless (and *luvcraft-tracy-profiler-process*
-               (sb-ext:process-alive-p *luvcraft-tracy-profiler-process*))
-    (setf *luvcraft-tracy-profiler-process*
-          (sb-ext:run-program
-           (namestring (luvcraft-tracy-profiler-program))
-           '("-a" "127.0.0.1")
-           :input nil :output nil :error nil :wait nil)))
-  *luvcraft-tracy-profiler-process*)
+  (when (tracy-connected-p)
+    (error "A Tracy viewer is already connected. Stop that capture before starting another."))
+  (let* ((pathname (fresh-luvcraft-tracy-capture-pathname))
+         (process
+           (sb-ext:run-program
+            (namestring (luvcraft-tracy-capture-program))
+            (list "-o" (namestring pathname) "-a" "127.0.0.1")
+            :input nil :output nil :error nil :wait nil)))
+    (setf *luvcraft-tracy-capture-process* process
+          *luvcraft-tracy-capture-pathname* pathname)
+    ;; Saving a large capture must not stall the canvas thread.  tracy-capture
+    ;; turns SIGINT into a clean disconnect, writes the file, and only then
+    ;; exits; this watcher opens that finished, frozen trace in the GUI.
+    (sb-thread:make-thread
+     (lambda ()
+       (unwind-protect
+            (progn
+              (sb-ext:process-wait process)
+              (when (and (eql 0 (sb-ext:process-exit-code process))
+                         (probe-file pathname))
+                (open-luvcraft-tracy-capture pathname)))
+         (when (eq process *luvcraft-tracy-capture-process*)
+           (setf *luvcraft-tracy-capture-process* nil
+                 *luvcraft-tracy-capture-pathname* nil))
+         (sb-ext:process-close process)))
+     :name "Tracy capture finalizer")
+    pathname))
+
+(defun stop-luvcraft-tracy-capture ()
+  "End the active capture; its watcher saves and opens the frozen trace."
+  (when (luvcraft-tracy-capture-active-p)
+    ;; SIGINT is Tracy's documented graceful-stop path, not an abrupt kill.
+    (sb-ext:process-kill *luvcraft-tracy-capture-process* 2))
+  *luvcraft-tracy-capture-pathname*)
+
+(defun toggle-luvcraft-tracy-capture ()
+  "Start a capture, or finish the active capture and open it in Tracy."
+  (if (luvcraft-tracy-capture-active-p)
+      (stop-luvcraft-tracy-capture)
+      (start-luvcraft-tracy-capture)))
 
 (defun describe-luvcraft-tracy-plots ()
   "Describe luvcraft's plots to a viewer, once per connection.

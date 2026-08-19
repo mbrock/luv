@@ -31,7 +31,7 @@
            #:com-toggle-phone
            #:com-toggle-metabar
            #:com-toggle-fullscreen
-           #:com-start-tracy
+           #:com-toggle-tracy-capture
            #:com-toggle-focus
            #:com-select-quickbar-slot
            #:com-leave-focus

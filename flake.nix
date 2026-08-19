@@ -274,6 +274,7 @@
             LUV_GHOSTTY_LIBRARY = env.libghosttyVtLibrary;
             LUV_SLYNK_DIR = "${env.slyRoot}/slynk";
             LUV_TRACY_CLIENT = env.tracyClientLibrary;
+            LUV_TRACY_CAPTURE = "${env.pkgs.tracy}/bin/tracy-capture";
             LUV_TRACY_PROFILER = "${env.pkgs.tracy}/bin/tracy";
             LUV_FFMPEG_LIBDIR = env.ffmpegLibraryDirectory;
             LUV_MUPDF_LIBDIR = env.mupdfLibraryDirectory;
