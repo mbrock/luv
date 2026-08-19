@@ -236,6 +236,16 @@
 (math:define-quantity :seat-pitch :kind :angular-measure)
 (math:define-quantity :switch :kind :control-signal)
 
+;;; What an embodied agent's figure measures.  A gnome is laid out in his own
+;;; upright frame -- feet at zero, hat tip near one and three quarters -- and
+;;; the lengths in that layout are cells like any other world length.  The
+;;; proportions beside them are the dimensionless ones: how far apart his
+;;; eyes are set on his head, how much colour is in his cheeks.
+(math:define-quantity :figure-extent :kind :lattice-coordinate
+  :non-negative-p t)
+(math:define-quantity :figure-offset :kind :lattice-coordinate)
+(math:define-quantity :figure-proportion :kind :proportion)
+
 ;;; What the reworked sky and surface materials measure.  Cloud cover and
 ;;; star and moon radiance are sky facts; detail, roughness, and bounce are
 ;;; facts about a surface's micro-structure and the light it gathers from

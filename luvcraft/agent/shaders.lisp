@@ -20,6 +20,108 @@
 (in-package #:luvcraft.shaders)
 
 ;;; ---------------------------------------------------------------------
+;;; The gnome's proportions, as knobs
+;;;
+;;; Every number below stands in the shader source by name and folds to a
+;;; literal when the source is parsed, so turning one rebuilds his pipeline
+;;; rather than writing a uniform (LUVCRAFT/KNOBS.LISP).  For a figure that
+;;; is drawn once in the frame that is the right trade: the knobs pay for
+;;; themselves in how fast a proportion can be tried, and nothing pays per
+;;; pixel.  What is here is what an argument about how a gnome should look
+;;; actually turns out to be about -- the hat, the nose, the beard, the
+;;; belly, and how far apart his eyes are set.
+
+(defparameter *gnome-stature* 1.0
+  "The whole figure's scale.  One is a gnome of about one and three quarter
+cells; the marcher works in figure units and this is the only place the
+world's scale enters, so his bounding sphere follows from it too.")
+(defparameter *gnome-hat-height* 1.70
+  "How high the hat's tip stands above his feet.")
+(defparameter *gnome-hat-flare* 0.300
+  "The radius of the hat's cone where it meets the brim.")
+(defparameter *gnome-hat-lean* 0.27
+  "How far forward the hat's tip leans.  Zero is a traffic cone.")
+(defparameter *gnome-brim-width* 0.335
+  "The brim's radius.  Wider than about four tenths and it eats his face.")
+(defparameter *gnome-head-size* 0.25
+  "The radius of the head the face is laid out on.")
+(defparameter *gnome-nose-size* 0.085
+  "The radius of the nose, the one feature of him nothing hides.")
+(defparameter *gnome-beard-width* 0.26
+  "How broad the beard hangs at the cheeks.")
+(defparameter *gnome-beard-length* 0.435
+  "The height of the beard's blunt point above his feet: lower is longer.")
+(defparameter *gnome-belly* 0.300
+  "The robe's radius at the hem.")
+(defparameter *gnome-shoulder* 0.210
+  "The robe's radius at the shoulders.")
+(defparameter *gnome-mitten-reach* 0.300
+  "How far out from the body his mitten hands rest.")
+(defparameter *gnome-eye-spread* 0.52
+  "How far to the side the eyes sit on the head, as a direction component.")
+(defparameter *gnome-eye-height* 0.04
+  "How high the eyes sit on the head.  Too high and the brim hides them.")
+(defparameter *gnome-eye-size* 0.100
+  "The angular radius of a pupil on the head.")
+(defparameter *gnome-blush* 0.30
+  "How much colour there is in his cheeks.")
+(defparameter *gnome-grain* 1.0
+  "How strongly the beard's strands, the robe's weave and the hat's felt
+show.  Zero is flawless vinyl.")
+(defparameter *gnome-rim-light* 0.30
+  "The warm outline that separates him from whatever he stands in front of.")
+
+(macrolet
+    ((define-figure-knob (name place quantity minimum maximum step
+                          &optional documentation)
+       `(luvcraft:define-knob ,name
+            (:group :gnome :quantity (:quantity ,quantity
+                                      :unit ,(if (eq quantity
+                                                     :figure-proportion)
+                                                 :one
+                                                 :cell)
+                                      )
+             :documentation ,documentation
+             :minimum ,minimum :maximum ,maximum :step ,step)
+          ,place)))
+  (define-figure-knob gnome-stature *gnome-stature*
+    :figure-proportion 0.4 2.5 0.05)
+  (define-figure-knob gnome-hat-height *gnome-hat-height*
+    :figure-extent 1.15 2.60 0.02)
+  (define-figure-knob gnome-hat-flare *gnome-hat-flare*
+    :figure-extent 0.16 0.44 0.005)
+  (define-figure-knob gnome-hat-lean *gnome-hat-lean*
+    :figure-offset -0.15 0.60 0.01)
+  (define-figure-knob gnome-brim-width *gnome-brim-width*
+    :figure-extent 0.24 0.50 0.005)
+  (define-figure-knob gnome-head-size *gnome-head-size*
+    :figure-extent 0.17 0.33 0.005)
+  (define-figure-knob gnome-nose-size *gnome-nose-size*
+    :figure-extent 0.03 0.16 0.005)
+  (define-figure-knob gnome-beard-width *gnome-beard-width*
+    :figure-extent 0.15 0.35 0.005)
+  (define-figure-knob gnome-beard-length *gnome-beard-length*
+    :figure-extent 0.25 0.72 0.01)
+  (define-figure-knob gnome-belly *gnome-belly*
+    :figure-extent 0.18 0.44 0.005)
+  (define-figure-knob gnome-shoulder *gnome-shoulder*
+    :figure-extent 0.12 0.32 0.005)
+  (define-figure-knob gnome-mitten-reach *gnome-mitten-reach*
+    :figure-extent 0.20 0.42 0.005)
+  (define-figure-knob gnome-eye-spread *gnome-eye-spread*
+    :figure-proportion 0.25 0.75 0.01)
+  (define-figure-knob gnome-eye-height *gnome-eye-height*
+    :figure-proportion -0.20 0.35 0.01)
+  (define-figure-knob gnome-eye-size *gnome-eye-size*
+    :figure-proportion 0.04 0.22 0.005)
+  (define-figure-knob gnome-blush *gnome-blush*
+    :figure-proportion 0.0 1.0 0.05)
+  (define-figure-knob gnome-grain *gnome-grain*
+    :figure-proportion 0.0 2.5 0.05)
+  (define-figure-knob gnome-rim-light *gnome-rim-light*
+    :figure-proportion 0.0 1.0 0.02))
+
+;;; ---------------------------------------------------------------------
 ;;; Distance-field vocabulary
 
 (define-shader-function gnome-length (vector)
@@ -81,11 +183,11 @@ where the cone meets its rounding."
 
 A straight cone is a traffic cone.  The lean is what makes it a hat someone
 is wearing, and it costs one smoothstep."
-  (let* ((rise (smoothstep 1.02 1.70 (swizzle point :y)))
+  (let* ((rise (smoothstep 1.02 gnome-hat-height (swizzle point :y)))
          (lean (* rise rise)))
-    (vec3 (- (swizzle point :x) (* 0.055 lean))
+    (vec3 (- (swizzle point :x) (* (* gnome-hat-lean 0.20) lean))
           (swizzle point :y)
-          (- (swizzle point :z) (* 0.27 lean)))))
+          (- (swizzle point :z) (* gnome-hat-lean lean)))))
 
 (define-shader-function gnome-hat-distance (point)
   "The tall cone and the brim it sits on.
@@ -94,9 +196,11 @@ The brim rides high, near the crown rather than at eye level.  A brim low
 enough to be practical would put his whole face in shadow, and a gnome whose
 eyes you cannot find is not a friendly little fellow but a bollard."
   (let* ((cone (gnome-round-cone-distance
-                (gnome-hat-point point) 1.04 1.70 0.300 0.018))
+                (gnome-hat-point point)
+                1.04 gnome-hat-height gnome-hat-flare 0.018))
          (brim (gnome-ellipsoid-distance
-                point (vec3 0.0 1.06 0.0) (vec3 0.335 0.042 0.335))))
+                point (vec3 0.0 1.06 0.0)
+                (vec3 gnome-brim-width 0.042 gnome-brim-width))))
     (gnome-smooth-union cone brim 0.045)))
 
 (define-shader-function gnome-skin-distance (point)
@@ -104,8 +208,13 @@ eyes you cannot find is not a friendly little fellow but a bollard."
 
 Most of the head is under the hat or behind the beard; the nose is the part
 of him you actually see, so it is a frank sphere."
-  (let* ((head (gnome-sphere-distance point (vec3 0.0 0.90 0.0) 0.25))
-         (nose (gnome-sphere-distance point (vec3 0.0 0.855 0.225) 0.085)))
+  (let* ((head (gnome-sphere-distance point (vec3 0.0 0.90 0.0)
+                                      gnome-head-size))
+         ;; The nose rides on whatever head it was given, so resizing the
+         ;; head does not leave it hanging in front of his face.
+         (nose (gnome-sphere-distance
+                point (vec3 0.0 0.855 (* gnome-head-size 0.90))
+                gnome-nose-size)))
     (gnome-smooth-union head nose 0.045)))
 
 (define-shader-function gnome-beard-distance (point)
@@ -114,8 +223,10 @@ of him you actually see, so it is a frank sphere."
 Its top edge is the lower bound of his face, so it sits just under the nose:
 enough beard to be venerable, not so much that there is nobody behind it."
   (let* ((mass (gnome-ellipsoid-distance
-                point (vec3 0.0 0.605 0.04) (vec3 0.26 0.23 0.235)))
-         (tip (gnome-sphere-distance point (vec3 0.0 0.435 0.115) 0.095))
+                point (vec3 0.0 0.605 0.04)
+                (vec3 gnome-beard-width 0.23 (* gnome-beard-width 0.90))))
+         (tip (gnome-sphere-distance
+               point (vec3 0.0 gnome-beard-length 0.115) 0.095))
          (moustache (gnome-ellipsoid-distance
                      point (vec3 0.0 0.775 0.155) (vec3 0.155 0.045 0.145))))
     (gnome-smooth-union (gnome-smooth-union mass tip 0.11) moustache 0.05)))
@@ -126,12 +237,13 @@ enough beard to be venerable, not so much that there is nobody behind it."
 The hem stops just above his boots.  An earlier version ran the cone's lower
 cap down past the feet, and the terrain cut it off in a dead straight line:
 he looked less like he was standing on the world than pasted onto it."
-  (let* ((robe (gnome-round-cone-distance point 0.30 0.80 0.30 0.21))
+  (let* ((robe (gnome-round-cone-distance
+                point 0.30 0.80 gnome-belly gnome-shoulder))
          (mirrored (vec3 (abs (swizzle point :x))
                          (swizzle point :y)
                          (swizzle point :z)))
-         (mitten (gnome-sphere-distance mirrored
-                                        (vec3 0.30 0.50 0.115) 0.09)))
+         (mitten (gnome-sphere-distance
+                  mirrored (vec3 gnome-mitten-reach 0.50 0.115) 0.09)))
     (gnome-smooth-union robe mitten 0.05)))
 
 (define-shader-function gnome-boot-distance (point)
@@ -193,19 +305,31 @@ something."
                          (swizzle point :y)
                          (swizzle point :z)))
          (direction (normalize (- mirrored (vec3 0.0 0.90 0.0))))
-         (eye (gnome-length (- direction (normalize (vec3 0.52 0.04 0.85)))))
-         (pupil (- 1.0 (smoothstep 0.100 0.135 eye)))
-         (socket (- 1.0 (smoothstep 0.135 0.310 eye)))
+         ;; Glint and brow are stated relative to the eye, so moving the eyes
+         ;; moves the whole expression rather than taking it apart.
+         (eye-direction
+           (normalize (vec3 gnome-eye-spread gnome-eye-height 0.85)))
+         (eye (gnome-length (- direction eye-direction)))
+         (pupil (- 1.0 (smoothstep gnome-eye-size
+                                   (+ gnome-eye-size 0.035) eye)))
+         (socket (- 1.0 (smoothstep (+ gnome-eye-size 0.035)
+                                    (+ gnome-eye-size 0.210) eye)))
          (glint (- 1.0 (smoothstep 0.035 0.060
                                    (gnome-length
                                     (- direction
-                                       (normalize (vec3 0.47 0.12 0.87)))))))
+                                       (normalize
+                                        (vec3 (- gnome-eye-spread 0.05)
+                                              (+ gnome-eye-height 0.08)
+                                              0.87)))))))
          ;; The brow is measured in a squashed metric: wide, low and shallow,
          ;; which is a brow, where an unsquashed disc would be a wart.
          (brow (- 1.0 (smoothstep 0.115 0.190
                                   (gnome-length
                                    (* (- direction
-                                         (normalize (vec3 0.53 0.21 0.82)))
+                                         (normalize
+                                          (vec3 (+ gnome-eye-spread 0.01)
+                                                (+ gnome-eye-height 0.17)
+                                                0.82)))
                                       (vec3 0.45 1.9 0.9))))))
          (cheek (- 1.0 (smoothstep 0.180 0.400
                                    (gnome-length
@@ -214,7 +338,7 @@ something."
          (shaded (mix albedo (* albedo (vec3 0.62 0.55 0.52))
                       (* socket (* skin-weight 0.32))))
          (blushed (mix shaded (vec3 0.82 0.40 0.33)
-                       (* cheek (* skin-weight 0.30))))
+                       (* cheek (* skin-weight gnome-blush))))
          (eyed (mix blushed (vec3 0.035 0.030 0.042)
                     (* pupil skin-weight)))
          (browed (mix eyed (vec3 0.80 0.79 0.76)
@@ -240,9 +364,12 @@ saturated primaries would read as a toy."
          ;; everything the sphere tracer returns is the same flawless vinyl,
          ;; and a gnome who has stood in a garden for two hundred years
          ;; should not look like he came out of a mould this morning.
-         (strand (- (lattice-noise (* point (vec3 34.0 7.0 34.0))) 0.5))
-         (weave (- (lattice-noise (* point (vec3 15.0 15.0 15.0))) 0.5))
-         (felt (- (lattice-noise (* point (vec3 24.0 24.0 24.0))) 0.5))
+         (strand (* (- (lattice-noise (* point (vec3 34.0 7.0 34.0))) 0.5)
+                    gnome-grain))
+         (weave (* (- (lattice-noise (* point (vec3 15.0 15.0 15.0))) 0.5)
+                   gnome-grain))
+         (felt (* (- (lattice-noise (* point (vec3 24.0 24.0 24.0))) 0.5)
+                  gnome-grain))
          (robe-color (* (vec3 0.055 0.145 0.245) (+ 1.0 (* weave 0.30))))
          (skin-color (vec3 0.72 0.47 0.35))
          (beard-color (* (vec3 0.80 0.79 0.755) (+ 1.0 (* strand 0.22))))
@@ -331,19 +458,24 @@ saturated primaries would read as a toy."
                                   0.0
                                   (swizzle toward-eye :z))))
          (sideways (vec3 (swizzle facing :z) 0.0 (- (swizzle facing :x))))
-         ;; The gnome stands with his feet at local y zero; the instance
-         ;; centre is the middle of his bounding sphere, 0.85 above them.
-         (local-camera (vec3 (dot toward-eye sideways)
-                             (+ (swizzle toward-eye :y) 0.85)
-                             (dot toward-eye facing)))
+         ;; The whole march happens in figure units, where the gnome is one
+         ;; and three quarters tall whatever his stature: dividing the camera
+         ;; by the stature once here is the entire cost of the scale knob,
+         ;; and every proportion below can be written as itself.  He stands
+         ;; with his feet at figure y zero; the instance centre is the middle
+         ;; of his bounding sphere, 0.85 above them.
+         (local-camera (vec3 (/ (dot toward-eye sideways) gnome-stature)
+                             (+ (/ (swizzle toward-eye :y) gnome-stature) 0.85)
+                             (/ (dot toward-eye facing) gnome-stature)))
          (local-ray (vec3 (dot ray sideways)
                           (swizzle ray :y)
                           (dot ray facing)))
          ;; Enter and leave through the bounding sphere analytically, so the
          ;; fixed step count is spent on the body rather than on the approach.
+         (figure-radius (/ radius gnome-stature))
          (to-center (- local-camera (vec3 0.0 0.85 0.0)))
          (half-way (- (dot to-center local-ray)))
-         (gap (- (dot to-center to-center) (* radius radius)))
+         (gap (- (dot to-center to-center) (* figure-radius figure-radius)))
          (discriminant (- (* half-way half-way) gap))
          (span (sqrt (max discriminant 0.0)))
          (entry (max (- half-way span) 0.0))
@@ -394,7 +526,7 @@ saturated primaries would read as a toy."
                  (* sun-color (* specular coverage)))
               ;; The rim is the mystery: a thin warm outline that separates
               ;; him from whatever he is standing in front of.
-              (* (vec3 0.95 0.72 0.44) (* rim 0.30)))))
+              (* (vec3 0.95 0.72 0.44) (* rim gnome-rim-light)))))
     ;; The scene target uses premultiplied alpha.  Misses leave no rectangular
     ;; trace of the conservative billboard.
     (set-output color-output (vec4 (* radiance coverage) coverage))))

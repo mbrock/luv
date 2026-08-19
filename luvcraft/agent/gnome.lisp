@@ -16,22 +16,68 @@
 ;;; line is subtitled.
 
 (defparameter *gnome-name* "gnome")
-(defparameter *gnome-body-radius* 0.95
-  "The radius of the bounding sphere the billboard proxy covers.
 
-The figure itself stands in the shader's own frame, feet at local zero and
-hat tip at 1.70; this sphere, centred 0.85 above his feet, is only what the
-rasterizer needs to know about him.")
-(defparameter *gnome-body-world-height* 1.70
-  "The height of the hat's tip above the cell the gnome stands in.
+;;; The lengths below, like everything in the shader that draws him, are in
+;;; figure units: the frame the gnome is laid out in, where he stands about
+;;; one and three quarters tall whatever his stature.  GNOME-STATURE is the
+;;; one place the world's scale enters, so it multiplies all of them.
 
-What is above a gnome -- his speech bubbles -- is measured from here.")
+(defparameter *gnome-body-centre* 0.85
+  "The height above his feet of the centre of the gnome's bounding sphere.
+
+The shader's marcher agrees with this number; moving one moves both.")
+
+(defparameter *gnome-body-margin* 0.05
+  "Slack added to the computed bounding radius, for the rim light and for
+the fillets that push a weld a little outside the parts it joins.")
 
 (defparameter *gnome-face-height* 0.94
-  "The height of the gnome's eyes above the cell he stands in.
+  "The height of the gnome's eyes above his feet.
 
 What looks at a gnome is aimed here.  It is not the top of him: aiming a
 conversation at the top of a gnome frames his hat.")
+
+(defun gnome-stature ()
+  "How many world cells one figure unit is, from the GNOME-STATURE knob."
+  (float luvcraft.shaders::*gnome-stature* 1.0))
+
+(defun gnome-figure-radius ()
+  "The radius, in figure units, of a sphere about *GNOME-BODY-CENTRE* that
+holds every part of the gnome the knobs are currently asking for.
+
+The billboard is a conservative proxy and nothing outside it is drawn, so
+this has to be recomputed rather than assumed: a hat raised past a fixed
+radius does not overflow, it comes out sliced flat across the top.  Each
+term is the extreme of one part -- how far out it reaches and how high it
+sits -- and the sphere is the largest of them."
+  (macrolet ((knob (name) `(float (symbol-value ',name) 1.0)))
+    (let ((hat-height (knob luvcraft.shaders::*gnome-hat-height*))
+          (hat-flare (knob luvcraft.shaders::*gnome-hat-flare*))
+          (hat-lean (knob luvcraft.shaders::*gnome-hat-lean*))
+          (brim (knob luvcraft.shaders::*gnome-brim-width*))
+          (head (knob luvcraft.shaders::*gnome-head-size*))
+          (nose (knob luvcraft.shaders::*gnome-nose-size*))
+          (beard-width (knob luvcraft.shaders::*gnome-beard-width*))
+          (beard-length (knob luvcraft.shaders::*gnome-beard-length*))
+          (belly (knob luvcraft.shaders::*gnome-belly*))
+          (shoulder (knob luvcraft.shaders::*gnome-shoulder*))
+          (mitten (knob luvcraft.shaders::*gnome-mitten-reach*)))
+      (flet ((reach (radial height)
+               (let ((rise (- height *gnome-body-centre*)))
+                 (sqrt (+ (* radial radial) (* rise rise))))))
+        (+ *gnome-body-margin*
+           (max (reach (abs hat-lean) hat-height)     ; the tip, wherever it leans
+                (reach hat-flare 1.04)                ; the cone's skirt
+                (reach brim 1.06)                     ; the brim's edge
+                (reach (+ (* head 0.90) nose) 0.855)  ; the end of the nose
+                (reach head 0.90)                     ; the back of the head
+                (reach beard-width 0.605)             ; the whiskers
+                (reach 0.115 (- beard-length 0.095))  ; the beard's point
+                (reach belly 0.30)                    ; the hem at its widest
+                (reach 0.0 (- 0.30 belly))            ; the hem at the ground
+                (reach shoulder 0.80)                 ; the shoulders
+                (reach (+ mitten 0.09) 0.50)          ; the mittens
+                (reach 0.35 0.0)))))))                ; the toes
 
 (defparameter +clear-ink+ (compose-in (make-rgb-color 0 0 0) (make-opacity 0.0))
   "A pane background that paints nothing: colour with zero opacity, which the
@@ -96,16 +142,27 @@ When MAKE-P is true, create and attach one if the cell is unoccupied."
   "Compatibility name for FIND-AGENT."
   (find-agent session x y z make-p))
 
+(defun gnome-body-height ()
+  "The height of the hat's tip above his feet, in figure units.
+
+What is above a gnome -- his speech bubbles -- is measured from here, so a
+taller hat pushes them up rather than growing through them."
+  (float luvcraft.shaders::*gnome-hat-height* 1.0))
+
 (defun gnome-head-position (gnome &optional (lift 0.0))
   "The point above the gnome's hat, LIFT blocks higher."
   (luvcraft::make-vec3 (+ (gnome-x gnome) 0.5)
-                       (+ (gnome-y gnome) *gnome-body-world-height* lift)
+                       (+ (gnome-y gnome)
+                          (* (gnome-body-height) (gnome-stature))
+                          lift)
                        (+ (gnome-z gnome) 0.5)))
 
 (defun gnome-face-position (gnome &optional (lift 0.0))
   "The point between the gnome's eyes, LIFT blocks higher."
   (luvcraft::make-vec3 (+ (gnome-x gnome) 0.5)
-                       (+ (gnome-y gnome) *gnome-face-height* lift)
+                       (+ (gnome-y gnome)
+                          (* *gnome-face-height* (gnome-stature))
+                          lift)
                        (+ (gnome-z gnome) 0.5)))
 
 ;;; ---------------------------------------------------------------------
@@ -131,9 +188,10 @@ When MAKE-P is true, create and attach one if the cell is unoccupied."
 
 (defun gnome-ray-distance (gnome origin direction max-distance)
   "Return where a ray enters GNOME's upright body, or NIL when it misses."
-  (let ((near 0d0)
-        (far (coerce max-distance 'double-float))
-        (half-width 0.34d0))
+  (let* ((near 0d0)
+         (far (coerce max-distance 'double-float))
+         (stature (coerce (gnome-stature) 'double-float))
+         (half-width (* 0.36d0 stature)))
     (flet ((slab (origin direction minimum maximum)
              (let ((origin (coerce origin 'double-float))
                    (direction (coerce direction 'double-float)))
@@ -151,7 +209,10 @@ When MAKE-P is true, create and attach one if the cell is unoccupied."
         (and (slab (luvcraft::vec3-x origin) (luvcraft::vec3-x direction)
                    (- center-x half-width) (+ center-x half-width))
              (slab (luvcraft::vec3-y origin) (luvcraft::vec3-y direction)
-                   (gnome-y gnome) (+ (gnome-y gnome) 1.70d0))
+                   (gnome-y gnome)
+                   (+ (gnome-y gnome)
+                      (* (coerce (gnome-body-height) 'double-float)
+                         stature)))
              (slab (luvcraft::vec3-z origin) (luvcraft::vec3-z direction)
                    (- center-z half-width) (+ center-z half-width))
              near)))))
@@ -479,11 +540,16 @@ title or bubble shows only what its pane draws."))
          (phase (/ (get-internal-real-time)
                    (float internal-time-units-per-second 1.0)))
          (bob (* 0.025 (sin (* phase 2.2))))
+         (stature (gnome-stature))
          (data (gnome-body-instance-data overlay)))
     (setf (aref data 0) (coerce (+ (gnome-x gnome) 0.5) 'single-float)
-          (aref data 1) (coerce (+ (gnome-y gnome) 0.85 bob) 'single-float)
+          (aref data 1) (coerce (+ (gnome-y gnome)
+                                   (* *gnome-body-centre* stature)
+                                   bob)
+                                'single-float)
           (aref data 2) (coerce (+ (gnome-z gnome) 0.5) 'single-float)
-          (aref data 3) (coerce *gnome-body-radius* 'single-float))
+          (aref data 3) (coerce (* (gnome-figure-radius) stature)
+                                'single-float))
     (luv:write-buffer (gnome-body-instance-buffer overlay) data))
   overlay)
 
