@@ -123,6 +123,53 @@
   #-(or sbcl darwin)
   `(progn ,@body))
 
+(defparameter *runtime-signals-sdl-must-not-take*
+  ;; SIGILL, SIGTRAP, SIGBUS, SIGFPE, SIGSEGV.
+  '(4 5 7 8 11)
+  "The signals SBCL's runtime handles itself, by number.
+
+SDL's KMSDRM backend mutes the console keyboard and registers an emergency
+restore handler over every fatal signal, SIGSEGV included.  SBCL takes ordinary
+SIGSEGVs as part of running Lisp -- garbage collection's write barrier and the
+control stack guard both arrive that way -- and SDL's handler answers one by
+re-raising it with PTHREAD_KILL, whose SIGINFO carries no faulting address at
+all.  What reaches SBCL is then a memory fault at (UID << 32) | PID: a
+CORRUPTION WARNING and a MEMORY-FAULT-ERROR in place of a collection.")
+
+(defconstant +sigaction-size+ 256
+  "Room for one struct sigaction, which is 152 bytes on x86-64 Linux.
+
+The bytes are only ever moved between the kernel and this buffer.")
+
+(defun call-with-runtime-signal-handlers-preserved (function)
+  "Call FUNCTION, restoring SBCL's own fatal-signal handlers afterwards.
+
+Wrap the SDL calls that may install console-keyboard cleanup handlers: the
+muting itself is worth keeping on a virtual console, but the handlers are not
+SDL's to take.  SDL_Quit and the process's own exit still restore the keyboard."
+  #+linux
+  (let ((signals *runtime-signals-sdl-must-not-take*))
+    (cffi:with-foreign-object (saved :char (* +sigaction-size+ (length signals)))
+      (loop for signal in signals
+            for index from 0
+            do (cffi:foreign-funcall
+                "sigaction" :int signal :pointer (cffi:null-pointer)
+                :pointer (cffi:inc-pointer saved (* index +sigaction-size+))
+                :int))
+      (unwind-protect (funcall function)
+        (loop for signal in signals
+              for index from 0
+              do (cffi:foreign-funcall
+                  "sigaction" :int signal
+                  :pointer (cffi:inc-pointer saved (* index +sigaction-size+))
+                  :pointer (cffi:null-pointer)
+                  :int)))))
+  #-linux
+  (funcall function))
+
+(defmacro with-runtime-signal-handlers-preserved (&body body)
+  `(call-with-runtime-signal-handlers-preserved (lambda () ,@body)))
+
 (defun linux-console-tty-p ()
   "Whether this process has a Linux virtual console as its controlling terminal."
   #+linux
@@ -1478,7 +1525,8 @@ servicing its window~@[; ending this image in ~,1F s unless it recovers~]"
                (progn
                  (prepare-sdl-canvas-host canvas)
                  (select-sdl-video-driver)
-                 (unless (sdl3:init :video)
+                 (unless (with-runtime-signal-handlers-preserved
+                           (sdl3:init :video))
                    (error "SDL video initialization failed: ~A"
                           (sdl3:get-error)))
                  (setf sdl-initialized-p t)
@@ -1490,9 +1538,12 @@ servicing its window~@[; ending this image in ~,1F s unless it recovers~]"
                  (let ((window
                          (multiple-value-bind (width height)
                              (resolve-sdl-canvas-size canvas)
-                           (sdl3:create-window
-                            (canvas-title canvas) width height
-                            (sdl-canvas-window-flags canvas)))))
+                           ;; KMSDRM's console keyboard support installs its
+                           ;; own fatal-signal handlers here.
+                           (with-runtime-signal-handlers-preserved
+                             (sdl3:create-window
+                              (canvas-title canvas) width height
+                              (sdl-canvas-window-flags canvas))))))
                    (when (cffi:null-pointer-p window)
                      (error "SDL window creation failed: ~A" (sdl3:get-error)))
                    (setf (sdl-canvas-window canvas) window)
