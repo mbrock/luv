@@ -8,6 +8,7 @@
 (asdf:load-asd (merge-pathnames #P"luv.asd" *load-truename*))
 (asdf:load-asd (merge-pathnames #P"luvcraft.asd" *load-truename*))
 (asdf:load-asd (merge-pathnames #P"telegram.asd" *load-truename*))
+(asdf:load-asd (merge-pathnames #P"openai.asd" *load-truename*))
 (asdf:load-asd (merge-pathnames #P"luv-wiki.asd" *load-truename*))
 (asdf:load-system :luv)
 (asdf:load-system :luvcraft)

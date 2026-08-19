@@ -1,0 +1,29 @@
+(in-package #:openai.tests)
+
+(deftest response-create-shape
+  (let ((agent (make-instance 'openai:agent
+                              :model "gpt-5.6-terra"
+                              :instructions "Be useful."
+                              :tools '()
+                              :socket nil)))
+    (let ((request (openai::response-create agent (openai::user-input "hello"))))
+      (ok (string= "response.create" (cdr (assoc "type" request :test #'string=))))
+      (ok (string= "gpt-5.6-terra" (cdr (assoc "model" request :test #'string=))))
+      (ok (search "input_text" (openai::json-string request))))))
+
+(defclass echo-tool (openai:tool) ())
+
+(defmethod openai:call-tool ((tool echo-tool) arguments agent)
+  (declare (ignore tool agent))
+  arguments)
+
+(deftest tool-result-shape
+  (let* ((tool (make-instance 'echo-tool :name "echo"))
+         (agent (make-instance 'openai:agent :model "gpt-5.6-terra"
+                               :tools (list tool) :socket nil))
+         (output (openai::tool-result
+                  agent '((:call-id . "call_1") (:name . "echo")
+                          (:arguments . "{\"x\":1}")))))
+    (ok (string= "function_call_output"
+                 (cdr (assoc "type" output :test #'string=))))
+    (ok (string= "call_1" (cdr (assoc "call_id" output :test #'string=))))))

@@ -238,6 +238,7 @@
               lispPackages.cffi
               lispPackages.cffi-libffi
               lispPackages.cl-base64
+              lispPackages.cl-json
               lispPackages.cl-fad
               lispPackages.cl-who
               lispPackages.closer-mop
@@ -249,6 +250,10 @@
               lispPackages.rove
               lispPackages.spinneret
               lispPackages.zpng
+              # websocket-driver-client is the blocking, TLS-capable client
+              # wrapper around fast-websocket.  OPENAI owns one connection per
+              # agent; it does not need an event-loop framework.
+              lispPackages.websocket-driver-client
             ] ++ mcclimDependencies
               ++ nixpkgs.lib.optionals pkgs.stdenv.isDarwin [
                 lispPackages.float-features
