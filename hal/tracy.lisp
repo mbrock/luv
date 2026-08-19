@@ -267,7 +267,7 @@ table on every entry."
                   "")))
     `(if *tracy*
          (let* (,@(when literal
-                    `((,location-cell (load-time-value (cons nil nil) t))))
+                    `((,location-cell (load-time-value (cons nil nil) nil))))
                 (,context
                  ,(if literal
                       `(%tracy-emit-zone-begin

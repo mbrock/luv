@@ -976,7 +976,10 @@ key, so the swap has to track the key itself.")
                   (<= 32 code (1- char-code-limit)))
           (code-char code)))))
 
-(defun dispatch-sdl-key (canvas event class)
+(zdefun (dispatch-sdl-key
+         :zone :canvas/key-event
+         :value (if (eq class 'canvas-key-press-event) 1 0))
+    (canvas event class)
   ;; Read fields directly from SDL_Event. Materializing cl-sdl3's
   ;; KEYBOARD-EVENT would translate its KEY slot through the broken enum even
   ;; though luv intentionally derives characters from SCANCODE and MOD.
@@ -1139,7 +1142,7 @@ key, so the swap has to track the key itself.")
         (handle-sdl-canvas-event canvas event (cffi:mem-ref event :uint32)))
       t)))
 
-(defun drain-sdl-canvas-events (canvas)
+(zdefun (drain-sdl-canvas-events :zone :canvas/drain-events) (canvas)
   (loop while (poll-sdl-canvas-event canvas)))
 
 ;;; Where the loop is, published for anyone who wants to know whether it is

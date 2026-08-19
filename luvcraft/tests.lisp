@@ -1204,6 +1204,42 @@
       (ok (null popped-level))
       (ok (null present-p)))))
 
+(zdefun zoned-test-function (value)
+  "A small definition used to prove inferred zones preserve function shape."
+  (declare (type fixnum value))
+  (values (1+ value) (1- value)))
+
+(defclass zoned-test-subject () ())
+
+(zdefmethod zoned-test-method ((subject zoned-test-subject) value)
+  (declare (ignore subject))
+  (* value 2))
+
+(zdefun (explicit-zoned-test-function
+         :zone :test/explicit-definition
+         :value value)
+    (value)
+  value)
+
+(deftest concise-zones-preserve-definitions-and-infer-stable-names
+  (let ((trace (make-cpu-trace :label "concise zones")))
+    (with-cpu-trace (trace)
+      (zone (:test/region :value 3)
+        (ok (= 3 (explicit-zoned-test-function 3))))
+      (multiple-value-bind (above below)
+          (zoned-test-function 7)
+        (ok (= 8 above))
+        (ok (= 6 below)))
+      (ok (= 10 (zoned-test-method (make-instance 'zoned-test-subject) 5))))
+    (ok (string=
+         "A small definition used to prove inferred zones preserve function shape."
+         (documentation 'zoned-test-function 'function)))
+    (ok (equal '(:test/region
+                 :test/explicit-definition
+                 "luvcraft.tests/zoned-test-function"
+                 "luvcraft.tests/zoned-test-method<luvcraft.tests/zoned-test-subject>")
+               (mapcar #'cpu-trace-zone-name (cpu-trace-zones trace))))))
+
 (deftest cpu-trace-zones-are-nested-reusable-and-bounded
   (let ((trace (make-cpu-trace :label "test")))
     (with-cpu-trace (trace)

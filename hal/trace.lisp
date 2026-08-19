@@ -238,6 +238,134 @@ it.  #OHNIWM"
                  (end-cpu-trace-zone ,trace ,index)))
              (progn ,@body))))))
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun zoned-definition-name-and-options (specification)
+    (if (and (consp specification)
+             (keywordp (second specification)))
+        (let ((name (first specification))
+              (options (rest specification)))
+          (unless (evenp (length options))
+            (error "Odd zoned definition option list ~S." options))
+          (loop for key in options by #'cddr
+                unless (member key '(:zone :value))
+                  do (error "Unknown zoned definition option ~S." key))
+          (values name
+                  (getf options :zone)
+                  (not (null (member :zone options)))
+                  (getf options :value)
+                  (not (null (member :value options)))))
+        (values specification nil nil nil nil)))
+
+  (defun zoned-symbol-name (symbol)
+    (let ((package (symbol-package symbol)))
+      (format nil "~(~A/~A~)"
+              (if package (package-name package) "anonymous")
+              (symbol-name symbol))))
+
+  (defun zoned-function-name (name)
+    (etypecase name
+      (symbol (zoned-symbol-name name))
+      (cons
+       (destructuring-bind (operator symbol) name
+         (unless (eq operator 'setf)
+           (error "Invalid function name ~S." name))
+         (format nil "~A/setf" (zoned-symbol-name symbol))))))
+
+  (defun zoned-specializer-name (specializer)
+    (etypecase specializer
+      (symbol (zoned-symbol-name specializer))
+      (cons
+       (destructuring-bind (operator value) specializer
+         (unless (eq operator 'eql)
+           (error "Invalid method specializer ~S." specializer))
+         (format nil "eql/~(~A~)" value)))))
+
+  (defun zoned-method-name (name qualifiers specialized-lambda-list)
+    (let ((specializers
+            (loop for parameter in specialized-lambda-list
+                  until (member parameter lambda-list-keywords)
+                  when (and (consp parameter)
+                            (not (eq (second parameter) t)))
+                    collect (zoned-specializer-name (second parameter)))))
+      (format nil "~A~@[<~{~A~^,~}>~]~@[{~{~(~A~)~^,~}}~]"
+              (zoned-function-name name)
+              specializers
+              qualifiers)))
+
+  (defun zoned-definition-body (body)
+    (let ((docstring (and (stringp (first body)) (pop body)))
+          declarations)
+      (loop while (and (consp (first body))
+                       (eq 'declare (first (first body))))
+            do (push (pop body) declarations))
+      (values docstring (nreverse declarations) body))))
+
+(defmacro zone (specification &body body)
+  "Measure BODY with concise ambient zone syntax.
+
+SPECIFICATION is either a zone name or (NAME :VALUE FORM).  This is the
+ordinary spelling for a meaningful region inside a definition; ZDEFUN and
+ZDEFMETHOD cover whole definitions."
+  (if (consp specification)
+      (destructuring-bind (name &key (value nil value-supplied-p)) specification
+        `(with-cpu-trace-zone
+             (,name ,@(when value-supplied-p `(:tracy-value ,value)))
+           ,@body))
+      `(with-cpu-trace-zone (,specification)
+         ,@body)))
+
+(defmacro zdefun (name-and-options lambda-list &body body)
+  "Define a function whose complete dynamic extent is an ambient trace zone.
+
+The inferred name is PACKAGE/FUNCTION.  Use (NAME :ZONE ZONE-NAME) to provide
+a more semantic name and :VALUE FORM to attach a Tracy work count."
+  (multiple-value-bind (name explicit-zone zone-supplied-p
+                        value value-supplied-p)
+      (zoned-definition-name-and-options name-and-options)
+    (multiple-value-bind (docstring declarations forms)
+        (zoned-definition-body body)
+      (let ((zone-name (if zone-supplied-p
+                           explicit-zone
+                           (zoned-function-name name))))
+        `(defun ,name ,lambda-list
+           ,@(when docstring (list docstring))
+           ,@declarations
+           (with-cpu-trace-zone
+               (,zone-name
+                ,@(when value-supplied-p `(:tracy-value ,value)))
+             ,@forms))))))
+
+(defmacro zdefmethod (name-and-options &rest method-tail)
+  "Define a method whose complete dynamic extent is an ambient trace zone.
+
+The inferred name includes the generic function, non-T required specializers,
+and qualifiers.  :ZONE and :VALUE have the same meaning as in ZDEFUN."
+  (multiple-value-bind (name explicit-zone zone-supplied-p
+                        value value-supplied-p)
+      (zoned-definition-name-and-options name-and-options)
+    (let ((qualifiers nil)
+          (tail method-tail))
+      (loop while (and tail (atom (first tail)))
+            do (push (pop tail) qualifiers))
+      (setf qualifiers (nreverse qualifiers))
+      (unless (and tail (listp (first tail)))
+        (error "ZDEFMETHOD ~S has no specialized lambda list." name))
+      (let ((specialized-lambda-list (pop tail)))
+        (multiple-value-bind (docstring declarations forms)
+            (zoned-definition-body tail)
+          (let ((zone-name
+                  (if zone-supplied-p
+                      explicit-zone
+                      (zoned-method-name
+                       name qualifiers specialized-lambda-list))))
+            `(defmethod ,name ,@qualifiers ,specialized-lambda-list
+               ,@(when docstring (list docstring))
+               ,@declarations
+               (with-cpu-trace-zone
+                   (,zone-name
+                    ,@(when value-supplied-p `(:tracy-value ,value)))
+                 ,@forms))))))))
+
 (defun cpu-trace-zones (trace)
   "Return TRACE's completed zones in start order."
   (loop for index below (%cpu-trace-zone-count trace)

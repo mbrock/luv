@@ -540,7 +540,8 @@ a development image can afford and a frame cannot."
   (remove-luvcraft-overlay session overlay :release-p nil)
   overlay)
 
-(defun dispatch-luvcraft-focus-event (session canvas event)
+(zdefun (dispatch-luvcraft-focus-event :zone :luvcraft/focus-event)
+    (session canvas event)
   (let ((focus (luvcraft-session-modal-focus session)))
     (when focus
       (if (member focus (luvcraft-session-overlays session))

@@ -192,6 +192,9 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:reset-cpu-trace
            #:with-cpu-trace
            #:with-cpu-trace-zone
+           #:zone
+           #:zdefun
+           #:zdefmethod
            #:cpu-trace-zones
            #:cpu-trace-zone-name
            #:cpu-trace-zone-parent-index

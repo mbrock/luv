@@ -890,28 +890,27 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
         (sheet-medium sheet))
       (sheet-medium sheet)))
 
-(defun compose-gpu-mirror-media (mirror)
+(luv:zdefun (compose-gpu-mirror-media :zone :mcluv/compose) (mirror)
   "Join MIRROR's current pane-local drawing streams in painter order."
-  (luv:with-cpu-trace-zone (:mcluv/compose)
-    (let* ((sheet (mirror-sheet mirror))
-           (media
-             (remove-duplicates
-              (remove-if-not
-               (lambda (medium) (typep medium 'luv-gpu-medium))
-               (mapcar #'gpu-sheet-presentation-medium
-                       (gpu-sheet-paint-order sheet)))
-              :test #'eq))
-           (target-medium (gpu-sheet-presentation-medium sheet))
-           (snapshots
-             (mapcar
-              (lambda (medium)
-                (list (copy-seq (gpu-medium-vertices medium))
-                      (copy-seq (gpu-medium-analytic-vertices medium))
-                      (copy-seq (gpu-medium-relief-vertices medium))
-                      (copy-seq (gpu-medium-gradient-vertices medium))
-                      (copy-seq (gpu-medium-image-vertices medium))
-                      (copy-seq (gpu-medium-commands medium))))
-              media)))
+  (let* ((sheet (mirror-sheet mirror))
+         (media
+           (remove-duplicates
+            (remove-if-not
+             (lambda (medium) (typep medium 'luv-gpu-medium))
+             (mapcar #'gpu-sheet-presentation-medium
+                     (gpu-sheet-paint-order sheet)))
+            :test #'eq))
+         (target-medium (gpu-sheet-presentation-medium sheet))
+         (snapshots
+           (mapcar
+            (lambda (medium)
+              (list (copy-seq (gpu-medium-vertices medium))
+                    (copy-seq (gpu-medium-analytic-vertices medium))
+                    (copy-seq (gpu-medium-relief-vertices medium))
+                    (copy-seq (gpu-medium-gradient-vertices medium))
+                    (copy-seq (gpu-medium-image-vertices medium))
+                    (copy-seq (gpu-medium-commands medium))))
+            media)))
       (setf (fill-pointer (gpu-medium-vertices target-medium)) 0
             (fill-pointer (gpu-medium-analytic-vertices target-medium)) 0
             (fill-pointer (gpu-medium-relief-vertices target-medium)) 0
@@ -991,7 +990,7 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
         (loop for value across (fifth snapshot)
               do (vector-push-extend
                   value (gpu-medium-image-vertices target-medium))))
-      target-medium)))
+      target-medium))
 
 (defun repaint-gpu-mirror (mirror &key (present-p t))
   "Rebuild MIRROR's retained triangle stream as one complete McCLIM frame."
@@ -1692,7 +1691,15 @@ family name adopted."
       (setf (gpu-mirror-prepared-frame-state mirror)
             (make-instance 'gpu-mirror-frame-state))))
 
-(defun upload-gpu-mirror-frame-data
+(luv:zdefun (upload-gpu-mirror-frame-data
+             :zone :mcluv/upload
+             :value
+             (* 4 (+ (length vertices)
+                     (length analytic-vertices)
+                     (length relief-vertices)
+                     (length gradient-vertices)
+                     (length image-vertices)
+                     (length text-data))))
     (mirror device vertices analytic-vertices relief-vertices
      gradient-vertices image-vertices text-data)
   "Upload one embedded mirror snapshot without creating a raster target."
@@ -1919,7 +1926,10 @@ family name adopted."
                     (* (third color) alpha)))
       (push-value value))))
 
-(defun append-gpu-text-command (mirror command data width height)
+(luv:zdefun (append-gpu-text-command
+             :zone :mcluv/prepare-text
+             :value (length (gpu-text-command-string command)))
+    (mirror command data width height)
   (let* ((cache (gpu-mirror-slug-cache mirror))
          (font-pathname (gpu-text-command-font-pathname command))
          (shaped
@@ -2002,11 +2012,11 @@ family name adopted."
                  :vertex-count (- (/ (length data) 18) first-vertex)
                  :clip (gpu-text-command-clip command))))))))))
 
-(defun prepare-gpu-frame-commands (mirror semantic-commands)
-  (luv:with-cpu-trace-zone
-      (:mcluv/prepare
-       :tracy-value (length semantic-commands))
-    (multiple-value-bind (width height)
+(luv:zdefun (prepare-gpu-frame-commands
+             :zone :mcluv/prepare
+             :value (length semantic-commands))
+    (mirror semantic-commands)
+  (multiple-value-bind (width height)
         (gpu-mirror-logical-size mirror)
       (let ((text-data
               (make-array 1024 :element-type 'single-float
@@ -2031,7 +2041,7 @@ family name adopted."
                    (append-gpu-text-command
                     mirror command text-data width height)))
               when prepared do (push prepared commands))
-        (values (nreverse commands) text-data)))))
+        (values (nreverse commands) text-data))))
 
 (defun gpu-frame-command-clip (command)
   (etypecase command

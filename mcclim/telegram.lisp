@@ -784,7 +784,8 @@ face rather than a blank square."
                      :filled nil :line-thickness 1
                      :ink *communicator-bezel-dark*)))
 
-(defun draw-communicator-header (frame pane view)
+(luv:zdefun (draw-communicator-header :zone :telegram/paint/header)
+    (frame pane view)
   (let ((left +communicator-inset+)
         (right (- *communicator-width* +communicator-inset+)))
     ;; The header is part of the screen, not part of the bezel: cream text on
@@ -808,7 +809,10 @@ face rather than a blank square."
     (draw-communicator-button pane (- right 96) 22 (- right 54) 70 "⌕")
     (draw-communicator-button pane (- right 48) 22 (- right 6) 70 "≡")))
 
-(defun draw-communicator-dialogs (pane view)
+(luv:zdefun (draw-communicator-dialogs
+             :zone :telegram/paint/dialogs
+             :value (length (console-view-dialogs view)))
+    (pane view)
   (let* ((left (+ +communicator-inset+ 4))
          (right (- *communicator-width* +communicator-inset+ 4))
          (top +communicator-screen-top+))
@@ -919,7 +923,10 @@ back, it holds its place instead of being dragged along by every arrival."
           (max 0 (min (communicator-scroll frame)
                       (communicator-scroll-limit view))))))
 
-(defun draw-communicator-transcript (pane frame view)
+(luv:zdefun (draw-communicator-transcript
+             :zone :telegram/paint/transcript
+             :value (length (console-view-lines view)))
+    (pane frame view)
   "Paint the visible part of the transcript, clipped to the well."
   (adjust-communicator-scroll frame view)
   (draw-communicator-scrollbar pane view (communicator-scroll frame))
@@ -988,7 +995,10 @@ back, it holds its place instead of being dragged along by every arrival."
                             :align-y :center :text-size 14
                             :ink *communicator-text-ink*)))))))
 
-(defun draw-communicator-login (pane view)
+(luv:zdefun (draw-communicator-login
+             :zone :telegram/paint/login
+             :value (length (console-view-prompt view)))
+    (pane view)
   "The login screen: what is being asked, in the well, above the field."
   (let ((left (+ +communicator-inset+ 18))
         (y (+ +communicator-screen-top+ 30)))
@@ -1008,7 +1018,10 @@ back, it holds its place instead of being dragged along by every arrival."
         (make-string (length draft) :initial-element #\•)
         draft)))
 
-(defun draw-communicator-composer (frame pane view)
+(luv:zdefun (draw-communicator-composer
+             :zone :telegram/paint/composer
+             :value (length (communicator-draft frame)))
+    (frame pane view)
   (let ((left +communicator-inset+)
         (right (- *communicator-width* +communicator-inset+))
         (draft (communicator-field-text frame view)))
@@ -1040,7 +1053,8 @@ back, it holds its place instead of being dragged along by every arrival."
     (draw-communicator-button pane (- right 52) *communicator-composer-top*
                               (- right 8) *communicator-composer-bottom* "➤")))
 
-(defmethod handle-repaint ((pane communicator-pane) region)
+(luv:zdefmethod (handle-repaint :zone :telegram/paint)
+    ((pane communicator-pane) region)
   (declare (ignore region))
   (let* ((frame (pane-frame pane))
          (view (console-view (communicator-console frame))))
@@ -1081,7 +1095,10 @@ back, it holds its place instead of being dragged along by every arrival."
                 (communicator-draft frame)
                 (communicator-scroll frame)))))
 
-(defun repaint-communicator (frame)
+(luv:zdefun (repaint-communicator
+             :zone :telegram/repaint
+             :value (length (communicator-draft frame)))
+    (frame)
   (let ((mirror (sheet-direct-mirror (frame-top-level-sheet frame))))
     (if (typep mirror 'luv-gpu-mirror)
         (repaint-gpu-mirror mirror)
@@ -1115,7 +1132,11 @@ back, it holds its place instead of being dragged along by every arrival."
       overlay session (first viewport-size) (second viewport-size))))
   overlay)
 
-(defmethod luvcraft:refresh-luvcraft-overlay
+(luv:zdefmethod (luvcraft:refresh-luvcraft-overlay
+                 :zone :telegram/refresh
+                 :value
+                 (length
+                  (communicator-draft (widget-overlay-frame overlay))))
     ((overlay luvcraft-communicator-overlay) session)
   "Repaint only when the console has published something new, or the player
 has typed.  This runs every frame, so it has to be cheap to say no."
@@ -1262,7 +1283,11 @@ world should not quietly move a screen on a wall somewhere behind it."
                                 (transcript-line-document line)))))))))
     t))
 
-(defmethod luvcraft:handle-luvcraft-focus-event
+(luv:zdefmethod (luvcraft:handle-luvcraft-focus-event
+                 :zone :telegram/key-input
+                 :value
+                 (length
+                  (communicator-draft (widget-overlay-frame overlay))))
     ((overlay luvcraft-communicator-overlay) session canvas
      (event luv:canvas-key-press-event))
   (let* ((frame (widget-overlay-frame overlay))

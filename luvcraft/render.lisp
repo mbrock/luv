@@ -871,9 +871,11 @@ submission that used them completes."
                                  (luvcraft-session-camera session))
     (advance-video-screen (luvcraft-session-video-screen session)
                           (luvcraft-session-device session)))
-  (dolist (overlay (luvcraft-session-overlays session))
-    (guarding-luvcraft-overlay (session overlay :overlay-refresh)
-      (refresh-luvcraft-overlay overlay session)))
+  (let ((overlays (luvcraft-session-overlays session)))
+    (zone (:luvcraft/refresh-overlays :value (length overlays))
+      (dolist (overlay overlays)
+        (guarding-luvcraft-overlay (session overlay :overlay-refresh)
+          (refresh-luvcraft-overlay overlay session)))))
   (let* ((products
            (with-luvcraft-frame-timing
                (sample luvcraft-frame-sample-mesh-publication-seconds
