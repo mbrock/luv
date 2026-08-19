@@ -82,6 +82,15 @@ mirror's identity: a later target may be a texture presented on a 3D quad."))
    (image-paints
     :initform (make-hash-table :test #'eq)
     :reader gpu-mirror-image-paints)
+   (lattice-vertex-module
+    :initform nil :accessor gpu-mirror-lattice-vertex-module)
+   (lattice-fragment-module
+    :initform nil :accessor gpu-mirror-lattice-fragment-module)
+   (lattice-layout :initform nil :accessor gpu-mirror-lattice-layout)
+   (lattice-pipeline :initform nil :accessor gpu-mirror-lattice-pipeline)
+   (lattice-paints
+    :initform (make-hash-table :test #'eq)
+    :reader gpu-mirror-lattice-paints)
    (slug-cache :initform nil :accessor gpu-mirror-slug-cache)
    (text-vertex-module :initform nil
                        :accessor gpu-mirror-text-vertex-module)
@@ -230,11 +239,16 @@ Conventional RUN-FRAME-TOP-LEVEL frames consume their own queues instead."
 (defun canvas-modifiers-to-clim-state (modifiers)
   (reduce #'logior
           (mapcar (lambda (modifier)
-                    (ecase modifier
+                    (case modifier
                       (:shift +shift-key+)
                       (:control +control-key+)
                       (:meta +meta-key+)
-                      (:super +super-key+)))
+                      (:super +super-key+)
+                      ;; :NUM-LOCK and :CAPS-LOCK arrive with every key
+                      ;; while latched, and CLIM has no state bit for them.
+                      ;; A latched lock must not error a key event -- that
+                      ;; fuses whatever overlay was focused.
+                      (t 0)))
                   modifiers)
           :initial-value 0))
 
