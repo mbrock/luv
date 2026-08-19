@@ -33,7 +33,9 @@ jobs:
       - uses: NixOS/nix-installer-action@main
       - uses: Mic92/hestia@v3
       - name: Render the wiki
-        run: make wiki
+        # Scripts refuse to run outside the dev shell, so CI enters one for
+        # the whole build rather than each script arranging its own.
+        run: nix develop -c make wiki
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

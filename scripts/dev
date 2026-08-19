@@ -1,44 +1,33 @@
 #!/bin/sh
 
+# Run one command in the checkout environment.
+#
+# This used to be the thing that *built* an environment -- a Nix profile
+# wrapper if one was installed, a `nix develop` subshell otherwise.  It no
+# longer builds anything: the dev shell is the environment, and a caller
+# outside it is told so rather than wrapped.
+
 set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
-if [ "${LUV_NIX_SHELL:-}" = 1 ]; then
-  if [ "${1:-}" = "--status" ]; then
-    "$project_root/scripts/worktree-port" --explain
-    printf 'environment: current Nix environment\n'
-    sh -c 'printf "SBCL: %s\nSBCL version: " "$(command -v sbcl)"; sbcl --version; printf "LUV_SLYNK_DIR: %s\nLUV_GHOSTTY_LIBRARY: %s\nCL_SOURCE_REGISTRY: %s\nASDF cache: %s/.cache/common-lisp\n" "${LUV_SLYNK_DIR:-unset}" "${LUV_GHOSTTY_LIBRARY:-unset}" "${CL_SOURCE_REGISTRY:-unset}" "$HOME"'
-    exit 0
-  fi
-  if [ "$#" -eq 0 ]; then
-    set -- sbcl
-  fi
-  exec "$@"
-fi
-
-if command -v luv-env >/dev/null 2>&1; then
-  environment=luv-env
-  provider="profile ($(command -v luv-env))"
-else
-  environment=
-  provider="nix develop fallback"
-fi
+. "$project_root/scripts/require-nix-shell"
 
 if [ "${1:-}" = "--status" ]; then
   "$project_root/scripts/worktree-port" --explain
-  printf 'environment: %s\n' "$provider"
-  if [ -n "$environment" ]; then
-    luv-env sh -c 'printf "SBCL: %s\nSBCL version: " "$(command -v sbcl)"; sbcl --version; printf "LUV_SLYNK_DIR: %s\nLUV_GHOSTTY_LIBRARY: %s\nCL_SOURCE_REGISTRY: %s\nASDF cache: %s/.cache/common-lisp\n" "${LUV_SLYNK_DIR:-unset}" "${LUV_GHOSTTY_LIBRARY:-unset}" "${CL_SOURCE_REGISTRY:-unset}" "$HOME"'
-  else
-    nix develop "$project_root" --command sh -c 'printf "SBCL: %s\nSBCL version: " "$(command -v sbcl)"; sbcl --version; printf "LUV_SLYNK_DIR: %s\nLUV_GHOSTTY_LIBRARY: %s\nCL_SOURCE_REGISTRY: %s\nASDF cache: %s/.cache/common-lisp\n" "${LUV_SLYNK_DIR:-unset}" "${LUV_GHOSTTY_LIBRARY:-unset}" "${CL_SOURCE_REGISTRY:-unset}" "$HOME"'
-  fi
+  printf 'environment: current Nix dev shell\n'
+  printf 'SBCL: %s\nSBCL version: ' "$(command -v sbcl)"
+  sbcl --version
+  printf 'LUV_SLYNK_DIR: %s\n' "${LUV_SLYNK_DIR:-unset}"
+  printf 'LUV_GHOSTTY_LIBRARY: %s\n' "${LUV_GHOSTTY_LIBRARY:-unset}"
+  printf 'VK_LAYER_PATH: %s\n' "${VK_LAYER_PATH:-unset}"
+  printf 'CL_SOURCE_REGISTRY: %s\n' "${CL_SOURCE_REGISTRY:-unset}"
+  printf 'ASDF cache: %s/.cache/common-lisp\n' "$HOME"
   exit 0
 fi
 
-if [ -n "$environment" ]; then
-  exec luv-env "$@"
+if [ "$#" -eq 0 ]; then
+  set -- sbcl
 fi
 
-echo "luv: no profile environment found; entering nix develop" >&2
-exec nix develop "$project_root" --command "$@"
+exec "$@"

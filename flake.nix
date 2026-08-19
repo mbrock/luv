@@ -136,7 +136,6 @@
           # Homebrew happens to have left in /usr/local/lib.
           ffmpeg = pkgs.ffmpeg;
           ffmpegLibraryDirectory = "${ffmpeg.lib}/lib";
-          ffmpegDevelopment = ffmpeg.dev;
           # MuPDF reads PDF.  Its shared library is found by soname the same
           # way the libav ones are, so it needs both a place on the loader
           # path and a pinned directory the binding can prefer.
@@ -213,78 +212,9 @@
             inherit system;
             overlays = [ nix-wpe-webkit.overlays.default ];
           };
-          dev = pkgs.writeShellApplication {
-            name = "luv-env";
-            runtimeInputs = [
-              lisp
-              ffmpeg
-              mupdf
-              libghosttyVt
-              pkgs.libffi
-              pkgs.harfbuzz
-              pkgs.mesa
-              pkgs.python3
-              pkgs.pkg-config
-              pkgs.sdl3
-              pkgs.spirv-tools
-              pkgs.vulkan-headers
-              pkgs.vulkan-tools
-              pkgs.vulkan-validation-layers
-              pkgs.yt-dlp
-            ];
-            text = ''
-              export LUV_NIX_SHELL=1
-              export LUV_GHOSTTY_LIBRARY=${libghosttyVtLibrary}
-              export LUV_SLYNK_DIR=${slyRoot}/slynk
-              export LUV_TRACY_CLIENT=${tracyClientLibrary}
-              export LUV_FFMPEG_LIBDIR=${ffmpegLibraryDirectory}
-              export LUV_MUPDF_LIBDIR=${mupdfLibraryDirectory}
-              export LUV_YT_DLP=${pkgs.yt-dlp}/bin/yt-dlp
-              export CL_SOURCE_REGISTRY=${mcclim}//:${cl-sdl3}//
-              # cffi-grovel compiles a C program against these headers to read
-              # AVFrame's layout out of the compiler rather than transcribing
-              # offsets.  The dev shell gets this from mkShell's buildInputs;
-              # here it has to be said out loud.
-              export PKG_CONFIG_PATH=${ffmpegDevelopment}/lib/pkgconfig''${PKG_CONFIG_PATH:+:}''${PKG_CONFIG_PATH:-}
-              export CPATH=${pkgs.vulkan-headers}/include''${CPATH:+:}''${CPATH:-}
-              # The layers are on the shelf, not in the loader: a run asks for
-              # them with VK_LOADER_LAYERS_ENABLE=\*validation\* when a driver
-              # crash needs a witness.
-              export VK_LAYER_PATH=${pkgs.vulkan-validation-layers}/share/vulkan/explicit_layer.d''${VK_LAYER_PATH:+:}''${VK_LAYER_PATH:-}
-              export LD_LIBRARY_PATH=${nativeLibraryPath}''${LD_LIBRARY_PATH:+:}''${LD_LIBRARY_PATH:-}
-
-              ${nixpkgs.lib.optionalString (system == "x86_64-linux") ''
-                export LUV_LAVAPIPE_ICD=${pkgs.mesa}/share/vulkan/icd.d/lvp_icd.x86_64.json
-              ''}
-              ${nixpkgs.lib.optionalString (system == "aarch64-linux") ''
-                export LUV_LAVAPIPE_ICD=${pkgs.mesa}/share/vulkan/icd.d/lvp_icd.aarch64.json
-              ''}
-              ${nixpkgs.lib.optionalString pkgs.stdenv.isDarwin ''
-                export VK_DRIVER_FILES=${pkgs.moltenvk}/share/vulkan/icd.d/MoltenVK_icd.json
-              ''}
-
-              if [[ -z "''${SDL_VIDEODRIVER:-}" \
-                    && -z "''${DISPLAY:-}" \
-                    && -z "''${WAYLAND_DISPLAY:-}" ]]; then
-                export SDL_VIDEODRIVER=offscreen
-              fi
-
-              if [[ -n "''${LUV_LAVAPIPE_ICD:-}" \
-                    && -f "$LUV_LAVAPIPE_ICD" \
-                    && -z "''${VK_DRIVER_FILES:-}" \
-                    && "''${SDL_VIDEODRIVER:-}" == offscreen ]]; then
-                export VK_DRIVER_FILES="$LUV_LAVAPIPE_ICD"
-              fi
-
-              if (( $# == 0 )); then
-                exec sbcl
-              fi
-              exec "$@"
-            '';
-          };
         in
         {
-          inherit pkgs wpePkgs sbcl lisp nativeLibraryPath slyRoot dev;
+          inherit pkgs wpePkgs sbcl lisp nativeLibraryPath slyRoot;
           inherit ffmpeg ffmpegLibraryDirectory mupdf mupdfLibraryDirectory;
           inherit libghosttyVt libghosttyVtLibrary;
           inherit tracyClient tracyClientLibrary;
@@ -297,7 +227,6 @@
         in {
           sbcl = env.sbcl;
           lisp = env.lisp;
-          dev = env.dev;
           ffmpeg = env.ffmpeg;
           libghostty-vt = env.libghosttyVt;
           tracy-client = env.tracyClient;

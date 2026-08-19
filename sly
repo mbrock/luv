@@ -37,8 +37,6 @@ if [ -z "${LUV_SLYNK_PORT:-}" ]; then
   export LUV_SLYNK_PORT
 fi
 
-if [ "${LUV_NIX_SHELL:-}" != 1 ]; then
-  exec "$project_root/scripts/dev" "$project_root/sly" "$@"
-fi
+. "$project_root/scripts/require-nix-shell"
 
 exec sbcl --script "$project_root/scripts/sly-client.lisp" "$@"

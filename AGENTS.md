@@ -73,6 +73,14 @@ The surfaces have distinct jobs:
 - `build/luvcraft`: shipped/CI executable. `./sly --luvcraft ...` is only for
   deliberately attaching to that standalone process.
 
+# The dev shell is the environment
+
+Every script here refuses to run outside the Nix dev shell rather than
+building an environment of its own, so enter one first: `direnv allow` once
+per checkout, `nix develop` for an explicit shell, or `nix develop -c CMD`
+for CI, cron, and other non-interactive callers. There is no profile to
+install and nothing to keep current.
+
 # Working style
 
 This is a fast-moving experimental project. Optimize for iteration speed,

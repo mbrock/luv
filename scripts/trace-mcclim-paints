@@ -4,9 +4,7 @@ set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
-if [ "${LUV_NIX_SHELL:-}" != 1 ]; then
-  exec "$project_root/scripts/dev" "$0" "$@"
-fi
+. "$project_root/scripts/require-nix-shell"
 
 if [ "$#" -gt 3 ]; then
   echo "Usage: scripts/trace-mcclim-paints [OUTPUT.tracy] [SHAPES] [REPETITIONS]" >&2

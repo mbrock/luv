@@ -6,3 +6,4 @@ capture.png
 capture.ppm
 *.fasl
 *.blend1
+.direnv/

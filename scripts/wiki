@@ -6,9 +6,7 @@ set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
-if [ "${LUV_NIX_SHELL:-}" != 1 ]; then
-  exec "$project_root/scripts/dev" "$project_root/scripts/wiki" "$@"
-fi
+. "$project_root/scripts/require-nix-shell"
 
 exe="$project_root/build/wiki-cli"
 stale=$(find "$project_root/wiki" "$project_root/luv-wiki.asd" \
