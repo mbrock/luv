@@ -524,12 +524,6 @@ a finished view for a McCLIM frame to paint."))
   (publish-console-view console :status "asking for a code…")
   (handler-case
       (let ((login (telegram.client:begin-qr-login)))
-        ;; ADVANCE-TELEGRAM-CONSOLE has to come back often enough to answer
-        ;; the player, so the wait for UPDATE-LOGIN-TOKEN is many short reads
-        ;; rather than one thirty-second one.
-        (setf (telegram.net:connection-read-timeout
-               (telegram.client:qr-login-connection login))
-              1)
         (setf (console-login console) login)
         (show-console-qr console))
     (error (condition)
@@ -537,12 +531,21 @@ a finished view for a McCLIM frame to paint."))
 
 (defun advance-console-qr-login (console)
   "One short wait for the phone to accept the code, then show whatever the
-login has now: the conversations, or a freshened code."
+login has now: the conversations, the password question, or a fresh code."
   (let* ((login (console-login console))
          (token (telegram.client:qr-login-token login)))
     (telegram.client:poll-qr-login login)
     (cond ((telegram.client:qr-login-user login)
            (finish-console-login console))
+          ((telegram.client:qr-login-password-hint login)
+           ;; The phone said yes and the account has a password: same
+           ;; question as a code login's, answered over this connection.
+           (setf (console-qr console) nil)
+           (enter-login-stage
+            console :password
+            :note (let ((hint (telegram.client:qr-login-password-hint login)))
+                    (when (plusp (length hint))
+                      (format nil "hint: ~A" hint)))))
           ((not (equalp token (telegram.client:qr-login-token login)))
            (show-console-qr console)))))
 
@@ -766,10 +769,17 @@ pictures appearing over a second or two is the better failure."
                     (error (condition)
                       ;; A dropped socket is ordinary: Telegram closes an idle
                       ;; connection and the next call notices.  Forget it and
-                      ;; the next pass resumes.
+                      ;; the next pass resumes.  Any login in progress owned
+                      ;; that connection, so it is over too: let it go and
+                      ;; clear its stage, or the loop would keep polling a
+                      ;; dead socket at a question no answer can advance --
+                      ;; the panel stuck saying "reconnecting" forever.
                       (publish-console-view
                        console :status "reconnecting…"
                        :failure (princ-to-string condition))
+                      (ignore-errors (forget-console-login console))
+                      (setf (console-login-stage console) nil
+                            (console-login-note console) nil)
                       (ignore-errors (telegram.client:disconnect))
                       (sleep 3))))
       (ignore-errors (forget-console-login console))

@@ -140,8 +140,11 @@ in-game panel does it.
 Telegram's mobile-app QR login is public MTProto, not a private desktop
 feature.  `log-in-with-qr` exports a short-lived token, renders it in the
 terminal, and keeps its unauthenticated connection alive for the
-`updateLoginToken` that arrives when the phone accepts it.  The completed
-session is saved exactly like a code login.
+`updateLoginToken` that arrives when the phone accepts it.  If the account
+has two-factor auth, the acceptance stops at the password —
+`qr-login-password-hint` becomes the account's hint, and `complete-password`
+answers by SRP over the same connection, exactly as for a code login.  The
+completed session is saved exactly like a code login.
 
 ```sh
 scripts/telegram '(telegram.client:log-in-with-qr)'
