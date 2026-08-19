@@ -62,7 +62,14 @@
    (name
     :initarg :name
     :initform nil
-    :accessor arithmetic-expression-name))
+    :accessor arithmetic-expression-name)
+   (quantity-checked-memo
+    :documentation
+    "The remembered answer of ARITHMETIC-EXPRESSION-QUANTITY-CHECKED-P.
+
+Unbound until the question is first asked of this expression.  See the
+:AROUND method on that generic function for why the memory is needed and
+what makes it sound."))
   (:documentation
    "A source expression with semantic meaning but no chosen machine form."))
 
@@ -199,6 +206,30 @@
 (defgeneric arithmetic-expression-quantity-checked-p (expression)
   (:documentation
    "Whether semantic quantity checking is active at EXPRESSION."))
+
+(defmethod arithmetic-expression-quantity-checked-p :around
+    ((expression arithmetic-expression))
+  "Answer once per expression and remember it.
+
+A parsed expression is a directed acyclic graph, not a tree: one binding
+referenced three times is one object with three references to it, and an
+inlined function call shares its argument expressions with the call site.
+The methods below recurse through operands, through a reference's target
+binding, and through a function call's result, so a plain recursive walk
+visits every path rather than every node -- which is exponential in the
+depth of the sharing, not linear in the size of the graph.  A shader with a
+few nested distance-field helpers is enough to make the difference minutes.
+
+The memory is sound because the graph is immutable once built: an
+expression's operands, a binding's expression, and a call's result are all
+read-only after construction, and every child is fully constructed before
+the parent that refers to it.  So the answer for a given object can never
+change, and asking early during parsing gives the same answer as asking at
+the end."
+  (if (slot-boundp expression 'quantity-checked-memo)
+      (slot-value expression 'quantity-checked-memo)
+      (setf (slot-value expression 'quantity-checked-memo)
+            (call-next-method))))
 
 (defmethod arithmetic-expression-quantity-checked-p
     ((expression arithmetic-literal))
