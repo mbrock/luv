@@ -2684,6 +2684,47 @@ distribution overhead."
 (defun block-world-crosshair-fragment-shader ()
   (assemble-spir-v-module (block-world-crosshair-fragment-module)))
 
+;;; The software cursor carries opacity so its outer silhouette can softly
+;;; cover the final composited frame instead of ending in staircase pixels.
+
+(define-shader-method shader-specification-for
+    luvcraft-cursor-vertex-specification
+    ((role (eql :cursor)) (stage (eql :vertex)))
+    (:stage :vertex
+     :inputs ((screen-position :vec3 :location 0
+                               :quantity :clip-coordinate :unit :one)
+              (ink-input :vec4 :location 1
+                         :components
+                         ((:xyz :quantity :linear-rgb :unit :one)
+                          (:w :quantity :opacity :unit :one))))
+     :outputs ((clip-position :vec4 :built-in :position)
+               (ink-output :vec4 :location 0
+                           :components
+                           ((:xyz :quantity :linear-rgb :unit :one)
+                            (:w :quantity :opacity :unit :one)))))
+  (let* ((clip
+          (vec4 (representation (swizzle screen-position :x))
+                (representation (swizzle screen-position :y))
+                (representation (swizzle screen-position :z))
+                1.0)))
+    (set-output clip-position clip)
+    (set-output ink-output ink-input)))
+
+(define-shader-method shader-specification-for
+    luvcraft-cursor-fragment-specification
+    ((role (eql :cursor)) (stage (eql :fragment)))
+    (:stage :fragment
+     :inputs ((ink-input :vec4 :location 0
+                         :components
+                         ((:xyz :quantity :linear-rgb :unit :one)
+                          (:w :quantity :opacity :unit :one))))
+     :outputs ((color-output :vec4 :location 0)))
+  (let* ((rgba
+           (assume-quantity
+            (representation ink-input)
+            :quantity :linear-rgba :unit :one)))
+    (set-output color-output rgba)))
+
 
 (defun block-world-crosshair-vertex-module ()
   "Pass screen-space crosshair vertices and their ink to the fragment stage."

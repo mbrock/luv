@@ -43,7 +43,7 @@
                            :reader luvcraft-frame-world-text-bind-groups)))
 
 (defconstant +block-world-crosshair-vertex-count+ 24)
-(defconstant +luvcraft-cursor-vertex-count+ 18)
+(defconstant +luvcraft-cursor-vertex-count+ 27)
 (defconstant +luvcraft-shadow-map-size+ 2048)
 (luv.arithmetic:define-quantity-constant
     +luvcraft-maximum-frame-duration+ 0.1d0
@@ -148,24 +148,29 @@
                         (list (/ (* 2.0 (+ origin-x x)) width)
                               (/ (* 2.0 (+ origin-y y)) height)
                               0.0
-                              (first color) (second color) (third color)))
+                              (first color) (second color) (third color)
+                              (fourth color)))
                  (vector-push-extend (coerce component 'single-float)
                                      vertices)))
              (triangle (a b c color)
                (dolist (point (list a b c))
                  (vertex (first point) (second point) color))))
-      ;; A charcoal silhouette stays legible over both the pale inventory and
-      ;; the bright world.  Its angled tail makes the hotspot unmistakably the
-      ;; upper-left tip rather than the centre of another crosshair.
-      (triangle '(0 0) '(2 23) '(8 16) '(0.05 0.06 0.07))
-      (triangle '(6 14) '(15 25) '(10 29) '(0.05 0.06 0.07))
-      (triangle '(6 14) '(10 29) '(2 19) '(0.05 0.06 0.07))
-      (triangle '(2 4) '(3 18) '(7 14) '(0.96 0.98 1.0))
-      (triangle '(6 16) '(13 25) '(10 27) '(0.82 0.88 0.92))
-      (triangle '(6 16) '(10 27) '(4 19) '(0.82 0.88 0.92)))
+      ;; A translucent one-pixel-ish fringe takes the bite out of diagonal
+      ;; stair steps.  Colours are premultiplied for the cursor pipeline.
+      (triangle '(-1 -1) '(2 33) '(12 23) '(0.0 0.0 0.0 0.32))
+      (triangle '(8 18) '(22 33) '(14 41) '(0.0 0.0 0.0 0.32))
+      (triangle '(8 18) '(14 41) '(1 27) '(0.0 0.0 0.0 0.32))
+      ;; The full-size charcoal body remains readable on light and dark views.
+      (triangle '(0 0) '(3 31) '(11 22) '(0.04 0.05 0.06 1.0))
+      (triangle '(8 19) '(20 33) '(14 39) '(0.04 0.05 0.06 1.0))
+      (triangle '(8 19) '(14 39) '(2 26) '(0.04 0.05 0.06 1.0))
+      ;; A bright inset gives the familiar black-outlined desktop pointer.
+      (triangle '(2 4) '(4 26) '(9 20) '(0.96 0.97 0.94 1.0))
+      (triangle '(8 22) '(18 33) '(14 37) '(0.72 0.80 0.86 1.0))
+      (triangle '(8 22) '(14 37) '(4 26) '(0.72 0.80 0.86 1.0)))
     (ensure-vertex-product-contract
-     vertices :crosshair-vertices +luvcraft-cursor-vertex-count+
-     (luvcraft.shaders:block-world-crosshair-vertex-specification))))
+     vertices :cursor-vertices +luvcraft-cursor-vertex-count+
+     (luvcraft.shaders::shader-specification-for :cursor :vertex))))
 
 (defun make-block-world-sky-vertices ()
   "Make the one fullscreen triangle in normalized clip coordinates."
@@ -1915,18 +1920,19 @@ NIL to let the display choose a comfortable window."
                   (cursor-pipeline
                     (let ((artifact
                             (make-live-shader-pipeline
-                             :role :block-crosshair
-                             :vertex-role :block-crosshair
+                             :role :cursor
+                             :vertex-role :cursor
                              :label "luvcraft software cursor pipeline"
                              :device device :layout layout
                              :vertex-buffers
-                             '((:array-stride 24
+                             '((:array-stride 28
                                 :attributes
                                 ((:shader-location 0 :offset 0
                                   :format :float32x3)
                                  (:shader-location 1 :offset 12
-                                  :format :float32x3))))
+                                  :format :float32x4))))
                              :target-format (canvas-format context)
+                             :target-blend :premultiplied-alpha
                              :primitive '(:topology :triangle-list)
                              :depth-stencil nil)))
                       (push artifact pipelines)

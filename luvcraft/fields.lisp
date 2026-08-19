@@ -237,6 +237,24 @@
      (luv.arithmetic:make-declared-quantity-specification
       '(:quantity :linear-rgb :unit :one :tensor-order 1))))))
 
+(defun make-cursor-vertex-product-layout ()
+  "Describe position, colour, and coverage as one packed cursor vertex."
+  (luv.arithmetic:make-quantity-layout
+   7
+   (list
+    (luv.arithmetic:make-quantity-projection
+     '(0 1 2)
+     (luv.arithmetic:make-declared-quantity-specification
+      '(:quantity :clip-coordinate :unit :one :tensor-order 1)))
+    (luv.arithmetic:make-quantity-projection
+     '(3 4 5)
+     (luv.arithmetic:make-declared-quantity-specification
+      '(:quantity :linear-rgb :unit :one :tensor-order 1)))
+    (luv.arithmetic:make-quantity-projection
+     '(6)
+     (luv.arithmetic:make-declared-quantity-specification
+      '(:quantity :opacity :unit :one))))))
+
 (defmethod luv.arithmetic:value-declaration-for
     ((name (eql :sky-vertices)))
   (declare (ignore name))
@@ -265,11 +283,28 @@
       ((0 1 2) clip-coordinate (3 4 5) absolute-linear-rgb)
       :stride 6))))
 
+(defmethod luv.arithmetic:value-declaration-for
+    ((name (eql :cursor-vertices)))
+  (declare (ignore name))
+  (load-time-value
+   (luv.arithmetic:make-represented-value-declaration
+    :representation-type '(vector single-float)
+    :quantity-layout
+    (luv.arithmetic:make-repeated-quantity-layout
+     (make-cursor-vertex-product-layout) :stride 7)
+    :source-form
+    '(cursor-vertices :type (vector single-float)
+      :repeated-product
+      ((0 1 2) clip-coordinate (3 4 5) absolute-linear-rgb (6) opacity)
+      :stride 7))))
+
 (defun ensure-vertex-product-contract
     (vertices declaration-name vertex-count shader-specification)
   "Validate raw VERTICES against one declared CPU and shader input product."
   (let* ((declaration
-           (luv.arithmetic:value-declaration-for declaration-name))
+           (or (luv.arithmetic:value-declaration-for declaration-name)
+               (error "No vertex product declaration is published for ~S."
+                      declaration-name)))
          (layout (luv.arithmetic:declaration-quantity-layout declaration)))
     (unless (typep
              vertices

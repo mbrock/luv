@@ -107,6 +107,7 @@
   (let ((center (luvcraft::make-luvcraft-cursor-vertices 200 100 100 50))
         (top-left
           (luvcraft::make-luvcraft-cursor-vertices 200 100 0 0)))
+    (ok (= 27 (/ (length center) 7)))
     ;; The Vulkan viewport performs the Y inversion: moving from the centre to
     ;; the top-left subtracts one in both vertex-coordinate axes here.
     (ok (= -1.0 (- (aref top-left 0) (aref center 0))))
@@ -908,7 +909,11 @@
              (:crosshair-vertices
               ,(luvcraft::make-block-world-crosshair-vertices 960 640)
               ,luvcraft::+block-world-crosshair-vertex-count+
-              ,(luvcraft.shaders:block-world-crosshair-vertex-specification))))
+              ,(luvcraft.shaders:block-world-crosshair-vertex-specification))
+             (:cursor-vertices
+              ,(luvcraft::make-luvcraft-cursor-vertices 960 640 120 90)
+              ,luvcraft::+luvcraft-cursor-vertex-count+
+              ,(luvcraft.shaders::shader-specification-for :cursor :vertex))))
     (destructuring-bind (name vertices count specification) claim
       (let* ((declaration (luv.arithmetic:value-declaration-for name))
              (layout
