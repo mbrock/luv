@@ -456,6 +456,13 @@ grid's own staircase is not a defect to be hidden: the chamfer gives every
 step of an arch ring a facet that catches the light differently, which is
 what a voussoir does.
 
+[[file:images/luft-grotto.png]]
+
+The same three lines carve a doorway and a cave mouth; only the radius
+differs.  Above, a fourteen-cell opening cut through the two courses of
+granite left standing at the face of a massif, ringed in limestone, with
+the rock of the hall behind it left as columns.
+
 ** Turf catches where the ground is flat
 :PROPERTIES:
 :ID: JNJF28

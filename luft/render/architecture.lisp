@@ -652,8 +652,8 @@ is a model of a tree; both are what a tree is at this distance."
     (scatter-boulders world '((17 22 2) (21 17 1) (46 23 2) (50 18 1)
                              (13 16 1) (42 20 1) (26 21 2) (39 25 1)))
     ;; Firs on the apron, and two on the cliff top, for scale.
-    (plant-wood world '((11 12 10) (19 8 12) (44 10 11) (52 14 10)
-                        (24 12 8) (40 6 12) (8 24 9) (55 26 9)))
+    (plant-wood world '((11 12 10) (19 6 12) (46 8 11) (54 14 10)
+                        (14 20 9) (40 4 12) (7 25 9) (56 25 9)))
     (world-scene world)))
 
 (defmethod atelier-cameras ((piece (eql :grotto)))
