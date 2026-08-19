@@ -63,13 +63,13 @@
   :quantity (:quantity :world-distance :unit :cell))
 ;;; The shadow's biases and filter radii are knobs: read at frame-pack time
 ;;; into the shadow control lanes, so a turn shows on the next frame.
-(defparameter *luvcraft-shadow-base-bias* 0.00045
+(defparameter *luvcraft-shadow-base-bias* 0.00405
   "Constant depth bias applied to every shadow comparison.")
-(defparameter *luvcraft-shadow-slope-bias* 0.0015
+(defparameter *luvcraft-shadow-slope-bias* 0.002
   "Depth bias scaled by the receiver's slope to the light.")
-(defparameter *luvcraft-shadow-minimum-filter-radius* 2.0
+(defparameter *luvcraft-shadow-minimum-filter-radius* 8.0
   "PCF radius in shadow texels when the sun is a point.")
-(defparameter *luvcraft-shadow-maximum-filter-radius* 6.0
+(defparameter *luvcraft-shadow-maximum-filter-radius* 24.0
   "PCF radius in shadow texels at the sun's widest.")
 
 (define-knob shadow-base-bias
@@ -359,7 +359,7 @@ some other space; the environment lanes are packed the same either way."
 ;;; presentation stack reads every frame, so a SLY eval can retune the whole
 ;;; look of the running game without rebuilding a pipeline.
 
-(defparameter *luvcraft-exposure* 0.72
+(defparameter *luvcraft-exposure* 0.45
   "Overall scene exposure multiplied into the sky profile's own exposure.")
 
 (defparameter *luvcraft-bloom-gain* 0.22
@@ -372,7 +372,7 @@ light around the sun and starts reading as fog over everything.")
 (defparameter *luvcraft-shaft-gain* 0.30
   "How strongly sunlight scattered around the solar disc streaks the frame.")
 
-(defparameter *luvcraft-vignette* 0.16
+(defparameter *luvcraft-vignette* 0.60
   "Corner falloff of the presented frame, as a fraction of full brightness.")
 
 (defparameter *luvcraft-bloom-threshold* 1.5
@@ -1648,7 +1648,7 @@ the replacement texture's width through the frame uniform."
                                 (video-distance 13.0)
                                 (video-lift 4.5)
                                 (video-height 5.0)
-                                (residency-radius 4)
+                                (residency-radius 8)
                                 (publication-limit 2)
                                 (load-schedule-limit 4)
                                 (mesh-capture-limit 1))

@@ -33,9 +33,9 @@
 
 (defparameter *sun-disc-scale* 4.0
   "How many times its true angular radius the sun's disc is drawn at.")
-(defparameter *sun-disc-radiance* 30.0
+(defparameter *sun-disc-radiance* 39.0
   "The disc's radiance above display white, which the bloom feeds on.")
-(defparameter *direct-light-gain* 2.05
+(defparameter *direct-light-gain* 0.80
   "The direct sun's diffuse intensity on a lit block face.")
 (defparameter *screen-curvature* 0.40
   "How far a terminal faceplate's normal bulges toward its rim.")
@@ -79,17 +79,17 @@
 ;;; frame environment from the day profile; these four are the art direction
 ;;; the profile has no opinion about.
 
-(defparameter *sky-scatter-gain* 1.0
+(defparameter *sky-scatter-gain* 0.70
   "How strongly the atmosphere's phase function brightens the sun's quarter.")
-(defparameter *cloud-coverage* 1.0
+(defparameter *cloud-coverage* 1.35
   "The profile's cloudiness against art direction; one leaves it alone.")
 (defparameter *star-brightness* 1.7
   "The radiance of a first-magnitude star, above display white.")
-(defparameter *moon-radiance* 3.4
+(defparameter *moon-radiance* 4.6
   "The full moon's radiance above display white; the bloom feeds on it.")
-(defparameter *cloud-altitude* 230.0
+(defparameter *cloud-altitude* 80.0
   "The cumulus deck's world height, which both the sky and the ground read.")
-(defparameter *cloud-shadow-depth* 0.62
+(defparameter *cloud-shadow-depth* 0.72
   "How much of the direct sun a cloud takes from the ground beneath it.")
 
 (luvcraft:define-knob sky-scatter-gain
@@ -124,13 +124,13 @@
 ;;; between the sun, the sky, and the ground, are the questions art
 ;;; direction actually asks about the world's materials.
 
-(defparameter *surface-detail* 1.0
+(defparameter *surface-detail* 0.85
   "How far the procedural weathering moves one face away from the next.")
-(defparameter *surface-roughness* 1.0
+(defparameter *surface-roughness* 1.35
   "The whole palette's micro-roughness against what its relief implies.")
-(defparameter *specular-gain* 1.0
+(defparameter *specular-gain* 1.95
   "How much of the sun's microfacet lobe a block surface returns.")
-(defparameter *ambient-bounce* 0.55
+(defparameter *ambient-bounce* 1.05
   "How much of the ground's own colour a downward face is lit by.")
 
 (luvcraft:define-knob surface-detail
@@ -155,7 +155,7 @@
 ;;; own small dispersion.  They are folded literals rather than uniform
 ;;; lanes because they are art direction, changed by hand and then left.
 
-(defparameter *chromatic-aberration* 0.40
+(defparameter *chromatic-aberration* 0.70
   "How far the lens splits red from blue at the corners, in texels.")
 (defparameter *grade-saturation* 1.10
   "Saturation of the presented image, one being the filmic curve's own.")

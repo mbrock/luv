@@ -75,7 +75,7 @@
                   "The world point the shadow texel lattice pivots about;
 SHADOW-FRAME-ROWS walks it after the camera in whole texels.")
    (player :initarg :player :initform nil :reader luvcraft-session-player)
-   (residency-radius :initarg :residency-radius :initform 4
+   (residency-radius :initarg :residency-radius :initform 8
                      :accessor luvcraft-session-residency-radius)
    (residency-center :initform nil
                      :accessor luvcraft-session-residency-center)
