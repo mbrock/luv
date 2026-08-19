@@ -12,6 +12,7 @@
 (asdf:load-asd (merge-pathnames #P"luv-wiki.asd" *load-truename*))
 (asdf:load-system :luv)
 (asdf:load-system :luvcraft)
+(asdf:load-system :luvcraft/agent)
 (asdf:load-system :luv-wiki)
 (asdf:load-asd (merge-pathnames #P"luft.asd" *load-truename*))
 (asdf:load-system :luft/render)

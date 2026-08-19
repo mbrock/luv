@@ -176,6 +176,23 @@
                          (test-op "luvcraft/mcclim/test")
                          (test-op "luvcraft/test"))))
 
+(defsystem "luvcraft/agent"
+  :description "An agent in the little world: tools as CLIM commands, results as presentations."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luvcraft" "openai" "alexandria" "sb-concurrency")
+  :serial t
+  :components ((:module "luvcraft/agent"
+                :serial t
+                :components ((:file "package")
+                             (:file "presentations")
+                             (:file "transcript")
+                             (:file "agent")
+                             (:file "tools")
+                             (:file "commands")
+                             (:file "hud")
+                             (:file "wall")))))
+
 (defsystem "luvcraft/program"
   :description "The standalone luvcraft executable with its live Slynk endpoint."
   :version "0.0.1"

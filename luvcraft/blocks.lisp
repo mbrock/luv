@@ -40,6 +40,11 @@
 (defmethod shared-initialize :after
     ((block block-kind) slot-names &key)
   (declare (ignore slot-names))
+  ;; A class prototype -- which CLIM's presentation dispatch asks for, and
+  ;; which a class redefinition updates through here -- has no slots at all
+  ;; and is not a block kind anyone defined; leave it alone.
+  (unless (slot-boundp block 'name)
+    (return-from shared-initialize))
   (unless (keywordp (block-kind-name block))
     (error "A block kind name must be a keyword, not ~S."
            (block-kind-name block)))

@@ -228,13 +228,18 @@ Conventional RUN-FRAME-TOP-LEVEL frames consume their own queues instead."
        mirror canvas event 'pointer-button-release-event :button button))))
 
 (defun canvas-modifiers-to-clim-state (modifiers)
+  "The CLIM modifier state for a luv MODIFIERS list.
+
+Lock modifiers (caps lock, num lock) have no CLIM bit and a player with one
+on is still playing the game, so they contribute nothing rather than fail."
   (reduce #'logior
           (mapcar (lambda (modifier)
-                    (ecase modifier
+                    (case modifier
                       (:shift +shift-key+)
                       (:control +control-key+)
                       (:meta +meta-key+)
-                      (:super +super-key+)))
+                      (:super +super-key+)
+                      (t 0)))
                   modifiers)
           :initial-value 0))
 

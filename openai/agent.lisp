@@ -69,12 +69,15 @@ subclasses for live text, reasoning, tool, or lifecycle presentation."))
 
 (defun make-agent (&key model instructions tools reasoning-effort reasoning-summary
                      (url "wss://api.openai.com/v1/responses")
-                     (api-key (uiop:getenv "OPENAI_API_KEY")))
+                     (api-key (uiop:getenv "OPENAI_API_KEY"))
+                     (class 'agent) initargs)
   "Open one OpenAI Responses WebSocket connection.
 
 MODEL is normally a GPT-5.6 model name.  TOOLS contains TOOL instances.
 The server protocol is experimental; URL is injectable so tests and local
-proxies can speak the same small protocol."
+proxies can speak the same small protocol.  CLASS names the AGENT subclass
+to make, with INITARGS for its own slots, so an application can specialize
+HANDLE-AGENT-EVENT and CALL-TOOL on its own agent."
   (unless (and api-key (plusp (length api-key)))
     (error 'openai-error :detail "OPENAI_API_KEY is not set"))
   (unless model
@@ -83,9 +86,11 @@ proxies can speak the same small protocol."
                   url :additional-headers
                   `(("authorization" . ,(format nil "Bearer ~A" api-key))
                     ("content-type" . "application/json"))))
-         (agent (make-instance 'agent :model model :instructions (or instructions "")
-                               :tools tools :reasoning-effort reasoning-effort
-                               :reasoning-summary reasoning-summary :socket socket)))
+         (agent (apply #'make-instance class
+                       :model model :instructions (or instructions "")
+                       :tools tools :reasoning-effort reasoning-effort
+                       :reasoning-summary reasoning-summary :socket socket
+                       initargs)))
     (websocket-driver:on :message socket
                          (lambda (message)
                            (handler-case
@@ -143,6 +148,17 @@ hyphens), so compare keys in their punctuation-free spelling."
 
 (defun json-string (value)
   (cl-json:encode-json-to-string value))
+
+(defclass json-false () ()
+  (:documentation "CL-JSON spells NIL as null; this is the value that spells false."))
+
+(defmethod cl-json:encode-json ((object json-false) &optional (stream cl-json:*json-output*))
+  (declare (ignore object))
+  (write-string "false" stream)
+  nil)
+
+(defparameter +json-false+ (make-instance 'json-false)
+  "JSON false, for schema fields such as additionalProperties.")
 
 (defun decode-json (string)
   (cl-json:decode-json-from-string string))

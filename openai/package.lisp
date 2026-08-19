@@ -14,4 +14,4 @@ when a program wants one agent thread per connection.")
    #:agent-turn #:agent-response #:agent-response-text #:agent-response-reasoning
    #:agent-response-id #:agent-response-usage
    #:tool #:tool-name #:tool-description #:tool-parameters #:call-tool
-   #:handle-agent-event))
+   #:handle-agent-event #:+json-false+))

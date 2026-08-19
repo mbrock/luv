@@ -1953,11 +1953,13 @@ material adds a method rather than growing a CASE.")
     (declare (ignore name session hit))
     nil))
 
-(defun open-activated-wall-display (session hit material attach)
+(defun open-activated-wall-display (session hit material attach
+                                    &key (class 'terminal-display))
   "Open the terminal display for the MATERIAL wall HIT names and ATTACH it.
 
 ATTACH receives the fresh display and gives the wall its process; if it
-fails, the display is taken down rather than left attached to nothing."
+fails, the display is taken down rather than left attached to nothing.
+CLASS is the display class to make, for walls that are not shells."
   (let* ((coordinate (block-ray-hit-coordinate hit))
          (face (block-ray-hit-face hit)))
     (when face
@@ -1973,7 +1975,8 @@ fails, the display is taken down rather than left attached to nothing."
                       (world-coordinate-z coordinate)
                       (block-face-name face)
                       :fixture ""
-                      :material material))
+                      :material material
+                      :class class))
                (funcall attach display)
                (setf completed-p t)
                display)
@@ -2062,6 +2065,7 @@ that cell height affords across the wall's width at the font's own aspect."
           (rows-per-block 6)
           (fixture (terminal-display-fixture))
           (material *terminal-block*)
+          (class 'terminal-display)
           (margin 0.12)
           (font-scale 1.0)
           (font-pathname *terminal-display-font-pathname*)
@@ -2087,6 +2091,7 @@ ROWS-PER-BLOCK rows per block height."
             rows (or rows fitted-rows)))
     (make-terminal-display
      session surface columns rows
+     :class class
      :fixture fixture :margin margin :font-scale font-scale
      :font-pathname font-pathname :bold-font-pathname bold-font-pathname
      :default-foreground default-foreground)))
