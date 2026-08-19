@@ -168,6 +168,31 @@
           'lvk::swapchain-create-flags
           '(:present-id-2-khr :present-timing-ext)))))
 
+(cffi:defcallback test-past-presentation-timing-device-procedure :int32
+    ((device :pointer)
+     (past-presentation-timing-info :pointer)
+     (past-presentation-timing-properties :pointer))
+  (declare (ignore device past-presentation-timing-info
+                   past-presentation-timing-properties))
+  0)
+
+(deftest presentation-timing-commands-use-device-procedure-dispatch
+  (let ((original (symbol-function 'lvk::device-procedure))
+        (lookups nil))
+    (unwind-protect
+         (progn
+           (setf (symbol-function 'lvk::device-procedure)
+                 (lambda (device name)
+                   (push (list device name) lookups)
+                   (cffi:callback test-past-presentation-timing-device-procedure)))
+           (let ((device (cffi:make-pointer 42)))
+             (ok (eq :success
+                     (vk:get-past-presentation-timing-ext
+                      device (cffi:null-pointer) (cffi:null-pointer))))
+             (ok (equal `((,device "vkGetPastPresentationTimingEXT"))
+                        lookups))))
+      (setf (symbol-function 'lvk::device-procedure) original))))
+
 (deftest presentation-timeline-correlates-predictions-with-display-results
   (let ((timeline
           (make-instance 'luv::vulkan-presentation-timeline

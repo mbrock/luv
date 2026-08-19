@@ -368,6 +368,35 @@
                (call))))
        ',lisp-name)))
 
+(defmacro defvkdeviceproc (foreign-name return-type &body arguments)
+  "Define a device extension command resolved through vkGetDeviceProcAddr."
+  (let* ((lisp-name (vulkan-lisp-name foreign-name))
+         (argument-names (mapcar #'first arguments))
+         (device (first argument-names))
+         (definition-name
+           (intern (format nil "*~A-DEFINITION*" lisp-name) '#:luv.vulkan)))
+    `(progn
+       (eval-when (:compile-toplevel :load-toplevel :execute)
+         (export ',lisp-name '#:luv.vk))
+       (defparameter ,definition-name
+         (register-vulkan-function-definition
+          ',lisp-name ,foreign-name ',return-type ',arguments))
+       (defun ,lisp-name ,argument-names
+         (flet ((call ()
+                  (cffi:foreign-funcall-pointer
+                   (device-procedure ,device ,foreign-name)
+                   ()
+                   ,@(loop for (name type) in arguments append (list type name))
+                   ,return-type)))
+           (if *vulkan-trace*
+               (call-with-vulkan-trace-event
+                *vulkan-trace* ,definition-name
+                (list ,@(loop for name in argument-names
+                              collect `(list ',name ,name)))
+                #'call)
+               (call))))
+       ',lisp-name)))
+
 (defun start-vulkan-trace ()
   "Start a process-wide structured trace of calls crossing into Vulkan."
   (when *vulkan-trace*

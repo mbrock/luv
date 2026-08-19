@@ -1693,27 +1693,27 @@
   (queue :pointer)
   (present-info :pointer))
 
-(defvkfun "vkSetSwapchainPresentTimingQueueSizeEXT"
+(defvkdeviceproc "vkSetSwapchainPresentTimingQueueSizeEXT"
     checked-result
   (device :pointer)
   (swapchain :pointer)
   (size :uint32))
 
-(defvkfun "vkGetSwapchainTimingPropertiesEXT"
+(defvkdeviceproc "vkGetSwapchainTimingPropertiesEXT"
     checked-result
   (device :pointer)
   (swapchain :pointer)
   (timing-properties :pointer)
   (timing-properties-counter :pointer))
 
-(defvkfun "vkGetSwapchainTimeDomainPropertiesEXT"
+(defvkdeviceproc "vkGetSwapchainTimeDomainPropertiesEXT"
     checked-result
   (device :pointer)
   (swapchain :pointer)
   (time-domain-properties :pointer)
   (time-domains-counter :pointer))
 
-(defvkfun "vkGetPastPresentationTimingEXT"
+(defvkdeviceproc "vkGetPastPresentationTimingEXT"
     checked-result
   (device :pointer)
   (past-presentation-timing-info :pointer)
