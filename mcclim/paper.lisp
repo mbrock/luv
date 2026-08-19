@@ -317,7 +317,7 @@ pipelines and buffers, and the pass is no place to do that."
                   0))))
 
 
-(defmethod luvcraft:encode-luvcraft-overlay
+(luv:zdefmethod (luvcraft:encode-luvcraft-overlay :zone :paper/encode)
     ((overlay luvcraft-paper-overlay) session pass surface-texture)
   "Draw the sheet, then set the page on it."
   (let* ((mirror (widget-overlay-mirror overlay))
@@ -359,7 +359,7 @@ pipelines and buffers, and the pass is no place to do that."
             (luv:draw pass 6 (length glyphs)))))))
   overlay)
 
-(defmethod luvcraft:refresh-luvcraft-overlay
+(luv:zdefmethod (luvcraft:refresh-luvcraft-overlay :zone :paper/refresh)
     ((overlay luvcraft-paper-overlay) session)
   (let ((frame (widget-overlay-frame overlay)))
     (unless (equal (paper-paint-state frame) (paper-painted frame))

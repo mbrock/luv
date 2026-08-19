@@ -1118,7 +1118,7 @@ back, it holds its place instead of being dragged along by every arrival."
 (defclass luvcraft-communicator-overlay (luvcraft-world-widget-overlay)
   ((display :initarg :display :reader communicator-overlay-display)))
 
-(defmethod luvcraft:encode-luvcraft-overlay
+(luv:zdefmethod (luvcraft:encode-luvcraft-overlay :zone :telegram/encode)
     ((overlay luvcraft-communicator-overlay) session pass surface-texture)
   "Draw the panel flat on its wall, in the scene, with the world's depth."
   (declare (ignore pass))

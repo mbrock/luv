@@ -590,16 +590,16 @@ surface still cannot supply an image and this frame should be skipped."
                 (values slot slot-index image-index))))))
     nil))
 
-(defun %call-with-vulkan-canvas-frame (context function)
-  (with-cpu-trace-zone (:canvas/frame)
-    (ensure-vulkan-canvas-state context :frame :configured)
-    (unless (ensure-vulkan-canvas-swapchain context)
-      (return-from %call-with-vulkan-canvas-frame nil))
-    (let* ((device (context-device context))
-           (queue (device-queue device))
-           (encoder nil)
-           (commands nil))
-      (multiple-value-bind (slot slot-index image-index)
+(zdefun (%call-with-vulkan-canvas-frame :zone :canvas/frame)
+    (context function)
+  (ensure-vulkan-canvas-state context :frame :configured)
+  (unless (ensure-vulkan-canvas-swapchain context)
+    (return-from %call-with-vulkan-canvas-frame nil))
+  (let* ((device (context-device context))
+         (queue (device-queue device))
+         (encoder nil)
+         (commands nil))
+    (multiple-value-bind (slot slot-index image-index)
           (acquire-vulkan-canvas-image context)
         (unless slot
           (return-from %call-with-vulkan-canvas-frame nil))
@@ -660,7 +660,7 @@ surface still cannot supply an image and this frame should be skipped."
             (setf (vulkan-canvas-current-texture context) nil
                   (canvas-context-state context) :configured)
             (when commands (destroy commands))
-            (when encoder (destroy encoder))))))))
+            (when encoder (destroy encoder)))))))
 
 (defun call-with-vulkan-canvas-frame (context function)
   "Run one frame, then account for whatever the validation layer said.

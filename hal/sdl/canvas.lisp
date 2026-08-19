@@ -358,7 +358,7 @@ is finally created."
     (prog1 (sdl-canvas-requests canvas)
       (setf (sdl-canvas-requests canvas) nil))))
 
-(defun process-sdl-canvas-requests (canvas)
+(zdefun (process-sdl-canvas-requests :zone :canvas/process-requests) (canvas)
   (dolist (request (take-sdl-canvas-requests canvas))
     (handler-case
         (setf (sdl-canvas-request-values request)
@@ -1037,7 +1037,10 @@ key, so the swap has to track the key itself.")
        (make-instance 'canvas-window-resized-event
                       :timestamp timestamp :width width :height height)))))
 
-(defun handle-sdl-canvas-event (canvas event event-type)
+(zdefun (handle-sdl-canvas-event
+         :zone :canvas/event
+         :value event-type)
+    (canvas event event-type)
   ;; Keep the raw event tag: SDL_RegisterEvents may return a value absent from
   ;; cl-sdl3's static enum. Decode only the native events we understand.
   (cond
@@ -1195,7 +1198,8 @@ evidence that matters: whether the loop came back.")
         (max 0 (min requested slice))
         slice)))
 
-(defun run-sdl-canvas-frame (canvas timestamp)
+(zdefun (run-sdl-canvas-frame :zone :canvas/service-frame)
+    (canvas timestamp)
   "Service the clock once, under guard.  A frame that fails parks the clock
 in FRAME-FAILURE; a frame that runs counts."
   (multiple-value-bind (ran-p failure)

@@ -293,7 +293,7 @@ a Telegram console left running behind a film is a connection nobody closes."
            (ignore-errors (luvcraft:release-luvcraft-overlay overlay))
            nil))))
 
-(defmethod luvcraft:encode-luvcraft-overlay
+(luv:zdefmethod (luvcraft:encode-luvcraft-overlay :zone :film-browser/encode)
     ((overlay terminal-film-browser-overlay) session pass surface-texture)
   "Draw the browser's semantic command stream directly on its wall."
   (declare (ignore pass))

@@ -486,7 +486,7 @@ re-expressed in that space."
                     thereis (world-terrain-solid-p
                              world block-x block-y block-z)))))))))
 
-(defun step-block-world-player
+(zdefun (step-block-world-player :zone :simulation/player-step)
     (player world camera intent seconds &key jump-p (sync-camera-p t))
   "Advance the scalar player controller by one small physics step.
 

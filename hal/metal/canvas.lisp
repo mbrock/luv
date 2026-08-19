@@ -215,10 +215,9 @@
     (metal-native-object surface-texture))
    'luv.metal::value))
 
-(defun call-with-metal-canvas-frame (context function)
-  (with-cpu-trace-zone (:canvas/frame)
-    (ensure-metal-canvas-state context :frame :configured)
-    (luv.objective-c:with-autorelease-pool ()
+(zdefun (call-with-metal-canvas-frame :zone :canvas/frame) (context function)
+  (ensure-metal-canvas-state context :frame :configured)
+  (luv.objective-c:with-autorelease-pool ()
       ;; All selectors and resource relationships below have already crossed
       ;; the Lisp validation boundary.  Keep the inspectable exception bridge
       ;; for setup and diagnosis, but do established per-frame traffic as
@@ -284,7 +283,7 @@
               (when encoder
                 (destroy encoder))
               (when texture
-                (destroy texture)))))))))
+                (destroy texture))))))))
 
 (defmethod call-with-canvas-frame
     ((context metal-canvas-context) function)

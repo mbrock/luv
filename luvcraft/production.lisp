@@ -46,7 +46,7 @@
            (< (production-request-ticket left)
               (production-request-ticket right)))))
 
-(defun take-production-system-request (system)
+(zdefun (take-production-system-request :zone :production/take-request) (system)
   (sb-thread:with-mutex ((production-system-lock system))
     (setf (production-system-wake-p system) nil)
     (let ((best nil))
@@ -143,7 +143,8 @@ order intelligible while taking expensive work out of the frame callback."
            (lambda () (run-production-system system)) :name name))
     system))
 
-(defun schedule-production-request (system request)
+(zdefun (schedule-production-request :zone :production/schedule)
+    (system request)
   "Schedule the latest REQUEST for its semantic key and return its ticket."
   (check-type system single-worker-production-system)
   (check-type request production-request)

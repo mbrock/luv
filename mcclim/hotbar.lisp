@@ -319,14 +319,14 @@ the slot that has none stop looking like the same kind of thing.")
                    half-width 0.0 0.0 0.0
                    0.0 half-height 0.0 0.0)))))
 
-(defmethod luvcraft:encode-luvcraft-overlay
+(luv:zdefmethod (luvcraft:encode-luvcraft-overlay :zone :hotbar/encode)
     ((overlay luvcraft-hotbar-overlay) session pass surface-texture)
   (declare (ignore pass))
   (prepare-direct-widget-overlay
    overlay session surface-texture (hotbar-screen-state overlay))
   overlay)
 
-(defmethod luvcraft:refresh-luvcraft-overlay
+(luv:zdefmethod (luvcraft:refresh-luvcraft-overlay :zone :hotbar/refresh)
     ((overlay luvcraft-hotbar-overlay) session)
   (declare (ignore session))
   (let* ((frame (widget-overlay-frame overlay))

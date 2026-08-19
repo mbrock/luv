@@ -424,7 +424,7 @@ every cell makes the word louder than the block it is about."
                    half-width 0.0 0.0 0.0
                    0.0 half-height 0.0 0.0)))))
 
-(defmethod luvcraft:encode-luvcraft-overlay
+(luv:zdefmethod (luvcraft:encode-luvcraft-overlay :zone :inventory/encode)
     ((overlay luvcraft-inventory-overlay) session pass surface-texture)
   (declare (ignore pass))
   (when (inventory-overlay-visible-p overlay)
@@ -432,7 +432,7 @@ every cell makes the word louder than the block it is about."
      overlay session surface-texture (inventory-screen-state overlay)))
   overlay)
 
-(defmethod luvcraft:refresh-luvcraft-overlay
+(luv:zdefmethod (luvcraft:refresh-luvcraft-overlay :zone :inventory/refresh)
     ((overlay luvcraft-inventory-overlay) session)
   (declare (ignore session))
   (when (inventory-overlay-visible-p overlay)

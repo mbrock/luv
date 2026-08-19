@@ -344,7 +344,7 @@ not where it denotes one command.
   gazetteer commands.  Tests, generated vocabularies, formatters, and tiny
   renderer nodes remain outside the ambient census.
 
-* NEXT Convert the outer runtime boundaries
+* DONE Convert the outer runtime boundaries
 :PROPERTIES:
 :ID: G3CFYX
 :END:
@@ -364,6 +364,27 @@ streaming phases, and overlay refresh/encode each have stable ambient zones;
 loop owners attach semantic counts; a representative live capture stays
 legible rather than emitting per-element spans; and the relevant tests and
 both source-structure checks pass.
+
+Outcome: forty-two outer functions and methods now use the concise zoned
+definition forms.  SDL request draining, event dispatch, and native frame
+service; Vulkan and Metal frame ownership; production request, worker, and
+publication transactions; the streaming reconciliation phases; fixed-step
+simulation; frame encoding; terminal and McCLIM overlay refresh, preparation,
+and encoding all have stable semantic names.  Scheduling, publication,
+fixed-step, and retained-command owners carry their natural work counts.
+
+A live focused-phone frame produced 54 CPU zones and remained a readable
+frame -> simulation/streaming/presentation -> overlay tree.  It attributed
+about 4.36 MiB in total, including the terminal -> Telegram -> McCLIM overlay
+path, without per-glyph, per-cell, or per-command spans.  Caller-side
+=request-canvas-frame= and =call-on-sdl-canvas-thread= deliberately remain
+ordinary definitions: the former transports the same opt-in CPU trace onto
+the native thread, so opening that trace on both sides would manufacture
+cross-thread nesting.  Native request draining and frame service provide the
+honest ownership zones instead.
+
+The full test matrix, strict Parinfer source check, cold =luvcraft= system
+load, and wiki build pass with this coverage.
 
 * DONE Stream one chunk window under measurement
 :PROPERTIES:

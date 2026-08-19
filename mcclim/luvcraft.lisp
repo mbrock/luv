@@ -827,7 +827,7 @@ for a wall the answer is the same every frame and costs a few vector ops."
   (multiple-value-list
    (gpu-mirror-logical-size (widget-overlay-mirror overlay))))
 
-(defun prepare-direct-widget-overlay
+(luv:zdefun (prepare-direct-widget-overlay :zone :mcluv/prepare-overlay)
     (overlay session surface-texture state)
   "Publish STATE and return the destination frame's affine resources."
   (let ((target-format
@@ -840,7 +840,7 @@ for a wall the answer is the same every frame and costs a few vector ops."
       (luv:write-buffer (direct-widget-frame-buffer frame-state) state)
       frame-state)))
 
-(defmethod luvcraft:encode-luvcraft-overlay
+(luv:zdefmethod (luvcraft:encode-luvcraft-overlay :zone :mcluv/encode-chassis)
     ((overlay luvcraft-widget-overlay) session pass surface-texture)
   (let ((mirror (widget-overlay-mirror overlay)))
     (when (gpu-mirror-prepared-commands mirror)
@@ -932,7 +932,13 @@ for a wall the answer is the same every frame and costs a few vector ops."
   ;; previous visible frame's text.
   (setf (widget-overlay-render-state overlay) nil))
 
-(defmethod luvcraft:encode-luvcraft-overlay :after
+(luv:zdefmethod (luvcraft:encode-luvcraft-overlay
+                 :zone :mcluv/encode-commands
+                 :value
+                 (length
+                  (gpu-mirror-prepared-commands
+                   (widget-overlay-mirror overlay))))
+    :after
     ((overlay luvcraft-direct-widget-overlay) session pass surface-texture)
   "Replay OVERLAY's retained McCLIM commands in exact painter order."
   (let* ((mirror (widget-overlay-mirror overlay))

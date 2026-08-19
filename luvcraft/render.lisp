@@ -854,7 +854,7 @@ submission that used them completes."
        (make-block-world-crosshair-vertices (first extent) (second extent))))
     extent))
 
-(defun encode-luvcraft-frame
+(zdefun (encode-luvcraft-frame :zone :luvcraft/encode-frame)
     (session surface-texture encoder &key readback-buffer sample)
   ;; The canvas callback is the ownership boundary for all GPU replacement.
   ;; MOP notifications from SLY workers have only marked these artifacts dirty.
@@ -1243,29 +1243,33 @@ submission that used them completes."
                          (not (and focus
                                    (luvcraft-focus-carries-player-p focus))))
                 (incf (luvcraft-session-physics-accumulator session) seconds)
-                (loop while (>= (luvcraft-session-physics-accumulator session)
-                                +player-physics-step+)
-                      do (step-block-world-player
-                          player (luvcraft-session-world session)
-                          (luvcraft-session-camera session)
-                          intent
-                          +player-physics-step+
-                          :jump-p (movement-intent-jump-requested-p intent)
-                          :sync-camera-p
-                          (not (luvcraft-session-focus-camera-active-p session)))
-                         (setf (movement-intent-jump-requested-p intent) nil)
-                         (decf (luvcraft-session-physics-accumulator session)
-                               +player-physics-step+))))
+                (zone (:simulation/player-steps
+                       :value
+                       (floor (luvcraft-session-physics-accumulator session)
+                              +player-physics-step+))
+                  (loop while (>=
+                               (luvcraft-session-physics-accumulator session)
+                               +player-physics-step+)
+                        do (step-block-world-player
+                            player (luvcraft-session-world session)
+                            (luvcraft-session-camera session)
+                            intent
+                            +player-physics-step+
+                            :jump-p (movement-intent-jump-requested-p intent)
+                            :sync-camera-p
+                            (not
+                             (luvcraft-session-focus-camera-active-p session)))
+                           (setf (movement-intent-jump-requested-p intent) nil)
+                           (decf (luvcraft-session-physics-accumulator session)
+                                 +player-physics-step+)))))
             (advance-luvcraft-focus-camera session seconds)
             (advance-player-body (luvcraft-session-body session)
                                  session seconds)))
         (with-luvcraft-frame-timing
             (sample luvcraft-frame-sample-streaming-seconds
                     :luvcraft/streaming)
-          (with-cpu-trace-zone (:streaming/reconcile-residency)
-            (maintain-luvcraft-residency session))
-          (with-cpu-trace-zone (:streaming/evict-products)
-            (evict-luvcraft-products session)))
+          (maintain-luvcraft-residency session)
+          (evict-luvcraft-products session))
         (with-luvcraft-frame-timing
             (sample luvcraft-frame-sample-presentation-seconds
                     :luvcraft/presentation)

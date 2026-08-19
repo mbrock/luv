@@ -992,34 +992,34 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
                   value (gpu-medium-image-vertices target-medium))))
       target-medium))
 
-(defun repaint-gpu-mirror (mirror &key (present-p t))
+(luv:zdefun (repaint-gpu-mirror :zone :mcluv/repaint)
+    (mirror &key (present-p t))
   "Rebuild MIRROR's retained triangle stream as one complete McCLIM frame."
-  (luv:with-cpu-trace-zone (:mcluv/repaint)
-    (let* ((sheet (mirror-sheet mirror))
-           (sheets (gpu-sheet-paint-order sheet))
-           (media
-             (remove-duplicates
-              (remove-if-not
-               (lambda (medium) (typep medium 'luv-gpu-medium))
-               (mapcar #'gpu-sheet-presentation-medium sheets))
-              :test #'eq)))
+  (let* ((sheet (mirror-sheet mirror))
+         (sheets (gpu-sheet-paint-order sheet))
+         (media
+           (remove-duplicates
+            (remove-if-not
+             (lambda (medium) (typep medium 'luv-gpu-medium))
+             (mapcar #'gpu-sheet-presentation-medium sheets))
+            :test #'eq)))
+    (dolist (medium media)
+      (setf (fill-pointer (gpu-medium-vertices medium)) 0)
+      (setf (fill-pointer (gpu-medium-analytic-vertices medium)) 0)
+      (setf (fill-pointer (gpu-medium-relief-vertices medium)) 0)
+      (setf (fill-pointer (gpu-medium-gradient-vertices medium)) 0)
+      (setf (fill-pointer (gpu-medium-image-vertices medium)) 0)
+      (setf (fill-pointer (gpu-medium-commands medium)) 0)
+      (incf (gpu-medium-buffering-depth medium)))
+    (unwind-protect
+         (repaint-sheet sheet +everywhere+)
       (dolist (medium media)
-        (setf (fill-pointer (gpu-medium-vertices medium)) 0)
-        (setf (fill-pointer (gpu-medium-analytic-vertices medium)) 0)
-        (setf (fill-pointer (gpu-medium-relief-vertices medium)) 0)
-        (setf (fill-pointer (gpu-medium-gradient-vertices medium)) 0)
-        (setf (fill-pointer (gpu-medium-image-vertices medium)) 0)
-        (setf (fill-pointer (gpu-medium-commands medium)) 0)
-        (incf (gpu-medium-buffering-depth medium)))
-      (unwind-protect
-           (repaint-sheet sheet +everywhere+)
-        (dolist (medium media)
-          (decf (gpu-medium-buffering-depth medium))))
-      ;; Each pane owns a semantic medium, but one mirror owns the ordered GPU
-      ;; frame. The top-level stream is its compact presentation buffer.
-      (compose-gpu-mirror-media mirror)
-      (when present-p
-        (present-mirror mirror)))))
+        (decf (gpu-medium-buffering-depth medium))))
+    ;; Each pane owns a semantic medium, but one mirror owns the ordered GPU
+    ;; frame. The top-level stream is its compact presentation buffer.
+    (compose-gpu-mirror-media mirror)
+    (when present-p
+      (present-mirror mirror))))
 
 (defmethod service-luv-frame-events ((mirror luv-gpu-mirror))
   (let* ((sheet (mirror-sheet mirror))
@@ -2118,15 +2118,17 @@ family name adopted."
   (assert (not (mirror-embedded-p mirror)))
   (luv:present-canvas-frame context function))
 
-(defun render-gpu-mirror-frame (mirror &key readback-buffer)
+(luv:zdefun (render-gpu-mirror-frame
+             :zone :mcluv/frame
+             :value
+             (length
+              (gpu-medium-commands (sheet-medium (mirror-sheet mirror)))))
+    (mirror &key readback-buffer)
   (let ((medium (sheet-medium (mirror-sheet mirror))))
-    (luv:with-cpu-trace-zone
-        (:mcluv/frame
-         :tracy-value (length (gpu-medium-commands medium)))
-      (when (and (mirror-embedded-p mirror)
-                 (zerop (length (gpu-medium-commands medium))))
-        (setf (gpu-mirror-prepared-commands mirror) nil)
-        (return-from render-gpu-mirror-frame mirror))
+    (when (and (mirror-embedded-p mirror)
+               (zerop (length (gpu-medium-commands medium))))
+      (setf (gpu-mirror-prepared-commands mirror) nil)
+      (return-from render-gpu-mirror-frame mirror))
       ;; Drawing may continue on the McCLIM side while canvas presentation
       ;; crosses onto its native frame thread. Upload one immutable frame
       ;; snapshot so the allocation size and the bytes written cannot drift.
@@ -2309,7 +2311,7 @@ family name adopted."
                      (luv:encode
                       encoder
                       (luv:make-gpu-copy-texture-to-buffer-command
-                       :source surface :destination readback-buffer))))))))))))
+                       :source surface :destination readback-buffer)))))))))))
   mirror)
 
 (defmethod present-mirror ((mirror luv-gpu-mirror))

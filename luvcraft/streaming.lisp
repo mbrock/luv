@@ -47,14 +47,14 @@ presentation; deterministic captures wait for the broader default set."
     :reader block-mesh-production-request-absent-neighbor-policy)
    (snapshot :initarg :snapshot :reader block-mesh-production-request-snapshot)))
 
-(defmethod perform-production-request ((request block-mesh-production-request))
-  (with-cpu-trace-zone (:production/mesh-chunk)
-    (mesh-block-snapshot
-     (make-instance
-      'exposed-face-mesher
-      :absent-neighbor-policy
-      (block-mesh-production-request-absent-neighbor-policy request))
-     (block-mesh-production-request-snapshot request))))
+(zdefmethod (perform-production-request :zone :production/mesh-chunk)
+    ((request block-mesh-production-request))
+  (mesh-block-snapshot
+   (make-instance
+    'exposed-face-mesher
+    :absent-neighbor-policy
+    (block-mesh-production-request-absent-neighbor-policy request))
+   (block-mesh-production-request-snapshot request)))
 
 (defclass block-light-production-request (production-request)
   ((region :initarg :region :reader block-light-production-request-region)
@@ -67,18 +67,18 @@ presentation; deterministic captures wait for the broader default set."
 (defstruct block-light-production-payload
   region cells-visited elapsed-seconds)
 
-(defmethod perform-production-request ((request block-light-production-request))
-  (with-cpu-trace-zone (:production/light-world)
-    (let ((start (get-internal-real-time)))
-      (multiple-value-bind (region visited)
-          (solve-light-region-using
-           (block-light-production-request-solver request)
-           (block-light-production-request-region request))
-        (make-block-light-production-payload
-         :region region :cells-visited visited
-         :elapsed-seconds
-         (/ (- (get-internal-real-time) start)
-            (coerce internal-time-units-per-second 'double-float)))))))
+(zdefmethod (perform-production-request :zone :production/light-world)
+    ((request block-light-production-request))
+  (let ((start (get-internal-real-time)))
+    (multiple-value-bind (region visited)
+        (solve-light-region-using
+         (block-light-production-request-solver request)
+         (block-light-production-request-region request))
+      (make-block-light-production-payload
+       :region region :cells-visited visited
+       :elapsed-seconds
+       (/ (- (get-internal-real-time) start)
+          (coerce internal-time-units-per-second 'double-float))))))
 
 (defclass block-chunk-load-payload ()
   ((key :initarg :key :reader block-chunk-load-payload-key)
@@ -148,29 +148,29 @@ the session's outstanding-work and cancellation bookkeeping."))
      :landmarks (little-world-landmarks-for-chunk source world key)
      :edits captured-edits)))
 
-(defmethod perform-production-request ((request little-world-load-request))
+(zdefmethod (perform-production-request :zone :production/load-chunk)
+    ((request little-world-load-request))
   "Generate one isolated chunk and transfer only its dense content columns."
-  (with-cpu-trace-zone (:production/load-chunk)
-    (destructuring-bind (chunk-x chunk-y chunk-z)
-        (second (production-request-key request))
-      (let* ((source (make-instance 'little-world-source
-                                    :seed (little-world-load-request-seed request)))
-             (world (make-block-world
-                     :chunk-width (little-world-load-request-width request)
-                     :chunk-height (little-world-load-request-height request)
-                     :chunk-depth (little-world-load-request-depth request)
-                     :source source)))
-        (materialize-block-world-chunk source world chunk-x chunk-y chunk-z)
-        (dolist (landmark (little-world-load-request-landmarks request))
-          (destructuring-bind (block x y z) landmark
-            (setf (world-block-at world x y z) block)))
-        (dolist (edit (little-world-load-request-edits request))
-          (destructuring-bind (block x y z) edit
-            (setf (world-block-at world x y z) block)))
-        (let ((chunk (world-chunk-at world chunk-x chunk-y chunk-z)))
-          (make-instance 'block-chunk-load-payload
-                         :key (list chunk-x chunk-y chunk-z)
-                         :content (block-chunk-content chunk)))))))
+  (destructuring-bind (chunk-x chunk-y chunk-z)
+      (second (production-request-key request))
+    (let* ((source (make-instance 'little-world-source
+                                  :seed (little-world-load-request-seed request)))
+           (world (make-block-world
+                   :chunk-width (little-world-load-request-width request)
+                   :chunk-height (little-world-load-request-height request)
+                   :chunk-depth (little-world-load-request-depth request)
+                   :source source)))
+      (materialize-block-world-chunk source world chunk-x chunk-y chunk-z)
+      (dolist (landmark (little-world-load-request-landmarks request))
+        (destructuring-bind (block x y z) landmark
+          (setf (world-block-at world x y z) block)))
+      (dolist (edit (little-world-load-request-edits request))
+        (destructuring-bind (block x y z) edit
+          (setf (world-block-at world x y z) block)))
+      (let ((chunk (world-chunk-at world chunk-x chunk-y chunk-z)))
+        (make-instance 'block-chunk-load-payload
+                       :key (list chunk-x chunk-y chunk-z)
+                       :content (block-chunk-content chunk))))))
 
 (defclass luvcraft-chunk-product ()
   ((coordinate :initarg :coordinate
@@ -284,7 +284,10 @@ but nothing could regenerate them once evicted."))
         (maintain-generated-luvcraft-residency session world player radius)
         (call-next-method))))
 
-(defun maintain-luvcraft-residency (session)
+(zdefun (maintain-luvcraft-residency
+         :zone :streaming/reconcile-residency
+         :value (hash-table-count (luvcraft-session-desired-chunks session)))
+    (session)
   "Reconcile desired residency without generating chunks on the frame thread."
   (let ((world (luvcraft-session-world session)))
     (maintain-block-world-residency
@@ -464,7 +467,11 @@ published independently."
      staged)
     groups))
 
-(defun discard-stale-luvcraft-staged-products (session)
+(zdefun (discard-stale-luvcraft-staged-products
+         :zone :streaming/discard-stale
+         :value
+         (hash-table-count (luvcraft-session-staged-chunk-products session)))
+    (session)
   (let ((discarded nil)
         (staged (luvcraft-session-staged-chunk-products session)))
     (maphash
@@ -477,7 +484,11 @@ published independently."
     (dolist (key discarded) (remhash key staged))
     (length discarded)))
 
-(defun publish-ready-luvcraft-meshes (session)
+(zdefun (publish-ready-luvcraft-meshes
+         :zone :streaming/publish-meshes
+         :value
+         (hash-table-count (luvcraft-session-staged-chunk-products session)))
+    (session)
   "Atomically replace every complete stale mesh cohort at a frame boundary."
   (let ((published 0)
         (retired nil)
@@ -512,7 +523,10 @@ published independently."
                    when (/= a b) return (< a b)
                    finally (return nil))))))
 
-(defun schedule-luvcraft-chunk-loads (session)
+(zdefun (schedule-luvcraft-chunk-loads
+         :zone :streaming/schedule-loads
+         :value (hash-table-count (luvcraft-session-desired-chunks session)))
+    (session)
   (let* ((world (luvcraft-session-world session))
          (source (block-world-source world))
          (center (luvcraft-session-residency-center session))
@@ -542,7 +556,10 @@ published independently."
                           (luvcraft-session-production-system session)
                           request))))))))
 
-(defun schedule-luvcraft-meshes (session)
+(zdefun (schedule-luvcraft-meshes
+         :zone :streaming/schedule-meshes
+         :value (hash-table-count (luvcraft-session-desired-chunks session)))
+    (session)
   "Capture at most the configured number of immutable mesh inputs this frame."
   (let* ((world (luvcraft-session-world session))
          (products (luvcraft-session-chunk-products session))
@@ -609,7 +626,16 @@ published independently."
                    (lighting-state-arrivals state))
           t)))
 
-(defun schedule-luvcraft-lighting (session)
+(zdefun (schedule-luvcraft-lighting
+         :zone :streaming/schedule-lighting
+         :value
+         (let ((state (luvcraft-session-lighting-state session)))
+           (if state
+               (+ (hash-table-count (lighting-state-dirty-cells state))
+                  (hash-table-count (lighting-state-arrivals state))
+                  (hash-table-count (lighting-state-departures state)))
+               0)))
+    (session)
   "Reconcile cell edits incrementally or schedule a residency-wide relight.
 
 Authored edits normally touch one settled cell and are much cheaper to
@@ -662,7 +688,11 @@ loop.  A stale product simply fails its own validation here.  Product kinds
 whose visible dependencies span several chunks may stage a complete candidate
 here and install its publication cohort later at the frame boundary."))
 
-(defmethod publish-production-result
+(zdefmethod (publish-production-result
+             :zone :production/publish-mesh
+             :value
+             (truncate (length (block-mesh-vertices mesh))
+                       +block-mesh-floats-per-vertex+))
     ((session luvcraft-session) (request block-mesh-production-request) mesh)
   (let* ((snapshot (block-mesh-production-request-snapshot request))
          (key (block-mesh-snapshot-key snapshot))
@@ -702,7 +732,9 @@ here and install its publication cohort later at the frame boundary."))
           (unless completed-p
             (when buffer (destroy buffer))))))))
 
-(defmethod publish-production-result
+(zdefmethod (publish-production-result
+             :zone :production/publish-light
+             :value (block-light-production-payload-cells-visited payload))
     ((session luvcraft-session) (request block-light-production-request) payload)
   (let* ((state (luvcraft-session-lighting-state session))
          (world (luvcraft-session-world session))
@@ -725,7 +757,7 @@ here and install its publication cohort later at the frame boundary."))
           changed)
         (mark-luvcraft-lighting-for-retry state))))
 
-(defmethod publish-production-result
+(zdefmethod (publish-production-result :zone :production/publish-chunk)
     ((session luvcraft-session) (request block-chunk-load-request) payload)
   (let* ((key (block-chunk-load-payload-key payload))
          (world (luvcraft-session-world session)))
@@ -737,7 +769,14 @@ here and install its publication cohort later at the frame boundary."))
          world x y z
          (block-chunk-load-payload-content payload))))))
 
-(defun drain-luvcraft-production (session)
+(zdefun (drain-luvcraft-production
+         :zone :streaming/drain-results
+         :value
+         (min (luvcraft-session-publication-limit session)
+              (sb-concurrency:mailbox-count
+               (production-system-result-mailbox
+                (luvcraft-session-production-system session)))))
+    (session)
   "Publish a bounded number of completed CPU products this frame."
   (loop repeat (luvcraft-session-publication-limit session)
         do (multiple-value-bind (result present-p)
@@ -760,7 +799,10 @@ here and install its publication cohort later at the frame boundary."))
                      (publish-production-result
                       session request (production-result-value result))))))))
 
-(defun evict-luvcraft-products (session)
+(zdefun (evict-luvcraft-products
+         :zone :streaming/evict-products
+         :value (hash-table-count (luvcraft-session-desired-chunks session)))
+    (session)
   (let ((evicted nil)
         (desired (luvcraft-session-desired-chunks session))
         (product-tables
@@ -776,26 +818,20 @@ here and install its publication cohort later at the frame boundary."))
                products)
       (dolist (key evicted) (remhash key products)))))
 
-(defun refresh-luvcraft-mesh (session)
+(zdefun (refresh-luvcraft-mesh :zone :streaming/refresh) (session)
   "Advance asynchronous loading/meshing without doing either computation here."
-  (with-cpu-trace-zone (:streaming/drain-results)
-    (drain-luvcraft-production session))
-  (with-cpu-trace-zone (:streaming/schedule-loads)
-    (schedule-luvcraft-chunk-loads session))
+  (drain-luvcraft-production session)
+  (schedule-luvcraft-chunk-loads session)
   ;; Batch arrivals, then solve a frozen region off-thread.  Publication still
   ;; precedes mesh capture, so dependency stamps observe complete light fields.
-  (with-cpu-trace-zone (:streaming/schedule-lighting)
-    (schedule-luvcraft-lighting session))
+  (schedule-luvcraft-lighting session)
   ;; A result captured before this frame's lighting publication may already
   ;; be stale.  Reject it before deciding whether a complete mesh cohort can
   ;; cross the frame boundary.
-  (with-cpu-trace-zone (:streaming/discard-stale)
-    (discard-stale-luvcraft-staged-products session))
-  (with-cpu-trace-zone (:streaming/publish-meshes)
-    (publish-ready-luvcraft-meshes session))
+  (discard-stale-luvcraft-staged-products session)
+  (publish-ready-luvcraft-meshes session)
   (when (luvcraft-lighting-settled-p session)
-    (with-cpu-trace-zone (:streaming/schedule-meshes)
-      (schedule-luvcraft-meshes session)))
+    (schedule-luvcraft-meshes session))
   (setf (luvcraft-session-meshed-world-revision session)
         (block-world-revision (luvcraft-session-world session)))
   (luvcraft-session-products-in-order session))

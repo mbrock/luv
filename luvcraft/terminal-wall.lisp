@@ -1519,7 +1519,7 @@ two materials can share one placement stage without sharing a name."
           (alexandria:when-let ((portal (terminal-display-portal display)))
             (luvcraft-overlay-live-shader-pipelines portal)))))
 
-(defmethod refresh-luvcraft-overlay
+(zdefmethod (refresh-luvcraft-overlay :zone :terminal/refresh)
     ((display terminal-display) (session luvcraft-session))
   (alexandria:when-let ((overlay (terminal-display-delegate-overlay display)))
     (refresh-luvcraft-overlay overlay session))
@@ -1607,7 +1607,7 @@ supplies a uniform whose camera is expressed in that space instead."))
               group)
         group)))
 
-(defmethod encode-luvcraft-overlay
+(zdefmethod (encode-luvcraft-overlay :zone :terminal/encode)
     ((display terminal-display) session pass surface-texture)
   (when (terminal-surface-current-p
          (terminal-display-surface display) session)

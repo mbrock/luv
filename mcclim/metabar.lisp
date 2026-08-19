@@ -335,7 +335,7 @@ shader, the mark that turning it rebuilds one."
                    half-width 0.0 0.0 0.0
                    0.0 half-height 0.0 0.0)))))
 
-(defmethod luvcraft:encode-luvcraft-overlay
+(luv:zdefmethod (luvcraft:encode-luvcraft-overlay :zone :metabar/encode)
     ((overlay luvcraft-metabar-overlay) session pass surface-texture)
   (declare (ignore pass))
   (when (plusp (metabar-slide overlay))
@@ -343,7 +343,7 @@ shader, the mark that turning it rebuilds one."
      overlay session surface-texture (metabar-screen-state overlay)))
   overlay)
 
-(defmethod luvcraft:refresh-luvcraft-overlay
+(luv:zdefmethod (luvcraft:refresh-luvcraft-overlay :zone :metabar/refresh)
     ((overlay luvcraft-metabar-overlay) session)
   ;; Ease the slide toward open or closed; a closed and fully slid-away
   ;; bar removes itself.
