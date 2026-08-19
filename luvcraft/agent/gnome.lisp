@@ -16,8 +16,22 @@
 ;;; line is subtitled.
 
 (defparameter *gnome-name* "gnome")
-(defparameter *gnome-body-radius* 0.62)
-(defparameter *gnome-body-world-height* 1.42)
+(defparameter *gnome-body-radius* 0.95
+  "The radius of the bounding sphere the billboard proxy covers.
+
+The figure itself stands in the shader's own frame, feet at local zero and
+hat tip at 1.70; this sphere, centred 0.85 above his feet, is only what the
+rasterizer needs to know about him.")
+(defparameter *gnome-body-world-height* 1.70
+  "The height of the hat's tip above the cell the gnome stands in.
+
+What is above a gnome -- his speech bubbles -- is measured from here.")
+
+(defparameter *gnome-face-height* 0.94
+  "The height of the gnome's eyes above the cell he stands in.
+
+What looks at a gnome is aimed here.  It is not the top of him: aiming a
+conversation at the top of a gnome frames his hat.")
 
 (defparameter +clear-ink+ (compose-in (make-rgb-color 0 0 0) (make-opacity 0.0))
   "A pane background that paints nothing: colour with zero opacity, which the
@@ -88,6 +102,12 @@ When MAKE-P is true, create and attach one if the cell is unoccupied."
                        (+ (gnome-y gnome) *gnome-body-world-height* lift)
                        (+ (gnome-z gnome) 0.5)))
 
+(defun gnome-face-position (gnome &optional (lift 0.0))
+  "The point between the gnome's eyes, LIFT blocks higher."
+  (luvcraft::make-vec3 (+ (gnome-x gnome) 0.5)
+                       (+ (gnome-y gnome) *gnome-face-height* lift)
+                       (+ (gnome-z gnome) 0.5)))
+
 ;;; ---------------------------------------------------------------------
 ;;; The embodied agent as an overlay and a focus
 
@@ -131,7 +151,7 @@ When MAKE-P is true, create and attach one if the cell is unoccupied."
         (and (slab (luvcraft::vec3-x origin) (luvcraft::vec3-x direction)
                    (- center-x half-width) (+ center-x half-width))
              (slab (luvcraft::vec3-y origin) (luvcraft::vec3-y direction)
-                   (gnome-y gnome) (+ (gnome-y gnome) 1.45d0))
+                   (gnome-y gnome) (+ (gnome-y gnome) 1.70d0))
              (slab (luvcraft::vec3-z origin) (luvcraft::vec3-z direction)
                    (- center-z half-width) (+ center-z half-width))
              near)))))
@@ -144,7 +164,7 @@ When MAKE-P is true, create and attach one if the cell is unoccupied."
 leave room above its hat for the bubbles."
   (let* ((camera (luvcraft:luvcraft-session-camera session))
          (eye (luvcraft:camera-position camera))
-         (face (gnome-head-position gnome -0.4))
+         (face (gnome-face-position gnome))
          (dx (- (luvcraft::vec3-x face) (luvcraft::vec3-x eye)))
          (dz (- (luvcraft::vec3-z face) (luvcraft::vec3-z eye)))
          (flat (max (sqrt (+ (* dx dx) (* dz dz))) 0.001))
@@ -152,9 +172,9 @@ leave room above its hat for the bubbles."
          (distance *gnome-audience-distance*)
          (position (luvcraft::make-vec3
                     (- (luvcraft::vec3-x face) (* ux distance))
-                    (+ (luvcraft::vec3-y face) 0.35)
+                    (+ (luvcraft::vec3-y face) 0.10)
                     (- (luvcraft::vec3-z face) (* uz distance))))
-         (target (gnome-head-position gnome 0.15))
+         (target (gnome-face-position gnome 0.02))
          (tdx (- (luvcraft::vec3-x target) (luvcraft::vec3-x position)))
          (tdy (- (luvcraft::vec3-y target) (luvcraft::vec3-y position)))
          (tdz (- (luvcraft::vec3-z target) (luvcraft::vec3-z position)))
@@ -461,7 +481,7 @@ title or bubble shows only what its pane draws."))
          (bob (* 0.025 (sin (* phase 2.2))))
          (data (gnome-body-instance-data overlay)))
     (setf (aref data 0) (coerce (+ (gnome-x gnome) 0.5) 'single-float)
-          (aref data 1) (coerce (+ (gnome-y gnome) 0.70 bob) 'single-float)
+          (aref data 1) (coerce (+ (gnome-y gnome) 0.85 bob) 'single-float)
           (aref data 2) (coerce (+ (gnome-z gnome) 0.5) 'single-float)
           (aref data 3) (coerce *gnome-body-radius* 'single-float))
     (luv:write-buffer (gnome-body-instance-buffer overlay) data))
