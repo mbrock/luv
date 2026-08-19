@@ -119,6 +119,8 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:*session*
            #:play
            #:stop-playing
+           #:start-luvcraft-lobby
+           #:stop-luvcraft-lobby
            #:+little-world-source-version+
            #:+luvcraft-save-format-version+
            #:absent-chunk-light-semantics
@@ -448,6 +450,16 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:luvcraft-session-meshed-world-revision
            #:luvcraft-session-outstanding-production
            #:luvcraft-session-overlays
+           #:luvcraft-session-lobby-client
+           #:lobby-client
+           #:lobby-client-id
+           #:lobby-client-name
+           #:lobby-client-snapshot
+           #:lobby-client-value
+           #:lobby-peer
+           #:lobby-peer-id
+           #:lobby-peer-name
+           #:receive-lobby-publication
            #:luvcraft-session-critters
            #:luvcraft-session-particle-system
            #:luvcraft-session-player

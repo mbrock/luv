@@ -161,9 +161,12 @@
   :depends-on ("luvcraft/core"
                "luvcraft/mcclim"
                "luvcraft/telegram"
+               "mqtt/net"
                "alexandria")
   :serial t
-  :components ((:module "luvcraft/clim"
+  :components ((:file "luvcraft/lobby")
+               (:file "mcclim/lobby")
+               (:module "luvcraft/clim"
                 :serial t
                 :components ((:file "package")
                              (:file "frame")
@@ -231,7 +234,9 @@
   :description "Executable claims for the complete game's CLIM command vocabulary."
   :version "0.0.1"
   :depends-on ("luvcraft" "rove")
-  :components ((:file "luvcraft/clim/tests"))
+  :serial t
+  :components ((:file "luvcraft/clim/tests")
+               (:file "luvcraft/lobby-tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
              (unless (uiop:symbol-call '#:rove '#:run-suite

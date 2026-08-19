@@ -2158,6 +2158,7 @@ NIL to let the display choose a comfortable window."
                 (list atlas-width atlas-height))
                (setf session new-session)
                (update-luvcraft-session-title session)
+               (start-luvcraft-lobby session)
                (attach-luvcraft-hud session)
                (maintain-luvcraft-residency session)
                (refresh-luvcraft-mesh session)
@@ -2206,6 +2207,7 @@ NIL to let the display choose a comfortable window."
         ;; actually explains why the game did not open.
         (with-release-warnings
           (when session
+            (releasing :lobby (stop-luvcraft-lobby session))
             (releasing :chunk-products
               (destroy-luvcraft-chunk-products session)))
           (dolist (pipeline pipelines)
@@ -2232,6 +2234,7 @@ LUVCRAFT-RELEASE-ERROR.  See WITH-RELEASE-REPORT."
   ;; belong to the session until this explicit teardown.
   (setf (luvcraft-session-running-p session) nil)
   (with-release-report
+    (releasing :lobby (stop-luvcraft-lobby session))
     (releasing :focus (unfocus-luvcraft-session session))
     (let ((canvas (luvcraft-session-canvas session)))
       (releasing :canvas-quiescence

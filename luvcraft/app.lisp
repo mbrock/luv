@@ -198,6 +198,9 @@ SHADOW-FRAME-ROWS walks it after the camera in whole texels.")
    ;; can watch the game.
    (frame-mirror :initform nil :accessor luvcraft-session-frame-mirror)
    (overlays :initform nil :accessor luvcraft-session-overlays)
+   (lobby-client :initform nil :accessor luvcraft-session-lobby-client
+                 :documentation
+                 "The reconnecting tailnet radio owned by this session, or NIL.")
    (modal-focus :initform nil :accessor luvcraft-session-modal-focus)
    (focus-camera-origin :initform nil
                         :accessor luvcraft-session-focus-camera-origin)
@@ -453,6 +456,21 @@ LUVCRAFT/MCCLIM specializes this at the session boundary and returns its
 attached overlay."))
 
 (defmethod attach-luvcraft-hud ((session t))
+  (declare (ignore session))
+  nil)
+
+(defgeneric start-luvcraft-lobby (session)
+  (:documentation
+   "Start SESSION's optional background lobby service and return it."))
+
+(defmethod start-luvcraft-lobby ((session t))
+  (declare (ignore session))
+  nil)
+
+(defgeneric stop-luvcraft-lobby (session)
+  (:documentation "Cooperatively stop SESSION's lobby service, if loaded."))
+
+(defmethod stop-luvcraft-lobby ((session t))
   (declare (ignore session))
   nil)
 
