@@ -17,12 +17,14 @@
 
 (in-package #:luft.render.shaders)
 
-(defconstant +brick-size+ 7
+(defconstant +brick-size+ 5
   "Sites per task workgroup and faces per mesh workgroup.
 
-Seven faces subdivided into 6x6 grids are 252 vertices, just under the mesh
-threadgroup limit of 256; the flat pipeline uses the same bricks at four
-vertices a face.")
+Five faces subdivided into 6x6 grids are 180 vertices and 250 triangles,
+inside Vulkan's guaranteed limits of 256 mesh-output vertices and 256
+mesh-output primitives.  The old seven-face brick fit the vertex limit but
+declared 350 primitives, which could hang a driver instead of rejecting the
+pipeline; the flat pipeline uses the same bricks at four vertices a face.")
 (defconstant +frame-binding+ 0)
 (defconstant +sites-binding+ 1)
 (defconstant +bricks-binding+ 2)

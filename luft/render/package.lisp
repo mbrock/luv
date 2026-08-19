@@ -58,6 +58,8 @@ of packed LUFT sites, drawn by task and mesh shaders.")
            #:renderer-camera
            #:renderer-extent
            #:renderer-style
+           #:renderer-pipeline-styles
+           #:renderer-effects
            #:*bevel-radius*
            #:*chamfer-width*
            #:*arris-softness*

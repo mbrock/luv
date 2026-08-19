@@ -131,6 +131,14 @@ whose face turns away from the camera by the exact plane test, scales its quad
 to a point instead of branching on output counts, which the language requires
 to be uniform.
 
+The rounded and chamfered mesh makes the brick grain a hardware contract, not
+just a batching choice.  One face's 6×6 point grid emits 36 vertices and 50
+triangles, so a five-face workgroup declares 180 vertices and 250 primitives,
+inside =VK_EXT_mesh_shader='s guaranteed minima of 256 for each.  The earlier
+seven-face brick declared only 252 vertices but 350 primitives; RADV accepted
+the pipeline and then reset the GPU on its first submission.  The generated
+SPIR-V and a host test now state both halves of the budget.
+
 The fragment stage is textureless by design: a top, side, and bottom tone,
 a soft line where faces meet, sun and ambient light, and fog toward the sky.
 The whole atelier is =luft/render=: a scene holds the solid chain and its
@@ -138,6 +146,14 @@ products, a renderer holds the GPU objects, [[lisp:luft.render:render-to-png]]
 draws headlessly, and [[lisp:luft.render:start-viewer]] opens a window with a
 fly camera.  Its test turns the camera straight up and expects only sky,
 which is the frustum test doing real work.
+
+The standalone atelier creates only the flat surface pipeline by default.
+=LUFT_RENDER_MODE=clear= submits a clear and copy with no shader pipeline;
+=sky= adds only the background; =flat=, =bevel=, =chamfer=, and =paper= each
+create only their named surface pipeline; =full= restores every style plus the
+sky and lens.  Thus a driver failure can be localized by increasing one
+semantic layer at a time rather than constructing and dispatching the entire
+atelier before the first frame.
 
 * Fillets and bevels belong to edge and vertex sites
 :PROPERTIES:

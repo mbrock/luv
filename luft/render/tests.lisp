@@ -60,6 +60,34 @@
     ;; The surface is closed: its boundary vanishes.
     (ok (zerop (luft:chain-count (luft:boundary-chain surface))))))
 
+(deftest rounded-mesh-output-fits-vulkan-guaranteed-limits
+  ;; Two bevel rings make a 6x6 point grid and 5x5x2 triangles per face.
+  ;; VK_EXT_mesh_shader guarantees at least 256 of each output kind.
+  (let* ((side (luft.render.shaders::bevel-grid-side))
+         (vertices (* side side luft.render.shaders:+brick-size+))
+         (primitives (* 2 (1- side) (1- side)
+                        luft.render.shaders:+brick-size+)))
+    (ok (= 180 vertices))
+    (ok (= 250 primitives))
+    (ok (<= vertices 256))
+    (ok (<= primitives 256))))
+
+(deftest standalone-render-modes-select-only-their-own-pipelines
+  (multiple-value-bind (mode style pipelines effects)
+      (luft.render::standalone-render-options "clear")
+    (ok (equal '(:clear :flat nil nil)
+               (list mode style pipelines effects))))
+  (multiple-value-bind (mode style pipelines effects)
+      (luft.render::standalone-render-options "bevel")
+    (ok (equal '(:bevel :bevel (:bevel) nil)
+               (list mode style pipelines effects))))
+  (multiple-value-bind (mode style pipelines effects)
+      (luft.render::standalone-render-options "full")
+    (ok (eq :full mode))
+    (ok (eq :bevel style))
+    (ok (equal '(:flat :bevel :chamfer :paper) pipelines))
+    (ok (equal '(:sky :lens) effects))))
+
 (deftest brick-spheres-enclose-their-faces
   (let* ((scene (make-demo-scene))
          (sites (scene-sites scene))
