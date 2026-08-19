@@ -578,11 +578,11 @@ more than the edges of walls, the way weather wears a top.")
 (define-light :overcast
   ;; No sun to speak of: everything is the sky, occlusion does all the
   ;; drawing, and the world reads as form rather than as light.
-  :sun '(0.10 0.15 0.98) :sun-color '(0.42 0.44 0.48)
-  :sky '(0.74 0.77 0.82) :ground '(0.32 0.32 0.30)
-  :fill '(-0.3 -0.3 0.6) :fill-strength 0.30
-  :ambient 0.72 :fog 210.0 :exposure 0.95 :shadow 0.35 :occlusion 0.95
-  :sheen 0.06)
+  :sun '(0.10 0.15 0.98) :sun-color '(0.26 0.27 0.29)
+  :sky '(0.70 0.72 0.76) :ground '(0.30 0.30 0.29)
+  :fill '(-0.3 -0.3 0.6) :fill-strength 0.34
+  :ambient 0.86 :fog 210.0 :exposure 0.92 :shadow 0.18 :occlusion 1.0
+  :sheen 0.04)
 
 (defmacro with-light ((name) &body body)
   "Evaluate BODY under the light called NAME."

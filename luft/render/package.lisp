@@ -145,6 +145,7 @@ mesh shaders.")
            #:atelier-cameras
            #:atelier-pieces
            #:render-piece-sheet
+           #:render-view
            #:render-light-sheet
            #:fill-disc
            #:fill-ring

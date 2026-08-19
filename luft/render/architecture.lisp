@@ -236,7 +236,73 @@ the top of a wall one does not want turfed."
 
 (defun atelier-pieces ()
   "Every piece the atelier can build, in the order a sheet would show them."
-  '(:arcade :turret :viaduct :grotto :headland))
+  '(:samples :arcade :turret :viaduct :grotto :headland))
+
+;;; The samples: one small object repeated in every stock there is.  A
+;;; material sheet with one material a column tells you what each is; this
+;;; tells you what they are next to each other, which is the only question
+;;; a world of several stocks ever asks.  The object is chosen to give each
+;;; of them everything it can show: a top face and a side, an arris the
+;;; light can catch, a re-entrant corner for the weathering to sit in, and
+;;; a thin tongue whose edges are almost all chamfer.
+
+(defmethod atelier-scene ((piece (eql :samples)))
+  (let* ((world (make-world :horizontal-bits 6))
+         (grade 4)
+         (names (material-names)))
+    ;; Flat ground, with a bank across the back so the picture ends in a
+    ;; hillside rather than at the edge of the world.  The bank wanders,
+    ;; because a contour that does not is a flight of steps.
+    (lay-ground world
+                :height (lambda (x y)
+                          (+ grade
+                             (* 0.6 (sin (/ x 17.0)) (cos (/ y 13.0)))
+                             ;; A low escarpment, steep enough that the
+                             ;; slope rule leaves it bare: a plain grey
+                             ;; backdrop, which is what a chart wants.
+                             (min 13.0
+                                  (max 0.0 (* 4.5 (+ (- y 50)
+                                                     (* 0.8 (sin (/ x 6.0)))
+                                                     (* 0.5 (sin (/ x 2.7)))))))))
+                :stock :granite)
+    (grass-the-flats world :flat 1 :depth 1)
+    (loop for name in names
+          for index from 0
+          for x = (+ 13 (* 12 (mod index 4)))
+          for y = (+ 18 (* 14 (floor index 4)))
+          for base = (or (column-top world x y) grade)
+          do (with-stock (name)
+               ;; A plinth, a block on it, a step on that.
+               (fill-box world (- x 4) (+ x 4) (- y 4) (+ y 4) base base)
+               (fill-box world (- x 3) (+ x 3) (- y 3) (+ y 3)
+                         (+ base 1) (+ base 2))
+               (fill-box world (- x 2) (+ x 2) (- y 2) (+ y 2)
+                         (+ base 3) (+ base 4))
+               ;; A quarter cut out of it: two re-entrant corners and a
+               ;; hollow deep enough for the weathering to collect in.
+               (fill-box world (- x 3) (1- x) (- y 3) (1- y)
+                         (+ base 1) (+ base 4) nil)
+               ;; A tongue standing out over the plinth, nearly all arris.
+               (fill-box world (1- x) (1+ x) (+ y 3) (+ y 6)
+                         (+ base 1) (+ base 1))
+               ;; And a post, so each stock shows a tall thin thing too.
+               (fill-box world (+ x 3) (+ x 3) (- y 4) (- y 4)
+                         (+ base 1) (+ base 5))))
+    (world-scene world)))
+
+(defmethod atelier-cameras ((piece (eql :samples)))
+  (list
+   ;; High and back, so every stock stands in one frame and each can be
+   ;; judged against its neighbours under one light.
+   (cons :all (studio-camera 31.0 1.0 24.0 :look-x 31.0 :look-y 34.0
+                             :look-z 3.0 :field-of-view 1.06))
+   ;; Obliquely across the rows at eye height, where the arrises catch the
+   ;; light and the near stocks can be judged against the far ones.
+   (cons :row (studio-camera 8.0 3.0 11.0 :look-x 52.0 :look-y 30.0
+                             :look-z 6.0 :field-of-view 0.62))
+   ;; Close on two of them, for the figure rather than the tone.
+   (cons :close (studio-camera 17.0 6.0 10.0 :look-x 25.0 :look-y 19.0
+                               :look-z 6.0 :field-of-view 0.62))))
 
 ;;; The arcade: a wall with round-headed openings, on a plinth, under a
 ;;; cornice.  It is the smallest thing that is unmistakably architecture:
@@ -641,6 +707,21 @@ the top of a wall one does not want turfed."
     (render-contact-sheet pathname
                           :scene (atelier-scene piece)
                           :cameras (atelier-cameras piece)
+                          :columns (list (list style))
+                          :width width :height height
+                          :supersample supersample)))
+
+(defun render-view (pathname piece camera &key (light *light*) (style :stock)
+                                               (width 1200) (height 750)
+                                               (supersample 2))
+  "Render one named CAMERA of PIECE at PATHNAME: a picture, not a sheet."
+  (let ((*light* light)
+        (views (atelier-cameras piece)))
+    (render-contact-sheet pathname
+                          :scene (atelier-scene piece)
+                          :cameras (list (or (assoc camera views)
+                                             (error "~S has no ~S camera; it
+has ~{~S~^, ~}." piece camera (mapcar #'car views))))
                           :columns (list (list style))
                           :width width :height height
                           :supersample supersample)))
