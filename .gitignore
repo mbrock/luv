@@ -1,3 +1,4 @@
+.claude/worktrees
 .sly-server.log
 .sly-server.pid
 .sly-server.start.lock
