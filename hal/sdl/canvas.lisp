@@ -123,6 +123,33 @@
   #-(or sbcl darwin)
   `(progn ,@body))
 
+(defun linux-console-tty-p ()
+  "Whether this process has a Linux virtual console as its controlling terminal."
+  #+linux
+  (let ((name (ignore-errors
+                (uiop:run-program '("tty") :output :string :error-output nil))))
+    (when name
+      (let ((name (string-trim '(#\Space #\Tab #\Newline #\Return) name)))
+        (and (uiop:string-prefix-p "/dev/tty" name)
+             (let ((number (subseq name (length "/dev/tty"))))
+               (and (plusp (length number))
+                    (every #'digit-char-p number)))))))
+  #-linux
+  nil)
+
+(defun select-sdl-video-driver ()
+  "Choose KMSDRM on a real console, otherwise a safe headless SDL backend.
+
+An explicit SDL_VIDEODRIVER, DISPLAY, or WAYLAND_DISPLAY always wins.  This
+must run before SDL video initialization: it covers standalone executables as
+well as processes started through the Nix development shell."
+  (when (and (null (uiop:getenv "SDL_VIDEODRIVER"))
+             (null (uiop:getenv "DISPLAY"))
+             (null (uiop:getenv "WAYLAND_DISPLAY")))
+    (sb-posix:setenv "SDL_VIDEODRIVER"
+                     (if (linux-console-tty-p) "kmsdrm" "offscreen")
+                     1)))
+
 (defun call-with-sdl-main-thread (function)
   "Call FUNCTION where synchronous SDL canvas work can use the native main thread.
 
@@ -1433,6 +1460,7 @@ servicing its window~@[; ending this image in ~,1F s unless it recovers~]"
            (handler-case
                (progn
                  (prepare-sdl-canvas-host canvas)
+                 (select-sdl-video-driver)
                  (unless (sdl3:init :video)
                    (error "SDL video initialization failed: ~A"
                           (sdl3:get-error)))
