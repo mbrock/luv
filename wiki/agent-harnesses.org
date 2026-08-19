@@ -661,10 +661,14 @@ future luv agent surface should probably accept as given:
   prepare/commit (#IOGTGD), nxt's firms (#3J1QNQ), swash's host-per-session
   slice that survives its client (#KZG2ZF).
 
-* IDEA A luv agent surface would inherit these seams
+* DONE A luv agent surface would inherit these seams
 :PROPERTIES:
 :ID: QQRFZ1
 :END:
+
+/Closed by/ [[file:agent-in-the-world.org][An agent in the little world]],
+whose NEXT mark #YDAQNO is the concrete first slice and whose figures cite
+the ones below as premises.
 
 /Intent./ Not a plan yet: an agent already talks to luv through the world
 terminal (#NMAD2U) and through =./sly=; if luv grows its own harness --

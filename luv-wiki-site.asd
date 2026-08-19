@@ -15,6 +15,7 @@
                  (:file "world-terminal")
                  (:file "agent-harnesses")
                  (:file "autolith")
+                 (:file "agent-in-the-world")
                  (:file "clim-in-the-world")
                  (:file "box3d-architecture")
                  (:file "domains-and-bundles")

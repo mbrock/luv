@@ -144,6 +144,10 @@ The following are starting paths rather than a table of settled doctrine.
   harness in detail: a REPL as the prompt line, tools as fbound functions,
   request-local context with a budget, restarts as a tool argument, and a
   self-modification ladder from =self.eval= to replay-probed image commits.
+- [[file:agent-in-the-world.org][An agent in the little world]] designs luv's own
+  agent surface in CLIM terms: tools as commands with presentation-typed
+  arguments, results as presentations read under a model view, cassettes
+  drawn on the HUD and committed to a wall, and an agent with a body.
 - [[file:luft.org][LUFT: packed sites, chains, and the mesh atelier]] names every vertex,
   edge, face, and cell of a cubical world with one fixnum, treats a block
   world as a 3-chain whose boundary is its surface, and draws that surface

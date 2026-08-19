@@ -1,0 +1,258 @@
+#+title: An agent in the little world
+#+startup: overview
+
+An agent should be able to stand inside luvcraft the way a player does: see
+what is there, act on it with the same verbs, and leave a record others can
+read.  The harness notes ([[file:agent-harnesses.org][#YY6EYZ]]) settled what
+any such surface must do.  This page says how luv does it: with the CLIM
+vocabulary the game already speaks -- command tables, presentation types,
+views, output records -- and with the world itself as the place the agent's
+work shows up.  The OpenAI websocket client
+([[file:../openai/agent.lisp][openai/agent.lisp]]) is the first provider
+behind it; nothing here depends on which provider it is.
+
+* The agent surface is a command table, a view, and a handle space
+:PROPERTIES:
+:ID: 4Y8Q8B
+:END:
+
+The four harnesses converged on seams (#YY6EYZ), and CLIM already has a name
+for each of them.  That is the whole design bet of this page:
+
+| harness seam                           | CLIM concept                                              |
+|----------------------------------------+-----------------------------------------------------------|
+| tool definition and JSON schema        | =define-command= with presentation-typed arguments        |
+| argument validation, "did you mean"    | =accept-from-string=, =complete-input=, presentation errors |
+| typed result with several renderings   | a presentation, presented under different /views/         |
+| short stable handles                   | presentation history, a =handle= presentation type        |
+| "what can I do with this?"             | =find-applicable-translators= on a presentation           |
+| history as data, re-rendered later     | the output-record history of the agent's stream           |
+
+Nothing in the table is a new mechanism.  The work is to choose the
+presentation types, write the views, and route a provider's tool calls
+through =accept= and =execute-frame-command= instead of around them.
+#0IF4TY through #1W8K03 take the rows in turn; #9K823O and #14ZP6S take the
+rendering from nxt; #UTQQV9 and #5JDNKF put the agent in the world.
+
+* A tool is a CLIM command whose arguments are presentation types
+:PROPERTIES:
+:ID: 0IF4TY
+:END:
+
+[[file:../luvcraft/clim/command-menu.lisp][command-menu.lisp]] already answers
+"what can I do?" for the player by walking the command tables, and it skips
+parameterized commands because M-x cannot yet prompt for their arguments.
+The agent's tool list is the same walk with the same gap.  One
+
+#+begin_src lisp
+(define-command (com-place-block :command-table luvcraft-world)
+    ((kind 'block-kind) (where 'block-position))
+  ...)
+#+end_src
+
+should yield a keystroke, an M-x entry that prompts through =accept=, and a
+JSON-schema tool whose arguments are parsed with =accept-from-string= per
+presentation type.  Finishing parameterized M-x and building the agent
+surface are one piece of work.
+
+Concretely: a =command-tool= is an =openai:tool= wrapping a command name; a
+generic =presentation-type-json-schema= with EQL methods on type names
+(=integer=, =string=, =(member ...)= as an enum, =block-position= as an
+object of three integers, =handle= as a pattern) derives the schema once
+from the command's parser table; and =call-tool= accepts each argument by
+its declared type and hands the finished command to the canvas thread
+(#T6PEVY).  An argument the model gets wrong is a presentation-parse error
+rendered back to it, not a crash, which is nxt's "failures as values"
+(#KZ019W) without writing a second validator.
+
+* A tool result is a presentation, and the model reads it under a view
+:PROPERTIES:
+:ID: WS5OEX
+:END:
+
+Froth's lesson is that /what the tool found/, /how much the model sees/,
+and /how it is spelled for a provider/ are three policies (#5GU1VI).  In
+CLIM a tool body does not return a string; it =present=s objects to a
+recording stream.  The three policies become three views over the same
+records:
+
+- =+model-view+= renders compact text for the provider: the output of
+  =present-to-string= on the record, folded by an =:around= method that
+  keeps a head and a tail and a handle (#1W8K03) when the body is long.
+  Folding lives here and nowhere else, so tool bodies never truncate.
+- =+trace-view+= is the three-line preview used when an old turn is replayed
+  inside a later prompt: for remembering, not for working, exactly as froth
+  distinguishes live from trace.
+- The ordinary view, and the cassette view (#9K823O), are what people see
+  on the HUD and on a terminal wall.
+
+Because rendering is =present= to a string stream, escaping and layout are
+in one place; there is no string concatenation anywhere between a tool and
+the model.  And because the records are kept, the whole transcript can be
+redrawn under any view later without rerunning a thing, which is the
+"history is data first" point of #YY6EYZ with the output-record history as
+the data.
+
+* Handles are presentation history
+:PROPERTIES:
+:ID: 1W8K03
+:END:
+
+Sheaf's six characters (#9P5YLW) and this wiki's figure IDs are the same
+idea: a short handle the model can cite by typing.  In the agent stream,
+every presented object of interest -- a chunk, a block position, a session,
+a folded body -- is entered in a presentation history under a short id, and
+=handle= is a presentation type whose =accept= method resolves the id back
+to the live object.  The model says =#AB12= in a tool argument; =accept=
+gives the tool the object; an unknown or stale handle is a parse error the
+model can read.  The pager (#FDMSXG) is then nothing special: =accept= a
+handle, =present= a slice of it under the model view.
+
+* The cassette is one presentation file
+:PROPERTIES:
+:ID: 9K823O
+:END:
+
+Before nxt deleted its UI runtime (nxtui commit =3d692d0=), a tool call was
+drawn as a /cassette/ (#7FFNVT): a trace as XML (=turn > thought | call[name,
+status, elapsed] > args, result[kind], affordances[key]=), and one XSLT
+stylesheet, =cassette/baltic-birch-v1.xsl=, holding the whole visual
+language in about three hundred lines organized as
+
+- a /spine/ keyed on call status (=✓= in the tool's colour, =!= rose, =?=
+  amber for pending approval, a spinner while running, =N= denied),
+- a /tool identity/ as one template pair per tool name (search amber, read
+  emerald, shell orange, fallback teal),
+- a /meta chip/ per result kind (=⨉309 22K=, =109L 3K=, =exit 0=),
+- a /window/ per result kind (hit list and "...N more", head of a file,
+  stdout and stderr tinted apart, a fact's fields, an error's message),
+- an /affordances/ strip -- =[A] see all 309  [P] by path  [C] context for
+  #1= -- "the same surface the model parses as its action menu."
+
+=<xsl:template match="result[@kind='matches']">= is a declarative visitor
+case, and =define-presentation-method present (object (type matches) stream
+(view cassette-view))= is the same case with a live object behind it.  So
+the luv cassette is one file: a =cassette-view=, presentation methods keyed
+on result kind for the window and the chip, a spine keyed on call status,
+the per-tool colour as a generic on the command name, and the affordances
+strip as =find-applicable-translators= printed as a menu.  That last point
+is the nicest: the affordances are not a list a tool author writes, they
+are whatever translators apply to the result's type.
+
+* Draw and print: live cards and committed records
+:PROPERTIES:
+:ID: 14ZP6S
+:END:
+
+The same nxtui tree (=src/nxtrt/ui_runtime.hpp=, =src/nxtai/tool_ui.cpp=)
+drew a batch of parallel tool calls with two verbs: =draw(layout)= replaces
+a /live surface/ shown as a bottom HUD, and =print(layout)= commits a
+rendered block to /durable scrollback/ above it.  Each tool call was a child
+with its own slot; the batch drew a column of the children's slots; each
+child redrew its card every frame with elapsed milliseconds while running,
+flipped it to ok or error with a few sanitized lines of output and a memory
+chip when done, held it for 900 ms so a person could see the flip, and
+returned.  When the batch finished the live column was cleared and the
+assistant's text was printed as a block.
+
+Luv has both surfaces already.  The HUD overlay (the legend and the tape
+prompt are McCLIM frames composited over the view) is the live surface:
+running calls are =call-view= objects, each presented every frame under
+#9K823O with its status.  The terminal wall and the agent's output-record
+history are the committed surface.  Keep the settle delay: a card that
+flips and vanishes in the same frame cannot be read.  And keep the
+no-terminal fallback -- when nothing is drawing, one line per call on a
+plain stream -- so the agent is usable from =./sly= alone.
+
+* A shell scope is a session object with a screen and an observation
+:PROPERTIES:
+:ID: UTQQV9
+:END:
+
+nxtui's =demo/shell_scope_demo.cpp= ran a shell as =systemd-run --user
+--scope= so it had a cgroup by construction, then forked four siblings into
+one scope: a PTY reader, a stdin pump, a 33 ms cgroup sampler keeping a
+sparkline series, and a 16 ms renderer drawing memory and CPU sparklines
+above the live PTY screen.  The =observation= (unit, cgroup path, samples)
+rode along inside the tool result, which is how a finished cassette could
+show a memory chip (#KZ019W).
+
+In luv the scope is a CLOS object rather than a coroutine zone: a
+=shell-session= owning a PTY (the world terminal already has one serialized
+PTY owner, #NMAD2U), a sampler thread, and its observation, all presentable.
+A shell a tool starts should /become/ a terminal-material wall the agent
+stands beside and the player can walk up to.  The concurrency story is the
+one [[file:../mcclim/telegram.lisp][mcclim/telegram.lisp]] already states
+for the Telegram console: a mailbox one way, a published immutable snapshot
+the other, and no lock anywhere.  Swash's default applies too (#I0U0LI): a
+shell tool returns within a few seconds with either the exit and a
+screenful, or a handle to the still-running session and the command to
+follow it.
+
+* The agent has a body
+:PROPERTIES:
+:ID: 5JDNKF
+:END:
+
+An agent that is only a websocket is a chat window with extra steps.  The
+point of doing this inside luvcraft is that the agent can be /somewhere/:
+a presence object with a position and a facing, so =look=, =walk= and
+=place= are presentation-typed commands relative to it, and its transcript
+is the terminal wall it is standing at.  The playful surface follows from
+that without new machinery:
+
+- a thought (the =thought= element of a trace, a reasoning summary from the
+  provider) is a thought bubble drawn above the avatar, a McCLIM frame in
+  world space like the instruments in #AX9ZTA;
+- a tool call in flight is the avatar typing at its wall while the live
+  card (#14ZP6S) sits on the HUD;
+- a parked call -- a question for the player, froth's park-versus-finish
+  (#IOGTGD) -- is an =accept= against the /player/, offered as a HUD gadget
+  like the tape prompt, and the turn resumes when it returns;
+- the evaluator is the durable image itself, the =./sly eval= shape with a
+  three-second detach (#ENM1B2); a form that returns objects gets them
+  presented, so the agent receives handles and applicable commands for what
+  it just computed -- froth's discover, inspect, act loop by way of
+  translators and =describe=.
+
+* The turn runs beside the canvas, and commands cross by mailbox
+:PROPERTIES:
+:ID: T6PEVY
+:END:
+
+Commands run on the canvas thread; a provider turn runs on its own.
+=call-tool= must therefore never call =execute-frame-command= from the
+websocket thread.  It accepts its arguments, posts the finished command to
+the session's mailbox, and waits with a timeout for the record the canvas
+thread produced -- froth's prepare/commit split (#IOGTGD), with =accept= as
+the prepare.  A call that does not finish within the bound returns a
+handle to the running work rather than silence, which is this project's
+own rule stated from the harness side.  Several calls in one turn are
+several threads and several cards; the batch is over when each has
+returned or been given a handle.
+
+* NEXT Wire three commands into an agent and draw their cassettes
+:PROPERTIES:
+:ID: YDAQNO
+:END:
+
+/Intent./ The first slice: a =luvcraft.agent= layer where a =command-tool=
+wraps a CLIM command (#0IF4TY), =presentation-type-json-schema= derives its
+schema, tool bodies =present= to a recording stream read under
+=+model-view+= (#WS5OEX), and a =cassette-view= draws each call on the HUD
+while it runs and commits it when done (#9K823O, #14ZP6S).  Three commands
+are enough to see the whole shape: =eval= against the image, =look= at a
+handle, and =place-block=.  Parameterized M-x should light up from the same
+parser-table walk.
+
+/Evidence./ [[file:../openai/agent.lisp][openai/agent.lisp]] already runs a
+turn with =call-tool= dispatch on a =tool= class, so the provider side needs
+no change to start.  The command tables and M-x walk exist in
+=luvcraft/clim/=.  The HUD overlay path exists for the legend and tape
+prompt.  The rest of this page is the design.
+
+/Done when./ An agent asked to put a stone block next to the player does
+it through =com-place-block= via =accept-from-string=, its three calls
+appear as cassettes on the HUD and then on a wall, and a =./sly= session
+with no window gets the same transcript as plain lines.  The evidence
+paragraph then records what the model actually did with the handles.
