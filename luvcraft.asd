@@ -88,7 +88,7 @@
   :description "One-shot command-line tools for luvcraft development."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luvcraft/core" "uiop")
+  :depends-on ("luvcraft/core" "mqtt/net" "uiop")
   :build-operation "program-op"
   :build-pathname "build/luv"
   :entry-point "luvcraft.tools:main"
@@ -99,7 +99,8 @@
     :components ((:file "package")
                  (:file "runner")
                  (:file "block-world")
-                 (:file "gazetteer")))))
+                 (:file "gazetteer")
+                 (:file "lobby")))))
 
 (defsystem "luvcraft/mcclim"
   :description "McCLIM command surfaces embedded in a live luvcraft session."
@@ -180,7 +181,7 @@
   :description "An agent in the little world: tools as CLIM commands, results as presentations."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luvcraft" "openai" "alexandria" "sb-concurrency")
+  :depends-on ("luvcraft" "openai" "mqtt/net" "alexandria" "sb-concurrency")
   :serial t
   :components ((:module "luvcraft/agent"
                 :serial t

@@ -67,9 +67,25 @@ subclasses for live text, reasoning, tool, or lifecycle presentation."))
   (declare (ignore agent event))
   nil)
 
+(defvar *api-key-fallbacks* '()
+  "Functions of no arguments tried in order for an API key when OPENAI_API_KEY
+is unset; the first non-empty string wins.  Applications push providers here
+(luvcraft asks the tailnet lobby).")
+
+(defun default-api-key ()
+  "OPENAI_API_KEY from the environment, else the first *API-KEY-FALLBACKS*
+answer."
+  (let ((env (uiop:getenv "OPENAI_API_KEY")))
+    (if (and env (plusp (length env)))
+        env
+        (loop for fallback in *api-key-fallbacks*
+              for key = (ignore-errors (funcall fallback))
+              when (and (stringp key) (plusp (length key)))
+                return key))))
+
 (defun make-agent (&key model instructions tools reasoning-effort reasoning-summary
                      (url "wss://api.openai.com/v1/responses")
-                     (api-key (uiop:getenv "OPENAI_API_KEY"))
+                     (api-key (default-api-key))
                      (class 'agent) initargs)
   "Open one OpenAI Responses WebSocket connection.
 
@@ -79,7 +95,7 @@ proxies can speak the same small protocol.  CLASS names the AGENT subclass
 to make, with INITARGS for its own slots, so an application can specialize
 HANDLE-AGENT-EVENT and CALL-TOOL on its own agent."
   (unless (and api-key (plusp (length api-key)))
-    (error 'openai-error :detail "OPENAI_API_KEY is not set"))
+    (error 'openai-error :detail "OPENAI_API_KEY is not set (and no fallback, such as the lobby store, had it)"))
   (unless model
     (error 'openai-error :detail ":MODEL is required"))
   (let* ((socket (websocket-driver:make-client

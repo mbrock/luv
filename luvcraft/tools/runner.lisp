@@ -12,6 +12,8 @@
   (format stream "             [--day-start R] [--day-step R] [--difference-scale R]~%")
   (format stream "             [--shadow-only 1]~%")
   (format stream "  eval FORM [--package PACKAGE]~%")
+  (format stream "  lobby get KEY | put KEY [VALUE] | rm KEY | ls | host~%")
+  (format stream "        (the tailnet lobby's value store; put without VALUE reads stdin)~%")
   (format stream "  help~%"))
 
 (define-condition command-line-error (error)
@@ -129,6 +131,8 @@
      (command-gazetteer arguments))
     ((string= command "eval")
      (command-eval arguments))
+    ((string= command "lobby")
+     (command-lobby arguments))
     (t
      (command-line-error "Unknown command ~A." command))))
 

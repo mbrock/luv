@@ -269,13 +269,137 @@ is alive."
 
 ;;;; The lobby
 
-(defparameter *lobby-host* "luv-lobby.whale-justice.ts.net"
-  "The tailnet MQTT lobby's MagicDNS name (see lobby/README.md).")
+(defparameter *lobby-host* nil
+  "The lobby broker's host, when set by hand or by LUV_LOBBY_HOST.  NIL means
+discover it on the local tailnet; see LOBBY-HOST.")
 
 (defparameter *lobby-port* 1883)
+
+(defparameter *lobby-service-name* "luv-lobby"
+  "The Tailscale Service name the lobby is published under (lobby/README.md).
+Its MagicDNS name is this name under the tailnet's MagicDNS suffix.")
+
+(defvar *discovered-lobby-host* nil
+  "The host DISCOVER-LOBBY-HOST last found, so the tailscale CLI is asked once.")
+
+(defun tailnet-magic-dns-suffix ()
+  "This machine's tailnet MagicDNS suffix (\"example.ts.net\"), asked of the
+local tailscale CLI, or NIL when there is no tailscale here or it is down.
+Runs tailscale status --json and looks for the MagicDNSSuffix string; no JSON
+reader needed for one key."
+  (ignore-errors
+   (let* ((output (with-output-to-string (out)
+                    (uiop:run-program '("tailscale" "status" "--json")
+                                      :output out :error-output nil
+                                      :input nil :ignore-error-status t)))
+          (key "\"MagicDNSSuffix\"")
+          (at (search key output)))
+     (when at
+       ;; After the key comes a colon, then the quoted value.
+       (let* ((colon (position #\: output :start (+ at (length key))))
+              (open (and colon (position #\" output :start colon)))
+              (close (and open (position #\" output :start (1+ open)))))
+         (when (and open close (< (1+ open) close))
+           (subseq output (1+ open) close)))))))
+
+(defun discover-lobby-host ()
+  "Find the lobby on the local tailnet: the service name under this tailnet's
+MagicDNS suffix, or the bare service name (MagicDNS search domains usually
+resolve it) when the suffix cannot be learned.  Cached in
+*DISCOVERED-LOBBY-HOST*; set that to NIL to look again."
+  (or *discovered-lobby-host*
+      (setf *discovered-lobby-host*
+            (let ((suffix (tailnet-magic-dns-suffix)))
+              (if suffix
+                  (format nil "~A.~A" *lobby-service-name* suffix)
+                  *lobby-service-name*)))))
+
+(defun lobby-host ()
+  "The host to reach the lobby at: *LOBBY-HOST* if set, else LUV_LOBBY_HOST,
+else whatever the tailnet says (DISCOVER-LOBBY-HOST)."
+  (or *lobby-host*
+      (let ((env (uiop:getenv "LUV_LOBBY_HOST")))
+        (and env (plusp (length env)) env))
+      (discover-lobby-host)))
+
+(defun lobby-available-p ()
+  "True when the lobby's name resolves from here.  Cheap and offline-safe; it
+says nothing about whether the broker answers."
+  (ignore-errors (and (host-address (lobby-host)) t)))
 
 (defun open-lobby-connection (&rest session-initargs &key &allow-other-keys)
   "Connect to the luv lobby.  Tailscale is the account system, so no
 username or password is needed; the broker knows who this node is."
-  (apply #'open-mqtt-connection :host *lobby-host* :port *lobby-port*
+  (apply #'open-mqtt-connection :host (lobby-host) :port *lobby-port*
          session-initargs))
+
+;;;; The lobby as a value store
+;;;;
+;;;; A retained message is a value the broker keeps for whoever subscribes
+;;;; next, which makes the lobby a small key-value store that follows the
+;;;; tailnet around instead of any one machine's environment variables.  The
+;;;; store is the topics under luv/store/; a key is the rest of the topic.
+;;;; Anyone on the tailnet who can reach the lobby can read it, which is the
+;;;; intended audience for things like API keys shared among my machines.
+
+(defparameter *lobby-store-prefix* "luv/store/")
+
+(defvar *lobby-client-counter* 0)
+
+(defun lobby-store-client-id ()
+  (format nil "store-~A-~D-~D" (or (ignore-errors (machine-instance)) "luv")
+          (sb-posix:getpid) (incf *lobby-client-counter*)))
+
+(defun store-topic (key)
+  (concatenate 'string *lobby-store-prefix* key))
+
+(defun lobby-put (key value)
+  "Store VALUE (a string or octet vector) under KEY in the lobby: a retained
+QoS 1 publish on luv/store/KEY, acknowledged before we return.  Returns VALUE."
+  (with-mqtt-connection (c :host (lobby-host) :port *lobby-port*
+                           :client-id (lobby-store-client-id))
+    (publish c (store-topic key) value :qos 1 :retain t))
+  value)
+
+(defun lobby-delete (key)
+  "Forget KEY: a retained empty payload clears the broker's retained message."
+  (with-mqtt-connection (c :host (lobby-host) :port *lobby-port*
+                           :client-id (lobby-store-client-id))
+    (publish c (store-topic key) "" :qos 1 :retain t))
+  key)
+
+(defun collect-retained (connection topic-filter)
+  "Subscribe to TOPIC-FILTER and return the retained publications under it.
+A ping after the subscribe is the end marker: the broker answers packets in
+order, so once the pong is back every retained message has arrived."
+  (subscribe connection (list topic-filter :qos 1))
+  (ping connection)
+  (loop for message = (and (connection-inbox connection) (pop (connection-inbox connection)))
+        while message collect message))
+
+(defun lobby-get (key &key (default nil))
+  "The value stored under KEY as a string, or DEFAULT when there is none.
+Signals the connection errors if the lobby cannot be reached, so a caller can
+tell absent from unreachable."
+  (with-mqtt-connection (c :host (lobby-host) :port *lobby-port*
+                           :client-id (lobby-store-client-id))
+    (let ((message (first (collect-retained c (store-topic key)))))
+      (if (and message (plusp (length (mqtt:publish-payload message))))
+          (mqtt:publish-payload-string message)
+          default))))
+
+(defun lobby-value (key)
+  "LOBBY-GET that answers NIL rather than erroring when the lobby is not
+there at all -- the shape for optional fallbacks like an API key."
+  (and (lobby-available-p)
+       (ignore-errors (lobby-get key))))
+
+(defun lobby-keys ()
+  "Every key in the store with its value, as an alist (KEY . VALUE)."
+  (with-mqtt-connection (c :host (lobby-host) :port *lobby-port*
+                           :client-id (lobby-store-client-id))
+    (loop for message in (collect-retained c (concatenate 'string *lobby-store-prefix* "#"))
+          for topic = (mqtt:publish-topic message)
+          when (plusp (length (mqtt:publish-payload message)))
+            collect (cons (subseq topic (length *lobby-store-prefix*))
+                          (mqtt:publish-payload-string message)))))

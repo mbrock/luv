@@ -76,4 +76,8 @@ outbound packets, and leaves the socket to somebody else.")
            #:connection-flush #:pump-connection #:pump-connection-until
            #:connection-await
            #:publish #:subscribe #:unsubscribe #:ping #:next-message
-           #:*lobby-host* #:*lobby-port* #:open-lobby-connection))
+           #:*lobby-host* #:*lobby-port* #:*lobby-service-name*
+           #:lobby-host #:discover-lobby-host #:tailnet-magic-dns-suffix
+           #:lobby-available-p #:open-lobby-connection
+           #:*lobby-store-prefix* #:lobby-put #:lobby-get #:lobby-value
+           #:lobby-delete #:lobby-keys))

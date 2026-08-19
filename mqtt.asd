@@ -24,7 +24,7 @@ lives in MQTT/NET."
   :description "A TCP connection that drives an MQTT session."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("mqtt" (:require #:sb-bsd-sockets))
+  :depends-on ("mqtt" "uiop" (:require #:sb-bsd-sockets) (:require #:sb-posix))
   :components ((:module "mqtt"
                 :components ((:file "net")))))
 

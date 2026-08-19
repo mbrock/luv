@@ -15,7 +15,15 @@ An MQTT 5 client in Common Lisp, written to talk to the tailnet lobby
   connects and waits for CONNACK; `publish`, `subscribe`, `unsubscribe`,
   `ping`, `next-message` block on the answer; `pump-connection` is the
   step they are built from and pings on the keep-alive schedule.
-  `open-lobby-connection` points at `luv-lobby.whale-justice.ts.net:1883`.
+  `open-lobby-connection` finds the lobby on the local tailnet: the
+  `luv-lobby` Service under the MagicDNS suffix that `tailscale status`
+  reports (`LUV_LOBBY_HOST` or `*lobby-host*` override it).
+- The lobby as a value store: retained messages under `luv/store/KEY`.
+  `lobby-put`, `lobby-get`, `lobby-delete`, `lobby-keys`, and the
+  error-swallowing `lobby-value` for optional fallbacks -- `openai:make-agent`
+  asks it for `OPENAI_API_KEY` when the environment lacks one.  From the
+  shell: `scripts/luv lobby put OPENAI_API_KEY` (value on stdin),
+  `scripts/luv lobby get KEY`, `ls`, `rm`.
 
 ```lisp
 (mqtt.net:with-mqtt-connection (c :host mqtt.net:*lobby-host* :client-id "me")

@@ -39,6 +39,13 @@ Coordinates are integer block cells: x and z are horizontal, y is up.
 Results may mention #ABCD handles; pass a handle back to describe-handle to
 read more about that thing.  Keep answers short; act rather than narrate.")
 
+;;; When the image was started without OPENAI_API_KEY, ask the tailnet lobby's
+;;; value store for it (mqtt/net.lisp): `./scripts/luv lobby put OPENAI_API_KEY`.
+(defun lobby-openai-api-key ()
+  (mqtt.net:lobby-value "OPENAI_API_KEY"))
+
+(pushnew 'lobby-openai-api-key openai:*api-key-fallbacks*)
+
 (defun make-world-agent (&key (session luvcraft:*session*)
                            (model *default-agent-model*)
                            (commands *default-agent-tools*)
