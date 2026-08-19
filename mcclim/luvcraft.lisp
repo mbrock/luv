@@ -40,6 +40,10 @@
                         :reader direct-widget-frame-states)
    (direct-image-bind-groups :initform (make-hash-table :test #'equal)
                              :reader direct-widget-image-bind-groups)
+   (direct-lattice-layout :initform nil
+                          :accessor direct-widget-lattice-layout)
+   (direct-lattice-bind-groups :initform (make-hash-table :test #'equal)
+                               :reader direct-widget-lattice-bind-groups)
    (text-device :initform nil :accessor world-widget-text-device)
    (text-layout :initform nil :accessor world-widget-text-layout)
    (text-vertex-module :initform nil
@@ -254,7 +258,8 @@ actual destination pixel."))
 
 (defun clear-world-widget-text-resources (overlay)
   (dolist (table (list (world-widget-text-bind-groups overlay)
-                       (direct-widget-image-bind-groups overlay)))
+                       (direct-widget-image-bind-groups overlay)
+                       (direct-widget-lattice-bind-groups overlay)))
     (maphash (lambda (key group)
                (declare (ignore key))
                (luv:destroy group))
@@ -276,6 +281,7 @@ actual destination pixel."))
         (direct-widget-depth-stencil overlay) nil
         (direct-widget-shape-layout overlay) nil
         (direct-widget-image-layout overlay) nil
+        (direct-widget-lattice-layout overlay) nil
         (direct-widget-image-sampler overlay) nil
         (direct-widget-resources overlay) nil
         (world-widget-text-device overlay) nil
@@ -387,6 +393,12 @@ actual destination pixel."))
                           :entries '((:binding 0 :type :texture)
                                      (:binding 1 :type :texture)
                                      (:binding 2 :type :uniform-buffer)))))
+                      (lattice-layout
+                        (create
+                         (luv:make-bind-group-layout-descriptor
+                          :label "direct McCLIM lattice layout"
+                          :entries '((:binding 0 :type :texture)
+                                     (:binding 2 :type :uniform-buffer)))))
                       (sampler
                         (create
                          (luv:make-sampler-descriptor
@@ -394,6 +406,7 @@ actual destination pixel."))
                  (setf (direct-widget-shape-layout overlay) shape-layout
                        (direct-widget-image-layout overlay) image-layout
                        (world-widget-text-layout overlay) text-layout
+                       (direct-widget-lattice-layout overlay) lattice-layout
                        (direct-widget-image-sampler overlay) sampler)
                  (flet ((install (key name layout vertex fragment stride attrs)
                           (setf (gethash key (direct-widget-pipelines overlay))
@@ -441,6 +454,15 @@ actual destination pixel."))
                     :image "image" image-layout
                     (direct-widget-image-vertex-specification)
                     (image-roundrect-fragment-specification)
+                    48
+                    '((:shader-location 0 :offset 0 :format :float32x3)
+                      (:shader-location 1 :offset 12 :format :float32x3)
+                      (:shader-location 2 :offset 24 :format :float32x3)
+                      (:shader-location 3 :offset 36 :format :float32x3)))
+                   (install
+                    :lattice "lattice" lattice-layout
+                    (direct-widget-analytic-vertex-specification)
+                    (luv.analytic:lattice-fragment-specification)
                     48
                     '((:shader-location 0 :offset 0 :format :float32x3)
                       (:shader-location 1 :offset 12 :format :float32x3)
@@ -521,6 +543,22 @@ actual destination pixel."))
                   (:binding 1 :resource ,(direct-widget-image-sampler overlay))
                   (:binding 2
                    :resource ,(direct-widget-frame-buffer frame-state)))))))))
+
+(defun ensure-direct-widget-lattice-bind-group
+    (overlay paint surface-texture frame-state)
+  (let ((key (list paint surface-texture)))
+    (or (gethash key (direct-widget-lattice-bind-groups overlay))
+        (setf (gethash key (direct-widget-lattice-bind-groups overlay))
+              (luv:create
+               (direct-widget-device overlay)
+               (luv:make-bind-group-descriptor
+                :label "direct McCLIM lattice bindings"
+                :layout (direct-widget-lattice-layout overlay)
+                :entries
+                `((:binding 0 :resource ,(gpu-lattice-paint-view paint))
+                  (:binding 2
+                   :resource
+                   ,(direct-widget-frame-buffer frame-state)))))))))
 
 (defun ensure-world-widget-text-bind-group
     (overlay atlas surface-texture frame-state)
@@ -988,6 +1026,15 @@ for a wall the answer is the same every frame and costs a few vector ops."
                     (direct-widget-frame-shape-bind-group frame-state)
                     (gpu-gradient-analytic-command-first-vertex command)
                     (gpu-gradient-analytic-command-vertex-count command)))
+                  (gpu-prepared-lattice-command
+                   (values
+                    (gethash :lattice (direct-widget-pipelines overlay))
+                    (gpu-frame-state-analytic-buffer source-state)
+                    (ensure-direct-widget-lattice-bind-group
+                     overlay (gpu-prepared-lattice-command-paint command)
+                     surface-texture frame-state)
+                    (gpu-prepared-lattice-command-first-vertex command)
+                    (gpu-prepared-lattice-command-vertex-count command)))
                   (gpu-prepared-image-command
                    (values
                     (gethash :image (direct-widget-pipelines overlay))

@@ -229,7 +229,8 @@ offsets and of headers."
                    (:file "slug-harfbuzz")
                    (:file "slug-truetype")
                    (:file "slug-cache")
-                   (:file "slug")))
+                   (:file "slug")
+                   (:file "lattice")))
      (:module "msl"
       :pathname "metal/msl"
       :serial t

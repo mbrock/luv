@@ -63,6 +63,7 @@
                     (mcluv::make-gpu-relief-analytic-command)
                     (mcluv::make-gpu-gradient-analytic-command)
                     (mcluv::make-gpu-prepared-image-command)
+                    (mcluv::make-gpu-prepared-lattice-command)
                     (mcluv::make-gpu-prepared-text-command)))
       (ok (not (mcluv::gpu-command-rasterized-p overlay command)))
       (ok (mcluv::gpu-command-rasterized-p nil command))))
@@ -81,7 +82,8 @@
                   (mcluv::direct-widget-relief-vertex-specification)
                   (mcluv::direct-widget-gradient-vertex-specification)
                   (mcluv::direct-widget-image-vertex-specification)
-                  (mcluv::world-widget-slug-vertex-specification)))
+                  (mcluv::world-widget-slug-vertex-specification)
+                  (luv.analytic:lattice-fragment-specification)))
     (ok (> (length (spv:assemble-shader-specification specification)) 5))
     (ok (search "using namespace metal"
                 (luv.msl:msl-document-source
