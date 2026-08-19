@@ -64,10 +64,27 @@
                (luvcraft-key-command
                 session (key-press :x :character #\x :modifiers '(:meta)))))
     (ok (equal '(com-start-walking :forward)
-               (luvcraft-key-command session (key-press :w :character #\w))))
+               (luvcraft-key-command
+                session (key-press :w
+                                   :character
+                                   (if (luvcraft.clim::dvorak-controls-p)
+                                       #\, #\w)))))
     ;; A key nothing binds is not a command and must not be mistaken for one:
     ;; LOOKUP-KEYSTROKE-COMMAND-ITEM answers with the gesture on a miss.
     (ok (null (luvcraft-key-command session (key-press :f8))))))
+
+(deftest dvorak-controls-use-the-wasd-places-without-the-e-collision
+  (ok (equal '((#\, :forward) (#\o :backward) (#\a :left) (#\e :right)
+               (:shift-left :sprint) (:shift-right :sprint))
+             (luvcraft.clim::walk-keys-for-layout :dvorak)))
+  (when (luvcraft.clim::dvorak-controls-p)
+    (let ((session (make-instance 'luvcraft:luvcraft-session)))
+      (ok (equal '(com-start-walking :right)
+                 (luvcraft-key-command session
+                                       (key-press :d :character #\e))))
+      (ok (equal '(luvcraft.clim::com-place-block)
+                 (luvcraft-key-command session
+                                       (key-press :e :character #\.)))))))
 
 (deftest m-x-searches-the-executable-command-vocabulary
   (let ((entries (luvcraft-command-menu-entries)))
@@ -153,23 +170,30 @@
     (ok (equal '(com-toggle-inventory)
                (luvcraft.clim::luvcraft-key-command session i)))))
 
-(defun key-release (key-name &key modifiers)
+(defun key-release (key-name &key character modifiers)
   (make-instance 'luv:canvas-key-release-event
-                 :timestamp 0 :key-name key-name :modifiers modifiers))
+                 :timestamp 0 :key-name key-name
+                 :character character :unshifted-character character
+                 :modifiers modifiers))
 
 (deftest walking-is-a-start-and-a-stop
   (let* ((session (make-instance 'luvcraft:luvcraft-session))
-         (intent (luvcraft:luvcraft-session-movement-intent session)))
-    (luv:handle-canvas-event session nil (key-press :w :character #\w))
+         (intent (luvcraft:luvcraft-session-movement-intent session))
+         (dvorak (luvcraft.clim::dvorak-controls-p)))
+    (luv:handle-canvas-event session nil
+                             (key-press :w :character (if dvorak #\, #\w)))
     (ok (luvcraft:movement-urging-p intent :forward))
     (ok (= 1d0 (luvcraft:movement-intent-axis intent :forward :backward)))
     ;; Holding the opposite direction is standing still, and letting go of it
     ;; leaves the first one still held -- which one axis could not remember.
-    (luv:handle-canvas-event session nil (key-press :s :character #\s))
+    (luv:handle-canvas-event session nil
+                             (key-press :s :character (if dvorak #\o #\s)))
     (ok (zerop (luvcraft:movement-intent-axis intent :forward :backward)))
-    (luv:handle-canvas-event session nil (key-release :s))
+    (luv:handle-canvas-event session nil
+                             (key-release :s :character (if dvorak #\o #\s)))
     (ok (= 1d0 (luvcraft:movement-intent-axis intent :forward :backward)))
-    (luv:handle-canvas-event session nil (key-release :w))
+    (luv:handle-canvas-event session nil
+                             (key-release :w :character (if dvorak #\, #\w)))
     (ok (luvcraft:movement-intent-still-p intent))))
 
 (deftest a-movement-key-means-the-same-thing-however-it-is-modified
@@ -179,7 +203,10 @@
     (luv:handle-canvas-event
      session nil (key-press :shift-left :modifiers '(:shift)))
     (luv:handle-canvas-event
-     session nil (key-press :w :character #\w :modifiers '(:shift)))
+     session nil (key-press :w
+                            :character (if (luvcraft.clim::dvorak-controls-p)
+                                           #\, #\w)
+                            :modifiers '(:shift)))
     (ok (luvcraft:movement-intent-sprinting-p intent))
     (ok (luvcraft:movement-urging-p intent :forward))
     (luv:handle-canvas-event
@@ -222,8 +249,10 @@
                          :test #'string=))))
       ;; A direction is its own line, because walking forward and sprinting are
       ;; different things to do even though one command performs both.
-      (ok (equal '("W") (keys-for "Moving" "walk forward")))
-      (ok (equal '("D") (keys-for "Moving" "walk right")))
+      (ok (equal (if (luvcraft.clim::dvorak-controls-p) '(",") '("W"))
+                 (keys-for "Moving" "walk forward")))
+      (ok (equal (if (luvcraft.clim::dvorak-controls-p) '("E") '("D"))
+                 (keys-for "Moving" "walk right")))
       ;; The arrows look rather than walk: one merged row, all four keys.
       (ok (equal '("↑" "↓" "←" "→") (keys-for "In the world" "look")))
       (ok (equal '("Shift") (keys-for "Moving" "sprint")))

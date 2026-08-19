@@ -81,10 +81,23 @@
 ;;; without a working click.
 
 (define-command (com-place-block :command-table luvcraft-world
-                                 :name "Place Block"
-                                 :keystroke (#\e))
+                                 :name "Place Block")
     ()
   (luvcraft:edit-luvcraft-block (luvcraft-command-session) :place))
+
+(defun dvorak-controls-p ()
+  (string-equal (or (uiop:getenv "LUV_KEYBOARD_LAYOUT") "") "dvorak"))
+
+(defun add-place-block-keystroke ()
+  "Bind place to QWERTY E's physical key under the configured layout."
+  (dolist (key '(#\e #\.))
+    (remove-keystroke-from-command-table 'luvcraft-world (list key)
+                                         :errorp nil))
+  (add-keystroke-to-command-table
+   'luvcraft-world (list (if (dvorak-controls-p) #\. #\e))
+   :command '(com-place-block) :errorp nil))
+
+(add-place-block-keystroke)
 
 (define-command (com-mine-block :command-table luvcraft-world
                                 :name "Mine Block"
@@ -180,12 +193,14 @@
          (luvcraft:luvcraft-session-movement-intent (luvcraft-command-session)))
         t))
 
+(defun walk-keys-for-layout (layout)
+  (append (if (eq layout :dvorak)
+              '((#\, :forward) (#\o :backward) (#\a :left) (#\e :right))
+              '((:w :forward) (:s :backward) (:a :left) (:d :right)))
+          '((:shift-left :sprint) (:shift-right :sprint))))
+
 (defparameter *walk-keys*
-  '((:w :forward)
-    (:s :backward)
-    (:a :left)
-    (:d :right)
-    (:shift-left :sprint) (:shift-right :sprint))
+  (walk-keys-for-layout (and (dvorak-controls-p) :dvorak))
   "Which key urges which direction.  The arrows are deliberately absent:
 they belong to looking (see *LOOK-KEYS*), a mouse for a console whose
 pointer has no working buttons.
@@ -196,6 +211,12 @@ other key.")
 
 (defun add-walk-keystrokes ()
   "Bind every walking key to its start on the way down and its stop on the up."
+  ;; Definition reloads change the live tables too, so clear both layouts
+  ;; before installing the currently configured one.
+  (dolist (key '(:w :s :a :d #\, #\o #\a #\e
+                 :shift-left :shift-right))
+    (dolist (table '(luvcraft-movement luvcraft-movement-release))
+      (remove-keystroke-from-command-table table (list key :any) :errorp nil)))
   (loop for (key direction) in *walk-keys*
         do (flet ((walk-item (command)
                     (let ((direction direction))
