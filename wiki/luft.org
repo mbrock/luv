@@ -345,6 +345,155 @@ samples of the half-cell tent out from the point, nearer ones weighted more,
 replace the four cell walks of =crowded-sky= with a measure that is smooth
 because the field is ([[lisp:luft.render.shaders::field-occlusion]]).
 
+* A world knows what it is cut from
+:PROPERTIES:
+:ID: ADEAKZ
+:END:
+
+[[file:images/luft-stocks.png]]
+
+Every style up to here shaded the world in one substance -- turf above,
+earth at a cut, dark underneath -- because a face's direction was the only
+thing a fragment knew about the matter behind it.  That is enough to read a
+solid and not enough to read a building.  A stone pier and an oak deck
+differ in colour, in figure, in how they take a highlight, and above all in
+what their planed arris does with the light: the chamfer on a mahogany board
+is /paler/ than its face because the cut crosses the fibre, and the chamfer
+on a bronze rail is /brighter/ than its face because a handled edge
+polishes.
+
+A [[lisp:luft.render:material]] is therefore not a shader.  It is a short
+list of numbers -- three albedos, a finish, a grain, a mottle, a way of
+weathering -- and adding a stone is editing a table.  The =:stock= style
+draws the chamfered geometry of #RUAWR5, which is what these materials are
+for, and lights it from the occupancy field of #TI9NJP: a soft shadow and a
+smooth crowding, so the edges stay crisp while the light stays gentle.
+
+Two of the numbers do most of the work.  Wood gets its figure from a bundle
+of pith lines running along a grain axis on a loose lattice: the point's
+distance from the nearest pith, jittered per trunk and warped by a slow
+turbulence, is banded into growth rings.  A face cutting /across/ the axis
+therefore meets the rings as circles and a face along it as the long streaks
+of a sawn board, and nothing has to be told which it is
+([[lisp:luft.render.shaders::stock-grain]]).  A metal gets the hemisphere
+about its mirror direction and almost no diffuse, which is what makes bronze
+read as bronze rather than as brown paint with a white spot on it; the
+weathering measure of the field then puts verdigris in every hollow and
+leaves every ridge polished.
+
+** How a cell says which stock it is
+:PROPERTIES:
+:ID: PWMCOL
+:END:
+
+A LUFT site occupies sixty bits and travels to the GPU in sixty-four, so
+four bits are free above it (#KE4P5F).  The packed site spends them on which
+stock the /solid behind the face/ is cut from: sixteen materials in a world,
+at no cost in bandwidth and none in a second lookup.  A
+[[lisp:luft.render:world]] is a chain together with one stock slot per cell,
+and building code does not pass the material about -- it binds =*stock*= and
+fills, the way a shop works from one board at a time:
+
+#+begin_src lisp
+(with-stock (:granite)
+  (fill-box world 26 27 44 45 0 8))
+#+end_src
+
+[[lisp:luft.render:refresh-scene]] stamps each surface site from the cell it
+bounds, after the brick spheres are measured, since past bit sixty a packed
+site is no longer a LUFT site and nothing may read it as one.  The sixteen
+stocks' numbers travel in a storage buffer of their own,
+[[lisp:luft.render:stock-table-data]], eight vec4 lanes apiece, rewritten
+every frame because it is two kilobytes.
+
+** An hour is a set of the light knobs
+:PROPERTIES:
+:ID: KG0EG6
+:END:
+
+[[file:images/luft-hours.png]]
+
+Setting eleven specials by hand is not how anyone chooses a time of day, so
+a [[lisp:luft.render:light]] names a set of them together and =*light*= says
+which is in force.  =:morning= is low and cool from the east, =:noon= is
+nearly overhead and kills the shadows, =:evening= is very warm with the
+shadows gone blue, =:overcast= has no sun to speak of and lets occlusion do
+all the drawing, and =:afternoon= names nothing at all, so it is exactly the
+atelier's own light and every knob still works by hand.
+
+* An architecture of arches, discs, and corbels
+:PROPERTIES:
+:ID: SY26PO
+:END:
+
+[[file:images/luft-arcade.png]]
+
+A cube world's reputation for making only boxes is a reputation for having
+no vocabulary.  A round-headed opening is a column of cleared cells whose
+height follows a circle; a tower is a disc repeated up Z; a corbel is a
+course that oversails the one below.  Each is a dozen lines of
+=luft/render/architecture.lisp=, and each becomes architecture once the
+chamfer runs along its staircase and the stock says what it is cut from.
+
+[[lisp:luft.render:carve-arch]] cuts the opening -- a rectangle up to the
+springing, closing above it on $z = \sqrt{r^2 - x^2}$ rounded to cells --
+and [[lisp:luft.render:ring-arch]] lays the voussoirs just outside that
+curve and brings them down as jambs, so a limestone wall can carry a granite
+arch and the opening reads as built rather than as punched.
+[[lisp:luft.render:fill-disc]], [[lisp:luft.render:fill-ring]],
+[[lisp:luft.render:corbel]], [[lisp:luft.render:crenellate]], and
+[[lisp:luft.render:spiral-stair]] are the rest of the mason's kit.  The
+grid's own staircase is not a defect to be hidden: the chamfer gives every
+step of an arch ring a facet that catches the light differently, which is
+what a voussoir does.
+
+** Turf catches where the ground is flat
+:PROPERTIES:
+:ID: JNJF28
+:END:
+
+[[file:images/luft-headland.png]]
+
+For landscape, one rule does most of the work.
+[[lisp:luft.render:lay-ground]] fills the whole floor as rock and decides
+nothing about what grows; [[lisp:luft.render:grass-the-flats]] then repaints
+the top cell of every column that is within a cell of all four neighbours.
+A cliff therefore comes out bare and its top a field, which is the whole
+difference between a terrain and a landscape, and the soil colour on the
+side of a one-cell turf clod becomes the brown line under every green ledge.
+
+The corollary is that a cliff must fall in about one cell of plan per many
+of height.  A face that falls three cells for every one it steps in is not
+a cliff but a flight of steps, and the slope rule will turf every tread of
+it; eight per one is a cliff with ledges.  Terrain functions here are
+written with that in mind.
+
+** Five pieces and a sheet of stocks
+:PROPERTIES:
+:ID: 6QZYNB
+:END:
+
+[[file:images/luft-viaduct.png]]
+
+[[lisp:luft.render:atelier-scene]] and [[lisp:luft.render:atelier-cameras]]
+are generic functions on a piece's name, so a sheet can ask for all of them
+without knowing any of them and a new piece is one method and one entry in
+[[lisp:luft.render:atelier-pieces]].  There are six: =:samples=, ten stocks
+of one small object; =:arcade=, a wall of round-headed openings on a
+stylobate under a corbelled cornice; =:turret=, a machicolated round tower
+with a curtain wall and a bailey; =:viaduct=, piers in a box canyon carrying
+a road; =:grotto=, a hall cut into a cliff behind an arched mouth; and
+=:headland=, which has no building on it at all and is the landscape the
+others are supposed to stand in.
+
+Each piece carries its own cameras, because a building nobody photographs
+from the right place is a building nobody has seen, and the cameras are as
+much of the design as the geometry:
+[[lisp:luft.render:render-piece-sheet]] puts a piece's views down one
+column, [[lisp:luft.render:render-light-sheet]] crosses them with the hours
+of #KG0EG6, and [[lisp:luft.render:render-view]] renders one of them as a
+picture.
+
 * The studio: a world of stars under the same cameras
 :PROPERTIES:
 :ID: UTRJ2T

@@ -26,6 +26,7 @@
 ;;; under a timber deck.  A world is therefore a chain together with one
 ;;; stock slot per cell -- an index into a short palette, sixteen materials
 ;;; at most, because sixteen is what the packed site has room to carry.
+;;; #PWMCOL
 ;;;
 ;;; Building code does not pass the material about.  It binds *STOCK* and
 ;;; fills, the way a shop works from one board at a time:
@@ -497,7 +498,7 @@ more than the edges of walls, the way weather wears a top.")
 ;;;
 ;;; A slot left NIL keeps whatever the special above says, so :AFTERNOON,
 ;;; which names nothing, is exactly the atelier's own light and every knob
-;;; still works by hand.
+;;; still works by hand.  #KG0EG6
 
 (defclass light ()
   ((name :initarg :name :reader light-name)

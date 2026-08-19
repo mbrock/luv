@@ -14,7 +14,7 @@
 ;;; it fills is stamped with the stock in force.  Then a handful of pieces
 ;;; built out of that vocabulary, each with cameras chosen for it, because a
 ;;; building that is never photographed from the right place is a building
-;;; nobody has seen.
+;;; nobody has seen.  #SY26PO #6QZYNB
 
 (in-package #:luft.render)
 
@@ -62,7 +62,7 @@ The opening runs from FLOOR up to SPRINGING as a rectangle and closes above
 it on a circle of RADIUS about CENTRE along AXIS; ACROSS is the inclusive
 range of the other horizontal axis, the thickness the opening passes
 through.  It is the shape a mason gets from a centring, and the shape a
-grid gets from one square root."
+grid gets from one square root.  #SY26PO"
   (destructuring-bind (near . far) across
     (loop for offset from (- radius) to radius
           for rise = (arch-rise offset radius)
@@ -194,7 +194,7 @@ Turf catches where the ground is within FLAT cells of all four neighbours,
 and nowhere else: a cliff therefore comes out as bare rock and its top as
 a field, which is the whole difference between a terrain and a landscape.
 BELOW, when given, is a height above which nothing grows -- a treeline, or
-the top of a wall one does not want turfed."
+the top of a wall one does not want turfed.  #JNJF28"
   (let* ((period (luft:world-domain-x-period (world-domain world)))
          (tops (make-array (list period period) :initial-element nil)))
     (dotimes (x period)

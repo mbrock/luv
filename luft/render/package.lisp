@@ -55,6 +55,8 @@ mesh shaders.")
            #:world-slots
            #:world-stocks
            #:world-cell-p
+           #:world-stock-slot
+           #:world-vertical-p
            #:world-scene
            #:paint-cell
            #:*stock*
@@ -122,6 +124,7 @@ mesh shaders.")
            #:find-material
            #:material-names
            #:material-lanes
+           #:material-spacing
            #:material-albedo
            #:*material*
            #:*top-color*
@@ -158,6 +161,10 @@ mesh shaders.")
            #:spiral-stair
            #:ground-height
            #:lay-ground
+           #:grass-the-flats
+           #:column-top
+           #:scatter-boulders
+           #:arch-rise
            #:studio-cameras
            #:studio-camera
            #:render-contact-sheet

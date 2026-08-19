@@ -108,11 +108,30 @@
 
 (deftest a-world-holds-sixteen-stocks-at-most
   ;; Sixteen is what the four free bits above a packed site can name.
-  (let ((world (make-world :horizontal-bits 4)))
+  (let ((world (make-world :horizontal-bits 4))
+        (names (material-names)))
     (ok (= 16 luft.render.shaders:+stock-slots+))
-    (ok (signals (dotimes (k 20)
-                   (world-stock-slot world (nth (mod k 10) (material-names))))
-                 'error))))
+    ;; Slot zero is turf before anything asks for a slot at all.
+    (ok (zerop (world-stock-slot world :turf)))
+    ;; Each new stock takes the next slot, and asking twice is idempotent.
+    (let ((slots (mapcar (lambda (name) (world-stock-slot world name)) names)))
+      (ok (equal slots (mapcar (lambda (name) (world-stock-slot world name))
+                               names)))
+      (ok (= (length slots) (length (remove-duplicates slots)))))
+    ;; Past the sixteenth the world says so rather than truncating.  The
+    ;; throwaway stocks live in a table of their own, or every later
+    ;; picture in this image would be drawn from a palette of thirty.
+    (let ((luft.render::*material-table*
+            (make-hash-table :test 'eq)))
+      (loop for k from 0 below 20
+            for name = (intern (format nil "TEST-STOCK-~D" k) :keyword)
+            do (eval `(define-material ,name)))
+      (ok (signals (dotimes (k 20)
+                     (world-stock-slot
+                      world (intern (format nil "TEST-STOCK-~D" k) :keyword)))
+                   'error)))
+    ;; And an undefined stock is an error where it is asked for, not later.
+    (ok (signals (world-stock-slot world :no-such-stock) 'error))))
 
 (deftest rounded-mesh-output-fits-vulkan-guaranteed-limits
   ;; Two bevel rings make a 6x6 point grid and 5x5x2 triangles per face.

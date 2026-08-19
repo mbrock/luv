@@ -20,7 +20,7 @@
 ;;; The :STOCK style draws the chamfered geometry, whose crisp planed facets
 ;;; are what these materials are for, and lights it from the occupancy field:
 ;;; a soft shadow and a smooth crowding, so the edges stay sharp while the
-;;; light stays gentle.  #TI9NJP
+;;; light stays gentle.  #ADEAKZ #TI9NJP
 
 (in-package #:luft.render.shaders)
 
@@ -370,7 +370,9 @@ whole trees; it decides how often a face meets a ring's centre.")
    (rim
     :initarg :rim :initform 0.0 :reader material-rim
     :documentation "How much sky a grazing view adds at the silhouette."))
-  (:documentation "The stock a world is cut from: albedo, finish, figure."))
+  (:documentation "The stock a world is cut from: albedo, finish, figure.
+
+#ADEAKZ"))
 
 (defvar *material-table* (make-hash-table :test 'eq)
   "Every defined material, by name.")
@@ -395,7 +397,11 @@ so a material may speak only of its finish and its figure."
         #'string< :key #'symbol-name))
 
 (defparameter *material* :turf
-  "The material the :STOCK style draws the whole world in.")
+  "The material a scene with no stocks of its own is drawn wholly in.
+
+A scene built from a WORLD carries a palette and this is only its
+fallback; a scene made straight from a chain has no palette, and then this
+is the whole of what it is cut from.  #PWMCOL")
 
 ;;; A palette.  The colours are linear, which is to say roughly the sRGB
 ;;; value squared: 0.25 here is a mid brown on the screen, not a dark one.
