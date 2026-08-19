@@ -311,8 +311,25 @@ drawable rather than in this number."
             (values width height))
           (values-list *sdl-fallback-canvas-size*)))))
 
+(defun resolve-kmsdrm-vulkan-canvas-size (canvas)
+  "Use the active display mode required by SDL's direct-display Vulkan WSI.
+
+Unlike a desktop window system, KMSDRM presents Vulkan through VK_KHR_display.
+SDL can only create that surface at a mode the display actually advertises;
+arbitrary window dimensions commonly fail in SDL_Vulkan_CreateSurface."
+  (when (and (eq :vulkan (sdl-canvas-presentation-api canvas))
+             (string-equal "kmsdrm" (sdl3:get-current-video-driver)))
+    (let* ((display (sdl3:get-primary-display))
+           (mode (unless (zerop display)
+                   (sdl3:get-current-display-mode display))))
+      (when mode
+        (setf (canvas-width canvas) (sdl3:%w mode)
+              (canvas-height canvas) (sdl3:%h mode)
+              (canvas-fullscreen-p canvas) t)))))
+
 (defun resolve-sdl-canvas-size (canvas)
   "Fill in whichever of CANVAS's dimensions were left for the display to pick."
+  (resolve-kmsdrm-vulkan-canvas-size canvas)
   (unless (and (canvas-width canvas) (canvas-height canvas))
     (multiple-value-bind (width height) (sdl-default-canvas-size)
       (setf (canvas-width canvas) (or (canvas-width canvas) width)
