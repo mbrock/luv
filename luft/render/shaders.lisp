@@ -60,7 +60,7 @@ lit: both the reach of shadows in cells and their cost per pixel.")
       (sun-colour-vector :vec4)  ; sun radiance, sheen strength
       (fill-vector :vec4)        ; direction toward the fill light, strength
       (ground-vector :vec4)      ; ground bounce colour, exposure
-      (occlusion-vector :vec4)   ; crowding strength, shadow strength
+      (occlusion-vector :vec4)   ; crowding strength, shadow strength, wear
       (top-vector :vec4)         ; the material of an upward face
       (side-vector :vec4)        ; the material of a sideways face
       (bottom-vector :vec4)      ; the material of a downward face
@@ -498,10 +498,21 @@ beside the solid cell and beside the air cell."
             (vec3 0.0 0.0 0.0)))))
 
 (define-shader-function chamfer-point (point minority width)
-  "Move a shared point half the chamfer width toward its star's minority,
-where the flat 45-degree facets of a convex or concave crease meet."
-  (+ point (* (clamp minority (vec3 -1.0 -1.0 -1.0) (vec3 1.0 1.0 1.0))
-              (* width 0.5))))
+  "Move a shared point toward its star's minority, onto the chamfer.
+
+Along a crease the shared point moves half the chamfer width, to the midline
+of the flat 45-degree facet between the two offset faces.  At a pure corner,
+where three facets of one sign meet, the corner is truncated by a plane
+across all three axes: the three facets end in an equilateral triangle whose
+vertices are the offset faces' corners and whose edge midpoints are the
+facets' midlines.  Each face's corner grid square becomes one planar kite of
+that triangle when the corner point moves to its centroid, two thirds of
+the width along every axis.  #RUAWR5"
+  (let* ((q (clamp minority (vec3 -1.0 -1.0 -1.0) (vec3 1.0 1.0 1.0)))
+         (three-p (> (dot q q) 2.5))
+         (pure-p (< (dot minority minority) 3.5))
+         (reach (if three-p (if pure-p 0.6666667 0.5) 0.5)))
+    (+ point (* q (* width reach)))))
 
 (define-shader-function chamfer-normal (minority normal)
   "The facet normal at a chamfered shared point, or NORMAL when flat."

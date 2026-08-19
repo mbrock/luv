@@ -40,6 +40,7 @@
                  (:static-file "site.js")
                  (:static-file "images/dexp.png")
                  (:static-file "images/luft-atelier.png")
+                 (:static-file "images/luft-field-corners.png")
                  (:static-file "images/analytic-roundrect-proof.png")
                  (:static-file "images/slug-bezier-proof.png")
                  (:static-file "images/slug-text-proof.png")

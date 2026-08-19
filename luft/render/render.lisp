@@ -290,6 +290,8 @@ smallest thing that reads as built rather than as terrain."
   "How darkly the sun's walk shadows a point; zero switches shadows off.")
 (defparameter *occlusion-strength* 0.75
   "How deeply the crowding of nearby cells darkens the ambient hemisphere.")
+(defparameter *wear-strength* 0.0
+  "How strongly the :FIELD style lightens ridges and darkens hollows.")
 (defparameter *exposure* 1.15
   "Exposure of the 1 - exp(-x) curve the lit colour rolls off through.")
 (defparameter *sky-color* (vec3:make-vec3 0.62 0.76 0.92))
@@ -345,7 +347,9 @@ the light as a band rather than a hairline, and still far short of the old
         (lane *sun-color* *sheen-strength*)
         (lane *fill-direction* *fill-strength*)
         (lane *ground-color* *exposure*)
-        (lane (vec3:make-vec3 *occlusion-strength* *shadow-strength* 0.0) 0.0)
+        (lane (vec3:make-vec3 *occlusion-strength* *shadow-strength*
+                              *wear-strength*)
+              0.0)
         (lane *top-color* 0.0)
         (lane *side-color* 0.0)
         (lane *bottom-color* 0.0)
@@ -587,7 +591,7 @@ amplifies bricks with task and mesh shaders and needs VK_EXT_mesh_shader.")
   '(:flat :bevel :chamfer :paper))
 
 (defmethod technique-styles ((technique (eql :vertex)))
-  '(:flat :bevel :chamfer :paper))
+  '(:flat :bevel :chamfer :paper :field))
 
 (defgeneric create-technique-pipelines (technique renderer)
   (:documentation
@@ -643,8 +647,8 @@ may draw it first and the world still covers it."
 (defun create-renderer-fragment-modules (renderer)
   "Create the fragment modules RENDERER's styles and effects share.
 
-The values are the surface, chamfer, paper, sky, and lens fragment modules,
-each NIL when nothing configured wants it."
+The values are the surface, chamfer, paper, sky, lens, and field fragment
+modules, each NIL when nothing configured wants it."
   (let ((styles (renderer-pipeline-styles renderer)))
     (values
      (when (intersection styles '(:flat :bevel))
@@ -666,7 +670,11 @@ each NIL when nothing configured wants it."
      (when (renderer-effect-p renderer :lens)
        (create-renderer-module renderer :luft/shader/lens-fragment
                                "luft lens fragment"
-                               (shaders:lens-fragment-shader))))))
+                               (shaders:lens-fragment-shader)))
+     (when (member :field styles)
+       (create-renderer-module renderer :luft/shader/field-fragment
+                               "luft field fragment"
+                               (shaders:field-fragment-shader))))))
 
 ;;; The mesh technique: one task workgroup per brick, one mesh lane per site.
 
@@ -752,7 +760,7 @@ each NIL when nothing configured wants it."
 
 (defmethod create-technique-pipelines ((technique (eql :vertex)) renderer)
   (let ((styles (renderer-pipeline-styles renderer))
-        surface bevel chamfer screen)
+        surface bevel chamfer field screen)
     (when (member :flat styles)
       (setf surface (create-renderer-module
                      renderer :luft/shader/surface-vertex
@@ -768,6 +776,11 @@ each NIL when nothing configured wants it."
                      renderer :luft/shader/chamfer-vertex
                      "luft chamfer vertex"
                      (shaders:chamfer-vertex-shader))))
+    (when (member :field styles)
+      (setf field (create-renderer-module
+                   renderer :luft/shader/field-vertex
+                   "luft field vertex"
+                   (shaders:field-vertex-shader))))
     (when (or (renderer-effect-p renderer :sky)
               (renderer-effect-p renderer :lens))
       (setf screen (create-renderer-module
@@ -775,7 +788,7 @@ each NIL when nothing configured wants it."
                     "luft sky vertex"
                     (shaders:sky-vertex-shader))))
     (multiple-value-bind (fragment chamfer-fragment paper-fragment
-                          sky-fragment lens-fragment)
+                          sky-fragment lens-fragment field-fragment)
         (create-renderer-fragment-modules renderer)
       (flet ((pipeline (name zone label vertex-module fragment-module
                         &key (layout (renderer-layout renderer))
@@ -801,6 +814,9 @@ each NIL when nothing configured wants it."
         (when (member :paper styles)
           (pipeline :paper :luft/pipeline/paper "luft paper pipeline"
                     chamfer paper-fragment))
+        (when (member :field styles)
+          (pipeline :field :luft/pipeline/field "luft field pipeline"
+                    field field-fragment))
         (when (renderer-effect-p renderer :sky)
           (pipeline :sky :luft/pipeline/sky "luft sky pipeline"
                     screen sky-fragment
@@ -1360,7 +1376,7 @@ many times oversize, and the frame is box-filtered down on the way out."
            (values :clear :flat nil nil technique))
           ((string= mode "sky")
            (values :sky :flat nil '(:sky) technique))
-          ((member mode '("flat" "bevel" "chamfer" "paper") :test #'string=)
+          ((member mode '("flat" "bevel" "chamfer" "paper" "field") :test #'string=)
            (let ((style (intern (string-upcase mode) :keyword)))
              (unless (member style styles)
                (error "The ~(~A~) technique does not draw ~A; it draws ~
@@ -1371,7 +1387,7 @@ many times oversize, and the frame is box-filtered down on the way out."
                    styles '(:sky :lens) technique))
           (t
            (error "Unknown LUFT_RENDER_MODE ~S; use clear, sky, flat, bevel, ~
-chamfer, paper, or full." name)))))
+chamfer, paper, field, or full." name)))))
 
 (zdefun (start-viewer :zone :luft/start-viewer)
     (&key (scene (make-demo-scene))

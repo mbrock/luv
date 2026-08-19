@@ -282,6 +282,18 @@ vertex placed by RULE, :CHAMFER or :ROUND, from its nearest corner's star."
                                    solid-cu solid-eu solid-cv solid-ev
                                    solid-cuv solid-euv))
                 ,@(ecase rule
+                    (:field
+                     ;; The level set: every point, boundary or inner, takes
+                     ;; three Newton steps onto the half-level set of the
+                     ;; tent-smoothed occupancy (luft/render/field.lisp) and
+                     ;; its normal from the gradient there.
+                     `(,@(occupancy-field-bindings 'field-0 'flat 'radius)
+                       (point-1 (field-step flat field-0 radius))
+                       ,@(occupancy-field-bindings 'field-1 'point-1 'radius)
+                       (point-2 (field-step point-1 field-1 radius))
+                       ,@(occupancy-field-bindings 'field-2 'point-2 'radius)
+                       (shaped (field-step point-2 field-2 radius))
+                       (shaped-normal (field-normal field-2 normal))))
                     (:chamfer
                      ;; Woodworking: shared points move to the meeting of
                      ;; flat facets, and nothing else moves.

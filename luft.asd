@@ -22,7 +22,9 @@
                 :components ((:file "package")
                              (:file "shaders")
                              (:file "vertex-shaders")
-                             (:file "render"))))
+                             (:file "field")
+                             (:file "render")
+                             (:file "studio"))))
   :in-order-to ((test-op (test-op "luft/render/test"))))
 
 (defsystem "luft/program"

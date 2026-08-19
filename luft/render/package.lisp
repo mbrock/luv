@@ -20,6 +20,8 @@ packed sites.")
            #:sky-mesh-shader
            #:sky-fragment-shader
            #:surface-vertex-shader
+           #:field-vertex-shader
+           #:field-fragment-shader
            #:bevel-vertex-shader
            #:chamfer-vertex-shader
            #:sky-vertex-shader
@@ -81,6 +83,7 @@ mesh shaders.")
            #:*ambient-light*
            #:*ground-color*
            #:*occlusion-strength*
+           #:*wear-strength*
            #:*shadow-strength*
            #:*top-color*
            #:*side-color*
@@ -98,6 +101,10 @@ mesh shaders.")
            #:render-to-png
            #:downsample-pixels
            #:capture-demo-png
+           #:make-studio-scene
+           #:studio-cameras
+           #:studio-camera
+           #:render-contact-sheet
            #:viewer
            #:main
            #:start-viewer
