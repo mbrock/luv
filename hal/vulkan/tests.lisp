@@ -149,6 +149,84 @@
            (cffi:foreign-slot-offset
             '(:struct lvk::physical-device-features) 'lvk::shader-int64)))))
 
+(deftest present-timing-abi-is-explicit-and-inspectable
+  (let ((description
+          (lvk:vulkan-function-description
+           'vk:get-past-presentation-timing-ext)))
+    (ok (equal (getf description :foreign-name)
+               "vkGetPastPresentationTimingEXT"))
+    (ok (equal (mapcar #'first (getf description :arguments))
+               '(lvk::device lvk::past-presentation-timing-info
+                 lvk::past-presentation-timing-properties))))
+  (ok (= 16
+         (cffi:foreign-type-size '(:struct lvk::present-stage-time))))
+  (ok (= 32
+         (cffi:foreign-type-size
+          '(:struct lvk::swapchain-timing-properties))))
+  (ok (= #x240
+         (cffi:foreign-bitfield-value
+          'lvk::swapchain-create-flags
+          '(:present-id-2-khr :present-timing-ext)))))
+
+(deftest presentation-timeline-correlates-predictions-with-display-results
+  (let ((timeline
+          (make-instance 'luv::vulkan-presentation-timeline
+                         :stage :image-first-pixel-visible)))
+    (setf (luv::vulkan-presentation-timeline-status timeline) :recording
+          (luv::vulkan-presentation-timeline-time-domain timeline)
+          :clock-monotonic
+          (luv::vulkan-presentation-timeline-time-domain-id timeline) 7
+          (luv::vulkan-presentation-timeline-refresh-duration timeline)
+          16666667
+          (luv::vulkan-presentation-timeline-refresh-interval timeline)
+          16666667)
+    (dotimes (index 3)
+      (let ((present-id (1+ index)))
+        (luv::note-vulkan-presentation-submission
+         timeline present-id (+ 10d0 (/ index 60d0)) (+ 9.99d0 (/ index 60d0)))
+        (ok (luv::note-vulkan-presentation-result
+             timeline present-id (+ 1000000000 (* index 16666667))
+             :clock-monotonic 7))))
+    (let* ((snapshot (luv::snapshot-vulkan-presentation-timeline timeline))
+           (observations
+             (coerce (luv:presentation-timing-snapshot-observations snapshot)
+                     'list))
+           (intervals
+             (luv::presentation-timing-interval-milliseconds observations))
+           (drift
+             (luv::presentation-timing-phase-errors-milliseconds
+              observations)))
+      (ok (eq :recording
+              (luv:presentation-timing-snapshot-status snapshot)))
+      (ok (equal '(1 2 3)
+                 (mapcar #'luv:presentation-timing-observation-present-id
+                         observations)))
+      (ok (= 2 (length intervals)))
+      (ok (every (lambda (value) (< (abs (- value 16.666667d0)) 1d-9))
+                 intervals))
+      (ok (< (abs (car (last drift))) 1d-3)))))
+
+(deftest presentation-timeline-ring-retains-only-its-newest-minute
+  (let ((timeline
+          (make-instance 'luv::vulkan-presentation-timeline
+                         :stage :image-first-pixel-out)))
+    (loop for present-id from 1
+          to (+ luv::+vulkan-presentation-timing-capacity+ 5)
+          do (luv::note-vulkan-presentation-submission
+              timeline present-id (float present-id 1d0)
+              (float present-id 1d0)))
+    (let ((observations
+            (luv:presentation-timing-snapshot-observations
+             (luv::snapshot-vulkan-presentation-timeline timeline))))
+      (ok (= luv::+vulkan-presentation-timing-capacity+
+             (length observations)))
+      (ok (= 6
+             (luv:presentation-timing-observation-present-id
+              (aref observations 0))))
+      (ok (= (+ luv::+vulkan-presentation-timing-capacity+ 5)
+             (luv:presentation-timing-observation-present-id
+              (aref observations (1- (length observations)))))))))
+
 (deftest real-loader-calls-allocate-events-only-in-an-explicit-trace
   (ok (null (lvk:current-vulkan-trace)))
   (ok (plusp (length (lvk:enumerate-instance-extension-names))))

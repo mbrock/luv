@@ -11,6 +11,13 @@
 
 (defparameter +swapchain-extension-name+ "VK_KHR_swapchain")
 
+(defparameter +surface-capabilities-2-extension-name+
+  "VK_KHR_get_surface_capabilities2")
+
+(defparameter +present-timing-extension-name+ "VK_EXT_present_timing")
+
+(defparameter +present-id-2-extension-name+ "VK_KHR_present_id2")
+
 (defparameter +debug-utils-extension-name+ "VK_EXT_debug_utils")
 
 (defparameter +mesh-shader-extension-name+ "VK_EXT_mesh_shader")
@@ -19,7 +26,10 @@
 
 (cffi:defcenum (result :int32)
   (:success 0)
+  (:not-ready 1)
   (:incomplete 5)
+  (:error-out-of-date-khr -1000001004)
+  (:error-present-timing-queue-full-ext -1000208000)
   (:suboptimal-khr 1000001003))
 
 (cffi:defcenum (structure-type :uint32)
@@ -57,6 +67,7 @@
   (:command-buffer-begin-info 42)
   (:render-pass-begin-info 43)
   (:image-memory-barrier 45)
+  (:physical-device-features-2 1000059000)
   (:physical-device-timeline-semaphore-features 1000207000)
   (:semaphore-type-create-info 1000207002)
   (:semaphore-wait-info 1000207004)
@@ -65,6 +76,20 @@
   (:command-buffer-submit-info 1000314006)
   (:physical-device-synchronization-2-features 1000314007)
   (:physical-device-mesh-shader-features-ext 1000328000)
+  (:physical-device-surface-info-2-khr 1000119000)
+  (:surface-capabilities-2-khr 1000119001)
+  (:physical-device-present-timing-features-ext 1000208000)
+  (:swapchain-timing-properties-ext 1000208001)
+  (:swapchain-time-domain-properties-ext 1000208002)
+  (:present-timings-info-ext 1000208003)
+  (:present-timing-info-ext 1000208004)
+  (:past-presentation-timing-info-ext 1000208005)
+  (:past-presentation-timing-properties-ext 1000208006)
+  (:past-presentation-timing-ext 1000208007)
+  (:present-timing-surface-capabilities-ext 1000208008)
+  (:surface-capabilities-present-id-2-khr 1000479000)
+  (:present-id-2-khr 1000479001)
+  (:physical-device-present-id-2-features-khr 1000479002)
   (:swapchain-create-info-khr 1000001000)
   (:present-info-khr 1000001001)
   (:debug-utils-messenger-callback-data-ext 1000128003)
@@ -221,6 +246,14 @@
   (:fifo-khr 2)
   (:fifo-relaxed-khr 3))
 
+(cffi:defcenum (time-domain :uint32 :allow-undeclared-values t)
+  (:device 0)
+  (:clock-monotonic 1)
+  (:clock-monotonic-raw 2)
+  (:query-performance-counter 3)
+  (:present-stage-local-ext 1000208000)
+  (:swapchain-local-ext 1000208001))
+
 (cffi:defcenum (surface-transform :uint32)
   (:identity #x1)
   (:rotate-90 #x2)
@@ -240,6 +273,24 @@
 
 (cffi:defbitfield (instance-create-flags :uint32)
   (:enumerate-portability #x1))
+
+(cffi:defbitfield (present-stage-flags :uint32)
+  (:queue-operations-end #x1)
+  (:request-dequeued #x2)
+  (:image-first-pixel-out #x4)
+  (:image-first-pixel-visible #x8))
+
+(cffi:defbitfield (past-presentation-timing-flags :uint32)
+  (:allow-partial-results #x1)
+  (:allow-out-of-order-results #x2))
+
+(cffi:defbitfield (present-timing-info-flags :uint32)
+  (:present-at-relative-time #x1)
+  (:present-at-nearest-refresh-cycle #x2))
+
+(cffi:defbitfield (swapchain-create-flags :uint32)
+  (:present-id-2-khr #x40)
+  (:present-timing-ext #x200))
 
 (cffi:defbitfield (debug-utils-message-severity-flags :uint32)
   (:verbose #x1)
@@ -498,6 +549,9 @@
   (sparse-residency-aliased :uint32)
   (variable-multisample-rate :uint32)
   (inherited-queries :uint32))
+
+(defvkstruct physical-device-features-2 (:s-type :physical-device-features-2)
+  (features (:struct physical-device-features)))
 
 (defvkstruct device-queue-create-info (:s-type :device-queue-create-info)
   (flags :uint32)
@@ -970,6 +1024,20 @@
   (primitive-fragment-shading-rate-mesh-shader :uint32)
   (mesh-shader-queries :uint32))
 
+(defvkstruct physical-device-present-timing-features-ext
+    (:s-type :physical-device-present-timing-features-ext)
+  (present-timing :uint32)
+  (present-at-absolute-time :uint32)
+  (present-at-relative-time :uint32))
+
+(defvkstruct physical-device-present-id-2-features-khr
+    (:s-type :physical-device-present-id-2-features-khr)
+  (present-id-2 :uint32))
+
+(defvkstruct physical-device-surface-info-2
+    (:s-type :physical-device-surface-info-2-khr)
+  (surface :pointer))
+
 (defvkstruct surface-capabilities ()
   (min-image-count :uint32)
   (max-image-count :uint32)
@@ -982,12 +1050,26 @@
   (supported-composite-alpha composite-alpha-flags)
   (supported-usage-flags image-usage-flags))
 
+(defvkstruct surface-capabilities-2 (:s-type :surface-capabilities-2-khr)
+  (surface-capabilities (:struct surface-capabilities)))
+
+(defvkstruct present-timing-surface-capabilities
+    (:s-type :present-timing-surface-capabilities-ext)
+  (present-timing-supported :uint32)
+  (present-at-absolute-time-supported :uint32)
+  (present-at-relative-time-supported :uint32)
+  (present-stage-queries present-stage-flags))
+
+(defvkstruct surface-capabilities-present-id-2
+    (:s-type :surface-capabilities-present-id-2-khr)
+  (present-id-2-supported :uint32))
+
 (defvkstruct surface-format ()
   (format format)
   (color-space color-space))
 
 (defvkstruct swapchain-create-info (:s-type :swapchain-create-info-khr)
-  (flags :uint32)
+  (flags swapchain-create-flags)
   (surface :pointer)
   (min-image-count :uint32)
   (image-format format)
@@ -1003,6 +1085,58 @@
   (present-mode present-mode)
   (clipped :uint32)
   (old-swapchain :pointer))
+
+(defvkstruct swapchain-timing-properties
+    (:s-type :swapchain-timing-properties-ext)
+  (refresh-duration :uint64)
+  (refresh-interval :uint64))
+
+(defvkstruct swapchain-time-domain-properties
+    (:s-type :swapchain-time-domain-properties-ext)
+  (time-domain-count :uint32)
+  (p-time-domains :pointer)
+  (p-time-domain-ids :pointer))
+
+(defvkstruct present-id-2 (:s-type :present-id-2-khr)
+  (swapchain-count :uint32)
+  (p-present-ids :pointer))
+
+(defvkstruct present-timing-info (:s-type :present-timing-info-ext)
+  (flags present-timing-info-flags)
+  (target-time :uint64)
+  (time-domain-id :uint64)
+  (present-stage-queries present-stage-flags)
+  (target-time-domain-present-stage present-stage-flags))
+
+(defvkstruct present-timings-info (:s-type :present-timings-info-ext)
+  (swapchain-count :uint32)
+  (p-timing-infos :pointer))
+
+(defvkstruct past-presentation-timing-info
+    (:s-type :past-presentation-timing-info-ext)
+  (flags past-presentation-timing-flags)
+  (swapchain :pointer))
+
+(defvkstruct present-stage-time ()
+  (stage present-stage-flags)
+  (time :uint64))
+
+(defvkstruct past-presentation-timing
+    (:s-type :past-presentation-timing-ext)
+  (present-id :uint64)
+  (target-time :uint64)
+  (present-stage-count :uint32)
+  (p-present-stages :pointer)
+  (time-domain time-domain)
+  (time-domain-id :uint64)
+  (report-complete :uint32))
+
+(defvkstruct past-presentation-timing-properties
+    (:s-type :past-presentation-timing-properties-ext)
+  (timing-properties-counter :uint64)
+  (time-domains-counter :uint64)
+  (presentation-timing-count :uint32)
+  (p-presentation-timings :pointer))
 
 (defvkstruct present-info (:s-type :present-info-khr)
   (wait-semaphore-count :uint32)
@@ -1075,6 +1209,11 @@
   (properties :pointer))
 
 (defvkfun "vkGetPhysicalDeviceFeatures"
+    :void
+  (physical-device :pointer)
+  (features :pointer))
+
+(defvkfun "vkGetPhysicalDeviceFeatures2"
     :void
   (physical-device :pointer)
   (features :pointer))
@@ -1475,6 +1614,12 @@
   (surface :pointer)
   (capabilities :pointer))
 
+(defvkfun "vkGetPhysicalDeviceSurfaceCapabilities2KHR"
+    checked-result
+  (physical-device :pointer)
+  (surface-info :pointer)
+  (surface-capabilities :pointer))
+
 (defvkfun "vkGetPhysicalDeviceSurfaceFormatsKHR"
     checked-result
   (physical-device :pointer)
@@ -1547,3 +1692,29 @@
     checked-result
   (queue :pointer)
   (present-info :pointer))
+
+(defvkfun "vkSetSwapchainPresentTimingQueueSizeEXT"
+    checked-result
+  (device :pointer)
+  (swapchain :pointer)
+  (size :uint32))
+
+(defvkfun "vkGetSwapchainTimingPropertiesEXT"
+    checked-result
+  (device :pointer)
+  (swapchain :pointer)
+  (timing-properties :pointer)
+  (timing-properties-counter :pointer))
+
+(defvkfun "vkGetSwapchainTimeDomainPropertiesEXT"
+    checked-result
+  (device :pointer)
+  (swapchain :pointer)
+  (time-domain-properties :pointer)
+  (time-domains-counter :pointer))
+
+(defvkfun "vkGetPastPresentationTimingEXT"
+    checked-result
+  (device :pointer)
+  (past-presentation-timing-info :pointer)
+  (past-presentation-timing-properties :pointer))

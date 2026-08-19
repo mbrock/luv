@@ -507,10 +507,22 @@ visible to it.")
     "VK_KHR_video_decode_h264" "VK_KHR_video_decode_h265")
   "Optional extensions which let FFmpeg decode on luv's VkDevice.")
 
+(defparameter *vulkan-presentation-timing-device-extensions*
+  (list lvk:+present-timing-extension-name+
+        lvk:+present-id-2-extension-name+)
+  "Optional extensions used to observe a swapchain's real display timeline.")
+
 (defun available-vulkan-video-device-extensions (physical-device)
   (let ((available (lvk:enumerate-device-extension-names physical-device)))
     (remove-if-not (lambda (name) (member name available :test #'string=))
                    *vulkan-video-device-extensions*)))
+
+(defun available-vulkan-presentation-timing-device-extensions
+    (physical-device)
+  (let ((available (lvk:enumerate-device-extension-names physical-device)))
+    (remove-if-not
+     (lambda (name) (member name available :test #'string=))
+     *vulkan-presentation-timing-device-extensions*)))
 
 (defun install-vulkan-device-leak-finalizer (device)
   "Arrange to warn about and reclaim DEVICE if it is collected undestroyed.
@@ -850,6 +862,8 @@ wrapper, this finalizer cannot run before theirs have."
                             (when (lvk:physical-device-mesh-shader-p
                                    physical-device)
                               (list lvk:+mesh-shader-extension-name+))
+                            (available-vulkan-presentation-timing-device-extensions
+                             physical-device)
                             (available-vulkan-video-device-extensions
                              physical-device))
                            :test #'string=))))

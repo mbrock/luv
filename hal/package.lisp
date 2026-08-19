@@ -10,6 +10,9 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
   (:use #:cl)
   (:export #:+portability-enumeration-extension-name+
            #:+swapchain-extension-name+
+           #:+surface-capabilities-2-extension-name+
+           #:+present-timing-extension-name+
+           #:+present-id-2-extension-name+
            #:+debug-utils-extension-name+
            #:+mesh-shader-extension-name+
            #:vulkan-call-error
@@ -56,6 +59,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:physical-device-queue-families
            #:physical-device-shader-int64-p
            #:physical-device-mesh-shader-p
+           #:physical-device-presentation-features
            #:physical-memory-type
            #:physical-memory-type-flags
            #:physical-memory-type-heap-index
@@ -150,6 +154,13 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:presentation-capabilities-composite-alpha
            #:presentation-capabilities-usage
            #:get-surface-capabilities
+           #:presentation-timing-capabilities
+           #:presentation-timing-capabilities-supported-p
+           #:presentation-timing-capabilities-absolute-time-p
+           #:presentation-timing-capabilities-relative-time-p
+           #:presentation-timing-capabilities-stages
+           #:presentation-timing-capabilities-present-id-2-p
+           #:get-presentation-timing-surface-capabilities
            #:presentation-format
            #:presentation-format-format
            #:presentation-format-color-space
@@ -158,6 +169,13 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:create-swapchain
            #:destroy-swapchain
            #:get-swapchain-images
+           #:swapchain-timing-properties
+           #:swapchain-timing-properties-refresh-duration
+           #:swapchain-timing-properties-refresh-interval
+           #:set-swapchain-present-timing-queue-size
+           #:get-swapchain-timing-properties
+           #:get-swapchain-time-domains
+           #:map-past-presentation-timings
            #:create-semaphore
            #:create-timeline-semaphore
            #:destroy-semaphore
@@ -514,6 +532,26 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:sdl-canvas-presentation-api
            #:sdl-presentation-api-for
            #:vulkan-canvas-context
+           #:vulkan-canvas-presentation-timing-snapshot
+           #:print-vulkan-canvas-presentation-timing
+           #:write-vulkan-canvas-presentation-timing-csv
+           #:presentation-timing-snapshot
+           #:presentation-timing-snapshot-status
+           #:presentation-timing-snapshot-reason
+           #:presentation-timing-snapshot-stage
+           #:presentation-timing-snapshot-time-domain
+           #:presentation-timing-snapshot-time-domain-id
+           #:presentation-timing-snapshot-refresh-duration
+           #:presentation-timing-snapshot-refresh-interval
+           #:presentation-timing-snapshot-dropped-count
+           #:presentation-timing-snapshot-observations
+           #:presentation-timing-observation
+           #:presentation-timing-observation-present-id
+           #:presentation-timing-observation-predicted-seconds
+           #:presentation-timing-observation-submitted-seconds
+           #:presentation-timing-observation-actual-nanoseconds
+           #:presentation-timing-observation-actual-time-domain
+           #:presentation-timing-observation-actual-time-domain-id
            #+darwin
            #:metal-canvas-context
            #:canvas-title

@@ -210,6 +210,17 @@
   (composite-alpha nil :type list)
   (usage nil :type list))
 
+(defstruct presentation-timing-capabilities
+  (supported-p nil :type boolean)
+  (absolute-time-p nil :type boolean)
+  (relative-time-p nil :type boolean)
+  (stages nil :type list)
+  (present-id-2-p nil :type boolean))
+
+(defstruct swapchain-timing-properties
+  (refresh-duration 0 :type (unsigned-byte 64))
+  (refresh-interval 0 :type (unsigned-byte 64)))
+
 (defstruct presentation-format
   format
   color-space)
@@ -404,61 +415,148 @@ destroy it before destroying INSTANCE."
                :test #'string=)
        t))
 
+(defun physical-device-presentation-features
+    (physical-device &key present-timing-p present-id-2-p)
+  "Return the optional presentation feature bits exposed by PHYSICAL-DEVICE.
+
+The values are PRESENT-TIMING, PRESENT-AT-ABSOLUTE-TIME,
+PRESENT-AT-RELATIVE-TIME, and PRESENT-ID-2.  A feature whose extension was not
+advertised is never placed in the query chain and is returned as NIL."
+  (if (or present-timing-p present-id-2-p)
+      (with-vk (id-features physical-device-present-id-2-features-khr
+                :present-id-2 0)
+        (with-vk (timing-features physical-device-present-timing-features-ext
+                  :p-next (if present-id-2-p
+                              id-features
+                              (cffi:null-pointer))
+                  :present-timing 0
+                  :present-at-absolute-time 0
+                  :present-at-relative-time 0)
+          (with-vk (features physical-device-features-2
+                    :p-next (cond (present-timing-p timing-features)
+                                  (present-id-2-p id-features)
+                                  (t (cffi:null-pointer))))
+            (vk:get-physical-device-features2 physical-device features)
+            (values
+             (and present-timing-p
+                  (not (zerop
+                        (cffi:foreign-slot-value
+                         timing-features
+                         '(:struct physical-device-present-timing-features-ext)
+                         'present-timing))))
+             (and present-timing-p
+                  (not (zerop
+                        (cffi:foreign-slot-value
+                         timing-features
+                         '(:struct physical-device-present-timing-features-ext)
+                         'present-at-absolute-time))))
+             (and present-timing-p
+                  (not (zerop
+                        (cffi:foreign-slot-value
+                         timing-features
+                         '(:struct physical-device-present-timing-features-ext)
+                         'present-at-relative-time))))
+             (and present-id-2-p
+                  (not (zerop
+                        (cffi:foreign-slot-value
+                         id-features
+                         '(:struct physical-device-present-id-2-features-khr)
+                         'present-id-2))))))))
+      (values nil nil nil nil)))
+
 (defun create-device
     (physical-device family-index &key enabled-extension-names
                                        additional-family-indices)
   (unless (physical-device-shader-int64-p physical-device)
     (error "The Vulkan physical device lacks luv's required shaderInt64 feature."))
-  (with-translated-values
-      ((extension-names enabled-extension-names string-list))
-    (let* ((families (remove-duplicates
-                      (cons family-index additional-family-indices)))
-           (queue-count (length families)))
-      (cffi:with-foreign-object (queue-priority :float)
-        (setf (cffi:mem-ref queue-priority :float) 1.0)
-        (cffi:with-foreign-object
-            (queue-infos '(:struct device-queue-create-info) queue-count)
-          (loop for family in families for index from 0
-                do (fill-vk
-                    (cffi:mem-aptr queue-infos
-                                   '(:struct device-queue-create-info) index)
-                    'device-queue-create-info
-                    :flags 0 :queue-family-index family :queue-count 1
-                    :p-queue-priorities queue-priority))
-          (with-vk (features physical-device-features :shader-int64 1)
-            (with-vk (timeline-features
-                      physical-device-timeline-semaphore-features
-                      :timeline-semaphore 1)
-              (with-vk (synchronization-features
-                        physical-device-synchronization-2-features
-                        :p-next timeline-features
-                        :synchronization-2 1)
-                ;; Asking for VK_EXT_mesh_shader admits its commands; the two
-                ;; stages themselves are features, and a pipeline whose module
-                ;; declares MeshShadingEXT is invalid without them.
-                (with-vk (mesh-features
-                          physical-device-mesh-shader-features-ext
-                          :p-next synchronization-features
-                          :task-shader 1
-                          :mesh-shader 1
-                          :multiview-mesh-shader 0
-                          :primitive-fragment-shading-rate-mesh-shader 0
-                          :mesh-shader-queries 0)
-                  (with-vk (create-info device-create-info
-                            :p-next (if (member +mesh-shader-extension-name+
-                                                enabled-extension-names
-                                                :test #'string=)
-                                        mesh-features
-                                        synchronization-features)
-                            :flags 0
-                            :queue-create-info-count queue-count
-                            :p-queue-create-infos queue-infos
-                            :enabled-layer-count 0
-                            :pp-enabled-layer-names (cffi:null-pointer)
-                            :enabled-extension-count (length enabled-extension-names)
-                            :pp-enabled-extension-names extension-names
-                            :p-enabled-features features)
-                    (create-device-handle physical-device create-info)))))))))))
+  (let ((present-timing-p
+          (member +present-timing-extension-name+
+                  enabled-extension-names :test #'string=))
+        (present-id-2-p
+          (member +present-id-2-extension-name+
+                  enabled-extension-names :test #'string=)))
+    (multiple-value-bind
+          (present-timing-feature-p present-at-absolute-time-p
+           present-at-relative-time-p present-id-2-feature-p)
+        (physical-device-presentation-features
+         physical-device
+         :present-timing-p present-timing-p
+         :present-id-2-p present-id-2-p)
+      (declare (ignore present-at-absolute-time-p present-at-relative-time-p))
+      (with-translated-values
+          ((extension-names enabled-extension-names string-list))
+        (let* ((families (remove-duplicates
+                          (cons family-index additional-family-indices)))
+               (queue-count (length families)))
+          (cffi:with-foreign-object (queue-priority :float)
+            (setf (cffi:mem-ref queue-priority :float) 1.0)
+            (cffi:with-foreign-object
+                (queue-infos '(:struct device-queue-create-info) queue-count)
+              (loop for family in families for index from 0
+                    do (fill-vk
+                        (cffi:mem-aptr
+                         queue-infos '(:struct device-queue-create-info) index)
+                        'device-queue-create-info
+                        :flags 0 :queue-family-index family :queue-count 1
+                        :p-queue-priorities queue-priority))
+              (with-vk (features physical-device-features :shader-int64 1)
+                (with-vk (timeline-features
+                          physical-device-timeline-semaphore-features
+                          :timeline-semaphore 1)
+                  (with-vk (synchronization-features
+                            physical-device-synchronization-2-features
+                            :p-next timeline-features
+                            :synchronization-2 1)
+                    ;; Asking for VK_EXT_mesh_shader admits its commands; the
+                    ;; two stages themselves are features, and a pipeline
+                    ;; whose module declares MeshShadingEXT is invalid without
+                    ;; them.
+                    (with-vk (mesh-features
+                              physical-device-mesh-shader-features-ext
+                              :p-next synchronization-features
+                              :task-shader 1
+                              :mesh-shader 1
+                              :multiview-mesh-shader 0
+                              :primitive-fragment-shading-rate-mesh-shader 0
+                              :mesh-shader-queries 0)
+                      (let ((base-features
+                              (if (member +mesh-shader-extension-name+
+                                          enabled-extension-names
+                                          :test #'string=)
+                                  mesh-features
+                                  synchronization-features)))
+                        (with-vk (id-features
+                                  physical-device-present-id-2-features-khr
+                                  :p-next base-features
+                                  :present-id-2
+                                  (if present-id-2-feature-p 1 0))
+                          (with-vk (timing-features
+                                    physical-device-present-timing-features-ext
+                                    :p-next (if present-id-2-p
+                                                id-features
+                                                base-features)
+                                    :present-timing
+                                    (if present-timing-feature-p 1 0)
+                                    :present-at-absolute-time 0
+                                    :present-at-relative-time 0)
+                            (with-vk (create-info device-create-info
+                                      :p-next
+                                      (cond
+                                        (present-timing-p timing-features)
+                                        (present-id-2-p id-features)
+                                        (t base-features))
+                                      :flags 0
+                                      :queue-create-info-count queue-count
+                                      :p-queue-create-infos queue-infos
+                                      :enabled-layer-count 0
+                                      :pp-enabled-layer-names
+                                      (cffi:null-pointer)
+                                      :enabled-extension-count
+                                      (length enabled-extension-names)
+                                      :pp-enabled-extension-names extension-names
+                                      :p-enabled-features features)
+                              (create-device-handle
+                               physical-device create-info))))))))))))))))
 
 (defun destroy-device (device)
   (vk:destroy-device device (cffi:null-pointer))
@@ -1797,6 +1895,38 @@ entries as understood by FILL-SEMAPHORE-SUBMIT-INFOS."
        :composite-alpha supported-composite-alpha
        :usage supported-usage-flags))))
 
+(defun get-presentation-timing-surface-capabilities
+    (physical-device surface)
+  "Return timing and present-id capabilities for this particular SURFACE."
+  (with-vk (present-id surface-capabilities-present-id-2
+            :present-id-2-supported 0)
+    (with-vk (timing present-timing-surface-capabilities
+              :p-next present-id
+              :present-timing-supported 0
+              :present-at-absolute-time-supported 0
+              :present-at-relative-time-supported 0
+              :present-stage-queries nil)
+      (with-vk (capabilities surface-capabilities-2 :p-next timing)
+        (with-vk (surface-info physical-device-surface-info-2
+                  :surface surface)
+          (with-vulkan-results (:get-physical-device-surface-capabilities-2)
+            (vk:get-physical-device-surface-capabilities2khr
+             physical-device surface-info capabilities))))
+      (cffi:with-foreign-slots
+          ((present-timing-supported present-at-absolute-time-supported
+            present-at-relative-time-supported present-stage-queries)
+           timing (:struct present-timing-surface-capabilities))
+        (make-presentation-timing-capabilities
+         :supported-p (not (zerop present-timing-supported))
+         :absolute-time-p (not (zerop present-at-absolute-time-supported))
+         :relative-time-p (not (zerop present-at-relative-time-supported))
+         :stages present-stage-queries
+         :present-id-2-p
+         (not (zerop
+               (cffi:foreign-slot-value
+                present-id '(:struct surface-capabilities-present-id-2)
+                'present-id-2-supported))))))))
+
 (defun extract-surface-format (formats index)
   (let ((format
           (cffi:mem-aptr formats '(:struct surface-format) index)))
@@ -1821,9 +1951,11 @@ entries as understood by FILL-SEMAPHORE-SUBMIT-INFOS."
     (device surface format color-space extent
      &key min-image-count (usage '(:transfer-dst))
        (pre-transform :identity) (composite-alpha :opaque)
-       (present-mode :fifo-khr) old-swapchain)
+       (present-mode :fifo-khr) old-swapchain present-timing-p)
   (with-vk (create-info swapchain-create-info
-            :flags 0
+            :flags (if present-timing-p
+                       '(:present-id-2-khr :present-timing-ext)
+                       nil)
             :surface surface
             :min-image-count min-image-count
             :image-format format
@@ -1843,6 +1975,140 @@ entries as understood by FILL-SEMAPHORE-SUBMIT-INFOS."
       create-info '(:struct swapchain-create-info) 'image-extent)
      'extent-2d :width (first extent) :height (second extent))
     (create-swapchain-handle device create-info)))
+
+(defun set-swapchain-present-timing-queue-size (device swapchain size)
+  (with-vulkan-results (:set-swapchain-present-timing-queue-size)
+    (vk:set-swapchain-present-timing-queue-size-ext device swapchain size))
+  size)
+
+(defun get-swapchain-timing-properties (device swapchain)
+  "Return current swapchain timing properties, or NIL while they are warming."
+  (with-vk (properties swapchain-timing-properties
+            :refresh-duration 0 :refresh-interval 0)
+    (cffi:with-foreign-object (counter :uint64)
+      (setf (cffi:mem-ref counter :uint64) 0)
+      (let ((result
+              (with-vulkan-results
+                  (:get-swapchain-timing-properties :success :not-ready)
+                (vk:get-swapchain-timing-properties-ext
+                 device swapchain properties counter))))
+        (when (eq result :success)
+          (cffi:with-foreign-slots
+              ((refresh-duration refresh-interval)
+               properties (:struct swapchain-timing-properties))
+            (values
+             (make-swapchain-timing-properties
+              :refresh-duration refresh-duration
+              :refresh-interval refresh-interval)
+             (cffi:mem-ref counter :uint64))))))))
+
+(defun get-swapchain-time-domains (device swapchain)
+  "Return (TIME-DOMAIN . ID) pairs, or NIL while they are warming."
+  (labels ((query (properties counter)
+             (with-vulkan-results
+                 (:get-swapchain-time-domain-properties
+                  :success :incomplete :not-ready)
+               (vk:get-swapchain-time-domain-properties-ext
+                device swapchain properties counter))))
+    (with-vk (properties swapchain-time-domain-properties
+              :time-domain-count 0
+              :p-time-domains (cffi:null-pointer)
+              :p-time-domain-ids (cffi:null-pointer))
+      (cffi:with-foreign-object (counter :uint64)
+        (setf (cffi:mem-ref counter :uint64) 0)
+        (unless (eq :not-ready (query properties counter))
+          (let ((count
+                  (cffi:foreign-slot-value
+                   properties '(:struct swapchain-time-domain-properties)
+                   'time-domain-count)))
+            (when (plusp count)
+              (cffi:with-foreign-object (domains 'time-domain count)
+                (cffi:with-foreign-object (ids :uint64 count)
+                  (setf (cffi:foreign-slot-value
+                         properties '(:struct swapchain-time-domain-properties)
+                         'p-time-domains)
+                        domains
+                        (cffi:foreign-slot-value
+                         properties '(:struct swapchain-time-domain-properties)
+                         'p-time-domain-ids)
+                        ids)
+                  (let ((result (query properties counter)))
+                    (unless (eq result :not-ready)
+                      (loop for index below
+                              (cffi:foreign-slot-value
+                               properties
+                               '(:struct swapchain-time-domain-properties)
+                               'time-domain-count)
+                            collect
+                            (cons (cffi:mem-aref domains 'time-domain index)
+                                  (cffi:mem-aref ids :uint64 index))))))))))))))
+
+(defun map-past-presentation-timings (device swapchain function)
+  "Call FUNCTION for each complete timing as ID, STAGE, TIME, DOMAIN, DOMAIN-ID."
+  (with-vk (info past-presentation-timing-info
+            :flags nil :swapchain swapchain)
+    (with-vk (properties past-presentation-timing-properties
+              :timing-properties-counter 0
+              :time-domains-counter 0
+              :presentation-timing-count 0
+              :p-presentation-timings (cffi:null-pointer))
+      (with-vulkan-results (:get-past-presentation-timing)
+        (vk:get-past-presentation-timing-ext device info properties))
+      (let ((count
+              (cffi:foreign-slot-value
+               properties '(:struct past-presentation-timing-properties)
+               'presentation-timing-count)))
+        (when (plusp count)
+          (cffi:with-foreign-object
+              (timings '(:struct past-presentation-timing) count)
+            (cffi:with-foreign-object
+                (stages '(:struct present-stage-time) count)
+              (dotimes (index count)
+                (fill-vk
+                 (cffi:mem-aptr
+                  timings '(:struct past-presentation-timing) index)
+                 'past-presentation-timing
+                 :present-id 0 :target-time 0
+                 :present-stage-count 1
+                 :p-present-stages
+                 (cffi:mem-aptr stages '(:struct present-stage-time) index)
+                 :time-domain :device :time-domain-id 0 :report-complete 0))
+              (setf (cffi:foreign-slot-value
+                     properties '(:struct past-presentation-timing-properties)
+                     'presentation-timing-count)
+                    count
+                    (cffi:foreign-slot-value
+                     properties '(:struct past-presentation-timing-properties)
+                     'p-presentation-timings)
+                    timings)
+              (with-vulkan-results
+                  (:get-past-presentation-timing :success :incomplete)
+                (vk:get-past-presentation-timing-ext
+                 device info properties))
+              (dotimes
+                  (index
+                   (cffi:foreign-slot-value
+                    properties '(:struct past-presentation-timing-properties)
+                    'presentation-timing-count))
+                (let ((timing
+                        (cffi:mem-aptr
+                         timings '(:struct past-presentation-timing) index)))
+                  (cffi:with-foreign-slots
+                      ((present-id present-stage-count p-present-stages
+                        time-domain time-domain-id report-complete)
+                       timing (:struct past-presentation-timing))
+                    (when (and (not (zerop report-complete))
+                               (plusp present-stage-count))
+                      (cffi:with-foreign-slots
+                          ((stage time) p-present-stages
+                           (:struct present-stage-time))
+                        (funcall function present-id
+                                 (if (and (consp stage) (null (rest stage)))
+                                     (first stage)
+                                     stage)
+                                 time
+                                 time-domain time-domain-id))))))))))))
+  (values))
 
 (defun destroy-swapchain (device swapchain)
   (vk:destroy-swapchain-khr device swapchain (cffi:null-pointer))
@@ -1902,17 +2168,37 @@ entries as understood by FILL-SEMAPHORE-SUBMIT-INFOS."
                device swapchain timeout semaphore (cffi:null-pointer) index))))
       (values (cffi:mem-ref index :uint32) result))))
 
-(defun present (queue swapchain image-index &key (wait-semaphores #()))
+(defun present
+    (queue swapchain image-index
+     &key (wait-semaphores #()) present-id present-stage time-domain-id)
   (with-foreign-array (waits :pointer wait-semaphores)
     (with-foreign-array (swapchains :pointer (vector swapchain))
       (with-foreign-array (indices :uint32 (vector image-index))
-        (with-vk (present-info present-info
-                  :wait-semaphore-count (length wait-semaphores)
-                  :p-wait-semaphores waits
-                  :swapchain-count 1
-                  :p-swapchains swapchains
-                  :p-image-indices indices
-                  :p-results (cffi:null-pointer))
-          (with-vulkan-results
-              (:present :success :suboptimal-khr :error-out-of-date-khr)
-            (vk:queue-present-khr queue present-info)))))))
+        (cffi:with-foreign-object (present-ids :uint64)
+          (setf (cffi:mem-ref present-ids :uint64) (or present-id 0))
+          (with-vk (timing present-timing-info
+                    :flags nil :target-time 0
+                    :time-domain-id (or time-domain-id 0)
+                    :present-stage-queries
+                    (if present-stage (list present-stage) nil)
+                    :target-time-domain-present-stage nil)
+            (with-vk (timings present-timings-info
+                      :swapchain-count 1 :p-timing-infos timing)
+              (with-vk (id present-id-2
+                        :p-next (if present-stage
+                                    timings
+                                    (cffi:null-pointer))
+                        :swapchain-count 1 :p-present-ids present-ids)
+                (with-vk (present-info present-info
+                          :p-next (if present-id id (cffi:null-pointer))
+                          :wait-semaphore-count (length wait-semaphores)
+                          :p-wait-semaphores waits
+                          :swapchain-count 1
+                          :p-swapchains swapchains
+                          :p-image-indices indices
+                          :p-results (cffi:null-pointer))
+                  (with-vulkan-results
+                      (:present :success :suboptimal-khr
+                       :error-out-of-date-khr
+                       :error-present-timing-queue-full-ext)
+                    (vk:queue-present-khr queue present-info)))))))))))

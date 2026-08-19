@@ -62,12 +62,345 @@ disagree would otherwise ask for a rebuild on every single frame.")
    (next-frame-slot
     :initform 0
     :accessor vulkan-canvas-next-frame-slot)
+   (presentation-timeline
+    :initform nil
+    :accessor vulkan-canvas-presentation-timeline)
    (current-texture
     :initform nil
     :accessor vulkan-canvas-current-texture)
    (state
     :initform :unconfigured
     :accessor canvas-context-state)))
+
+(defconstant +vulkan-presentation-timing-capacity+ 4096)
+(defconstant +vulkan-presentation-timing-queue-size+ 256)
+
+(defclass vulkan-presentation-timeline ()
+  ((status :initform :warming :accessor vulkan-presentation-timeline-status)
+   (reason :initform nil :accessor vulkan-presentation-timeline-reason)
+   (stage :initarg :stage :reader vulkan-presentation-timeline-stage)
+   (time-domain :initform nil :accessor vulkan-presentation-timeline-time-domain)
+   (time-domain-id :initform 0
+                   :accessor vulkan-presentation-timeline-time-domain-id)
+   (refresh-duration :initform 0
+                     :accessor vulkan-presentation-timeline-refresh-duration)
+   (refresh-interval :initform 0
+                     :accessor vulkan-presentation-timeline-refresh-interval)
+   (next-present-id :initform 1
+                    :accessor vulkan-presentation-timeline-next-present-id)
+   (count :initform 0 :accessor vulkan-presentation-timeline-count)
+   (dropped-count :initform 0
+                  :accessor vulkan-presentation-timeline-dropped-count)
+   (present-ids
+    :initform (make-array +vulkan-presentation-timing-capacity+
+                          :element-type '(unsigned-byte 64)
+                          :initial-element 0)
+    :reader vulkan-presentation-timeline-present-ids)
+   (predicted-seconds
+    :initform (make-array +vulkan-presentation-timing-capacity+
+                          :element-type 'double-float :initial-element 0d0)
+    :reader vulkan-presentation-timeline-predicted-seconds)
+   (submitted-seconds
+    :initform (make-array +vulkan-presentation-timing-capacity+
+                          :element-type 'double-float :initial-element 0d0)
+    :reader vulkan-presentation-timeline-submitted-seconds)
+   (actual-nanoseconds
+    :initform (make-array +vulkan-presentation-timing-capacity+
+                          :element-type '(unsigned-byte 64)
+                          :initial-element 0)
+    :reader vulkan-presentation-timeline-actual-nanoseconds)
+   (actual-time-domains
+    :initform (make-array +vulkan-presentation-timing-capacity+
+                          :initial-element nil)
+    :reader vulkan-presentation-timeline-actual-time-domains)
+   (actual-time-domain-ids
+    :initform (make-array +vulkan-presentation-timing-capacity+
+                          :element-type '(unsigned-byte 64)
+                          :initial-element 0)
+    :reader vulkan-presentation-timeline-actual-time-domain-ids))
+  (:documentation
+   "One swapchain's bounded, presentation-ID-indexed display observations."))
+
+(defstruct presentation-timing-observation
+  (present-id 0 :type (unsigned-byte 64))
+  (predicted-seconds 0d0 :type double-float)
+  (submitted-seconds 0d0 :type double-float)
+  (actual-nanoseconds 0 :type (unsigned-byte 64))
+  actual-time-domain
+  (actual-time-domain-id 0 :type (unsigned-byte 64)))
+
+(defstruct presentation-timing-snapshot
+  status reason stage time-domain
+  (time-domain-id 0 :type (unsigned-byte 64))
+  (refresh-duration 0 :type (unsigned-byte 64))
+  (refresh-interval 0 :type (unsigned-byte 64))
+  (dropped-count 0 :type (unsigned-byte 64))
+  (observations #() :type vector))
+
+(defun vulkan-presentation-timeline-index (present-id)
+  (mod (1- present-id) +vulkan-presentation-timing-capacity+))
+
+(defun note-vulkan-presentation-submission
+    (timeline present-id predicted-seconds submitted-seconds)
+  (let ((index (vulkan-presentation-timeline-index present-id)))
+    (setf (aref (vulkan-presentation-timeline-present-ids timeline) index)
+          present-id
+          (aref (vulkan-presentation-timeline-predicted-seconds timeline) index)
+          (float predicted-seconds 1d0)
+          (aref (vulkan-presentation-timeline-submitted-seconds timeline) index)
+          (float submitted-seconds 1d0)
+          (aref (vulkan-presentation-timeline-actual-nanoseconds timeline) index)
+          0
+          (aref (vulkan-presentation-timeline-actual-time-domains timeline) index)
+          nil
+          (aref (vulkan-presentation-timeline-actual-time-domain-ids timeline)
+                index)
+          0
+          (vulkan-presentation-timeline-count timeline)
+          (min +vulkan-presentation-timing-capacity+
+               (1+ (vulkan-presentation-timeline-count timeline)))
+          (vulkan-presentation-timeline-next-present-id timeline)
+          (1+ present-id)))
+  present-id)
+
+(defun note-vulkan-presentation-result
+    (timeline present-id actual-nanoseconds time-domain time-domain-id)
+  (let ((index (vulkan-presentation-timeline-index present-id)))
+    (when (= present-id
+             (aref (vulkan-presentation-timeline-present-ids timeline) index))
+      (setf (aref (vulkan-presentation-timeline-actual-nanoseconds timeline)
+                  index)
+            actual-nanoseconds
+            (aref (vulkan-presentation-timeline-actual-time-domains timeline)
+                  index)
+            time-domain
+            (aref
+             (vulkan-presentation-timeline-actual-time-domain-ids timeline)
+             index)
+            time-domain-id)
+      t)))
+
+(defun snapshot-vulkan-presentation-timeline (timeline)
+  (let* ((count (vulkan-presentation-timeline-count timeline))
+         (next (vulkan-presentation-timeline-next-present-id timeline))
+         (first-id (- next count))
+         (observations (make-array count)))
+    (dotimes (offset count)
+      (let* ((present-id (+ first-id offset))
+             (index (vulkan-presentation-timeline-index present-id)))
+        (setf (aref observations offset)
+              (make-presentation-timing-observation
+               :present-id present-id
+               :predicted-seconds
+               (aref (vulkan-presentation-timeline-predicted-seconds timeline)
+                     index)
+               :submitted-seconds
+               (aref (vulkan-presentation-timeline-submitted-seconds timeline)
+                     index)
+               :actual-nanoseconds
+               (aref (vulkan-presentation-timeline-actual-nanoseconds timeline)
+                     index)
+               :actual-time-domain
+               (aref (vulkan-presentation-timeline-actual-time-domains timeline)
+                     index)
+               :actual-time-domain-id
+               (aref
+                (vulkan-presentation-timeline-actual-time-domain-ids timeline)
+                index)))))
+    (make-presentation-timing-snapshot
+     :status (vulkan-presentation-timeline-status timeline)
+     :reason (vulkan-presentation-timeline-reason timeline)
+     :stage (vulkan-presentation-timeline-stage timeline)
+     :time-domain (vulkan-presentation-timeline-time-domain timeline)
+     :time-domain-id (vulkan-presentation-timeline-time-domain-id timeline)
+     :refresh-duration (vulkan-presentation-timeline-refresh-duration timeline)
+     :refresh-interval (vulkan-presentation-timeline-refresh-interval timeline)
+     :dropped-count (vulkan-presentation-timeline-dropped-count timeline)
+     :observations observations)))
+
+(defun vulkan-canvas-presentation-timing-snapshot (context)
+  "Return a coherent copy of CONTEXT's bounded presentation observations."
+  (check-type context vulkan-canvas-context)
+  (call-on-sdl-canvas-thread
+   (context-canvas context)
+   (lambda ()
+     (let ((timeline (vulkan-canvas-presentation-timeline context)))
+       (and timeline (snapshot-vulkan-presentation-timeline timeline))))))
+
+(defun completed-presentation-timing-observations (snapshot)
+  (remove-if
+   (lambda (observation)
+     (zerop (presentation-timing-observation-actual-nanoseconds observation)))
+   (coerce (presentation-timing-snapshot-observations snapshot) 'list)))
+
+(defun presentation-timing-interval-milliseconds (observations)
+  (loop for previous = nil then observation
+        for observation in observations
+        when (and previous
+                  (= (1+ (presentation-timing-observation-present-id previous))
+                     (presentation-timing-observation-present-id observation))
+                  (eq (presentation-timing-observation-actual-time-domain previous)
+                      (presentation-timing-observation-actual-time-domain observation))
+                  (= (presentation-timing-observation-actual-time-domain-id previous)
+                     (presentation-timing-observation-actual-time-domain-id observation)))
+          collect
+          (/ (- (presentation-timing-observation-actual-nanoseconds observation)
+                (presentation-timing-observation-actual-nanoseconds previous))
+             1d6)))
+
+(defun presentation-timing-phase-errors-milliseconds (observations)
+  (when observations
+    (let ((origin (first observations)))
+      (loop for observation in observations
+            when (and
+                  (eq (presentation-timing-observation-actual-time-domain origin)
+                      (presentation-timing-observation-actual-time-domain observation))
+                  (= (presentation-timing-observation-actual-time-domain-id origin)
+                     (presentation-timing-observation-actual-time-domain-id observation)))
+              collect
+              (* 1d3
+                 (- (/ (- (presentation-timing-observation-actual-nanoseconds
+                           observation)
+                          (presentation-timing-observation-actual-nanoseconds
+                           origin))
+                       1d9)
+                    (- (presentation-timing-observation-predicted-seconds observation)
+                       (presentation-timing-observation-predicted-seconds
+                        origin))))))))
+
+(defun presentation-timing-summary (values)
+  (when values
+    (let* ((count (length values))
+           (sorted (sort (copy-seq values) #'<))
+           (mean (/ (reduce #'+ values) count))
+           (variance
+             (/ (reduce #'+ values
+                        :key (lambda (value) (expt (- value mean) 2)))
+                count)))
+      (list :count count
+            :minimum (first sorted)
+            :mean mean
+            :p50 (elt sorted (floor (* 0.50d0 (1- count))))
+            :p95 (elt sorted (floor (* 0.95d0 (1- count))))
+            :maximum (car (last sorted))
+            :standard-deviation (sqrt variance)))))
+
+(defun print-vulkan-canvas-presentation-timing
+    (context &optional (stream *standard-output*))
+  "Print display cadence and prediction drift observed for CONTEXT."
+  (let ((snapshot (vulkan-canvas-presentation-timing-snapshot context)))
+    (unless snapshot
+      (format stream "No Vulkan presentation timeline exists.~%")
+      (return-from print-vulkan-canvas-presentation-timing nil))
+    (let* ((observations
+             (completed-presentation-timing-observations snapshot))
+           (intervals
+             (presentation-timing-interval-milliseconds observations))
+           (phase-errors
+             (presentation-timing-phase-errors-milliseconds observations))
+           (interval-summary (presentation-timing-summary intervals))
+           (phase-summary (presentation-timing-summary phase-errors))
+           (duration (presentation-timing-snapshot-refresh-duration snapshot)))
+      (format stream "Vulkan presentation timing: ~A~@[ (~A)~]~%"
+              (presentation-timing-snapshot-status snapshot)
+              (presentation-timing-snapshot-reason snapshot))
+      (format stream "  stage/domain: ~A / ~A [~D]~%"
+              (presentation-timing-snapshot-stage snapshot)
+              (presentation-timing-snapshot-time-domain snapshot)
+              (presentation-timing-snapshot-time-domain-id snapshot))
+      (when (plusp duration)
+        (format stream "  display: ~,6F ms (~,3F Hz), interval granularity ~,6F ms~%"
+                (/ duration 1d6) (/ 1d9 duration)
+                (/ (presentation-timing-snapshot-refresh-interval snapshot)
+                   1d6)))
+      (format stream "  frames: ~D submitted, ~D timed, ~D timing drops~%"
+              (length (presentation-timing-snapshot-observations snapshot))
+              (length observations)
+              (presentation-timing-snapshot-dropped-count snapshot))
+      (when interval-summary
+        (format stream
+                "  actual interval ms: mean ~,6F  sd ~,6F  min/p50/p95/max ~,6F / ~,6F / ~,6F / ~,6F~%"
+                (getf interval-summary :mean)
+                (getf interval-summary :standard-deviation)
+                (getf interval-summary :minimum)
+                (getf interval-summary :p50)
+                (getf interval-summary :p95)
+                (getf interval-summary :maximum)))
+      (when phase-summary
+        (format stream
+                "  prediction drift ms: rms ~,6F  min/max ~,6F / ~,6F~%"
+                (sqrt (/ (reduce #'+ phase-errors :key (lambda (x) (* x x)))
+                         (length phase-errors)))
+                (getf phase-summary :minimum)
+                (getf phase-summary :maximum)))
+      snapshot)))
+
+(defun write-vulkan-canvas-presentation-timing-csv (context pathname)
+  "Write CONTEXT's raw presentation observations to PATHNAME."
+  (let* ((snapshot (vulkan-canvas-presentation-timing-snapshot context))
+         (observations
+           (and snapshot
+                (coerce (presentation-timing-snapshot-observations snapshot)
+                        'list)))
+         (completed
+           (and snapshot
+                (completed-presentation-timing-observations snapshot)))
+         (origin (first completed)))
+    (unless snapshot
+      (error "No Vulkan presentation timeline exists for ~S." context))
+    (with-open-file (stream pathname :direction :output
+                                     :if-exists :supersede
+                                     :if-does-not-exist :create)
+      (format stream
+              "present_id,predicted_seconds,submitted_seconds,actual_nanoseconds,time_domain,time_domain_id,actual_interval_ms,prediction_drift_ms~%")
+      (loop with previous = nil
+            for observation in observations
+            for actual =
+              (presentation-timing-observation-actual-nanoseconds observation)
+            for comparable-p =
+              (and origin (plusp actual)
+                   (eq (presentation-timing-observation-actual-time-domain origin)
+                       (presentation-timing-observation-actual-time-domain
+                        observation))
+                   (= (presentation-timing-observation-actual-time-domain-id origin)
+                      (presentation-timing-observation-actual-time-domain-id
+                       observation)))
+            for interval =
+              (and previous (plusp actual)
+                   (plusp
+                    (presentation-timing-observation-actual-nanoseconds previous))
+                   (= (1+ (presentation-timing-observation-present-id previous))
+                      (presentation-timing-observation-present-id observation))
+                   (/ (- actual
+                         (presentation-timing-observation-actual-nanoseconds
+                          previous))
+                      1d6))
+            for drift =
+              (and comparable-p
+                   (* 1d3
+                      (- (/ (- actual
+                               (presentation-timing-observation-actual-nanoseconds
+                                origin))
+                            1d9)
+                         (- (presentation-timing-observation-predicted-seconds
+                             observation)
+                            (presentation-timing-observation-predicted-seconds
+                             origin)))))
+            do (format stream "~D,~,9F,~,9F,~D,~A,~D,~:[~;~,9F~],~:[~;~,9F~]~%"
+                       (presentation-timing-observation-present-id observation)
+                       (presentation-timing-observation-predicted-seconds
+                        observation)
+                       (presentation-timing-observation-submitted-seconds
+                        observation)
+                       actual
+                       (or (presentation-timing-observation-actual-time-domain
+                            observation)
+                           "")
+                       (presentation-timing-observation-actual-time-domain-id
+                        observation)
+                       interval interval drift drift)
+               (setf previous observation)))
+    pathname))
 
 (defmethod context-device ((context vulkan-canvas-context))
   (canvas-device context))
@@ -155,9 +488,17 @@ disagree would otherwise ask for a rebuild on every single frame.")
     ((provider vulkan-gpu-provider))
   (multiple-value-bind (extensions flags) (call-next-method)
     (values (if (sdl-vulkan-presentation-ready-p)
-                (remove-duplicates
-                 (append (sdl-vulkan-instance-extensions) extensions)
-                 :test #'string=)
+                (let* ((available (lvk:enumerate-instance-extension-names))
+                       (surface-capabilities-2
+                         lvk:+surface-capabilities-2-extension-name+))
+                  (remove-duplicates
+                   (append
+                    (sdl-vulkan-instance-extensions)
+                    (and (member surface-capabilities-2 available
+                                 :test #'string=)
+                         (list surface-capabilities-2))
+                    extensions)
+                   :test #'string=))
                 extensions)
             flags)))
 
@@ -185,6 +526,103 @@ disagree would otherwise ask for a rebuild on every single frame.")
   (declare (ignore canvas provider))
   (sdl3:vulkan-destroy-surface instance surface (cffi:null-pointer))
   (values))
+
+(defun choose-vulkan-presentation-stage (stages)
+  (find-if (lambda (stage) (member stage stages))
+           '(:image-first-pixel-visible
+             :image-first-pixel-out
+             :request-dequeued
+             :queue-operations-end)))
+
+(defun make-vulkan-canvas-presentation-timeline (context)
+  "Describe and, when possible, enable timing observation for CONTEXT."
+  (let* ((canvas (context-canvas context))
+         (device (context-device context))
+         (device-extensions (vulkan-device-extension-names device))
+         (instance-extensions
+           (vulkan-device-instance-extension-names device))
+         (timeline (make-instance 'vulkan-presentation-timeline :stage nil)))
+    (labels ((unsupported (reason)
+               (setf (vulkan-presentation-timeline-status timeline) :unsupported
+                     (vulkan-presentation-timeline-reason timeline) reason)
+               timeline))
+      (cond
+        ((not (sdl-canvas-direct-display-p canvas))
+         (unsupported :not-direct-display))
+        ((not (member lvk:+surface-capabilities-2-extension-name+
+                      instance-extensions :test #'string=))
+         (unsupported :missing-surface-capabilities-2))
+        ((not (member lvk:+present-timing-extension-name+
+                      device-extensions :test #'string=))
+         (unsupported :missing-present-timing-extension))
+        ((not (member lvk:+present-id-2-extension-name+
+                      device-extensions :test #'string=))
+         (unsupported :missing-present-id-2-extension))
+        (t
+         (multiple-value-bind
+               (timing-feature-p absolute-p relative-p id-feature-p)
+             (lvk:physical-device-presentation-features
+              (vulkan-canvas-physical-device context)
+              :present-timing-p t :present-id-2-p t)
+           (declare (ignore absolute-p relative-p))
+           (unless timing-feature-p
+             (return-from make-vulkan-canvas-presentation-timeline
+               (unsupported :missing-present-timing-feature)))
+           (unless id-feature-p
+             (return-from make-vulkan-canvas-presentation-timeline
+               (unsupported :missing-present-id-2-feature))))
+         (let* ((capabilities
+                  (lvk:get-presentation-timing-surface-capabilities
+                   (vulkan-canvas-physical-device context)
+                   (vulkan-canvas-surface context)))
+                (stage
+                  (choose-vulkan-presentation-stage
+                   (lvk:presentation-timing-capabilities-stages
+                    capabilities))))
+           (cond
+             ((not (lvk:presentation-timing-capabilities-supported-p
+                    capabilities))
+              (unsupported :surface-does-not-support-present-timing))
+             ((not (lvk:presentation-timing-capabilities-present-id-2-p
+                    capabilities))
+              (unsupported :surface-does-not-support-present-id-2))
+             ((not stage)
+              (unsupported :surface-offers-no-presentation-stage))
+             (t
+              (make-instance 'vulkan-presentation-timeline :stage stage)))))))))
+
+(defun refresh-vulkan-presentation-timeline
+    (timeline native-device swapchain)
+  (when (eq :warming (vulkan-presentation-timeline-status timeline))
+    (let ((properties
+            (lvk:get-swapchain-timing-properties native-device swapchain))
+          (domains (lvk:get-swapchain-time-domains native-device swapchain)))
+      (when (and properties domains)
+        (let ((domain
+                (or (assoc :clock-monotonic domains)
+                    (assoc :swapchain-local-ext domains)
+                    (assoc :present-stage-local-ext domains)
+                    (first domains))))
+          (setf (vulkan-presentation-timeline-refresh-duration timeline)
+                (lvk:swapchain-timing-properties-refresh-duration properties)
+                (vulkan-presentation-timeline-refresh-interval timeline)
+                (lvk:swapchain-timing-properties-refresh-interval properties)
+                (vulkan-presentation-timeline-time-domain timeline) (car domain)
+                (vulkan-presentation-timeline-time-domain-id timeline) (cdr domain)
+                (vulkan-presentation-timeline-status timeline) :recording
+                (vulkan-presentation-timeline-reason timeline) nil)))))
+  timeline)
+
+(defun drain-vulkan-presentation-timeline
+    (timeline native-device swapchain)
+  (when (eq :recording (vulkan-presentation-timeline-status timeline))
+    (lvk:map-past-presentation-timings
+     native-device swapchain
+     (lambda (present-id stage time time-domain time-domain-id)
+       (when (eq stage (vulkan-presentation-timeline-stage timeline))
+         (note-vulkan-presentation-result
+          timeline present-id time time-domain time-domain-id)))))
+  timeline)
 
 (defun bind-vulkan-canvas-device (context device)
   "Attach unconfigured CONTEXT to DEVICE and create its native SDL surface."
@@ -383,6 +821,11 @@ disagree would otherwise ask for a rebuild on every single frame.")
                         capabilities))
                  (first (lvk:presentation-capabilities-composite-alpha
                          capabilities))))
+           (presentation-timeline
+             (make-vulkan-canvas-presentation-timeline context))
+           (present-timing-p
+             (eq :warming
+                 (vulkan-presentation-timeline-status presentation-timeline)))
            (swapchain nil)
            (textures #())
            (frame-slots #())
@@ -408,7 +851,8 @@ disagree would otherwise ask for a rebuild on every single frame.")
                     (lvk:presentation-capabilities-current-transform
                      capabilities)
                     :composite-alpha composite-alpha
-                    :present-mode :fifo-khr)
+                    :present-mode :fifo-khr
+                    :present-timing-p present-timing-p)
                    textures
                    (map 'vector
                         (lambda (image)
@@ -425,6 +869,12 @@ disagree would otherwise ask for a rebuild on every single frame.")
                         (min 2 (length textures))))
                    render-done
                    (make-vulkan-semaphores native-device (length textures)))
+             (when present-timing-p
+               (lvk:set-swapchain-present-timing-queue-size
+                native-device swapchain
+                +vulkan-presentation-timing-queue-size+)
+               (refresh-vulkan-presentation-timeline
+                presentation-timeline native-device swapchain))
              (setf (vulkan-canvas-swapchain context) swapchain
                    (vulkan-canvas-textures context) textures
                    (canvas-extent context) extent
@@ -435,6 +885,8 @@ disagree would otherwise ask for a rebuild on every single frame.")
                    (vulkan-canvas-render-done context) render-done
                    (vulkan-canvas-frame-slots context) frame-slots
                    (vulkan-canvas-next-frame-slot context) 0
+                   (vulkan-canvas-presentation-timeline context)
+                   presentation-timeline
                    (canvas-context-configuration context)
                    (make-canvas-configuration
                     :device (context-device context)
@@ -483,6 +935,7 @@ disagree would otherwise ask for a rebuild on every single frame.")
           (vulkan-canvas-render-done context) #()
           (vulkan-canvas-frame-slots context) #()
           (vulkan-canvas-next-frame-slot context) 0
+          (vulkan-canvas-presentation-timeline context) nil
           (vulkan-canvas-current-texture context) nil
           (canvas-context-configuration context) nil
           (canvas-extent context) nil
@@ -601,6 +1054,58 @@ surface still cannot supply an image and this frame should be skipped."
                 (values slot slot-index image-index))))))
     nil))
 
+(defun present-vulkan-canvas-image
+    (context queue image-index render-done predicted-presentation-time)
+  "Present one image and opportunistically collect its display timestamp."
+  (let* ((device (context-device context))
+         (native-device (vulkan-handle device))
+         (swapchain (vulkan-canvas-swapchain context))
+         (timeline (vulkan-canvas-presentation-timeline context)))
+    (labels ((plain-present ()
+               (lvk:present
+                (vulkan-handle queue) swapchain image-index
+                :wait-semaphores (vector render-done)))
+             (timed-present (present-id)
+               (lvk:present
+                (vulkan-handle queue) swapchain image-index
+                :wait-semaphores (vector render-done)
+                :present-id present-id
+                :present-stage
+                (vulkan-presentation-timeline-stage timeline)
+                :time-domain-id
+                (vulkan-presentation-timeline-time-domain-id timeline))))
+      (cond
+        ((and timeline
+              (eq :recording
+                  (vulkan-presentation-timeline-status timeline)))
+         (let* ((present-id
+                  (vulkan-presentation-timeline-next-present-id timeline))
+                (submitted-seconds (monotonic-seconds))
+                (result (timed-present present-id)))
+           (when (eq result :error-present-timing-queue-full-ext)
+             (drain-vulkan-presentation-timeline
+              timeline native-device swapchain)
+             (setf result (timed-present present-id)))
+           (if (eq result :error-present-timing-queue-full-ext)
+               (progn
+                 (incf (vulkan-presentation-timeline-dropped-count timeline))
+                 (plain-present))
+               (progn
+                 (unless (eq result :error-out-of-date-khr)
+                   (note-vulkan-presentation-submission
+                    timeline present-id predicted-presentation-time
+                    submitted-seconds))
+                 (drain-vulkan-presentation-timeline
+                  timeline native-device swapchain)
+                 result))))
+        (t
+         (prog1 (plain-present)
+           (when (and timeline
+                      (eq :warming
+                          (vulkan-presentation-timeline-status timeline)))
+             (refresh-vulkan-presentation-timeline
+              timeline native-device swapchain))))))))
+
 (zdefun (%call-with-vulkan-canvas-frame :zone :canvas/frame)
     (context function)
   (ensure-vulkan-canvas-state context :frame :configured)
@@ -609,7 +1114,8 @@ surface still cannot supply an image and this frame should be skipped."
   (let* ((device (context-device context))
          (queue (device-queue device))
          (encoder nil)
-         (commands nil))
+         (commands nil)
+         (predicted-presentation-time nil))
     (multiple-value-bind (slot slot-index image-index)
           (acquire-vulkan-canvas-image context)
         (unless slot
@@ -627,6 +1133,7 @@ surface still cannot supply an image and this frame should be skipped."
                    (let ((presentation-time
                            (canvas-presentation-time
                             (context-canvas context))))
+                     (setf predicted-presentation-time presentation-time)
                      (call-with-canvas-time
                       (context-canvas context) presentation-time
                       (lambda ()
@@ -661,11 +1168,9 @@ surface still cannot supply an image and this frame should be skipped."
                          commands nil))
                  (when (eq :error-out-of-date-khr
                            (with-cpu-trace-zone (:canvas/present)
-                             (lvk:present
-                              (vulkan-handle queue)
-                              (vulkan-canvas-swapchain context) image-index
-                              :wait-semaphores
-                              (vector render-done))))
+                             (present-vulkan-canvas-image
+                              context queue image-index render-done
+                              predicted-presentation-time)))
                    ;; The image was presented to a surface that has already
                    ;; moved on.  Forgetting the size this swapchain was built
                    ;; for is what makes the next frame rebuild it, even when
