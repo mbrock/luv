@@ -402,7 +402,7 @@ the light as a band rather than a hairline, and still far short of the old
   (or (getf (renderer-pipelines renderer) style)
       (error "Renderer has no ~S pipeline." style)))
 
-(defun create-renderer-targets (renderer)
+(zdefun (create-renderer-targets :zone :luft/create-renderer-targets) (renderer)
   (let* ((device (renderer-device renderer))
          (extent (renderer-extent renderer))
          (color (create device
@@ -439,7 +439,7 @@ the light as a band rather than a hairline, and still far short of the old
                           :label "luft scene sampler"
                           :mag-filter :linear :min-filter :linear)))))
 
-(defun create-renderer-pipeline (renderer)
+(zdefun (create-renderer-pipeline :zone :luft/create-renderer-pipeline) (renderer)
   (let* ((device (renderer-device renderer))
          (task (create device
                        (make-shader-module-descriptor
@@ -575,11 +575,12 @@ the light as a band rather than a hairline, and still far short of the old
                        (:binding ,shaders:+lens-frame-binding+
                         :resource ,(renderer-uniform-buffer renderer)))))))))
 
-(defun make-renderer (&key scene camera device
-                        (provider *gpu-provider*)
-                        (width 1280) (height 800)
-                        (color-format :rgba8-unorm-srgb)
-                        (style :bevel))
+(zdefun (make-renderer :zone :luft/make-renderer)
+    (&key scene camera device
+          (provider *gpu-provider*)
+          (width 1280) (height 800)
+          (color-format :rgba8-unorm-srgb)
+          (style :bevel))
   "Create every GPU object needed to draw SCENE from CAMERA at WIDTH by HEIGHT.
 
 STYLE is :FLAT, :BEVEL (rounded), :CHAMFER (subtle planar crease relief), or
@@ -666,7 +667,9 @@ The second value is true when a new buffer was created."
           (funcall (fdefinition `(setf ,capacity-accessor)) needed renderer)
           (values new t)))))
 
-(defun upload-scene (renderer &optional (scene (renderer-scene renderer)))
+(zdefun (upload-scene :zone :luft/upload-scene
+                       :value (scene-brick-count scene))
+    (renderer &optional (scene (renderer-scene renderer)))
   "Upload SCENE's sites and brick spheres, rebinding when buffers grow."
   (let* ((sites (scene-sites scene))
          (bricks (scene-bricks scene))
@@ -711,7 +714,7 @@ The second value is true when a new buffer was created."
           (renderer-uploaded-scene renderer) scene)
     renderer))
 
-(defun encode-frame (renderer encoder)
+(zdefun (encode-frame :zone :luft/encode-frame) (renderer encoder)
   "Encode one frame of RENDERER's scene into its color texture on ENCODER."
   (let* ((extent (renderer-extent renderer))
          (scene (renderer-scene renderer))
@@ -897,6 +900,7 @@ many times oversize, and the frame is box-filtered down on the way out."
                  :reader viewer-pressed-keys)
    (pointer-captured-p :initform nil :accessor viewer-pointer-captured-p)
    (running-p :initform t :accessor viewer-running-p)
+   (tracy-thread-named-p :initform nil :accessor viewer-tracy-thread-named-p)
    (last-timestamp :initform nil :accessor viewer-last-timestamp)
    (speed :initarg :speed :initform 12.0 :accessor viewer-speed)
    (sensitivity :initarg :sensitivity :initform 0.0032
@@ -934,17 +938,24 @@ many times oversize, and the frame is box-filtered down on the way out."
         (when (viewer-key-down-p viewer :left-control :q :c)
           (move (vec3:make-vec3 0 0 1) (- step)))))))
 
-(defun render-viewer-frame (viewer timestamp)
+(zdefun (render-viewer-frame :zone :luft/viewer-frame) (viewer timestamp)
   (unless (viewer-running-p viewer)
     (return-from render-viewer-frame nil))
+  (when (and *tracy* (not (viewer-tracy-thread-named-p viewer)))
+    (name-tracy-thread "luft canvas")
+    (setf (viewer-tracy-thread-named-p viewer) t))
   (advance-viewer-camera viewer timestamp)
-  (present-canvas-frame
-   (viewer-context viewer)
-   (lambda (surface-texture encoder)
-     (let ((color (encode-frame (viewer-renderer viewer) encoder)))
-       (encode encoder
-               (make-gpu-copy-texture-command
-                :source color :destination surface-texture))))))
+  (prog1
+      (present-canvas-frame
+       (viewer-context viewer)
+       (lambda (surface-texture encoder)
+         (let ((color (encode-frame (viewer-renderer viewer) encoder)))
+           (encode encoder
+                   (make-gpu-copy-texture-command
+                    :source color :destination surface-texture)))))
+    ;; Keep LUFT's frame boundary distinct from other canvases sharing this
+    ;; durable image.  A wedged frame intentionally remains open in Tracy.
+    (tracy-frame-mark "luft")))
 
 (defmethod handle-canvas-event
     ((viewer viewer) canvas (event canvas-key-press-event))
@@ -1002,12 +1013,13 @@ many times oversize, and the frame is box-filtered down on the way out."
   (declare (ignore viewer canvas event))
   nil)
 
-(defun start-viewer (&key (scene (make-demo-scene))
-                       (camera (make-fly-camera))
-                       (title "luft atelier")
-                       (width 1280) (height 800)
-                       (frames-per-second 60)
-                       (provider *gpu-provider*))
+(zdefun (start-viewer :zone :luft/start-viewer)
+    (&key (scene (make-demo-scene))
+          (camera (make-fly-camera))
+          (title "luft atelier")
+          (width 1280) (height 800)
+          (frames-per-second 60)
+          (provider *gpu-provider*))
   "Open a window flying through SCENE and return the running VIEWER.
 
 Click to capture the pointer, Escape to release it; WASD, Space, and C move.
