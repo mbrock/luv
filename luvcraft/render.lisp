@@ -1894,14 +1894,25 @@ NIL to let the display choose a comfortable window."
                (setf (canvas-event-handler canvas) session)
                (when visible-p
                  ;; Preserve asynchronous residency after startup, but do not
-                 ;; publish the window until the nearest immutable mesh and one
-                 ;; complete frame are ready.
+                 ;; publish the window until the nearest immutable mesh is
+                 ;; ready.
+                 ;;
+                 ;; The window is mapped before that first frame rather than
+                 ;; after it.  A Wayland surface that has never been mapped
+                 ;; receives no frame callbacks, and a FIFO present waits for
+                 ;; one, so presenting first and showing afterwards is a wait
+                 ;; for a frame that cannot arrive until the wait ends.
+                 ;; Nothing can break that tie from outside either:
+                 ;; SHOW-CANVAS runs on the canvas thread, which is the very
+                 ;; thread the present is holding.  Waiting for the mesh is
+                 ;; what keeps the window from opening on an empty world; the
+                 ;; frame merely has to come second.
                  (wait-for-luvcraft-products session :minimum 1)
+                 (show-canvas canvas)
                  (request-canvas-frame
                   canvas
                   (lambda (timestamp)
-                    (render-luvcraft-frame session timestamp)))
-                 (show-canvas canvas))
+                    (render-luvcraft-frame session timestamp))))
                (setf (canvas-clock canvas)
                      (if frames-per-second
                          (make-cadence-clock

@@ -2175,6 +2175,16 @@ ownership and cancel this finalizer."
                 :buffer-row-length (/ bytes-per-row bytes-per-texel)
                 :buffer-image-height height
                 :x (first origin) :y (second origin))
+               ;; Leave the texture where a reader can use it.  An upload
+               ;; that stops at :TRANSFER-DST-OPTIMAL makes whoever samples
+               ;; the texture next responsible for the transition, and the
+               ;; place that notices is SET-BIND-GROUP -- inside a render
+               ;; pass, where a layout transition is not allowed at all.
+               ;; The upload is a whole operation, so it ends in the layout
+               ;; an uploaded texture is for; every other consumer can
+               ;; transition out of this one legally, outside a pass.
+               (transition-vulkan-texture
+                encoder texture :shader-read-only-optimal)
                (push (list :upload-buffer buffer memory)
                      (vulkan-command-encoder-native-resources encoder))
                (setf retained-p t
