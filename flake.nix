@@ -203,7 +203,6 @@
               libghosttyVt
               pkgs.harfbuzz
               tracyClient
-              pkgs.mesa
               pkgs.sdl3
               pkgs.sdl3-image
               pkgs.sdl3-mixer
@@ -213,6 +212,7 @@
               pkgs.moltenvk
             ]
           );
+          mesaLibraryPath = nixpkgs.lib.makeLibraryPath [ pkgs.mesa ];
           # Keep the owned CFFI binding and development tools available to SBCL.
           # McCLIM itself comes from the pinned source above.  Pull only the
           # packaged McCLIM dependency closure into SBCL, since registering the
@@ -265,7 +265,7 @@
           };
         in
         {
-          inherit pkgs wpePkgs sbcl lisp nativeLibraryPath slyRoot;
+          inherit pkgs wpePkgs sbcl lisp nativeLibraryPath mesaLibraryPath slyRoot;
           inherit ffmpeg ffmpegLibraryDirectory mupdf mupdfLibraryDirectory;
           inherit libghosttyVt libghosttyVtLibrary;
           inherit tracyClient tracyClientLibrary tracyTools;
@@ -331,6 +331,11 @@
               env.pkgs.yt-dlp
             ];
             LD_LIBRARY_PATH = env.nativeLibraryPath;
+            # On Linux the desktop owns the hardware Vulkan driver under
+            # /run/opengl-driver.  Mesa remains available for Lavapipe and
+            # deliberate driver experiments, but never wins discovery merely
+            # because a development shell was opened.
+            LUV_MESA_LIBRARY_PATH = env.mesaLibraryPath;
             LUV_NIX_SHELL = "1";
             # The real urbit runtime (vere), which an urbit wall boots.
             LUV_URBIT = "${env.pkgs.urbit}/bin/urbit";
@@ -347,6 +352,10 @@
             VK_LAYER_PATH =
               "${env.pkgs.vulkan-validation-layers}/share/vulkan/explicit_layer.d";
             shellHook = ''
+              if [ "''${LUV_USE_NIX_MESA:-}" = 1 ]; then
+                export LD_LIBRARY_PATH="$LUV_MESA_LIBRARY_PATH:$LD_LIBRARY_PATH"
+              fi
+
               if [ -z "''${SDL_VIDEODRIVER:-}" ] \
                 && [ -z "''${DISPLAY:-}" ] \
                 && [ -z "''${WAYLAND_DISPLAY:-}" ]; then
