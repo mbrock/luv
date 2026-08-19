@@ -295,31 +295,16 @@ a Telegram console left running behind a film is a connection nobody closes."
 
 (defmethod luvcraft:encode-luvcraft-overlay
     ((overlay terminal-film-browser-overlay) session pass surface-texture)
-  "Draw the browser as one flat wall texture, without widget-lab chassis relief."
-  (let* ((mirror (widget-overlay-mirror overlay))
-         (source (mirror-texture mirror)))
-    (when source
-      (ensure-spinning-compositor-resources
-       overlay (mirror-context mirror) source
-       :depth-format :depth32-float
-       :target-format
-       (luv:gpu-texture-format
-        (luvcraft::luvcraft-session-color-texture session)))
-      (place-widget-overlay-on-surface
-       overlay (terminal-film-browser-overlay-display overlay) session)
-      (let* ((viewport-size
-               (luv:canvas-extent (luvcraft::luvcraft-session-context session)))
-             (state
-               (world-device-clip-state
-                overlay session (first viewport-size) (second viewport-size)))
-             (frame-state
-               (ensure-spinning-compositor-frame-state overlay surface-texture)))
-        (setf (widget-overlay-render-state overlay) state)
-        (luv:write-buffer (spinning-frame-state-buffer frame-state) state)
-        (luv:set-pipeline pass (spinning-compositor-pipeline overlay))
-        (luv:set-bind-group pass 0
-                            (spinning-frame-state-bind-group frame-state))
-        (luv:draw pass 4))))
+  "Draw the browser's semantic command stream directly on its wall."
+  (declare (ignore pass))
+  (place-widget-overlay-on-surface
+   overlay (terminal-film-browser-overlay-display overlay) session)
+  (let ((viewport-size
+          (luv:canvas-extent (luvcraft::luvcraft-session-context session))))
+    (prepare-direct-widget-overlay
+     overlay session surface-texture
+     (world-device-clip-state
+      overlay session (first viewport-size) (second viewport-size))))
   overlay)
 
 (defmethod luvcraft:handle-luvcraft-overlay-event
@@ -334,10 +319,7 @@ a Telegram console left running behind a film is a connection nobody closes."
     (when (and (typep event 'luv:canvas-pointer-button-press-event)
                (eq :left (luv:canvas-pointer-event-button event)))
       (let* ((frame (widget-overlay-frame overlay))
-             (height
-               (second
-                (luv:gpu-texture-size
-                 (mirror-texture (widget-overlay-mirror overlay)))))
+             (height (second (widget-overlay-logical-size overlay)))
              (entry (terminal-film-browser-entry-at
                      frame (* (second uv) height))))
         (when entry

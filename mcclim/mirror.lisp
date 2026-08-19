@@ -92,16 +92,17 @@ mirror's identity: a later target may be a texture presented on a 3D quad."))
    (text-bind-groups
     :initform (make-hash-table :test #'eq)
     :reader gpu-mirror-text-bind-groups)
-   ;; The last immutable semantic stream prepared for presentation.  A world
-   ;; compositor can replay selected families (notably Slug text) into the
-   ;; game's actual scene pass instead of sampling their rasterized result.
+   ;; The last immutable semantic stream prepared for presentation. Embedded
+   ;; compositors replay it into the game's actual scene or HUD pass.
    (prepared-commands
-    :initform nil :accessor gpu-mirror-prepared-commands))
+    :initform nil :accessor gpu-mirror-prepared-commands)
+   (prepared-frame-state
+    :initform nil :accessor gpu-mirror-prepared-frame-state))
   (:documentation
    "A direct GPU target for an ordered LUV-GPU-MEDIUM drawing stream.
 
-An embedded mirror renders into TEXTURE for the game to sample; a standalone
-mirror renders into its native canvas drawable."))
+An embedded mirror retains prepared GPU commands and buffers for the game's
+final pass; a standalone mirror renders into its native canvas drawable."))
 
 (defmethod print-object ((mirror luv-mirror) stream)
   (print-unreadable-object (mirror stream :type t :identity t)

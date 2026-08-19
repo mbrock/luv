@@ -45,7 +45,7 @@
            (allocate-instance
             (find-class 'mcluv:luvcraft-hotbar-overlay))))))
 
-(deftest mcclim-text-replays-in-each-overlays-final-pass
+(deftest mcclim-commands-replay-in-each-overlays-final-pass
   (ok (subtypep 'mcluv::terminal-film-browser-overlay
                 'mcluv:luvcraft-world-widget-overlay))
   (ok (not (subtypep 'mcluv:luvcraft-hotbar-overlay
@@ -56,10 +56,16 @@
     (ok (subtypep class 'mcluv:luvcraft-hud-widget-overlay)))
   (let ((overlay
           (allocate-instance
-           (find-class 'mcluv:luvcraft-world-widget-overlay)))
-        (command (mcluv::make-gpu-prepared-text-command)))
-    (ok (not (mcluv::gpu-command-rasterized-p overlay command)))
-    (ok (mcluv::gpu-command-rasterized-p nil command)))
+           (find-class 'mcluv:luvcraft-world-widget-overlay))))
+    (dolist (command
+              (list (mcluv::make-gpu-solid-command)
+                    (mcluv::make-gpu-analytic-command)
+                    (mcluv::make-gpu-relief-analytic-command)
+                    (mcluv::make-gpu-gradient-analytic-command)
+                    (mcluv::make-gpu-prepared-image-command)
+                    (mcluv::make-gpu-prepared-text-command)))
+      (ok (not (mcluv::gpu-command-rasterized-p overlay command)))
+      (ok (mcluv::gpu-command-rasterized-p nil command))))
   (ok (null
        (mcluv::direct-widget-text-depth-stencil
         (allocate-instance
@@ -69,7 +75,13 @@
              (mcluv::direct-widget-text-depth-stencil
               (allocate-instance
                (find-class 'mcluv:luvcraft-world-widget-overlay)))))
-  (let ((specification (mcluv::world-widget-slug-vertex-specification)))
+  (dolist (specification
+            (list (mcluv::direct-widget-solid-vertex-specification)
+                  (mcluv::direct-widget-analytic-vertex-specification)
+                  (mcluv::direct-widget-relief-vertex-specification)
+                  (mcluv::direct-widget-gradient-vertex-specification)
+                  (mcluv::direct-widget-image-vertex-specification)
+                  (mcluv::world-widget-slug-vertex-specification)))
     (ok (> (length (spv:assemble-shader-specification specification)) 5))
     (ok (search "using namespace metal"
                 (luv.msl:msl-document-source

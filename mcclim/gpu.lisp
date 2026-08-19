@@ -81,7 +81,7 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
        ,@body)))
 
 (defclass gpu-mirror-frame-state ()
-  ((view :initarg :view :accessor gpu-frame-state-view)
+  ((view :initarg :view :initform nil :accessor gpu-frame-state-view)
    (vertex-buffer :initarg :vertex-buffer :initform nil
                   :accessor gpu-frame-state-vertex-buffer)
    (vertex-capacity :initarg :vertex-capacity :initform 0
@@ -110,7 +110,8 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
 (defclass gpu-cached-image-paint ()
   ((texture :initarg :texture :reader gpu-image-paint-texture)
    (view :initarg :view :reader gpu-image-paint-view)
-   (bind-group :initarg :bind-group :reader gpu-image-paint-bind-group)
+   (bind-group :initarg :bind-group :initform nil
+               :reader gpu-image-paint-bind-group)
    (width :initarg :width :reader gpu-image-paint-width)
    (height :initarg :height :reader gpu-image-paint-height)))
 
@@ -1233,7 +1234,8 @@ family name adopted."
   (maphash
    (lambda (design paint)
      (declare (ignore design))
-     (luv:destroy (gpu-image-paint-bind-group paint))
+     (alexandria:when-let ((group (gpu-image-paint-bind-group paint)))
+       (luv:destroy group))
      (luv:destroy (gpu-image-paint-view paint))
      (luv:destroy (gpu-image-paint-texture paint)))
    (gpu-mirror-image-paints mirror))
@@ -1653,6 +1655,13 @@ family name adopted."
     (ensure-gpu-mirror-image-pipeline mirror device format)
     (ensure-gpu-mirror-text-pipeline mirror device format)))
 
+(defun ensure-embedded-gpu-mirror-preparation-resources (mirror device)
+  "Create only what a textureless mirror needs to prepare its commands."
+  (unless (gpu-mirror-slug-cache mirror)
+    (setf (gpu-mirror-slug-cache mirror)
+          (luv.slug:make-slug-glyph-cache device)))
+  mirror)
+
 (defun ensure-gpu-mirror-frame-state (mirror context surface)
   (let* ((key (luv:canvas-frame-resource-key context surface))
          (state (gethash key (gpu-mirror-frame-states mirror))))
@@ -1678,14 +1687,29 @@ family name adopted."
               (gethash key (gpu-mirror-frame-states mirror)) state))
     state))
 
-(defun gpu-mirror-retained-text-buffer (mirror)
-  "Return the uploaded Slug buffer for MIRROR's retained prepared commands."
-  (let* ((context (mirror-context mirror))
-         (surface (mirror-texture mirror))
-         (key (and context surface
-                   (luv:canvas-frame-resource-key context surface)))
-         (state (and key (gethash key (gpu-mirror-frame-states mirror)))))
-    (and state (gpu-frame-state-text-buffer state))))
+(defun ensure-embedded-gpu-mirror-frame-state (mirror)
+  (or (gpu-mirror-prepared-frame-state mirror)
+      (setf (gpu-mirror-prepared-frame-state mirror)
+            (make-instance 'gpu-mirror-frame-state))))
+
+(defun upload-gpu-mirror-frame-data
+    (mirror device vertices analytic-vertices relief-vertices
+     gradient-vertices image-vertices text-data)
+  "Upload one embedded mirror snapshot without creating a raster target."
+  (let ((state (ensure-embedded-gpu-mirror-frame-state mirror)))
+    (flet ((upload (data ensure-buffer)
+             (when (plusp (length data))
+               (let ((buffer
+                       (funcall ensure-buffer
+                                state device (* 4 (length data)))))
+                 (luv:write-buffer buffer data)))))
+      (upload vertices #'ensure-gpu-frame-vertex-buffer)
+      (upload analytic-vertices #'ensure-gpu-frame-analytic-buffer)
+      (upload relief-vertices #'ensure-gpu-frame-relief-buffer)
+      (upload gradient-vertices #'ensure-gpu-frame-gradient-buffer)
+      (upload image-vertices #'ensure-gpu-frame-image-buffer)
+      (upload text-data #'ensure-gpu-frame-text-buffer))
+    state))
 
 (defun ensure-gpu-frame-vertex-buffer (state device byte-count)
   (when (> byte-count (gpu-frame-state-vertex-capacity state))
@@ -1817,16 +1841,18 @@ family name adopted."
                      :bytes-per-row (* 4 width)
                      :rows-per-image height)
                     (list width height))
-                   (setf bind-group
-                         (luv:create
-                          device
-                          (luv:make-bind-group-descriptor
-                           :label "cached McCLIM image paint bindings"
-                           :layout (gpu-mirror-image-layout mirror)
-                           :entries
-                           `((:binding 0 :resource ,view)
-                             (:binding 1
-                              :resource ,(gpu-mirror-image-sampler mirror))))))
+                   (when (gpu-mirror-image-layout mirror)
+                     (setf bind-group
+                           (luv:create
+                            device
+                            (luv:make-bind-group-descriptor
+                             :label "cached McCLIM image paint bindings"
+                             :layout (gpu-mirror-image-layout mirror)
+                             :entries
+                             `((:binding 0 :resource ,view)
+                               (:binding 1
+                                :resource
+                                ,(gpu-mirror-image-sampler mirror)))))))
                    (let ((paint
                            (make-instance
                             'gpu-cached-image-paint
@@ -1976,17 +2002,17 @@ family name adopted."
                  :vertex-count (- (/ (length data) 18) first-vertex)
                  :clip (gpu-text-command-clip command))))))))))
 
-(defun prepare-gpu-frame-commands (mirror medium)
+(defun prepare-gpu-frame-commands (mirror semantic-commands)
   (luv:with-cpu-trace-zone
       (:mcluv/prepare
-       :tracy-value (length (gpu-medium-commands medium)))
+       :tracy-value (length semantic-commands))
     (multiple-value-bind (width height)
         (gpu-mirror-logical-size mirror)
       (let ((text-data
               (make-array 1024 :element-type 'single-float
                           :adjustable t :fill-pointer 0))
             commands)
-        (loop for command across (gpu-medium-commands medium)
+        (loop for command across semantic-commands
               for prepared =
                 (etypecase command
                   (gpu-solid-command command)
@@ -2062,59 +2088,35 @@ family name adopted."
                      (gpu-frame-state-image-buffer state)
                      (gpu-frame-state-text-buffer state)))
        (when buffer (luv:destroy buffer)))
-     (luv:destroy (gpu-frame-state-view state)))
+     (alexandria:when-let ((view (gpu-frame-state-view state)))
+       (luv:destroy view)))
    (gpu-mirror-frame-states mirror))
   (clrhash (gpu-mirror-frame-states mirror))
+  (alexandria:when-let ((state (gpu-mirror-prepared-frame-state mirror)))
+    (dolist (buffer
+              (list (gpu-frame-state-vertex-buffer state)
+                    (gpu-frame-state-analytic-buffer state)
+                    (gpu-frame-state-relief-buffer state)
+                    (gpu-frame-state-gradient-buffer state)
+                    (gpu-frame-state-image-buffer state)
+                    (gpu-frame-state-text-buffer state)))
+      (when buffer (luv:destroy buffer)))
+    (setf (gpu-mirror-prepared-frame-state mirror) nil))
   mirror)
 
-(defun ensure-embedded-gpu-mirror-texture (mirror context)
-  (multiple-value-bind (width height) (gpu-mirror-logical-size mirror)
-    (let ((texture (mirror-texture mirror))
-          (format (luv:canvas-format context))
-          (size (list width height)))
-      (unless (and texture
-                   (equal (luv:gpu-texture-size texture) (append size '(1)))
-                   (eq (luv:gpu-texture-format texture) format))
-        (when texture
-          (release-gpu-mirror-frame-states mirror)
-          (luv:destroy texture))
-        (setf (mirror-texture mirror)
-              (luv:create
-               (luv:context-device context)
-               (luv:make-texture-descriptor
-                :label "direct McCLIM embedded target"
-                :size size
-                :usage '(:render-attachment :texture-binding :copy-src)
-                :dimensions :2d
-                :format format))))
-      (mirror-texture mirror))))
-
 (defun call-with-gpu-mirror-target (mirror context function)
-  (if (mirror-embedded-p mirror)
-      (let* ((device (luv:context-device context))
-             (queue (luv:device-queue device))
-             (texture (ensure-embedded-gpu-mirror-texture mirror context))
-             (encoder nil)
-             (commands nil))
-        (unwind-protect
-             (progn
-               (setf encoder
-                     (luv:create
-                      device
-                      (luv:make-command-encoder-descriptor
-                       :label "direct embedded McCLIM frame")))
-               (funcall function texture encoder)
-               (setf commands (luv:finish encoder))
-               (luv:submit queue commands))
-          (when commands (luv:destroy commands))
-          (when encoder (luv:destroy encoder))))
-      (luv:present-canvas-frame context function)))
+  (assert (not (mirror-embedded-p mirror)))
+  (luv:present-canvas-frame context function))
 
 (defun render-gpu-mirror-frame (mirror &key readback-buffer)
   (let ((medium (sheet-medium (mirror-sheet mirror))))
     (luv:with-cpu-trace-zone
         (:mcluv/frame
          :tracy-value (length (gpu-medium-commands medium)))
+      (when (and (mirror-embedded-p mirror)
+                 (zerop (length (gpu-medium-commands medium))))
+        (setf (gpu-mirror-prepared-commands mirror) nil)
+        (return-from render-gpu-mirror-frame mirror))
       ;; Drawing may continue on the McCLIM side while canvas presentation
       ;; crosses onto its native frame thread. Upload one immutable frame
       ;; snapshot so the allocation size and the bytes written cannot drift.
@@ -2126,16 +2128,29 @@ family name adopted."
              (gradient-vertices
                (copy-seq (gpu-medium-gradient-vertices medium)))
              (image-vertices
-               (copy-seq (gpu-medium-image-vertices medium))))
+               (copy-seq (gpu-medium-image-vertices medium)))
+             (semantic-commands
+               (copy-seq (gpu-medium-commands medium))))
         (when (plusp (length (gpu-medium-commands medium)))
           (let* ((context
                    (ensure-gpu-mirror-context
                     mirror :readback-p (not (null readback-buffer))))
                  (device (luv:context-device context))
                  (byte-count (* 4 (length vertices))))
-            (ensure-gpu-mirror-pipeline mirror context)
+            (if (mirror-embedded-p mirror)
+                (ensure-embedded-gpu-mirror-preparation-resources mirror device)
+                (ensure-gpu-mirror-pipeline mirror context))
             (multiple-value-bind (commands text-data)
-                (prepare-gpu-frame-commands mirror medium)
+                (prepare-gpu-frame-commands mirror semantic-commands)
+              (when (mirror-embedded-p mirror)
+                (upload-gpu-mirror-frame-data
+                 mirror device vertices analytic-vertices relief-vertices
+                 gradient-vertices image-vertices text-data)
+                ;; Publish the semantic stream only after every family buffer
+                ;; has received the matching snapshot. The game render thread
+                ;; must never observe new command ranges over old bytes.
+                (setf (gpu-mirror-prepared-commands mirror) commands)
+                (return-from render-gpu-mirror-frame mirror))
               (setf (gpu-mirror-prepared-commands mirror) commands)
               (call-with-gpu-mirror-target
                mirror context
@@ -2291,12 +2306,18 @@ family name adopted."
   (let ((target (mirror-target mirror))
         (medium (sheet-medium (mirror-sheet mirror))))
     (when (and (eq :open (luv:canvas-state target))
-               (plusp (length (gpu-medium-commands medium))))
-      (luv:request-canvas-frame
-       target
-       (lambda (timestamp)
-         (declare (ignore timestamp))
-         (render-gpu-mirror-frame mirror)))))
+               (or (mirror-embedded-p mirror)
+                   (plusp (length (gpu-medium-commands medium)))))
+      (if (mirror-embedded-p mirror)
+          ;; No drawable is acquired and no pass is encoded. Publish the
+          ;; retained snapshot synchronously with the repaint that authored
+          ;; it, so command ranges and all six dense buffers are one revision.
+          (render-gpu-mirror-frame mirror)
+          (luv:request-canvas-frame
+           target
+           (lambda (timestamp)
+             (declare (ignore timestamp))
+             (render-gpu-mirror-frame mirror))))))
   mirror)
 
 (defun capture-gpu-mirror-screenshot (mirror pathname)

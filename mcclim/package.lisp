@@ -49,6 +49,8 @@
            #:widget-overlay-frame
            #:widget-overlay-mirror
            #:widget-overlay-render-state
+           #:widget-overlay-logical-size
+           #:prepare-direct-widget-overlay
            #:luvcraft-widget-texture-coordinate
            #:*embedded-mirror-target*
            #:*embedded-mirror-context*

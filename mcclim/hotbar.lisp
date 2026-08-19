@@ -297,9 +297,7 @@ the slot that has none stop looking like the same kind of thing.")
   :hud)
 
 (defun hotbar-screen-state (overlay)
-  (let* ((source-size
-           (luv:gpu-texture-size
-            (mirror-texture (widget-overlay-mirror overlay))))
+  (let* ((source-size (widget-overlay-logical-size overlay))
          (viewport-size
            (luv:canvas-extent
             (luvcraft::luvcraft-session-context
@@ -323,26 +321,9 @@ the slot that has none stop looking like the same kind of thing.")
 
 (defmethod luvcraft:encode-luvcraft-overlay
     ((overlay luvcraft-hotbar-overlay) session pass surface-texture)
-  (declare (ignore session))
-  (let* ((mirror (widget-overlay-mirror overlay))
-         (source (mirror-texture mirror)))
-    (when source
-      ;; The hotbar draws in the presentation pass, which has no depth
-      ;; attachment, so the pipeline declares no depth state -- the
-      ;; Vulkan HAL rejects any mismatch with the pass's attachments.
-      (ensure-spinning-compositor-resources
-       overlay (mirror-context mirror) source
-       :target-format (luv:gpu-texture-format surface-texture))
-      (let* ((state (hotbar-screen-state overlay))
-             (frame-state
-               (ensure-spinning-compositor-frame-state
-                overlay surface-texture)))
-        (setf (widget-overlay-render-state overlay) state)
-        (luv:write-buffer (spinning-frame-state-buffer frame-state) state)
-        (luv:set-pipeline pass (spinning-compositor-pipeline overlay))
-        (luv:set-bind-group
-         pass 0 (spinning-frame-state-bind-group frame-state))
-        (luv:draw pass 4))))
+  (declare (ignore pass))
+  (prepare-direct-widget-overlay
+   overlay session surface-texture (hotbar-screen-state overlay))
   overlay)
 
 (defmethod luvcraft:refresh-luvcraft-overlay

@@ -311,9 +311,7 @@ shader, the mark that turning it rebuilds one."
   :hud)
 
 (defun metabar-screen-state (overlay)
-  (let* ((source-size
-           (luv:gpu-texture-size
-            (mirror-texture (widget-overlay-mirror overlay))))
+  (let* ((source-size (widget-overlay-logical-size overlay))
          (viewport-size
            (luv:canvas-extent
             (luvcraft::luvcraft-session-context
@@ -339,21 +337,10 @@ shader, the mark that turning it rebuilds one."
 
 (defmethod luvcraft:encode-luvcraft-overlay
     ((overlay luvcraft-metabar-overlay) session pass surface-texture)
-  (declare (ignore session))
-  (let* ((mirror (widget-overlay-mirror overlay))
-         (source (mirror-texture mirror)))
-    (when (and source (plusp (metabar-slide overlay)))
-      (ensure-spinning-compositor-resources
-       overlay (mirror-context mirror) source
-       :target-format (luv:gpu-texture-format surface-texture))
-      (let* ((state (metabar-screen-state overlay))
-             (frame-state
-               (ensure-spinning-compositor-frame-state overlay surface-texture)))
-        (setf (widget-overlay-render-state overlay) state)
-        (luv:write-buffer (spinning-frame-state-buffer frame-state) state)
-        (luv:set-pipeline pass (spinning-compositor-pipeline overlay))
-        (luv:set-bind-group pass 0 (spinning-frame-state-bind-group frame-state))
-        (luv:draw pass 4))))
+  (declare (ignore pass))
+  (when (plusp (metabar-slide overlay))
+    (prepare-direct-widget-overlay
+     overlay session surface-texture (metabar-screen-state overlay)))
   overlay)
 
 (defmethod luvcraft:refresh-luvcraft-overlay

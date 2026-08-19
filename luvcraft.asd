@@ -102,7 +102,7 @@
                  (:file "gazetteer")))))
 
 (defsystem "luvcraft/mcclim"
-  :description "McCLIM gadget textures embedded in a live luvcraft session."
+  :description "McCLIM command surfaces embedded in a live luvcraft session."
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on ("luv/mcclim" "luvcraft/core")

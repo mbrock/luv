@@ -105,9 +105,7 @@ in the middle of the view wants to be read from where the player stands.")
 
 (defun tape-prompt-screen-state (overlay)
   "Place the panel, scaled, in the middle of the viewport."
-  (let* ((source-size
-           (luv:gpu-texture-size
-            (mcluv:mirror-texture (mcluv:widget-overlay-mirror overlay))))
+  (let* ((source-size (mcluv:widget-overlay-logical-size overlay))
          (viewport-size
            (luv:canvas-extent
             (luvcraft:luvcraft-session-context
@@ -137,23 +135,9 @@ in the middle of the view wants to be read from where the player stands.")
 
 (defmethod luvcraft:encode-luvcraft-overlay
     ((overlay luvcraft-tape-prompt-overlay) session pass surface-texture)
-  (declare (ignore session))
-  (let* ((mirror (mcluv:widget-overlay-mirror overlay))
-         (source (mcluv:mirror-texture mirror)))
-    (when source
-      (mcluv:ensure-spinning-compositor-resources
-       overlay (mcluv:mirror-context mirror) source
-       :target-format (luv:gpu-texture-format surface-texture))
-      (let* ((state (tape-prompt-screen-state overlay))
-             (frame-state
-               (mcluv:ensure-spinning-compositor-frame-state
-                overlay surface-texture)))
-        (setf (mcluv:widget-overlay-render-state overlay) state)
-        (luv:write-buffer (mcluv:spinning-frame-state-buffer frame-state) state)
-        (luv:set-pipeline pass (mcluv:spinning-compositor-pipeline overlay))
-        (luv:set-bind-group
-         pass 0 (mcluv:spinning-frame-state-bind-group frame-state))
-        (luv:draw pass 4))))
+  (declare (ignore pass))
+  (mcluv:prepare-direct-widget-overlay
+   overlay session surface-texture (tape-prompt-screen-state overlay))
   overlay)
 
 ;;; The question is asked by the tape, not by the crosshair: nothing targets

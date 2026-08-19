@@ -1104,30 +1104,15 @@ back, it holds its place instead of being dragged along by every arrival."
 (defmethod luvcraft:encode-luvcraft-overlay
     ((overlay luvcraft-communicator-overlay) session pass surface-texture)
   "Draw the panel flat on its wall, in the scene, with the world's depth."
-  (let* ((mirror (widget-overlay-mirror overlay))
-         (source (mirror-texture mirror)))
-    (when source
-      (ensure-spinning-compositor-resources
-       overlay (mirror-context mirror) source
-       :depth-format :depth32-float
-       :target-format
-       (luv:gpu-texture-format
-        (luvcraft::luvcraft-session-color-texture session)))
-      (place-widget-overlay-on-surface
-       overlay (communicator-overlay-display overlay) session)
-      (let* ((viewport-size
-               (luv:canvas-extent (luvcraft::luvcraft-session-context session)))
-             (state (world-device-clip-state
-                     overlay session (first viewport-size)
-                     (second viewport-size)))
-             (frame-state
-               (ensure-spinning-compositor-frame-state overlay surface-texture)))
-        (setf (widget-overlay-render-state overlay) state)
-        (luv:write-buffer (spinning-frame-state-buffer frame-state) state)
-        (luv:set-pipeline pass (spinning-compositor-pipeline overlay))
-        (luv:set-bind-group pass 0
-                            (spinning-frame-state-bind-group frame-state))
-        (luv:draw pass 4))))
+  (declare (ignore pass))
+  (place-widget-overlay-on-surface
+   overlay (communicator-overlay-display overlay) session)
+  (let ((viewport-size
+          (luv:canvas-extent (luvcraft::luvcraft-session-context session))))
+    (prepare-direct-widget-overlay
+     overlay session surface-texture
+     (world-device-clip-state
+      overlay session (first viewport-size) (second viewport-size))))
   overlay)
 
 (defmethod luvcraft:refresh-luvcraft-overlay
