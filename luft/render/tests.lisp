@@ -42,11 +42,15 @@
         (ok (search "interrupted test interruption" log))
         (ok (not (search "complete test interruption" log)))))))
 
+(defun packed-site (site)
+  "The LUFT site inside a packed one: its low sixty bits, without the stock."
+  (ldb (byte luft.render.shaders:+site-stock-shift+ 0) site))
+
 (deftest demo-scene-sites-are-its-surface-in-whole-bricks
   (let* ((scene (make-demo-scene))
          (surface (scene-surface scene))
          (sites (scene-sites scene))
-         (present (remove 0 sites)))
+         (present (map 'list #'packed-site (remove 0 sites))))
     (ok (zerop (mod (length sites) luft.render.shaders:+brick-size+)))
     (ok (= (scene-brick-count scene)
            (/ (length sites) luft.render.shaders:+brick-size+)))
@@ -59,6 +63,56 @@
                present))
     ;; The surface is closed: its boundary vanishes.
     (ok (zerop (luft:chain-count (luft:boundary-chain surface))))))
+
+(deftest packed-sites-carry-the-stock-of-the-solid-behind-them
+  ;; A face is stamped with the stock of the cell it bounds, not of the air
+  ;; on the other side, and the stamp lives above the sixty bits a LUFT
+  ;; site occupies, so the site itself is untouched.
+  (let* ((world (make-world :horizontal-bits 4))
+         (scene (progn
+                  (with-stock (:limestone)
+                    (fill-box world 2 5 2 5 0 0))
+                  (with-stock (:oak)
+                    (fill-box world 3 4 3 4 1 1))
+                  (world-scene world)))
+         (stocks (scene-stocks scene))
+         (limestone (position :limestone stocks))
+         (oak (position :oak stocks))
+         (slot-of (make-hash-table)))
+    (ok (and limestone oak (/= limestone oak)))
+    (loop for site across (scene-sites scene)
+          unless (zerop site)
+            do (setf (gethash (ldb (byte luft.render.shaders:+site-stock-bits+
+                                         luft.render.shaders:+site-stock-shift+)
+                                   site)
+                              slot-of)
+                     t))
+    ;; Both stocks reach the packed sites, and nothing else does.
+    (ok (gethash limestone slot-of))
+    (ok (gethash oak slot-of))
+    (ok (= 2 (hash-table-count slot-of)))
+    ;; The oak block's own top face carries oak: the cell below a face with
+    ;; an upward normal is the one that owns it.
+    (let ((top (find-if (lambda (site)
+                          (and (not (zerop site))
+                               (= luft:+xy-face-extent+
+                                  (luft:site-extent (packed-site site)))
+                               (= 2 (luft:site-z (packed-site site)))
+                               (= 3 (luft:site-x (packed-site site)))
+                               (= 3 (luft:site-y (packed-site site)))))
+                        (scene-sites scene))))
+      (ok top)
+      (ok (= oak (ldb (byte luft.render.shaders:+site-stock-bits+
+                            luft.render.shaders:+site-stock-shift+)
+                      top))))))
+
+(deftest a-world-holds-sixteen-stocks-at-most
+  ;; Sixteen is what the four free bits above a packed site can name.
+  (let ((world (make-world :horizontal-bits 4)))
+    (ok (= 16 luft.render.shaders:+stock-slots+))
+    (ok (signals (dotimes (k 20)
+                   (world-stock-slot world (nth (mod k 10) (material-names))))
+                 'error))))
 
 (deftest rounded-mesh-output-fits-vulkan-guaranteed-limits
   ;; Two bevel rings make a 6x6 point grid and 5x5x2 triangles per face.
@@ -89,14 +143,15 @@
       (luft.render::standalone-render-options "full" :mesh)
     (ok (eq :full mode))
     (ok (eq :bevel style))
-    (ok (equal '(:flat :bevel :chamfer :paper) pipelines))
+    (ok (equal '(:flat :bevel :chamfer :paper :stock) pipelines))
     (ok (equal '(:sky :lens) effects))
     (ok (eq :mesh technique)))
   (multiple-value-bind (mode style pipelines effects technique)
       (luft.render::standalone-render-options "full" :vertex)
     (ok (eq :full mode))
     (ok (eq :bevel style))
-    (ok (equal '(:flat :bevel :chamfer :paper :field :soft :ink) pipelines))
+    (ok (equal '(:flat :bevel :chamfer :paper :stock :field :soft :ink)
+                   pipelines))
     (ok (equal '(:sky :lens) effects))
     (ok (eq :vertex technique))))
 
@@ -130,7 +185,7 @@
               for radius = (aref spheres (+ 3 (* 4 brick)))
               always
               (loop for index from (* brick size) below (* (1+ brick) size)
-                    for site = (aref sites index)
+                    for site = (packed-site (aref sites index))
                     always
                     (or (zerop site)
                         (flet ((reach (axis anchor center)

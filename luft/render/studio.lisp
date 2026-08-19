@@ -19,50 +19,49 @@
   "A floor carrying one exhibit of each crease and corner kind.
 
 The exhibits stand far enough apart that no two share a star."
-  (let* ((domain (luft:make-world-domain :horizontal-bits horizontal-bits))
-         (period (luft:world-domain-x-period domain))
-         (solid (luft:make-solid-chain domain))
+  (let* ((world (make-world :horizontal-bits horizontal-bits))
+         (period (luft:world-domain-x-period (world-domain world)))
          (z floor-height))
     (dotimes (x period)
       (dotimes (y period)
         (dotimes (k floor-height)
-          (setf (luft:solid-cell-p solid x y k) t))))
+          (setf (world-cell-p world x y k) t))))
     ;; Row one: convex things resting on the floor.
-    (fill-box solid 3 3 3 3 z z)                  ; a cube on the floor
-    (fill-box solid 7 8 3 3 z z)                  ; a bar
-    (fill-box solid 12 13 3 3 z z)                ; an L
-    (fill-box solid 12 12 4 4 z z)
-    (fill-box solid 17 18 3 4 z z)                ; a 2x2 slab
-    (fill-box solid 22 23 3 4 z (1+ z))           ; a 2x2x2 block
-    (fill-box solid 27 27 3 3 z (+ z 3))          ; a pillar
+    (fill-box world 3 3 3 3 z z)                  ; a cube on the floor
+    (fill-box world 7 8 3 3 z z)                  ; a bar
+    (fill-box world 12 13 3 3 z z)                ; an L
+    (fill-box world 12 12 4 4 z z)
+    (fill-box world 17 18 3 4 z z)                ; a 2x2 slab
+    (fill-box world 22 23 3 4 z (1+ z))           ; a 2x2x2 block
+    (fill-box world 27 27 3 3 z (+ z 3))          ; a pillar
     ;; Row two: things in the air, whose every corner is pure.
-    (fill-box solid 3 3 9 9 (+ z 2) (+ z 2))      ; a floating cube
-    (fill-box solid 7 9 9 9 (+ z 2) (+ z 2))      ; a floating bar
-    (fill-box solid 12 13 9 10 (+ z 2) (+ z 2))   ; a floating slab
-    (fill-box solid 17 17 9 9 (+ z 2) (+ z 2))    ; two cubes meeting at an edge
-    (fill-box solid 18 18 10 10 (+ z 2) (+ z 2))
-    (fill-box solid 22 22 9 9 (+ z 2) (+ z 2))    ; two cubes meeting at a vertex
-    (fill-box solid 23 23 10 10 (+ z 3) (+ z 3))
-    (fill-box solid 27 27 9 9 (+ z 2) (+ z 2))    ; a cube under a cube, offset
-    (fill-box solid 28 28 9 9 (+ z 3) (+ z 3))
+    (fill-box world 3 3 9 9 (+ z 2) (+ z 2))      ; a floating cube
+    (fill-box world 7 9 9 9 (+ z 2) (+ z 2))      ; a floating bar
+    (fill-box world 12 13 9 10 (+ z 2) (+ z 2))   ; a floating slab
+    (fill-box world 17 17 9 9 (+ z 2) (+ z 2))    ; two cubes meeting at an edge
+    (fill-box world 18 18 10 10 (+ z 2) (+ z 2))
+    (fill-box world 22 22 9 9 (+ z 2) (+ z 2))    ; two cubes meeting at a vertex
+    (fill-box world 23 23 10 10 (+ z 3) (+ z 3))
+    (fill-box world 27 27 9 9 (+ z 2) (+ z 2))    ; a cube under a cube, offset
+    (fill-box world 28 28 9 9 (+ z 3) (+ z 3))
     ;; Row three: concave things cut into or built on the floor.
-    (fill-box solid 3 3 15 15 (1- z) (1- z) nil)  ; a one-cell pit
-    (fill-box solid 7 8 15 16 (1- z) (1- z) nil)  ; a 2x2 pit
-    (fill-box solid 12 12 15 16 (1- z) (1- z) nil) ; a trench
-    (fill-box solid 12 12 17 17 (1- z) (1- z) nil)
+    (fill-box world 3 3 15 15 (1- z) (1- z) nil)  ; a one-cell pit
+    (fill-box world 7 8 15 16 (1- z) (1- z) nil)  ; a 2x2 pit
+    (fill-box world 12 12 15 16 (1- z) (1- z) nil) ; a trench
+    (fill-box world 12 12 17 17 (1- z) (1- z) nil)
     (loop for step from 0 below 3                 ; stairs
-          do (fill-box solid (+ 17 step) (+ 17 step) 15 17 z (+ z step)))
-    (fill-box solid 22 24 15 15 z (+ z 2))        ; a wall with a ledge
-    (fill-box solid 22 24 16 16 (+ z 2) (+ z 2))
-    (fill-box solid 27 29 15 17 z (+ z 1))        ; a block with an inner corner
-    (fill-box solid 27 28 15 16 z (+ z 1) nil)
+          do (fill-box world (+ 17 step) (+ 17 step) 15 17 z (+ z step)))
+    (fill-box world 22 24 15 15 z (+ z 2))        ; a wall with a ledge
+    (fill-box world 22 24 16 16 (+ z 2) (+ z 2))
+    (fill-box world 27 29 15 17 z (+ z 1))        ; a block with an inner corner
+    (fill-box world 27 28 15 16 z (+ z 1) nil)
     ;; Row four: a doorway through a wall, and a roofed nook.
-    (fill-box solid 3 8 22 22 z (+ z 2))
-    (fill-box solid 5 6 22 22 z (+ z 1) nil)
-    (fill-box solid 12 15 22 25 z (+ z 2))
-    (fill-box solid 13 14 23 24 z (+ z 1) nil)
-    (fill-box solid 13 14 22 22 z (+ z 1) nil)
-    (make-scene domain :solid solid)))
+    (fill-box world 3 8 22 22 z (+ z 2))
+    (fill-box world 5 6 22 22 z (+ z 1) nil)
+    (fill-box world 12 15 22 25 z (+ z 2))
+    (fill-box world 13 14 23 24 z (+ z 1) nil)
+    (fill-box world 13 14 22 22 z (+ z 1) nil)
+    (world-scene world)))
 
 ;;; ------------------------------------------------------------------------
 ;;; Cameras

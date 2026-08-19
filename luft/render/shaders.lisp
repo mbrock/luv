@@ -29,6 +29,17 @@ pipeline; the flat pipeline uses the same bricks at four vertices a face.")
 (defconstant +sites-binding+ 1)
 (defconstant +bricks-binding+ 2)
 (defconstant +cells-binding+ 3)
+(defconstant +stocks-binding+ 4)
+
+;;; A LUFT site occupies sixty bits and travels to the GPU in sixty-four, so
+;;; four bits are free above it.  The packed site spends them on which stock
+;;; the solid behind the face is cut from: sixteen materials in a world, at
+;;; no cost in bandwidth and none in a second lookup.  #KE4P5F
+(defconstant +site-stock-shift+ 60)
+(defconstant +site-stock-bits+ 4)
+(defconstant +stock-slots+ (ash 1 +site-stock-bits+))
+(defconstant +stock-lanes+ 8
+  "Vec4 lanes a stock occupies in the table: three albedos, five materials.")
 
 ;;; The focus pass reads a drawn frame rather than the world, and so binds a
 ;;; group of its own.
@@ -796,7 +807,7 @@ The chamfer rule also emits the face normal for facet shading."
                         (uv (vec2 ,(bevel-grid-parameter i)
                                   ,(bevel-grid-parameter j)))
                         ,@(when (eq rule :chamfer)
-                            '((face-normal normal))))))))))
+                            '((face-normal normal) (stock stock-slot))))))))))
         (dotimes (i (1- side))
           (dotimes (j (1- side))
             ;; Each quad's diagonal points at the nearest corner vertex, so a
@@ -851,9 +862,13 @@ The chamfer rule also emits the face normal for facet shading."
                         (world :vec3 :location 1)
                         (uv :vec2 :location 2)
                         ,@(when (eq rule :chamfer)
-                            '((face-normal :vec3 :location 3))))))
+                            '((face-normal :vec3 :location 3)
+                              (stock :float :location 4))))))
            (let* ((site (buffer-element
                          sites (+ (* brick-index (uint ,+brick-size+)) lane)))
+                  (stock-slot (float (uint (ldb (byte ,+site-stock-bits+
+                                                     ,+site-stock-shift+)
+                                                site))))
                   (extent (uint (ldb (byte luft:+extent-bits+ 0) site)))
                   (anchor
                     (vec3 (float (uint (ldb (byte luft:+horizontal-capacity-bits+

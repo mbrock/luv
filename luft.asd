@@ -23,6 +23,7 @@
                              (:file "shaders")
                              (:file "vertex-shaders")
                              (:file "field")
+                             (:file "material")
                              (:file "render")
                              (:file "studio"))))
   :in-order-to ((test-op (test-op "luft/render/test"))))

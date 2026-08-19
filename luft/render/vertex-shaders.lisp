@@ -184,9 +184,15 @@ vertex placed by RULE, :CHAMFER or :ROUND, from its nearest corner's star."
                       (world :vec3 :location 1)
                       (uv :vec2 :location 2)
                       ,@(when (eq rule :chamfer)
-                          '((face-normal :vec3 :location 3)))))
+                          '((face-normal :vec3 :location 3)
+                            (stock :float :location 4)))))
          (let* ((site (buffer-element
                        sites (/ vertex-index (uint ,(float vertices)))))
+                ;; The four bits above the site: which stock the solid
+                ;; behind this face is cut from.
+                (stock-slot (float (uint (ldb (byte ,+site-stock-bits+
+                                                    ,+site-stock-shift+)
+                                              site))))
                 (vertex-in-face (mod vertex-index (uint ,(float vertices))))
                 ;; Which grid quad, and which vertex of its six.
                 (quad (/ vertex-in-face (uint 6.0)))
@@ -397,12 +403,16 @@ vertex placed by RULE, :CHAMFER or :ROUND, from its nearest corner's star."
            (set-output world point)
            (set-output uv (vec2 s t*))
            ,@(when (eq rule :chamfer)
-               '((set-output face-normal normal))))))))
+               '((set-output face-normal normal)
+                 (set-output stock stock-slot))))))))
 
 (defmethod surface-vertices-per-face ((style (eql :chamfer)))
   (grid-vertices-per-face 1))
 
 (defmethod surface-vertices-per-face ((style (eql :paper)))
+  (grid-vertices-per-face 1))
+
+(defmethod surface-vertices-per-face ((style (eql :stock)))
   (grid-vertices-per-face 1))
 
 (defmethod surface-vertices-per-face ((style (eql :bevel)))

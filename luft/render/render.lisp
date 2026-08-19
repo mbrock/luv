@@ -17,6 +17,91 @@
 (defconstant +chunk-bits+ 3
   "Sites are ordered by 8-cell chunk so a brick's faces stay close together.")
 
+;;; ------------------------------------------------------------------------
+;;; Worlds: a solid, and what every cell of it is cut from
+;;;
+;;; A LUFT chain says where the world is solid and nothing about what the
+;;; solid is.  That was enough while every style shaded by face direction
+;;; alone, and it stops being enough the moment a bridge wants stone piers
+;;; under a timber deck.  A world is therefore a chain together with one
+;;; stock slot per cell -- an index into a short palette, sixteen materials
+;;; at most, because sixteen is what the packed site has room to carry.
+;;;
+;;; Building code does not pass the material about.  It binds *STOCK* and
+;;; fills, the way a shop works from one board at a time:
+;;;
+;;;   (with-stock (:limestone)
+;;;     (fill-box world 26 27 44 45 0 8))
+
+(defclass world ()
+  ((domain
+    :initarg :domain
+    :reader world-domain)
+   (solid
+    :initarg :solid
+    :reader world-solid
+    :documentation "The solid world: a 3-chain of positive cells.")
+   (stocks
+    :initform (make-array 1 :adjustable t :fill-pointer 1
+                            :initial-element :turf)
+    :accessor world-stocks
+    :documentation "The material of each slot, slot zero first.")
+   (slots
+    :initarg :slots
+    :reader world-slots
+    :documentation "One stock slot per cell, indexed as the cell bits are."))
+  (:documentation "A solid world and the stock every cell of it is cut from."))
+
+(defun make-world (&key (horizontal-bits 6)
+                        (domain (luft:make-world-domain
+                                 :horizontal-bits horizontal-bits)))
+  "An empty world over DOMAIN, every cell of it slot zero."
+  (make-instance 'world
+                 :domain domain
+                 :solid (luft:make-solid-chain domain)
+                 :slots (make-array (luft:chain-cell-bit-count domain)
+                                    :element-type '(unsigned-byte 8)
+                                    :initial-element 0)))
+
+(defparameter *stock* :turf
+  "The material FILL-BOX and its kin stamp on the cells they fill.")
+
+(defmacro with-stock ((material) &body body)
+  "Evaluate BODY with MATERIAL as the stock that filling stamps."
+  `(let ((*stock* ,material)) ,@body))
+
+(defun world-stock-slot (world material)
+  "The slot MATERIAL occupies in WORLD's palette, adding it if it is new."
+  (let ((stocks (world-stocks world)))
+    (or (position material stocks)
+        (progn
+          (find-material material)
+          (when (<= shaders:+stock-slots+ (fill-pointer stocks))
+            (error "A world holds ~D stocks; ~S would be the ~:*~R."
+                   shaders:+stock-slots+ material))
+          (vector-push-extend material stocks)
+          (1- (fill-pointer stocks))))))
+
+(defun world-cell-p (world x y z)
+  "Whether WORLD is solid at X,Y,Z."
+  (luft:solid-cell-p (world-solid world) x y z))
+
+(defun (setf world-cell-p) (state world x y z)
+  "Make WORLD solid or empty at X,Y,Z, stamping *STOCK* where it fills."
+  (setf (luft:solid-cell-p (world-solid world) x y z) state)
+  (when state
+    (setf (aref (world-slots world)
+                (luft:cell-bit-index (world-domain world) x y z))
+          (world-stock-slot world *stock*)))
+  state)
+
+(defun paint-cell (world x y z &optional (material *stock*))
+  "Give the cell at X,Y,Z of WORLD the stock MATERIAL, solid or not."
+  (setf (aref (world-slots world)
+              (luft:cell-bit-index (world-domain world) x y z))
+        (world-stock-slot world material))
+  material)
+
 (defclass scene ()
   ((domain
     :initarg :domain
@@ -43,12 +128,31 @@
    (cell-bits
     :initform nil
     :accessor scene-cell-bits
-    :documentation "The solid chain as dense (unsigned-byte 32) cell bits."))
+    :documentation "The solid chain as dense (unsigned-byte 32) cell bits.")
+   (slots
+    :initarg :slots
+    :initform nil
+    :accessor scene-slots
+    :documentation "One stock slot per cell, or NIL for a single-stock scene.")
+   (stocks
+    :initarg :stocks
+    :initform nil
+    :accessor scene-stocks
+    :documentation "The material of each stock slot, or NIL for *MATERIAL*."))
   (:documentation "A solid world together with its drawable surface products."))
 
-(defun make-scene (domain &key (solid (luft:make-solid-chain domain)))
+(defun make-scene (domain &key (solid (luft:make-solid-chain domain))
+                               slots stocks)
   "Make a scene over DOMAIN and refresh its surface products once."
-  (refresh-scene (make-instance 'scene :domain domain :solid solid)))
+  (refresh-scene (make-instance 'scene :domain domain :solid solid
+                                       :slots slots :stocks stocks)))
+
+(defun world-scene (world)
+  "The drawable scene of WORLD, carrying its stock slots and palette."
+  (make-scene (world-domain world)
+              :solid (world-solid world)
+              :slots (world-slots world)
+              :stocks (copy-seq (world-stocks world))))
 
 (defun site-chunk-key (site)
   "A fixnum ordering key grouping signed site SITE by chunk, then by site."
@@ -96,6 +200,37 @@
                   (aref spheres (+ 3 (* 4 brick)))
                   (coerce radius 'single-float))))))))
 
+(defun site-solid-cell (site)
+  "The X, Y, and Z of the solid cell a surface face SITE bounds.
+
+The face's missing extent axis is its normal axis; its polarity says which
+way that normal points, and the solid is the cell on the inward side."
+  (let ((x (luft:site-x site))
+        (y (luft:site-y site))
+        (z (luft:site-z site))
+        (extent (luft:site-extent site))
+        ;; The canonical orientation of a face is +X, -Y, +Z by spanning
+        ;; axis; polarity flips it, and the solid lies one cell back
+        ;; whenever the outward normal runs along the positive axis.
+        (negative-p (luft:site-negative-p site)))
+    (cond ((= extent luft:+yz-face-extent+)
+           (values (if negative-p x (1- x)) y z))
+          ((= extent luft:+xz-face-extent+)
+           (values x (if negative-p (1- y) y) z))
+          (t (values x y (if negative-p z (1- z)))))))
+
+(defun stamp-site-stocks (sites domain slots)
+  "Set each site's stock bits from SLOTS, the stock slot of every cell."
+  (dotimes (index (length sites) sites)
+    (let ((site (aref sites index)))
+      (unless (zerop site)
+        (multiple-value-bind (x y z) (site-solid-cell site)
+          (when (<= 0 z (1- luft:+vertical-cell-rows+))
+            (setf (ldb (byte shaders:+site-stock-bits+
+                             shaders:+site-stock-shift+)
+                       (aref sites index))
+                  (aref slots (luft:cell-bit-index domain x y z)))))))))
+
 (defun refresh-scene (scene)
   "Recompute SCENE's surface chain, brick-ordered sites, and brick spheres."
   (let* ((surface (luft:surface-chain (scene-solid scene)))
@@ -108,8 +243,12 @@
     (setf (scene-surface scene) surface
           (scene-sites scene) sites
           (scene-brick-count scene) brick-count
+          ;; Measured before the stock bits go on: past bit sixty a packed
+          ;; site is no longer a LUFT site, and nothing may read it as one.
           (scene-bricks scene) (brick-spheres sites brick-count)
           (scene-cell-bits scene) (luft:chain-cell-bits (scene-solid scene)))
+    (when (scene-slots scene)
+      (stamp-site-stocks sites (scene-domain scene) (scene-slots scene)))
     scene))
 
 ;;; ------------------------------------------------------------------------
@@ -123,105 +262,115 @@
         (plateau (if (and (<= 40 x 52) (<= 10 y 22)) 3.0 0.0)))
     (max 1 (floor (+ rolling plateau)))))
 
-(defun fill-box (solid x0 x1 y0 y1 z0 z1 &optional (state t))
-  "Set every cell of the closed box to STATE."
+(defun fill-box (world x0 x1 y0 y1 z0 z1 &optional (state t))
+  "Set every cell of the closed box to STATE, stamping *STOCK* where it fills."
   (loop for x from x0 to x1
         do (loop for y from y0 to y1
                  do (loop for z from z0 to z1
-                          do (setf (luft:solid-cell-p solid x y z) state)))))
+                          do (setf (world-cell-p world x y z) state)))))
 
-(defun carve-ravine (solid)
+(defun carve-ravine (world)
   "A gap for the bridge to cross, cut where the ground was continuous."
   (loop for y from 40 to 56
         do (let ((width (+ 3 (floor (abs (- y 48)) 3))))
              (loop for x from (- 30 width) to (+ 30 width)
                    do (loop for z from 0 to 12
-                            do (setf (luft:solid-cell-p solid x y z) nil))))))
+                            do (setf (world-cell-p world x y z) nil))))))
 
-(defun build-bridge (solid)
+(defun build-bridge (world)
   "A deck across the ravine on two piers, with a parapet either side.
 
 Something has to span a gap before a world has anywhere to stand and look
 down from, and a deck one cell thick with a parapet at its edge is the
-smallest thing that reads as built rather than as terrain."
+smallest thing that reads as built rather than as terrain.  The piers are
+stone because they stand in the water and the deck is oak because it is
+walked on, which is the whole argument for a world knowing its stocks."
   (let ((deck 9))
-    ;; Piers down to whatever floor the ravine left.
-    (dolist (x '(26 34))
-      (fill-box solid x (1+ x) 44 45 0 (1- deck))
-      (fill-box solid x (1+ x) 51 52 0 (1- deck)))
-    ;; The deck, and a parapet along both sides with regular gaps.
-    (fill-box solid 24 36 43 53 deck deck)
-    (loop for x from 24 to 36
-          unless (zerop (mod (- x 24) 4))
-            do (setf (luft:solid-cell-p solid x 43 (+ deck 1)) t
-                     (luft:solid-cell-p solid x 53 (+ deck 1)) t))
-    ;; Ramps up to the deck at either end.
-    (loop for step from 0 to 8
-          do (fill-box solid (- 23 step) (- 23 step) 45 51
-                       0 (max 0 (- deck 1 step)))
-             (fill-box solid (+ 37 step) (+ 37 step) 45 51
-                       0 (max 0 (- deck 1 step))))))
+    (with-stock (:granite)
+      (dolist (x '(26 34))
+        (fill-box world x (1+ x) 44 45 0 (1- deck))
+        (fill-box world x (1+ x) 51 52 0 (1- deck))))
+    (with-stock (:oak)
+      (fill-box world 24 36 43 53 deck deck)
+      (loop for x from 24 to 36
+            unless (zerop (mod (- x 24) 4))
+              do (setf (world-cell-p world x 43 (+ deck 1)) t
+                       (world-cell-p world x 53 (+ deck 1)) t)))
+    ;; Ramps up to the deck at either end, cut into the ground itself.
+    (with-stock (:limestone)
+      (loop for step from 0 to 8
+            do (fill-box world (- 23 step) (- 23 step) 45 51
+                         0 (max 0 (- deck 1 step)))
+               (fill-box world (+ 37 step) (+ 37 step) 45 51
+                         0 (max 0 (- deck 1 step)))))))
 
-(defun build-balconies (solid)
+(defun build-balconies (world)
   "Three balconies off the tower, each a slab with a lip and a doorway."
   (loop for (z side) in '((6 :east) (12 :north) (17 :east))
         do (ecase side
              (:east
-              (fill-box solid 28 31 32 35 z z)
-              (fill-box solid 31 31 32 35 (1+ z) (1+ z))
-              (fill-box solid 28 31 32 32 (1+ z) (1+ z))
-              (fill-box solid 28 31 35 35 (1+ z) (1+ z))
+              (with-stock (:oak) (fill-box world 28 31 32 35 z z))
+              (with-stock (:bronze)
+                (fill-box world 31 31 32 35 (1+ z) (1+ z))
+                (fill-box world 28 31 32 32 (1+ z) (1+ z))
+                (fill-box world 28 31 35 35 (1+ z) (1+ z)))
               ;; The doorway it is reached through.
-              (fill-box solid 27 27 33 34 z (+ z 1) nil))
+              (fill-box world 27 27 33 34 z (+ z 1) nil))
              (:north
-              (fill-box solid 22 25 38 41 z z)
-              (fill-box solid 22 25 41 41 (1+ z) (1+ z))
-              (fill-box solid 22 22 38 41 (1+ z) (1+ z))
-              (fill-box solid 25 25 38 41 (1+ z) (1+ z))
-              (fill-box solid 23 24 37 37 z (+ z 1) nil)))))
+              (with-stock (:oak) (fill-box world 22 25 38 41 z z))
+              (with-stock (:bronze)
+                (fill-box world 22 25 41 41 (1+ z) (1+ z))
+                (fill-box world 22 22 38 41 (1+ z) (1+ z))
+                (fill-box world 25 25 38 41 (1+ z) (1+ z)))
+              (fill-box world 23 24 37 37 z (+ z 1) nil)))))
 
-(defun build-terraces (solid)
+(defun build-terraces (world)
   "Stepped terraces below the tower: a hillside someone has taken in hand."
   (loop for step from 0 below 5
         for z = (+ 3 step)
         for near = (- 18 (* 2 step))
-        do (fill-box solid near (+ near 1) (- 24 step) (+ 33 step) 0 z)
+        do (with-stock (:turf)
+             (fill-box world near (+ near 1) (- 24 step) (+ 33 step) 0 z))
            ;; A low retaining wall along the front of each terrace.
-           (loop for y from (- 24 step) to (+ 33 step)
-                 unless (zerop (mod y 5))
-                   do (setf (luft:solid-cell-p solid near y (1+ z)) t))))
+           (with-stock (:limestone)
+             (loop for y from (- 24 step) to (+ 33 step)
+                   unless (zerop (mod y 5))
+                     do (setf (world-cell-p world near y (1+ z)) t)))))
 
 (defun make-demo-scene (&key (horizontal-bits 6))
-  "A small textureless world: rolling ground, a tower, and a floating slab."
-  (let* ((domain (luft:make-world-domain :horizontal-bits horizontal-bits))
-         (period (luft:world-domain-x-period domain))
-         (solid (luft:make-solid-chain domain)))
-    (dotimes (x period)
-      (dotimes (y period)
-        (dotimes (z (demo-height x y))
-          (setf (luft:solid-cell-p solid x y z) t))))
+  "A small world: rolling turf, a stone tower, a timber bridge, terraces."
+  (let* ((world (make-world :horizontal-bits horizontal-bits))
+         (period (luft:world-domain-x-period (world-domain world))))
+    (with-stock (:turf)
+      (dotimes (x period)
+        (dotimes (y period)
+          (dotimes (z (demo-height x y))
+            (setf (world-cell-p world x y z) t)))))
     ;; A hollow tower with a doorway.
-    (loop for z from 1 below 22
-          do (loop for x from 20 to 27
-                   do (loop for y from 30 to 37
-                            when (and (or (= x 20) (= x 27) (= y 30) (= y 37))
-                                      (not (and (= y 30) (<= 23 x 24) (< z 9))))
-                              do (setf (luft:solid-cell-p solid x y z) t))))
+    (with-stock (:limestone)
+      (loop for z from 1 below 22
+            do (loop for x from 20 to 27
+                     do (loop for y from 30 to 37
+                              when (and (or (= x 20) (= x 27)
+                                            (= y 30) (= y 37))
+                                        (not (and (= y 30) (<= 23 x 24)
+                                                  (< z 9))))
+                                do (setf (world-cell-p world x y z) t)))))
     ;; A floating slab, casting a clean shadow of empty air.
-    (loop for x from 8 to 15
-          do (loop for y from 8 to 12
-                   do (setf (luft:solid-cell-p solid x y 14) t)))
+    (with-stock (:slate)
+      (fill-box world 8 15 8 12 14 14))
     ;; A staircase up the plateau.
-    (loop for step from 0 below 6
-          do (loop for y from 14 to 18
-                   do (loop for z from 0 to (+ 4 step)
-                            do (setf (luft:solid-cell-p solid (- 39 step) y z)
-                                     t))))
-    (carve-ravine solid)
-    (build-bridge solid)
-    (build-balconies solid)
-    (build-terraces solid)
-    (make-scene domain :solid solid)))
+    (with-stock (:limestone)
+      (loop for step from 0 below 6
+            do (loop for y from 14 to 18
+                     do (loop for z from 0 to (+ 4 step)
+                              do (setf (world-cell-p world (- 39 step) y z)
+                                       t)))))
+    (carve-ravine world)
+    (build-bridge world)
+    (build-balconies world)
+    (build-terraces world)
+    (world-scene world)))
 
 ;;; ------------------------------------------------------------------------
 ;;; Camera
@@ -320,6 +469,151 @@ the light as a band rather than a hairline, and still far short of the old
 Wider than the horizontal radius, it rounds the edges of floors and roofs
 more than the edges of walls, the way weather wears a top.")
 
+;;; ------------------------------------------------------------------------
+;;; Lights: the hour a picture is taken at
+;;;
+;;; The knobs above are the whole of the atelier's light, and setting eleven
+;;; of them by hand is not how anyone chooses an hour.  A light names a set
+;;; of them together -- where the sun is, what colour it is, what the sky
+;;; does, how far one can see -- so that a contact sheet can put the same
+;;; world at four times of day beside itself, and so that a picture can be
+;;; composed by naming a light rather than by tuning a lamp.
+;;;
+;;; A slot left NIL keeps whatever the special above says, so :AFTERNOON,
+;;; which names nothing, is exactly the atelier's own light and every knob
+;;; still works by hand.
+
+(defclass light ()
+  ((name :initarg :name :reader light-name)
+   (sun :initarg :sun :initform nil :reader light-sun
+        :documentation "The direction toward the key light, as three floats.")
+   (sun-color :initarg :sun-color :initform nil :reader light-sun-color)
+   (sky :initarg :sky :initform nil :reader light-sky)
+   (ground :initarg :ground :initform nil :reader light-ground)
+   (fill :initarg :fill :initform nil :reader light-fill)
+   (fill-strength :initarg :fill-strength :initform nil
+                  :reader light-fill-strength)
+   (ambient :initarg :ambient :initform nil :reader light-ambient)
+   (exposure :initarg :exposure :initform nil :reader light-exposure)
+   (sheen :initarg :sheen :initform nil :reader light-sheen)
+   (fog :initarg :fog :initform nil :reader light-fog)
+   (shadow :initarg :shadow :initform nil :reader light-shadow)
+   (occlusion :initarg :occlusion :initform nil :reader light-occlusion))
+  (:documentation "An hour of the day, as a set of the atelier's light knobs."))
+
+(defvar *light-table* (make-hash-table :test 'eq)
+  "Every defined light, by name.")
+
+(defmacro define-light (name &body initargs)
+  "Define or redefine the light called NAME from INITARGS."
+  `(setf (gethash ,name *light-table*)
+         (make-instance 'light :name ,name ,@initargs)))
+
+(defun find-light (name)
+  "The light called NAME, or an error naming what there is."
+  (or (gethash name *light-table*)
+      (error "No light ~S; there is ~{~S~^, ~}." name (light-names))))
+
+(defun light-names ()
+  "Every defined light's name, in alphabetical order."
+  (sort (loop for name being the hash-keys of *light-table* collect name)
+        #'string< :key #'symbol-name))
+
+(defparameter *light* :afternoon
+  "The light every frame is drawn under.")
+
+(defun light-direction (list)
+  "A unit direction from a list of three floats."
+  (vec3:vec3-normalize
+   (apply #'vec3:make-vec3
+          (mapcar (lambda (x) (coerce x 'single-float)) list))))
+
+(defun light-colour (list)
+  (apply #'vec3:make-vec3
+         (mapcar (lambda (x) (coerce x 'single-float)) list)))
+
+(define-light :afternoon
+  ;; The atelier's own light, named so that a sheet can ask for it: a warm
+  ;; sun about thirty degrees up, a cool fill from the opposite quarter.
+  )
+
+(define-light :morning
+  ;; Low from the east, the air still cool and clear, shadows long enough
+  ;; to draw the plan of a building on the ground beside it.
+  :sun '(-0.78 0.36 0.30) :sun-color '(1.02 0.94 0.86)
+  :sky '(0.60 0.74 0.94) :fill '(0.55 -0.45 0.35) :fill-strength 0.26
+  :ambient 0.40 :fog 190.0 :exposure 1.12)
+
+(define-light :noon
+  ;; Almost overhead: tops blaze, walls fall away, and every shadow is a
+  ;; small hard pool underneath the thing that casts it.
+  :sun '(0.18 0.12 0.97) :sun-color '(1.12 1.06 0.98)
+  :sky '(0.55 0.72 0.96) :fill '(-0.4 -0.4 0.2) :fill-strength 0.22
+  :ambient 0.46 :fog 220.0 :exposure 1.05 :sheen 0.20)
+
+(define-light :evening
+  ;; The sun nearly down and very warm; the sky behind it goes rose, the
+  ;; shadows go blue, and the fog closes in the distance.
+  :sun '(0.86 -0.28 0.16) :sun-color '(1.35 0.86 0.54)
+  :sky '(0.62 0.60 0.72) :ground '(0.30 0.22 0.20)
+  :fill '(-0.55 0.42 0.30) :fill-strength 0.34
+  :ambient 0.34 :fog 110.0 :exposure 1.25 :sheen 0.26)
+
+(define-light :overcast
+  ;; No sun to speak of: everything is the sky, occlusion does all the
+  ;; drawing, and the world reads as form rather than as light.
+  :sun '(0.10 0.15 0.98) :sun-color '(0.42 0.44 0.48)
+  :sky '(0.74 0.77 0.82) :ground '(0.32 0.32 0.30)
+  :fill '(-0.3 -0.3 0.6) :fill-strength 0.30
+  :ambient 0.72 :fog 130.0 :exposure 0.95 :shadow 0.35 :occlusion 0.95
+  :sheen 0.06)
+
+(defmacro with-light ((name) &body body)
+  "Evaluate BODY under the light called NAME."
+  `(let ((*light* ,name)) ,@body))
+
+(defun material-albedo (material face)
+  "MATERIAL's colour for an upward, sideways, or downward FACE.
+
+A material that does not name a colour takes the world's own, so a material
+may speak only of its finish and its figure."
+  (flet ((colour (list) (apply #'vec3:make-vec3
+                               (mapcar (lambda (x) (coerce x 'single-float))
+                                       list))))
+    (ecase face
+      (:top (let ((own (material-top material)))
+              (if own (colour own) *top-color*)))
+      (:side (let ((own (material-side material)))
+               (if own (colour own) *side-color*)))
+      (:bottom (let ((own (material-bottom material)))
+                 (if own (colour own) *bottom-color*))))))
+
+(defun stock-table-data (stocks)
+  "The table the :STOCK style indexes with a site's four stock bits.
+
+Every slot takes +STOCK-LANES+ vec4s: the three albedos, then the five
+lanes of MATERIAL-LANES.  STOCKS is a scene's palette of material names;
+a scene with none is drawn wholly in *MATERIAL*, and slots past the end of
+the palette repeat slot zero so a stale site can never read rubbish."
+  (let* ((names (if (and stocks (plusp (length stocks)))
+                    stocks
+                    (vector *material*)))
+         (data (make-array (* 4 shaders:+stock-lanes+ shaders:+stock-slots+)
+                           :element-type 'single-float :initial-element 0.0))
+         (index 0))
+    (flet ((quad (floats)
+             (loop for value in floats
+                   do (setf (aref data index) (coerce value 'single-float))
+                      (incf index))))
+      (dotimes (slot shaders:+stock-slots+ data)
+        (let* ((name (aref names (if (< slot (length names)) slot 0)))
+               (material (find-material name)))
+          (dolist (face '(:top :side :bottom))
+            (let ((colour (material-albedo material face)))
+              (quad (list (vec3:vec3-x colour) (vec3:vec3-y colour)
+                          (vec3:vec3-z colour) 0.0))))
+          (mapc #'quad (material-lanes material)))))))
+
 (defun frame-uniform-data
     (camera width height &optional domain (surface-width *bevel-radius*)
                                   (surface-detail *arris-softness*))
@@ -329,7 +623,27 @@ SURFACE-WIDTH is the style's rounding radius or chamfer width, and
 SURFACE-DETAIL its second lane: the arris softness of a chamfer, or the
 vertical radius of the field."
   (multiple-value-bind (right up forward) (camera-basis camera)
-    (let* ((near *near-distance*)
+    (let* ((light (find-light *light*))
+           (sun (if (light-sun light) (light-direction (light-sun light))
+                    *sun-direction*))
+           (sun-colour (if (light-sun-color light)
+                           (light-colour (light-sun-color light)) *sun-color*))
+           (sky-colour (if (light-sky light)
+                           (light-colour (light-sky light)) *sky-color*))
+           (ground-colour (if (light-ground light)
+                              (light-colour (light-ground light))
+                              *ground-color*))
+           (fill-direction (if (light-fill light)
+                               (light-direction (light-fill light))
+                               *fill-direction*))
+           (fill-strength (or (light-fill-strength light) *fill-strength*))
+           (ambient (or (light-ambient light) *ambient-light*))
+           (exposure (or (light-exposure light) *exposure*))
+           (sheen (or (light-sheen light) *sheen-strength*))
+           (fog (or (light-fog light) *fog-distance*))
+           (shadow (or (light-shadow light) *shadow-strength*))
+           (occlusion (or (light-occlusion light) *occlusion-strength*))
+           (near *near-distance*)
            (far *far-distance*)
            (focal (/ (tan (/ (camera-field-of-view camera) 2.0))))
            (aspect (/ (coerce width 'single-float) height))
@@ -349,18 +663,17 @@ vertical radius of the field."
         (lane forward 0.0)
         (lane (vec3:make-vec3 (/ focal aspect) focal (/ far (- far near)))
               (/ (- (* far near)) (- far near)))
-        (lane *sun-direction* *ambient-light*)
-        (lane *sky-color* *fog-distance*)
+        (lane sun ambient)
+        (lane sky-colour fog)
         (lane (vec3:make-vec3
                (if domain (luft:world-domain-x-period domain) 1)
                (if domain (luft:world-domain-y-period domain) 1)
                surface-width)
               surface-detail)
-        (lane *sun-color* *sheen-strength*)
-        (lane *fill-direction* *fill-strength*)
-        (lane *ground-color* *exposure*)
-        (lane (vec3:make-vec3 *occlusion-strength* *shadow-strength*
-                              *wear-strength*)
+        (lane sun-colour sheen)
+        (lane fill-direction fill-strength)
+        (lane ground-colour exposure)
+        (lane (vec3:make-vec3 occlusion shadow *wear-strength*)
               *ink-width*)
         (lane *top-color* 0.0)
         (lane *side-color* 0.0)
@@ -394,6 +707,7 @@ vertical radius of the field."
    (sites-buffer :initform nil :accessor renderer-sites-buffer)
    (bricks-buffer :initform nil :accessor renderer-bricks-buffer)
    (cells-buffer :initform nil :accessor renderer-cells-buffer)
+   (stocks-buffer :initform nil :accessor renderer-stocks-buffer)
    (sites-capacity :initform 0 :accessor renderer-sites-capacity)
    (bricks-capacity :initform 0 :accessor renderer-bricks-capacity)
    (cells-capacity :initform 0 :accessor renderer-cells-capacity)
@@ -600,10 +914,10 @@ amplifies bricks with task and mesh shaders and needs VK_EXT_mesh_shader.")
    "The surface styles TECHNIQUE can draw, in the order a menu would list."))
 
 (defmethod technique-styles ((technique (eql :mesh)))
-  '(:flat :bevel :chamfer :paper))
+  '(:flat :bevel :chamfer :paper :stock))
 
 (defmethod technique-styles ((technique (eql :vertex)))
-  '(:flat :bevel :chamfer :paper :field :soft :ink))
+  '(:flat :bevel :chamfer :paper :stock :field :soft :ink))
 
 (defgeneric create-technique-pipelines (technique renderer)
   (:documentation
@@ -659,8 +973,8 @@ may draw it first and the world still covers it."
 (defun create-renderer-fragment-modules (renderer)
   "Create the fragment modules RENDERER's styles and effects share.
 
-The values are the surface, chamfer, paper, sky, lens, field, and ink
-fragment modules, each NIL when nothing configured wants it."
+The values are the surface, chamfer, paper, sky, lens, field, ink, and
+stock fragment modules, each NIL when nothing configured wants it."
   (let ((styles (renderer-pipeline-styles renderer)))
     (values
      (when (intersection styles '(:flat :bevel))
@@ -690,7 +1004,11 @@ fragment modules, each NIL when nothing configured wants it."
      (when (member :ink styles)
        (create-renderer-module renderer :luft/shader/ink-fragment
                                "luft ink fragment"
-                               (shaders:ink-fragment-shader))))))
+                               (shaders:ink-fragment-shader)))
+     (when (member :stock styles)
+       (create-renderer-module renderer :luft/shader/stock-fragment
+                               "luft stock fragment"
+                               (shaders:stock-fragment-shader))))))
 
 ;;; The mesh technique: one task workgroup per brick, one mesh lane per site.
 
@@ -709,7 +1027,7 @@ fragment modules, each NIL when nothing configured wants it."
       (setf bevel (create-renderer-module renderer :luft/shader/bevel-mesh
                                           "luft bevel mesh"
                                           (shaders:bevel-mesh-shader))))
-    (when (intersection styles '(:chamfer :paper))
+    (when (intersection styles '(:chamfer :paper :stock))
       (setf chamfer (create-renderer-module renderer :luft/shader/chamfer-mesh
                                             "luft chamfer mesh"
                                             (shaders:chamfer-mesh-shader))))
@@ -719,8 +1037,10 @@ fragment modules, each NIL when nothing configured wants it."
                                              "luft sky mesh"
                                              (shaders:sky-mesh-shader))))
     (multiple-value-bind (fragment chamfer-fragment paper-fragment
-                          sky-fragment lens-fragment)
+                          sky-fragment lens-fragment field-fragment
+                          ink-fragment stock-fragment)
         (create-renderer-fragment-modules renderer)
+      (declare (ignore field-fragment ink-fragment))
       (flet ((pipeline (name zone label mesh-module fragment-module
                         &key (task-module task)
                              (layout (renderer-layout renderer))
@@ -749,6 +1069,9 @@ fragment modules, each NIL when nothing configured wants it."
         (when (member :paper styles)
           (pipeline :paper :luft/pipeline/paper "luft paper pipeline"
                     chamfer paper-fragment))
+        (when (member :stock styles)
+          (pipeline :stock :luft/pipeline/stock "luft stock pipeline"
+                    chamfer stock-fragment))
         ;; The background: no task stage to amplify, no depth to write, and
         ;; it runs before anything that would hide it.
         (when (renderer-effect-p renderer :sky)
@@ -787,7 +1110,7 @@ fragment modules, each NIL when nothing configured wants it."
                    renderer :luft/shader/bevel-vertex
                    "luft bevel vertex"
                    (shaders:bevel-vertex-shader))))
-    (when (intersection styles '(:chamfer :paper))
+    (when (intersection styles '(:chamfer :paper :stock))
       (setf chamfer (create-renderer-module
                      renderer :luft/shader/chamfer-vertex
                      "luft chamfer vertex"
@@ -805,7 +1128,7 @@ fragment modules, each NIL when nothing configured wants it."
                     (shaders:sky-vertex-shader))))
     (multiple-value-bind (fragment chamfer-fragment paper-fragment
                           sky-fragment lens-fragment field-fragment
-                          ink-fragment)
+                          ink-fragment stock-fragment)
         (create-renderer-fragment-modules renderer)
       (flet ((pipeline (name zone label vertex-module fragment-module
                         &key (layout (renderer-layout renderer))
@@ -831,6 +1154,11 @@ fragment modules, each NIL when nothing configured wants it."
         (when (member :paper styles)
           (pipeline :paper :luft/pipeline/paper "luft paper pipeline"
                     chamfer paper-fragment))
+        ;; The stock draws the chamfered geometry too: its materials are
+        ;; about what a planed arris does with the light.
+        (when (member :stock styles)
+          (pipeline :stock :luft/pipeline/stock "luft stock pipeline"
+                    chamfer stock-fragment))
         (when (member :field styles)
           (pipeline :field :luft/pipeline/field "luft field pipeline"
                     field field-fragment))
@@ -893,6 +1221,8 @@ fragment modules, each NIL when nothing configured wants it."
                        (:binding ,shaders:+bricks-binding+
                         :type :storage-buffer)
                        (:binding ,shaders:+cells-binding+
+                        :type :storage-buffer)
+                       (:binding ,shaders:+stocks-binding+
                         :type :storage-buffer))))))))
 
 (defun create-lens-bind-group (renderer)
@@ -965,7 +1295,16 @@ one is requested from PROVIDER and owned by the renderer."
                          (make-buffer-descriptor
                           :label "luft frame block"
                           :size (frame-uniform-size)
-                          :usage '(:uniform))))
+                          :usage '(:uniform)))
+                 ;; The stock table is small, rewritten every frame, and
+                 ;; bound whether or not the drawing style reads it.
+                 (renderer-stocks-buffer renderer)
+                 (create device
+                         (make-buffer-descriptor
+                          :label "luft stock table"
+                          :size (* 4 4 shaders:+stock-lanes+
+                                   shaders:+stock-slots+)
+                          :usage '(:storage))))
            (create-renderer-pipeline renderer)
            (upload-scene renderer)
            (setf completed-p t)
@@ -991,6 +1330,7 @@ one is requested from PROVIDER and owned by the renderer."
                           (renderer-sites-buffer renderer)
                           (renderer-bricks-buffer renderer)
                           (renderer-cells-buffer renderer)
+                          (renderer-stocks-buffer renderer)
                           (renderer-uniform-buffer renderer)
                           (renderer-color-view renderer)
                           (renderer-color-texture renderer)
@@ -1004,6 +1344,7 @@ one is requested from PROVIDER and owned by the renderer."
         (renderer-sites-buffer renderer) nil
         (renderer-bricks-buffer renderer) nil
         (renderer-cells-buffer renderer) nil
+        (renderer-stocks-buffer renderer) nil
         (renderer-uniform-buffer renderer) nil)
   (when (renderer-owns-device-p renderer)
     (ignore-errors (destroy (renderer-device renderer))))
@@ -1068,7 +1409,9 @@ The second value is true when a new buffer was created."
                        (:binding ,shaders:+bricks-binding+
                         :resource ,(renderer-bricks-buffer renderer))
                        (:binding ,shaders:+cells-binding+
-                        :resource ,(renderer-cells-buffer renderer)))))))
+                        :resource ,(renderer-cells-buffer renderer))
+                       (:binding ,shaders:+stocks-binding+
+                        :resource ,(renderer-stocks-buffer renderer)))))))
     (setf (renderer-scene renderer) scene
           (renderer-uploaded-scene renderer) scene)
     renderer))
@@ -1078,15 +1421,19 @@ The second value is true when a new buffer was created."
   (let* ((extent (renderer-extent renderer))
          (scene (renderer-scene renderer))
          (technique (renderer-technique renderer))
-         (sky *sky-color*))
+         (light (find-light *light*))
+         (sky (if (light-sky light) (light-colour (light-sky light))
+                  *sky-color*)))
     (unless (eq scene (renderer-uploaded-scene renderer))
       (upload-scene renderer scene))
+    (write-buffer (renderer-stocks-buffer renderer)
+                  (stock-table-data (scene-stocks scene)))
     (write-buffer (renderer-uniform-buffer renderer)
                   (frame-uniform-data (renderer-camera renderer)
                                       (first extent) (second extent)
                                       (scene-domain scene)
                                       (if (member (renderer-style renderer)
-                                                  '(:chamfer :paper))
+                                                  '(:chamfer :paper :stock))
                                           *chamfer-width*
                                           *bevel-radius*)
                                       (if (member (renderer-style renderer)

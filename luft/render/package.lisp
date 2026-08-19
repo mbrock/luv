@@ -5,6 +5,11 @@
    "Task, mesh, vertex, and fragment stages that draw a surface chain of
 packed sites.")
   (:export #:+brick-size+
+           #:+stocks-binding+
+           #:+stock-slots+
+           #:+stock-lanes+
+           #:+site-stock-shift+
+           #:+site-stock-bits+
            #:+frame-binding+
            #:+sites-binding+
            #:+bricks-binding+
@@ -23,6 +28,7 @@ packed sites.")
            #:field-vertex-shader
            #:field-fragment-shader
            #:ink-fragment-shader
+           #:stock-fragment-shader
            #:bevel-vertex-shader
            #:chamfer-vertex-shader
            #:sky-vertex-shader
@@ -42,8 +48,23 @@ packed sites.")
    "A greenfield atelier renderer: a small block world as a boundary chain
 of packed LUFT sites, drawn by vertex shaders pulling sites or by task and
 mesh shaders.")
-  (:export #:scene
+  (:export #:world
+           #:make-world
+           #:world-domain
+           #:world-solid
+           #:world-slots
+           #:world-stocks
+           #:world-cell-p
+           #:world-scene
+           #:paint-cell
+           #:*stock*
+           #:with-stock
+           #:fill-box
+           #:scene
            #:make-scene
+           #:scene-slots
+           #:scene-stocks
+           #:stock-table-data
            #:make-demo-scene
            #:scene-domain
            #:scene-solid
@@ -77,6 +98,13 @@ mesh shaders.")
            #:*chamfer-width*
            #:*arris-softness*
            #:*field-vertical-radius*
+           #:light
+           #:light-name
+           #:define-light
+           #:find-light
+           #:light-names
+           #:*light*
+           #:with-light
            #:*sun-direction*
            #:*sun-color*
            #:*sheen-strength*
@@ -88,6 +116,14 @@ mesh shaders.")
            #:*wear-strength*
            #:*ink-width*
            #:*shadow-strength*
+           #:material
+           #:material-name
+           #:define-material
+           #:find-material
+           #:material-names
+           #:material-lanes
+           #:material-albedo
+           #:*material*
            #:*top-color*
            #:*side-color*
            #:*bottom-color*
