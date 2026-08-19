@@ -615,7 +615,8 @@ the same face normal it reads."
 
 The box arrives in the animal's own frame; the yaw rotation here is the only
 place a critter model meets world coordinates."
-  (let* ((position (critter-position critter))
+  (let* ((tile (block-atlas-tile-offset tile))
+         (position (critter-position critter))
          (yaw (critter-yaw critter))
          (cos-yaw (cos yaw))
          (sin-yaw (sin yaw))

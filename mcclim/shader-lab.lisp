@@ -268,13 +268,14 @@
                   (/ (ldb (byte 8 16) word) 255.0)))
 
 (defun draw-block-atlas-tile (stream atlas tile left top &key (scale 3))
-  (dotimes (y 16)
-    (dotimes (x 16)
-      (draw-rectangle*
-       stream
-       (+ left (* x scale)) (+ top (* y scale))
-       (+ left (* (1+ x) scale)) (+ top (* (1+ y) scale))
-       :ink (packed-block-ink (aref atlas y (+ x (* tile 16))))))))
+  (let ((offset (luvcraft:block-atlas-tile-offset tile)))
+    (dotimes (y 16)
+      (dotimes (x 16)
+        (draw-rectangle*
+         stream
+         (+ left (* x scale)) (+ top (* y scale))
+         (+ left (* (1+ x) scale)) (+ top (* (1+ y) scale))
+         :ink (packed-block-ink (aref atlas y (+ x (* offset 16)))))))))
 
 (defun draw-shader-tab (frame stream definition left top)
   (let ((selected-p (eq definition

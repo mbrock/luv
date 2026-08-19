@@ -497,7 +497,7 @@ normalized to 0..1."
 
 (defun block-face-atlas-uv (block face corner)
   (multiple-value-bind (local-u local-v) (block-face-local-uv face corner)
-    (let* ((tile (block-face-tile block face))
+    (let* ((tile (block-atlas-tile-offset (block-face-tile block face)))
            (size +block-atlas-tile-size+)
            (width (* size +block-atlas-tile-capacity+))
            ;; Half-texel insets make bilinear bleed impossible even if a
@@ -513,7 +513,7 @@ normalized to 0..1."
          (nx (voxel-direction-dx normal))
          (ny (voxel-direction-dy normal))
          (nz (voxel-direction-dz normal))
-         (tile (block-face-tile block face))
+         (tile (block-atlas-tile-offset (block-face-tile block face)))
          (size +block-atlas-tile-size+)
          (atlas-width (* size +block-atlas-tile-capacity+))
          (variation (block-color-variation x y z)))

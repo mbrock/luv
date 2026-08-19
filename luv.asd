@@ -274,6 +274,7 @@ offsets and of headers."
   :serial t
   :components
   ((:file "arithmetic/tests")
+   (:file "domains/tests")
    (:file "arithmetic/records/tests")
    (:file "arithmetic/records/columnar-tests")
    (:file "arithmetic/records/columnar-simd-tests" :if-feature :sbcl)

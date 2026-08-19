@@ -46,7 +46,11 @@
   (let ((tiles (block-kind-face-tiles block)))
     (unless (and (listp tiles) (evenp (length tiles)))
       (error "Block kind ~S has invalid face tiles ~S."
-             (block-kind-name block) tiles)))
+             (block-kind-name block) tiles))
+    (loop for (face tile) on tiles by #'cddr
+          unless (and (keywordp face) (keywordp tile))
+            do (error "Block kind ~S has non-keyword face tile ~S => ~S."
+                      (block-kind-name block) face tile)))
   (unless (every #'keywordp (block-kind-categories block))
     (error "Block kind ~S has invalid categories ~S."
            (block-kind-name block) (block-kind-categories block)))
@@ -189,98 +193,100 @@ definition."
 
 (define-block-kinds
   (*grass-block* :grass
-   :face-tiles '(:top 0 :side 1 :bottom 2)
+   :face-tiles '(:top :grass-top :side :grass-side :bottom :dirt)
    :categories '(:natural) :display-color '(0.28 0.66 0.25))
   (*dirt-block* :dirt
-   :face-tiles '(:all 2)
+   :face-tiles '(:all :dirt)
    :categories '(:natural) :display-color '(0.48 0.31 0.18))
   (*stone-block* :stone
-   :face-tiles '(:all 3)
+   :face-tiles '(:all :stone)
    :categories '(:building) :display-color '(0.49 0.52 0.54))
   (*wood-block* :wood
-   :face-tiles '(:top 5 :bottom 5 :side 4)
+   :face-tiles '(:top :wood-end :bottom :wood-end :side :wood-side)
    :categories '(:building) :display-color '(0.57 0.36 0.17))
   (*leaf-block* :leaves
-   :face-tiles '(:all 6)
+   :face-tiles '(:all :leaves)
    :categories '(:natural) :display-color '(0.19 0.50 0.22))
   (*sand-block* :sand
-   :face-tiles '(:all 7)
+   :face-tiles '(:all :sand)
    :categories '(:natural) :display-color '(0.78 0.68 0.37))
   (*snow-block* :snow
-   :face-tiles '(:top 8 :side 8 :bottom 2)
+   :face-tiles '(:top :snow :side :snow :bottom :dirt)
    :categories '(:natural) :display-color '(0.86 0.91 0.94))
   (*crystal-block* :crystal
-   :face-tiles '(:all 9)
+   :face-tiles '(:all :crystal)
    :categories '(:luminous) :display-color '(0.18 0.86 0.88)
    :light-emission 12 :surface-emission 1.2)
   (*terminal-block* :terminal
    "The graphite display-block material used by world-native terminals."
-   :face-tiles '(:all 10)
+   :face-tiles '(:all :terminal)
    :categories '(:building :luminous) :display-color '(0.13 0.31 0.34)
    :surface-emission 0.16)
   (*urbit-block* :urbit
    "The Martian computer: a white planet sigil on a near-black field,
 the tenth quickbar material, reached by the 0 key at the end of the
 number row."
-   :face-tiles '(:all 36)
+   :face-tiles '(:all :urbit)
    :categories '(:building :luminous) :display-color '(0.07 0.07 0.09)
    :surface-emission 0.22)
   (*gravel-block* :gravel
-   :face-tiles '(:all 11)
+   :face-tiles '(:all :gravel)
    :categories '(:natural) :display-color '(0.46 0.44 0.40))
   (*clay-block* :clay
-   :face-tiles '(:all 12)
+   :face-tiles '(:all :clay)
    :categories '(:natural) :display-color '(0.63 0.68 0.70))
   (*mud-block* :mud
-   :face-tiles '(:all 13)
+   :face-tiles '(:all :mud)
    :categories '(:natural) :display-color '(0.31 0.20 0.12))
   (*moss-block* :moss
-   :face-tiles '(:all 14)
+   :face-tiles '(:all :moss)
    :categories '(:natural) :display-color '(0.29 0.45 0.16))
   (*cactus-block* :cactus
-   :face-tiles '(:top 16 :bottom 16 :side 15)
+   :face-tiles '(:top :cactus-end :bottom :cactus-end :side :cactus-side)
    :categories '(:natural) :display-color '(0.20 0.49 0.24))
   (*cobblestone-block* :cobblestone
-   :face-tiles '(:all 17)
+   :face-tiles '(:all :cobblestone)
    :categories '(:building) :display-color '(0.42 0.43 0.41))
   (*stone-bricks-block* :stone-bricks
-   :face-tiles '(:all 18)
+   :face-tiles '(:all :stone-bricks)
    :categories '(:building) :display-color '(0.53 0.54 0.51))
   (*bricks-block* :bricks
-   :face-tiles '(:all 19)
+   :face-tiles '(:all :bricks)
    :categories '(:building) :display-color '(0.63 0.28 0.19))
   (*planks-block* :planks
-   :face-tiles '(:all 20)
+   :face-tiles '(:all :planks)
    :categories '(:building) :display-color '(0.66 0.45 0.23))
   (*sandstone-block* :sandstone
-   :face-tiles '(:all 21)
+   :face-tiles '(:all :sandstone)
    :categories '(:building) :display-color '(0.79 0.68 0.43))
   (*slate-block* :slate
-   :face-tiles '(:all 22)
+   :face-tiles '(:all :slate)
    :categories '(:building) :display-color '(0.25 0.29 0.32))
   (*tape-block* :tape
    "A blank film reel.  Focus it and it asks for a YouTube code; when the
 download lands it has become a film, which is a block that can be picked up
 and carried.  See luvcraft/tape.lisp."
    :class 'tape-block-kind
-   :face-tiles '(:front 30 :back 30 :top 31 :bottom 31 :left 31 :right 31)
+   :face-tiles '(:front :tape-flange :back :tape-flange
+                 :top :reel-rim :bottom :reel-rim
+                 :left :reel-rim :right :reel-rim)
    :categories '(:building) :display-color '(0.36 0.34 0.32))
   (*orb-mote-block* :orb-mote
    "The bright grain a progress orb is made of; never placed, only emitted."
-   :face-tiles '(:all 9)
+   :face-tiles '(:all :crystal)
    :categories '(:luminous) :display-color '(0.9 0.95 1.0)
    :placeable-p nil :light-emission 0 :surface-emission 5.0)
   (*fountain-block* :fountain
    "A stone basin that throws water into the air, drop by drop; see
 luvcraft/balls.lisp for what the drops do."
    :class 'spring-block-kind
-   :face-tiles '(:top 34 :side 17 :bottom 17)
+   :face-tiles '(:top :water :side :cobblestone :bottom :cobblestone)
    :categories '(:building) :display-color '(0.35 0.55 0.75))
   (*lava-spring-block* :lava-spring
    "A slate well of lava that spits glowing gobbets which cool where they
 land; see luvcraft/balls.lisp."
    :class 'spring-block-kind
-   :face-tiles '(:top 35 :side 22 :bottom 22)
+   :face-tiles '(:top :lava :side :slate :bottom :slate)
    :categories '(:building :luminous) :display-color '(0.95 0.45 0.10)
    :light-emission 11 :surface-emission 0.0))
 
@@ -309,9 +315,32 @@ kinds through this vocabulary instead of printing CLOS object identities."
 (defconstant +block-atlas-tile-capacity+ 64
   "How many tiles wide every block atlas texture is, painted or not.")
 
-(defparameter *block-atlas-tile-count* 37
-  "How many atlas tiles are painted.  A parameter rather than a constant so
-a live image adds a tile without a constant redefinition.")
+(defparameter *block-atlas-tile-domain*
+  (domains:make-keyword-vocabulary-domain
+   '(:grass-top :grass-side :dirt :stone :wood-side :wood-end :leaves
+     :sand :snow :crystal :terminal :gravel :clay :mud :moss
+     :cactus-side :cactus-end :cobblestone :stone-bricks :bricks :planks
+     :sandstone :slate :turtle-carapace :turtle-skin :turtle-plastron
+     :player-skin :player-sleeve :phone-body :phone-screen
+     :tape-flange :reel-rim :film-flange :ball :water :lava :urbit))
+  "The replaceable interpretation of atlas tile identities as dense offsets.
+
+Re-evaluating this definition constructs a new domain.  Existing offsets stay
+closed by the old domain; atlas refresh and later publication explicitly adopt
+the new one instead of pretending a vocabulary is materialized only once.")
+
+(defun block-atlas-tile-count (&optional (domain *block-atlas-tile-domain*))
+  (domains:domain-cardinality domain))
+
+(defun block-atlas-tile-offset
+    (tile &optional (domain *block-atlas-tile-domain*))
+  "Return TILE's dense offset under the explicitly supplied atlas DOMAIN."
+  (domains:keyword-vocabulary-offset domain tile))
+
+(defun block-atlas-tile-at-offset
+    (offset &optional (domain *block-atlas-tile-domain*))
+  "Return the semantic tile identity at OFFSET under atlas DOMAIN."
+  (domains:keyword-vocabulary-keyword domain offset))
 (defconstant +block-atlas-texture-format+ :rgba8-unorm-srgb)
 (defconstant +block-normal-atlas-texture-format+ :rgba8-unorm)
 
@@ -319,7 +348,7 @@ a live image adds a tile without a constant redefinition.")
   (:documentation
    "Return the 0..255 surface height of atlas tile TILE at tile-local X,Y.
 
-Like the colour, each numbered tile is one EQL method, so a live image can
+Like the colour, each named tile is one EQL method, so a live image can
 re-sculpt a single material's micro-surface and rebuild both atlases without
 touching the rest of the palette.
 
@@ -337,7 +366,10 @@ than arriving as authored assets."))
 
 (defun block-atlas-variation (x y tile)
   "Fine colour grain modulated by TILE's shared procedural relief."
-  (+ (- (mod (+ (* x 17) (* y 31) (* tile 43) (* x y 7)) 25) 12)
+  (+ (- (mod (+ (* x 17) (* y 31)
+                   (* (block-atlas-tile-offset tile) 43) (* x y 7))
+                25)
+           12)
      (round (- (paint-block-atlas-relief tile x y) 128) 12)))
 
 (defun shaded-block-atlas-pixel (red green blue &optional (variation 0))
@@ -371,70 +403,70 @@ plated surface can be both coloured and domed from one expression."
   (:documentation
    "Return the packed RGBA pixel of atlas tile TILE at tile-local X,Y.
 
-Each numbered tile is one EQL method, so a live image can repaint a single
+Each named tile is one EQL method, so a live image can repaint a single
 material and rebuild the atlas without touching the rest of the palette."))
 
 (defmethod paint-block-atlas-tile (tile x y)
   (declare (ignore x y))
   (error "Unknown block atlas tile ~S." tile))
 
-(defmethod paint-block-atlas-tile ((tile (eql 0)) x y)
+(defmethod paint-block-atlas-tile ((tile (eql :grass-top)) x y)
   "Grass top."
   (shaded-block-atlas-pixel 97 142 71 (block-atlas-variation x y tile)))
 
-(defmethod paint-block-atlas-tile ((tile (eql 1)) x y)
+(defmethod paint-block-atlas-tile ((tile (eql :grass-side)) x y)
   "Grass side: a green fringe over dirt."
   (let ((variation (block-atlas-variation x y tile)))
     (if (< y 4)
         (shaded-block-atlas-pixel 91 133 63 variation)
         (shaded-block-atlas-pixel 116 82 54 (round variation 2)))))
 
-(defmethod paint-block-atlas-tile ((tile (eql 2)) x y)
+(defmethod paint-block-atlas-tile ((tile (eql :dirt)) x y)
   "Dirt."
   (shaded-block-atlas-pixel 118 84 56 (block-atlas-variation x y tile)))
 
-(defmethod paint-block-atlas-tile ((tile (eql 3)) x y)
+(defmethod paint-block-atlas-tile ((tile (eql :stone)) x y)
   "Stone, with sparse bright flecks."
   (shaded-block-atlas-pixel
    116 121 125
    (+ (round (block-atlas-variation x y tile) 2)
       (if (zerop (mod (+ (* x 3) (* y 5)) 19)) 20 0))))
 
-(defmethod paint-block-atlas-tile ((tile (eql 4)) x y)
+(defmethod paint-block-atlas-tile ((tile (eql :wood-side)) x y)
   "Wood bark, with vertical grain stripes."
   (shaded-block-atlas-pixel
    108 76 46
    (+ (round (block-atlas-variation x y tile) 3)
       (if (zerop (mod x 5)) 18 0))))
 
-(defmethod paint-block-atlas-tile ((tile (eql 5)) x y)
+(defmethod paint-block-atlas-tile ((tile (eql :wood-end)) x y)
   "Wood end grain: concentric rings around the tile centre."
   (let* ((dx (- x 7.5))
          (dy (- y 7.5))
          (ring (mod (floor (+ (* dx dx) (* dy dy))) 18)))
     (shaded-block-atlas-pixel 124 92 56 (- ring 9))))
 
-(defmethod paint-block-atlas-tile ((tile (eql 6)) x y)
+(defmethod paint-block-atlas-tile ((tile (eql :leaves)) x y)
   "Leaves: a strong checker so the canopy reads as foliage."
   (shaded-block-atlas-pixel
    57 112 59
    (+ (block-atlas-variation x y tile) (if (evenp (+ x y)) 8 -8))))
 
-(defmethod paint-block-atlas-tile ((tile (eql 7)) x y)
+(defmethod paint-block-atlas-tile ((tile (eql :sand)) x y)
   "Sand, with sparse darker grains."
   (shaded-block-atlas-pixel
    172 157 122
    (+ (round (block-atlas-variation x y tile) 2)
       (if (zerop (mod (+ x (* y 3)) 13)) 13 0))))
 
-(defmethod paint-block-atlas-tile ((tile (eql 8)) x y)
+(defmethod paint-block-atlas-tile ((tile (eql :snow)) x y)
   "Snow, with sparse glints."
   (shaded-block-atlas-pixel
    219 231 236
    (+ (round (block-atlas-variation x y tile) 3)
       (if (zerop (mod (+ (* x 5) (* y 7)) 23)) 14 0))))
 
-(defmethod paint-block-atlas-tile ((tile (eql 9)) x y)
+(defmethod paint-block-atlas-tile ((tile (eql :crystal)) x y)
   "Blue crystal, with bright diagonal facets."
   (let* ((diagonal (abs (- x y)))
          (facet (if (or (<= diagonal 1)
@@ -452,7 +484,7 @@ material and rebuild the atlas without touching the rest of the palette."))
      (+ 176 (round variation 2) facet edge)
      (+ 235 variation facet edge))))
 
-(defmethod paint-block-atlas-tile ((tile (eql 10)) x y)
+(defmethod paint-block-atlas-tile ((tile (eql :terminal)) x y)
   "Terminal graphite: a quiet face with a raised per-block bezel."
   (let* ((outer-edge
            (if (or (zerop x) (zerop y)
@@ -473,27 +505,27 @@ material and rebuild the atlas without touching the rest of the palette."))
      (+ 25 variation bezel)
      (+ 36 variation bezel))))
 
-(defmethod paint-block-atlas-tile ((tile (eql 11)) x y)
+(defmethod paint-block-atlas-tile ((tile (eql :gravel)) x y)
   "Gravel: mixed cool and warm stones."
   (let* ((grain (block-atlas-lattice-hash x y 111))
          (variation (+ (round (block-atlas-variation x y tile) 2)
                        (- (mod grain 43) 21))))
     (shaded-block-atlas-pixel 111 107 99 variation)))
 
-(defmethod paint-block-atlas-tile ((tile (eql 12)) x y)
+(defmethod paint-block-atlas-tile ((tile (eql :clay)) x y)
   "Clay: cool compact earth with faint horizontal bands."
   (shaded-block-atlas-pixel
    146 158 163
    (+ (round (block-atlas-variation x y tile) 4)
       (case (mod y 6) (0 -7) (1 -3) (t 2)))))
 
-(defmethod paint-block-atlas-tile ((tile (eql 13)) x y)
+(defmethod paint-block-atlas-tile ((tile (eql :mud)) x y)
   "Mud: dark wet clods with occasional glossy pockets."
   (let ((pocket (if (> (block-atlas-lattice-hash x y 132) 232) 20 0)))
     (shaded-block-atlas-pixel
      78 51 31 (+ pocket (round (block-atlas-variation x y tile) 2)))))
 
-(defmethod paint-block-atlas-tile ((tile (eql 14)) x y)
+(defmethod paint-block-atlas-tile ((tile (eql :moss)) x y)
   "Moss: dense green cushions mottled across the face."
   (let ((clump (- (block-atlas-clump x y 141 4) 128)))
     (pack-block-atlas-rgba
@@ -501,7 +533,7 @@ material and rebuild the atlas without touching the rest of the palette."))
      (+ 115 (round clump 4))
      (+ 35 (round clump 10)))))
 
-(defmethod paint-block-atlas-tile ((tile (eql 15)) x y)
+(defmethod paint-block-atlas-tile ((tile (eql :cactus-side)) x y)
   "Cactus side: vertical ribs dotted with pale spines."
   (let* ((rib (case (mod x 5) (0 -18) (1 8) (2 18) (3 8) (t -10)))
          (spine (if (zerop (mod (+ (* x 3) (* y 5)) 17)) 34 0)))
@@ -509,7 +541,7 @@ material and rebuild the atlas without touching the rest of the palette."))
                            (+ 125 rib spine)
                            (+ 55 (round rib 2) spine))))
 
-(defmethod paint-block-atlas-tile ((tile (eql 16)) x y)
+(defmethod paint-block-atlas-tile ((tile (eql :cactus-end)) x y)
   "Cactus top: a radial cut surface around a dark green rind."
   (let* ((dx (- x 7.5))
          (dy (- y 7.5))
@@ -520,7 +552,7 @@ material and rebuild the atlas without touching the rest of the palette."))
                            (+ 151 rind ring)
                            (+ 68 rind (round ring 2)))))
 
-(defmethod paint-block-atlas-tile ((tile (eql 17)) x y)
+(defmethod paint-block-atlas-tile ((tile (eql :cobblestone)) x y)
   "Cobblestone: irregular grey stones divided by dark joints."
   (let* ((joint (or (zerop (mod (+ x (* 2 y)) 7))
                     (zerop (mod (+ (* 3 x) y) 13))))
@@ -529,21 +561,21 @@ material and rebuild the atlas without touching the rest of the palette."))
         (shaded-block-atlas-pixel 64 66 64 variation)
         (shaded-block-atlas-pixel 123 126 120 variation))))
 
-(defmethod paint-block-atlas-tile ((tile (eql 18)) x y)
+(defmethod paint-block-atlas-tile ((tile (eql :stone-bricks)) x y)
   "Stone bricks in a pale staggered bond."
   (if (block-atlas-brick-mortar-p x y 8 5)
       (shaded-block-atlas-pixel 77 79 76)
       (shaded-block-atlas-pixel
        139 142 135 (round (block-atlas-variation x y tile) 3))))
 
-(defmethod paint-block-atlas-tile ((tile (eql 19)) x y)
+(defmethod paint-block-atlas-tile ((tile (eql :bricks)) x y)
   "Fired red bricks with warm variation and deep mortar."
   (if (block-atlas-brick-mortar-p x y 8 5)
       (shaded-block-atlas-pixel 83 69 61)
       (shaded-block-atlas-pixel
        166 72 49 (round (block-atlas-variation x y tile) 2))))
 
-(defmethod paint-block-atlas-tile ((tile (eql 20)) x y)
+(defmethod paint-block-atlas-tile ((tile (eql :planks)) x y)
   "Sawn planks with horizontal seams and wandering grain."
   (let ((seam (zerop (mod y 5)))
         (grain (round (* 9 (sin (/ (+ (* x 2) y) 2.4))))))
@@ -551,13 +583,13 @@ material and rebuild the atlas without touching the rest of the palette."))
         (shaded-block-atlas-pixel 91 58 28)
         (shaded-block-atlas-pixel 170 116 58 grain))))
 
-(defmethod paint-block-atlas-tile ((tile (eql 21)) x y)
+(defmethod paint-block-atlas-tile ((tile (eql :sandstone)) x y)
   "Cut sandstone with broad sediment bands."
   (let ((band (case (mod y 7) (0 -18) (1 -8) (5 7) (t 0))))
     (shaded-block-atlas-pixel
      205 178 111 (+ band (round (block-atlas-variation x y tile) 4)))))
 
-(defmethod paint-block-atlas-tile ((tile (eql 22)) x y)
+(defmethod paint-block-atlas-tile ((tile (eql :slate)) x y)
   "Slate: dark blue-grey layers with fine pale cleavage lines."
   (let ((seam (or (zerop (mod y 5))
                   (and (zerop (mod y 3)) (> (mod (+ x y) 7) 4)))))
@@ -572,9 +604,9 @@ material and rebuild the atlas without touching the rest of the palette."))
 ;;; the ordinary block surface pipeline, so its hide is painted by exactly the
 ;;; same per-tile arithmetic as stone or moss.  See CRITTERS.LISP.
 
-(defconstant +turtle-carapace-tile+ 23)
-(defconstant +turtle-skin-tile+ 24)
-(defconstant +turtle-plastron-tile+ 25)
+(defconstant +turtle-carapace-tile+ :turtle-carapace)
+(defconstant +turtle-skin-tile+ :turtle-skin)
+(defconstant +turtle-plastron-tile+ :turtle-plastron)
 
 ;;; A critter tile is stretched across a box face a fraction of a cell wide
 ;;; rather than tiled over a whole block, so its pattern is deliberately
@@ -584,7 +616,7 @@ material and rebuild the atlas without touching the rest of the palette."))
 (defconstant +turtle-scute-width+ 5)
 (defconstant +turtle-scute-height+ 4)
 
-(defmethod paint-block-atlas-tile ((tile (eql 23)) x y)
+(defmethod paint-block-atlas-tile ((tile (eql :turtle-carapace)) x y)
   "Turtle carapace: small staggered scutes with dark keratin joints."
   (let ((distance (block-atlas-plate-distance
                    x y +turtle-scute-width+ +turtle-scute-height+))
@@ -595,7 +627,7 @@ material and rebuild the atlas without touching the rest of the palette."))
         (shaded-block-atlas-pixel
          84 108 50 (+ variation (round (* 22 (- 0.75 distance))))))))
 
-(defmethod paint-block-atlas-tile ((tile (eql 24)) x y)
+(defmethod paint-block-atlas-tile ((tile (eql :turtle-skin)) x y)
   "Turtle skin: dark olive hide pebbled with paler flecks."
   (let ((pebble (- (block-atlas-clump x y 241 3) 128))
         (fleck (if (> (block-atlas-lattice-hash x y 242) 232) 34 0)))
@@ -607,7 +639,7 @@ material and rebuild the atlas without touching the rest of the palette."))
   "Whether X,Y lies in the straight seam between two belly plates."
   (or (zerop (mod x 6)) (zerop (mod y 5))))
 
-(defmethod paint-block-atlas-tile ((tile (eql 25)) x y)
+(defmethod paint-block-atlas-tile ((tile (eql :turtle-plastron)) x y)
   "Turtle plastron: pale horn plates in a straight, unstaggered bond."
   (let ((variation (round (block-atlas-variation x y tile) 4)))
     (if (turtle-plastron-seam-p x y)
@@ -644,15 +676,19 @@ material and rebuild the atlas without touching the rest of the palette."))
 
 (defmethod paint-block-atlas-relief (tile x y)
   "A plausible default: fine grain, so a new material is never dead flat."
-  (+ 128 (- (ash (block-atlas-lattice-hash x y (+ 91 tile)) -2) 32)))
+  (+ 128
+     (- (ash (block-atlas-lattice-hash
+              x y (+ 91 (block-atlas-tile-offset tile)))
+             -2)
+        32)))
 
-(defmethod paint-block-atlas-relief ((tile (eql 0)) x y)
+(defmethod paint-block-atlas-relief ((tile (eql :grass-top)) x y)
   "Grass top: blades clumped into tufts."
   (block-atlas-byte
    (+ (* 0.62 (block-atlas-clump x y 3 4))
       (* 0.38 (block-atlas-lattice-hash x y 11)))))
 
-(defmethod paint-block-atlas-relief ((tile (eql 1)) x y)
+(defmethod paint-block-atlas-relief ((tile (eql :grass-side)) x y)
   "Grass side: a ragged fringe over dirt clods."
   (if (< y 5)
       (block-atlas-byte
@@ -660,13 +696,13 @@ material and rebuild the atlas without touching the rest of the palette."))
           (* 40 (- 4 y))))
       (block-atlas-byte (* 0.85 (block-atlas-clump x y 13 5)))))
 
-(defmethod paint-block-atlas-relief ((tile (eql 2)) x y)
+(defmethod paint-block-atlas-relief ((tile (eql :dirt)) x y)
   "Dirt: rounded clods with grit between them."
   (block-atlas-byte
    (+ (* 0.70 (block-atlas-clump x y 21 5))
       (* 0.30 (block-atlas-lattice-hash x y 22)))))
 
-(defmethod paint-block-atlas-relief ((tile (eql 3)) x y)
+(defmethod paint-block-atlas-relief ((tile (eql :stone)) x y)
   "Stone: granular, cut by a couple of shallow cracks."
   (let ((crack (if (or (zerop (mod (+ (* x 3) y) 11))
                        (zerop (mod (+ x (* y 5)) 13)))
@@ -677,13 +713,13 @@ material and rebuild the atlas without touching the rest of the palette."))
         (* 0.45 (- (block-atlas-lattice-hash x y 31) 128))
         (* 0.40 (- (block-atlas-clump x y 32 4) 128))))))
 
-(defmethod paint-block-atlas-relief ((tile (eql 4)) x y)
+(defmethod paint-block-atlas-relief ((tile (eql :wood-side)) x y)
   "Wood bark: deep vertical grooves with grain between them."
   (let ((groove (case (mod x 5) (0 -80) (1 -30) (4 -25) (t 20))))
     (block-atlas-byte
      (+ 150 groove (* 0.30 (- (block-atlas-lattice-hash x y 41) 128))))))
 
-(defmethod paint-block-atlas-relief ((tile (eql 5)) x y)
+(defmethod paint-block-atlas-relief ((tile (eql :wood-end)) x y)
   "Wood end grain: raised concentric rings."
   (let* ((dx (- x 7.5))
          (dy (- y 7.5))
@@ -692,14 +728,14 @@ material and rebuild the atlas without touching the rest of the palette."))
      (+ 128 (* 7 (- ring 9))
         (* 0.20 (- (block-atlas-lattice-hash x y 51) 128))))))
 
-(defmethod paint-block-atlas-relief ((tile (eql 6)) x y)
+(defmethod paint-block-atlas-relief ((tile (eql :leaves)) x y)
   "Leaves: overlapping lobes with gaps between them."
   (block-atlas-byte
    (+ (* 0.80 (block-atlas-clump x y 61 4))
       (* 0.35 (block-atlas-lattice-hash x y 62))
       (if (evenp (+ x y)) 18 -18))))
 
-(defmethod paint-block-atlas-relief ((tile (eql 7)) x y)
+(defmethod paint-block-atlas-relief ((tile (eql :sand)) x y)
   "Sand: fine wind ripples over a soft dune."
   (block-atlas-byte
    (+ 128
@@ -707,21 +743,21 @@ material and rebuild the atlas without touching the rest of the palette."))
       (* 0.45 (- (block-atlas-clump x y 71 6) 128))
       (* 0.18 (- (block-atlas-lattice-hash x y 72) 128)))))
 
-(defmethod paint-block-atlas-relief ((tile (eql 8)) x y)
+(defmethod paint-block-atlas-relief ((tile (eql :snow)) x y)
   "Snow: soft drifts with the odd crystal glint standing proud."
   (block-atlas-byte
    (+ (* 0.80 (block-atlas-clump x y 81 6))
       (* 0.20 (block-atlas-lattice-hash x y 82))
       (if (zerop (mod (+ (* x 5) (* y 7)) 23)) 60 0))))
 
-(defmethod paint-block-atlas-relief ((tile (eql 9)) x y)
+(defmethod paint-block-atlas-relief ((tile (eql :crystal)) x y)
   "Crystal: sharp faceted planes meeting along the tile diagonals."
   (let ((diagonal (abs (- x y)))
         (anti (abs (- (+ x y) 15))))
     (block-atlas-byte
      (+ 110 (* 9 (- 8 (min diagonal 8))) (* 6 (- 8 (min anti 8)))))))
 
-(defmethod paint-block-atlas-relief ((tile (eql 10)) x y)
+(defmethod paint-block-atlas-relief ((tile (eql :terminal)) x y)
   "Terminal graphite: flat glass inside a raised per-block bezel."
   (let ((edge (min x y (- +block-atlas-tile-size+ 1 x)
                    (- +block-atlas-tile-size+ 1 y))))
@@ -729,36 +765,36 @@ material and rebuild the atlas without touching the rest of the palette."))
      (+ 96 (* 55 (max 0 (- 2 edge)))
         (* 0.10 (- (block-atlas-lattice-hash x y 101) 128))))))
 
-(defmethod paint-block-atlas-relief ((tile (eql 11)) x y)
+(defmethod paint-block-atlas-relief ((tile (eql :gravel)) x y)
   "Gravel: sharply varying grains at nearly every texel."
   (block-atlas-byte
    (+ 112 (* 0.70 (- (block-atlas-lattice-hash x y 111) 96)))))
 
-(defmethod paint-block-atlas-relief ((tile (eql 12)) x y)
+(defmethod paint-block-atlas-relief ((tile (eql :clay)) x y)
   "Clay: compressed layers with very little loose grain."
   (block-atlas-byte
    (+ 132 (case (mod y 6) (0 -24) (1 -9) (t 4))
       (* 0.08 (- (block-atlas-lattice-hash x y 121) 128)))))
 
-(defmethod paint-block-atlas-relief ((tile (eql 13)) x y)
+(defmethod paint-block-atlas-relief ((tile (eql :mud)) x y)
   "Mud: rounded wet clods interrupted by sunken pockets."
   (let ((pocket (if (> (block-atlas-lattice-hash x y 132) 232) -70 0)))
     (block-atlas-byte
      (+ 132 pocket (* 0.42 (- (block-atlas-clump x y 131 5) 128))))))
 
-(defmethod paint-block-atlas-relief ((tile (eql 14)) x y)
+(defmethod paint-block-atlas-relief ((tile (eql :moss)) x y)
   "Moss: soft overlapping cushions."
   (block-atlas-byte
    (+ 112 (* 0.62 (block-atlas-clump x y 141 4))
       (* 0.14 (- (block-atlas-lattice-hash x y 142) 128)))))
 
-(defmethod paint-block-atlas-relief ((tile (eql 15)) x y)
+(defmethod paint-block-atlas-relief ((tile (eql :cactus-side)) x y)
   "Cactus side: strong vertical ribs with standing spines."
   (block-atlas-byte
    (+ 118 (case (mod x 5) (0 -55) (1 5) (2 48) (3 5) (t -28))
       (if (zerop (mod (+ (* x 3) (* y 5)) 17)) 70 0))))
 
-(defmethod paint-block-atlas-relief ((tile (eql 16)) x y)
+(defmethod paint-block-atlas-relief ((tile (eql :cactus-end)) x y)
   "Cactus top: gently domed flesh inside a lower rind."
   (let* ((dx (- x 7.5))
          (dy (- y 7.5))
@@ -766,7 +802,7 @@ material and rebuild the atlas without touching the rest of the palette."))
     (block-atlas-byte (+ 178 (- (* radius 8))
                          (if (> radius 5.5) -35 0)))))
 
-(defmethod paint-block-atlas-relief ((tile (eql 17)) x y)
+(defmethod paint-block-atlas-relief ((tile (eql :cobblestone)) x y)
   "Cobblestone: proud stones separated by recessed irregular joints."
   (if (or (zerop (mod (+ x (* 2 y)) 7))
           (zerop (mod (+ (* 3 x) y) 13)))
@@ -774,34 +810,34 @@ material and rebuild the atlas without touching the rest of the palette."))
       (block-atlas-byte
        (+ 158 (* 0.28 (- (block-atlas-clump x y 171 4) 128))))))
 
-(defmethod paint-block-atlas-relief ((tile (eql 18)) x y)
+(defmethod paint-block-atlas-relief ((tile (eql :stone-bricks)) x y)
   "Stone bricks: shallow-cut mortar around worn faces."
   (if (block-atlas-brick-mortar-p x y 8 5)
       54
       (block-atlas-byte
        (+ 157 (* 0.16 (- (block-atlas-lattice-hash x y 181) 128))))))
 
-(defmethod paint-block-atlas-relief ((tile (eql 19)) x y)
+(defmethod paint-block-atlas-relief ((tile (eql :bricks)) x y)
   "Fired bricks: deeper joints and rougher faces than stone masonry."
   (if (block-atlas-brick-mortar-p x y 8 5)
       42
       (block-atlas-byte
        (+ 164 (* 0.26 (- (block-atlas-lattice-hash x y 191) 128))))))
 
-(defmethod paint-block-atlas-relief ((tile (eql 20)) x y)
+(defmethod paint-block-atlas-relief ((tile (eql :planks)) x y)
   "Planks: recessed seams over gently ridged grain."
   (if (zerop (mod y 5))
       45
       (block-atlas-byte
        (+ 145 (* 18 (sin (/ (+ (* x 2) y) 2.4)))))))
 
-(defmethod paint-block-atlas-relief ((tile (eql 21)) x y)
+(defmethod paint-block-atlas-relief ((tile (eql :sandstone)) x y)
   "Sandstone: broad sediment layers with granular faces."
   (block-atlas-byte
    (+ 136 (case (mod y 7) (0 -42) (1 -18) (5 14) (t 0))
       (* 0.14 (- (block-atlas-lattice-hash x y 211) 128)))))
 
-(defmethod paint-block-atlas-relief ((tile (eql 22)) x y)
+(defmethod paint-block-atlas-relief ((tile (eql :slate)) x y)
   "Slate: thin raised sheets divided by sharp cleavage."
   (if (or (zerop (mod y 5))
           (and (zerop (mod y 3)) (> (mod (+ x y) 7) 4)))
@@ -809,7 +845,7 @@ material and rebuild the atlas without touching the rest of the palette."))
       (block-atlas-byte
        (+ 151 (* 0.12 (- (block-atlas-lattice-hash x y 221) 128))))))
 
-(defmethod paint-block-atlas-relief ((tile (eql 23)) x y)
+(defmethod paint-block-atlas-relief ((tile (eql :turtle-carapace)) x y)
   "Turtle carapace: each scute domes up out of the joint around it."
   (let ((distance (block-atlas-plate-distance
                    x y +turtle-scute-width+ +turtle-scute-height+)))
@@ -820,13 +856,13 @@ material and rebuild the atlas without touching the rest of the palette."))
             (+ 158 (* 52 (- 0.75 distance))))
         (* 0.10 (- (block-atlas-lattice-hash x y 231) 128))))))
 
-(defmethod paint-block-atlas-relief ((tile (eql 24)) x y)
+(defmethod paint-block-atlas-relief ((tile (eql :turtle-skin)) x y)
   "Turtle skin: small tight pebbles all over the hide."
   (block-atlas-byte
    (+ 118 (* 0.34 (- (block-atlas-clump x y 241 3) 128))
       (* 0.22 (- (block-atlas-lattice-hash x y 243) 128)))))
 
-(defmethod paint-block-atlas-relief ((tile (eql 25)) x y)
+(defmethod paint-block-atlas-relief ((tile (eql :turtle-plastron)) x y)
   "Turtle plastron: flat belly plates with narrow sunken seams."
   (block-atlas-byte
    (+ (if (turtle-plastron-seam-p x y) 72 150)
@@ -836,25 +872,25 @@ material and rebuild the atlas without touching the rest of the palette."))
 ;;; animals -- textured boxes on the block surface pipeline -- and paint their
 ;;; hide, sleeve, and gadgets from the same atlas.  See BODY.LISP.
 
-(defconstant +player-skin-tile+ 26)
-(defconstant +player-sleeve-tile+ 27)
-(defconstant +phone-body-tile+ 28)
-(defconstant +phone-screen-tile+ 29)
+(defconstant +player-skin-tile+ :player-skin)
+(defconstant +player-sleeve-tile+ :player-sleeve)
+(defconstant +phone-body-tile+ :phone-body)
+(defconstant +phone-screen-tile+ :phone-screen)
 
-(defmethod paint-block-atlas-tile ((tile (eql 26)) x y)
+(defmethod paint-block-atlas-tile ((tile (eql :player-skin)) x y)
   "Player skin: warm hide with the faintest knuckle mottling."
   (let ((pebble (- (block-atlas-clump x y 261 4) 128)))
     (pack-block-atlas-rgba (+ 214 (round pebble 9))
                            (+ 166 (round pebble 8))
                            (+ 132 (round pebble 8)))))
 
-(defmethod paint-block-atlas-tile ((tile (eql 27)) x y)
+(defmethod paint-block-atlas-tile ((tile (eql :player-sleeve)) x y)
   "Player sleeve: a knitted teal cuff, ribbed along the arm."
   (let ((rib (if (evenp (floor x 2)) 6 -6))
         (variation (round (block-atlas-variation x y tile) 4)))
     (shaded-block-atlas-pixel 44 112 118 (+ rib variation))))
 
-(defmethod paint-block-atlas-tile ((tile (eql 28)) x y)
+(defmethod paint-block-atlas-tile ((tile (eql :phone-body)) x y)
   "Phone body: matte dark metal, one even tone with no visible grain."
   (declare (ignore x y))
   (pack-block-atlas-rgba 34 35 39))
@@ -869,7 +905,7 @@ and a dock row at the bottom."
        (let ((column (mod x 4)) (row (mod (- y 3) 3)))
          (and (>= column 1) (< column 3) (< row 2)))))
 
-(defmethod paint-block-atlas-tile ((tile (eql 29)) x y)
+(defmethod paint-block-atlas-tile ((tile (eql :phone-screen)) x y)
   "Phone screen: a lit wallpaper gradient with a grid of little app icons."
   (cond ((= y 0)
          (shaded-block-atlas-pixel 236 236 240))
@@ -885,26 +921,26 @@ and a dock row at the bottom."
                                 (+ 70 (* 4 y))
                                 (+ 150 (* 5 y))))))
 
-(defmethod paint-block-atlas-relief ((tile (eql 26)) x y)
+(defmethod paint-block-atlas-relief ((tile (eql :player-skin)) x y)
   "Player skin: soft, barely textured."
   (block-atlas-byte
    (+ 128 (* 0.10 (- (block-atlas-clump x y 261 4) 128)))))
 
-(defmethod paint-block-atlas-relief ((tile (eql 27)) x y)
+(defmethod paint-block-atlas-relief ((tile (eql :player-sleeve)) x y)
   "Player sleeve: knitted ribs along the arm."
   (block-atlas-byte (if (evenp (floor x 2)) 150 106)))
 
-(defmethod paint-block-atlas-relief ((tile (eql 28)) x y)
+(defmethod paint-block-atlas-relief ((tile (eql :phone-body)) x y)
   "Phone body: bead-blasted flat, the least relief a tile is allowed."
   (+ 128 (mod (block-atlas-lattice-hash x y 283) 2)))
 
-(defmethod paint-block-atlas-relief ((tile (eql 29)) x y)
+(defmethod paint-block-atlas-relief ((tile (eql :phone-screen)) x y)
   "Phone screen: glass, flat but for the faintest bow across the pane."
   (+ 126 (floor (+ x y) 8)))
 
 ;;; The urbit material arrived after the gadget and reel tiles, so its tile
-;;; number sits past them: tile order is history, not palette order, and the
-;;; DEFINE-BLOCK-KINDS list alone decides which number key a material gets.
+;;; offset sits past them: tile order is history, not palette order, and the
+;;; vocabulary domain alone decides which dense atlas lane a tile gets.
 
 (defun urbit-sigil-glyph-p (x y)
   "Whether X,Y lies on the planet sigil: a ring crossed by its equator."
@@ -914,14 +950,14 @@ and a dock row at the bottom."
     (or (<= 4.4 radius 5.9)
         (and (<= 7 y 8) (< radius 5.9)))))
 
-(defmethod paint-block-atlas-tile ((tile (eql 36)) x y)
+(defmethod paint-block-atlas-tile ((tile (eql :urbit)) x y)
   "Urbit: a white planet sigil on a near-black field."
   (if (urbit-sigil-glyph-p x y)
       (shaded-block-atlas-pixel 232 232 236)
       (shaded-block-atlas-pixel
        16 17 21 (round (block-atlas-variation x y tile) 6))))
 
-(defmethod paint-block-atlas-relief ((tile (eql 36)) x y)
+(defmethod paint-block-atlas-relief ((tile (eql :urbit)) x y)
   "Urbit: the sigil stands proud of a matte face."
   (block-atlas-byte
    (+ (if (urbit-sigil-glyph-p x y) 168 118)
@@ -948,7 +984,7 @@ and a dock row at the bottom."
 three spokes, a hub with a spindle.  LABEL-P paints a paper label on the
 film."
   (let ((r (reel-radius x y))
-        (grain (block-atlas-variation x y 30)))
+        (grain (block-atlas-variation x y :tape-flange)))
     (cond ((> r 7.6)
            ;; The canister the reel sits in.
            (shaded-block-atlas-pixel 44 42 40 (round grain 4)))
@@ -969,13 +1005,13 @@ film."
           (t
            (shaded-block-atlas-pixel 30 30 30 0)))))
 
-(defmethod paint-block-atlas-tile ((tile (eql 30)) x y)
+(defmethod paint-block-atlas-tile ((tile (eql :tape-flange)) x y)
   "Tape flange: an empty reel, film wound dark behind its windows."
   (paint-reel-flange x y nil))
 
-(defmethod paint-block-atlas-tile ((tile (eql 31)) x y)
+(defmethod paint-block-atlas-tile ((tile (eql :reel-rim)) x y)
   "Reel rim: two bright flanges with the wound film's edge between them."
-  (let ((grain (block-atlas-variation x y 31)))
+  (let ((grain (block-atlas-variation x y :reel-rim)))
     (cond ((or (< y 2) (> y 13))
            (shaded-block-atlas-pixel 168 166 158 (round grain 3)))
           ((or (= y 2) (= y 13))
@@ -986,11 +1022,11 @@ film."
                                      (+ (round grain 4)
                                         (if (evenp x) 5 -5)))))))
 
-(defmethod paint-block-atlas-tile ((tile (eql 32)) x y)
+(defmethod paint-block-atlas-tile ((tile (eql :film-flange)) x y)
   "Film flange: a loaded reel with a paper label across the film."
   (paint-reel-flange x y t))
 
-(defmethod paint-block-atlas-relief ((tile (eql 30)) x y)
+(defmethod paint-block-atlas-relief ((tile (eql :tape-flange)) x y)
   "Tape flange: the rim and hub stand proud, the windows sink."
   (let ((r (reel-radius x y)))
     (cond ((> r 7.6) 96)
@@ -1001,14 +1037,14 @@ film."
           ((> r 1.1) 168)
           (t 60))))
 
-(defmethod paint-block-atlas-relief ((tile (eql 31)) x y)
+(defmethod paint-block-atlas-relief ((tile (eql :reel-rim)) x y)
   "Reel rim: flanges proud, the film between them lower and ribbed."
   (cond ((or (< y 2) (> y 13)) 176)
         ((or (= y 2) (= y 13)) 130)
         (t (if (evenp x) 110 104))))
 
-(defmethod paint-block-atlas-relief ((tile (eql 32)) x y)
-  (paint-block-atlas-relief 30 x y))
+(defmethod paint-block-atlas-relief ((tile (eql :film-flange)) x y)
+  (paint-block-atlas-relief :tape-flange x y))
 
 (defun make-block-texture-atlas ()
   "Return the little world's horizontal RGBA8 atlas as packed pixel words.
@@ -1016,15 +1052,19 @@ film."
 RGB is the material's procedural colour and A is opaque coverage.  The
 array spans the full tile capacity; tiles past the painted count stay
 zero, waiting for a material to claim them."
-  (assert (<= *block-atlas-tile-count* +block-atlas-tile-capacity+))
-  (let* ((width (* +block-atlas-tile-size+ +block-atlas-tile-capacity+))
+  (let* ((domain *block-atlas-tile-domain*)
+         (*block-atlas-tile-domain* domain)
+         (count (block-atlas-tile-count domain))
+         (width (* +block-atlas-tile-size+ +block-atlas-tile-capacity+))
          (pixels (make-array (list +block-atlas-tile-size+ width)
                              :element-type '(unsigned-byte 32))))
+    (assert (<= count +block-atlas-tile-capacity+))
     (dotimes (y +block-atlas-tile-size+)
-      (dotimes (tile *block-atlas-tile-count*)
-        (dotimes (x +block-atlas-tile-size+)
-          (setf (aref pixels y (+ x (* tile +block-atlas-tile-size+)))
-                (paint-block-atlas-tile tile x y)))))
+      (dotimes (offset count)
+        (let ((tile (block-atlas-tile-at-offset offset domain)))
+          (dotimes (x +block-atlas-tile-size+)
+            (setf (aref pixels y (+ x (* offset +block-atlas-tile-size+)))
+                  (paint-block-atlas-tile tile x y))))))
     pixels))
 
 (defun block-atlas-relief-at (tile x y)
@@ -1067,13 +1107,17 @@ map nor later texture filtering can borrow a neighbouring material's shape."
 
 RGB is a linear encoded unit normal and A is the procedural height from which
 it was derived.  This is a derived materialization, not an authored asset."
-  (assert (<= *block-atlas-tile-count* +block-atlas-tile-capacity+))
-  (let* ((width (* +block-atlas-tile-size+ +block-atlas-tile-capacity+))
+  (let* ((domain *block-atlas-tile-domain*)
+         (*block-atlas-tile-domain* domain)
+         (count (block-atlas-tile-count domain))
+         (width (* +block-atlas-tile-size+ +block-atlas-tile-capacity+))
          (pixels (make-array (list +block-atlas-tile-size+ width)
                              :element-type '(unsigned-byte 32))))
+    (assert (<= count +block-atlas-tile-capacity+))
     (dotimes (y +block-atlas-tile-size+)
-      (dotimes (tile *block-atlas-tile-count*)
-        (dotimes (x +block-atlas-tile-size+)
-          (setf (aref pixels y (+ x (* tile +block-atlas-tile-size+)))
-                (paint-block-atlas-normal tile x y)))))
+      (dotimes (offset count)
+        (let ((tile (block-atlas-tile-at-offset offset domain)))
+          (dotimes (x +block-atlas-tile-size+)
+            (setf (aref pixels y (+ x (* offset +block-atlas-tile-size+)))
+                  (paint-block-atlas-normal tile x y))))))
     pixels))

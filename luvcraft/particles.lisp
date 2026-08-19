@@ -147,7 +147,7 @@ fragment when the population is full."
          (nx (voxel-direction-dx normal))
          (ny (voxel-direction-dy normal))
          (nz (voxel-direction-dz normal))
-         (tile (block-face-tile block face))
+         (tile (block-atlas-tile-offset (block-face-tile block face)))
          (atlas-width (* +block-atlas-tile-size+ +block-atlas-tile-capacity+))
          (half-size (* 0.5 (block-particle-size particle))))
     (dolist (index '(0 1 2 0 2 3))

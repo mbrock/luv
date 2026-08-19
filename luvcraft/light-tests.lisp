@@ -7,12 +7,12 @@
 
 (defparameter *test-glow-block*
   (make-instance 'luvcraft::block-kind
-                 :name :test-glow :face-tiles '(:all 3)
+                 :name :test-glow :face-tiles '(:all :stone)
                  :light-emission 10 :surface-emission 1.0))
 
 (defparameter *test-dim-glow-block*
   (make-instance 'luvcraft::block-kind
-                 :name :test-dim-glow :face-tiles '(:all 3)
+                 :name :test-dim-glow :face-tiles '(:all :stone)
                  :light-emission 6))
 
 (defvar *light-region-window-lookups* nil)

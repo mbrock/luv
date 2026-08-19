@@ -64,10 +64,11 @@ is the same turn-around the video path makes."
             (channel 16))))
 
 (defun block-icon-texel (atlas tile column row)
-  (aref atlas
-        (max 0 (min (1- +block-icon-tile-size+) row))
-        (+ (max 0 (min (1- +block-icon-tile-size+) column))
-           (* tile +block-icon-tile-size+))))
+  (let ((offset (luvcraft:block-atlas-tile-offset tile)))
+    (aref atlas
+          (max 0 (min (1- +block-icon-tile-size+) row))
+          (+ (max 0 (min (1- +block-icon-tile-size+) column))
+             (* offset +block-icon-tile-size+)))))
 
 (defun rasterize-block-icon (block size)
   "Draw BLOCK as a SIZE by SIZE isometric cube of RGBA words.

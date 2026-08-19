@@ -25,11 +25,11 @@
 ;;; ---------------------------------------------------------------------
 ;;; Three tiles of the atlas: what a ball, a drop, and a gobbet are painted with.
 
-(defconstant +ball-tile+ 33)
-(defconstant +water-drop-tile+ 34)
-(defconstant +lava-tile+ 35)
+(defconstant +ball-tile+ :ball)
+(defconstant +water-drop-tile+ :water)
+(defconstant +lava-tile+ :lava)
 
-(defmethod paint-block-atlas-tile ((tile (eql 33)) x y)
+(defmethod paint-block-atlas-tile ((tile (eql :ball)) x y)
   "A ball: worn red rubber with one pale band around it, so it is seen to turn."
   (let* ((seam (<= 6 y 8))
          (variation (round (block-atlas-variation x y tile) 3)))
@@ -37,12 +37,12 @@
         (shaded-block-atlas-pixel 226 214 190 variation)
         (shaded-block-atlas-pixel 196 62 48 variation))))
 
-(defmethod paint-block-atlas-tile ((tile (eql 34)) x y)
+(defmethod paint-block-atlas-tile ((tile (eql :water)) x y)
   "Water: a clear cool blue with a lighter ripple through it."
   (let ((ripple (block-atlas-clump x y 733 5)))
     (shaded-block-atlas-pixel 78 140 214 (round (- ripple 128) 5))))
 
-(defmethod paint-block-atlas-tile ((tile (eql 35)) x y)
+(defmethod paint-block-atlas-tile ((tile (eql :lava)) x y)
   "Lava: near-white heat veined through orange; the glow is added per body."
   (let ((vein (block-atlas-clump x y 977 4)))
     (if (> vein 175)
@@ -61,7 +61,7 @@
                                           (lifetime nil) (hit-report-p nil)
                                           (draw-scale 0.8))))
   (name :ball :type keyword)
-  (tile 0 :type fixnum)
+  (tile :ball :type keyword)
   (emission 0.0 :type single-float)
   (radius 0.22 :type single-float)
   (mass 1.0 :type single-float)
@@ -197,7 +197,8 @@ corner (-0.5..0.5), the tile-local UV, and the face normal, flat.")
           (let* ((kind (aref kinds (aref kind-indices i)))
                  (cx (aref xs i)) (cy (aref ys i)) (cz (aref zs i))
                  (half (* (aref radii i) (body-kind-draw-scale kind)))
-                 (tile (float (body-kind-tile kind) 0f0))
+                 (tile (float (block-atlas-tile-offset (body-kind-tile kind))
+                              0f0))
                  (emission (body-kind-emission kind))
                  (qx (aref qxs i)) (qy (aref qys i)) (qz (aref qzs i)) (qw (aref qws i))
                  ;; The rotation matrix of the unit quaternion.

@@ -107,8 +107,9 @@ bag that name the same video get the same object back.")
             (make-instance
              'film-block-kind
              :name :film :video-id video-id
-             :face-tiles '(:front 32 :back 32 :top 31 :bottom 31
-                           :left 31 :right 31)
+             :face-tiles '(:front :film-flange :back :film-flange
+                           :top :reel-rim :bottom :reel-rim
+                           :left :reel-rim :right :reel-rim)
              :categories '(:building) :display-color '(0.62 0.55 0.42)
              :placeable-p nil)
             (gethash video-id *films*) film))

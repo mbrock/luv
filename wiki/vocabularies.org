@@ -14,9 +14,11 @@ vocabulary.  Nothing else about the definition changes.
 
 Seeing this makes the machinery already built for space apply unchanged to
 naming.  #J7A2KD divides the world into descriptions that dispatch and domains
-that compute; a vocabulary belongs on both sides of that line at once.  Its
-members are semantic objects with protocols, and the mapping from member to
-offset is exactly the kind of small dense table a hot loop wants to index.
+that compute; a vocabulary belongs on both sides of that line at once.  A
+member need not be a singleton instance: an interned keyword can be the
+semantic identity, with its qualities supplied by EQL-specialized methods.
+The domain object owns the mapping from those identities to the small dense
+offsets a hot loop wants to index.
 
 The luv block world already contains one worked example.  =block-palette-domain=
 in [[file:../luvcraft/light.lisp][light.lisp]] declares the palette's entries as
@@ -25,9 +27,9 @@ propagation loss and emission over it, under a comment that states the whole
 pattern: one generic dispatch per palette entry, then dense =u8= lookups in
 every hot loop.
 
-The atlas received no such treatment.  Its tile numbers are written by hand
-into method specializers and into each material's face list.  #X3WRP1 is what
-that cost.
+The atlas originally received no such treatment.  Its tile numbers were
+written by hand into method specializers and into each material's face list.
+#X3WRP1 is what that cost; #F2IOKG records the conversion to a named domain.
 
 * The tile that two branches both called thirty
 :PROPERTIES:
@@ -246,14 +248,14 @@ existing file.  A vocabulary-bearing save wants the opposite disposition:
 accept anything up to the current version, migrate forward through one step per
 version, and write only the newest, so files heal as they are saved.
 
-* NEXT Name the atlas tiles and give the domain an owner
+* DONE Name the atlas tiles and give the domain an owner
 :PROPERTIES:
 :ID: F2IOKG
 :END:
 
 *Intent.* Replace the hand-allocated atlas tile integers with keywords, and
 make the tile vocabulary a finite domain object that assigns offsets.
-Specializers become =(eql :urbit-sigil)= rather than =(eql 36)=; a material's
+Specializers become =(eql :urbit)= rather than =(eql 36)=; a material's
 face list names tiles rather than positions; the atlas materializes over the
 domain, appending offsets and never moving one.
 
@@ -264,10 +266,14 @@ materials say nothing about tiles at all, leaving only the interesting cases
 written down: grass split three ways, snow borrowing dirt underneath, the
 fountain and lava spring borrowing masonry.
 
-*Evidence.* #X3WRP1 is a collision that reached =main= and was resolved by
-hand.  #SICRZO notes that the palette light table in
-[[file:../luvcraft/light.lisp][light.lisp]] already demonstrates the shape this
-wants.
+*Evidence.* =*block-atlas-tile-domain*= now maps thirty-seven keyword identities
+to the historical dense lane order.  Paint methods and material face maps use
+those identities; mesh, body, icon, and atlas materialization code resolve an
+offset only at the representation boundary.  The finite-domain tests reject
+duplicate names and demonstrate that the same offset means something different
+under another explicit mapping.  The full test suite passes, and =make smoke=
+reproduces the prior image byte for byte at
+=fa11abca777cb86907f660d180480f5476c68c315927e306cfe82b95bc59e785=.
 
 *Done when.* No atlas tile integer appears in
 [[file:../luvcraft/blocks.lisp][blocks.lisp]],

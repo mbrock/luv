@@ -231,7 +231,8 @@ the right; a positive pitch tips the top away from the viewer."
 
 The box's local x, y, z are those axes; RIGHT UP FORWARD must be a unit
 orthonormal frame, so the face normals come out unit too."
-  (let* ((size +block-atlas-tile-size+)
+  (let* ((tile (block-atlas-tile-offset tile))
+         (size +block-atlas-tile-size+)
          (atlas-width (* size +block-atlas-tile-capacity+)))
     (dolist (face *block-faces*)
       (let* ((normal (block-face-neighbor face))
@@ -445,7 +446,8 @@ from the right side's lower end, with SEGMENTS arcs per corner."
   "Append a slab centred on ORIGIN with axes RIGHT UP FORWARD whose four
 corners are rounded to RADIUS in the RIGHT/UP plane: two flat faces and a
 band of quads around the edge, all wearing TILE stretched once around."
-  (let* ((outline (rounded-rectangle-outline half-x half-y radius segments))
+  (let* ((tile (block-atlas-tile-offset tile))
+         (outline (rounded-rectangle-outline half-x half-y radius segments))
          (count (length outline))
          (size +block-atlas-tile-size+)
          (atlas-width (* size +block-atlas-tile-capacity+)))
