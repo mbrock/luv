@@ -246,12 +246,19 @@ wedged image looks like, and the difference has to be visible from here.")
     (write-char #\' output)))
 
 (defun run-shell (command)
+  "Run COMMAND under /bin/sh, letting it speak, and return its exit code.
+
+The streams are inherited rather than discarded.  SB-EXT:RUN-PROGRAM reads
+NIL as /dev/null, not as \"inherit\", so a command told to print swallowed
+its own output here: `./sly log` shelled out to tail and threw the tail
+away, leaving a header with nothing under it.  Every caller that wants
+silence redirects for itself."
   (let ((process
           (sb-ext:run-program
            "/bin/sh" (list "-c" command)
            :search nil
-           :output nil
-           :error nil
+           :output t
+           :error t
            :wait t)))
     (sb-ext:process-exit-code process)))
 
