@@ -252,11 +252,11 @@
     (multiple-value-bind (host target)
         (luv::predict-vulkan-presentation-target timeline 99d0)
       (ok (= host 99d0))
-      (ok (= target 1033333334)))
+      (ok (= target 1016666667)))
     (multiple-value-bind (host target)
         (luv::predict-vulkan-presentation-target timeline 100d0)
       (ok (= host 100d0))
-      (ok (= target 1033333334))
+      (ok (= target 1016666667))
       (luv::note-vulkan-presentation-submission
        timeline 8 host 99.99d0 target))
     ;; Feedback for 7 may still be the newest result when frame 9 is queued.
@@ -264,7 +264,15 @@
     (multiple-value-bind (host target)
         (luv::predict-vulkan-presentation-target timeline 101d0)
       (ok (= host 101d0))
-      (ok (= target 1050000001)))))
+      (ok (= target 1033333334)))
+    ;; Frame 8 then misses its target by one whole refresh.  That lateness is
+    ;; diagnostic feedback; it must not turn frame 9 into another 33 ms gap.
+    (ok (luv::note-vulkan-presentation-result
+         timeline 8 1033333334 :present-stage-local-ext 7))
+    (multiple-value-bind (host target)
+        (luv::predict-vulkan-presentation-target timeline 102d0)
+      (ok (= host 102d0))
+      (ok (= target 1033333334)))))
 
 (deftest presentation-timeline-ring-retains-only-its-newest-minute
   (let ((timeline

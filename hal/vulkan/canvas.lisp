@@ -232,15 +232,14 @@ native targets only from observed or already-scheduled native timestamps."
              (plusp duration)
              (or (plusp base-id)
                  (and previous-target (plusp previous-target))))
-        ;; A completed result catches the schedule up after a genuinely missed
-        ;; target.  Otherwise queued frames march from the preceding target at
-        ;; exactly one refresh per present, even while feedback trails them.
+        ;; Feedback seeds the native clock.  After that, requested targets own
+        ;; cadence: a late result is evidence of a missed beat, not a new phase
+        ;; from which to delay the following frame.
         (let ((native-base
-                (max (if (plusp base-id)
-                         (vulkan-presentation-timeline-latest-result-nanoseconds
-                          timeline)
-                         0)
-                     (or previous-target 0))))
+                (if (and previous-target (plusp previous-target))
+                    previous-target
+                    (vulkan-presentation-timeline-latest-result-nanoseconds
+                     timeline))))
           (values fallback-time (+ native-base duration)))
         (values fallback-time nil))))
 
