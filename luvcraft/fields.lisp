@@ -238,22 +238,18 @@
       '(:quantity :linear-rgb :unit :one :tensor-order 1))))))
 
 (defun make-cursor-vertex-product-layout ()
-  "Describe position, colour, and coverage as one packed cursor vertex."
+  "Describe a clip position and its cursor-local offset as one packed vertex."
   (luv.arithmetic:make-quantity-layout
-   7
+   5
    (list
     (luv.arithmetic:make-quantity-projection
      '(0 1 2)
      (luv.arithmetic:make-declared-quantity-specification
       '(:quantity :clip-coordinate :unit :one :tensor-order 1)))
     (luv.arithmetic:make-quantity-projection
-     '(3 4 5)
+     '(3 4)
      (luv.arithmetic:make-declared-quantity-specification
-      '(:quantity :linear-rgb :unit :one :tensor-order 1)))
-    (luv.arithmetic:make-quantity-projection
-     '(6)
-     (luv.arithmetic:make-declared-quantity-specification
-      '(:quantity :opacity :unit :one))))))
+      '(:quantity :cursor-coordinate :unit :one :tensor-order 1))))))
 
 (defmethod luv.arithmetic:value-declaration-for
     ((name (eql :sky-vertices)))
@@ -291,12 +287,11 @@
     :representation-type '(vector single-float)
     :quantity-layout
     (luv.arithmetic:make-repeated-quantity-layout
-     (make-cursor-vertex-product-layout) :stride 7)
+     (make-cursor-vertex-product-layout) :stride 5)
     :source-form
     '(cursor-vertices :type (vector single-float)
-      :repeated-product
-      ((0 1 2) clip-coordinate (3 4 5) absolute-linear-rgb (6) opacity)
-      :stride 7))))
+      :repeated-product ((0 1 2) clip-coordinate (3 4) cursor-coordinate)
+      :stride 5))))
 
 (defun ensure-vertex-product-contract
     (vertices declaration-name vertex-count shader-specification)

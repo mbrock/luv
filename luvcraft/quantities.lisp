@@ -174,6 +174,12 @@
   :components
   (:clip-x-coordinate :clip-y-coordinate :clip-z-coordinate))
 
+;;; The software cursor's own design grid: an offset from the pointer hotspot
+;;; measured in the units the arrow outline is drawn in, which the vertex
+;;; stage scales into framebuffer pixels.
+(math:define-quantity :cursor-coordinate :kind :sample-count
+  :components (:cursor-x-coordinate :cursor-y-coordinate))
+
 ;;; Units and quantities the knobs (KNOBS.LISP) present values in.  A knob's
 ;;; unit is the same vocabulary the arithmetic checks, so the metabar prints
 ;;; the unit the shader would have typed.

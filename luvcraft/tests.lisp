@@ -107,11 +107,17 @@
   (let ((center (luvcraft::make-luvcraft-cursor-vertices 200 100 100 50))
         (top-left
           (luvcraft::make-luvcraft-cursor-vertices 200 100 0 0)))
-    (ok (= 27 (/ (length center) 7)))
+    (ok (= luvcraft::+luvcraft-cursor-vertex-count+ (/ (length center) 5)))
     ;; The Vulkan viewport performs the Y inversion: moving from the centre to
-    ;; the top-left subtracts one in both vertex-coordinate axes here.
-    (ok (= -1.0 (- (aref top-left 0) (aref center 0))))
-    (ok (= -1.0 (- (aref top-left 1) (aref center 1))))))
+    ;; the top-left subtracts one in both vertex-coordinate axes here.  The
+    ;; quad's own corner offset survives the subtraction as rounding, so the
+    ;; shift is read to single-float tolerance rather than exactly.
+    (flet ((shift (lane)
+             (- (aref top-left lane) (aref center lane))))
+      (ok (< (abs (+ 1.0 (shift 0))) 1e-5))
+      (ok (< (abs (+ 1.0 (shift 1))) 1e-5)))
+    ;; The design-grid lanes describe the arrow, not where it is drawn.
+    (ok (equalp (subseq center 3 5) (subseq top-left 3 5)))))
 
 (deftest pointer-reports-coalesce-into-latest-frame-state
   (let ((session (make-instance 'luvcraft-session)))

@@ -2684,8 +2684,83 @@ distribution overhead."
 (defun block-world-crosshair-fragment-shader ()
   (assemble-spir-v-module (block-world-crosshair-fragment-module)))
 
-;;; The software cursor carries opacity so its outer silhouette can softly
-;;; cover the final composited frame instead of ending in staircase pixels.
+;;; The software cursor is one quad carrying a cursor-local coordinate; the
+;;; arrow itself is a signed distance field the fragment stage evaluates.  A
+;;; pointer is nearly all long diagonals, so triangle soup stairsteps badly at
+;;; any size, and its outline, its fill, and its drop shadow all fall out of
+;;; thresholds of the one distance.
+;;;
+;;; The outline is the classic desktop arrow, wound from the tip down the
+;;; vertical left edge and back up the diagonal right edge, in a design grid
+;;; the vertex stage scales into framebuffer pixels:
+;;;
+;;;   A (0.0,  0.0)   the hotspot, at the pointer position exactly
+;;;   B (0.0, 16.8)   foot of the vertical left edge
+;;;   C (3.2, 13.6)   where the tail leaves the head
+;;;   D (6.0, 20.2)   tail, outer corner
+;;;   E (10.5, 18.3)  tail, inner corner
+;;;   F (7.9, 11.6)   where the tail rejoins the head
+;;;   G (11.9, 11.6)  foot of the diagonal right edge
+;;;
+;;; C and F are reflex, so the distance is taken the general way -- nearest
+;;; point over every edge, sign from a crossing count -- rather than by
+;;; intersecting half planes, which would quietly shave the notch off.
+
+(define-shader-function cursor-edge-squared-distance (point px py qx qy)
+  "Squared distance from POINT to the arrow edge between P and Q."
+  (let* ((ex (- qx px))
+         (ey (- qy py))
+         (wx (- (swizzle point :x) px))
+         (wy (- (swizzle point :y) py))
+         (along
+           (clamp (/ (+ (* wx ex) (* wy ey))
+                     (max (+ (* ex ex) (* ey ey)) 1e-6))
+                  0.0 1.0))
+         (bx (- wx (* ex along)))
+         (by (- wy (* ey along))))
+    (+ (* bx bx) (* by by))))
+
+(define-shader-function cursor-edge-crossing (point px py qx qy)
+  "-1 when a ray from POINT crosses the arrow edge between P and Q, else 1.
+
+Multiplying one of these per edge counts the crossings, so the product is
+negative exactly inside the outline however it winds."
+  (let* ((ex (- qx px))
+         (ey (- qy py))
+         (wx (- (swizzle point :x) px))
+         (wy (- (swizzle point :y) py))
+         (past-p (step py (swizzle point :y)))
+         (before-q (- 1.0 (step qy (swizzle point :y))))
+         (left-of (step (* ey wx) (* ex wy)))
+         (crossing
+           (+ (* past-p before-q left-of)
+              (* (- 1.0 past-p) (- 1.0 before-q) (- 1.0 left-of)))))
+    (- 1.0 (* 2.0 crossing))))
+
+(define-shader-function cursor-arrow-distance (point)
+  "Signed distance from POINT to the arrow outline, negative inside."
+  (let* ((squared
+           (min (cursor-edge-squared-distance point 0.0 0.0 11.9 11.6)
+                (min (cursor-edge-squared-distance point 0.0 16.8 0.0 0.0)
+                     (min (cursor-edge-squared-distance point 3.2 13.6 0.0 16.8)
+                          (min (cursor-edge-squared-distance
+                                point 6.0 20.2 3.2 13.6)
+                               (min (cursor-edge-squared-distance
+                                     point 10.5 18.3 6.0 20.2)
+                                    (min (cursor-edge-squared-distance
+                                          point 7.9 11.6 10.5 18.3)
+                                         (cursor-edge-squared-distance
+                                          point 11.9 11.6 7.9 11.6))))))))
+         (sign
+           (* (cursor-edge-crossing point 0.0 0.0 11.9 11.6)
+              (* (cursor-edge-crossing point 0.0 16.8 0.0 0.0)
+                 (* (cursor-edge-crossing point 3.2 13.6 0.0 16.8)
+                    (* (cursor-edge-crossing point 6.0 20.2 3.2 13.6)
+                       (* (cursor-edge-crossing point 10.5 18.3 6.0 20.2)
+                          (* (cursor-edge-crossing point 7.9 11.6 10.5 18.3)
+                             (cursor-edge-crossing
+                              point 11.9 11.6 7.9 11.6)))))))))
+    (* sign (sqrt (max squared 1e-12)))))
 
 (define-shader-method shader-specification-for
     luvcraft-cursor-vertex-specification
@@ -2693,35 +2768,47 @@ distribution overhead."
     (:stage :vertex
      :inputs ((screen-position :vec3 :location 0
                                :quantity :clip-coordinate :unit :one)
-              (ink-input :vec4 :location 1
-                         :components
-                         ((:xyz :quantity :linear-rgb :unit :one)
-                          (:w :quantity :opacity :unit :one))))
+              (cursor-input :vec2 :location 1
+                            :quantity :cursor-coordinate :unit :one))
      :outputs ((clip-position :vec4 :built-in :position)
-               (ink-output :vec4 :location 0
-                           :components
-                           ((:xyz :quantity :linear-rgb :unit :one)
-                            (:w :quantity :opacity :unit :one)))))
+               (cursor-output :vec2 :location 0)))
   (let* ((clip
-          (vec4 (representation (swizzle screen-position :x))
-                (representation (swizzle screen-position :y))
-                (representation (swizzle screen-position :z))
-                1.0)))
+           (vec4 (representation (swizzle screen-position :x))
+                 (representation (swizzle screen-position :y))
+                 (representation (swizzle screen-position :z))
+                 1.0)))
     (set-output clip-position clip)
-    (set-output ink-output ink-input)))
+    (set-output cursor-output (representation cursor-input))))
 
 (define-shader-method shader-specification-for
     luvcraft-cursor-fragment-specification
     ((role (eql :cursor)) (stage (eql :fragment)))
     (:stage :fragment
-     :inputs ((ink-input :vec4 :location 0
-                         :components
-                         ((:xyz :quantity :linear-rgb :unit :one)
-                          (:w :quantity :opacity :unit :one))))
+     :inputs ((cursor-input :vec2 :location 0))
      :outputs ((color-output :vec4 :location 0)))
-  (let* ((rgba
+  (let* (;; One pixel measured in the cursor's own units, so the same source
+         ;; resolves its edges wherever the arrow is scaled to.
+         (dx (derivative-x (swizzle cursor-input :x)))
+         (dy (derivative-y (swizzle cursor-input :x)))
+         (pixel (max (sqrt (+ (* dx dx) (* dy dy))) 1e-4))
+         (distance (cursor-arrow-distance cursor-input))
+         ;; A soft shadow down and to the right lifts the arrow off bright sky
+         ;; and pale inventory panels alike without a second silhouette.
+         (shadow-distance
+           (cursor-arrow-distance (- cursor-input (vec2 1.1 1.6))))
+         (shadow (* 0.40 (- 1.0 (smoothstep -0.4 2.8 shadow-distance))))
+         ;; The silhouette, and the white body inset from it by the outline.
+         (body (- 1.0 (smoothstep (- pixel) pixel distance)))
+         (core (- 1.0 (smoothstep (- pixel) pixel (+ distance 1.15))))
+         (outline-ink (vec3 0.045 0.050 0.060))
+         (body-ink (vec3 0.965 0.970 0.980))
+         (ink (mix outline-ink body-ink core))
+         ;; Premultiplied: the arrow covers its own share and the shadow only
+         ;; darkens whatever the arrow itself left uncovered.
+         (alpha (+ body (* shadow (- 1.0 body))))
+         (rgba
            (assume-quantity
-            (representation ink-input)
+            (vec4 (* ink body) alpha)
             :quantity :linear-rgba :unit :one)))
     (set-output color-output rgba)))
 

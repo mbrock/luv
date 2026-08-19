@@ -43,7 +43,11 @@
                            :reader luvcraft-frame-world-text-bind-groups)))
 
 (defconstant +block-world-crosshair-vertex-count+ 24)
-(defconstant +luvcraft-cursor-vertex-count+ 27)
+(defconstant +luvcraft-cursor-vertex-count+ 6)
+(defconstant +luvcraft-cursor-scale+ 1.75
+  "Framebuffer pixels per unit of the cursor shader's design grid.")
+(defconstant +luvcraft-cursor-margin+ 5.0
+  "Design-grid slack around the arrow for its shadow and antialiased edge.")
 (defconstant +luvcraft-shadow-map-size+ 2048)
 (luv.arithmetic:define-quantity-constant
     +luvcraft-maximum-frame-duration+ 0.1d0
@@ -138,36 +142,41 @@
      (luvcraft.shaders:block-world-crosshair-vertex-specification))))
 
 (defun make-luvcraft-cursor-vertices (width height x y)
-  "Make a high-contrast arrow cursor whose tip is screen position X,Y."
+  "Make the quad the cursor shader draws its arrow inside, tip at screen X,Y.
+
+Only the hotspot and the scale live here: each vertex carries its offset from
+the tip in the shader's design grid, and the fragment stage turns that into
+the outline, the fill, and the shadow."
   (let ((vertices (make-array 0 :element-type 'single-float
                                 :adjustable t :fill-pointer 0))
         (origin-x (- x (/ width 2.0)))
         (origin-y (- y (/ height 2.0))))
-    (labels ((vertex (x y color)
+    (labels ((vertex (local-x local-y)
                (dolist (component
-                        (list (/ (* 2.0 (+ origin-x x)) width)
-                              (/ (* 2.0 (+ origin-y y)) height)
+                        (list (/ (* 2.0
+                                    (+ origin-x
+                                       (* +luvcraft-cursor-scale+ local-x)))
+                                 width)
+                              (/ (* 2.0
+                                    (+ origin-y
+                                       (* +luvcraft-cursor-scale+ local-y)))
+                                 height)
                               0.0
-                              (first color) (second color) (third color)
-                              (fourth color)))
+                              local-x local-y))
                  (vector-push-extend (coerce component 'single-float)
-                                     vertices)))
-             (triangle (a b c color)
-               (dolist (point (list a b c))
-                 (vertex (first point) (second point) color))))
-      ;; A translucent one-pixel-ish fringe takes the bite out of diagonal
-      ;; stair steps.  Colours are premultiplied for the cursor pipeline.
-      (triangle '(-1 -1) '(2 33) '(12 23) '(0.0 0.0 0.0 0.32))
-      (triangle '(8 18) '(22 33) '(14 41) '(0.0 0.0 0.0 0.32))
-      (triangle '(8 18) '(14 41) '(1 27) '(0.0 0.0 0.0 0.32))
-      ;; The full-size charcoal body remains readable on light and dark views.
-      (triangle '(0 0) '(3 31) '(11 22) '(0.04 0.05 0.06 1.0))
-      (triangle '(8 19) '(20 33) '(14 39) '(0.04 0.05 0.06 1.0))
-      (triangle '(8 19) '(14 39) '(2 26) '(0.04 0.05 0.06 1.0))
-      ;; A bright inset gives the familiar black-outlined desktop pointer.
-      (triangle '(2 4) '(4 26) '(9 20) '(0.96 0.97 0.94 1.0))
-      (triangle '(8 22) '(18 33) '(14 37) '(0.72 0.80 0.86 1.0))
-      (triangle '(8 22) '(14 37) '(4 26) '(0.72 0.80 0.86 1.0)))
+                                     vertices))))
+      ;; The arrow occupies (0,0) to (11.9,20.2) of the design grid; the
+      ;; margin leaves room for the shadow cast down and to the right.
+      (let* ((left (- +luvcraft-cursor-margin+))
+             (top (- +luvcraft-cursor-margin+))
+             (right (+ 11.9 +luvcraft-cursor-margin+))
+             (bottom (+ 20.2 +luvcraft-cursor-margin+)))
+        (vertex left top)
+        (vertex right top)
+        (vertex right bottom)
+        (vertex left top)
+        (vertex right bottom)
+        (vertex left bottom)))
     (ensure-vertex-product-contract
      vertices :cursor-vertices +luvcraft-cursor-vertex-count+
      (luvcraft.shaders::shader-specification-for :cursor :vertex))))
@@ -1925,12 +1934,12 @@ NIL to let the display choose a comfortable window."
                              :label "luvcraft software cursor pipeline"
                              :device device :layout layout
                              :vertex-buffers
-                             '((:array-stride 28
+                             '((:array-stride 20
                                 :attributes
                                 ((:shader-location 0 :offset 0
                                   :format :float32x3)
                                  (:shader-location 1 :offset 12
-                                  :format :float32x4))))
+                                  :format :float32x2))))
                              :target-format (canvas-format context)
                              :target-blend :premultiplied-alpha
                              :primitive '(:topology :triangle-list)
