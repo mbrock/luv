@@ -803,19 +803,29 @@ wrapper, this finalizer cannot run before theirs have."
                       (vulkan-provider-application-name provider)
                       :flags flags
                       :enabled-extension-names extensions))
-               (when (vulkan-provider-debug-callback provider)
-                 (unless (member lvk:+debug-utils-extension-name+
-                                 extensions :test #'string=)
+               ;; A provider handed an explicit callback insists on the
+               ;; extension; the default messenger only asks for one when
+               ;; the instance already has it, so an ordinary run installs
+               ;; it and simply never hears anything.  Nothing speaks
+               ;; through it but a validation layer someone loaded.
+               (let* ((requested (vulkan-provider-debug-callback provider))
+                      (callback (or requested
+                                    (and *vulkan-validation-enabled-p*
+                                         #'note-vulkan-debug-message)))
+                      (available-p
+                        (member lvk:+debug-utils-extension-name+
+                                extensions :test #'string=)))
+                 (when (and requested (not available-p))
                    (error 'vulkan-gpu-error
                           :operation :request-device
                           :reason :missing-debug-utils-extension))
-                 (setf debug-messenger
-                       (lvk:install-debug-messenger
-                        instance
-                        (vulkan-provider-debug-callback provider)
-                        :severities
-                        (vulkan-provider-debug-severities provider)
-                        :types (vulkan-provider-debug-types provider))))
+                 (when (and callback available-p)
+                   (setf debug-messenger
+                         (lvk:install-debug-messenger
+                          instance callback
+                          :severities
+                          (vulkan-provider-debug-severities provider)
+                          :types (vulkan-provider-debug-types provider)))))
                (let* ((physical-device
                         (or (first
                              (lvk:enumerate-physical-devices instance))

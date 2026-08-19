@@ -119,6 +119,28 @@ A responsive image and a stuck call are different things: if `./sly eval "(+ 1 2
 
 A cold checkout-local load and a full program image build are different timings: ASDF compilation writes under `~/.cache/common-lisp/.../<absolute-checkout-path>/`, while `program-op` also writes a large executable core. Report the phase and elapsed time when diagnosing regressions.
 
+## Turn the Vulkan validation layer on
+
+The layer is packaged but not loaded; a run asks for it, and it has to be
+asked before the image starts, because the instance is created once:
+
+```sh
+nix develop -c env VK_LOADER_LAYERS_ENABLE='*validation*' ./sly start
+```
+
+luv installs its own debug messenger whenever `VK_EXT_debug_utils` is
+available, so anything the layer says arrives as a `:vulkan` log line with a
+Lisp backtrace taken where the offending call was made, and becomes a
+`VULKAN-VALIDATION-FAILURE` at the end of the frame -- caught by the canvas
+guard, retained, and reported by `./sly` like any other frame failure.
+Nothing speaks through the messenger unless a layer is loaded, so an
+ordinary run is unaffected.
+
+`WITH-VULKAN-VALIDATION` wraps any other Vulkan work the same way. Bind
+`*VULKAN-VALIDATION-ENABLED-P*` to NIL to keep a provider quiet, or
+`*VULKAN-VALIDATION-BACKTRACE-P*` to NIL when the backtraces cost more than
+they tell.
+
 ## Verify what the game shows
 
 `./sly screenshot build/frame.png` renders the playing game's frame once

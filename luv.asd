@@ -250,7 +250,8 @@ offsets and of headers."
         (with-compilation-unit (:override t
                                 :policy '(optimize (debug 3)))
           (funcall thunk)))
-      :components ((:file "gpu")
+      :components ((:file "validation")
+                   (:file "gpu")
                    (:file "canvas")))
      (:module "metal"
       :if-feature :darwin

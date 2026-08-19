@@ -590,11 +590,11 @@ surface still cannot supply an image and this frame should be skipped."
                 (values slot slot-index image-index))))))
     nil))
 
-(defun call-with-vulkan-canvas-frame (context function)
+(defun %call-with-vulkan-canvas-frame (context function)
   (with-cpu-trace-zone (:canvas/frame)
     (ensure-vulkan-canvas-state context :frame :configured)
     (unless (ensure-vulkan-canvas-swapchain context)
-      (return-from call-with-vulkan-canvas-frame nil))
+      (return-from %call-with-vulkan-canvas-frame nil))
     (let* ((device (context-device context))
            (queue (device-queue device))
            (encoder nil)
@@ -602,7 +602,7 @@ surface still cannot supply an image and this frame should be skipped."
       (multiple-value-bind (slot slot-index image-index)
           (acquire-vulkan-canvas-image context)
         (unless slot
-          (return-from call-with-vulkan-canvas-frame nil))
+          (return-from %call-with-vulkan-canvas-frame nil))
         (let ((texture (aref (vulkan-canvas-textures context) image-index))
               (render-done
                 (aref (vulkan-canvas-render-done context) image-index)))
@@ -661,6 +661,19 @@ surface still cannot supply an image and this frame should be skipped."
                   (canvas-context-state context) :configured)
             (when commands (destroy commands))
             (when encoder (destroy encoder))))))))
+
+(defun call-with-vulkan-canvas-frame (context function)
+  "Run one frame, then account for whatever the validation layer said.
+
+The end of the frame is the safe point: every Vulkan call it made has
+returned, so a complaint can become a condition without unwinding through a
+driver mid-call.  GUARDING-SDL-CANVAS catches it, retains it with the
+backtrace the callback took while the offending frames were still on the
+stack, and parks the canvas -- the same treatment as any other frame that
+failed, and visible from ./sly as a reported failure rather than a line
+somebody has to go looking for."
+  (with-vulkan-validation (:frame)
+    (%call-with-vulkan-canvas-frame context function)))
 
 (defmethod call-with-canvas-frame
     ((context vulkan-canvas-context) function)

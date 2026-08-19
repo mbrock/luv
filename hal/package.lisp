@@ -466,6 +466,25 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:retain-canvas-failure
            #:capture-backtrace-string
            #:*canvas-failure-limit*
+           ;; Vulkan validation, reported as conditions.
+           #:vulkan-validation-problem
+           #:vulkan-validation-failure
+           #:vulkan-validation-complaint
+           #:vulkan-validation-problem-operation
+           #:vulkan-validation-problem-notes
+           #:vulkan-validation-note
+           #:vulkan-validation-note-severity
+           #:vulkan-validation-note-types
+           #:vulkan-validation-note-id-name
+           #:vulkan-validation-note-id-number
+           #:vulkan-validation-note-text
+           #:vulkan-validation-note-backtrace
+           #:vulkan-validation-note-error-p
+           #:note-vulkan-debug-message
+           #:check-vulkan-validation
+           #:with-vulkan-validation
+           #:*vulkan-validation-enabled-p*
+           #:*vulkan-validation-backtrace-p*
            #:open-canvases
            #:resume-canvas-frames
            #:hold-canvas-frames
