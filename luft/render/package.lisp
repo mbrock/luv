@@ -2,7 +2,8 @@
   (:use #:cl #:luv.spir-v)
   (:shadowing-import-from #:luv.spir-v #:step)
   (:documentation
-   "Task, mesh, and fragment stages that draw a surface chain of packed sites.")
+   "Task, mesh, vertex, and fragment stages that draw a surface chain of
+packed sites.")
   (:export #:+brick-size+
            #:+frame-binding+
            #:+sites-binding+
@@ -18,6 +19,10 @@
            #:paper-fragment-shader
            #:sky-mesh-shader
            #:sky-fragment-shader
+           #:surface-vertex-shader
+           #:chamfer-vertex-shader
+           #:sky-vertex-shader
+           #:surface-vertices-per-face
            #:lens-fragment-shader
            #:+scene-binding+
            #:+sampler-binding+
@@ -31,7 +36,8 @@
                     (#:vec3 #:luv.arithmetic.lisp.vec3))
   (:documentation
    "A greenfield atelier renderer: a small block world as a boundary chain
-of packed LUFT sites, drawn by task and mesh shaders.")
+of packed LUFT sites, drawn by vertex shaders pulling sites or by task and
+mesh shaders.")
   (:export #:scene
            #:make-scene
            #:make-demo-scene
@@ -58,8 +64,11 @@ of packed LUFT sites, drawn by task and mesh shaders.")
            #:renderer-camera
            #:renderer-extent
            #:renderer-style
+           #:renderer-technique
            #:renderer-pipeline-styles
            #:renderer-effects
+           #:*default-technique*
+           #:technique-styles
            #:*bevel-radius*
            #:*chamfer-width*
            #:*arris-softness*

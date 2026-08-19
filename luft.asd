@@ -11,7 +11,7 @@
   :in-order-to ((test-op (test-op "luft/test"))))
 
 (defsystem "luft/render"
-  :description "A greenfield atelier drawing surface chains with mesh shaders."
+  :description "A greenfield atelier drawing surface chains of packed sites."
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on ("luft" "luv")
@@ -21,6 +21,7 @@
                 :serial t
                 :components ((:file "package")
                              (:file "shaders")
+                             (:file "vertex-shaders")
                              (:file "render"))))
   :in-order-to ((test-op (test-op "luft/render/test"))))
 

@@ -73,20 +73,44 @@
     (ok (<= primitives 256))))
 
 (deftest standalone-render-modes-select-only-their-own-pipelines
-  (multiple-value-bind (mode style pipelines effects)
-      (luft.render::standalone-render-options "clear")
-    (ok (equal '(:clear :flat nil nil)
-               (list mode style pipelines effects))))
-  (multiple-value-bind (mode style pipelines effects)
-      (luft.render::standalone-render-options "bevel")
-    (ok (equal '(:bevel :bevel (:bevel) nil)
-               (list mode style pipelines effects))))
-  (multiple-value-bind (mode style pipelines effects)
-      (luft.render::standalone-render-options "full")
+  (multiple-value-bind (mode style pipelines effects technique)
+      (luft.render::standalone-render-options "clear" :vertex)
+    (ok (equal '(:clear :flat nil nil :vertex)
+               (list mode style pipelines effects technique))))
+  (multiple-value-bind (mode style pipelines effects technique)
+      (luft.render::standalone-render-options "bevel" :mesh)
+    (ok (equal '(:bevel :bevel (:bevel) nil :mesh)
+               (list mode style pipelines effects technique))))
+  ;; The vertex technique has no rounded style to offer.
+  (ok (signals (luft.render::standalone-render-options "bevel" :vertex)))
+  (multiple-value-bind (mode style pipelines effects technique)
+      (luft.render::standalone-render-options "full" :mesh)
     (ok (eq :full mode))
     (ok (eq :bevel style))
     (ok (equal '(:flat :bevel :chamfer :paper) pipelines))
-    (ok (equal '(:sky :lens) effects))))
+    (ok (equal '(:sky :lens) effects))
+    (ok (eq :mesh technique)))
+  (multiple-value-bind (mode style pipelines effects technique)
+      (luft.render::standalone-render-options "full" :vertex)
+    (ok (eq :full mode))
+    (ok (eq :chamfer style))
+    (ok (equal '(:flat :chamfer :paper) pipelines))
+    (ok (equal '(:sky :lens) effects))
+    (ok (eq :vertex technique))))
+
+(deftest vertex-pulling-draws-whole-grids-per-face
+  ;; Six vertices draw a flat quad; the chamfer grid of one ring has four
+  ;; points a side, nine quads, and so fifty-four vertices.
+  (ok (= 6 (luft.render.shaders:surface-vertices-per-face :flat)))
+  (let ((side (let ((luft.render.shaders::*bevel-rings* 1))
+                (luft.render.shaders::bevel-grid-side))))
+    (ok (= (* 6 (1- side) (1- side))
+           (luft.render.shaders:surface-vertices-per-face :chamfer)))
+    (ok (= (luft.render.shaders:surface-vertices-per-face :chamfer)
+           (luft.render.shaders:surface-vertices-per-face :paper))))
+  ;; A style a technique cannot draw is refused before any GPU work.
+  (ok (signals (luft.render:make-renderer :technique :vertex :style :bevel
+                                          :scene nil :camera nil))))
 
 (deftest brick-spheres-enclose-their-faces
   (let* ((scene (make-demo-scene))
@@ -116,13 +140,15 @@
                             (<= (sqrt (+ (* dx dx) (* dy dy) (* dz dz)))
                                 (+ radius 1.0e-3))))))))))
 
-#+darwin
 (deftest the-demo-scene-renders-ground-under-sky
+  ;; The background is the flat clear colour: the sky pass would put the
+  ;; sun's white disc into the straight-up view below.
   (let* ((width 160)
          (height 100)
          (renderer (make-renderer :scene (make-demo-scene)
                                   :camera (make-fly-camera)
-                                  :width width :height height)))
+                                  :width width :height height
+                                  :style :flat :effects nil)))
     (unwind-protect
          (progn
            (let* ((pixels (render-pixels renderer))
@@ -136,8 +162,9 @@
              (ok (= (* 4 width height) (length pixels)))
              (ok (> sky-above (* 0.9 10 width)))
              (ok (> ground-below (* 0.9 20 width))))
-           ;; Turned straight up, every brick fails the frustum test and only
-           ;; sky remains.
+           ;; Turned straight up, nothing of the world is in view -- by the
+           ;; mesh technique's frustum test or by ordinary clipping -- and
+           ;; only sky remains.
            (setf (camera-pitch (renderer-camera renderer)) 1.5)
            (let ((pixels (render-pixels renderer)))
              (ok (= (* width height)
@@ -158,30 +185,29 @@
           (luft:solid-cell-p solid 6 5 2) t)
     (make-scene domain :solid solid)))
 
-#+darwin
 (deftest shaped-surfaces-are-watertight-from-above
   ;; Straight down onto the floor, every pixel inside the floor is ground:
-  ;; a crack between rounded faces would let the sky through.
+  ;; a crack between shaped faces would let the sky through.  Every style
+  ;; the default technique draws is tried.
   (let* ((width 200)
          (height 200)
          (*bevel-radius* 0.3)
+         (*chamfer-width* 0.3)
+         (styles (technique-styles *default-technique*))
          (renderer (make-renderer
                     :scene (probe-scene)
                     :camera (make-fly-camera
                              :position (vec3:make-vec3 5.0 5.0 9.0)
                              :yaw 0.0 :pitch -1.5
                              :field-of-view 0.75)
-                    :width width :height height :style :bevel)))
+                    :width width :height height
+                    :style (first styles) :pipeline-styles styles
+                    :effects nil)))
     (unwind-protect
-         (let ((pixels (render-pixels renderer)))
-           (ok (zerop (count-pixels pixels width height #'sky-pixel-p
-                                    :from-row 20 :to-row 180)))
-           (setf (renderer-style renderer) :flat)
+         (dolist (style styles)
+           (setf (renderer-style renderer) style)
            (ok (zerop (count-pixels (render-pixels renderer) width height
                                     #'sky-pixel-p
-                                    :from-row 20 :to-row 180)))
-           (setf (renderer-style renderer) :chamfer)
-           (ok (zerop (count-pixels (render-pixels renderer) width height
-                                    #'sky-pixel-p
-                                    :from-row 20 :to-row 180))))
+                                    :from-row 20 :to-row 180))
+               (format nil "~A is watertight" style)))
       (destroy-renderer renderer))))

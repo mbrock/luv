@@ -4,8 +4,9 @@
 ;;; Nothing here meshes.  The world is a 3-chain of solid cells; REFRESH-SCENE
 ;;; takes its boundary, orders the resulting face sites by chunk, pads them to
 ;;; whole bricks, and measures a bounding sphere per brick.  The renderer
-;;; uploads exactly those two arrays and one frame block, then dispatches one
-;;; task workgroup per brick.
+;;; uploads exactly those two arrays and one frame block, then either draws a
+;;; few vertices per site, each pulling its own site, or dispatches one task
+;;; workgroup per brick: the TECHNIQUE below.
 
 (in-package #:luft.render)
 
@@ -362,7 +363,7 @@ the light as a band rather than a hairline, and still far short of the old
                   :reader renderer-owns-device-p)
    (scene :initarg :scene :accessor renderer-scene)
    (camera :initarg :camera :accessor renderer-camera)
-   (extent :initarg :extent :reader renderer-extent)
+   (extent :initarg :extent :accessor renderer-extent)
    (color-format :initarg :color-format :reader renderer-color-format)
    (color-texture :initform nil :accessor renderer-color-texture)
    (color-view :initform nil :accessor renderer-color-view)
@@ -384,7 +385,7 @@ the light as a band rather than a hairline, and still far short of the old
    (bind-group :initform nil :accessor renderer-bind-group)
    (modules :initform nil :accessor renderer-modules)
    (pipelines :initform nil :accessor renderer-pipelines
-              :documentation "A plist from style to mesh pipeline.")
+              :documentation "A plist from style or effect to its pipeline.")
    (pipeline-styles :initarg :pipeline-styles
                     :initform '(:flat :bevel :chamfer :paper)
                     :reader renderer-pipeline-styles
@@ -397,6 +398,9 @@ the light as a band rather than a hairline, and still far short of the old
    (style :initarg :style :initform :bevel :accessor renderer-style
           :documentation
           "Which pipeline draws: :FLAT, :BEVEL (rounded), :CHAMFER, or :PAPER.")
+   (technique :initarg :technique :initform :vertex :reader renderer-technique
+              :documentation
+              "How sites become triangles: :VERTEX pulling or :MESH shaders.")
    (uploaded-scene :initform nil :accessor renderer-uploaded-scene))
   (:documentation "GPU resources drawing one scene from one camera."))
 
@@ -469,56 +473,351 @@ remains the last durable line."
                           :label "luft scene sampler"
                           :mag-filter :linear :min-filter :linear)))))
 
-(zdefun (create-renderer-pipeline :zone :luft/create-renderer-pipeline) (renderer)
-  (let ((device (renderer-device renderer))
-        (styles (renderer-pipeline-styles renderer))
-        task mesh bevel chamfer fragment chamfer-fragment paper-fragment
-        sky-mesh sky-fragment lens-fragment)
-    (macrolet ((module (place zone label code)
-                 `(setf ,place
-                        (let ((module
-                                (with-renderer-creation-step (,zone ,label)
-                                  (create
-                                   device
-                                   (make-shader-module-descriptor
-                                    :label ,label
-                                    :language :mathematical
-                                    :code ,code)))))
-                          ;; Publish ownership as each driver call succeeds so
-                          ;; MAKE-RENDERER's unwind cleanup sees partial work.
-                          (push module (renderer-modules renderer))
-                          module))))
-      (when styles
-        (module task :luft/shader/surface-task "luft surface task"
-                (shaders:surface-task-shader)))
-      (when (member :flat styles)
-        (module mesh :luft/shader/surface-mesh "luft surface mesh"
-                (shaders:surface-mesh-shader)))
-      (when (member :bevel styles)
-        (module bevel :luft/shader/bevel-mesh "luft bevel mesh"
-                (shaders:bevel-mesh-shader)))
-      (when (intersection styles '(:chamfer :paper))
-        (module chamfer :luft/shader/chamfer-mesh "luft chamfer mesh"
-                (shaders:chamfer-mesh-shader)))
-      (when (intersection styles '(:flat :bevel))
-        (module fragment :luft/shader/surface-fragment "luft surface fragment"
-                (shaders:surface-fragment-shader)))
-      (when (member :chamfer styles)
-        (module chamfer-fragment :luft/shader/chamfer-fragment
-                "luft chamfer fragment" (shaders:chamfer-fragment-shader)))
-      (when (member :paper styles)
-        (module paper-fragment :luft/shader/paper-fragment
-                "luft paper fragment" (shaders:paper-fragment-shader)))
-      (when (or (renderer-effect-p renderer :sky)
-                (renderer-effect-p renderer :lens))
-        (module sky-mesh :luft/shader/sky-mesh "luft sky mesh"
-                (shaders:sky-mesh-shader)))
-      (when (renderer-effect-p renderer :sky)
-        (module sky-fragment :luft/shader/sky-fragment "luft sky fragment"
-                (shaders:sky-fragment-shader)))
-      (when (renderer-effect-p renderer :lens)
-        (module lens-fragment :luft/shader/lens-fragment "luft lens fragment"
-                (shaders:lens-fragment-shader))))
+(zdefun (ensure-renderer-extent :zone :luft/ensure-renderer-extent)
+    (renderer extent)
+  "Replace RENDERER's frame-sized targets when EXTENT has changed.
+
+This runs inside the canvas frame callback, after drawable acquisition has
+synchronized the presentation context's extent.  New resources are assembled
+before publication; destroying the outgoing handles is safe while older GPU
+work is in flight because the GPU abstraction defers their native teardown."
+  (unless (equal extent (renderer-extent renderer))
+    (log-event :luft "reframing ~{~D~^x~} to ~{~D~^x~}"
+               (renderer-extent renderer) extent)
+    (let ((device (renderer-device renderer))
+          color color-view depth depth-view scene scene-view lens-bind-group
+          (completed-p nil))
+      (unwind-protect
+           (progn
+             (setf color
+                   (create device
+                           (make-texture-descriptor
+                            :label "luft surface color"
+                            :size extent :dimensions :2d
+                            :format (renderer-color-format renderer)
+                            :usage '(:render-attachment :copy-src)))
+                   color-view
+                   (create device (make-texture-view-descriptor
+                                   :texture color))
+                   depth
+                   (create device
+                           (make-texture-descriptor
+                            :label "luft surface depth"
+                            :size extent :dimensions :2d
+                            :format :depth32-float
+                            :usage '(:render-attachment)))
+                   depth-view
+                   (create device (make-texture-view-descriptor
+                                   :texture depth))
+                   scene
+                   (create device
+                           (make-texture-descriptor
+                            :label "luft scene color"
+                            :size extent :dimensions :2d
+                            :format (renderer-color-format renderer)
+                            :usage '(:render-attachment :texture-binding)))
+                   scene-view
+                   (create device (make-texture-view-descriptor
+                                   :texture scene)))
+             (when (renderer-effect-p renderer :lens)
+               (setf lens-bind-group
+                     (create
+                      device
+                      (make-bind-group-descriptor
+                       :label "luft lens bindings"
+                       :layout (renderer-lens-layout renderer)
+                       :entries
+                       `((:binding ,shaders:+scene-binding+
+                          :resource ,scene-view)
+                         (:binding ,shaders:+sampler-binding+
+                          :resource ,(renderer-sampler renderer))
+                         (:binding ,shaders:+lens-frame-binding+
+                          :resource ,(renderer-uniform-buffer renderer)))))))
+             (let ((old-resources
+                     (list (renderer-lens-bind-group renderer)
+                           (renderer-scene-view renderer)
+                           (renderer-scene-texture renderer)
+                           (renderer-color-view renderer)
+                           (renderer-color-texture renderer)
+                           (renderer-depth-view renderer)
+                           (renderer-depth-texture renderer))))
+               (setf (renderer-extent renderer) extent
+                     (renderer-color-texture renderer) color
+                     (renderer-color-view renderer) color-view
+                     (renderer-depth-texture renderer) depth
+                     (renderer-depth-view renderer) depth-view
+                     (renderer-scene-texture renderer) scene
+                     (renderer-scene-view renderer) scene-view
+                     (renderer-lens-bind-group renderer) lens-bind-group
+                     completed-p t)
+               (dolist (resource old-resources)
+                 (when resource (destroy resource)))))
+        (unless completed-p
+          (dolist (resource (list lens-bind-group scene-view scene color-view
+                                  color depth-view depth))
+            (when resource (ignore-errors (destroy resource))))))))
+  renderer)
+
+;;; ------------------------------------------------------------------------
+;;; Techniques: how the surface chain becomes triangles
+;;;
+;;; Two ways exist to turn the uploaded site buffer into rasterized faces.
+;;; The :MESH technique dispatches task and mesh workgroups over bricks of
+;;; sites (#VAABY9); it needs VK_EXT_mesh_shader, which not every driver runs
+;;; as well as it advertises.  The :VERTEX technique draws K vertices per
+;;; site with no vertex buffer and lets each vertex shader invocation pull its
+;;; own site out of the very same buffer (luft/render/vertex-shaders.lisp);
+;;; it runs on any device.  The fragment stages, the frame block, the bind
+;;; group, and every frame-sized target are shared, so a technique is only
+;;; which modules are created, how a pipeline is described, and how a pass
+;;; is told to draw.  The names are the identity, and the three protocols
+;;; below are EQL methods on them.
+
+(defparameter *default-technique* :vertex
+  "The technique a renderer uses unless told otherwise.
+
+:VERTEX pulls sites in a vertex shader and runs on any Vulkan device; :MESH
+amplifies bricks with task and mesh shaders and needs VK_EXT_mesh_shader.")
+
+(defgeneric technique-styles (technique)
+  (:documentation
+   "The surface styles TECHNIQUE can draw, in the order a menu would list."))
+
+(defmethod technique-styles ((technique (eql :mesh)))
+  '(:flat :bevel :chamfer :paper))
+
+(defmethod technique-styles ((technique (eql :vertex)))
+  '(:flat :chamfer :paper))
+
+(defgeneric create-technique-pipelines (technique renderer)
+  (:documentation
+   "Create the shader modules and pipelines RENDERER's styles and effects need.
+
+Modules are pushed onto RENDERER-MODULES and pipelines installed under their
+style or effect name in RENDERER-PIPELINES; the bind group layouts already
+exist.  Each driver call is one traced, logged creation step."))
+
+(defgeneric draw-surface (technique pass scene style)
+  (:documentation
+   "Record into PASS the draw of SCENE's whole surface in STYLE.
+The pipeline and bind group are already set."))
+
+(defgeneric draw-screen (technique pass)
+  (:documentation
+   "Record into PASS the draw of one triangle covering the screen."))
+
+(defun technique-style-p (technique style)
+  (not (null (member style (technique-styles technique)))))
+
+(defun create-renderer-module (renderer zone label code)
+  "Create a shader module from CODE and publish it as one of RENDERER's.
+
+Ownership is published as each driver call succeeds so MAKE-RENDERER's
+unwind cleanup sees partial work."
+  (let ((module (with-renderer-creation-step (zone label)
+                  (create (renderer-device renderer)
+                          (make-shader-module-descriptor
+                           :label label
+                           :language :mathematical
+                           :code code)))))
+    (push module (renderer-modules renderer))
+    module))
+
+(defun install-renderer-pipeline (renderer name zone label descriptor)
+  "Create DESCRIPTOR's pipeline and install it as RENDERER's NAME pipeline."
+  (setf (getf (renderer-pipelines renderer) name)
+        (with-renderer-creation-step (zone label)
+          (create (renderer-device renderer) descriptor))))
+
+(defun surface-depth-state ()
+  '(:format :depth32-float :depth-write-enabled t :depth-compare :less))
+
+(defun background-depth-state ()
+  "The sky's depth: written by nothing, tested against nothing, so the pass
+may draw it first and the world still covers it."
+  '(:format :depth32-float :depth-write-enabled nil :depth-compare :always))
+
+(defun fragment-stage (renderer module)
+  `(:module ,module :targets ((:format ,(renderer-color-format renderer)))))
+
+(defun create-renderer-fragment-modules (renderer)
+  "Create the fragment modules RENDERER's styles and effects share.
+
+The values are the surface, chamfer, paper, sky, and lens fragment modules,
+each NIL when nothing configured wants it."
+  (let ((styles (renderer-pipeline-styles renderer)))
+    (values
+     (when (intersection styles '(:flat :bevel))
+       (create-renderer-module renderer :luft/shader/surface-fragment
+                               "luft surface fragment"
+                               (shaders:surface-fragment-shader)))
+     (when (member :chamfer styles)
+       (create-renderer-module renderer :luft/shader/chamfer-fragment
+                               "luft chamfer fragment"
+                               (shaders:chamfer-fragment-shader)))
+     (when (member :paper styles)
+       (create-renderer-module renderer :luft/shader/paper-fragment
+                               "luft paper fragment"
+                               (shaders:paper-fragment-shader)))
+     (when (renderer-effect-p renderer :sky)
+       (create-renderer-module renderer :luft/shader/sky-fragment
+                               "luft sky fragment"
+                               (shaders:sky-fragment-shader)))
+     (when (renderer-effect-p renderer :lens)
+       (create-renderer-module renderer :luft/shader/lens-fragment
+                               "luft lens fragment"
+                               (shaders:lens-fragment-shader))))))
+
+;;; The mesh technique: one task workgroup per brick, one mesh lane per site.
+
+(defmethod create-technique-pipelines ((technique (eql :mesh)) renderer)
+  (let ((styles (renderer-pipeline-styles renderer))
+        task mesh bevel chamfer sky-mesh)
+    (when styles
+      (setf task (create-renderer-module renderer :luft/shader/surface-task
+                                         "luft surface task"
+                                         (shaders:surface-task-shader))))
+    (when (member :flat styles)
+      (setf mesh (create-renderer-module renderer :luft/shader/surface-mesh
+                                         "luft surface mesh"
+                                         (shaders:surface-mesh-shader))))
+    (when (member :bevel styles)
+      (setf bevel (create-renderer-module renderer :luft/shader/bevel-mesh
+                                          "luft bevel mesh"
+                                          (shaders:bevel-mesh-shader))))
+    (when (intersection styles '(:chamfer :paper))
+      (setf chamfer (create-renderer-module renderer :luft/shader/chamfer-mesh
+                                            "luft chamfer mesh"
+                                            (shaders:chamfer-mesh-shader))))
+    (when (or (renderer-effect-p renderer :sky)
+              (renderer-effect-p renderer :lens))
+      (setf sky-mesh (create-renderer-module renderer :luft/shader/sky-mesh
+                                             "luft sky mesh"
+                                             (shaders:sky-mesh-shader))))
+    (multiple-value-bind (fragment chamfer-fragment paper-fragment
+                          sky-fragment lens-fragment)
+        (create-renderer-fragment-modules renderer)
+      (flet ((pipeline (name zone label mesh-module fragment-module
+                        &key (task-module task)
+                             (layout (renderer-layout renderer))
+                             (depth (surface-depth-state)))
+               (install-renderer-pipeline
+                renderer name zone label
+                (make-mesh-render-pipeline-descriptor
+                 :label label
+                 :layout layout
+                 :task (and task-module `(:module ,task-module))
+                 :mesh `(:module ,mesh-module)
+                 :fragment (fragment-stage renderer fragment-module)
+                 :max-mesh-workgroups 1
+                 :depth-stencil depth))))
+        (when (member :flat styles)
+          (pipeline :flat :luft/pipeline/flat "luft surface pipeline"
+                    mesh fragment))
+        (when (member :bevel styles)
+          (pipeline :bevel :luft/pipeline/bevel "luft bevel pipeline"
+                    bevel fragment))
+        (when (member :chamfer styles)
+          (pipeline :chamfer :luft/pipeline/chamfer "luft chamfer pipeline"
+                    chamfer chamfer-fragment))
+        ;; The paper material draws the chamfered geometry: the glint it
+        ;; exists for lives on the planed facets.
+        (when (member :paper styles)
+          (pipeline :paper :luft/pipeline/paper "luft paper pipeline"
+                    chamfer paper-fragment))
+        ;; The background: no task stage to amplify, no depth to write, and
+        ;; it runs before anything that would hide it.
+        (when (renderer-effect-p renderer :sky)
+          (pipeline :sky :luft/pipeline/sky "luft sky pipeline"
+                    sky-mesh sky-fragment
+                    :task-module nil
+                    :depth (background-depth-state)))
+        ;; The lens draws the frame the world was drawn into, so it binds a
+        ;; group of textures rather than the world's sites.
+        (when (renderer-effect-p renderer :lens)
+          (pipeline :lens :luft/pipeline/lens "luft lens pipeline"
+                    sky-mesh lens-fragment
+                    :task-module nil
+                    :layout (renderer-lens-layout renderer)
+                    :depth nil))))))
+
+(defmethod draw-surface ((technique (eql :mesh)) pass scene style)
+  (declare (ignore style))
+  (draw-mesh-workgroups pass (scene-brick-count scene)))
+
+(defmethod draw-screen ((technique (eql :mesh)) pass)
+  (draw-mesh-workgroups pass 1))
+
+;;; The vertex technique: K vertices a site, each pulling its own site.
+
+(defmethod create-technique-pipelines ((technique (eql :vertex)) renderer)
+  (let ((styles (renderer-pipeline-styles renderer))
+        surface chamfer screen)
+    (when (member :flat styles)
+      (setf surface (create-renderer-module
+                     renderer :luft/shader/surface-vertex
+                     "luft surface vertex"
+                     (shaders:surface-vertex-shader))))
+    (when (intersection styles '(:chamfer :paper))
+      (setf chamfer (create-renderer-module
+                     renderer :luft/shader/chamfer-vertex
+                     "luft chamfer vertex"
+                     (shaders:chamfer-vertex-shader))))
+    (when (or (renderer-effect-p renderer :sky)
+              (renderer-effect-p renderer :lens))
+      (setf screen (create-renderer-module
+                    renderer :luft/shader/sky-vertex
+                    "luft sky vertex"
+                    (shaders:sky-vertex-shader))))
+    (multiple-value-bind (fragment chamfer-fragment paper-fragment
+                          sky-fragment lens-fragment)
+        (create-renderer-fragment-modules renderer)
+      (flet ((pipeline (name zone label vertex-module fragment-module
+                        &key (layout (renderer-layout renderer))
+                             (depth (surface-depth-state)))
+               (install-renderer-pipeline
+                renderer name zone label
+                (make-render-pipeline-descriptor
+                 :label label
+                 :layout layout
+                 :vertex `(:module ,vertex-module)
+                 :fragment (fragment-stage renderer fragment-module)
+                 :primitive '(:topology :triangle-list)
+                 :depth-stencil depth))))
+        (when (member :flat styles)
+          (pipeline :flat :luft/pipeline/flat "luft surface pipeline"
+                    surface fragment))
+        (when (member :chamfer styles)
+          (pipeline :chamfer :luft/pipeline/chamfer "luft chamfer pipeline"
+                    chamfer chamfer-fragment))
+        (when (member :paper styles)
+          (pipeline :paper :luft/pipeline/paper "luft paper pipeline"
+                    chamfer paper-fragment))
+        (when (renderer-effect-p renderer :sky)
+          (pipeline :sky :luft/pipeline/sky "luft sky pipeline"
+                    screen sky-fragment
+                    :depth (background-depth-state)))
+        (when (renderer-effect-p renderer :lens)
+          (pipeline :lens :luft/pipeline/lens "luft lens pipeline"
+                    screen lens-fragment
+                    :layout (renderer-lens-layout renderer)
+                    :depth nil))))))
+
+(defmethod draw-surface ((technique (eql :vertex)) pass scene style)
+  ;; The site vector is padded to whole bricks; a zero site collapses its
+  ;; vertices in the shader, so the padding costs a few degenerate triangles
+  ;; and no bookkeeping.
+  (draw pass (* (shaders:surface-vertices-per-face style)
+                (length (scene-sites scene)))))
+
+(defmethod draw-screen ((technique (eql :vertex)) pass)
+  (draw pass 3))
+
+;;; ------------------------------------------------------------------------
+;;; Creating the renderer's pipelines
+
+(zdefun (create-renderer-layouts :zone :luft/create-renderer-layouts) (renderer)
+  (let ((device (renderer-device renderer)))
     (setf (renderer-lens-layout renderer)
           (with-renderer-creation-step
               (:luft/layout/lens "luft lens layout")
@@ -545,93 +844,56 @@ remains the last durable line."
                        (:binding ,shaders:+bricks-binding+
                         :type :storage-buffer)
                        (:binding ,shaders:+cells-binding+
-                        :type :storage-buffer))))))
-    (flet ((pipeline (style zone label mesh-module fragment-module
-                      &key (task-module task)
-                           (group (renderer-layout renderer))
-                           (depth '(:format :depth32-float
-                                    :depth-write-enabled t
-                                    :depth-compare :less)))
-             (setf (getf (renderer-pipelines renderer) style)
-                   (with-renderer-creation-step (zone label)
-                     (create device
-                             (make-mesh-render-pipeline-descriptor
-                              :label label
-                              :layout group
-                              :task (and task-module `(:module ,task-module))
-                              :mesh `(:module ,mesh-module)
-                              :fragment
-                              `(:module ,fragment-module
-                                :targets
-                                ((:format
-                                  ,(renderer-color-format renderer))))
-                              :max-mesh-workgroups 1
-                              :depth-stencil depth))))))
-      (when (member :flat styles)
-        (pipeline :flat :luft/pipeline/flat "luft surface pipeline"
-                  mesh fragment))
-      (when (member :bevel styles)
-        (pipeline :bevel :luft/pipeline/bevel "luft bevel pipeline"
-                  bevel fragment))
-      (when (member :chamfer styles)
-        (pipeline :chamfer :luft/pipeline/chamfer "luft chamfer pipeline"
-                  chamfer chamfer-fragment))
-      ;; The paper material draws the chamfered geometry: the glint it exists
-      ;; for lives on the planed facets.
-      (when (member :paper styles)
-        (pipeline :paper :luft/pipeline/paper "luft paper pipeline"
-                  chamfer paper-fragment))
-      ;; The background: no task stage to amplify, no depth to write, and it
-      ;; runs before anything that would hide it.
-      (when (renderer-effect-p renderer :sky)
-        (pipeline :sky :luft/pipeline/sky "luft sky pipeline"
-                  sky-mesh sky-fragment
-                  :task-module nil
-                  :depth '(:format :depth32-float
-                           :depth-write-enabled nil
-                           :depth-compare :always)))
-      ;; The lens draws the frame the world was drawn into, so it binds a
-      ;; group of textures rather than the world's sites.
-      (when (renderer-effect-p renderer :lens)
-        (pipeline :lens :luft/pipeline/lens "luft lens pipeline"
-                  sky-mesh lens-fragment
-                  :task-module nil
-                  :group (renderer-lens-layout renderer)
-                  :depth nil)
-        (setf (renderer-lens-bind-group renderer)
-              (with-renderer-creation-step
-                  (:luft/bindings/lens "luft lens bindings")
-                (create device
-                        (make-bind-group-descriptor
-                         :label "luft lens bindings"
-                         :layout (renderer-lens-layout renderer)
-                         :entries
-                         `((:binding ,shaders:+scene-binding+
-                            :resource ,(renderer-scene-view renderer))
-                           (:binding ,shaders:+sampler-binding+
-                            :resource ,(renderer-sampler renderer))
-                           (:binding ,shaders:+lens-frame-binding+
-                            :resource ,(renderer-uniform-buffer renderer)))))))))))
+                        :type :storage-buffer))))))))
+
+(defun create-lens-bind-group (renderer)
+  (with-renderer-creation-step (:luft/bindings/lens "luft lens bindings")
+    (create (renderer-device renderer)
+            (make-bind-group-descriptor
+             :label "luft lens bindings"
+             :layout (renderer-lens-layout renderer)
+             :entries
+             `((:binding ,shaders:+scene-binding+
+                :resource ,(renderer-scene-view renderer))
+               (:binding ,shaders:+sampler-binding+
+                :resource ,(renderer-sampler renderer))
+               (:binding ,shaders:+lens-frame-binding+
+                :resource ,(renderer-uniform-buffer renderer)))))))
+
+(zdefun (create-renderer-pipeline :zone :luft/create-renderer-pipeline) (renderer)
+  (create-renderer-layouts renderer)
+  (create-technique-pipelines (renderer-technique renderer) renderer)
+  (when (renderer-effect-p renderer :lens)
+    (setf (renderer-lens-bind-group renderer)
+          (create-lens-bind-group renderer))))
 
 (zdefun (make-renderer :zone :luft/make-renderer)
     (&key scene camera device
           (provider *gpu-provider*)
           (width 1280) (height 800)
           (color-format :rgba8-unorm-srgb)
-          (style :bevel)
-          (pipeline-styles '(:flat :bevel :chamfer :paper))
+          (technique *default-technique*)
+          (style (if (technique-style-p technique :bevel) :bevel :chamfer))
+          (pipeline-styles (technique-styles technique))
           (effects '(:sky :lens)))
   "Create every GPU object needed to draw SCENE from CAMERA at WIDTH by HEIGHT.
 
-STYLE is :FLAT, :BEVEL (rounded), :CHAMFER (subtle planar crease relief), or
-:PAPER (the chamfered geometry in a matte, toothed material), and may be
-changed later to a member of PIPELINE-STYLES.  Only those surface pipelines
-and the optional :SKY and :LENS EFFECTS are created; NIL/NIL is a clear-only
-renderer useful for reducing a suspect GPU frame to its presentation core.
-Without DEVICE, one is requested from PROVIDER and owned by the renderer."
+TECHNIQUE is :VERTEX, which pulls sites in a vertex shader on any device, or
+:MESH, which dispatches task and mesh shaders where VK_EXT_mesh_shader works.
+STYLE is :FLAT, :BEVEL (rounded, mesh only), :CHAMFER (subtle planar crease
+relief), or :PAPER (the chamfered geometry in a matte, toothed material), and
+may be changed later to a member of PIPELINE-STYLES, which defaults to every
+style the technique draws.  Only those surface pipelines and the optional
+:SKY and :LENS EFFECTS are created; NIL/NIL is a clear-only renderer useful
+for reducing a suspect GPU frame to its presentation core.  Without DEVICE,
+one is requested from PROVIDER and owned by the renderer."
   (unless (or (null pipeline-styles) (member style pipeline-styles))
     (error "Renderer style ~S is absent from PIPELINE-STYLES ~S."
            style pipeline-styles))
+  (let ((foreign (set-difference pipeline-styles (technique-styles technique))))
+    (when foreign
+      (error "The ~S technique cannot draw ~S; it draws ~S."
+             technique foreign (technique-styles technique))))
   (let* ((owns-device-p (null device))
          (device (or device
                      (request-gpu-device
@@ -641,6 +903,7 @@ Without DEVICE, one is requested from PROVIDER and owned by the renderer."
                                   :scene scene :camera camera
                                   :extent (list width height)
                                   :color-format color-format
+                                  :technique technique
                                   :style style
                                   :pipeline-styles pipeline-styles
                                   :effects effects))
@@ -765,6 +1028,7 @@ The second value is true when a new buffer was created."
   "Encode one frame of RENDERER's scene into its color texture on ENCODER."
   (let* ((extent (renderer-extent renderer))
          (scene (renderer-scene renderer))
+         (technique (renderer-technique renderer))
          (sky *sky-color*))
     (unless (eq scene (renderer-uploaded-scene renderer))
       (upload-scene renderer scene))
@@ -803,11 +1067,11 @@ The second value is true when a new buffer was created."
       (when (and *draw-sky* sky-pipeline)
         (set-pipeline pass sky-pipeline)
         (set-bind-group pass 0 (renderer-bind-group renderer))
-        (draw-mesh-workgroups pass 1))
+        (draw-screen technique pass))
       (when surface-pipeline
         (set-pipeline pass surface-pipeline)
         (set-bind-group pass 0 (renderer-bind-group renderer))
-        (draw-mesh-workgroups pass (scene-brick-count scene)))
+        (draw-surface technique pass scene (renderer-style renderer)))
       (end-pass pass)
       (when lens-p
         (prepare-texture encoder (renderer-scene-texture renderer)
@@ -822,7 +1086,7 @@ The second value is true when a new buffer was created."
                          :clear-value #(0.0 0.0 0.0 1.0)))))))
           (set-pipeline lens lens-pipeline)
           (set-bind-group lens 0 (renderer-lens-bind-group renderer))
-          (draw-mesh-workgroups lens 1)
+          (draw-screen technique lens)
           (end-pass lens))))
     (renderer-color-texture renderer)))
 
@@ -991,16 +1255,20 @@ many times oversize, and the frame is box-filtered down on the way out."
           (move (vec3:make-vec3 0 0 1) (- step)))))))
 
 (zdefun (render-viewer-frame :zone :luft/viewer-frame) (viewer timestamp)
+  (declare (ignore timestamp))
   (unless (viewer-running-p viewer)
     (return-from render-viewer-frame nil))
   (when (and *tracy* (not (viewer-tracy-thread-named-p viewer)))
     (name-tracy-thread "luft canvas")
     (setf (viewer-tracy-thread-named-p viewer) t))
-  (advance-viewer-camera viewer timestamp)
   (prog1
       (present-canvas-frame
        (viewer-context viewer)
-       (lambda (surface-texture encoder)
+       (lambda (surface-texture encoder presentation-time)
+         (ensure-renderer-extent
+          (viewer-renderer viewer)
+          (canvas-extent (viewer-context viewer)))
+         (advance-viewer-camera viewer presentation-time)
          (let ((color (encode-frame (viewer-renderer viewer) encoder)))
            (encode encoder
                    (make-gpu-copy-texture-command
@@ -1065,18 +1333,34 @@ many times oversize, and the frame is box-filtered down on the way out."
   (declare (ignore viewer canvas event))
   nil)
 
-(defun standalone-render-options (&optional (name (uiop:getenv "LUFT_RENDER_MODE")))
-  "Return MODE, STYLE, PIPELINE-STYLES, and EFFECTS for standalone NAME."
-  (let ((mode (string-downcase (or name "flat"))))
+(defun standalone-render-technique
+    (&optional (name (uiop:getenv "LUFT_RENDER_TECHNIQUE")))
+  "Return the technique standalone NAME asks for: vertex unless told mesh."
+  (let ((technique (string-downcase (or name "vertex"))))
+    (cond ((string= technique "vertex") :vertex)
+          ((string= technique "mesh") :mesh)
+          (t (error "Unknown LUFT_RENDER_TECHNIQUE ~S; use vertex or mesh."
+                    name)))))
+
+(defun standalone-render-options
+    (&optional (name (uiop:getenv "LUFT_RENDER_MODE"))
+               (technique (standalone-render-technique)))
+  "Return MODE, STYLE, PIPELINE-STYLES, EFFECTS, and TECHNIQUE for standalone NAME."
+  (let ((mode (string-downcase (or name "flat")))
+        (styles (technique-styles technique)))
     (cond ((string= mode "clear")
-           (values :clear :flat nil nil))
+           (values :clear :flat nil nil technique))
           ((string= mode "sky")
-           (values :sky :flat nil '(:sky)))
+           (values :sky :flat nil '(:sky) technique))
           ((member mode '("flat" "bevel" "chamfer" "paper") :test #'string=)
            (let ((style (intern (string-upcase mode) :keyword)))
-             (values style style (list style) nil)))
+             (unless (member style styles)
+               (error "The ~(~A~) technique does not draw ~A; it draws ~
+~{~(~A~)~^, ~}." technique mode styles))
+             (values style style (list style) nil technique)))
           ((string= mode "full")
-           (values :full :bevel '(:flat :bevel :chamfer :paper) '(:sky :lens)))
+           (values :full (if (member :bevel styles) :bevel :chamfer)
+                   styles '(:sky :lens) technique))
           (t
            (error "Unknown LUFT_RENDER_MODE ~S; use clear, sky, flat, bevel, ~
 chamfer, paper, or full." name)))))
@@ -1087,6 +1371,7 @@ chamfer, paper, or full." name)))))
           (title "luft atelier")
           (width 1280) (height 800)
           (frames-per-second 60)
+          (technique *default-technique*)
           (style :flat)
           (pipeline-styles nil pipeline-styles-p)
           (effects nil)
@@ -1096,7 +1381,8 @@ chamfer, paper, or full." name)))))
 Click to capture the pointer, Escape to release it; WASD, Space, and C move.
 The renderer stays available as (VIEWER-RENDERER *VIEWER*) for live tinkering.
 By default the viewer creates only the flat surface pipeline: pass explicit
-PIPELINE-STYLES and EFFECTS to add the complex geometry, sky, or lens."
+PIPELINE-STYLES and EFFECTS to add the complex geometry, sky, or lens.
+TECHNIQUE chooses vertex pulling or mesh shaders, as for MAKE-RENDERER."
   (let ((canvas (make-sdl-canvas
                  :title title :width width :height height :visible-p nil
                  :presentation-api (sdl-presentation-api-for provider)))
@@ -1118,6 +1404,7 @@ PIPELINE-STYLES and EFFECTS to add the complex geometry, sky, or lens."
                                   :scene scene :camera camera :device device*
                                   :width (first extent) :height (second extent)
                                   :color-format (canvas-format context)
+                                  :technique technique
                                   :style style
                                   :pipeline-styles
                                   (if pipeline-styles-p

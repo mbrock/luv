@@ -1,14 +1,15 @@
-#+title: LUFT: packed sites, chains, and the mesh atelier
+#+title: LUFT: packed sites, chains, and the atelier
 #+startup: overview
 
 LUFT is a small complement to luv: a way of naming the vertices, edges, faces,
 and cells of a cubical world with one fixnum each, and of treating a block
 world as algebra rather than as voxels with decorations.  Its first client
 is a greenfield renderer, an atelier free of the luvcraft mesher, that draws
-a textureless block world with task and mesh shaders reading those fixnums
-straight from a GPU buffer.  This page records the vocabulary, the algebra
-that makes the surface fall out, the shader-language extensions the GPU path
-needed, and the shape of the pipeline.
+a textureless block world from shaders reading those fixnums straight from a
+GPU buffer -- by vertex pulling on any device, or by task and mesh shaders
+where those run.  This page records the vocabulary, the algebra that makes
+the surface fall out, the shader-language extensions the GPU path needed,
+and the shape of the pipeline.
 
 * A site is a lattice anchor, an extent mask, and a polarity
 :PROPERTIES:
@@ -153,7 +154,57 @@ The standalone atelier creates only the flat surface pipeline by default.
 create only their named surface pipeline; =full= restores every style plus the
 sky and lens.  Thus a driver failure can be localized by increasing one
 semantic layer at a time rather than constructing and dispatching the entire
-atelier before the first frame.
+atelier before the first frame.  =LUFT_RENDER_TECHNIQUE=mesh= asks for this
+mesh path at all; the default is the vertex pulling of #NV25VM.
+
+* Vertex shaders pull the same sites where mesh shaders will not run
+:PROPERTIES:
+:ID: NV25VM
+:END:
+
+RADV on this project's RX 6600 XT advertises =VK_EXT_mesh_shader= and accepts
+the pipelines of #VAABY9, but does not reliably run them; lavapipe draws them
+correctly and slowly, which is how the flat style was first seen working
+here.  Rather than chase a young extension driver by driver, the atelier
+gained a second /technique/ that needs nothing beyond Vulkan 1.0 and changes
+nothing about the representation.
+A renderer is made with =:technique :vertex= (the default, and
+[[lisp:luft.render:*default-technique*]]) or =:technique :mesh=; the frame
+block, the site and cell buffers, the bind group, every fragment stage, the
+sky, and the lens are the same objects either way.  A technique is only
+which modules are created, how a pipeline is described, and how a pass is
+told to draw, and those three are EQL methods on the technique's name
+([[lisp:luft.render::create-technique-pipelines]],
+[[lisp:luft.render::draw-surface]], [[lisp:luft.render::draw-screen]]).
+
+The vertex path draws $K$ vertices per site with no vertex buffer at all.
+Each vertex shader invocation divides its built-in index by $K$ to find its
+site in the very same =(unsigned-byte 64)= buffer, takes the remainder to
+learn which corner of which triangle it is, and unpacks anchor, extent, and
+polarity with the same =ldb= forms as the mesh lane (#AGVXGM).  A flat face
+is six vertices, the two triangles $(0\,1\,2)(0\,2\,3)$ around the anchor
+corner, reversed when the polarity is negative so the loop stays
+counter-clockwise from outside.  A vertex cannot be skipped the way a mesh
+lane's output count is uniform, so an absent site or a back-facing face
+collapses every one of its vertices onto the anchor, and the rasterizer drops
+the degenerate triangle.  The brick spheres of #VAABY9 are still computed
+and uploaded but nothing culls by them; with no culling state in the
+pipeline and twelve thousand faces in the demonstration world, clipping is
+cheap enough that the first version simply draws everything.
+
+The chamfer of #RUAWR5 is the same grid at fifty-four vertices a face: nine
+quads of the $4	imes4$ point lattice, each split along the diagonal toward
+its nearest corner as the mesh shader splits them.  Where one mesh lane
+gathered all sixteen star cells and placed all sixteen points, a vertex is
+one point and needs only the star of its own nearest corner: six cells
+beside the face's solid and air cells, across $U$, across $V$, and across
+both, toward that corner's side.  The site rules of #6TEFOS then move it --
+corner star at a corner, edge star along a boundary, nowhere inside -- and
+because every face incident to a site gathers the same star, the facets meet
+exactly.  The watertightness test that was Metal-only now runs on Linux over
+every style the default technique draws; the rounded =:bevel= style remains
+mesh-only until its ring rule is written the same way.  The vertex shaders
+live in =luft/render/vertex-shaders.lisp=.
 
 * Fillets and bevels belong to edge and vertex sites
 :PROPERTIES:
