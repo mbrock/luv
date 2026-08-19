@@ -18,7 +18,12 @@ Before the process can host the Service, define `luv-lobby` on port `1883` in
 the Tailscale Services admin page. The tailnet policy must permit `tag:luv` to
 auto-approve `svc:luv-lobby` and grant intended clients access to that Service.
 
-Mochi currently uses its allow-all hook: Tailscale access policy is the network
-admission boundary, but every admitted MQTT client may publish or subscribe to
-any topic. Add a Mochi authentication/ACL hook before exposing this to mutually
-untrusted tailnet users.
+Each MQTT connection is resolved through tsnet's LocalAPI and receives a
+Tailnet principal (node name/ID, user, and tags). An unresolved connection is
+denied. The broker logs those principals at connect and disconnect, and only a
+resolved principal can publish or subscribe. It currently grants every resolved
+principal every topic; use the principal hook as the place to add per-user or
+per-tag topic ACLs when the lobby needs them.
+
+When run as a systemd `Type=notify` service, `luv-lobby` sends `READY=1` only
+after the Tailscale Service listener is attached and the MQTT broker is serving.

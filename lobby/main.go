@@ -7,14 +7,16 @@ package main
 
 import (
 	"flag"
-	"log"
+	"fmt"
+	"log/slog"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	mqtt "github.com/mochi-mqtt/server/v2"
-	"github.com/mochi-mqtt/server/v2/hooks/auth"
 	"github.com/mochi-mqtt/server/v2/listeners"
 	"tailscale.com/tsnet"
 )
@@ -36,7 +38,32 @@ func defaultStateDir() string {
 	return filepath.Join(home, ".local", "state", "luv", "lobby", "tsnet")
 }
 
+// notifySystemd sends a service-manager notification when this process was
+// started by systemd. Outside systemd, it is deliberately a no-op.
+func notifySystemd(message string) error {
+	socket := os.Getenv("NOTIFY_SOCKET")
+	if socket == "" {
+		return nil
+	}
+	// systemd spells Linux abstract Unix sockets with an @; net understands
+	// that spelling for Unix-domain addresses.
+	socket = strings.TrimPrefix(socket, "@")
+	if strings.HasPrefix(os.Getenv("NOTIFY_SOCKET"), "@") {
+		socket = "\x00" + socket
+	}
+	conn, err := net.DialUnix("unixgram", nil, &net.UnixAddr{Name: socket, Net: "unixgram"})
+	if err != nil {
+		return fmt.Errorf("connect to NOTIFY_SOCKET: %w", err)
+	}
+	defer conn.Close()
+	if _, err := conn.Write([]byte(message)); err != nil {
+		return fmt.Errorf("write systemd notification: %w", err)
+	}
+	return nil
+}
+
 func main() {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil)).With("service", "luv-lobby")
 	stateDir := flag.String("state", defaultStateDir(), "durable tsnet state directory")
 	hostname := flag.String("hostname", "luv-lobby", "Tailscale node hostname")
 	service := flag.String("service", defaultService, "Tailscale Service name")
@@ -44,11 +71,14 @@ func main() {
 	flag.Parse()
 
 	if *port < 1 || *port > 65535 {
-		log.Fatalf("invalid MQTT port %d", *port)
+		logger.Error("invalid MQTT port", "port", *port)
+		os.Exit(2)
 	}
 	if err := os.MkdirAll(*stateDir, 0700); err != nil {
-		log.Fatalf("create tsnet state directory: %v", err)
+		logger.Error("create tsnet state directory", "path", *stateDir, "error", err)
+		os.Exit(1)
 	}
+	logger.Info("starting", "state_dir", *stateDir, "hostname", *hostname, "service_name", *service, "port", *port)
 
 	authKey := os.Getenv("TS_AUTHKEY")
 	tailnet := &tsnet.Server{
@@ -56,6 +86,9 @@ func main() {
 		Hostname:      *hostname,
 		AuthKey:       authKey,
 		AdvertiseTags: []string{defaultTag},
+		UserLogf: func(format string, args ...any) {
+			logger.Info("tailscale", "component", "tsnet", "message", fmt.Sprintf(format, args...))
+		},
 	}
 	// tsnet reads AuthKey when it starts; keep the bootstrap key out of the
 	// durable broker process after that point.
@@ -66,33 +99,51 @@ func main() {
 		Port: uint16(*port),
 	})
 	if err != nil {
-		log.Fatalf("listen as %s on %s:%d: %v", defaultTag, *service, *port, err)
+		logger.Error("attach Tailscale Service listener", "tag", defaultTag, "service_name", *service, "port", *port, "error", err)
+		os.Exit(1)
 	}
 	defer listener.Close()
 
-	broker := mqtt.New(nil)
-	// Tailscale policy admits clients to this listener. MQTT itself currently
-	// has no second credential or topic ACL layer; add a Mochi auth hook before
-	// treating mutually untrusted tailnet members as lobby participants.
-	if err := broker.AddHook(new(auth.AllowHook), nil); err != nil {
-		log.Fatalf("install MQTT admission hook: %v", err)
+	broker := mqtt.New(&mqtt.Options{Logger: logger.With("component", "mqtt")})
+	localClient, err := tailnet.LocalClient()
+	if err != nil {
+		logger.Error("open tsnet LocalAPI", "error", err)
+		os.Exit(1)
+	}
+	// Tailscale is the MQTT account system: every MQTT session must resolve to
+	// the Tailscale node actually backing its TCP connection.
+	if err := broker.AddHook(newTailnetPrincipalHook(localClient, logger), nil); err != nil {
+		logger.Error("install Tailnet principal hook", "error", err)
+		os.Exit(1)
 	}
 	if err := broker.AddListener(listeners.NewNet("tailscale", listener)); err != nil {
-		log.Fatalf("attach Tailscale listener to MQTT broker: %v", err)
+		logger.Error("attach Tailscale listener to MQTT broker", "error", err)
+		os.Exit(1)
 	}
 
-	log.Printf("MQTT lobby available at %s:%d as %s", listener.FQDN, *port, defaultTag)
+	logger.Info("Tailscale Service listener attached", "fqdn", listener.FQDN, "port", *port, "tag", defaultTag)
 	// Serve starts Mochi's listener and event-loop goroutines, then returns.
 	// Keep this owner process alive until an explicit shutdown signal arrives.
 	if err := broker.Serve(); err != nil {
-		log.Fatal(err)
+		logger.Error("start MQTT broker", "error", err)
+		os.Exit(1)
 	}
+	readyStatus := fmt.Sprintf("Ready: MQTT at %s:%d", listener.FQDN, *port)
+	if err := notifySystemd("READY=1\nSTATUS=" + readyStatus); err != nil {
+		logger.Error("notify systemd readiness", "error", err)
+		os.Exit(1)
+	}
+	logger.Info("ready", "fqdn", listener.FQDN, "port", *port, "tag", defaultTag)
 
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	sig := <-signals
-	log.Printf("stopping on %s", sig)
-	if err := broker.Close(); err != nil {
-		log.Printf("close MQTT broker: %v", err)
+	logger.Info("stopping", "signal", sig)
+	if err := notifySystemd("STOPPING=1\nSTATUS=Stopping MQTT lobby"); err != nil {
+		logger.Warn("notify systemd shutdown", "error", err)
 	}
+	if err := broker.Close(); err != nil {
+		logger.Error("close MQTT broker", "error", err)
+	}
+	logger.Info("stopped")
 }
