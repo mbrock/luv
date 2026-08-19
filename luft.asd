@@ -24,6 +24,17 @@
                              (:file "render"))))
   :in-order-to ((test-op (test-op "luft/render/test"))))
 
+(defsystem "luft/program"
+  :description "The standalone LUFT atelier executable."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luft/render")
+  :serial t
+  :components ((:file "luft/render/main"))
+  :build-operation "program-op"
+  :build-pathname "build/luft"
+  :entry-point "luft.render:main")
+
 (defsystem "luft/render/test"
   :description "Executable claims for the packed-site mesh renderer."
   :version "0.0.1"

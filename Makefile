@@ -10,12 +10,15 @@ TRACY_MCCLIM_PAINT_TRACE ?= build/mcclim-paints.tracy
 
 FASL_CACHE := $(HOME)/.cache/common-lisp
 
-.PHONY: all luvcraft run test clean-fasls parinfer-check shader-validate msl-validate smoke vulkan-smoke metal-smoke metal-text-closeup metal-benchmark metal-streaming-benchmark tracy-streaming tracy-mcclim-roundrect tracy-mcclim-paints readme-screenshots mcclim-gallery wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw roundrect-proof slug-proof slug-text-proof clean
+.PHONY: all luvcraft luft run test clean-fasls parinfer-check shader-validate msl-validate smoke vulkan-smoke metal-smoke metal-text-closeup metal-benchmark metal-streaming-benchmark tracy-streaming tracy-mcclim-roundrect tracy-mcclim-paints readme-screenshots mcclim-gallery wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw roundrect-proof slug-proof slug-text-proof clean
 
-all: luvcraft
+all: luvcraft luft
 
 luvcraft:
 	./scripts/dev sbcl --script luvcraft/build.lisp
+
+luft:
+	./scripts/dev sbcl --script luft/build.lisp
 
 run: luvcraft
 	./scripts/dev ./build/luvcraft
@@ -205,7 +208,7 @@ clean-fasls:
 
 clean:
 	rm -rf ./build/logs
-	rm -f ./build/luvcraft ./build/mcluv ./build/luvcraft-smoke.png ./build/luvcraft-metal-smoke.png
+	rm -f ./build/luvcraft ./build/luft ./build/mcluv ./build/luvcraft-smoke.png ./build/luvcraft-metal-smoke.png
 	rm -f ./build/block-world.vert.metal ./build/block-world.vert.air
 	rm -f ./build/block-world.frag.metal ./build/block-world.frag.air
 	rm -f ./build/slug-bezier.vert.spv ./build/slug-bezier.frag.spv

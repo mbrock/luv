@@ -350,7 +350,13 @@
               if [ -z "''${SDL_VIDEODRIVER:-}" ] \
                 && [ -z "''${DISPLAY:-}" ] \
                 && [ -z "''${WAYLAND_DISPLAY:-}" ]; then
-                export SDL_VIDEODRIVER=offscreen
+                # A real Linux virtual terminal can own DRM master after its
+                # compositor exits; use it directly.  SSH, CI, and shell
+                # commands with no controlling terminal stay headless.
+                case "$(${env.pkgs.coreutils}/bin/tty 2>/dev/null || :)" in
+                  /dev/tty[0-9]*) export SDL_VIDEODRIVER=kmsdrm ;;
+                  *) export SDL_VIDEODRIVER=offscreen ;;
+                esac
               fi
 
               if [ -n "''${LUV_LAVAPIPE_ICD:-}" ] \
