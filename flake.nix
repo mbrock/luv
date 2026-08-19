@@ -387,6 +387,11 @@
                 export LUV_KEYBOARD_LAYOUT=dvorak
               fi
 
+              if [ "''${SDL_VIDEODRIVER:-}" = kmsdrm ] \
+                && [ -z "''${LUV_KEYBOARD_SWAP_CAPS_CONTROL+x}" ]; then
+                export LUV_KEYBOARD_SWAP_CAPS_CONTROL=1
+              fi
+
               if [ -n "''${LUV_LAVAPIPE_ICD:-}" ] \
                 && [ -f "$LUV_LAVAPIPE_ICD" ] \
                 && [ -z "''${VK_DRIVER_FILES:-}" ] \

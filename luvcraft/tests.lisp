@@ -103,6 +103,15 @@
     (ok (not (recording-canvas-relative-p canvas)))
     (ok (not (luvcraft::luvcraft-session-pointer-captured-p session)))))
 
+(deftest software-cursor-follows-screen-pointer-coordinates
+  (let ((center (luvcraft::make-block-world-crosshair-vertices 200 100))
+        (top-left
+          (luvcraft::make-block-world-crosshair-vertices 200 100 0 0)))
+    ;; Moving from the centre to the top-left subtracts one clip-space X and
+    ;; adds one clip-space Y; the little crosshair's local shape is unchanged.
+    (ok (= -1.0 (- (aref top-left 0) (aref center 0))))
+    (ok (= 1.0 (- (aref top-left 1) (aref center 1))))))
+
 (deftest focusing-a-terminal-frames-the-whole-wall-above-the-hotbar
   (let* ((world (make-block-world :chunk-width 16
                                   :chunk-height 16

@@ -104,15 +104,19 @@
              format expected declared))
     format))
 
-(defun make-block-world-crosshair-vertices (width height)
-  "Make an outlined pixel-sized crosshair in Vulkan clip coordinates."
+(defun make-block-world-crosshair-vertices (width height &optional x y)
+  "Make an outlined pixel-sized crosshair at screen X,Y, or at the centre."
   (let ((vertices (make-array 0 :element-type 'single-float
-                                :adjustable t :fill-pointer 0)))
+                                :adjustable t :fill-pointer 0))
+        (origin-x (if x (- x (/ width 2.0)) 0.0))
+        ;; Screen coordinates grow downward; clip coordinates grow upward.
+        (origin-y (if y (- (/ height 2.0) y) 0.0)))
     (labels ((clip-x (pixels) (/ (* 2.0 pixels) width))
              (clip-y (pixels) (/ (* 2.0 pixels) height))
              (vertex (x y color)
                (dolist (component
-                        (list (clip-x x) (clip-y y) 0.0
+                        (list (clip-x (+ origin-x x))
+                              (clip-y (+ origin-y y)) 0.0
                               (first color) (second color) (third color)))
                  (vector-push-extend (coerce component 'single-float)
                                      vertices)))
@@ -860,7 +864,13 @@ submission that used them completes."
       ;; so its clip-space vertices are only correct for one extent.
       (write-buffer
        (luvcraft-session-crosshair-vertex-buffer session)
-       (make-block-world-crosshair-vertices (first extent) (second extent))))
+       (make-block-world-crosshair-vertices (first extent) (second extent)))
+      (write-buffer
+       (luvcraft-session-cursor-vertex-buffer session)
+       (make-block-world-crosshair-vertices
+        (first extent) (second extent)
+        (or (luvcraft-session-pointer-x session) (/ (first extent) 2.0))
+        (or (luvcraft-session-pointer-y session) (/ (second extent) 2.0)))))
     extent))
 
 (zdefun (encode-luvcraft-frame :zone :luvcraft/encode-frame)
@@ -1173,6 +1183,16 @@ submission that used them completes."
           (when (eq :hud (luvcraft-overlay-stage overlay))
             (guarding-luvcraft-overlay (session overlay :overlay-encode)
               (encode-luvcraft-overlay overlay session pass surface-texture))))
+        ;; KMSDRM has no native cursor plane.  A focused CLIM view still gets
+        ;; the same absolute pointer events as any other backend, so draw the
+        ;; crosshair geometry at their last position after the HUD itself.
+        (when (and (luvcraft-session-software-cursor-p session)
+                   (luvcraft-session-modal-focus session))
+          (set-pipeline pass (luvcraft-session-cursor-native-pipeline session))
+          (set-bind-group pass 0 (luvcraft-frame-scene-bind-group frame))
+          (set-vertex-buffer
+           pass 0 (luvcraft-session-cursor-vertex-buffer session))
+          (draw pass +block-world-crosshair-vertex-count+))
         (end-pass pass)))
     (with-luvcraft-frame-timing
         (sample luvcraft-frame-sample-surface-copy-encode-seconds
@@ -1309,8 +1329,20 @@ here -- so an unconsumed wheel event is simply the end of the matter."
     (dispatch-luvcraft-overlay-event session canvas event))
   nil)
 
+(defun note-luvcraft-pointer-position (session event)
+  (setf (luvcraft-session-pointer-x session) (canvas-pointer-event-x event)
+        (luvcraft-session-pointer-y session) (canvas-pointer-event-y event))
+  (when (luvcraft-session-cursor-vertex-buffer session)
+    (let ((extent (canvas-extent (luvcraft-session-context session))))
+      (write-buffer
+       (luvcraft-session-cursor-vertex-buffer session)
+       (make-block-world-crosshair-vertices
+        (first extent) (second extent)
+        (canvas-pointer-event-x event) (canvas-pointer-event-y event))))))
+
 (defmethod handle-canvas-event
     ((session luvcraft-session) canvas (event canvas-pointer-button-press-event))
+  (note-luvcraft-pointer-position session event)
   (when (dispatch-luvcraft-focus-event session canvas event)
     (return-from handle-canvas-event nil))
   (when (and (not (luvcraft-session-pointer-captured-p session))
@@ -1336,6 +1368,7 @@ here -- so an unconsumed wheel event is simply the end of the matter."
 (defmethod handle-canvas-event
     ((session luvcraft-session) canvas
      (event canvas-pointer-button-release-event))
+  (note-luvcraft-pointer-position session event)
   (unless (dispatch-luvcraft-focus-event session canvas event)
     (unless (luvcraft-session-pointer-captured-p session)
       (dispatch-luvcraft-overlay-event session canvas event)))
@@ -1343,6 +1376,7 @@ here -- so an unconsumed wheel event is simply the end of the matter."
 
 (defmethod handle-canvas-event
     ((session luvcraft-session) canvas (event canvas-pointer-motion-event))
+  (note-luvcraft-pointer-position session event)
   (cond
     ((dispatch-luvcraft-focus-event session canvas event))
     ((luvcraft-session-pointer-captured-p session)
@@ -1688,6 +1722,14 @@ NIL to let the display choose a comfortable window."
                        :label "block world crosshair vertices"
                        :size (* 4 (length crosshair-vertices))
                        :usage '(:vertex)))))
+                  (cursor-vertex-buffer
+                    (keep
+                     (create
+                      device
+                      (make-buffer-descriptor
+                       :label "luvcraft software cursor vertices"
+                       :size (* 4 (length crosshair-vertices))
+                       :usage '(:vertex)))))
                   (layout
                     (keep
                      (create
@@ -1829,6 +1871,25 @@ NIL to let the display choose a comfortable window."
                                :depth-compare :always))))
                       (push artifact pipelines)
                       artifact))
+                  (cursor-pipeline
+                    (let ((artifact
+                            (make-live-shader-pipeline
+                             :role :block-crosshair
+                             :vertex-role :block-crosshair
+                             :label "luvcraft software cursor pipeline"
+                             :device device :layout layout
+                             :vertex-buffers
+                             '((:array-stride 24
+                                :attributes
+                                ((:shader-location 0 :offset 0
+                                  :format :float32x3)
+                                 (:shader-location 1 :offset 12
+                                  :format :float32x3))))
+                             :target-format (canvas-format context)
+                             :primitive '(:topology :triangle-list)
+                             :depth-stencil nil)))
+                      (push artifact pipelines)
+                      artifact))
                   (post-pipeline
                     (let ((artifact
                             (make-live-shader-pipeline
@@ -1951,7 +2012,12 @@ NIL to let the display choose a comfortable window."
                      :sky-vertex-buffer sky-vertex-buffer
                      :sky-pipeline sky-pipeline
                      :crosshair-vertex-buffer crosshair-vertex-buffer
+                     :cursor-vertex-buffer cursor-vertex-buffer
                      :crosshair-pipeline crosshair-pipeline
+                     :cursor-pipeline cursor-pipeline
+                     :software-cursor-p
+                     (string-equal (or (uiop:getenv "SDL_VIDEODRIVER") "")
+                                   "kmsdrm")
                      :post-pipeline post-pipeline
                      :critters critters
                      :world-text text-run
@@ -1959,6 +2025,7 @@ NIL to let the display choose a comfortable window."
                      :resources resources)))
                (write-buffer sky-vertex-buffer sky-vertices)
                (write-buffer crosshair-vertex-buffer crosshair-vertices)
+               (write-buffer cursor-vertex-buffer crosshair-vertices)
                (write-texture
                 (device-queue device)
                 (make-texture-copy :texture atlas-texture)
@@ -2074,6 +2141,7 @@ LUVCRAFT-RELEASE-ERROR.  See WITH-RELEASE-REPORT."
                       (luvcraft-session-shadow-pipeline session)
                       (luvcraft-session-sky-pipeline session)
                       (luvcraft-session-crosshair-pipeline session)
+                      (luvcraft-session-cursor-pipeline session)
                       (luvcraft-session-post-pipeline session)
                       (luvcraft-session-bloom-bright-pipeline session)
                       (luvcraft-session-bloom-horizontal-pipeline session)

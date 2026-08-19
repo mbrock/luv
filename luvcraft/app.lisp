@@ -174,8 +174,12 @@
    (crosshair-vertex-buffer
     :initarg :crosshair-vertex-buffer
     :reader luvcraft-session-crosshair-vertex-buffer)
+   (cursor-vertex-buffer :initarg :cursor-vertex-buffer :initform nil
+                         :reader luvcraft-session-cursor-vertex-buffer)
    (crosshair-pipeline :initarg :crosshair-pipeline
                        :reader luvcraft-session-crosshair-pipeline)
+   (cursor-pipeline :initarg :cursor-pipeline
+                    :reader luvcraft-session-cursor-pipeline)
    (post-pipeline :initarg :post-pipeline
                   :reader luvcraft-session-post-pipeline)
    (world-text :initarg :world-text :initform nil
@@ -209,6 +213,10 @@
 the arrow keys: a mouse for the mouseless console.")
    (pointer-captured-p :initform nil
                        :accessor luvcraft-session-pointer-captured-p)
+   (pointer-x :initform nil :accessor luvcraft-session-pointer-x)
+   (pointer-y :initform nil :accessor luvcraft-session-pointer-y)
+   (software-cursor-p :initarg :software-cursor-p :initform nil
+                      :reader luvcraft-session-software-cursor-p)
    (pointer-capture-suspended-p
     :initform nil
     :accessor luvcraft-session-pointer-capture-suspended-p
@@ -644,6 +652,10 @@ the terrain the ray meets first is what the player is looking at."
   (live-shader-pipeline-native-pipeline
    (luvcraft-session-crosshair-pipeline session)))
 
+(defun luvcraft-session-cursor-native-pipeline (session)
+  (live-shader-pipeline-native-pipeline
+   (luvcraft-session-cursor-pipeline session)))
+
 (defun luvcraft-session-sky-native-pipeline (session)
   (live-shader-pipeline-native-pipeline
    (luvcraft-session-sky-pipeline session)))
@@ -659,6 +671,7 @@ the terrain the ray meets first is what the player is looking at."
                  (luvcraft-session-shadow-pipeline session)
                  (luvcraft-session-sky-pipeline session)
                  (luvcraft-session-crosshair-pipeline session)
+                 (luvcraft-session-cursor-pipeline session)
                  (luvcraft-session-post-pipeline session)
                  (luvcraft-session-bloom-bright-pipeline session)
                  (luvcraft-session-bloom-horizontal-pipeline session)
