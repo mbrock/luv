@@ -45,6 +45,6 @@
    #:ansi-view #:+ansi-view+
    ;; Embodied agents (gnomes are the first visible form)
    #:gnome #:*agents* #:agents-in-session #:find-agent #:spawn-agent
-   #:find-gnome #:place-gnome #:gnome-say #:gnome-agent #:com-say
+   #:gnome-say #:gnome-agent #:com-say
    #:com-spawn-agent
    #:*current-agent* #:world-agent-presence))

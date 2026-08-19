@@ -67,7 +67,6 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:bucket-frontier-pushes
            #:define-frontier-program
            #:do-voxel-frontier-relations
-           #:execute-frontier-program
            #:frontier-execution
            #:frontier-execution-admissions
            #:frontier-execution-crossings
@@ -275,7 +274,6 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:chunk-light-field-state
            #:chunk-light-levels-at
            #:chunk-light-levels-at-coordinate
-           #:compare-voxel-light-solvers
            #:chunk-mesh-dependency-stamp
            #:activate-luvcraft-critter
            #:add-critter
@@ -370,7 +368,6 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:handle-luvcraft-overlay-event
            #:handle-luvcraft-focus-event
            #:handle-luvcraft-focus-control-event
-           #:emit-block-face
            #:exposed-face-mesher
            #:find-luvcraft-gazetteer-view
            #:fly-camera
@@ -411,6 +408,8 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:luvcraft-gazetteer-view-name
            #:luvcraft-gazetteer-views
            #:luvcraft-lighting-state
+           #:luvcraft-renderer
+           #:luvcraft-session-renderer
            #:luvcraft-session
            #:luvcraft-session-atlas-sampler
            #:luvcraft-session-atlas-texture
@@ -488,6 +487,8 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:make-block-normal-atlas
            #:refresh-block-atlas
            #:refresh-luvcraft-inventory
+           #:release-luvcraft-component
+           #:resize-luvcraft-component
            #:make-default-sky-profile
            #:make-empty-little-block-world
            #:make-little-block-world
@@ -511,7 +512,6 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:materialize-little-world-chunk
            #:mesh-block-chunk
            #:mesh-block-snapshot
-           #:mesh-block-world
            #:perform-world-checkpoint
            #:pick-luvcraft-block
            #:placeable-block-kinds
@@ -539,23 +539,7 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:trace-luvcraft-streaming-boundary
            #:refresh-luvcraft-shaders
            #:relight-block-world
-           #:solve-frontier-light-region
            #:solve-light-region-using
-           #:voxel-light-solver-comparison
-           #:voxel-light-solver-comparison-equal-p
-           #:voxel-light-solver-comparison-frontier-executions
-           #:voxel-light-solver-comparison-frontier-bytes-consed
-           #:voxel-light-solver-comparison-frontier-garbage-collections
-           #:voxel-light-solver-comparison-frontier-gc-seconds
-           #:voxel-light-solver-comparison-frontier-seconds
-           #:voxel-light-solver-comparison-frontier-visits
-           #:voxel-light-solver-comparison-candidate-solver
-           #:voxel-light-solver-comparison-legacy-bytes-consed
-           #:voxel-light-solver-comparison-legacy-garbage-collections
-           #:voxel-light-solver-comparison-legacy-gc-seconds
-           #:voxel-light-solver-comparison-legacy-seconds
-           #:voxel-light-solver-comparison-legacy-visits
-           #:voxel-light-solver-comparison-mismatched-keys
            #:rematerialize-little-world-chunk
            #:request-luvcraft-session-checkpoint
            #:request-world-checkpoint
@@ -659,8 +643,6 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:block-world-crosshair-fragment-module
            #:block-world-crosshair-fragment-shader
            #:block-world-crosshair-fragment-specification
-           #:block-world-crosshair-vertex-module
-           #:block-world-crosshair-vertex-shader
            #:block-world-crosshair-vertex-specification
            #:block-world-fragment-lowering
            #:block-world-fragment-module

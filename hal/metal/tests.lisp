@@ -785,19 +785,39 @@
                      :visible-p nil :frames-per-second nil
                      :width 160 :height 100))
               (wait-for-luvcraft-products session :minimum 1)
-              (let ((resources-before
-                      (length (luvcraft::luvcraft-session-resources session))))
+              (let* ((renderer
+                       (luvcraft:luvcraft-session-renderer session))
+                     (frame-states
+                       (luvcraft::luvcraft-session-frame-states session))
+                     (frame-resources-before
+                       (loop for state being the hash-values of frame-states
+                             sum
+                             (length
+                              (luvcraft::luvcraft-frame-state-resources
+                               state))))
+                     (non-frame-resources
+                       (- (length
+                           (luvcraft::luvcraft-renderer-resources renderer))
+                          frame-resources-before)))
                 (dotimes (index 8)
                   (luvcraft::render-luvcraft-frame
                    session (* index (/ 1d0 60d0))))
                 (submitted-work-done
                  (device-queue (luvcraft::luvcraft-session-device session)))
-                (let ((state-count
-                        (hash-table-count
-                         (luvcraft::luvcraft-session-frame-states session))))
+                (let* ((frame-states
+                         (luvcraft::luvcraft-session-frame-states session))
+                       (state-count (hash-table-count frame-states))
+                       (frame-resource-count
+                         (loop for state being the hash-values of frame-states
+                               sum
+                               (length
+                                (luvcraft::luvcraft-frame-state-resources
+                                 state)))))
                   (ok (<= 1 state-count 3))
-                  (ok (= (length (luvcraft::luvcraft-session-resources session))
-                         (+ resources-before (* 4 state-count)))))))
+                  (ok (= (length
+                          (luvcraft::luvcraft-renderer-resources
+                           (luvcraft:luvcraft-session-renderer session)))
+                         (+ non-frame-resources frame-resource-count))))))
          (when session
            (stop-luvcraft session)))))))
 

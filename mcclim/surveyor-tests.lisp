@@ -67,6 +67,18 @@
                     (mcluv::make-gpu-prepared-text-command)))
       (ok (not (mcluv::gpu-command-rasterized-p overlay command)))
       (ok (mcluv::gpu-command-rasterized-p nil command))))
+  (let ((generic (fdefinition 'mcluv::encode-gpu-command))
+        (context (mcluv::make-direct-widget-command-encode-context)))
+    (dolist (command
+              (list (mcluv::make-gpu-solid-command)
+                    (mcluv::make-gpu-analytic-command)
+                    (mcluv::make-gpu-relief-analytic-command)
+                    (mcluv::make-gpu-gradient-analytic-command)
+                    (mcluv::make-gpu-prepared-image-command)
+                    (mcluv::make-gpu-prepared-lattice-command)
+                    (mcluv::make-gpu-prepared-text-command)))
+      (ok (compute-applicable-methods generic
+                                      (list command nil context)))))
   (ok (null
        (mcluv::direct-widget-text-depth-stencil
         (allocate-instance

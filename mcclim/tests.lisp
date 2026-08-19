@@ -6,6 +6,223 @@
 (defun fresh-gpu-medium ()
   (make-instance 'mcluv:luv-gpu-medium))
 
+(defstruct protocol-test-gpu-command clip)
+
+(defmethod mcluv::rebase-gpu-command
+    ((command protocol-test-gpu-command) offsets)
+  (declare (ignore offsets))
+  command)
+
+(defmethod mcluv::prepare-gpu-command
+    ((command protocol-test-gpu-command) mirror frame-build)
+  (declare (ignore mirror frame-build))
+  command)
+
+(defmethod mcluv::gpu-command-clip ((command protocol-test-gpu-command))
+  (protocol-test-gpu-command-clip command))
+
+(defmethod mcluv::encode-gpu-command
+    ((command protocol-test-gpu-command) pass frame-state)
+  (list command pass frame-state))
+
+(defclass gpu-command-spy-encoder (luv:gpu-command-encoder)
+  ((commands :initform nil :accessor gpu-command-spy-commands)))
+
+(defmethod luv:encode ((encoder gpu-command-spy-encoder) command)
+  (push command (gpu-command-spy-commands encoder))
+  encoder)
+
+(deftest gpu-command-phases-are-an-open-command-grain-protocol
+  (dolist (name '(mcluv::rebase-gpu-command
+                  mcluv::prepare-gpu-command
+                  mcluv::gpu-command-clip
+                  mcluv::encode-gpu-command))
+    (ok (typep (fdefinition name) 'generic-function)))
+  (let ((command (make-protocol-test-gpu-command :clip '(1 2 3 4))))
+    (ok (eq command (mcluv::rebase-gpu-command command nil)))
+    (ok (eq command (mcluv::prepare-gpu-command command nil nil)))
+    (ok (equal '(1 2 3 4) (mcluv::gpu-command-clip command)))
+    (ok (equal (list command :pass :frame-state)
+               (mcluv::encode-gpu-command command :pass :frame-state)))))
+
+(deftest built-in-gpu-commands-rebase-their-own-dense-stream
+  (let* ((offsets
+           (mcluv::make-gpu-command-offsets
+            :vertex 10 :analytic 20 :relief 30 :gradient 40 :image 50))
+         (solid
+           (mcluv::rebase-gpu-command
+            (mcluv::make-gpu-solid-command
+             :first-vertex 1 :vertex-count 6 :clip '(1 2 3 4))
+            offsets))
+         (analytic
+           (mcluv::rebase-gpu-command
+            (mcluv::make-gpu-analytic-command :first-vertex 2)
+            offsets))
+         (lattice
+           (mcluv::rebase-gpu-command
+            (mcluv::make-gpu-lattice-command
+             :modules :modules :first-vertex 3)
+            offsets))
+         (relief
+           (mcluv::rebase-gpu-command
+            (mcluv::make-gpu-relief-analytic-command :first-vertex 4)
+            offsets))
+         (gradient
+           (mcluv::rebase-gpu-command
+            (mcluv::make-gpu-gradient-analytic-command :first-vertex 5)
+            offsets))
+         (design (list :design))
+         (image
+           (mcluv::rebase-gpu-command
+            (mcluv::make-gpu-image-command
+             :design design :first-vertex 6)
+            offsets))
+         (text (mcluv::make-gpu-text-command)))
+    (ok (= 11 (mcluv::gpu-solid-command-first-vertex solid)))
+    (ok (= 6 (mcluv::gpu-solid-command-vertex-count solid)))
+    (ok (equal '(1 2 3 4) (mcluv::gpu-command-clip solid)))
+    (ok (= 22 (mcluv::gpu-analytic-command-first-vertex analytic)))
+    (ok (= 23 (mcluv::gpu-lattice-command-first-vertex lattice)))
+    (ok (eq :modules (mcluv::gpu-lattice-command-modules lattice)))
+    (ok (= 34 (mcluv::gpu-relief-analytic-command-first-vertex relief)))
+    (ok (= 45 (mcluv::gpu-gradient-analytic-command-first-vertex gradient)))
+    (ok (= 56 (mcluv::gpu-image-command-first-vertex image)))
+    (ok (eq design (mcluv::gpu-image-command-design image)))
+    (ok (eq text (mcluv::rebase-gpu-command text offsets)))))
+
+(deftest every-built-in-command-has-its-required-phase-methods
+  (let ((prepare (fdefinition 'mcluv::prepare-gpu-command)))
+    (dolist (command
+              (list (mcluv::make-gpu-solid-command)
+                    (mcluv::make-gpu-analytic-command)
+                    (mcluv::make-gpu-relief-analytic-command)
+                    (mcluv::make-gpu-gradient-analytic-command)
+                    (mcluv::make-gpu-lattice-command)
+                    (mcluv::make-gpu-image-command)
+                    (mcluv::make-gpu-text-command)))
+      (ok (compute-applicable-methods prepare (list command nil nil)))))
+  (let ((clip (fdefinition 'mcluv::gpu-command-clip))
+        (encode (fdefinition 'mcluv::encode-gpu-command))
+        (state (make-instance 'mcluv::gpu-mirror-frame-state :mirror nil)))
+    (dolist (command
+              (list (mcluv::make-gpu-solid-command)
+                    (mcluv::make-gpu-analytic-command)
+                    (mcluv::make-gpu-relief-analytic-command)
+                    (mcluv::make-gpu-gradient-analytic-command)
+                    (mcluv::make-gpu-prepared-lattice-command)
+                    (mcluv::make-gpu-prepared-image-command)
+                    (mcluv::make-gpu-prepared-text-command)))
+      (ok (compute-applicable-methods clip (list command)))
+      (ok (compute-applicable-methods encode (list command nil state))))))
+
+(deftest native-command-encoders-map-to-their-dense-gpu-resources
+  (let* ((mirror
+           (make-instance 'mcluv:luv-gpu-mirror :sheet nil :target nil))
+         (state
+           (make-instance
+            'mcluv::gpu-mirror-frame-state
+            :mirror mirror
+            :vertex-buffer :solid-buffer
+            :analytic-buffer :analytic-buffer
+            :relief-buffer :relief-buffer
+            :gradient-buffer :gradient-buffer
+            :image-buffer :image-buffer
+            :text-buffer :text-buffer))
+         (lattice-paint
+           (mcluv::make-gpu-lattice-paint
+            :texture :lattice-texture
+            :view :lattice-view
+            :bind-group :lattice-bind-group))
+         (image-paint
+           (make-instance
+            'mcluv::gpu-cached-image-paint
+            :texture :image-texture
+            :view :image-view
+            :bind-group :image-bind-group
+            :width 16
+            :height 8))
+         (atlas :text-atlas))
+    (setf (mcluv::gpu-mirror-pipeline mirror) :solid-pipeline
+          (mcluv::gpu-mirror-analytic-pipeline mirror) :analytic-pipeline
+          (mcluv::gpu-mirror-relief-pipeline mirror) :relief-pipeline
+          (mcluv::gpu-mirror-gradient-analytic-pipeline mirror)
+          :gradient-pipeline
+          (mcluv::gpu-mirror-lattice-pipeline mirror) :lattice-pipeline
+          (mcluv::gpu-mirror-image-pipeline mirror) :image-pipeline
+          (mcluv::gpu-mirror-text-pipeline mirror) :text-pipeline
+          (mcluv::gpu-mirror-bind-group mirror) :shape-bind-group
+          (gethash atlas (mcluv::gpu-mirror-text-bind-groups mirror))
+          :text-bind-group)
+    (dolist (specification
+              (list
+               (list (mcluv::make-gpu-solid-command
+                      :first-vertex 11 :vertex-count 3)
+                     :solid-pipeline :shape-bind-group :solid-buffer 11 3)
+               (list (mcluv::make-gpu-analytic-command
+                      :first-vertex 22 :vertex-count 6)
+                     :analytic-pipeline :shape-bind-group
+                     :analytic-buffer 22 6)
+               (list (mcluv::make-gpu-relief-analytic-command
+                      :first-vertex 33 :vertex-count 9)
+                     :relief-pipeline :shape-bind-group :relief-buffer 33 9)
+               (list (mcluv::make-gpu-gradient-analytic-command
+                      :first-vertex 44 :vertex-count 12)
+                     :gradient-pipeline :shape-bind-group
+                     :gradient-buffer 44 12)
+               (list (mcluv::make-gpu-prepared-lattice-command
+                      :paint lattice-paint :first-vertex 55 :vertex-count 15)
+                     :lattice-pipeline :lattice-bind-group
+                     :analytic-buffer 55 15)
+               (list (mcluv::make-gpu-prepared-image-command
+                      :paint image-paint :first-vertex 66 :vertex-count 18)
+                     :image-pipeline :image-bind-group :image-buffer 66 18)
+               (list (mcluv::make-gpu-prepared-text-command
+                      :atlas atlas :first-vertex 77 :vertex-count 21)
+                     :text-pipeline :text-bind-group :text-buffer 77 21)))
+      (destructuring-bind
+          (command expected-pipeline expected-bind-group expected-buffer
+           expected-first-vertex expected-vertex-count)
+          specification
+        (let ((encoder (make-instance 'gpu-command-spy-encoder)))
+          (mcluv::encode-gpu-command command encoder state)
+          (let ((commands (reverse (gpu-command-spy-commands encoder))))
+            (ok (= 4 (length commands)))
+            (destructuring-bind
+                (pipeline-command bind-group-command vertex-buffer-command
+                 draw-command)
+                commands
+              (ok (typep pipeline-command 'luv:gpu-set-pipeline-command))
+              (ok (eq expected-pipeline
+                      (luv::gpu-set-pipeline-command-pipeline
+                       pipeline-command)))
+              (ok (typep bind-group-command
+                         'luv:gpu-set-bind-group-command))
+              (ok (zerop
+                   (luv::gpu-set-bind-group-command-index
+                    bind-group-command)))
+              (ok (eq expected-bind-group
+                      (luv::gpu-set-bind-group-command-bind-group
+                       bind-group-command)))
+              (ok (typep vertex-buffer-command
+                         'luv:gpu-set-vertex-buffer-command))
+              (ok (zerop
+                   (luv::gpu-set-vertex-buffer-command-slot
+                    vertex-buffer-command)))
+              (ok (eq expected-buffer
+                      (luv::gpu-set-vertex-buffer-command-buffer
+                       vertex-buffer-command)))
+              (ok (zerop
+                   (luv::gpu-set-vertex-buffer-command-offset
+                    vertex-buffer-command)))
+              (ok (typep draw-command 'luv:gpu-draw-command))
+              (ok (= expected-vertex-count
+                     (luv::gpu-draw-command-vertex-count draw-command)))
+              (ok (= 1 (luv::gpu-draw-command-instance-count draw-command)))
+              (ok (= expected-first-vertex
+                     (luv::gpu-draw-command-first-vertex draw-command)))
+              (ok (zerop
+                   (luv::gpu-draw-command-first-instance draw-command))))))))))
+
 (deftest compositor-shaders-are-shared-mathematical-specifications
   (dolist (specification
             (list (mcluv::spinning-texture-vertex-specification)

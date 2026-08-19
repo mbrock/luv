@@ -1939,10 +1939,6 @@ body does not execute as Lisp and does not return generated S-expressions.
   (sb-thread:with-mutex (*shader-source-revision-lock*)
     *shader-source-revision*))
 
-(defun shader-abstraction-revision ()
-  "Compatibility name for SHADER-SOURCE-REVISION."
-  (shader-source-revision))
-
 (defun note-shader-source-redefinition (name)
   "Record that reusable shader source named by NAME may have changed."
   (declare (ignore name))

@@ -70,6 +70,10 @@ actual destination pixel."))
    (shape-bind-group :initarg :shape-bind-group
                      :reader direct-widget-frame-shape-bind-group)))
 
+(defstruct direct-widget-command-encode-context
+  "Resources borrowed together for one direct-widget command replay."
+  overlay surface-texture destination-state source-state)
+
 (defclass luvcraft-world-widget-overlay (luvcraft-direct-widget-overlay) ()
   (:documentation "A direct McCLIM surface mounted in the 3D scene."))
 
@@ -578,6 +582,133 @@ actual destination pixel."))
                   (:binding 2
                    :resource ,(direct-widget-frame-buffer frame-state)))))))))
 
+(defmethod encode-gpu-command
+    ((command gpu-solid-command) pass
+     (context direct-widget-command-encode-context))
+  (let ((overlay (direct-widget-command-encode-context-overlay context))
+        (destination-state
+          (direct-widget-command-encode-context-destination-state context))
+        (source-state
+          (direct-widget-command-encode-context-source-state context)))
+    (encode-gpu-draw-range
+     pass
+     (gethash :solid (direct-widget-pipelines overlay))
+     (direct-widget-frame-shape-bind-group destination-state)
+     (gpu-frame-state-vertex-buffer source-state)
+     (gpu-solid-command-first-vertex command)
+     (gpu-solid-command-vertex-count command))))
+
+(defmethod encode-gpu-command
+    ((command gpu-analytic-command) pass
+     (context direct-widget-command-encode-context))
+  (let ((overlay (direct-widget-command-encode-context-overlay context))
+        (destination-state
+          (direct-widget-command-encode-context-destination-state context))
+        (source-state
+          (direct-widget-command-encode-context-source-state context)))
+    (encode-gpu-draw-range
+     pass
+     (gethash :analytic (direct-widget-pipelines overlay))
+     (direct-widget-frame-shape-bind-group destination-state)
+     (gpu-frame-state-analytic-buffer source-state)
+     (gpu-analytic-command-first-vertex command)
+     (gpu-analytic-command-vertex-count command))))
+
+(defmethod encode-gpu-command
+    ((command gpu-relief-analytic-command) pass
+     (context direct-widget-command-encode-context))
+  (let ((overlay (direct-widget-command-encode-context-overlay context))
+        (destination-state
+          (direct-widget-command-encode-context-destination-state context))
+        (source-state
+          (direct-widget-command-encode-context-source-state context)))
+    (encode-gpu-draw-range
+     pass
+     (gethash :relief (direct-widget-pipelines overlay))
+     (direct-widget-frame-shape-bind-group destination-state)
+     (gpu-frame-state-relief-buffer source-state)
+     (gpu-relief-analytic-command-first-vertex command)
+     (gpu-relief-analytic-command-vertex-count command))))
+
+(defmethod encode-gpu-command
+    ((command gpu-gradient-analytic-command) pass
+     (context direct-widget-command-encode-context))
+  (let ((overlay (direct-widget-command-encode-context-overlay context))
+        (destination-state
+          (direct-widget-command-encode-context-destination-state context))
+        (source-state
+          (direct-widget-command-encode-context-source-state context)))
+    (encode-gpu-draw-range
+     pass
+     (gethash :gradient (direct-widget-pipelines overlay))
+     (direct-widget-frame-shape-bind-group destination-state)
+     (gpu-frame-state-gradient-buffer source-state)
+     (gpu-gradient-analytic-command-first-vertex command)
+     (gpu-gradient-analytic-command-vertex-count command))))
+
+(defmethod encode-gpu-command
+    ((command gpu-prepared-lattice-command) pass
+     (context direct-widget-command-encode-context))
+  (let* ((overlay
+           (direct-widget-command-encode-context-overlay context))
+         (surface-texture
+           (direct-widget-command-encode-context-surface-texture context))
+         (destination-state
+           (direct-widget-command-encode-context-destination-state context))
+         (source-state
+           (direct-widget-command-encode-context-source-state context)))
+    (encode-gpu-draw-range
+     pass
+     (gethash :lattice (direct-widget-pipelines overlay))
+     (ensure-direct-widget-lattice-bind-group
+      overlay (gpu-prepared-lattice-command-paint command)
+      surface-texture destination-state)
+     (gpu-frame-state-analytic-buffer source-state)
+     (gpu-prepared-lattice-command-first-vertex command)
+     (gpu-prepared-lattice-command-vertex-count command))))
+
+(defmethod encode-gpu-command
+    ((command gpu-prepared-image-command) pass
+     (context direct-widget-command-encode-context))
+  (let* ((overlay
+           (direct-widget-command-encode-context-overlay context))
+         (surface-texture
+           (direct-widget-command-encode-context-surface-texture context))
+         (destination-state
+           (direct-widget-command-encode-context-destination-state context))
+         (source-state
+           (direct-widget-command-encode-context-source-state context)))
+    (encode-gpu-draw-range
+     pass
+     (gethash :image (direct-widget-pipelines overlay))
+     (ensure-direct-widget-image-bind-group
+      overlay (gpu-prepared-image-command-paint command)
+      surface-texture destination-state)
+     (gpu-frame-state-image-buffer source-state)
+     (gpu-prepared-image-command-first-vertex command)
+     (gpu-prepared-image-command-vertex-count command))))
+
+(defmethod encode-gpu-command
+    ((command gpu-prepared-text-command) pass
+     (context direct-widget-command-encode-context))
+  (let* ((overlay
+           (direct-widget-command-encode-context-overlay context))
+         (surface-texture
+           (direct-widget-command-encode-context-surface-texture context))
+         (destination-state
+           (direct-widget-command-encode-context-destination-state context))
+         (source-state
+           (direct-widget-command-encode-context-source-state context)))
+    (encode-gpu-draw-range
+     pass
+     (gethash :text (direct-widget-pipelines overlay))
+     (ensure-world-widget-text-bind-group
+      overlay (gpu-prepared-text-command-atlas command)
+      surface-texture destination-state)
+     (gpu-frame-state-text-buffer source-state)
+     (gpu-prepared-text-command-first-vertex command)
+     (gpu-prepared-text-command-vertex-count command))))
+
 (spv:define-shader widget-relief-world-vertex-specification
     (:stage :vertex
      :inputs ((position :vec3 :location 0)
@@ -985,78 +1116,24 @@ for a wall the answer is the same every frame and costs a few vector ops."
     (when (and commands source-state (widget-overlay-render-state overlay))
       (let* ((frame-state
                (ensure-direct-widget-frame-state overlay surface-texture))
+             (encode-context
+               (make-direct-widget-command-encode-context
+                :overlay overlay
+                :surface-texture surface-texture
+                :destination-state frame-state
+                :source-state source-state))
              (active-clip (list :unset))
              (clip-visible-p t))
+        (declare (dynamic-extent encode-context))
         (dolist (command commands)
-          (let ((clip (gpu-frame-command-clip command)))
+          (let ((clip (gpu-command-clip command)))
             (unless (equal clip active-clip)
               (setf active-clip clip
                     clip-visible-p
                     (set-world-widget-text-scissor
                      pass overlay mirror surface-texture clip))))
           (when clip-visible-p
-            (multiple-value-bind
-                  (pipeline buffer bind-group first-vertex vertex-count)
-                (etypecase command
-                  (gpu-solid-command
-                   (values
-                    (gethash :solid (direct-widget-pipelines overlay))
-                    (gpu-frame-state-vertex-buffer source-state)
-                    (direct-widget-frame-shape-bind-group frame-state)
-                    (gpu-solid-command-first-vertex command)
-                    (gpu-solid-command-vertex-count command)))
-                  (gpu-analytic-command
-                   (values
-                    (gethash :analytic (direct-widget-pipelines overlay))
-                    (gpu-frame-state-analytic-buffer source-state)
-                    (direct-widget-frame-shape-bind-group frame-state)
-                    (gpu-analytic-command-first-vertex command)
-                    (gpu-analytic-command-vertex-count command)))
-                  (gpu-relief-analytic-command
-                   (values
-                    (gethash :relief (direct-widget-pipelines overlay))
-                    (gpu-frame-state-relief-buffer source-state)
-                    (direct-widget-frame-shape-bind-group frame-state)
-                    (gpu-relief-analytic-command-first-vertex command)
-                    (gpu-relief-analytic-command-vertex-count command)))
-                  (gpu-gradient-analytic-command
-                   (values
-                    (gethash :gradient (direct-widget-pipelines overlay))
-                    (gpu-frame-state-gradient-buffer source-state)
-                    (direct-widget-frame-shape-bind-group frame-state)
-                    (gpu-gradient-analytic-command-first-vertex command)
-                    (gpu-gradient-analytic-command-vertex-count command)))
-                  (gpu-prepared-lattice-command
-                   (values
-                    (gethash :lattice (direct-widget-pipelines overlay))
-                    (gpu-frame-state-analytic-buffer source-state)
-                    (ensure-direct-widget-lattice-bind-group
-                     overlay (gpu-prepared-lattice-command-paint command)
-                     surface-texture frame-state)
-                    (gpu-prepared-lattice-command-first-vertex command)
-                    (gpu-prepared-lattice-command-vertex-count command)))
-                  (gpu-prepared-image-command
-                   (values
-                    (gethash :image (direct-widget-pipelines overlay))
-                    (gpu-frame-state-image-buffer source-state)
-                    (ensure-direct-widget-image-bind-group
-                     overlay (gpu-prepared-image-command-paint command)
-                     surface-texture frame-state)
-                    (gpu-prepared-image-command-first-vertex command)
-                    (gpu-prepared-image-command-vertex-count command)))
-                  (gpu-prepared-text-command
-                   (values
-                    (gethash :text (direct-widget-pipelines overlay))
-                    (gpu-frame-state-text-buffer source-state)
-                    (ensure-world-widget-text-bind-group
-                     overlay (gpu-prepared-text-command-atlas command)
-                     surface-texture frame-state)
-                    (gpu-prepared-text-command-first-vertex command)
-                    (gpu-prepared-text-command-vertex-count command))))
-              (luv:set-pipeline pass pipeline)
-              (luv:set-bind-group pass 0 bind-group)
-              (luv:set-vertex-buffer pass 0 buffer)
-              (luv:draw pass vertex-count 1 first-vertex))))
+            (encode-gpu-command command pass encode-context)))
         ;; Overlay encoding continues in the same scene pass.
         (destructuring-bind (width height &rest ignored)
             (luv:gpu-texture-size surface-texture)

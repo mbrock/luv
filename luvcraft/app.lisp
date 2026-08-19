@@ -1,10 +1,10 @@
 ;;; The luvcraft application object and its direct interactions.
 ;;;
-;;; A LUVCRAFT-SESSION owns the canvas, GPU device, world, camera, player, and
-;;; every derived GPU artifact.  This file defines that object plus the
-;;; player-facing verbs: aiming along the view ray, selecting materials, and
-;;; placing or removing blocks.  Chunk streaming lives in streaming.lisp and
-;;; frame rendering in render.lisp.
+;;; A LUVCRAFT-SESSION coordinates the canvas, GPU device, world, camera,
+;;; player, and a LUVCRAFT-RENDERER which solely owns the frame GPU artifacts.
+;;; This file defines that coordinator plus the player-facing verbs: aiming
+;;; along the view ray, selecting materials, and placing or removing blocks.
+;;; Chunk streaming lives in streaming.lisp and frame rendering in render.lisp.
 
 (in-package #:luvcraft)
 
@@ -109,84 +109,8 @@ SHADOW-FRAME-ROWS walks it after the camera in whole texels.")
    (springs :initform nil :accessor luvcraft-session-springs)
    (title-base :initarg :title-base :initform "luvcraft"
                :reader luvcraft-session-title-base)
-   (atlas-texture :initarg :atlas-texture
-                  :accessor luvcraft-session-atlas-texture)
-   (atlas-view :initarg :atlas-view :accessor luvcraft-session-atlas-view)
-   (atlas-sampler :initarg :atlas-sampler
-                  :reader luvcraft-session-atlas-sampler)
-   (normal-atlas-texture :initarg :normal-atlas-texture
-                         :accessor luvcraft-session-normal-atlas-texture)
-   (normal-atlas-view :initarg :normal-atlas-view
-                      :accessor luvcraft-session-normal-atlas-view)
-   ;; The attachments below are the frame's own size rather than the world's,
-   ;; so a window resize replaces all of them together.  RENDER-EXTENT records
-   ;; the size they were made for; a frame that finds the drawable disagreeing
-   ;; with it rebuilds them before encoding anything.
-   (render-extent :initarg :render-extent :initform nil
-                  :accessor luvcraft-session-render-extent)
-   (color-texture :initarg :color-texture
-                  :accessor luvcraft-session-color-texture)
-   (color-view :initarg :color-view :accessor luvcraft-session-color-view)
-   (depth-texture :initarg :depth-texture
-                  :accessor luvcraft-session-depth-texture)
-   (depth-view :initarg :depth-view :accessor luvcraft-session-depth-view)
-   (presentation-texture :initarg :presentation-texture
-                         :accessor luvcraft-session-presentation-texture)
-   (presentation-view :initarg :presentation-view
-                      :accessor luvcraft-session-presentation-view)
-   (shadow-depth-texture :initarg :shadow-depth-texture
-                         :reader luvcraft-session-shadow-depth-texture)
-   (shadow-depth-view :initarg :shadow-depth-view
-                      :reader luvcraft-session-shadow-depth-view)
-   (shadow-depth-sampler :initarg :shadow-depth-sampler
-                         :reader luvcraft-session-shadow-depth-sampler)
-   (shadow-comparison-sampler :initarg :shadow-comparison-sampler
-                              :reader luvcraft-session-shadow-comparison-sampler)
-   (layout :initarg :layout :reader luvcraft-session-layout)
-   (shadow-layout :initarg :shadow-layout
-                  :reader luvcraft-session-shadow-layout)
-   (post-layout :initarg :post-layout :reader luvcraft-session-post-layout)
-   (bloom-layout :initarg :bloom-layout :initform nil
-                 :reader luvcraft-session-bloom-layout)
-   (linear-sampler :initarg :linear-sampler :initform nil
-                   :reader luvcraft-session-linear-sampler)
-   ;; The lens chain ping-pongs between two reduced attachments: the blurred
-   ;; bloom ends on the primary one and the light shafts on the secondary.
-   (bloom-primary-texture :initarg :bloom-primary-texture :initform nil
-                          :accessor luvcraft-session-bloom-primary-texture)
-   (bloom-primary-view :initarg :bloom-primary-view :initform nil
-                       :accessor luvcraft-session-bloom-primary-view)
-   (bloom-secondary-texture :initarg :bloom-secondary-texture :initform nil
-                            :accessor luvcraft-session-bloom-secondary-texture)
-   (bloom-secondary-view :initarg :bloom-secondary-view :initform nil
-                         :accessor luvcraft-session-bloom-secondary-view)
-   (bloom-bright-pipeline :initarg :bloom-bright-pipeline :initform nil
-                          :reader luvcraft-session-bloom-bright-pipeline)
-   (bloom-horizontal-pipeline :initarg :bloom-horizontal-pipeline :initform nil
-                              :reader luvcraft-session-bloom-horizontal-pipeline)
-   (bloom-vertical-pipeline :initarg :bloom-vertical-pipeline :initform nil
-                            :reader luvcraft-session-bloom-vertical-pipeline)
-   (sun-shaft-pipeline :initarg :sun-shaft-pipeline :initform nil
-                       :reader luvcraft-session-sun-shaft-pipeline)
-   (block-pipeline :initarg :block-pipeline
-                   :reader luvcraft-session-block-pipeline)
-   (shadow-pipeline :initarg :shadow-pipeline
-                    :reader luvcraft-session-shadow-pipeline)
-   (sky-vertex-buffer :initarg :sky-vertex-buffer :initform nil
-                      :reader luvcraft-session-sky-vertex-buffer)
-   (sky-pipeline :initarg :sky-pipeline :initform nil
-                 :reader luvcraft-session-sky-pipeline)
-   (crosshair-vertex-buffer
-    :initarg :crosshair-vertex-buffer
-    :reader luvcraft-session-crosshair-vertex-buffer)
-   (cursor-vertex-buffer :initarg :cursor-vertex-buffer :initform nil
-                         :reader luvcraft-session-cursor-vertex-buffer)
-   (crosshair-pipeline :initarg :crosshair-pipeline
-                       :reader luvcraft-session-crosshair-pipeline)
-   (cursor-pipeline :initarg :cursor-pipeline
-                    :reader luvcraft-session-cursor-pipeline)
-   (post-pipeline :initarg :post-pipeline
-                  :reader luvcraft-session-post-pipeline)
+   (renderer :initarg :renderer :initform (make-instance 'luvcraft-renderer)
+             :reader luvcraft-session-renderer)
    (world-text :initarg :world-text :initform nil
                :reader luvcraft-session-world-text)
    (world-text-glyph-cache :initarg :world-text-glyph-cache :initform nil
@@ -206,10 +130,6 @@ SHADOW-FRAME-ROWS walks it after the camera in whole texels.")
                         :accessor luvcraft-session-focus-camera-origin)
    (focus-toggle-tab-down-p
     :initform nil :accessor luvcraft-session-focus-toggle-tab-down-p)
-   (frame-states :initform (make-hash-table :test #'eql)
-                 :reader luvcraft-session-frame-states)
-   (resources :initarg :resources :initform nil
-              :accessor luvcraft-session-resources)
    (movement-intent
     :initform (make-movement-intent)
     :reader luvcraft-session-movement-intent
@@ -248,6 +168,206 @@ of making them click the world again.")
                         :accessor luvcraft-session-physics-accumulator)
    (running-p :initform t :accessor luvcraft-session-running-p))
   (:metaclass luv.arithmetic.records:quantity-class))
+
+;;; Keep the established session-facing renderer vocabulary while making its
+;;; storage and lifecycle belong to one semantic owner.  These are methods,
+;;; rather than captured closures, so a live class redefinition replaces the
+;;; former slot-accessor methods at their ordinary CLOS coordinates.
+(defmacro define-luvcraft-renderer-forwarder
+    (session-accessor renderer-accessor &key setf)
+  `(progn
+     (defmethod ,session-accessor ((session luvcraft-session))
+       (,renderer-accessor (luvcraft-session-renderer session)))
+     ,@(when setf
+         `((defmethod (setf ,session-accessor)
+               (value (session luvcraft-session))
+             (setf (,renderer-accessor (luvcraft-session-renderer session))
+                   value))))))
+
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-atlas-texture luvcraft-renderer-atlas-texture :setf t)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-atlas-view luvcraft-renderer-atlas-view :setf t)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-atlas-sampler luvcraft-renderer-atlas-sampler)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-normal-atlas-texture
+    luvcraft-renderer-normal-atlas-texture :setf t)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-normal-atlas-view luvcraft-renderer-normal-atlas-view
+    :setf t)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-render-extent luvcraft-renderer-render-extent)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-color-texture luvcraft-renderer-color-texture)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-color-view luvcraft-renderer-color-view)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-depth-texture luvcraft-renderer-depth-texture)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-depth-view luvcraft-renderer-depth-view)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-presentation-texture
+    luvcraft-renderer-presentation-texture)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-presentation-view luvcraft-renderer-presentation-view)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-shadow-depth-texture
+    luvcraft-renderer-shadow-depth-texture)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-shadow-depth-view luvcraft-renderer-shadow-depth-view)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-shadow-depth-sampler
+    luvcraft-renderer-shadow-depth-sampler)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-shadow-comparison-sampler
+    luvcraft-renderer-shadow-comparison-sampler)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-layout luvcraft-renderer-layout)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-shadow-layout luvcraft-renderer-shadow-layout)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-post-layout luvcraft-renderer-post-layout)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-bloom-layout luvcraft-renderer-bloom-layout)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-linear-sampler luvcraft-renderer-linear-sampler)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-bloom-primary-texture
+    luvcraft-renderer-bloom-primary-texture)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-bloom-primary-view luvcraft-renderer-bloom-primary-view)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-bloom-secondary-texture
+    luvcraft-renderer-bloom-secondary-texture)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-bloom-secondary-view
+    luvcraft-renderer-bloom-secondary-view)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-bloom-bright-pipeline
+    luvcraft-renderer-bloom-bright-pipeline)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-bloom-horizontal-pipeline
+    luvcraft-renderer-bloom-horizontal-pipeline)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-bloom-vertical-pipeline
+    luvcraft-renderer-bloom-vertical-pipeline)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-sun-shaft-pipeline luvcraft-renderer-sun-shaft-pipeline)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-block-pipeline luvcraft-renderer-block-pipeline)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-shadow-pipeline luvcraft-renderer-shadow-pipeline)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-sky-vertex-buffer luvcraft-renderer-sky-vertex-buffer)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-sky-pipeline luvcraft-renderer-sky-pipeline)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-crosshair-vertex-buffer
+    luvcraft-renderer-crosshair-vertex-buffer)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-cursor-vertex-buffer
+    luvcraft-renderer-cursor-vertex-buffer)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-crosshair-pipeline luvcraft-renderer-crosshair-pipeline)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-cursor-pipeline luvcraft-renderer-cursor-pipeline)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-post-pipeline luvcraft-renderer-post-pipeline)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-frame-states luvcraft-renderer-frame-states)
+
+(defparameter +retired-session-renderer-slot-initargs+
+  '((atlas-texture . :atlas-texture)
+    (atlas-view . :atlas-view)
+    (atlas-sampler . :atlas-sampler)
+    (normal-atlas-texture . :normal-atlas-texture)
+    (normal-atlas-view . :normal-atlas-view)
+    (shadow-depth-texture . :shadow-depth-texture)
+    (shadow-depth-view . :shadow-depth-view)
+    (shadow-depth-sampler . :shadow-depth-sampler)
+    (shadow-comparison-sampler . :shadow-comparison-sampler)
+    (layout . :layout)
+    (shadow-layout . :shadow-layout)
+    (post-layout . :post-layout)
+    (bloom-layout . :bloom-layout)
+    (linear-sampler . :linear-sampler)
+    (bloom-bright-pipeline . :bloom-bright-pipeline)
+    (bloom-horizontal-pipeline . :bloom-horizontal-pipeline)
+    (bloom-vertical-pipeline . :bloom-vertical-pipeline)
+    (sun-shaft-pipeline . :sun-shaft-pipeline)
+    (block-pipeline . :block-pipeline)
+    (shadow-pipeline . :shadow-pipeline)
+    (sky-vertex-buffer . :sky-vertex-buffer)
+    (sky-pipeline . :sky-pipeline)
+    (crosshair-vertex-buffer . :crosshair-vertex-buffer)
+    (cursor-vertex-buffer . :cursor-vertex-buffer)
+    (crosshair-pipeline . :crosshair-pipeline)
+    (cursor-pipeline . :cursor-pipeline)
+    (post-pipeline . :post-pipeline)
+    (frame-states . :frame-states)
+    (resources . :resources))
+  "The former session slots transferred into a renderer by live migration.")
+
+(defparameter +retired-session-frame-attachment-slots+
+  '((render-extent . :render-extent)
+    (color-texture . :color-texture)
+    (color-view . :color-view)
+    (depth-texture . :depth-texture)
+    (depth-view . :depth-view)
+    (presentation-texture . :presentation-texture)
+    (presentation-view . :presentation-view)
+    (bloom-primary-texture . :bloom-primary-texture)
+    (bloom-primary-view . :bloom-primary-view)
+    (bloom-secondary-texture . :bloom-secondary-texture)
+    (bloom-secondary-view . :bloom-secondary-view))
+  "The former session slots published together as one attachment cohort.")
+
+(defun make-luvcraft-renderer-from-retired-session-slots
+    (session retired-values)
+  "Adopt a pre-renderer SESSION's discarded slot values into one owner.
+
+RETIRED-VALUES is the property list supplied by
+UPDATE-INSTANCE-FOR-REDEFINED-CLASS.  Unbound old slots remain unbound in the
+new renderer; owned resource and frame-state collections retain identity."
+  (let ((missing (gensym "MISSING"))
+        (initargs nil)
+        (attachments nil))
+    (dolist (mapping +retired-session-renderer-slot-initargs+)
+      (let ((value (getf retired-values (car mapping) missing)))
+        (unless (eq value missing)
+          (setf initargs (list* (cdr mapping) value initargs)))))
+    (dolist (mapping +retired-session-frame-attachment-slots+)
+      (let ((value (getf retired-values (car mapping) missing)))
+        (unless (eq value missing)
+          (setf attachments (list* (cdr mapping) value attachments)))))
+    (when attachments
+      (setf initargs (list* :frame-attachments attachments initargs)))
+    (dolist (mapping '((device . :device) (context . :context)))
+      (when (slot-boundp session (car mapping))
+        (setf initargs
+              (list* (cdr mapping)
+                     (slot-value session (car mapping))
+                     initargs))))
+    (apply #'make-instance 'luvcraft-renderer initargs)))
+
+(defmethod update-instance-for-redefined-class :after
+    ((session luvcraft-session) added-slots discarded-slots retired-values
+     &rest initargs)
+  (declare (ignore initargs))
+  (when (and (member 'renderer added-slots)
+             (intersection discarded-slots
+                           (append
+                            (mapcar #'car
+                                    +retired-session-renderer-slot-initargs+)
+                            (mapcar #'car
+                                    +retired-session-frame-attachment-slots+))))
+    ;; A running game is valuable state.  Moving the ownership boundary must
+    ;; not require abandoning it or leave its old GPU objects unreachable.
+    ;; See #V9VH79.
+    (setf (slot-value session 'renderer)
+          (make-luvcraft-renderer-from-retired-session-slots
+           session retired-values))))
 
 (defgeneric encode-luvcraft-overlay (overlay session pass surface-texture)
   (:documentation
@@ -689,27 +809,19 @@ the terrain the ray meets first is what the player is looking at."
    (luvcraft-session-post-pipeline session)))
 
 (defun luvcraft-session-live-shader-pipelines (session)
-  "Every live shader pipeline SESSION owns, the optional ones included."
+  "Every live shader pipeline coordinated by SESSION, optional ones included."
   (remove nil
-          (list* (luvcraft-session-block-pipeline session)
-                 (luvcraft-session-shadow-pipeline session)
-                 (luvcraft-session-sky-pipeline session)
-                 (luvcraft-session-crosshair-pipeline session)
-                 (luvcraft-session-cursor-pipeline session)
-                 (luvcraft-session-post-pipeline session)
-                 (luvcraft-session-bloom-bright-pipeline session)
-                 (luvcraft-session-bloom-horizontal-pipeline session)
-                 (luvcraft-session-bloom-vertical-pipeline session)
-                 (luvcraft-session-sun-shaft-pipeline session)
-                 (and (luvcraft-session-world-text session)
+          (append
+           (luvcraft-renderer-pipelines
+            (luvcraft-session-renderer session))
+           (list (and (luvcraft-session-world-text session)
                       (world-text-run-pipeline
                        (luvcraft-session-world-text session)))
                  (and (luvcraft-session-video-screen session)
                       (video-screen-pipeline
-                       (luvcraft-session-video-screen session)))
-                 (loop for overlay in (luvcraft-session-overlays session)
-                       append (luvcraft-overlay-live-shader-pipelines
-                               overlay)))))
+                       (luvcraft-session-video-screen session))))
+           (loop for overlay in (luvcraft-session-overlays session)
+                 append (luvcraft-overlay-live-shader-pipelines overlay)))))
 
 (defun refresh-luvcraft-shaders (session)
   "Install any successfully redefined block-world shader methods."

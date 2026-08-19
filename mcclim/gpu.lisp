@@ -38,6 +38,39 @@
 (defstruct gpu-prepared-text-command
   atlas first-vertex vertex-count clip)
 
+(defstruct gpu-command-offsets
+  "Base vertex indices for the dense streams joined into one mirror frame."
+  vertex analytic relief gradient image)
+
+(defstruct gpu-frame-build
+  "Mutable frame-local data shared while semantic commands are prepared."
+  text-data width height)
+
+(defgeneric rebase-gpu-command (command offsets)
+  (:documentation
+   "Copy COMMAND with its dense-stream range rebased by OFFSETS.
+
+Commands without dense-stream ranges may return themselves.  There is no
+default method: every semantic command family must state its compose rule."))
+
+(defgeneric prepare-gpu-command (command mirror frame-build)
+  (:documentation
+   "Prepare semantic COMMAND for MIRROR within FRAME-BUILD.
+
+Return the command to encode, or NIL when it produces no draw.  There is no
+default method so adding a semantic command requires an explicit preparation
+decision."))
+
+(defgeneric gpu-command-clip (command)
+  (:documentation "Return COMMAND's logical-device clip rectangle, or NIL."))
+
+(defgeneric encode-gpu-command (command pass frame-state)
+  (:documentation
+   "Encode one prepared COMMAND into PASS using destination FRAME-STATE.
+
+Dispatch is at command grain.  Vertex and texture payloads remain in the
+dense buffers owned by FRAME-STATE."))
+
 (defgeneric gpu-command-rasterized-p (compositor command)
   (:documentation
    "Whether COMPOSITOR wants prepared COMMAND in the mirror texture.
@@ -90,7 +123,8 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
        ,@body)))
 
 (defclass gpu-mirror-frame-state ()
-  ((view :initarg :view :initform nil :accessor gpu-frame-state-view)
+  ((mirror :initarg :mirror :initform nil :accessor gpu-frame-state-mirror)
+   (view :initarg :view :initform nil :accessor gpu-frame-state-view)
    (vertex-buffer :initarg :vertex-buffer :initform nil
                   :accessor gpu-frame-state-vertex-buffer)
    (vertex-capacity :initarg :vertex-capacity :initform 0
@@ -1020,6 +1054,61 @@ included, is a single coverage computation, so nothing in it can seam."
         (sheet-medium sheet))
       (sheet-medium sheet)))
 
+(defmethod rebase-gpu-command
+    ((command gpu-solid-command) offsets)
+  (make-gpu-solid-command
+   :first-vertex (+ (gpu-command-offsets-vertex offsets)
+                    (gpu-solid-command-first-vertex command))
+   :vertex-count (gpu-solid-command-vertex-count command)
+   :clip (gpu-solid-command-clip command)))
+
+(defmethod rebase-gpu-command
+    ((command gpu-analytic-command) offsets)
+  (make-gpu-analytic-command
+   :first-vertex (+ (gpu-command-offsets-analytic offsets)
+                    (gpu-analytic-command-first-vertex command))
+   :vertex-count (gpu-analytic-command-vertex-count command)
+   :clip (gpu-analytic-command-clip command)))
+
+(defmethod rebase-gpu-command
+    ((command gpu-lattice-command) offsets)
+  (make-gpu-lattice-command
+   :modules (gpu-lattice-command-modules command)
+   :first-vertex (+ (gpu-command-offsets-analytic offsets)
+                    (gpu-lattice-command-first-vertex command))
+   :vertex-count (gpu-lattice-command-vertex-count command)
+   :clip (gpu-lattice-command-clip command)))
+
+(defmethod rebase-gpu-command
+    ((command gpu-relief-analytic-command) offsets)
+  (make-gpu-relief-analytic-command
+   :first-vertex (+ (gpu-command-offsets-relief offsets)
+                    (gpu-relief-analytic-command-first-vertex command))
+   :vertex-count (gpu-relief-analytic-command-vertex-count command)
+   :clip (gpu-relief-analytic-command-clip command)))
+
+(defmethod rebase-gpu-command
+    ((command gpu-gradient-analytic-command) offsets)
+  (make-gpu-gradient-analytic-command
+   :first-vertex (+ (gpu-command-offsets-gradient offsets)
+                    (gpu-gradient-analytic-command-first-vertex command))
+   :vertex-count (gpu-gradient-analytic-command-vertex-count command)
+   :clip (gpu-gradient-analytic-command-clip command)))
+
+(defmethod rebase-gpu-command
+    ((command gpu-image-command) offsets)
+  (make-gpu-image-command
+   :design (gpu-image-command-design command)
+   :first-vertex (+ (gpu-command-offsets-image offsets)
+                    (gpu-image-command-first-vertex command))
+   :vertex-count (gpu-image-command-vertex-count command)
+   :clip (gpu-image-command-clip command)))
+
+(defmethod rebase-gpu-command
+    ((command gpu-text-command) offsets)
+  (declare (ignore offsets))
+  command)
+
 (luv:zdefun (compose-gpu-mirror-media :zone :mcluv/compose) (mirror)
   "Join MIRROR's current pane-local drawing streams in painter order."
   (let* ((sheet (mirror-sheet mirror))
@@ -1048,71 +1137,20 @@ included, is a single coverage computation, so nothing in it can seam."
             (fill-pointer (gpu-medium-image-vertices target-medium)) 0
             (fill-pointer (gpu-medium-commands target-medium)) 0)
       (dolist (snapshot snapshots)
-        (let ((vertex-offset
-                (/ (length (gpu-medium-vertices target-medium)) 6))
-              (analytic-offset
-                (/ (length (gpu-medium-analytic-vertices target-medium)) 12))
-              (relief-offset
-                (/ (length (gpu-medium-relief-vertices target-medium)) 15))
-              (gradient-offset
-                (/ (length (gpu-medium-gradient-vertices target-medium)) 21))
-              (image-offset
-                (/ (length (gpu-medium-image-vertices target-medium)) 12)))
+        (let ((offsets
+                (make-gpu-command-offsets
+                 :vertex (/ (length (gpu-medium-vertices target-medium)) 6)
+                 :analytic
+                 (/ (length (gpu-medium-analytic-vertices target-medium)) 12)
+                 :relief
+                 (/ (length (gpu-medium-relief-vertices target-medium)) 15)
+                 :gradient
+                 (/ (length (gpu-medium-gradient-vertices target-medium)) 21)
+                 :image
+                 (/ (length (gpu-medium-image-vertices target-medium)) 12))))
           (loop for command across (sixth snapshot)
                 do (vector-push-extend
-                    (etypecase command
-                      (gpu-solid-command
-                      (make-gpu-solid-command
-                        :first-vertex
-                        (+ vertex-offset
-                           (gpu-solid-command-first-vertex command))
-                        :vertex-count
-                        (gpu-solid-command-vertex-count command)
-                        :clip (gpu-solid-command-clip command)))
-                      (gpu-analytic-command
-                       (make-gpu-analytic-command
-                        :first-vertex
-                        (+ analytic-offset
-                           (gpu-analytic-command-first-vertex command))
-                        :vertex-count
-                        (gpu-analytic-command-vertex-count command)
-                        :clip (gpu-analytic-command-clip command)))
-                      (gpu-lattice-command
-                       (make-gpu-lattice-command
-                        :modules (gpu-lattice-command-modules command)
-                        :first-vertex
-                        (+ analytic-offset
-                           (gpu-lattice-command-first-vertex command))
-                        :vertex-count
-                        (gpu-lattice-command-vertex-count command)
-                        :clip (gpu-lattice-command-clip command)))
-                      (gpu-relief-analytic-command
-                       (make-gpu-relief-analytic-command
-                        :first-vertex
-                        (+ relief-offset
-                           (gpu-relief-analytic-command-first-vertex command))
-                        :vertex-count
-                        (gpu-relief-analytic-command-vertex-count command)
-                        :clip (gpu-relief-analytic-command-clip command)))
-                      (gpu-gradient-analytic-command
-                       (make-gpu-gradient-analytic-command
-                        :first-vertex
-                        (+ gradient-offset
-                           (gpu-gradient-analytic-command-first-vertex
-                            command))
-                        :vertex-count
-                        (gpu-gradient-analytic-command-vertex-count command)
-                        :clip (gpu-gradient-analytic-command-clip command)))
-                      (gpu-image-command
-                       (make-gpu-image-command
-                        :design (gpu-image-command-design command)
-                        :first-vertex
-                        (+ image-offset
-                           (gpu-image-command-first-vertex command))
-                        :vertex-count
-                        (gpu-image-command-vertex-count command)
-                        :clip (gpu-image-command-clip command)))
-                      (gpu-text-command command))
+                    (rebase-gpu-command command offsets)
                     (gpu-medium-commands target-medium))))
         (loop for value across (first snapshot)
               do (vector-push-extend
@@ -1894,17 +1932,24 @@ family name adopted."
         (setf state
               (make-instance
                'gpu-mirror-frame-state
+               :mirror mirror
                :view
                (luv:create
                 (luv:context-device context)
                 (luv:make-texture-view-descriptor :texture surface)))
               (gethash key (gpu-mirror-frame-states mirror)) state))
+    ;; Also repairs states retained across a live class redefinition which
+    ;; introduced the owner slot.
+    (setf (gpu-frame-state-mirror state) mirror)
     state))
 
 (defun ensure-embedded-gpu-mirror-frame-state (mirror)
-  (or (gpu-mirror-prepared-frame-state mirror)
-      (setf (gpu-mirror-prepared-frame-state mirror)
-            (make-instance 'gpu-mirror-frame-state))))
+  (let ((state
+          (or (gpu-mirror-prepared-frame-state mirror)
+              (setf (gpu-mirror-prepared-frame-state mirror)
+                    (make-instance 'gpu-mirror-frame-state :mirror mirror)))))
+    (setf (gpu-frame-state-mirror state) mirror)
+    state))
 
 (luv:zdefun (upload-gpu-mirror-frame-data
              :zone :mcluv/upload
@@ -2303,59 +2348,193 @@ solid ink."
                  :vertex-count (- (/ (length data) 18) first-vertex)
                  :clip (gpu-text-command-clip command))))))))))
 
+(defmethod prepare-gpu-command
+    ((command gpu-solid-command) mirror frame-build)
+  (declare (ignore mirror frame-build))
+  command)
+
+(defmethod prepare-gpu-command
+    ((command gpu-analytic-command) mirror frame-build)
+  (declare (ignore mirror frame-build))
+  command)
+
+(defmethod prepare-gpu-command
+    ((command gpu-relief-analytic-command) mirror frame-build)
+  (declare (ignore mirror frame-build))
+  command)
+
+(defmethod prepare-gpu-command
+    ((command gpu-gradient-analytic-command) mirror frame-build)
+  (declare (ignore mirror frame-build))
+  command)
+
+(defmethod prepare-gpu-command
+    ((command gpu-lattice-command) mirror frame-build)
+  (declare (ignore frame-build))
+  (make-gpu-prepared-lattice-command
+   :paint (ensure-gpu-lattice-paint
+           mirror (gpu-lattice-command-modules command))
+   :first-vertex (gpu-lattice-command-first-vertex command)
+   :vertex-count (gpu-lattice-command-vertex-count command)
+   :clip (gpu-lattice-command-clip command)))
+
+(defmethod prepare-gpu-command
+    ((command gpu-image-command) mirror frame-build)
+  (declare (ignore frame-build))
+  (make-gpu-prepared-image-command
+   :paint (ensure-gpu-image-paint mirror (gpu-image-command-design command))
+   :first-vertex (gpu-image-command-first-vertex command)
+   :vertex-count (gpu-image-command-vertex-count command)
+   :clip (gpu-image-command-clip command)))
+
+(defmethod prepare-gpu-command
+    ((command gpu-text-command) mirror frame-build)
+  (append-gpu-text-command
+   mirror command
+   (gpu-frame-build-text-data frame-build)
+   (gpu-frame-build-width frame-build)
+   (gpu-frame-build-height frame-build)))
+
 (luv:zdefun (prepare-gpu-frame-commands
              :zone :mcluv/prepare
              :value (length semantic-commands))
     (mirror semantic-commands)
   (multiple-value-bind (width height)
         (gpu-mirror-logical-size mirror)
-      (let ((text-data
-              (make-array 1024 :element-type 'single-float
-                          :adjustable t :fill-pointer 0))
-            commands)
+      (let* ((text-data
+               (make-array 1024 :element-type 'single-float
+                           :adjustable t :fill-pointer 0))
+             (frame-build
+               (make-gpu-frame-build
+                :text-data text-data :width width :height height))
+             commands)
         (loop for command across semantic-commands
-              for prepared =
-                (etypecase command
-                  (gpu-solid-command command)
-                  (gpu-analytic-command command)
-                  (gpu-relief-analytic-command command)
-                  (gpu-gradient-analytic-command command)
-                  (gpu-lattice-command
-                   (make-gpu-prepared-lattice-command
-                    :paint
-                    (ensure-gpu-lattice-paint
-                     mirror (gpu-lattice-command-modules command))
-                    :first-vertex (gpu-lattice-command-first-vertex command)
-                    :vertex-count (gpu-lattice-command-vertex-count command)
-                    :clip (gpu-lattice-command-clip command)))
-                  (gpu-image-command
-                   (make-gpu-prepared-image-command
-                    :paint
-                    (ensure-gpu-image-paint
-                     mirror (gpu-image-command-design command))
-                    :first-vertex (gpu-image-command-first-vertex command)
-                    :vertex-count (gpu-image-command-vertex-count command)
-                    :clip (gpu-image-command-clip command)))
-                  (gpu-text-command
-                   (append-gpu-text-command
-                    mirror command text-data width height)))
+              for prepared = (prepare-gpu-command command mirror frame-build)
               when prepared do (push prepared commands))
         (values (nreverse commands) text-data))))
 
-(defun gpu-frame-command-clip (command)
-  (etypecase command
-    (gpu-solid-command (gpu-solid-command-clip command))
-    (gpu-analytic-command (gpu-analytic-command-clip command))
-    (gpu-relief-analytic-command
-     (gpu-relief-analytic-command-clip command))
-    (gpu-gradient-analytic-command
-     (gpu-gradient-analytic-command-clip command))
-    (gpu-prepared-lattice-command
-     (gpu-prepared-lattice-command-clip command))
-    (gpu-prepared-image-command
-     (gpu-prepared-image-command-clip command))
-    (gpu-prepared-text-command
-     (gpu-prepared-text-command-clip command))))
+(defmethod gpu-command-clip ((command gpu-solid-command))
+  (gpu-solid-command-clip command))
+
+(defmethod gpu-command-clip ((command gpu-analytic-command))
+  (gpu-analytic-command-clip command))
+
+(defmethod gpu-command-clip ((command gpu-relief-analytic-command))
+  (gpu-relief-analytic-command-clip command))
+
+(defmethod gpu-command-clip ((command gpu-gradient-analytic-command))
+  (gpu-gradient-analytic-command-clip command))
+
+(defmethod gpu-command-clip ((command gpu-lattice-command))
+  (gpu-lattice-command-clip command))
+
+(defmethod gpu-command-clip ((command gpu-prepared-lattice-command))
+  (gpu-prepared-lattice-command-clip command))
+
+(defmethod gpu-command-clip ((command gpu-image-command))
+  (gpu-image-command-clip command))
+
+(defmethod gpu-command-clip ((command gpu-prepared-image-command))
+  (gpu-prepared-image-command-clip command))
+
+(defmethod gpu-command-clip ((command gpu-text-command))
+  (gpu-text-command-clip command))
+
+(defmethod gpu-command-clip ((command gpu-prepared-text-command))
+  (gpu-prepared-text-command-clip command))
+
+(defun encode-gpu-draw-range
+    (pass pipeline bind-group buffer first-vertex vertex-count)
+  "Bind one prepared command's resources and draw its dense vertex range."
+  (luv:set-pipeline pass pipeline)
+  (luv:set-bind-group pass 0 bind-group)
+  (luv:set-vertex-buffer pass 0 buffer)
+  (luv:draw pass vertex-count 1 first-vertex))
+
+(defmethod encode-gpu-command
+    ((command gpu-solid-command) pass (state gpu-mirror-frame-state))
+  (let ((mirror (gpu-frame-state-mirror state)))
+    (encode-gpu-draw-range
+     pass
+     (gpu-mirror-pipeline mirror)
+     (gpu-mirror-bind-group mirror)
+     (gpu-frame-state-vertex-buffer state)
+     (gpu-solid-command-first-vertex command)
+     (gpu-solid-command-vertex-count command))))
+
+(defmethod encode-gpu-command
+    ((command gpu-analytic-command) pass (state gpu-mirror-frame-state))
+  (let ((mirror (gpu-frame-state-mirror state)))
+    (encode-gpu-draw-range
+     pass
+     (gpu-mirror-analytic-pipeline mirror)
+     (gpu-mirror-bind-group mirror)
+     (gpu-frame-state-analytic-buffer state)
+     (gpu-analytic-command-first-vertex command)
+     (gpu-analytic-command-vertex-count command))))
+
+(defmethod encode-gpu-command
+    ((command gpu-relief-analytic-command) pass
+     (state gpu-mirror-frame-state))
+  (let ((mirror (gpu-frame-state-mirror state)))
+    (encode-gpu-draw-range
+     pass
+     (gpu-mirror-relief-pipeline mirror)
+     (gpu-mirror-bind-group mirror)
+     (gpu-frame-state-relief-buffer state)
+     (gpu-relief-analytic-command-first-vertex command)
+     (gpu-relief-analytic-command-vertex-count command))))
+
+(defmethod encode-gpu-command
+    ((command gpu-gradient-analytic-command) pass
+     (state gpu-mirror-frame-state))
+  (let ((mirror (gpu-frame-state-mirror state)))
+    (encode-gpu-draw-range
+     pass
+     (gpu-mirror-gradient-analytic-pipeline mirror)
+     (gpu-mirror-bind-group mirror)
+     (gpu-frame-state-gradient-buffer state)
+     (gpu-gradient-analytic-command-first-vertex command)
+     (gpu-gradient-analytic-command-vertex-count command))))
+
+(defmethod encode-gpu-command
+    ((command gpu-prepared-lattice-command) pass
+     (state gpu-mirror-frame-state))
+  (let ((mirror (gpu-frame-state-mirror state)))
+    (encode-gpu-draw-range
+     pass
+     (gpu-mirror-lattice-pipeline mirror)
+     (gpu-lattice-paint-bind-group
+      (gpu-prepared-lattice-command-paint command))
+     (gpu-frame-state-analytic-buffer state)
+     (gpu-prepared-lattice-command-first-vertex command)
+     (gpu-prepared-lattice-command-vertex-count command))))
+
+(defmethod encode-gpu-command
+    ((command gpu-prepared-image-command) pass
+     (state gpu-mirror-frame-state))
+  (let ((mirror (gpu-frame-state-mirror state)))
+    (encode-gpu-draw-range
+     pass
+     (gpu-mirror-image-pipeline mirror)
+     (gpu-image-paint-bind-group
+      (gpu-prepared-image-command-paint command))
+     (gpu-frame-state-image-buffer state)
+     (gpu-prepared-image-command-first-vertex command)
+     (gpu-prepared-image-command-vertex-count command))))
+
+(defmethod encode-gpu-command
+    ((command gpu-prepared-text-command) pass
+     (state gpu-mirror-frame-state))
+  (let ((mirror (gpu-frame-state-mirror state)))
+    (encode-gpu-draw-range
+     pass
+     (gpu-mirror-text-pipeline mirror)
+     (ensure-gpu-text-bind-group
+      mirror (gpu-prepared-text-command-atlas command))
+     (gpu-frame-state-text-buffer state)
+     (gpu-prepared-text-command-first-vertex command)
+     (gpu-prepared-text-command-vertex-count command))))
 
 (defun set-gpu-frame-scissor (pass mirror surface clip)
   "Encode CLIP in physical drawable pixels and return whether it is nonempty."
@@ -2525,7 +2704,7 @@ solid ink."
                    (let ((active-clip (list :unset))
                          (active-clip-visible-p t))
                      (dolist (command commands)
-                       (let ((clip (gpu-frame-command-clip command)))
+                       (let ((clip (gpu-command-clip command)))
                          (unless (equal clip active-clip)
                            (setf active-clip clip)
                            (setf active-clip-visible-p
@@ -2534,94 +2713,7 @@ solid ink."
                        (when (and active-clip-visible-p
                                   (gpu-command-rasterized-p
                                    (mirror-compositor mirror) command))
-                         (etypecase command
-                           (gpu-solid-command
-                            (luv:set-pipeline
-                             pass (gpu-mirror-pipeline mirror))
-                            (luv:set-bind-group
-                             pass 0 (gpu-mirror-bind-group mirror))
-                            (luv:set-vertex-buffer pass 0 buffer)
-                            (luv:draw
-                             pass (gpu-solid-command-vertex-count command) 1
-                             (gpu-solid-command-first-vertex command)))
-                           (gpu-analytic-command
-                            (luv:set-pipeline
-                             pass (gpu-mirror-analytic-pipeline mirror))
-                            (luv:set-bind-group
-                             pass 0 (gpu-mirror-bind-group mirror))
-                            (luv:set-vertex-buffer pass 0 analytic-buffer)
-                            (luv:draw
-                             pass (gpu-analytic-command-vertex-count command) 1
-                             (gpu-analytic-command-first-vertex command)))
-                           (gpu-relief-analytic-command
-                            (luv:set-pipeline
-                             pass (gpu-mirror-relief-pipeline mirror))
-                            (luv:set-bind-group
-                             pass 0 (gpu-mirror-bind-group mirror))
-                            (luv:set-vertex-buffer pass 0 relief-buffer)
-                            (luv:draw
-                             pass
-                             (gpu-relief-analytic-command-vertex-count command)
-                             1
-                             (gpu-relief-analytic-command-first-vertex
-                              command)))
-                           (gpu-gradient-analytic-command
-                            (luv:set-pipeline
-                             pass
-                             (gpu-mirror-gradient-analytic-pipeline mirror))
-                            (luv:set-bind-group
-                             pass 0 (gpu-mirror-bind-group mirror))
-                            (luv:set-vertex-buffer pass 0 gradient-buffer)
-                            (luv:draw
-                             pass
-                             (gpu-gradient-analytic-command-vertex-count
-                              command)
-                             1
-                             (gpu-gradient-analytic-command-first-vertex
-                              command)))
-                           (gpu-prepared-lattice-command
-                            (luv:set-pipeline
-                             pass (gpu-mirror-lattice-pipeline mirror))
-                            (luv:set-bind-group
-                             pass 0
-                             (gpu-lattice-paint-bind-group
-                              (gpu-prepared-lattice-command-paint command)))
-                            (luv:set-vertex-buffer pass 0 analytic-buffer)
-                            (luv:draw
-                             pass
-                             (gpu-prepared-lattice-command-vertex-count
-                              command)
-                             1
-                             (gpu-prepared-lattice-command-first-vertex
-                              command)))
-                           (gpu-prepared-image-command
-                            (luv:set-pipeline
-                             pass (gpu-mirror-image-pipeline mirror))
-                            (luv:set-bind-group
-                             pass 0
-                             (gpu-image-paint-bind-group
-                              (gpu-prepared-image-command-paint command)))
-                            (luv:set-vertex-buffer pass 0 image-buffer)
-                            (luv:draw
-                             pass
-                             (gpu-prepared-image-command-vertex-count command)
-                             1
-                             (gpu-prepared-image-command-first-vertex command)))
-                           (gpu-prepared-text-command
-                            (luv:set-pipeline
-                             pass (gpu-mirror-text-pipeline mirror))
-                            (luv:set-bind-group
-                             pass 0
-                             (ensure-gpu-text-bind-group
-                              mirror
-                              (gpu-prepared-text-command-atlas command)))
-                            (luv:set-vertex-buffer pass 0 text-buffer)
-                            (luv:draw
-                             pass
-                             (gpu-prepared-text-command-vertex-count command)
-                             1
-                             (gpu-prepared-text-command-first-vertex
-                              command)))))))
+                         (encode-gpu-command command pass state))))
                    (luv:end-pass pass)
                    (when readback-buffer
                      (luv:encode

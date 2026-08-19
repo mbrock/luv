@@ -1774,7 +1774,6 @@ negative inside.  RADIUS is the corner radius in world cells."
             :quantity :linear-rgba :unit :one))
          (rgba (mix normal-rgba shadow-rgba shadow-diagnostic)))
     (set-output color-output rgba)))
-
 (defun block-world-fragment-specification ()
   (shader-specification-for :block-surface :fragment))
 
@@ -2893,57 +2892,3 @@ disappeared into a dark background."
             (vec4 (* ink body) alpha)
             :quantity :linear-rgba :unit :one)))
     (set-output color-output rgba)))
-
-
-(defun block-world-crosshair-vertex-module ()
-  "Pass screen-space crosshair vertices and their ink to the fragment stage."
-  (make-instance
-   'spir-v-module
-   :entry-points
-   (list (make-instance
-          'spir-v-entry-point :execution-model 'vertex
-          :function '%main
-          :interfaces '(%screen-position %ink %position %ink-output)))
-   :annotations
-   '((decorate %screen-position location 0)
-     (decorate %ink location 1)
-     (decorate %position built-in (enum built-in position))
-     (decorate %ink-output location 0))
-   :global-declarations
-   '((%void type-void)
-     (%float type-float 32)
-     (%vec3 type-vector %float 3)
-     (%vec4 type-vector %float 4)
-     (%input-vec3-pointer type-pointer input %vec3)
-     (%output-vec3-pointer type-pointer output %vec3)
-     (%output-vec4-pointer type-pointer output %vec4)
-     (%function-type type-function %void)
-     (%one constant %float 1.0)
-     (%screen-position variable %input-vec3-pointer input)
-     (%ink variable %input-vec3-pointer input)
-     (%position variable %output-vec4-pointer output)
-     (%ink-output variable %output-vec3-pointer output))
-   :function-definitions
-   (list
-    (make-instance
-     'spir-v-function-definition
-     :result-id '%main :return-type '%void
-     :function-type '%function-type
-     :basic-blocks
-     (list
-      (make-instance
-       'spir-v-basic-block :label '%entry
-       :instructions
-       '((%screen load %vec3 %screen-position)
-         (%ink-value load %vec3 %ink)
-         (%screen-x composite-extract %float %screen 0)
-         (%screen-y composite-extract %float %screen 1)
-         (%screen-z composite-extract %float %screen 2)
-         (%clip-position composite-construct
-                         %vec4 %screen-x %screen-y %screen-z %one)
-         (store %position %clip-position)
-         (store %ink-output %ink-value)
-         (return))))))))
-
-(defun block-world-crosshair-vertex-shader ()
-  (assemble-spir-v-module (block-world-crosshair-vertex-module)))

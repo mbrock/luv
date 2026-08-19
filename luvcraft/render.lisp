@@ -4,7 +4,7 @@
 ;;; replacement: shader refresh, mesh publication, and uniform updates all
 ;;; happen here, on the thread that owns the swapchain.  This file also owns
 ;;; canvas event handling and the START/STOP pair that creates and releases
-;;; every GPU resource the application uses.
+;;; the renderer and the other explicitly owned application components.
 
 (in-package #:luvcraft)
 
@@ -41,6 +41,24 @@
                                :reader luvcraft-frame-bloom-secondary-bind-group)
    (world-text-bind-groups :initarg :world-text-bind-groups :initform #()
                            :reader luvcraft-frame-world-text-bind-groups)))
+
+(defun luvcraft-frame-state-resources (state)
+  "Return the unique GPU resources retained by one drawable frame STATE."
+  (remove-duplicates
+   (list* (luvcraft-frame-scene-bind-group state)
+          (luvcraft-frame-shadow-bind-group state)
+          (luvcraft-frame-post-bind-group state)
+          (luvcraft-frame-bloom-scene-bind-group state)
+          (luvcraft-frame-bloom-primary-bind-group state)
+          (luvcraft-frame-bloom-secondary-bind-group state)
+          (luvcraft-frame-post-uniform-buffer state)
+          (luvcraft-frame-particle-vertex-buffer state)
+          (luvcraft-frame-critter-vertex-buffer state)
+          (luvcraft-frame-physics-vertex-buffer state)
+          (luvcraft-frame-body-vertex-buffer state)
+          (luvcraft-frame-uniform-buffer state)
+          (coerce (luvcraft-frame-world-text-bind-groups state) 'list))
+   :test #'eq))
 
 (defconstant +block-world-crosshair-vertex-count+ 24)
 (defconstant +luvcraft-cursor-vertex-count+ 6)
@@ -331,12 +349,13 @@ some other space; the environment lanes are packed the same either way."
         ;; The texture resource owns atlas extent.  Meshes retain only a tile
         ;; offset under the mapping which painted that resource, so replacing
         ;; it with a wider atlas needs no remesh.
-        (emit (if (slot-boundp session 'atlas-texture)
-                  (first (gpu-texture-size
-                          (luvcraft-session-atlas-texture session)))
-                  (* +block-atlas-tile-size+
-                     *block-atlas-tile-capacity*))
-              0.0 0.0 0.0)
+        (let ((renderer (luvcraft-session-renderer session)))
+          (emit (if (slot-boundp renderer 'atlas-texture)
+                    (first (gpu-texture-size
+                            (luvcraft-renderer-atlas-texture renderer)))
+                    (* +block-atlas-tile-size+
+                       *block-atlas-tile-capacity*))
+                0.0 0.0 0.0))
         (multiple-value-bind (rows anchor)
             (shadow-frame-rows (luvcraft-session-camera session) sky
                                (luvcraft-session-shadow-anchor session))
@@ -542,20 +561,22 @@ the frame uniform cannot silently diverge between shader and host."
                      (spv:shader-uniform-block-members block))))
     size))
 
-(defun remember-luvcraft-resource (session resource)
-  (push resource (luvcraft-session-resources session))
+(defun remember-luvcraft-renderer-resource (renderer resource)
+  "Adopt RESOURCE into RENDERER's single release inventory."
+  (push resource (luvcraft-renderer-resources renderer))
   resource)
 
-(defun forget-luvcraft-resource (session resource)
-  "Drop RESOURCE from SESSION's release list, for a caller releasing it now."
-  (setf (luvcraft-session-resources session)
-        (delete resource (luvcraft-session-resources session) :test #'eq))
+(defun forget-luvcraft-renderer-resource (renderer resource)
+  "Drop RESOURCE from RENDERER's inventory for immediate release."
+  (setf (luvcraft-renderer-resources renderer)
+        (delete resource (luvcraft-renderer-resources renderer) :test #'eq))
   resource)
 
-(defun release-luvcraft-resource (session resource)
+(defun release-luvcraft-renderer-resource (renderer resource)
   (when resource
-    (forget-luvcraft-resource session resource)
-    (destroy resource))
+    ;; A failed destruction must leave the only retry handle with its owner.
+    (destroy resource)
+    (forget-luvcraft-renderer-resource renderer resource))
   (values))
 
 (defun make-luvcraft-bloom-bind-group (session uniform-buffer view label)
@@ -636,48 +657,49 @@ lands in a presentation image that is finally copied onto the drawable."
                            :presentation-texture presentation-texture
                            :presentation-view presentation-view))))))
         (unless completed-p
-          (mapc #'destroy made))))))
+          ;; Preserve the originating creation failure and make a best effort
+          ;; to retire every partial candidate, even if one DESTROY also errs.
+          (with-release-warnings
+            (dolist (resource made)
+              (releasing :frame-attachment-candidate
+                (destroy resource)))))))))
 
-(defun install-luvcraft-frame-attachments (session attachments)
-  "Adopt ATTACHMENTS as SESSION's frame-sized images, releasing them with it."
-  (flet ((adopt (key)
-           (remember-luvcraft-resource session (getf attachments key))))
-    (setf (luvcraft-session-color-texture session) (adopt :color-texture)
-          (luvcraft-session-color-view session) (adopt :color-view)
-          (luvcraft-session-depth-texture session) (adopt :depth-texture)
-          (luvcraft-session-depth-view session) (adopt :depth-view)
-          (luvcraft-session-bloom-primary-texture session)
-          (adopt :bloom-primary-texture)
-          (luvcraft-session-bloom-primary-view session)
-          (adopt :bloom-primary-view)
-          (luvcraft-session-bloom-secondary-texture session)
-          (adopt :bloom-secondary-texture)
-          (luvcraft-session-bloom-secondary-view session)
-          (adopt :bloom-secondary-view)
-          (luvcraft-session-presentation-texture session)
-          (adopt :presentation-texture)
-          (luvcraft-session-presentation-view session)
-          (adopt :presentation-view)
-          (luvcraft-session-render-extent session)
-          (getf attachments :render-extent)))
-  session)
+(defun install-luvcraft-frame-attachments (renderer attachments)
+  "Adopt and atomically publish ATTACHMENTS as one frame-sized cohort."
+  (let* ((resources (luvcraft-frame-attachment-resources attachments))
+         (inventory
+           (append resources (luvcraft-renderer-resources renderer))))
+    ;; Everything that may allocate is complete before either owner slot is
+    ;; changed.  FRAME-ATTACHMENTS is the sole reader-visible publication.
+    (setf (luvcraft-renderer-resources renderer) inventory
+          (luvcraft-renderer-frame-attachments renderer) attachments))
+  renderer)
 
-(defun release-luvcraft-frame-attachments (session)
-  "Release the frame-sized images SESSION is holding, if it has any yet."
-  (dolist (resource
-           (list (luvcraft-session-color-view session)
-                 (luvcraft-session-color-texture session)
-                 (luvcraft-session-depth-view session)
-                 (luvcraft-session-depth-texture session)
-                 (luvcraft-session-bloom-primary-view session)
-                 (luvcraft-session-bloom-primary-texture session)
-                 (luvcraft-session-bloom-secondary-view session)
-                 (luvcraft-session-bloom-secondary-texture session)
-                 (luvcraft-session-presentation-view session)
-                 (luvcraft-session-presentation-texture session)))
-    (release-luvcraft-resource session resource))
-  (setf (luvcraft-session-render-extent session) nil)
+(defun luvcraft-renderer-frame-attachment-resources (renderer)
+  "Return RENDERER's currently published extent-sized GPU objects."
+  (luvcraft-frame-attachment-resources
+   (luvcraft-renderer-frame-attachments renderer)))
+
+(defun release-luvcraft-frame-attachment-resources (renderer resources)
+  "Release an unpublished or superseded attachment cohort from RENDERER."
+  (with-release-report
+    (dolist (resource resources)
+      (releasing :frame-attachment
+        (release-luvcraft-renderer-resource renderer resource))))
   (values))
+
+(defun release-luvcraft-frame-attachments (renderer)
+  "Release RENDERER's currently published frame-sized image cohort."
+  (release-luvcraft-frame-attachment-resources
+   renderer (luvcraft-renderer-frame-attachment-resources renderer))
+  (setf (luvcraft-renderer-frame-attachments renderer) nil)
+  (values))
+
+(defun luvcraft-frame-attachment-resources (attachments)
+  "Return the GPU objects in an attachment candidate, excluding its extent."
+  (loop for (key value) on attachments by #'cddr
+        unless (eq key :render-extent)
+          collect value))
 
 (defun make-luvcraft-lens-pipeline (device layout role label)
   "One fullscreen lens-chain stage, named by the fragment method it runs."
@@ -831,22 +853,6 @@ lands in a presentation image that is finally copied onto the drawable."
                           (luvcraft-session-world-text session)
                           (luvcraft-session-device session) buffer)
                          #()))
-               (remember-luvcraft-resource session buffer)
-               (remember-luvcraft-resource session particle-vertex-buffer)
-               (remember-luvcraft-resource session critter-vertex-buffer)
-               (remember-luvcraft-resource session physics-vertex-buffer)
-               (remember-luvcraft-resource session body-vertex-buffer)
-               (remember-luvcraft-resource session scene-bind-group)
-               (remember-luvcraft-resource session shadow-bind-group)
-               (remember-luvcraft-resource session post-uniform-buffer)
-               (remember-luvcraft-resource session post-bind-group)
-               (remember-luvcraft-resource session bloom-scene-bind-group)
-               (remember-luvcraft-resource session bloom-primary-bind-group)
-               (remember-luvcraft-resource session bloom-secondary-bind-group)
-               (dolist (group
-                         (remove-duplicates
-                          (coerce world-text-bind-groups 'list) :test #'eq))
-                 (remember-luvcraft-resource session group))
                (let ((state
                        (make-instance
                         'luvcraft-frame-state
@@ -863,6 +869,9 @@ lands in a presentation image that is finally copied onto the drawable."
                         :bloom-primary-bind-group bloom-primary-bind-group
                         :bloom-secondary-bind-group bloom-secondary-bind-group
                         :world-text-bind-groups world-text-bind-groups)))
+                 (dolist (resource (luvcraft-frame-state-resources state))
+                   (remember-luvcraft-renderer-resource
+                    (luvcraft-session-renderer session) resource))
                  (setf (gethash key
                                 (luvcraft-session-frame-states session))
                        state
@@ -887,38 +896,94 @@ lands in a presentation image that is finally copied onto the drawable."
             (when particle-vertex-buffer (destroy particle-vertex-buffer))
             (when buffer (destroy buffer))))))))
 
-(defun discard-luvcraft-frame-states (session)
+(defun discard-luvcraft-frame-states (renderer)
   "Forget every cached per-drawable binding, which names images that are gone.
 
-The bind groups are keyed by drawable, not by size, so nothing else would
+  The bind groups are keyed by drawable, not by size, so nothing else would
 notice that their scene, depth, and lens-chain views belong to the previous
 window.  Dropping them here makes the next frame rebuild them against the
-attachments the session actually holds."
-  (let ((states (luvcraft-session-frame-states session)))
-    (maphash
-     (lambda (key state)
-       (declare (ignore key))
-       (dolist (resource
-                (list* (luvcraft-frame-scene-bind-group state)
-                       (luvcraft-frame-shadow-bind-group state)
-                       (luvcraft-frame-post-bind-group state)
-                       (luvcraft-frame-bloom-scene-bind-group state)
-                       (luvcraft-frame-bloom-primary-bind-group state)
-                       (luvcraft-frame-bloom-secondary-bind-group state)
-                       (luvcraft-frame-post-uniform-buffer state)
-                       (luvcraft-frame-particle-vertex-buffer state)
-                       (luvcraft-frame-critter-vertex-buffer state)
-                       (luvcraft-frame-physics-vertex-buffer state)
-                       (luvcraft-frame-body-vertex-buffer state)
-                       (luvcraft-frame-uniform-buffer state)
-                       (remove-duplicates
-                        (coerce (luvcraft-frame-world-text-bind-groups state)
-                                'list)
-                        :test #'eq)))
-         (release-luvcraft-resource session resource)))
-     states)
-    (clrhash states))
+attachments the renderer actually holds."
+  (let ((states (luvcraft-renderer-frame-states renderer)))
+    (with-release-report
+      (maphash
+       (lambda (key state)
+         (declare (ignore key))
+         (dolist (resource (luvcraft-frame-state-resources state))
+           (releasing :frame-state-resource
+             (release-luvcraft-renderer-resource renderer resource))))
+       states)
+      (clrhash states)))
   (values))
+
+(defmethod release-luvcraft-component ((renderer luvcraft-renderer))
+  "Release RENDERER's pipelines and GPU resources exactly once."
+  (with-release-report
+    (dolist (slot +luvcraft-renderer-pipeline-slots+)
+      (when (and (slot-boundp renderer slot)
+                 (slot-value renderer slot))
+        (releasing :renderer-pipeline
+          (release-live-shader-pipeline (slot-value renderer slot))
+          ;; A failed pipeline stays named so a second release retries it.
+          (slot-makunbound renderer slot))))
+    (let ((retained nil))
+      (dolist (resource
+                (remove-duplicates (luvcraft-renderer-resources renderer)
+                                   :test #'eq))
+        (let ((released-p nil))
+          (releasing :renderer-resource
+            (destroy resource)
+            (setf released-p t))
+          (unless released-p
+            (push resource retained))))
+      ;; Likewise, failed resources remain in the one owner inventory.
+      (setf (luvcraft-renderer-resources renderer) (nreverse retained)))
+    (when (and (null (luvcraft-renderer-pipelines renderer))
+               (null (luvcraft-renderer-resources renderer)))
+      (setf (luvcraft-renderer-frame-attachments renderer) nil)
+      (clrhash (luvcraft-renderer-frame-states renderer))))
+  (values))
+
+(defmethod resize-luvcraft-component
+    ((renderer luvcraft-renderer) extent)
+  "Transactionally replace every extent-sized image owned by RENDERER."
+  (let ((attachments
+          (make-luvcraft-frame-attachments
+           (luvcraft-renderer-device renderer)
+           (luvcraft-renderer-context renderer)
+           extent))
+        (old-attachments
+          (luvcraft-renderer-frame-attachment-resources renderer))
+        (installed-p nil))
+    (unwind-protect
+         (progn
+           ;; The new cohort exists before any old object is released.  If
+           ;; creation fails, MAKE-LUVCRAFT-FRAME-ATTACHMENTS destroys its
+           ;; partial candidate and the installed renderer remains coherent.
+           ;; Vertex writes also precede publication so a failed write leaves
+           ;; the old extent installed and makes the next frame retry.
+           (write-buffer
+            (luvcraft-renderer-crosshair-vertex-buffer renderer)
+            (make-block-world-crosshair-vertices
+             (first extent) (second extent)))
+           (write-buffer
+            (luvcraft-renderer-cursor-vertex-buffer renderer)
+            (make-luvcraft-cursor-vertices
+             (first extent) (second extent)
+             (/ (first extent) 2.0) (/ (second extent) 2.0)))
+           (discard-luvcraft-frame-states renderer)
+           (install-luvcraft-frame-attachments renderer attachments)
+           (setf installed-p t)
+           ;; Publication precedes retirement.  Even if a backend reports a
+           ;; destruction failure, every reader now observes the complete new
+           ;; cohort instead of a half-cleared renderer.
+           (release-luvcraft-frame-attachment-resources
+            renderer old-attachments))
+      (unless installed-p
+        (with-release-warnings
+          (dolist (resource
+                    (luvcraft-frame-attachment-resources attachments))
+            (releasing :frame-attachment-candidate (destroy resource)))))))
+  renderer)
 
 (defun ensure-luvcraft-frame-extent (session)
   "Rebuild SESSION's frame-sized images when the drawable has changed size.
@@ -935,26 +1000,11 @@ submission that used them completes."
     (unless (equal extent (luvcraft-session-render-extent session))
       (log-event :luvcraft "reframing ~{~D~^x~} to ~{~D~^x~}"
                  (or (luvcraft-session-render-extent session) '(0 0)) extent)
-      (let ((attachments
-              (make-luvcraft-frame-attachments
-               (luvcraft-session-device session)
-               (luvcraft-session-context session)
-               extent)))
-        (discard-luvcraft-frame-states session)
-        (release-luvcraft-frame-attachments session)
-        (install-luvcraft-frame-attachments session attachments))
-      ;; The crosshair is measured in pixels around the centre of the frame,
-      ;; so its clip-space vertices are only correct for one extent.
-      (write-buffer
-       (luvcraft-session-crosshair-vertex-buffer session)
-       (make-block-world-crosshair-vertices (first extent) (second extent)))
-      (write-buffer
-       (luvcraft-session-cursor-vertex-buffer session)
-       (make-luvcraft-cursor-vertices
-        (first extent) (second extent)
-        (or (luvcraft-session-pointer-x session) (/ (first extent) 2.0))
-        (or (luvcraft-session-pointer-y session) (/ (second extent) 2.0))))
-      (setf (luvcraft-session-pointer-dirty-p session) nil))
+      ;; Pointer intent belongs to the session.  The normal frame-boundary
+      ;; update replaces the renderer's centred candidate and retains DIRTY-P
+      ;; if its buffer write fails.
+      (setf (luvcraft-session-pointer-dirty-p session) t)
+      (resize-luvcraft-component (luvcraft-session-renderer session) extent))
     extent))
 
 (zdefun (encode-luvcraft-frame :zone :luvcraft/encode-frame)
@@ -1274,14 +1324,15 @@ submission that used them completes."
                    (luvcraft-session-modal-focus session))
           ;; Motion events publish only the newest pointer state.  Consume it
           ;; once at the frame boundary, no matter how many reports SDL drained.
-          (when (shiftf (luvcraft-session-pointer-dirty-p session) nil)
+          (when (luvcraft-session-pointer-dirty-p session)
             (write-buffer
              (luvcraft-session-cursor-vertex-buffer session)
              (make-luvcraft-cursor-vertices
               (first extent) (second extent)
               (or (luvcraft-session-pointer-x session) (/ (first extent) 2.0))
               (or (luvcraft-session-pointer-y session)
-                  (/ (second extent) 2.0)))))
+                  (/ (second extent) 2.0))))
+            (setf (luvcraft-session-pointer-dirty-p session) nil))
           (set-pipeline pass (luvcraft-session-cursor-native-pipeline session))
           (set-bind-group pass 0 (luvcraft-frame-scene-bind-group frame))
           (set-vertex-buffer
@@ -1525,7 +1576,7 @@ here -- so an unconsumed wheel event is simply the end of the matter."
   (dispatch-luvcraft-focus-event session canvas event)
   nil)
 
-(defun refresh-block-atlas (session)
+(defun %refresh-block-atlas (session)
   "Republish both block atlases into SESSION without invalidating its meshes.
 
 If *BLOCK-ATLAS-TILE-CAPACITY* changed, replace the renderer-owned textures
@@ -1545,7 +1596,7 @@ the replacement texture's width through the frame uniform."
          (normal (and (not resize-p) old-normal))
          (atlas-view nil)
          (normal-view nil)
-         (made nil))
+         (published-p nil))
     (unwind-protect
          (progn
            (when resize-p
@@ -1581,25 +1632,45 @@ the replacement texture's width through the frame uniform."
                           (make-block-normal-atlas)
                           layout (list width height))
            (when resize-p
-             (let ((old-atlas-view (luvcraft-session-atlas-view session))
+             (let ((renderer (luvcraft-session-renderer session))
+                   (old-atlas-view (luvcraft-session-atlas-view session))
                    (old-normal-view
-                     (luvcraft-session-normal-atlas-view session)))
-               (discard-luvcraft-frame-states session)
+                     (luvcraft-session-normal-atlas-view session))
+                   (new-resources (list atlas normal atlas-view normal-view)))
+               (discard-luvcraft-frame-states renderer)
+               ;; Prepare the complete owner inventory before publishing any
+               ;; of the four mutually dependent atlas handles.
+               (setf (luvcraft-renderer-resources renderer)
+                     (append new-resources
+                             (luvcraft-renderer-resources renderer)))
                (setf (luvcraft-session-atlas-texture session) atlas
                      (luvcraft-session-atlas-view session) atlas-view
                      (luvcraft-session-normal-atlas-texture session) normal
                      (luvcraft-session-normal-atlas-view session) normal-view)
-               (dolist (resource (list atlas normal atlas-view normal-view))
-                 (remember-luvcraft-resource session resource))
-               (dolist (resource (list old-atlas-view old-normal-view
-                                       old-atlas old-normal))
-                 (release-luvcraft-resource session resource))
-               (setf made t))))
-      (when (and resize-p (not made))
-        (dolist (resource
-                  (remove nil (list atlas-view normal-view atlas normal)))
-          (destroy resource)))))
+               ;; The candidate is now authoritative.  A failure while
+               ;; retiring the predecessor must neither roll it back nor
+               ;; destroy the newly published textures during unwind.
+               (setf published-p t)
+               (with-release-report
+                 (dolist (resource (list old-atlas-view old-normal-view
+                                         old-atlas old-normal))
+                   (releasing :retired-block-atlas
+                     (release-luvcraft-renderer-resource
+                      renderer resource)))))))
+      (when (and resize-p (not published-p))
+        (with-release-warnings
+          (dolist (resource
+                    (remove nil (list atlas-view normal-view atlas normal)))
+            (releasing :block-atlas-candidate
+              (release-luvcraft-renderer-resource
+               (luvcraft-session-renderer session) resource)))))))
   session)
+
+(defun refresh-block-atlas (session)
+  "Republish SESSION's block atlases while its canvas cannot render them."
+  (call-with-canvas-frames-held
+   (lambda () (%refresh-block-atlas session))
+   (list (luvcraft-session-canvas session))))
 
 (defun start-luvcraft (&key
                                 (title "luv little block world — click, look, walk")
@@ -1684,6 +1755,7 @@ NIL to let the display choose a comfortable window."
          (player (or player (make-player-for-camera camera)))
          (camera (sync-camera-to-player camera player))
          (device nil) (context nil) (resources nil) (pipelines nil)
+         (renderer nil)
          (world-text-glyph-cache nil)
          (world-text-run nil)
          (video-screen nil)
@@ -1714,23 +1786,12 @@ NIL to let the display choose a comfortable window."
                   ;; Every frame-sized image comes from one constructor, which
                   ;; a live window resize calls again with the new extent.
                   (attachments
-                    (make-luvcraft-frame-attachments device context extent))
-                  (color-texture (keep (getf attachments :color-texture)))
-                  (color-view (keep (getf attachments :color-view)))
-                  (depth-texture (keep (getf attachments :depth-texture)))
-                  (depth-view (keep (getf attachments :depth-view)))
-                  (bloom-primary-texture
-                    (keep (getf attachments :bloom-primary-texture)))
-                  (bloom-primary-view
-                    (keep (getf attachments :bloom-primary-view)))
-                  (bloom-secondary-texture
-                    (keep (getf attachments :bloom-secondary-texture)))
-                  (bloom-secondary-view
-                    (keep (getf attachments :bloom-secondary-view)))
-                  (presentation-texture
-                    (keep (getf attachments :presentation-texture)))
-                  (presentation-view
-                    (keep (getf attachments :presentation-view)))
+                    (let ((attachments
+                            (make-luvcraft-frame-attachments
+                             device context extent)))
+                      (mapc #'keep
+                            (luvcraft-frame-attachment-resources attachments))
+                      attachments))
                   (shadow-depth-texture
                     (keep
                      (create
@@ -2076,9 +2137,42 @@ NIL to let the display choose a comfortable window."
                              :distance video-distance
                              :lift video-lift
                              :height video-height))))
+                  (renderer-owner
+                    (setf renderer
+                          (make-instance
+                           'luvcraft-renderer
+                           :device device :context context
+                           :atlas-texture atlas-texture
+                           :atlas-view atlas-view
+                           :atlas-sampler atlas-sampler
+                           :normal-atlas-texture normal-atlas-texture
+                           :normal-atlas-view normal-atlas-view
+                           :frame-attachments attachments
+                           :shadow-depth-texture shadow-depth-texture
+                           :shadow-depth-view shadow-depth-view
+                           :shadow-depth-sampler shadow-depth-sampler
+                           :shadow-comparison-sampler shadow-comparison-sampler
+                           :layout layout :shadow-layout shadow-layout
+                           :post-layout post-layout :bloom-layout bloom-layout
+                           :linear-sampler linear-sampler
+                           :bloom-bright-pipeline bloom-bright-pipeline
+                           :bloom-horizontal-pipeline bloom-horizontal-pipeline
+                           :bloom-vertical-pipeline bloom-vertical-pipeline
+                           :sun-shaft-pipeline sun-shaft-pipeline
+                           :block-pipeline pipeline
+                           :shadow-pipeline shadow-pipeline
+                           :sky-vertex-buffer sky-vertex-buffer
+                           :sky-pipeline sky-pipeline
+                           :crosshair-vertex-buffer crosshair-vertex-buffer
+                           :cursor-vertex-buffer cursor-vertex-buffer
+                           :crosshair-pipeline crosshair-pipeline
+                           :cursor-pipeline cursor-pipeline
+                           :post-pipeline post-pipeline
+                           :resources resources)))
                   (new-session
                     (make-instance
                      'luvcraft-session
+                     :renderer renderer-owner
                      :video-screen screen
                      :canvas canvas :device device :context context
                      :world world :mesher mesher
@@ -2096,47 +2190,12 @@ NIL to let the display choose a comfortable window."
                      :load-schedule-limit load-schedule-limit
                      :mesh-capture-limit mesh-capture-limit
                      :title-base title
-                     :atlas-texture atlas-texture :atlas-view atlas-view
-                     :atlas-sampler atlas-sampler
-                     :normal-atlas-texture normal-atlas-texture
-                     :normal-atlas-view normal-atlas-view
-                     :render-extent extent
-                     :color-texture color-texture :color-view color-view
-                     :depth-texture depth-texture :depth-view depth-view
-                     :presentation-texture presentation-texture
-                     :presentation-view presentation-view
-                     :shadow-depth-texture shadow-depth-texture
-                     :shadow-depth-view shadow-depth-view
-                     :shadow-depth-sampler shadow-depth-sampler
-                     :shadow-comparison-sampler shadow-comparison-sampler
-                     :layout layout :shadow-layout shadow-layout
-                     :post-layout post-layout
-                     :bloom-layout bloom-layout
-                     :linear-sampler linear-sampler
-                     :bloom-primary-texture bloom-primary-texture
-                     :bloom-primary-view bloom-primary-view
-                     :bloom-secondary-texture bloom-secondary-texture
-                     :bloom-secondary-view bloom-secondary-view
-                     :bloom-bright-pipeline bloom-bright-pipeline
-                     :bloom-horizontal-pipeline bloom-horizontal-pipeline
-                     :bloom-vertical-pipeline bloom-vertical-pipeline
-                     :sun-shaft-pipeline sun-shaft-pipeline
-                     :block-pipeline pipeline
-                     :shadow-pipeline shadow-pipeline
-                     :sky-vertex-buffer sky-vertex-buffer
-                     :sky-pipeline sky-pipeline
-                     :crosshair-vertex-buffer crosshair-vertex-buffer
-                     :cursor-vertex-buffer cursor-vertex-buffer
-                     :crosshair-pipeline crosshair-pipeline
-                     :cursor-pipeline cursor-pipeline
                      :software-cursor-p
                      (string-equal (or (uiop:getenv "SDL_VIDEODRIVER") "")
                                    "kmsdrm")
-                     :post-pipeline post-pipeline
                      :critters critters
                      :world-text text-run
-                     :world-text-glyph-cache text-glyph-cache
-                     :resources resources)))
+                     :world-text-glyph-cache text-glyph-cache)))
                (write-buffer sky-vertex-buffer sky-vertices)
                (write-buffer crosshair-vertex-buffer crosshair-vertices)
                (write-buffer cursor-vertex-buffer cursor-vertices)
@@ -2209,11 +2268,19 @@ NIL to let the display choose a comfortable window."
           (when session
             (releasing :lobby (stop-luvcraft-lobby session))
             (releasing :chunk-products
-              (destroy-luvcraft-chunk-products session)))
-          (dolist (pipeline pipelines)
-            (releasing :pipeline (release-live-shader-pipeline pipeline)))
-          (dolist (resource resources)
-            (releasing :resource (destroy resource)))
+              (destroy-luvcraft-chunk-products session))
+            (releasing :focus (unfocus-luvcraft-session session))
+            (dolist (overlay (luvcraft-session-overlays session))
+              (releasing :overlay (release-luvcraft-overlay overlay)))
+            (setf (luvcraft-session-overlays session) nil))
+          (if renderer
+              (releasing :renderer (release-luvcraft-component renderer))
+              (progn
+                (dolist (pipeline pipelines)
+                  (releasing :pipeline
+                    (release-live-shader-pipeline pipeline)))
+                (dolist (resource resources)
+                  (releasing :resource (destroy resource)))))
           (when video-screen
             (releasing :video-screen (release-video-screen video-screen)))
           (when world-text-run
@@ -2257,22 +2324,10 @@ LUVCRAFT-RELEASE-ERROR.  See WITH-RELEASE-REPORT."
       (dolist (overlay (luvcraft-session-overlays session))
         (releasing :overlay (release-luvcraft-overlay overlay)))
       (setf (luvcraft-session-overlays session) nil)
-      (dolist (pipeline
-                (list (luvcraft-session-block-pipeline session)
-                      (luvcraft-session-shadow-pipeline session)
-                      (luvcraft-session-sky-pipeline session)
-                      (luvcraft-session-crosshair-pipeline session)
-                      (luvcraft-session-cursor-pipeline session)
-                      (luvcraft-session-post-pipeline session)
-                      (luvcraft-session-bloom-bright-pipeline session)
-                      (luvcraft-session-bloom-horizontal-pipeline session)
-                      (luvcraft-session-bloom-vertical-pipeline session)
-                      (luvcraft-session-sun-shaft-pipeline session)))
-        (when pipeline
-          (releasing :pipeline (release-live-shader-pipeline pipeline))))
-      (dolist (resource (luvcraft-session-resources session))
-        (releasing :resource (destroy resource)))
-      (setf (luvcraft-session-resources session) nil)
+      ;; The session coordinates one renderer owner; it no longer reproduces
+      ;; the renderer's pipeline and resource inventories during teardown.
+      (releasing :renderer
+        (release-luvcraft-component (luvcraft-session-renderer session)))
       (when (luvcraft-session-video-screen session)
         (releasing :video-screen
           (release-video-screen (luvcraft-session-video-screen session)))

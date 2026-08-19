@@ -170,7 +170,7 @@
                  (equalp (luvcraft::light-region-entry-block entry)
                          (chunk-light-field-block-levels field)))))))
 
-(deftest frontier-light-is-inspectable-and-exactly-matches-the-oracle
+(deftest compiled-frontier-light-is-inspectable-and-matches-the-oracle
   (let ((definition
           (luvcraft.frontier:frontier-program-definition-for
            'luvcraft::voxel-light-addition)))
@@ -195,25 +195,35 @@
           (setf (world-block-at world x 15 z) luvcraft::*stone-block*))))
     (setf (world-block-at world 15 8 8) *test-glow-block*
           (world-block-at world 18 8 8) *test-dim-glow-block*)
-    (let ((comparison (compare-voxel-light-solvers world)))
-      (ok (voxel-light-solver-comparison-equal-p comparison))
+    (let ((comparison
+            (luvcraft.light-reference:compare-voxel-light-solvers world)))
+      (ok (luvcraft.light-reference:voxel-light-solver-comparison-equal-p
+           comparison))
       (ok (null
-           (voxel-light-solver-comparison-mismatched-keys comparison)))
-      (ok (= (voxel-light-solver-comparison-legacy-visits comparison)
-             (voxel-light-solver-comparison-frontier-visits comparison)))
+           (luvcraft.light-reference:voxel-light-solver-comparison-mismatched-keys
+            comparison)))
+      (ok (= (luvcraft.light-reference:voxel-light-solver-comparison-legacy-visits
+              comparison)
+             (luvcraft.light-reference:voxel-light-solver-comparison-candidate-visits
+              comparison)))
       (ok (plusp
-           (voxel-light-solver-comparison-legacy-bytes-consed comparison)))
+           (luvcraft.light-reference:voxel-light-solver-comparison-legacy-bytes-consed
+            comparison)))
       (ok (plusp
-           (voxel-light-solver-comparison-frontier-bytes-consed comparison)))
-      (ok (>= (voxel-light-solver-comparison-legacy-gc-seconds comparison)
+           (luvcraft.light-reference:voxel-light-solver-comparison-candidate-bytes-consed
+            comparison)))
+      (ok (>= (luvcraft.light-reference:voxel-light-solver-comparison-legacy-gc-seconds
+               comparison)
               0d0))
-      (ok (>= (voxel-light-solver-comparison-frontier-gc-seconds comparison)
+      (ok (>= (luvcraft.light-reference:voxel-light-solver-comparison-candidate-gc-seconds
+               comparison)
               0d0))
       (ok (= 2 (length
-                (voxel-light-solver-comparison-frontier-executions
+                (luvcraft.light-reference:voxel-light-solver-comparison-candidate-executions
                  comparison))))
       (dolist (execution
-               (voxel-light-solver-comparison-frontier-executions comparison))
+               (luvcraft.light-reference:voxel-light-solver-comparison-candidate-executions
+                comparison))
         (ok (plusp
              (luvcraft.frontier:frontier-execution-visits execution)))
         (ok (= (* 6
@@ -233,7 +243,7 @@
           (world-block-at world 18 8 8) *test-dim-glow-block*)
     world))
 
-(deftest compiled-light-kernel-is-inspectable-and-matches-both-oracles
+(deftest compiled-light-kernel-is-inspectable-and-matches-the-reference-oracle
   ;; The program states its law; the realization retains the checked
   ;; expressions, the emitted forms, and the compiled functions.
   (let* ((definition
@@ -281,30 +291,21 @@
                (mentions-p
                 (luvcraft.frontier:frontier-realization-drain-form
                  realization))))))
-  (let ((world (make-compiled-light-proof-world)))
-    ;; Warm the realizations, then compare exactly against both oracles.
-    (compare-voxel-light-solvers world :candidate :compiled)
-    (let ((legacy (compare-voxel-light-solvers world :candidate :compiled))
-          (frontier (compare-voxel-light-solvers world :candidate :frontier)))
-      (ok (voxel-light-solver-comparison-equal-p legacy))
-      (ok (= (voxel-light-solver-comparison-legacy-visits legacy)
-             (voxel-light-solver-comparison-frontier-visits legacy)
-             (voxel-light-solver-comparison-frontier-visits frontier)))
-      (ok (eq :compiled (voxel-light-solver-comparison-candidate-solver legacy)))
-      (ok (= 2 (length
-                (voxel-light-solver-comparison-frontier-executions legacy))))
-      ;; Both realizations of the same definition perform the same semantic
-      ;; work: visits, relations, and crossings agree execution by execution.
-      (loop for compiled in (voxel-light-solver-comparison-frontier-executions
-                             legacy)
-            for manual in (voxel-light-solver-comparison-frontier-executions
-                           frontier)
-            do (ok (= (luvcraft.frontier:frontier-execution-visits compiled)
-                      (luvcraft.frontier:frontier-execution-visits manual)))
-               (ok (= (luvcraft.frontier:frontier-execution-relations compiled)
-                      (luvcraft.frontier:frontier-execution-relations manual)))
-               (ok (= (luvcraft.frontier:frontier-execution-crossings compiled)
-                      (luvcraft.frontier:frontier-execution-crossings manual)))))))
+  (let* ((world (make-compiled-light-proof-world))
+         (comparison
+           (luvcraft.light-reference:compare-voxel-light-solvers world)))
+    (ok (luvcraft.light-reference:voxel-light-solver-comparison-equal-p
+         comparison))
+    (ok (= (luvcraft.light-reference:voxel-light-solver-comparison-legacy-visits
+            comparison)
+           (luvcraft.light-reference:voxel-light-solver-comparison-candidate-visits
+            comparison)))
+    (ok (eq :compiled
+            (luvcraft.light-reference:voxel-light-solver-comparison-candidate-solver
+             comparison)))
+    (ok (= 2 (length
+              (luvcraft.light-reference:voxel-light-solver-comparison-candidate-executions
+               comparison))))))
 
 (deftest compiled-light-seeds-are-boundary-transfers
   ;; Open sky is a virtual source at full brightness related inward through
@@ -389,6 +390,17 @@
     (ok (eq :compiled
             (luvcraft::block-light-production-request-solver request)))))
 
+(deftest voxel-light-solver-dispatch-rejects-retired-and-unknown-names
+  (let* ((world (make-open-sky-test-world))
+         (region (luvcraft::capture-light-region world))
+         (state (luvcraft::attach-lighting-state world))
+         (candidate (luvcraft::make-light-candidate world)))
+    (dolist (solver '(:legacy :frontier :misspelled))
+      (ok (signals (solve-light-region-using solver region) 'error))
+      (ok (signals
+           (luvcraft::reconcile-light-region-using solver state candidate)
+           'error)))))
+
 (deftest bucket-frontier-admission-does-not-construct-a-type-per-site
   (let ((frontier
           (luvcraft.frontier:make-bucket-frontier
@@ -410,7 +422,7 @@
   (let ((world (make-open-sky-test-world))
         (trace (make-cpu-trace :label "voxel light solvers")))
     (with-cpu-trace (trace)
-      (compare-voxel-light-solvers world))
+      (luvcraft.light-reference:compare-voxel-light-solvers world))
     (let ((names (mapcar #'cpu-trace-zone-name (cpu-trace-zones trace))))
       (ok (equal
            '(:lighting/compare
@@ -421,23 +433,14 @@
              :lighting/legacy/seed-block
              :lighting/legacy/propagate-block
              :lighting/legacy/drain-sites
-             :lighting/frontier
-             :lighting/frontier/seed-sky
-             :lighting/frontier/propagate-sky
-             :lighting/frontier/drain-sites
-             :lighting/frontier/seed-block
-             :lighting/frontier/propagate-block
-             :lighting/frontier/drain-sites)
+             :lighting/compiled
+             :lighting/compiled/seed-sky
+             :lighting/compiled/propagate-sky
+             :lighting/compiled/drain-sites
+             :lighting/compiled/seed-block
+             :lighting/compiled/propagate-block
+             :lighting/compiled/drain-sites)
            names)))))
-
-(deftest frontier-light-can-be-selected-for-real-publication
-  (let ((world (make-open-sky-test-world '(0 0 0) '(1 0 0))))
-    (setf (world-block-at world 15 8 8) *test-glow-block*)
-    (let ((*voxel-light-solver* :frontier))
-      (ok (relight-block-world world)))
-    (ok (light-matches-reference-p world))
-    (ok (= 10 (blocklight-at world 15 8 8)))
-    (ok (= 9 (blocklight-at world 16 8 8)))))
 
 (defun check-incremental-edits-converge ()
   (let* ((world (make-block-world
@@ -470,12 +473,8 @@
     (ok (plusp (luvcraft::lighting-state-publications state)))
     (ok (plusp (luvcraft::lighting-state-cells-visited state)))))
 
-(deftest incremental-edits-converge-to-the-reference-field
-  (check-incremental-edits-converge))
-
 (deftest compiled-incremental-edits-converge-to-the-reference-field
-  (let ((*voxel-light-solver* :compiled))
-    (check-incremental-edits-converge)))
+  (check-incremental-edits-converge))
 
 (deftest asynchronous-lighting-publishes-only-a-current-immutable-capture
   (let* ((world (make-open-sky-test-world '(0 0 0)))
@@ -503,12 +502,12 @@
              (make-instance
               'luvcraft::block-light-production-request
               :key '(:light) :priority -1
-              :solver :frontier
+              :solver :compiled
               :dependency-stamp
               (luvcraft::block-world-light-dependency-stamp world)
               :region (luvcraft::capture-light-region world :immutable-p t)))
            (payload (luvcraft::perform-production-request request)))
-      (ok (eq :frontier
+      (ok (eq :compiled
               (luvcraft::block-light-production-request-solver request)))
       (ok (luvcraft::publish-production-result session request payload))
       (ok (= (blocklight-at world 1 1 1)
@@ -582,14 +581,10 @@
       (luvcraft::reconcile-lighting state)
       (ok (light-matches-reference-p world)))))
 
-(deftest random-edits-and-residency-match-the-reference-solver
-  (check-random-edits-and-residency))
-
 (deftest compiled-random-edits-and-residency-match-the-reference-solver
   ;; The compiled removal and addition programs must reproduce the reference
   ;; field across the same edit bursts, departure, and re-arrival. #K3WRD3
-  (let ((*voxel-light-solver* :compiled))
-    (check-random-edits-and-residency)))
+  (check-random-edits-and-residency))
 
 (deftest compiled-light-removal-is-an-invalidation-program
   (let ((definition
@@ -776,35 +771,6 @@
                     (luvcraft::propagate-light-region
                      region #'luvcraft::light-region-entry-block
                      queue nil)
-                    *light-region-window-lookups*))))
-        (multiple-value-bind (visited lookups) (visit 1 1 1)
-          (ok (= visited 1))
-          (ok (zerop lookups)))
-        (multiple-value-bind (visited lookups) (visit 0 1 1)
-          (ok (= visited 1))
-          (ok (= lookups 1)))))))
-
-(deftest unlighting-locates-only-at-domain-crossings
-  (let ((world (make-block-world :chunk-width 3
-                                 :chunk-height 3
-                                 :chunk-depth 3)))
-    (let* ((chunk (luvcraft::ensure-world-chunk world 0 0 0))
-           (region (luvcraft::capture-light-region world))
-           (key (chunk-domain-coordinate (block-chunk-domain chunk)))
-           (entry (gethash key (luvcraft::light-region-entries region))))
-      (labels ((visit (x y z)
-                 (let* ((local (make-local-coordinate x y z))
-                        (offset
-                          (chunk-domain-offset
-                           (luvcraft::light-region-entry-domain entry) local))
-                        (queue
-                          (luvcraft::make-light-removal-queue
-                           :block-light #'luvcraft::light-region-entry-block))
-                        (sources (luvcraft::make-light-worklist))
-                        (*light-region-window-lookups* 0))
-                   (luvcraft::enqueue-light-removal queue entry offset 1)
-                   (values
-                    (luvcraft::unlight-light-region region queue sources)
                     *light-region-window-lookups*))))
         (multiple-value-bind (visited lookups) (visit 1 1 1)
           (ok (= visited 1))

@@ -138,10 +138,6 @@ When MAKE-P is true, create and attach one if the cell is unoccupied."
              (luvcraft:add-luvcraft-overlay session agent)
              agent))))
 
-(defun find-gnome (session x y z &optional (make-p t))
-  "Compatibility name for FIND-AGENT."
-  (find-agent session x y z make-p))
-
 (defun gnome-body-height ()
   "The height of the hat's tip above his feet, in figure units.
 
@@ -905,10 +901,6 @@ the figure's bobbing and any future step interpolation are only presentation."
     (when (luvcraft:world-block-at world x y z)
       (error "Cell (~D ~D ~D) is occupied by terrain." x y z))
     (find-agent session x y z)))
-
-(defun place-gnome (&rest arguments)
-  "Compatibility name for SPAWN-AGENT."
-  (apply #'spawn-agent arguments))
 
 (define-command (com-spawn-agent :command-table luvcraft.clim::luvcraft-world
                                   :name "Spawn Gnome")

@@ -1447,13 +1447,13 @@
                     (visible-form
                      (shader-abstraction-method-probe
                       :abstraction-probe :fragment)))
-                  (revision (spv:shader-abstraction-revision)))
+                  (revision (spv:shader-source-revision)))
              (install-addition)
              (let ((added (parse-probe))
                    (method-added
                      (shader-abstraction-method-probe
                       :abstraction-probe :fragment)))
-               (ok (> (spv:shader-abstraction-revision) revision))
+               (ok (> (spv:shader-source-revision) revision))
                (ok (equal (form-names subtracted-form)
                           '("step" ("-" "receiver" "bias") "depth")))
                (ok (equal (form-names (visible-form added))
@@ -1477,7 +1477,9 @@
     (let ((words (shaders:block-world-fragment-shader)))
       (ok (> (length words) 5))
       (ok (= (aref words 0) #x07230203)))
-    (let ((vertex (shaders:block-world-crosshair-vertex-shader))
+    (let ((vertex
+            (spv:assemble-shader-specification
+             (shaders:block-world-crosshair-vertex-specification)))
           (fragment (shaders:block-world-crosshair-fragment-shader)))
       (ok (> (length vertex) 5))
       (ok (> (length fragment) 5))

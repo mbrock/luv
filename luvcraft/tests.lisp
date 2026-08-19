@@ -1153,61 +1153,6 @@
                         (luvcraft::terminal-grid-character
                          presentation 79 row))))))))
 
-(deftest light-removal-queues-own-the-meaning-of-unwrapped-levels
-  (let* ((world (make-block-world))
-         (chunk (luvcraft::ensure-world-chunk world 0 0 0))
-         (region (luvcraft::capture-light-region world))
-         (entry (gethash (chunk-domain-coordinate (block-chunk-domain chunk))
-                         (luvcraft::light-region-entries region)))
-         (domain (block-chunk-domain chunk))
-         (local (make-local-coordinate 1 2 3))
-         (offset (chunk-domain-offset domain local))
-         (sky
-           (luvcraft::make-light-removal-queue
-            :sky-light #'luvcraft::light-region-entry-sky :skylight-p t))
-         (block
-           (luvcraft::make-light-removal-queue
-            :block-light #'luvcraft::light-region-entry-block)))
-    (luvcraft::enqueue-light-removal sky entry offset 12)
-    (ok (eq domain (luvcraft::light-region-entry-domain entry)))
-    (ok (luvcraft.world.fields:materialized-field-current-p sky :sky-light))
-    (ok (luvcraft.world.fields:materialized-field-current-p block :block-light))
-    (ok (null
-         (luvcraft.world.fields:materialized-field-definition sky :block-light)))
-    (ok (eq :sky-propagation-level
-            (luv.arithmetic:quantity-specification-name
-             (luv.arithmetic:declaration-quantity-specification
-              (luvcraft::light-removal-queue-field-definition sky)))))
-    (ok (eq :block-propagation-level
-            (luv.arithmetic:quantity-specification-name
-             (luv.arithmetic:declaration-quantity-specification
-              (luvcraft::light-removal-queue-field-definition block)))))
-    (ok (eq (luvcraft::light-removal-queue-field-definition sky)
-            (luv.arithmetic.records:columnar-row-lane-declaration
-             (luvcraft::light-worklist-bucket-row-declaration
-              (aref
-               (luvcraft::light-worklist-buckets
-                (luvcraft::light-removal-queue-worklist sky))
-               0))
-             'luvcraft::level)))
-    (ok (eq (luvcraft::light-removal-queue-field-definition block)
-            (luv.arithmetic.records:columnar-row-lane-declaration
-             (luvcraft::light-worklist-bucket-row-declaration
-              (aref
-               (luvcraft::light-worklist-buckets
-                (luvcraft::light-removal-queue-worklist block))
-               0))
-             'luvcraft::level)))
-    (multiple-value-bind (queued-entry queued-offset level present-p)
-        (luvcraft::light-worklist-pop
-         (luvcraft::light-removal-queue-worklist sky))
-      (ok present-p)
-      (ok (eq entry queued-entry))
-      (ok (= offset queued-offset))
-      (ok (= 12 level)))
-    (ok (signals
-         (luvcraft::enqueue-light-removal sky entry offset 16) 'error))))
-
 (deftest packed-light-worklists-preserve-order-and-release-entries
   (let* ((world (make-block-world))
          (chunk (luvcraft::ensure-world-chunk world 0 0 0))
@@ -1664,13 +1609,13 @@
 
 (deftest retired-gnome-world-edits-migrate-to-explicit-air
   (let ((overlay
-          (restore-block-edit-overlay
+          (luvcraft::restore-block-edit-overlay
            '((:at (48 6 -82) :value (:block :name :gnome))))))
     (multiple-value-bind (block present-p)
         (block-edit-at overlay 48 6 -82)
       (ok present-p)
       (ok (null block)))
-    (ok (equal (block-edit-overlay-save-descriptions overlay)
+    (ok (equal (luvcraft::block-edit-overlay-save-descriptions overlay)
                '((:at (48 6 -82) :value (:air)))))))
 
 (deftest asynchronous-world-checkpoints-flush-the-latest-description
@@ -1806,12 +1751,13 @@
                  :terminal :urbit :gravel :clay :mud :moss :cactus
                  :cobblestone :stone-bricks :bricks :planks :sandstone
                  :slate :tape :fountain :lava-spring))))
-  (let ((world (make-block-world :chunk-width 2
-                                 :chunk-height 2
-                                 :chunk-depth 2)))
-    (ensure-world-chunk world 0 0 0)
+  (let* ((world (make-block-world :chunk-width 2
+                                  :chunk-height 2
+                                  :chunk-depth 2))
+         (chunk (ensure-world-chunk world 0 0 0)))
     (setf (world-block-at world 0 0 0) luvcraft::*stone-block*)
-    (let ((mesh (mesh-block-world (make-instance 'exposed-face-mesher) world)))
+    (let ((mesh (mesh-block-chunk (make-instance 'exposed-face-mesher)
+                                  world chunk)))
       (ok (= (length (block-mesh-vertices mesh))
              (* luvcraft::+block-mesh-floats-per-vertex+
                 (block-mesh-vertex-count mesh)))))))
@@ -2165,20 +2111,25 @@
   (let ((world (make-block-world :chunk-width 2
                                  :chunk-height 2
                                  :chunk-depth 2)))
-    (ensure-world-chunk world 0 0 0)
-    (ensure-world-chunk world 1 0 0)
-    (setf (world-block-at world 1 0 0) luvcraft::*stone-block*
-          (world-block-at world 2 0 0) luvcraft::*stone-block*)
-    (let ((mesher (make-instance 'exposed-face-mesher)))
-      (ok (= (block-mesh-face-count (mesh-block-world mesher world)) 10))
-      (let ((revision (block-world-revision world)))
-        (setf (world-block-at world 2 0 0) nil)
-        (ok (= (block-world-revision world) (1+ revision))))
-      (ok (= (block-mesh-face-count (mesh-block-world mesher world)) 6))
-      (setf (world-block-at world 2 0 0) luvcraft::*stone-block*)
-      (ok (= (block-mesh-face-count (mesh-block-world mesher world)) 10)))))
+    (let ((left (ensure-world-chunk world 0 0 0))
+          (right (ensure-world-chunk world 1 0 0)))
+      (setf (world-block-at world 1 0 0) luvcraft::*stone-block*
+            (world-block-at world 2 0 0) luvcraft::*stone-block*)
+      (let ((mesher (make-instance 'exposed-face-mesher)))
+        (flet ((face-count ()
+                 (+ (block-mesh-face-count
+                     (mesh-block-chunk mesher world left))
+                    (block-mesh-face-count
+                     (mesh-block-chunk mesher world right)))))
+          (ok (= (face-count) 10))
+          (let ((revision (block-world-revision world)))
+            (setf (world-block-at world 2 0 0) nil)
+            (ok (= (block-world-revision world) (1+ revision))))
+          (ok (= (face-count) 6))
+          (setf (world-block-at world 2 0 0) luvcraft::*stone-block*)
+          (ok (= (face-count) 10)))))))
 
-(deftest chunk-mesh-is-exactly-sized-and-preserves-the-public-emitter
+(deftest chunk-mesh-is-exactly-sized
   (let* ((world (make-block-world :chunk-width 2
                                   :chunk-height 2
                                   :chunk-depth 2))
@@ -2203,17 +2154,7 @@
                            '(0.03125 0.96875)))
                (ok (= (aref vertices (+ offset 12))
                       (block-atlas-tile-offset :stone)))
-               (ok (= (aref vertices (+ offset 13)) 80.0))))
-    ;; Tools may still emit a single semantic face through the exported API;
-    ;; the optimized neighborhood object remains an implementation detail.
-    (let ((vertices
-            (make-array luvcraft::+block-mesh-floats-per-face+
-                        :element-type 'single-float :fill-pointer 0)))
-      (emit-block-face mesher world vertices luvcraft::*stone-block*
-                       (find :top luvcraft::*block-faces*
-                             :key #'block-face-name)
-                       0 0 0)
-      (ok (= (length vertices) luvcraft::+block-mesh-floats-per-face+)))))
+               (ok (= (aref vertices (+ offset 13)) 80.0))))))
 
 (deftest immutable-mesh-snapshot-is-bit-identical-to-owner-side-meshing
   (let* ((world (make-little-block-world :chunk-radius 1 :seed 121))

@@ -65,6 +65,7 @@
                  (:file "text")
                  (:file "sound")
                  (:file "video-screen")
+                 (:file "renderer")
                  (:file "app")
                  (:file "riding")
                  (:file "body")
@@ -83,6 +84,13 @@
                  (:file "benchmark")
                  (:file "gazetteer"))))
   :in-order-to ((test-op (test-op "luvcraft/core/test"))))
+
+(defsystem "luvcraft/light-reference"
+  :description "Test-only voxel-light oracle and differential diagnostics."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luvcraft/core")
+  :components ((:file "luvcraft/light-reference")))
 
 (defsystem "luvcraft/tools"
   :description "One-shot command-line tools for luvcraft development."
@@ -213,11 +221,12 @@
   :description "Executable claims for the world, shaders, and interactive slice."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luvcraft/core" "cl-dejavu" "rove")
+  :depends-on ("luvcraft/core" "luvcraft/light-reference" "cl-dejavu" "rove")
   :serial t
   :components ((:file "hal/shader/tests")
                (:file "luvcraft/world-tests")
                (:file "luvcraft/tests")
+               (:file "luvcraft/renderer-tests")
                (:file "luvcraft/physics-tests")
                (:file "luvcraft/light-tests")
                (:file "hal/metal/msl/tests")

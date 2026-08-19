@@ -166,11 +166,6 @@ lowers it mechanically over bound fields."))
   (declare (ignore name))
   nil)
 
-(defgeneric execute-frontier-program
-    (program input &rest arguments &key &allow-other-keys)
-  (:documentation
-   "Execute PROGRAM over INPUT after selecting its concrete realization once."))
-
 (defun frontier-program-relaxed-field (definition)
   (find-if #'frontier-field-role-relaxed-p
            (frontier-program-definition-fields definition)))

@@ -781,21 +781,12 @@ TARGET interns any member it lacks, so the translation is always total."
   (declare (ignore field-name))
   column)
 
-(defun make-block-content-column (domain &key vocabulary palette indices)
-  "Make a content column over DOMAIN under VOCABULARY.
-
-For compatibility a PALETTE vector (NIL first) may stand in for a vocabulary;
-it becomes a fresh vocabulary with the same ordering."
+(defun make-block-content-column (domain &key vocabulary indices)
+  "Make a content column over DOMAIN under VOCABULARY."
   (make-instance
    'block-content-column
    :domain domain
-   :vocabulary (or vocabulary
-                   (if palette
-                       (let ((fresh (make-block-vocabulary)))
-                         (loop for block across palette
-                               do (block-vocabulary-offset fresh block))
-                         fresh)
-                       (make-block-vocabulary)))
+   :vocabulary (or vocabulary (make-block-vocabulary))
    :indices (or indices
                 (make-array (chunk-domain-cardinality domain)
                             :element-type '(unsigned-byte 16)
@@ -1122,33 +1113,26 @@ including when FUNCTION exits non-locally after making a partial change."
           (note-world-residency-event world x y z :arrived)
           new-chunk))))
 
-(defun install-world-chunk-storage (world x y z content &optional indices)
+(defun install-world-chunk-storage (world x y z content)
   "Install transferred block-content storage as a newly resident chunk.
 
 The caller gives WORLD ownership of CONTENT and must not mutate it afterward.
-For compatibility, CONTENT may be a palette followed by INDICES, but producers
-should transfer a BLOCK-CONTENT-COLUMN.  Installation rebinds that aggregate to
-the authoritative resident domain and WORLD's vocabulary, translating its
-indices in place if it was produced under another vocabulary, and publishes
-it in one single-writer step."
+CONTENT is a BLOCK-CONTENT-COLUMN.  Installation rebinds that aggregate to the
+authoritative resident domain and WORLD's vocabulary, translating its indices
+in place if it was produced under another vocabulary, and publishes it in one
+single-writer step."
   (check-type world block-world)
+  (check-type content block-content-column)
   (when (nth-value 1 (world-chunk-at world x y z))
     (error "Chunk (~D ~D ~D) is already resident." x y z))
   (let* ((coordinate (make-chunk-coordinate x y z))
          (domain (make-chunk-domain (block-world-space world) coordinate))
-         (transferred
-           (if (typep content 'block-content-column)
-               content
-               (make-block-content-column domain
-                                          :palette content
-                                          :indices indices))))
-    (let* ((chunk (make-world-owned-block-chunk
-                   world domain :content transferred)))
-      (setf (gethash (chunk-key x y z) (block-world-chunks world)) chunk)
-      (incf (slot-value world 'residency-revision))
-      (note-block-world-change world)
-      (note-world-residency-event world x y z :arrived)
-      chunk)))
+         (chunk (make-world-owned-block-chunk world domain :content content)))
+    (setf (gethash (chunk-key x y z) (block-world-chunks world)) chunk)
+    (incf (slot-value world 'residency-revision))
+    (note-block-world-change world)
+    (note-world-residency-event world x y z :arrived)
+    chunk))
 
 (defun remove-world-chunk (world x y z)
   "Remove a resident chunk.  Return the chunk and whether it was present."

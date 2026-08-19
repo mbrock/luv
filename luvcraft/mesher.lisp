@@ -155,10 +155,8 @@ worker never observes live chunk storage."))
   (declare (ignore field-name))
   (block-mesh-snapshot-block-light-definition snapshot))
 
-(defgeneric mesh-block-world (mesher world))
 (defgeneric mesh-block-chunk (mesher world chunk))
 (defgeneric mesh-block-snapshot (mesher snapshot))
-(defgeneric emit-block-face (mesher world vertices block face x y z))
 
 (defconstant +block-mesh-floats-per-vertex+ 14)
 (defconstant +block-mesh-vertices-per-face+ 6)
@@ -781,48 +779,6 @@ by construction rather than by parallel maintenance."
   (mesh-block-snapshot-halo
    mesher (make-block-mesh-snapshot world chunk nil)))
 
-(defmethod emit-block-face
-    ((mesher exposed-face-mesher) (world block-world) vertices
-     (block block-kind) (face block-face) x y z)
-  "Compatibility entry point for tools emitting an individual world face.
-
-The face is emitted as if BLOCK stood at (X Y Z) within the surrounding
-world, with neighbours and light read from a fresh snapshot of its chunk."
-  (multiple-value-bind (chunk-x chunk-y chunk-z local-x local-y local-z)
-      (voxel-space-decompose-components (block-world-space world) x y z)
-    (let ((chunk (world-chunk-at world chunk-x chunk-y chunk-z)))
-      (unless chunk
-        (error "Cannot emit a face from absent chunk (~D ~D ~D)."
-               chunk-x chunk-y chunk-z))
-      ;; BLOCK may be one the world has never held; interning it first keeps
-      ;; the snapshot's frozen vocabulary able to name it.
-      (let* ((palette-index
-               (block-vocabulary-offset (block-world-vocabulary world) block))
-             (snapshot (make-block-mesh-snapshot world chunk nil))
-             (palette (block-mesh-snapshot-palette snapshot))
-             (domain (block-mesh-snapshot-domain snapshot))
-             (shape (voxel-space-chunk-shape (chunk-domain-space domain)))
-             (width (+ 2 (chunk-shape-width shape)))
-             (height (+ 2 (chunk-shape-height shape)))
-             (depth (+ 2 (chunk-shape-depth shape)))
-             (base (+ (1+ local-x)
-                      (* width (+ (1+ local-y) (* height (1+ local-z))))))
-             (tables (gather-block-mesh-kind-tables mesher palette))
-             (face-index (position face *block-faces*))
-             (scratch (make-array +block-mesh-floats-per-face+
-                                  :element-type 'single-float)))
-        (unless face-index
-          (error "~S is not one of the block faces." face))
-        (emit-block-mesh-face
-         tables (block-mesh-face-tables) scratch 0
-         (block-mesh-kind-tables-solid tables)
-         (block-mesh-snapshot-sample-indices snapshot)
-         (block-mesh-snapshot-sky-samples snapshot)
-         (block-mesh-snapshot-block-light-samples snapshot)
-         width height depth base palette-index face-index x y z)
-        (loop for value across scratch do (vector-push value vertices))
-        vertices))))
-
 (defun make-block-mesh-snapshot (world chunk dependency-stamp)
   "Copy CHUNK and its one-cell halo into immutable worker-owned columns.
 
@@ -943,28 +899,3 @@ the index written for absent halo samples."
      :content-definition content-definition
      :palette palette
      :halo-fields halo-fields)))
-
-(defmethod mesh-block-world
-    ((mesher exposed-face-mesher) (world block-world))
-  "Make a combined compatibility mesh from independently meshed chunks."
-  (let ((vertices (make-array 0 :element-type 'single-float
-                                :adjustable t :fill-pointer 0))
-        (vertex-declaration nil)
-        (vertex-count 0)
-        (face-count 0))
-    (dolist (chunk (resident-world-chunks world))
-      (let ((mesh (mesh-block-chunk mesher world chunk)))
-        (setf vertex-declaration
-              (merge-block-mesh-vertex-declaration vertex-declaration mesh))
-        (loop for component across (block-mesh-vertices mesh)
-              do (vector-push-extend component vertices))
-        (incf vertex-count (block-mesh-vertex-count mesh))
-        (incf face-count (block-mesh-face-count mesh))))
-    (make-instance 'block-mesh
-                               :vertex-declaration
-                               (or vertex-declaration
-                                   (luv.arithmetic:value-declaration-for
-                                    :block-mesh-vertices))
-                               :vertices vertices
-                               :vertex-count vertex-count
-                               :face-count face-count)))
