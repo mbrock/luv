@@ -402,6 +402,24 @@ the light as a band rather than a hairline, and still far short of the old
   (or (getf (renderer-pipelines renderer) style)
       (error "Renderer has no ~S pipeline." style)))
 
+(defmacro with-renderer-creation-step ((zone label) &body body)
+  "Trace and synchronously log one cold LUFT driver transaction.
+
+The BEGIN breadcrumb is forced to the image log before BODY enters the driver.
+COMPLETE proves that it returned; INTERRUPTED means an ordinary non-local exit
+unwound through Lisp.  If the process or GPU disappears, BEGIN deliberately
+remains the last durable line."
+  (let ((completed-p (gensym "COMPLETED-P")))
+    `(with-cpu-trace-zone (,zone)
+       (let ((,completed-p nil))
+         (log-event :luft "begin ~A" ,label)
+         (unwind-protect
+              (multiple-value-prog1 (progn ,@body)
+                (setf ,completed-p t)
+                (log-event :luft "complete ~A" ,label))
+           (unless ,completed-p
+             (log-event :luft "interrupted ~A" ,label)))))))
+
 (zdefun (create-renderer-targets :zone :luft/create-renderer-targets) (renderer)
   (let* ((device (renderer-device renderer))
          (extent (renderer-extent renderer))
@@ -440,140 +458,130 @@ the light as a band rather than a hairline, and still far short of the old
                           :mag-filter :linear :min-filter :linear)))))
 
 (zdefun (create-renderer-pipeline :zone :luft/create-renderer-pipeline) (renderer)
-  (let* ((device (renderer-device renderer))
-         (task (create device
-                       (make-shader-module-descriptor
-                        :label "luft surface task"
-                        :language :mathematical
-                        :code (shaders:surface-task-shader))))
-         (mesh (create device
-                       (make-shader-module-descriptor
-                        :label "luft surface mesh"
-                        :language :mathematical
-                        :code (shaders:surface-mesh-shader))))
-         (bevel (create device
-                        (make-shader-module-descriptor
-                         :label "luft bevel mesh"
-                         :language :mathematical
-                         :code (shaders:bevel-mesh-shader))))
-         (chamfer (create device
-                          (make-shader-module-descriptor
-                           :label "luft chamfer mesh"
-                           :language :mathematical
-                           :code (shaders:chamfer-mesh-shader))))
-         (fragment (create device
-                           (make-shader-module-descriptor
-                            :label "luft surface fragment"
-                            :language :mathematical
-                            :code (shaders:surface-fragment-shader))))
-         (chamfer-fragment
-           (create device
-                   (make-shader-module-descriptor
-                    :label "luft chamfer fragment"
-                    :language :mathematical
-                    :code (shaders:chamfer-fragment-shader))))
-         (paper-fragment
-           (create device
-                   (make-shader-module-descriptor
-                    :label "luft paper fragment"
-                    :language :mathematical
-                    :code (shaders:paper-fragment-shader))))
-         (sky-mesh (create device
-                           (make-shader-module-descriptor
-                            :label "luft sky mesh"
-                            :language :mathematical
-                            :code (shaders:sky-mesh-shader))))
-         (sky-fragment
-           (create device
-                   (make-shader-module-descriptor
-                    :label "luft sky fragment"
-                    :language :mathematical
-                    :code (shaders:sky-fragment-shader))))
-         (lens-fragment
-           (create device
-                   (make-shader-module-descriptor
-                    :label "luft lens fragment"
-                    :language :mathematical
-                    :code (shaders:lens-fragment-shader))))
-         (lens-layout
-           (create device
-                   (make-bind-group-layout-descriptor
-                    :label "luft lens layout"
-                    :entries `((:binding ,shaders:+scene-binding+
-                                :type :texture)
-                               (:binding ,shaders:+sampler-binding+
-                                :type :sampler)
-                               (:binding ,shaders:+lens-frame-binding+
-                                :type :uniform-buffer)))))
-         (layout (create device
-                         (make-bind-group-layout-descriptor
-                          :label "luft surface layout"
-                          :entries
-                          `((:binding ,shaders:+frame-binding+
-                             :type :uniform-buffer)
-                            (:binding ,shaders:+sites-binding+
-                             :type :storage-buffer)
-                            (:binding ,shaders:+bricks-binding+
-                             :type :storage-buffer)
-                            (:binding ,shaders:+cells-binding+
-                             :type :storage-buffer))))))
-    (flet ((pipeline (label mesh-module fragment-module
+  (let ((device (renderer-device renderer))
+        task mesh bevel chamfer fragment chamfer-fragment paper-fragment
+        sky-mesh sky-fragment lens-fragment)
+    (macrolet ((module (place zone label code)
+                 `(setf ,place
+                        (let ((module
+                                (with-renderer-creation-step (,zone ,label)
+                                  (create
+                                   device
+                                   (make-shader-module-descriptor
+                                    :label ,label
+                                    :language :mathematical
+                                    :code ,code)))))
+                          ;; Publish ownership as each driver call succeeds so
+                          ;; MAKE-RENDERER's unwind cleanup sees partial work.
+                          (push module (renderer-modules renderer))
+                          module))))
+      (module task :luft/shader/surface-task "luft surface task"
+              (shaders:surface-task-shader))
+      (module mesh :luft/shader/surface-mesh "luft surface mesh"
+              (shaders:surface-mesh-shader))
+      (module bevel :luft/shader/bevel-mesh "luft bevel mesh"
+              (shaders:bevel-mesh-shader))
+      (module chamfer :luft/shader/chamfer-mesh "luft chamfer mesh"
+              (shaders:chamfer-mesh-shader))
+      (module fragment :luft/shader/surface-fragment "luft surface fragment"
+              (shaders:surface-fragment-shader))
+      (module chamfer-fragment :luft/shader/chamfer-fragment
+              "luft chamfer fragment" (shaders:chamfer-fragment-shader))
+      (module paper-fragment :luft/shader/paper-fragment
+              "luft paper fragment" (shaders:paper-fragment-shader))
+      (module sky-mesh :luft/shader/sky-mesh "luft sky mesh"
+              (shaders:sky-mesh-shader))
+      (module sky-fragment :luft/shader/sky-fragment "luft sky fragment"
+              (shaders:sky-fragment-shader))
+      (module lens-fragment :luft/shader/lens-fragment "luft lens fragment"
+              (shaders:lens-fragment-shader)))
+    (setf (renderer-lens-layout renderer)
+          (with-renderer-creation-step
+              (:luft/layout/lens "luft lens layout")
+            (create device
+                    (make-bind-group-layout-descriptor
+                     :label "luft lens layout"
+                     :entries `((:binding ,shaders:+scene-binding+
+                                 :type :texture)
+                                (:binding ,shaders:+sampler-binding+
+                                 :type :sampler)
+                                (:binding ,shaders:+lens-frame-binding+
+                                 :type :uniform-buffer)))))
+          (renderer-layout renderer)
+          (with-renderer-creation-step
+              (:luft/layout/surface "luft surface layout")
+            (create device
+                    (make-bind-group-layout-descriptor
+                     :label "luft surface layout"
+                     :entries
+                     `((:binding ,shaders:+frame-binding+
+                        :type :uniform-buffer)
+                       (:binding ,shaders:+sites-binding+
+                        :type :storage-buffer)
+                       (:binding ,shaders:+bricks-binding+
+                        :type :storage-buffer)
+                       (:binding ,shaders:+cells-binding+
+                        :type :storage-buffer))))))
+    (flet ((pipeline (style zone label mesh-module fragment-module
                       &key (task-module task)
-                           (group layout)
+                           (group (renderer-layout renderer))
                            (depth '(:format :depth32-float
                                     :depth-write-enabled t
                                     :depth-compare :less)))
-             (create device
-                     (make-mesh-render-pipeline-descriptor
-                      :label label
-                      :layout group
-                      :task (and task-module `(:module ,task-module))
-                      :mesh `(:module ,mesh-module)
-                      :fragment
-                      `(:module ,fragment-module
-                        :targets ((:format
-                                   ,(renderer-color-format renderer))))
-                      :max-mesh-workgroups 1
-                      :depth-stencil depth))))
-      (setf (renderer-modules renderer)
-            (list task mesh bevel chamfer fragment chamfer-fragment
-                  paper-fragment sky-mesh sky-fragment lens-fragment)
-            (renderer-layout renderer) layout
-            (renderer-lens-layout renderer) lens-layout
-            (renderer-pipelines renderer)
-            (list :flat (pipeline "luft surface pipeline" mesh fragment)
-                  :bevel (pipeline "luft bevel pipeline" bevel fragment)
-                  :chamfer (pipeline "luft chamfer pipeline"
-                                     chamfer chamfer-fragment)
-                  ;; The paper material draws the chamfered geometry: the
-                  ;; glint it exists for lives on the planed facets.
-                  :paper (pipeline "luft paper pipeline"
-                                   chamfer paper-fragment)
-                  ;; The background: no task stage to amplify, no depth to
-                  ;; write, and it runs before anything that would hide it.
-                  :sky (pipeline "luft sky pipeline" sky-mesh sky-fragment
-                                 :task-module nil
-                                 :depth '(:format :depth32-float
-                                          :depth-write-enabled nil
-                                          :depth-compare :always))
-                  ;; The lens draws the frame the world was drawn into, so it
-                  ;; binds a group of textures rather than the world's sites.
-                  :lens (pipeline "luft lens pipeline" sky-mesh lens-fragment
-                                  :task-module nil
-                                  :group lens-layout
-                                  :depth nil)))
+             (setf (getf (renderer-pipelines renderer) style)
+                   (with-renderer-creation-step (zone label)
+                     (create device
+                             (make-mesh-render-pipeline-descriptor
+                              :label label
+                              :layout group
+                              :task (and task-module `(:module ,task-module))
+                              :mesh `(:module ,mesh-module)
+                              :fragment
+                              `(:module ,fragment-module
+                                :targets
+                                ((:format
+                                  ,(renderer-color-format renderer))))
+                              :max-mesh-workgroups 1
+                              :depth-stencil depth))))))
+      (pipeline :flat :luft/pipeline/flat "luft surface pipeline"
+                mesh fragment)
+      (pipeline :bevel :luft/pipeline/bevel "luft bevel pipeline"
+                bevel fragment)
+      (pipeline :chamfer :luft/pipeline/chamfer "luft chamfer pipeline"
+                chamfer chamfer-fragment)
+      ;; The paper material draws the chamfered geometry: the glint it exists
+      ;; for lives on the planed facets.
+      (pipeline :paper :luft/pipeline/paper "luft paper pipeline"
+                chamfer paper-fragment)
+      ;; The background: no task stage to amplify, no depth to write, and it
+      ;; runs before anything that would hide it.
+      (pipeline :sky :luft/pipeline/sky "luft sky pipeline"
+                sky-mesh sky-fragment
+                :task-module nil
+                :depth '(:format :depth32-float
+                         :depth-write-enabled nil
+                         :depth-compare :always))
+      ;; The lens draws the frame the world was drawn into, so it binds a
+      ;; group of textures rather than the world's sites.
+      (pipeline :lens :luft/pipeline/lens "luft lens pipeline"
+                sky-mesh lens-fragment
+                :task-module nil
+                :group (renderer-lens-layout renderer)
+                :depth nil)
       (setf (renderer-lens-bind-group renderer)
-            (create device
-                    (make-bind-group-descriptor
-                     :label "luft lens bindings"
-                     :layout lens-layout
-                     :entries
-                     `((:binding ,shaders:+scene-binding+
-                        :resource ,(renderer-scene-view renderer))
-                       (:binding ,shaders:+sampler-binding+
-                        :resource ,(renderer-sampler renderer))
-                       (:binding ,shaders:+lens-frame-binding+
-                        :resource ,(renderer-uniform-buffer renderer)))))))))
+            (with-renderer-creation-step
+                (:luft/bindings/lens "luft lens bindings")
+              (create device
+                      (make-bind-group-descriptor
+                       :label "luft lens bindings"
+                       :layout (renderer-lens-layout renderer)
+                       :entries
+                       `((:binding ,shaders:+scene-binding+
+                          :resource ,(renderer-scene-view renderer))
+                         (:binding ,shaders:+sampler-binding+
+                          :resource ,(renderer-sampler renderer))
+                         (:binding ,shaders:+lens-frame-binding+
+                          :resource ,(renderer-uniform-buffer renderer))))))))))
 
 (zdefun (make-renderer :zone :luft/make-renderer)
     (&key scene camera device

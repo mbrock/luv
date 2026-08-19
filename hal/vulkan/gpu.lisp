@@ -1090,30 +1090,37 @@ as its own element type rather than as reinterpreted floats."
   (with-vulkan-gpu-driver-environment
     (ensure-live-vulkan-object device :create-shader-module)
     (let ((code
-            (case (shader-module-descriptor-language descriptor)
-              (:spir-v (shader-module-descriptor-code descriptor))
-              (:mathematical
-               (let ((specification
-                       (shader-module-descriptor-code descriptor)))
-                 (unless (typep specification
-                                'luv.spir-v:shader-specification)
-                   (reject-gpu-request
-                    descriptor :invalid-mathematical-shader specification))
-                 (luv.spir-v:assemble-shader-specification specification)))
-              (otherwise
-               (reject-gpu-request
-                descriptor :unsupported-shader-language
-                (shader-module-descriptor-language descriptor))))))
+            (with-cpu-trace-zone (:vulkan/shader/prepare-spir-v)
+              (case (shader-module-descriptor-language descriptor)
+                (:spir-v (shader-module-descriptor-code descriptor))
+                (:mathematical
+                 (let ((specification
+                         (shader-module-descriptor-code descriptor)))
+                   (unless (typep specification
+                                  'luv.spir-v:shader-specification)
+                     (reject-gpu-request
+                      descriptor :invalid-mathematical-shader specification))
+                   (luv.spir-v:assemble-shader-specification specification)))
+                (otherwise
+                 (reject-gpu-request
+                  descriptor :unsupported-shader-language
+                  (shader-module-descriptor-language descriptor)))))))
       (unless (and (vectorp code)
                    (plusp (length code))
                    (every (lambda (word)
                             (typep word '(unsigned-byte 32)))
                           code))
         (reject-gpu-request descriptor :invalid-spir-v code))
+      ;; This forced line separates pure Lisp/SPIR-V preparation from the
+      ;; first driver call if the latter takes the process or device down.
+      (log-event :vulkan "prepared shader module ~A (~:D SPIR-V words)"
+                 (or (gpu-descriptor-label descriptor) "unlabelled")
+                 (length code))
       (make-instance
        'vulkan-gpu-shader-module
        :label (gpu-descriptor-label descriptor)
-       :handle (lvk:create-shader-module (vulkan-handle device) code)
+       :handle (with-cpu-trace-zone (:vulkan/shader/create-module)
+                 (lvk:create-shader-module (vulkan-handle device) code))
        :device device))))
 
 (defun storage-texture-layout-entry (descriptor)
@@ -1467,31 +1474,36 @@ render-pass compatibility need no separate vocabulary."
             (vulkan-shader-module-device object)))
          device :create-mesh-render-pipeline))
       (let* ((render-pass
-               (vulkan-render-pass-for-format
-                device format descriptor depth-format
-                (or depth-store-op :discard)))
+               (with-cpu-trace-zone (:vulkan/pipeline/render-pass)
+                 (vulkan-render-pass-for-format
+                  device format descriptor depth-format
+                  (or depth-store-op :discard))))
              (pipeline-layout
-               (lvk:create-pipeline-layout
-                (vulkan-handle device) (vector (vulkan-handle layout))))
+               (with-cpu-trace-zone (:vulkan/pipeline/create-layout)
+                 (lvk:create-pipeline-layout
+                  (vulkan-handle device) (vector (vulkan-handle layout)))))
              (pipeline nil)
              (completed-p nil))
         (unwind-protect
              (progn
                (setf pipeline
-                     (lvk:create-mesh-graphics-pipeline
-                      (vulkan-handle device)
-                      (vulkan-handle mesh-module)
-                      (and fragment-module (vulkan-handle fragment-module))
-                      pipeline-layout render-pass
-                      :task-module (and task-module
-                                        (vulkan-handle task-module))
-                      :task-entry-point (or (getf task :entry-point) "main")
-                      :mesh-entry-point (or (getf mesh :entry-point) "main")
-                      :fragment-entry-point
-                      (or (getf fragment :entry-point) "main")
-                      :depth-compare depth-compare
-                      :depth-write-enabled depth-write-enabled
-                      :blend blend)
+                     (with-cpu-trace-zone (:vulkan/pipeline/create-mesh)
+                       (lvk:create-mesh-graphics-pipeline
+                        (vulkan-handle device)
+                        (vulkan-handle mesh-module)
+                        (and fragment-module (vulkan-handle fragment-module))
+                        pipeline-layout render-pass
+                        :task-module (and task-module
+                                          (vulkan-handle task-module))
+                        :task-entry-point
+                        (or (getf task :entry-point) "main")
+                        :mesh-entry-point
+                        (or (getf mesh :entry-point) "main")
+                        :fragment-entry-point
+                        (or (getf fragment :entry-point) "main")
+                        :depth-compare depth-compare
+                        :depth-write-enabled depth-write-enabled
+                        :blend blend))
                      completed-p t)
                (make-instance
                 'vulkan-gpu-render-pipeline
