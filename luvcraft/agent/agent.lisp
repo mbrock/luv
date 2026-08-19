@@ -42,7 +42,12 @@ read more about that thing.  Keep answers short; act rather than narrate.")
 ;;; When the image was started without OPENAI_API_KEY, ask the tailnet lobby's
 ;;; value store for it (mqtt/net.lisp): `./scripts/luv lobby put OPENAI_API_KEY`.
 (defun lobby-openai-api-key ()
-  (mqtt.net:lobby-value "OPENAI_API_KEY"))
+  ;; The lobby worker owns the socket.  Agent creation only reads the retained
+  ;; value it has already heard, so a missing radio can never stall the canvas.
+  (and luvcraft:*session*
+       (luvcraft:lobby-client-value
+        (luvcraft:luvcraft-session-lobby-client luvcraft:*session*)
+        "OPENAI_API_KEY")))
 
 (pushnew 'lobby-openai-api-key openai:*api-key-fallbacks*)
 
@@ -52,11 +57,11 @@ read more about that thing.  Keep answers short; act rather than narrate.")
                            (instructions *default-instructions*)
                            (reasoning-summary "auto")
                            reasoning-effort
-                           (api-key (uiop:getenv "OPENAI_API_KEY")))
+                           (api-key (openai:default-api-key)))
   "Open an agent for SESSION with tools for COMMANDS.
 
-API-KEY defaults to the image's OPENAI_API_KEY; a ./sly session whose image
-was started without one can pass it here or (SETF (UIOP:GETENV ...)) first."
+API-KEY defaults to OPENAI_API_KEY, then registered semantic fallbacks such as
+the playing session's lobby radio."
   (unless session
     (error "No session: start one with ./sly play, or pass :SESSION."))
   (let ((agent (openai:make-agent

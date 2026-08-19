@@ -40,9 +40,9 @@ emit per frame; a rounded slab counts for several.")
 ;;; bob cycle and sways once; the arms above already follow the same phase,
 ;;; so the two motions read as one body walking.  These are knobs so the
 ;;; gait can be tuned from play without a rebuild.
-(defparameter *player-view-bob-lift* 0.045d0
+(defparameter *player-view-bob-lift* 0.07d0
   "Peak-to-trough rise of the eye over one step, in cells.")
-(defparameter *player-view-bob-sway* 0.022d0
+(defparameter *player-view-bob-sway* 0.035d0
   "Sideways amplitude of the eye over one stride, in cells.")
 (defparameter *player-view-land-dip* 0.035d0
   "Eye dip per cell-per-second of landing speed, in cells.")

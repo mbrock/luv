@@ -11,17 +11,18 @@
 
 (defclass sky-clock ()
   ((day-fraction
-    :initarg :day-fraction :initform 0.40
+    :initarg :day-fraction :initform (/ 6.5 24.0)
     :type real
     :quantity (:quantity :day-fraction :unit :one)
     :accessor sky-clock-day-fraction
-    :documentation "Time of day in [0,1): 0 midnight, 0.25 sunrise, 0.5 noon.")
+    :documentation "Time of day in [0,1): 0 midnight, 0.25 sunrise, 0.5 noon.
+The game starts at half past six in the morning.")
    (rate
-    :initarg :rate :initform (/ 1.0 600.0)
+    :initarg :rate :initform (/ 1.0 1200.0)
     :type real
     :quantity (:quantity :sky-cycle-rate :unit :hertz)
     :accessor sky-clock-rate
-    :documentation "Day fractions per real second; the default day is 10 minutes.")
+    :documentation "Day fractions per real second; the default day is 20 minutes.")
    (paused-p
     :initarg :paused-p :initform nil
     :accessor sky-clock-paused-p)
@@ -232,7 +233,7 @@ SLY can pause it, set a time, change its rate, or pin it without restarting.")
            (sky-frame-parameters-fog-near sky)
            (sky-frame-parameters-fog-far sky)))
 
-(defparameter *sky-sun-orbit-tilt* 0.28
+(defparameter *sky-sun-orbit-tilt* 0.44
   "How far the solar orbit leans out of the world X/Y plane.")
 
 (define-knob sun-orbit-tilt

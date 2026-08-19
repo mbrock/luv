@@ -15,6 +15,16 @@
              (format stream "The OpenAI response failed: ~A"
                      (openai-error-detail condition)))))
 
+(define-condition missing-api-key (openai-error) ()
+  (:default-initargs :detail "OPENAI_API_KEY is not set and no fallback supplied one")
+  (:report (lambda (condition stream)
+             (declare (ignore condition))
+             (format stream "No OpenAI API key is available.")))
+  (:documentation
+   "No API key was available when an agent was opened.  The RETRY restart asks
+the environment and registered fallbacks again; USE-VALUE supplies one for
+this connection."))
+
 (defclass tool ()
   ((name :initarg :name :reader tool-name)
    (description :initarg :description :initform "" :reader tool-description)
@@ -83,6 +93,19 @@ answer."
               when (and (stringp key) (plusp (length key)))
                 return key))))
 
+(defun ensure-api-key (key)
+  "Return a non-empty API key, offering semantic recovery when none exists."
+  (loop
+    (when (and (stringp key) (plusp (length key)))
+      (return key))
+    (restart-case (error 'missing-api-key)
+      (retry ()
+        :report "Ask OPENAI_API_KEY and the registered fallbacks again."
+        (setf key (default-api-key)))
+      (use-value (value)
+        :report "Supply an API key for this connection."
+        (setf key value)))))
+
 (defun make-agent (&key model instructions tools reasoning-effort reasoning-summary
                      (url "wss://api.openai.com/v1/responses")
                      (api-key (default-api-key))
@@ -94,8 +117,7 @@ The server protocol is experimental; URL is injectable so tests and local
 proxies can speak the same small protocol.  CLASS names the AGENT subclass
 to make, with INITARGS for its own slots, so an application can specialize
 HANDLE-AGENT-EVENT and CALL-TOOL on its own agent."
-  (unless (and api-key (plusp (length api-key)))
-    (error 'openai-error :detail "OPENAI_API_KEY is not set (and no fallback, such as the lobby store, had it)"))
+  (setf api-key (ensure-api-key api-key))
   (unless model
     (error 'openai-error :detail ":MODEL is required"))
   (let* ((socket (websocket-driver:make-client

@@ -9,7 +9,8 @@
 connection and serializes its turns; call AGENT-TURN from a dedicated thread
 when a program wants one agent thread per connection.")
   (:export
-   #:openai-error #:openai-error-detail #:agent-closed #:agent-failed
+   #:openai-error #:openai-error-detail #:missing-api-key #:retry
+   #:agent-closed #:agent-failed
    #:agent #:make-agent #:default-api-key #:*api-key-fallbacks* #:close-agent #:agent-model #:agent-response-id
    #:agent-turn #:agent-response #:agent-response-text #:agent-response-reasoning
    #:agent-response-id #:agent-response-usage

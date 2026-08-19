@@ -94,7 +94,13 @@ Signals CONNECTION-REFUSED if the broker says no."
                             (declare (ignore condition))
                             (ignore-errors (sb-bsd-sockets:socket-close socket)))))
       (setf (sb-bsd-sockets:sockopt-tcp-nodelay socket) t)
-      (sb-bsd-sockets:socket-connect socket (host-address host) port)
+      (handler-case
+          (if timeout
+              (sb-ext:with-timeout timeout
+                (sb-bsd-sockets:socket-connect socket (host-address host) port))
+              (sb-bsd-sockets:socket-connect socket (host-address host) port))
+        (sb-ext:timeout ()
+          (error 'connection-timeout :seconds timeout)))
       (let ((connection (make-instance 'mqtt-connection
                                        :host host :port port :socket socket
                                        :session session :timeout timeout)))
@@ -288,10 +294,11 @@ local tailscale CLI, or NIL when there is no tailscale here or it is down.
 Runs tailscale status --json and looks for the MagicDNSSuffix string; no JSON
 reader needed for one key."
   (ignore-errors
-   (let* ((output (with-output-to-string (out)
-                    (uiop:run-program '("tailscale" "status" "--json")
-                                      :output out :error-output nil
-                                      :input nil :ignore-error-status t)))
+   (let* ((output (sb-ext:with-timeout 3
+                    (with-output-to-string (out)
+                      (uiop:run-program '("tailscale" "status" "--json")
+                                        :output out :error-output nil
+                                        :input nil :ignore-error-status t))))
           (key "\"MagicDNSSuffix\"")
           (at (search key output)))
      (when at
@@ -308,11 +315,14 @@ MagicDNS suffix, or the bare service name (MagicDNS search domains usually
 resolve it) when the suffix cannot be learned.  Cached in
 *DISCOVERED-LOBBY-HOST*; set that to NIL to look again."
   (or *discovered-lobby-host*
-      (setf *discovered-lobby-host*
-            (let ((suffix (tailnet-magic-dns-suffix)))
-              (if suffix
-                  (format nil "~A.~A" *lobby-service-name* suffix)
-                  *lobby-service-name*)))))
+      (let ((suffix (tailnet-magic-dns-suffix)))
+        ;; Cache a discovery, not a transient failure.  The bare Service name
+        ;; remains a useful MagicDNS fallback, but the next call should ask
+        ;; Tailscale again when it was all we could produce.
+        (if suffix
+            (setf *discovered-lobby-host*
+                  (format nil "~A.~A" *lobby-service-name* suffix))
+            *lobby-service-name*))))
 
 (defun lobby-host ()
   "The host to reach the lobby at: *LOBBY-HOST* if set, else LUV_LOBBY_HOST,

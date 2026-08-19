@@ -33,3 +33,23 @@
     (ok (string= "function_call_output"
                  (cdr (assoc "type" output :test #'string=))))
     (ok (string= "call_1" (cdr (assoc "call_id" output :test #'string=))))))
+
+(deftest missing-api-key-is-restartable
+  (ok (string= "from-restart"
+               (handler-bind
+                   ((openai:missing-api-key
+                      (lambda (condition)
+                        (declare (ignore condition))
+                        (invoke-restart 'use-value "from-restart"))))
+                 (openai::ensure-api-key nil))))
+  (let* ((calls 0)
+         (openai:*api-key-fallbacks*
+           (list (lambda ()
+                   (when (> (incf calls) 1) "from-retry")))))
+    (ok (string= "from-retry"
+                 (handler-bind
+                     ((openai:missing-api-key
+                        (lambda (condition)
+                          (declare (ignore condition))
+                          (invoke-restart 'openai:retry))))
+                   (openai::ensure-api-key (openai:default-api-key)))))))
