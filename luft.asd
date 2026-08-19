@@ -37,7 +37,7 @@
   :entry-point "luft.render:main")
 
 (defsystem "luft/render/test"
-  :description "Executable claims for the packed-site mesh renderer."
+  :description "Executable claims for the packed-site renderer."
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on ("luft/render" "rove")
