@@ -260,6 +260,7 @@
               env.pkgs.pkg-config
               env.pkgs.sdl3
               env.pkgs.spirv-tools
+              env.pkgs.tracy
               env.pkgs.urbit
               env.pkgs.vulkan-headers
               env.pkgs.vulkan-tools
@@ -273,6 +274,7 @@
             LUV_GHOSTTY_LIBRARY = env.libghosttyVtLibrary;
             LUV_SLYNK_DIR = "${env.slyRoot}/slynk";
             LUV_TRACY_CLIENT = env.tracyClientLibrary;
+            LUV_TRACY_PROFILER = "${env.pkgs.tracy}/bin/tracy";
             LUV_FFMPEG_LIBDIR = env.ffmpegLibraryDirectory;
             LUV_MUPDF_LIBDIR = env.mupdfLibraryDirectory;
             LUV_YT_DLP = "${env.pkgs.yt-dlp}/bin/yt-dlp";

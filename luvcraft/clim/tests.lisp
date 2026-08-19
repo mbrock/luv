@@ -71,6 +71,7 @@
   (let ((entries (luvcraft-command-menu-entries)))
     (ok (assoc "Toggle Phone" entries :test #'string=))
     (ok (assoc "Place Block" entries :test #'string=))
+    (ok (assoc "Start Tracy" entries :test #'string=))
     ;; Commands needing arguments will join M-x when it can ask for them;
     ;; presenting them as executable before then would make a dishonest menu.
     (ok (null (assoc "Select Quickbar Slot" entries :test #'string=)))

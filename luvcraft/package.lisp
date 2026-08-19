@@ -585,6 +585,7 @@ compiler which closes a program over bound fields into a scalar loop.")
            #:luvcraft-mirror-frames
            #:luvcraft-session-frame-mirror
            #:start-luvcraft-tracy
+           #:start-luvcraft-tracy-profiler
            #:step-block-world-player
            #:movement-intent
            #:make-movement-intent

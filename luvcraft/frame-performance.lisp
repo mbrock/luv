@@ -74,6 +74,28 @@ is already running, and luvcraft's workers introduce themselves as they start."
   (setf *luvcraft-tracy-plots-described-p* nil)
   *tracy*)
 
+(defvar *luvcraft-tracy-profiler-process* nil
+  "The Tracy profiler window launched from luvcraft, while it remains open.")
+
+(defun luvcraft-tracy-profiler-program ()
+  "Return the exact-version Tracy profiler supplied by the dev environment."
+  (let ((configured (uiop:getenv "LUV_TRACY_PROFILER")))
+    (or (and configured (plusp (length configured))
+             (probe-file configured))
+        (error "No Tracy profiler GUI is available. Re-enter the luv Nix dev shell."))))
+
+(defun start-luvcraft-tracy-profiler ()
+  "Start luvcraft's Tracy client and show a profiler connected to this image."
+  (start-luvcraft-tracy)
+  (unless (and *luvcraft-tracy-profiler-process*
+               (sb-ext:process-alive-p *luvcraft-tracy-profiler-process*))
+    (setf *luvcraft-tracy-profiler-process*
+          (sb-ext:run-program
+           (namestring (luvcraft-tracy-profiler-program))
+           '("-a" "127.0.0.1")
+           :input nil :output nil :error nil :wait nil)))
+  *luvcraft-tracy-profiler-process*)
+
 (defun describe-luvcraft-tracy-plots ()
   "Describe luvcraft's plots to a viewer, once per connection.
 
