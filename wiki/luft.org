@@ -201,10 +201,13 @@ beside the face's solid and air cells, across $U$, across $V$, and across
 both, toward that corner's side.  The site rules of #6TEFOS then move it --
 corner star at a corner, edge star along a boundary, nowhere inside -- and
 because every face incident to a site gathers the same star, the facets meet
-exactly.  The watertightness test that was Metal-only now runs on Linux over
-every style the default technique draws; the rounded =:bevel= style remains
-mesh-only until its ring rule is written the same way.  The vertex shaders
-live in =luft/render/vertex-shaders.lisp=.
+exactly.  The rounding of #6TEFOS is the same
+again at two rings and a hundred and fifty vertices a face: the vertex's own
+grid position says whether it is a shared corner, a ring point, or an inner
+point, and the rules BEVEL-POINT-BINDINGS generates per point are chosen at
+run time from the same six-cell star.  The watertightness test that was
+Metal-only now runs on Linux over all four styles.  The vertex shaders live
+in =luft/render/vertex-shaders.lisp=.
 
 * Fillets and bevels belong to edge and vertex sites
 :PROPERTIES:

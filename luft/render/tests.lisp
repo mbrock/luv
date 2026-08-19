@@ -81,8 +81,10 @@
       (luft.render::standalone-render-options "bevel" :mesh)
     (ok (equal '(:bevel :bevel (:bevel) nil :mesh)
                (list mode style pipelines effects technique))))
-  ;; The vertex technique has no rounded style to offer.
-  (ok (signals (luft.render::standalone-render-options "bevel" :vertex)))
+  (multiple-value-bind (mode style pipelines effects technique)
+      (luft.render::standalone-render-options "bevel" :vertex)
+    (ok (equal '(:bevel :bevel (:bevel) nil :vertex)
+               (list mode style pipelines effects technique))))
   (multiple-value-bind (mode style pipelines effects technique)
       (luft.render::standalone-render-options "full" :mesh)
     (ok (eq :full mode))
@@ -93,23 +95,26 @@
   (multiple-value-bind (mode style pipelines effects technique)
       (luft.render::standalone-render-options "full" :vertex)
     (ok (eq :full mode))
-    (ok (eq :chamfer style))
-    (ok (equal '(:flat :chamfer :paper) pipelines))
+    (ok (eq :bevel style))
+    (ok (equal '(:flat :bevel :chamfer :paper) pipelines))
     (ok (equal '(:sky :lens) effects))
     (ok (eq :vertex technique))))
 
 (deftest vertex-pulling-draws-whole-grids-per-face
   ;; Six vertices draw a flat quad; the chamfer grid of one ring has four
-  ;; points a side, nine quads, and so fifty-four vertices.
+  ;; points a side, nine quads, and so fifty-four vertices; the rounding's
+  ;; two rings make six a side, twenty-five quads, a hundred and fifty.
   (ok (= 6 (luft.render.shaders:surface-vertices-per-face :flat)))
-  (let ((side (let ((luft.render.shaders::*bevel-rings* 1))
-                (luft.render.shaders::bevel-grid-side))))
-    (ok (= (* 6 (1- side) (1- side))
-           (luft.render.shaders:surface-vertices-per-face :chamfer)))
-    (ok (= (luft.render.shaders:surface-vertices-per-face :chamfer)
-           (luft.render.shaders:surface-vertices-per-face :paper))))
-  ;; A style a technique cannot draw is refused before any GPU work.
-  (ok (signals (luft.render:make-renderer :technique :vertex :style :bevel
+  (ok (= 54 (luft.render.shaders:surface-vertices-per-face :chamfer)))
+  (ok (= 54 (luft.render.shaders:surface-vertices-per-face :paper)))
+  (ok (= 150 (luft.render.shaders:surface-vertices-per-face :bevel)))
+  (ok (= (luft.render.shaders:surface-vertices-per-face :bevel)
+         (let ((side (let ((luft.render.shaders::*bevel-rings* 2))
+                       (luft.render.shaders::bevel-grid-side))))
+           (* 6 (1- side) (1- side)))))
+  ;; A style outside the pipelines asked for is refused before any GPU work.
+  (ok (signals (luft.render:make-renderer :style :bevel
+                                          :pipeline-styles '(:flat)
                                           :scene nil :camera nil))))
 
 (deftest brick-spheres-enclose-their-faces

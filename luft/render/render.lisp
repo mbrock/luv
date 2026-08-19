@@ -587,7 +587,7 @@ amplifies bricks with task and mesh shaders and needs VK_EXT_mesh_shader.")
   '(:flat :bevel :chamfer :paper))
 
 (defmethod technique-styles ((technique (eql :vertex)))
-  '(:flat :chamfer :paper))
+  '(:flat :bevel :chamfer :paper))
 
 (defgeneric create-technique-pipelines (technique renderer)
   (:documentation
@@ -752,12 +752,17 @@ each NIL when nothing configured wants it."
 
 (defmethod create-technique-pipelines ((technique (eql :vertex)) renderer)
   (let ((styles (renderer-pipeline-styles renderer))
-        surface chamfer screen)
+        surface bevel chamfer screen)
     (when (member :flat styles)
       (setf surface (create-renderer-module
                      renderer :luft/shader/surface-vertex
                      "luft surface vertex"
                      (shaders:surface-vertex-shader))))
+    (when (member :bevel styles)
+      (setf bevel (create-renderer-module
+                   renderer :luft/shader/bevel-vertex
+                   "luft bevel vertex"
+                   (shaders:bevel-vertex-shader))))
     (when (intersection styles '(:chamfer :paper))
       (setf chamfer (create-renderer-module
                      renderer :luft/shader/chamfer-vertex
@@ -787,6 +792,9 @@ each NIL when nothing configured wants it."
         (when (member :flat styles)
           (pipeline :flat :luft/pipeline/flat "luft surface pipeline"
                     surface fragment))
+        (when (member :bevel styles)
+          (pipeline :bevel :luft/pipeline/bevel "luft bevel pipeline"
+                    bevel fragment))
         (when (member :chamfer styles)
           (pipeline :chamfer :luft/pipeline/chamfer "luft chamfer pipeline"
                     chamfer chamfer-fragment))
@@ -880,7 +888,7 @@ each NIL when nothing configured wants it."
 
 TECHNIQUE is :VERTEX, which pulls sites in a vertex shader on any device, or
 :MESH, which dispatches task and mesh shaders where VK_EXT_mesh_shader works.
-STYLE is :FLAT, :BEVEL (rounded, mesh only), :CHAMFER (subtle planar crease
+STYLE is :FLAT, :BEVEL (rounded), :CHAMFER (subtle planar crease
 relief), or :PAPER (the chamfered geometry in a matte, toothed material), and
 may be changed later to a member of PIPELINE-STYLES, which defaults to every
 style the technique draws.  Only those surface pipelines and the optional

@@ -20,6 +20,7 @@ packed sites.")
            #:sky-mesh-shader
            #:sky-fragment-shader
            #:surface-vertex-shader
+           #:bevel-vertex-shader
            #:chamfer-vertex-shader
            #:sky-vertex-shader
            #:surface-vertices-per-face
