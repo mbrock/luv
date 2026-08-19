@@ -44,8 +44,8 @@
 (defparameter *terminal-display-modes* '(:shell :film)
   "The wall modes the hotbar offers, in slot order.
 
-A presentation extension which teaches CHANGE-TERMINAL-DISPLAY-MODE a new
-mode appends it here and gets a numbered slot; nothing else has to change.")
+A presentation layer which teaches CHANGE-TERMINAL-DISPLAY-MODE a new mode
+appends it here and gets a numbered slot; nothing else has to change.")
 
 (defparameter *terminal-display-mode-colors*
   '((:shell 0.12 0.44 0.30)

@@ -178,14 +178,6 @@
                        :reader luvcraft-session-crosshair-pipeline)
    (post-pipeline :initarg :post-pipeline
                   :reader luvcraft-session-post-pipeline)
-   (particle-vertex-buffer :initarg :particle-vertex-buffer
-                           :reader luvcraft-session-particle-vertex-buffer)
-   (critter-vertex-buffer :initarg :critter-vertex-buffer
-                          :reader luvcraft-session-critter-vertex-buffer)
-   (body-vertex-buffer :initarg :body-vertex-buffer :initform nil
-                       :reader luvcraft-session-body-vertex-buffer)
-   (physics-vertex-buffer :initarg :physics-vertex-buffer :initform nil
-                          :reader luvcraft-session-physics-vertex-buffer)
    (world-text :initarg :world-text :initform nil
                :reader luvcraft-session-world-text)
    (world-text-glyph-cache :initarg :world-text-glyph-cache :initform nil
@@ -442,9 +434,9 @@ looked at."))
   (:documentation
    "Attach the player HUD supplied by the loaded presentation system.
 
-The base game deliberately has no presentation-system dependency.  An
-extension such as MCLUV may specialize this at the session boundary and
-return its attached overlay."))
+LUVCRAFT/CORE deliberately has no presentation-system dependency.
+LUVCRAFT/MCCLIM specializes this at the session boundary and returns its
+attached overlay."))
 
 (defmethod attach-luvcraft-hud ((session t))
   (declare (ignore session))

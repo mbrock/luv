@@ -7,8 +7,7 @@
                    (uiop:pathname-directory-pathname *load-truename*)))
 
 (asdf:load-asd (merge-pathnames #P"luv.asd" (gallery-project-root)))
-(asdf:load-asd (merge-pathnames #P"mcluv.asd" (gallery-project-root)))
-(asdf:load-system :mcluv/gallery)
+(asdf:load-system :luv/mcclim/gallery)
 
 (defun gallery-target ()
   (let ((arguments (uiop:command-line-arguments)))

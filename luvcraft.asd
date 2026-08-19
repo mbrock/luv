@@ -16,8 +16,8 @@
                  (:file "world-package")
                  (:file "world")))))
 
-(defsystem "luvcraft"
-  :description "The interactive block world built on luv."
+(defsystem "luvcraft/core"
+  :description "The renderer, simulation, and devices of the luvcraft block world."
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on ("luv"
@@ -82,13 +82,13 @@
                  (:file "portal-server" :if-feature :darwin)
                  (:file "benchmark")
                  (:file "gazetteer"))))
-  :in-order-to ((test-op (test-op "luvcraft/test"))))
+  :in-order-to ((test-op (test-op "luvcraft/core/test"))))
 
 (defsystem "luvcraft/tools"
   :description "One-shot command-line tools for luvcraft development."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luvcraft" "uiop")
+  :depends-on ("luvcraft/core" "uiop")
   :build-operation "program-op"
   :build-pathname "build/luv"
   :entry-point "luvcraft.tools:main"
@@ -101,14 +101,66 @@
                  (:file "block-world")
                  (:file "gazetteer")))))
 
-(defsystem "luvcraft/clim"
-  :description "Luvcraft's verbs as CLIM commands in an application frame."
+(defsystem "luvcraft/mcclim"
+  :description "McCLIM gadget textures embedded in a live luvcraft session."
   :version "0.0.1"
   :author "Mikael Brockman"
-  ;; The Telegram panel is part of the game: it is what the phone shows, and
-  ;; the wall's third mode.  It has to be loaded before the command layer,
-  ;; which binds a keystroke to every mode the wall offers at load time.
-  :depends-on ("luvcraft" "mcluv/luvcraft" "mcluv/telegram" "alexandria")
+  :depends-on ("luv/mcclim" "luvcraft/core")
+  :serial t
+  :components ((:file "mcclim/surveyor")
+               (:file "mcclim/luvcraft")
+               (:file "mcclim/terminal-film-browser")
+               (:file "mcclim/block-icon")
+               (:file "mcclim/hotbar")
+               (:file "mcclim/inventory")
+               (:file "mcclim/metabar"))
+  :in-order-to ((test-op (test-op "luvcraft/mcclim/test"))))
+
+(defsystem "luvcraft/mcclim/test"
+  :description "Executable claims for McCLIM instruments embedded in luvcraft."
+  :version "0.0.1"
+  :depends-on ("luvcraft/mcclim" "rove")
+  :components ((:file "mcclim/surveyor-tests"))
+  :perform (test-op (operation component)
+             (declare (ignore operation component))
+             (unless (uiop:symbol-call '#:rove '#:run-suite
+                                       (uiop:symbol-call '#:rove '#:find-suite
+                                                         '#:mcluv.surveyor-tests)
+                                       :style :luv)
+               (error "luvcraft/mcclim tests failed"))))
+
+(defsystem "luvcraft/telegram"
+  :description "A Telegram terminal mounted on a luvcraft wall and phone."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luvcraft/mcclim" "telegram/chat" "luv/libav" "sb-concurrency")
+  :components ((:file "mcclim/telegram")))
+
+(defsystem "luvcraft/paper"
+  :description "A sheet of PDF paper hung on a luvcraft wall."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luvcraft/mcclim" "luv/mupdf" "cl-dejavu" "zpb-ttf")
+  :components ((:file "mcclim/paper")))
+
+(defsystem "luvcraft/shader-lab"
+  :description "A McCLIM presentation browser for luvcraft's live shaders."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luvcraft/mcclim")
+  :components ((:file "mcclim/shader-lab")))
+
+(defsystem "luvcraft"
+  :description "The complete interactive luvcraft game."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  ;; Telegram is part of the game: it is what the phone initially shows and
+  ;; the wall's third mode.  Load it before the command layer, whose keymap is
+  ;; assembled from the modes available at load time.
+  :depends-on ("luvcraft/core"
+               "luvcraft/mcclim"
+               "luvcraft/telegram"
+               "alexandria")
   :serial t
   :components ((:module "luvcraft/clim"
                 :serial t
@@ -118,36 +170,26 @@
                              (:file "legend")
                              (:file "tape")
                              (:file "input"))))
-  :in-order-to ((test-op (test-op "luvcraft/clim-test"))))
-
-(defsystem "luvcraft/clim-test"
-  :description "Executable claims for luvcraft's CLIM command vocabulary."
-  :version "0.0.1"
-  :depends-on ("luvcraft/clim" "rove")
-  :components ((:file "luvcraft/clim/tests"))
-  :perform (test-op (operation component)
-             (declare (ignore operation component))
-             (unless (uiop:symbol-call '#:rove '#:run-suite
-                                       (uiop:symbol-call '#:rove '#:find-suite
-                                                         '#:luvcraft.clim.tests)
-                                       :style :luv)
-               (error "luvcraft CLIM tests failed"))))
+  :in-order-to ((test-op (test-op "luvcraft/core/test")
+                         (test-op "luv/mcclim/test")
+                         (test-op "luvcraft/mcclim/test")
+                         (test-op "luvcraft/test"))))
 
 (defsystem "luvcraft/program"
   :description "The standalone luvcraft executable with its live Slynk endpoint."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luvcraft" "luvcraft/clim" "sb-posix" "slynk")
+  :depends-on ("luvcraft" "sb-posix" "slynk")
   :components ((:file "luvcraft/main"))
   :build-operation "program-op"
   :build-pathname "build/luvcraft"
   :entry-point "luvcraft:main")
 
-(defsystem "luvcraft/test"
+(defsystem "luvcraft/core/test"
   :description "Executable claims for the world, shaders, and interactive slice."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luvcraft" "cl-dejavu" "rove")
+  :depends-on ("luvcraft/core" "cl-dejavu" "rove")
   :serial t
   :components ((:file "hal/shader/tests")
                (:file "luvcraft/world-tests")
@@ -161,5 +203,18 @@
              (unless (uiop:symbol-call '#:rove '#:run-suite
                                        (uiop:symbol-call '#:rove '#:find-suite
                                                          '#:luvcraft.tests)
+                                       :style :luv)
+               (error "luvcraft tests failed"))))
+
+(defsystem "luvcraft/test"
+  :description "Executable claims for the complete game's CLIM command vocabulary."
+  :version "0.0.1"
+  :depends-on ("luvcraft" "rove")
+  :components ((:file "luvcraft/clim/tests"))
+  :perform (test-op (operation component)
+             (declare (ignore operation component))
+             (unless (uiop:symbol-call '#:rove '#:run-suite
+                                       (uiop:symbol-call '#:rove '#:find-suite
+                                                         '#:luvcraft.clim.tests)
                                        :style :luv)
                (error "luvcraft tests failed"))))

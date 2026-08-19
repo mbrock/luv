@@ -103,8 +103,8 @@ material the palette gives without limit.  A film is; stone is not.")
   (:documentation
    "Toggle SESSION's inventory view, returning true when one is available.
 
-The renderer-independent game has no UI dependency.  A loaded presentation
-extension such as MCLUV supplies the session method."))
+LUVCRAFT/CORE has no UI dependency.  LUVCRAFT/MCCLIM supplies the session
+method."))
 
 (defmethod toggle-luvcraft-inventory ((session t))
   (declare (ignore session))

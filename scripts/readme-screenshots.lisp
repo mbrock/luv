@@ -10,10 +10,8 @@
  (merge-pathnames #P"luv.asd" (readme-screenshot-project-root)))
 (asdf:load-asd
  (merge-pathnames #P"luvcraft.asd" (readme-screenshot-project-root)))
-(asdf:load-asd
- (merge-pathnames #P"mcluv.asd" (readme-screenshot-project-root)))
 (asdf:load-system :luvcraft)
-(asdf:load-system :mcluv/shader-lab)
+(asdf:load-system :luvcraft/shader-lab)
 
 (defun readme-screenshot-target ()
   (let ((arguments (uiop:command-line-arguments)))

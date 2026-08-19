@@ -11,6 +11,17 @@
 (defclass luvcraft-frame-state ()
   ((uniform-buffer :initarg :uniform-buffer
                    :reader luvcraft-frame-uniform-buffer)
+   ;; WRITE-BUFFER writes mapped host-visible memory directly.  Animated
+   ;; streams therefore belong to the presentation slot: reacquiring this
+   ;; slot is the proof that the GPU has finished reading its previous data.
+   (particle-vertex-buffer :initarg :particle-vertex-buffer
+                           :reader luvcraft-frame-particle-vertex-buffer)
+   (critter-vertex-buffer :initarg :critter-vertex-buffer
+                          :reader luvcraft-frame-critter-vertex-buffer)
+   (physics-vertex-buffer :initarg :physics-vertex-buffer
+                          :reader luvcraft-frame-physics-vertex-buffer)
+   (body-vertex-buffer :initarg :body-vertex-buffer
+                       :reader luvcraft-frame-body-vertex-buffer)
    (scene-bind-group :initarg :scene-bind-group
                      :reader luvcraft-frame-scene-bind-group)
    (shadow-bind-group :initarg :shadow-bind-group
@@ -592,6 +603,10 @@ lands in a presentation image that is finally copied onto the drawable."
            (luvcraft-session-context session) surface-texture)))
     (or (gethash key (luvcraft-session-frame-states session))
       (let ((buffer nil)
+            (particle-vertex-buffer nil)
+            (critter-vertex-buffer nil)
+            (physics-vertex-buffer nil)
+            (body-vertex-buffer nil)
             (scene-bind-group nil)
             (shadow-bind-group nil)
             (post-uniform-buffer nil)
@@ -610,6 +625,34 @@ lands in a presentation image that is finally copied onto the drawable."
                        :label "block world camera uniform"
                        :size (block-world-camera-uniform-size session)
                        :usage '(:uniform)))
+                     particle-vertex-buffer
+                     (create
+                      (luvcraft-session-device session)
+                      (make-buffer-descriptor
+                       :label "block smash particle vertices"
+                       :size +block-particle-buffer-size+
+                       :usage '(:vertex)))
+                     critter-vertex-buffer
+                     (create
+                      (luvcraft-session-device session)
+                      (make-buffer-descriptor
+                       :label "critter model vertices"
+                       :size +critter-buffer-size+
+                       :usage '(:vertex)))
+                     physics-vertex-buffer
+                     (create
+                      (luvcraft-session-device session)
+                      (make-buffer-descriptor
+                       :label "physics body vertices"
+                       :size +physics-vertex-buffer-size+
+                       :usage '(:vertex)))
+                     body-vertex-buffer
+                     (create
+                      (luvcraft-session-device session)
+                      (make-buffer-descriptor
+                       :label "player body vertices"
+                       :size +player-body-buffer-size+
+                       :usage '(:vertex)))
                      scene-bind-group
                      (create
                       (luvcraft-session-device session)
@@ -693,6 +736,10 @@ lands in a presentation image that is finally copied onto the drawable."
                           (luvcraft-session-device session) buffer)
                          #()))
                (remember-luvcraft-resource session buffer)
+               (remember-luvcraft-resource session particle-vertex-buffer)
+               (remember-luvcraft-resource session critter-vertex-buffer)
+               (remember-luvcraft-resource session physics-vertex-buffer)
+               (remember-luvcraft-resource session body-vertex-buffer)
                (remember-luvcraft-resource session scene-bind-group)
                (remember-luvcraft-resource session shadow-bind-group)
                (remember-luvcraft-resource session post-uniform-buffer)
@@ -708,6 +755,10 @@ lands in a presentation image that is finally copied onto the drawable."
                        (make-instance
                         'luvcraft-frame-state
                         :uniform-buffer buffer
+                        :particle-vertex-buffer particle-vertex-buffer
+                        :critter-vertex-buffer critter-vertex-buffer
+                        :physics-vertex-buffer physics-vertex-buffer
+                        :body-vertex-buffer body-vertex-buffer
                         :scene-bind-group scene-bind-group
                         :shadow-bind-group shadow-bind-group
                         :post-uniform-buffer post-uniform-buffer
@@ -734,6 +785,10 @@ lands in a presentation image that is finally copied onto the drawable."
               (destroy bloom-secondary-bind-group))
             (when post-bind-group (destroy post-bind-group))
             (when post-uniform-buffer (destroy post-uniform-buffer))
+            (when body-vertex-buffer (destroy body-vertex-buffer))
+            (when physics-vertex-buffer (destroy physics-vertex-buffer))
+            (when critter-vertex-buffer (destroy critter-vertex-buffer))
+            (when particle-vertex-buffer (destroy particle-vertex-buffer))
             (when buffer (destroy buffer))))))))
 
 (defun discard-luvcraft-frame-states (session)
@@ -755,6 +810,10 @@ attachments the session actually holds."
                        (luvcraft-frame-bloom-primary-bind-group state)
                        (luvcraft-frame-bloom-secondary-bind-group state)
                        (luvcraft-frame-post-uniform-buffer state)
+                       (luvcraft-frame-particle-vertex-buffer state)
+                       (luvcraft-frame-critter-vertex-buffer state)
+                       (luvcraft-frame-physics-vertex-buffer state)
+                       (luvcraft-frame-body-vertex-buffer state)
                        (luvcraft-frame-uniform-buffer state)
                        (remove-duplicates
                         (coerce (luvcraft-frame-world-text-bind-groups state)
@@ -911,19 +970,19 @@ submission that used them completes."
        (luvcraft-post-uniform-data session (first extent) (second extent)))
       (when (plusp particle-vertex-count)
         (write-buffer
-         (luvcraft-session-particle-vertex-buffer session)
+         (luvcraft-frame-particle-vertex-buffer frame)
          particle-vertices))
       (when (plusp critter-vertex-count)
         (write-buffer
-         (luvcraft-session-critter-vertex-buffer session)
+         (luvcraft-frame-critter-vertex-buffer frame)
          critter-vertices))
       (when (plusp body-vertex-count)
         (write-buffer
-         (luvcraft-session-body-vertex-buffer session)
+         (luvcraft-frame-body-vertex-buffer frame)
          body-vertices))
       (when (plusp physics-vertex-count)
         (write-buffer
-         (luvcraft-session-physics-vertex-buffer session)
+         (luvcraft-frame-physics-vertex-buffer frame)
          (luvcraft-physics-vertex-stream session))))
     (with-luvcraft-frame-timing
         (sample luvcraft-frame-sample-shadow-encode-seconds
@@ -950,12 +1009,12 @@ submission that used them completes."
         ;; solid; a tumbling smash fragment deliberately does not.
         (when (plusp critter-vertex-count)
           (set-vertex-buffer
-           pass 0 (luvcraft-session-critter-vertex-buffer session))
+           pass 0 (luvcraft-frame-critter-vertex-buffer frame))
           (draw pass critter-vertex-count))
         ;; So do the balls, drops, and gobbets: things with weight.
         (when (plusp physics-vertex-count)
           (set-vertex-buffer
-           pass 0 (luvcraft-session-physics-vertex-buffer session))
+           pass 0 (luvcraft-frame-physics-vertex-buffer frame))
           (draw pass physics-vertex-count))
         (end-pass pass))
       (prepare-texture
@@ -992,22 +1051,22 @@ submission that used them completes."
               (draw pass (block-mesh-vertex-count mesh)))))
         (when (plusp critter-vertex-count)
           (set-vertex-buffer
-           pass 0 (luvcraft-session-critter-vertex-buffer session))
+           pass 0 (luvcraft-frame-critter-vertex-buffer frame))
           (draw pass critter-vertex-count))
         (when (plusp physics-vertex-count)
           (set-vertex-buffer
-           pass 0 (luvcraft-session-physics-vertex-buffer session))
+           pass 0 (luvcraft-frame-physics-vertex-buffer frame))
           (draw pass physics-vertex-count))
         ;; The player's own arms and whatever they hold, drawn in the scene
         ;; but not into the shadow map: a pair of floating forearms would
         ;; throw a shadow that explains nothing.
         (when (plusp body-vertex-count)
           (set-vertex-buffer
-           pass 0 (luvcraft-session-body-vertex-buffer session))
+           pass 0 (luvcraft-frame-body-vertex-buffer frame))
           (draw pass body-vertex-count))
         (when (plusp particle-vertex-count)
           (set-vertex-buffer
-           pass 0 (luvcraft-session-particle-vertex-buffer session))
+           pass 0 (luvcraft-frame-particle-vertex-buffer frame))
           (draw pass particle-vertex-count))
         ;; Before the text, so a caption drawn over the screen wins.
         (when (luvcraft-session-video-screen session)
@@ -1391,8 +1450,7 @@ Click to capture the pointer, look with the mouse, walk with WASD, and jump
 with Space.  Once captured, left click removes the block at the centre of view
 and right click places the selected block.  Number keys select materials,
 middle click picks the targeted material, Shift sprints, and Escape releases
-the pointer.  When a presentation extension supplies it, I opens the player
-inventory.
+the pointer.  In the complete game, I opens the player inventory.
 
 Everything also works without a pointer: the arrow keys look around, E places
 the selected block, X removes the targeted block, C picks its material, and M
@@ -1562,38 +1620,6 @@ NIL to let the display choose a comfortable window."
                       (make-buffer-descriptor
                        :label "block world crosshair vertices"
                        :size (* 4 (length crosshair-vertices))
-                       :usage '(:vertex)))))
-                  (particle-vertex-buffer
-                    (keep
-                     (create
-                      device
-                      (make-buffer-descriptor
-                       :label "block smash particle vertices"
-                       :size +block-particle-buffer-size+
-                       :usage '(:vertex)))))
-                  (critter-vertex-buffer
-                    (keep
-                     (create
-                      device
-                      (make-buffer-descriptor
-                       :label "critter model vertices"
-                       :size +critter-buffer-size+
-                       :usage '(:vertex)))))
-                  (physics-vertex-buffer
-                    (keep
-                     (create
-                      device
-                      (make-buffer-descriptor
-                       :label "physics body vertices"
-                       :size +physics-vertex-buffer-size+
-                       :usage '(:vertex)))))
-                  (body-vertex-buffer
-                    (keep
-                     (create
-                      device
-                      (make-buffer-descriptor
-                       :label "player body vertices"
-                       :size +player-body-buffer-size+
                        :usage '(:vertex)))))
                   (layout
                     (keep
@@ -1860,11 +1886,7 @@ NIL to let the display choose a comfortable window."
                      :crosshair-vertex-buffer crosshair-vertex-buffer
                      :crosshair-pipeline crosshair-pipeline
                      :post-pipeline post-pipeline
-                     :particle-vertex-buffer particle-vertex-buffer
-                     :critter-vertex-buffer critter-vertex-buffer
                      :critters critters
-                     :physics-vertex-buffer physics-vertex-buffer
-                     :body-vertex-buffer body-vertex-buffer
                      :world-text text-run
                      :world-text-glyph-cache text-glyph-cache
                      :resources resources)))

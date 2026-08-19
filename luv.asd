@@ -289,3 +289,51 @@ offsets and of headers."
                                                          '#:luv.tests)
                                        :style :luv)
                (error "luv tests failed"))))
+
+(defsystem "luv/mcclim"
+  :description "An experimental McCLIM backend presented through luv canvases."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luv" "mcclim-render" "cl-dejavu")
+  :serial t
+  :components ((:module "mcclim"
+                :serial t
+                :components ((:file "package")
+                             (:file "paint")
+                             (:file "port")
+                             (:file "mirror")
+                             (:file "gpu")
+                             (:file "widget-lab")
+                             (:file "compositor"))))
+  :in-order-to ((test-op (test-op "luv/mcclim/test"))))
+
+(defsystem "luv/mcclim/test"
+  :description "Executable claims for luv's direct McCLIM GPU backend."
+  :version "0.0.1"
+  :depends-on ("luv/mcclim" "rove")
+  :components ((:file "mcclim/tests"))
+  :perform (test-op (operation component)
+             (declare (ignore operation component))
+             (unless (uiop:symbol-call '#:rove '#:run-suite
+                                       (uiop:symbol-call '#:rove '#:find-suite
+                                                         '#:mcluv.tests)
+                                       :style :luv)
+               (error "luv/mcclim tests failed"))))
+
+(defsystem "luv/mcclim/gallery"
+  :description "A screenshot gallery and primitive-fallback audit for McCLIM."
+  :version "0.0.1"
+  :depends-on ("luv/mcclim" "clim-examples")
+  :components ((:file "mcclim/gallery")))
+
+(defsystem "luv/mcclim/roundrect-benchmark"
+  :description "A Tracy A/B of native and decomposed McCLIM roundrects."
+  :version "0.0.1"
+  :depends-on ("luv/mcclim")
+  :components ((:file "mcclim/roundrect-benchmark")))
+
+(defsystem "luv/mcclim/paint-benchmark"
+  :description "A Tracy comparison of solid, gradient, and image GUI paints."
+  :version "0.0.1"
+  :depends-on ("luv/mcclim")
+  :components ((:file "mcclim/paint-benchmark")))

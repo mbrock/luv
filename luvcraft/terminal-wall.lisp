@@ -46,7 +46,7 @@
   bold-p)
 
 (defparameter *luvcraft-fonts-directory*
-  (asdf:system-relative-pathname "luvcraft" "fonts/")
+  (asdf:system-relative-pathname "luvcraft/core" "fonts/")
   "The checkout's bundled fonts, captured while the system is loaded.")
 
 (defun luvcraft-font-pathname (name)
@@ -241,9 +241,9 @@ than once at mounting.")
   ((session :initarg :session :initform nil :reader terminal-display-session)
    (surface :initarg :surface :reader terminal-display-surface)
    (mode :initform :shell :accessor terminal-display-mode)
-   ;; Presentation extensions such as MCLUV install their browser here.  The
-   ;; terminal remains the focus owner and delegates drawing and events to this
-   ;; child only while its mode calls for it.
+   ;; LUVCRAFT/MCCLIM presentations install their browser here.  The terminal
+   ;; remains the focus owner and delegates drawing and events to this child
+   ;; only while its mode calls for it.
    (mode-overlay :initform nil :accessor terminal-display-mode-overlay)
    (film-screen :initform nil :accessor terminal-display-film-screen)
    ;; The wall's name, which its shell learns as LUVCRAFT_PARENT_SCREEN, and
@@ -288,9 +288,9 @@ than once at mounting.")
   (:documentation
    "Select DISPLAY's focused wall MODE.
 
-The built-in modes are the EQL-specialized symbols :SHELL and :FILM.  A
-presentation extension may add an :AFTER method which supplies the film
-browser, while the display continues to own focus and movie lifetime."))
+The built-in modes are the EQL-specialized symbols :SHELL and :FILM.
+LUVCRAFT/MCCLIM adds an :AFTER method which supplies the film browser, while
+the display continues to own focus and movie lifetime."))
 
 (defmethod change-terminal-display-mode
     ((display terminal-display) (session luvcraft-session) (mode (eql :shell)))
@@ -1652,8 +1652,8 @@ supplies a uniform whose camera is expressed in that space instead."))
          (alexandria:when-let ((portal (terminal-display-portal display)))
            (encode-luvcraft-portal-picture portal session pass surface-texture)))
         (t
-         ;; Film, Telegram, and anything a presentation extension adds later
-         ;; all draw through the mode's own overlay.
+         ;; Film, Telegram, and other presentation-layer modes all draw
+         ;; through the mode's own overlay.
          (alexandria:when-let
              ((overlay (terminal-display-delegate-overlay display)))
            (encode-luvcraft-overlay overlay session pass surface-texture))))
@@ -2009,7 +2009,10 @@ on, so a luvcraft started in it appears right here."
              session (terminal-display-name display) environment)))
     (attach-terminal-display-pty
      display
-     :program "/bin/bash"
+     ;; The Nix dev shell supplies Bash through PATH; NixOS deliberately has
+     ;; no /bin/bash.  OPEN-PTY-DEVICE resolves a bare program name against
+     ;; the child environment before launching it.
+     :program "bash"
      :directory (uiop:getcwd)
      :environment environment)))
 

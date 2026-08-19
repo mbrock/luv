@@ -356,7 +356,7 @@ CLASS's business."
 (defgeneric toggle-luvcraft-metabar (session)
   (:documentation
    "Slide SESSION's metabar of knobs in or out, returning true when one is
-available.  The presentation extension supplies the method."))
+available.  LUVCRAFT/MCCLIM supplies the session method."))
 
 (defmethod toggle-luvcraft-metabar ((session t))
   (declare (ignore session))

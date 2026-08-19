@@ -17,7 +17,7 @@ design page for =luv-wiki=, the Lisp system in [[file:org.lisp][wiki/org.lisp]],
 The rendered site lives at [[https://mbrock.github.io/luv/][mbrock.github.io/luv]] once the Pages
 workflow in [[file:../.github/workflows/wiki.yml][wiki.yml]] has run; locally, =make wiki= writes it to
 =build/wiki/=.  Besides the pages it carries a figure index and, per
-#58SVCM, the whole source of the repository's five primary system families as
+#58SVCM, the whole source of the repository's four primary system families as
 browsable dexp pages.
 
 * Why ASDF, and how the wiki slots into it
@@ -178,7 +178,7 @@ supplies =CL_SOURCE_REGISTRY= and =ASDF_OUTPUT_TRANSLATIONS= to SBCL
 processes only, so a dumped image would look for compiled files in the
 wrong place; =wiki/build.lisp= captures that environment before the dump
 and =main= re-establishes it.  The =build= command registers =luv.asd=,
-=luvcraft.asd=, =mcluv.asd=, =luv-wiki.asd=, and =luv-wiki-site.asd= before
+=luvcraft.asd=, =luv-wiki.asd=, and =luv-wiki-site.asd= before
 asking ASDF to render, so the source browser sees every component tree without
 loading the GPU, game, or native systems.  =make wiki= uses that command rather
 than a partial fresh image that knows only the two wiki ASD files.

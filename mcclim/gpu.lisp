@@ -1034,7 +1034,7 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
 ;;; own fonts, and DejaVu stands in otherwise.
 
 (defparameter *bundled-fonts-directory*
-  (asdf:system-relative-pathname "mcluv/backend" "fonts/")
+  (asdf:system-relative-pathname "luv/mcclim" "fonts/")
   "The checkout's bundled fonts, captured while the system is loaded.")
 
 (defun user-font-pathname (name)

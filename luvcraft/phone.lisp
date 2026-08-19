@@ -206,8 +206,8 @@ against a per-frame uniform whose camera is expressed in the grip frame."))
    ;; the hand has brought it square to the centre of the view; eased.
    (attention :initform 0d0 :type double-float :accessor phone-attention))
   (:documentation
-   "A comically large phone: a graphite slab with a live shell on its face
-toward the player.  Held in the right hand; TAB focuses its shell."))
+   "A comically large phone: a graphite slab with a live terminal on its face
+toward the player.  Held in the right hand; TAB focuses its display."))
 
 (defmethod hand-item-name ((item phone)) "phone")
 (defmethod hand-item-box-count ((item phone)) 4)
@@ -280,12 +280,13 @@ toward the player.  Held in the right hand; TAB focuses its shell."))
 (defun phone-in-hand-p (phone session)
   (eq phone (player-body-hand-item (luvcraft-session-body session))))
 
-(defparameter *phone-initial-mode* :shell
+(defvar *phone-initial-mode* :shell
   "The mode a phone's display starts in when it is first taken out.
 
 The phone is a terminal like a wall is, so :SHELL is what it knows by
-itself; a presentation extension that mounts something more phone-like --
-a messenger -- sets this when it loads, and the phone comes out showing it.")
+itself.  The complete luvcraft system includes the Telegram presentation and
+sets this to :TELEGRAM when that part loads.  DEFVAR deliberately preserves
+that application-owned choice when LUVCRAFT/CORE is reloaded live.")
 
 (defun ensure-phone-display (phone session)
   "The phone's terminal display, made -- with a shell in it -- on first use."

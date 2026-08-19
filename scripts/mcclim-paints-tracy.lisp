@@ -7,8 +7,7 @@
                    (uiop:pathname-directory-pathname *load-truename*)))
 
 (asdf:load-asd (merge-pathnames #P"luv.asd" (project-root)))
-(asdf:load-asd (merge-pathnames #P"mcluv.asd" (project-root)))
-(asdf:load-system :mcluv/paint-benchmark)
+(asdf:load-system :luv/mcclim/paint-benchmark)
 
 (destructuring-bind (ready-path &optional (shape-count "256") (repetitions "30"))
     (uiop:command-line-arguments)

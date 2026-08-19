@@ -20,7 +20,6 @@
 
 (asdf:load-asd (merge-pathnames #P"luv.asd" *project-root*))
 (asdf:load-asd (merge-pathnames #P"luvcraft.asd" *project-root*))
-(asdf:load-asd (merge-pathnames #P"mcluv.asd" *project-root*))
 (asdf:load-asd (merge-pathnames #P"telegram.asd" *project-root*))
 
 (let ((slynk-root (uiop:getenv "LUV_SLYNK_DIR")))
