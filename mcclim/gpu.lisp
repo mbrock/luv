@@ -733,6 +733,14 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
   (draw-rounded-rectangle*
    medium x1 y1 x2 y2 :radius radius :filled filled))
 
+;; McCLIM's basic medium clears by composing the background over black,
+;; which is right for a raster that has no alpha and wrong for a medium
+;; whose destination is a live scene: a pane whose background has opacity
+;; zero should paint nothing, so a HUD title or a world bubble can float.
+(defmethod medium-clear-area ((medium luv-gpu-medium) left top right bottom)
+  (draw-rectangle* medium left top right bottom
+                   :ink (medium-background medium)))
+
 (defun clear-raster-medium-reliefs (medium)
   (setf (fill-pointer (raster-medium-reliefs medium)) 0)
   medium)

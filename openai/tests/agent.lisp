@@ -9,7 +9,13 @@
     (let ((request (openai::response-create agent (openai::user-input "hello"))))
       (ok (string= "response.create" (cdr (assoc "type" request :test #'string=))))
       (ok (string= "gpt-5.6-terra" (cdr (assoc "model" request :test #'string=))))
-      (ok (search "input_text" (openai::json-string request))))))
+      (ok (search "input_text" (openai::json-string request)))
+      (ok (null (assoc "previous_response_id" request :test #'string=)))
+      (setf (openai:agent-response-id agent) "resp_1")
+      (ok (string= "resp_1"
+                   (cdr (assoc "previous_response_id"
+                               (openai::response-create agent (openai::user-input "again"))
+                               :test #'string=)))))))
 
 (defclass echo-tool (openai:tool) ())
 

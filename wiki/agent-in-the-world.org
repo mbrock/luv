@@ -231,28 +231,87 @@ own rule stated from the harness side.  Several calls in one turn are
 several threads and several cards; the batch is over when each has
 returned or been given a handle.
 
-* NEXT Wire three commands into an agent and draw their cassettes
+* DONE Wire three commands into an agent and draw their cassettes
 :PROPERTIES:
 :ID: YDAQNO
 :END:
 
 /Intent./ The first slice: a =luvcraft.agent= layer where a =command-tool=
 wraps a CLIM command (#0IF4TY), =presentation-type-json-schema= derives its
-schema, tool bodies =present= to a recording stream read under
-=+model-view+= (#WS5OEX), and a =cassette-view= draws each call on the HUD
-while it runs and commits it when done (#9K823O, #14ZP6S).  Three commands
-are enough to see the whole shape: =eval= against the image, =look= at a
-handle, and =place-block=.  Parameterized M-x should light up from the same
-parser-table walk.
+schema, tool bodies' values are presented under =+model-view+= (#WS5OEX),
+and a =cassette-view= draws each call while it runs and after (#9K823O,
+#14ZP6S).
 
-/Evidence./ [[file:../openai/agent.lisp][openai/agent.lisp]] already runs a
-turn with =call-tool= dispatch on a =tool= class, so the provider side needs
-no change to start.  The command tables and M-x walk exist in
-=luvcraft/clim/=.  The HUD overlay path exists for the legend and tape
-prompt.  The rest of this page is the design.
+/Evidence./ =luvcraft/agent/= (2026-08-19).  =make-command-tool= reads
+=climi::*command-parser-table*=; =accept-from-string= parses every argument
+and a bad one comes back as a parse error the model reads ("cheese is not a
+block kind; try one of grass, dirt, ...").  Results are presented under the
+model view and objects worth returning to carry =#ABCD= handles
+(=describe-handle= reads them; folded long text names its remainder by
+handle).  Commands run on the canvas thread through =request-canvas-frame=;
+=eval= runs on the turn's thread.  The cassette is one file of presentation
+methods keyed on status and command (=hud.lisp=), drawn both on a HUD pane
+and -- the thing that turned out to matter -- as bubbles in the world
+(#V9DHV5).  A real turn against GPT-5.6 over the websocket placed blocks,
+surveyed its neighbours in one parallel batch of =block-at= calls, and, asked
+to remove a block without a removal tool, used =eval= with =apropos= to find
+=edit-block-at= on its own.  The provider client had to move from
+=response.append= to =response.create= with =previous_response_id= along the
+way.  Parameterized M-x is still open (#YPGXKI).
 
-/Done when./ An agent asked to put a stone block next to the player does
-it through =com-place-block= via =accept-from-string=, its three calls
-appear as cassettes on the HUD and then on a wall, and a =./sly= session
-with no window gets the same transcript as plain lines.  The evidence
-paragraph then records what the model actually did with the handles.
+* The gnome: a block that is an agent, and what it shows
+:PROPERTIES:
+:ID: V9DHV5
+:END:
+
+The body (#5JDNKF) became a block kind: =gnome-block-kind= is a little pillar
+with a red hat, and =luvcraft/agent/gnome.lisp= gives each placed gnome a
+=gnome= object -- an overlay and a focus at once.  Focusing one (TAB on it,
+or activating it) steps the camera back to a conversational distance, aims
+it at the face with the focused field of view, and turns the keys into a
+prompt line; RET asks.
+
+What the gnome shows is the transcript in three registers:
+
+- /Bubbles./ Its thinking and each tool call are =gnome-bubble= frames --
+  McCLIM world widgets of the same family as the Telegram panel (direct
+  replay into the scene pass, a =relief-design= slab), billboarded above the
+  hat every frame, content-fitted, and stacked: a new bubble appears low and
+  eases the older ones upward; past four they are taken down, and a finished
+  turn's bubbles linger a few seconds.  A pane that paints nothing is what
+  makes them float: the pane and the frame's top-level sheet take
+  =never-repaint-background-mixin=, since McCLIM otherwise composes every
+  background over black.
+- /The line./ =say= is a tool like any other, and the only way the gnome is
+  heard: the dialogue HUD at the bottom of the view titles what it said,
+  the way an NPC line is subtitled, and shows the prompt being typed while
+  the gnome is focused.  =say= reaches its gnome through =*current-agent*=,
+  bound around the command by =call-tool=.
+- /The record./ The same turn is on =transcript-lines= for a windowless
+  session, and on an agent terminal wall if one is open.
+
+The threads meet the same way as everywhere else on this page: the turn's
+observer posts notes to the gnome's mailbox; the gnome's own
+=refresh-luvcraft-overlay=, on the canvas thread, turns them into bubbles
+and lines.  Repainting a mirror from any other thread races the frame and
+faults; every repaint here happens at the frame boundary.
+
+* NEXT Parameterized M-x from the same parser walk, and a gnome that moves
+:PROPERTIES:
+:ID: YPGXKI
+:END:
+
+/Intent./ Two next bets.  First, finish what #0IF4TY promised: the command
+menu should offer commands with arguments, prompting through =accept= with
+the presentation types the agent already uses, so =place-block-at= is one
+definition reachable by key, M-x, and tool.  Second, the gnome is still a
+block: a =walk= command that moves its body (and its bubbles) would make the
+conversation a scene rather than a kiosk, and a =remove-block= command would
+spare the next gnome its trip through =apropos=.
+
+/Evidence./ #V9DHV5 for what exists; the M-x gap is
+=command-menu-command-without-arguments-p= in
+=luvcraft/clim/command-menu.lisp=.
+
+/Done when./ M-x "Place Block At" prompts for a kind and three integers and
+places the block; and a gnome asked to come closer does.

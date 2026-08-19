@@ -42,4 +42,7 @@
    #:open-agent-hud #:close-agent-hud #:toggle-agent-hud
    ;; The wall
    #:agent-terminal-display #:open-agent-wall #:com-open-agent-wall
-   #:ansi-view #:+ansi-view+))
+   #:ansi-view #:+ansi-view+
+   ;; The gnome
+   #:gnome #:find-gnome #:place-gnome #:gnome-say #:gnome-agent #:com-say
+   #:*current-agent* #:world-agent-presence))

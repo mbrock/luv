@@ -11,6 +11,8 @@
           :documentation "Every turn so far, newest first.")
    (current-turn :initform nil :accessor world-agent-current-turn)
    (handles :initform (make-handle-table) :reader world-agent-handles)
+   (presence :initform nil :accessor world-agent-presence
+             :documentation "The agent's body in the world -- a GNOME -- or NIL.")
    (observers :initform '() :accessor world-agent-observers
               :documentation
               "Functions of (AGENT EVENT-KIND OBJECT), told when the transcript changes.")
@@ -19,6 +21,10 @@
 
 (defvar *agent* nil
   "The most recently made WORLD-AGENT, for a ./sly session's convenience.")
+
+(defvar *current-agent* nil
+  "The agent whose command is running, bound around EXECUTE-FRAME-COMMAND so a
+command such as SAY can reach the agent's presence.")
 
 (defparameter *default-agent-model* "gpt-5.6")
 

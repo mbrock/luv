@@ -148,6 +148,13 @@ hang upright."
 A class of its own rather than a name test, so activating one is a method
 on the kind and no other block's activation has to know about tapes."))
 
+(defclass gnome-block-kind (block-kind) ()
+  (:metaclass luv.arithmetic.records:quantity-class)
+  (:documentation
+   "A little pillar with a pointed hat: an agent's body in the world.
+Focusing one lets the player talk to it; see luvcraft/agent/gnome.lisp.
+A class so that activation is a method on the kind."))
+
 (defclass spring-block-kind (block-kind) ()
   (:metaclass luv.arithmetic.records:quantity-class)
   (:documentation
@@ -287,6 +294,13 @@ luvcraft/balls.lisp for what the drops do."
    :class 'spring-block-kind
    :face-tiles '(:top :water :side :cobblestone :bottom :cobblestone)
    :categories '(:building) :display-color '(0.35 0.55 0.75))
+  (*gnome-block* :gnome
+   "A gnome: a little pillar with a red hat and a white beard, which is an
+agent standing in the world.  Focus it to talk to it; see
+luvcraft/agent/gnome.lisp."
+   :class 'gnome-block-kind
+   :face-tiles '(:top :gnome-top :side :gnome-side :bottom :gnome-top)
+   :categories '(:building) :display-color '(0.80 0.22 0.18))
   (*lava-spring-block* :lava-spring
    "A slate well of lava that spits glowing gobbets which cool where they
 land; see luvcraft/balls.lisp."
@@ -324,7 +338,8 @@ kinds through this vocabulary instead of printing CLOS object identities."
      :cactus-side :cactus-end :cobblestone :stone-bricks :bricks :planks
      :sandstone :slate :turtle-carapace :turtle-skin :turtle-plastron
      :player-skin :player-sleeve :phone-body :phone-screen
-     :tape-flange :reel-rim :film-flange :ball :water :lava :urbit))
+     :tape-flange :reel-rim :film-flange :ball :water :lava :urbit
+     :gnome-side :gnome-top))
   "The replaceable interpretation of atlas tile identities as dense offsets.
 
 Re-evaluating this definition constructs a new domain.  Existing offsets stay
@@ -964,6 +979,54 @@ and a dock row at the bottom."
   (block-atlas-byte
    (+ (if (urbit-sigil-glyph-p x y) 168 118)
       (* 0.08 (- (block-atlas-lattice-hash x y 301) 128)))))
+
+;;; ---------------------------------------------------------------------
+;;; The gnome: a red hat, a face, a beard, a blue coat, from the top down.
+
+(defun gnome-tile-part (x y)
+  "Which part of the gnome texel X,Y belongs to on the side tile."
+  (let ((dx (abs (- x 7.5))))
+    (cond ((< y 6) (if (< dx (+ 1.0 (* y 1.1))) :hat :sky))
+          ((< y 7) (if (< dx 7) :brim :sky))
+          ((< y 10) (cond ((and (= y 8) (or (= x 5) (= x 10))) :eye)
+                          ((< dx 4.5) :skin)
+                          (t :coat)))
+          ((< y 13) (if (< dx 5) :beard :coat))
+          (t :coat))))
+
+(defmethod paint-block-atlas-tile ((tile (eql :gnome-side)) x y)
+  "Gnome side: hat, face, beard, coat."
+  (let ((grain (round (block-atlas-variation x y tile) 8)))
+    (ecase (gnome-tile-part x y)
+      (:hat (shaded-block-atlas-pixel 204 52 44 grain))
+      (:brim (shaded-block-atlas-pixel 150 34 30 grain))
+      (:sky (shaded-block-atlas-pixel 58 64 76 grain))
+      (:skin (shaded-block-atlas-pixel 232 184 150 grain))
+      (:eye (shaded-block-atlas-pixel 30 30 40))
+      (:beard (shaded-block-atlas-pixel 236 232 224 grain))
+      (:coat (shaded-block-atlas-pixel 48 78 140 grain)))))
+
+(defmethod paint-block-atlas-relief ((tile (eql :gnome-side)) x y)
+  "Gnome side: the hat and beard stand off the coat."
+  (block-atlas-byte
+   (+ (ecase (gnome-tile-part x y)
+        ((:hat :brim) 160) (:beard 150) (:skin 136) (:eye 120)
+        (:coat 124) (:sky 100))
+      (* 0.06 (- (block-atlas-lattice-hash x y 307) 128)))))
+
+(defmethod paint-block-atlas-tile ((tile (eql :gnome-top)) x y)
+  "Gnome top: the point of the hat, seen from above."
+  (let* ((dx (- x 7.5)) (dy (- y 7.5))
+         (radius (sqrt (+ (* dx dx) (* dy dy)))))
+    (shaded-block-atlas-pixel
+     (if (< radius 2.5) 232 204) (if (< radius 2.5) 80 52) 44
+     (round (block-atlas-variation x y tile) 8))))
+
+(defmethod paint-block-atlas-relief ((tile (eql :gnome-top)) x y)
+  "Gnome top: a cone rising to the point."
+  (let* ((dx (- x 7.5)) (dy (- y 7.5))
+         (radius (sqrt (+ (* dx dx) (* dy dy)))))
+    (block-atlas-byte (+ 110 (* 8 (max 0 (- 8 radius)))))))
 
 ;;; ---------------------------------------------------------------------
 ;;; The tape: a film reel, drawn flange-on and rim-on.

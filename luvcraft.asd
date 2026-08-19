@@ -191,7 +191,8 @@
                              (:file "tools")
                              (:file "commands")
                              (:file "hud")
-                             (:file "wall")))))
+                             (:file "wall")
+                             (:file "gnome")))))
 
 (defsystem "luvcraft/program"
   :description "The standalone luvcraft executable with its live Slynk endpoint."

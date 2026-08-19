@@ -173,11 +173,17 @@ hyphens), so compare keys in their punctuation-free spelling."
           tools))
 
 (defun response-create (agent input)
+  "A response.create event for INPUT, continuing from the agent's last
+response when it has one: the server keeps the conversation under the
+previous response id, so each event carries only what is new."
   (append
    (list (cons "type" "response.create")
          (cons "model" (agent-model agent))
          (cons "instructions" (agent-instructions agent))
-         (cons "input" input)
+         (cons "input" input))
+   (let ((previous (agent-response-id agent)))
+     (if previous (list (cons "previous_response_id" previous)) '()))
+   (list
          (cons "tools" (encoded-tools (agent-tools agent)))
          (cons "tool_choice" "auto")
          (cons "parallel_tool_calls" t)
@@ -229,18 +235,16 @@ hyphens), so compare keys in their punctuation-free spelling."
   "Send TEXT and synchronously run one complete agent turn.
 
 Text and reasoning deltas reach HANDLE-AGENT-EVENT immediately in this
-calling thread.  Function calls run their TOOL here too, then continue with a
-response.append carrying its function_call_output."
+calling thread.  Function calls run their TOOL here too, as their items
+complete; when the response completes with calls outstanding, a further
+response.create carries every function_call_output under the previous
+response id, and the loop continues until a response completes with none."
   (sb-thread:with-mutex ((agent-turn-lock agent))
     (let ((text-output "") (reasoning-output "") (usage nil) (done nil)
           (items-with-text-deltas (make-hash-table :test #'equal))
-          (tool-append-p nil))
-      (send-json agent
-                 (if (agent-created-p agent)
-                     (list (cons "type" "response.append")
-                           (cons "input" (user-input text)))
-                     (prog1 (response-create agent (user-input text))
-                       (setf (agent-created-p agent) t))))
+          (outputs '()))
+      (send-json agent (response-create agent (user-input text)))
+      (setf (agent-created-p agent) t)
       (loop until done
             for event = (next-agent-event agent)
             do (cond
@@ -266,11 +270,7 @@ response.append carrying its function_call_output."
                      ((and (string= type "response.output_item.done")
                            (let ((item (json-value event :item)))
                              (and item (string= (json-value item :type) "function_call"))))
-                      (setf tool-append-p t)
-                      (send-json agent
-                                 (list (cons "type" "response.append")
-                                       (cons "input"
-                                             (list (tool-result agent (json-value event :item)))))))
+                      (push (tool-result agent (json-value event :item)) outputs))
                      ((and (string= type "response.output_item.done")
                            (let ((item (json-value event :item)))
                              (and item (string= (json-value item :type) "message"))))
@@ -287,8 +287,10 @@ response.append carrying its function_call_output."
                           (let ((id (json-value response :id)))
                             (when id (setf (agent-response-id agent) id)))
                           (setf usage (json-value response :usage))))
-                      (if tool-append-p
-                          (setf tool-append-p nil)
+                      (if outputs
+                          (progn
+                            (send-json agent (response-create agent (reverse outputs)))
+                            (setf outputs '()))
                           (setf done t)))
                      ((string= type "response.failed")
                       (error 'agent-failed :detail (json-value event :response)))

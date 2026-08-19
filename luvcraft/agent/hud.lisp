@@ -124,26 +124,36 @@
     (:ok (values "+" (tool-call-ink call)))
     (:error (values "!" *hud-error-ink*))))
 
+(defun tool-call-window-lines (call &optional (columns (- *agent-hud-columns* 2)))
+  "The lines a cassette's window shows for CALL: the output, folded to
+*CASSETTE-OUTPUT-LINES* with a count of what is left."
+  (let ((lines (wrap-words
+                (if (string= (tool-call-output call) "")
+                    (if (eq :running (tool-call-status call)) "running" "")
+                    (tool-call-output call))
+                columns)))
+    (if (> (length lines) *cassette-output-lines*)
+        (append (subseq lines 0 (1- *cassette-output-lines*))
+                (list (format nil "... ~D more lines"
+                              (- (length lines) (1- *cassette-output-lines*)))))
+        lines)))
+
+(defparameter *cassette-header-height* 28)
+
+(defun tool-call-cassette-height (call &optional (columns (- *agent-hud-columns* 2)))
+  "How tall CALL's cassette is, header and window."
+  (let ((lines (tool-call-window-lines call columns)))
+    (+ *cassette-header-height* (* *cassette-line-height* (length lines))
+       (if lines 6 0))))
+
 (define-presentation-method present
     (call (type tool-call) stream (view cassette-view) &key)
   (let* ((left (cassette-left stream))
          (right (cassette-right stream))
          (top (cassette-top stream))
-         (header-height 28)
-         (output-lines
-           (let ((lines (wrap-words
-                         (if (string= (tool-call-output call) "")
-                             (if (eq :running (tool-call-status call)) "running" "")
-                             (tool-call-output call))
-                         (- *agent-hud-columns* 2))))
-             (if (> (length lines) *cassette-output-lines*)
-                 (append (subseq lines 0 (1- *cassette-output-lines*))
-                         (list (format nil "... ~D more lines"
-                                       (- (length lines) (1- *cassette-output-lines*)))))
-                 lines)))
-         (bottom (+ top header-height
-                    (* *cassette-line-height* (length output-lines))
-                    (if output-lines 6 0))))
+         (header-height *cassette-header-height*)
+         (output-lines (tool-call-window-lines call))
+         (bottom (+ top (tool-call-cassette-height call))))
     ;; The card.
     (draw-rectangle* stream left top right bottom :ink *hud-card-ink*)
     ;; The spine.
