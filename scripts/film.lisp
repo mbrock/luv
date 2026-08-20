@@ -1,7 +1,8 @@
 ;;;; Render the project's films: headless MP4s from luft and luvcraft.
 ;;;;
 ;;;; Usage: sbcl --script scripts/film.lisp [TARGET-DIRECTORY] [FILM...]
-;;;; FILM names limit the run: luft-orbit, luft-styles, birthday.
+;;;; FILM names limit the run.  The incremental construction films are
+;;;; explicit-only: luft-rise, luft-spiral, and luft-carve.
 
 (require :asdf)
 
@@ -53,6 +54,21 @@
        (luft.render:film-atelier-flight
         (merge-pathnames #P"luft-flight-vertical.mp4" directory)
         :width 720 :height 1280 :field-scale 1.25))
+     (when (member :luft-rise names)
+       (format t "~&Filming the Luft holm rising from its cell chain...~%")
+       (luft.render:film-atelier-construction
+        (merge-pathnames #P"luft-holm-rise.mp4" directory)
+        :piece :holm :mode :rise))
+     (when (member :luft-spiral names)
+       (format t "~&Filming the Luft holm winding into place...~%")
+       (luft.render:film-atelier-construction
+        (merge-pathnames #P"luft-holm-spiral.mp4" directory)
+        :piece :holm :mode :spiral))
+     (when (member :luft-carve names)
+       (format t "~&Filming the Luft holm carved from a granite chunk...~%")
+       (luft.render:film-atelier-construction
+        (merge-pathnames #P"luft-holm-carve.mp4" directory)
+        :piece :holm :mode :carve))
      (when (film-wanted-p :birthday names)
        (format t "~&Filming the birthday party cutscenes...~%")
        (luvcraft.birthday:film-birthday-cutscenes

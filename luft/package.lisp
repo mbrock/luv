@@ -63,6 +63,7 @@
    #:chain-site-count
    #:chain-site-p
    #:add-chain-site
+   #:add-chain
    #:map-chain
    #:chain-sites
    #:boundary-chain

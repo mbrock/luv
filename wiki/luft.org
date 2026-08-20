@@ -666,22 +666,46 @@ output size, box filtered down, into one PNG, cameras down and styles
 across.  The sheets in this page come from it, and a change to any rule is
 judged by rendering one.
 
-** NEXT Edit cells through the linearity of the boundary
+** DONE Cell edits are linear boundary updates
 :PROPERTIES:
 :ID: 3QNZC1
 :END:
 
-/Intent./ Let the viewer place and remove cells by adding =∂cell= or its
-opposite to the surface chain (#9HLYEE), reorder only the touched chunks, and
-upload them, so an edit costs six ledger updates and one small =write-buffer=.
+/Intent./ Make a voxel edit the sparse chain delta it is, rather than a request
+to mesh the world again.  If the solid is $C$, its surface is $S=\partial C$,
+and an edit is the signed 3-chain $\Delta$, the complete update is
 
-/Evidence./ The whole-scene path already refreshes and re-uploads correctly;
-[[lisp:luft.render:refresh-scene]] rebuilds everything, which is fine for a
-64×64 world but is not the point of chains.
+\[
+ C' = C + \Delta, \qquad
+ S' = S + \partial\Delta = \partial(C + \Delta).
+\]
 
-/Done when./ Clicking in the viewer changes the world without a full
-=surface-chain= recomputation, and a test shows the incremental surface equals
-the recomputed one.
+/Evidence./ [[lisp:luft.render:apply-scene-edit]] now performs exactly that
+addition after validating the whole edit against binary occupancy.  The
+surface is also a direct sum of 8³ chunk ledgers.  A chunk has at most
+$3\cdot8^3=1536$ face geometries -- one 8³ set for each face extent -- so it
+owns one stable, exactly bounded GPU page.  Only summands met by
+$\partial\Delta$ are reordered; their page offsets never move.  Occupancy is
+updated one 32-bit word at a time, and a bounded revision history lets several
+renderers catch up incrementally or fall back honestly to a full cohort.
+
+The viewer's grid ray now removes its hit cell with left click and places into
+the preceding empty cell with right click.  Differential tests cross chunk
+boundaries and the horizontal torus through additions, removals, and eighty
+successive toggles; after every group the incremental surface, packed pages,
+dense occupancy, and fresh [[lisp:luft:surface-chain]] agree.  A Vulkan test
+observes one ordinary edit as two writes -- one face page and one occupancy
+word -- smaller than the full scene upload.
+
+[[lisp:luft.render:film-atelier-construction]] turns the proof into three
+films: the Holm rises, winds into place, or is subtracted from a sacrificial
+granite prism.  The 49,294-cell spiral uploaded 4,484,904 bytes across all of
+its incremental publications; one full reserved scene cohort was 3,801,088
+bytes by itself.
+
+/Done when./ Done: edits no longer call [[lisp:luft.render:refresh-scene]], the
+reference and GPU tests pass, clicks use the incremental path, and all three
+construction orders finish at the exact authored solid and boundary.
 
 ** IDEA Compact surviving faces only when measurement earns another path
 :PROPERTIES:

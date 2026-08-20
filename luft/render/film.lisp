@@ -77,6 +77,199 @@ so the path passes through every point and starts and ends at rest."
               (point (1- index)) (point index)
               (point (1+ index)) (point (+ index 2))))))
 
+;;; ------------------------------------------------------------------------
+;;; Construction films: the boundary changes while the camera flies
+
+(defun copy-scene-slots (scene)
+  (and (scene-slots scene) (copy-seq (scene-slots scene))))
+
+(defun construction-cell-score (mode cell domain ceiling)
+  "The authored reveal order of CELL for construction MODE."
+  (let* ((x (float (luft:site-x cell) 1.0))
+         (y (float (luft:site-y cell) 1.0))
+         (z (float (luft:site-z cell) 1.0))
+         (cx (* 0.5 (luft:world-domain-x-period domain)))
+         (cy (* 0.5 (luft:world-domain-y-period domain)))
+         (dx (- x cx))
+         (dy (- y cy))
+         (radius (sqrt (+ (* dx dx) (* dy dy))))
+         (angle (mod (+ (atan dy dx) (* 2.0 pi)) (* 2.0 pi))))
+    (ecase mode
+      (:rise
+       ;; A slightly rippled horizontal front makes columns arrive together
+       ;; without making the whole level pop on one frame.
+       (+ z (* 0.22 (sin (+ (* 0.31 x) (* 0.19 y))))
+          (* 0.002 (+ x (* 3.0 y)))))
+      (:spiral
+       ;; One turn winds outward and upward: angle is the broad ordering,
+       ;; radius and height keep the wave from becoming a flat radial wipe.
+       (+ angle (* 0.045 radius) (* 0.065 z)))
+      (:carve
+       ;; Subtraction begins at the far, high corners of the sacrificial
+       ;; block and closes on the architecture near its heart.
+       (- (+ (* dx dx) (* dy dy)
+             (* 1.7 (expt (- z (* 0.45 ceiling)) 2))))))))
+
+(defun target-construction (target mode)
+  "Return MODE's initial scene and signed cells which turn it into TARGET."
+  (let* ((domain (scene-domain target))
+         (target-cells (luft:chain-sites (scene-solid target)))
+         (ceiling (reduce #'max target-cells :key #'luft:site-z)))
+    (ecase mode
+      ((:rise :spiral)
+       (values (make-scene domain
+                           :slots (copy-scene-slots target)
+                           :stocks (copy-seq (scene-stocks target)))
+               (copy-seq target-cells)
+               ceiling))
+      (:carve
+       (let* ((solid (luft:make-solid-chain domain))
+              (slots (copy-scene-slots target))
+              (stocks (copy-seq (scene-stocks target)))
+              (stone-slot (or (position :granite stocks) 0))
+              (margin
+                (max 2
+                     (floor
+                      (min (luft:world-domain-x-period domain)
+                           (luft:world-domain-y-period domain))
+                      12)))
+              (x0 margin)
+              (x1 (- (luft:world-domain-x-period domain) margin 1))
+              (y0 margin)
+              (y1 (- (luft:world-domain-y-period domain) margin 1))
+              (z1 (min (- luft:+vertical-cell-rows+ 2) (+ ceiling 2)))
+              (edits (make-array 1024 :element-type 'luft:site
+                                      :adjustable t :fill-pointer 0)))
+         ;; The final world is already within the initial one.  The added
+         ;; granite prism is sacrificial stock; its negative cells alone are
+         ;; the edit chain which reveals the architecture.
+         (luft:add-chain solid (scene-solid target))
+         (loop for x from x0 to x1
+               do (loop for y from y0 to y1
+                        do (loop for z from 0 to z1
+                                 unless (luft:solid-cell-p
+                                         (scene-solid target) x y z)
+                                   do (let ((cell
+                                             (luft:make-site
+                                              domain x y z luft:+cell-extent+)))
+                                        (luft:add-chain-site solid cell)
+                                        (when slots
+                                          (setf (aref slots
+                                                      (luft:cell-bit-index
+                                                       domain x y z))
+                                                stone-slot))
+                                        (vector-push-extend
+                                         (luft:opposite-site cell) edits)))))
+         (values (make-scene domain :solid solid :slots slots :stocks stocks)
+                 edits z1))))))
+
+(defun construction-camera (domain ceiling progress)
+  "A high, collision-free orbit which watches the whole edit field."
+  (let* ((cx (* 0.5 (luft:world-domain-x-period domain)))
+         (cy (* 0.5 (luft:world-domain-y-period domain)))
+         (radius (* 0.43 (min (luft:world-domain-x-period domain)
+                              (luft:world-domain-y-period domain))))
+         (angle (+ -1.15 (* progress 2.35 pi)))
+         (height (+ ceiling 16.0 (* 3.0 (cos (* progress 2.0 pi))))))
+    (studio-camera (+ cx (* radius (cos angle)))
+                   (+ cy (* radius (sin angle)))
+                   height
+                   :look-x cx :look-y cy
+                   :look-z (* 0.42 ceiling)
+                   :field-of-view 0.82)))
+
+(defun construction-finished-p (scene target)
+  (equalp (luft:chain-sites (scene-solid scene))
+          (luft:chain-sites (scene-solid target))))
+
+(defun film-atelier-construction
+    (pathname &key (piece :holm) (mode :rise)
+                   (seconds 10) (frame-rate 24)
+                   (width 960) (height 540)
+                   (style :stock)
+                   (chamfer-width (/ 1.0 6.0))
+                   (light :evening)
+                   (aperture 0.35)
+                   (effects (default-renderer-effects)))
+  "Film PIECE becoming itself through exact incremental chain edits.
+
+MODE is :RISE for a bottom-up front, :SPIRAL for a winding assembly, or
+:CARVE for subtraction from a sacrificial granite prism.  Every frame batches
+signed cells into one APPLY-SCENE-EDIT publication; the renderer uploads only
+the changed face pages and occupancy words.  Returns PATHNAME, the frame count,
+and the total incremental bytes uploaded."
+  (let* ((*chamfer-width* chamfer-width)
+         (*light* light)
+         (*aperture* aperture)
+         (target (atelier-scene piece)))
+    (multiple-value-bind (scene edits ceiling)
+        (target-construction target mode)
+      (let* ((ordered (stable-sort
+                       (copy-seq edits) #'<
+                       :key (lambda (cell)
+                              (construction-cell-score
+                               mode cell (scene-domain scene) ceiling))))
+             (frame-count (max 2 (round (* seconds frame-rate))))
+             (renderer nil)
+             (cursor 0)
+             (uploaded-bytes 0)
+             (uploaded-writes 0))
+        ;; Assign all pages before GPU creation.  No later frame has to replace
+        ;; the sites buffer merely because its edit wave reached a new chunk.
+        (reserve-scene-edit-pages scene ordered)
+        (setf renderer
+              (make-renderer
+               :scene scene
+               :camera (construction-camera (scene-domain scene) ceiling 0.0)
+               :width width :height height
+               :style style :pipeline-styles (list style)
+               :effects effects))
+        (unwind-protect
+             (with-video-encoder (write-frame pathname width height
+                                  :frame-rate frame-rate
+                                  :format (renderer-color-format renderer))
+               (dotimes (frame frame-count)
+                 (let* ((progress (/ (float frame 1.0) (1- frame-count)))
+                        (edit-progress
+                          (min 1.0 (max 0.0 (/ (- progress 0.06) 0.86))))
+                        (eased (* edit-progress edit-progress
+                                  (- 3.0 (* 2.0 edit-progress))))
+                        (wanted (if (= frame (1- frame-count))
+                                    (length ordered)
+                                    (floor (* eased (length ordered)))))
+                        (revision (scene-revision scene)))
+                   (when (< cursor wanted)
+                     (let ((edit (luft:make-chain (scene-domain scene))))
+                       (loop for index from cursor below wanted
+                             do (luft:add-chain-site edit (aref ordered index)))
+                       (apply-scene-edit scene edit)
+                       (setf cursor wanted)))
+                   (setf (renderer-camera renderer)
+                         (construction-camera
+                          (scene-domain scene) ceiling progress))
+                   (write-frame (render-pixels renderer))
+                   (unless (= revision (scene-revision scene))
+                     (incf uploaded-bytes
+                           (renderer-last-scene-upload-bytes renderer))
+                     (incf uploaded-writes
+                           (renderer-last-scene-upload-writes renderer)))
+                   (when (or (zerop (mod frame (max 1 frame-rate)))
+                             (= frame (1- frame-count)))
+                     (format t "~&~(~A~) ~A: frame ~D/~D, cells ~D/~D, ~
+                                faces ~D, last upload ~:D bytes.~%"
+                             mode piece (1+ frame) frame-count cursor
+                             (length ordered)
+                             (luft:chain-count (scene-surface scene))
+                             (renderer-last-scene-upload-bytes renderer))
+                     (finish-output)))))
+          (when renderer (destroy-renderer renderer)))
+        (unless (construction-finished-p scene target)
+          (error "The ~S ~S film ended before reconstructing its target."
+                 piece mode))
+        (format t "~&~S ~S complete: ~:D incremental bytes in ~:D writes.~%"
+                piece mode uploaded-bytes uploaded-writes)
+        (values pathname frame-count uploaded-bytes)))))
+
 (defun flight-cell-solid-p (scene x y z)
   "Whether the flight would be inside SCENE's masonry at cell X,Y,Z.
 

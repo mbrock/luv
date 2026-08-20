@@ -14,6 +14,37 @@
 (defconstant +chunk-bits+ 3
   "Sites are ordered by 8-cell chunk so nearby faces stay close together.")
 
+(defconstant +chunk-size+ (ash 1 +chunk-bits+))
+
+(defconstant +surface-chunk-capacity+
+  (* 3 +chunk-size+ +chunk-size+ +chunk-size+)
+  "The largest number of face geometries anchored in one site chunk.
+
+Each of the three face extents has 8 cubed possible anchors.  A surface of a
+binary solid has at most one polarity at each geometry, so 3*8^3 is an exact
+page bound rather than a guessed reserve.  #3QNZC1")
+
+(defconstant +vertical-chunk-count+
+  (ceiling luft:+vertical-cell-rows+ +chunk-size+))
+
+(defstruct (surface-chunk (:constructor make-surface-chunk (chain)))
+  "One chunk-local summand of a scene's surface chain."
+  chain
+  page
+  (count 0 :type fixnum))
+
+(defstruct (scene-change
+             (:constructor make-scene-change
+                 (revision chunks cell-words slot-words)))
+  "The dense ranges changed by one published chain edit."
+  (revision 0 :type fixnum :read-only t)
+  (chunks #() :type vector :read-only t)
+  (cell-words #() :type vector :read-only t)
+  (slot-words #() :type vector :read-only t))
+
+(defparameter *scene-change-history-limit* 128
+  "How many incremental scene publications remain available to renderers.")
+
 ;;; ------------------------------------------------------------------------
 ;;; Worlds: a solid, and what every cell of it is cut from
 ;;;
@@ -120,10 +151,22 @@ rather than making an error."
     :initform nil
     :accessor scene-surface
     :documentation "The boundary of SOLID: exposed signed face sites.")
-   (sites
+   (surface-chunks
     :initform nil
-    :accessor scene-sites
-    :documentation "Packed surface sites in chunk order.")
+    :accessor scene-surface-chunks
+    :documentation "The surface partitioned into stable chunk-local ledgers.")
+   (site-pages
+    :initform nil
+    :accessor scene-site-pages
+    :documentation "Packed u64 face pages addressed by SURFACE-CHUNK-PAGE.")
+   (page-count
+    :initform 0
+    :accessor scene-page-count
+    :documentation "How many stable face pages have been assigned.")
+   (page-capacity
+    :initform 0
+    :accessor scene-page-capacity
+    :documentation "How many pages SITE-PAGES currently has room for.")
    (cell-bits
     :initform nil
     :accessor scene-cell-bits
@@ -146,7 +189,11 @@ them: the same dense cell order as the occupancy bits.")
    (revision
     :initform 0
     :accessor scene-revision
-    :documentation "Monotonic publication number of the derived GPU products."))
+    :documentation "Monotonic publication number of the derived GPU products.")
+   (changes
+    :initform nil
+    :accessor scene-changes
+    :documentation "Newest-first bounded history of incremental publications."))
   (:documentation "A solid world together with its drawable surface products."))
 
 (defun make-scene (domain &key (solid (luft:make-solid-chain domain))
@@ -162,15 +209,90 @@ them: the same dense cell order as the occupancy bits.")
               :slots (world-slots world)
               :stocks (copy-seq (world-stocks world))))
 
-(defun site-chunk-key (site)
-  "A fixnum ordering key grouping signed site SITE by chunk, then by site."
-  (logior (ash (ash (luft:site-z site) (- +chunk-bits+)) 45)
-          (ash (ash (luft:site-y site) (- +chunk-bits+)) 24)
-          (ash (luft:site-x site) (- +chunk-bits+))))
+(defun horizontal-chunk-count (period)
+  (ceiling period +chunk-size+))
 
-(defun order-sites-by-chunk (sites)
-  "Return a fresh copy of the site-ordered SITES grouped by chunk."
-  (stable-sort (copy-seq sites) #'< :key #'site-chunk-key))
+(defun domain-surface-chunk-count (domain)
+  (* (horizontal-chunk-count (luft:world-domain-x-period domain))
+     (horizontal-chunk-count (luft:world-domain-y-period domain))
+     +vertical-chunk-count+))
+
+(defun site-chunk-index (domain site)
+  "The dense chunk index of SITE's canonical anchor in DOMAIN."
+  (let ((x-count (horizontal-chunk-count
+                  (luft:world-domain-x-period domain)))
+        (y-count (horizontal-chunk-count
+                  (luft:world-domain-y-period domain))))
+    (+ (ash (luft:site-x site) (- +chunk-bits+))
+       (* x-count
+          (+ (ash (luft:site-y site) (- +chunk-bits+))
+             (* y-count (ash (luft:site-z site) (- +chunk-bits+))))))))
+
+(defun page-capacity-for (page-count)
+  (loop for capacity = 1 then (* 2 capacity)
+        when (<= page-count capacity)
+          return capacity))
+
+(defun ensure-scene-page-capacity (scene needed)
+  "Grow SCENE's CPU face-page arena geometrically to hold NEEDED pages."
+  (when (< (scene-page-capacity scene) needed)
+    (let* ((capacity (page-capacity-for needed))
+           (pages (make-array (* capacity +surface-chunk-capacity+)
+                              :element-type '(unsigned-byte 64)
+                              :initial-element 0)))
+      (when (scene-site-pages scene)
+        (replace pages (scene-site-pages scene)))
+      (setf (scene-site-pages scene) pages
+            (scene-page-capacity scene) capacity)))
+  scene)
+
+(defun ensure-surface-chunk (scene index)
+  "Return SCENE's chunk at INDEX, assigning it one stable face page."
+  (or (aref (scene-surface-chunks scene) index)
+      (let ((chunk (make-surface-chunk
+                    (luft:make-chain (scene-domain scene))))
+            (page (scene-page-count scene)))
+        (ensure-scene-page-capacity scene (1+ page))
+        (setf (surface-chunk-page chunk) page
+              (aref (scene-surface-chunks scene) index) chunk)
+        (incf (scene-page-count scene))
+        chunk)))
+
+(defun index-set-vector (set)
+  (let ((indices (make-array (hash-table-count set)
+                             :element-type 'fixnum))
+        (cursor 0))
+    (maphash (lambda (index present-p)
+               (declare (ignore present-p))
+               (setf (aref indices cursor) index)
+               (incf cursor))
+             set)
+    (sort indices #'<)))
+
+(defun reserve-scene-edit-pages (scene cells)
+  "Assign stable pages for every chunk any signed cell in CELLS can touch.
+
+This is a cold preparation operation for a known edit sequence, such as a
+film.  It prevents page-arena growth from turning otherwise incremental frame
+updates into buffer replacements."
+  (let ((indices (make-hash-table :test #'eql))
+        (domain (scene-domain scene)))
+    (loop for cell across cells
+          do (luft:map-site-boundary
+              (lambda (face axis side)
+                (declare (ignore axis side))
+                (setf (gethash (site-chunk-index domain face) indices) t))
+              domain cell))
+    (let ((missing 0))
+      (maphash (lambda (index present-p)
+                 (declare (ignore present-p))
+                 (unless (aref (scene-surface-chunks scene) index)
+                   (incf missing)))
+               indices)
+      (ensure-scene-page-capacity scene (+ (scene-page-count scene) missing)))
+    (loop for index across (index-set-vector indices)
+          do (ensure-surface-chunk scene index))
+    scene))
 
 (defun site-solid-cell (site)
   "The X, Y, and Z of the solid cell a surface face SITE bounds.
@@ -225,26 +347,222 @@ its own packs to zeros, which is slot zero, which is *MATERIAL*."
                   (logand slot #xf))))))
     words))
 
+(defun rebuild-surface-chunk (scene index)
+  "Reorder and restamp only SCENE's surface chunk at INDEX."
+  (let* ((chunk (aref (scene-surface-chunks scene) index))
+         (raw (if chunk (luft:chain-sites (surface-chunk-chain chunk)) #()))
+         (count (length raw)))
+    (when (> count +surface-chunk-capacity+)
+      (error "Surface chunk ~D has ~D faces, beyond its exact ~D-site bound."
+             index count +surface-chunk-capacity+))
+    (when chunk
+      (let ((sites (make-array count :element-type '(unsigned-byte 64)))
+            (start (* (surface-chunk-page chunk)
+                      +surface-chunk-capacity+)))
+        (replace sites raw)
+        (when (scene-slots scene)
+          (stamp-site-stocks sites (scene-domain scene) (scene-slots scene)))
+        (replace (scene-site-pages scene) sites :start1 start)
+        (setf (surface-chunk-count chunk) count)))
+    count))
+
+(defun scene-sites (scene)
+  "Return SCENE's current packed surface sites in chunk order.
+
+The renderer reads stable chunk pages directly; this compact vector is the
+inspection and reference form, allocated only when a caller asks for it."
+  (let ((sites (make-array (luft:chain-count (scene-surface scene))
+                           :element-type '(unsigned-byte 64)))
+        (cursor 0))
+    (loop for chunk across (scene-surface-chunks scene)
+          when (and chunk (plusp (surface-chunk-count chunk)))
+            do (let* ((count (surface-chunk-count chunk))
+                      (start (* (surface-chunk-page chunk)
+                                +surface-chunk-capacity+)))
+                 (replace sites (scene-site-pages scene)
+                          :start1 cursor :start2 start :end2 (+ start count))
+                 (incf cursor count)))
+    sites))
+
 (defun refresh-scene (scene)
-  "Recompute SCENE's surface chain and chunk-ordered packed sites."
-  (let* ((surface (luft:surface-chain (scene-solid scene)))
-         (ordered (order-sites-by-chunk (luft:chain-sites surface)))
-         ;; Vulkan storage buffers cannot have zero size.  An empty world
-         ;; keeps one absent site bound and records a zero-vertex draw.
-         ;; The surface chain itself needs only sixty bits; the fresh u64
-         ;; vector leaves room for the stock nibble stamped above it.
-         (sites (make-array (max 1 (length ordered))
-                            :element-type '(unsigned-byte 64)
-                            :initial-element 0)))
-    (replace sites ordered)
-    (setf (scene-surface scene) surface
-          (scene-sites scene) sites
-          (scene-cell-bits scene) (luft:chain-cell-bits (scene-solid scene)))
-    (when (scene-slots scene)
-      (stamp-site-stocks sites (scene-domain scene) (scene-slots scene)))
-    (setf (scene-slot-words scene) (pack-slot-words scene))
+  "Recompute every derived product of SCENE from its solid reference chain."
+  (let* ((domain (scene-domain scene))
+         (surface (luft:surface-chain (scene-solid scene)))
+         (chunks (make-array (domain-surface-chunk-count domain)
+                             :initial-element nil)))
+    ;; Partition first, then number nonempty pages in chunk order.  The stable
+    ;; page address is what lets later edits upload one reordered summand.
+    (luft:map-chain
+     (lambda (site)
+       (let* ((index (site-chunk-index domain site))
+              (chunk (or (aref chunks index)
+                         (setf (aref chunks index)
+                               (make-surface-chunk
+                                (luft:make-chain domain))))))
+         (luft:add-chain-site (surface-chunk-chain chunk) site)))
+     surface)
+    (let ((page-count 0))
+      (loop for chunk across chunks
+            when chunk
+              do (setf (surface-chunk-page chunk) page-count)
+                 (incf page-count))
+      (let ((page-capacity (page-capacity-for page-count)))
+        (setf (scene-surface scene) surface
+              (scene-surface-chunks scene) chunks
+              (scene-page-count scene) page-count
+              (scene-page-capacity scene) page-capacity
+              (scene-site-pages scene)
+              (make-array (* page-capacity +surface-chunk-capacity+)
+                          :element-type '(unsigned-byte 64)
+                          :initial-element 0)
+              (scene-cell-bits scene)
+              (luft:chain-cell-bits (scene-solid scene))
+              (scene-slot-words scene) (pack-slot-words scene))
+        (dotimes (index (length chunks))
+          (when (aref chunks index)
+            (rebuild-surface-chunk scene index)))))
+    ;; A full refresh breaks the incremental revision chain.  Renderers which
+    ;; did not consume it must perform one coherent full upload.
     (incf (scene-revision scene))
+    (setf (scene-changes scene) nil)
     scene))
+
+(defun publish-scene-change (scene chunks cell-words &optional slot-words)
+  "Publish one complete incremental materialization revision of SCENE."
+  (let* ((revision (incf (scene-revision scene)))
+         (change (make-scene-change revision
+                                    (index-set-vector chunks)
+                                    (index-set-vector cell-words)
+                                    (index-set-vector
+                                     (or slot-words
+                                         (make-hash-table :test #'eql))))))
+    (push change (scene-changes scene))
+    (let ((tail (nthcdr (1- *scene-change-history-limit*)
+                        (scene-changes scene))))
+      (when tail (setf (cdr tail) nil)))
+    change))
+
+(defun validate-scene-edit (scene edit)
+  "Return EDIT's sites after proving it is a binary cell-chain delta."
+  (check-type edit luft:chain)
+  (unless (equalp (scene-domain scene) (luft:chain-domain edit))
+    (error "Scene and edit use different world domains."))
+  (let ((sites (luft:chain-sites edit))
+        (seen (make-hash-table :test #'eql)))
+    (loop for site across sites
+          do (unless (= (luft:site-extent site) luft:+cell-extent+)
+               (error "A scene edit contains non-cell site ~S." site))
+             (unless (world-vertical-p (luft:site-z site))
+               (error "A scene edit contains out-of-world cell ~S." site))
+             (when (gethash (luft:site-geometry site) seen)
+               (error "A scene edit contains repeated cell ~S." site))
+             (setf (gethash (luft:site-geometry site) seen) t)
+             (let ((solid-p (luft:solid-cell-p
+                             (scene-solid scene)
+                             (luft:site-x site) (luft:site-y site)
+                             (luft:site-z site))))
+               (when (eql solid-p (luft:site-positive-p site))
+                 (error "Scene edit ~S would ~:[remove empty~;fill solid~] cell."
+                        site solid-p))))
+    sites))
+
+(defun set-scene-cell-bit (scene site solid-p)
+  "Set SITE's dense occupancy bit and return its changed word index."
+  (let* ((bit (luft:cell-bit-index
+               (scene-domain scene)
+               (luft:site-x site) (luft:site-y site) (luft:site-z site)))
+         (word (floor bit 32)))
+    (setf (ldb (byte 1 (mod bit 32)) (aref (scene-cell-bits scene) word))
+          (if solid-p 1 0))
+    word))
+
+(defun apply-scene-edit (scene edit)
+  "Apply signed cell-chain EDIT to SCENE without remeshing the world.  #3QNZC1
+
+If C is the solid and S its surface, EDIT is a sparse 3-chain delta and the
+publication is exactly
+
+    C' = C + EDIT,        S' = S + boundary(EDIT) = boundary(C').
+
+Only chunk summands touched by BOUNDARY(EDIT) are reordered.  Inputs are
+validated completely before SCENE is mutated; repeated fills, repeated
+removals, non-cell sites, and foreign domains are errors."
+  (let ((sites (validate-scene-edit scene edit)))
+    (when (zerop (length sites))
+      (return-from apply-scene-edit scene))
+    (let ((surface-change (luft:boundary-chain edit))
+          (chunks (make-hash-table :test #'eql))
+          (cell-words (make-hash-table :test #'eql)))
+      (luft:add-chain (scene-solid scene) edit)
+      (loop for site across sites
+            do (setf (gethash
+                      (set-scene-cell-bit
+                       scene site (luft:site-positive-p site))
+                      cell-words)
+                     t))
+      (luft:add-chain (scene-surface scene) surface-change)
+      (luft:map-chain
+       (lambda (face)
+         (let* ((index (site-chunk-index (scene-domain scene) face))
+                (chunk (ensure-surface-chunk scene index)))
+           (luft:add-chain-site (surface-chunk-chain chunk) face)
+           (setf (gethash index chunks) t)))
+       surface-change)
+      (maphash (lambda (index present-p)
+                 (declare (ignore present-p))
+                 (rebuild-surface-chunk scene index))
+               chunks)
+      (publish-scene-change scene chunks cell-words)
+      scene)))
+
+(defun scene-cell-p (scene x y z)
+  "Whether SCENE's solid contains the cell at X,Y,Z."
+  (and (world-vertical-p z)
+       (luft:solid-cell-p (scene-solid scene) x y z)))
+
+(defun (setf scene-cell-p) (state scene x y z)
+  "Set one SCENE cell through an exact signed-chain edit."
+  (when (and (world-vertical-p z)
+             (not (eql (not (null state)) (scene-cell-p scene x y z))))
+    (let* ((edit (luft:make-chain (scene-domain scene)))
+           (cell (luft:make-site (scene-domain scene) x y z
+                                 luft:+cell-extent+
+                                 (if state 1 -1))))
+      (luft:add-chain-site edit cell)
+      (apply-scene-edit scene edit)))
+  state)
+
+(defun scene-changes-since (scene revision)
+  "Return changed chunk/cell/slot indices since REVISION and availability.
+
+The fourth value is false when the bounded history cannot bridge REVISION to
+the current scene, in which case a renderer must upload a full cohort."
+  (block changes
+    (unless (and (integerp revision)
+                 (<= 0 revision (scene-revision scene)))
+      (return-from changes (values nil nil nil nil)))
+    (let ((expected (scene-revision scene))
+          (chunks (make-hash-table :test #'eql))
+          (cell-words (make-hash-table :test #'eql))
+          (slot-words (make-hash-table :test #'eql)))
+      (dolist (change (scene-changes scene))
+        (when (<= (scene-change-revision change) revision)
+          (return))
+        (unless (= (scene-change-revision change) expected)
+          (return-from changes (values nil nil nil nil)))
+        (loop for index across (scene-change-chunks change)
+              do (setf (gethash index chunks) t))
+        (loop for index across (scene-change-cell-words change)
+              do (setf (gethash index cell-words) t))
+        (loop for index across (scene-change-slot-words change)
+              do (setf (gethash index slot-words) t))
+        (decf expected))
+      (if (= expected revision)
+          (values (index-set-vector chunks)
+                  (index-set-vector cell-words)
+                  (index-set-vector slot-words)
+                  t)
+          (values nil nil nil nil)))))
 
 ;;; ------------------------------------------------------------------------
 ;;; A demonstration world
@@ -893,6 +1211,12 @@ lane: the arris softness of a chamfer, or the vertical radius of the field."
    (uploaded-scene :initform nil :accessor renderer-uploaded-scene)
    (uploaded-scene-revision :initform nil
                             :accessor renderer-uploaded-scene-revision)
+   (last-scene-upload-kind :initform nil
+                           :accessor renderer-last-scene-upload-kind)
+   (last-scene-upload-bytes :initform 0
+                            :accessor renderer-last-scene-upload-bytes)
+   (last-scene-upload-writes :initform 0
+                             :accessor renderer-last-scene-upload-writes)
    (frame-index :initform 0 :accessor renderer-frame-index)
    (previous-view :initform nil :accessor renderer-previous-view)
    (history-index :initform 0 :accessor renderer-history-index)
@@ -1352,9 +1676,15 @@ field, ink, and stock fragment modules, each NIL when nothing wants it."
                     (list (renderer-color-format renderer))))))))
 
 (defun draw-surface (pass scene style)
-  "Record the vertex-pulled draw of SCENE's whole surface in STYLE."
-  (draw pass (* (shaders:surface-vertices-per-face style)
-                (luft:chain-count (scene-surface scene)))))
+  "Record one vertex-pulled draw for each nonempty surface chunk of SCENE."
+  (let ((vertices-per-face (shaders:surface-vertices-per-face style)))
+    (loop for chunk across (scene-surface-chunks scene)
+          when (and chunk (plusp (surface-chunk-count chunk)))
+            do (draw pass
+                     (* vertices-per-face (surface-chunk-count chunk))
+                     1
+                     (* vertices-per-face +surface-chunk-capacity+
+                        (surface-chunk-page chunk))))))
 
 (defun draw-screen (pass)
   "Record one triangle covering the screen."
@@ -1560,7 +1890,7 @@ old generation until its entirely new replacement is ready."
                        :value (luft:chain-count (scene-surface scene)))
     (renderer &optional (scene (renderer-scene renderer)))
   "Upload SCENE and publish one coherent buffer/bind-group generation."
-  (let* ((sites (scene-sites scene))
+  (let* ((sites (scene-site-pages scene))
          (sites-needed (* 8 (length sites)))
          (cells-needed (* 4 (length (scene-cell-bits scene))))
          (slots-needed (* 4 (length (scene-slot-words scene))))
@@ -1610,6 +1940,10 @@ old generation until its entirely new replacement is ready."
                  (renderer-uploaded-scene renderer) scene
                  (renderer-uploaded-scene-revision renderer)
                  (scene-revision scene)
+                 (renderer-last-scene-upload-kind renderer) :full
+                 (renderer-last-scene-upload-bytes renderer)
+                 (+ sites-needed cells-needed slots-needed)
+                 (renderer-last-scene-upload-writes renderer) 3
                  (renderer-history-valid-p renderer) nil
                  completed-p t)
            ;; Only now can the previous generation stop being reachable.
@@ -1630,6 +1964,85 @@ old generation until its entirely new replacement is ready."
           (ignore-errors (destroy cells-buffer)))
         (when (and slots-new-p slots-buffer)
           (ignore-errors (destroy slots-buffer)))))))
+
+(defun write-buffer-index-ranges (buffer data indices element-size)
+  "Write sorted INDICES from DATA in maximal adjacent ranges.
+
+Return the number of bytes and write calls issued."
+  (let ((bytes 0)
+        (writes 0))
+    (labels ((write-range (start end)
+               (let ((slice (subseq data start end)))
+                 (write-buffer buffer slice :offset (* element-size start))
+                 (incf bytes (* element-size (- end start)))
+                 (incf writes))))
+      (when (plusp (length indices))
+        (let ((start (aref indices 0))
+              (previous (aref indices 0)))
+          (loop for cursor from 1 below (length indices)
+                for index = (aref indices cursor)
+                do (if (= index (1+ previous))
+                       (setf previous index)
+                       (progn
+                         (write-range start (1+ previous))
+                         (setf start index previous index))))
+          (write-range start (1+ previous)))))
+    (values bytes writes)))
+
+(zdefun (upload-scene-changes :zone :luft/upload-scene-changes)
+    (renderer scene chunks cell-words slot-words)
+  "Upload only the stable pages and dense words named by a scene revision."
+  (let ((bytes 0)
+        (writes 0)
+        (pages (scene-site-pages scene)))
+    (loop for index across chunks
+          for chunk = (aref (scene-surface-chunks scene) index)
+          when (and chunk (plusp (surface-chunk-count chunk)))
+            do (let* ((count (surface-chunk-count chunk))
+                      (start (* (surface-chunk-page chunk)
+                                +surface-chunk-capacity+))
+                      (sites (subseq pages start (+ start count))))
+                 (write-buffer (renderer-sites-buffer renderer) sites
+                               :offset (* 8 start))
+                 (incf bytes (* 8 count))
+                 (incf writes)))
+    (multiple-value-bind (range-bytes range-writes)
+        (write-buffer-index-ranges
+         (renderer-cells-buffer renderer) (scene-cell-bits scene) cell-words 4)
+      (incf bytes range-bytes)
+      (incf writes range-writes))
+    (multiple-value-bind (range-bytes range-writes)
+        (write-buffer-index-ranges
+         (renderer-slots-buffer renderer) (scene-slot-words scene) slot-words 4)
+      (incf bytes range-bytes)
+      (incf writes range-writes))
+    (setf (renderer-uploaded-scene-revision renderer) (scene-revision scene)
+          (renderer-last-scene-upload-kind renderer) :incremental
+          (renderer-last-scene-upload-bytes renderer) bytes
+          (renderer-last-scene-upload-writes renderer) writes
+          (renderer-history-valid-p renderer) nil)
+    renderer))
+
+(defun synchronize-renderer-scene (renderer scene)
+  "Bring RENDERER to SCENE's published revision, incrementally when possible."
+  (cond
+    ((not (eq scene (renderer-uploaded-scene renderer)))
+     (upload-scene renderer scene))
+    ((eql (scene-revision scene) (renderer-uploaded-scene-revision renderer))
+     renderer)
+    ((or (> (* 8 (length (scene-site-pages scene)))
+            (renderer-sites-capacity renderer))
+         (> (* 4 (length (scene-cell-bits scene)))
+            (renderer-cells-capacity renderer))
+         (> (* 4 (length (scene-slot-words scene)))
+            (renderer-slots-capacity renderer)))
+     (upload-scene renderer scene))
+    (t
+     (multiple-value-bind (chunks cell-words slot-words available-p)
+         (scene-changes-since scene (renderer-uploaded-scene-revision renderer))
+       (if available-p
+           (upload-scene-changes renderer scene chunks cell-words slot-words)
+           (upload-scene renderer scene))))))
 
 (defun renderer-surface-width (renderer)
   (if (member (renderer-style renderer) '(:chamfer :paper :stock))
@@ -1679,10 +2092,7 @@ to shade the frame.  The appended temporal lanes are deliberately excluded.
          (light (find-light *light*))
          (sky (if (light-sky light) (light-colour (light-sky light))
                   *sky-color*)))
-    (unless (and (eq scene (renderer-uploaded-scene renderer))
-                 (eql (scene-revision scene)
-                      (renderer-uploaded-scene-revision renderer)))
-      (upload-scene renderer scene))
+    (synchronize-renderer-scene renderer scene)
     (let* ((jitter (if temporal-p
                        (temporal-jitter (renderer-frame-index renderer)
                                         width height)
@@ -1977,6 +2387,70 @@ many times oversize, and the frame is box-filtered down on the way out."
         (when (viewer-key-down-p viewer :left-control :q :c)
           (move (vec3:make-vec3 0 0 1) (- step)))))))
 
+(defun ray-axis-crossings (position direction)
+  "Return grid STEP, first crossing time, and crossing interval for one axis."
+  (cond ((plusp direction)
+         (values 1 (/ (- (1+ (floor position)) position) direction)
+                 (/ 1.0 direction)))
+        ((minusp direction)
+         (values -1 (/ (- position (floor position)) (- direction))
+                 (/ 1.0 (- direction))))
+        (t (values 0 1.0e30 1.0e30))))
+
+(defun raycast-scene (scene origin direction &key (max-distance 24.0))
+  "Return the first solid cell met by a grid ray and the empty cell before it.
+
+The first two values are three-element coordinate lists or NIL; the third is
+the parametric distance.  Tied edge and corner crossings advance together, so
+a ray never claims a cell it merely touches."
+  (let ((x (floor (vec3:vec3-x origin)))
+        (y (floor (vec3:vec3-y origin)))
+        (z (floor (vec3:vec3-z origin)))
+        step-x step-y step-z
+        next-x next-y next-z
+        delta-x delta-y delta-z
+        (distance 0.0)
+        (previous nil))
+    (multiple-value-setq (step-x next-x delta-x)
+      (ray-axis-crossings (vec3:vec3-x origin) (vec3:vec3-x direction)))
+    (multiple-value-setq (step-y next-y delta-y)
+      (ray-axis-crossings (vec3:vec3-y origin) (vec3:vec3-y direction)))
+    (multiple-value-setq (step-z next-z delta-z)
+      (ray-axis-crossings (vec3:vec3-z origin) (vec3:vec3-z direction)))
+    (loop
+      (when (scene-cell-p scene x y z)
+        (return (values (list x y z) previous distance)))
+      (let ((next (min next-x next-y next-z)))
+        (when (> next max-distance)
+          (return (values nil nil nil)))
+        (setf previous (list x y z)
+              distance next)
+        (when (<= next-x (+ next 1.0e-6))
+          (incf x step-x)
+          (incf next-x delta-x))
+        (when (<= next-y (+ next 1.0e-6))
+          (incf y step-y)
+          (incf next-y delta-y))
+        (when (<= next-z (+ next 1.0e-6))
+          (incf z step-z)
+          (incf next-z delta-z))))))
+
+(defun edit-viewer-facing-cell (viewer solid-p)
+  "Remove the facing cell, or add one to the empty site immediately before it."
+  (let* ((renderer (viewer-renderer viewer))
+         (camera (renderer-camera renderer)))
+    (multiple-value-bind (hit before)
+        (multiple-value-bind (right up forward) (camera-basis camera)
+          (declare (ignore right up))
+          (raycast-scene (renderer-scene renderer)
+                         (camera-position camera) forward))
+      (let ((cell (if solid-p before hit)))
+        (when cell
+          (setf (scene-cell-p (renderer-scene renderer)
+                              (first cell) (second cell) (third cell))
+                solid-p)
+          cell)))))
+
 (zdefun (render-viewer-frame :zone :luft/viewer-frame) (viewer timestamp)
   (declare (ignore timestamp))
   (unless (viewer-running-p viewer)
@@ -2018,10 +2492,15 @@ many times oversize, and the frame is box-filtered down on the way out."
 
 (defmethod handle-canvas-event
     ((viewer viewer) canvas (event canvas-pointer-button-press-event))
-  (when (and (not (viewer-pointer-captured-p viewer))
-             (eq :left (canvas-pointer-event-button event)))
-    (set-canvas-relative-pointer-mode canvas t)
-    (setf (viewer-pointer-captured-p viewer) t))
+  (let ((button (canvas-pointer-event-button event)))
+    (cond ((not (viewer-pointer-captured-p viewer))
+           (when (eq :left button)
+             (set-canvas-relative-pointer-mode canvas t)
+             (setf (viewer-pointer-captured-p viewer) t)))
+          ((eq :left button)
+           (edit-viewer-facing-cell viewer nil))
+          ((eq :right button)
+           (edit-viewer-facing-cell viewer t))))
   nil)
 
 (defmethod handle-canvas-event
@@ -2092,7 +2571,9 @@ chamfer, paper, stock, field, soft, ink, or full." name)))))
           (provider *gpu-provider*))
   "Open a window flying through SCENE and return the running VIEWER.
 
-Click to capture the pointer, Escape to release it; WASD, Space, and C move.
+  Click to capture the pointer, then left-click to remove the facing cell and
+right-click to place one beside it.  Escape releases the pointer; WASD, Space,
+and C move.
 The renderer stays available as (VIEWER-RENDERER *VIEWER*) for live tinkering.
 By default the viewer creates only the flat surface pipeline: pass explicit
 PIPELINE-STYLES and EFFECTS to add the complex geometry, sky, or lens.

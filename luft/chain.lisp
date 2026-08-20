@@ -120,6 +120,18 @@ ledgers.  Return SITE."
         (incf (gethash geometry same 0))))
   site)
 
+(defun add-chain (chain addend)
+  "Add every signed occurrence of ADDEND to CHAIN and return CHAIN.
+
+This is integer chain addition with immediate normalization: opposite sites
+annihilate and equal sites accumulate.  Both chains must describe the same
+world domain."
+  (unless (equalp (chain-domain chain) (chain-domain addend))
+    (error "Cannot add chains over different domains: ~S and ~S."
+           (chain-domain chain) (chain-domain addend)))
+  (map-chain-unordered (lambda (site) (add-chain-site chain site)) addend)
+  chain)
+
 (defun map-chain-unordered (function chain)
   "Call FUNCTION with each signed site occurrence without sorting or allocating."
   (flet ((map-ledger (table polarity)

@@ -69,6 +69,105 @@
     (ok (eq scene (refresh-scene scene)))
     (ok (= (1+ revision) (scene-revision scene)))))
 
+(defun scene-agrees-with-boundary-reference-p (scene)
+  "Whether every incremental product of SCENE equals a fresh reconstruction."
+  (let* ((reference (luft:surface-chain (scene-solid scene)))
+         (reference-sites (luft:chain-sites reference))
+         (incremental-sites
+           (sort (map 'vector #'packed-site (scene-sites scene)) #'<)))
+    (and (equalp reference-sites
+                 (luft:chain-sites (scene-surface scene)))
+         (equalp reference-sites incremental-sites)
+         (equalp (luft:chain-cell-bits (scene-solid scene))
+                 (scene-cell-bits scene))
+         (zerop (luft:chain-count
+                 (luft:boundary-chain (scene-surface scene)))))))
+
+(deftest signed-cell-edits-are-exactly-linear-boundary-updates
+  ;; Cross ordinary and chunk boundaries, wrap around the horizontal torus,
+  ;; and repeatedly remove cells.  At every publication the incremental
+  ;; surface and dense occupancy must equal the deliberately slow reference.
+  (let* ((domain (luft:make-world-domain :horizontal-bits 4))
+         (scene (make-scene domain)))
+    (labels ((apply-cells (&rest cells)
+               (let ((edit (luft:make-chain domain)))
+                 (dolist (cell cells)
+                   (destructuring-bind (x y z state) cell
+                     (luft:add-chain-site
+                      edit (luft:make-site domain x y z luft:+cell-extent+
+                                           (if state 1 -1)))))
+                 (apply-scene-edit scene edit)
+                 (ok (scene-agrees-with-boundary-reference-p scene)))))
+      (apply-cells '(7 7 0 t) '(8 7 0 t) '(7 8 0 t) '(8 8 0 t))
+      (apply-cells '(15 3 1 t) '(0 3 1 t) '(15 4 1 t))
+      (apply-cells '(7 7 0 nil) '(8 8 0 nil) '(0 3 1 nil))
+      ;; A deterministic toggle walk supplies additions, removals, vertical
+      ;; crossings, and many successive revision histories.
+      (dotimes (step 80)
+        (let ((x (mod (* 7 step) 16))
+              (y (mod (+ 3 (* 11 step)) 16))
+              (z (mod (+ step (floor step 5)) 18)))
+          (setf (scene-cell-p scene x y z)
+                (not (scene-cell-p scene x y z))))
+        (when (zerop (mod step 8))
+          (ok (scene-agrees-with-boundary-reference-p scene))))
+      (ok (scene-agrees-with-boundary-reference-p scene)))))
+
+(deftest one-cell-publication-names-only-its-chunk-and-occupancy-word
+  (let* ((scene (make-scene (luft:make-world-domain :horizontal-bits 4)))
+         (revision (scene-revision scene)))
+    (setf (scene-cell-p scene 3 3 3) t)
+    (multiple-value-bind (chunks cell-words slot-words available-p)
+        (luft.render::scene-changes-since scene revision)
+      (ok available-p)
+      (ok (= 1 (length chunks)))
+      (ok (= 1 (length cell-words)))
+      (ok (zerop (length slot-words))))
+    ;; The edit protocol rejects an invalid delta before mutating any product.
+    (let ((bad (luft:make-chain (scene-domain scene)))
+          (revision (scene-revision scene))
+          (sites (scene-sites scene)))
+      (luft:add-chain-site
+       bad (luft:make-site (scene-domain scene) 3 3 3 luft:+cell-extent+))
+      (ok (signals (apply-scene-edit scene bad) 'error))
+      (ok (= revision (scene-revision scene)))
+      (ok (equalp sites (scene-sites scene))))))
+
+(deftest a-grid-ray-names-the-hit-cell-and-the-placement-cell
+  (let ((scene (make-scene (luft:make-world-domain :horizontal-bits 4))))
+    (setf (scene-cell-p scene 4 4 4) t)
+    (multiple-value-bind (hit before distance)
+        (raycast-scene scene
+                       (vec3:make-vec3 4.5 4.5 8.0)
+                       (vec3:make-vec3 0.0 0.0 -1.0))
+      (ok (equal '(4 4 4) hit))
+      (ok (equal '(4 4 5) before))
+      (ok (= 3.0 distance)))
+    ;; An exact diagonal crosses grid corners simultaneously and therefore
+    ;; cannot report either of the merely touched off-diagonal cells.
+    (setf (scene-cell-p scene 2 1 1) t)
+    (multiple-value-bind (hit)
+        (raycast-scene scene
+                       (vec3:make-vec3 0.5 0.5 1.5)
+                       (vec3:make-vec3 1.0 1.0 0.0)
+                       :max-distance 3.0)
+      (ok (null hit)))))
+
+(deftest every-construction-mode-finishes-at-the-authored-world
+  (let ((target (atelier-scene :joinery)))
+    (dolist (mode '(:rise :spiral :carve))
+      (multiple-value-bind (scene cells ceiling)
+          (luft.render::target-construction target mode)
+        (declare (ignore ceiling))
+        (let ((edit (luft:make-chain (scene-domain scene))))
+          (loop for cell across cells
+                do (luft:add-chain-site edit cell))
+          (apply-scene-edit scene edit))
+        (ok (luft.render::construction-finished-p scene target)
+            (format nil "~S reaches the exact target solid" mode))
+        (ok (scene-agrees-with-boundary-reference-p scene)
+            (format nil "~S reaches the exact target surface" mode))))))
+
 (deftest packed-sites-carry-the-stock-of-the-solid-behind-them
   ;; A face is stamped with the stock of the cell it bounds, not of the air
   ;; on the other side, and the stamp lives above the sixty bits a LUFT
@@ -210,6 +309,30 @@
            (let ((pixels (render-pixels renderer)))
              (ok (= (* width height)
                     (count-pixels pixels width height #'sky-pixel-p)))))
+      (destroy-renderer renderer))))
+
+(deftest a-rendered-cell-edit-uploads-one-small-face-page
+  (let* ((scene (probe-scene))
+         (renderer (make-renderer
+                    :scene scene
+                    :camera (make-fly-camera
+                             :position (vec3:make-vec3 5.0 1.0 5.0)
+                             :yaw 1.6 :pitch -0.6)
+                    :width 96 :height 64
+                    :style :flat :pipeline-styles '(:flat) :effects nil))
+         (full-bytes (renderer-last-scene-upload-bytes renderer)))
+    (unwind-protect
+         (progn
+           ;; This cell and all six of its boundary sites lie in one 8^3
+           ;; chunk.  The next frame rewrites that page and one occupancy word.
+           (setf (scene-cell-p scene 4 4 2) t)
+           (render-pixels renderer)
+           (ok (eq :incremental
+                   (renderer-last-scene-upload-kind renderer)))
+           (ok (= 2 (renderer-last-scene-upload-writes renderer)))
+           (ok (< (renderer-last-scene-upload-bytes renderer) full-bytes))
+           (ok (= (scene-revision scene)
+                  (luft.render::renderer-uploaded-scene-revision renderer))))
       (destroy-renderer renderer))))
 
 (deftest temporal-jitter-and-frame-views-are-frame-sized-and-frozen

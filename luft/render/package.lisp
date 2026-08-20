@@ -85,6 +85,8 @@ of packed LUFT sites, drawn by vertex shaders pulling sites.")
            #:scene-sites
            #:scene-cell-bits
            #:scene-revision
+           #:scene-cell-p
+           #:apply-scene-edit
            #:refresh-scene
            #:fly-camera
            #:make-fly-camera
@@ -93,6 +95,7 @@ of packed LUFT sites, drawn by vertex shaders pulling sites.")
            #:camera-pitch
            #:camera-field-of-view
            #:camera-basis
+           #:raycast-scene
            #:frame-uniform-data
            #:renderer
            #:make-renderer
@@ -103,6 +106,9 @@ of packed LUFT sites, drawn by vertex shaders pulling sites.")
            #:renderer-style
            #:renderer-pipeline-styles
            #:renderer-effects
+           #:renderer-last-scene-upload-kind
+           #:renderer-last-scene-upload-bytes
+           #:renderer-last-scene-upload-writes
            #:*bevel-radius*
            #:*chamfer-width*
            #:*arris-softness*
@@ -191,6 +197,7 @@ of packed LUFT sites, drawn by vertex shaders pulling sites.")
            #:render-contact-sheet
            #:film-studio-orbit
            #:film-atelier-flight
+           #:film-atelier-construction
            #:viewer
            #:main
            #:start-viewer
