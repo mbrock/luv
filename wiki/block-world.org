@@ -534,29 +534,35 @@ through a save description.
 Until now the player was a camera: an eye at a height above a collision
 box, with an inventory of materials and nothing to carry them in.  The
 body in [[file:../luvcraft/body.lisp][body.lisp]] gives the eye two arms.
-They hang into the bottom corners of the view, sleeve and wrist and fist,
-and they are drawn exactly as an animal is (#KTRMAO): a handful of
-textured boxes streamed through the block surface pipeline every frame,
-lit by the sky and block light where the eye stands, painted from the same
-atlas as stone and turtle hide.
+They hang into the bottom corners of the view, sleeve and wrist and hand,
+but are no longer little boxes.  =player-body= owns a live ray-marched SDF
+pipeline like the embodied gnome and cat: capsules make the forearms,
+ellipsoids make palms and thumbs, and smooth unions make the wrist one
+silhouette.  Five player-group knobs expose arm radius, hand size, sleeve
+length, shoulder spread, and smoothing; the thumb derives from hand size so
+turning one knob does not pull the figure apart.
 
-What differs is the frame.  A critter's boxes turn only with its yaw; the
-body's boxes live in the view frame -- right, up, and forward from the
-eye -- and turn with the whole camera, pitch included, so the hands stay
-where they are on the screen while the head looks around.  Each box may
-carry a small tilt of its own, which is what lets a forearm slope up from
-the screen edge and a phone lean back in the palm instead of everything
-standing square to the lens.  Walking bobs the hands on a phase accumulated
-from ground speed, so standing still stands still, and a breath moves them
-when nothing else does.
+The complete neutral avatar is authored as the same analytic field -- head,
+torso, legs, arms, and hands -- while first person launches rays only through
+its lower-screen, view-local arm slice.  In that frame x is camera-right, y is
+up, z is forward, and the eye is the origin, so hands stay attached to the
+body while the head looks around.  Walking bobs their published palm points on
+a phase accumulated from ground speed, so standing still stands still, and a
+breath moves them when nothing else does.  The explicit =:viewmodel= stage
+draws after every world participant and before held-item geometry, rather than
+letting a later-attached agent blend over the player's own hands.  A future
+third-person or reflected view can launch rays through the full avatar instead
+of inventing another body.
 
 A hand can hold something.  The held-item protocol is a few generic
 functions -- map-hand-item-boxes for the item's boxes in the grip frame,
 hand-item-carry-pose for where the right hand holds it, hand-item-name for
 the title, hand-item-taken-out and hand-item-put-away for what the item
 does about being held -- and the body eases between pocket and hand rather
-than cutting, so taking a thing out is a motion.  F takes the phone out or
-puts it away; a pocketed item keeps its state.
+than cutting, so taking a thing out is a motion.  Held-item geometry draws
+after the analytic hands in the same grip frame; the phone can remain a
+round-corner slab with a live display without dictating how flesh is shaped.
+F takes the phone out or puts it away; a pocketed item keeps its state.
 
 ** The phone is a wall terminal you can carry
 :PROPERTIES:

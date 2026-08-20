@@ -1357,13 +1357,6 @@ submission that used them completes."
               (set-pipeline pass (luvcraft-session-pipeline session))
               (set-bind-group
                pass 0 (luvcraft-frame-scene-bind-group frame)))))
-        ;; The player's own arms and whatever they hold, drawn in the scene
-        ;; but not into the shadow map: a pair of floating forearms would
-        ;; throw a shadow that explains nothing.
-        (when (plusp body-vertex-count)
-          (set-vertex-buffer
-           pass 0 (luvcraft-frame-body-vertex-buffer frame))
-          (draw pass body-vertex-count))
         (when (plusp particle-vertex-count)
           (set-vertex-buffer
            pass 0 (luvcraft-frame-particle-vertex-buffer frame))
@@ -1392,6 +1385,22 @@ submission that used them completes."
           (when (eq :scene (luvcraft-overlay-stage overlay))
             (guarding-luvcraft-overlay (session overlay :overlay-encode)
               (encode-luvcraft-overlay overlay session pass surface-texture))))
+        ;; First-person geometry is above every world participant regardless
+        ;; of overlay attachment order.  It still lives in the scene texture
+        ;; (and therefore the lens/grade chain), unlike the later HUD pass.
+        (dolist (overlay (reverse (luvcraft-session-overlays session)))
+          (when (eq :viewmodel (luvcraft-overlay-stage overlay))
+            (guarding-luvcraft-overlay (session overlay :overlay-encode)
+              (encode-luvcraft-overlay overlay session pass surface-texture))))
+        ;; A held item's own geometry follows the analytic hands so glass,
+        ;; buttons, and live displays remain legible in the grip; neither body
+        ;; nor item enters the shadow map.
+        (when (plusp body-vertex-count)
+          (set-pipeline pass (luvcraft-session-pipeline session))
+          (set-bind-group pass 0 (luvcraft-frame-scene-bind-group frame))
+          (set-vertex-buffer
+           pass 0 (luvcraft-frame-body-vertex-buffer frame))
+          (draw pass body-vertex-count))
         (unless (or (luvcraft-session-modal-focus session)
                     (not *luvcraft-crosshair-p*))
           (set-pipeline pass (luvcraft-session-crosshair-native-pipeline session))
@@ -1539,6 +1548,12 @@ submission that used them completes."
       (advance-luvcraft-keyboard-look session seconds))
     (advance-luvcraft-critters session seconds)
     (advance-luvcraft-physics session seconds)
+    ;; Scene participants own their behavior while core owns the frame clock.
+    ;; An embodied agent therefore advances here without making core depend on
+    ;; the agent system which specializes this open protocol.
+    (dolist (overlay (reverse (luvcraft-session-overlays session)))
+      (guarding-luvcraft-overlay (session overlay :overlay-advance)
+        (advance-luvcraft-overlay overlay session seconds)))
     ;; A moving interaction takes its turn after the world it moves in and
     ;; before the player controller, which stands down while it carries them.
     (let ((focus (luvcraft-session-modal-focus session))
@@ -1552,6 +1567,12 @@ submission that used them completes."
           (focus (luvcraft-session-modal-focus session)))
       (when (and player
                  (not (and focus (luvcraft-focus-carries-player-p focus))))
+        ;; Held controls have immediate authority over the player's legs.
+        ;; Move To is still a useful player primitive, but touching movement
+        ;; cancels it instead of fighting a hidden autopilot.
+        (when (and (body-movement-action player)
+                   (not (movement-intent-still-p intent)))
+          (cancel-body-movement player "cancelled by manual player input"))
         (incf (luvcraft-session-physics-accumulator session) seconds)
         (zone (:simulation/player-steps
                :value
@@ -1559,13 +1580,21 @@ submission that used them completes."
                       +player-physics-step+))
           (loop while (>= (luvcraft-session-physics-accumulator session)
                           +player-physics-step+)
-                do (step-block-world-player
-                    player (luvcraft-session-world session)
-                    (luvcraft-session-camera session) intent
-                    +player-physics-step+
-                    :jump-p (movement-intent-jump-requested-p intent)
-                    :sync-camera-p
-                    (not (luvcraft-session-focus-camera-active-p session)))
+                do (if (body-movement-action player)
+                       (progn
+                         (advance-body-movement
+                          player (luvcraft-session-world session)
+                          +player-physics-step+)
+                         (unless (luvcraft-session-focus-camera-active-p session)
+                           (sync-camera-to-player
+                            (luvcraft-session-camera session) player)))
+                       (step-block-world-player
+                        player (luvcraft-session-world session)
+                        (luvcraft-session-camera session) intent
+                        +player-physics-step+
+                        :jump-p (movement-intent-jump-requested-p intent)
+                        :sync-camera-p
+                        (not (luvcraft-session-focus-camera-active-p session))))
                    (setf (movement-intent-jump-requested-p intent) nil)
                    (decf (luvcraft-session-physics-accumulator session)
                          +player-physics-step+)))))
@@ -2365,6 +2394,7 @@ NIL to let the display choose a comfortable window."
                 (list atlas-width atlas-height))
                (setf session new-session)
                (update-luvcraft-session-title session)
+               (attach-player-body-sdf session)
                (attach-physics-sphere-drawer session)
                (start-luvcraft-lobby session)
                (attach-luvcraft-hud session)

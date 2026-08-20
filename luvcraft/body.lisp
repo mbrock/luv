@@ -7,15 +7,12 @@
 ;;; grip protocol so that a hand can hold something: brought up out of a
 ;;; pocket, held while walking, put away again.
 ;;;
-;;; The body is drawn exactly like an animal (see CRITTERS.LISP): a handful of
-;;; textured boxes on the ordinary block surface pipeline.  What differs is
-;;; the frame.  A critter's boxes turn only with its yaw; the body's boxes
-;;; live in the *view* frame -- x to the right, y up, z forward, origin at
-;;; the eye -- and turn with the whole camera, pitch included, so the hands
-;;; stay put on the screen while the head looks around.  Each box may also
-;;; carry its own small tilt, which is what lets a forearm slope up from the
-;;; screen edge and a phone lean back in the palm instead of everything
-;;; standing square to the lens.
+;;; The body is an SDF like the embodied agents.  In first person its visible
+;;; slice is the arms and hands, sphere-traced in the *view* frame -- x to the
+;;; right, y up, z forward, origin at the eye -- so the body stays attached to
+;;; the camera while the head looks around.  Held things retain their own
+;;; geometry and grip protocol: an analytic hand can still hold a round-corner
+;;; phone with a live terminal on it.
 ;;;
 ;;; The first thing a hand can hold is a phone (PHONE.LISP).  It is
 ;;; deliberately a little too large: a slab of near-black glass with a live
@@ -159,8 +156,130 @@ the default hand holds things but does nothing with them."))
                  :accessor player-body-land-elapsed)
    ;; A time base for the small breathing sway of a body that is not
    ;; walking anywhere.
-   (clock :initform 0d0 :type double-float :accessor player-body-clock))
+   (clock :initform 0d0 :type double-float :accessor player-body-clock)
+   ;; The lower-screen proxy and live shader are render resources owned by the
+   ;; body itself once it is attached to a session.
+   (sdf-pipeline :initform nil :accessor player-body-sdf-pipeline)
+   (sdf-vertex-buffer :initform nil :accessor player-body-sdf-vertex-buffer)
+   (sdf-instance-buffer :initform nil :accessor player-body-sdf-instance-buffer)
+   (sdf-instance-data :initform nil :accessor player-body-sdf-instance-data))
   (:documentation "The first-person body: two arms and what they hold."))
+
+(defmethod luvcraft-overlay-stage ((body player-body))
+  (declare (ignore body))
+  :viewmodel)
+
+(defmethod luvcraft-overlay-live-shader-pipelines ((body player-body))
+  (when (player-body-sdf-pipeline body)
+    (list (player-body-sdf-pipeline body))))
+
+(defun place-player-body-sdf (body)
+  "Publish BODY's current view-local palms to its SDF instance buffer."
+  (let ((data (player-body-sdf-instance-data body)))
+    (loop for pose in (list (player-body-hand-pose body :left)
+                            (player-body-hand-pose body :right))
+          for offset in '(0 4)
+          do (destructuring-bind (x y z pitch yaw roll) pose
+               (declare (ignore pitch yaw roll))
+               (setf (aref data offset) (coerce x 'single-float)
+                     (aref data (+ offset 1)) (coerce y 'single-float)
+                     (aref data (+ offset 2)) (coerce z 'single-float)
+                     (aref data (+ offset 3)) 1.0)))
+    (write-buffer (player-body-sdf-instance-buffer body) data))
+  body)
+
+(defmethod encode-luvcraft-overlay
+    ((body player-body) session pass surface-texture)
+  (when (player-body-sdf-pipeline body)
+    (place-player-body-sdf body)
+    (let ((frame (luvcraft-frame-state session surface-texture)))
+      (set-pipeline
+       pass (live-shader-pipeline-native-pipeline
+             (player-body-sdf-pipeline body)))
+      (set-vertex-buffer pass 0 (player-body-sdf-vertex-buffer body))
+      (set-vertex-buffer pass 1 (player-body-sdf-instance-buffer body))
+      (set-bind-group pass 0 (luvcraft-frame-scene-bind-group frame))
+      (draw pass 6 1)))
+  body)
+
+(defmethod release-luvcraft-overlay ((body player-body))
+  (when (player-body-sdf-pipeline body)
+    (release-live-shader-pipeline (player-body-sdf-pipeline body)))
+  (dolist (resource (list (player-body-sdf-instance-buffer body)
+                          (player-body-sdf-vertex-buffer body)))
+    (when resource (destroy resource)))
+  (setf (player-body-sdf-pipeline body) nil
+        (player-body-sdf-instance-buffer body) nil
+        (player-body-sdf-vertex-buffer body) nil
+        (player-body-sdf-instance-data body) nil)
+  (values))
+
+(defun attach-player-body-sdf (session)
+  "Attach SESSION's first-person SDF body and its owned GPU resources."
+  (let ((body (luvcraft-session-body session)))
+    (when (player-body-sdf-pipeline body)
+      (return-from attach-player-body-sdf body))
+    (let* ((device (luvcraft-session-device session))
+           (vertex-data (make-world-text-quad-vertices))
+           (instance-data (make-array 8 :element-type 'single-float))
+           (vertex-buffer nil)
+           (instance-buffer nil)
+           (pipeline nil)
+           (completed-p nil))
+      (unwind-protect
+           (progn
+             (setf vertex-buffer
+                   (create
+                    device
+                    (make-buffer-descriptor
+                     :label "player SDF proxy"
+                     :size (* 4 (length vertex-data))
+                     :usage '(:vertex :copy-dst)))
+                   instance-buffer
+                   (create
+                    device
+                    (make-buffer-descriptor
+                     :label "player SDF palms"
+                     :size (* 4 (length instance-data))
+                     :usage '(:vertex :copy-dst)))
+                   pipeline
+                   (make-live-shader-pipeline
+                    :role :player-body-sdf
+                    :vertex-role :player-body-sdf
+                    :label "player body SDF pipeline"
+                    :device device
+                    :layout
+                    (live-shader-pipeline-layout
+                     (luvcraft-session-block-pipeline session))
+                    :vertex-buffers
+                    '((:array-stride 12
+                       :attributes
+                       ((:shader-location 0 :offset 0 :format :float32x3)))
+                      (:array-stride 32 :step-mode :instance
+                       :attributes
+                       ((:shader-location 1 :offset 0 :format :float32x4)
+                        (:shader-location 2 :offset 16 :format :float32x4))))
+                    :target-format +luvcraft-scene-color-format+
+                    :target-blend :premultiplied-alpha
+                    :primitive '(:topology :triangle-list)
+                    :depth-stencil
+                    '(:format :depth32-float
+                      :depth-write-enabled nil
+                      :depth-compare :always)))
+             (write-buffer vertex-buffer vertex-data)
+             (setf (player-body-sdf-pipeline body) pipeline
+                   (player-body-sdf-vertex-buffer body) vertex-buffer
+                   (player-body-sdf-instance-buffer body) instance-buffer
+                   (player-body-sdf-instance-data body) instance-data)
+             (place-player-body-sdf body)
+             (add-luvcraft-overlay session body)
+             (setf completed-p t)
+             body)
+        (unless completed-p
+          (when pipeline
+            (ignore-errors (release-live-shader-pipeline pipeline)))
+          (when instance-buffer (ignore-errors (destroy instance-buffer)))
+          (when vertex-buffer (ignore-errors (destroy vertex-buffer))))))))
 
 (defun put-away-hand-item (body session)
   "Pocket whatever BODY holds and return it, or NIL when the hand was empty."
@@ -383,7 +502,7 @@ the left just hangs into the corner of the view."
          (equip (player-body-equip-amount body)))
     (ecase side
       (:right
-       (let* ((empty '(0.36d0 -0.40d0 0.60d0 -0.30d0 -0.35d0 0.20d0))
+       (let* ((empty '(0.43d0 -0.25d0 0.64d0 -0.30d0 -0.35d0 0.20d0))
               (pocket '(0.40d0 -0.72d0 0.55d0 -0.60d0 -0.35d0 0.20d0))
               (pose (if item
                         (lerp-pose pocket (hand-item-carry-pose item body)
@@ -394,7 +513,7 @@ the left just hangs into the corner of the view."
                  (+ pitch (* bob 0.05d0 (sin bob-phase))) yaw roll))))
       (:left
        (destructuring-bind (x y z pitch yaw roll)
-           '(-0.36d0 -0.40d0 0.60d0 -0.30d0 0.35d0 -0.20d0)
+           '(-0.43d0 -0.25d0 0.64d0 -0.30d0 0.35d0 -0.20d0)
          (list (- x bob-x) (+ y (* 0.7d0 bob-y) (- breathe)) z
                (- pitch (* bob 0.05d0 (sin bob-phase))) yaw roll))))))
 
@@ -414,70 +533,17 @@ item (the phone's terminal) expresses the camera in it."
           (values (frame-point (camera-position camera) right up forward x y z)
                   grip-right grip-up grip-forward))))))
 
-(defun emit-player-arm
-    (vertices eye right up forward pose sign sky block)
-  "Append one arm reaching from off the bottom edge of the view to POSE.
-
-SIGN is +1 for the right arm and -1 for the left.  The forearm is a sleeved
-box sloping from the palm back toward the shoulder, which is somewhere
-behind and below the eye and never in the picture; the hand is a skin box
-at its end."
-  (destructuring-bind (x y z pitch yaw roll) pose
-    (let* ((shoulder-x (* sign 0.30d0))
-           ;; The elbow follows the reach: a hand held far out is on a bent
-           ;; arm, so the forearm keeps its slope instead of lying flat.
-           (shoulder-z (- z 0.36d0))
-           (shoulder-y -0.62d0)
-           (dx (- x shoulder-x)) (dy (- y shoulder-y)) (dz (- z shoulder-z))
-           (length (sqrt (+ (* dx dx) (* dy dy) (* dz dz))))
-           ;; The forearm's own frame: its z runs from shoulder to palm.
-           (arm-pitch (- (atan dy (sqrt (+ (* dx dx) (* dz dz))))))
-           (arm-yaw (atan dx dz)))
-      (multiple-value-bind (arm-right arm-up arm-forward)
-          (rotate-frame right up forward arm-pitch arm-yaw 0d0)
-        ;; The sleeve covers the far two thirds of the arm, so the wrist is
-        ;; bare skin for a little way before the hand.
-        (let ((cuff (frame-point eye right up forward
-                                 (+ shoulder-x (* 0.42d0 dx))
-                                 (+ shoulder-y (* 0.42d0 dy))
-                                 (+ shoulder-z (* 0.42d0 dz)))))
-          (emit-framed-box vertices cuff arm-right arm-up arm-forward
-                           0.062d0 0.062d0 (* 0.24d0 length)
-                           +player-sleeve-tile+ sky block 0.0 nil))
-        (let ((wrist (frame-point eye right up forward
-                                  (+ shoulder-x (* 0.88d0 dx))
-                                  (+ shoulder-y (* 0.88d0 dy))
-                                  (+ shoulder-z (* 0.88d0 dz)))))
-          (emit-framed-box vertices wrist arm-right arm-up arm-forward
-                           0.055d0 0.055d0 (* 0.10d0 length)
-                           +player-skin-tile+ sky block 0.0 nil)))
-      ;; The hand itself sits at the palm, turned as the pose says: a fist
-      ;; when empty, a grip when holding.
-      (multiple-value-bind (hand-right hand-up hand-forward)
-          (rotate-frame right up forward pitch yaw roll)
-        (let ((palm (frame-point eye right up forward x y z)))
-          (emit-framed-box vertices palm hand-right hand-up hand-forward
-                           0.080d0 0.062d0 0.070d0
-                           +player-skin-tile+ sky block 0.0 nil))))))
-
 (defun emit-player-body (vertices session)
-  "Append SESSION's first-person body -- arms, hands, held item -- to VERTICES."
+  "Append SESSION's held item; its arms and hands are the SDF scene overlay."
   (let* ((body (luvcraft-session-body session))
-         (camera (luvcraft-session-camera session))
-         (eye (camera-position camera)))
-    (multiple-value-bind (right up forward) (camera-basis camera)
+         (item (player-body-hand-item body)))
+    (when item
       (multiple-value-bind (sky block) (player-body-light-levels session)
-        (let ((right-pose (player-body-hand-pose body :right))
-              (left-pose (player-body-hand-pose body :left)))
-          (emit-player-arm vertices eye right up forward left-pose -1 sky block)
-          (emit-player-arm vertices eye right up forward right-pose 1 sky block)
-          (let ((item (player-body-hand-item body)))
-            (when item
-              (multiple-value-bind (palm grip-right grip-up grip-forward)
-                  (player-body-grip-frame session)
-                (emit-hand-item item body vertices
-                                palm grip-right grip-up grip-forward
-                                sky block)))))))
+        (multiple-value-bind (palm grip-right grip-up grip-forward)
+            (player-body-grip-frame session)
+          (emit-hand-item item body vertices
+                          palm grip-right grip-up grip-forward
+                          sky block))))
     vertices))
 
 (defmethod emit-hand-item (item body vertices palm right up forward
@@ -580,7 +646,7 @@ band of quads around the edge, all wearing TILE stretched once around."
   vertices)
 
 (defun player-body-vertices (session)
-  "Build the block-pipeline vertex stream for the player's body this frame."
+  "Build the block-pipeline stream for the player's held item this frame."
   (let ((vertices
           (make-array (* +player-body-box-limit+ +critter-vertices-per-box+
                          +block-mesh-floats-per-vertex+)

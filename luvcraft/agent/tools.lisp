@@ -95,6 +95,17 @@ so a list reads as Lisp rather than as a comma-separated sequence.")
    "How many lines COMMAND's result may run to before the model view folds it.")
   (:method ((command t)) *model-text-max-lines*))
 
+(defgeneric settle-command-result (command value)
+  (:documentation
+   "Finish any off-canvas work represented by VALUE before presenting it.
+
+The command itself has already returned from the canvas thread.  The default
+is immediate; a long-lived action can wait here on the provider's turn thread
+without ever freezing rendering.")
+  (:method ((command t) value)
+    (declare (ignore command))
+    value))
+
 (define-condition tool-argument-error (error)
   ((name :initarg :name :reader tool-argument-error-name)
    (detail :initarg :detail :reader tool-argument-error-detail))
@@ -145,9 +156,12 @@ so a list reads as Lisp rather than as a comma-separated sequence.")
     (note-tool-call agent call)
     (handler-case
         (let* ((command (command-tool-parse tool arguments))
-               (values (progn
-                         (setf (tool-call-command call) command)
-                         (execute-command-for-agent agent command)))
+               (raw-values (progn
+                             (setf (tool-call-command call) command)
+                             (execute-command-for-agent agent command)))
+               (values (mapcar (lambda (value)
+                                 (settle-command-result (car command) value))
+                               raw-values))
                (*model-text-max-lines* (command-output-line-limit (car command)))
                (output (format nil "~{~A~^~%~}"
                                (mapcar (lambda (value)

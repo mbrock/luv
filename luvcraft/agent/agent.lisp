@@ -29,7 +29,8 @@ command such as SAY can reach the agent's presence.")
 (defparameter *default-agent-model* "gpt-5.6")
 
 (defparameter *default-agent-tools*
-  '(com-where-am-i com-block-at com-place-block-at com-describe-handle com-eval)
+  '(com-where-am-i com-move-to com-block-at com-place-block-at
+    com-describe-handle com-eval)
   "The commands an agent is handed by default.")
 
 (defparameter *default-instructions*

@@ -222,14 +222,17 @@ that without new machinery:
 
 Commands run on the canvas thread; a provider turn runs on its own.
 =call-tool= must therefore never call =execute-frame-command= from the
-websocket thread.  It accepts its arguments, posts the finished command to
-the session's mailbox, and waits with a timeout for the record the canvas
-thread produced -- froth's prepare/commit split (#IOGTGD), with =accept= as
-the prepare.  A call that does not finish within the bound returns a
-handle to the running work rather than silence, which is this project's
-own rule stated from the harness side.  Several calls in one turn are
-several threads and several cards; the batch is over when each has
-returned or been given a handle.
+websocket thread.  It accepts its arguments and posts the finished command
+through =request-canvas-frame= -- froth's prepare/commit split (#IOGTGD),
+with =accept= as the prepare.  Most commands return their values in that
+one frame.  A command may instead return a running semantic object and let
+=settle-command-result= wait for it on the provider's turn thread.  =Move
+To= does exactly that: the canvas returns a =body-move-action= immediately,
+keeps advancing it at frame boundaries, and publishes its terminal state to
+a private mailbox.  The tool call is deliberately blocking in this first
+version while the canvas never is.  A later duration bound can return a
+handle to the same action without changing either the command or movement
+protocol.
 
 * DONE Wire three commands into an agent and draw their cassettes
 :PROPERTIES:
@@ -257,28 +260,29 @@ surveyed its neighbours in one parallel batch of =block-at= calls, and, asked
 to remove a block without a removal tool, used =eval= with =apropos= to find
 =edit-block-at= on its own.  The provider client had to move from
 =response.append= to =response.create= with =previous_response_id= along the
-way.  Parameterized M-x is still open (#YPGXKI).
+way.  Parameterized M-x is still open (#OL2JZ1).
 
 * The gnome is an agent occupying a cell, not a block
 :PROPERTIES:
 :ID: V9DHV5
 :END:
 
-The body (#5JDNKF) is now deliberately skew to the block field.  A =gnome=
-owns an integer =(x y z)= cell and belongs to =*agents*=, not =*critters*=;
-the cell is its authoritative place while its visible animation is derived
-presentation state.  =Spawn Agent= chooses an empty supported cell ahead of
-the player without editing terrain.  The old =gnome-block-kind= and its atlas
-tiles no longer exist.
+The body (#5JDNKF) is deliberately skew to the block field.  A =gnome= or
+=cat= belongs to =*agents*=, not =*critters*=, and =Spawn Gnome= or =Spawn
+Cat= chooses an empty supported cell ahead of the player without editing
+terrain.  Its integer =(x y z)= is the public, intentional place; continuous
+position and velocity are the physical authority while it travels between
+places (#YPGXKI).  The old =gnome-block-kind= and its atlas tiles no longer
+exist.
 
-The first visible body is a retained McCLIM drawing replayed as a
-camera-facing world widget: a small red-hatted figure with a gentle visual
-bob.  This gives agents a scene render path independent of terrain without
-prematurely choosing a geometric or SDF body language.  Its upright world
-volume answers the view ray directly, and a nearer terrain hit occludes it.
-Focusing one with TAB steps the camera back to a conversational distance,
-aims it at the face with the focused field of view, and turns the keys into a
-prompt line; RET asks.
+The visible bodies are analytic SDFs launched from conservative scene
+proxies: a red-hatted gnome and an orange tabby cat, each with its own live
+metabar vocabulary.  Their world-space fields follow continuous body
+positions, so focus rays, lighting, and silhouettes move with the same body
+that collides with terrain.  Focusing one with TAB steps the camera back to a
+conversational distance, aims it at the face with the focused field of view,
+and turns the keys into a prompt line; RET asks.  Speech bubbles remain
+retained McCLIM world widgets above that analytic body.
 
 What the gnome shows is the transcript in three registers:
 
@@ -305,24 +309,54 @@ observer posts notes to the gnome's mailbox; the gnome's own
 and lines.  Repainting a mirror from any other thread races the frame and
 faults; every repaint here happens at the frame boundary.
 
-* NEXT Parameterized M-x and agents that take discrete steps
+* DONE Discrete destinations, continuously embodied
 :PROPERTIES:
 :ID: YPGXKI
 :END:
 
-/Intent./ Two next bets.  First, finish what #0IF4TY promised: the command
-menu should offer commands with arguments, prompting through =accept= with
-the presentation types the agent already uses, so =place-block-at= is one
-definition reachable by key, M-x, and tool.  Second, give an embodied agent a
-=step= command whose state transition is between integer cells.  The body and
-bubbles may interpolate between old and new cells, but continuous velocity is
-not part of the agent's authoritative state.
+/Intent./ An embodied agent acts in places rather than holding a WASD key:
+=Move To (x y z)= is one discrete, nearby destination and one terminal
+result.  Intent does not flatten physics.  The body has a continuous position
+and velocity, accelerates through the same collision motor as the player,
+falls under gravity, steps one-cell ledges, and only changes its reported cell
+as its base crosses the lattice boundary.  Those are two explicit authorities
+rather than an interpolation pretending not to be state.
 
-/Evidence./ #V9DHV5 records the 2026-08-19 unblocking: =*agents*=,
-=spawn-agent=, direct body targeting, and the independent world-widget body.
-The M-x gap is
-=command-menu-command-without-arguments-p= in
+A bounded four-connected search names standable cells, routes around terrain,
+and permits one-cell steps up or down.  The path is an inspectable part of the
+=body-move-action=.  Stalling replans twice before failing; impossible,
+nonresident, or distant destinations fail as values.  The player implements
+the same body protocol and can use the primitive internally, while held
+movement or jump input cancels it immediately rather than fighting an
+autopilot.
+
+/Evidence./ =simulation.lisp= factors =step-walking-body= out of the player;
+=locomotion.lisp= owns path search, action state, completion mailbox, and the
+fixed-step motor; =embodied-agent= supplies the same body methods and advances
+from the overlay frame clock.  =com-move-to= chooses the current command
+subject (agent presence or player), returns on the canvas, and settles beside
+it (#T6PEVY).  On 2026-08-20 the live SDF cat travelled four terrain cells
+while all 60 film frames rendered; the waiting worker began in =:running= and
+returned =:arrived= after 2.458 simulated seconds at the requested cell.
+
+/Done when./ A cat asked to move reaches a nearby supported place by a visible
+continuous route; its tool call waits without parking rendering; the same
+primitive moves a player body; manual player input takes authority back; and
+terrain routing and invalid destinations have tests.
+
+* NEXT Parameterized M-x prompts through presentation types
+:PROPERTIES:
+:ID: OL2JZ1
+:END:
+
+/Intent./ Finish what #0IF4TY promised: the command menu should offer commands
+with arguments, prompting through =accept= with the presentation types the
+agent already uses, so =place-block-at= is one definition reachable by key,
+M-x, and tool.
+
+/Evidence./ The tool side already reads the command parser table.  The M-x gap
+is =command-menu-command-without-arguments-p= in
 =luvcraft/clim/command-menu.lisp=.
 
 /Done when./ M-x "Place Block At" prompts for a kind and three integers and
-places the block; and a gnome asked to come closer does.
+places the block.

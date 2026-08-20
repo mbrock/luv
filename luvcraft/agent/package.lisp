@@ -36,7 +36,7 @@
    #:ask #:ask-and-wait #:transcript-lines #:print-transcript
    #:*agent*
    ;; Commands
-   #:luvcraft-agent #:com-where-am-i #:com-place-block-at #:com-eval
+   #:luvcraft-agent #:com-where-am-i #:com-move-to #:com-place-block-at #:com-eval
    #:com-describe-handle #:com-block-at
    ;; The HUD
    #:open-agent-hud #:close-agent-hud #:toggle-agent-hud

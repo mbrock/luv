@@ -85,9 +85,19 @@ GPU medium spells as a fully transparent fill.")
 
 (defclass embodied-agent ()
   ((session :initarg :session :reader gnome-session)
-   (x :initarg :x :reader gnome-x)
-   (y :initarg :y :reader gnome-y)
-   (z :initarg :z :reader gnome-z)
+   ;; The cell is the discrete public place; POSITION and VELOCITY are the
+   ;; physical realization moving between such places.  Keeping both makes
+   ;; the intentional and simulation authorities explicit (#YPGXKI).
+   (x :initarg :x :accessor gnome-x)
+   (y :initarg :y :accessor gnome-y)
+   (z :initarg :z :accessor gnome-z)
+   (position :initarg :position :accessor embodied-agent-position)
+   (velocity :initform (luvcraft::make-vec3 0d0 0d0 0d0)
+             :accessor embodied-agent-velocity)
+   (grounded-p :initform t :accessor embodied-agent-grounded-p)
+   (movement-action :initform nil :accessor embodied-agent-movement-action)
+   (movement-accumulator :initform 0d0
+                         :accessor embodied-agent-movement-accumulator)
    (agent :initform nil :accessor gnome-agent)
    (body :initform nil :accessor gnome-body)
    (bubbles :initform '() :accessor gnome-bubbles
@@ -108,9 +118,6 @@ GPU medium spells as a fully transparent fill.")
 
 (defclass gnome (embodied-agent) ()
   (:documentation "A small SDF-rendered garden gnome carrying a WORLD-AGENT."))
-
-(defgeneric embodied-agent-name (agent)
-  (:documentation "The short speaker name shown for AGENT."))
 
 (defmethod embodied-agent-name ((gnome gnome))
   (declare (ignore gnome))
@@ -141,6 +148,61 @@ GPU medium spells as a fully transparent fill.")
   (:documentation
    "Return AGENT's conservative SDF proxy as world-space X, Y, Z, RADIUS."))
 
+;;; The visible conversational figures are full block-world bodies.  Their
+;;; behavior is destinational, but contact is the same open body protocol the
+;;; player and critters use.
+
+(defparameter *embodied-agent-walk-speed* 2.35d0)
+(defparameter *embodied-agent-ground-acceleration* 28d0)
+(defparameter *embodied-agent-air-acceleration* 9d0)
+(defparameter *embodied-agent-gravity* 24d0)
+(defparameter *embodied-agent-jump-speed* 7.2d0)
+
+(defmethod luvcraft:body-position ((agent embodied-agent))
+  (embodied-agent-position agent))
+
+(defmethod luvcraft:body-velocity ((agent embodied-agent))
+  (embodied-agent-velocity agent))
+
+(defmethod luvcraft:body-half-width ((agent embodied-agent))
+  (declare (ignore agent))
+  0.28d0)
+
+(defmethod luvcraft:body-height ((agent embodied-agent))
+  (coerce (embodied-agent-body-height agent) 'double-float))
+
+(defmethod luvcraft:body-grounded-p ((agent embodied-agent))
+  (embodied-agent-grounded-p agent))
+
+(defmethod (setf luvcraft:body-grounded-p) (grounded-p (agent embodied-agent))
+  (setf (embodied-agent-grounded-p agent) grounded-p))
+
+(defmethod luvcraft:body-walk-speed ((agent embodied-agent))
+  (declare (ignore agent))
+  *embodied-agent-walk-speed*)
+
+(defmethod luvcraft:body-ground-acceleration ((agent embodied-agent))
+  (declare (ignore agent))
+  *embodied-agent-ground-acceleration*)
+
+(defmethod luvcraft:body-air-acceleration ((agent embodied-agent))
+  (declare (ignore agent))
+  *embodied-agent-air-acceleration*)
+
+(defmethod luvcraft:body-gravity ((agent embodied-agent))
+  (declare (ignore agent))
+  *embodied-agent-gravity*)
+
+(defmethod luvcraft:body-jump-speed ((agent embodied-agent))
+  (declare (ignore agent))
+  *embodied-agent-jump-speed*)
+
+(defmethod luvcraft:body-movement-action ((agent embodied-agent))
+  (embodied-agent-movement-action agent))
+
+(defmethod (setf luvcraft:body-movement-action) (action (agent embodied-agent))
+  (setf (embodied-agent-movement-action agent) action))
+
 (defmethod print-object ((gnome embodied-agent) stream)
   (print-unreadable-object (gnome stream :type t)
     (format stream "~D ~D ~D" (gnome-x gnome) (gnome-y gnome) (gnome-z gnome))))
@@ -167,7 +229,11 @@ them from this registry.")
 
 (defun attach-embodied-agent (class session x y z)
   "Make one CLASS at X,Y,Z and attach its semantic and render overlays."
-  (let ((agent (make-instance class :session session :x x :y y :z z)))
+  (let ((agent (make-instance class :session session :x x :y y :z z
+                              :position
+                              (luvcraft::make-vec3 (+ x 0.5d0)
+                                                   (coerce y 'double-float)
+                                                   (+ z 0.5d0)))))
     (ensure-embodied-agent-body agent)
     (push agent *agents*)
     (luvcraft:add-luvcraft-overlay session agent)
@@ -194,11 +260,11 @@ taller hat pushes them up rather than growing through them."
 
 (defmethod embodied-agent-head-position ((gnome gnome) &optional (lift 0.0))
   "The point above the gnome's hat, LIFT blocks higher."
-  (luvcraft::make-vec3 (+ (gnome-x gnome) 0.5)
-                       (+ (gnome-y gnome)
+  (luvcraft::make-vec3 (luvcraft::body-x gnome)
+                       (+ (luvcraft::body-y gnome)
                           (embodied-agent-body-height gnome)
                           lift)
-                       (+ (gnome-z gnome) 0.5)))
+                       (luvcraft::body-z gnome)))
 
 (defun gnome-head-position (gnome &optional (lift 0.0))
   "Compatibility name for EMBODIED-AGENT-HEAD-POSITION."
@@ -206,11 +272,11 @@ taller hat pushes them up rather than growing through them."
 
 (defmethod embodied-agent-face-position ((gnome gnome) &optional (lift 0.0))
   "The point between the gnome's eyes, LIFT blocks higher."
-  (luvcraft::make-vec3 (+ (gnome-x gnome) 0.5)
-                       (+ (gnome-y gnome)
+  (luvcraft::make-vec3 (luvcraft::body-x gnome)
+                       (+ (luvcraft::body-y gnome)
                           (* *gnome-face-height* (gnome-stature))
                           lift)
-                       (+ (gnome-z gnome) 0.5)))
+                       (luvcraft::body-z gnome)))
 
 (defun gnome-face-position (gnome &optional (lift 0.0))
   "Compatibility name for EMBODIED-AGENT-FACE-POSITION."
@@ -257,13 +323,13 @@ taller hat pushes them up rather than growing through them."
                      (setf near (max near entering)
                            far (min far leaving))
                      (<= near far))))))
-      (let ((center-x (+ (gnome-x gnome) 0.5d0))
-            (center-z (+ (gnome-z gnome) 0.5d0)))
+      (let ((center-x (luvcraft::body-x gnome))
+            (center-z (luvcraft::body-z gnome)))
         (and (slab (luvcraft::vec3-x origin) (luvcraft::vec3-x direction)
                    (- center-x half-width) (+ center-x half-width))
              (slab (luvcraft::vec3-y origin) (luvcraft::vec3-y direction)
-                   (gnome-y gnome)
-                   (+ (gnome-y gnome)
+                   (luvcraft::body-y gnome)
+                   (+ (luvcraft::body-y gnome)
                       (* (coerce (gnome-body-height) 'double-float)
                          stature)))
              (slab (luvcraft::vec3-z origin) (luvcraft::vec3-z direction)
@@ -380,7 +446,8 @@ what you say short and in character.  Results may mention #ABCD handles; pass
 one back to describe-handle to read more.")
 
 (defparameter *gnome-tools*
-  '(com-say com-where-am-i com-block-at com-place-block-at com-describe-handle com-eval))
+  '(com-say com-where-am-i com-move-to com-block-at com-place-block-at
+    com-describe-handle com-eval))
 
 (defmethod ensure-embodied-agent-agent ((gnome gnome))
   (or (gnome-agent gnome)
@@ -612,9 +679,9 @@ title or bubble shows only what its pane draws."))
                    (float internal-time-units-per-second 1.0)))
          (bob (* 0.025 (sin (* phase 2.2))))
          (stature (gnome-stature)))
-    (values (+ (gnome-x gnome) 0.5)
-            (+ (gnome-y gnome) (* *gnome-body-centre* stature) bob)
-            (+ (gnome-z gnome) 0.5)
+    (values (luvcraft::body-x gnome)
+            (+ (luvcraft::body-y gnome) (* *gnome-body-centre* stature) bob)
+            (luvcraft::body-z gnome)
             (* (gnome-figure-radius) stature))))
 
 (defun place-gnome-body (overlay)
@@ -955,6 +1022,23 @@ title or bubble shows only what its pane draws."))
       (clear-gnome-bubbles gnome)))
   gnome)
 
+(defmethod luvcraft:advance-luvcraft-overlay
+    ((agent embodied-agent) session seconds)
+  "Run AGENT's Move To motor at the same fixed step as the player."
+  (incf (embodied-agent-movement-accumulator agent) seconds)
+  (loop while (>= (embodied-agent-movement-accumulator agent)
+                  luvcraft::+player-physics-step+)
+        do (when (luvcraft:body-movement-action agent)
+             (luvcraft:advance-body-movement
+              agent (luvcraft:luvcraft-session-world session)
+              luvcraft::+player-physics-step+))
+           (decf (embodied-agent-movement-accumulator agent)
+                 luvcraft::+player-physics-step+))
+  ;; The public place follows the continuous base as it crosses cell bounds.
+  (multiple-value-bind (x y z) (luvcraft:body-cell agent)
+    (setf (gnome-x agent) x (gnome-y agent) y (gnome-z agent) z))
+  agent)
+
 (defmethod luvcraft:release-luvcraft-overlay :after ((gnome embodied-agent))
   (setf *agents* (delete gnome *agents* :test #'eq))
   (when (and (gnome-agent gnome) (gnome-observer gnome))
@@ -969,8 +1053,9 @@ title or bubble shows only what its pane draws."))
   "Spawn an embodied agent of CLASS at integer cell X,Y,Z and return it.
 
 With no coordinate, choose an empty cell a few steps ahead of the player and
-stand the agent on the first supporting block.  The cell is authoritative;
-the figure's bobbing and any future step interpolation are only presentation."
+stand the agent on the first supporting block.  The cell names its discrete
+place while its position and velocity continuously realize travel between
+places."
   (let* ((player (luvcraft:luvcraft-session-player session))
          (camera (luvcraft:luvcraft-session-camera session))
          (world (luvcraft:luvcraft-session-world session)))

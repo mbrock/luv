@@ -156,11 +156,34 @@
            #:block-world-player
            #:block-world-source
            #:body-grounded-p
+           #:body-air-acceleration
+           #:body-cell
+           #:body-cell-list
+           #:body-gravity
+           #:body-ground-acceleration
            #:body-half-width
            #:body-height
+           #:body-jump-speed
+           #:body-movement-action
+           #:body-move-action
+           #:body-move-action-body
+           #:body-move-action-destination
+           #:body-move-action-detail
+           #:body-move-action-elapsed
+           #:body-move-action-path
+           #:body-move-action-start
+           #:body-move-action-status
            #:body-position
            #:body-position-clear-p
+           #:body-standable-at-p
            #:body-velocity
+           #:body-walk-speed
+           #:start-body-move-to
+           #:await-body-move-action
+           #:advance-body-movement
+           #:cancel-body-movement
+           #:find-body-path
+           #:step-walking-body
            #:camera-basis
            #:camera-field-of-view
            #:camera-pitch
@@ -192,6 +215,7 @@
            #:add-critter
            #:advance-critter
            #:advance-critters
+           #:advance-luvcraft-overlay
            #:advance-luvcraft-focus
            #:critter
            #:critter-along-ray
@@ -230,6 +254,7 @@
            #:player-body-hand-item
            #:player-body-pocket
            #:player-body-vertices
+           #:attach-player-body-sdf
            #:luvcraft-session-body
            #:hand-item-name
            #:hand-item-box-count

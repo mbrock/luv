@@ -9,18 +9,48 @@
 
 (define-command-table luvcraft-agent)
 
+(defgeneric embodied-agent-name (agent)
+  (:documentation "The short speaker name shown for an embodied AGENT."))
+
 ;;; ---------------------------------------------------------------------
 ;;; Where am I
 
-(defclass player-place ()
+(defclass body-place ()
   ((x :initarg :x :reader place-x)
    (y :initarg :y :reader place-y)
    (z :initarg :z :reader place-z)
-   (yaw :initarg :yaw :reader place-yaw)
-   (pitch :initarg :pitch :reader place-pitch)
+   (subject :initarg :subject :reader place-subject)
+   (yaw :initarg :yaw :initform nil :reader place-yaw)
+   (pitch :initarg :pitch :initform nil :reader place-pitch)
+   (looking-p :initarg :looking-p :initform nil :reader place-looking-p)
    (target :initarg :target :initform nil :reader place-target
            :documentation "A BLOCK-REPORT for the block under the crosshair, or NIL."))
-  (:documentation "Where the player stands and what they are looking at."))
+  (:documentation "Where one command subject stands and, when applicable, looks."))
+
+(defclass player-place (body-place) ()
+  (:documentation "Compatibility specialization for an explicitly player place."))
+
+(defun command-subject (session)
+  "The embodied object whose command is running: agent presence, then player."
+  (or (and *current-agent* (world-agent-presence *current-agent*))
+      (luvcraft:luvcraft-session-player session)))
+
+(defun command-subject-name (subject session)
+  (if (eq subject (luvcraft:luvcraft-session-player session))
+      "you"
+      (embodied-agent-name subject)))
+
+(defun command-subject-bearing (subject session)
+  "Return SUBJECT's YAW and PITCH, or NIL values when it has no facing yet."
+  (if (eq subject (luvcraft:luvcraft-session-player session))
+      (let ((camera (luvcraft:luvcraft-session-camera session)))
+        (values (luvcraft:camera-yaw camera) (luvcraft:camera-pitch camera)))
+      (let* ((velocity (luvcraft:body-velocity subject))
+             (x (luvcraft::vec3-x velocity))
+             (z (luvcraft::vec3-z velocity)))
+        (if (> (+ (* x x) (* z z)) 1d-4)
+            (values (atan x z) 0d0)
+            (values nil nil)))))
 
 (defun compass-word (yaw)
   "A rough compass word for YAW in radians, with +z as north."
@@ -30,35 +60,74 @@
                    "south" "south-west" "west" "north-west"))))
 
 (define-presentation-method present
-    (object (type player-place) stream (view textual-view) &key)
-  (format stream "You stand at x=~D y=~D z=~D facing ~A"
-          (place-x object) (place-y object) (place-z object)
-          (compass-word (place-yaw object)))
-  (if (place-target object)
-      (progn (write-string ", looking at " stream)
-             (present (place-target object) 'block-report :stream stream :view view))
-      (write-string ", looking at nothing in reach." stream)))
+    (object (type body-place) stream (view textual-view) &key)
+  (format stream "~:(~A~) stand~:[s~;~] at x=~D y=~D z=~D"
+          (place-subject object) (string= (place-subject object) "you")
+          (place-x object) (place-y object) (place-z object))
+  (when (place-yaw object)
+    (format stream " facing ~A" (compass-word (place-yaw object))))
+  (when (place-looking-p object)
+    (if (place-target object)
+        (progn (write-string ", looking at " stream)
+               (present (place-target object) 'block-report :stream stream :view view))
+        (write-string ", looking at nothing in reach." stream))))
 
 (define-command (com-where-am-i :command-table luvcraft-agent
                                 :name "Where Am I")
     ()
-  "Report the player's block position, facing, and the block under the crosshair."
+  "Report your body's block position and, when you have one, facing and target."
   (let* ((session (luvcraft.clim:luvcraft-command-session))
-         (player (luvcraft:luvcraft-session-player session))
-         (camera (luvcraft:luvcraft-session-camera session))
-         (hit (luvcraft::luvcraft-session-target session)))
-    (make-instance 'player-place
-                   :x (floor (luvcraft:player-x player))
-                   :y (floor (luvcraft:player-y player))
-                   :z (floor (luvcraft:player-z player))
-                   :yaw (luvcraft:camera-yaw camera)
-                   :pitch (luvcraft:camera-pitch camera)
-                   :target (and hit
-                                (let ((c (luvcraft::block-ray-hit-coordinate hit)))
-                                  (block-report-at session
-                                                   (luvcraft::world-coordinate-x c)
-                                                   (luvcraft::world-coordinate-y c)
-                                                   (luvcraft::world-coordinate-z c)))))))
+         (subject (command-subject session))
+         (player-p (eq subject (luvcraft:luvcraft-session-player session)))
+         (hit (and player-p (luvcraft::luvcraft-session-target session))))
+    (multiple-value-bind (x y z) (luvcraft:body-cell subject)
+      (multiple-value-bind (yaw pitch) (command-subject-bearing subject session)
+        (make-instance 'body-place
+                       :subject (command-subject-name subject session)
+                       :x x :y y :z z :yaw yaw :pitch pitch
+                       :looking-p player-p
+                       :target
+                       (and hit
+                            (let ((c (luvcraft::block-ray-hit-coordinate hit)))
+                              (block-report-at
+                               session
+                               (luvcraft::world-coordinate-x c)
+                               (luvcraft::world-coordinate-y c)
+                               (luvcraft::world-coordinate-z c)))))))))
+
+;;; ---------------------------------------------------------------------
+;;; Moving to a place
+
+(define-command (com-move-to :command-table luvcraft-agent :name "Move To")
+    ((x 'integer :prompt "x" :documentation "nearby destination x cell")
+     (y 'integer :prompt "y" :documentation "supported destination y cell")
+     (z 'integer :prompt "z" :documentation "nearby destination z cell"))
+  "Move your body to the nearby supported cell x y z.  The call waits until you arrive or movement fails; basic wayfinding can step one block up or down and route around solid blocks."
+  (let* ((session (luvcraft.clim:luvcraft-command-session))
+         (subject (command-subject session)))
+    (unless subject
+      (error "No embodied command subject is present."))
+    (luvcraft:start-body-move-to
+     subject (luvcraft:luvcraft-session-world session) x y z)))
+
+(defmethod settle-command-result
+    ((command (eql 'com-move-to)) (action luvcraft:body-move-action))
+  (declare (ignore command))
+  (luvcraft:await-body-move-action action))
+
+(defmethod command-result-presentation-type
+    ((command (eql 'com-move-to)) value)
+  (declare (ignore value))
+  'luvcraft:body-move-action)
+
+(define-presentation-method present
+    (action (type luvcraft:body-move-action) stream (view textual-view) &key)
+  (destructuring-bind (x y z) (luvcraft:body-move-action-destination action)
+    (format stream "Move To x=~D y=~D z=~D: ~(~A~) after ~,2Fs"
+            x y z (luvcraft:body-move-action-status action)
+            (luvcraft:body-move-action-elapsed action)))
+  (when (luvcraft:body-move-action-detail action)
+    (format stream " (~A)" (luvcraft:body-move-action-detail action))))
 
 ;;; ---------------------------------------------------------------------
 ;;; Blocks

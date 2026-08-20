@@ -379,7 +379,11 @@ new renderer; owned resource and frame-state collections retain identity."
 
 (defgeneric luvcraft-overlay-stage (overlay)
   (:documentation
-   "Return :SCENE for depth-bearing overlays or :HUD for crisp presentation."))
+   "Return where OVERLAY draws: :SCENE, :VIEWMODEL, :HUD, or :NONE.
+
+Scene overlays inhabit world depth; viewmodels are first-person geometry above
+the world but below held items and the crosshair; HUD overlays follow scene
+postprocessing.  :NONE participates in no render pass."))
 
 (defmethod luvcraft-overlay-stage (overlay)
   (declare (ignore overlay))
@@ -399,6 +403,14 @@ among its own; none by default.")
 
 (defmethod refresh-luvcraft-overlay (overlay session)
   (declare (ignore overlay session))
+  nil)
+
+(defgeneric advance-luvcraft-overlay (overlay session seconds)
+  (:documentation
+   "Advance OVERLAY's simulation state by SECONDS at the frame boundary."))
+
+(defmethod advance-luvcraft-overlay (overlay session seconds)
+  (declare (ignore overlay session seconds))
   nil)
 
 (defgeneric release-luvcraft-overlay (overlay)

@@ -288,7 +288,10 @@ re-expressed in that space."
                           :unit ((:cell 1) (:second -1)))
                :accessor player-jump-speed)
    (grounded-p :initarg :grounded-p :initform nil
-               :accessor player-grounded-p))
+               :accessor player-grounded-p)
+   (movement-action :initform nil :accessor player-movement-action
+                    :documentation
+                    "The current destinational movement action, or NIL."))
   (:metaclass luv.arithmetic.records:quantity-class))
 
 (defparameter *player-frame-duration-declaration*
@@ -388,6 +391,19 @@ re-expressed in that space."
 (defgeneric body-grounded-p (body)
   (:documentation "Whether BODY rested on solid terrain after its last step."))
 (defgeneric (setf body-grounded-p) (grounded-p body))
+(defgeneric body-walk-speed (body)
+  (:documentation "BODY's intended level-ground speed in cells per second."))
+(defgeneric body-ground-acceleration (body)
+  (:documentation "How quickly BODY changes horizontal velocity on the ground."))
+(defgeneric body-air-acceleration (body)
+  (:documentation "How quickly BODY changes horizontal velocity in the air."))
+(defgeneric body-gravity (body)
+  (:documentation "BODY's downward acceleration magnitude."))
+(defgeneric body-jump-speed (body)
+  (:documentation "BODY's upward speed when climbing a one-cell step."))
+(defgeneric body-movement-action (body)
+  (:documentation "BODY's current destinational movement action, or NIL."))
+(defgeneric (setf body-movement-action) (action body))
 
 (defmethod body-position ((body block-world-player)) (player-position body))
 (defmethod body-velocity ((body block-world-player)) (player-velocity body))
@@ -398,6 +414,20 @@ re-expressed in that space."
   (player-grounded-p body))
 (defmethod (setf body-grounded-p) (grounded-p (body block-world-player))
   (setf (player-grounded-p body) grounded-p))
+(defmethod body-walk-speed ((body block-world-player))
+  (player-walk-speed body))
+(defmethod body-ground-acceleration ((body block-world-player))
+  (player-ground-acceleration body))
+(defmethod body-air-acceleration ((body block-world-player))
+  (player-air-acceleration body))
+(defmethod body-gravity ((body block-world-player))
+  (player-gravity body))
+(defmethod body-jump-speed ((body block-world-player))
+  (player-jump-speed body))
+(defmethod body-movement-action ((body block-world-player))
+  (player-movement-action body))
+(defmethod (setf body-movement-action) (action (body block-world-player))
+  (setf (player-movement-action body) action))
 
 (defun body-x (body) (vec3-x (body-position body)))
 (defun body-y (body) (vec3-y (body-position body)))
@@ -486,6 +516,54 @@ re-expressed in that space."
                     thereis (world-terrain-solid-p
                              world block-x block-y block-z)))))))))
 
+(defun step-walking-body (body world target-x target-z seconds &key jump-p)
+  "Advance BODY by one collision-checked walking step toward horizontal velocity.
+
+TARGET-X and TARGET-Z are velocities, not coordinates.  This is the common
+physical motor beneath held player input and discrete Move To actions: the
+caller decides where to go; the body accelerates, collides, steps, and falls."
+  (let* ((acceleration
+           (if (body-grounded-p body)
+               (body-ground-acceleration body)
+               (body-air-acceleration body)))
+         (maximum-change (* acceleration seconds))
+         (grounded-p (body-grounded-p body))
+         (velocity (body-velocity body)))
+    (setf (vec3-x velocity)
+          (move-toward (vec3-x velocity) target-x maximum-change)
+          (vec3-z velocity)
+          (move-toward (vec3-z velocity) target-z maximum-change))
+    (when (and jump-p grounded-p)
+      (setf (vec3-y velocity) (body-jump-speed body)
+            (body-grounded-p body) nil))
+    (let* ((distance-x (* (vec3-x velocity) seconds))
+           (attempted-x (+ (body-x body) distance-x))
+           (collided-x-p (move-body-axis body world :x distance-x))
+           (distance-z (* (vec3-z velocity) seconds))
+           (attempted-z (+ (body-z body) distance-z))
+           (collided-z-p (move-body-axis body world :z distance-z))
+           (step-y (+ (body-y body) +player-step-height+))
+           (clear-above-x-p
+             (and collided-x-p
+                  (body-position-clear-p
+                   body world attempted-x step-y (body-z body))))
+           (clear-above-z-p
+             (and collided-z-p
+                  (body-position-clear-p
+                   body world (body-x body) step-y attempted-z))))
+      (when (and grounded-p
+                 (not jump-p)
+                 (or (not (zerop target-x)) (not (zerop target-z)))
+                 (or clear-above-x-p clear-above-z-p))
+        (setf (vec3-y velocity) (body-jump-speed body)
+              (body-grounded-p body) nil)))
+    (decf (vec3-y velocity) (* (body-gravity body) seconds))
+    (setf (vec3-y velocity)
+          (max +player-terminal-fall-speed+ (vec3-y velocity))
+          (body-grounded-p body) nil)
+    (move-body-axis body world :y (* (vec3-y velocity) seconds)))
+  body)
+
 (zdefun (step-block-world-player :zone :simulation/player-step)
     (player world camera intent seconds &key jump-p (sync-camera-p t))
   "Advance the scalar player controller by one small physics step.
@@ -506,46 +584,8 @@ keyboard."
          (target-x (* speed (+ (* (sin yaw) forward-amount)
                                (* (cos yaw) right-amount))))
          (target-z (* speed (+ (* (cos yaw) forward-amount)
-                               (* (- (sin yaw)) right-amount))))
-         (acceleration
-           (if (player-grounded-p player)
-               (player-ground-acceleration player)
-               (player-air-acceleration player)))
-         (maximum-change (* acceleration seconds))
-         (grounded-p (player-grounded-p player)))
-    (setf (player-velocity-x player)
-          (move-toward (player-velocity-x player) target-x maximum-change)
-          (player-velocity-z player)
-          (move-toward (player-velocity-z player) target-z maximum-change))
-    (when (and jump-p grounded-p)
-      (setf (player-velocity-y player) (player-jump-speed player)
-            (player-grounded-p player) nil))
-    (let* ((distance-x (* (player-velocity-x player) seconds))
-           (attempted-x (+ (player-x player) distance-x))
-           (collided-x-p (move-body-axis player world :x distance-x))
-           (distance-z (* (player-velocity-z player) seconds))
-           (attempted-z (+ (player-z player) distance-z))
-           (collided-z-p (move-body-axis player world :z distance-z))
-           (step-y (+ (player-y player) +player-step-height+))
-           (clear-above-x-p
-             (and collided-x-p
-                  (body-position-clear-p
-                   player world attempted-x step-y (player-z player))))
-           (clear-above-z-p
-             (and collided-z-p
-                  (body-position-clear-p
-                   player world (player-x player) step-y attempted-z))))
-      (when (and grounded-p
-                 (not jump-p)
-                 (plusp length)
-                 (or clear-above-x-p clear-above-z-p))
-        (setf (player-velocity-y player) (player-jump-speed player)
-              (player-grounded-p player) nil)))
-    (decf (player-velocity-y player) (* (player-gravity player) seconds))
-    (setf (player-velocity-y player)
-          (max +player-terminal-fall-speed+ (player-velocity-y player))
-          (player-grounded-p player) nil)
-    (move-body-axis player world :y (* (player-velocity-y player) seconds)))
+                               (* (- (sin yaw)) right-amount)))))
+    (step-walking-body player world target-x target-z seconds :jump-p jump-p))
   (when sync-camera-p
     (sync-camera-to-player camera player))
   player)

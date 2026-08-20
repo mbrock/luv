@@ -42,6 +42,10 @@
           (luvcraft-overlay-stage
            (make-instance 'recording-modal-focus)))))
 
+(deftest player-body-renders-after-the-world-in-the-viewmodel-stage
+  (ok (eq :viewmodel
+          (luvcraft-overlay-stage (make-instance 'player-body)))))
+
 (deftest modal-focus-suspends-player-input-and-owns-events
   (let ((session (make-instance 'luvcraft-session))
         (first (make-instance 'recording-modal-focus))
@@ -2106,6 +2110,63 @@
       (setf highest-y (max highest-y (player-y player))))
     (ok (> highest-y 2d0))
     (ok (> (player-x player) 3.3d0))))
+
+(deftest destinational-body-routes-around-terrain-and-arrives-continuously
+  (let* ((world (make-block-world :chunk-width 8
+                                  :chunk-height 4
+                                  :chunk-depth 8))
+         (player (make-instance 'block-world-player
+                                :position (make-vec3 1.5d0 1d0 1.5d0)
+                                :grounded-p t))
+         (action nil))
+    (ensure-world-chunk world 0 0 0)
+    (loop for x below 8 do
+      (loop for z below 8 do
+        (setf (world-block-at world x 0 z) luvcraft::*stone-block*)))
+    ;; A head-high wall closes the direct line but leaves both sides open.
+    (setf (world-block-at world 3 1 1) luvcraft::*stone-block*
+          (world-block-at world 3 2 1) luvcraft::*stone-block*
+          action (start-body-move-to player world 5 1 1))
+    (ok (eq :running (body-move-action-status action)))
+    (ok (> (length (body-move-action-path action)) 4)
+        "the planned intent names a route, not a straight velocity")
+    (let ((start (body-cell-list player))
+          (start-x (player-x player))
+          (start-z (player-z player)))
+      (advance-body-movement player world (/ 1d0 120d0))
+      (ok (or (> (abs (- (player-x player) start-x)) 1d-6)
+              (> (abs (- (player-z player) start-z)) 1d-6))
+          "the physical body starts moving before its public cell changes")
+      (ok (equal start (body-cell-list player)))
+      (ok (eq :running (body-move-action-status action))))
+    (loop repeat 2399
+          while (eq :running (body-move-action-status action))
+          do (advance-body-movement player world (/ 1d0 120d0)))
+    (ok (eq :arrived (body-move-action-status action)))
+    (ok (equal '(5 1 1) (body-cell-list player)))
+    (ok (< (abs (- (player-x player) 5.5d0)) 0.12d0))
+    (ok (< (abs (- (player-z player) 1.5d0)) 0.12d0))
+    (ok (null (body-movement-action player)))))
+
+(deftest destinational-body-reports-an-unstandable-place-immediately
+  (let* ((world (make-block-world :chunk-width 4
+                                  :chunk-height 4
+                                  :chunk-depth 4))
+         (player (make-instance 'block-world-player
+                                :position (make-vec3 1.5d0 1d0 1.5d0)
+                                :grounded-p t)))
+    (ensure-world-chunk world 0 0 0)
+    (loop for x below 4 do
+      (loop for z below 4 do
+        (setf (world-block-at world x 0 z) luvcraft::*stone-block*)))
+    (let ((action (start-body-move-to player world 2 3 2)))
+      (ok (eq :failed (body-move-action-status action)))
+      (ok (search "not a clear supported cell"
+                  (body-move-action-detail action)))
+      ;; Waiting after an immediate terminal result is also immediate; the
+      ;; completion notification may already be sitting in its mailbox.
+      (ok (eq action (await-body-move-action action)))
+      (ok (null (body-movement-action player))))))
 
 (deftest meshing-and-editing-cross-a-chunk-boundary
   (let ((world (make-block-world :chunk-width 2

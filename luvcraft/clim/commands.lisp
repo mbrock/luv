@@ -199,10 +199,13 @@
 (define-command (com-start-walking :command-table luvcraft-movement
                                    :name "Start Walking")
     ((direction 'keyword :prompt "direction"))
-  (setf (luvcraft:movement-urging-p
-         (luvcraft:luvcraft-session-movement-intent (luvcraft-command-session))
-         direction)
-        t))
+  (let* ((session (luvcraft-command-session))
+         (player (luvcraft:luvcraft-session-player session)))
+    (when player
+      (luvcraft:cancel-body-movement player "cancelled by manual player input"))
+    (setf (luvcraft:movement-urging-p
+           (luvcraft:luvcraft-session-movement-intent session) direction)
+          t)))
 
 (define-command (com-stop-walking :command-table luvcraft-movement-release
                                   :name "Stop Walking")
@@ -216,9 +219,13 @@
                           :name "Jump"
                           :keystroke (:space :any))
     ()
-  (setf (luvcraft:movement-intent-jump-requested-p
-         (luvcraft:luvcraft-session-movement-intent (luvcraft-command-session)))
-        t))
+  (let* ((session (luvcraft-command-session))
+         (player (luvcraft:luvcraft-session-player session)))
+    (when player
+      (luvcraft:cancel-body-movement player "cancelled by manual player input"))
+    (setf (luvcraft:movement-intent-jump-requested-p
+           (luvcraft:luvcraft-session-movement-intent session))
+          t)))
 
 (defun walk-keys-for-layout (layout)
   (append (if (eq layout :dvorak)
