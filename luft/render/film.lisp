@@ -60,10 +60,11 @@ style throughout.  Returns PATHNAME and the frame count."
 (defun film-clay-breath (pathname
                          &key (pieces '(:grotto :holm))
                               (seconds-per-shot 9) (frame-rate 30)
-                              (width 960) (height 540)
+                              (width 720) (height 1280)
                               (light :golden)
-                              (aperture 0.5)
-                              (field-scale 1.0))
+                              (aperture 0.85)
+                              (field-scale 1.25)
+                              (effects (default-renderer-effects)))
   "Fly the atelier's architecture in :CLAY while the world breathes.
 
 Each of PIECES gets the same two shots the drone films cut together -- its
@@ -73,11 +74,17 @@ reach ride two incommensurate sine waves over the whole reel, so the same
 walls pass continuously through tight quilting, pillowed masonry, full
 pearls, and deep bridging melt.  The clay surface never swells more than a
 quarter of the melt past its cells, well inside the flights' sworn
-clearance.  The knobs change every frame, so this film runs without
-temporal accumulation rather than pretending its history is reusable.
-Returns PATHNAME and the frame count."
+clearance.
+
+The frame is a phone held upright, the field of view widened a quarter
+for the tall frame, the lens open for the tilt-shift focus at the centre
+of frame, and the temporal resolve accumulates across the breath under
+*TEMPORAL-SURFACE-DRIFT-P*: the knobs move the surface far less than a
+pixel per frame, which is the drift accumulation exists for.  Returns
+PATHNAME and the frame count."
   (let* ((*light* light)
          (*aperture* aperture)
+         (*temporal-surface-drift-p* t)
          (shot-frames (max 1 (round (* seconds-per-shot frame-rate))))
          (scenes (mapcar (lambda (piece) (cons piece (atelier-scene piece)))
                          (remove-duplicates pieces)))
@@ -92,7 +99,7 @@ Returns PATHNAME and the frame count."
                     :camera (cdr (first (atelier-cameras (first pieces))))
                     :width width :height height
                     :style :clay :pipeline-styles '(:clay)
-                    :effects '(:sky :lens))))
+                    :effects effects)))
     (unwind-protect
          (with-video-encoder (write-frame pathname width height
                               :frame-rate frame-rate

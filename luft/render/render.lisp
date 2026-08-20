@@ -2084,15 +2084,30 @@ Return the number of bytes and write calls issued."
         ((eq (renderer-style renderer) :clay) *clay-melt*)
         (t *arris-softness*)))
 
+(defparameter *temporal-surface-drift-p* nil
+  "Whether the surface knobs in the domain lane are drifting continuously.
+
+A film that breathes a radius or a melt moves the surface by far less
+than a pixel per frame -- exactly the slowly varying content temporal
+accumulation exists for -- so while this is bound true the domain lane
+leaves the history key and history survives the drift.  A discrete knob
+step is still a cut and should not hide under this flag.")
+
 (defun temporal-history-key (renderer scene frame-data stock-data)
   "The rendered state across which temporal history is semantically reusable.
 
 The first five frame lanes are the camera and projection; lanes five through
 eighteen are every light, material, lens, domain, and deformation value used
-to shade the frame.  The appended temporal lanes are deliberately excluded.
-#OWG6ZD"
+to shade the frame.  The appended temporal lanes are deliberately excluded,
+and the domain lane is excluded while *TEMPORAL-SURFACE-DRIFT-P* declares
+its motion continuous and sub-pixel.  #OWG6ZD"
   (list scene (scene-revision scene) (renderer-style renderer) *draw-sky*
-        (subseq frame-data (* 4 5) (* 4 19)) stock-data))
+        (if *temporal-surface-drift-p*
+            (concatenate 'vector
+                         (subseq frame-data (* 4 5) (* 4 7))
+                         (subseq frame-data (* 4 8) (* 4 19)))
+            (subseq frame-data (* 4 5) (* 4 19)))
+        stock-data))
 
 (defun frame-color-attachment (view clear)
   `(:view ,view :load-op :clear :store-op :store :clear-value ,clear))
