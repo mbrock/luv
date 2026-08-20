@@ -29,9 +29,11 @@
                  curve-texture
                  (create
                   device
-                  (make-texture-descriptor
+                 (make-texture-descriptor
                    :size '(2 1) :dimensions :2d :format :rgba16-float
                    :usage '(:texture-binding :copy-dst))))
+           (ok (equal '(2 1 1) (gpu-texture-size band-texture)))
+           (ok (equal '(2 1 1) (gpu-texture-size curve-texture)))
            (write-texture
             queue (make-texture-copy :texture band-texture)
             (make-array '(1 2) :element-type '(unsigned-byte 32)
@@ -45,9 +47,25 @@
                     :initial-contents
                     '((#x3c00380034003000 #x40003c0038003400)))
             (make-texture-data-layout :bytes-per-row 16 :rows-per-image 1)
-            '(2 1))
+           '(2 1))
            (ok (typep band-texture 'luv::metal-gpu-texture))
-           (ok (typep curve-texture 'luv::metal-gpu-texture)))
+           (ok (typep curve-texture 'luv::metal-gpu-texture))
+           (let ((unexpected nil))
+             (unwind-protect
+                  (ok (eq :unsupported-texture-usage
+                          (handler-case
+                              (progn
+                                (setf unexpected
+                                      (create
+                                       device
+                                       (make-texture-descriptor
+                                        :size '(1 1) :dimensions :2d
+                                        :format :rgba8-unorm
+                                        :usage :storage-binding)))
+                                :no-error)
+                            (gpu-request-error (condition)
+                              (gpu-request-error-reason condition)))))
+               (when unexpected (destroy unexpected)))))
       (when curve-texture (destroy curve-texture))
       (when band-texture (destroy band-texture))
       (destroy device))))
@@ -76,6 +94,7 @@
                      :size '(8 8) :dimensions :2d :format :r8-unorm
                      :usage '(:texture-binding)))))
            (ok (luv::metal-texture-resident-p texture))
+           (ok (equal '(8 8 1) (gpu-texture-size texture)))
            (ok (not (luv::metal-texture-owned-p texture)))
            (destroy texture)
            (setf texture nil)
@@ -174,26 +193,26 @@
 
 (defun install-metal-live-probe-vertex ()
   (eval
-   '(luv.spir-v:define-shader-method
-        luv.spir-v:shader-specification-for
+   '(luv.shader:define-shader-method
+        luv.shader:shader-specification-for
         metal-live-probe-vertex-specification
         ((role (eql :metal-live-probe)) (stage (eql :vertex)))
         (:stage :vertex
          :inputs ((position :vec3 :location 0))
          :outputs ((clip-position :vec4 :built-in :position)))
-      (let* ((clip (luv.spir-v:vec4 position 1.0)))
-        (luv.spir-v:set-output clip-position clip)))))
+      (let* ((clip (luv.shader:vec4 position 1.0)))
+        (luv.shader:set-output clip-position clip)))))
 
 (defun install-metal-live-probe-fragment (red &key invalid-p)
   (eval
-   `(luv.spir-v:define-shader-method
-        luv.spir-v:shader-specification-for
+   `(luv.shader:define-shader-method
+        luv.shader:shader-specification-for
         metal-live-probe-fragment-specification
         ((role (eql :metal-live-probe)) (stage (eql :fragment)))
         (:stage ,(if invalid-p :compute :fragment)
          :outputs ((color :vec4 :location 0)))
-      (let* ((rgba (luv.spir-v:vec4 ,red 0.25 0.75 1.0)))
-        (luv.spir-v:set-output color rgba)))))
+      (let* ((rgba (luv.shader:vec4 ,red 0.25 0.75 1.0)))
+        (luv.shader:set-output color rgba)))))
 
 (deftest metal-messages-retain-structure-abi
   (let ((size
@@ -769,6 +788,114 @@
            (ok (objc:objective-c-object-released-p allocator)))
       (when command-buffer (destroy command-buffer))
       (when encoder (destroy encoder))
+      (destroy device))))
+
+(deftest metal-completion-signal-failure-is-a-rooted-retry-obligation
+  (let* ((luv::*gpu-retirement-ledger-custodians*
+           (make-hash-table :test #'eq))
+         (luv::*gpu-retirement-custodian-service-enabled-p* nil)
+         (device
+           (request-gpu-device (make-instance 'metal-gpu-provider)))
+         (queue (device-queue device))
+         (encoder nil)
+         (command-buffer nil)
+         (commit-symbol 'luv.metal:commit-command-buffers)
+         (signal-symbol 'luv.metal:signal-metal-event)
+         (original-commit (symbol-function commit-symbol))
+         (original-signal (symbol-function signal-symbol))
+         (commits 0)
+         (signals 0)
+         (fail-signal-p t))
+    (unwind-protect
+         (progn
+           (setf encoder
+                 (create device (make-command-encoder-descriptor))
+                 command-buffer (finish encoder)
+                 (symbol-function commit-symbol)
+                 (lambda (&rest arguments)
+                   (incf commits)
+                   (apply original-commit arguments))
+                 (symbol-function signal-symbol)
+                 (lambda (&rest arguments)
+                   (incf signals)
+                   (when fail-signal-p
+                     (setf fail-signal-p nil)
+                     (error "injected Metal completion signal failure"))
+                   (apply original-signal arguments)))
+           (ok (signals
+                (submit queue command-buffer)
+                'simple-error))
+           (ok (= 1 commits))
+           (ok (= 1 signals))
+           (ok (eq :submitted
+                   (luv::metal-command-buffer-state command-buffer)))
+           (ok (= 1 (length
+                     (luv::metal-queue-pending-submissions queue))))
+           (ok (= 1
+                  (luv::metal-queue-completion-signal-ready-value queue)))
+           (ok (zerop
+                (luv::metal-queue-completion-signal-enqueued-value queue)))
+           (ok (eq queue
+                   (gethash
+                    (luv::metal-queue-retirement-ledger queue)
+                    luv::*gpu-retirement-ledger-custodians*)))
+           ;; The deterministic service pass retries only the published signal,
+           ;; never recommitting the native command buffers.
+           (luv::service-gpu-retirement-custodians-once)
+           (ok (= 1 commits))
+           (ok (= 2 signals))
+           (ok (= 1
+                  (luv::metal-queue-completion-signal-enqueued-value queue)))
+           (submitted-work-done queue)
+           (ok (null (luv::metal-queue-pending-submissions queue)))
+           (ok (zerop
+                (hash-table-count
+                 luv::*gpu-retirement-ledger-custodians*))))
+      (setf (symbol-function commit-symbol) original-commit
+            (symbol-function signal-symbol) original-signal)
+      (when command-buffer (destroy command-buffer))
+      (when encoder (destroy encoder))
+      (destroy device))))
+
+(deftest metal-finish-retains-ended-encoder-ownership-on-wrapper-failure
+  (let* ((device
+           (request-gpu-device (make-instance 'metal-gpu-provider)))
+         (encoder
+           (create device (make-command-encoder-descriptor
+                           :label "Metal finish handoff probe")))
+         (wrapper nil)
+         (end-symbol 'luv.metal:end-command-buffer)
+         (constructor-symbol 'luv::make-metal-finished-command-buffer)
+         (original-end (symbol-function end-symbol))
+         (original-constructor (symbol-function constructor-symbol))
+         (ends 0)
+         (fail-construction-p t))
+    (unwind-protect
+         (progn
+           (setf (symbol-function end-symbol)
+                 (lambda (&rest arguments)
+                   (incf ends)
+                   (apply original-end arguments))
+                 (symbol-function constructor-symbol)
+                 (lambda (&rest arguments)
+                   (when fail-construction-p
+                     (setf fail-construction-p nil)
+                     (error "injected Metal command-buffer wrapper failure"))
+                   (apply original-constructor arguments)))
+           (ok (signals (finish encoder) 'simple-error))
+           (ok (= 1 ends))
+           (ok (eq :ended (luv::metal-encoder-state encoder)))
+           (ok (luv::metal-encoder-command-buffer encoder))
+           (ok (luv::metal-encoder-allocator encoder))
+           (setf wrapper (finish encoder))
+           (ok (= 1 ends))
+           (ok (eq :finished (luv::metal-encoder-state encoder)))
+           (ok (null (luv::metal-encoder-command-buffer encoder)))
+           (ok (null (luv::metal-encoder-allocator encoder))))
+      (setf (symbol-function end-symbol) original-end
+            (symbol-function constructor-symbol) original-constructor)
+      (when wrapper (destroy wrapper))
+      (destroy encoder)
       (destroy device))))
 
 (deftest luvcraft-metal-frame-resources-follow-the-drawable-pool

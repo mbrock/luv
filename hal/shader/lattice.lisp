@@ -25,23 +25,23 @@
 
 (in-package #:luv.analytic)
 
-(spv:define-shader-abstraction lattice-tap (lattice column row)
+(shader:define-shader-abstraction lattice-tap (lattice column row)
   "One summed-area node as a float: the count of inked cells below-left."
-  `(spv:float
-    (spv:swizzle (spv:texel-load ,lattice (spv:uvec2 ,column ,row)) :x)))
+  `(shader:float
+    (shader:swizzle (shader:texel-load ,lattice (shader:uvec2 ,column ,row)) :x)))
 
-(spv:define-shader-abstraction lattice-node (lattice i j a b)
+(shader:define-shader-abstraction lattice-node (lattice i j a b)
   "The continuous summed-area value at cell (I,J) plus offset (A,B).
 Bilinear over the cell's four nodes, which for a unit-cell-constant
 integrand is the integral itself, not an interpolation of it."
-  `(spv:mix
-    (spv:mix (lattice-tap ,lattice ,i ,j)
-             (lattice-tap ,lattice (+ ,i (spv:uint 1.0)) ,j)
+  `(shader:mix
+    (shader:mix (lattice-tap ,lattice ,i ,j)
+             (lattice-tap ,lattice (+ ,i (shader:uint 1.0)) ,j)
              ,a)
-    (spv:mix (lattice-tap ,lattice ,i (+ ,j (spv:uint 1.0)))
+    (shader:mix (lattice-tap ,lattice ,i (+ ,j (shader:uint 1.0)))
              (lattice-tap ,lattice
-                          (+ ,i (spv:uint 1.0))
-                          (+ ,j (spv:uint 1.0)))
+                          (+ ,i (shader:uint 1.0))
+                          (+ ,j (shader:uint 1.0)))
              ,a)
     ,b))
 
@@ -52,45 +52,45 @@ integrand is the integral itself, not an interpolation of it."
 ;; edge is part of the same integral: alpha is the footprint's overlap with
 ;; the grid rectangle, so even the card boundary is filtered, and no part of
 ;; the drawing is composited against another part of itself.
-(spv:define-live-shader lattice-fragment-specification
+(shader:define-live-shader lattice-fragment-specification
     (:stage :fragment
      :inputs ((coordinate :vec2 :location 0)
               (lattice-size :vec3 :location 1)
               (color :vec4 :location 2))
      :resources ((lattice-data :uint-texture-2d :binding 0))
      :outputs ((color-output :vec4 :location 0)))
-  (let* ((columns (spv:swizzle lattice-size :x))
-         (rows (spv:swizzle lattice-size :y))
+  (let* ((columns (shader:swizzle lattice-size :x))
+         (rows (shader:swizzle lattice-size :y))
          ;; The pixel's footprint in cell units, per axis, exactly as
          ;; SLUG-PIXELS-PER-EM measures it in em units.
-         (coordinate-dx (spv:derivative-x coordinate))
-         (coordinate-dy (spv:derivative-y coordinate))
-         (x-gradient (spv:vec2 (spv:swizzle coordinate-dx :x)
-                               (spv:swizzle coordinate-dy :x)))
-         (y-gradient (spv:vec2 (spv:swizzle coordinate-dx :y)
-                               (spv:swizzle coordinate-dy :y)))
+         (coordinate-dx (shader:derivative-x coordinate))
+         (coordinate-dy (shader:derivative-y coordinate))
+         (x-gradient (shader:vec2 (shader:swizzle coordinate-dx :x)
+                               (shader:swizzle coordinate-dy :x)))
+         (y-gradient (shader:vec2 (shader:swizzle coordinate-dx :y)
+                               (shader:swizzle coordinate-dy :y)))
          (length-footprint
-           (spv:vec2 (sqrt (spv:dot x-gradient x-gradient))
-                     (sqrt (spv:dot y-gradient y-gradient))))
+           (shader:vec2 (sqrt (shader:dot x-gradient x-gradient))
+                     (sqrt (shader:dot y-gradient y-gradient))))
          (width-footprint (+ (abs coordinate-dx) (abs coordinate-dy)))
          (footprint
-           (spv:mix length-footprint width-footprint
+           (shader:mix length-footprint width-footprint
                     luv.slug:slug-footprint-norm))
          (half-x
-           (max (* (spv:swizzle footprint :x)
+           (max (* (shader:swizzle footprint :x)
                    (* luv.slug:slug-filter-width 0.5))
                 +analytic-coverage-epsilon+))
          (half-y
-           (max (* (spv:swizzle footprint :y)
+           (max (* (shader:swizzle footprint :y)
                    (* luv.slug:slug-filter-width 0.5))
                 +analytic-coverage-epsilon+))
          (area (* (* half-x half-y) 4.0))
          ;; The box's corners, clamped to the grid: the integrand is zero
          ;; outside, so clamping the integration bound changes nothing.
-         (x0 (spv:clamp (- (spv:swizzle coordinate :x) half-x) 0.0 columns))
-         (x1 (spv:clamp (+ (spv:swizzle coordinate :x) half-x) 0.0 columns))
-         (y0 (spv:clamp (- (spv:swizzle coordinate :y) half-y) 0.0 rows))
-         (y1 (spv:clamp (+ (spv:swizzle coordinate :y) half-y) 0.0 rows))
+         (x0 (shader:clamp (- (shader:swizzle coordinate :x) half-x) 0.0 columns))
+         (x1 (shader:clamp (+ (shader:swizzle coordinate :x) half-x) 0.0 columns))
+         (y0 (shader:clamp (- (shader:swizzle coordinate :y) half-y) 0.0 rows))
+         (y1 (shader:clamp (+ (shader:swizzle coordinate :y) half-y) 0.0 rows))
          ;; Cell addresses, clamped to the last cell so an offset of exactly
          ;; one stays on the lattice; bilinear is exact on the closed cell.
          (column0 (min (floor x0) (- columns 1.0)))
@@ -101,10 +101,10 @@ integrand is the integral itself, not an interpolation of it."
          (a1 (- x1 column1))
          (b0 (- y0 row0))
          (b1 (- y1 row1))
-         (i0 (spv:uint column0))
-         (i1 (spv:uint column1))
-         (j0 (spv:uint row0))
-         (j1 (spv:uint row1))
+         (i0 (shader:uint column0))
+         (i1 (shader:uint column1))
+         (j0 (shader:uint row0))
+         (j1 (shader:uint row1))
          (s00 (lattice-node lattice-data i0 j0 a0 b0))
          (s10 (lattice-node lattice-data i1 j0 a1 b0))
          (s01 (lattice-node lattice-data i0 j1 a0 b1))
@@ -112,9 +112,9 @@ integrand is the integral itself, not an interpolation of it."
          ;; Ink fraction and grid (paper) fraction of the footprint.
          (inked (/ (+ (- s11 s10) (- s00 s01)) area))
          (card (/ (* (- x1 x0) (- y1 y0)) area))
-         (alpha (spv:swizzle color :w))
+         (alpha (shader:swizzle color :w))
          (paper (* (max (- card inked) 0.0) alpha)))
-    (spv:set-output
+    (shader:set-output
      color-output
-     (+ (spv:vec4 paper paper paper (* card alpha))
-        (spv:vec4 (* (spv:swizzle color :xyz) inked) 0.0)))))
+     (+ (shader:vec4 paper paper paper (* card alpha))
+        (shader:vec4 (* (shader:swizzle color :xyz) inked) 0.0)))))

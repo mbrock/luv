@@ -252,7 +252,8 @@
                           'metal-gpu-texture
                           :device device :native-object native-texture
                           :owned-p nil
-                          :size (canvas-extent context)
+                          :size (canonical-texture-extent
+                                 (canvas-extent context) context :canvas-frame)
                           :dimensions :2d :format (canvas-format context)
                           :usage (canvas-configuration-usage
                                   (canvas-context-configuration context))))

@@ -5,24 +5,24 @@
 (asdf:load-asd (truename (merge-pathnames #P"../../../luv.asd" *load-truename*)))
 (asdf:load-system :luv)
 
-(luv.spir-v:define-shader-method
-    luv.spir-v:shader-specification-for
+(luv.shader:define-shader-method
+    luv.shader:shader-specification-for
     metal-draw-probe-vertex-specification
     ((role (eql :metal-draw-probe)) (stage (eql :vertex)))
     (:stage :vertex
      :inputs ((position :vec3 :location 0))
      :outputs ((clip-position :vec4 :built-in :position)))
-  (let* ((clip (luv.spir-v:vec4 position 1.0)))
-    (luv.spir-v:set-output clip-position clip)))
+  (let* ((clip (luv.shader:vec4 position 1.0)))
+    (luv.shader:set-output clip-position clip)))
 
-(luv.spir-v:define-shader-method
-    luv.spir-v:shader-specification-for
+(luv.shader:define-shader-method
+    luv.shader:shader-specification-for
     metal-draw-probe-fragment-specification
     ((role (eql :metal-draw-probe)) (stage (eql :fragment)))
     (:stage :fragment
      :outputs ((color :vec4 :location 0)))
-  (let* ((rgba (luv.spir-v:vec4 0.85 0.25 0.75 1.0)))
-    (luv.spir-v:set-output color rgba)))
+  (let* ((rgba (luv.shader:vec4 0.85 0.25 0.75 1.0)))
+    (luv.shader:set-output color rgba)))
 
 (defun require-selector-sequence (selectors required)
   (let ((tail selectors))

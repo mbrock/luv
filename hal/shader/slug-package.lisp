@@ -1,6 +1,6 @@
 (defpackage #:luv.slug
   (:use #:cl)
-  (:local-nicknames (#:spv #:luv.spir-v)
+  (:local-nicknames (#:shader #:luv.shader)
                     (#:arith-lisp #:luv.arithmetic.lisp))
   (:export #:slug-outline-error
            #:slug-outline-error-reason

@@ -22,26 +22,26 @@
          (inside (min (max qx qy) 0.0)))
     (- (+ outside inside) safe-radius)))
 
-(spv:define-shader-function roundrect-coverage
+(shader:define-shader-function roundrect-coverage
     (coordinate half-size-radius)
   "Evaluate an analytic roundrect and turn its screen gradient into coverage."
   (let* ((distance
            (roundrect-signed-distance
-            (spv:swizzle coordinate :x)
-            (spv:swizzle coordinate :y)
-            (spv:swizzle half-size-radius :x)
-            (spv:swizzle half-size-radius :y)
-            (spv:swizzle half-size-radius :z)))
-         (distance-dx (spv:derivative-x distance))
-         (distance-dy (spv:derivative-y distance))
+            (shader:swizzle coordinate :x)
+            (shader:swizzle coordinate :y)
+            (shader:swizzle half-size-radius :x)
+            (shader:swizzle half-size-radius :y)
+            (shader:swizzle half-size-radius :z)))
+         (distance-dx (shader:derivative-x distance))
+         (distance-dy (shader:derivative-y distance))
          (pixel-span
            (max
             (sqrt (+ (* distance-dx distance-dx)
                      (* distance-dy distance-dy)))
             +analytic-coverage-epsilon+)))
-    (spv:clamp (- 0.5 (/ distance pixel-span)) 0.0 1.0)))
+    (shader:clamp (- 0.5 (/ distance pixel-span)) 0.0 1.0)))
 
-(spv:define-shader roundrect-vertex-specification
+(shader:define-shader roundrect-vertex-specification
     (:stage :vertex
      :inputs ((position :vec3 :location 0)
               (local-coordinate :vec3 :location 1)
@@ -51,20 +51,20 @@
                (render-coordinate :vec2 :location 0)
                (render-half-size-radius :vec3 :location 1)
                (render-color :vec4 :location 2)))
-  (let* ((alpha (spv:swizzle position :z)))
-    (spv:set-output
-     clip-position (spv:vec4 (spv:swizzle position :xy) 0.0 1.0))
-    (spv:set-output render-coordinate
-                    (spv:swizzle local-coordinate :xy))
-    (spv:set-output render-half-size-radius half-size-radius)
-    (spv:set-output render-color
-                    (spv:vec4 (* color alpha) alpha))))
+  (let* ((alpha (shader:swizzle position :z)))
+    (shader:set-output
+     clip-position (shader:vec4 (shader:swizzle position :xy) 0.0 1.0))
+    (shader:set-output render-coordinate
+                    (shader:swizzle local-coordinate :xy))
+    (shader:set-output render-half-size-radius half-size-radius)
+    (shader:set-output render-color
+                    (shader:vec4 (* color alpha) alpha))))
 
-(spv:define-shader roundrect-fragment-specification
+(shader:define-shader roundrect-fragment-specification
     (:stage :fragment
      :inputs ((render-coordinate :vec2 :location 0)
               (half-size-radius :vec3 :location 1)
               (color :vec4 :location 2))
      :outputs ((color-output :vec4 :location 0)))
   (let* ((coverage (roundrect-coverage render-coordinate half-size-radius)))
-    (spv:set-output color-output (* color coverage))))
+    (shader:set-output color-output (* color coverage))))

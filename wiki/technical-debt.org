@@ -88,6 +88,19 @@ finished owner must not also depend on a catch-all session resource list.
 Later extractions can give production/streaming and simulation the same shape;
 the session then coordinates owners instead of being all of them.
 
+** DONE Give rendering resources one transactional owner
+:PROPERTIES:
+:ID: V5V0JJ
+:END:
+
+=luvcraft-renderer= now solely owns named pipelines, layouts, resources, frame
+state, atlas state, and one atomically published frame-attachment cohort.
+Startup, resize, atlas replacement, live-session migration, and teardown all
+use that owner.  A failed renderer destruction retains its retry handle;
+focused tests exercise partial construction, coherent publication, migration,
+retry, and idempotent release.  Backend-native retirement has separate durable
+HAL custody described in the cut below.
+
 * 2. McCLIM implements one open command vocabulary four times
 :PROPERTIES:
 :ID: A0JOG7
@@ -132,6 +145,18 @@ The dense vertex arrays should remain arrays.  This follows the already useful
 portable =encode=/=enqueue= command seam described by #D8F3QM; it does not ask
 for a retained object graph or a class per vertex.
 
+** DONE Make command phases an open protocol
+:PROPERTIES:
+:ID: GC3QF4
+:END:
+
+The four command-family type tables are gone.  Internal generic functions own
+rebase, preparation, clipping, and encoding while the command structures and
+dense arrays stay compact.  Direct luvcraft replay builds one dynamic-extent
+context, so cached frame state retains only its persistent destination GPU
+resources.  A recording encoder checks the exact pipeline, binding, buffer,
+offset, and draw mapping of all seven native command families.
+
 * 3. The shared shader language is trapped inside the SPIR-V backend
 :PROPERTIES:
 :ID: TUVTOM
@@ -169,6 +194,20 @@ remaining =shader-abstraction-revision= callers to =shader-source-revision=,
 restart the durable image at the package boundary, and then delete the one-time
 live migration shims.  The split makes the architecture in #LVKEYO true in the
 loader as well as in the prose.
+
+** DONE Give the shared shader graph its own home
+:PROPERTIES:
+:ID: C18ML5
+:END:
+
+The neutral type graph, parser, quantity checks, source revisions, live
+definition tracking, and lowering generics now live in =luv/shader= and the
+=LUV.SHADER= package.  SPIR-V's literal model and lowering context live in the
+sibling =luv/spir-v= system; =luv/msl= depends only on the shared language.
+Repository callers name neutral concepts through =shader:= and reserve =spv:=
+for actual modules, instructions, compilation, and lowering results.  Cold
+loads prove that the shared system loads neither backend and MSL loads without
+SPIR-V.  The one-time package/accessor migration shims are gone.
 
 * 4. The HAL boundary is only half-owned
 :PROPERTIES:
@@ -210,6 +249,43 @@ Backend/video bridge files should own native handles and return portable
 textures/views plus an explicit owner.  Luvcraft should own playback policy and
 the screen; it should not decode Vulkan or CoreVideo ownership records.
 
+** DONE Make the portable HAL boundary tell the whole truth
+:PROPERTIES:
+:ID: QYZ3XP
+:END:
+
+Portable =create= and =adopt-native-texture= methods now copy and canonicalize
+buffer/texture descriptors before backend dispatch.  Size, dimension, and
+usage syntax has one error vocabulary; every texture extent is =(w h 1)=;
+Metal and Vulkan retain only format/capability translation.  Backend-free
+probe tests cover copies, vectors, duplicates, malformed sequences, adoption,
+and condition provenance, while the Darwin suite checks Metal's canonical
+owned/imported extents and two-dimensional writes.
+
+Video decoding crosses a separate open bridge.  Portable
+=video-decode-configuration= and frame-importer generics own the policy seam;
+Vulkan and Metal bridge files alone inspect =AVVkFrame=, queues, CoreVideo,
+and native handles.  A screen publishes one complete two-plane picture cohort,
+rolls back partial import, and retires views before textures.
+
+While a backend queue is live, logical GPU destruction transfers a complete,
+per-call resumable native teardown into its FIFO retirement ledger before
+invalidating the wrapper.  Nonempty submission and retirement work
+process-roots the queue; a lazy service advances it even after the application
+drops its last reference.  Device destruction closes admission and refuses to
+discard unfinished ownership.  Without a live queue, teardown must succeed
+before invalidation.  Vulkan leak finalizers transfer into a separate
+process-global ledger before reporting the leak.
+
+Each adopted video plane retains its frame importer until that native
+retirement callback succeeds.  Partial picture construction, partial screen
+construction, and failed startup teardown enter small process-rooted release
+backlogs, so no lexical unwind can discard the final retry handle.  Vulkan's
+two plane wrappers also share one generation-scoped external timeline state;
+post-submit layout/semaphore publication remains in the rooted submission
+until every owner callback succeeds.  =video-screen.lisp= contains no backend
+or native ownership names.
+
 * 5. Voxel lighting keeps oracle, experiment, and production live
 :PROPERTIES:
 :ID: S6421N
@@ -240,6 +316,18 @@ explicitly and record its use rather than making it the fallback.  Rename
 comparison slots from =frontier-*= to =candidate-*= so the diagnostic does not
 preserve the retired implementation in its interface.
 
+** DONE Keep one production light solver
+:PROPERTIES:
+:ID: J2UE30
+:END:
+
+Production from-scratch and incremental dispatch now accept only =:compiled=;
+unknown and retired names signal.  The handwritten frontier solver and legacy
+incremental reconciler are gone.  A simple from-scratch oracle and the renamed
+candidate comparator remain available only through the explicit
+=luvcraft/light-reference= system, preserving differential evidence without a
+fallback runtime truth.
+
 * 6. Serial umbrella systems conceal useful dependency islands
 :PROPERTIES:
 :ID: 74HG89
@@ -261,6 +349,19 @@ Extract only boundaries already demanded above: =luv/shader=, a frontier
 kernel system, the renderer owner, and platform video bridges.  Keep =luv= and
 =luvcraft/core= as convenience umbrellas.  ASDF decomposition should express
 ownership and optionality, not merely make the component list shorter.
+
+** DONE Expose the shader, frontier, and reference islands already earned
+:PROPERTIES:
+:ID: JV6E2Z
+:END:
+
+=luv/shader=, =luv/spir-v=, and =luv/msl= are now independent sibling systems,
+and =luvcraft/light-reference= keeps the oracle out of production loading.
+=luvcraft/frontier= now owns the frontier package and compiler over only
+=luv/arithmetic= and =luvcraft/world=; a cold load does not acquire the
+renderer, video, GPU, Ghostty, or libav umbrella.  Renderer and video ownership
+boundaries remain separate source components under the convenient
+=luvcraft/core= umbrella.
 
 * 7. A high-confidence deletion queue
 :PROPERTIES:
@@ -292,6 +393,17 @@ reduce the surface that later refactors must carry:
 The persistence migration for old saved gnome edits is different: saved data
 is an external boundary.  Keep versioned persistence migrations until the
 supported save floor is intentionally raised.
+
+** DONE Delete the queue without deleting history
+:PROPERTIES:
+:ID: OHTJXI
+:END:
+
+The gnome aliases, literal crosshair module, shader revision alias, palette
+constructor/install compatibility, and compatibility meshing entry points are
+gone; their tests now exercise production specifications, chunks, snapshots,
+and vocabulary-backed columns.  The saved-gnome migration remains because it
+serves persisted external data rather than repository callers.
 
 * A workable order
 :PROPERTIES:

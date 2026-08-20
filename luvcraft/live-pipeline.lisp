@@ -60,21 +60,21 @@
   (let* ((vertex-only-p
            (eq (live-shader-pipeline-stage artifact) :vertex))
          (source-values (list nil))
-         (spv:*shader-source-value-references* source-values)
+         (shader:*shader-source-value-references* source-values)
          (vertex-specification
            (cond
              ((live-shader-pipeline-vertex-role artifact)
-              (spv:shader-specification-for
+              (shader:shader-specification-for
                (live-shader-pipeline-vertex-role artifact) :vertex))
              (vertex-only-p
-              (spv:shader-specification-for
+              (shader:shader-specification-for
                (live-shader-pipeline-role artifact) :vertex))))
          (vertex-lowering
            (when vertex-specification
              (spv:compile-shader-specification vertex-specification)))
          (specification
            (unless vertex-only-p
-             (spv:shader-specification-for
+             (shader:shader-specification-for
               (live-shader-pipeline-role artifact)
               (live-shader-pipeline-stage artifact))))
          (lowering
@@ -187,14 +187,14 @@
 (defun make-live-shader-pipeline
     (&key role (stage :fragment) vertex-role label device layout vertex-module
           vertex-buffers target-format target-blend primitive depth-stencil)
-  (let* ((generic-function (fdefinition 'spv:shader-specification-for))
-         (source-revision (spv:shader-source-revision))
+  (let* ((generic-function (fdefinition 'shader:shader-specification-for))
+         (source-revision (shader:shader-source-revision))
          (dependent
-           (spv:make-shader-definition-dependent
+           (shader:make-shader-definition-dependent
             generic-function (list role stage)))
          (vertex-dependent
            (when vertex-role
-             (spv:make-shader-definition-dependent
+             (shader:make-shader-definition-dependent
               generic-function (list vertex-role :vertex))))
          (artifact
            (make-instance
@@ -220,29 +220,29 @@
            (setf completed-p t)
            artifact)
       (unless completed-p
-        (spv:release-shader-definition-dependent dependent)
+        (shader:release-shader-definition-dependent dependent)
         (when vertex-dependent
-          (spv:release-shader-definition-dependent vertex-dependent))))))
+          (shader:release-shader-definition-dependent vertex-dependent))))))
 
 (defun refresh-live-shader-pipeline (artifact)
   "Attempt the newest pending definition, retaining the last good pipeline."
   (let ((dependent (live-shader-pipeline-dependent artifact))
         (vertex-dependent (live-shader-pipeline-vertex-dependent artifact))
-        (source-revision (spv:shader-source-revision)))
-    (when (or (spv:shader-definition-change-pending-p dependent)
+        (source-revision (shader:shader-source-revision)))
+    (when (or (shader:shader-definition-change-pending-p dependent)
               (and vertex-dependent
-                   (spv:shader-definition-change-pending-p vertex-dependent))
+                   (shader:shader-definition-change-pending-p vertex-dependent))
               (> source-revision
                  (live-shader-pipeline-attempted-source-revision
                   artifact))
-              (not (spv:shader-source-value-references-current-p
+              (not (shader:shader-source-value-references-current-p
                     (live-shader-pipeline-attempted-source-values artifact))))
       (multiple-value-bind (revision event)
-          (spv:shader-definition-change-snapshot dependent)
+          (shader:shader-definition-change-snapshot dependent)
         (declare (ignore event))
         (multiple-value-bind (vertex-revision vertex-event)
             (if vertex-dependent
-                (spv:shader-definition-change-snapshot vertex-dependent)
+                (shader:shader-definition-change-snapshot vertex-dependent)
                 (values 0 nil))
           (declare (ignore vertex-event))
           (setf (live-shader-pipeline-status artifact) :building)
@@ -263,18 +263,18 @@
                     (live-shader-pipeline-attempted-source-revision
                      artifact)
                     source-revision)))
-            (spv:acknowledge-shader-definition-change dependent revision)
+            (shader:acknowledge-shader-definition-change dependent revision)
             (when vertex-dependent
-              (spv:acknowledge-shader-definition-change
+              (shader:acknowledge-shader-definition-change
                vertex-dependent vertex-revision))))))
   artifact)
 
 (defun release-live-shader-pipeline (artifact)
-  (spv:release-shader-definition-dependent
+  (shader:release-shader-definition-dependent
    (live-shader-pipeline-dependent artifact))
   (let ((dependent (live-shader-pipeline-vertex-dependent artifact)))
     (when dependent
-      (spv:release-shader-definition-dependent dependent)))
+      (shader:release-shader-definition-dependent dependent)))
   (let ((pipeline (live-shader-pipeline-native-pipeline artifact)))
     (when pipeline
       (destroy pipeline)

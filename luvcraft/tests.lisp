@@ -664,7 +664,7 @@
                    (eq definition
                        (luv.arithmetic.language:arithmetic-function-call-definition
                         expression))))
-            (luv.spir-v:shader-specification-expressions vertex))))
+            (luv.shader:shader-specification-expressions vertex))))
     (ok definition)
     (ok (= 1 (length calls)))
     (ok (= 0.0 (luvcraft::sky-fog-amount-at-distance sky 10.0)))
@@ -913,7 +913,7 @@
            (luv.arithmetic:repeated-quantity-layout-element-layout layout))
          (shader-layout
            (luvcraft::shader-input-product-layout
-            (luv.spir-v:shader-specification-for :block-surface :vertex))))
+            (luv.shader:shader-specification-for :block-surface :vertex))))
     (ok (eq declaration
             (luv.arithmetic:value-declaration-for :block-mesh-vertices)))
     (ok (typep (block-mesh-vertices mesh)

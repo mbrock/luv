@@ -122,7 +122,7 @@ McCLIM backends see ALBEDO; relief-aware backends may render the height."))
   (interpolate-gradient-ink
    gradient (gradient-coordinate gradient x y)))
 
-(spv:define-shader relief-roundrect-vertex-specification
+(shader:define-shader relief-roundrect-vertex-specification
     (:stage :vertex
      :inputs ((position :vec3 :location 0)
               (local-coordinate :vec3 :location 1)
@@ -134,15 +134,15 @@ McCLIM backends see ALBEDO; relief-aware backends may render the height."))
                (render-half-size-radius :vec3 :location 1)
                (render-color :vec4 :location 2)
                (render-height :float :location 3)))
-  (let* ((alpha (spv:swizzle position :z)))
-    (spv:set-output
-     clip-position (spv:vec4 (spv:swizzle position :xy) 0.0 1.0))
-    (spv:set-output render-coordinate (spv:swizzle local-coordinate :xy))
-    (spv:set-output render-half-size-radius half-size-radius)
-    (spv:set-output render-color (spv:vec4 (* color alpha) alpha))
-    (spv:set-output render-height (spv:swizzle relief :x))))
+  (let* ((alpha (shader:swizzle position :z)))
+    (shader:set-output
+     clip-position (shader:vec4 (shader:swizzle position :xy) 0.0 1.0))
+    (shader:set-output render-coordinate (shader:swizzle local-coordinate :xy))
+    (shader:set-output render-half-size-radius half-size-radius)
+    (shader:set-output render-color (shader:vec4 (* color alpha) alpha))
+    (shader:set-output render-height (shader:swizzle relief :x))))
 
-(spv:define-shader relief-roundrect-fragment-specification
+(shader:define-shader relief-roundrect-fragment-specification
     (:stage :fragment
      :inputs ((render-coordinate :vec2 :location 0)
               (half-size-radius :vec3 :location 1)
@@ -151,13 +151,13 @@ McCLIM backends see ALBEDO; relief-aware backends may render the height."))
      :outputs ((color-output :vec4 :location 0)))
   (let* ((distance
            (luv.analytic:roundrect-signed-distance
-            (spv:swizzle render-coordinate :x)
-            (spv:swizzle render-coordinate :y)
-            (spv:swizzle half-size-radius :x)
-            (spv:swizzle half-size-radius :y)
-            (spv:swizzle half-size-radius :z)))
-         (distance-dx (spv:derivative-x distance))
-         (distance-dy (spv:derivative-y distance))
+            (shader:swizzle render-coordinate :x)
+            (shader:swizzle render-coordinate :y)
+            (shader:swizzle half-size-radius :x)
+            (shader:swizzle half-size-radius :y)
+            (shader:swizzle half-size-radius :z)))
+         (distance-dx (shader:derivative-x distance))
+         (distance-dy (shader:derivative-y distance))
          (normal-length
            (max (sqrt (+ (* distance-dx distance-dx)
                          (* distance-dy distance-dy)))
@@ -168,21 +168,21 @@ McCLIM backends see ALBEDO; relief-aware backends may render the height."))
                  (/ distance-dy normal-length))))
          (absolute-height (abs height))
          (rim-width (max 1.0 absolute-height))
-         (rim (spv:clamp (+ 1.0 (/ distance rim-width)) 0.0 1.0))
-         (direction (- (* 2.0 (spv:step 0.0 height)) 1.0))
-         (strength (spv:clamp (* absolute-height 0.055) 0.0 0.36))
+         (rim (shader:clamp (+ 1.0 (/ distance rim-width)) 0.0 1.0))
+         (direction (- (* 2.0 (shader:step 0.0 height)) 1.0))
+         (strength (shader:clamp (* absolute-height 0.055) 0.0 0.36))
          (shade (+ 1.0 (* edge-light rim direction strength)))
          (coverage
            (luv.analytic:roundrect-coverage
             render-coordinate half-size-radius)))
-    (spv:set-output
+    (shader:set-output
      color-output
-     (* (spv:vec4
-         (* (spv:swizzle color :rgb) shade)
-         (spv:swizzle color :a))
+     (* (shader:vec4
+         (* (shader:swizzle color :rgb) shade)
+         (shader:swizzle color :a))
         coverage))))
 
-(spv:define-shader gradient-roundrect-vertex-specification
+(shader:define-shader gradient-roundrect-vertex-specification
     (:stage :vertex
      :inputs ((position :vec3 :location 0)
               (local-coordinate :vec3 :location 1)
@@ -199,16 +199,16 @@ McCLIM backends see ALBEDO; relief-aware backends may render the height."))
                (render-end-color :vec3 :location 4)
                (render-paint-alphas :vec2 :location 5)))
   (let* ()
-    (spv:set-output
-     clip-position (spv:vec4 (spv:swizzle position :xy) 0.0 1.0))
-    (spv:set-output render-coordinate (spv:swizzle local-coordinate :xy))
-    (spv:set-output render-half-size-radius half-size-radius)
-    (spv:set-output render-paint-coordinate-kind paint-coordinate-kind)
-    (spv:set-output render-start-color start-color)
-    (spv:set-output render-end-color end-color)
-    (spv:set-output render-paint-alphas (spv:swizzle paint-alphas :xy))))
+    (shader:set-output
+     clip-position (shader:vec4 (shader:swizzle position :xy) 0.0 1.0))
+    (shader:set-output render-coordinate (shader:swizzle local-coordinate :xy))
+    (shader:set-output render-half-size-radius half-size-radius)
+    (shader:set-output render-paint-coordinate-kind paint-coordinate-kind)
+    (shader:set-output render-start-color start-color)
+    (shader:set-output render-end-color end-color)
+    (shader:set-output render-paint-alphas (shader:swizzle paint-alphas :xy))))
 
-(spv:define-shader gradient-roundrect-fragment-specification
+(shader:define-shader gradient-roundrect-fragment-specification
     (:stage :fragment
      :inputs ((render-coordinate :vec2 :location 0)
               (half-size-radius :vec3 :location 1)
@@ -217,31 +217,31 @@ McCLIM backends see ALBEDO; relief-aware backends may render the height."))
               (end-color :vec3 :location 4)
               (paint-alphas :vec2 :location 5))
      :outputs ((color-output :vec4 :location 0)))
-  (let* ((paint-coordinate (spv:swizzle paint-coordinate-kind :xy))
-         (kind (spv:swizzle paint-coordinate-kind :z))
-         (linear-coordinate (spv:swizzle paint-coordinate :x))
+  (let* ((paint-coordinate (shader:swizzle paint-coordinate-kind :xy))
+         (kind (shader:swizzle paint-coordinate-kind :z))
+         (linear-coordinate (shader:swizzle paint-coordinate :x))
          (radial-coordinate
-           (sqrt (spv:dot paint-coordinate paint-coordinate)))
+           (sqrt (shader:dot paint-coordinate paint-coordinate)))
          (amount
-           (spv:clamp
-            (spv:mix linear-coordinate radial-coordinate
-                     (spv:step 0.5 kind))
+           (shader:clamp
+            (shader:mix linear-coordinate radial-coordinate
+                     (shader:step 0.5 kind))
             0.0 1.0))
          (alpha
-           (spv:mix (spv:swizzle paint-alphas :x)
-                    (spv:swizzle paint-alphas :y) amount))
-         (rgb (spv:mix start-color end-color amount))
+           (shader:mix (shader:swizzle paint-alphas :x)
+                    (shader:swizzle paint-alphas :y) amount))
+         (rgb (shader:mix start-color end-color amount))
          (coverage
-           (spv:mix
+           (shader:mix
             (luv.analytic:roundrect-coverage
              render-coordinate half-size-radius)
             1.0
             (- 1.0
-               (spv:step -0.5 (spv:swizzle half-size-radius :z))))))
-    (spv:set-output color-output
-                    (* (spv:vec4 (* rgb alpha) alpha) coverage))))
+               (shader:step -0.5 (shader:swizzle half-size-radius :z))))))
+    (shader:set-output color-output
+                    (* (shader:vec4 (* rgb alpha) alpha) coverage))))
 
-(spv:define-shader image-roundrect-vertex-specification
+(shader:define-shader image-roundrect-vertex-specification
     (:stage :vertex
      :inputs ((position :vec3 :location 0)
               (local-coordinate :vec3 :location 1)
@@ -253,17 +253,17 @@ McCLIM backends see ALBEDO; relief-aware backends may render the height."))
                (render-texture-coordinate :vec2 :location 2)
                (render-opacity :float :location 3)))
   (let* ()
-    (spv:set-output
-     clip-position (spv:vec4 (spv:swizzle position :xy) 0.0 1.0))
-    (spv:set-output render-coordinate (spv:swizzle local-coordinate :xy))
-    (spv:set-output render-half-size-radius half-size-radius)
-    (spv:set-output
+    (shader:set-output
+     clip-position (shader:vec4 (shader:swizzle position :xy) 0.0 1.0))
+    (shader:set-output render-coordinate (shader:swizzle local-coordinate :xy))
+    (shader:set-output render-half-size-radius half-size-radius)
+    (shader:set-output
      render-texture-coordinate
-     (spv:swizzle texture-coordinate-opacity :xy))
-    (spv:set-output
-     render-opacity (spv:swizzle texture-coordinate-opacity :z))))
+     (shader:swizzle texture-coordinate-opacity :xy))
+    (shader:set-output
+     render-opacity (shader:swizzle texture-coordinate-opacity :z))))
 
-(spv:define-shader image-roundrect-fragment-specification
+(shader:define-shader image-roundrect-fragment-specification
     (:stage :fragment
      :inputs ((render-coordinate :vec2 :location 0)
               (half-size-radius :vec3 :location 1)
@@ -273,24 +273,24 @@ McCLIM backends see ALBEDO; relief-aware backends may render the height."))
      ((image :texture-2d :binding 0 :sample-transfer :identity)
       (texture-sampler :sampler :binding 1))
      :outputs ((color-output :vec4 :location 0)))
-  (let* ((u (spv:swizzle texture-coordinate :x))
-         (v (spv:swizzle texture-coordinate :y))
+  (let* ((u (shader:swizzle texture-coordinate :x))
+         (v (shader:swizzle texture-coordinate :y))
          (inside-texture
-           (* (spv:step 0.0 u) (spv:step u 1.0)
-              (spv:step 0.0 v) (spv:step v 1.0)))
-         (texel (spv:sample image texture-sampler texture-coordinate))
-         (alpha (* (spv:swizzle texel :a) opacity))
+           (* (shader:step 0.0 u) (shader:step u 1.0)
+              (shader:step 0.0 v) (shader:step v 1.0)))
+         (texel (shader:sample image texture-sampler texture-coordinate))
+         (alpha (* (shader:swizzle texel :a) opacity))
          (coverage
-           (spv:mix
+           (shader:mix
             (luv.analytic:roundrect-coverage
              render-coordinate half-size-radius)
             1.0
             (- 1.0
-               (spv:step -0.5 (spv:swizzle half-size-radius :z)))))
+               (shader:step -0.5 (shader:swizzle half-size-radius :z)))))
          (covered-alpha (* alpha coverage inside-texture)))
     ;; McCLIM image arrays store straight RGB and alpha. The render target's
     ;; blend contract is premultiplied, exactly like the solid paint path.
-    (spv:set-output
+    (shader:set-output
      color-output
-     (spv:vec4 (* (spv:swizzle texel :rgb) covered-alpha)
+     (shader:vec4 (* (shader:swizzle texel :rgb) covered-alpha)
                covered-alpha))))

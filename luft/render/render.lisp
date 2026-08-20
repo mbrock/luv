@@ -636,10 +636,11 @@ may speak only of its finish and its figure."
 (defun stock-table-data (stocks)
   "The table the :STOCK style indexes with a site's four stock bits.
 
-Every slot takes +STOCK-LANES+ vec4s: the three albedos, then the five
-lanes of MATERIAL-LANES.  STOCKS is a scene's palette of material names;
-a scene with none is drawn wholly in *MATERIAL*, and slots past the end of
-the palette repeat slot zero so a stale site can never read rubbish."
+Every slot takes +STOCK-LANES+ vec4s: the three albedos, the five lanes of
+MATERIAL-LANES, and one lattice lane.  STOCKS is a scene's palette of
+material names; a scene with none is drawn wholly in *MATERIAL*, and slots
+past the end of the palette repeat slot zero so a stale site can never read
+rubbish."
   (let* ((names (if (and stocks (plusp (length stocks)))
                     stocks
                     (vector *material*)))
@@ -796,7 +797,7 @@ vertical radius of the field."
   (:documentation "GPU resources drawing one scene from one camera."))
 
 (defun frame-uniform-size ()
-  (let ((size (spv:shader-uniform-block-byte-size (shaders:frame-uniform-block))))
+  (let ((size (shader:shader-uniform-block-byte-size (shaders:frame-uniform-block))))
     (unless (= size (* 4 (length (frame-uniform-data (make-fly-camera) 1 1))))
       (error "Frame block is ~D bytes but the host packs ~D."
              size (* 4 (length (frame-uniform-data (make-fly-camera) 1 1)))))

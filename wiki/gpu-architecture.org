@@ -189,9 +189,9 @@ queue frontier, but the records attached to that frontier are different.
 |-
 | Native completion value | timeline semaphore | shared event |
 | Submitted value | queue submission index | queue submission value |
-| Retained until completion | command buffers, captured wrappers, native temporaries, deferred destroys | command buffers, allocators, captured wrappers, deferred destroys |
+| Retained until completion | command buffers, captured wrappers, native temporaries | command buffers, allocators, captured wrappers |
 | General public =submit= | yes | yes |
-| Maintenance points | submission and explicit wait | submission and explicit wait |
+| Maintenance points | submission, explicit wait, and eventual retirement service | submission, explicit wait, and eventual retirement service |
 
 [[file:../hal/vulkan/gpu.lisp::(defun submit-vulkan-command-buffers][=submit-vulkan-command-buffers=]] signals the queue timeline, installs a
 =vulkan-gpu-submission= record, and returns its index.  Queue maintenance reads
@@ -201,25 +201,36 @@ minimums; there is no fence or legacy-submit fallback.
 
 [[file:../hal/metal/gpu.lisp::(defun submit-metal-command-buffers][=submit-metal-command-buffers=]] commits a batch of finished Metal 4 work,
 registers command memory and captured dependencies before presentation can
-fail, and signals a shared event afterward.  Reclamation drops the retained
-record and performs deferred native teardown when the event value passes it.
-The current Metal page #NABRMK follows that backend's larger compiler and
+fail, and records the shared-event signal itself as a retryable post-commit
+obligation.  Reclamation drops the retained record when the event value passes
+it.  The current Metal page #NABRMK follows that backend's larger compiler and
 rendering story.
 
-Neither queue polls in the background.  If no later submission or explicit
-wait occurs, a completed record can remain retained until the next maintenance
-point.  That is delayed reclamation, not unsafe reclamation.
+A nonempty submission or retirement ledger process-roots its queue.  A lazy
+service thread polls only those custodians, under their backend queue locks,
+and exits when the registry becomes empty.  Explicit submission and wait calls
+remain useful low-latency maintenance points; the service exists so abandoning
+the last application reference cannot turn safe delayed reclamation into a
+permanent root cycle.
 
 * Destroy is logically immediate and physically conditional
 :PROPERTIES:
 :ID: D3H7VK
 :END:
 
-Both resource implementations now give =destroy= this shape.  The operation
-marks the wrapper destroyed immediately, so no new command can mention it,
-then compares its last submitted use with the queue frontier.  Native teardown
-happens immediately if safe or is attached to the still-live submission record
-that last used it.  Retiring that record performs the deferred teardown.
+Both resource implementations now give =destroy= this shape.  While a backend
+queue is live, the operation first transfers a complete native teardown into a
+FIFO retirement ledger, tagged with the resource's last submitted use, and
+only then marks the wrapper destroyed.  The ledger runs the eligible prefix as
+the queue frontier advances.  Without a live queue, teardown must succeed
+synchronously before logical invalidation.
+
+Native teardowns are sequences of individually resumable calls.  A failure
+therefore retains that entry and its dependency-ordered successors without
+repeating calls which already succeeded.  The process custodian keeps the
+queue reachable until submissions, post-commit publication, and retirement
+are all quiescent; device destruction closes admission and refuses to pass a
+nonempty ledger.
 
 This division is essential rather than stylistic.  Native destruction requires
 every submitted use to have completed, while a pleasant API should not make
@@ -237,20 +248,20 @@ object an invalid state which later operations can reject; continued CLOS
 reachability does not make a destroyed GPU object usable.
 
 Vulkan wrappers also install finalizers.  Explicit destruction cancels the
-finalizer.  If the collector instead finds a live wrapper, the finalizer warns
-with =gpu-resource-leaked=, records the condition in
-=*leaked-gpu-resources*=, and reclaims the native object.  Submission records
-hold in-flight wrappers strongly, so a collected wrapper is already past the
-frontier.  The finalizer closure captures extracted native handles and the
-device wrapper rather than the resource wrapper itself; this both avoids a
-self-retaining finalizer and keeps the device reachable through child
-teardown.
+finalizer.  If the collector instead finds a live wrapper, the finalizer first
+transfers its progress-tracked native teardown into a process-global ledger,
+then warns with =gpu-resource-leaked= and records the condition in
+=*leaked-gpu-resources*=.  Thus even a warning handler which exits cannot lose
+native custody.  Submission records hold in-flight wrappers strongly, so an
+ordinary collected child is already past the frontier; its fallback teardown
+still shares queue/device exclusion and the Vulkan driver environment.
 
 Metal currently has explicit destruction but not the equivalent finalizer
 audit.  Dropping the last Lisp reference without =destroy= can therefore leak
-native ownership without a warning.  Device destruction waits for its queue,
-but neither backend maintains a general child registry that turns device
-teardown into automatic orderly destruction of every still-live wrapper.
+native ownership without a warning.  Both backends durably service ownership
+which /was/ explicitly transferred, but neither maintains a general child
+registry that turns device teardown into automatic orderly destruction of
+every still-live wrapper.
 
 The portable discipline is consequently simple and honest: callers explicitly
 destroy what they create.  Vulkan's collector path is failure recovery and a

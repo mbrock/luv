@@ -16,6 +16,15 @@
                  (:file "world-package")
                  (:file "world")))))
 
+(defsystem "luvcraft/frontier"
+  :description "Inspectable frontier programs compiled over packed world fields."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luv/arithmetic" "luvcraft/world")
+  :serial t
+  :components ((:file "luvcraft/frontier-package")
+               (:file "luvcraft/frontier")))
+
 (defsystem "luvcraft/core"
   :description "The renderer, simulation, and devices of the luvcraft block world."
   :version "0.0.1"
@@ -25,6 +34,7 @@
                "luv/libav"
                "luv/terminal/canvas"
                "luvcraft/world"
+               "luvcraft/frontier"
                "cl-dejavu"
                "sb-concurrency"
                (:require #:sb-bsd-sockets)
@@ -47,7 +57,6 @@
                  (:file "blocks")
                  (:file "inventory")
                  (:file "terrain")
-                 (:file "frontier")
                  (:file "light")
                  (:file "frontier-light")
                  (:file "mesher")
@@ -64,6 +73,9 @@
                  (:file "release")
                  (:file "text")
                  (:file "sound")
+                 (:file "video-interop")
+                 (:file "video-interop-vulkan")
+                 (:file "video-interop-metal" :if-feature :darwin)
                  (:file "video-screen")
                  (:file "renderer")
                  (:file "app")
@@ -227,6 +239,7 @@
                (:file "luvcraft/world-tests")
                (:file "luvcraft/tests")
                (:file "luvcraft/renderer-tests")
+               (:file "luvcraft/video-interop-tests")
                (:file "luvcraft/physics-tests")
                (:file "luvcraft/light-tests")
                (:file "hal/metal/msl/tests")

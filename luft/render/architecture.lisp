@@ -536,8 +536,10 @@ is a model of a tree; both are what a tree is at this distance."
       (loop for course from 0 below 4
             do (fill-box world (+ 37 course) (- 47 course) 17 29
                          (+ base 7 course) (+ base 7 course))))
-    (scatter-boulders world '((16 44 2) (20 50 1) (52 44 2) (56 52 1)
-                             (14 20 2) (22 30 1) (24 12 2)))
+    (scatter-boulders
+     world
+     '((16 44 2) (20 50 1) (52 44 2) (56 52 1)
+       (14 20 2) (22 30 1) (24 12 2)))
     (world-scene world)))
 
 (defmethod atelier-cameras ((piece (eql :turret)))
@@ -629,8 +631,10 @@ is a model of a tree; both are what a tree is at this distance."
                          (+ bed 7 course) (+ bed 7 course))))
     (with-stock (:bronze)
       (fill-disc world 18 44 3 (+ bed 2) (+ bed 2)))
-    (scatter-boulders world '((36 44 2) (40 22 2) (24 20 1) (44 48 2)
-                             (17 26 1)))
+    (scatter-boulders
+     world
+     '((36 44 2) (40 22 2) (24 20 1) (44 48 2)
+       (17 26 1)))
     (world-scene world)))
 
 (defmethod atelier-cameras ((piece (eql :viaduct)))
@@ -701,8 +705,10 @@ is a model of a tree; both are what a tree is at this distance."
                          (- face 1 step) (- face 1 step)
                          0 (- floor step 1))))
     (grass-the-flats world :flat 1 :depth 1)
-    (scatter-boulders world '((17 22 2) (21 17 1) (46 23 2) (50 18 1)
-                             (13 16 1) (42 20 1) (26 21 2) (39 25 1)))
+    (scatter-boulders
+     world
+     '((17 22 2) (21 17 1) (46 23 2) (50 18 1)
+       (13 16 1) (42 20 1) (26 21 2) (39 25 1)))
     ;; Firs on the apron, and two on the cliff top, for scale.
     (plant-wood world '((11 12 10) (19 6 12) (46 8 11) (54 14 10)
                         (14 20 9) (40 4 12) (7 25 9) (56 25 9)))
@@ -751,8 +757,10 @@ is a model of a tree; both are what a tree is at this distance."
     ;; and on nothing else.
     (grass-the-flats world :flat 1 :depth 1)
     ;; Boulders fallen to the strand, and a few standing on the top.
-    (scatter-boulders world '((14 22 2) (24 18 2) (30 24 1) (41 20 2)
-                             (50 25 2) (56 19 1) (20 46 2) (46 48 2)))
+    (scatter-boulders
+     world
+     '((14 22 2) (24 18 2) (30 24 1) (41 20 2)
+       (50 25 2) (56 19 1) (20 46 2) (46 48 2)))
     ;; A cairn on the highest ground, and two standing stones beside the
     ;; path that runs along the cliff top.
     (with-stock (:slate)
@@ -947,8 +955,10 @@ knowing what it is cut from."
     ;; A bronze beacon on one turret, and rocks fallen into the channel.
     (with-stock (:bronze)
       (fill-disc world 45 46 2 (+ plateau 12) (+ plateau 13)))
-    (scatter-boulders world '((10 20 2) (54 22 2) (18 32 1) (48 30 1)
-                             (8 40 2) (58 36 2) (38 18 1) (20 26 1)))
+    (scatter-boulders
+     world
+     '((10 20 2) (54 22 2) (18 32 1) (48 30 1)
+       (8 40 2) (58 36 2) (38 18 1) (20 26 1)))
     ;; Firs on the shore behind the bridgehead, and two round trees in the
     ;; yard, which is the whole of the town's planting.
     (plant-wood world '((10 6 12) (18 3 10) (42 4 11) (52 8 12) (22 8 9)))

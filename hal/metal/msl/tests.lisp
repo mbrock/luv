@@ -1,38 +1,38 @@
 (in-package #:luvcraft.tests)
 
-(spv:define-shader msl-unsigned-texel-fold-probe
+(shader:define-shader msl-unsigned-texel-fold-probe
     (:stage :fragment
      :resources ((band-data :uint-texture-2d :binding 0)
                  (curve-data :texture-2d :binding 1))
      :outputs ((color :vec4 :location 0)))
-  (let* ((origin (spv:uvec2 (spv:uint 0.0) (spv:uint 0.0)))
-         (header (spv:texel-load band-data origin))
-         (count (spv:swizzle header :x))
-         (offset (spv:swizzle header :y))
-         (seed (spv:swizzle (spv:texel-load curve-data origin) :x))
+  (let* ((origin (shader:uvec2 (shader:uint 0.0) (shader:uint 0.0)))
+         (header (shader:texel-load band-data origin))
+         (count (shader:swizzle header :x))
+         (offset (shader:swizzle header :y))
+         (seed (shader:swizzle (shader:texel-load curve-data origin) :x))
          (total
-           (spv:counted-fold (index count sum seed)
+           (shader:counted-fold (index count sum seed)
              (let* ((address (+ offset index))
                     (location
-                      (spv:uvec2 (mod address (spv:uint 4096.0))
-                                 (/ address (spv:uint 4096.0))))
+                      (shader:uvec2 (mod address (shader:uint 4096.0))
+                                 (/ address (shader:uint 4096.0))))
                     (word
-                      (spv:swizzle (spv:texel-load band-data location) :x)))
+                      (shader:swizzle (shader:texel-load band-data location) :x)))
                (+ sum (float word))))))
-    (spv:set-output color (spv:vec4 total total total 1.0))))
+    (shader:set-output color (shader:vec4 total total total 1.0))))
 
-(spv:define-shader msl-vertex-index-probe
+(shader:define-shader msl-vertex-index-probe
     (:stage :vertex
      :inputs ((vertex-index :uint :built-in :vertex-index))
      :outputs ((clip-position :vec4 :built-in :position)))
-  (let* ((x (spv:float (mod vertex-index (spv:uint 2.0)))))
-    (spv:set-output clip-position (spv:vec4 x 0.0 0.0 1.0))))
+  (let* ((x (shader:float (mod vertex-index (shader:uint 2.0)))))
+    (shader:set-output clip-position (shader:vec4 x 0.0 0.0 1.0))))
 
-(spv:define-task-payload msl-task-mesh-payload
+(shader:define-task-payload msl-task-mesh-payload
   (payload-site :uint64)
   (payload-position (:array :vec4 32)))
 
-(spv:define-shader msl-task-probe
+(shader:define-shader msl-task-probe
     (:stage :task
      :workgroup-size (32 1 1)
      :payload msl-task-mesh-payload
@@ -41,21 +41,21 @@
               (group :uvec3 :built-in :workgroup-id)
               (group-count :uvec3 :built-in :num-workgroups)
               (threads :uvec3 :built-in :workgroup-size)))
-  (let* ((three (spv:uint 3.0))
-         (one (spv:uint 1.0))
+  (let* ((three (shader:uint 3.0))
+         (one (shader:uint 1.0))
          (position
-           (if (= lane (spv:uint 0.0))
-               (spv:vec4 -0.8 -0.8 0.0 1.0)
+           (if (= lane (shader:uint 0.0))
+               (shader:vec4 -0.8 -0.8 0.0 1.0)
                (if (= lane one)
-                   (spv:vec4 0.8 -0.8 0.0 1.0)
-                   (spv:vec4 0.0 0.8 0.0 1.0)))))
-    (when (= lane (spv:uint 0.0))
-      (spv:set-payload payload-site (spv:uint64 three)))
-    (spv:set-payload-element
+                   (shader:vec4 0.8 -0.8 0.0 1.0)
+                   (shader:vec4 0.0 0.8 0.0 1.0)))))
+    (when (= lane (shader:uint 0.0))
+      (shader:set-payload payload-site (shader:uint64 three)))
+    (shader:set-payload-element
      payload-position lane position)
-    (spv:emit-mesh-workgroups (spv:uvec3 one one one))))
+    (shader:emit-mesh-workgroups (shader:uvec3 one one one))))
 
-(spv:define-shader msl-mesh-probe
+(shader:define-shader msl-mesh-probe
     (:stage :mesh
      :workgroup-size (32 1 1)
      :payload msl-task-mesh-payload
@@ -68,30 +68,30 @@
       :vertex ((position :vec4 :built-in :position)
                (uv :vec2 :location 0))
       :primitive ((primitive-color :vec4 :location 1))))
-  (let* ((vertex-count (spv:uint payload-site))
-         (primitive-count (spv:uint 1.0)))
-    (spv:set-mesh-output-counts vertex-count primitive-count)
+  (let* ((vertex-count (shader:uint payload-site))
+         (primitive-count (shader:uint 1.0)))
+    (shader:set-mesh-output-counts vertex-count primitive-count)
     (when (< lane vertex-count)
-      (spv:set-mesh-vertex
+      (shader:set-mesh-vertex
        lane
-       (position (spv:payload-element payload-position lane))
-       (uv (spv:vec2 0.0 0.0))))
-    (when (= lane (spv:uint 0.0))
-      (spv:set-mesh-primitive
-       (spv:uint 0.0)
-       (spv:uvec3 (spv:uint 0.0)
-                  (spv:uint 1.0)
-                  (spv:uint 2.0))
-       (primitive-color (spv:vec4 1.0 1.0 1.0 1.0))))))
+       (position (shader:payload-element payload-position lane))
+       (uv (shader:vec2 0.0 0.0))))
+    (when (= lane (shader:uint 0.0))
+      (shader:set-mesh-primitive
+       (shader:uint 0.0)
+       (shader:uvec3 (shader:uint 0.0)
+                  (shader:uint 1.0)
+                  (shader:uint 2.0))
+       (primitive-color (shader:vec4 1.0 1.0 1.0 1.0))))))
 
-(spv:define-shader msl-mesh-fragment-probe
+(shader:define-shader msl-mesh-fragment-probe
     (:stage :fragment
      :outputs ((color :vec4 :location 0)))
-  (spv:set-output color (spv:vec4 0.25 0.5 0.75 1.0)))
+  (shader:set-output color (shader:vec4 0.25 0.5 0.75 1.0)))
 
 (defun msl-binding-named (name specification)
-  (find name (spv:shader-specification-bindings specification)
-        :key #'spv:shader-object-name
+  (find name (shader:shader-specification-bindings specification)
+        :key #'shader:shader-object-name
         :test (lambda (left right)
                 (string-equal (symbol-name left) (symbol-name right)))))
 
@@ -141,28 +141,28 @@
 (deftest task-and-mesh-specifications-retain-their-workgroup-contracts
   (let* ((task (msl-task-probe))
          (mesh (msl-mesh-probe))
-         (payload (spv:shader-specification-task-payload task))
-         (mesh-output (spv:shader-specification-mesh-output mesh)))
-    (ok (equal '(32 1 1) (spv:shader-specification-workgroup-size task)))
-    (ok (eq payload (spv:shader-specification-task-payload mesh)))
-    (ok (= 2 (length (spv:shader-task-payload-fields payload))))
+         (payload (shader:shader-specification-task-payload task))
+         (mesh-output (shader:shader-specification-mesh-output mesh)))
+    (ok (equal '(32 1 1) (shader:shader-specification-workgroup-size task)))
+    (ok (eq payload (shader:shader-specification-task-payload mesh)))
+    (ok (= 2 (length (shader:shader-task-payload-fields payload))))
     (ok (= 32
-           (spv:shader-task-payload-field-element-count
-            (second (spv:shader-task-payload-fields payload)))))
-    (ok (eq :triangles (spv:shader-mesh-output-topology mesh-output)))
-    (ok (= 32 (spv:shader-mesh-output-max-vertices mesh-output)))
-    (ok (= 16 (spv:shader-mesh-output-max-primitives mesh-output)))
-    (ok (typep (first (spv:shader-specification-statements mesh))
-               'spv:shader-mesh-output-counts))))
+           (shader:shader-task-payload-field-element-count
+            (second (shader:shader-task-payload-fields payload)))))
+    (ok (eq :triangles (shader:shader-mesh-output-topology mesh-output)))
+    (ok (= 32 (shader:shader-mesh-output-max-vertices mesh-output)))
+    (ok (= 16 (shader:shader-mesh-output-max-primitives mesh-output)))
+    (ok (typep (first (shader:shader-specification-statements mesh))
+               'shader:shader-mesh-output-counts))))
 
 (deftest task-and-mesh-effects-enforce-stage-and-collective-legality
   (flet ((failure-reason (name options body)
            (handler-case
                (progn
-                 (spv:parse-shader-specification name options body)
+                 (shader:parse-shader-specification name options body)
                  nil)
-             (spv:shader-language-error (condition)
-               (spv:shader-language-error-reason condition)))))
+             (shader:shader-language-error (condition)
+               (shader:shader-language-error-reason condition)))))
     (ok (eq :mesh-output-counts-not-uniform
             (failure-reason
              'varying-mesh-counts
@@ -173,15 +173,15 @@
                (:topology :triangles
                 :max-vertices 32 :max-primitives 16
                 :vertex ((position :vec4 :built-in :position))))
-             '((let* ((one (spv:uint 1.0)))
-                 (spv:set-mesh-output-counts lane one)
-                 (spv:set-mesh-vertex
-                  lane (position (spv:vec4 0.0 0.0 0.0 1.0)))
-                 (spv:set-mesh-primitive
-                  (spv:uint 0.0)
-                  (spv:uvec3 (spv:uint 0.0)
-                             (spv:uint 0.0)
-                             (spv:uint 0.0))))))))
+             '((let* ((one (shader:uint 1.0)))
+                 (shader:set-mesh-output-counts lane one)
+                 (shader:set-mesh-vertex
+                  lane (position (shader:vec4 0.0 0.0 0.0 1.0)))
+                 (shader:set-mesh-primitive
+                  (shader:uint 0.0)
+                  (shader:uvec3 (shader:uint 0.0)
+                             (shader:uint 0.0)
+                             (shader:uint 0.0))))))))
     (ok (eq :mesh-workgroups-emission-must-be-last
             (failure-reason
              'nonterminal-task-emission
@@ -189,17 +189,17 @@
                :workgroup-size (1 1 1)
                :payload msl-task-mesh-payload
                :inputs ((lane :uint :built-in :local-invocation-index)))
-             '((let* ((one (spv:uint 1.0)))
-                 (spv:emit-mesh-workgroups (spv:uvec3 one one one))
-                 (spv:set-payload payload-site (spv:uint64 one)))))))
+             '((let* ((one (shader:uint 1.0)))
+                 (shader:emit-mesh-workgroups (shader:uvec3 one one one))
+                 (shader:set-payload payload-site (shader:uint64 one)))))))
     (ok (eq :invalid-statement-for-stage
             (failure-reason
              'task-vertex-write
              '(:stage :task
                :workgroup-size (1 1 1)
                :inputs ((lane :uint :built-in :local-invocation-index)))
-             '((spv:set-mesh-vertex
-                lane (position (spv:vec4 0.0 0.0 0.0 1.0)))))))
+             '((shader:set-mesh-vertex
+                lane (position (shader:vec4 0.0 0.0 0.0 1.0)))))))
     (ok (eq :mesh-output-count-exceeds-limit
             (failure-reason
              'oversized-mesh-count
@@ -210,16 +210,16 @@
                (:topology :triangles
                 :max-vertices 32 :max-primitives 16
                 :vertex ((position :vec4 :built-in :position))))
-             '((let* ((vertices (spv:uint 33.0))
-                      (primitives (spv:uint 1.0)))
-                 (spv:set-mesh-output-counts vertices primitives)
-                 (spv:set-mesh-vertex
-                  lane (position (spv:vec4 0.0 0.0 0.0 1.0)))
-                 (spv:set-mesh-primitive
-                  (spv:uint 0.0)
-                  (spv:uvec3 (spv:uint 0.0)
-                             (spv:uint 0.0)
-                             (spv:uint 0.0))))))))
+             '((let* ((vertices (shader:uint 33.0))
+                      (primitives (shader:uint 1.0)))
+                 (shader:set-mesh-output-counts vertices primitives)
+                 (shader:set-mesh-vertex
+                  lane (position (shader:vec4 0.0 0.0 0.0 1.0)))
+                 (shader:set-mesh-primitive
+                  (shader:uint 0.0)
+                  (shader:uvec3 (shader:uint 0.0)
+                             (shader:uint 0.0)
+                             (shader:uint 0.0))))))))
     (ok (eq :payload-index-out-of-bounds
             (failure-reason
              'payload-overrun
@@ -227,12 +227,12 @@
                :workgroup-size (1 1 1)
                :payload msl-task-mesh-payload
                :inputs ((lane :uint :built-in :local-invocation-index)))
-             '((let* ((one (spv:uint 1.0)))
-                 (spv:set-payload-element
-                  payload-position (spv:uint 32.0)
-                  (spv:vec4 0.0 0.0 0.0 1.0))
-                 (spv:emit-mesh-workgroups
-                  (spv:uvec3 one one one)))))))))
+             '((let* ((one (shader:uint 1.0)))
+                 (shader:set-payload-element
+                  payload-position (shader:uint 32.0)
+                  (shader:vec4 0.0 0.0 0.0 1.0))
+                 (shader:emit-mesh-workgroups
+                  (shader:uvec3 one one one)))))))))
 
 (deftest task-and-mesh-lower-to-metal-object-and-mesh-entry-points
   (let ((task-source
@@ -292,7 +292,7 @@
          (document (msl:compile-msl specification))
          (source (msl:msl-document-source document))
          (binding (msl-binding-named 'shadow-projection specification))
-         (expression (spv:shader-binding-expression binding)))
+         (expression (shader:shader-binding-expression binding)))
     (ok (search "vertex BlockWorldVertexSpecificationOutput" source))
     (ok (search "float3 shadow_projection =" source))
     (ok (search "dot(frame_state.shadow_row_x, float4(stage_in.world_position, 1.0f))"
@@ -317,14 +317,14 @@
          (spir-v-after (spv:assemble-shader-specification specification)))
     (ok (string= first second))
     (ok (equalp spir-v-before spir-v-after))
-    (ok (typep (spv:lower-shader-specification :spir-v specification)
+    (ok (typep (shader:lower-shader-specification :spir-v specification)
                'spv:shader-lowering))))
 
 (deftest msl-occurrences-retain-expression-provenance
   (let* ((specification (shaders:block-world-fragment-specification))
          (document (msl:compile-msl specification))
          (binding (msl-binding-named 'reflected specification))
-         (expression (spv:shader-binding-expression binding))
+         (expression (shader:shader-binding-expression binding))
          (occurrences
            (gethash expression
                     (msl:msl-document-expression-occurrences document))))
@@ -343,7 +343,7 @@
   (let* ((specification (shaders:block-world-vertex-specification))
          (document (msl:compile-msl specification))
          (source (msl:msl-document-source document))
-         (input (first (spv:shader-specification-inputs specification)))
+         (input (first (shader:shader-specification-inputs specification)))
          (input-structure (first (msl:msl-document-declarations document)))
          (field
            (msl-named "world_position"
@@ -351,7 +351,7 @@
                       #'msl:msl-field-name))
          (binding (msl-binding-named 'view-z specification))
          (output
-           (first (spv:shader-specification-statements specification)))
+           (first (shader:shader-specification-statements specification)))
          (statement
            (msl-named
             "view_z"
@@ -385,9 +385,9 @@
          (source (msl:msl-document-source document))
          (resource
            (find "BLOCK-ATLAS"
-                 (spv:shader-specification-resources specification)
+                 (shader:shader-specification-resources specification)
                  :key (lambda (resource)
-                        (symbol-name (spv:shader-object-name resource)))
+                        (symbol-name (shader:shader-object-name resource)))
                  :test #'string=))
          (parameter
            (msl-named
@@ -403,7 +403,7 @@
   (ok (equal
        (mapcar #'symbol-name
                (closer-mop:generic-function-argument-precedence-order
-                #'spv:lower-shader-call))
+                #'shader:lower-shader-call))
        '("CONTEXT" "OPERATOR" "EXPRESSION"))))
 
 (deftest slug-proof-lowers-to-direct-metal-pixel-mathematics
@@ -447,13 +447,13 @@
 
 (deftest counted-fold-lowers-to-a-direct-metal-loop
   (let* ((specification
-           (spv:parse-shader-specification
+           (shader:parse-shader-specification
             'metal-fold-probe
             '(:stage :fragment
               :inputs ((count :float :location 0))
               :outputs ((result :float :location 0)))
-            '((spv:set-output result
-                              (spv:counted-fold
+            '((shader:set-output result
+                              (shader:counted-fold
                                   (index count sum 0.0)
                                 (+ sum index))))))
          (source
@@ -465,14 +465,14 @@
 
 (deftest shared-conditionals-lower-inside-direct-metal-folds
   (let* ((specification
-           (spv:parse-shader-specification
+           (shader:parse-shader-specification
             'metal-conditional-fold-probe
             '(:stage :fragment
               :inputs ((count :float :location 0)
                        (limit :float :location 1))
               :outputs ((result :float :location 0)))
-            '((spv:set-output result
-                              (spv:counted-fold
+            '((shader:set-output result
+                              (shader:counted-fold
                                   (index count sum 0.0)
                                 (if (< index limit)
                                     (+ sum index)
@@ -486,20 +486,20 @@
   (flet ((reason-for (specification)
            (handler-case
                (progn (msl:compile-msl specification) nil)
-             (spv:shader-language-error (condition)
-               (spv:shader-language-error-reason condition)))))
+             (shader:shader-language-error (condition)
+               (shader:shader-language-error-reason condition)))))
     (let ((compute
-            (spv:parse-shader-specification
+            (shader:parse-shader-specification
              'compute-probe
              '(:stage :compute :outputs ((value :float :location 0)))
-             '((spv:set-output value 1.0))))
+             '((shader:set-output value 1.0))))
           (descriptor-set
-            (spv:parse-shader-specification
+            (shader:parse-shader-specification
              'descriptor-set-probe
              '(:stage :fragment
                :outputs ((value :float :location 0))
                :resources ((image :texture-2d :set 1 :binding 0)))
-             '((spv:set-output value 1.0)))))
+             '((shader:set-output value 1.0)))))
       (ok (eq :unsupported-msl-stage (reason-for compute)))
       (ok (eq :unsupported-msl-descriptor-set
               (reason-for descriptor-set))))))

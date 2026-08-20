@@ -37,6 +37,35 @@
                    (:file "vec3-package")
                    (:file "vec3")))))))
 
+(defsystem "luv/shader"
+  :description "The backend-neutral typed shader language and lowering protocols."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("closer-mop" "luv/arithmetic")
+  :serial t
+  :components ((:file "hal/shader/package")
+               (:file "hal/shader/language")))
+
+(defsystem "luv/spir-v"
+  :description "Literal SPIR-V modules and lowering for luv's shader language."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("cffi" "closer-mop" "luv/shader")
+  :serial t
+  :components ((:file "hal/vulkan/spir-v/package")
+               (:file "hal/vulkan/spir-v/instructions")
+               (:file "hal/vulkan/spir-v/module")
+               (:file "hal/vulkan/spir-v/lowering")))
+
+(defsystem "luv/msl"
+  :description "Structured Metal Shading Language lowering for luv's shader graph."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luv/shader")
+  :serial t
+  :components ((:file "hal/metal/msl/package")
+               (:file "hal/metal/msl/lowering")))
+
 (defsystem "luv/objective-c"
   :description "A declared Objective-C foreign object system with opt-in tracing."
   :version "0.0.1"
@@ -185,6 +214,9 @@ offsets and of headers."
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on ("luv/arithmetic"
+               "luv/shader"
+               "luv/spir-v"
+               "luv/msl"
                (:feature :darwin "luv/objective-c")
                "cffi"
                "closer-mop"
@@ -213,16 +245,10 @@ offsets and of headers."
       :components
       ((:file "ffi")
        (:file "abi")
-       (:file "native")
-       (:module "spir-v"
-        :serial t
-        :components ((:file "package")
-                     (:file "instructions")
-                     (:file "module")))))
+       (:file "native")))
      (:module "shader"
       :serial t
-      :components ((:file "language")
-                   (:file "analytic-package")
+      :components ((:file "analytic-package")
                    (:file "analytic")
                    (:file "slug-package")
                    (:file "slug-outline")
@@ -232,11 +258,6 @@ offsets and of headers."
                    (:file "slug-cache")
                    (:file "slug")
                    (:file "lattice")))
-     (:module "msl"
-      :pathname "metal/msl"
-      :serial t
-      :components ((:file "package")
-                   (:file "lowering")))
      (:module "sdl"
       :serial t
       :components ((:file "canvas")
@@ -283,6 +304,7 @@ offsets and of headers."
    (:file "arithmetic/language/tests")
    (:file "arithmetic/lisp/tests")
    (:file "objective-c/tests" :if-feature :darwin)
+   (:file "hal/gpu-tests")
    (:file "hal/vulkan/tests")
    (:file "parinfer/tests"))
   :perform (test-op (operation component)

@@ -307,7 +307,7 @@ CLASS's business."
 ;;; whose place needs no session can stand in a shader, since the shader is
 ;;; parsed with none.
 
-(defmethod luv.spir-v:shader-source-value ((name symbol))
+(defmethod luv.shader:shader-source-value ((name symbol))
   (let ((knob (find-knob name)))
     (if (and knob (typep knob 'scalar-knob))
         (values (knob-value knob nil) (knob-declaration knob) t)

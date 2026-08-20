@@ -1,5 +1,6 @@
 (defpackage #:mcluv.tests
-  (:use #:cl #:rove))
+  (:use #:cl #:rove)
+  (:local-nicknames (#:shader #:luv.shader)))
 
 (in-package #:mcluv.tests)
 
@@ -229,7 +230,7 @@
                   (mcluv::spinning-texture-fragment-specification)
                   (mcluv::lisp-machine-chassis-vertex-specification)
                   (mcluv::lisp-machine-chassis-fragment-specification)))
-    (ok (typep specification 'spv:shader-specification))
+    (ok (typep specification 'shader:shader-specification))
     (ok (> (length (spv:assemble-shader-specification specification)) 5))
     (ok (search "using namespace metal"
                 (luv.msl:msl-document-source

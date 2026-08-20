@@ -82,18 +82,21 @@ which make the plan durable.
 :ID: SK9INV
 :END:
 
-- [[file:../hal/shader/language.lisp][=hal/shader/language.lisp=]] is already an open compiler.  Operators are symbols,
-  and parsing, typing, lowering, result naming, and documentation are
-  EQL-specialized generic functions.  A new operator should be a cohesive
-  method cluster, not another central dispatch table.
+- [[file:../hal/shader/language.lisp][=hal/shader/language.lisp=]] is already an open shared frontend.  Operators are
+  symbols, and parsing, typing, result naming, and documentation are
+  EQL-specialized generic functions.  The =lower-shader-call= protocol is
+  shared while SPIR-V and MSL own sibling methods and result products.  A new
+  operator should be a cohesive method cluster, not another central dispatch
+  table.
 - The expression language has floats, =vec2..4=, arithmetic, =dot=, =mix=,
   =swizzle=, texture sampling, and the first GLSL extended-math family:
   =min=, =max=, =clamp=, =smoothstep=, =abs=, =sqrt=, =expt=, and
   =normalize=.  A small shadow-ready follow-up added =step=, a typed
   =:depth-texture-2d= resource, and depth-image sampling that feeds ordinary
-  scalar math through =swizzle=.  It still has no branching, loops, matrices,
-  boolean values, or general uniform packing.  Uniform blocks intentionally
-  consist only of aligned vec4 lanes.
+  scalar math through =swizzle=.  It now has expression conditionals and
+  bounded counted folds, but no general loops, matrices, first-class boolean
+  values, or general uniform packing.  Uniform blocks intentionally consist
+  only of aligned vec4 lanes.
 - [[file:../hal/vulkan/spir-v/instructions.lisp][=hal/vulkan/spir-v/instructions.lisp=]] now models =OpExtInstImport= and =OpExtInst= as structured
   module sections in logical-layout order.  Lowering requests =GLSL.std.450=
   once per module when needed, while modules with no extended math acquire no
@@ -344,27 +347,29 @@ source can provide sky-column knowledge or retain =:unknown= until the upper
 stack is known.  That source protocol, rather than a hardcoded chunk Y=0 test,
 is the growth seam.
 
-* The solver: reference truth plus incremental runtime work
+* The solver: explicit reference truth plus one runtime implementation
 :PROPERTIES:
 :ID: SKRELT
 :END:
 
-Implement two algorithms with the same semantics.
+Maintain two roles with the same semantics but deliberately different loader
+and dispatch status.
 
 1. A *from-scratch reference relight* clears a finite captured region, seeds
    known sky boundaries and emitters, imports explicit boundary values, and
-   propagates to fixation.  It favors obvious correctness and is used by tests,
-   inspections, and recovery.
+   propagates to fixation.  It favors obvious correctness and is loaded only
+   by the explicit =luvcraft/light-reference= test/reference system.
 2. The *runtime relighter* maintains removal and addition queues.  Content
    changes first recompute direct-sky seeds for affected columns.  Decreased or
    invalidated values enter the removal queue; surviving sources and alternate
    paths enter the addition queue.  The same mechanism crosses resident chunk
    faces and works for both edits and residency transitions.
 
-The old 3x3-horizontal recomputation remains a useful test case and perhaps a
-current-world fallback: with a 0..15 attenuating lateral field and one known
-vertical chunk it bounds local influence.  It is not the public correctness
-argument and no caller may assume that shape.
+The old 3x3-horizontal recomputation remains useful historical test evidence,
+not a current-world fallback.  Production dispatch accepts only =:compiled=;
+unknown, misspelled, and retired solver names signal immediately.  The
+reference system can still compare a complete captured world without placing
+the oracle on the operational recovery path.
 
 A =luvcraft-lighting-state= owned by the session records dirty cell/column or
 chunk coordinates, residency-boundary changes, queue counters, and an
@@ -685,6 +690,23 @@ that a SLY eval retunes on the running game without rebuilding a pipeline.
 [[file:images/hdr-day-vista.png]]
 
 [[file:images/hdr-night-crystal.png]]
+
+** The screen centre is the focus plane
+:PROPERTIES:
+:ID: RLXR7B
+:END:
+
+Luvcraft chooses focus from the image itself: the presentation pass samples
+scene depth under the centre of the frame, then smoothly mixes only farther
+fragments toward a nine-tap tent blur.  Near ground and the framed subject
+stay crisp; radial colour dispersion and a gentle vignette give the result
+lens character, while the HUD is drawn afterward and remains untouched.
+
+That convention travels without taking the renderer with it.  LUFT uses the
+same centre-relative rule but carries view distance in scene alpha, omits the
+bloom and shaft attachments, and owns its smaller lens pass independently.
+The shared shader language lets image mathematics cross between the two
+worlds while their resources and lifetimes remain honest.
 
 * A sky worth tone mapping
 :PROPERTIES:
@@ -1510,7 +1532,7 @@ knobs: =surface-detail=, =surface-roughness=, =specular-gain=,
 =sky-scatter-gain=, =star-brightness=, =moon-radiance=, and the grade's
 saturation, contrast, and aberration.
 
-** TODO Rebuild the offscreen attachments when the canvas resizes
+** TODO Verify resized presentation in a live capture
 :PROPERTIES:
 :ID: YMAQQD
 :END:
@@ -1520,15 +1542,20 @@ all created once from the canvas extent at session start.  A resized window
 therefore presents a stale-sized image.  The bug predates the lens chain, but
 the chain multiplies the number of textures which have to agree.
 
-Evidence to gather:
+Evidence: =luvcraft-renderer= now owns one =frame-attachments= cohort containing
+the scene colour, presentation, depth, lens, crosshair, and cursor resources.
+Resize builds and initializes a complete candidate first, discards frame-state
+bindings keyed by the old attachments, publishes the cohort in one slot write,
+then retires the old resources.  Construction failure leaves the old cohort
+installed; retirement failure leaves the new cohort installed and retains the
+failed handle for teardown retry.  Synthetic renderer tests observe only whole
+attachment plists through the session readers and verify live-session migration
+into the same owner.
 
-- what the canvas actually reports and when, on a live resize; and
-- whether frame-state bind groups can be invalidated by extent the way they
-  are already keyed by surface texture.
-
-Done when: a resized window presents a correctly sized frame, the old
-attachments retire through the completion frontier, and a capture after resize
-matches a capture taken at that size from the start.
+The ownership and publication conditions now hold in tests.  The remaining
+evidence is deliberately visual: resize a live game, capture it, and compare it
+with a frame started at that extent.  Until that confirms both presentation
+size and the absence of stale attachments, this mark stays open.
 
 * Decisions now made; questions left to evidence
 :PROPERTIES:

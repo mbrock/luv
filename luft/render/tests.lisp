@@ -170,7 +170,7 @@
     (ok (eq :full mode))
     (ok (eq :stock style))
     (ok (equal '(:flat :bevel :chamfer :paper :stock :field :soft :ink)
-                   pipelines))
+               pipelines))
     (ok (equal '(:sky :lens) effects))
     (ok (eq :vertex technique)))
   ;; A mode of its own selects only its own pipeline, the stock included.

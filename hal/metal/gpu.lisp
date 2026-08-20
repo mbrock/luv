@@ -23,6 +23,8 @@
 (defclass metal-gpu-object ()
   ((native-object :initarg :native-object :reader metal-native-object)
    (destroyed-p :initform nil :accessor metal-object-destroyed-p)
+   (retirement-teardown :initform nil
+                        :accessor metal-object-retirement-teardown)
    (last-submission
     :initform 0
     :accessor metal-object-last-submission
@@ -32,21 +34,47 @@
   ((queue :initform nil :accessor metal-device-queue)
    (compiler :initarg :compiler :reader metal-device-compiler)
    (residency-set :initarg :residency-set
-                  :reader metal-device-residency-set)))
+                  :reader metal-device-residency-set)
+   (retiring-p :initform nil :accessor metal-device-retiring-p)
+   (residency-retired-p
+    :initform nil :accessor metal-device-residency-retired-p)
+   (native-device-retired-p
+    :initform nil :accessor metal-device-native-retired-p)
+   (destroy-admission
+    :initform nil :accessor metal-device-destroy-admission)
+   (destroy-teardown
+    :initform nil :accessor metal-device-destroy-teardown)))
 
 (defstruct metal-submission
-  value command-buffers resources pending-destroys)
+  value command-buffers resources)
 
 (defclass metal-gpu-queue (gpu-queue metal-gpu-object)
   ((device :initarg :device :reader metal-queue-device)
    (completion-event :initarg :completion-event
                      :reader metal-queue-completion-event)
    (submitted-value :initform 0 :accessor metal-queue-submitted-value)
+   (completion-signal-ready-value
+    :initform 0 :accessor metal-queue-completion-signal-ready-value
+    :documentation "Highest committed value whose presentation step finished.")
+   (completion-signal-enqueued-value
+    :initform 0 :accessor metal-queue-completion-signal-enqueued-value
+    :documentation "Highest value successfully enqueued on the shared event.")
    (pending-submissions :initform nil
                         :accessor metal-queue-pending-submissions)
+   (retirement-ledger :initform (make-gpu-retirement-ledger)
+                      :reader metal-queue-retirement-ledger)
    (lock :initform (sb-thread:make-mutex
                     :name "luv Metal submission queue")
          :reader metal-queue-lock)))
+
+(defgeneric metal-admission-closed-p (object)
+  (:method ((object t)) nil))
+
+(defmethod metal-admission-closed-p ((device metal-gpu-device))
+  (metal-device-retiring-p device))
+
+(defmethod metal-admission-closed-p ((queue metal-gpu-queue))
+  (metal-device-retiring-p (metal-queue-device queue)))
 
 (defclass metal-gpu-buffer (gpu-buffer metal-gpu-object)
   ((device :initarg :device :reader metal-buffer-device)
@@ -119,6 +147,8 @@
    (active-pass :initform nil :accessor metal-encoder-active-pass)
    (pending-consumer-barrier
     :initform nil :accessor metal-encoder-pending-consumer-barrier)
+   (retirement-teardown
+    :initform nil :accessor metal-encoder-retirement-teardown)
    (state :initform :recording :accessor metal-encoder-state)
    (encoded-p :initform nil :accessor metal-encoder-encoded-p))
   (:documentation
@@ -150,18 +180,39 @@ The first vertex-stage realization is the executable mechanism described by
 #348B7B; it deliberately has no legacy individual-resource setter path."))
 
 (defun ensure-live-metal-object (object operation)
-  (when (metal-object-destroyed-p object)
+  (when (or (metal-object-destroyed-p object)
+            (metal-admission-closed-p object))
     (error 'gpu-object-destroyed-error :object object :operation operation))
   object)
+
+(defun call-with-live-metal-device-queue (device operation thunk)
+  "Serialize admitted device-native work against DEVICE destruction."
+  (let ((queue (metal-device-queue device)))
+    (if queue
+        (sb-thread:with-recursive-lock ((metal-queue-lock queue))
+          (ensure-live-metal-object device operation)
+          (funcall thunk))
+        (progn
+          (ensure-live-metal-object device operation)
+          (funcall thunk)))))
+
+(defmacro with-live-metal-device-queue ((device operation) &body body)
+  `(call-with-live-metal-device-queue
+    ,device ,operation (lambda () ,@body)))
 
 (defun check-metal-device-descriptor (descriptor)
   (unless (typep descriptor 'device-descriptor)
     (error 'gpu-request-error :operation :request-device
-           :descriptor descriptor :reason :invalid-descriptor))
-  (when (or (device-descriptor-required-features descriptor)
-            (device-descriptor-required-limits descriptor))
+           :descriptor descriptor :reason :invalid-descriptor
+           :details descriptor))
+  (when (device-descriptor-required-features descriptor)
     (error 'gpu-request-error :operation :request-device
-           :descriptor descriptor :reason :unsupported-requirements)))
+           :descriptor descriptor :reason :unsupported-features
+           :details (device-descriptor-required-features descriptor)))
+  (when (device-descriptor-required-limits descriptor)
+    (error 'gpu-request-error :operation :request-device
+           :descriptor descriptor :reason :unsupported-limits
+           :details (device-descriptor-required-limits descriptor))))
 
 (defmethod request-gpu-device
     ((provider metal-gpu-provider) &optional descriptor)
@@ -298,64 +349,198 @@ The first vertex-stage realization is the executable mechanism described by
         (when allocator
           (luv.objective-c:release-objective-c-object allocator))))))
 
+(declaim (ftype (function (t t t t) t)
+                make-metal-finished-command-buffer))
+
 (defmethod finish ((encoder metal-gpu-command-encoder))
   "End recording and transfer native memory and dependencies to one-shot work."
-  (ensure-metal-command-encoder-state encoder :finish)
-  (ensure-no-active-metal-pass encoder :finish)
-  (let ((command-buffer (metal-encoder-command-buffer encoder))
-        (allocator (metal-encoder-allocator encoder)))
-    (luv.metal:end-command-buffer command-buffer)
-    (setf (metal-encoder-state encoder) :finished
-          (metal-encoder-command-buffer encoder) nil
-          (metal-encoder-allocator encoder) nil)
-    (make-instance
-     'metal-gpu-command-buffer
-     :label (gpu-object-label encoder)
-     :native-object command-buffer :allocator allocator
-     :device (metal-command-encoder-device encoder)
-     :resources (metal-encoder-resource-list encoder))))
+  (unless (member (metal-encoder-state encoder) '(:recording :ended))
+    (error 'gpu-invalid-state-error
+           :object encoder :operation :finish
+           :state (metal-encoder-state encoder)
+           :expected-state :recording-or-ended))
+  (when (eq :recording (metal-encoder-state encoder))
+    (ensure-no-active-metal-pass encoder :finish))
+  (let* ((device (metal-command-encoder-device encoder))
+         (queue (metal-device-queue device)))
+    (flet ((finish-under-lock ()
+             (ensure-live-metal-object device :finish)
+             (unless (member (metal-encoder-state encoder)
+                             '(:recording :ended))
+               (error 'gpu-invalid-state-error
+                      :object encoder :operation :finish
+                      :state (metal-encoder-state encoder)
+                      :expected-state :recording-or-ended))
+             (when (eq :recording (metal-encoder-state encoder))
+               (ensure-no-active-metal-pass encoder :finish))
+             (let ((command-buffer (metal-encoder-command-buffer encoder))
+                   (allocator (metal-encoder-allocator encoder)))
+               (when (eq :recording (metal-encoder-state encoder))
+                 (luv.metal:end-command-buffer command-buffer)
+                 ;; Retain explicit encoder ownership until wrapper publication.
+                 (setf (metal-encoder-state encoder) :ended))
+               (let ((wrapper
+                       (make-metal-finished-command-buffer
+                        encoder device command-buffer allocator)))
+                 (setf (metal-encoder-state encoder) :finished
+                       (metal-encoder-command-buffer encoder) nil
+                       (metal-encoder-allocator encoder) nil)
+                 wrapper))))
+      (if queue
+          (sb-thread:with-recursive-lock ((metal-queue-lock queue))
+            (finish-under-lock))
+          (finish-under-lock)))))
 
-(defgeneric destroy-metal-native (object)
+(defun make-metal-finished-command-buffer
+    (encoder device command-buffer allocator)
+  "Publish ENCODER's ended native ownership as one command-buffer wrapper."
+  (make-instance
+   'metal-gpu-command-buffer
+   :label (gpu-object-label encoder)
+   :native-object command-buffer :allocator allocator
+   :device device :resources (metal-encoder-resource-list encoder)))
+
+(defgeneric metal-native-teardown-closure (object)
   (:documentation
-   "Release OBJECT's native Metal ownership after its last use is complete."))
+   "Return OBJECT's persistent, progress-tracked native teardown closure."))
+
+(defun flush-metal-queue-completion-signal (queue)
+  "Enqueue QUEUE's newest ready shared-event signal, retaining it on failure."
+  (sb-thread:with-recursive-lock ((metal-queue-lock queue))
+    (let ((ready (metal-queue-completion-signal-ready-value queue))
+          (enqueued (metal-queue-completion-signal-enqueued-value queue)))
+      (when (> ready enqueued)
+        ;; Re-enqueuing the same monotonic value is safe if the Objective-C
+        ;; wrapper returned nonlocally after the native message took effect.
+        (luv.metal:signal-metal-event
+         (metal-native-object queue)
+         (metal-queue-completion-event queue) ready)
+        (setf (metal-queue-completion-signal-enqueued-value queue) ready)
+        t))))
 
 (defun metal-queue-completed-frontier (queue)
   (luv.metal:metal-shared-event-signaled-value
    (metal-queue-completion-event queue)))
 
+(defun metal-retirement-custodian-quiescent-p (queue)
+  "Whether QUEUE owns no signal, submitted, or native-retirement obligation."
+  (let ((ledger (metal-queue-retirement-ledger queue)))
+    (and (<= (metal-queue-completion-signal-ready-value queue)
+             (metal-queue-completion-signal-enqueued-value queue))
+         (null (metal-queue-pending-submissions queue))
+         (null (gpu-retirement-ledger-active-batch ledger))
+         (null (gpu-retirement-ledger-entries ledger)))))
+
+(defun maybe-release-metal-retirement-custodian (queue)
+  "Unroot QUEUE only after backend quiescence was proved under its lock."
+  (when (metal-retirement-custodian-quiescent-p queue)
+    (release-gpu-retirement-ledger-custodian
+     (metal-queue-retirement-ledger queue) queue)
+    t))
+
 (defun maintain-metal-queue (queue)
-  "Retire the completed submission prefix and its deferred native releases."
+  "Retire completed submissions and every now-eligible native ownership."
   (sb-thread:with-recursive-lock ((metal-queue-lock queue))
+    (flush-metal-queue-completion-signal queue)
     (let ((frontier (metal-queue-completed-frontier queue)))
       (loop while (and (metal-queue-pending-submissions queue)
                        (<= (metal-submission-value
-                            (first (metal-queue-pending-submissions queue)))
+                           (first (metal-queue-pending-submissions queue)))
                            frontier))
-            do (let ((submission
-                       (pop (metal-queue-pending-submissions queue))))
-                 (dolist (resource
-                          (metal-submission-pending-destroys submission))
-                   (destroy-metal-native resource))))
+            do (pop (metal-queue-pending-submissions queue)))
+      (maintain-gpu-retirement-ledger
+       (metal-queue-retirement-ledger queue) frontier
+       :operation :maintain-metal-queue)
+      (maybe-release-metal-retirement-custodian queue)
       frontier)))
 
-(defun metal-destroy-or-defer (resource device)
-  "Release RESOURCE now or attach its native teardown to its last submission."
-  (let ((queue (metal-device-queue device))
-        (last-use (metal-object-last-submission resource)))
-    (if (or (null queue)
-            (metal-object-destroyed-p device)
-            (zerop last-use))
-        (destroy-metal-native resource)
-        (sb-thread:with-recursive-lock ((metal-queue-lock queue))
-          (let ((submission
-                  (and (> last-use (metal-queue-completed-frontier queue))
-                       (find last-use (metal-queue-pending-submissions queue)
-                             :key #'metal-submission-value))))
-            (if submission
-                (pushnew resource
-                         (metal-submission-pending-destroys submission)
-                         :test #'eq)
-                (destroy-metal-native resource))))))
+(defmethod service-gpu-retirement-custodian ((queue metal-gpu-queue))
+  "Service QUEUE from the process custodian registry without caller access."
+  (sb-thread:with-recursive-lock ((metal-queue-lock queue))
+    (let* ((device (metal-queue-device queue))
+           (ledger (metal-queue-retirement-ledger queue))
+           (before (+ (length (metal-queue-pending-submissions queue))
+                      (if (> (metal-queue-completion-signal-ready-value queue)
+                             (metal-queue-completion-signal-enqueued-value queue))
+                          1 0)
+                      (length (gpu-retirement-ledger-active-batch ledger))
+                      (length (gpu-retirement-ledger-entries ledger)))))
+      (cond
+        ((or (metal-object-destroyed-p queue)
+             (metal-object-destroyed-p device)
+             (metal-device-retiring-p device)
+             (metal-device-native-retired-p device))
+         ;; Never message a retiring/released MTLDevice or its event.  Device
+         ;; teardown has already enforced this queue's complete barrier.
+         (maybe-release-metal-retirement-custodian queue))
+        (t
+         (maintain-metal-queue queue)
+         (let ((after
+                 (+ (length (metal-queue-pending-submissions queue))
+                    (if (> (metal-queue-completion-signal-ready-value queue)
+                           (metal-queue-completion-signal-enqueued-value queue))
+                        1 0)
+                    (length (gpu-retirement-ledger-active-batch ledger))
+                    (length (gpu-retirement-ledger-entries ledger)))))
+           (or (< after before)
+               (zerop after))))))))
+
+(defun live-metal-retirement-queue-p (queue device)
+  (and queue
+       (eq queue (metal-device-queue device))
+       (not (metal-object-destroyed-p device))
+       (not (metal-device-retiring-p device))
+       (not (metal-device-native-retired-p device))
+       (not (metal-object-destroyed-p queue))))
+
+(defun retire-metal-native-owner
+    (resource device ready-after teardown invalidate operation)
+  "Transfer one native owner after revalidating its queue under the lock."
+  (labels ((retire-directly (&optional queue-snapshot)
+             (perform-gpu-retirement-directly
+              resource
+              (lambda ()
+                (unless (or (metal-object-destroyed-p device)
+                            (metal-device-native-retired-p device))
+                  (when (and queue-snapshot
+                             (or (not (eq queue-snapshot
+                                          (metal-device-queue device)))
+                                 (metal-object-destroyed-p queue-snapshot)))
+                    (error "The Metal retirement queue is no longer live.")))
+                (funcall teardown))
+              invalidate
+              :operation operation)))
+    (let ((queue (metal-device-queue device)))
+      (if queue
+          (sb-thread:with-recursive-lock ((metal-queue-lock queue))
+            (if (live-metal-retirement-queue-p queue device)
+                (progn
+                  (transfer-gpu-retirement
+                   (metal-queue-retirement-ledger queue)
+                   resource ready-after teardown invalidate queue)
+                  (maintain-metal-queue queue))
+                (retire-directly queue)))
+          (retire-directly))))
+  (values))
+
+(defmethod retire-gpu-native-owner
+    ((device metal-gpu-device) owner teardown invalidate)
+  (retire-metal-native-owner
+   owner device 0 teardown invalidate :retire-gpu-native-owner))
+
+(defun metal-destroy-or-defer (resource device &optional extra-invalidation)
+  "Transfer RESOURCE's native ownership before logically invalidating it."
+  (flet ((invalidate ()
+           (setf (metal-object-destroyed-p resource) t)
+           (when extra-invalidation
+             (funcall extra-invalidation))))
+    (let ((teardown
+            (or (metal-object-retirement-teardown resource)
+                (setf (metal-object-retirement-teardown resource)
+                      (metal-native-teardown-closure resource)))))
+      (retire-metal-native-owner
+       resource device (metal-object-last-submission resource)
+       teardown #'invalidate :destroy-metal-resource)))
   (values))
 
 (defun check-metal-command-buffer-for-submit (queue command-buffer)
@@ -387,16 +572,17 @@ The first vertex-stage realization is the executable mechanism described by
 (defmethod submitted-work-done ((queue metal-gpu-queue))
   "Wait for the Metal 4 shared-event frontier most recently submitted."
   (ensure-live-metal-object queue :submitted-work-done)
-  (let ((value
-          (sb-thread:with-recursive-lock ((metal-queue-lock queue))
-            (metal-queue-submitted-value queue))))
-    (when (plusp value)
-      (unless (plusp
-               (luv.metal:wait-for-metal-shared-event
-                (metal-queue-completion-event queue) value 30000))
-        (error 'metal-gpu-error :operation :submitted-work-done
-               :reason :completion-timeout :details value))))
-  (maintain-metal-queue queue)
+  (sb-thread:with-recursive-lock ((metal-queue-lock queue))
+    (ensure-live-metal-object queue :submitted-work-done)
+    (flush-metal-queue-completion-signal queue)
+    (let ((value (metal-queue-submitted-value queue)))
+      (when (plusp value)
+        (unless (plusp
+                 (luv.metal:wait-for-metal-shared-event
+                  (metal-queue-completion-event queue) value 30000))
+          (error 'metal-gpu-error :operation :submitted-work-done
+                 :reason :completion-timeout :details value))))
+    (maintain-metal-queue queue))
   (values))
 
 (defun submit-metal-command-buffers
@@ -413,6 +599,9 @@ backend-local extension; ordinary callers use SUBMIT.  #T9K4RC"
   (when (zerop (length command-buffers))
     (return-from submit-metal-command-buffers nil))
   (sb-thread:with-recursive-lock ((metal-queue-lock queue))
+    ;; Device teardown closes admission under this lock.  Recheck after any
+    ;; wait to make this the authoritative gate before maintenance and FFI.
+    (ensure-live-metal-object queue :submit)
     (maintain-metal-queue queue)
     (loop for command-buffer across command-buffers
           do (check-metal-command-buffer-for-submit queue command-buffer))
@@ -434,44 +623,77 @@ backend-local extension; ordinary callers use SUBMIT.  #T9K4RC"
                             :value value
                             :command-buffers command-buffers
                             :resources resources))))
+        (retain-gpu-retirement-ledger-custodian
+         (metal-queue-retirement-ledger queue) queue)
         (unwind-protect
              (when after-commit
                (funcall after-commit))
-          (luv.metal:signal-metal-event
-           (metal-native-object queue)
-           (metal-queue-completion-event queue) value))
+          ;; Presentation must be ordered before completion, but failure to
+          ;; enqueue that completion is now a rooted retryable queue obligation.
+          (setf (metal-queue-completion-signal-ready-value queue)
+                (max value
+                     (metal-queue-completion-signal-ready-value queue)))
+          (flush-metal-queue-completion-signal queue))
         value))))
 
 (defmethod destroy ((encoder metal-gpu-command-encoder))
-  (when (eq :recording (metal-encoder-state encoder))
-    (when (metal-encoder-active-pass encoder)
-      (ignore-errors (end-pass (metal-encoder-active-pass encoder))))
-    (when (metal-encoder-command-buffer encoder)
-      (ignore-errors
-        (luv.metal:end-command-buffer (metal-encoder-command-buffer encoder)))
-      (luv.objective-c:release-objective-c-object
-       (metal-encoder-command-buffer encoder)))
-    (when (metal-encoder-allocator encoder)
-      (luv.objective-c:release-objective-c-object
-       (metal-encoder-allocator encoder)))
-    (setf (metal-encoder-command-buffer encoder) nil
-          (metal-encoder-allocator encoder) nil))
-  (setf (metal-encoder-state encoder) :destroyed)
+  (when (member (metal-encoder-state encoder) '(:recording :ended))
+    (when (and (eq :recording (metal-encoder-state encoder))
+               (metal-encoder-active-pass encoder))
+      (end-pass (metal-encoder-active-pass encoder)))
+    (let ((device (metal-command-encoder-device encoder))
+          (command-buffer (metal-encoder-command-buffer encoder))
+          (allocator (metal-encoder-allocator encoder))
+          (ended-p (eq :ended (metal-encoder-state encoder))))
+      (flet ((invalidate ()
+               (setf (metal-encoder-command-buffer encoder) nil
+                     (metal-encoder-allocator encoder) nil
+                     (metal-encoder-state encoder) :destroyed)))
+        (let ((teardown
+                (or (metal-encoder-retirement-teardown encoder)
+                    (setf
+                     (metal-encoder-retirement-teardown encoder)
+                     (apply
+                      #'make-gpu-retirement-sequence
+                      (append
+                       (when command-buffer
+                         (append
+                          (unless ended-p
+                            (list
+                             (lambda ()
+                               (luv.metal:end-command-buffer command-buffer))))
+                          (list
+                           (lambda ()
+                             (luv.objective-c:release-objective-c-object
+                              command-buffer)))))
+                       (when allocator
+                         (list
+                          (lambda ()
+                            (luv.objective-c:release-objective-c-object
+                             allocator))))))))))
+          (retire-metal-native-owner
+           encoder device 0 teardown #'invalidate
+           :destroy-metal-command-encoder)))))
+  (unless (eq :destroyed (metal-encoder-state encoder))
+    (setf (metal-encoder-state encoder) :destroyed))
   (values))
 
-(defmethod destroy-metal-native ((command-buffer metal-gpu-command-buffer))
-  (luv.objective-c:release-objective-c-object
-   (metal-native-object command-buffer))
-  (luv.objective-c:release-objective-c-object
-   (metal-command-buffer-allocator command-buffer))
-  (values))
+(defmethod metal-native-teardown-closure
+    ((command-buffer metal-gpu-command-buffer))
+  (let ((native (metal-native-object command-buffer))
+        (allocator (metal-command-buffer-allocator command-buffer)))
+    (make-gpu-retirement-sequence
+     (lambda ()
+       (luv.objective-c:release-objective-c-object native))
+     (lambda ()
+       (luv.objective-c:release-objective-c-object allocator)))))
 
 (defmethod destroy ((command-buffer metal-gpu-command-buffer))
   (unless (metal-object-destroyed-p command-buffer)
-    (setf (metal-object-destroyed-p command-buffer) t
-          (metal-command-buffer-state command-buffer) :destroyed)
     (metal-destroy-or-defer
-     command-buffer (metal-command-buffer-device command-buffer)))
+     command-buffer (metal-command-buffer-device command-buffer)
+     (lambda ()
+       (setf (metal-command-buffer-state command-buffer) :destroyed))))
   (values))
 
 (defmethod submit
@@ -481,53 +703,97 @@ backend-local extension; ordinary callers use SUBMIT.  #T9K4RC"
 (defmethod submit ((queue metal-gpu-queue) (command-buffers vector))
   (submit-metal-command-buffers queue command-buffers))
 
+(defun make-metal-device-destroy-admission (device queue)
+  "Return a persistent completion-and-ledger barrier for DEVICE destruction."
+  (let ((waited-submission nil))
+    (lambda ()
+      (unless (metal-device-retiring-p device)
+        (let ((submission (if queue
+                              (metal-queue-submitted-value queue)
+                              0)))
+          (when queue
+            (flush-metal-queue-completion-signal queue))
+          (unless (eql submission waited-submission)
+            (when (plusp submission)
+              (unless (plusp
+                       (luv.metal:wait-for-metal-shared-event
+                        (metal-queue-completion-event queue)
+                        submission 30000))
+                (error 'metal-gpu-error
+                       :operation :destroy-metal-device
+                       :reason :completion-timeout :details submission)))
+            (setf waited-submission submission))
+          (when queue
+            (maintain-metal-queue queue)
+            (ensure-gpu-retirement-ledger-empty
+             (metal-queue-retirement-ledger queue)
+             :operation :destroy-metal-device))
+          (setf (metal-device-retiring-p device) t))))))
+
+(defun make-metal-device-destroy-teardown (device queue)
+  "Return DEVICE's persistent one-native-call-at-a-time teardown."
+  (apply
+   #'make-gpu-retirement-sequence
+   (append
+    (list
+     (lambda ()
+       (luv.objective-c:release-objective-c-object
+        (metal-device-compiler device))))
+    (when queue
+      (list
+       (lambda ()
+         (luv.metal:remove-metal-queue-residency-set
+          (metal-native-object queue) (metal-device-residency-set device)))
+       (lambda ()
+         (luv.objective-c:release-objective-c-object
+          (metal-queue-completion-event queue)))
+       (lambda ()
+         (luv.objective-c:release-objective-c-object
+          (metal-native-object queue)))))
+    (list
+     (lambda ()
+       (luv.objective-c:release-objective-c-object
+        (metal-device-residency-set device))
+       (setf (metal-device-residency-retired-p device) t))
+     (lambda ()
+       (luv.objective-c:release-objective-c-object
+        (metal-native-object device))
+       (setf (metal-device-native-retired-p device) t))
+     (lambda ()
+       (setf (metal-object-destroyed-p device) t)
+       (when queue
+         (setf (metal-object-destroyed-p queue) t)))))))
+
 (defmethod destroy ((device metal-gpu-device))
   (unless (metal-object-destroyed-p device)
     (let ((queue (metal-device-queue device)))
-      (when (and queue (not (metal-object-destroyed-p queue)))
-        (submitted-work-done queue)))
-    (luv.objective-c:release-objective-c-object
-     (metal-device-compiler device))
-    (let ((queue (metal-device-queue device)))
-      (when (and queue (not (metal-object-destroyed-p queue)))
-        (luv.metal:remove-metal-queue-residency-set
-         (metal-native-object queue) (metal-device-residency-set device))
-        (luv.objective-c:release-objective-c-object
-         (metal-queue-completion-event queue))
-        (luv.objective-c:release-objective-c-object
-         (metal-native-object queue))
-        (setf (metal-object-destroyed-p queue) t)))
-    (luv.objective-c:release-objective-c-object
-     (metal-device-residency-set device))
-    (luv.objective-c:release-objective-c-object (metal-native-object device))
-    (setf (metal-object-destroyed-p device) t))
+      (flet ((tear-down-device ()
+               (funcall
+                (or (metal-device-destroy-admission device)
+                    (setf (metal-device-destroy-admission device)
+                          (make-metal-device-destroy-admission device queue))))
+               (when queue
+                 (ensure-gpu-retirement-ledger-empty
+                  (metal-queue-retirement-ledger queue)
+                  :operation :destroy-metal-device))
+               (funcall
+                (or (metal-device-destroy-teardown device)
+                    (setf (metal-device-destroy-teardown device)
+                          (make-metal-device-destroy-teardown device queue))))))
+        (if queue
+            (sb-thread:with-recursive-lock ((metal-queue-lock queue))
+              (tear-down-device))
+            (tear-down-device)))))
   (values))
-
-(defun normalize-metal-buffer-usage (descriptor)
-  (let* ((raw (buffer-descriptor-usage descriptor))
-         (usage
-           (typecase raw
-             (keyword (list raw))
-             (list (remove-duplicates raw))
-             (vector (remove-duplicates (coerce raw 'list)))
-             (otherwise nil))))
-    (unless (and usage
-                 (every (lambda (value)
-                          (member value '(:uniform :storage :vertex :copy-dst)))
-                        usage))
-      (reject-metal-gpu-request descriptor :unsupported-buffer-usage raw))
-    usage))
 
 (defmethod create
     ((device metal-gpu-device) (descriptor buffer-descriptor))
   "Create one shared Metal buffer and add its allocation to device residency."
   (ensure-live-metal-object device :create-buffer)
-  (let ((size (buffer-descriptor-size descriptor)))
-    (unless (and (typep size '(unsigned-byte 64)) (plusp size))
-      (reject-metal-gpu-request descriptor :invalid-buffer-size size))
-    (let* ((usage (normalize-metal-buffer-usage descriptor))
-           (native-buffer
-             (luv.metal:new-metal-buffer (metal-native-object device) size 0)))
+  (let ((size (buffer-descriptor-size descriptor))
+        (usage (buffer-descriptor-usage descriptor)))
+    (let ((native-buffer
+            (luv.metal:new-metal-buffer (metal-native-object device) size 0)))
       (unless native-buffer
         (error 'metal-gpu-error :operation :create-buffer
                :reason :buffer-creation-failed :details size))
@@ -598,45 +864,24 @@ aligned to the element size."
       (dotimes (index size bytes)
         (setf (aref bytes index) (cffi:mem-aref source :uint8 index))))))
 
-(defmethod destroy-metal-native ((buffer metal-gpu-buffer))
+(defmethod metal-native-teardown-closure ((buffer metal-gpu-buffer))
   (let* ((device (metal-buffer-device buffer))
-         (residency-set (metal-device-residency-set device)))
-    (luv.metal:remove-metal-residency-allocation
-     residency-set (metal-native-object buffer))
-    (luv.metal:commit-metal-residency-set residency-set)
-    (luv.objective-c:release-objective-c-object
-     (metal-native-object buffer)))
-  (values))
+         (residency-set (metal-device-residency-set device))
+         (native (metal-native-object buffer)))
+    (make-gpu-retirement-sequence
+     (lambda ()
+       (unless (metal-device-residency-retired-p device)
+         (luv.metal:remove-metal-residency-allocation residency-set native)))
+     (lambda ()
+       (unless (metal-device-residency-retired-p device)
+         (luv.metal:commit-metal-residency-set residency-set)))
+     (lambda ()
+       (luv.objective-c:release-objective-c-object native)))))
 
 (defmethod destroy ((buffer metal-gpu-buffer))
   (unless (metal-object-destroyed-p buffer)
-    (setf (metal-object-destroyed-p buffer) t)
     (metal-destroy-or-defer buffer (metal-buffer-device buffer)))
   (values))
-
-(defun normalize-metal-texture-size (descriptor)
-  (let ((size (texture-descriptor-size descriptor)))
-    (unless (and (listp size) (= 2 (length size))
-                 (every (lambda (value)
-                          (typep value '(integer 1 *)))
-                        size))
-      (reject-metal-gpu-request descriptor :invalid-texture-size size))
-    size))
-
-(defun normalize-metal-texture-usage (descriptor)
-  (let* ((raw (texture-descriptor-usage descriptor))
-         (usage (typecase raw
-                  (keyword (list raw))
-                  (list (remove-duplicates raw))
-                  (vector (remove-duplicates (coerce raw 'list)))
-                  (otherwise nil))))
-    (unless (and usage
-                 (every (lambda (value)
-                          (member value '(:render-attachment :texture-binding
-                                          :copy-src :copy-dst)))
-                        usage))
-      (reject-metal-gpu-request descriptor :unsupported-texture-usage raw))
-    usage))
 
 (defun metal-resource-pixel-format (format descriptor)
   (case format
@@ -662,23 +907,23 @@ aligned to the element size."
     ((device metal-gpu-device) (descriptor texture-descriptor))
   "Create one resident two-dimensional Metal texture."
   (ensure-live-metal-object device :create-texture)
-  (unless (eq :2d (texture-descriptor-dimensions descriptor))
-    (reject-metal-gpu-request
-     descriptor :unsupported-texture-dimensions
-     (texture-descriptor-dimensions descriptor)))
-  (let* ((size (normalize-metal-texture-size descriptor))
-         (usage (normalize-metal-texture-usage descriptor))
+  (let* ((size (texture-descriptor-size descriptor))
+         (usage (texture-descriptor-usage descriptor))
          (native
-           (luv.metal:new-metal-texture
-            (metal-native-object device) (first size) (second size)
-            (metal-resource-pixel-format
-             (texture-descriptor-format descriptor) descriptor)
-            (metal-native-texture-usage usage)
-            :storage-mode
-            (if (member :copy-dst usage)
-                luv.metal:+storage-mode-shared+
-                luv.metal:+storage-mode-private+)
-            :label (gpu-descriptor-label descriptor))))
+           (progn
+             (when (member :storage-binding usage)
+               (reject-metal-gpu-request
+                descriptor :unsupported-texture-usage :storage-binding))
+             (luv.metal:new-metal-texture
+              (metal-native-object device) (first size) (second size)
+              (metal-resource-pixel-format
+               (texture-descriptor-format descriptor) descriptor)
+              (metal-native-texture-usage usage)
+              :storage-mode
+              (if (member :copy-dst usage)
+                  luv.metal:+storage-mode-shared+
+                  luv.metal:+storage-mode-private+)
+              :label (gpu-descriptor-label descriptor)))))
     (unless native
       (error 'metal-gpu-error :operation :create-texture
              :reason :texture-creation-failed :details descriptor))
@@ -713,36 +958,40 @@ aligned to the element size."
   (ensure-live-metal-object device :adopt-native-texture)
   (unless (and (typep native 'luv.objective-c:objective-c-object) owner)
     (reject-metal-gpu-request descriptor :invalid-native-texture native))
-  (let ((size (normalize-metal-texture-size descriptor))
-        (usage (normalize-metal-texture-usage descriptor))
-        (resident-p nil)
-        (completed-p nil))
-    (unwind-protect
-         (progn
-           ;; Metal 4 does not make an externally created MTLTexture resident
-           ;; merely because an argument table points at it.  CVMetalTexture
-           ;; planes therefore need the same explicit residency membership as
-           ;; textures allocated by this device.
-           (luv.metal:add-metal-residency-allocation
-            (metal-device-residency-set device) native)
-           (setf resident-p t)
-           (luv.metal:commit-metal-residency-set
-            (metal-device-residency-set device))
-           (let ((texture
-                   (make-instance
-                    'metal-gpu-texture
-                    :label (gpu-descriptor-label descriptor)
-                    :device device :native-object native :owned-p nil
-                    :resident-p t :external-owner owner
-                    :size size :usage usage :dimensions :2d
-                    :format (texture-descriptor-format descriptor))))
-             (setf completed-p t)
-             texture))
-      (when (and resident-p (not completed-p))
-        (luv.metal:remove-metal-residency-allocation
-         (metal-device-residency-set device) native)
-        (luv.metal:commit-metal-residency-set
-         (metal-device-residency-set device))))))
+  (with-live-metal-device-queue (device :adopt-native-texture)
+    (let ((size (texture-descriptor-size descriptor))
+          (usage (texture-descriptor-usage descriptor))
+          (resident-p nil)
+          (completed-p nil))
+      (when (member :storage-binding usage)
+        (reject-metal-gpu-request
+         descriptor :unsupported-texture-usage :storage-binding))
+      (unwind-protect
+           (progn
+             ;; Metal 4 does not make an externally created MTLTexture resident
+             ;; merely because an argument table points at it.  CVMetalTexture
+             ;; planes therefore need the same explicit residency membership as
+             ;; textures allocated by this device.
+             (luv.metal:add-metal-residency-allocation
+              (metal-device-residency-set device) native)
+             (setf resident-p t)
+             (luv.metal:commit-metal-residency-set
+              (metal-device-residency-set device))
+             (let ((texture
+                     (make-instance
+                      'metal-gpu-texture
+                      :label (gpu-descriptor-label descriptor)
+                      :device device :native-object native :owned-p nil
+                      :resident-p t :external-owner owner
+                      :size size :usage usage :dimensions :2d
+                      :format (texture-descriptor-format descriptor))))
+               (setf completed-p t)
+               texture))
+        (when (and resident-p (not completed-p))
+          (luv.metal:remove-metal-residency-allocation
+           (metal-device-residency-set device) native)
+          (luv.metal:commit-metal-residency-set
+           (metal-device-residency-set device)))))))
 
 (defmethod create
     ((device metal-gpu-device) (descriptor texture-view-descriptor))
@@ -887,7 +1136,9 @@ aligned to the element size."
   (let* ((copy (gpu-write-texture-command-destination command))
          (texture (texture-copy-texture copy))
          (layout (gpu-write-texture-command-data-layout command))
-         (size (gpu-write-texture-command-size command))
+         (size
+           (canonical-texture-extent
+            (gpu-write-texture-command-size command) command :write-texture))
          (data (gpu-write-texture-command-data command))
          (offset (texture-data-layout-offset layout))
          (bytes-per-row (texture-data-layout-bytes-per-row layout))
@@ -964,24 +1215,41 @@ contiguous block -- starting at the beginning, with no padding between rows."
      (sb-sys:vector-sap (sb-ext:array-storage-vector data))
      bytes-per-row)))
 
-(defmethod destroy-metal-native ((texture metal-gpu-texture))
-  (when (metal-texture-resident-p texture)
-    (let* ((device (metal-texture-device texture))
-           (residency-set (metal-device-residency-set device)))
-      (luv.metal:remove-metal-residency-allocation
-       residency-set (metal-native-object texture))
-      (luv.metal:commit-metal-residency-set residency-set)))
-  (when (metal-texture-owned-p texture)
-    (luv.objective-c:release-objective-c-object
-     (metal-native-object texture)))
-  (when (metal-texture-external-owner texture)
-    (cffi:foreign-funcall "CFRelease" :pointer
-                          (metal-texture-external-owner texture) :void))
-  (values))
+(defmethod metal-native-teardown-closure ((texture metal-gpu-texture))
+  (let* ((device (metal-texture-device texture))
+         (residency-set (metal-device-residency-set device))
+         (native (metal-native-object texture))
+         (resident-p (metal-texture-resident-p texture))
+         (owned-p (metal-texture-owned-p texture))
+         (owner (metal-texture-external-owner texture)))
+    (apply
+     #'make-gpu-retirement-sequence
+     (append
+      (when resident-p
+        (list
+         (lambda ()
+           (unless (metal-device-residency-retired-p device)
+             (luv.metal:remove-metal-residency-allocation
+              residency-set native)))
+         (lambda ()
+           (unless (metal-device-residency-retired-p device)
+             (luv.metal:commit-metal-residency-set residency-set)))))
+      (when owned-p
+        (list
+         (lambda ()
+           (luv.objective-c:release-objective-c-object native))))
+      (when owner
+        (list
+         ;; New importers can couple native-plane release to their own retained
+         ;; lifetime with a callback.  Raw CF owners remain source-compatible.
+         (lambda ()
+           (if (functionp owner)
+               (funcall owner)
+               (cffi:foreign-funcall
+                "CFRelease" :pointer owner :void)))))))))
 
 (defmethod destroy ((texture metal-gpu-texture))
   (unless (metal-object-destroyed-p texture)
-    (setf (metal-object-destroyed-p texture) t)
     (metal-destroy-or-defer texture (metal-texture-device texture)))
   (values))
 
@@ -991,14 +1259,14 @@ contiguous block -- starting at the beginning, with no padding between rows."
 
 (defmethod destroy ((sampler metal-gpu-sampler))
   (unless (metal-object-destroyed-p sampler)
-    (setf (metal-object-destroyed-p sampler) t)
     (metal-destroy-or-defer sampler (metal-sampler-device sampler)))
   (values))
 
-(defmethod destroy-metal-native ((sampler metal-gpu-sampler))
-  (luv.objective-c:release-objective-c-object
-   (metal-native-object sampler))
-  (values))
+(defmethod metal-native-teardown-closure ((sampler metal-gpu-sampler))
+  (let ((native (metal-native-object sampler)))
+    (make-gpu-retirement-sequence
+     (lambda ()
+       (luv.objective-c:release-objective-c-object native)))))
 
 (defmethod destroy ((layout metal-gpu-bind-group-layout))
   (setf (metal-object-destroyed-p layout) t)
@@ -1013,7 +1281,7 @@ contiguous block -- starting at the beginning, with no padding between rows."
         (language (shader-module-descriptor-language descriptor)))
     (case language
       (:mathematical
-       (unless (typep code 'luv.spir-v:shader-specification)
+       (unless (typep code 'luv.shader:shader-specification)
          (error 'gpu-request-error
                 :operation :create-shader-module
                 :descriptor descriptor
@@ -1105,14 +1373,14 @@ compiler boundary of #58IDSR."
 
 (defmethod destroy ((module metal-gpu-shader-module))
   (unless (metal-object-destroyed-p module)
-    (setf (metal-object-destroyed-p module) t)
     (metal-destroy-or-defer module (metal-shader-module-device module)))
   (values))
 
-(defmethod destroy-metal-native ((module metal-gpu-shader-module))
-  (luv.objective-c:release-objective-c-object
-   (metal-native-object module))
-  (values))
+(defmethod metal-native-teardown-closure ((module metal-gpu-shader-module))
+  (let ((native (metal-native-object module)))
+    (make-gpu-retirement-sequence
+     (lambda ()
+       (luv.objective-c:release-objective-c-object native)))))
 
 (defun reject-metal-gpu-request (descriptor reason &optional details)
   (error 'gpu-request-error
@@ -1295,7 +1563,7 @@ compiler boundary of #58IDSR."
             (luv.objective-c:release-objective-c-object pipeline-state)))))))
 
 (defun metal-shader-module-workgroup-size (module)
-  (luv.spir-v:shader-specification-workgroup-size
+  (luv.shader:shader-specification-workgroup-size
    (luv.msl:msl-document-specification
     (metal-shader-module-document module))))
 
@@ -1436,17 +1704,23 @@ compiler boundary of #58IDSR."
 
 (defmethod destroy ((pipeline metal-gpu-render-pipeline))
   (unless (metal-object-destroyed-p pipeline)
-    (setf (metal-object-destroyed-p pipeline) t)
     (metal-destroy-or-defer pipeline (metal-render-pipeline-device pipeline)))
   (values))
 
-(defmethod destroy-metal-native ((pipeline metal-gpu-render-pipeline))
-  (let ((depth-state (metal-render-pipeline-depth-stencil-state pipeline)))
-    (when depth-state
-      (luv.objective-c:release-objective-c-object depth-state)))
-  (luv.objective-c:release-objective-c-object
-   (metal-native-object pipeline))
-  (values))
+(defmethod metal-native-teardown-closure
+    ((pipeline metal-gpu-render-pipeline))
+  (let ((depth-state (metal-render-pipeline-depth-stencil-state pipeline))
+        (native (metal-native-object pipeline)))
+    (apply
+     #'make-gpu-retirement-sequence
+     (append
+      (when depth-state
+        (list
+         (lambda ()
+           (luv.objective-c:release-objective-c-object depth-state))))
+      (list
+       (lambda ()
+         (luv.objective-c:release-objective-c-object native)))))))
 
 (defun probe-metal-shader-library (specification)
   "Compile SPECIFICATION through a fresh Metal device and return bounded evidence."

@@ -158,7 +158,7 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
    (width :initarg :width :reader gpu-image-paint-width)
    (height :initarg :height :reader gpu-image-paint-height)))
 
-(spv:define-shader-method spv:shader-specification-for
+(shader:define-shader-method shader:shader-specification-for
     mcluv-solid-vertex-specification
     ((role (eql :mcluv-solid)) (stage (eql :vertex)))
     (:stage :vertex
@@ -166,21 +166,21 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
               (color-input :vec3 :location 1))
      :outputs ((clip-position :vec4 :built-in :position)
                (color-output :vec4 :location 0)))
-  (let* ((clip (spv:vec4 (spv:swizzle position-opacity :xy) 0.0 1.0))
-         (color (spv:vec4 color-input
-                          (spv:swizzle position-opacity :z))))
-    (spv:set-output clip-position clip)
-    (spv:set-output color-output color)))
+  (let* ((clip (shader:vec4 (shader:swizzle position-opacity :xy) 0.0 1.0))
+         (color (shader:vec4 color-input
+                          (shader:swizzle position-opacity :z))))
+    (shader:set-output clip-position clip)
+    (shader:set-output color-output color)))
 
-(spv:define-shader-method spv:shader-specification-for
+(shader:define-shader-method shader:shader-specification-for
     mcluv-solid-fragment-specification
     ((role (eql :mcluv-solid)) (stage (eql :fragment)))
     (:stage :fragment
      :inputs ((color-input :vec4 :location 0))
      :outputs ((color-output :vec4 :location 0)))
-  (spv:set-output color-output color-input))
+  (shader:set-output color-output color-input))
 
-(spv:define-shader-method spv:shader-specification-for
+(shader:define-shader-method shader:shader-specification-for
     mcluv-slug-vertex-specification
     ((role (eql :mcluv-slug)) (stage (eql :vertex)))
     (:stage :vertex
@@ -197,25 +197,25 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
                (render-band-counts :vec2 :location 3)
                (render-color :vec4 :location 4)))
   (let* ()
-    (spv:set-output
+    (shader:set-output
      clip-position
-     (spv:vec4 (spv:swizzle position-alpha :xy) 0.0 1.0))
-    (spv:set-output render-coordinate
-                    (spv:swizzle outline-horizontal :xy))
-    (spv:set-output render-atlas-base (spv:swizzle atlas-vertical :xy))
-    (spv:set-output
+     (shader:vec4 (shader:swizzle position-alpha :xy) 0.0 1.0))
+    (shader:set-output render-coordinate
+                    (shader:swizzle outline-horizontal :xy))
+    (shader:set-output render-atlas-base (shader:swizzle atlas-vertical :xy))
+    (shader:set-output
      render-band-bounds
-     (spv:vec4 (spv:swizzle band-low :xy)
-               (spv:swizzle band-high :xy)))
-    (spv:set-output
+     (shader:vec4 (shader:swizzle band-low :xy)
+               (shader:swizzle band-high :xy)))
+    (shader:set-output
      render-band-counts
-     (spv:vec2 (spv:swizzle outline-horizontal :z)
-               (spv:swizzle atlas-vertical :z)))
-    (spv:set-output
+     (shader:vec2 (shader:swizzle outline-horizontal :z)
+               (shader:swizzle atlas-vertical :z)))
+    (shader:set-output
      render-color
-     (spv:vec4 color-input (spv:swizzle position-alpha :z)))))
+     (shader:vec4 color-input (shader:swizzle position-alpha :z)))))
 
-(defmethod spv:shader-specification-for
+(defmethod shader:shader-specification-for
     ((role (eql :mcluv-slug)) (stage (eql :fragment)))
   (declare (ignore role stage))
   (luv.slug:slug-atlas-fragment-specification))
@@ -1768,14 +1768,14 @@ family name adopted."
                     device
                     (luv:make-shader-module-descriptor
                      :label "McCLIM Slug vertex" :language :mathematical
-                     :code (spv:shader-specification-for
+                     :code (shader:shader-specification-for
                             :mcluv-slug :vertex)))
                    fragment
                    (luv:create
                     device
                     (luv:make-shader-module-descriptor
                      :label "McCLIM Slug fragment" :language :mathematical
-                     :code (spv:shader-specification-for
+                     :code (shader:shader-specification-for
                             :mcluv-slug :fragment)))
                    layout
                    (luv:create
@@ -1830,7 +1830,7 @@ family name adopted."
                 (luv:make-shader-module-descriptor
                  :label "McCLIM solid vertex"
                  :language :mathematical
-                 :code (spv:shader-specification-for :mcluv-solid :vertex))))
+                 :code (shader:shader-specification-for :mcluv-solid :vertex))))
              (fragment nil)
              (layout nil)
              (uniform-buffer nil)
@@ -1845,7 +1845,7 @@ family name adopted."
                       (luv:make-shader-module-descriptor
                        :label "McCLIM solid fragment"
                        :language :mathematical
-                       :code (spv:shader-specification-for
+                       :code (shader:shader-specification-for
                               :mcluv-solid :fragment)))
                      layout
                      (luv:create

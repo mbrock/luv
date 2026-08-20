@@ -254,6 +254,15 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:gpu-resource-leaked-class
            #:gpu-resource-leaked-label
            #:*leaked-gpu-resources*
+           #:gpu-native-retirement-condition
+           #:gpu-native-retirement-warning
+           #:gpu-native-retirement-error
+           #:gpu-native-retirement-operation
+           #:gpu-native-retirement-failures
+           #:gpu-native-retirement-failure
+           #:gpu-native-retirement-failure-resource
+           #:gpu-native-retirement-failure-cause
+           #:gpu-native-retirement-failure-attempts
            #:vulkan-gpu-error
            #:vulkan-gpu-error-reason
            #:vulkan-gpu-error-details

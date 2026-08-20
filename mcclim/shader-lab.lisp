@@ -19,7 +19,7 @@
 
 (define-presentation-method presentation-typep
     (object (type shader-expression-presentation))
-  (typep object 'luv.spir-v:shader-expression))
+  (typep object 'luv.shader:shader-expression))
 
 (define-presentation-method presentation-typep
     (object (type shader-instruction-presentation))
@@ -31,7 +31,7 @@
 
 (define-presentation-method presentation-typep
     (object (type shader-specification-presentation))
-  (typep object 'luv.spir-v:shader-specification))
+  (typep object 'luv.shader:shader-specification))
 
 (define-presentation-method presentation-typep
     (object (type shader-definition-presentation))
@@ -94,17 +94,17 @@
   (let ((dependent (shader-definition-entry-dependent entry)))
     (when (or force
               (and dependent
-                   (luv.spir-v:shader-definition-change-pending-p dependent)))
+                   (luv.shader:shader-definition-change-pending-p dependent)))
       (multiple-value-bind (revision event)
           (if dependent
-              (luv.spir-v:shader-definition-change-snapshot dependent)
+              (luv.shader:shader-definition-change-snapshot dependent)
               (values 0 nil))
         (declare (ignore event))
         (setf (shader-definition-entry-status entry) :compiling)
         (handler-case
             (let* ((specification
                      (if dependent
-                         (luv.spir-v:shader-specification-for
+                         (luv.shader:shader-specification-for
                           (shader-definition-entry-role entry)
                           (shader-definition-entry-stage entry))
                          (shader-definition-entry-specification entry)))
@@ -118,14 +118,14 @@
             (setf (shader-definition-entry-status entry) :failed
                   (shader-definition-entry-diagnostic entry) condition)))
         (when dependent
-          (luv.spir-v:acknowledge-shader-definition-change
+          (luv.shader:acknowledge-shader-definition-change
            dependent revision)))))
   entry)
 
 (defun make-live-shader-definition-entry (role stage label pipeline)
   (let* ((dependent
-           (luv.spir-v:make-shader-definition-dependent
-            (fdefinition 'luv.spir-v:shader-specification-for)
+           (luv.shader:make-shader-definition-dependent
+            (fdefinition 'luv.shader:shader-specification-for)
             (list role stage)))
          (entry
            (make-instance 'shader-definition-entry
@@ -137,19 +137,19 @@
   (let ((entry
           (make-instance
            'shader-definition-entry
-           :role (luv.spir-v:shader-object-name specification)
-           :stage (luv.spir-v:shader-specification-stage specification)
+           :role (luv.shader:shader-object-name specification)
+           :stage (luv.shader:shader-specification-stage specification)
            :label (or label
                       (string-upcase
                        (symbol-name
-                        (luv.spir-v:shader-object-name specification))))
+                        (luv.shader:shader-object-name specification))))
            :specification specification)))
     (refresh-shader-definition-entry entry :force t)))
 
 (defun release-shader-definition-entry (entry)
   (let ((dependent (shader-definition-entry-dependent entry)))
     (when dependent
-      (luv.spir-v:release-shader-definition-dependent dependent)))
+      (luv.shader:release-shader-definition-dependent dependent)))
   nil)
 
 (define-application-frame shader-lab ()
@@ -216,7 +216,7 @@
 
 (defun selected-shader-expression (frame)
   (let ((selection (shader-lab-selection frame)))
-    (cond ((typep selection 'luv.spir-v:shader-expression) selection)
+    (cond ((typep selection 'luv.shader:shader-expression) selection)
           ((typep selection 'luv.spir-v:instruction)
            (first
             (gethash
@@ -226,7 +226,7 @@
 
 (defun selected-shader-instructions (frame)
   (let ((selection (shader-lab-selection frame)))
-    (cond ((typep selection 'luv.spir-v:shader-expression)
+    (cond ((typep selection 'luv.shader:shader-expression)
            (gethash
             selection
             (luv.spir-v:shader-lowering-expression-instructions
@@ -234,7 +234,7 @@
           ((typep selection 'luv.spir-v:instruction) (list selection)))))
 
 (defun shader-type-label (type)
-  (string-downcase (symbol-name (luv.spir-v:shader-type-name type))))
+  (string-downcase (symbol-name (luv.shader:shader-type-name type))))
 
 (defun write-shader-name (name stream)
   (write-string (string-downcase (symbol-name name)) stream))
@@ -251,12 +251,12 @@
    (shader-lab-lowering frame)))
 
 (defun shader-display-label (specification)
-  (case (luv.spir-v:shader-object-name specification)
+  (case (luv.shader:shader-object-name specification)
     (luvcraft.shaders:block-world-fragment-specification "BLOCK SURFACE")
     (luvcraft.shaders:block-world-crosshair-fragment-specification "CROSSHAIR INK")
     (otherwise
      (string-upcase
-      (symbol-name (luv.spir-v:shader-object-name specification))))))
+      (symbol-name (luv.shader:shader-object-name specification))))))
 
 (defun block-material-preview-tile (block)
   (let ((tiles (luvcraft:block-kind-face-tiles block)))
@@ -403,89 +403,89 @@
   "Render EXPRESSION as nested selectable mathematical presentations."
   (labels ((write-body ()
              (etypecase expression
-               (luv.spir-v:shader-literal
+               (luv.shader:shader-literal
                 (format stream "~G"
-                        (luv.spir-v:shader-literal-value expression)))
-               (luv.spir-v:shader-reference
+                        (luv.shader:shader-literal-value expression)))
+               (luv.shader:shader-reference
                 (write-shader-name
-                 (luv.spir-v:shader-object-name
-                  (luv.spir-v:shader-reference-target expression))
+                 (luv.shader:shader-object-name
+                  (luv.shader:shader-reference-target expression))
                  stream))
-               (luv.spir-v:shader-map-application
+               (luv.shader:shader-map-application
                 (write-string "project-point[" stream)
                 (write-shader-name
-                 (luv.spir-v:shader-object-name
-                  (luv.spir-v:shader-map-application-definition expression))
+                 (luv.shader:shader-object-name
+                  (luv.shader:shader-map-application-definition expression))
                  stream)
                 (write-string "](" stream)
                 (write-shader-expression
-                 (luv.spir-v:shader-map-application-point expression)
+                 (luv.shader:shader-map-application-point expression)
                  stream frame)
                 (write-string "; rows " stream)
                 (loop for row in
-                        (luv.spir-v:shader-map-application-rows expression)
+                        (luv.shader:shader-map-application-rows expression)
                       for first-p = t then nil
                       unless first-p do (write-string ", " stream)
                       do (write-shader-expression row stream frame))
                 (write-char #\) stream))
-               (luv.spir-v:shader-map-projection
+               (luv.shader:shader-map-projection
                 (write-string "project-sample(" stream)
                 (write-shader-expression
-                 (luv.spir-v:shader-map-projection-application expression)
+                 (luv.shader:shader-map-projection-application expression)
                  stream frame)
                 (write-char #\) stream))
-               (luv.spir-v:shader-interpretation
+               (luv.shader:shader-interpretation
                 (write-string "interpret(" stream)
                 (write-shader-expression
-                 (luv.spir-v:shader-interpretation-operand expression)
+                 (luv.shader:shader-interpretation-operand expression)
                  stream frame)
                 (format stream ", ~A)"
                         (quantity-specification-label
-                         (luv.spir-v:shader-expression-quantity-specification
+                         (luv.shader:shader-expression-quantity-specification
                           expression))))
-               (luv.spir-v:shader-quantity-construction
+               (luv.shader:shader-quantity-construction
                 (write-string "quantity(" stream)
                 (write-shader-expression
-                 (luv.spir-v:shader-quantity-construction-operand expression)
+                 (luv.shader:shader-quantity-construction-operand expression)
                  stream frame)
                 (format stream ", ~A)"
                         (quantity-specification-label
-                         (luv.spir-v:shader-expression-quantity-specification
+                         (luv.shader:shader-expression-quantity-specification
                           expression))))
-               (luv.spir-v:shader-quantity-assumption
+               (luv.shader:shader-quantity-assumption
                 (write-string "assume(" stream)
                 (write-shader-expression
-                 (luv.spir-v:shader-quantity-assumption-operand expression)
+                 (luv.shader:shader-quantity-assumption-operand expression)
                  stream frame)
                 (format stream ", ~A)"
                         (quantity-specification-label
-                         (luv.spir-v:shader-expression-quantity-specification
+                         (luv.shader:shader-expression-quantity-specification
                           expression))))
-               (luv.spir-v:shader-representation
+               (luv.shader:shader-representation
                 (write-string "representation(" stream)
                 (write-shader-expression
-                 (luv.spir-v:shader-representation-operand expression)
+                 (luv.shader:shader-representation-operand expression)
                  stream frame)
                 (write-char #\) stream))
-               (luv.spir-v:shader-unit-conversion
+               (luv.shader:shader-unit-conversion
                 (write-string "convert-unit(" stream)
                 (write-shader-expression
-                 (luv.spir-v:shader-unit-conversion-operand expression)
+                 (luv.shader:shader-unit-conversion-operand expression)
                  stream frame)
                 (format stream ", ~A, scale ~A)"
                         (quantity-specification-label
-                         (luv.spir-v:shader-expression-quantity-specification
+                         (luv.shader:shader-expression-quantity-specification
                           expression))
-                        (luv.spir-v:shader-unit-conversion-factor expression)))
-               (luv.spir-v:shader-call
-                (let ((operator (luv.spir-v:shader-call-operator expression))
-                      (operands (luv.spir-v:shader-call-operands expression)))
+                        (luv.shader:shader-unit-conversion-factor expression)))
+               (luv.shader:shader-call
+                (let ((operator (luv.shader:shader-call-operator expression))
+                      (operands (luv.shader:shader-call-operands expression)))
                   (cond
                     ((eq operator :swizzle)
                      (write-shader-expression (first operands) stream frame)
                      (format stream ".~(~A~)"
                              (first
-                              (luv.spir-v:shader-call-parameters expression))))
+                              (luv.shader:shader-call-parameters expression))))
                     ((shader-infix-operator-p operator)
                      (write-char #\( stream)
                      (loop for operand in operands
@@ -512,75 +512,75 @@
           (with-drawing-options
               (stream :ink
                       (etypecase expression
-                        (luv.spir-v:shader-literal *shader-literal-ink*)
-                        (luv.spir-v:shader-reference
+                        (luv.shader:shader-literal *shader-literal-ink*)
+                        (luv.shader:shader-reference
                          *shader-reference-ink*)
-                        (luv.spir-v:shader-map-application
+                        (luv.shader:shader-map-application
                          *shader-call-ink*)
-                        (luv.spir-v:shader-map-projection
+                        (luv.shader:shader-map-projection
                          *shader-call-ink*)
-                        (luv.spir-v:shader-interpretation
+                        (luv.shader:shader-interpretation
                          *shader-accent-ink*)
-                        (luv.spir-v:shader-quantity-construction
+                        (luv.shader:shader-quantity-construction
                          *shader-accent-ink*)
-                        (luv.spir-v:shader-quantity-assumption
+                        (luv.shader:shader-quantity-assumption
                          *shader-literal-ink*)
-                        (luv.spir-v:shader-representation
+                        (luv.shader:shader-representation
                          *shader-accent-ink*)
-                        (luv.spir-v:shader-unit-conversion
+                        (luv.shader:shader-unit-conversion
                          *shader-accent-ink*)
-                        (luv.spir-v:shader-call *shader-call-ink*)))
+                        (luv.shader:shader-call *shader-call-ink*)))
             (write-body))))))
 
 (defun display-shader-interface (stream declaration)
   (write-string "  " stream)
   (with-drawing-options
       (stream :ink (if (eq :input
-                           (luv.spir-v:shader-interface-direction declaration))
+                           (luv.shader:shader-interface-direction declaration))
                        *shader-reference-ink*
                        *shader-call-ink*)
               :text-face :bold)
     (format stream "~(~A~)"
-            (luv.spir-v:shader-interface-direction declaration)))
+            (luv.shader:shader-interface-direction declaration)))
   (write-char #\Space stream)
-  (write-shader-name (luv.spir-v:shader-object-name declaration) stream)
+  (write-shader-name (luv.shader:shader-object-name declaration) stream)
   (format stream " : ~A  [~A]  ·  meaning ~A~%"
           (shader-type-label
-           (luv.spir-v:shader-declaration-type declaration))
-          (if (luv.spir-v:shader-interface-built-in declaration)
+           (luv.shader:shader-declaration-type declaration))
+          (if (luv.shader:shader-interface-built-in declaration)
               (format nil "built-in ~(~A~)"
-                      (luv.spir-v:shader-interface-built-in declaration))
+                      (luv.shader:shader-interface-built-in declaration))
               (format nil "location ~D"
-                      (luv.spir-v:shader-interface-location declaration)))
+                      (luv.shader:shader-interface-location declaration)))
           (quantity-semantics-label
-           (luv.spir-v:shader-declaration-quantity-specification declaration)
-           (luv.spir-v:shader-declaration-quantity-layout declaration))))
+           (luv.shader:shader-declaration-quantity-specification declaration)
+           (luv.shader:shader-declaration-quantity-layout declaration))))
 
 (defun display-shader-resource (stream resource)
   (write-string "  resource " stream)
-  (write-shader-name (luv.spir-v:shader-object-name resource) stream)
+  (write-shader-name (luv.shader:shader-object-name resource) stream)
   (format stream " : ~A  [set ~D, binding ~D]~%"
-          (shader-type-label (luv.spir-v:shader-declaration-type resource))
-          (luv.spir-v:shader-resource-descriptor-set resource)
-          (luv.spir-v:shader-resource-binding resource))
-  (when (or (luv.spir-v:shader-resource-sample-quantity-specification resource)
-            (luv.spir-v:shader-resource-sample-quantity-layout resource))
+          (shader-type-label (luv.shader:shader-declaration-type resource))
+          (luv.shader:shader-resource-descriptor-set resource)
+          (luv.shader:shader-resource-binding resource))
+  (when (or (luv.shader:shader-resource-sample-quantity-specification resource)
+            (luv.shader:shader-resource-sample-quantity-layout resource))
     (format stream "    sample meaning ~A~%"
             (quantity-semantics-label
-             (luv.spir-v:shader-resource-sample-quantity-specification
+             (luv.shader:shader-resource-sample-quantity-specification
               resource)
-             (luv.spir-v:shader-resource-sample-quantity-layout resource))))
-  (when (typep resource 'luv.spir-v:shader-uniform-block)
-    (dolist (member (luv.spir-v:shader-uniform-block-members resource))
+             (luv.shader:shader-resource-sample-quantity-layout resource))))
+  (when (typep resource 'luv.shader:shader-uniform-block)
+    (dolist (member (luv.shader:shader-uniform-block-members resource))
       (format stream "    ~2D  "
-              (luv.spir-v:shader-uniform-member-offset member))
-      (write-shader-name (luv.spir-v:shader-object-name member) stream)
+              (luv.shader:shader-uniform-member-offset member))
+      (write-shader-name (luv.shader:shader-object-name member) stream)
       (format stream " : ~A  ·  meaning ~A~%"
               (shader-type-label
-               (luv.spir-v:shader-declaration-type member))
+               (luv.shader:shader-declaration-type member))
               (quantity-semantics-label
-               (luv.spir-v:shader-declaration-quantity-specification member)
-               (luv.spir-v:shader-declaration-quantity-layout member))))))
+               (luv.shader:shader-declaration-quantity-specification member)
+               (luv.shader:shader-declaration-quantity-layout member))))))
 
 (defun display-shader-source (frame stream)
   (let* ((lowering (shader-lab-lowering frame))
@@ -594,13 +594,13 @@
         (write-string (string-downcase (shader-display-label specification))
                       stream)))
     (format stream "  ~(~A~)~2%"
-            (luv.spir-v:shader-specification-stage specification))
+            (luv.shader:shader-specification-stage specification))
     (format stream "definition ~(~A~)/~(~A~)  ·  source ~(~A~)"
             (shader-definition-entry-role definition)
             (shader-definition-entry-stage definition)
             (shader-definition-entry-status definition))
     (when (and dependent
-               (luv.spir-v:shader-definition-change-pending-p dependent))
+               (luv.shader:shader-definition-change-pending-p dependent))
       (write-string "  ·  changed" stream))
     (terpri stream)
     (when pipeline
@@ -619,43 +619,43 @@
       (write-string "interface" stream))
     (terpri stream)
     (dolist (declaration
-             (append (luv.spir-v:shader-specification-inputs specification)
-                     (luv.spir-v:shader-specification-outputs specification)))
+             (append (luv.shader:shader-specification-inputs specification)
+                     (luv.shader:shader-specification-outputs specification)))
       (display-shader-interface stream declaration))
     (dolist (resource
-             (luv.spir-v:shader-specification-resources specification))
+             (luv.shader:shader-specification-resources specification))
       (display-shader-resource stream resource))
     (terpri stream)
     (with-drawing-options (stream :text-face :bold)
       (write-string "mathematical bindings" stream))
     (terpri stream)
     (dolist (binding
-             (luv.spir-v:shader-specification-bindings specification))
+             (luv.shader:shader-specification-bindings specification))
       (write-string "  " stream)
       (with-drawing-options (stream :text-face :bold)
-        (write-shader-name (luv.spir-v:shader-object-name binding) stream))
-      (let ((expression (luv.spir-v:shader-binding-expression binding)))
+        (write-shader-name (luv.shader:shader-object-name binding) stream))
+      (let ((expression (luv.shader:shader-binding-expression binding)))
         (format stream " : ~A  ·  meaning ~A = "
                 (shader-type-label
-                 (luv.spir-v:shader-expression-type expression))
+                 (luv.shader:shader-expression-type expression))
                 (quantity-semantics-label
-                 (luv.spir-v:shader-expression-quantity-specification
+                 (luv.shader:shader-expression-quantity-specification
                   expression)
-                 (luv.spir-v:shader-expression-quantity-layout expression)))
+                 (luv.shader:shader-expression-quantity-layout expression)))
         (write-shader-expression expression stream frame))
       (terpri stream))
     (terpri stream)
     (dolist (statement
-             (luv.spir-v:shader-specification-statements specification))
+             (luv.shader:shader-specification-statements specification))
       (write-string "  output " stream)
       (with-drawing-options (stream :text-face :bold)
         (write-shader-name
-         (luv.spir-v:shader-object-name
-          (luv.spir-v:shader-assignment-output statement))
+         (luv.shader:shader-object-name
+          (luv.shader:shader-assignment-output statement))
          stream))
       (write-string " = " stream)
       (write-shader-expression
-       (luv.spir-v:shader-assignment-value statement) stream frame)
+       (luv.shader:shader-assignment-value statement) stream frame)
       (terpri stream))))
 
 (defun write-spir-v-form (form stream)
@@ -742,16 +742,16 @@
          (format stream
                  "atlas tile ~D · number key ~A in luvcraft · right click places · middle click picks"
                  tile (if number (1+ number) "?"))))
-      ((typep selection 'luv.spir-v:shader-expression)
+      ((typep selection 'luv.shader:shader-expression)
        (format stream " — representation ~A  ·  meaning ~A  ·  source "
                (shader-type-label
-                (luv.spir-v:shader-expression-type selection))
+                (luv.shader:shader-expression-type selection))
                (quantity-semantics-label
-                (luv.spir-v:shader-expression-quantity-specification
+                (luv.shader:shader-expression-quantity-specification
                  selection)
-                (luv.spir-v:shader-expression-quantity-layout selection)))
+                (luv.shader:shader-expression-quantity-layout selection)))
        (write-spir-v-form
-        (luv.spir-v:shader-expression-source-form selection) stream)
+        (luv.shader:shader-expression-source-form selection) stream)
        (let ((instructions
                (gethash
                 selection
@@ -1099,7 +1099,7 @@
 PIPELINES may contain a running demo's live shader artifacts; their installed
 revision and last diagnostic then appear alongside the source definition."
   (when specification
-    (check-type specification luv.spir-v:shader-specification))
+    (check-type specification luv.shader:shader-specification))
   (let* ((definitions
            (cond
              (specifications

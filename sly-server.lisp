@@ -36,7 +36,7 @@
   (asdf:load-asd (merge-pathnames #P"openai.asd" project-root))
   (asdf:load-system :luv)
   (asdf:load-system :luvcraft)
-(asdf:load-system :luvcraft/agent)
+  (asdf:load-system :luvcraft/agent)
   (asdf:load-system :luv-wiki)
   (asdf:load-system :luft/render)
   (format t "~&Starting luv Slynk on 127.0.0.1:~D.~%" port)

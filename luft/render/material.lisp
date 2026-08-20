@@ -262,7 +262,7 @@ goes up."
               (tilt (- 1.0 (abs (dot oriented-rest face))))
               (planed (smoothstep 0.015 0.30 tilt))
               ;; The stock the solid behind this face is cut from: the
-              ;; site's own four bits, and its eight lanes of the table.
+              ;; site's own four bits, and its nine lanes of the table.
               ;; The value is one number over the whole face, so however
               ;; the rasterizer interpolates it, it arrives unchanged.
               (slot (* (uint (+ stock 0.25)) (uint ,(float +stock-lanes+))))

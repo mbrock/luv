@@ -115,13 +115,13 @@
   "Check the host texture format against the block shader's decoded result."
   (let* ((resource
            (find 'luvcraft.shaders::block-atlas
-                 (luv.spir-v:shader-specification-resources
+                 (luv.shader:shader-specification-resources
                   (luvcraft.shaders:block-world-fragment-specification))
-                 :key #'luv.spir-v:shader-object-name))
+                 :key #'luv.shader:shader-object-name))
          (expected (texture-format-sample-transfer format))
          (declared
            (and resource
-                (luv.spir-v:shader-resource-sample-transfer resource))))
+                (luv.shader:shader-resource-sample-transfer resource))))
     (unless (eq expected declared)
       (error "Block atlas format ~S implies ~S sampling, but the shader declares ~S."
              format expected declared))
@@ -483,7 +483,7 @@ check in LUVCRAFT-POST-UNIFORM-SIZE keeps the two honest."
 (defun luvcraft-post-uniform-size (session)
   "The presentation buffer byte size derived from the shader-visible block."
   (let* ((block (luvcraft.shaders:focus-post-uniform-block))
-         (size (spv:shader-uniform-block-byte-size block))
+         (size (shader:shader-uniform-block-byte-size block))
          (bytes (* 4 (length (luvcraft-post-uniform-data session 1 1)))))
     (unless (= size bytes)
       (error "Presentation uniform ABI mismatch: the shader block occupies ~
@@ -496,15 +496,15 @@ check in LUVCRAFT-POST-UNIFORM-SIZE keeps the two honest."
 This is deliberately luvcraft's fixed 32-bit-lane ABI adapter, not a claim
 about general uniform-block packing.  The shader owns offsets and member
 quantities; the host independently owns the product it writes."
-  (let ((bytes (spv:shader-uniform-block-byte-size block))
+  (let ((bytes (shader:shader-uniform-block-byte-size block))
         (projections nil))
     (unless (zerop (mod bytes 4))
       (error "Frame shader uniform size ~D is not a whole float lane count."
              bytes))
-    (dolist (member (spv:shader-uniform-block-members block))
-      (let* ((byte-offset (spv:shader-uniform-member-offset member))
+    (dolist (member (shader:shader-uniform-block-members block))
+      (let* ((byte-offset (shader:shader-uniform-member-offset member))
              (width
-               (spv:shader-type-component-count
+               (shader:shader-type-component-count
                 (luv.arithmetic:declaration-representation-type member)))
              (whole
                (luv.arithmetic:declaration-quantity-specification member))
@@ -512,7 +512,7 @@ quantities; the host independently owns the product it writes."
                (luv.arithmetic:declaration-quantity-layout member)))
         (unless (and width (zerop (mod byte-offset 4)))
           (error "Frame shader member ~S is not a 32-bit scalar-lane value."
-                 (spv:shader-object-name member)))
+                 (shader:shader-object-name member)))
         (let ((base (/ byte-offset 4)))
           (when whole
             (push
@@ -524,7 +524,7 @@ quantities; the host independently owns the product it writes."
             (unless (= width
                        (luv.arithmetic:quantity-layout-extent layout))
               (error "Frame shader member ~S has width ~D but layout ~D."
-                     (spv:shader-object-name member) width
+                     (shader:shader-object-name member) width
                      (luv.arithmetic:quantity-layout-extent layout)))
             (dolist (projection
                      (luv.arithmetic:quantity-layout-projections layout))
@@ -544,7 +544,7 @@ quantities; the host independently owns the product it writes."
 Checked against the host's packed frame data at construction, so growing
 the frame uniform cannot silently diverge between shader and host."
   (let* ((block (luvcraft.shaders:block-world-camera-uniform-block))
-         (size (spv:shader-uniform-block-byte-size block))
+         (size (shader:shader-uniform-block-byte-size block))
          (declaration
            (luv.arithmetic:value-declaration-for :frame-uniform-data))
          (host-layout
@@ -557,8 +557,8 @@ the frame uniform cannot silently diverge between shader and host."
     (unless (luv.arithmetic:quantity-layout= host-layout shader-layout)
       (error "Frame uniform semantic ABI mismatch between ~S and shader ~S."
              (luv.arithmetic:declaration-source-form declaration)
-             (mapcar #'spv:shader-object-name
-                     (spv:shader-uniform-block-members block))))
+             (mapcar #'shader:shader-object-name
+                     (shader:shader-uniform-block-members block))))
     size))
 
 (defun remember-luvcraft-renderer-resource (renderer resource)
@@ -1591,7 +1591,7 @@ the replacement texture's width through the frame uniform."
          (old-atlas (luvcraft-session-atlas-texture session))
          (old-normal (luvcraft-session-normal-atlas-texture session))
          (resize-p (not (equal (gpu-texture-size old-atlas)
-                               (list width height))))
+                               (list width height 1))))
          (atlas (and (not resize-p) old-atlas))
          (normal (and (not resize-p) old-normal))
          (atlas-view nil)
@@ -1765,6 +1765,8 @@ NIL to let the display choose a comfortable window."
     ;; attempt the first dlopen under Cocoa's running canvas and hang.  Preload
     ;; the libraries here; no decoder or file is opened until Film is chosen.
     (libav:load-libav)
+    (retry-decoded-video-picture-release-backlog)
+    (retry-video-screen-release-backlog)
     (open-canvas canvas)
     (unwind-protect
          (progn
@@ -2282,7 +2284,8 @@ NIL to let the display choose a comfortable window."
                 (dolist (resource resources)
                   (releasing :resource (destroy resource)))))
           (when video-screen
-            (releasing :video-screen (release-video-screen video-screen)))
+            (releasing :video-screen
+              (release-video-screen-or-retain video-screen)))
           (when world-text-run
             (releasing :world-text (release-world-text-run world-text-run)))
           (when world-text-glyph-cache
@@ -2329,9 +2332,11 @@ LUVCRAFT-RELEASE-ERROR.  See WITH-RELEASE-REPORT."
       (releasing :renderer
         (release-luvcraft-component (luvcraft-session-renderer session)))
       (when (luvcraft-session-video-screen session)
-        (releasing :video-screen
-          (release-video-screen (luvcraft-session-video-screen session)))
-        (setf (luvcraft-session-video-screen session) nil))
+        (let ((screen (luvcraft-session-video-screen session)))
+          (releasing :video-screen
+            (release-video-screen screen)
+            (when (video-screen-released-p screen)
+              (setf (luvcraft-session-video-screen session) nil)))))
       (when (luvcraft-session-world-text session)
         (releasing :world-text
           (release-world-text-run (luvcraft-session-world-text session))))

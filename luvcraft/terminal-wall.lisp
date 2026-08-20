@@ -966,10 +966,12 @@ projection remain one last-known-good cohort."
 (defun stop-terminal-display-film (display session)
   "Stop and release DISPLAY's owned movie, if any."
   (alexandria:when-let ((screen (terminal-display-film-screen display)))
-    (when (eq screen (luvcraft-session-video-screen session))
-      (setf (luvcraft-session-video-screen session) nil))
-    (setf (terminal-display-film-screen display) nil)
-    (release-video-screen screen))
+    (with-release-report
+      (release-video-screen screen))
+    (when (video-screen-released-p screen)
+      (when (eq screen (luvcraft-session-video-screen session))
+        (setf (luvcraft-session-video-screen session) nil))
+      (setf (terminal-display-film-screen display) nil)))
   display)
 
 (defun play-terminal-display-film (display pathname &key (hardware :required))

@@ -1189,7 +1189,7 @@ what the fog converges to and what the background paints must agree."
 ;;; ------------------------------------------------------------------------
 ;;; Paper: a matte material for photographing the chamfers
 
-;;; The hash and its value noise come from luvcraft's sky (#GJ4CBM); they are
+;;; The hash and its value noise come from luvcraft's sky (#9SSXDJ); they are
 ;;; ordinary lattice mathematics with no luvcraft in them, and the atelier
 ;;; wants a paper tooth rather than a cloud.
 (define-shader-function paper-hash (site)
@@ -1226,7 +1226,7 @@ what the fog converges to and what the background paints must agree."
          (fine (paper-noise (* world 19.0))))
     (+ 1.0 (* #.*paper-grain* (- (+ (* 0.65 coarse) (* 0.35 fine)) 0.5)))))
 
-;;; ACES's filmic fit, as luvcraft tonemaps with (#TLBJVX).  The exponential
+;;; ACES's filmic fit, as luvcraft tonemaps with (#IC14P3).  The exponential
 ;;; roll-off of SURFACE-LIGHTING desaturates as it clips; this keeps a lit
 ;;; chamfer's glint white without bleaching the tone beside it.
 (define-shader-function paper-tonemap (radiance)

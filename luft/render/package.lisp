@@ -1,6 +1,6 @@
 (defpackage #:luft.render.shaders
-  (:use #:cl #:luv.spir-v)
-  (:shadowing-import-from #:luv.spir-v #:step)
+  (:use #:cl #:luv.shader)
+  (:shadowing-import-from #:luv.shader #:step)
   (:documentation
    "Task, mesh, vertex, and fragment stages that draw a surface chain of
 packed sites.")
@@ -49,6 +49,7 @@ packed sites.")
 (defpackage #:luft.render
   (:use #:cl #:luv)
   (:local-nicknames (#:shaders #:luft.render.shaders)
+                    (#:shader #:luv.shader)
                     (#:vec3 #:luv.arithmetic.lisp.vec3))
   (:documentation
    "A greenfield atelier renderer: a small block world as a boundary chain

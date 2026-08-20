@@ -13,25 +13,26 @@ place to state that illumination is ambient light plus a sun contribution or
 that fog linearly combines lit albedo with sky colour.
 
 The expression language in [[file:../hal/shader/language.lisp][=hal/shader/language.lisp=]] states those relationships directly.  It
-does not replace the literal layer.  It lowers into the existing
+does not replace either backend.  The =luv/shader= system owns the typed graph
+and open lowering protocol.  Sibling =luv/spir-v= lowers it into the existing
 =spir-v-module=, =spir-v-function-definition=, =spir-v-basic-block=, and
-=instruction= objects, after which the same =lower-spir-v= and =assemble=
-paths emit the binary.
+=instruction= objects, after which =lower-spir-v= and =assemble= emit binary;
+=luv/msl= lowers the same graph directly into a structured MSL document.
 
 #+begin_example
 typed shader specification
   declarations + let* bindings + expressions
-                     |
-                     | compile-shader-specification
-                     v
-shader-lowering -- provenance maps -- expression <-> instruction
-                     |
-                     v
+                 /                           \
+   lower :spir-v /                             \ lower MSL target
+               v                               v
+shader-lowering -- provenance maps         msl-document
+               |
+               v
 spir-v-module -- function -- basic block -- CLOS instruction occurrences
-                     |
-                     | lower-spir-v / assemble
-                     v
-                 SPIR-V words
+               |
+               | lower-spir-v / assemble
+               v
+           SPIR-V words
 #+end_example
 
 This separation preserves the assembler as an inspectable truth rather than

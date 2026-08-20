@@ -11,6 +11,26 @@
   #-(or sbcl darwin)
   `(progn ,@body))
 
+(defun wrap-vulkan-gpu-driver-teardown (teardown)
+  "Return a durable TEARDOWN which restores the Vulkan driver environment.
+
+Queue maintenance already establishes this environment, but process-global
+finalizer retirement can replay a failed closure from an arbitrary thread."
+  (check-type teardown function)
+  (lambda ()
+    (with-vulkan-gpu-driver-environment
+      (funcall teardown))))
+
+(defun retire-vulkan-leaked-native-owner
+    (resource-class label device owner teardown)
+  "Transfer leaked native ownership before signaling the discipline warning."
+  (unwind-protect
+       (with-vulkan-gpu-driver-environment
+         (retire-gpu-finalizer-native-owner device owner teardown))
+    ;; Custody is already durable even if a handler promotes this warning or
+    ;; leaves it by THROW, ERROR, or an interactive debugger restart.
+    (note-gpu-resource-leak resource-class label)))
+
 (define-condition vulkan-gpu-error (gpu-error)
   ((reason
     :initarg :reason
@@ -100,6 +120,10 @@
    (destroyed-p
     :initform nil
     :accessor vulkan-object-destroyed-p)
+   (retirement-teardown
+    :initform nil
+    :accessor vulkan-object-retirement-teardown
+    :documentation "Progress-tracked native teardown closure, if any.")
    (last-submission
     :initform 0
     :accessor vulkan-object-last-submission
@@ -128,7 +152,8 @@ the finalizer thread — against submission and device destruction."
         (queue (gensym "QUEUE")))
     `(let ((,object ,device-object))
        (flet ((,run ()
-                (unless (vulkan-object-destroyed-p ,object)
+                (unless (or (vulkan-object-destroyed-p ,object)
+                            (vulkan-device-native-retired-p ,object))
                   (let ((,device-var (vulkan-handle ,object)))
                     (declare (ignorable ,device-var))
                     ,@body))))
@@ -138,22 +163,32 @@ the finalizer thread — against submission and device destruction."
                  (,run))
                (,run)))))))
 
+(defgeneric vulkan-finalizer-device (object)
+  (:method ((object t))
+    (declare (ignore object))
+    nil)
+  (:documentation
+   "Return the live device queue which may durably own OBJECT's finalizer."))
+
 (defmethod initialize-instance :after ((object vulkan-gpu-object) &key)
   ;; Explicit DESTROY cancels this finalizer.  If the object is instead
   ;; reclaimed by the collector, the leak is a warned discipline failure
   ;; and the native resources are freed as a safety net.  Anything the
   ;; queue still retains through a live submission record is reachable,
   ;; so a collected wrapper is always past the completion frontier.
-  (let ((closer (vulkan-native-teardown-closure object)))
+  (let ((closer (vulkan-native-teardown-closure object))
+        (device (vulkan-finalizer-device object)))
+    (setf (vulkan-object-retirement-teardown object) closer)
     (when closer
-      (let ((resource-class (class-name (class-of object)))
-            (label (gpu-object-label object)))
+      (let* ((resource-class (class-name (class-of object)))
+             (label (gpu-object-label object))
+             (owner (list resource-class :label label)))
         (sb-ext:finalize
          object
          (lambda ()
-           (note-gpu-resource-leak resource-class label)
-           (with-vulkan-gpu-driver-environment
-             (funcall closer))))))))
+           (retire-vulkan-leaked-native-owner
+            resource-class label device owner
+            (wrap-vulkan-gpu-driver-teardown closer))))))))
 
 (defclass vulkan-gpu-device (gpu-device vulkan-gpu-object)
   ((instance
@@ -183,9 +218,35 @@ the finalizer thread — against submission and device destruction."
    (queue
     :initform nil
     :accessor vulkan-device-queue)
+   (retiring-p
+    :initform nil
+    :accessor vulkan-device-retiring-p
+    :documentation "True once the idle-and-ledger admission barrier closes.")
+   (native-device-retired-box
+    :initform (list nil)
+    :reader vulkan-device-native-retired-box
+    :documentation
+    "Shared phase flag set immediately after vkDestroyDevice succeeds.")
+   (destroy-admission
+    :initform nil
+    :accessor vulkan-device-destroy-admission)
+   (destroy-teardown
+    :initform nil
+    :accessor vulkan-device-destroy-teardown)
+   (finalizer-teardown
+    :initform nil
+    :accessor vulkan-device-finalizer-teardown
+    :documentation
+    "Driver-wrapped fallback sharing DESTROY's native progress sequence.")
    (render-passes
     :initform (make-hash-table :test #'equal)
     :reader vulkan-device-render-passes)))
+
+(defun vulkan-device-native-retired-p (device)
+  (car (vulkan-device-native-retired-box device)))
+
+(defun (setf vulkan-device-native-retired-p) (value device)
+  (setf (car (vulkan-device-native-retired-box device)) value))
 
 (defclass vulkan-gpu-queue (gpu-queue vulkan-gpu-object)
   ((device
@@ -206,18 +267,47 @@ the finalizer thread — against submission and device destruction."
     :accessor vulkan-queue-live-submissions
     :documentation "Submission records not yet passed by the frontier,
 oldest first.")
+   (external-semaphore-states
+    :initform '()
+    :accessor vulkan-queue-external-semaphore-states
+    :documentation "Live handle-generation states shared by adopted textures.")
+   (retirement-ledger
+    :initform (make-gpu-retirement-ledger)
+    :reader vulkan-queue-retirement-ledger
+    :documentation "Native ownership transferred by logical DESTROY.")
    (lock
     :initform (sb-thread:make-mutex :name "vulkan gpu queue")
     :reader vulkan-queue-lock
     :documentation "Guards the counter, live records, deferred destroys,
 and scheduled texture layouts across the canvas and REPL threads.")))
 
+(defgeneric vulkan-admission-closed-p (object)
+  (:method ((object t)) nil))
+
+(defmethod vulkan-admission-closed-p ((device vulkan-gpu-device))
+  (vulkan-device-retiring-p device))
+
+(defmethod vulkan-admission-closed-p ((queue vulkan-gpu-queue))
+  (vulkan-device-retiring-p (vulkan-queue-device queue)))
+
 (defstruct vulkan-gpu-submission
   "One queue submission awaiting completion, retaining what the GPU may use."
   (index 0 :type (unsigned-byte 64))
   (command-buffers #() :type vector)
   (resources '() :type list)
-  (pending-destroys '() :type list))
+  post-submit-publication)
+
+(defstruct vulkan-external-submission-group
+  "Textures sharing one external timeline semaphore in a submission."
+  semaphore
+  (current-value 0 :type (unsigned-byte 64))
+  (textures '() :type list))
+
+(defstruct vulkan-external-semaphore-state
+  "Generation-safe shared high-water state for one retained native timeline."
+  semaphore
+  (value 0 :type (unsigned-byte 64))
+  (references 0 :type (unsigned-byte 64)))
 
 (defclass vulkan-gpu-buffer (gpu-buffer vulkan-gpu-object)
   ((device
@@ -255,7 +345,10 @@ and scheduled texture layouts across the canvas and REPL threads.")))
     :reader vulkan-texture-external-semaphore)
    (external-semaphore-value
     :initarg :external-semaphore-value :initform 0
-    :reader vulkan-texture-external-semaphore-value)
+    :accessor vulkan-texture-private-external-semaphore-value)
+   (external-semaphore-state
+    :initarg :external-semaphore-state :initform nil
+    :reader vulkan-texture-external-semaphore-state)
    (external-submitted
     :initarg :external-submitted :initform nil
    :reader vulkan-texture-external-submitted)
@@ -391,6 +484,9 @@ visible to it.")
    (active-pass
     :initform nil
     :accessor vulkan-command-encoder-active-pass)
+   (retirement-teardown
+    :initform nil
+    :accessor vulkan-command-encoder-retirement-teardown)
    (state
     :initform :recording
     :accessor vulkan-command-encoder-state)))
@@ -468,6 +564,36 @@ visible to it.")
     :initform :ready
     :accessor vulkan-command-buffer-state)))
 
+(defmethod vulkan-finalizer-device ((object vulkan-gpu-buffer))
+  (vulkan-buffer-device object))
+
+(defmethod vulkan-finalizer-device ((object vulkan-gpu-texture))
+  (vulkan-texture-device object))
+
+(defmethod vulkan-finalizer-device ((object vulkan-gpu-texture-view))
+  (vulkan-texture-view-device object))
+
+(defmethod vulkan-finalizer-device ((object vulkan-gpu-shader-module))
+  (vulkan-shader-module-device object))
+
+(defmethod vulkan-finalizer-device ((object vulkan-gpu-sampler))
+  (vulkan-sampler-device object))
+
+(defmethod vulkan-finalizer-device ((object vulkan-gpu-bind-group-layout))
+  (vulkan-bind-group-layout-device object))
+
+(defmethod vulkan-finalizer-device ((object vulkan-gpu-compute-pipeline))
+  (vulkan-compute-pipeline-device object))
+
+(defmethod vulkan-finalizer-device ((object vulkan-gpu-render-pipeline))
+  (vulkan-render-pipeline-device object))
+
+(defmethod vulkan-finalizer-device ((object vulkan-gpu-bind-group))
+  (vulkan-bind-group-device object))
+
+(defmethod vulkan-finalizer-device ((object vulkan-gpu-command-buffer))
+  (vulkan-command-buffer-device object))
+
 (defun vulkan-command-encoder-native-resources (encoder)
   (first (vulkan-command-encoder-native-resource-box encoder)))
 
@@ -475,11 +601,27 @@ visible to it.")
   (setf (first (vulkan-command-encoder-native-resource-box encoder)) value))
 
 (defun ensure-live-vulkan-object (object operation)
-  (when (vulkan-object-destroyed-p object)
+  (when (or (vulkan-object-destroyed-p object)
+            (vulkan-admission-closed-p object))
     (error 'gpu-object-destroyed-error
            :object object
            :operation operation))
   object)
+
+(defun call-with-live-vulkan-device-queue (device operation thunk)
+  "Serialize admitted device-native work against DEVICE destruction."
+  (let ((queue (vulkan-device-queue device)))
+    (if queue
+        (sb-thread:with-recursive-lock ((vulkan-queue-lock queue))
+          (ensure-live-vulkan-object device operation)
+          (funcall thunk))
+        (progn
+          (ensure-live-vulkan-object device operation)
+          (funcall thunk)))))
+
+(defmacro with-live-vulkan-device-queue ((device operation) &body body)
+  `(call-with-live-vulkan-device-queue
+    ,device ,operation (lambda () ,@body)))
 
 (defun first-vulkan-graphics-queue-family (physical-device)
   "Return the first graphics-and-compute queue exposed by PHYSICAL-DEVICE."
@@ -527,31 +669,21 @@ visible to it.")
 (defun install-vulkan-device-leak-finalizer (device)
   "Arrange to warn about and reclaim DEVICE if it is collected undestroyed.
 
-The finalizer captures only native handles: capturing the queue wrapper
-would keep DEVICE reachable through its own back reference forever.
-Because every child resource's teardown closure captures the device
-wrapper, this finalizer cannot run before theirs have."
-  (let ((label (gpu-object-label device))
-        (native-device (vulkan-handle device))
-        (instance (vulkan-device-instance device))
-        (messenger (vulkan-device-debug-messenger device))
-        (timeline (vulkan-queue-timeline (vulkan-device-queue device)))
-        (render-passes (vulkan-device-render-passes device)))
-    (sb-ext:finalize
-     device
-     (lambda ()
-       (note-gpu-resource-leak 'vulkan-gpu-device label)
-       (with-vulkan-gpu-driver-environment
-         (ignore-errors (lvk:device-wait-idle native-device))
-         (maphash (lambda (format render-pass)
-                    (declare (ignore format))
-                    (lvk:destroy-render-pass native-device render-pass))
-                  render-passes)
-         (lvk:destroy-semaphore native-device timeline)
-         (lvk:destroy-device native-device)
-         (when messenger
-           (ignore-errors (lvk:destroy-debug-messenger messenger)))
-         (lvk:destroy-instance instance)))))
+The finalizer captures the same progress-tracked native teardown as explicit
+DESTROY, but not the device or queue wrappers.  A failed explicit teardown can
+therefore be abandoned without replaying native calls which already returned."
+  (multiple-value-bind (native-teardown finalizer-teardown)
+      (ensure-vulkan-device-retirement-teardowns
+       device (vulkan-device-queue device))
+    (declare (ignore native-teardown))
+    (let ((label (gpu-object-label device)))
+      (sb-ext:finalize
+       device
+       (lambda ()
+         (retire-vulkan-leaked-native-owner
+          'vulkan-gpu-device label nil
+          (list 'vulkan-gpu-device :label label)
+          finalizer-teardown)))))
   device)
 
 (defun make-vulkan-gpu-device
@@ -606,23 +738,37 @@ wrapper, this finalizer cannot run before theirs have."
                                              (layout :undefined) semaphore
                                              (semaphore-value 0) submitted)
   "Wrap an externally owned Vulkan IMAGE as a GPU texture."
-  (make-instance
-   'vulkan-gpu-texture
-   :label "borrowed swapchain texture"
-   :size (list (first size) (second size) 1)
-   :usage usage
-   :dimensions :2d
-   :format format
-   :handle image
-   :device device
-   :vk-format vk-format
-   :external-owner owner
-   :aspect aspect
-   :layout layout
-   :external-semaphore semaphore
-   :external-semaphore-value semaphore-value
-   :external-submitted submitted
-   :owned-p nil))
+  (let* ((queue (vulkan-device-queue device))
+         (semaphore-state
+           (and semaphore
+                (retain-vulkan-external-semaphore-state
+                 queue semaphore semaphore-value)))
+         (completed-p nil))
+    (unwind-protect
+         (prog1
+             (make-instance
+              'vulkan-gpu-texture
+              :label "borrowed swapchain texture"
+              :size (list (first size) (second size) 1)
+              :usage usage
+              :dimensions :2d
+              :format format
+              :handle image
+              :device device
+              :vk-format vk-format
+              :external-owner owner
+              :aspect aspect
+              :layout layout
+              :external-semaphore semaphore
+              :external-semaphore-value semaphore-value
+              :external-semaphore-state semaphore-state
+              :external-submitted submitted
+              :owned-p nil)
+           (setf completed-p t))
+      (unless completed-p
+        (when semaphore-state
+          (release-vulkan-external-semaphore-state
+           queue semaphore-state))))))
 
 (defun check-vulkan-device-descriptor (descriptor)
   "Reject WebGPU requirements the initial Vulkan backend cannot honor yet."
@@ -651,39 +797,6 @@ wrapper, this finalizer cannot run before theirs have."
          :descriptor descriptor
          :reason reason
          :details details))
-
-(defun normalize-vulkan-texture-size (descriptor)
-  (let* ((size (texture-descriptor-size descriptor))
-         (components
-           (typecase size
-             (list size)
-             (vector (coerce size 'list))
-             (otherwise nil))))
-    (unless (and (member (length components) '(2 3))
-                 (every (lambda (value)
-                          (and (integerp value) (plusp value)))
-                        components)
-                 (or (= 2 (length components))
-                     (= 1 (third components))))
-      (reject-gpu-request descriptor :invalid-texture-size size))
-    (list (first components) (second components) 1)))
-
-(defun normalize-vulkan-texture-usage (descriptor)
-  (let* ((usage (texture-descriptor-usage descriptor))
-         (usages
-           (typecase usage
-             (keyword (list usage))
-             (list usage)
-             (vector (coerce usage 'list))
-             (otherwise nil))))
-    (unless (and usages
-                 (every (lambda (value)
-                          (member value
-                                  '(:copy-src :copy-dst :storage-binding
-                                    :texture-binding :render-attachment)))
-                        usages))
-      (reject-gpu-request descriptor :unsupported-texture-usage usage))
-    (remove-duplicates usages)))
 
 (defun vulkan-gpu-format (format descriptor)
   (or (cdr (assoc format
@@ -716,16 +829,17 @@ wrapper, this finalizer cannot run before theirs have."
   (ensure-live-vulkan-object device :adopt-native-texture)
   (unless (and (listp native) (getf native :image) owner)
     (reject-gpu-request descriptor :invalid-native-texture native))
-  (make-borrowed-vulkan-texture
-   device (getf native :image) (normalize-vulkan-texture-size descriptor)
-   (texture-descriptor-format descriptor)
-   (or (getf native :format) (vulkan-texture-format descriptor))
-   :usage (normalize-vulkan-texture-usage descriptor)
-   :owner owner :aspect (getf native :aspect)
-   :layout (or (getf native :layout) :general)
-   :semaphore (getf native :semaphore)
-   :semaphore-value (or (getf native :semaphore-value) 0)
-   :submitted (getf native :submitted)))
+  (with-live-vulkan-device-queue (device :adopt-native-texture)
+    (make-borrowed-vulkan-texture
+     device (getf native :image) (texture-descriptor-size descriptor)
+     (texture-descriptor-format descriptor)
+     (or (getf native :format) (vulkan-texture-format descriptor))
+     :usage (texture-descriptor-usage descriptor)
+     :owner owner :aspect (getf native :aspect)
+     :layout (or (getf native :layout) :general)
+     :semaphore (getf native :semaphore)
+     :semaphore-value (or (getf native :semaphore-value) 0)
+     :submitted (getf native :submitted))))
 
 (defun vulkan-image-usage (usages format)
   (mapcar (lambda (usage)
@@ -890,20 +1004,7 @@ wrapper, this finalizer cannot run before theirs have."
   (with-vulkan-gpu-driver-environment
     (ensure-live-vulkan-object device :create-buffer)
     (let* ((size (buffer-descriptor-size descriptor))
-           (raw-usage (buffer-descriptor-usage descriptor))
-           (usage (typecase raw-usage
-                    (keyword (list raw-usage))
-                    (list (remove-duplicates raw-usage))
-                    (vector (remove-duplicates (coerce raw-usage 'list)))
-                    (otherwise nil))))
-      (unless (and (typep size '(unsigned-byte 64)) (plusp size))
-        (reject-gpu-request descriptor :invalid-buffer-size size))
-      (unless (and usage
-                   (every (lambda (value)
-                            (member value
-                                    '(:uniform :storage :vertex :copy-dst)))
-                          usage))
-        (reject-gpu-request descriptor :unsupported-buffer-usage raw-usage))
+           (usage (buffer-descriptor-usage descriptor)))
       (let ((native-device (vulkan-handle device))
             (buffer nil)
             (memory nil)
@@ -996,12 +1097,8 @@ as its own element type rather than as reinterpreted floats."
   "Create one owned, single-mip Vulkan 2D texture and bind its memory."
   (with-vulkan-gpu-driver-environment
     (ensure-live-vulkan-object device :create-texture)
-    (unless (eq :2d (texture-descriptor-dimensions descriptor))
-      (reject-gpu-request
-       descriptor :unsupported-texture-dimensions
-       (texture-descriptor-dimensions descriptor)))
-    (let* ((size (normalize-vulkan-texture-size descriptor))
-           (usages (normalize-vulkan-texture-usage descriptor))
+    (let* ((size (texture-descriptor-size descriptor))
+           (usages (texture-descriptor-usage descriptor))
            (format (vulkan-texture-format descriptor))
            (native-device (vulkan-handle device))
            (image nil)
@@ -1116,7 +1213,7 @@ as its own element type rather than as reinterpreted floats."
                  (let ((specification
                          (shader-module-descriptor-code descriptor)))
                    (unless (typep specification
-                                  'luv.spir-v:shader-specification)
+                                  'luv.shader:shader-specification)
                      (reject-gpu-request
                       descriptor :invalid-mathematical-shader specification))
                    (luv.spir-v:assemble-shader-specification specification)))
@@ -1254,49 +1351,63 @@ VK_EXT_mesh_shader is enabled, so ask the device first."
        :create-compute-pipeline)
       (unless (stringp entry-point)
         (reject-gpu-request descriptor :invalid-entry-point entry-point))
-      (let ((pipeline-layout
-              (lvk:create-pipeline-layout
-               (vulkan-handle device) (vector (vulkan-handle layout))))
-            (pipeline nil)
-            (completed-p nil))
-        (unwind-protect
-             (progn
-               (setf pipeline
-                     (lvk:create-compute-pipeline
-                      (vulkan-handle device)
-                      (vulkan-handle module)
-                      pipeline-layout
-                      :entry-point entry-point)
-                     completed-p t)
-               (make-instance
-                'vulkan-gpu-compute-pipeline
-                :label (gpu-descriptor-label descriptor)
-                :handle pipeline
-                :device device
-                :layout layout
-                :pipeline-layout pipeline-layout))
-          (unless completed-p
-            (lvk:destroy-pipeline-layout
-             (vulkan-handle device) pipeline-layout)))))))
+      (with-live-vulkan-device-queue (device :create-compute-pipeline)
+        (ensure-vulkan-object-device
+         module (vulkan-shader-module-device module) device
+         :create-compute-pipeline)
+        (ensure-vulkan-object-device
+         layout (vulkan-bind-group-layout-device layout) device
+         :create-compute-pipeline)
+        (let ((pipeline-layout
+                (lvk:create-pipeline-layout
+                 (vulkan-handle device) (vector (vulkan-handle layout))))
+              (pipeline nil)
+              (completed-p nil))
+          (unwind-protect
+               (let ((wrapper nil))
+                 (setf pipeline
+                       (lvk:create-compute-pipeline
+                        (vulkan-handle device)
+                        (vulkan-handle module)
+                        pipeline-layout
+                        :entry-point entry-point)
+                       wrapper
+                       (make-instance
+                        'vulkan-gpu-compute-pipeline
+                        :label (gpu-descriptor-label descriptor)
+                        :handle pipeline
+                        :device device
+                        :layout layout
+                        :pipeline-layout pipeline-layout)
+                       completed-p t)
+                 wrapper)
+            (unless completed-p
+              (unwind-protect
+                   (when pipeline
+                     (lvk:destroy-pipeline
+                      (vulkan-handle device) pipeline))
+                (lvk:destroy-pipeline-layout
+                 (vulkan-handle device) pipeline-layout)))))))))
 
 (defun vulkan-render-pass-for-format
     (device gpu-format descriptor &optional depth-format
             (depth-store-op :discard))
-  (let ((key (list gpu-format depth-format depth-store-op)))
-    (or (gethash key (vulkan-device-render-passes device))
-        (setf (gethash key (vulkan-device-render-passes device))
-              (if gpu-format
-                  (lvk:create-color-render-pass
-                   (vulkan-handle device)
-                   (vulkan-gpu-format gpu-format descriptor)
-                   :depth-format
-                   (and depth-format
-                        (vulkan-gpu-format depth-format descriptor))
-                   :depth-store-op depth-store-op)
-                  (lvk:create-depth-render-pass
-                   (vulkan-handle device)
-                   (vulkan-gpu-format depth-format descriptor)
-                   :depth-store-op depth-store-op))))))
+  (with-live-vulkan-device-queue (device :create-render-pass)
+    (let ((key (list gpu-format depth-format depth-store-op)))
+      (or (gethash key (vulkan-device-render-passes device))
+          (setf (gethash key (vulkan-device-render-passes device))
+                (if gpu-format
+                    (lvk:create-color-render-pass
+                     (vulkan-handle device)
+                     (vulkan-gpu-format gpu-format descriptor)
+                     :depth-format
+                     (and depth-format
+                          (vulkan-gpu-format depth-format descriptor))
+                     :depth-store-op depth-store-op)
+                    (lvk:create-depth-render-pass
+                     (vulkan-handle device)
+                     (vulkan-gpu-format depth-format descriptor)
+                     :depth-store-op depth-store-op)))))))
 
 (defun normalize-vulkan-vertex-buffers (descriptor buffers)
   (unless (listp buffers)
@@ -1391,42 +1502,60 @@ VK_EXT_mesh_shader is enabled, so ask the device first."
            (vulkan-gpu-shader-module
             (vulkan-shader-module-device object)))
          device :create-render-pipeline))
-      (let* ((render-pass
-             (vulkan-render-pass-for-format
-                device format descriptor depth-format
-                (or depth-store-op :discard)))
-             (pipeline-layout
-               (lvk:create-pipeline-layout
-                (vulkan-handle device) (vector (vulkan-handle layout))))
-             (pipeline nil)
-             (completed-p nil))
-        (unwind-protect
-             (progn
-               (setf pipeline
-                     (lvk:create-graphics-pipeline
-                      (vulkan-handle device)
-                      (vulkan-handle vertex-module)
-                      (and fragment-module (vulkan-handle fragment-module))
-                      pipeline-layout render-pass
-                      :vertex-entry-point (or (getf vertex :entry-point) "main")
-                      :fragment-entry-point
-                      (or (getf fragment :entry-point) "main")
-                      :topology topology
-                      :vertex-buffers vertex-buffers
-                      :depth-compare depth-compare
-                      :depth-write-enabled depth-write-enabled
-                      :blend blend)
-                     completed-p t)
-               (make-instance
-                'vulkan-gpu-render-pipeline
-                :label (gpu-descriptor-label descriptor)
-                :handle pipeline :device device :layout layout
-                :pipeline-layout pipeline-layout :render-pass render-pass
-                :vertex-buffers vertex-buffers :target-format format
-                :depth-format depth-format))
-          (unless completed-p
-             (lvk:destroy-pipeline-layout
-              (vulkan-handle device) pipeline-layout)))))))
+      (with-live-vulkan-device-queue (device :create-render-pipeline)
+        (dolist (object
+                 (remove nil (list layout vertex-module fragment-module)))
+          (ensure-vulkan-object-device
+           object
+           (etypecase object
+             (vulkan-gpu-bind-group-layout
+              (vulkan-bind-group-layout-device object))
+             (vulkan-gpu-shader-module
+              (vulkan-shader-module-device object)))
+           device :create-render-pipeline))
+        (let* ((render-pass
+                 (vulkan-render-pass-for-format
+                  device format descriptor depth-format
+                  (or depth-store-op :discard)))
+               (pipeline-layout
+                 (lvk:create-pipeline-layout
+                  (vulkan-handle device) (vector (vulkan-handle layout))))
+               (pipeline nil)
+               (completed-p nil))
+          (unwind-protect
+               (let ((wrapper nil))
+                 (setf pipeline
+                       (lvk:create-graphics-pipeline
+                        (vulkan-handle device)
+                        (vulkan-handle vertex-module)
+                        (and fragment-module (vulkan-handle fragment-module))
+                        pipeline-layout render-pass
+                        :vertex-entry-point
+                        (or (getf vertex :entry-point) "main")
+                        :fragment-entry-point
+                        (or (getf fragment :entry-point) "main")
+                        :topology topology
+                        :vertex-buffers vertex-buffers
+                        :depth-compare depth-compare
+                        :depth-write-enabled depth-write-enabled
+                        :blend blend)
+                       wrapper
+                       (make-instance
+                        'vulkan-gpu-render-pipeline
+                        :label (gpu-descriptor-label descriptor)
+                        :handle pipeline :device device :layout layout
+                        :pipeline-layout pipeline-layout :render-pass render-pass
+                        :vertex-buffers vertex-buffers :target-format format
+                        :depth-format depth-format)
+                       completed-p t)
+                 wrapper)
+            (unless completed-p
+              (unwind-protect
+                   (when pipeline
+                     (lvk:destroy-pipeline
+                      (vulkan-handle device) pipeline))
+                (lvk:destroy-pipeline-layout
+                 (vulkan-handle device) pipeline-layout)))))))))
 
 (defmethod create
     ((device vulkan-gpu-device) (descriptor mesh-render-pipeline-descriptor))
@@ -1492,48 +1621,65 @@ render-pass compatibility need no separate vocabulary."
            (vulkan-gpu-shader-module
             (vulkan-shader-module-device object)))
          device :create-mesh-render-pipeline))
-      (let* ((render-pass
-               (with-cpu-trace-zone (:vulkan/pipeline/render-pass)
-                 (vulkan-render-pass-for-format
-                  device format descriptor depth-format
-                  (or depth-store-op :discard))))
-             (pipeline-layout
-               (with-cpu-trace-zone (:vulkan/pipeline/create-layout)
-                 (lvk:create-pipeline-layout
-                  (vulkan-handle device) (vector (vulkan-handle layout)))))
-             (pipeline nil)
-             (completed-p nil))
-        (unwind-protect
-             (progn
-               (setf pipeline
-                     (with-cpu-trace-zone (:vulkan/pipeline/create-mesh)
-                       (lvk:create-mesh-graphics-pipeline
-                        (vulkan-handle device)
-                        (vulkan-handle mesh-module)
-                        (and fragment-module (vulkan-handle fragment-module))
-                        pipeline-layout render-pass
-                        :task-module (and task-module
-                                          (vulkan-handle task-module))
-                        :task-entry-point
-                        (or (getf task :entry-point) "main")
-                        :mesh-entry-point
-                        (or (getf mesh :entry-point) "main")
-                        :fragment-entry-point
-                        (or (getf fragment :entry-point) "main")
-                        :depth-compare depth-compare
-                        :depth-write-enabled depth-write-enabled
-                        :blend blend))
-                     completed-p t)
-               (make-instance
-                'vulkan-gpu-render-pipeline
-                :label (gpu-descriptor-label descriptor)
-                :handle pipeline :device device :layout layout
-                :pipeline-layout pipeline-layout :render-pass render-pass
-                :vertex-buffers nil :target-format format
-                :depth-format depth-format))
-          (unless completed-p
-            (lvk:destroy-pipeline-layout
-             (vulkan-handle device) pipeline-layout)))))))
+      (with-live-vulkan-device-queue (device :create-mesh-render-pipeline)
+        (dolist (object (remove nil (list layout task-module mesh-module
+                                          fragment-module)))
+          (ensure-vulkan-object-device
+           object
+           (etypecase object
+             (vulkan-gpu-bind-group-layout
+              (vulkan-bind-group-layout-device object))
+             (vulkan-gpu-shader-module
+              (vulkan-shader-module-device object)))
+           device :create-mesh-render-pipeline))
+        (let* ((render-pass
+                 (with-cpu-trace-zone (:vulkan/pipeline/render-pass)
+                   (vulkan-render-pass-for-format
+                    device format descriptor depth-format
+                    (or depth-store-op :discard))))
+               (pipeline-layout
+                 (with-cpu-trace-zone (:vulkan/pipeline/create-layout)
+                   (lvk:create-pipeline-layout
+                    (vulkan-handle device) (vector (vulkan-handle layout)))))
+               (pipeline nil)
+               (completed-p nil))
+          (unwind-protect
+               (let ((wrapper nil))
+                 (setf pipeline
+                       (with-cpu-trace-zone (:vulkan/pipeline/create-mesh)
+                         (lvk:create-mesh-graphics-pipeline
+                          (vulkan-handle device)
+                          (vulkan-handle mesh-module)
+                          (and fragment-module (vulkan-handle fragment-module))
+                          pipeline-layout render-pass
+                          :task-module (and task-module
+                                            (vulkan-handle task-module))
+                          :task-entry-point
+                          (or (getf task :entry-point) "main")
+                          :mesh-entry-point
+                          (or (getf mesh :entry-point) "main")
+                          :fragment-entry-point
+                          (or (getf fragment :entry-point) "main")
+                          :depth-compare depth-compare
+                          :depth-write-enabled depth-write-enabled
+                          :blend blend))
+                       wrapper
+                       (make-instance
+                        'vulkan-gpu-render-pipeline
+                        :label (gpu-descriptor-label descriptor)
+                        :handle pipeline :device device :layout layout
+                        :pipeline-layout pipeline-layout :render-pass render-pass
+                        :vertex-buffers nil :target-format format
+                        :depth-format depth-format)
+                       completed-p t)
+                 wrapper)
+            (unless completed-p
+              (unwind-protect
+                   (when pipeline
+                     (lvk:destroy-pipeline
+                      (vulkan-handle device) pipeline))
+                (lvk:destroy-pipeline-layout
+                 (vulkan-handle device) pipeline-layout)))))))))
 
 (defun storage-texture-bind-group-entry (descriptor layout)
   (let ((entries (bind-group-descriptor-entries descriptor)))
@@ -1602,13 +1748,14 @@ render-pass compatibility need no separate vocabulary."
              (lvk:update-uniform-buffer-descriptor
               (vulkan-handle device) set (vulkan-handle buffer)
               (gpu-buffer-size buffer) :binding binding)
-             (setf completed-p t)
-             (make-instance
-              'vulkan-gpu-bind-group
-              :label (gpu-descriptor-label descriptor)
-              :handle set :device device :layout layout
-              :buffers (list buffer)
-              :descriptor-pool pool))
+             (prog1
+                 (make-instance
+                  'vulkan-gpu-bind-group
+                  :label (gpu-descriptor-label descriptor)
+                  :handle set :device device :layout layout
+                  :buffers (list buffer)
+                  :descriptor-pool pool)
+               (setf completed-p t)))
         (unless completed-p
           (lvk:destroy-descriptor-pool (vulkan-handle device) pool))))))
 
@@ -1644,13 +1791,14 @@ render-pass compatibility need no separate vocabulary."
                      (lvk:update-storage-image-descriptor
                       (vulkan-handle device) set (vulkan-handle view)
                       :binding (vulkan-bind-group-layout-binding layout))
-                     (setf completed-p t)
-                     (make-instance
-                      'vulkan-gpu-bind-group
-                      :label (gpu-descriptor-label descriptor)
-                      :handle set :device device :layout layout
-                      :texture-views (list view)
-                      :descriptor-pool pool))
+                     (prog1
+                         (make-instance
+                          'vulkan-gpu-bind-group
+                          :label (gpu-descriptor-label descriptor)
+                          :handle set :device device :layout layout
+                          :texture-views (list view)
+                          :descriptor-pool pool)
+                       (setf completed-p t)))
                 (unless completed-p
                   (lvk:destroy-descriptor-pool
                    (vulkan-handle device) pool)))))
@@ -1736,15 +1884,16 @@ render-pass compatibility need no separate vocabulary."
                                 (vulkan-handle layout)))
                          (lvk:update-texture-sampler-uniform-descriptors
                           (vulkan-handle device) set descriptor-entries)
-                         (setf completed-p t)
-                         (make-instance
-                          'vulkan-gpu-bind-group
-                          :label (gpu-descriptor-label descriptor)
-                          :handle set :device device :layout layout
-                          :texture-views views
-                          :samplers samplers
-                          :buffers buffers
-                          :descriptor-pool pool))
+                         (prog1
+                             (make-instance
+                              'vulkan-gpu-bind-group
+                              :label (gpu-descriptor-label descriptor)
+                              :handle set :device device :layout layout
+                              :texture-views views
+                              :samplers samplers
+                              :buffers buffers
+                              :descriptor-pool pool)
+                           (setf completed-p t)))
                     (unless completed-p
                       (lvk:destroy-descriptor-pool
                        (vulkan-handle device) pool))))))))))
@@ -1754,31 +1903,35 @@ render-pass compatibility need no separate vocabulary."
   "Allocate and begin one Vulkan primary command buffer."
   (with-vulkan-gpu-driver-environment
     (ensure-live-vulkan-object device :create-command-encoder)
-    (let ((command-pool nil)
-          (completed-p nil))
-      (unwind-protect
-           (progn
-             (setf command-pool
-                   (lvk:create-command-pool
-                    (vulkan-handle device)
-                    (vulkan-device-queue-family device)
-                    :flags '(:transient)))
-             (let ((command-buffer
-                     (lvk:allocate-command-buffer
-                      (vulkan-handle device) command-pool)))
-               (lvk:begin-command-buffer command-buffer)
-               (setf completed-p t)
-               (install-vulkan-encoder-leak-finalizer
-                (make-instance
-                 'vulkan-gpu-command-encoder
-                 :label (gpu-descriptor-label descriptor)
-                 :device device
-                 :command-pool command-pool
-                 :command-buffer command-buffer))))
-        (unless completed-p
-          (when command-pool
-            (lvk:destroy-command-pool
-             (vulkan-handle device) command-pool)))))))
+    (with-live-vulkan-device-queue (device :create-command-encoder)
+      (let ((command-pool nil)
+            (completed-p nil))
+        (unwind-protect
+             (progn
+               (setf command-pool
+                     (lvk:create-command-pool
+                      (vulkan-handle device)
+                      (vulkan-device-queue-family device)
+                      :flags '(:transient)))
+               (let* ((command-buffer
+                        (lvk:allocate-command-buffer
+                         (vulkan-handle device) command-pool))
+                      (encoder nil))
+                 (lvk:begin-command-buffer command-buffer)
+                 (setf encoder
+                       (make-instance
+                        'vulkan-gpu-command-encoder
+                        :label (gpu-descriptor-label descriptor)
+                        :device device
+                        :command-pool command-pool
+                        :command-buffer command-buffer)
+                       encoder (install-vulkan-encoder-leak-finalizer encoder)
+                       completed-p t)
+                 encoder))
+          (unless completed-p
+            (when command-pool
+              (lvk:destroy-command-pool
+               (vulkan-handle device) command-pool))))))))
 
 (defun install-vulkan-encoder-leak-finalizer (encoder)
   "Arrange to warn about and reclaim ENCODER if it is collected while it
@@ -1791,13 +1944,12 @@ ownership and cancel this finalizer."
     (sb-ext:finalize
      encoder
      (lambda ()
-       (note-gpu-resource-leak 'vulkan-gpu-command-encoder label)
-       (with-vulkan-gpu-driver-environment
-         (with-vulkan-queue-teardown (device native-device)
-           (lvk:destroy-command-pool native-device command-pool)
-           (dolist (resource (first box))
-             (destroy-vulkan-command-native-resource
-              native-device resource)))))))
+       (retire-vulkan-leaked-native-owner
+        'vulkan-gpu-command-encoder label device
+        (list 'vulkan-gpu-command-encoder :label label)
+        (wrap-vulkan-gpu-driver-teardown
+         (make-vulkan-command-retirement-teardown
+          device command-pool (first box)))))))
   encoder)
 
 (defun ensure-vulkan-command-encoder-state (encoder operation)
@@ -2310,72 +2462,74 @@ lowering later without changing this queue-level operation."
                             (member depth-store-op '(:discard :store)))))
         (reject-gpu-request descriptor :unsupported-render-pass))
       (let* ((device (vulkan-command-encoder-device encoder))
-             (size (gpu-texture-size (or target depth-target)))
-             (render-pass
-               (vulkan-render-pass-for-format
-                device (and target (gpu-texture-format target)) descriptor
-                (and depth-target (gpu-texture-format depth-target))
-                (or depth-store-op :discard)))
-             (framebuffer nil)
-             (completed-p nil))
-        (when target
-          (ensure-vulkan-object-device
-           view (vulkan-texture-view-device view) device :begin-render-pass))
-        (when depth-target
-          (unless (or (null target)
-                      (equal size (gpu-texture-size depth-target)))
-            (reject-gpu-request descriptor :mismatched-depth-size
-                                (gpu-texture-size depth-target)))
-          (ensure-vulkan-object-device
-           depth-view (vulkan-texture-view-device depth-view)
-           device :begin-render-pass)
-          (retain-vulkan-resource encoder depth-view)
-          (ensure-vulkan-texture-for-command
-           encoder depth-target descriptor :render-attachment)
-          (transition-vulkan-texture
-           encoder depth-target :depth-stencil-attachment-optimal))
-        (when target
-          (retain-vulkan-resource encoder view)
-          (ensure-vulkan-texture-for-command
-           encoder target descriptor :render-attachment)
-          (transition-vulkan-texture
-           encoder target :color-attachment-optimal))
-        (unwind-protect
-             (progn
-               (setf framebuffer
-                     (lvk:create-framebuffer
-                      (vulkan-handle device) render-pass
-                      (and view (vulkan-handle view))
-                      (first size) (second size)
-                      :depth-view (and depth-view
-                                       (vulkan-handle depth-view))))
-               (if target
-                   (lvk:cmd-begin-color-render-pass
+             (size (gpu-texture-size (or target depth-target))))
+        (with-live-vulkan-device-queue (device :begin-render-pass)
+          (let* ((render-pass
+                   (vulkan-render-pass-for-format
+                    device (and target (gpu-texture-format target)) descriptor
+                    (and depth-target (gpu-texture-format depth-target))
+                    (or depth-store-op :discard)))
+                 (framebuffer nil)
+                 (completed-p nil))
+            (when target
+              (ensure-vulkan-object-device
+               view (vulkan-texture-view-device view)
+               device :begin-render-pass))
+            (when depth-target
+              (unless (or (null target)
+                          (equal size (gpu-texture-size depth-target)))
+                (reject-gpu-request descriptor :mismatched-depth-size
+                                    (gpu-texture-size depth-target)))
+              (ensure-vulkan-object-device
+               depth-view (vulkan-texture-view-device depth-view)
+               device :begin-render-pass)
+              (retain-vulkan-resource encoder depth-view)
+              (ensure-vulkan-texture-for-command
+               encoder depth-target descriptor :render-attachment)
+              (transition-vulkan-texture
+               encoder depth-target :depth-stencil-attachment-optimal))
+            (when target
+              (retain-vulkan-resource encoder view)
+              (ensure-vulkan-texture-for-command
+               encoder target descriptor :render-attachment)
+              (transition-vulkan-texture
+               encoder target :color-attachment-optimal))
+            (unwind-protect
+                 (progn
+                   (setf framebuffer
+                         (lvk:create-framebuffer
+                          (vulkan-handle device) render-pass
+                          (and view (vulkan-handle view))
+                          (first size) (second size)
+                          :depth-view (and depth-view
+                                           (vulkan-handle depth-view))))
+                   (if target
+                       (lvk:cmd-begin-color-render-pass
+                        (vulkan-command-encoder-command-buffer encoder)
+                        render-pass framebuffer (first size) (second size)
+                        clear-color :depth-clear-value clear-depth)
+                       (lvk:cmd-begin-depth-render-pass
+                        (vulkan-command-encoder-command-buffer encoder)
+                        render-pass framebuffer (first size) (second size)
+                        clear-depth))
+                   (lvk:cmd-set-viewport-and-scissor
                     (vulkan-command-encoder-command-buffer encoder)
-                    render-pass framebuffer (first size) (second size)
-                    clear-color :depth-clear-value clear-depth)
-                   (lvk:cmd-begin-depth-render-pass
-                    (vulkan-command-encoder-command-buffer encoder)
-                    render-pass framebuffer (first size) (second size)
-                    clear-depth))
-               (lvk:cmd-set-viewport-and-scissor
-                (vulkan-command-encoder-command-buffer encoder)
-                (first size) (second size))
-               (push (list :framebuffer framebuffer)
-                     (vulkan-command-encoder-native-resources encoder))
-               (let ((pass
-                       (make-instance
-                        'vulkan-gpu-render-pass-encoder
-                        :encoder encoder :framebuffer framebuffer
-                        :target target :depth-target depth-target
-                        :depth-store-op depth-store-op)))
-                 (setf (vulkan-command-encoder-active-pass encoder) pass
-                       completed-p t)
-                 pass))
-          (unless completed-p
-            (when framebuffer
-              (lvk:destroy-framebuffer
-               (vulkan-handle device) framebuffer))))))))
+                    (first size) (second size))
+                   (push (list :framebuffer framebuffer)
+                         (vulkan-command-encoder-native-resources encoder))
+                   (let ((pass
+                           (make-instance
+                            'vulkan-gpu-render-pass-encoder
+                            :encoder encoder :framebuffer framebuffer
+                            :target target :depth-target depth-target
+                            :depth-store-op depth-store-op)))
+                     (setf (vulkan-command-encoder-active-pass encoder) pass
+                           completed-p t)
+                     pass))
+              (unless completed-p
+                (when framebuffer
+                  (lvk:destroy-framebuffer
+                   (vulkan-handle device) framebuffer))))))))))
 
 (defun ensure-vulkan-render-pass-state (pass operation)
   (unless (eq :recording (vulkan-render-pass-state pass))
@@ -2742,38 +2896,68 @@ lowering later without changing this queue-level operation."
 (defun hash-table-keys (table)
   (loop for key being the hash-keys of table collect key))
 
+(defun make-vulkan-finished-command-buffer
+    (encoder device command-buffer command-pool native-resources)
+  "Publish ENCODER's ended native ownership as one command-buffer wrapper."
+  (make-instance
+   'vulkan-gpu-command-buffer
+   :label (gpu-object-label encoder)
+   :handle command-buffer
+   :device device
+   :command-pool command-pool
+   :initial-texture-layouts
+   (hash-table-alist
+    (vulkan-command-encoder-initial-texture-layouts encoder))
+   :final-texture-layouts
+   (hash-table-alist (vulkan-command-encoder-texture-layouts encoder))
+   :textures
+   (hash-table-keys (vulkan-command-encoder-textures encoder))
+   :resources
+   (hash-table-keys (vulkan-command-encoder-resources encoder))
+   :native-resources native-resources))
+
 (defmethod finish ((encoder vulkan-gpu-command-encoder))
   (with-vulkan-gpu-driver-environment
-    (ensure-vulkan-command-encoder-state encoder :finish)
-    (ensure-no-active-vulkan-pass encoder :finish)
-    (let ((device (vulkan-command-encoder-device encoder))
-          (command-buffer (vulkan-command-encoder-command-buffer encoder))
-          (command-pool (vulkan-command-encoder-command-pool encoder)))
-      (ensure-live-vulkan-object device :finish)
-      (lvk:end-command-buffer command-buffer)
-      ;; Ownership of the pool and native resources moves to the command
-      ;; buffer, whose own finalizer takes over leak protection.
-      (sb-ext:cancel-finalization encoder)
-      (setf (vulkan-command-encoder-state encoder) :finished
-            (vulkan-command-encoder-command-pool encoder) nil)
-      (make-instance
-       'vulkan-gpu-command-buffer
-       :label (gpu-object-label encoder)
-       :handle command-buffer
-       :device device
-       :command-pool command-pool
-       :initial-texture-layouts
-       (hash-table-alist
-        (vulkan-command-encoder-initial-texture-layouts encoder))
-       :final-texture-layouts
-       (hash-table-alist (vulkan-command-encoder-texture-layouts encoder))
-       :textures
-       (hash-table-keys (vulkan-command-encoder-textures encoder))
-       :resources
-       (hash-table-keys (vulkan-command-encoder-resources encoder))
-       :native-resources
-       (prog1 (vulkan-command-encoder-native-resources encoder)
-         (setf (vulkan-command-encoder-native-resources encoder) nil))))))
+    (unless (member (vulkan-command-encoder-state encoder)
+                    '(:recording :ended))
+      (error 'gpu-invalid-state-error
+             :object encoder :operation :finish
+             :state (vulkan-command-encoder-state encoder)
+             :expected-state :recording-or-ended))
+    (when (member (vulkan-command-encoder-state encoder)
+                  '(:recording :ended))
+      (ensure-no-active-vulkan-pass encoder :finish))
+    (let ((device (vulkan-command-encoder-device encoder)))
+      (with-live-vulkan-device-queue (device :finish)
+        (unless (member (vulkan-command-encoder-state encoder)
+                        '(:recording :ended))
+          (error 'gpu-invalid-state-error
+                 :object encoder :operation :finish
+                 :state (vulkan-command-encoder-state encoder)
+                 :expected-state :recording-or-ended))
+        (when (eq :recording (vulkan-command-encoder-state encoder))
+          (ensure-no-active-vulkan-pass encoder :finish))
+        (let ((command-buffer
+                (vulkan-command-encoder-command-buffer encoder))
+              (command-pool
+                (vulkan-command-encoder-command-pool encoder))
+              (native-resources
+                (copy-list
+                 (vulkan-command-encoder-native-resources encoder))))
+          (when (eq :recording (vulkan-command-encoder-state encoder))
+            (lvk:end-command-buffer command-buffer)
+            ;; The encoder and its finalizer retain ownership in :ENDED until a
+            ;; fully initialized command-buffer wrapper takes over.
+            (setf (vulkan-command-encoder-state encoder) :ended))
+          (let ((wrapper
+                  (make-vulkan-finished-command-buffer
+                   encoder device command-buffer command-pool
+                   native-resources)))
+            (sb-ext:cancel-finalization encoder)
+            (setf (vulkan-command-encoder-state encoder) :finished
+                  (vulkan-command-encoder-command-pool encoder) nil
+                  (vulkan-command-encoder-native-resources encoder) nil)
+            wrapper))))))
 
 (defun check-vulkan-command-buffer-for-submit (queue command-buffer)
   (ensure-live-vulkan-object command-buffer :submit)
@@ -2826,6 +3010,188 @@ lowering later without changing this queue-level operation."
                  (setf (gethash (car entry) layouts) (cdr entry)))))
     layouts))
 
+(defun same-vulkan-native-handle-p (first second)
+  "Compare native handles even when CFFI wrapped one address twice."
+  (if (and (cffi:pointerp first) (cffi:pointerp second))
+      (cffi:pointer-eq first second)
+      (eql first second)))
+
+(defun vulkan-texture-external-semaphore-value (texture)
+  (let ((state (vulkan-texture-external-semaphore-state texture)))
+    (if state
+        (vulkan-external-semaphore-state-value state)
+        (vulkan-texture-private-external-semaphore-value texture))))
+
+(defun (setf vulkan-texture-external-semaphore-value) (value texture)
+  (let ((state (vulkan-texture-external-semaphore-state texture)))
+    (if state
+        (setf (vulkan-external-semaphore-state-value state) value)
+        (setf (vulkan-texture-private-external-semaphore-value texture)
+              value)))
+  value)
+
+(defun find-vulkan-external-semaphore-state (queue semaphore)
+  (find semaphore (vulkan-queue-external-semaphore-states queue)
+        :key #'vulkan-external-semaphore-state-semaphore
+        :test #'same-vulkan-native-handle-p))
+
+(defun retain-vulkan-external-semaphore-state
+    (queue semaphore initial-value)
+  "Share one high-water state for the retained native semaphore generation."
+  (flet ((retain ()
+           (let ((state
+                   (or (and queue
+                            (find-vulkan-external-semaphore-state
+                             queue semaphore))
+                       (make-vulkan-external-semaphore-state
+                        :semaphore semaphore :value initial-value))))
+             (setf (vulkan-external-semaphore-state-value state)
+                   (max (vulkan-external-semaphore-state-value state)
+                        initial-value))
+             (incf (vulkan-external-semaphore-state-references state))
+             (when (and queue
+                        (not (member
+                              state
+                              (vulkan-queue-external-semaphore-states queue)
+                              :test #'eq)))
+               (push state (vulkan-queue-external-semaphore-states queue)))
+             state)))
+    (if queue
+        (sb-thread:with-recursive-lock ((vulkan-queue-lock queue))
+          (retain))
+        (retain))))
+
+(defun release-vulkan-external-semaphore-state (queue state)
+  "Release one adopted texture reference and forget an exhausted generation."
+  (flet ((release ()
+           (when (plusp
+                  (vulkan-external-semaphore-state-references state))
+             (decf (vulkan-external-semaphore-state-references state)))
+           (when (and queue
+                      (zerop
+                       (vulkan-external-semaphore-state-references state)))
+             (setf (vulkan-queue-external-semaphore-states queue)
+                   (delete state
+                           (vulkan-queue-external-semaphore-states queue)
+                           :test #'eq)))))
+    (if queue
+        (sb-thread:with-recursive-lock ((vulkan-queue-lock queue))
+          (release))
+        (release)))
+  (values))
+
+(defun vulkan-external-submission-groups (texture-layouts)
+  "Group submitted external textures by semaphore and retain the newest wait."
+  (let ((groups '()))
+    (maphash
+     (lambda (texture layout)
+       (declare (ignore layout))
+       (let ((semaphore (vulkan-texture-external-semaphore texture)))
+         (when semaphore
+           (let ((group
+                   (find semaphore groups
+                         :key #'vulkan-external-submission-group-semaphore
+                         :test #'same-vulkan-native-handle-p)))
+             (if group
+                 (setf
+                  (vulkan-external-submission-group-current-value group)
+                  (max
+                   (vulkan-external-submission-group-current-value group)
+                   (vulkan-texture-external-semaphore-value texture))
+                  (vulkan-external-submission-group-textures group)
+                  (cons texture
+                        (vulkan-external-submission-group-textures group)))
+                 (push
+                  (make-vulkan-external-submission-group
+                   :semaphore semaphore
+                   :current-value
+                   (vulkan-texture-external-semaphore-value texture)
+                   :textures (list texture))
+                  groups))))))
+     texture-layouts)
+    (dolist (group groups)
+      (setf (vulkan-external-submission-group-textures group)
+            (nreverse
+             (vulkan-external-submission-group-textures group))))
+    (nreverse groups)))
+
+(defun vulkan-external-submission-next-value (group)
+  (let ((current
+          (vulkan-external-submission-group-current-value group)))
+    (when (= current (1- (expt 2 64)))
+      (error 'vulkan-gpu-error :operation :submit
+             :reason :external-semaphore-value-exhausted
+             :details current))
+    (1+ current)))
+
+(defun make-vulkan-external-callback-batch (callbacks)
+  "Return an attempt-all, retry-only-failures external callback obligation."
+  (let ((pending (copy-list callbacks)))
+    (lambda ()
+      (let ((retained '())
+            (failures '()))
+        (dolist (entry pending)
+          (destructuring-bind (texture callback layout value) entry
+            (handler-case
+                (funcall callback layout value)
+              (serious-condition (cause)
+                (push entry retained)
+                (push (cons texture cause) failures)))))
+        (setf pending (nreverse retained))
+        (when failures
+          (error 'vulkan-gpu-error :operation :submit
+                 :reason :external-submission-callbacks-failed
+                 :details (nreverse failures)))))))
+
+(defun make-vulkan-post-submit-publication (texture-layouts groups)
+  "Build the durable HAL-state and external-owner publication obligation."
+  (let ((callbacks '()))
+    (dolist (group groups)
+      (let ((value (vulkan-external-submission-next-value group)))
+        (dolist (texture
+                 (vulkan-external-submission-group-textures group))
+          (let ((callback (vulkan-texture-external-submitted texture)))
+            (when callback
+              (push (list texture callback
+                          (gethash texture texture-layouts) value)
+                    callbacks))))))
+    (apply
+     #'make-gpu-retirement-sequence
+     (append
+      (list
+       (lambda ()
+         ;; Every HAL wrapper advances before any owner callback runs.  A
+         ;; failing plane therefore cannot leave its siblings on stale values.
+         (maphash
+          (lambda (texture layout)
+            (setf (vulkan-texture-layout texture) layout))
+          texture-layouts)
+         (dolist (group groups)
+           (let ((value (vulkan-external-submission-next-value group)))
+             (dolist (texture
+                      (vulkan-external-submission-group-textures group))
+               (setf (vulkan-texture-external-semaphore-value texture)
+                     value))))))
+      (when callbacks
+        (list
+         (make-vulkan-external-callback-batch (nreverse callbacks))))))))
+
+(defun complete-vulkan-submission-publication (submission)
+  "Attempt SUBMISSION's durable post-commit publication once."
+  (let ((publication
+          (vulkan-gpu-submission-post-submit-publication submission)))
+    (when publication
+      (funcall publication)
+      (setf (vulkan-gpu-submission-post-submit-publication submission) nil)
+      t)))
+
+(defun complete-vulkan-queue-submission-publications (queue)
+  "Complete the live FIFO prefix of post-commit owner publications."
+  (let ((progress-p nil))
+    (dolist (submission (vulkan-queue-live-submissions queue) progress-p)
+      (when (complete-vulkan-submission-publication submission)
+        (setf progress-p t)))))
+
 (defmethod submit
     ((queue vulkan-gpu-queue) (command-buffer vulkan-gpu-command-buffer))
   (submit queue (vector command-buffer)))
@@ -2844,54 +3210,130 @@ lowering later without changing this queue-level operation."
    index)
   (values))
 
+(defun vulkan-retirement-custodian-quiescent-p (queue)
+  "Whether QUEUE owns no submitted, publishing, or retirement work."
+  (let ((ledger (vulkan-queue-retirement-ledger queue)))
+    (and (null (vulkan-queue-live-submissions queue))
+         (null (gpu-retirement-ledger-active-batch ledger))
+         (null (gpu-retirement-ledger-entries ledger)))))
+
+(defun maybe-release-vulkan-retirement-custodian (queue)
+  "Unroot QUEUE only after backend quiescence was proved under its lock."
+  (when (vulkan-retirement-custodian-quiescent-p queue)
+    (release-gpu-retirement-ledger-custodian
+     (vulkan-queue-retirement-ledger queue) queue)
+    t))
+
 (defun maintain-vulkan-queue (queue)
   "Retire live submissions the completion frontier has passed.
 
 Retiring a submission drops the queue's references to everything it
-retained and performs the native teardown of resources whose DESTROY was
-deferred while this submission was still in flight."
+retained.  The independent retirement ledger then attempts every native
+teardown which that frontier makes safe; failures remain queue-owned."
   (with-vulkan-gpu-driver-environment
     (sb-thread:with-recursive-lock ((vulkan-queue-lock queue))
+      ;; External-owner publication is part of the live record.  It must finish
+      ;; before a completed record can release those owners or retirement can
+      ;; advance beyond it.
+      (complete-vulkan-queue-submission-publications queue)
       (let ((frontier (vulkan-queue-completed-frontier queue)))
         (loop while (and (vulkan-queue-live-submissions queue)
                          (<= (vulkan-gpu-submission-index
                               (first (vulkan-queue-live-submissions queue)))
                              frontier))
-              do (let ((record (pop (vulkan-queue-live-submissions queue))))
-                   (dolist (resource
-                            (vulkan-gpu-submission-pending-destroys record))
-                     (destroy-vulkan-native resource))))
+              do (pop (vulkan-queue-live-submissions queue)))
+        (maintain-gpu-retirement-ledger
+         (vulkan-queue-retirement-ledger queue) frontier
+         :operation :maintain-vulkan-queue)
+        (maybe-release-vulkan-retirement-custodian queue)
         frontier))))
 
-(defgeneric destroy-vulkan-native (object)
-  (:documentation "Perform OBJECT's native Vulkan teardown unconditionally.
+(defmethod service-gpu-retirement-custodian ((queue vulkan-gpu-queue))
+  "Service QUEUE from the process custodian registry without caller access."
+  (with-vulkan-gpu-driver-environment
+    (sb-thread:with-recursive-lock ((vulkan-queue-lock queue))
+      (let* ((device (vulkan-queue-device queue))
+             (ledger (vulkan-queue-retirement-ledger queue))
+             (before (+ (length (vulkan-queue-live-submissions queue))
+                        (length (gpu-retirement-ledger-active-batch ledger))
+                        (length (gpu-retirement-ledger-entries ledger)))))
+        (cond
+          ((or (vulkan-object-destroyed-p queue)
+               (vulkan-object-destroyed-p device)
+               (vulkan-device-retiring-p device)
+               (vulkan-device-native-retired-p device))
+           ;; Never query a frontier through a retiring or retired VkDevice.
+           ;; Device teardown has already enforced the ledger/submission
+           ;; barrier; a stale empty root may now be removed without FFI.
+           (maybe-release-vulkan-retirement-custodian queue))
+          (t
+           (maintain-vulkan-queue queue)
+           (let ((after
+                   (+ (length (vulkan-queue-live-submissions queue))
+                      (length (gpu-retirement-ledger-active-batch ledger))
+                      (length (gpu-retirement-ledger-entries ledger)))))
+             (or (< after before)
+                 (zerop after)))))))))
 
-Called either directly by DESTROY when nothing submitted still uses
-OBJECT, or by queue maintenance once the completion frontier passes its
-last use.  Callers are responsible for the logical destroyed mark."))
+(defun live-vulkan-retirement-queue-p (queue device)
+  (and queue
+       (eq queue (vulkan-device-queue device))
+       (not (vulkan-object-destroyed-p device))
+       (not (vulkan-device-retiring-p device))
+       (not (vulkan-device-native-retired-p device))
+       (not (vulkan-object-destroyed-p queue))))
 
-(defun vulkan-destroy-or-defer (resource device)
-  "Destroy RESOURCE's native objects now, or once its last use completes.
-
-The public DESTROY has already marked RESOURCE destroyed, so no new
-submissions can mention it; this decides only when the native teardown is
-provably safe."
-  (let ((queue (vulkan-device-queue device))
-        (last-use (vulkan-object-last-submission resource)))
-    (if (or (null queue)
-            (vulkan-object-destroyed-p device)
-            (zerop last-use))
-        (destroy-vulkan-native resource)
-        (sb-thread:with-recursive-lock ((vulkan-queue-lock queue))
-          (let ((record
-                  (and (> last-use (vulkan-queue-completed-frontier queue))
-                       (find last-use (vulkan-queue-live-submissions queue)
-                             :key #'vulkan-gpu-submission-index))))
-            (if record
-                (push resource
-                      (vulkan-gpu-submission-pending-destroys record))
-                (destroy-vulkan-native resource))))))
+(defun retire-vulkan-native-owner
+    (resource device ready-after teardown invalidate operation)
+  "Transfer one native owner after revalidating its queue under the lock."
+  (labels ((retire-directly (&optional queue-snapshot)
+             (perform-gpu-retirement-directly
+              resource
+              (lambda ()
+                (unless (or (vulkan-object-destroyed-p device)
+                            (vulkan-device-native-retired-p device))
+                  (when (and queue-snapshot
+                             (or (not (eq queue-snapshot
+                                          (vulkan-device-queue device)))
+                                 (vulkan-object-destroyed-p queue-snapshot)))
+                    (error "The Vulkan retirement queue is no longer live.")))
+                (funcall teardown))
+              invalidate
+              :operation operation)))
+    (let ((queue (vulkan-device-queue device)))
+      (if queue
+          (sb-thread:with-recursive-lock ((vulkan-queue-lock queue))
+            ;; Device teardown uses this same lock.  Revalidate and choose the
+            ;; queue or direct path without a race window between them.
+            (if (live-vulkan-retirement-queue-p queue device)
+                (progn
+                  (transfer-gpu-retirement
+                   (vulkan-queue-retirement-ledger queue)
+                   resource ready-after teardown invalidate queue)
+                  (maintain-vulkan-queue queue))
+                (retire-directly queue)))
+          (retire-directly))))
   (values))
+
+(defmethod retire-gpu-native-owner
+    ((device vulkan-gpu-device) owner teardown invalidate)
+  (retire-vulkan-native-owner
+   owner device 0 teardown invalidate :retire-gpu-native-owner))
+
+(defun vulkan-destroy-or-defer (resource device invalidate)
+  "Transfer RESOURCE's native ownership, then logically invalidate it.
+
+A live queue owns the retirement before INVALIDATE marks the wrapper and
+cancels its finalizer.  Queue maintenance immediately attempts anything
+already safe and retains failures.  Without a live queue, native teardown
+must succeed before INVALIDATE is called."
+  (let ((teardown
+          (or (vulkan-object-retirement-teardown resource)
+              (setf (vulkan-object-retirement-teardown resource)
+                    (vulkan-native-teardown-closure resource)))))
+    (retire-vulkan-native-owner
+     resource device (vulkan-object-last-submission resource)
+     teardown invalidate :destroy-vulkan-resource)))
 
 (defun submit-vulkan-command-buffers
     (queue command-buffers &key (wait-semaphores #())
@@ -2909,78 +3351,91 @@ destroy any of them immediately after this returns."
     (ensure-live-vulkan-object queue :submit)
     (let ((index nil))
       (sb-thread:with-recursive-lock ((vulkan-queue-lock queue))
+        ;; The first check can race while waiting for this lock.  Device
+        ;; teardown closes admission under the same lock, so this is the
+        ;; authoritative check before any queue or device FFI.
+        (ensure-live-vulkan-object queue :submit)
+        ;; A failed owner publication from an earlier native commit is a FIFO
+        ;; admission barrier.  Retry it before scheduling dependent work.
+        (complete-vulkan-queue-submission-publications queue)
         (loop for command-buffer across command-buffers
               do (check-vulkan-command-buffer-for-submit
                   queue command-buffer))
-        (let ((texture-layouts
-                (vulkan-submitted-texture-layouts command-buffers)))
+        (let* ((texture-layouts
+                 (vulkan-submitted-texture-layouts command-buffers))
+               (external-groups
+                 (vulkan-external-submission-groups texture-layouts)))
           (when (plusp (length command-buffers))
-            (let ((external '()))
-              (maphash
-               (lambda (texture layout)
-                 (declare (ignore layout))
-                 (let ((semaphore (vulkan-texture-external-semaphore texture)))
-                   (when (and semaphore
-                              (not (find semaphore external :key #'first)))
-                     (push (list semaphore
-                                 (vulkan-texture-external-semaphore-value texture)
-                                 texture)
-                           external))))
-               texture-layouts)
-              (setf index (1+ (vulkan-queue-submission-counter queue)))
+            (setf index (1+ (vulkan-queue-submission-counter queue)))
+            (let* ((resources
+                     (loop for command-buffer across command-buffers
+                           append
+                           (copy-list
+                            (vulkan-command-buffer-resources
+                             command-buffer))))
+                   (submission
+                     (make-vulkan-gpu-submission
+                      :index index
+                      :command-buffers command-buffers
+                      :resources resources
+                      :post-submit-publication
+                      (make-vulkan-post-submit-publication
+                       texture-layouts external-groups)))
+                   ;; Allocate the list cell before native commit.  Once Vulkan
+                   ;; accepts the batch, publication below performs no external
+                   ;; callback before this durable queue record exists.
+                   (submission-cell (list submission)))
               (lvk:submit-command-buffers
                (vulkan-handle queue)
                (map 'vector #'vulkan-handle command-buffers)
                :wait-semaphores
                (concatenate
                 'vector wait-semaphores
-                (map 'vector (lambda (entry)
-                               (list (first entry) '(:all-commands)
-                                     (second entry)))
-                     external))
+                (map
+                 'vector
+                 (lambda (group)
+                   (list
+                    (vulkan-external-submission-group-semaphore group)
+                    '(:all-commands)
+                    (vulkan-external-submission-group-current-value group)))
+                 external-groups))
                :signal-semaphores
                (concatenate
                 'vector signal-semaphores
-                (map 'vector (lambda (entry)
-                               (list (first entry) '(:all-commands)
-                                     (1+ (second entry))))
-                     external)
+                (map
+                 'vector
+                 (lambda (group)
+                   (list
+                    (vulkan-external-submission-group-semaphore group)
+                    '(:all-commands)
+                    (vulkan-external-submission-next-value group)))
+                 external-groups)
                 (vector (list (vulkan-queue-timeline queue)
                               '(:all-commands)
                               index))))
-              (dolist (entry external)
-                (let* ((texture (third entry))
-                       (callback (vulkan-texture-external-submitted texture)))
-                  (when callback
-                    (funcall callback
-                             (gethash texture texture-layouts)
-                             (1+ (second entry)))))))
-            (setf (vulkan-queue-submission-counter queue) index)
-            (let ((resources '()))
+              ;; Native commit has happened.  Publish every counter, wrapper
+              ;; state, dependency, and owner callback obligation before any
+              ;; fallible user callback can regain control.
+              (setf (vulkan-queue-submission-counter queue) index)
               (loop for command-buffer across command-buffers
                     do (setf (vulkan-command-buffer-state command-buffer)
                              :submitted
                              (vulkan-object-last-submission command-buffer)
-                             index)
-                       (dolist (resource
-                                (vulkan-command-buffer-resources
-                                 command-buffer))
-                         (setf (vulkan-object-last-submission resource)
-                               index)
-                         (push resource resources)))
-              (maphash (lambda (texture layout)
-                         (setf (vulkan-texture-layout texture) layout))
-                       texture-layouts)
+                             index))
+              (dolist (resource resources)
+                (setf (vulkan-object-last-submission resource) index))
               (setf (vulkan-queue-live-submissions queue)
                     (nconc (vulkan-queue-live-submissions queue)
-                           (list (make-vulkan-gpu-submission
-                                  :index index
-                                  :command-buffers command-buffers
-                                  :resources resources))))))))
-      (when index
-        (when wait-for-completion
-          (wait-for-vulkan-submission queue index))
-        (maintain-vulkan-queue queue))
+                           submission-cell))
+              (retain-gpu-retirement-ledger-custodian
+               (vulkan-queue-retirement-ledger queue) queue)
+              ;; Success clears the obligation slot.  Failure propagates only
+              ;; after the rooted live record has retained its retry progress.
+              (complete-vulkan-submission-publication submission))))
+        (when index
+          (when wait-for-completion
+            (wait-for-vulkan-submission queue index))
+          (maintain-vulkan-queue queue)))
       index)))
 
 (defmethod submit ((queue vulkan-gpu-queue) (command-buffers vector))
@@ -2990,76 +3445,119 @@ destroy any of them immediately after this returns."
 (defmethod submitted-work-done ((queue vulkan-gpu-queue))
   (with-vulkan-gpu-driver-environment
     (ensure-live-vulkan-object queue :submitted-work-done)
-    (let ((counter
-            (sb-thread:with-recursive-lock ((vulkan-queue-lock queue))
-              (vulkan-queue-submission-counter queue))))
-      (when (plusp counter)
-        (wait-for-vulkan-submission queue counter))
-      (maintain-vulkan-queue queue)))
+    (sb-thread:with-recursive-lock ((vulkan-queue-lock queue))
+      (ensure-live-vulkan-object queue :submitted-work-done)
+      (let ((counter (vulkan-queue-submission-counter queue)))
+        (when (plusp counter)
+          (wait-for-vulkan-submission queue counter))
+        (maintain-vulkan-queue queue))))
   (values))
 
-(defun destroy-vulkan-command-native-resource (native-device resource)
+(defun make-vulkan-device-retirement-step (device function)
+  (lambda ()
+    (with-vulkan-queue-teardown (device native-device)
+      (funcall function native-device))))
+
+(defun vulkan-command-native-resource-retirement-steps (device resource)
+  "Flatten one tagged command resource into one-native-call retry steps."
   (ecase (first resource)
     (:framebuffer
-     (lvk:destroy-framebuffer native-device (second resource)))
+     (let ((framebuffer (second resource)))
+       (list
+        (make-vulkan-device-retirement-step
+         device
+         (lambda (native-device)
+           (lvk:destroy-framebuffer native-device framebuffer))))))
     (:upload-buffer
-     (lvk:destroy-buffer native-device (second resource))
-     (lvk:free-memory native-device (third resource))))
-  (values))
+     (let ((buffer (second resource))
+           (memory (third resource)))
+       (list
+        (make-vulkan-device-retirement-step
+         device
+         (lambda (native-device)
+           (lvk:destroy-buffer native-device buffer)))
+        (make-vulkan-device-retirement-step
+         device
+         (lambda (native-device)
+           (lvk:free-memory native-device memory))))))))
 
-(defun destroy-vulkan-command-native-resources (device resources)
-  (unless (vulkan-object-destroyed-p device)
-    (dolist (resource resources)
-      (destroy-vulkan-command-native-resource
-       (vulkan-handle device) resource)))
-  (values))
+(defun make-vulkan-command-retirement-teardown
+    (device command-pool resources)
+  "Build one persistent, progress-tracked command ownership teardown."
+  (apply
+   #'make-gpu-retirement-sequence
+   (append
+    (when command-pool
+      (list
+       (make-vulkan-device-retirement-step
+        device
+        (lambda (native-device)
+          (lvk:destroy-command-pool native-device command-pool)))))
+    (loop for resource in resources
+          append
+          (vulkan-command-native-resource-retirement-steps
+           device resource)))))
 
 (defmethod destroy ((encoder vulkan-gpu-command-encoder))
   (with-vulkan-gpu-driver-environment
-    (sb-ext:cancel-finalization encoder)
-    (when (eq :recording (vulkan-command-encoder-state encoder))
+    (when (member (vulkan-command-encoder-state encoder)
+                  '(:recording :ended))
       (let ((device (vulkan-command-encoder-device encoder))
-            (command-pool (vulkan-command-encoder-command-pool encoder)))
-        (when (and command-pool
-                   (not (vulkan-object-destroyed-p device)))
-          (lvk:destroy-command-pool
-           (vulkan-handle device) command-pool))
-        (destroy-vulkan-command-native-resources
-         device (vulkan-command-encoder-native-resources encoder))
-        (setf (vulkan-command-encoder-native-resources encoder) nil)
-        (setf (vulkan-command-encoder-command-pool encoder) nil)))
-    (setf (vulkan-command-encoder-state encoder) :destroyed))
+            (command-pool (vulkan-command-encoder-command-pool encoder))
+            (resources
+              (copy-list
+               (vulkan-command-encoder-native-resources encoder))))
+        (flet ((invalidate ()
+                 (setf (vulkan-command-encoder-native-resources encoder) nil
+                       (vulkan-command-encoder-command-pool encoder) nil
+                       (vulkan-command-encoder-state encoder) :destroyed)
+                 (sb-ext:cancel-finalization encoder)))
+          (let ((teardown
+                  (or (vulkan-command-encoder-retirement-teardown encoder)
+                      (setf
+                       (vulkan-command-encoder-retirement-teardown encoder)
+                       (make-vulkan-command-retirement-teardown
+                        device command-pool resources)))))
+            (retire-vulkan-native-owner
+             encoder device 0 teardown #'invalidate
+             :destroy-vulkan-command-encoder)))))
+    (unless (eq :destroyed (vulkan-command-encoder-state encoder))
+      (setf (vulkan-command-encoder-state encoder) :destroyed)))
   (values))
 
 (defmacro define-vulkan-resource-destroy
     ((class variable) device-form bindings &body native-teardown)
-  "Define DESTROY, DESTROY-VULKAN-NATIVE, and the teardown closure for CLASS.
+  "Define DESTROY and the queueable native teardown closure for CLASS.
 
-DESTROY marks the wrapper destroyed immediately, cancels its leak
-finalizer, then either performs NATIVE-TEARDOWN now or defers it until
-the completion frontier passes the object's last submitted use.
+DESTROY first transfers NATIVE-TEARDOWN to the queue, then marks the wrapper
+destroyed and cancels its leak finalizer.  Without a live queue, it marks and
+cancels only after native teardown succeeds.
 
 BINDINGS extract every native handle NATIVE-TEARDOWN needs, so the
 teardown closure captures raw handles and the device wrapper rather than
 VARIABLE itself and can therefore serve as the wrapper's leak finalizer.
 NATIVE-TEARDOWN runs only while the device is alive, under the queue
-teardown lock, with DEVICE anaphorically bound to the native handle."
+  teardown lock, with DEVICE anaphorically bound to the native handle."
   (let ((device-object (gensym "DEVICE-OBJECT")))
     `(progn
        (defmethod vulkan-native-teardown-closure ((,variable ,class))
-         (let ((,device-object ,device-form)
-               ,@bindings)
-           (lambda ()
-             (with-vulkan-queue-teardown (,device-object device)
-               ,@native-teardown))))
-       (defmethod destroy-vulkan-native ((,variable ,class))
-         (funcall (vulkan-native-teardown-closure ,variable)))
+         (let* ((,device-object ,device-form)
+                ,@bindings)
+           (make-gpu-retirement-sequence
+            ,@(loop for form in native-teardown
+                    collect
+                    `(lambda ()
+                       (with-vulkan-queue-teardown
+                           (,device-object device)
+                         ,form))))))
        (defmethod destroy ((,variable ,class))
          (with-vulkan-gpu-driver-environment
            (unless (vulkan-object-destroyed-p ,variable)
-             (setf (vulkan-object-destroyed-p ,variable) t)
-             (sb-ext:cancel-finalization ,variable)
-             (vulkan-destroy-or-defer ,variable ,device-form)))
+             (vulkan-destroy-or-defer
+              ,variable ,device-form
+              (lambda ()
+                (setf (vulkan-object-destroyed-p ,variable) t)
+                (sb-ext:cancel-finalization ,variable)))))
          (values))
        ',class)))
 
@@ -3067,10 +3565,12 @@ teardown lock, with DEVICE anaphorically bound to the native handle."
     (vulkan-gpu-command-buffer command-buffer)
     (vulkan-command-buffer-device command-buffer)
     ((command-pool (vulkan-command-buffer-command-pool command-buffer))
-     (resources (vulkan-command-buffer-native-resources command-buffer)))
-  (lvk:destroy-command-pool device command-pool)
-  (dolist (resource resources)
-    (destroy-vulkan-command-native-resource device resource)))
+     (resources (vulkan-command-buffer-native-resources command-buffer))
+     (teardown
+       (make-vulkan-command-retirement-teardown
+        (vulkan-command-buffer-device command-buffer)
+        command-pool resources)))
+  (funcall teardown))
 
 (defmethod destroy :after ((command-buffer vulkan-gpu-command-buffer))
   (setf (vulkan-command-buffer-state command-buffer) :destroyed))
@@ -3122,52 +3622,183 @@ teardown lock, with DEVICE anaphorically bound to the native handle."
     ((handle (vulkan-handle view)))
   (lvk:destroy-image-view device handle))
 
-(define-vulkan-resource-destroy (vulkan-gpu-texture texture)
-    (vulkan-texture-device texture)
-    ((handle (vulkan-handle texture))
-     (memory (vulkan-texture-memory texture))
-     (owned-p (vulkan-texture-owned-p texture))
-     (external-owner (vulkan-texture-external-owner texture)))
-  (when owned-p
-    (lvk:destroy-image device handle)
-    (lvk:free-memory device memory))
-  (when external-owner
-    (funcall external-owner)))
+(defmethod vulkan-native-teardown-closure ((texture vulkan-gpu-texture))
+  (let ((device (vulkan-texture-device texture))
+        (queue (vulkan-device-queue (vulkan-texture-device texture)))
+        (handle (vulkan-handle texture))
+        (memory (vulkan-texture-memory texture))
+        (owned-p (vulkan-texture-owned-p texture))
+        (external-owner (vulkan-texture-external-owner texture))
+        (semaphore-state
+          (vulkan-texture-external-semaphore-state texture)))
+    (apply
+     #'make-gpu-retirement-sequence
+     (append
+      (when owned-p
+        (list
+         (make-vulkan-device-retirement-step
+          device
+          (lambda (native-device)
+            (lvk:destroy-image native-device handle)))
+         (make-vulkan-device-retirement-step
+          device
+          (lambda (native-device)
+            (lvk:free-memory native-device memory)))))
+      (when external-owner
+        ;; This owner is not a VkDevice child.  Keep it outside the guarded
+        ;; device steps so a finalizer after vkDestroyDevice still releases it.
+        (list (lambda () (funcall external-owner))))
+      (when semaphore-state
+        (list
+         (lambda ()
+           (release-vulkan-external-semaphore-state
+            queue semaphore-state))))))))
+
+(defmethod destroy ((texture vulkan-gpu-texture))
+  (with-vulkan-gpu-driver-environment
+    (unless (vulkan-object-destroyed-p texture)
+      (vulkan-destroy-or-defer
+       texture (vulkan-texture-device texture)
+       (lambda ()
+         (setf (vulkan-object-destroyed-p texture) t)
+         (sb-ext:cancel-finalization texture)))))
+  (values))
+
+(defun make-vulkan-device-destroy-admission (device queue)
+  "Return a persistent idle-and-ledger barrier for DEVICE destruction."
+  (let ((waited-submission nil))
+    (lambda ()
+      (unless (vulkan-device-retiring-p device)
+        (let ((submission (if queue
+                              (vulkan-queue-submission-counter queue)
+                              0)))
+          ;; A ledger failure leaves admission open.  Preserve a completed
+          ;; wait across retry, but renew it if another submission arrived.
+          (unless (eql submission waited-submission)
+            (lvk:device-wait-idle (vulkan-handle device))
+            (setf waited-submission submission))
+          (when queue
+            (maintain-vulkan-queue queue)
+            (ensure-gpu-retirement-ledger-empty
+             (vulkan-queue-retirement-ledger queue)
+             :operation :destroy-vulkan-device))
+          ;; The caller holds QUEUE's lock, so the waited generation cannot
+          ;; change between this barrier and closing admission.
+          (setf (vulkan-device-retiring-p device) t))))))
+
+(defun make-vulkan-render-pass-retirement-teardown
+    (native-device render-pass-table)
+  "Return a lazy, retryable drain of RENDER-PASS-TABLE.
+
+The snapshot happens only when teardown begins, after explicit destruction
+has closed device admission.  Native destruction and hash bookkeeping have
+separate progress flags, so neither a late-created pass nor a Lisp-side error
+can make a successful native call repeat."
+  (let ((pending nil)
+        (snapshotted-p nil)
+        (current-native-retired-p nil))
+    (lambda ()
+      (unless snapshotted-p
+        (setf pending
+              (loop for format being the hash-keys of render-pass-table
+                    using (hash-value render-pass)
+                    collect (cons format render-pass))
+              snapshotted-p t))
+      (loop while pending
+            for entry = (first pending)
+            do (unless current-native-retired-p
+                 (lvk:destroy-render-pass native-device (cdr entry))
+                 (setf current-native-retired-p t))
+               (remhash (car entry) render-pass-table)
+               (setf current-native-retired-p nil)
+               (pop pending))
+      (values))))
+
+(defun make-vulkan-device-destroy-teardown (device queue)
+  "Return a native teardown which does not retain DEVICE or QUEUE."
+  (let ((native-device (vulkan-handle device))
+        (timeline (and queue (vulkan-queue-timeline queue)))
+        (render-pass-table (vulkan-device-render-passes device))
+        (native-retired-box (vulkan-device-native-retired-box device))
+        (debug-messenger (vulkan-device-debug-messenger device))
+        (instance (vulkan-device-instance device)))
+    (apply
+     #'make-gpu-retirement-sequence
+     (append
+      (when timeline
+        (list
+         (lambda ()
+           (lvk:destroy-semaphore native-device timeline))))
+      (list
+       (make-vulkan-render-pass-retirement-teardown
+        native-device render-pass-table))
+      (list
+       (lambda ()
+         (lvk:destroy-device native-device)
+         ;; Finalizers must stop issuing device-level calls immediately, even
+         ;; if a later instance-level owner fails and overall DESTROY retries.
+         (setf (car native-retired-box) t)))
+      (when debug-messenger
+        (list
+         (lambda ()
+           (lvk:destroy-debug-messenger debug-messenger))))
+      (list
+       (lambda ()
+         (lvk:destroy-instance instance)))))))
+
+(defun ensure-vulkan-device-retirement-teardowns (device queue)
+  "Return DEVICE's shared explicit and leak-finalizer teardown closures."
+  (let ((native-teardown
+          (or (vulkan-device-destroy-teardown device)
+              (setf (vulkan-device-destroy-teardown device)
+                    (make-vulkan-device-destroy-teardown device queue)))))
+    (values
+     native-teardown
+     (or (vulkan-device-finalizer-teardown device)
+         (setf
+          (vulkan-device-finalizer-teardown device)
+          (let ((native-device (vulkan-handle device))
+                (native-retired-box
+                  (vulkan-device-native-retired-box device)))
+            (wrap-vulkan-gpu-driver-teardown
+             (make-gpu-retirement-sequence
+              (lambda ()
+                (unless (car native-retired-box)
+                  (lvk:device-wait-idle native-device)))
+              native-teardown))))))))
 
 (defmethod destroy ((device vulkan-gpu-device))
   (with-vulkan-gpu-driver-environment
     (unless (vulkan-object-destroyed-p device)
-      (sb-ext:cancel-finalization device)
       (let ((queue (vulkan-device-queue device)))
-        ;; The queue lock serializes this against finalizer-thread
-        ;; teardown of collected children, which checks the device's
-        ;; destroyed mark under the same lock.
-        (sb-thread:with-recursive-lock ((vulkan-queue-lock queue))
-          (unwind-protect
-             (progn
-               (lvk:device-wait-idle (vulkan-handle device))
-               (when queue
-                 ;; After the idle wait the frontier has reached the
-                 ;; counter, so this retires every record and performs
-                 ;; all deferred native destruction.
-                 (maintain-vulkan-queue queue)
-                 (lvk:destroy-semaphore
-                  (vulkan-handle device) (vulkan-queue-timeline queue)))
-               (maphash
-                (lambda (format render-pass)
-                  (declare (ignore format))
-                  (lvk:destroy-render-pass
-                   (vulkan-handle device) render-pass))
-                (vulkan-device-render-passes device))
-               (clrhash (vulkan-device-render-passes device)))
-          (unwind-protect
-               (lvk:destroy-device (vulkan-handle device))
-            (unwind-protect
-                 (when (vulkan-device-debug-messenger device)
-                   (lvk:destroy-debug-messenger
-                    (vulkan-device-debug-messenger device)))
-              (lvk:destroy-instance (vulkan-device-instance device))
-              (setf (vulkan-object-destroyed-p device) t)
-              (when queue
-                (setf (vulkan-object-destroyed-p queue) t)))))))))
+        (flet ((tear-down-device ()
+                 (funcall
+                  (or (vulkan-device-destroy-admission device)
+                      (setf (vulkan-device-destroy-admission device)
+                            (make-vulkan-device-destroy-admission
+                             device queue))))
+                 ;; Admission is closed after the first successful barrier.
+                 ;; Recheck on every partial-teardown retry so an invariant
+                 ;; violation can never be silently skipped.
+                 (when queue
+                   (ensure-gpu-retirement-ledger-empty
+                    (vulkan-queue-retirement-ledger queue)
+                    :operation :destroy-vulkan-device))
+                 (multiple-value-bind (native-teardown finalizer-teardown)
+                     (ensure-vulkan-device-retirement-teardowns device queue)
+                   (declare (ignore finalizer-teardown))
+                   (funcall native-teardown))
+                 ;; Logical publication is deliberately outside the shared
+                 ;; native sequence so its leak finalizer never captures the
+                 ;; DEVICE or QUEUE wrappers through their back reference.
+                 (sb-ext:cancel-finalization device)
+                 (setf (vulkan-object-destroyed-p device) t)
+                 (when queue
+                   (setf (vulkan-object-destroyed-p queue) t))))
+          ;; This Lisp lock outlives every native queue/device phase and stays
+          ;; usable across failures in the persistent teardown sequence.
+          (if queue
+              (sb-thread:with-recursive-lock ((vulkan-queue-lock queue))
+                (tear-down-device))
+              (tear-down-device))))))
   (values))

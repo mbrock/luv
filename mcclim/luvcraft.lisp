@@ -108,7 +108,7 @@ actual destination pixel."))
   (declare (ignore overlay command))
   nil)
 
-(spv:define-shader world-widget-slug-vertex-specification
+(shader:define-shader world-widget-slug-vertex-specification
     (:stage :vertex
      :inputs ((position-alpha :vec3 :location 0)
               (outline-horizontal :vec3 :location 1)
@@ -125,24 +125,24 @@ actual destination pixel."))
                (render-band-bounds :vec4 :location 2)
                (render-band-counts :vec2 :location 3)
                (render-color :vec4 :location 4)))
-  (let* ((local-x (spv:swizzle position-alpha :x))
-         (local-y (spv:swizzle position-alpha :y)))
-    (spv:set-output clip-position
+  (let* ((local-x (shader:swizzle position-alpha :x))
+         (local-y (shader:swizzle position-alpha :y)))
+    (shader:set-output clip-position
                     (+ center (* right local-x) (* up local-y)))
-    (spv:set-output render-coordinate
-                    (spv:swizzle outline-horizontal :xy))
-    (spv:set-output render-atlas-base (spv:swizzle atlas-vertical :xy))
-    (spv:set-output render-band-bounds
-                    (spv:vec4 (spv:swizzle band-low :xy)
-                              (spv:swizzle band-high :xy)))
-    (spv:set-output render-band-counts
-                    (spv:vec2 (spv:swizzle outline-horizontal :z)
-                              (spv:swizzle atlas-vertical :z)))
-    (spv:set-output render-color
-                    (spv:vec4 color-input
-                              (spv:swizzle position-alpha :z)))))
+    (shader:set-output render-coordinate
+                    (shader:swizzle outline-horizontal :xy))
+    (shader:set-output render-atlas-base (shader:swizzle atlas-vertical :xy))
+    (shader:set-output render-band-bounds
+                    (shader:vec4 (shader:swizzle band-low :xy)
+                              (shader:swizzle band-high :xy)))
+    (shader:set-output render-band-counts
+                    (shader:vec2 (shader:swizzle outline-horizontal :z)
+                              (shader:swizzle atlas-vertical :z)))
+    (shader:set-output render-color
+                    (shader:vec4 color-input
+                              (shader:swizzle position-alpha :z)))))
 
-(spv:define-shader direct-widget-solid-vertex-specification
+(shader:define-shader direct-widget-solid-vertex-specification
     (:stage :vertex
      :inputs ((position-opacity :vec3 :location 0)
               (color-input :vec3 :location 1))
@@ -151,14 +151,14 @@ actual destination pixel."))
              :members ((center :vec4) (right :vec4) (up :vec4))))
      :outputs ((clip-position :vec4 :built-in :position)
                (color-output :vec4 :location 0)))
-  (let* ((local-x (spv:swizzle position-opacity :x))
-         (local-y (spv:swizzle position-opacity :y))
-         (alpha (spv:swizzle position-opacity :z)))
-    (spv:set-output clip-position
+  (let* ((local-x (shader:swizzle position-opacity :x))
+         (local-y (shader:swizzle position-opacity :y))
+         (alpha (shader:swizzle position-opacity :z)))
+    (shader:set-output clip-position
                     (+ center (* right local-x) (* up local-y)))
-    (spv:set-output color-output (spv:vec4 color-input alpha))))
+    (shader:set-output color-output (shader:vec4 color-input alpha))))
 
-(spv:define-shader direct-widget-analytic-vertex-specification
+(shader:define-shader direct-widget-analytic-vertex-specification
     (:stage :vertex
      :inputs ((position :vec3 :location 0)
               (local-coordinate :vec3 :location 1)
@@ -171,16 +171,16 @@ actual destination pixel."))
                (render-coordinate :vec2 :location 0)
                (render-half-size-radius :vec3 :location 1)
                (render-color :vec4 :location 2)))
-  (let* ((local-x (spv:swizzle position :x))
-         (local-y (spv:swizzle position :y))
-         (alpha (spv:swizzle position :z)))
-    (spv:set-output clip-position
+  (let* ((local-x (shader:swizzle position :x))
+         (local-y (shader:swizzle position :y))
+         (alpha (shader:swizzle position :z)))
+    (shader:set-output clip-position
                     (+ center (* right local-x) (* up local-y)))
-    (spv:set-output render-coordinate (spv:swizzle local-coordinate :xy))
-    (spv:set-output render-half-size-radius half-size-radius)
-    (spv:set-output render-color (spv:vec4 (* color alpha) alpha))))
+    (shader:set-output render-coordinate (shader:swizzle local-coordinate :xy))
+    (shader:set-output render-half-size-radius half-size-radius)
+    (shader:set-output render-color (shader:vec4 (* color alpha) alpha))))
 
-(spv:define-shader direct-widget-relief-vertex-specification
+(shader:define-shader direct-widget-relief-vertex-specification
     (:stage :vertex
      :inputs ((position :vec3 :location 0)
               (local-coordinate :vec3 :location 1)
@@ -195,17 +195,17 @@ actual destination pixel."))
                (render-half-size-radius :vec3 :location 1)
                (render-color :vec4 :location 2)
                (render-height :float :location 3)))
-  (let* ((local-x (spv:swizzle position :x))
-         (local-y (spv:swizzle position :y))
-         (alpha (spv:swizzle position :z)))
-    (spv:set-output clip-position
+  (let* ((local-x (shader:swizzle position :x))
+         (local-y (shader:swizzle position :y))
+         (alpha (shader:swizzle position :z)))
+    (shader:set-output clip-position
                     (+ center (* right local-x) (* up local-y)))
-    (spv:set-output render-coordinate (spv:swizzle local-coordinate :xy))
-    (spv:set-output render-half-size-radius half-size-radius)
-    (spv:set-output render-color (spv:vec4 (* color alpha) alpha))
-    (spv:set-output render-height (spv:swizzle relief :x))))
+    (shader:set-output render-coordinate (shader:swizzle local-coordinate :xy))
+    (shader:set-output render-half-size-radius half-size-radius)
+    (shader:set-output render-color (shader:vec4 (* color alpha) alpha))
+    (shader:set-output render-height (shader:swizzle relief :x))))
 
-(spv:define-shader direct-widget-gradient-vertex-specification
+(shader:define-shader direct-widget-gradient-vertex-specification
     (:stage :vertex
      :inputs ((position :vec3 :location 0)
               (local-coordinate :vec3 :location 1)
@@ -224,18 +224,18 @@ actual destination pixel."))
                (render-start-color :vec3 :location 3)
                (render-end-color :vec3 :location 4)
                (render-paint-alphas :vec2 :location 5)))
-  (let* ((local-x (spv:swizzle position :x))
-         (local-y (spv:swizzle position :y)))
-    (spv:set-output clip-position
+  (let* ((local-x (shader:swizzle position :x))
+         (local-y (shader:swizzle position :y)))
+    (shader:set-output clip-position
                     (+ center (* right local-x) (* up local-y)))
-    (spv:set-output render-coordinate (spv:swizzle local-coordinate :xy))
-    (spv:set-output render-half-size-radius half-size-radius)
-    (spv:set-output render-paint-coordinate-kind paint-coordinate-kind)
-    (spv:set-output render-start-color start-color)
-    (spv:set-output render-end-color end-color)
-    (spv:set-output render-paint-alphas (spv:swizzle paint-alphas :xy))))
+    (shader:set-output render-coordinate (shader:swizzle local-coordinate :xy))
+    (shader:set-output render-half-size-radius half-size-radius)
+    (shader:set-output render-paint-coordinate-kind paint-coordinate-kind)
+    (shader:set-output render-start-color start-color)
+    (shader:set-output render-end-color end-color)
+    (shader:set-output render-paint-alphas (shader:swizzle paint-alphas :xy))))
 
-(spv:define-shader direct-widget-image-vertex-specification
+(shader:define-shader direct-widget-image-vertex-specification
     (:stage :vertex
      :inputs ((position :vec3 :location 0)
               (local-coordinate :vec3 :location 1)
@@ -249,16 +249,16 @@ actual destination pixel."))
                (render-half-size-radius :vec3 :location 1)
                (render-texture-coordinate :vec2 :location 2)
                (render-opacity :float :location 3)))
-  (let* ((local-x (spv:swizzle position :x))
-         (local-y (spv:swizzle position :y)))
-    (spv:set-output clip-position
+  (let* ((local-x (shader:swizzle position :x))
+         (local-y (shader:swizzle position :y)))
+    (shader:set-output clip-position
                     (+ center (* right local-x) (* up local-y)))
-    (spv:set-output render-coordinate (spv:swizzle local-coordinate :xy))
-    (spv:set-output render-half-size-radius half-size-radius)
-    (spv:set-output render-texture-coordinate
-                    (spv:swizzle texture-coordinate-opacity :xy))
-    (spv:set-output render-opacity
-                    (spv:swizzle texture-coordinate-opacity :z))))
+    (shader:set-output render-coordinate (shader:swizzle local-coordinate :xy))
+    (shader:set-output render-half-size-radius half-size-radius)
+    (shader:set-output render-texture-coordinate
+                    (shader:swizzle texture-coordinate-opacity :xy))
+    (shader:set-output render-opacity
+                    (shader:swizzle texture-coordinate-opacity :z))))
 
 (defun clear-world-widget-text-resources (overlay)
   (dolist (table (list (world-widget-text-bind-groups overlay)
@@ -419,7 +419,7 @@ actual destination pixel."))
                    (install
                     :solid "solid" shape-layout
                     (direct-widget-solid-vertex-specification)
-                    (spv:shader-specification-for :mcluv-solid :fragment)
+                    (shader:shader-specification-for :mcluv-solid :fragment)
                     24
                     '((:shader-location 0 :offset 0 :format :float32x3)
                       (:shader-location 1 :offset 12 :format :float32x3)))
@@ -709,7 +709,7 @@ actual destination pixel."))
      (gpu-prepared-text-command-first-vertex command)
      (gpu-prepared-text-command-vertex-count command))))
 
-(spv:define-shader widget-relief-world-vertex-specification
+(shader:define-shader widget-relief-world-vertex-specification
     (:stage :vertex
      :inputs ((position :vec3 :location 0)
               (homogeneous-texture-coordinate :vec3 :location 1)
@@ -718,16 +718,16 @@ actual destination pixel."))
                (render-texture-coordinate :vec2 :location 0)
                (render-shade :float :location 1)))
   (let* ()
-    (spv:set-output
+    (shader:set-output
      clip-position
-     (spv:vec4 position (spv:swizzle homogeneous-texture-coordinate :x)))
-    (spv:set-output
+     (shader:vec4 position (shader:swizzle homogeneous-texture-coordinate :x)))
+    (shader:set-output
      render-texture-coordinate
-     (spv:swizzle homogeneous-texture-coordinate :yz))
-    (spv:set-output render-shade
-                    (spv:swizzle shade-padding :x))))
+     (shader:swizzle homogeneous-texture-coordinate :yz))
+    (shader:set-output render-shade
+                    (shader:swizzle shade-padding :x))))
 
-(spv:define-shader widget-relief-world-fragment-specification
+(shader:define-shader widget-relief-world-fragment-specification
     (:stage :fragment
      :inputs ((texture-coordinate :vec2 :location 0)
               (shade :float :location 1))
@@ -735,11 +735,11 @@ actual destination pixel."))
      ((image :texture-2d :binding 0 :sample-transfer :identity)
       (texture-sampler :sampler :binding 1))
      :outputs ((color-output :vec4 :location 0)))
-  (let* ((texel (spv:sample image texture-sampler texture-coordinate)))
-    (spv:set-output
+  (let* ((texel (shader:sample image texture-sampler texture-coordinate)))
+    (shader:set-output
      color-output
-     (spv:vec4 (* (spv:swizzle texel :rgb) shade)
-               (spv:swizzle texel :a)))))
+     (shader:vec4 (* (shader:swizzle texel :rgb) shade)
+               (shader:swizzle texel :a)))))
 
 (defun clear-widget-overlay-relief-resources (overlay)
   (dolist (resource

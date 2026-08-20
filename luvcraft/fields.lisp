@@ -187,10 +187,10 @@
   (let ((offset 0) (projections nil))
     (dolist (input
              (sort (copy-list
-                    (spv:shader-specification-inputs specification))
-                   #'< :key #'spv:shader-interface-location))
+                    (shader:shader-specification-inputs specification))
+                   #'< :key #'shader:shader-interface-location))
       (let* ((width
-               (spv:shader-type-component-count
+               (shader:shader-type-component-count
                 (luv.arithmetic:declaration-representation-type input)))
              (whole
                (luv.arithmetic:declaration-quantity-specification input))
@@ -322,5 +322,5 @@
          (shader-input-product-layout shader-specification))
       (error "Vertex semantic ABI mismatch for ~S against shader ~S."
              declaration-name
-             (spv:shader-object-source-form shader-specification)))
+             (shader:shader-object-source-form shader-specification)))
     vertices))

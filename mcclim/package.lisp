@@ -15,6 +15,7 @@
 (defpackage #:mcluv
   (:use #:clim-lisp #:clim #:clime #:climb)
   (:local-nicknames (#:luv #:luv)
+                    (#:shader #:luv.shader)
                     (#:spv #:luv.spir-v)
                     (#:vec #:luv.arithmetic.lisp.vec3))
   (:export #:luv-port

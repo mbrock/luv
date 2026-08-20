@@ -391,13 +391,13 @@
 
 (defun block-world-vertex-lowering ()
   "Compile the camera transform and retain expression-to-SSA provenance."
-  (compile-shader-specification (block-world-vertex-specification)))
+  (spv:compile-shader-specification (block-world-vertex-specification)))
 
 (defun block-world-vertex-module ()
-  (shader-lowering-module (block-world-vertex-lowering)))
+  (spv:shader-lowering-module (block-world-vertex-lowering)))
 
 (defun block-world-vertex-shader ()
-  (assemble-spir-v-module (block-world-vertex-module)))
+  (spv:assemble-spir-v-module (block-world-vertex-module)))
 
 ;;; World text is ordinary scene geometry.  Its model transform has already
 ;;; placed each glyph quad in world coordinates; this stage applies the same
@@ -1779,14 +1779,14 @@ negative inside.  RADIUS is the corner radius in world cells."
 
 (defun block-world-fragment-lowering ()
   "Compile the block material and retain its expression-to-SSA provenance."
-  (compile-shader-specification (block-world-fragment-specification)))
+  (spv:compile-shader-specification (block-world-fragment-specification)))
 
 (defun block-world-fragment-module ()
   "Lower the readable block material to luv's structured SPIR-V module."
-  (shader-lowering-module (block-world-fragment-lowering)))
+  (spv:shader-lowering-module (block-world-fragment-lowering)))
 
 (defun block-world-fragment-shader ()
-  (assemble-spir-v-module (block-world-fragment-module)))
+  (spv:assemble-spir-v-module (block-world-fragment-module)))
 
 ;;; The sky is a fullscreen triangle drawn before block geometry with depth
 ;;; writes disabled.  Its vertex stage reconstructs a per-corner view ray
@@ -1843,11 +1843,11 @@ negative inside.  RADIUS is the corner radius in world cells."
   (shader-specification-for :sky :vertex))
 
 (defun block-world-sky-vertex-module ()
-  (shader-lowering-module
-   (compile-shader-specification (block-world-sky-vertex-specification))))
+  (spv:shader-lowering-module
+   (spv:compile-shader-specification (block-world-sky-vertex-specification))))
 
 (defun block-world-sky-vertex-shader ()
-  (assemble-spir-v-module (block-world-sky-vertex-module)))
+  (spv:assemble-spir-v-module (block-world-sky-vertex-module)))
 
 ;;; Lattice value noise is the whole procedural vocabulary this file needs: a
 ;;; hash of an integer lattice index, trilinear smoothing between its corners,
@@ -2267,11 +2267,11 @@ distribution overhead."
   (shader-specification-for :sky :fragment))
 
 (defun block-world-sky-fragment-module ()
-  (shader-lowering-module
-   (compile-shader-specification (block-world-sky-fragment-specification))))
+  (spv:shader-lowering-module
+   (spv:compile-shader-specification (block-world-sky-fragment-specification))))
 
 (defun block-world-sky-fragment-shader ()
-  (assemble-spir-v-module (block-world-sky-fragment-module)))
+  (spv:assemble-spir-v-module (block-world-sky-fragment-module)))
 
 ;;; Presentation is where linear scene radiance becomes a display image.  The
 ;;; scene attachment is floating point, so a sun disc or a specular glint
@@ -2623,11 +2623,11 @@ distribution overhead."
   (shader-specification-for :block-shadow :vertex))
 
 (defun block-world-shadow-vertex-module ()
-  (shader-lowering-module
-   (compile-shader-specification (block-world-shadow-vertex-specification))))
+  (spv:shader-lowering-module
+   (spv:compile-shader-specification (block-world-shadow-vertex-specification))))
 
 (defun block-world-shadow-vertex-shader ()
-  (assemble-spir-v-module (block-world-shadow-vertex-module)))
+  (spv:assemble-spir-v-module (block-world-shadow-vertex-module)))
 
 ;;; The crosshair is deliberately another tiny mathematical material rather
 ;;; than a magic fixed-function colour.  Its positions and ink are dense vertex
@@ -2676,12 +2676,12 @@ distribution overhead."
   (shader-specification-for :block-crosshair :fragment))
 
 (defun block-world-crosshair-fragment-module ()
-  (shader-lowering-module
-   (compile-shader-specification
+  (spv:shader-lowering-module
+   (spv:compile-shader-specification
     (block-world-crosshair-fragment-specification))))
 
 (defun block-world-crosshair-fragment-shader ()
-  (assemble-spir-v-module (block-world-crosshair-fragment-module)))
+  (spv:assemble-spir-v-module (block-world-crosshair-fragment-module)))
 
 ;;; The software cursor is one quad carrying a cursor-local coordinate; the
 ;;; arrow itself is a signed distance field the fragment stage evaluates.  A

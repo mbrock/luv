@@ -193,7 +193,7 @@
                (write-char emitted stream)))))
 
 (defun msl-type-name (type &optional source-form)
-  (case (spv:shader-type-name (spv:find-shader-type type source-form))
+  (case (shader:shader-type-name (shader:find-shader-type type source-form))
     (:bool "bool")
     (:float "float")
     (:uint "uint")
@@ -209,9 +209,9 @@
     (:uint-texture-2d "texture2d<uint>")
     (:sampler "sampler")
     (otherwise
-     (error 'spv:shader-language-error
+     (error 'shader:shader-language-error
             :form source-form :reason :unsupported-msl-type
-            :details (spv:shader-type-name type)))))
+            :details (shader:shader-type-name type)))))
 
 (defun msl-structure-name-for (name &optional suffix)
   (let ((capitalize-next-p t))
@@ -359,20 +359,20 @@
   nil)
 
 (defmethod msl-origin-quantity-specification
-    ((origin spv:shader-variable-declaration))
-  (spv:shader-declaration-quantity-specification origin))
+    ((origin shader:shader-variable-declaration))
+  (shader:shader-declaration-quantity-specification origin))
 
-(defmethod msl-origin-quantity-specification ((origin spv:shader-binding))
-  (spv:shader-expression-quantity-specification
-   (spv:shader-binding-expression origin)))
+(defmethod msl-origin-quantity-specification ((origin shader:shader-binding))
+  (shader:shader-expression-quantity-specification
+   (shader:shader-binding-expression origin)))
 
 (defmethod msl-origin-quantity-specification
-    ((origin spv:shader-output-assignment))
-  (spv:shader-expression-quantity-specification
-   (spv:shader-assignment-value origin)))
+    ((origin shader:shader-output-assignment))
+  (shader:shader-expression-quantity-specification
+   (shader:shader-assignment-value origin)))
 
-(defmethod msl-origin-quantity-specification ((origin spv:shader-resource))
-  (spv:shader-resource-sample-quantity-specification origin))
+(defmethod msl-origin-quantity-specification ((origin shader:shader-resource))
+  (shader:shader-resource-sample-quantity-specification origin))
 
 (defgeneric msl-origin-quantity-layout (origin)
   (:documentation "Return the component quantity layout carried by ORIGIN."))
@@ -381,20 +381,20 @@
   nil)
 
 (defmethod msl-origin-quantity-layout
-    ((origin spv:shader-variable-declaration))
-  (spv:shader-declaration-quantity-layout origin))
+    ((origin shader:shader-variable-declaration))
+  (shader:shader-declaration-quantity-layout origin))
 
-(defmethod msl-origin-quantity-layout ((origin spv:shader-binding))
-  (spv:shader-expression-quantity-layout
-   (spv:shader-binding-expression origin)))
+(defmethod msl-origin-quantity-layout ((origin shader:shader-binding))
+  (shader:shader-expression-quantity-layout
+   (shader:shader-binding-expression origin)))
 
 (defmethod msl-origin-quantity-layout
-    ((origin spv:shader-output-assignment))
-  (spv:shader-expression-quantity-layout
-   (spv:shader-assignment-value origin)))
+    ((origin shader:shader-output-assignment))
+  (shader:shader-expression-quantity-layout
+   (shader:shader-assignment-value origin)))
 
-(defmethod msl-origin-quantity-layout ((origin spv:shader-resource))
-  (spv:shader-resource-sample-quantity-layout origin))
+(defmethod msl-origin-quantity-layout ((origin shader:shader-resource))
+  (shader:shader-resource-sample-quantity-layout origin))
 
 (defun msl-semantic-sentences (origin &key sampled-p unannotated-p)
   (let ((specification (msl-origin-quantity-specification origin))
@@ -429,69 +429,69 @@
    "Render one shader EXPRESSION and retain a source occurrence for it."))
 
 (defmethod lower-msl-expression
-    ((context msl-lowering-context) (expression spv:shader-literal))
+    ((context msl-lowering-context) (expression shader:shader-literal))
   (note-msl-occurrence
-   context expression (msl-float-literal (spv:shader-literal-value expression))))
+   context expression (msl-float-literal (shader:shader-literal-value expression))))
 
 (defmethod lower-msl-expression
-    ((context msl-lowering-context) (expression spv:shader-reference))
-  (let* ((target (spv:shader-reference-target expression))
+    ((context msl-lowering-context) (expression shader:shader-reference))
+  (let* ((target (shader:shader-reference-target expression))
          (text (gethash target (msl-context-references context))))
     (cond (text
            (note-msl-occurrence context expression text))
-          ((typep target 'spv:shader-function-parameter-binding)
+          ((typep target 'shader:shader-function-parameter-binding)
            (let ((argument
                    (lower-msl-expression
-                    context (spv:shader-binding-expression target))))
+                    context (shader:shader-binding-expression target))))
              (note-msl-occurrence
               context expression (msl-occurrence-text argument))))
           (t
-           (error 'spv:shader-language-error
-                  :form (spv:shader-expression-source-form expression)
+           (error 'shader:shader-language-error
+                  :form (shader:shader-expression-source-form expression)
                   :reason :unsupported-msl-reference
-                  :details (spv:shader-object-name target))))))
+                  :details (shader:shader-object-name target))))))
 
 (defmethod lower-msl-expression
-    ((context msl-lowering-context) (expression spv:shader-payload-element))
+    ((context msl-lowering-context) (expression shader:shader-payload-element))
   (let ((index
           (lower-msl-expression
-           context (spv:shader-payload-element-index expression))))
+           context (shader:shader-payload-element-index expression))))
     (note-msl-occurrence
      context expression
      (format nil "payload.~A[~A]"
              (msl-identifier
-              (spv:shader-object-name
-               (spv:shader-payload-element-field expression)))
+              (shader:shader-object-name
+               (shader:shader-payload-element-field expression)))
              (msl-occurrence-text index)))))
 
 (defmethod lower-msl-expression
-    ((context msl-lowering-context) (expression spv:shader-buffer-element))
+    ((context msl-lowering-context) (expression shader:shader-buffer-element))
   (let ((index
           (lower-msl-expression
-           context (spv:shader-buffer-element-index expression))))
+           context (shader:shader-buffer-element-index expression))))
     (note-msl-occurrence
      context expression
      (format nil "~A[~A]"
              (msl-identifier
-              (spv:shader-object-name
-               (spv:shader-buffer-element-buffer expression)))
+              (shader:shader-object-name
+               (shader:shader-buffer-element-buffer expression)))
              (msl-occurrence-text index)))))
 
 (defmethod lower-msl-expression
-    ((context msl-lowering-context) (expression spv:shader-call))
-  (spv:lower-shader-call (spv:shader-call-operator expression)
+    ((context msl-lowering-context) (expression shader:shader-call))
+  (shader:lower-shader-call (shader:shader-call-operator expression)
                          context expression))
 
 (defmethod lower-msl-expression
-    ((context msl-lowering-context) (expression spv:shader-function-call))
+    ((context msl-lowering-context) (expression shader:shader-function-call))
   (let ((outer-statements (drain-msl-pending-statements context))
         (local-statements nil)
         (saved-references nil))
     (unwind-protect
          (progn
-           (dolist (binding (spv:shader-function-call-bindings expression))
+           (dolist (binding (shader:shader-function-call-bindings expression))
              (unless (or (typep binding
-                                'spv:shader-function-parameter-binding)
+                                'shader:shader-function-parameter-binding)
                          (nth-value 1
                            (gethash binding
                                     (msl-context-references context))))
@@ -500,9 +500,9 @@
                  (push (list binding old-reference old-reference-p)
                        saved-references))
                (let* ((binding-expression
-                        (spv:shader-binding-expression binding))
+                        (shader:shader-binding-expression binding))
                       (name
-                        (msl-identifier (spv:shader-object-name binding)))
+                        (msl-identifier (shader:shader-object-name binding)))
                       (value
                         (lower-msl-expression context binding-expression)))
                  (setf local-statements
@@ -516,12 +516,12 @@
                          (make-instance
                           'msl-variable-statement
                           :type (msl-type-name
-                                 (spv:shader-expression-type
+                                 (shader:shader-expression-type
                                   binding-expression))
                           :name name :value value :origin binding)))))))
            (let ((result
                    (lower-msl-expression
-                    context (spv:shader-function-call-result expression))))
+                    context (shader:shader-function-call-result expression))))
              (setf local-statements
                    (nconc local-statements
                           (drain-msl-pending-statements context))
@@ -537,7 +537,7 @@
               (remhash binding (msl-context-references context))))))))
 
 (defmethod lower-msl-expression
-    ((context msl-lowering-context) (expression spv:shader-conditional))
+    ((context msl-lowering-context) (expression shader:shader-conditional))
   (let ((condition
           (lower-msl-expression
            context (lang:arithmetic-conditional-condition expression)))
@@ -555,7 +555,7 @@
              (msl-occurrence-text alternative)))))
 
 (defmethod lower-msl-expression
-    ((context msl-lowering-context) (expression spv:shader-counted-fold))
+    ((context msl-lowering-context) (expression shader:shader-counted-fold))
   (let* ((ordinal (incf (msl-context-fold-counter context)))
          (state-name (format nil "fold_state_~D" ordinal))
          (index-name (format nil "fold_index_~D" ordinal))
@@ -590,8 +590,8 @@
           (dolist (binding
                    (lang:arithmetic-counted-fold-bindings expression))
             (let* ((binding-expression
-                     (spv:shader-binding-expression binding))
-                   (name (msl-identifier (spv:shader-object-name binding)))
+                     (shader:shader-binding-expression binding))
+                   (name (msl-identifier (shader:shader-object-name binding)))
                    (value (lower-msl-expression context binding-expression)))
               (setf local-statements
                     (nconc local-statements
@@ -604,7 +604,7 @@
                       (make-instance
                        'msl-variable-statement
                        :type (msl-type-name
-                              (spv:shader-expression-type binding-expression))
+                              (shader:shader-expression-type binding-expression))
                        :name name :value value :origin binding))))))
           (let ((update
                   (lower-msl-expression
@@ -618,12 +618,12 @@
                           (make-instance
                            'msl-counted-fold-statement
                            :type (msl-type-name
-                                  (spv:shader-expression-type expression))
+                                  (shader:shader-expression-type expression))
                            :state-name state-name :initial initial
                            :index-name index-name
                            :index-type
                            (msl-type-name
-                            (spv:shader-expression-type
+                            (shader:shader-expression-type
                              (lang:arithmetic-counted-fold-count expression)))
                            :count count
                            :bindings local-statements
@@ -652,27 +652,27 @@
 
 (defmethod lower-msl-shader-map-application
     (definition (context msl-lowering-context)
-     (application spv:shader-map-application))
+     (application shader:shader-map-application))
   (declare (ignore context))
-  (error 'spv:shader-language-error
-         :form (spv:shader-expression-source-form application)
+  (error 'shader:shader-language-error
+         :form (shader:shader-expression-source-form application)
          :reason :unsupported-msl-shader-map
          :details (class-name (class-of definition))))
 
 (defmethod lower-msl-shader-map-application
-    ((definition spv:shader-projective-map-definition)
+    ((definition shader:shader-projective-map-definition)
      (context msl-lowering-context)
-     (application spv:shader-map-application))
+     (application shader:shader-map-application))
   (declare (ignore definition))
   (let* ((point
            (msl-occurrence-text
             (lower-msl-expression
-             context (spv:shader-map-application-point application))))
+             context (shader:shader-map-application-point application))))
            (rows
              (mapcar (lambda (row)
                        (msl-occurrence-text
                         (lower-msl-expression context row)))
-                     (spv:shader-map-application-rows application)))
+                     (shader:shader-map-application-rows application)))
            (homogeneous (format nil "float4(~A, 1.0f)" point))
            (clip-components
              (mapcar (lambda (row)
@@ -683,18 +683,18 @@
      (format nil "float4(~{~A~^, ~})" clip-components))))
 
 (defmethod lower-msl-expression
-    ((context msl-lowering-context) (expression spv:shader-map-projection))
-  (let* ((application (spv:shader-map-projection-application expression))
-         (definition (spv:shader-map-application-definition application))
+    ((context msl-lowering-context) (expression shader:shader-map-projection))
+  (let* ((application (shader:shader-map-projection-application expression))
+         (definition (shader:shader-map-application-definition application))
          (point
            (msl-occurrence-text
             (lower-msl-expression
-             context (spv:shader-map-application-point application))))
+             context (shader:shader-map-application-point application))))
          (rows
            (mapcar (lambda (row)
                      (msl-occurrence-text
                       (lower-msl-expression context row)))
-                   (spv:shader-map-application-rows application)))
+                   (shader:shader-map-application-rows application)))
          (homogeneous (format nil "float4(~A, 1.0f)" point))
          (clip-components
            (mapcar (lambda (row)
@@ -707,54 +707,54 @@
            (scale
              (format nil "float3(~{~A~^, ~})"
                      (mapcar #'msl-float-literal
-                             (spv:shader-projective-map-coordinate-scale
+                             (shader:shader-projective-map-coordinate-scale
                               definition))))
            (offset
              (format nil "float3(~{~A~^, ~})"
                      (mapcar #'msl-float-literal
-                             (spv:shader-projective-map-coordinate-offset
+                             (shader:shader-projective-map-coordinate-offset
                               definition)))))
     (note-msl-occurrence
      context expression
      (format nil "((~A * ~A) + ~A)" normalized scale offset))))
 
 (defmethod lower-msl-expression
-    ((context msl-lowering-context) (expression spv:shader-map-application))
+    ((context msl-lowering-context) (expression shader:shader-map-application))
   (lower-msl-shader-map-application
-   (spv:shader-map-application-definition expression) context expression))
+   (shader:shader-map-application-definition expression) context expression))
 
 (defun lower-msl-quantity-boundary (context expression operand)
   (let ((lowered (lower-msl-expression context operand)))
     (note-msl-occurrence context expression (msl-occurrence-text lowered))))
 
 (defmethod lower-msl-expression
-    ((context msl-lowering-context) (expression spv:shader-interpretation))
+    ((context msl-lowering-context) (expression shader:shader-interpretation))
   (lower-msl-quantity-boundary
-   context expression (spv:shader-interpretation-operand expression)))
+   context expression (shader:shader-interpretation-operand expression)))
 
 (defmethod lower-msl-expression
     ((context msl-lowering-context)
-     (expression spv:shader-quantity-construction))
+     (expression shader:shader-quantity-construction))
   (lower-msl-quantity-boundary
-   context expression (spv:shader-quantity-construction-operand expression)))
+   context expression (shader:shader-quantity-construction-operand expression)))
 
 (defmethod lower-msl-expression
     ((context msl-lowering-context)
-     (expression spv:shader-quantity-assumption))
+     (expression shader:shader-quantity-assumption))
   (lower-msl-quantity-boundary
-   context expression (spv:shader-quantity-assumption-operand expression)))
+   context expression (shader:shader-quantity-assumption-operand expression)))
 
 (defmethod lower-msl-expression
-    ((context msl-lowering-context) (expression spv:shader-representation))
+    ((context msl-lowering-context) (expression shader:shader-representation))
   (lower-msl-quantity-boundary
-   context expression (spv:shader-representation-operand expression)))
+   context expression (shader:shader-representation-operand expression)))
 
 (defmethod lower-msl-expression
-    ((context msl-lowering-context) (expression spv:shader-unit-conversion))
+    ((context msl-lowering-context) (expression shader:shader-unit-conversion))
   (let* ((operand
            (lower-msl-expression
-            context (spv:shader-unit-conversion-operand expression)))
-         (factor (spv:shader-unit-conversion-factor expression))
+            context (shader:shader-unit-conversion-operand expression)))
+         (factor (shader:shader-unit-conversion-factor expression))
          (text
            (if (= factor 1)
                (msl-occurrence-text operand)
@@ -764,17 +764,17 @@
     (note-msl-occurrence context expression text)))
 
 (defmethod lower-msl-expression
-    ((context msl-lowering-context) (expression spv:shader-expression))
+    ((context msl-lowering-context) (expression shader:shader-expression))
   (declare (ignore context))
-  (error 'spv:shader-language-error
-         :form (spv:shader-expression-source-form expression)
+  (error 'shader:shader-language-error
+         :form (shader:shader-expression-source-form expression)
          :reason :unsupported-msl-expression
          :details (class-name (class-of expression))))
 
 (defun lower-msl-operands (context expression)
   (mapcar (lambda (operand)
             (lower-msl-expression context operand))
-          (spv:shader-call-operands expression)))
+          (shader:shader-call-operands expression)))
 
 (defun lower-msl-infix-call (context expression operator)
   (let ((operands (mapcar #'msl-occurrence-text
@@ -806,33 +806,33 @@
                (format nil "~A(~A, ~A)" name left right))
              (rest operands) :initial-value (first operands)))))
 
-(defmethod spv:lower-shader-call
+(defmethod shader:lower-shader-call
     (operator (context msl-lowering-context) expression)
-  (error 'spv:shader-language-error
-         :form (spv:shader-expression-source-form expression)
+  (error 'shader:shader-language-error
+         :form (shader:shader-expression-source-form expression)
          :reason :unsupported-msl-operator :details operator))
 
 (defmacro define-msl-infix-operator (operator text)
-  `(defmethod spv:lower-shader-call
+  `(defmethod shader:lower-shader-call
        ((operator (eql ',operator))
         (context msl-lowering-context)
-        (expression spv:shader-call))
+        (expression shader:shader-call))
      (declare (ignore operator))
      (lower-msl-infix-call context expression ,text)))
 
-(defmethod spv:lower-shader-call
-    ((operator (eql 'spv:ldb))
+(defmethod shader:lower-shader-call
+    ((operator (eql 'shader:ldb))
      (context msl-lowering-context)
-     (expression spv:shader-bit-field-call))
+     (expression shader:shader-bit-field-call))
   "Lower LDB to a logical shift and mask in the operand's own width."
   (declare (ignore operator))
-  (let* ((operands (spv:shader-call-operands expression))
+  (let* ((operands (shader:shader-call-operands expression))
          (value (msl-occurrence-text
                  (lower-msl-expression context (first operands))))
-         (size (spv:shader-bit-field-size expression))
-         (position (spv:shader-bit-field-position expression))
-         (width (spv:shader-type-bit-width
-                 (spv:shader-expression-type expression)))
+         (size (shader:shader-bit-field-size expression))
+         (position (shader:shader-bit-field-position expression))
+         (width (shader:shader-type-bit-width
+                 (shader:shader-expression-type expression)))
          (suffix (if (= width 64) "ul" "u"))
          (shift (cond (position (format nil "~D~A" position suffix))
                       ((= width 64)
@@ -865,37 +865,37 @@
 (define-msl-infix-operator = "==")
 
 (defmacro define-msl-function-operator (operator name)
-  `(defmethod spv:lower-shader-call
+  `(defmethod shader:lower-shader-call
        ((operator (eql ',operator))
         (context msl-lowering-context)
-        (expression spv:shader-call))
+        (expression shader:shader-call))
      (declare (ignore operator))
      (lower-msl-function-call context expression ,name)))
 
-(define-msl-function-operator spv:dot "dot")
-(define-msl-function-operator spv:mix "mix")
+(define-msl-function-operator shader:dot "dot")
+(define-msl-function-operator shader:mix "mix")
 (define-msl-function-operator abs "abs")
 (define-msl-function-operator signum "sign")
 (define-msl-function-operator sqrt "sqrt")
-(define-msl-function-operator spv:derivative-x "dfdx")
-(define-msl-function-operator spv:derivative-y "dfdy")
+(define-msl-function-operator shader:derivative-x "dfdx")
+(define-msl-function-operator shader:derivative-y "dfdy")
 (define-msl-function-operator expt "pow")
-(define-msl-function-operator spv:clamp "clamp")
-(define-msl-function-operator spv:smoothstep "smoothstep")
-(define-msl-function-operator spv:step "step")
-(define-msl-function-operator spv:normalize "normalize")
+(define-msl-function-operator shader:clamp "clamp")
+(define-msl-function-operator shader:smoothstep "smoothstep")
+(define-msl-function-operator shader:step "step")
+(define-msl-function-operator shader:normalize "normalize")
 (define-msl-function-operator floor "floor")
-(define-msl-function-operator spv:fract "fract")
+(define-msl-function-operator shader:fract "fract")
 (define-msl-function-operator sin "sin")
 (define-msl-function-operator cos "cos")
 (define-msl-function-operator exp "exp")
 (define-msl-function-operator log "log")
 
 (defmacro define-msl-chained-function-operator (operator name)
-  `(defmethod spv:lower-shader-call
+  `(defmethod shader:lower-shader-call
        ((operator (eql ',operator))
         (context msl-lowering-context)
-        (expression spv:shader-call))
+        (expression shader:shader-call))
      (declare (ignore operator))
      (lower-msl-chained-function-call context expression ,name)))
 
@@ -908,68 +908,68 @@
     (note-msl-occurrence
      context expression
      (format nil "~A(~{~A~^, ~})"
-             (msl-type-name (spv:shader-expression-type expression)
-                            (spv:shader-expression-source-form expression))
+             (msl-type-name (shader:shader-expression-type expression)
+                            (shader:shader-expression-source-form expression))
              operands))))
 
 (defmacro define-msl-vector-constructor (operator)
-  `(defmethod spv:lower-shader-call
+  `(defmethod shader:lower-shader-call
        ((operator (eql ',operator))
         (context msl-lowering-context)
-        (expression spv:shader-call))
+        (expression shader:shader-call))
      (declare (ignore operator))
      (lower-msl-vector-constructor context expression)))
 
-(define-msl-vector-constructor spv:vec2)
-(define-msl-vector-constructor spv:vec3)
-(define-msl-vector-constructor spv:vec4)
-(define-msl-vector-constructor spv:uvec2)
-(define-msl-vector-constructor spv:uvec3)
-(define-msl-vector-constructor spv:uvec4)
+(define-msl-vector-constructor shader:vec2)
+(define-msl-vector-constructor shader:vec3)
+(define-msl-vector-constructor shader:vec4)
+(define-msl-vector-constructor shader:uvec2)
+(define-msl-vector-constructor shader:uvec3)
+(define-msl-vector-constructor shader:uvec4)
 
-(defmethod spv:lower-shader-call
-    ((operator (eql 'spv:uint))
+(defmethod shader:lower-shader-call
+    ((operator (eql 'shader:uint))
      (context msl-lowering-context)
-     (expression spv:shader-call))
+     (expression shader:shader-call))
   (declare (ignore operator))
   (lower-msl-function-call context expression "uint"))
 
-(defmethod spv:lower-shader-call
-    ((operator (eql 'spv:uint64))
+(defmethod shader:lower-shader-call
+    ((operator (eql 'shader:uint64))
      (context msl-lowering-context)
-     (expression spv:shader-call))
+     (expression shader:shader-call))
   (declare (ignore operator))
   (lower-msl-function-call context expression "ulong"))
 
-(defmethod spv:lower-shader-call
+(defmethod shader:lower-shader-call
     ((operator (eql 'float))
      (context msl-lowering-context)
-     (expression spv:shader-call))
+     (expression shader:shader-call))
   (declare (ignore operator))
   (lower-msl-function-call context expression "float"))
 
-(defmethod spv:lower-shader-call
-    ((operator (eql 'spv:swizzle))
+(defmethod shader:lower-shader-call
+    ((operator (eql 'shader:swizzle))
      (context msl-lowering-context)
-     (expression spv:shader-call))
+     (expression shader:shader-call))
   (declare (ignore operator))
   (let* ((operand
            (lower-msl-expression
-            context (first (spv:shader-call-operands expression))))
+            context (first (shader:shader-call-operands expression))))
          (components
            (string-downcase
-            (string (first (spv:shader-call-parameters expression))))))
+            (string (first (shader:shader-call-parameters expression))))))
     (note-msl-occurrence
      context expression
      (format nil "~A.~A" (msl-occurrence-text operand) components))))
 
-(defmethod spv:lower-shader-call
-    ((operator (eql 'spv:sample))
+(defmethod shader:lower-shader-call
+    ((operator (eql 'shader:sample))
      (context msl-lowering-context)
-     (expression spv:shader-call))
+     (expression shader:shader-call))
   (declare (ignore operator))
   (destructuring-bind (texture sampler coordinate)
-      (spv:shader-call-operands expression)
+      (shader:shader-call-operands expression)
     (let* ((lowered
              (mapcar (lambda (operand)
                        (lower-msl-expression context operand))
@@ -980,16 +980,16 @@
                      (msl-occurrence-text (second lowered))
                      (msl-occurrence-text (third lowered))))
            (text
-             (if (spv:shader-type-image-depth-p
-                  (spv:shader-expression-type texture))
+             (if (shader:shader-type-image-depth-p
+                  (shader:shader-expression-type texture))
                  (format nil "float4(~A)" sample)
                  sample)))
       (note-msl-occurrence context expression text))))
 
-(defmethod spv:lower-shader-call
-    ((operator (eql 'spv:sample-compare))
+(defmethod shader:lower-shader-call
+    ((operator (eql 'shader:sample-compare))
      (context msl-lowering-context)
-     (expression spv:shader-call))
+     (expression shader:shader-call))
   (declare (ignore operator))
   (let ((operands (mapcar #'msl-occurrence-text
                           (lower-msl-operands context expression))))
@@ -999,10 +999,10 @@
        (format nil "~A.sample_compare(~A, ~A, ~A)"
                texture sampler coordinate depth-reference)))))
 
-(defmethod spv:lower-shader-call
-    ((operator (eql 'spv:texel-load))
+(defmethod shader:lower-shader-call
+    ((operator (eql 'shader:texel-load))
      (context msl-lowering-context)
-     (expression spv:shader-call))
+     (expression shader:shader-call))
   (declare (ignore operator))
   (destructuring-bind (texture coordinate)
       (mapcar #'msl-occurrence-text
@@ -1011,11 +1011,11 @@
      context expression (format nil "~A.read(~A)" texture coordinate))))
 
 (defun msl-interface-attribute (stage declaration)
-  (let ((direction (spv:shader-interface-direction declaration))
-        (location (spv:shader-interface-location declaration))
-        (built-in (spv:shader-interface-built-in declaration))
-        (interpolation (spv:shader-interface-interpolation declaration))
-        (source-form (spv:shader-object-source-form declaration)))
+  (let ((direction (shader:shader-interface-direction declaration))
+        (location (shader:shader-interface-location declaration))
+        (built-in (shader:shader-interface-built-in declaration))
+        (interpolation (shader:shader-interface-interpolation declaration))
+        (source-form (shader:shader-object-source-form declaration)))
     (cond
       ((and (eq direction :output) (eq built-in :position))
        "[[position]]")
@@ -1030,11 +1030,11 @@
          (:num-workgroups "[[threadgroups_per_grid]]")
          (:workgroup-size "[[threads_per_threadgroup]]")
          (otherwise
-          (error 'spv:shader-language-error
+          (error 'shader:shader-language-error
                  :form source-form :reason :unsupported-msl-built-in
                  :details (list direction built-in)))))
       (built-in
-       (error 'spv:shader-language-error
+       (error 'shader:shader-language-error
               :form source-form :reason :unsupported-msl-built-in
               :details (list direction built-in)))
       ((and (eq stage :vertex) (eq direction :input))
@@ -1057,9 +1057,9 @@
     (lambda (declaration)
       (make-instance
        'msl-field
-       :type (msl-type-name (spv:shader-declaration-type declaration)
-                            (spv:shader-object-source-form declaration))
-       :name (msl-identifier (spv:shader-object-name declaration))
+       :type (msl-type-name (shader:shader-declaration-type declaration)
+                            (shader:shader-object-source-form declaration))
+       :name (msl-identifier (shader:shader-object-name declaration))
        :attribute (msl-interface-attribute stage declaration)
        :origin declaration))
     declarations)))
@@ -1067,60 +1067,60 @@
 (defun msl-built-in-input-parameter (stage declaration)
   (make-instance
    'msl-parameter
-   :type (msl-type-name (spv:shader-declaration-type declaration)
-                        (spv:shader-object-source-form declaration))
-   :name (msl-identifier (spv:shader-object-name declaration))
+   :type (msl-type-name (shader:shader-declaration-type declaration)
+                        (shader:shader-object-source-form declaration))
+   :name (msl-identifier (shader:shader-object-name declaration))
    :attribute (msl-interface-attribute stage declaration)
    :origin declaration))
 
 (defun msl-uniform-structure (resource)
   (make-instance
    'msl-structure-declaration
-   :name (msl-structure-name-for (spv:shader-object-name resource))
+   :name (msl-structure-name-for (shader:shader-object-name resource))
    :fields
    (mapcar
     (lambda (member)
       (make-instance
        'msl-field
-       :type (msl-type-name (spv:shader-declaration-type member)
-                            (spv:shader-object-source-form member))
-       :name (msl-identifier (spv:shader-object-name member))
+       :type (msl-type-name (shader:shader-declaration-type member)
+                            (shader:shader-object-source-form member))
+       :name (msl-identifier (shader:shader-object-name member))
        :attribute nil :origin member))
-    (spv:shader-uniform-block-members resource))))
+    (shader:shader-uniform-block-members resource))))
 
 (defun msl-task-payload-structure (payload)
   (make-instance
    'msl-structure-declaration
-   :name (msl-structure-name-for (spv:shader-object-name payload))
+   :name (msl-structure-name-for (shader:shader-object-name payload))
    :fields
    (mapcar
     (lambda (field)
       (make-instance
        'msl-field
-       :type (msl-type-name (spv:shader-declaration-type field)
-                            (spv:shader-object-source-form field))
-       :name (msl-identifier (spv:shader-object-name field))
+       :type (msl-type-name (shader:shader-declaration-type field)
+                            (shader:shader-object-source-form field))
+       :name (msl-identifier (shader:shader-object-name field))
        :attribute nil :origin field
-       :array-length (spv:shader-task-payload-field-element-count field)))
-    (spv:shader-task-payload-fields payload))))
+       :array-length (shader:shader-task-payload-field-element-count field)))
+    (shader:shader-task-payload-fields payload))))
 
 (defun msl-resource-parameter (resource)
-  (unless (zerop (spv:shader-resource-descriptor-set resource))
-    (error 'spv:shader-language-error
-           :form (spv:shader-object-source-form resource)
+  (unless (zerop (shader:shader-resource-descriptor-set resource))
+    (error 'shader:shader-language-error
+           :form (shader:shader-object-source-form resource)
            :reason :unsupported-msl-descriptor-set
-           :details (spv:shader-resource-descriptor-set resource)))
-  (let* ((name (msl-identifier (spv:shader-object-name resource)))
-         (binding (spv:shader-resource-binding resource))
-         (type (spv:shader-declaration-type resource))
-         (kind (spv:shader-type-opaque-kind type)))
+           :details (shader:shader-resource-descriptor-set resource)))
+  (let* ((name (msl-identifier (shader:shader-object-name resource)))
+         (binding (shader:shader-resource-binding resource))
+         (type (shader:shader-declaration-type resource))
+         (kind (shader:shader-type-opaque-kind type)))
     (case kind
       (:uniform-block
        (make-instance
         'msl-parameter
         :type (format nil "constant ~A&"
                       (msl-structure-name-for
-                       (spv:shader-object-name resource)))
+                       (shader:shader-object-name resource)))
         :name name :attribute (format nil "[[buffer(~D)]]" binding)
         :origin resource))
       (:storage-buffer
@@ -1128,14 +1128,14 @@
         'msl-parameter
         :type (format nil "const device ~A*"
                       (msl-type-name
-                       (spv:shader-storage-buffer-element-type resource)
-                       (spv:shader-object-source-form resource)))
+                       (shader:shader-storage-buffer-element-type resource)
+                       (shader:shader-object-source-form resource)))
         :name name :attribute (format nil "[[buffer(~D)]]" binding)
         :origin resource))
       (:texture-2d
        (make-instance
         'msl-parameter
-        :type (msl-type-name type (spv:shader-object-source-form resource))
+        :type (msl-type-name type (shader:shader-object-source-form resource))
         :name name :attribute (format nil "[[texture(~D)]]" binding)
         :origin resource))
       (:sampler
@@ -1145,33 +1145,33 @@
         :attribute (format nil "[[sampler(~D)]]" binding)
         :origin resource))
       (otherwise
-       (error 'spv:shader-language-error
-              :form (spv:shader-object-source-form resource)
+       (error 'shader:shader-language-error
+              :form (shader:shader-object-source-form resource)
               :reason :unsupported-msl-resource :details kind)))))
 
 (defun register-msl-declaration-references
     (context specification input-parameter-name)
-  (dolist (input (spv:shader-specification-inputs specification))
+  (dolist (input (shader:shader-specification-inputs specification))
     (setf (gethash input (msl-context-references context))
-          (if (spv:shader-interface-built-in input)
-              (msl-identifier (spv:shader-object-name input))
+          (if (shader:shader-interface-built-in input)
+              (msl-identifier (shader:shader-object-name input))
               (format nil "~A.~A" input-parameter-name
-                      (msl-identifier (spv:shader-object-name input))))))
-  (dolist (resource (spv:shader-specification-resources specification))
-    (let ((resource-name (msl-identifier (spv:shader-object-name resource))))
+                      (msl-identifier (shader:shader-object-name input))))))
+  (dolist (resource (shader:shader-specification-resources specification))
+    (let ((resource-name (msl-identifier (shader:shader-object-name resource))))
       (setf (gethash resource (msl-context-references context)) resource-name)
-      (when (typep resource 'spv:shader-uniform-block)
-        (dolist (member (spv:shader-uniform-block-members resource))
+      (when (typep resource 'shader:shader-uniform-block)
+        (dolist (member (shader:shader-uniform-block-members resource))
           (setf (gethash member (msl-context-references context))
                 (format nil "~A.~A" resource-name
-                        (msl-identifier (spv:shader-object-name member))))))))
-  (let ((payload (spv:shader-specification-task-payload specification)))
+                        (msl-identifier (shader:shader-object-name member))))))))
+  (let ((payload (shader:shader-specification-task-payload specification)))
     (when payload
-      (dolist (field (spv:shader-task-payload-fields payload))
-        (unless (spv:shader-task-payload-field-element-count field)
+      (dolist (field (shader:shader-task-payload-fields payload))
+        (unless (shader:shader-task-payload-field-element-count field)
           (setf (gethash field (msl-context-references context))
                 (format nil "payload.~A"
-                        (msl-identifier (spv:shader-object-name field))))))))
+                        (msl-identifier (shader:shader-object-name field))))))))
   context)
 
 (defgeneric write-msl-declaration (declaration stream))
@@ -1200,7 +1200,7 @@
         do (write-string "  " stream)))
 
 (defun msl-position-adjusted-text (declaration value)
-  (if (eq :position (spv:shader-interface-built-in declaration))
+  (if (eq :position (shader:shader-interface-built-in declaration))
       ;; The shared camera graph intentionally retains Vulkan's
       ;; framebuffer-oriented clip Y. Metal owns the target conversion.
       (format nil "float4((~A).x, -(~A).y, (~A).z, (~A).w)"
@@ -1227,7 +1227,7 @@
 
 (defmethod write-msl-statement ((statement msl-output-statement) stream)
   (let* ((origin (msl-output-statement-origin statement))
-         (output (spv:shader-assignment-output origin))
+         (output (shader:shader-assignment-output origin))
          (value (msl-occurrence-text
                  (msl-output-statement-value statement)))
          (text (msl-position-adjusted-text output value)))
@@ -1413,10 +1413,10 @@
 
 (defun msl-local-invocation-index-name (specification)
   (msl-identifier
-   (spv:shader-object-name
+   (shader:shader-object-name
     (find :local-invocation-index
-          (spv:shader-specification-inputs specification)
-          :key #'spv:shader-interface-built-in))))
+          (shader:shader-specification-inputs specification)
+          :key #'shader:shader-interface-built-in))))
 
 (defgeneric lower-msl-statement (context statement)
   (:documentation "Lower one semantic shader statement to structured MSL."))
@@ -1426,26 +1426,26 @@
     (values value (drain-msl-pending-statements context))))
 
 (defmethod lower-msl-statement
-    ((context msl-lowering-context) (statement spv:shader-output-assignment))
+    ((context msl-lowering-context) (statement shader:shader-output-assignment))
   (multiple-value-bind (value pending)
       (lower-msl-expression-with-pending
-       context (spv:shader-assignment-value statement))
+       context (shader:shader-assignment-value statement))
     (append
      pending
      (list
       (make-instance
        'msl-output-statement
        :field (msl-identifier
-               (spv:shader-object-name
-                (spv:shader-assignment-output statement)))
+               (shader:shader-object-name
+                (shader:shader-assignment-output statement)))
        :value value :origin statement)))))
 
 (defmethod lower-msl-statement
     ((context msl-lowering-context)
-     (statement spv:shader-conditional-statement))
+     (statement shader:shader-conditional-statement))
   (multiple-value-bind (condition pending)
       (lower-msl-expression-with-pending
-       context (spv:shader-conditional-statement-condition statement))
+       context (shader:shader-conditional-statement-condition statement))
     (append
      pending
      (list
@@ -1454,18 +1454,18 @@
        :condition condition
        :statements
        (mapcan (lambda (child) (lower-msl-statement context child))
-               (spv:shader-conditional-statement-statements statement))
+               (shader:shader-conditional-statement-statements statement))
        :origin statement)))))
 
 (defmethod lower-msl-statement
     ((context msl-lowering-context)
-     (statement spv:shader-mesh-output-counts))
+     (statement shader:shader-mesh-output-counts))
   (let ((vertex-count
           (lower-msl-expression
-           context (spv:shader-mesh-output-vertex-count statement)))
+           context (shader:shader-mesh-output-vertex-count statement)))
         (primitive-count
           (lower-msl-expression
-           context (spv:shader-mesh-output-primitive-count statement))))
+           context (shader:shader-mesh-output-primitive-count statement))))
     (append
      (drain-msl-pending-statements context)
      (list
@@ -1487,14 +1487,14 @@
     (values (nreverse lowered) pending)))
 
 (defmethod lower-msl-statement
-    ((context msl-lowering-context) (statement spv:shader-mesh-vertex-store))
+    ((context msl-lowering-context) (statement shader:shader-mesh-vertex-store))
   (let ((index
           (lower-msl-expression
-           context (spv:shader-mesh-vertex-store-index statement))))
+           context (shader:shader-mesh-vertex-store-index statement))))
     (let ((pending (drain-msl-pending-statements context)))
       (multiple-value-bind (values value-pending)
           (lower-msl-declaration-values
-           context (spv:shader-mesh-vertex-store-values statement))
+           context (shader:shader-mesh-vertex-store-values statement))
         (append
          pending value-pending
          (list
@@ -1503,64 +1503,64 @@
            :index index
            :vertex-type
            (msl-structure-name-for
-            (spv:shader-object-name (msl-context-specification context))
+            (shader:shader-object-name (msl-context-specification context))
             "Vertex")
            :values values :origin statement)))))))
 
 (defmethod lower-msl-statement
     ((context msl-lowering-context)
-     (statement spv:shader-mesh-primitive-store))
+     (statement shader:shader-mesh-primitive-store))
   (let ((index
           (lower-msl-expression
-           context (spv:shader-mesh-primitive-store-index statement)))
+           context (shader:shader-mesh-primitive-store-index statement)))
         (indices
           (lower-msl-expression
-           context (spv:shader-mesh-primitive-store-indices statement))))
+           context (shader:shader-mesh-primitive-store-indices statement))))
     (let ((pending (drain-msl-pending-statements context)))
       (multiple-value-bind (values value-pending)
           (lower-msl-declaration-values
-           context (spv:shader-mesh-primitive-store-values statement))
+           context (shader:shader-mesh-primitive-store-values statement))
         (let* ((specification (msl-context-specification context))
-               (mesh-output (spv:shader-specification-mesh-output specification)))
+               (mesh-output (shader:shader-specification-mesh-output specification)))
           (append
            pending value-pending
            (list
             (make-instance
              'msl-mesh-primitive-statement
              :index index :indices indices
-             :topology (spv:shader-mesh-output-topology mesh-output)
+             :topology (shader:shader-mesh-output-topology mesh-output)
              :primitive-type
              (and values
                   (msl-structure-name-for
-                   (spv:shader-object-name specification) "Primitive"))
+                   (shader:shader-object-name specification) "Primitive"))
              :values values :origin statement))))))))
 
 (defmethod lower-msl-statement
     ((context msl-lowering-context)
-     (statement spv:shader-task-payload-store))
+     (statement shader:shader-task-payload-store))
   (let ((index
-          (and (spv:shader-task-payload-store-index statement)
+          (and (shader:shader-task-payload-store-index statement)
                (lower-msl-expression
-                context (spv:shader-task-payload-store-index statement))))
+                context (shader:shader-task-payload-store-index statement))))
         (value
           (lower-msl-expression
-           context (spv:shader-task-payload-store-value statement))))
+           context (shader:shader-task-payload-store-value statement))))
     (append
      (drain-msl-pending-statements context)
      (list
       (make-instance
        'msl-task-payload-store-statement
        :field (msl-identifier
-               (spv:shader-object-name
-                (spv:shader-task-payload-store-field statement)))
+               (shader:shader-object-name
+                (shader:shader-task-payload-store-field statement)))
        :index index :value value :origin statement)))))
 
 (defmethod lower-msl-statement
     ((context msl-lowering-context)
-     (statement spv:shader-emit-mesh-workgroups))
+     (statement shader:shader-emit-mesh-workgroups))
   (multiple-value-bind (workgroups pending)
       (lower-msl-expression-with-pending
-       context (spv:shader-emit-mesh-workgroups-counts statement))
+       context (shader:shader-emit-mesh-workgroups-counts statement))
     (append
      pending
      (list
@@ -1572,9 +1572,9 @@
 
 (defun lower-msl-bindings (context specification)
   (let ((statements nil))
-    (dolist (binding (spv:shader-specification-bindings specification))
-      (let* ((expression (spv:shader-binding-expression binding))
-             (name (msl-identifier (spv:shader-object-name binding)))
+    (dolist (binding (shader:shader-specification-bindings specification))
+      (let* ((expression (shader:shader-binding-expression binding))
+             (name (msl-identifier (shader:shader-object-name binding)))
              (value (lower-msl-expression context expression)))
         (setf statements
               (nconc statements (drain-msl-pending-statements context)))
@@ -1586,18 +1586,18 @@
                 (make-instance
                  'msl-variable-statement
                  :type (msl-type-name
-                        (spv:shader-expression-type expression)
-                        (spv:shader-expression-source-form expression))
+                        (shader:shader-expression-type expression)
+                        (shader:shader-expression-source-form expression))
                  :name name :value value :origin binding))))))
     statements))
 
 (defun lower-msl-statements (context specification)
   (mapcan (lambda (statement) (lower-msl-statement context statement))
-          (spv:shader-specification-statements specification)))
+          (shader:shader-specification-statements specification)))
 
 (defun msl-uniform-structures (specification)
-  (loop for resource in (spv:shader-specification-resources specification)
-        when (typep resource 'spv:shader-uniform-block)
+  (loop for resource in (shader:shader-specification-resources specification)
+        when (typep resource 'shader:shader-uniform-block)
           collect (msl-uniform-structure resource)))
 
 (defun finish-msl-document
@@ -1621,25 +1621,25 @@
 
 (defun lower-traditional-msl-specification
     (target specification context)
-  (let* ((stage (spv:shader-specification-stage specification))
-         (base-name (spv:shader-object-name specification))
+  (let* ((stage (shader:shader-specification-stage specification))
+         (base-name (shader:shader-object-name specification))
          (ordinary-inputs
-           (remove-if #'spv:shader-interface-built-in
-                      (spv:shader-specification-inputs specification)))
+           (remove-if #'shader:shader-interface-built-in
+                      (shader:shader-specification-inputs specification)))
          (built-in-inputs
-           (remove-if-not #'spv:shader-interface-built-in
-                          (spv:shader-specification-inputs specification)))
+           (remove-if-not #'shader:shader-interface-built-in
+                          (shader:shader-specification-inputs specification)))
          (input-structure
            (when ordinary-inputs
              (msl-interface-structure base-name "Input" stage ordinary-inputs)))
          (output-structure
            (msl-interface-structure
             base-name "Output" stage
-            (spv:shader-specification-outputs specification)))
+            (shader:shader-specification-outputs specification)))
          (input-parameter-name "stage_in"))
     (unless (member stage '(:vertex :fragment))
-      (error 'spv:shader-language-error
-             :form (spv:shader-object-source-form specification)
+      (error 'shader:shader-language-error
+             :form (shader:shader-object-source-form specification)
              :reason :unsupported-msl-stage :details stage))
     (register-msl-declaration-references
      context specification input-parameter-name)
@@ -1659,7 +1659,7 @@
                         (msl-built-in-input-parameter stage input))
                       built-in-inputs)
               (mapcar #'msl-resource-parameter
-                      (spv:shader-specification-resources specification)))
+                      (shader:shader-specification-resources specification)))
              :statements
              (nconc (lower-msl-bindings context specification)
                     (lower-msl-statements context specification)))))
@@ -1671,7 +1671,7 @@
 
 (defun msl-workgroup-parameters (stage specification)
   (mapcar (lambda (input) (msl-built-in-input-parameter stage input))
-          (spv:shader-specification-inputs specification)))
+          (shader:shader-specification-inputs specification)))
 
 (defun msl-payload-parameter (stage payload)
   (when payload
@@ -1679,11 +1679,11 @@
      'msl-parameter
      :type (format nil "object_data ~A~A&"
                    (if (eq stage :mesh) "const " "")
-                   (msl-structure-name-for (spv:shader-object-name payload)))
+                   (msl-structure-name-for (shader:shader-object-name payload)))
      :name "payload" :attribute "[[payload]]")))
 
 (defun lower-task-msl-specification (target specification context)
-  (let* ((payload (spv:shader-specification-task-payload specification))
+  (let* ((payload (shader:shader-specification-task-payload specification))
          (payload-structure (and payload (msl-task-payload-structure payload))))
     (register-msl-declaration-references context specification "stage_in")
     (finish-msl-document
@@ -1693,7 +1693,7 @@
      (make-instance
       'msl-entry-point
       :stage :task :return-type "void"
-      :name (msl-identifier (spv:shader-object-name specification))
+      :name (msl-identifier (shader:shader-object-name specification))
       :parameters
       (append
        (remove nil
@@ -1704,7 +1704,7 @@
                       :name "mesh_grid" :attribute nil)))
        (msl-workgroup-parameters :task specification)
        (mapcar #'msl-resource-parameter
-               (spv:shader-specification-resources specification)))
+               (shader:shader-specification-resources specification)))
       :statements
       (nconc (lower-msl-bindings context specification)
              (lower-msl-statements context specification))))))
@@ -1716,19 +1716,19 @@
     (:triangles "triangle")))
 
 (defun lower-mesh-msl-specification (target specification context)
-  (let* ((base-name (spv:shader-object-name specification))
-         (mesh-output (spv:shader-specification-mesh-output specification))
+  (let* ((base-name (shader:shader-object-name specification))
+         (mesh-output (shader:shader-specification-mesh-output specification))
          (vertex-structure
            (msl-interface-structure
             base-name "Vertex" :mesh
-            (spv:shader-mesh-output-vertex-outputs mesh-output)))
+            (shader:shader-mesh-output-vertex-outputs mesh-output)))
          (primitive-outputs
-           (spv:shader-mesh-output-primitive-outputs mesh-output))
+           (shader:shader-mesh-output-primitive-outputs mesh-output))
          (primitive-structure
            (and primitive-outputs
                 (msl-interface-structure
                  base-name "Primitive" :mesh primitive-outputs)))
-         (payload (spv:shader-specification-task-payload specification))
+         (payload (shader:shader-specification-task-payload specification))
          (payload-structure (and payload (msl-task-payload-structure payload)))
          (mesh-type
            (format nil "metal::mesh<~A, ~A, ~D, ~D, metal::topology::~A>"
@@ -1736,10 +1736,10 @@
                    (if primitive-structure
                        (msl-structure-name primitive-structure)
                        "void")
-                   (spv:shader-mesh-output-max-vertices mesh-output)
-                   (spv:shader-mesh-output-max-primitives mesh-output)
+                   (shader:shader-mesh-output-max-vertices mesh-output)
+                   (shader:shader-mesh-output-max-primitives mesh-output)
                    (msl-mesh-topology-name
-                    (spv:shader-mesh-output-topology mesh-output)))))
+                    (shader:shader-mesh-output-topology mesh-output)))))
     (register-msl-declaration-references context specification "stage_in")
     (finish-msl-document
      target specification context
@@ -1758,30 +1758,30 @@
        (remove nil (list (msl-payload-parameter :mesh payload)))
        (msl-workgroup-parameters :mesh specification)
        (mapcar #'msl-resource-parameter
-               (spv:shader-specification-resources specification)))
+               (shader:shader-specification-resources specification)))
       :statements
       (nconc (lower-msl-bindings context specification)
              (lower-msl-statements context specification))))))
 
-(defmethod spv:lower-shader-specification
-    ((target msl-target) (specification spv:shader-specification))
+(defmethod shader:lower-shader-specification
+    ((target msl-target) (specification shader:shader-specification))
   "Lower the shared shader graph directly to a structured MSL document."
   (let ((context
           (make-instance 'msl-lowering-context
                          :target target :specification specification)))
-    (case (spv:shader-specification-stage specification)
+    (case (shader:shader-specification-stage specification)
       ((:vertex :fragment)
        (lower-traditional-msl-specification target specification context))
       (:task (lower-task-msl-specification target specification context))
       (:mesh (lower-mesh-msl-specification target specification context))
       (otherwise
-       (error 'spv:shader-language-error
-              :form (spv:shader-object-source-form specification)
+       (error 'shader:shader-language-error
+              :form (shader:shader-object-source-form specification)
               :reason :unsupported-msl-stage
-              :details (spv:shader-specification-stage specification))))))
+              :details (shader:shader-specification-stage specification))))))
 
 (defun compile-msl (specification &optional (target *metal-4-target*))
-  (spv:lower-shader-specification target specification))
+  (shader:lower-shader-specification target specification))
 
 (defun write-msl (document pathname)
   "Write DOCUMENT's deterministic source to PATHNAME and return PATHNAME."

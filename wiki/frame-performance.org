@@ -181,23 +181,24 @@ not where it denotes one command.
   =wait-for-luvcraft-streaming-quiescence=.  Counts should distinguish
   scheduled, drained, stale, published, and evicted products.
 - [[file:../luvcraft/light.lisp][luvcraft/light.lisp]]:
-  =capture-light-region=, =propagate-light-region=,
-  =seed-region-sky-boundaries=, =seed-region-emitters=,
-  =solve-light-region=, =publish-light-region=, =relight-block-world=,
-  =unlight-light-region=, =attach-lighting-state=, =seed-arrived-chunk=,
-  =reconcile-lighting=, and =reconcile-legacy-light-region=.  Worklist visits,
-  removals, boundary seeds, emitters, and changed chunks are the values; the
-  push/pop leaf operations are deliberately excluded.
+  =capture-light-region=, =make-light-candidate=, =publish-light-region=,
+  =relight-block-world=, =attach-lighting-state=, and =reconcile-lighting=.
+  Captured chunks, changed chunks, and publication revisions are the values;
+  solver work belongs to the compiled realization below.
 - [[file:../luvcraft/frontier-light.lisp][luvcraft/frontier-light.lisp]]:
-  =execute-frontier-program=, =solve-frontier-light-region=,
   =solve-compiled-light-region=, =make-compiled-light-reconciliation=,
   =drain-compiled-light-removals=, =reseed-compiled-open-sky=,
   =seed-compiled-arrived-chunk=, =drain-compiled-light-additions=,
-  =reconcile-compiled-lighting=, and =compare-voxel-light-solvers=.  Existing
+  and =reconcile-compiled-lighting=.  Existing
   inner zones and their visit counts should be retained while the containing
   definitions become concise.
+- [[file:../luvcraft/light-reference.lisp][luvcraft/light-reference.lisp]]:
+  =solve-light-region= and =compare-voxel-light-solvers= are explicit
+  test/reference instrumentation, not production fallback.  Reference and
+  candidate visits, allocation, GC, and mismatched keys remain valuable
+  differential evidence when that system is deliberately loaded.
 - [[file:../luvcraft/mesher.lisp][luvcraft/mesher.lisp]]:
-  =mesh-block-storage=, =make-block-mesh-snapshot=, and =mesh-block-world=.
+  =make-block-mesh-snapshot=, =mesh-block-snapshot=, and =mesh-block-chunk=.
   Candidate values are visited blocks, emitted faces, and output vertices.
 - [[file:../luvcraft/terrain.lisp][luvcraft/terrain.lisp]]:
   =populate-little-world-chunk=, =center-little-world-residency=, and
@@ -291,6 +292,9 @@ not where it denotes one command.
   methods.  One buffer write or one encoded command is below the ambient
   grain.
 - [[file:../hal/shader/language.lisp][hal/shader/language.lisp]]:
+  =parse-shader-specification=, whole shader-function parsing, and live source
+  revision/dependent notification.  Per-expression parsing is excluded.
+- [[file:../hal/vulkan/spir-v/lowering.lisp][hal/vulkan/spir-v/lowering.lisp]]:
   =compile-shader-specification= and the complete task, mesh, vertex, and
   fragment entry-point lowering operations; expression-level lowering is
   excluded.

@@ -44,15 +44,16 @@ for a greenfield, from-scratch monotone light program:
 The declaration is an inspectable CLOS definition, while its realization is
 one closed loop over specialized arrays.  On a three-chunk proof world with
 vertical and lateral seams, occlusion, a sky shaft, and competing emitters,
-the new program produces exactly the legacy oracle's sky and block arrays
-with the same number of site visits.  The compiled program is the production
-default; the legacy program remains its oracle and recovery path.  Either can
-solve future from-scratch captures in a running image, and candidates can be
-compared without publishing them:
+the new program produces exactly the reference oracle's sky and block arrays
+with the same number of site visits.  The compiled program is now the only
+production solver.  The deliberately simple oracle lives in the explicit
+=luvcraft/light-reference= system: it can compare a captured candidate without
+publishing it, but cannot be selected accidentally by runtime dispatch:
 
 #+begin_src lisp
 (setf luvcraft:*voxel-light-solver* :compiled)
-(luvcraft:compare-voxel-light-solvers
+(asdf:load-system "luvcraft/light-reference")
+(luvcraft.light-reference:compare-voxel-light-solvers
  (luvcraft:luvcraft-session-world luvcraft:*session*)
  :candidate :compiled)
 #+end_src
@@ -68,11 +69,12 @@ either.  #T2G95K describes the kernel language, #FE0O5R what a family
 contributes, #716UN6 how bindings reach storage, and #55IRJO the terminal
 wall as the second compiled client.
 
-The old solver remains present as oracle and recovery path.  The new program
-begins deliberately with the simpler addition fixpoint; incremental
-invalidation, removal, and residency reconciliation are the next frontier
-program to state.  This lets the abstraction grow under exact differential
-evidence while we enjoy the much clearer conceptual surface immediately.
+The retired solver remains only as test/reference evidence.  Incremental
+invalidation, removal, and residency reconciliation have since joined the
+addition fixpoint as compiled frontier programs (#K3WRD3).  Misspelled or
+retired solver names signal rather than silently changing algorithms.  This
+keeps differential evidence available without preserving a second operational
+truth.
 
 The proof carries cost evidence at the same semantic boundaries.  Both
 solvers emit nested CPU/Tracy zones for the whole solve, sky and block
@@ -650,11 +652,11 @@ The current implementation is a useful manually staged compiler prototype:
 | Present definition | Compiler reading |
 |-
 | =define-frontier-program= | embryonic semantic source definition |
-| =execute-frontier-program= method | handwritten program/backend selection and lowering |
+| =compile-frontier-program= | semantic program and field bindings become one realization |
 | =do-voxel-frontier-relations= | fused scalar loop template with compiler temporaries exposed |
 | =bucket-frontier= | one physical scheduler and record store |
 | inline light body | not-yet-reified arithmetic kernel |
-| legacy/frontier A/B | reference-backend conformance and cost test |
+| reference/candidate A/B | explicit test-system conformance and cost evidence |
 
 The large binding list of =do-voxel-frontier-relations= is thus not the
 desired human-facing API.  It is evidence about the lowered loop.  A pleasant
@@ -923,7 +925,7 @@ This division follows the instruments' actual powers:
 | source and disassembly | which exact form allocates, dispatches, or escapes? |
 
 The drain zones now attach their visit count through Tracy's zone-value API.
-The A/B comparator emits legacy/frontier allocated-byte, GC-millisecond, and
+The A/B comparator emits reference/candidate allocated-byte, GC-millisecond, and
 collection-count plots.  A thirty-pair capture therefore showed every sky
 drain beside the value =30,534=, and the steady allocation samples for both
 solvers converged to =1,179,696= bytes after #GJZL85.  A separate sixty-pair
@@ -964,8 +966,9 @@ A/B control.
 
 The current light result makes its relevance precise:
 
-- Sealing =execute-frontier-program= would save only two dispatches per solve;
-  it cannot explain several milliseconds.
+- The retired =execute-frontier-program= selector cost only two dispatches per
+  solve; deleting it closed runtime policy but could not explain several
+  milliseconds.
 - =bucket-frontier-push= and =bucket-frontier-pop= are ordinary functions, but
   their CLOS slot readers and writers are generic functions in the per-site
   path.  Disassembly of push contains nine accessor FDEFN calls and is 1,044
@@ -1067,6 +1070,11 @@ and Tracy attributes any remaining cost at the same semantic zones.  All of
 these hold; SIMD, GPU lowering, invalidation, and a final surface syntax
 remain outside this proof.
 
+The later retirement cut kept that proof but removed both old runtime
+choices.  Production calls can now reach only the compiled realization; the
+simple from-scratch oracle and comparator load only with
+=luvcraft/light-reference=.
+
 * DONE Compile the sky seeds as boundary transfers
 :PROPERTIES:
 :ID: 581ZQP
@@ -1117,5 +1125,7 @@ against 1.25 ms.
 Done when: invalidation and re-admission are explicit program operations,
 executions retain stale and useful work counters, and the compiled program
 converges bit-for-bit with from-scratch frontier light across each residency
-and edit case above.  All hold; the legacy reconciler remains the oracle
-behind =light-matches-reference-p=.
+and edit case above.  All hold.  The subsequent retirement cut removed the
+legacy incremental reconciler altogether; =light-matches-reference-p= now asks
+the separate =luvcraft/light-reference= system for a from-scratch oracle and
+compares that result with the production compiled path.
