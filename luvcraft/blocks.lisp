@@ -293,7 +293,12 @@ land; see luvcraft/balls.lisp."
    :class 'spring-block-kind
    :face-tiles '(:top :lava :side :slate :bottom :slate)
    :categories '(:building :luminous) :display-color '(0.95 0.45 0.10)
-   :light-emission 11 :surface-emission 0.0))
+   :light-emission 11 :surface-emission 0.0)
+  (*flowers-block* :flowers
+   "Meadow grass in bloom: a grass block whose top carries small bright
+flowers.  The birthday meadow freckles its lawns with these."
+   :face-tiles '(:top :flowers-top :side :grass-side :bottom :dirt)
+   :categories '(:natural) :display-color '(0.44 0.62 0.31)))
 
 (eval-when (:load-toplevel :execute)
   ;; ENSURE-BLOCK-KIND preserves identities across live redefinition, so
@@ -331,7 +336,8 @@ kinds through this vocabulary instead of printing CLOS object identities."
      :cactus-side :cactus-end :cobblestone :stone-bricks :bricks :planks
      :sandstone :slate :turtle-carapace :turtle-skin :turtle-plastron
      :player-skin :player-sleeve :phone-body :phone-screen
-     :tape-flange :reel-rim :film-flange :ball :water :lava :urbit))
+     :tape-flange :reel-rim :film-flange :ball :water :lava :urbit
+     :flowers-top))
   "The replaceable interpretation of atlas tile identities as dense offsets.
 
 Re-evaluating this definition constructs a new domain.  Existing offsets stay
@@ -1054,6 +1060,45 @@ film."
 
 (defmethod paint-block-atlas-relief ((tile (eql :film-flange)) x y)
   (paint-block-atlas-relief :tape-flange x y))
+
+;;; The birthday meadow's blooming grass.  One tile: the grass top scattered
+;;; with small four-petal flowers.  Each bloom belongs to one 4x4 texel cell,
+;;; so blooms never collide and the tiling stays unobtrusive.
+
+(defun flowers-top-bloom (x y)
+  "Return the bloom part covering texel X,Y, or NIL for plain grass.
+
+Each 4x4 cell may host one five-texel flower: four petals around a warm
+centre, jittered inside its cell and coloured per cell."
+  (let* ((cell-x (floor x 4))
+         (cell-y (floor y 4))
+         (gate (block-atlas-lattice-hash cell-x cell-y 311)))
+    (when (> gate 112)
+      (let* ((jitter (block-atlas-lattice-hash cell-x cell-y 313))
+             (bloom-x (+ (* cell-x 4) 1 (mod jitter 2)))
+             (bloom-y (+ (* cell-y 4) 1 (mod (ash jitter -2) 2)))
+             (distance (+ (abs (- x bloom-x)) (abs (- y bloom-y)))))
+        (cond ((zerop distance) :center)
+              ((= distance 1)
+               (case (mod (block-atlas-lattice-hash cell-x cell-y 317) 4)
+                 (0 :pink) (1 :white) (2 :violet) (t :blue))))))))
+
+(defmethod paint-block-atlas-tile ((tile (eql :flowers-top)) x y)
+  "Blooming grass top: little bright flowers over the meadow green."
+  (case (flowers-top-bloom x y)
+    (:center (pack-block-atlas-rgba 246 208 96))
+    (:pink (pack-block-atlas-rgba 236 132 178))
+    (:white (pack-block-atlas-rgba 240 242 234))
+    (:violet (pack-block-atlas-rgba 172 132 226))
+    (:blue (pack-block-atlas-rgba 120 158 236))
+    (t (shaded-block-atlas-pixel 97 142 71 (block-atlas-variation x y tile)))))
+
+(defmethod paint-block-atlas-relief ((tile (eql :flowers-top)) x y)
+  "Blooming grass top: the grass top's tufts, each flower standing proud."
+  (block-atlas-byte
+   (+ (* 0.55 (block-atlas-clump x y 3 4))
+      (* 0.33 (block-atlas-lattice-hash x y 11))
+      (if (flowers-top-bloom x y) 40 0))))
 
 (defun make-block-texture-atlas ()
   "Return the little world's horizontal RGBA8 atlas as packed pixel words.
