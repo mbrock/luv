@@ -259,6 +259,16 @@
                 lispPackages.float-features
                 lispPackages.trivial-main-thread
               ]);
+          # Upstream's one ASDF system bundles otherwise independent SDL_image,
+          # SDL_ttf, and SDL_mixer bindings.  Luv uses the first two but not the
+          # mixer, so keep its eagerly loaded foreign library out of the normal
+          # development path.  The opt-in mixer shell below uses the untouched
+          # source and supplies SDL3_mixer.
+          clSdl3WithoutMixer = pkgs.applyPatches {
+            name = "cl-sdl3-without-mixer";
+            src = cl-sdl3;
+            patches = [ ./nix/cl-sdl3-no-mixer.patch ];
+          };
           slyRoot =
             "${pkgs.emacsPackages.sly}/share/emacs/site-lisp/elpa/${pkgs.emacsPackages.sly.pname}-${pkgs.emacsPackages.sly.version}";
           # A second nixpkgs instance carrying the WPE overlay, so the main
@@ -270,7 +280,8 @@
           };
         in
         {
-          inherit pkgs wpePkgs sbcl lisp nativeLibraryPath mesaLibraryPath slyRoot;
+          inherit pkgs wpePkgs sbcl lisp clSdl3WithoutMixer;
+          inherit nativeLibraryPath mesaLibraryPath slyRoot;
           inherit ffmpeg ffmpegLibraryDirectory mupdf mupdfLibraryDirectory;
           inherit libghosttyVt libghosttyVtLibrary;
           inherit tracyClient tracyClientLibrary tracyTools;
@@ -353,7 +364,7 @@
             LUV_FFMPEG_LIBDIR = env.ffmpegLibraryDirectory;
             LUV_MUPDF_LIBDIR = env.mupdfLibraryDirectory;
             LUV_YT_DLP = "${env.pkgs.yt-dlp}/bin/yt-dlp";
-            CL_SOURCE_REGISTRY = "${mcclim}//:${cl-sdl3}//";
+            CL_SOURCE_REGISTRY = "${mcclim}//:${env.clSdl3WithoutMixer}//";
             CPATH = "${env.pkgs.vulkan-headers}/include";
             VK_LAYER_PATH =
               "${env.pkgs.vulkan-validation-layers}/share/vulkan/explicit_layer.d";
@@ -416,6 +427,7 @@
             packages = shellEnvironment.packages ++ [ env.pkgs.sdl3-mixer ];
             LD_LIBRARY_PATH = nixpkgs.lib.makeLibraryPath [ env.pkgs.sdl3-mixer ]
               + ":${shellEnvironment.LD_LIBRARY_PATH}";
+            CL_SOURCE_REGISTRY = "${mcclim}//:${cl-sdl3}//";
           });
           # Tracy is intentionally opt-in: its viewer is a large C++ build
           # that should not hold up the ordinary Lisp development shell.
