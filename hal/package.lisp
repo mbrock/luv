@@ -285,6 +285,13 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:gpu-bind-group
            #:gpu-compute-pipeline
            #:gpu-render-pipeline
+           #:gpu-temporal-scaler
+           #:gpu-temporal-scaler-input-size
+           #:gpu-temporal-scaler-output-size
+           #:gpu-temporal-scaler-color-usage
+           #:gpu-temporal-scaler-depth-usage
+           #:gpu-temporal-scaler-motion-usage
+           #:gpu-temporal-scaler-output-usage
            #:gpu-encoder
            #:gpu-render-pass-encoder
            #:gpu-compute-pass-encoder
@@ -307,6 +314,9 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:gpu-copy-texture-to-buffer-command
            #:gpu-write-texture-command
            #:gpu-prepare-texture-command
+           #:gpu-temporal-scale-command
+           #:gpu-signal-temporal-scaler-command
+           #:gpu-wait-temporal-scaler-command
            #:gpu-object-label
            #:request-gpu-device
            #:device-queue
@@ -358,12 +368,19 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:make-mesh-render-pipeline-descriptor
            #:make-render-pass-descriptor
            #:make-command-encoder-descriptor
+           #:make-temporal-scaler-descriptor
            #:make-gpu-clear-texture-command
            #:make-gpu-copy-texture-command
            #:make-gpu-copy-texture-to-buffer-command
            #:make-gpu-write-texture-command
            #:make-gpu-prepare-texture-command
            #:prepare-texture
+           #:make-gpu-temporal-scale-command
+           #:encode-temporal-scale
+           #:make-gpu-signal-temporal-scaler-command
+           #:signal-temporal-scaler-inputs
+           #:make-gpu-wait-temporal-scaler-command
+           #:wait-temporal-scaler-output
            #:make-gpu-set-pipeline-command
            #:make-gpu-set-bind-group-command
            #:make-gpu-set-vertex-buffer-command

@@ -801,7 +801,8 @@ therefore be abandoned without replaying native calls which already returned."
 
 (defun vulkan-gpu-format (format descriptor)
   (or (cdr (assoc format
-                  '((:rgba8-unorm . :r8g8b8a8-unorm)
+                  '((:r16-float . :r16-sfloat)
+                    (:rgba8-unorm . :r8g8b8a8-unorm)
                     (:r8-unorm . :r8-unorm)
                     (:rg8-unorm . :r8g8-unorm)
                     (:rgba8-unorm-srgb . :r8g8b8a8-srgb)
@@ -2270,7 +2271,7 @@ ownership and cancel this finalizer."
                :required-usage :copy-dst
                :actual-usage (gpu-texture-usage texture)))
       (unless (member (gpu-texture-format texture)
-                      '(:rgba8-unorm :rgba8-unorm-srgb
+                      '(:r16-float :rgba8-unorm :rgba8-unorm-srgb
                         :bgra8-unorm :bgra8-unorm-srgb
                         :rg16-uint :rg16-float :rgba16-float))
         (reject-texture-write
@@ -2317,7 +2318,8 @@ ownership and cancel this finalizer."
 
 (defun copy-texture-words-to-mapped-memory
     (data pointer width height offset bytes-per-row bytes-per-texel)
-  (let ((foreign-type (ecase bytes-per-texel (4 :uint32) (8 :uint64))))
+  (let ((foreign-type (ecase bytes-per-texel
+                        (2 :uint16) (4 :uint32) (8 :uint64))))
     (dotimes (row height)
       (let ((destination
               (cffi:inc-pointer pointer (+ offset (* row bytes-per-row)))))

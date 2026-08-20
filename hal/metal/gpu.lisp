@@ -94,6 +94,22 @@
 (defclass metal-gpu-sampler (gpu-sampler metal-gpu-object)
   ((device :initarg :device :reader metal-sampler-device)))
 
+(defclass metal-gpu-temporal-scaler (gpu-temporal-scaler metal-gpu-object)
+  ((device :initarg :device :reader metal-temporal-scaler-device)
+   (fence :initarg :fence :reader metal-temporal-scaler-fence)
+   (exposure-texture :initarg :exposure-texture
+                     :reader metal-temporal-scaler-exposure-texture)
+   (color-format :initarg :color-format
+                 :reader metal-temporal-scaler-color-format)
+   (depth-format :initarg :depth-format
+                 :reader metal-temporal-scaler-depth-format)
+   (motion-format :initarg :motion-format
+                  :reader metal-temporal-scaler-motion-format)
+   (output-format :initarg :output-format
+                  :reader metal-temporal-scaler-output-format))
+  (:documentation
+   "A Metal4FX temporal scaler, its fence, and neutral exposure texture."))
+
 (defclass metal-gpu-bind-group-layout (gpu-bind-group-layout metal-gpu-object)
   ((device :initarg :device :reader metal-bind-group-layout-device)
    (entries :initarg :entries :reader metal-bind-group-layout-entries)))
@@ -885,6 +901,7 @@ aligned to the element size."
 
 (defun metal-resource-pixel-format (format descriptor)
   (case format
+    (:r16-float luv.metal:+pixel-format-r16-float+)
     (:rgba8-unorm luv.metal:+pixel-format-rgba8-unorm+)
     (:rgba8-unorm-srgb luv.metal:+pixel-format-rgba8-unorm-srgb+)
     (:r8-unorm luv.metal::+pixel-format-r8-unorm+)
@@ -901,6 +918,8 @@ aligned to the element size."
 (defun metal-native-texture-usage (usage)
   (logior (if (member :texture-binding usage)
               luv.metal:+texture-usage-shader-read+ 0)
+          (if (member :storage-binding usage)
+              luv.metal:+texture-usage-shader-write+ 0)
           (if (member :render-attachment usage)
               luv.metal:+texture-usage-render-target+ 0)))
 
@@ -911,11 +930,7 @@ aligned to the element size."
   (let* ((size (texture-descriptor-size descriptor))
          (usage (texture-descriptor-usage descriptor))
          (native
-           (progn
-             (when (member :storage-binding usage)
-               (reject-metal-gpu-request
-                descriptor :unsupported-texture-usage :storage-binding))
-             (luv.metal:new-metal-texture
+           (luv.metal:new-metal-texture
               (metal-native-object device) (first size) (second size)
               (metal-resource-pixel-format
                (texture-descriptor-format descriptor) descriptor)
@@ -924,7 +939,7 @@ aligned to the element size."
               (if (member :copy-dst usage)
                   luv.metal:+storage-mode-shared+
                   luv.metal:+storage-mode-private+)
-              :label (gpu-descriptor-label descriptor)))))
+              :label (gpu-descriptor-label descriptor))))
     (unless native
       (error 'metal-gpu-error :operation :create-texture
              :reason :texture-creation-failed :details descriptor))
@@ -953,6 +968,113 @@ aligned to the element size."
             (luv.metal:commit-metal-residency-set
              (metal-device-residency-set device)))
           (luv.objective-c:release-objective-c-object native))))))
+
+(defun portable-metal-texture-usage (native descriptor role)
+  "Translate a MetalFX texture usage mask into the portable usage vocabulary."
+  (let ((known (logior luv.metal:+texture-usage-shader-read+
+                       luv.metal:+texture-usage-shader-write+
+                       luv.metal:+texture-usage-render-target+)))
+    (unless (zerop (logandc2 native known))
+      (reject-metal-gpu-request
+       descriptor :unsupported-metalfx-texture-usage (list role native)))
+    (append (when (logtest luv.metal:+texture-usage-shader-read+ native)
+              '(:texture-binding))
+            (when (logtest luv.metal:+texture-usage-shader-write+ native)
+              '(:storage-binding))
+            (when (logtest luv.metal:+texture-usage-render-target+ native)
+              '(:render-attachment)))))
+
+(defmethod create
+    ((device metal-gpu-device) (descriptor temporal-scaler-descriptor))
+  "Create one synchronous Metal4FX temporal scaler for a fixed extent.
+
+The scaler publishes the exact native texture contract that Luft uses to
+construct its temporal surface cohort.  #NL5J0J"
+  (ensure-live-metal-object device :create-temporal-scaler)
+  (let* ((input-size
+           (canonical-texture-extent
+            (temporal-scaler-descriptor-input-size descriptor)
+            descriptor :create-temporal-scaler))
+         (output-size
+           (canonical-texture-extent
+            (temporal-scaler-descriptor-output-size descriptor)
+            descriptor :create-temporal-scaler))
+         (color-format (temporal-scaler-descriptor-color-format descriptor))
+         (depth-format (temporal-scaler-descriptor-depth-format descriptor))
+         (motion-format (temporal-scaler-descriptor-motion-format descriptor))
+         (output-format (temporal-scaler-descriptor-output-format descriptor))
+         native fence exposure scaler (completed-p nil))
+    (unless (and (= 1 (third input-size)) (= 1 (third output-size)))
+      (reject-metal-gpu-request descriptor :invalid-temporal-scaler-extent))
+    (unwind-protect
+         (progn
+           (log-event :metal "begin Metal4FX temporal scaler ~{~Dx~D~}"
+                      (subseq input-size 0 2))
+           (multiple-value-setq (native fence)
+             (luv.metal:new-metal-4-temporal-scaler
+              (metal-native-object device) (metal-device-compiler device)
+              (metal-resource-pixel-format color-format descriptor)
+              (metal-resource-pixel-format depth-format descriptor)
+              (metal-resource-pixel-format motion-format descriptor)
+              (metal-resource-pixel-format output-format descriptor)
+              (first input-size) (second input-size)
+              (first output-size) (second output-size)))
+           (unless (and native fence)
+             (error 'metal-gpu-error :operation :create-temporal-scaler
+                    :reason :unsupported-or-creation-failed
+                    :details descriptor))
+           (multiple-value-bind
+                 (native-color-usage native-depth-usage native-motion-usage
+                  native-output-usage)
+               (luv.metal:metal-temporal-scaler-texture-usages native)
+             (let ((color-usage
+                     (portable-metal-texture-usage
+                      native-color-usage descriptor :color))
+                   (depth-usage
+                     (portable-metal-texture-usage
+                      native-depth-usage descriptor :depth))
+                   (motion-usage
+                     (portable-metal-texture-usage
+                      native-motion-usage descriptor :motion))
+                   (output-usage
+                     (portable-metal-texture-usage
+                      native-output-usage descriptor :output)))
+               (setf exposure
+                     (create
+                      device
+                      (make-texture-descriptor
+                       :label "MetalFX neutral exposure" :size '(1 1)
+                       :dimensions :2d :format :r16-float
+                       :usage '(:copy-dst :texture-binding))))
+               (write-texture
+                (device-queue device) (make-texture-copy :texture exposure)
+                (make-array '(1 1) :element-type '(unsigned-byte 16)
+                                    :initial-element #x3c00)
+                (make-texture-data-layout :bytes-per-row 2) '(1 1))
+               (setf scaler
+                     (make-instance
+                      'metal-gpu-temporal-scaler
+                      :label (gpu-descriptor-label descriptor)
+                      :native-object native :device device :fence fence
+                      :exposure-texture exposure
+                      :input-size input-size :output-size output-size
+                      :color-format color-format :depth-format depth-format
+                      :motion-format motion-format :output-format output-format
+                      :color-usage color-usage :depth-usage depth-usage
+                      :motion-usage motion-usage :output-usage output-usage)
+                     completed-p t
+                     native nil fence nil exposure nil)
+               (log-event :metal "complete Metal4FX temporal scaler")
+               scaler)))
+      (unless completed-p
+        (when exposure (ignore-errors (destroy exposure)))
+        (when native
+          (ignore-errors (luv.metal:clear-metal-temporal-scaler native))
+          (ignore-errors
+            (luv.objective-c:release-objective-c-object native)))
+        (when fence
+          (ignore-errors
+            (luv.objective-c:release-objective-c-object fence)))))))
 
 (defmethod adopt-native-texture
     ((device metal-gpu-device) native owner (descriptor texture-descriptor))
@@ -1151,7 +1273,8 @@ aligned to the element size."
            (and (typep texture 'metal-gpu-texture)
                 (texture-format-upload-element-type
                  (gpu-texture-format texture))))
-         (foreign-type (case bytes-per-texel (4 :uint32) (8 :uint64))))
+         (foreign-type (case bytes-per-texel
+                         (2 :uint16) (4 :uint32) (8 :uint64))))
     (unless (and (typep texture 'metal-gpu-texture)
                  (eq (metal-texture-device texture)
                      (metal-queue-device queue))
@@ -1252,6 +1375,24 @@ contiguous block -- starting at the beginning, with no padding between rows."
 (defmethod destroy ((texture metal-gpu-texture))
   (unless (metal-object-destroyed-p texture)
     (metal-destroy-or-defer texture (metal-texture-device texture)))
+  (values))
+
+(defmethod metal-native-teardown-closure
+    ((scaler metal-gpu-temporal-scaler))
+  (let ((native (metal-native-object scaler))
+        (fence (metal-temporal-scaler-fence scaler)))
+    (make-gpu-retirement-sequence
+     (lambda () (luv.metal:clear-metal-temporal-scaler native))
+     (lambda () (luv.objective-c:release-objective-c-object native))
+     (lambda () (luv.objective-c:release-objective-c-object fence)))))
+
+(defmethod destroy ((scaler metal-gpu-temporal-scaler))
+  (unless (metal-object-destroyed-p scaler)
+    ;; The scaler's native properties retain frame textures.  Enqueue its
+    ;; teardown first, then its private exposure texture, at the same GPU
+    ;; completion frontier.
+    (metal-destroy-or-defer scaler (metal-temporal-scaler-device scaler))
+    (destroy (metal-temporal-scaler-exposure-texture scaler)))
   (values))
 
 (defmethod destroy ((view metal-gpu-texture-view))
@@ -1458,9 +1599,12 @@ compiler boundary of #58IDSR."
            (normalize-metal-vertex-buffers
             descriptor (or (getf vertex :buffers) nil)))
          (targets (getf fragment :targets))
-         (format (and (= (length targets) 1)
-                      (getf (first targets) :format)))
-         (blend (getf (first targets) :blend))
+         (formats
+           (mapcar (lambda (target)
+                     (metal-render-pipeline-pixel-format
+                      (getf target :format) descriptor))
+                   targets))
+         (blends (mapcar (lambda (target) (getf target :blend)) targets))
          (primitive (render-pipeline-descriptor-primitive descriptor))
          (topology (or (getf primitive :topology) :triangle-list))
          (depth-stencil
@@ -1483,9 +1627,12 @@ compiler boundary of #58IDSR."
                           (string= fragment-entry-point
                                    (metal-shader-module-entry-point
                                     fragment-module))
-                          format
-                          (member blend '(nil :premultiplied-alpha)))
-                     (and (null fragment-module) (null format) depth-stencil))
+                          (<= 1 (length formats) 8)
+                          (every #'identity formats)
+                          (every (lambda (blend)
+                                   (member blend '(nil :premultiplied-alpha)))
+                                 blends))
+                     (and (null fragment-module) (null formats) depth-stencil))
                  (member topology '(:triangle-list :triangle-strip))
                  (or (null depth-stencil)
                      (and (eq depth-format :depth32-float)
@@ -1519,12 +1666,12 @@ compiler boundary of #58IDSR."
                   (and fragment-module (metal-native-object fragment-module))
                   fragment-entry-point
                   vertex-buffers
-                  (metal-render-pipeline-pixel-format format descriptor)
+                  formats
                   luv.metal:+primitive-topology-class-triangle+
                   :depth-format
                   (and depth-format
                        (metal-resource-pixel-format depth-format descriptor))
-                  :blend blend
+                  :blends blends
                   :label (gpu-descriptor-label descriptor))
                (unless pipeline
                  (error 'metal-gpu-error
@@ -1885,39 +2032,49 @@ compiler boundary of #58IDSR."
          (depth-attachment
            (render-pass-descriptor-depth-stencil-attachment descriptor))
          (device (metal-command-encoder-device encoder)))
-    (unless (and (listp attachments) (<= (length attachments) 1)
+    (unless (and (listp attachments) (<= (length attachments) 8)
                  (or attachments depth-attachment))
       (reject-metal-gpu-request
        descriptor :unsupported-metal-render-pass
        (list :color-attachments attachments
              :depth-stencil depth-attachment)))
-    (let* ((color (normalize-metal-color-attachment
-                   device descriptor (first attachments)))
+    (let* ((colors
+             (mapcar (lambda (attachment)
+                       (normalize-metal-color-attachment
+                        device descriptor attachment))
+                     attachments))
            (depth (normalize-metal-depth-attachment
                    device descriptor depth-attachment)))
-      (when color
-        (retain-metal-resource encoder (first color))
-        (let ((view (getf (first attachments) :view)))
-          (when (typep view 'metal-gpu-texture-view)
-            (retain-metal-resource encoder view))))
+      (loop for color in colors
+            for attachment in attachments
+            do (retain-metal-resource encoder (first color))
+               (let ((view (getf attachment :view)))
+                 (when (typep view 'metal-gpu-texture-view)
+                   (retain-metal-resource encoder view))))
       (when depth
         (retain-metal-resource encoder (first depth))
         (let ((view (getf depth-attachment :view)))
           (when (typep view 'metal-gpu-texture-view)
             (retain-metal-resource encoder view))))
-      (when (and color depth
-                 (not (equal (gpu-texture-size (first color))
-                             (gpu-texture-size (first depth)))))
-        (reject-metal-gpu-request descriptor :mismatched-depth-size
-                                  (gpu-texture-size (first depth))))
+      (let ((sizes (append (mapcar (lambda (color)
+                                     (gpu-texture-size (first color)))
+                                   colors)
+                           (when depth
+                             (list (gpu-texture-size (first depth)))))))
+        (unless (every (lambda (size) (equal size (first sizes))) (rest sizes))
+          (reject-metal-gpu-request descriptor :mismatched-attachment-size
+                                    sizes)))
       (let ((native-encoder
               (luv.metal:new-render-command-encoder
                (metal-encoder-command-buffer encoder)
-               :color-texture
-               (and color (metal-native-object (first color)))
-               :color (and color (fourth color))
-               :color-clear-p (and color (eq :clear (second color)))
-               :color-store-p (and color (eq :store (third color)))
+               :color-attachments
+               (mapcar
+                (lambda (color)
+                  (list (metal-native-object (first color))
+                        (fourth color)
+                        (eq :clear (second color))
+                        (eq :store (third color))))
+                colors)
                :depth-texture
                (and depth (metal-native-object (first depth)))
                :clear-depth (and depth (fourth depth))
@@ -1971,6 +2128,114 @@ compiler boundary of #58IDSR."
                   luv.metal:+visibility-device+)))
     (retain-metal-resource encoder texture))
   encoder)
+
+(defun ensure-metal-temporal-scaler-device (scaler device operation)
+  (unless (typep scaler 'metal-gpu-temporal-scaler)
+    (reject-metal-gpu-request scaler :incompatible-temporal-scaler))
+  (ensure-live-metal-object scaler operation)
+  (ensure-metal-object-device
+   scaler (metal-temporal-scaler-device scaler) device operation)
+  scaler)
+
+(defmethod encode
+    ((pass metal-render-pass-encoder)
+     (command gpu-signal-temporal-scaler-command))
+  (ensure-metal-render-pass-state pass :signal-temporal-scaler-inputs)
+  (let* ((owner (metal-render-pass-owner pass))
+         (device (metal-command-encoder-device owner))
+         (scaler (gpu-signal-temporal-scaler-command-scaler command)))
+    (ensure-metal-temporal-scaler-device
+     scaler device :signal-temporal-scaler-inputs)
+    (luv.metal:update-metal-fence
+     (metal-render-pass-native-encoder pass)
+     (metal-temporal-scaler-fence scaler)
+     luv.metal:+stage-fragment+)
+    (retain-metal-resource owner scaler)
+    command))
+
+(defmethod encode
+    ((pass metal-render-pass-encoder)
+     (command gpu-wait-temporal-scaler-command))
+  (ensure-metal-render-pass-state pass :wait-temporal-scaler-output)
+  (let* ((owner (metal-render-pass-owner pass))
+         (device (metal-command-encoder-device owner))
+         (scaler (gpu-wait-temporal-scaler-command-scaler command)))
+    (ensure-metal-temporal-scaler-device
+     scaler device :wait-temporal-scaler-output)
+    (luv.metal:wait-for-metal-fence
+     (metal-render-pass-native-encoder pass)
+     (metal-temporal-scaler-fence scaler)
+     luv.metal:+stage-fragment+)
+    (retain-metal-resource owner scaler)
+    command))
+
+(defmethod encode
+    ((encoder metal-gpu-command-encoder)
+     (command gpu-temporal-scale-command))
+  (ensure-metal-command-encoder-state encoder :temporal-scale)
+  (ensure-no-active-metal-pass encoder :temporal-scale)
+  (let* ((device (metal-command-encoder-device encoder))
+         (scaler (gpu-temporal-scale-command-scaler command))
+         (color (gpu-temporal-scale-command-color command))
+         (depth (gpu-temporal-scale-command-depth command))
+         (motion (gpu-temporal-scale-command-motion command))
+         (output (gpu-temporal-scale-command-output command))
+         (jitter (gpu-temporal-scale-command-jitter command))
+         (reset-p (gpu-temporal-scale-command-reset-p command)))
+    (ensure-metal-temporal-scaler-device scaler device :temporal-scale)
+    (unless (and
+             (every (lambda (texture)
+                      (and (typep texture 'metal-gpu-texture)
+                           (eq (metal-texture-device texture) device)))
+                    (list color depth motion output))
+             (equal (gpu-texture-size color)
+                    (gpu-temporal-scaler-input-size scaler))
+             (equal (gpu-texture-size depth)
+                    (gpu-temporal-scaler-input-size scaler))
+             (equal (gpu-texture-size motion)
+                    (gpu-temporal-scaler-input-size scaler))
+             (equal (gpu-texture-size output)
+                    (gpu-temporal-scaler-output-size scaler))
+             (eq (gpu-texture-format color)
+                 (metal-temporal-scaler-color-format scaler))
+             (eq (gpu-texture-format depth)
+                 (metal-temporal-scaler-depth-format scaler))
+             (eq (gpu-texture-format motion)
+                 (metal-temporal-scaler-motion-format scaler))
+             (eq (gpu-texture-format output)
+                 (metal-temporal-scaler-output-format scaler))
+             (subsetp (gpu-temporal-scaler-color-usage scaler)
+                      (gpu-texture-usage color))
+             (subsetp (gpu-temporal-scaler-depth-usage scaler)
+                      (gpu-texture-usage depth))
+             (subsetp (gpu-temporal-scaler-motion-usage scaler)
+                      (gpu-texture-usage motion))
+             (subsetp (gpu-temporal-scaler-output-usage scaler)
+                      (gpu-texture-usage output))
+             (typep jitter 'sequence) (= 2 (length jitter))
+             (every #'realp jitter)
+             (member reset-p '(nil t)))
+      (reject-metal-gpu-request command :invalid-temporal-scale-frame))
+    (dolist (texture (list color depth motion output))
+      (ensure-live-metal-object texture :temporal-scale)
+      (retain-metal-resource encoder texture))
+    (let ((exposure (metal-temporal-scaler-exposure-texture scaler)))
+      (ensure-live-metal-object exposure :temporal-scale)
+      (luv.metal:configure-metal-temporal-scaler
+       (metal-native-object scaler)
+       (metal-native-object color) (metal-native-object depth)
+       (metal-native-object motion) (metal-native-object exposure)
+       (metal-native-object output)
+       (first (gpu-temporal-scaler-input-size scaler))
+       (second (gpu-temporal-scaler-input-size scaler))
+       (elt jitter 0) (elt jitter 1) reset-p)
+      (luv.metal:encode-metal-temporal-scaler
+       (metal-native-object scaler)
+       (metal-encoder-command-buffer encoder))
+      (retain-metal-resource encoder exposure))
+    (retain-metal-resource encoder scaler)
+    (setf (metal-encoder-encoded-p encoder) t)
+    command))
 
 (defun release-metal-render-pass-argument-table (pass)
   (let ((table (metal-render-pass-argument-table pass)))

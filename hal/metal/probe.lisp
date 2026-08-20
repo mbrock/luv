@@ -4,9 +4,12 @@
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (cffi:define-foreign-library metal-framework
-    (:darwin (:framework "Metal"))))
+    (:darwin (:framework "Metal")))
+  (cffi:define-foreign-library metal-fx-framework
+    (:darwin (:framework "MetalFX"))))
 
 (cffi:use-foreign-library metal-framework)
+(cffi:use-foreign-library metal-fx-framework)
 
 (cffi:defcfun ("MTLCreateSystemDefaultDevice" %make-system-default-device
                :library metal-framework)

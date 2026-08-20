@@ -1193,6 +1193,12 @@ lane: the arris softness of a chamfer, or the vertical radius of the field."
                    :reader frame-surfaces-motion-texture)
    (motion-view :initarg :motion-view :initform nil
                 :reader frame-surfaces-motion-view)
+   (temporal-scaler :initarg :temporal-scaler :initform nil
+                    :reader frame-surfaces-temporal-scaler)
+   (resolved-texture :initarg :resolved-texture :initform nil
+                     :reader frame-surfaces-resolved-texture)
+   (resolved-view :initarg :resolved-view :initform nil
+                  :reader frame-surfaces-resolved-view)
    (history-textures :initarg :history-textures :initform #()
                      :reader frame-surfaces-history-textures)
    (history-views :initarg :history-views :initform #()
@@ -1259,6 +1265,29 @@ lane: the arris softness of a chamfer, or the vertical radius of the field."
    (history-key :initform nil :accessor renderer-history-key))
   (:documentation "GPU resources drawing one scene from one camera."))
 
+(defgeneric temporal-resolve-kind (device)
+  (:documentation
+   "The temporal reconstruction implementation DEVICE gives Luft."))
+
+(defmethod temporal-resolve-kind ((device gpu-device))
+  (declare (ignore device))
+  :shader)
+
+#+darwin
+(defmethod temporal-resolve-kind ((device metal-gpu-device))
+  (declare (ignore device))
+  :metalfx)
+
+(defun renderer-temporal-resolve-kind (renderer)
+  (and (renderer-effect-p renderer :taa)
+       (temporal-resolve-kind (renderer-device renderer))))
+
+(defun renderer-metalfx-temporal-p (renderer)
+  (eq :metalfx (renderer-temporal-resolve-kind renderer)))
+
+(defun renderer-shader-temporal-p (renderer)
+  (eq :shader (renderer-temporal-resolve-kind renderer)))
+
 (defun renderer-color-texture (renderer)
   (frame-surfaces-color-texture (renderer-surfaces renderer)))
 
@@ -1318,15 +1347,18 @@ remains the last durable line."
 (defun frame-surfaces-resources (surfaces)
   "Return SURFACES' dependents before their views and textures."
   (when surfaces
-    (append (coerce (frame-surfaces-temporal-bind-groups surfaces) 'list)
+    (append (list (frame-surfaces-temporal-scaler surfaces))
+            (coerce (frame-surfaces-temporal-bind-groups surfaces) 'list)
             (coerce (frame-surfaces-post-bind-groups surfaces) 'list)
             (list (frame-surfaces-motion-view surfaces))
             (coerce (frame-surfaces-history-views surfaces) 'list)
+            (list (frame-surfaces-resolved-view surfaces))
             (list (frame-surfaces-scene-view surfaces)
                   (frame-surfaces-color-view surfaces)
                   (frame-surfaces-depth-view surfaces)
                   (frame-surfaces-motion-texture surfaces))
             (coerce (frame-surfaces-history-textures surfaces) 'list)
+            (list (frame-surfaces-resolved-texture surfaces))
             (list (frame-surfaces-scene-texture surfaces)
                   (frame-surfaces-color-texture surfaces)
                   (frame-surfaces-depth-texture surfaces)))))
@@ -1369,22 +1401,28 @@ remains the last durable line."
   "Assemble RENDERER's complete EXTENT-sized frame cohort transactionally."
   (let* ((device (renderer-device renderer))
          (temporal-p (renderer-effect-p renderer :taa))
+         (temporal-kind (renderer-temporal-resolve-kind renderer))
+         (shader-temporal-p (eq temporal-kind :shader))
+         (metalfx-p (eq temporal-kind :metalfx))
          (post-p (or temporal-p (renderer-effect-p renderer :lens)))
          (scene-format (if temporal-p :rgba16-float
                            (renderer-color-format renderer)))
-         (history-textures (if temporal-p
+         (history-textures (if shader-temporal-p
                                (make-array 2 :initial-element nil) #()))
-         (history-views (if temporal-p
+         (history-views (if shader-temporal-p
                             (make-array 2 :initial-element nil) #()))
-         (temporal-bind-groups (if temporal-p
+         (temporal-bind-groups (if shader-temporal-p
                                    (make-array 2 :initial-element nil) #()))
          (post-bind-groups
-           (if temporal-p
+           (if shader-temporal-p
                (make-array 2 :initial-element nil)
                (if post-p (make-array 1 :initial-element nil) #())))
          color color-view depth depth-view scene scene-view motion motion-view
+         temporal-scaler resolved resolved-view
          surfaces (completed-p nil))
-    (labels ((texture (label format usage)
+    (labels ((usage (&rest groups)
+               (remove-duplicates (apply #'append groups)))
+             (texture (label format usage)
                (create device
                        (make-texture-descriptor
                         :label label :size extent :dimensions :2d
@@ -1394,29 +1432,57 @@ remains the last durable line."
                                :texture texture))))
       (unwind-protect
            (progn
+             (when metalfx-p
+               (setf temporal-scaler
+                     (create
+                      device
+                      (make-temporal-scaler-descriptor
+                       :label "Luft MetalFX temporal scaler"
+                       :input-size extent :output-size extent))))
              (setf color (texture "luft frame color"
                                   (renderer-color-format renderer)
                                   '(:render-attachment :copy-src))
                    color-view (view color)
                    depth (texture "luft frame depth" :depth32-float
-                                  '(:render-attachment))
+                                  (usage
+                                   '(:render-attachment)
+                                   (when temporal-scaler
+                                     (gpu-temporal-scaler-depth-usage
+                                      temporal-scaler))))
                    depth-view (view depth))
              (when post-p
                (setf scene (texture "luft current color" scene-format
-                                    '(:render-attachment :texture-binding))
+                                    (usage
+                                     '(:render-attachment :texture-binding)
+                                     (when temporal-scaler
+                                       (gpu-temporal-scaler-color-usage
+                                        temporal-scaler))))
                      scene-view (view scene)))
              (when temporal-p
                (setf motion (texture "luft current motion" :rg16-float
-                                     '(:render-attachment :texture-binding))
+                                     (usage
+                                      '(:render-attachment :texture-binding)
+                                      (when temporal-scaler
+                                        (gpu-temporal-scaler-motion-usage
+                                         temporal-scaler))))
                      motion-view (view motion))
-               (dotimes (index 2)
-                 (setf (aref history-textures index)
-                       (texture (format nil "luft history ~D" index)
-                                :rgba16-float
-                                '(:render-attachment :texture-binding
-                                  :copy-dst))
-                       (aref history-views index)
-                       (view (aref history-textures index)))))
+               (when shader-temporal-p
+                 (dotimes (index 2)
+                   (setf (aref history-textures index)
+                         (texture (format nil "luft history ~D" index)
+                                  :rgba16-float
+                                  '(:render-attachment :texture-binding
+                                    :copy-dst))
+                         (aref history-views index)
+                         (view (aref history-textures index)))))
+               (when metalfx-p
+                 (setf resolved
+                       (texture
+                        "luft MetalFX resolved color" :rgba16-float
+                        (usage
+                         '(:texture-binding)
+                         (gpu-temporal-scaler-output-usage temporal-scaler)))
+                       resolved-view (view resolved))))
              ;; Publish the texture cohort locally before its bind groups are
              ;; made; they refer only to this candidate, never to the live one.
              (setf surfaces
@@ -1426,11 +1492,13 @@ remains the last durable line."
                     :depth-texture depth :depth-view depth-view
                     :scene-texture scene :scene-view scene-view
                     :motion-texture motion :motion-view motion-view
+                    :temporal-scaler temporal-scaler
+                    :resolved-texture resolved :resolved-view resolved-view
                     :history-textures history-textures
                     :history-views history-views
                     :temporal-bind-groups temporal-bind-groups
                     :post-bind-groups post-bind-groups))
-             (when temporal-p
+             (when shader-temporal-p
                (dotimes (write-index 2)
                  (let ((read-index (mod (1+ write-index) 2)))
                    (setf (aref temporal-bind-groups write-index)
@@ -1442,6 +1510,11 @@ remains the last durable line."
                           renderer (aref history-views write-index)
                           (format nil "luft history presentation ~D"
                                   write-index))))))
+             (when metalfx-p
+               (setf (aref post-bind-groups 0)
+                     (create-post-bind-group
+                      renderer resolved-view
+                      "luft MetalFX presentation bindings")))
              (when (and post-p (not temporal-p))
                (setf (aref post-bind-groups 0)
                      (create-post-bind-group renderer scene-view
@@ -1452,8 +1525,9 @@ remains the last durable line."
           (if surfaces
               (destroy-frame-surfaces surfaces)
               (dolist (resource
-                        (list motion-view motion scene-view scene color-view
-                              color depth-view depth))
+                        (list temporal-scaler motion-view motion resolved-view
+                              resolved scene-view scene color-view color
+                              depth-view depth))
                 (when resource (ignore-errors (destroy resource))))))))))
 
 (zdefun (create-renderer-targets :zone :luft/create-renderer-targets) (renderer)
@@ -1495,11 +1569,9 @@ work is in flight because the GPU abstraction defers their native teardown."
 (defun default-renderer-effects ()
   "The native atelier's full post stack.
 
-Vulkan owns Luft's temporal resolve today.  Metal keeps the same renderer
-boundary; its temporal implementation is left for a MetalFX experiment.
-#D7GZA6"
-  #-darwin '(:sky :lens :taa)
-  #+darwin '(:sky :lens))
+Vulkan resolves through Luft's inspectable shader path; Metal resolves the
+same jittered color, depth, and motion contract through Metal4FX.  #D7GZA6"
+  '(:sky :lens :taa))
 
 (defun create-renderer-module (renderer zone label code)
   "Create a shader module from CODE and publish it as one of RENDERER's.
@@ -1575,7 +1647,7 @@ it."
        (create-renderer-module renderer :luft/shader/lens-fragment
                                "luft lens fragment"
                                (shaders:lens-fragment-shader)))
-     (when (renderer-effect-p renderer :taa)
+     (when (renderer-shader-temporal-p renderer)
        (create-renderer-module renderer :luft/shader/temporal-fragment
                                "luft temporal resolve fragment"
                                (shaders:temporal-resolve-fragment-shader)))
@@ -1713,11 +1785,12 @@ it."
                     :layout (renderer-lens-layout renderer)
                     :depth nil
                     :target-formats (list (renderer-color-format renderer))))
-        (when (renderer-effect-p renderer :taa)
+        (when (renderer-shader-temporal-p renderer)
           (pipeline :taa :luft/pipeline/taa "luft temporal resolve pipeline"
                     screen temporal-fragment
                     :layout (renderer-temporal-layout renderer)
-                    :depth nil :target-formats '(:rgba16-float))
+                    :depth nil :target-formats '(:rgba16-float)))
+        (when (renderer-effect-p renderer :taa)
           (pipeline :present :luft/pipeline/present
                     "luft presentation pipeline"
                     screen present-fragment
@@ -1770,7 +1843,7 @@ it."
                 (:binding ,shaders:+cells-binding+ :type :storage-buffer)
                 (:binding ,shaders:+stocks-binding+ :type :storage-buffer)
                 (:binding ,shaders:+slots-binding+ :type :storage-buffer))))))
-    (when (renderer-effect-p renderer :taa)
+    (when (renderer-shader-temporal-p renderer)
       (setf (renderer-temporal-layout renderer)
             (with-renderer-creation-step
                 (:luft/layout/temporal "luft temporal layout")
@@ -1805,7 +1878,7 @@ STYLE is :FLAT, :BEVEL (rounded), :CHAMFER (subtle planar crease
 relief), or :PAPER (the chamfered geometry in a matte, toothed material), and
 may be changed later to a member of PIPELINE-STYLES, which defaults to every
 Luft style.  Only those surface pipelines and the optional :SKY, :LENS, and
-Vulkan :TAA EFFECTS are created; NIL/NIL is a clear-only renderer useful
+:TAA EFFECTS are created; NIL/NIL is a clear-only renderer useful
 for reducing a suspect GPU frame to its presentation core.  Without DEVICE,
 one is requested from PROVIDER and owned by the renderer."
   (unless (or (null pipeline-styles) (member style pipeline-styles))
@@ -2133,7 +2206,8 @@ its motion continuous and sub-pixel.  #OWG6ZD"
 (defun frame-color-attachment (view clear)
   `(:view ,view :load-op :clear :store-op :store :clear-value ,clear))
 
-(defun encode-post-pass (renderer encoder pipeline bind-group label)
+(defun encode-post-pass
+    (renderer encoder pipeline bind-group label &optional temporal-scaler)
   (let ((pass
           (begin-render-pass
            encoder
@@ -2142,6 +2216,8 @@ its motion continuous and sub-pixel.  #OWG6ZD"
             :color-attachments
             (list (frame-color-attachment
                    (renderer-color-view renderer) #(0.0 0.0 0.0 1.0)))))))
+    (when temporal-scaler
+      (wait-temporal-scaler-output pass temporal-scaler))
     (set-pipeline pass pipeline)
     (set-bind-group pass 0 bind-group)
     (draw-screen pass)
@@ -2155,6 +2231,9 @@ its motion continuous and sub-pixel.  #OWG6ZD"
          (height (second extent))
          (scene (renderer-scene renderer))
          (temporal-p (renderer-effect-p renderer :taa))
+         (surfaces (renderer-surfaces renderer))
+         (temporal-scaler
+           (and temporal-p (frame-surfaces-temporal-scaler surfaces)))
          (light (find-light *light*))
          (sky (if (light-sky light) (light-colour (light-sky light))
                   *sky-color*)))
@@ -2218,7 +2297,8 @@ its motion continuous and sub-pixel.  #OWG6ZD"
                  :color-attachments attachments
                  :depth-stencil-attachment
                  `(:view ,(renderer-depth-view renderer)
-                   :depth-load-op :clear :depth-store-op :discard
+                   :depth-load-op :clear
+                   :depth-store-op ,(if temporal-scaler :store :discard)
                    :depth-clear-value 1.0)))))
         (when (and *draw-sky* sky-pipeline)
           (set-pipeline pass sky-pipeline)
@@ -2237,57 +2317,85 @@ its motion continuous and sub-pixel.  #OWG6ZD"
             (set-pipeline pass clay-pipeline)
             (set-bind-group pass 0 (renderer-bind-group renderer))
             (draw-surface pass scene :clay)))
+        (when temporal-scaler
+          (signal-temporal-scaler-inputs pass temporal-scaler))
         (end-pass pass)
         (cond
           (temporal-p
-           (let* ((surfaces (renderer-surfaces renderer))
-                  (write-index (renderer-history-index renderer))
-                  (read-index (mod (1+ write-index) 2))
-                  (history-textures
-                    (frame-surfaces-history-textures surfaces))
-                  (history-views (frame-surfaces-history-views surfaces))
-                  (temporal-groups
-                    (frame-surfaces-temporal-bind-groups surfaces))
-                  (post-groups (frame-surfaces-post-bind-groups surfaces)))
-             (prepare-texture encoder (renderer-scene-texture renderer)
-                              :texture-binding)
-             (prepare-texture encoder (renderer-motion-texture renderer)
-                              :texture-binding)
-             (unless history-valid-p
-               (encode encoder
-                       (make-gpu-clear-texture-command
-                        :texture (aref history-textures read-index)
-                        :color #(0.0 0.0 0.0 0.0))))
-             (prepare-texture encoder (aref history-textures read-index)
-                              :texture-binding)
-             (let ((resolve
-                     (begin-render-pass
-                      encoder
-                      (make-render-pass-descriptor
-                       :label "luft temporal resolve"
-                       :color-attachments
-                       (list (frame-color-attachment
-                              (aref history-views write-index)
-                              #(0.0 0.0 0.0 0.0)))))))
-               (set-pipeline resolve (renderer-pipeline renderer :taa))
-               (set-bind-group resolve 0
-                               (aref temporal-groups write-index))
-               (draw-screen resolve)
-               (end-pass resolve))
-             (prepare-texture encoder (aref history-textures write-index)
-                              :texture-binding)
-             (encode-post-pass
-              renderer encoder
-              (if lens-p lens-pipeline (renderer-pipeline renderer :present))
-              (aref post-groups write-index)
-              (if lens-p "luft lens pass" "luft presentation pass"))
-             ;; Publish temporal state only after all three passes encoded.
-             (setf (renderer-previous-view renderer) view
-                   (renderer-history-valid-p renderer) t
-                   (renderer-history-used-p renderer) history-valid-p
-                   (renderer-history-key renderer) history-key
-                   (renderer-history-index renderer) read-index)
-             (incf (renderer-frame-index renderer))))
+           (if temporal-scaler
+               (progn
+                 (encode-temporal-scale
+                  encoder temporal-scaler
+                  (renderer-scene-texture renderer)
+                  (renderer-depth-texture renderer)
+                  (renderer-motion-texture renderer)
+                  (frame-surfaces-resolved-texture surfaces)
+                  (vector (* 0.5 width (aref jitter 0))
+                          (* 0.5 height (aref jitter 1)))
+                  (not history-valid-p))
+                 (encode-post-pass
+                  renderer encoder
+                  (if lens-p lens-pipeline
+                      (renderer-pipeline renderer :present))
+                  (aref (frame-surfaces-post-bind-groups surfaces) 0)
+                  (if lens-p "luft lens pass" "luft presentation pass")
+                  temporal-scaler)
+                 (setf (renderer-previous-view renderer) view
+                       (renderer-history-valid-p renderer) t
+                       (renderer-history-used-p renderer) history-valid-p
+                       (renderer-history-key renderer) history-key
+                       (renderer-history-index renderer) 0)
+                 (incf (renderer-frame-index renderer)))
+               (let* ((write-index (renderer-history-index renderer))
+                      (read-index (mod (1+ write-index) 2))
+                      (history-textures
+                        (frame-surfaces-history-textures surfaces))
+                      (history-views
+                        (frame-surfaces-history-views surfaces))
+                      (temporal-groups
+                        (frame-surfaces-temporal-bind-groups surfaces))
+                      (post-groups
+                        (frame-surfaces-post-bind-groups surfaces)))
+                 (prepare-texture encoder (renderer-scene-texture renderer)
+                                  :texture-binding)
+                 (prepare-texture encoder (renderer-motion-texture renderer)
+                                  :texture-binding)
+                 (unless history-valid-p
+                   (encode encoder
+                           (make-gpu-clear-texture-command
+                            :texture (aref history-textures read-index)
+                            :color #(0.0 0.0 0.0 0.0))))
+                 (prepare-texture encoder (aref history-textures read-index)
+                                  :texture-binding)
+                 (let ((resolve
+                         (begin-render-pass
+                          encoder
+                          (make-render-pass-descriptor
+                           :label "luft temporal resolve"
+                           :color-attachments
+                           (list (frame-color-attachment
+                                  (aref history-views write-index)
+                                  #(0.0 0.0 0.0 0.0)))))))
+                   (set-pipeline resolve (renderer-pipeline renderer :taa))
+                   (set-bind-group resolve 0
+                                   (aref temporal-groups write-index))
+                   (draw-screen resolve)
+                   (end-pass resolve))
+                 (prepare-texture encoder (aref history-textures write-index)
+                                  :texture-binding)
+                 (encode-post-pass
+                  renderer encoder
+                  (if lens-p lens-pipeline
+                      (renderer-pipeline renderer :present))
+                  (aref post-groups write-index)
+                  (if lens-p "luft lens pass" "luft presentation pass"))
+                 ;; Publish only after surface, resolve, and post all encode.
+                 (setf (renderer-previous-view renderer) view
+                       (renderer-history-valid-p renderer) t
+                       (renderer-history-used-p renderer) history-valid-p
+                       (renderer-history-key renderer) history-key
+                       (renderer-history-index renderer) read-index)
+                 (incf (renderer-frame-index renderer)))))
           (lens-p
            (prepare-texture encoder (renderer-scene-texture renderer)
                             :texture-binding)

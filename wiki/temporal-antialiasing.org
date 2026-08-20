@@ -1,20 +1,21 @@
 #+title: Temporal reconstruction in the Luft atelier
 #+startup: overview
 
-Luft's first antialiasing pass is deliberately a renderer experiment rather
-than a new engine-wide temporal framework.  Vulkan draws a jittered scene,
-writes current-to-previous motion beside it, and resolves into one of two
-history images before the lens and presentation pass.  Metal keeps the same
-semantic frame boundary but not this resolve; the intended next experiment
-there is to give the jittered inputs to MetalFX.
+Luft's temporal antialiasing is deliberately a renderer experiment rather
+than a new engine-wide temporal framework.  Both backends draw a jittered
+scene and write current-to-previous motion beside it before the lens and
+presentation pass.  Vulkan resolves those inputs with Luft's inspectable
+shader and two history images; Metal gives colour, depth, and motion to a
+MetalFX temporal scaler that owns its opaque history.
 
 The work also answers two architectural questions the small greenfield
 renderer made cheap to ask.  The renderer wanted explicit owners for a frozen
 frame and for every extent-sized surface, plus revisions on published scene
 products.  The mathematical shader language already had all the expressions
-TAA needed.  The portable GPU layer needed one concrete capability: an ordered
-list of colour attachments on Vulkan, together with a two-half-float format for
-motion.
+the Vulkan resolve needed.  The portable GPU layer grew only the concrete
+vocabulary both consumers earned: ordered colour attachments, a two-half-float
+motion format, and a temporal-scaler command whose Metal implementation exposes
+the native texture contract and ordering fence.
 
 * TAA reconstructs samples; it is not a blur
 :PROPERTIES:
@@ -71,8 +72,8 @@ flowchart TB
   S --> D["D32 visibility"]
   C --> R["temporal resolve"]
   M --> R
-  A["old RGBA16F history"] --> R
-  R --> B["new RGBA16F history"]
+  A["old RGBA16F history, Vulkan"] --> R
+  R --> B["resolved RGBA16F"]
   B -. "swap roles next frame" .-> A
   B --> P["lens or plain present"]
   P --> O["output attachment"]
@@ -82,15 +83,17 @@ flowchart TB
 |-
 | Current colour | =RGBA16F= | This frame's jittered, pre-presentation colour; alpha is current focus metadata |
 | Motion | =RG16F= | Unjittered current-to-previous displacement in UV units |
-| Depth | =D32= | Surface visibility for this frame; not yet sampled by resolve |
-| History A/B | =RGBA16F= | Alternating resolve destination and reprojected source |
+| Depth | =D32= | Surface visibility; consumed by MetalFX and retained for the Vulkan experiment |
+| Resolved colour | =RGBA16F= | Vulkan ping-pongs explicit history A/B; MetalFX owns native history behind one output |
 | Output | Renderer format | Lens-processed or plainly presented result, normally sRGB |
 
-[[lisp:luft.render::encode-frame]] records the three passes in this order and
-uses explicit texture preparation between render-attachment and sampled
-states.  On a cold or invalid frame it clears the would-be history source and
-sets history weight to zero.  Only after all passes have encoded does it swap
-the history index and publish the frozen view.
+[[lisp:luft.render::encode-frame]] keeps this semantic order on both backends.
+Vulkan records three render passes and prepares textures between attachment
+and sampled states.  Metal ends the surface pass by signaling the scaler's
+fence, encodes MetalFX on the Metal 4 command encoder, then makes the lens pass
+wait on the same fence before sampling the resolved colour.  A cold or invalid
+frame resets the selected resolver; only after the whole sequence has encoded
+does Luft publish the frozen view.
 
 * Motion points from the current sample to its old address
 :PROPERTIES:
@@ -122,9 +125,9 @@ and background velocities would invent a third surface.
 
 Ordinary and temporal surface fragments are paired from one source body.
 The ordinary form advertises only colour location zero; the temporal form adds
-motion at location one.  This keeps the existing one-target Metal pipelines
-valid while every Luft material -- flat, rounded, chamfered, field, ink,
-paper, stock, and sky -- follows the same motion convention on Vulkan.
+motion at location one.  Every Luft material -- flat, rounded, chamfered,
+field, ink, paper, stock, and sky -- therefore follows the same motion
+convention on both Vulkan and Metal.
 
 * Resolve admits old colour through a shaped neighbourhood
 :PROPERTIES:
@@ -174,8 +177,9 @@ all produce one current-only frame before accumulation resumes.
 
 TAA made the old collection of renderer texture slots too easy to publish
 halfway through a resize.  A [[lisp:luft.render::frame-surfaces]] now owns the
-final colour and depth, optional current colour, motion, both histories, their
-views, and the bind groups that depend on them.  [[lisp:luft.render::make-frame-surfaces]]
+final colour and depth, optional current colour and motion, either two Vulkan
+histories or a MetalFX scaler and resolved output, their views, and the bind
+groups that depend on them.  [[lisp:luft.render::make-frame-surfaces]]
 constructs a complete candidate; resize publishes it as one value, resets
 history, and then retires the old cohort.  Destruction walks the opposite
 dependency order: bind groups, views, textures, then the longer-lived layouts
@@ -189,7 +193,7 @@ retires the old generation.  Buffers that already fit are updated in place;
 capacities double on growth so editing does not rebuild the cohort for every
 new face.
 
-* The shader language was ready; the Vulkan HAL needed MRT
+* The shader language was ready; both HALs needed MRT
 :PROPERTIES:
 :ID: CZGBC9
 :END:
@@ -205,30 +209,62 @@ The GPU layer did need to tell the truth about a fragment stage with more than
 one result.  =:rg16-float= now names two half-float motion lanes, including its
 four-byte texel size and native Vulkan and Metal formats.  Vulkan render
 pipelines, compatible-render-pass caching, attachment descriptions and
-references, blend states, framebuffers, clear values, and pass validation now
-all consume an ordered target list rather than silently selecting its first
-member.  The same generic descriptors still describe a one-target pass.
+references, blend states, framebuffers, clear values, and pass validation all
+consume an ordered target list.  Metal pipeline compilation and render-pass
+attachment setup now do the same.  The generic descriptors still describe a
+one-target pass without a special case at their callers.
 
 This is the useful boundary: multiple render targets and a format are portable
 GPU vocabulary; temporal rejection, ping-pong history, and camera-cut policy
 belong to the renderer.
 
-* Vulkan owns this resolve; Metal keeps a MetalFX-shaped boundary
+* Two backend resolves share one semantic boundary
 :PROPERTIES:
 :ID: D7GZA6
 :END:
 
-On Vulkan, =:taa= is part of Luft's default full effect list.  On Darwin the
-default remains sky plus lens.  The current Metal backend understands the new
-=RG16F= portable format, but Luft's default does not compile the Vulkan-oriented
-resolve there and does not force motion location one into ordinary pipelines.
+The frozen current/previous views, jitter sequence, current colour, depth,
+motion meaning, invalidation decision, and extent cohort are backend-neutral
+semantic inputs.  [[lisp:luft.render::temporal-resolve-kind]] selects an
+implementation at the device boundary: Vulkan compiles Luft's shader resolve;
+Metal creates a fixed-extent [[lisp:gpu-temporal-scaler]] and does not compile
+that shader at all.
 
-That asymmetry is intentional while there is only one production consumer.
-The frozen current/previous views, jitter sequence, current colour, motion
-meaning, and extent cohort are backend-neutral semantic inputs.  A MetalFX
-integration can decide which of those its native contract actually consumes
-and add a backend-owned operation when there is concrete evidence for its
-shape, rather than making Vulkan's three-pass mechanism the portable API.
+The scaler is a narrow capability, not a portable imitation of MetalFX.  Its
+descriptor fixes input and output extents and the four formats.  Creation asks
+MetalFX for the exact usage of each texture before Luft constructs the extent
+cohort.  Each frame supplies colour, conventional depth, normalized
+current-to-previous motion, pixel-space jitter, and the semantic reset bit.
+Metal owns the neutral exposure texture and the fence required to order its
+render, scaler, and post stages; destruction retires the scaler before the
+textures and views on which it depends.
+
+This leaves renderer policy in Luft and native reconstruction in the backend.
+The default full effect list is =(:sky :lens :taa)= on both platforms, but
+neither backend has to pretend that the other's history representation is its
+own.
+
+* DONE MetalFX resolves Luft's temporal inputs
+:PROPERTIES:
+:ID: NL5J0J
+:END:
+
+/Intent./ Make Darwin's default Luft renderer accumulate the same jittered
+colour and motion contract as Vulkan while letting MetalFX own reconstruction,
+history, and its required synchronization.
+
+/Evidence./ The Metal renderer test creates a real =RGBA16F + D32 + RG16F=
+Metal4FX scaler, renders repeated frames, observes reset on the first frame and
+history use on the second, and invalidates on material values, same-object scene
+publication, and a camera cut.  A 640 by 400 all-style demo compiled every
+temporal MRT pipeline and produced a MetalFX-resolved PNG.  The same test
+reframes the renderer, proves a new extent-owned scaler is published cold, and
+then renders and tears down that replacement successfully.
+
+/Done when./ Darwin enables =:taa= by default, queries MetalFX texture usage,
+orders surface, scaler, and lens work with the native fence, preserves Vulkan's
+shader path, and survives real rendering, readback, resize-owned destruction,
+and semantic history resets.  Those conditions now hold.
 
 * DONE First Vulkan temporal resolve
 :PROPERTIES:
@@ -261,19 +297,20 @@ The first pass is a coherent baseline, not the last word in temporal quality.
 The next evidence should come from moving silhouettes and animated materials,
 where colour clipping alone has the least information.
 
-** TODO Make disocclusion depth-aware
+** TODO Make the Vulkan disocclusion test depth-aware
 :PROPERTIES:
 :ID: 1MZC4T
 :END:
 
-/Intent./ Retain current depth for resolve, choose the frontmost velocity from
-a small neighbourhood at silhouettes, and reject history whose reprojected
-depth no longer describes the visible surface.  This is velocity dilation and
-disocclusion testing, one connected improvement rather than two unrelated
-filters.
+/Intent./ Sample the retained current depth in Luft's shader resolve, choose
+the frontmost velocity from a small neighbourhood at silhouettes, and reject
+history whose reprojected depth no longer describes the visible surface.  This
+is velocity dilation and disocclusion testing, one connected improvement rather
+than two unrelated filters.  MetalFX already receives depth under #NL5J0J;
+this mark concerns the inspectable Vulkan implementation.
 
 /Evidence./ Current motion is exact at its own pixel and the YCoCg box rejects
-many stale colours, but depth is discarded after visibility and cannot yet
+many stale colours, but Vulkan discards depth after visibility and cannot yet
 distinguish a newly revealed background from the foreground that occupied its
 old address.
 

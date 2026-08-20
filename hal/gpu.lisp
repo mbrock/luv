@@ -649,6 +649,28 @@ factories for requesting GPU-DEVICE instances."))
 
 (defclass gpu-shader-module (gpu-object) ())
 
+(defclass gpu-temporal-scaler (gpu-object)
+  ((input-size
+    :initarg :input-size
+    :reader gpu-temporal-scaler-input-size)
+   (output-size
+    :initarg :output-size
+    :reader gpu-temporal-scaler-output-size)
+   (color-usage
+    :initarg :color-usage
+    :reader gpu-temporal-scaler-color-usage)
+   (depth-usage
+    :initarg :depth-usage
+    :reader gpu-temporal-scaler-depth-usage)
+   (motion-usage
+    :initarg :motion-usage
+    :reader gpu-temporal-scaler-motion-usage)
+   (output-usage
+    :initarg :output-usage
+    :reader gpu-temporal-scaler-output-usage))
+  (:documentation
+   "A retained temporal reconstruction owner and its exact texture contract."))
+
 (defgeneric retire-gpu-native-owner (device owner teardown invalidate)
   (:documentation
    "Transfer OWNER's native teardown to DEVICE, then invalidate OWNER.
@@ -879,6 +901,7 @@ array of single-floats or unsigned bytes, words, or double words."
 (defun texture-format-bytes-per-texel (format)
   "Return the exact storage size of one texel in portable FORMAT."
   (ecase format
+    (:r16-float 2)
     ((:rgba8-unorm :rgba8-unorm-srgb
       :bgra8-unorm :bgra8-unorm-srgb
       :depth32-float :rg16-uint :rg16-float)
@@ -899,6 +922,7 @@ backend is expected to accept all of it."
 (defun texture-format-upload-element-type (format)
   "The packed array element type accepted by WRITE-TEXTURE for FORMAT."
   (ecase (texture-format-bytes-per-texel format)
+    (2 '(unsigned-byte 16))
     (4 '(unsigned-byte 32))
     (8 '(unsigned-byte 64))))
 
@@ -959,6 +983,14 @@ largest task-to-mesh amplification admitted by one task workgroup."
   layout module (entry-point "main"))
 
 (defstruct (command-encoder-descriptor (:include gpu-descriptor)))
+
+(defstruct (temporal-scaler-descriptor (:include gpu-descriptor))
+  input-size
+  output-size
+  (color-format :rgba16-float)
+  (depth-format :depth32-float)
+  (motion-format :rg16-float)
+  (output-format :rgba16-float))
 
 (defstruct (shader-module-descriptor (:include gpu-descriptor))
   code
@@ -1042,6 +1074,24 @@ largest task-to-mesh amplification admitted by one task workgroup."
   texture
   usage)
 
+(defstruct (gpu-temporal-scale-command
+             (:include gpu-command-encoder-command))
+  scaler
+  color
+  depth
+  motion
+  output
+  jitter
+  reset-p)
+
+(defstruct (gpu-signal-temporal-scaler-command
+             (:include gpu-render-pass-command))
+  scaler)
+
+(defstruct (gpu-wait-temporal-scaler-command
+             (:include gpu-render-pass-command))
+  scaler)
+
 (defmethod encode ((encoder gpu-encoder) (command gpu-command))
   (error 'gpu-request-error
          :operation :encode
@@ -1112,3 +1162,23 @@ to realize the usage.  Application code does not dispatch on the backend.
   (encode encoder
           (make-gpu-prepare-texture-command
            :texture texture :usage usage)))
+
+(defun encode-temporal-scale
+    (encoder scaler color depth motion output jitter reset-p)
+  "Encode one temporal reconstruction from COLOR, DEPTH, and MOTION.
+
+JITTER is the current sample offset in input-pixel units.  Motion values are
+current-to-previous displacements in normalized input-texture coordinates;
+the scaler's input extent binds their conversion to pixels once per frame."
+  (encode encoder
+          (make-gpu-temporal-scale-command
+           :scaler scaler :color color :depth depth :motion motion
+           :output output :jitter jitter :reset-p reset-p)))
+
+(defun signal-temporal-scaler-inputs (pass scaler)
+  "Publish PASS's attachment writes to SCALER's private synchronization."
+  (encode pass (make-gpu-signal-temporal-scaler-command :scaler scaler)))
+
+(defun wait-temporal-scaler-output (pass scaler)
+  "Make PASS's fragment reads wait for SCALER's reconstructed output."
+  (encode pass (make-gpu-wait-temporal-scaler-command :scaler scaler)))

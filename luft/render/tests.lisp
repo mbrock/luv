@@ -256,7 +256,7 @@
     (ok (eq :stock style))
     (ok (equal '(:flat :bevel :chamfer :paper :stock :field :soft :ink :clay)
                pipelines))
-    (ok (equal (luft.render::default-renderer-effects) effects)))
+    (ok (equal '(:sky :lens :taa) effects)))
   ;; A mode of its own selects only its own pipeline, the stock included.
   (multiple-value-bind (mode style pipelines effects)
       (luft.render::standalone-render-options "stock")
@@ -401,8 +401,7 @@
           (luft:solid-cell-p solid 6 5 2) t)
     (make-scene domain :solid solid)))
 
-#-darwin
-(deftest vulkan-temporal-history-resolves-ping-pongs-and-invalidates
+(deftest temporal-history-resolves-and-invalidates
   (let* ((scene (probe-scene))
          (camera (make-fly-camera
                   :position (vec3:make-vec3 5.0 1.0 5.0)
@@ -419,6 +418,15 @@
            (ok (eq :rg16-float
                    (luv:gpu-texture-format
                     (luft.render::renderer-motion-texture renderer))))
+           #+darwin
+           (ok (typep
+                (luft.render::frame-surfaces-temporal-scaler
+                 (luft.render::renderer-surfaces renderer))
+                'luv:gpu-temporal-scaler))
+           #-darwin
+           (ok (null
+                (luft.render::frame-surfaces-temporal-scaler
+                 (luft.render::renderer-surfaces renderer))))
            (ok (= (* 4 96 64) (length (render-pixels renderer))))
            (ok (not (luft.render::renderer-history-used-p renderer)))
            (render-pixels renderer)
@@ -441,7 +449,20 @@
            ;; step on the next frame resumes reprojection.
            (setf (camera-position camera) (vec3:make-vec3 40.0 40.0 30.0))
            (render-pixels renderer)
-           (ok (not (luft.render::renderer-history-used-p renderer))))
+           (ok (not (luft.render::renderer-history-used-p renderer)))
+           ;; Extent-sized temporal ownership is replaced as one cohort.  The
+           ;; next frame must use the new scaler/history and begin cold.
+           (let ((old-scaler
+                   (luft.render::frame-surfaces-temporal-scaler
+                    (luft.render::renderer-surfaces renderer))))
+             (declare (ignorable old-scaler))
+             (luft.render::ensure-renderer-extent renderer '(80 48))
+             #+darwin
+             (ok (not (eq old-scaler
+                          (luft.render::frame-surfaces-temporal-scaler
+                           (luft.render::renderer-surfaces renderer)))))
+             (ok (= (* 4 80 48) (length (render-pixels renderer))))
+             (ok (not (luft.render::renderer-history-used-p renderer)))))
       (destroy-renderer renderer))))
 
 (defun mixed-stock-scene ()

@@ -55,6 +55,7 @@
 (defconstant +pixel-format-bgra8-unorm-srgb+ 81)
 (defconstant +pixel-format-rgba8-unorm+ 70)
 (defconstant +pixel-format-rgba8-unorm-srgb+ 71)
+(defconstant +pixel-format-r16-float+ 25)
 (defconstant +pixel-format-r8-unorm+ 10)
 (defconstant +pixel-format-rg8-unorm+ 30)
 (defconstant +pixel-format-rg16-uint+ 63)
@@ -63,6 +64,7 @@
 (defconstant +pixel-format-depth32-float+ 252)
 (defconstant +texture-type-2d+ 2)
 (defconstant +texture-usage-shader-read+ (ash 1 0))
+(defconstant +texture-usage-shader-write+ (ash 1 1))
 (defconstant +texture-usage-render-target+ (ash 1 2))
 (defconstant +storage-mode-shared+ 0)
 (defconstant +storage-mode-private+ 2)
@@ -464,6 +466,222 @@ description on native rejection."
         (let ((compiler (%new-metal-4-compiler device descriptor error)))
           (values compiler (objective-c-error-pointer-description error)))))))
 
+;;; MetalFX temporal reconstruction on a Metal 4 command buffer.
+
+(objc:define-objective-c-message %new-temporal-scaler-descriptor
+    ("new" :object :ownership :owned
+     :class "MTLFXTemporalScalerDescriptor"))
+
+(objc:define-objective-c-message %temporal-scaler-supports-metal-4-fx
+    ("supportsMetal4FX:" :uint8)
+  (device :object))
+
+(objc:define-objective-c-message %set-temporal-color-format
+    ("setColorTextureFormat:" :void)
+  (format :uint64))
+
+(objc:define-objective-c-message %set-temporal-depth-format
+    ("setDepthTextureFormat:" :void)
+  (format :uint64))
+
+(objc:define-objective-c-message %set-temporal-motion-format
+    ("setMotionTextureFormat:" :void)
+  (format :uint64))
+
+(objc:define-objective-c-message %set-temporal-output-format
+    ("setOutputTextureFormat:" :void)
+  (format :uint64))
+
+(objc:define-objective-c-message %set-temporal-input-width
+    ("setInputWidth:" :void)
+  (width :uint64))
+
+(objc:define-objective-c-message %set-temporal-input-height
+    ("setInputHeight:" :void)
+  (height :uint64))
+
+(objc:define-objective-c-message %set-temporal-output-width
+    ("setOutputWidth:" :void)
+  (width :uint64))
+
+(objc:define-objective-c-message %set-temporal-output-height
+    ("setOutputHeight:" :void)
+  (height :uint64))
+
+(objc:define-objective-c-message %set-temporal-auto-exposure-enabled
+    ("setAutoExposureEnabled:" :void)
+  (enabled :uint8))
+
+(objc:define-objective-c-message %set-temporal-synchronous-initialization
+    ("setRequiresSynchronousInitialization:" :void)
+  (enabled :uint8))
+
+(objc:define-objective-c-message %new-temporal-scaler-with-compiler
+    ("newTemporalScalerWithDevice:compiler:" :object :ownership :owned
+     :class "MTL4FXTemporalScaler")
+  (device :object)
+  (compiler :object))
+
+(objc:define-objective-c-message new-metal-fence
+    ("newFence" :object :ownership :owned :class "MTLFence"))
+
+(objc:define-objective-c-message %set-temporal-fence
+    ("setFence:" :void)
+  (fence :object))
+
+(objc:define-objective-c-message %temporal-color-texture-usage
+    ("colorTextureUsage" :uint64))
+
+(objc:define-objective-c-message %temporal-depth-texture-usage
+    ("depthTextureUsage" :uint64))
+
+(objc:define-objective-c-message %temporal-motion-texture-usage
+    ("motionTextureUsage" :uint64))
+
+(objc:define-objective-c-message %temporal-output-texture-usage
+    ("outputTextureUsage" :uint64))
+
+(objc:define-objective-c-message %set-temporal-color-texture
+    ("setColorTexture:" :void)
+  (texture :object))
+
+(objc:define-objective-c-message %set-temporal-depth-texture
+    ("setDepthTexture:" :void)
+  (texture :object))
+
+(objc:define-objective-c-message %set-temporal-motion-texture
+    ("setMotionTexture:" :void)
+  (texture :object))
+
+(objc:define-objective-c-message %set-temporal-exposure-texture
+    ("setExposureTexture:" :void)
+  (texture :object))
+
+(objc:define-objective-c-message %set-temporal-output-texture
+    ("setOutputTexture:" :void)
+  (texture :object))
+
+(objc:define-objective-c-message %set-temporal-input-content-width
+    ("setInputContentWidth:" :void)
+  (width :uint64))
+
+(objc:define-objective-c-message %set-temporal-input-content-height
+    ("setInputContentHeight:" :void)
+  (height :uint64))
+
+(objc:define-objective-c-message %set-temporal-pre-exposure
+    ("setPreExposure:" :void)
+  (exposure :float))
+
+(objc:define-objective-c-message %set-temporal-jitter-x
+    ("setJitterOffsetX:" :void)
+  (offset :float))
+
+(objc:define-objective-c-message %set-temporal-jitter-y
+    ("setJitterOffsetY:" :void)
+  (offset :float))
+
+(objc:define-objective-c-message %set-temporal-motion-scale-x
+    ("setMotionVectorScaleX:" :void)
+  (scale :float))
+
+(objc:define-objective-c-message %set-temporal-motion-scale-y
+    ("setMotionVectorScaleY:" :void)
+  (scale :float))
+
+(objc:define-objective-c-message %set-temporal-reset
+    ("setReset:" :void)
+  (reset :uint8))
+
+(objc:define-objective-c-message %set-temporal-depth-reversed
+    ("setDepthReversed:" :void)
+  (reversed :uint8))
+
+(objc:define-objective-c-message encode-metal-temporal-scaler
+    ("encodeToCommandBuffer:" :void)
+  (command-buffer :object))
+
+(objc:define-objective-c-message update-metal-fence
+    ("updateFence:afterEncoderStages:" :void)
+  (fence :object)
+  (stages :uint64))
+
+(objc:define-objective-c-message wait-for-metal-fence
+    ("waitForFence:beforeEncoderStages:" :void)
+  (fence :object)
+  (stages :uint64))
+
+(defun new-metal-4-temporal-scaler
+    (device compiler color-format depth-format motion-format output-format
+     input-width input-height output-width output-height)
+  "Create an owned Metal4FX temporal scaler and its owned synchronization fence."
+  (objc:with-autorelease-pool ()
+    (let ((class (objc:find-objective-c-class
+                  "MTLFXTemporalScalerDescriptor")))
+      (when (plusp (%temporal-scaler-supports-metal-4-fx class device))
+        (objc:with-owned-objective-c-object
+            (descriptor (%new-temporal-scaler-descriptor class))
+          (%set-temporal-color-format descriptor color-format)
+          (%set-temporal-depth-format descriptor depth-format)
+          (%set-temporal-motion-format descriptor motion-format)
+          (%set-temporal-output-format descriptor output-format)
+          (%set-temporal-input-width descriptor input-width)
+          (%set-temporal-input-height descriptor input-height)
+          (%set-temporal-output-width descriptor output-width)
+          (%set-temporal-output-height descriptor output-height)
+          (%set-temporal-auto-exposure-enabled descriptor 0)
+          (%set-temporal-synchronous-initialization descriptor 1)
+          (let ((scaler (%new-temporal-scaler-with-compiler
+                         descriptor device compiler)))
+            (when scaler
+              (let ((fence (new-metal-fence device)))
+                (if fence
+                    (progn
+                      (%set-temporal-fence scaler fence)
+                      (values scaler fence))
+                    (progn
+                      (objc:release-objective-c-object scaler)
+                      (values nil nil)))))))))))
+
+(defun metal-temporal-scaler-texture-usages (scaler)
+  "Return SCALER's required color, depth, motion, and output usage masks."
+  (values (%temporal-color-texture-usage scaler)
+          (%temporal-depth-texture-usage scaler)
+          (%temporal-motion-texture-usage scaler)
+          (%temporal-output-texture-usage scaler)))
+
+(defun configure-metal-temporal-scaler
+    (scaler color depth motion exposure output width height jitter-x jitter-y
+     reset-p)
+  "Bind one native frame to SCALER before encoding it."
+  (%set-temporal-color-texture scaler color)
+  (%set-temporal-depth-texture scaler depth)
+  (%set-temporal-motion-texture scaler motion)
+  (%set-temporal-exposure-texture scaler exposure)
+  (%set-temporal-output-texture scaler output)
+  (%set-temporal-input-content-width scaler width)
+  (%set-temporal-input-content-height scaler height)
+  (%set-temporal-pre-exposure scaler 1.0)
+  (%set-temporal-jitter-x scaler (coerce jitter-x 'single-float))
+  (%set-temporal-jitter-y scaler (coerce jitter-y 'single-float))
+  ;; Luft writes normalized current-to-previous motion.  MetalFX consumes
+  ;; pixels after applying these once-per-frame extent scales.
+  (%set-temporal-motion-scale-x scaler (coerce width 'single-float))
+  (%set-temporal-motion-scale-y scaler (coerce height 'single-float))
+  (%set-temporal-depth-reversed scaler 0)
+  (%set-temporal-reset scaler (if reset-p 1 0))
+  scaler)
+
+(defun clear-metal-temporal-scaler (scaler)
+  "Release every object property retained by SCALER."
+  (%set-temporal-color-texture scaler nil)
+  (%set-temporal-depth-texture scaler nil)
+  (%set-temporal-motion-texture scaler nil)
+  (%set-temporal-exposure-texture scaler nil)
+  (%set-temporal-output-texture scaler nil)
+  (%set-temporal-fence scaler nil)
+  scaler)
+
 (defun compile-metal-4-library (compiler source &key name)
   "Synchronously compile SOURCE as Metal 4 and return an owned MTLLibrary.
 
@@ -684,7 +902,7 @@ rejection.  Source and names cross only as in-memory NSString objects."
 
 (defun compile-metal-4-render-pipeline
     (compiler vertex-library vertex-name fragment-library fragment-name
-     vertex-buffers color-format topology &key depth-format blend label)
+     vertex-buffers color-formats topology &key depth-format blends label)
   "Synchronously link Metal libraries into an owned Metal 4 pipeline state."
   (declare (ignore depth-format))
   (objc:with-autorelease-pool ()
@@ -728,28 +946,31 @@ rejection.  Source and names cross only as in-memory NSString objects."
                    (%set-pipeline-vertex-descriptor
                     descriptor vertex-descriptor)
                    (%set-input-primitive-topology descriptor topology)
-                   (when color-format
-                     (let ((attachment
-                             (%render-pipeline-color-attachment-at
-                              (%render-pipeline-color-attachments descriptor)
-                              0)))
-                       (%set-render-pipeline-pixel-format
-                        attachment color-format)
-                       (when blend
-                         (%set-render-pipeline-blending-state
-                          attachment +blend-state-enabled+)
-                         (%set-source-rgb-blend-factor
-                          attachment +blend-factor-one+)
-                         (%set-destination-rgb-blend-factor
-                          attachment +blend-factor-one-minus-source-alpha+)
-                         (%set-rgb-blend-operation
-                          attachment +blend-operation-add+)
-                         (%set-source-alpha-blend-factor
-                          attachment +blend-factor-one+)
-                         (%set-destination-alpha-blend-factor
-                          attachment +blend-factor-one-minus-source-alpha+)
-                         (%set-alpha-blend-operation
-                          attachment +blend-operation-add+))))
+                   (loop with attachments =
+                           (%render-pipeline-color-attachments descriptor)
+                         for color-format in color-formats
+                         for blend in blends
+                         for index from 0
+                         for attachment =
+                           (%render-pipeline-color-attachment-at
+                            attachments index)
+                         do (%set-render-pipeline-pixel-format
+                             attachment color-format)
+                            (when blend
+                              (%set-render-pipeline-blending-state
+                               attachment +blend-state-enabled+)
+                              (%set-source-rgb-blend-factor
+                               attachment +blend-factor-one+)
+                              (%set-destination-rgb-blend-factor
+                               attachment +blend-factor-one-minus-source-alpha+)
+                              (%set-rgb-blend-operation
+                               attachment +blend-operation-add+)
+                              (%set-source-alpha-blend-factor
+                               attachment +blend-factor-one+)
+                              (%set-destination-alpha-blend-factor
+                               attachment +blend-factor-one-minus-source-alpha+)
+                              (%set-alpha-blend-operation
+                               attachment +blend-operation-add+)))
                    (cffi:with-foreign-object (error :pointer)
                      (setf (cffi:mem-ref error :pointer) (cffi:null-pointer))
                      (let ((pipeline
@@ -1074,10 +1295,10 @@ rejection.  Source and names cross only as in-memory NSString objects."
   (depth :double))
 
 (defun configure-metal-pass-color-attachment
-    (descriptor texture color clear-p store-p)
+    (descriptor index texture color clear-p store-p)
   (when texture
     (let* ((attachments (%render-pass-color-attachments descriptor))
-           (attachment (%color-attachment-at attachments 0)))
+           (attachment (%color-attachment-at attachments index)))
       (%set-color-attachment-texture attachment texture)
       (%set-color-attachment-load-action
        attachment (if clear-p +load-action-clear+ +load-action-load+))
@@ -1108,7 +1329,7 @@ rejection.  Source and names cross only as in-memory NSString objects."
          attachment (coerce clear-depth 'double-float))))))
 
 (defun new-render-command-encoder
-    (command-buffer &key color-texture
+    (command-buffer &key color-attachments color-texture
                           (color #(0.0 0.0 0.0 1.0))
                           (color-clear-p t) (color-store-p t)
                           depth-texture (clear-depth 1.0)
@@ -1118,8 +1339,14 @@ rejection.  Source and names cross only as in-memory NSString objects."
       (descriptor
         (%new-render-pass-descriptor
          (objc:find-objective-c-class "MTL4RenderPassDescriptor")))
-    (configure-metal-pass-color-attachment
-     descriptor color-texture color color-clear-p color-store-p)
+    (if color-attachments
+        (loop for (texture attachment-color clear-p store-p)
+                in color-attachments
+              for index from 0
+              do (configure-metal-pass-color-attachment
+                  descriptor index texture attachment-color clear-p store-p))
+        (configure-metal-pass-color-attachment
+         descriptor 0 color-texture color color-clear-p color-store-p))
     (configure-metal-pass-depth-attachment
      descriptor depth-texture clear-depth depth-clear-p depth-store-p)
     (render-command-encoder command-buffer descriptor)))

@@ -63,6 +63,14 @@
            #:metal-shared-event-signaled-value
            #:signal-metal-event
            #:new-metal-4-compiler
+           #:new-metal-4-temporal-scaler
+           #:metal-temporal-scaler-texture-usages
+           #:configure-metal-temporal-scaler
+           #:clear-metal-temporal-scaler
+           #:encode-metal-temporal-scaler
+           #:new-metal-fence
+           #:update-metal-fence
+           #:wait-for-metal-fence
            #:compile-metal-4-library
            #:compile-metal-4-render-pipeline
            #:compile-metal-4-mesh-render-pipeline
@@ -158,11 +166,13 @@
            #:+pixel-format-bgra8-unorm-srgb+
            #:+pixel-format-rgba8-unorm+
            #:+pixel-format-rgba8-unorm-srgb+
+           #:+pixel-format-r16-float+
            #:+pixel-format-rg16-uint+
            #:+pixel-format-rg16-float+
            #:+pixel-format-rgba16-float+
            #:+pixel-format-depth32-float+
            #:+texture-usage-shader-read+
+           #:+texture-usage-shader-write+
            #:+texture-usage-render-target+
            #:+storage-mode-shared+
            #:+storage-mode-private+
