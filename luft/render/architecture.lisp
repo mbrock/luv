@@ -993,18 +993,60 @@ knowing what it is cut from."
   (:documentation "The drone waypoints of PIECE: (position look fov) lists.")
   (:method (piece)
     ;; A piece without an authored flight flies its still cameras.
-    (mapcar (lambda (entry)
-              (let ((camera (cdr entry)))
-                (multiple-value-bind (right up forward) (camera-basis camera)
-                  (declare (ignore right up))
-                  (let ((p (camera-position camera)))
-                    (list (list (vec3:vec3-x p) (vec3:vec3-y p)
-                                (vec3:vec3-z p))
-                          (list (+ (vec3:vec3-x p) (* 12.0 (vec3:vec3-x forward)))
-                                (+ (vec3:vec3-y p) (* 12.0 (vec3:vec3-y forward)))
-                                (+ (vec3:vec3-z p) (* 12.0 (vec3:vec3-z forward))))
-                          (camera-field-of-view camera))))))
-            (atelier-cameras piece))))
+    (atelier-camera-flight piece)))
+
+(defgeneric atelier-flyover (piece)
+  (:documentation "A distant aerial pass over PIECE: (position look fov)
+lists, derived from the still cameras unless a piece authors its own."))
+
+(defmethod atelier-flyover ((piece (eql :grotto)))
+  ;; The derived flyover inherits the hall's interior camera, which lifted
+  ;; lands in the rock; the aerial that suits a cliff is a lateral pass
+  ;; along its face.
+  '((( 4.0  8.0 25.0) (32.0 30.0 19.0) 0.80)
+    ((18.0  5.0 23.0) (32.0 30.0 15.0) 0.82)
+    ((44.0  9.0 23.0) (34.0 31.0 15.0) 0.82)
+    ((58.0 20.0 27.0) (30.0 32.0 18.0) 0.80)))
+
+(defmethod atelier-flyover (piece)
+  (let* ((lift 9.0)
+         (pushback 1.35)
+         (waypoints (atelier-camera-flight piece))
+         (centre (list 0.0 0.0 0.0)))
+    (dolist (waypoint waypoints)
+      (loop for axis below 3
+            do (incf (elt centre axis)
+                     (/ (elt (second waypoint) axis) (length waypoints)))))
+    (mapcar (lambda (waypoint)
+              (destructuring-bind (position look fov) waypoint
+                (list (list (+ (first centre)
+                               (* pushback (- (first position)
+                                              (first centre))))
+                            (+ (second centre)
+                               (* pushback (- (second position)
+                                              (second centre))))
+                            (+ (third position) lift))
+                      look
+                      fov)))
+            waypoints)))
+
+(defun atelier-camera-flight (piece)
+  "The camera-derived waypoints every piece has, authored flight or not."
+  (mapcar (lambda (entry)
+            (let ((camera (cdr entry)))
+              (multiple-value-bind (right up forward) (camera-basis camera)
+                (declare (ignore right up))
+                (let ((p (camera-position camera)))
+                  (list (list (vec3:vec3-x p) (vec3:vec3-y p)
+                              (vec3:vec3-z p))
+                        (list (+ (vec3:vec3-x p)
+                                 (* 12.0 (vec3:vec3-x forward)))
+                              (+ (vec3:vec3-y p)
+                                 (* 12.0 (vec3:vec3-y forward)))
+                              (+ (vec3:vec3-z p)
+                                 (* 12.0 (vec3:vec3-z forward))))
+                        (camera-field-of-view camera))))))
+          (atelier-cameras piece)))
 
 (defmethod atelier-flight ((piece (eql :arcade)))
   ;; On axis over the lawn, through the middle bay, along the cloister

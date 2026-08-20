@@ -195,10 +195,24 @@ CLEARANCE, names the piece and the sample and refuses to fly."
                     clearance)))
   points)
 
+(defun flight-shot-progress (s shot shot-count)
+  "SHOT's eased parameter at linear S: momentum survives every cut.
+
+Only the reel's very first shot eases in and only its very last eases
+out; every interior cut lands with both shots moving, the way a cut on
+action does.  The edge easings end and begin at unit speed."
+  (cond ((and (zerop shot) (= shot-count 1))
+         (* s s (- 3.0 (* 2.0 s))))
+        ((zerop shot) (* s s (- 2.0 s)))
+        ((= shot (1- shot-count))
+         (let ((tail (- 1.0 s)))
+           (- 1.0 (* tail tail (- 2.0 tail)))))
+        (t s)))
+
 (defun film-atelier-flight (pathname
                             &key (pieces '(:arcade :viaduct :turret
                                            :grotto :headland :holm))
-                                 (seconds-per-piece 8) (frame-rate 30)
+                                 (seconds-per-shot 7) (frame-rate 30)
                                  (width 1280) (height 720)
                                  (style :stock)
                                  (chamfer-width (/ 1.0 6.0))
@@ -208,26 +222,34 @@ CLEARANCE, names the piece and the sample and refuses to fly."
                                  (field-scale 1.0))
   "Fly a drone through the atelier's architecture into an MP4 at PATHNAME.
 
-Each of PIECES gets one continuous shot: a Catmull-Rom flight through the
-piece's ATELIER-FLIGHT waypoints -- through its arches, along its decks,
-around its shafts -- easing in and out of the run.  STYLE defaults to
-:STOCK -- the chamfered
-multi-material style the wiki's stills use -- with CHAMFER-WIDTH of a
-sixth of a cell, wide enough that every arris reads as a planed band.
-FIELD-SCALE widens every authored field of view; a portrait film scales
-it up, because the field of view is vertical and the authored views were
-composed for landscape.  Returns PATHNAME and the frame count."
+Each of PIECES gets two shots cut together: a distant aerial pass over
+its authored views (ATELIER-FLYOVER), then its close authored route
+(ATELIER-FLIGHT) -- through the arches, along the decks, around the
+shafts.  Every flight is a Catmull-Rom spline relaxed off the masonry
+and sworn collision-free, and the easing bookends the whole reel rather
+than each shot, so a cut never resets the drone's speed.  STYLE defaults
+to :STOCK -- the chamfered multi-material style the wiki's stills use --
+with CHAMFER-WIDTH of a sixth of a cell, wide enough that every arris
+reads as a planed band.  FIELD-SCALE widens every authored field of
+view; a portrait film scales it up, because the field of view is
+vertical and the views were composed for landscape.  Returns PATHNAME
+and the frame count."
   (let* ((*chamfer-width* chamfer-width)
          (*light* light)
          ;; The lens focuses at the centre of frame, where the flight is
          ;; always looking: with the aperture open, whatever stands beyond
          ;; the subject melts, which is the mountain games' tilt-shift.
          (*aperture* aperture)
-         (piece-frames (max 1 (round (* seconds-per-piece frame-rate))))
-         (first-piece (first pieces))
+         (shot-frames (max 1 (round (* seconds-per-shot frame-rate))))
+         (scenes (mapcar (lambda (piece) (cons piece (atelier-scene piece)))
+                         (remove-duplicates pieces)))
+         (shots (loop for piece in pieces
+                      append (list (list piece (atelier-flyover piece))
+                                   (list piece (atelier-flight piece)))))
+         (shot-count (length shots))
          (renderer (make-renderer
-                    :scene (atelier-scene first-piece)
-                    :camera (cdr (first (atelier-cameras first-piece)))
+                    :scene (cdr (first scenes))
+                    :camera (cdr (first (atelier-cameras (first pieces))))
                     :width width :height height
                     :style style :pipeline-styles (list style)
                     :effects effects)))
@@ -235,45 +257,48 @@ composed for landscape.  Returns PATHNAME and the frame count."
          (with-video-encoder (write-frame pathname width height
                               :frame-rate frame-rate
                               :format (renderer-color-format renderer))
-           (dolist (piece pieces)
-             (let* ((scene (atelier-scene piece))
-                    (waypoints (atelier-flight piece))
-                    (positions (mapcar #'first waypoints))
-                    (looks (mapcar #'second waypoints))
-                    (fields (mapcar (lambda (waypoint)
-                                      (list (third waypoint)))
-                                    waypoints))
-                    ;; The authored cameras say where to look; the flight
-                    ;; between them is sampled at every frame, relaxed off
-                    ;; the masonry, and then sworn clear: a drone that
-                    ;; passes through a voxel is an error, not a take.
-                    (flight
-                      (coerce
-                       (assert-flight-clear
-                        piece scene
-                        (clear-flight-path
-                         scene
-                         (loop for frame below piece-frames
-                               for s = (/ (+ frame 0.5) piece-frames)
-                               for eased = (* s s (- 3.0 (* 2.0 s)))
-                               collect (catmull-rom-sample positions
-                                                           eased))))
-                       'vector)))
-               (setf (renderer-scene renderer) scene)
-               (dotimes (frame piece-frames)
-                 (let* ((s (/ (+ frame 0.5) piece-frames))
-                        (eased (* s s (- 3.0 (* 2.0 s))))
-                        (position (aref flight frame))
-                        (look (catmull-rom-sample looks eased))
-                        (field (* field-scale
-                                  (first (catmull-rom-sample fields
-                                                             eased)))))
-                   (setf (renderer-camera renderer)
-                         (studio-camera
-                          (first position) (second position)
-                          (third position)
-                          :look-x (first look) :look-y (second look)
-                          :look-z (third look)
-                          :field-of-view field))
-                   (write-frame (render-pixels renderer)))))))
+           (loop for (piece waypoints) in shots
+                 for shot from 0
+                 do (let* ((scene (cdr (assoc piece scenes)))
+                           (positions (mapcar #'first waypoints))
+                           (looks (mapcar #'second waypoints))
+                           (fields (mapcar (lambda (waypoint)
+                                             (list (third waypoint)))
+                                           waypoints))
+                           ;; The waypoints say where to look; the flight
+                           ;; between them is sampled at every frame,
+                           ;; relaxed off the masonry, and then sworn
+                           ;; clear: a drone that passes through a voxel
+                           ;; is an error, not a take.
+                           (flight
+                             (coerce
+                              (assert-flight-clear
+                               piece scene
+                               (clear-flight-path
+                                scene
+                                (loop for frame below shot-frames
+                                      for s = (/ (+ frame 0.5) shot-frames)
+                                      collect (catmull-rom-sample
+                                               positions
+                                               (flight-shot-progress
+                                                s shot shot-count)))))
+                              'vector)))
+                      (setf (renderer-scene renderer) scene)
+                      (dotimes (frame shot-frames)
+                        (let* ((s (/ (+ frame 0.5) shot-frames))
+                               (eased (flight-shot-progress
+                                       s shot shot-count))
+                               (position (aref flight frame))
+                               (look (catmull-rom-sample looks eased))
+                               (field (* field-scale
+                                         (first (catmull-rom-sample
+                                                 fields eased)))))
+                          (setf (renderer-camera renderer)
+                                (studio-camera
+                                 (first position) (second position)
+                                 (third position)
+                                 :look-x (first look) :look-y (second look)
+                                 :look-z (third look)
+                                 :field-of-view field))
+                          (write-frame (render-pixels renderer)))))))
       (destroy-renderer renderer))))
