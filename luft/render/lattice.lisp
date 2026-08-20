@@ -468,9 +468,16 @@ and bent.  A tenth of a cell is a weathered edge; half a cell is rubble.")
                   0.0)
               0.0 grain))))
 
+(defvar *clay-stock-lane* 0.0
+  "The frame's resolved clay stocks, packed for the arris lane's spare
+component by ENCODE-FRAME: (1+A) + 16(1+B) over the first two resolved
+palette slots, zero when none.  Pure float arithmetic on both sides, so
+the shaders decode it with a floor and two equality tests.")
+
 (defun arris-lane ()
-  "The frame block's chamfer-rule lane: the rule, and the relief factors."
+  "The frame block's chamfer-rule lane: the rule, the relief factors, and
+the packed clay stocks of the spare component."
   (list (ecase *chamfer-rule* (:uniform 0.0) (:relief 1.0) (:stock 2.0))
         (coerce *relief-convex* 'single-float)
         (coerce *relief-concave* 'single-float)
-        0.0))
+        *clay-stock-lane*))

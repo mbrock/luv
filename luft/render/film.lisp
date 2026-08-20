@@ -515,7 +515,8 @@ action does.  The edge easings end and begin at unit speed."
                                  (light :evening)
                                  (aperture 0.85)
                                  (effects (default-renderer-effects))
-                                 (field-scale 1.0))
+                                 (field-scale 1.0)
+                                 (clay-stocks nil))
   "Fly a drone through the atelier's architecture into an MP4 at PATHNAME.
 
 Each of PIECES gets two shots cut together: a distant aerial pass over
@@ -528,10 +529,13 @@ to :STOCK -- the chamfered multi-material style the wiki's stills use --
 with CHAMFER-WIDTH of a sixth of a cell, wide enough that every arris
 reads as a planed band.  FIELD-SCALE widens every authored field of
 view; a portrait film scales it up, because the field of view is
-vertical and the views were composed for landscape.  Returns PATHNAME
-and the frame count."
+vertical and the views were composed for landscape.  CLAY-STOCKS names
+stocks handed to the clay overlay -- '(:conifer :leaf) turns every tree
+crown into clay blobs under *CLAY-RADIUS* and *CLAY-MELT* while the
+masonry keeps its chamfers.  Returns PATHNAME and the frame count."
   (let* ((*chamfer-width* chamfer-width)
          (*light* light)
+         (*clay-stocks* clay-stocks)
          ;; The lens focuses at the centre of frame, where the flight is
          ;; always looking: with the aperture open, whatever stands beyond
          ;; the subject melts, which is the mountain games' tilt-shift.
@@ -547,7 +551,10 @@ and the frame count."
                     :scene (cdr (first scenes))
                     :camera (cdr (first (atelier-cameras (first pieces))))
                     :width width :height height
-                    :style style :pipeline-styles (list style)
+                    :style style
+                    :pipeline-styles (if clay-stocks
+                                         (list style :clay)
+                                         (list style))
                     :effects effects)))
     (unwind-protect
          (with-video-encoder (write-frame pathname width height

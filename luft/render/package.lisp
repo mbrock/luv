@@ -118,6 +118,7 @@ of packed LUFT sites, drawn by vertex shaders pulling sites.")
            #:*field-vertical-radius*
            #:*clay-radius*
            #:*clay-melt*
+           #:*clay-stocks*
            #:light
            #:light-name
            #:define-light

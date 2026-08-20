@@ -254,8 +254,9 @@ everything it looks up in the lattice."
                         ,@(when (eq widths :site)
                             `((stocks :storage-buffer
                                       :binding ,+stocks-binding+
-                                      :element :vec4)
-                              (slots :storage-buffer
+                                      :element :vec4)))
+                        ,@(when (or (eq widths :site) (eq rule :clay))
+                            `((slots :storage-buffer
                                      :binding ,+slots-binding+
                                      :element :uint))))
             :outputs ((position :vec4 :built-in :position)
@@ -318,21 +319,46 @@ everything it looks up in the lattice."
                               (> 1.0 0.0)
                               (< (* toward-normal toward-normal)
                                  (* 0.72 (dot toward toward)))))
+                ;; The packed clay stocks claim whole faces for the clay
+                ;; overlay: the clay rule draws exactly the claimed faces
+                ;; and every other rule leaves them to it.  The lane is
+                ;; (1+A) + 16(1+B); a slot matching either is claimed.
+                (clay-lane (swizzle arris-vector :w))
+                (clay-high (floor (/ clay-lane 16.0)))
+                (clay-slot-a (- (- clay-lane (* clay-high 16.0)) 1.0))
+                (clay-slot-b (- clay-high 1.0))
+                (clay-claimed
+                  (if (> clay-lane 0.5)
+                      (if (< (abs (- stock-slot clay-slot-a)) 0.25)
+                          1.0
+                          (if (< (abs (- stock-slot clay-slot-b)) 0.25)
+                              1.0 0.0))
+                      0.0))
                 ;; A bent lattice can turn a face toward the camera that
                 ;; the rest lattice had turned away, so a deforming shader
                 ;; keeps every present face and lets depth sort it out.
-                (scale ,(if deform
-                            '(if present-p
-                                 (if (> (+ (abs (swizzle deform-vector :y))
-                                           (abs (swizzle deform-vector :w)))
-                                        0.0)
-                                     1.0
-                                     (if facing-p 1.0 0.0))
-                                 0.0)
-                            '(if present-p (if facing-p 1.0 0.0) 0.0)))
+                (scale (* ,(if deform
+                               '(if present-p
+                                    (if (> (+ (abs (swizzle deform-vector
+                                                            :y))
+                                              (abs (swizzle deform-vector
+                                                            :w)))
+                                           0.0)
+                                        1.0
+                                        (if facing-p 1.0 0.0))
+                                    0.0)
+                               '(if present-p (if facing-p 1.0 0.0) 0.0))
+                          ,(if (eq rule :clay)
+                               'clay-claimed
+                               '(- 1.0 clay-claimed))))
                 (period-x (swizzle domain-vector :x))
                 (period-y (swizzle domain-vector :y))
-                (radius (swizzle domain-vector :z))
+                ;; The in-plane band the grid reserves.  The clay rule's
+                ;; knobs ride the material lanes' spares, so a hybrid
+                ;; frame can carry another style's width here too.
+                (radius ,(if (eq rule :clay)
+                             '(swizzle top-vector :w)
+                             '(swizzle domain-vector :z)))
                 ;; The quad's diagonal points at the nearest corner of the
                 ;; face: rotate the corner loop by one when it does not, so
                 ;; that (p q r)(p r s) splits a b c d along b-d, not a-c.
@@ -399,7 +425,7 @@ everything it looks up in the lattice."
                      ;; takes two Newton steps onto the zero set of the
                      ;; rounded-cell field (luft/render/clay.lisp), the
                      ;; gradient read by tetrahedron.
-                     `((melt (swizzle domain-vector :w))
+                     `((melt (swizzle side-vector :w))
                        ,@(clay-newton-bindings 'clay-a 'flat
                                                'radius 'melt)
                        ,@(clay-newton-bindings 'clay-b 'clay-a-point

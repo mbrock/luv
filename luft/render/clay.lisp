@@ -62,12 +62,46 @@ read CELLS, PERIOD-X, and PERIOD-Y from the enclosing shader."
              (,half (- 0.5 ,r))
              (,v (floor (+ ,p (vec3 0.5 0.5 0.5))))
              (,q (- ,p ,v)))
+           `((,(local "~A-MASK" name) (swizzle arris-vector :w))
+             (,(local "~A-MHIGH" name)
+              (floor (/ ,(local "~A-MASK" name) 16.0)))
+             (,(local "~A-MA" name)
+              (- (- ,(local "~A-MASK" name)
+                    (* ,(local "~A-MHIGH" name) 16.0))
+                 1.0))
+             (,(local "~A-MB" name)
+              (- ,(local "~A-MHIGH" name) 1.0)))
            (loop for (i j k) in corners
                  append (field-cell-bindings
                          (cell i j k)
                          `(+ ,v (vec3 ,(if (= i 1) 0.0 -1.0)
                                       ,(if (= j 1) 0.0 -1.0)
                                       ,(if (= k 1) 0.0 -1.0)))))
+           ;; The clay-stock mask of *clay-stocks*: while it is set, only
+           ;; cells whose stock it names are clay, and the rest of the
+           ;; world is air to this field.
+           (loop for (i j k) in corners
+                 append
+                 (append
+                  (cell-stock-bindings
+                   (local "~A-CS-~D~D~D" name i j k)
+                   `(+ ,v (vec3 ,(if (= i 1) 0.0 -1.0)
+                                ,(if (= j 1) 0.0 -1.0)
+                                ,(if (= k 1) 0.0 -1.0))))
+                  `((,(local "~A-EFF-~D~D~D" name i j k)
+                     (if (< ,(local "~A-MASK" name) 0.5)
+                         ,(cell i j k)
+                         (* ,(cell i j k)
+                            (if (< (abs (- ,(local "~A-CS-~D~D~D-SLOT"
+                                                   name i j k)
+                                           ,(local "~A-MA" name)))
+                                   0.25)
+                                1.0
+                                (if (< (abs (- ,(local "~A-CS-~D~D~D-SLOT"
+                                                       name i j k)
+                                               ,(local "~A-MB" name)))
+                                       0.25)
+                                    1.0 0.0))))))))
            ;; Each solid cell's rounded box: the box shrunk by R, its
            ;; distance lowered by R.  Air cells offer a distance no melt
            ;; reach can pull on, so they vanish from the union exactly.
@@ -80,7 +114,8 @@ read CELLS, PERIOD-X, and PERIOD-Y from the enclosing shader."
                                                     ,(* 0.5 (sgn k)))))
                                    (vec3 ,half ,half ,half)))
                             (,bo (max ,b (vec3 0.0 0.0 0.0)))
-                            (,d (if (> ,(cell i j k) 0.5)
+                            (,d (if (> ,(local "~A-EFF-~D~D~D" name i j k)
+                                       0.5)
                                     (- (+ (sqrt (dot ,bo ,bo))
                                           (min (max (max (swizzle ,b :x)
                                                          (swizzle ,b :y))
@@ -254,8 +289,10 @@ miss along the ray, scaled by this.")
                              :element :uint)))
        (let* ((period-x (swizzle domain-vector :x))
               (period-y (swizzle domain-vector :y))
-              (radius (swizzle domain-vector :z))
-              (melt (swizzle domain-vector :w))
+              ;; The clay knobs ride the material lanes' spares, leaving
+              ;; the domain lane to whatever style shares the frame.
+              (radius (swizzle top-vector :w))
+              (melt (swizzle side-vector :w))
               (face (normalize normal))
               ;; The gradient by tetrahedron: four probes a hair from the
               ;; fragment, summed along their directions.

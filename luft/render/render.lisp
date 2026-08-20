@@ -881,6 +881,26 @@ of pearls.  A frame-block lane, so a film can turn the knob mid-reel.")
 
 Small leaves every coplanar seam a tight quilted dimple; larger deepens
 the quilting and grows bridges between diagonal contacts.")
+(defparameter *clay-stocks* nil
+  "Stock names drawn as clay while another style draws the rest, or NIL.
+
+With names here and :CLAY among the renderer's pipeline styles, every
+face whose stock is named becomes the clay overlay's and leaves the main
+style's draw: a chamfered world whose tree crowns are clay blobs.  At
+most two stocks fit the lane; the first two found in the scene's palette
+are the ones taken.")
+
+(defun clay-stock-lane (stocks)
+  "Pack the first two *CLAY-STOCKS* slots of the palette STOCKS as a float."
+  (let ((found (and stocks
+                    (loop for name in *clay-stocks*
+                          for slot = (position name stocks)
+                          when slot collect slot))))
+    (if found
+        (coerce (+ 1 (first found)
+                   (* 16 (if (rest found) (+ 1 (second found)) 0)))
+                'single-float)
+        0.0)))
 
 ;;; ------------------------------------------------------------------------
 ;;; Lights: the hour a picture is taken at
@@ -1130,8 +1150,11 @@ lane: the arris softness of a chamfer, or the vertical radius of the field."
         (lane ground-colour exposure)
         (lane (vec3:make-vec3 occlusion shadow *wear-strength*)
               *ink-width*)
-        (lane *top-color* 0.0)
-        (lane *side-color* 0.0)
+        ;; The clay knobs ride the material lanes' spare components, so
+        ;; the clay overlay keeps its own radius and melt while another
+        ;; style owns the domain lane's width and detail.
+        (lane *top-color* (coerce *clay-radius* 'single-float))
+        (lane *side-color* (coerce *clay-melt* 'single-float))
         (lane *bottom-color* 0.0)
         (lane (vec3:make-vec3 *focus-distance* *aperture*
                               (/ 1.0 (max 1 width)))
@@ -2073,16 +2096,14 @@ Return the number of bytes and write calls issued."
            (upload-scene renderer scene))))))
 
 (defun renderer-surface-width (renderer)
-  (cond ((member (renderer-style renderer) '(:chamfer :paper :stock))
-         *chamfer-width*)
-        ((eq (renderer-style renderer) :clay) *clay-radius*)
-        (t *bevel-radius*)))
+  (if (member (renderer-style renderer) '(:chamfer :paper :stock))
+      *chamfer-width*
+      *bevel-radius*))
 
 (defun renderer-surface-detail (renderer)
-  (cond ((member (renderer-style renderer) '(:field :soft :ink))
-         (or *field-vertical-radius* *bevel-radius*))
-        ((eq (renderer-style renderer) :clay) *clay-melt*)
-        (t *arris-softness*)))
+  (if (member (renderer-style renderer) '(:field :soft :ink))
+      (or *field-vertical-radius* *bevel-radius*)
+      *arris-softness*))
 
 (defparameter *temporal-surface-drift-p* nil
   "Whether the surface knobs in the domain lane are drifting continuously.
@@ -2104,8 +2125,8 @@ its motion continuous and sub-pixel.  #OWG6ZD"
   (list scene (scene-revision scene) (renderer-style renderer) *draw-sky*
         (if *temporal-surface-drift-p*
             (concatenate 'vector
-                         (subseq frame-data (* 4 5) (* 4 7))
-                         (subseq frame-data (* 4 8) (* 4 19)))
+                         (subseq frame-data (* 4 5) (* 4 12))
+                         (subseq frame-data (* 4 14) (* 4 19)))
             (subseq frame-data (* 4 5) (* 4 19)))
         stock-data))
 
@@ -2138,7 +2159,8 @@ its motion continuous and sub-pixel.  #OWG6ZD"
          (sky (if (light-sky light) (light-colour (light-sky light))
                   *sky-color*)))
     (synchronize-renderer-scene renderer scene)
-    (let* ((jitter (if temporal-p
+    (let* ((*clay-stock-lane* (clay-stock-lane (scene-stocks scene)))
+           (jitter (if temporal-p
                        (temporal-jitter (renderer-frame-index renderer)
                                         width height)
                        #(0.0 0.0)))
@@ -2206,6 +2228,15 @@ its motion continuous and sub-pixel.  #OWG6ZD"
           (set-pipeline pass surface-pipeline)
           (set-bind-group pass 0 (renderer-bind-group renderer))
           (draw-surface pass scene (renderer-style renderer)))
+        ;; The clay overlay: the faces the stock mask claimed left the
+        ;; main draw, and this second draw is theirs alone.
+        (let ((clay-pipeline (getf (renderer-pipelines renderer) :clay)))
+          (when (and clay-pipeline
+                     (plusp *clay-stock-lane*)
+                     (not (eq (renderer-style renderer) :clay)))
+            (set-pipeline pass clay-pipeline)
+            (set-bind-group pass 0 (renderer-bind-group renderer))
+            (draw-surface pass scene :clay)))
         (end-pass pass)
         (cond
           (temporal-p
