@@ -54,6 +54,15 @@
        (luft.render:film-atelier-flight
         (merge-pathnames #P"luft-flight-vertical.mp4" directory)
         :width 720 :height 1280 :field-scale 1.25))
+     (when (film-wanted-p :luft-vale names)
+       (format t "~&Filming the vale...~%")
+       (let ((luft.render:*clay-radius* 0.5)
+             (luft.render:*clay-melt* 0.45))
+         (luft.render:film-atelier-flight
+          (merge-pathnames #P"luft-vale.mp4" directory)
+          :pieces '(:vale) :seconds-per-shot 14
+          :width 720 :height 1280 :field-scale 1.25
+          :clay-stocks '(:conifer :leaf))))
      (when (film-wanted-p :luft-flight-clay-trees names)
        (format t "~&Filming the flight with clay tree crowns...~%")
        (let ((luft.render:*clay-radius* 0.5)

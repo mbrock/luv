@@ -270,7 +270,8 @@ is a model of a tree; both are what a tree is at this distance."
 
 (defun atelier-pieces ()
   "Every piece the atelier can build, in the order a sheet would show them."
-  '(:samples :joinery :arcade :turret :viaduct :grotto :headland :holm))
+  '(:samples :joinery :arcade :turret :viaduct :grotto :headland :vale
+    :holm))
 
 ;;; The joinery: one thing made of several stocks, so that the creases
 ;;; /between/ them can be looked at.  A per-stock chamfer rule says nothing
@@ -802,6 +803,95 @@ is a model of a tree; both are what a tree is at this distance."
    (cons :top (studio-camera 59.0 28.0 26.0 :look-x 28.0 :look-y 48.0
                              :look-z 17.0 :field-of-view 0.82))))
 
+;;; The vale: a landscape rather than a building.  A high south plateau
+;;; ends in a cliff wall; the valley floor carries a stream and a meadow;
+;;; the north side climbs as a wooded slope whose grove is dense enough
+;;; to read as a canopy rather than as trees standing about.  Built for
+;;; flying: everything long, nothing to thread.
+
+(defmethod atelier-scene ((piece (eql :vale)))
+  (let ((world (make-world :horizontal-bits 6)))
+    (flet ((roll (x y)
+             (+ (* 2.2 (sin (/ x 9.0)) (cos (/ y 8.0)))
+                (* 1.0 (sin (/ (+ x y) 5.5))))))
+      (lay-ground world
+                  :height
+                  (lambda (x y)
+                    (let* ((rim (+ 14.0 (* 3.0 (sin (/ x 11.0)))
+                                  (* 1.5 (sin (/ x 5.3)))))
+                           (r (roll x y))
+                           (plateau (+ 24.0 r))
+                           ;; The wall: eight cells down for one out.
+                           (drop (- plateau (* 8.0 (- y rim))))
+                           (floor* (+ 5.0 (* 0.7 r)))
+                           (slope (+ floor* (* 0.6 (- y 40.0)))))
+                      (max 2
+                           (cond ((<= y rim) plateau)
+                                 ((> y 40.0) (max floor* slope))
+                                 (t (max floor* drop))))))
+                  :stock :granite))
+    (grass-the-flats world :flat 1 :depth 1)
+    ;; The stream: two cells dug out of the meadow along a meander, the
+    ;; bed slate where the water would run.  Grass first, so the banks
+    ;; keep their turf and only the bed is stone.
+    (loop for x from 1 to 62
+          for y = (round (+ 30.0 (* 4.0 (sin (/ x 7.0)))
+                            (* 1.5 (sin (/ x 3.1)))))
+          do (loop for dy from 0 to 1
+                   for top = (column-top world x (+ y dy))
+                   when top
+                     do (fill-box world x x (+ y dy) (+ y dy)
+                                  (1- top) top nil)
+                        (let ((bed (column-top world x (+ y dy))))
+                          (when bed
+                            (paint-cell world x (+ y dy) bed :slate)))))
+    ;; A worn path along the near bank.
+    (loop for x from 1 to 62
+          for y = (round (+ 27.0 (* 4.0 (sin (/ x 7.0)))
+                            (* 1.5 (sin (/ x 3.1)))))
+          do (let ((top (column-top world x y)))
+               (when top (paint-cell world x y top :limestone))))
+    ;; Talus under the wall, and a few boulders standing in the meadow.
+    (scatter-boulders
+     world
+     '((8 19 2) (17 21 1) (26 18 2) (36 20 2) (44 17 1) (53 21 2)
+       (14 33 1) (39 35 2) (57 36 1)))
+    ;; The grove: the whole north slope wooded, thick enough that the
+    ;; crowns close over each other, thinning as it comes down to the
+    ;; meadow; a straggle of trees follows the stream.
+    (plant-wood world
+                (loop for x from 4 to 60 by 4
+                      append (loop for y from 43 to 61 by 5
+                                   for jx = (+ x (round (* 1.9 (sin (* y 2.7)))))
+                                   for jy = (+ y (round (* 1.8 (sin (* x 1.3)))))
+                                   when (and (<= 2 jx 61) (<= 42 jy 62))
+                                     collect (list jx jy
+                                                   (+ 8 (mod (+ x y) 5))))))
+    (plant-wood world '((10 39 8) (23 41 9) (37 40 8) (49 41 9) (59 43 8))
+                :kind :round)
+    (plant-wood world '((6 36 7) (31 37 7) (45 38 8)))
+    ;; A few firs stand on the plateau rim, and a cairn where the wall is
+    ;; highest, so the cliff top has a silhouette.
+    (plant-wood world '((12 8 9) (28 6 10) (46 9 9) (58 7 8)))
+    (with-stock (:slate)
+      (let ((top (or (column-top world 36 6) 24)))
+        (fill-disc world 36 6 2 (1+ top) (+ top 2))
+        (fill-disc world 36 6 1 (+ top 3) (+ top 4))))
+    (world-scene world)))
+
+(defmethod atelier-cameras ((piece (eql :vale)))
+  (list
+   ;; Down the length of the valley from the west, wall on the right,
+   ;; grove on the left, the stream leading the eye.
+   (cons :vale (studio-camera 2.0 32.0 18.0 :look-x 40.0 :look-y 28.0
+                              :look-z 8.0 :field-of-view 0.82))
+   ;; From the meadow, the wall filling the south.
+   (cons :wall (studio-camera 34.0 36.0 9.0 :look-x 28.0 :look-y 8.0
+                              :look-z 20.0 :field-of-view 0.85))
+   ;; Into the grove where the slope steepens and the crowns close.
+   (cons :grove (studio-camera 16.0 44.0 13.0 :look-x 48.0 :look-y 52.0
+                               :look-z 14.0 :field-of-view 0.85))))
+
 ;;; ------------------------------------------------------------------------
 ;;; Sheets of the pieces
 
@@ -1095,6 +1185,28 @@ lists, derived from the still cameras unless a piece authors its own."))
     ((34.0 18.0 16.0) (44.0 40.0 18.0) 0.84)
     ((50.0 30.0 24.0) (30.0 48.0 18.0) 0.82)
     ((56.0 42.0 27.0) (24.0 44.0 16.0) 0.80)))
+
+(defmethod atelier-flyover ((piece (eql :vale)))
+  ;; One long unhurried glide down the whole valley, west to east, the
+  ;; wall on the right and the grove on the left, easing out on a look
+  ;; back up the vale.
+  '((( 2.0 34.0 26.0) (26.0 30.0 10.0) 0.80)
+    ((16.0 30.0 24.0) (40.0 28.0 10.0) 0.80)
+    ((32.0 27.0 23.0) (54.0 26.0 12.0) 0.80)
+    ((48.0 26.0 24.0) (62.0 30.0 14.0) 0.78)
+    ((60.0 30.0 27.0) (30.0 34.0 12.0) 0.78)))
+
+(defmethod atelier-flight ((piece (eql :vale)))
+  ;; The low pass, still gentle: in over the grove skimming the canopy,
+  ;; down the slope out of the trees, along the stream with the meadow
+  ;; opening ahead, then a slow bank up the face of the wall and away.
+  '(((58.0 52.0 27.0) (30.0 48.0 16.0) 0.82)
+    ((42.0 50.0 24.0) (18.0 44.0 12.0) 0.84)
+    ((26.0 44.0 18.0) (10.0 32.0  8.0) 0.86)
+    ((14.0 33.0 11.0) (30.0 26.0  8.0) 0.86)
+    ((30.0 28.0 10.0) (44.0 18.0 14.0) 0.86)
+    ((44.0 22.0 14.0) (40.0  6.0 22.0) 0.84)
+    ((50.0 30.0 24.0) (20.0 12.0 20.0) 0.80)))
 
 (defmethod atelier-flight ((piece (eql :holm)))
   ;; Down the causeway, over the bridge and the gate, and up across the
