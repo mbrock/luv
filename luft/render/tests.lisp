@@ -46,14 +46,12 @@
   "The LUFT site inside a packed one: its low sixty bits, without the stock."
   (ldb (byte luft.render.shaders:+site-stock-shift+ 0) site))
 
-(deftest demo-scene-sites-are-its-surface-in-whole-bricks
+(deftest demo-scene-sites-are-exactly-its-surface
   (let* ((scene (make-demo-scene))
          (surface (scene-surface scene))
          (sites (scene-sites scene))
          (present (map 'list #'packed-site (remove 0 sites))))
-    (ok (zerop (mod (length sites) luft.render.shaders:+brick-size+)))
-    (ok (= (scene-brick-count scene)
-           (/ (length sites) luft.render.shaders:+brick-size+)))
+    (ok (= (length sites) (luft:chain-count surface)))
     (ok (= (length present) (luft:chain-count surface)))
     (ok (every (lambda (site)
                  (luft:chain-site-p surface site))
@@ -133,54 +131,30 @@
     ;; And an undefined stock is an error where it is asked for, not later.
     (ok (signals (world-stock-slot world :no-such-stock) 'error))))
 
-(deftest rounded-mesh-output-fits-vulkan-guaranteed-limits
-  ;; Two bevel rings make a 6x6 point grid and 5x5x2 triangles per face.
-  ;; VK_EXT_mesh_shader guarantees at least 256 of each output kind.
-  (let* ((side (luft.render.shaders::bevel-grid-side))
-         (vertices (* side side luft.render.shaders:+brick-size+))
-         (primitives (* 2 (1- side) (1- side)
-                        luft.render.shaders:+brick-size+)))
-    (ok (= 180 vertices))
-    (ok (= 250 primitives))
-    (ok (<= vertices 256))
-    (ok (<= primitives 256))))
-
 (deftest standalone-render-modes-select-only-their-own-pipelines
-  (multiple-value-bind (mode style pipelines effects technique)
-      (luft.render::standalone-render-options "clear" :vertex)
-    (ok (equal '(:clear :flat nil nil :vertex)
-               (list mode style pipelines effects technique))))
-  (multiple-value-bind (mode style pipelines effects technique)
-      (luft.render::standalone-render-options "bevel" :mesh)
-    (ok (equal '(:bevel :bevel (:bevel) nil :mesh)
-               (list mode style pipelines effects technique))))
-  (multiple-value-bind (mode style pipelines effects technique)
-      (luft.render::standalone-render-options "bevel" :vertex)
-    (ok (equal '(:bevel :bevel (:bevel) nil :vertex)
-               (list mode style pipelines effects technique))))
-  (multiple-value-bind (mode style pipelines effects technique)
-      (luft.render::standalone-render-options "full" :mesh)
-    (ok (eq :full mode))
-    (ok (eq :stock style))
-    (ok (equal '(:flat :bevel :chamfer :paper :stock) pipelines))
-    (ok (equal '(:sky :lens) effects))
-    (ok (eq :mesh technique)))
-  (multiple-value-bind (mode style pipelines effects technique)
-      (luft.render::standalone-render-options "full" :vertex)
+  (multiple-value-bind (mode style pipelines effects)
+      (luft.render::standalone-render-options "clear")
+    (ok (equal '(:clear :flat nil nil)
+               (list mode style pipelines effects))))
+  (multiple-value-bind (mode style pipelines effects)
+      (luft.render::standalone-render-options "bevel")
+    (ok (equal '(:bevel :bevel (:bevel) nil)
+               (list mode style pipelines effects))))
+  (multiple-value-bind (mode style pipelines effects)
+      (luft.render::standalone-render-options "full")
     (ok (eq :full mode))
     (ok (eq :stock style))
     (ok (equal '(:flat :bevel :chamfer :paper :stock :field :soft :ink)
                pipelines))
-    (ok (equal '(:sky :lens) effects))
-    (ok (eq :vertex technique)))
+    (ok (equal '(:sky :lens) effects)))
   ;; A mode of its own selects only its own pipeline, the stock included.
-  (multiple-value-bind (mode style pipelines effects technique)
-      (luft.render::standalone-render-options "stock" :vertex)
-    (ok (equal '(:stock :stock (:stock) nil :vertex)
-               (list mode style pipelines effects technique))))
+  (multiple-value-bind (mode style pipelines effects)
+      (luft.render::standalone-render-options "stock")
+    (ok (equal '(:stock :stock (:stock) nil)
+               (list mode style pipelines effects))))
   ;; And with nothing named at all, the atelier opens on the whole world.
   (multiple-value-bind (mode style)
-      (luft.render::standalone-render-options nil :vertex)
+      (luft.render::standalone-render-options nil)
     (ok (eq :full mode))
     (ok (eq :stock style))))
 
@@ -200,34 +174,6 @@
   (ok (signals (luft.render:make-renderer :style :bevel
                                           :pipeline-styles '(:flat)
                                           :scene nil :camera nil))))
-
-(deftest brick-spheres-enclose-their-faces
-  (let* ((scene (make-demo-scene))
-         (sites (scene-sites scene))
-         (spheres (scene-bricks scene))
-         (size luft.render.shaders:+brick-size+))
-    (ok (= (length spheres) (* 4 (scene-brick-count scene))))
-    (ok (loop for brick below (scene-brick-count scene)
-              for center-x = (aref spheres (* 4 brick))
-              for center-y = (aref spheres (+ 1 (* 4 brick)))
-              for center-z = (aref spheres (+ 2 (* 4 brick)))
-              for radius = (aref spheres (+ 3 (* 4 brick)))
-              always
-              (loop for index from (* brick size) below (* (1+ brick) size)
-                    for site = (packed-site (aref sites index))
-                    always
-                    (or (zerop site)
-                        (flet ((reach (axis anchor center)
-                                 (max (abs (- anchor center))
-                                      (abs (- (if (luft:site-extends-p site axis)
-                                                  (1+ anchor)
-                                                  anchor)
-                                              center)))))
-                          (let* ((dx (reach :x (luft:site-x site) center-x))
-                                 (dy (reach :y (luft:site-y site) center-y))
-                                 (dz (reach :z (luft:site-z site) center-z)))
-                            (<= (sqrt (+ (* dx dx) (* dy dy) (* dz dz)))
-                                (+ radius 1.0e-3))))))))))
 
 (deftest the-demo-scene-renders-ground-under-sky
   ;; The background is the flat clear colour: the sky pass would put the
@@ -252,8 +198,7 @@
              (ok (> sky-above (* 0.9 10 width)))
              (ok (> ground-below (* 0.9 20 width))))
            ;; Turned straight up, nothing of the world is in view -- by the
-           ;; mesh technique's frustum test or by ordinary clipping -- and
-           ;; only sky remains.
+           ;; ordinary clipping leaves only sky.
            (setf (camera-pitch (renderer-camera renderer)) 1.5)
            (let ((pixels (render-pixels renderer)))
              (ok (= (* width height)
@@ -388,12 +333,12 @@ by ~,1F cells" rule strength))))
 (deftest shaped-surfaces-are-watertight-from-above
   ;; Straight down onto the floor, every pixel inside the floor is ground:
   ;; a crack between shaped faces would let the sky through.  Every style
-  ;; the default technique draws is tried.
+  ;; Luft draws is tried.
   (let* ((width 200)
          (height 200)
          (*bevel-radius* 0.3)
          (*chamfer-width* 0.3)
-         (styles (technique-styles *default-technique*))
+         (styles luft.render::*surface-styles*)
          (renderer (make-renderer
                     :scene (probe-scene)
                     :camera (make-fly-camera

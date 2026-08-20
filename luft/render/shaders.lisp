@@ -1376,6 +1376,6 @@ the white the tonemap defends."
     (set-output color (vec4 final depth))))
 
 (defun frame-uniform-block ()
-  "The frame uniform block as declared by the mesh stage."
+  "The frame uniform block as declared by the surface fragment stage."
   (find-if (lambda (resource) (typep resource 'shader-uniform-block))
-           (shader-specification-resources (surface-mesh-shader))))
+           (shader-specification-resources (surface-fragment-shader))))

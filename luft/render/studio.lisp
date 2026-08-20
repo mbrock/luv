@@ -113,7 +113,6 @@ The exhibits stand far enough apart that no two share a star."
                    (styles '(:flat :bevel :chamfer :paper))
                    (columns (mapcar #'list styles))
                    (width 320) (height 240) (supersample 3)
-                   (technique *default-technique*)
                    (effects '(:sky))
                    (renderer nil))
   "Render every CAMERA in every column and tile them into one PNG at PATHNAME.
@@ -141,7 +140,6 @@ fresh one; its scene and camera are restored afterwards."
                                       :camera (cdr (first cameras))
                                       :width (* supersample width)
                                       :height (* supersample height)
-                                      :technique technique
                                       :style (first styles)
                                       :pipeline-styles styles
                                       :effects effects)))
