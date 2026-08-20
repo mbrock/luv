@@ -1,0 +1,39 @@
+#!/bin/sh
+# Toss one progress note into the luv Telegram workshop chat.
+#
+#   scripts/telegram-update "The movement action now reaches its first cell."
+#
+# LUV_TELEGRAM_UPDATE_CHAT may name another dialog.  Authorization
+# comes from the same durable session and credentials as scripts/telegram.
+
+set -eu
+
+if [ "$#" -eq 0 ]; then
+  echo "usage: scripts/telegram-update TEXT..." >&2
+  exit 2
+fi
+
+project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+
+LUV_TELEGRAM_UPDATE=$*
+LUV_TELEGRAM_UPDATE_CHAT=${LUV_TELEGRAM_UPDATE_CHAT:-Minecraft 100.0}
+export LUV_TELEGRAM_UPDATE LUV_TELEGRAM_UPDATE_CHAT
+
+exec "$project_root/scripts/telegram" \
+  '(handler-bind ((warning (function muffle-warning)))
+     (asdf:load-system "telegram/chat"))' \
+  '(multiple-value-bind (connection user)
+       (telegram.client:resume :stream *standard-output*)
+     (declare (ignore user))
+     (unwind-protect
+          (let ((roster (telegram.chat:make-roster))
+                (title (uiop:getenv "LUV_TELEGRAM_UPDATE_CHAT")))
+            (telegram.chat:refresh-roster-dialogs
+             roster :pages 3 :connection connection)
+            (let ((peer (telegram.chat:find-roster-peer roster title)))
+              (unless peer
+                (error "Telegram dialog ~S was not found" title))
+              (telegram.chat:send-chat-message
+               roster peer (uiop:getenv "LUV_TELEGRAM_UPDATE")
+               :connection connection)))
+       (telegram.client:disconnect connection)))'
