@@ -233,6 +233,33 @@
                                            (min muzzle (min paws tail))))))))
     (cat-face-detail point color-5 head-weight)))
 
+(define-shader-function cat-shaded-color
+    (point ray sideways facing sun-direction sun-color ambient coverage)
+  "Shade one confirmed cat surface hit behind the billboard hit guard."
+  (let* ((local-normal (cat-normal point))
+         (normal (+ (* sideways (swizzle local-normal :x))
+                    (+ (vec3 0.0 (swizzle local-normal :y) 0.0)
+                       (* facing (swizzle local-normal :z)))))
+         (albedo (cat-albedo point))
+         (lambert (dot normal sun-direction))
+         (wrapped (max 0.0 (/ (+ lambert 0.38) 1.38)))
+         (sky (+ 0.56 (* 0.44 (swizzle normal :y))))
+         (occlusion (clamp (+ 0.38 (* 0.62 (smoothstep -0.08 0.42
+                                                       (swizzle point :y))))
+                           0.38 1.0))
+         (view-facing (max 0.0 (dot normal (* ray -1.0))))
+         (rim (expt (- 1.0 view-facing) 3.5))
+         (halfway (normalize (- sun-direction ray)))
+         (specular (* 0.18 (expt (max 0.0 (dot normal halfway)) 34.0)))
+         (illumination
+           (+ (* ambient (* sky occlusion))
+              (* sun-color (+ 0.12 (* wrapped 1.12)))))
+         (radiance
+           (+ (+ (* albedo illumination)
+                 (* sun-color (* specular coverage)))
+              (* (vec3 0.95 0.63 0.32) (* rim cat-rim-light)))))
+    (vec4 (* radiance coverage) coverage)))
+
 (define-shader-method shader-specification-for
     cat-sdf-vertex-specification
     ((role (eql :cat-sdf)) (stage (eql :vertex)))
@@ -307,42 +334,37 @@
          (span (sqrt (max discriminant 0.0)))
          (entry (max (- half-way span) 0.0))
          (exit (+ half-way span))
-         (travel
-           (counted-fold (march 68.0 ray-distance entry)
-             (let* ((point (+ local-camera (* local-ray ray-distance)))
-                    (distance (cat-distance point)))
-               (if (< distance 0.0008)
-                   ray-distance
-                   (if (> ray-distance exit)
-                       ray-distance
-                       (+ ray-distance (max (* distance 0.82) 0.0008)))))))
+         (initial-point (+ local-camera (* local-ray entry)))
+         (initial-distance (cat-distance initial-point))
+         (initial-state
+           (vec3 entry initial-distance
+                 (max (- 1.0 (step 0.0008 initial-distance))
+                      (step 0.000001 (- entry exit)))))
+         (march-state
+           (counted-fold
+               (march 68.0 state initial-state
+                :until (> (swizzle state :z) 0.5))
+             (let* ((ray-distance (swizzle state :x))
+                    (distance (swizzle state :y))
+                    (next-distance
+                      (+ ray-distance (max (* distance 0.82) 0.0008)))
+                    (next-point (+ local-camera (* local-ray next-distance)))
+                    (next-surface-distance (cat-distance next-point)))
+               (vec3 next-distance next-surface-distance
+                     (max (- 1.0 (step 0.0008 next-surface-distance))
+                          (step 0.000001 (- next-distance exit)))))))
+         (travel (swizzle march-state :x))
          (point (+ local-camera (* local-ray travel)))
-         (surface-distance (cat-distance point))
+         (surface-distance (swizzle march-state :y))
          (coverage (* (- 1.0 (step 0.0035 surface-distance))
-                      (- 1.0 (step 0.0 (- discriminant)))))
-         (local-normal (cat-normal point))
-         (normal (+ (* sideways (swizzle local-normal :x))
-                    (+ (vec3 0.0 (swizzle local-normal :y) 0.0)
-                       (* facing (swizzle local-normal :z)))))
-         (albedo (cat-albedo point))
-         (sun-direction (representation (swizzle sun-vector :xyz)))
-         (sun-color (representation (swizzle sun-color-vector :xyz)))
-         (ambient (representation (swizzle ambient-vector :xyz)))
-         (lambert (dot normal sun-direction))
-         (wrapped (max 0.0 (/ (+ lambert 0.38) 1.38)))
-         (sky (+ 0.56 (* 0.44 (swizzle normal :y))))
-         (occlusion (clamp (+ 0.38 (* 0.62 (smoothstep -0.08 0.42
-                                                       (swizzle point :y))))
-                           0.38 1.0))
-         (view-facing (max 0.0 (dot normal (* ray -1.0))))
-         (rim (expt (- 1.0 view-facing) 3.5))
-         (halfway (normalize (- sun-direction ray)))
-         (specular (* 0.18 (expt (max 0.0 (dot normal halfway)) 34.0)))
-         (illumination
-           (+ (* ambient (* sky occlusion))
-              (* sun-color (+ 0.12 (* wrapped 1.12)))))
-         (radiance
-           (+ (+ (* albedo illumination)
-                 (* sun-color (* specular coverage)))
-              (* (vec3 0.95 0.63 0.32) (* rim cat-rim-light)))))
-    (set-output color-output (vec4 (* radiance coverage) coverage))))
+                      (- 1.0 (step 0.0 (- discriminant))))))
+    (set-output color-output (vec4 0.0 0.0 0.0 0.0))
+    (when (> coverage 0.0)
+      (set-output
+       color-output
+       (cat-shaded-color
+        point ray sideways facing
+        (representation (swizzle sun-vector :xyz))
+        (representation (swizzle sun-color-vector :xyz))
+        (representation (swizzle ambient-vector :xyz))
+        coverage)))))

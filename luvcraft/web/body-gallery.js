@@ -6,10 +6,18 @@ const knobsElement = document.querySelector("#knobs");
 const resetButton = document.querySelector("#reset");
 
 const FRAME_FLOATS = 76;
+const FRAME_INTERVAL = 1000 / 60;
+const RENDER_SCALE = 1;
 const QUAD = new Float32Array([
   0, 0, 0,  1, 0, 0,  1, 1, 0,
   0, 0, 0,  1, 1, 0,  0, 1, 0,
 ]);
+const frameData = new Float32Array(FRAME_FLOATS);
+const instanceData = new Float32Array(4);
+const sunLength = Math.hypot(0.55, 0.82, 0.28);
+const sunX = 0.55 / sunLength;
+const sunY = 0.82 / sunLength;
+const sunZ = 0.28 / sunLength;
 
 let device;
 let context;
@@ -19,6 +27,7 @@ let quadBuffer;
 let instanceBuffer;
 let facingBuffer;
 let depthTexture;
+let depthView;
 let pipeline;
 let bindGroup;
 let catalog;
@@ -31,29 +40,29 @@ let distance = 4.1;
 let dragging = false;
 let previousPointer = null;
 let pipelineGeneration = 0;
+let lastFrameTime = -Infinity;
+let canvasSizeDirty = true;
+let cameraBufferDirty = true;
+let instanceBufferDirty = true;
 
 function setStatus(message, failed = false) {
   status.textContent = message;
   status.style.color = failed ? "#ef927f" : "";
 }
 
-function normalize([x, y, z]) {
-  const length = Math.hypot(x, y, z) || 1;
-  return [x / length, y / length, z / length];
-}
-
-function cross([ax, ay, az], [bx, by, bz]) {
-  return [ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx];
-}
-
-function writeVec4(array, index, values) {
-  array.set(values, index * 4);
+function writeVec4(array, index, x, y, z, w) {
+  const offset = index * 4;
+  array[offset] = x;
+  array[offset + 1] = y;
+  array[offset + 2] = z;
+  array[offset + 3] = w;
 }
 
 function resizeCanvas() {
-  const scale = Math.min(devicePixelRatio, 2);
-  const width = Math.max(1, Math.floor(canvas.clientWidth * scale));
-  const height = Math.max(1, Math.floor(canvas.clientHeight * scale));
+  if (!canvasSizeDirty) return false;
+  canvasSizeDirty = false;
+  const width = Math.max(1, Math.floor(canvas.clientWidth * RENDER_SCALE));
+  const height = Math.max(1, Math.floor(canvas.clientHeight * RENDER_SCALE));
   if (canvas.width === width && canvas.height === height) return false;
   canvas.width = width;
   canvas.height = height;
@@ -64,6 +73,8 @@ function resizeCanvas() {
     format: "depth32float",
     usage: GPUTextureUsage.RENDER_ATTACHMENT,
   });
+  depthView = depthTexture.createView();
+  cameraBufferDirty = true;
   return true;
 }
 
@@ -75,33 +86,51 @@ function updateBuffers() {
   const scale = stature();
   const center = selectedBody.centerHeight * scale;
   const radius = selectedBody.radius * scale;
-  device.queue.writeBuffer(instanceBuffer, 0, new Float32Array([0, center, 0, radius]));
+  if (instanceBufferDirty) {
+    instanceData[0] = 0;
+    instanceData[1] = center;
+    instanceData[2] = 0;
+    instanceData[3] = radius;
+    device.queue.writeBuffer(instanceBuffer, 0, instanceData);
+    instanceBufferDirty = false;
+  }
+  if (!cameraBufferDirty) return;
 
-  const target = [0, center, 0];
-  const camera = [
-    target[0] + Math.sin(yaw) * Math.cos(elevation) * distance,
-    target[1] + Math.sin(elevation) * distance,
-    target[2] + Math.cos(yaw) * Math.cos(elevation) * distance,
-  ];
-  const forward = normalize(target.map((value, index) => value - camera[index]));
-  const right = normalize(cross([0, 1, 0], forward));
-  const up = normalize(cross(forward, right));
+  const cosElevation = Math.cos(elevation);
+  const cameraX = Math.sin(yaw) * cosElevation * distance;
+  const cameraY = center + Math.sin(elevation) * distance;
+  const cameraZ = Math.cos(yaw) * cosElevation * distance;
+  let forwardX = -cameraX;
+  let forwardY = center - cameraY;
+  let forwardZ = -cameraZ;
+  const forwardLength = Math.hypot(forwardX, forwardY, forwardZ) || 1;
+  forwardX /= forwardLength;
+  forwardY /= forwardLength;
+  forwardZ /= forwardLength;
+  let rightX = forwardZ;
+  let rightZ = -forwardX;
+  const rightLength = Math.hypot(rightX, rightZ) || 1;
+  rightX /= rightLength;
+  rightZ /= rightLength;
+  const upX = forwardY * rightZ;
+  const upY = forwardZ * rightX - forwardX * rightZ;
+  const upZ = -forwardY * rightX;
   const near = 0.05;
   const far = 40;
   const focal = 1 / Math.tan((42 * Math.PI / 180) / 2);
-  const frame = new Float32Array(FRAME_FLOATS);
-  writeVec4(frame, 0, [...camera, 0]);
-  writeVec4(frame, 1, [...right, 0]);
-  writeVec4(frame, 2, [...up, 0]);
-  writeVec4(frame, 3, [...forward, 0]);
-  writeVec4(frame, 4, [focal / (canvas.width / canvas.height), focal,
-                       far / (far - near), (-far * near) / (far - near)]);
-  writeVec4(frame, 6, [...normalize([0.55, 0.82, 0.28]), 1]);
-  writeVec4(frame, 7, [2.0, 1.55, 1.15, 0.02]);
-  writeVec4(frame, 8, [0.20, 0.27, 0.34, canvas.height]);
-  writeVec4(frame, 9, [0.42, 0.33, 0.25, canvas.width]);
-  writeVec4(frame, 10, [0.13, 0.16, 0.19, 1]);
-  device.queue.writeBuffer(frameBuffer, 0, frame);
+  writeVec4(frameData, 0, cameraX, cameraY, cameraZ, 0);
+  writeVec4(frameData, 1, rightX, 0, rightZ, 0);
+  writeVec4(frameData, 2, upX, upY, upZ, 0);
+  writeVec4(frameData, 3, forwardX, forwardY, forwardZ, 0);
+  writeVec4(frameData, 4, focal / (canvas.width / canvas.height), focal,
+            far / (far - near), (-far * near) / (far - near));
+  writeVec4(frameData, 6, sunX, sunY, sunZ, 1);
+  writeVec4(frameData, 7, 2.0, 1.55, 1.15, 0.02);
+  writeVec4(frameData, 8, 0.20, 0.27, 0.34, canvas.height);
+  writeVec4(frameData, 9, 0.42, 0.33, 0.25, canvas.width);
+  writeVec4(frameData, 10, 0.13, 0.16, 0.19, 1);
+  device.queue.writeBuffer(frameBuffer, 0, frameData);
+  cameraBufferDirty = false;
 }
 
 function compilationMessages(info) {
@@ -186,7 +215,10 @@ async function rebuildPipeline() {
   setStatus(`${body.knobs.length} live shader knobs`);
 }
 
-function render() {
+function render(timestamp) {
+  requestAnimationFrame(render);
+  if (document.hidden || timestamp - lastFrameTime + 0.25 < FRAME_INTERVAL) return;
+  lastFrameTime = timestamp;
   resizeCanvas();
   if (pipeline && selectedBody) {
     updateBuffers();
@@ -199,7 +231,7 @@ function render() {
         storeOp: "store",
       }],
       depthStencilAttachment: {
-        view: depthTexture.createView(),
+        view: depthView,
         depthClearValue: 1,
         depthLoadOp: "clear",
         depthStoreOp: "discard",
@@ -214,7 +246,6 @@ function render() {
     pass.end();
     device.queue.submit([encoder.finish()]);
   }
-  requestAnimationFrame(render);
 }
 
 function formatValue(knob, value) {
@@ -251,6 +282,10 @@ function buildKnobs() {
       const value = Math.max(knob.minimum, Math.min(knob.maximum, snapped));
       input.value = value;
       currentValues.set(knob.name, value);
+      if (knob.name === selectedBody.statureKnob) {
+        instanceBufferDirty = true;
+        cameraBufferDirty = true;
+      }
       output.value = formatValue(knob, value);
       rebuildPipeline().catch(fail);
     });
@@ -269,6 +304,8 @@ function buildKnobs() {
 async function selectBody(body) {
   selectedBody = body;
   currentValues = new Map(body.knobs.map(knob => [knob.name, knob.default]));
+  instanceBufferDirty = true;
+  cameraBufferDirty = true;
   title.textContent = body.label;
   for (const button of picker.children) {
     button.setAttribute("aria-current", button.dataset.body === body.id ? "true" : "false");
@@ -340,12 +377,22 @@ canvas.addEventListener("pointermove", event => {
   elevation = Math.max(-0.5, Math.min(0.7,
     elevation + (event.clientY - previousPointer[1]) * 0.006));
   previousPointer = [event.clientX, event.clientY];
+  cameraBufferDirty = true;
 });
 canvas.addEventListener("pointerup", () => { dragging = false; });
 canvas.addEventListener("pointercancel", () => { dragging = false; });
 canvas.addEventListener("wheel", event => {
   event.preventDefault();
   distance = Math.max(2.0, Math.min(8.0, distance * Math.exp(event.deltaY * 0.001)));
+  cameraBufferDirty = true;
 }, { passive: false });
+
+new ResizeObserver(() => {
+  canvasSizeDirty = true;
+}).observe(canvas);
+
+document.addEventListener("visibilitychange", () => {
+  lastFrameTime = -Infinity;
+});
 
 start().catch(fail);

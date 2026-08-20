@@ -3518,36 +3518,54 @@ NIL leaves the character to the named definition; T is the historical
 (defun collect-shader-bindings (bindings statements)
   "Hoist inline-function lexical bindings in dependency order.
 
-The bindings remain typed objects owned by each SHADER-FUNCTION-CALL.  A flat
-entry-block order lets both SPIR-V and direct MSL lowering name their values
-without turning function definitions back into source-form substitution."
+The bindings remain typed objects owned by each SHADER-FUNCTION-CALL.  Values
+needed by the entry block are flattened there, while expressions inside a
+structured conditional remain owned by that arm so backends do not eagerly
+evaluate work which the condition excludes."
   (let ((seen (make-hash-table :test #'eq))
         (ordered nil))
-    (labels ((add-binding (binding)
-               (unless (gethash binding seen)
-                 (visit (shader-binding-expression binding))
+    (labels ((add-binding (binding hoist-p)
+               (unless (or (not hoist-p) (gethash binding seen))
+                 (visit (shader-binding-expression binding) hoist-p)
                  (setf (gethash binding seen) t)
                  (push binding ordered)))
-             (visit (expression)
+             (visit (expression hoist-p)
                (typecase expression
                  (shader-counted-fold
                   ;; COUNT and INITIAL belong to the preheader.  UPDATE owns
                   ;; its lexical work inside the loop body.
-                  (visit (lang:arithmetic-counted-fold-count expression))
-                  (visit (lang:arithmetic-counted-fold-initial expression)))
+                  (visit (lang:arithmetic-counted-fold-count expression) hoist-p)
+                  (visit (lang:arithmetic-counted-fold-initial expression) hoist-p))
                  (shader-function-call
-                  (mapc #'visit (shader-function-call-arguments expression))
-                  (dolist (binding (shader-function-call-bindings expression))
-                    (if (typep binding 'shader-function-parameter-binding)
-                        (visit (shader-binding-expression binding))
-                        (add-binding binding)))
-                  (visit (shader-function-call-result expression)))
+                  ;; A non-hoisted call is lowered where it occurs; its owned
+                  ;; bindings and any nested calls travel with it.
+                  (when hoist-p
+                    (dolist (argument
+                             (shader-function-call-arguments expression))
+                      (visit argument hoist-p))
+                    (dolist (binding (shader-function-call-bindings expression))
+                      (if (typep binding 'shader-function-parameter-binding)
+                          (visit (shader-binding-expression binding) hoist-p)
+                          (add-binding binding hoist-p)))
+                    (visit (shader-function-call-result expression) hoist-p)))
                  (t
-                  (mapc #'visit (shader-expression-children expression))))))
+                  (dolist (child (shader-expression-children expression))
+                    (visit child hoist-p)))))
+             (visit-statement (statement hoist-p)
+               (typecase statement
+                 (shader-conditional-statement
+                  (visit (shader-conditional-statement-condition statement)
+                         hoist-p)
+                  (dolist (child
+                           (shader-conditional-statement-statements statement))
+                    (visit-statement child nil)))
+                 (t
+                  (dolist (expression (shader-statement-expressions statement))
+                    (visit expression hoist-p))))))
       (dolist (binding bindings)
-        (add-binding binding))
+        (add-binding binding t))
       (dolist (statement statements)
-        (mapc #'visit (shader-statement-expressions statement))))
+        (visit-statement statement t)))
     (nreverse ordered)))
 
 (defun parse-workgroup-size (form options)

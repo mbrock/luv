@@ -47,6 +47,19 @@
                 (wgsl:wgsl-document-source gnome-fragment)))
     (ok (search "override knob_cat_stripe_strength: f32 = 0.72f;"
                 (wgsl:wgsl-document-source cat-fragment)))
+    (dolist (source (list (wgsl:wgsl-document-source gnome-fragment)
+                          (wgsl:wgsl-document-source cat-fragment)))
+      (ok (search "break;" source)))
+    (flet ((shading-follows-hit-guard (source marker)
+             (let ((guard (search "if ((coverage > 0.0f)) {" source))
+                   (shading (search marker source)))
+               (and guard shading (< guard shading)))))
+      (ok (shading-follows-hit-guard
+           (wgsl:wgsl-document-source gnome-fragment)
+           "let gnome_shaded_color"))
+      (ok (shading-follows-hit-guard
+           (wgsl:wgsl-document-source cat-fragment)
+           "let cat_shaded_color")))
     (let ((json (luvcraft.web:body-gallery-json bundles)))
       (ok (char= #\{ (char json 0)))
       (ok (search "\"statureKnob\":\"gnome-stature\"" json))
@@ -60,6 +73,8 @@
          (gallery (luvcraft.web:respond-to-web-request application "/bodies/"))
          (catalog (luvcraft.web:respond-to-web-request
                    application "/bodies/bodies.json"))
+         (gallery-js (luvcraft.web:respond-to-web-request
+                      application "/bodies/gallery.js"))
          (shader (luvcraft.web:respond-to-web-request
                   application "/bodies/body/gnome/fragment.wgsl"))
          (missing (luvcraft.web:respond-to-web-request application "/nope")))
@@ -71,6 +86,12 @@
                 (luvcraft.web:web-response-body gallery)))
     (ok (search "\"vertexUrl\":\"\\/bodies\\/body\\/gnome\\/vertex.wgsl\""
                 (luvcraft.web:web-response-body catalog)))
+    (ok (search "const FRAME_INTERVAL = 1000 / 60;"
+                (luvcraft.web:web-response-body gallery-js)))
+    (ok (search "const RENDER_SCALE = 1;"
+                (luvcraft.web:web-response-body gallery-js)))
+    (ok (search "if (!cameraBufferDirty) return;"
+                (luvcraft.web:web-response-body gallery-js)))
     (ok (search "@fragment" (luvcraft.web:web-response-body shader)))
     (ok (string= "404 Not Found"
                  (luvcraft.web:web-response-status missing)))))

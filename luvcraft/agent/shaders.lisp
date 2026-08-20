@@ -396,6 +396,37 @@ saturated primaries would read as a toy."
            (- 1.0 (smoothstep 0.0 0.035 (- skin (min distance-3 boots))))))
     (gnome-face-detail point color-4 skin-weight)))
 
+(define-shader-function gnome-shaded-color
+    (point ray sideways facing sun-direction sun-color ambient coverage)
+  "Shade one confirmed gnome surface hit.
+
+Keeping the expensive normal and material field evaluations behind the
+fragment statement's hit guard means conservative billboard misses pay only
+for the march, not another five whole-body field evaluations."
+  (let* ((local-normal (gnome-normal point))
+         (normal (+ (* sideways (swizzle local-normal :x))
+                    (+ (vec3 0.0 (swizzle local-normal :y) 0.0)
+                       (* facing (swizzle local-normal :z)))))
+         (albedo (gnome-albedo point))
+         (lambert (dot normal sun-direction))
+         (wrapped (max 0.0 (/ (+ lambert 0.35) 1.35)))
+         (sky (+ 0.55 (* 0.45 (swizzle normal :y))))
+         (occlusion (clamp (+ 0.35 (* 0.65 (smoothstep -0.15 0.35
+                                                       (swizzle point :y))))
+                           0.35 1.0))
+         (view-facing (max 0.0 (dot normal (* ray -1.0))))
+         (rim (expt (- 1.0 view-facing) 3.5))
+         (halfway (normalize (- sun-direction ray)))
+         (specular (* 0.12 (expt (max 0.0 (dot normal halfway)) 28.0)))
+         (illumination
+           (+ (* ambient (* sky occlusion))
+              (* sun-color (+ 0.12 (* wrapped 1.15)))))
+         (radiance
+           (+ (+ (* albedo illumination)
+                 (* sun-color (* specular coverage)))
+              (* (vec3 0.95 0.72 0.44) (* rim gnome-rim-light)))))
+    (vec4 (* radiance coverage) coverage)))
+
 ;;; ---------------------------------------------------------------------
 ;;; The pipeline stages
 
@@ -484,53 +515,46 @@ saturated primaries would read as a toy."
          (span (sqrt (max discriminant 0.0)))
          (entry (max (- half-way span) 0.0))
          (exit (+ half-way span))
-         (travel
-           (counted-fold (march 64.0 ray-distance entry)
-             (let* ((point (+ local-camera (* local-ray ray-distance)))
-                    (distance (gnome-distance point)))
-               (if (< distance 0.0009)
-                   ray-distance
-                   (if (> ray-distance exit)
-                       ray-distance
-                       ;; The hat's domain warp makes the field slightly
-                       ;; non-metric; a shortened step keeps the march honest.
-                       (+ ray-distance (max (* distance 0.85) 0.0009)))))))
+         (initial-point (+ local-camera (* local-ray entry)))
+         (initial-distance (gnome-distance initial-point))
+         (initial-state
+           (vec3 entry initial-distance
+                 (max (- 1.0 (step 0.0009 initial-distance))
+                      (step 0.000001 (- entry exit)))))
+         ;; Carry distance and termination explicitly. COUNTED-FOLD lowers
+         ;; :UNTIL to a real loop break on every backend, so hits and sphere
+         ;; exits no longer spend the rest of the fixed budget re-evaluating
+         ;; the whole body field.
+         (march-state
+           (counted-fold
+               (march 64.0 state initial-state
+                :until (> (swizzle state :z) 0.5))
+             (let* ((ray-distance (swizzle state :x))
+                    (distance (swizzle state :y))
+                    ;; The hat's domain warp makes the field slightly
+                    ;; non-metric; a shortened step keeps the march honest.
+                    (next-distance
+                      (+ ray-distance (max (* distance 0.85) 0.0009)))
+                    (next-point (+ local-camera (* local-ray next-distance)))
+                    (next-surface-distance (gnome-distance next-point)))
+               (vec3 next-distance next-surface-distance
+                     (max (- 1.0 (step 0.0009 next-surface-distance))
+                          (step 0.000001 (- next-distance exit)))))))
+         (travel (swizzle march-state :x))
          (point (+ local-camera (* local-ray travel)))
-         (surface-distance (gnome-distance point))
+         (surface-distance (swizzle march-state :y))
          (coverage (* (- 1.0 (step 0.0035 surface-distance))
-                      (- 1.0 (step 0.0 (- discriminant)))))
-         (local-normal (gnome-normal point))
-         (normal (+ (* sideways (swizzle local-normal :x))
-                    (+ (vec3 0.0 (swizzle local-normal :y) 0.0)
-                       (* facing (swizzle local-normal :z)))))
-         (albedo (gnome-albedo point))
-         (sun-direction (representation (swizzle sun-vector :xyz)))
-         (sun-color (representation (swizzle sun-color-vector :xyz)))
-         (ambient (representation (swizzle ambient-vector :xyz)))
-         ;; Wrapped diffuse: light bends a little past the terminator, which
-         ;; is what keeps a small round person from looking like a billiard
-         ;; ball with one hard shadow across the face.
-         (lambert (dot normal sun-direction))
-         (wrapped (max 0.0 (/ (+ lambert 0.35) 1.35)))
-         ;; The sky above contributes more to what points up at it.
-         (sky (+ 0.55 (* 0.45 (swizzle normal :y))))
-         ;; A crude ambient occlusion: what is low and inward is darker.
-         (occlusion (clamp (+ 0.35 (* 0.65 (smoothstep -0.15 0.35
-                                                       (swizzle point :y))))
-                           0.35 1.0))
-         (view-facing (max 0.0 (dot normal (* ray -1.0))))
-         (rim (expt (- 1.0 view-facing) 3.5))
-         (halfway (normalize (- sun-direction ray)))
-         (specular (* 0.12 (expt (max 0.0 (dot normal halfway)) 28.0)))
-         (illumination
-           (+ (* ambient (* sky occlusion))
-              (* sun-color (+ 0.12 (* wrapped 1.15)))))
-         (radiance
-           (+ (+ (* albedo illumination)
-                 (* sun-color (* specular coverage)))
-              ;; The rim is the mystery: a thin warm outline that separates
-              ;; him from whatever he is standing in front of.
-              (* (vec3 0.95 0.72 0.44) (* rim gnome-rim-light)))))
+                      (- 1.0 (step 0.0 (- discriminant))))))
     ;; The scene target uses premultiplied alpha.  Misses leave no rectangular
-    ;; trace of the conservative billboard.
-    (set-output color-output (vec4 (* radiance coverage) coverage))))
+    ;; trace of the conservative billboard. Set the cheap miss first; the
+    ;; structured WHEN keeps normal and albedo evaluation inside the hit arm.
+    (set-output color-output (vec4 0.0 0.0 0.0 0.0))
+    (when (> coverage 0.0)
+      (set-output
+       color-output
+       (gnome-shaded-color
+        point ray sideways facing
+        (representation (swizzle sun-vector :xyz))
+        (representation (swizzle sun-color-vector :xyz))
+        (representation (swizzle ambient-vector :xyz))
+        coverage)))))
