@@ -1750,7 +1750,7 @@
                '(:grass :dirt :stone :wood :leaves :sand :snow :crystal
                  :terminal :urbit :gravel :clay :mud :moss :cactus
                  :cobblestone :stone-bricks :bricks :planks :sandstone
-                 :slate :tape :fountain :lava-spring))))
+                 :slate :tape :fountain :lava-spring :flowers))))
   (let* ((world (make-block-world :chunk-width 2
                                   :chunk-height 2
                                   :chunk-depth 2))
