@@ -10,7 +10,7 @@ TRACY_MCCLIM_PAINT_TRACE ?= build/mcclim-paints.tracy
 
 FASL_CACHE := $(HOME)/.cache/common-lisp
 
-.PHONY: all luvcraft luft run test clean-fasls parinfer-check shader-validate msl-validate smoke vulkan-smoke metal-smoke metal-text-closeup metal-benchmark metal-streaming-benchmark tracy-streaming tracy-mcclim-roundrect tracy-mcclim-paints readme-screenshots mcclim-gallery wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw roundrect-proof slug-proof slug-text-proof clean
+.PHONY: all luvcraft luft run test capture showcase-bootstrap showcase-render showcase-deploy showcase-publish showcase-status clean-fasls parinfer-check shader-validate msl-validate smoke vulkan-smoke metal-smoke metal-text-closeup metal-benchmark metal-streaming-benchmark tracy-streaming tracy-mcclim-roundrect tracy-mcclim-paints readme-screenshots mcclim-gallery wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw roundrect-proof slug-proof slug-text-proof clean
 
 all: luvcraft luft
 
@@ -25,6 +25,24 @@ run: luvcraft
 
 test: parinfer-check shader-validate
 	@./scripts/dev sbcl --noinform --non-interactive --load scripts/test.lisp
+
+capture:
+	./scripts/captures render
+
+showcase-bootstrap:
+	./scripts/showcase bootstrap
+
+showcase-render:
+	./scripts/showcase render
+
+showcase-deploy:
+	./scripts/showcase deploy
+
+showcase-publish:
+	./scripts/showcase publish
+
+showcase-status:
+	./scripts/showcase status
 
 parinfer-check:
 	@./scripts/dev sh -c 'tmp=$$(mktemp); trap "rm -f $$tmp" EXIT; if ! ./sly parinfer --batch --strict --check $$(rg --files -g"*.lisp") >"$$tmp" 2>&1; then cat "$$tmp"; exit 1; fi; echo "parinfer: strict check passed."'

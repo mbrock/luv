@@ -1,0 +1,300 @@
+#!/bin/sh
+# Render the reproducible showcase on chapel and publish its annexed media on
+# swa.  Host and checkout names are boring environment configuration; capture
+# recipes and media identity remain in Lisp and the showcase-media branch.
+
+set -eu
+
+render_host=${LUV_SHOWCASE_RENDER_HOST:-chapel}
+render_checkout=${LUV_SHOWCASE_RENDER_CHECKOUT:-luv-showcase}
+render_media_checkout=${LUV_SHOWCASE_RENDER_MEDIA_CHECKOUT:-luv-showcase-media}
+web_host=${LUV_SHOWCASE_WEB_HOST:-swa}
+web_checkout=${LUV_SHOWCASE_WEB_CHECKOUT:-/srv/luv}
+web_media_checkout=${LUV_SHOWCASE_WEB_MEDIA_CHECKOUT:-/var/www/luv/showcase}
+web_service=${LUV_SHOWCASE_WEB_SERVICE:-luvcraft-web.service}
+repository=${LUV_SHOWCASE_REPOSITORY:-git@github.com:mbrock/luv}
+media_branch=${LUV_SHOWCASE_MEDIA_BRANCH:-showcase-media}
+
+usage() {
+  printf '%s\n' \
+    'Usage: scripts/showcase bootstrap|render|deploy|publish|status' \
+    '' \
+    '  bootstrap  create/update the source and annex checkouts on chapel and swa' \
+    '  render     fast-forward chapel, render every recipe, annex, commit, and push' \
+    '  deploy     fast-forward swa, get annex content from chapel, restart, and check' \
+    '  publish    bootstrap, render, then deploy' \
+    '  status     show source, media, annex, service, and public HTTP state'
+}
+
+valid_host() {
+  case "$1" in
+    ''|*[!A-Za-z0-9._-]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+valid_host "$render_host" || { echo "Invalid render host: $render_host" >&2; exit 2; }
+valid_host "$web_host" || { echo "Invalid web host: $web_host" >&2; exit 2; }
+
+ssh_run() {
+  host=$1
+  shift
+  echo "showcase: connecting to $host"
+  ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" sh -s -- "$@"
+}
+
+bootstrap_render() {
+  ssh_run "$render_host" "$render_checkout" "$render_media_checkout" \
+    "$repository" "$media_branch" <<'REMOTE'
+set -eu
+source_checkout=$1
+media_checkout=$2
+repository=$3
+media_branch=$4
+case "$source_checkout" in /*) ;; *) source_checkout=$HOME/$source_checkout ;; esac
+case "$media_checkout" in /*) ;; *) media_checkout=$HOME/$media_checkout ;; esac
+
+echo "showcase: chapel source $source_checkout"
+if [ ! -d "$source_checkout/.git" ]; then
+  git clone --progress "$repository" "$source_checkout"
+fi
+test -z "$(git -C "$source_checkout" status --porcelain)" || {
+  echo "showcase: refusing dirty chapel source checkout" >&2
+  git -C "$source_checkout" status --short >&2
+  exit 1
+}
+git -C "$source_checkout" fetch --progress origin main
+git -C "$source_checkout" switch main
+git -C "$source_checkout" merge --ff-only origin/main
+
+echo "showcase: chapel media $media_checkout"
+if [ ! -d "$media_checkout/.git" ]; then
+  if git ls-remote --exit-code --heads "$repository" "refs/heads/$media_branch" >/dev/null 2>&1; then
+    git clone --progress --branch "$media_branch" "$repository" "$media_checkout"
+  else
+    git clone --progress --no-checkout "$repository" "$media_checkout"
+    git -C "$media_checkout" checkout --orphan "$media_branch"
+    git -C "$media_checkout" rm -rf --cached . >/dev/null 2>&1 || true
+    printf '%s\n' \
+      'media/** annex.largefiles=anything' \
+      'media/manifest.sexp annex.largefiles=nothing' \
+      >"$media_checkout/.gitattributes"
+    git -C "$media_checkout" add .gitattributes
+    git -C "$media_checkout" commit -m 'Initialize showcase media branch'
+    git -C "$media_checkout" push -u origin "$media_branch"
+  fi
+fi
+nix develop --verbose -L "$source_checkout" --no-write-lock-file -c \
+  git -C "$media_checkout" annex init "chapel showcase renderer"
+echo "showcase: chapel bootstrap complete"
+REMOTE
+}
+
+bootstrap_web() {
+  ssh_run "$web_host" "$web_checkout" "$web_media_checkout" "$repository" \
+    "$media_branch" "$render_host" "$render_media_checkout" <<'REMOTE'
+set -eu
+source_checkout=$1
+media_checkout=$2
+repository=$3
+media_branch=$4
+render_host=$5
+render_media_checkout=$6
+case "$source_checkout" in /*) ;; *) source_checkout=$HOME/$source_checkout ;; esac
+case "$media_checkout" in /*) ;; *) media_checkout=$HOME/$media_checkout ;; esac
+case "$render_media_checkout" in /*) ;; *) render_media_checkout=$HOME/$render_media_checkout ;; esac
+
+echo "showcase: swa source $source_checkout"
+test -d "$source_checkout/.git" || git clone --progress "$repository" "$source_checkout"
+test -z "$(git -C "$source_checkout" status --porcelain)" || {
+  echo "showcase: refusing dirty swa source checkout" >&2
+  git -C "$source_checkout" status --short >&2
+  exit 1
+}
+git -C "$source_checkout" fetch --progress origin main
+git -C "$source_checkout" switch main
+git -C "$source_checkout" merge --ff-only origin/main
+if [ "$source_checkout" = /srv/luv ] \
+   && [ "$media_checkout" = /var/www/luv/showcase ]; then
+  echo "showcase: installing the checked-in web service"
+  sudo install -m 0644 "$source_checkout/deploy/luvcraft-web.service" \
+    /etc/systemd/system/luvcraft-web.service
+  sudo systemctl daemon-reload
+else
+  echo "showcase: custom swa paths leave service installation to local configuration"
+fi
+
+echo "showcase: swa media $media_checkout"
+if [ ! -d "$media_checkout/.git" ]; then
+  git clone --progress --branch "$media_branch" "$repository" "$media_checkout"
+fi
+nix develop --verbose -L "$source_checkout" --no-write-lock-file -c \
+  git -C "$media_checkout" annex init "swa showcase web"
+if git -C "$media_checkout" remote get-url chapel >/dev/null 2>&1; then
+  git -C "$media_checkout" remote set-url chapel \
+    "$render_host:$render_media_checkout"
+else
+  git -C "$media_checkout" remote add chapel \
+    "$render_host:$render_media_checkout"
+fi
+ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 \
+  "$render_host" true </dev/null
+echo "showcase: swa bootstrap complete"
+REMOTE
+}
+
+render() {
+  ssh_run "$render_host" "$render_checkout" "$render_media_checkout" \
+    "$media_branch" <<'REMOTE'
+set -eu
+source_checkout=$1
+media_checkout=$2
+media_branch=$3
+case "$source_checkout" in /*) ;; *) source_checkout=$HOME/$source_checkout ;; esac
+case "$media_checkout" in /*) ;; *) media_checkout=$HOME/$media_checkout ;; esac
+test -d "$source_checkout/.git" || { echo "showcase: run bootstrap first" >&2; exit 1; }
+test -d "$media_checkout/.git" || { echo "showcase: run bootstrap first" >&2; exit 1; }
+
+echo "showcase: fast-forwarding chapel source"
+test -z "$(git -C "$source_checkout" status --porcelain)" || {
+  echo "showcase: refusing dirty chapel source checkout" >&2
+  git -C "$source_checkout" status --short >&2
+  exit 1
+}
+git -C "$source_checkout" fetch --progress origin main
+git -C "$source_checkout" switch main
+git -C "$source_checkout" merge --ff-only origin/main
+
+echo "showcase: fast-forwarding chapel media metadata"
+test -z "$(git -C "$media_checkout" status --porcelain)" || {
+  echo "showcase: refusing dirty chapel media checkout" >&2
+  git -C "$media_checkout" status --short >&2
+  exit 1
+}
+git -C "$media_checkout" fetch --progress origin "$media_branch" git-annex ||
+  git -C "$media_checkout" fetch --progress origin "$media_branch"
+git -C "$media_checkout" switch "$media_branch"
+git -C "$media_checkout" merge --ff-only "origin/$media_branch"
+
+revision=$(git -C "$source_checkout" rev-parse --short=12 HEAD)
+echo "showcase: rendering source $revision on chapel"
+LUV_CAPTURE_OUTPUT_DIRECTORY="$media_checkout/media" \
+  nix develop --verbose -L "$source_checkout" --no-write-lock-file -c \
+    make -C "$source_checkout" capture
+
+echo "showcase: annexing rendered media"
+nix develop --verbose -L "$source_checkout" --no-write-lock-file -c \
+  git -C "$media_checkout" annex add media
+git -C "$media_checkout" add media/manifest.sexp
+if test -n "$(git -C "$media_checkout" status --porcelain)"; then
+  git -C "$media_checkout" commit -m "Capture showcase at $revision"
+else
+  echo "showcase: rendered media is unchanged"
+fi
+git -C "$media_checkout" push --progress origin "$media_branch" git-annex
+echo "showcase: chapel render published"
+REMOTE
+}
+
+deploy() {
+  ssh_run "$web_host" "$web_checkout" "$web_media_checkout" "$media_branch" \
+    "$web_service" <<'REMOTE'
+set -eu
+source_checkout=$1
+media_checkout=$2
+media_branch=$3
+web_service=$4
+case "$source_checkout" in /*) ;; *) source_checkout=$HOME/$source_checkout ;; esac
+case "$media_checkout" in /*) ;; *) media_checkout=$HOME/$media_checkout ;; esac
+test -d "$source_checkout/.git" || { echo "showcase: run bootstrap first" >&2; exit 1; }
+test -d "$media_checkout/.git" || { echo "showcase: run bootstrap first" >&2; exit 1; }
+
+echo "showcase: fast-forwarding swa source"
+test -z "$(git -C "$source_checkout" status --porcelain)" || {
+  echo "showcase: refusing dirty swa source checkout" >&2
+  git -C "$source_checkout" status --short >&2
+  exit 1
+}
+git -C "$source_checkout" fetch --progress origin main
+git -C "$source_checkout" switch main
+git -C "$source_checkout" merge --ff-only origin/main
+
+echo "showcase: fast-forwarding swa media metadata"
+test -z "$(git -C "$media_checkout" status --porcelain)" || {
+  echo "showcase: refusing dirty swa media checkout" >&2
+  git -C "$media_checkout" status --short >&2
+  exit 1
+}
+git -C "$media_checkout" fetch --progress origin "$media_branch" git-annex
+git -C "$media_checkout" switch "$media_branch"
+git -C "$media_checkout" merge --ff-only "origin/$media_branch"
+git -C "$media_checkout" fetch --progress chapel git-annex
+nix develop --verbose -L "$source_checkout" --no-write-lock-file -c \
+  git -C "$media_checkout" annex get --from chapel media
+
+missing=$(nix develop --verbose "$source_checkout" --no-write-lock-file -c \
+  git -C "$media_checkout" annex find --not --in here media)
+test -z "$missing" || {
+  echo "showcase: annex content still missing:" >&2
+  printf '%s\n' "$missing" >&2
+  exit 1
+}
+
+echo "showcase: warming the web application"
+nix develop --verbose -L "$source_checkout" --no-write-lock-file -c \
+  "$source_checkout/scripts/luv" help
+echo "showcase: restarting $web_service"
+sudo systemctl restart "$web_service"
+for attempt in $(seq 1 30); do
+  echo "showcase: health check $attempt/30"
+  if curl --fail --silent --show-error --max-time 2 \
+      http://127.0.0.1:8765/healthz; then
+    echo "showcase: swa deployment healthy"
+    exit 0
+  fi
+done
+sudo systemctl status --no-pager "$web_service" || true
+exit 1
+REMOTE
+}
+
+status() {
+  ssh_run "$render_host" "$render_checkout" "$render_media_checkout" <<'REMOTE'
+set -eu
+source_checkout=$1
+media_checkout=$2
+case "$source_checkout" in /*) ;; *) source_checkout=$HOME/$source_checkout ;; esac
+case "$media_checkout" in /*) ;; *) media_checkout=$HOME/$media_checkout ;; esac
+echo "chapel source: $source_checkout"
+git -C "$source_checkout" status --short --branch
+echo "chapel media: $media_checkout"
+git -C "$media_checkout" status --short --branch
+test -f "$media_checkout/media/manifest.sexp" && sed -n '1,12p' "$media_checkout/media/manifest.sexp"
+REMOTE
+  ssh_run "$web_host" "$web_checkout" "$web_media_checkout" "$web_service" <<'REMOTE'
+set -eu
+source_checkout=$1
+media_checkout=$2
+web_service=$3
+case "$source_checkout" in /*) ;; *) source_checkout=$HOME/$source_checkout ;; esac
+case "$media_checkout" in /*) ;; *) media_checkout=$HOME/$media_checkout ;; esac
+echo "swa source: $source_checkout"
+git -C "$source_checkout" status --short --branch
+echo "swa media: $media_checkout"
+git -C "$media_checkout" status --short --branch
+systemctl is-active "$web_service"
+curl --fail --silent --show-error https://luv.swa.sh/showcase/ >/dev/null
+echo "public showcase: healthy"
+REMOTE
+}
+
+command=${1:-}
+case "$command" in
+  bootstrap) bootstrap_render; bootstrap_web ;;
+  render) render ;;
+  deploy) deploy ;;
+  publish) bootstrap_render; bootstrap_web; render; deploy ;;
+  status) status ;;
+  help|-h|--help) usage ;;
+  *) usage >&2; exit 2 ;;
+esac

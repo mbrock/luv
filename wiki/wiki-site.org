@@ -93,14 +93,12 @@ recipe, kind, and filename.  =scripts/captures list= discovers the set and
 announce progress because shader compilation, readback, and video encoding are
 real GPU work, not a reason for a silent build.
 
-Execution placement is deliberately outside this graph.  A GPU worker may run
-the same command through SSH, CI, or a future queue; its hostname and checkout
-path are deployment configuration, never recipe data.  Likewise Git annex is
-one possible publication cache, not part of capture identity: an annex pointer
-alone cannot serve a browser, so deployment would still have to fetch and copy
-the content.  Object storage, release assets, annex, and retention policy can
-be compared after the local build and transclusion contract has produced real
-artifacts.
+Execution placement is deliberately outside this graph.  A GPU worker runs the
+same command through SSH, but its hostname and checkout path are deployment
+configuration, never recipe data.  Git annex is likewise a publication cache,
+not part of capture identity: the web host explicitly obtains each annexed
+file before Caddy serves it.  A pointer alone is never mistaken for a browser
+artifact.
 
 * DONE Make wiki media executable without committing it
 :PROPERTIES:
@@ -121,7 +119,7 @@ the generated manifest binds both artifacts to their source revision.
 the wiki can show both media kinds without tracking their bytes, and no source
 file names a GPU host.
 
-* IDEA Publish generated media out of band
+* NEXT Publish generated media out of band
 :PROPERTIES:
 :ID: 0BGP3P
 :END:
@@ -131,13 +129,48 @@ growing the ordinary source clone, and run expensive recipes on a configured
 GPU executor.
 
 /Evidence./ The local contract in #IVRWI8 supplies deterministic paths and a
-source-revision manifest.  What remains is operational evidence comparing an
-annex-backed deployment fetch, object storage, and release artifacts, including
-cache invalidation, retention, and Pages URLs.
+source-revision manifest.  =scripts/showcase= now gives that contract an
+ordinary two-machine deployment:
 
-/Done when./ A clean non-GPU site build can obtain the manifest and referenced
-media, a configured remote executor can publish them without repository host
-names, and pruning policy cannot break still-linked historical figures.
+#+begin_example
+origin/main -> chapel:~/luv-showcase          -> capture recipes
+                 |                              |
+                 `-> ~/luv-showcase-media      -> annex content
+                                  |                |
+                                  `----------> swa:/var/www/luv/showcase
+origin/main --------------------------------> swa:/srv/luv
+#+end_example
+
+The separate =showcase-media= branch contains tiny annex pointers and the
+plain-text manifest, so normal source history stays light.  Chapel is the
+authoritative annex content store.  SWA fast-forwards both branches, obtains
+the bytes directly from Chapel, verifies that no referenced artifact is
+missing, and only then restarts the web service.  Caddy's existing =/video/=
+static route exposes those files while the Lisp web application reads the
+manifest and renders =/showcase/=.  This split keeps byte serving out of the
+character-oriented HTTP implementation.
+
+The common tailnet layout is deliberately boring and recorded as overrideable
+=.envrc= defaults: hosts =chapel= and =swa=, source checkouts
+=~/luv-showcase= and =/srv/luv=, and media checkouts
+=~/luv-showcase-media= and =/var/www/luv/showcase=.  A differently named host
+or checkout only needs the corresponding =LUV_SHOWCASE_*= environment value.
+The whole trip is:
+
+#+begin_src sh
+make showcase-publish
+#+end_src
+
+For diagnosis or iteration, =showcase-bootstrap= establishes clones and annex
+remotes, =showcase-render= only captures and publishes media,
+=showcase-deploy= only obtains it and restarts the service, and
+=showcase-status= reports both machines and the public page.  Each remote
+checkout must be clean and can advance only by fast-forward; a human edit on a
+deployment machine stops publication instead of being overwritten.
+
+/Done when./ The public showcase has been exercised end to end, including real
+image and video responses, and the remaining retention question has an answer:
+which historical annex keys remain reachable when recipes or figures change.
 
 * The Org subset the reader understands
 :PROPERTIES:

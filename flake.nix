@@ -330,6 +330,7 @@
               env.ffmpeg
               env.ffmpeg.dev
               env.pkgs.go
+              env.pkgs.git-annex
               env.mupdf
               env.libghosttyVt
               env.pkgs.libffi

@@ -125,6 +125,7 @@
   :serial t
   :components ((:file "luvcraft/web-package")
                (:file "luvcraft/web-server")
+               (:file "luvcraft/showcase")
                (:file "luvcraft/body-gallery")
                (:static-file "luvcraft/web/body-gallery.html")
                (:static-file "luvcraft/web/body-gallery.css")

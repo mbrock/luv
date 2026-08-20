@@ -65,33 +65,74 @@
       (ok (search "\"statureKnob\":\"gnome-stature\"" json))
       (ok (search "\"identifier\":\"knob_cat_tail_reach\"" json)))))
 
-(deftest luvcraft-web-mounts-the-body-gallery-as-one-page
-  (let* ((bundles (luvcraft.web:compile-body-gallery))
-         (application (luvcraft.web:make-luvcraft-web-application
-                       :bundles bundles))
-         (index (luvcraft.web:respond-to-web-request application "/"))
-         (gallery (luvcraft.web:respond-to-web-request application "/bodies/"))
-         (catalog (luvcraft.web:respond-to-web-request
-                   application "/bodies/bodies.json"))
-         (gallery-js (luvcraft.web:respond-to-web-request
-                      application "/bodies/gallery.js"))
-         (shader (luvcraft.web:respond-to-web-request
-                  application "/bodies/body/gnome/fragment.wgsl"))
-         (missing (luvcraft.web:respond-to-web-request application "/nope")))
-    (ok (string= "200 OK" (luvcraft.web:web-response-status index)))
-    (ok (search "href=\"/bodies/\""
-                (luvcraft.web:web-response-body index)))
-    (ok (string= "200 OK" (luvcraft.web:web-response-status gallery)))
-    (ok (search "/bodies/gallery.js"
-                (luvcraft.web:web-response-body gallery)))
-    (ok (search "\"vertexUrl\":\"\\/bodies\\/body\\/gnome\\/vertex.wgsl\""
-                (luvcraft.web:web-response-body catalog)))
-    (ok (search "const FRAME_INTERVAL = 1000 / 60;"
-                (luvcraft.web:web-response-body gallery-js)))
-    (ok (search "const RENDER_SCALE = 1;"
-                (luvcraft.web:web-response-body gallery-js)))
-    (ok (search "if (!cameraBufferDirty) return;"
-                (luvcraft.web:web-response-body gallery-js)))
-    (ok (search "@fragment" (luvcraft.web:web-response-body shader)))
-    (ok (string= "404 Not Found"
-                 (luvcraft.web:web-response-status missing)))))
+(deftest luvcraft-web-mounts-its-semantic-pages
+  (let ((directory
+          (uiop:ensure-directory-pathname
+           (merge-pathnames "luvcraft-showcase-test/"
+                            (uiop:temporary-directory)))))
+    (unwind-protect
+         (progn
+           (ensure-directories-exist directory)
+           (with-open-file (stream (merge-pathnames "manifest.sexp" directory)
+                                   :direction :output :if-exists :supersede)
+             (write '(:version 1 :source-revision "abc123def456"
+                      :captures
+                      ((:name "proposal-still" :figure "Y7X7WK"
+                        :kind :image :file "Y7X7WK-proposal-still.png")
+                       (:name "proposal-orbit" :figure "Y7X7WK"
+                        :kind :video :file "Y7X7WK-proposal-orbit.mp4")))
+                    :stream stream))
+           (let* ((bundles (luvcraft.web:compile-body-gallery))
+                  (application
+                    (luvcraft.web:make-luvcraft-web-application
+                     :bundles bundles :showcase-directory directory))
+                  (index
+                    (luvcraft.web:respond-to-web-request application "/"))
+                  (gallery
+                    (luvcraft.web:respond-to-web-request
+                     application "/bodies/"))
+                  (showcase
+                    (luvcraft.web:respond-to-web-request
+                     application "/showcase/"))
+                  (catalog
+                    (luvcraft.web:respond-to-web-request
+                     application "/bodies/bodies.json"))
+                  (gallery-js
+                    (luvcraft.web:respond-to-web-request
+                     application "/bodies/gallery.js"))
+                  (shader
+                    (luvcraft.web:respond-to-web-request
+                     application "/bodies/body/gnome/fragment.wgsl"))
+                  (missing
+                    (luvcraft.web:respond-to-web-request application "/nope")))
+             (ok (string= "200 OK"
+                          (luvcraft.web:web-response-status index)))
+             (ok (search "href=\"/bodies/\""
+                         (luvcraft.web:web-response-body index)))
+             (ok (search "href=\"/showcase/\""
+                         (luvcraft.web:web-response-body index)))
+             (ok (string= "200 OK"
+                          (luvcraft.web:web-response-status gallery)))
+             (ok (search "/bodies/gallery.js"
+                         (luvcraft.web:web-response-body gallery)))
+             (ok (search
+                  "\"vertexUrl\":\"\\/bodies\\/body\\/gnome\\/vertex.wgsl\""
+                  (luvcraft.web:web-response-body catalog)))
+             (ok (search "const FRAME_INTERVAL = 1000 / 60;"
+                         (luvcraft.web:web-response-body gallery-js)))
+             (ok (search "const RENDER_SCALE = 1;"
+                         (luvcraft.web:web-response-body gallery-js)))
+             (ok (search "if (!cameraBufferDirty) return;"
+                         (luvcraft.web:web-response-body gallery-js)))
+             (ok (search "@fragment"
+                         (luvcraft.web:web-response-body shader)))
+             (ok (search "/showcase/media/Y7X7WK-proposal-still.png"
+                         (luvcraft.web:web-response-body showcase)))
+             (ok (search "/showcase/media/Y7X7WK-proposal-orbit.mp4"
+                         (luvcraft.web:web-response-body showcase)))
+             (ok (search "abc123def456"
+                         (luvcraft.web:web-response-body showcase)))
+             (ok (string= "404 Not Found"
+                          (luvcraft.web:web-response-status missing)))))
+      (uiop:delete-directory-tree directory :validate t
+                                            :if-does-not-exist :ignore))))

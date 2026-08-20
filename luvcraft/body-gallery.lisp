@@ -169,12 +169,13 @@
                (ok-response "text/wgsl; charset=utf-8" source)
                (call-next-method))))))
 
-(defun make-luvcraft-web-application (&key bundles)
+(defun make-luvcraft-web-application (&key bundles showcase-directory)
   "Build the luvcraft web application and its currently installed pages."
   (make-web-application
    (if bundles
        (make-body-gallery-page bundles)
-       (make-body-gallery-page))))
+       (make-body-gallery-page))
+   (make-showcase-page :directory showcase-directory)))
 
 (defun serve-luvcraft-web (&key (host "127.0.0.1") (port 8765))
   "Compile the web-facing artifacts once, then serve luvcraft until stopped."

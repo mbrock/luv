@@ -29,5 +29,8 @@
            #:body-gallery-bundle-fragment
            #:compile-body-gallery
            #:body-gallery-json
+           #:showcase-page
+           #:showcase-page-directory
+           #:make-showcase-page
            #:make-luvcraft-web-application
            #:serve-luvcraft-web))
