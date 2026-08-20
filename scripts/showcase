@@ -70,11 +70,13 @@ git -C "$source_checkout" merge --ff-only origin/main
 echo "showcase: chapel media $media_checkout"
 if [ ! -d "$media_checkout/.git" ]; then
   if git ls-remote --exit-code --heads "$repository" "refs/heads/$media_branch" >/dev/null 2>&1; then
-    git clone --progress --branch "$media_branch" "$repository" "$media_checkout"
+    git clone --progress --single-branch --branch "$media_branch" \
+      "$repository" "$media_checkout"
   else
-    git clone --progress --no-checkout "$repository" "$media_checkout"
+    mkdir -p "$media_checkout"
+    git -C "$media_checkout" init
+    git -C "$media_checkout" remote add origin "$repository"
     git -C "$media_checkout" checkout --orphan "$media_branch"
-    git -C "$media_checkout" rm -rf --cached . >/dev/null 2>&1 || true
     printf '%s\n' \
       'media/** annex.largefiles=anything' \
       'media/manifest.sexp annex.largefiles=nothing' \
@@ -126,7 +128,8 @@ fi
 
 echo "showcase: swa media $media_checkout"
 if [ ! -d "$media_checkout/.git" ]; then
-  git clone --progress --branch "$media_branch" "$repository" "$media_checkout"
+  git clone --progress --single-branch --branch "$media_branch" \
+    "$repository" "$media_checkout"
 fi
 nix develop --verbose -L "$source_checkout" --no-write-lock-file -c \
   git -C "$media_checkout" annex init "swa showcase web"
