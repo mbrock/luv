@@ -160,7 +160,6 @@ annex_bin=$(nix develop --verbose -L "$source_checkout" --no-write-lock-file \
   -c sh -c 'dirname "$(command -v git-annex)"')
 PATH=$annex_bin:$PATH
 export PATH
-git -C "$media_checkout" annex init "swa showcase web"
 if git -C "$media_checkout" remote get-url chapel >/dev/null 2>&1; then
   git -C "$media_checkout" remote set-url chapel \
     "$render_host:$render_media_checkout"
@@ -171,6 +170,7 @@ fi
 git -C "$media_checkout" config remote.chapel.annex-shell \
   "$chapel_annex_shell"
 git -C "$media_checkout" config --unset-all remote.chapel.annex-ignore || true
+git -C "$media_checkout" annex init "swa showcase web"
 ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 \
   "$render_host" true </dev/null
 git -C "$media_checkout" annex enableremote chapel
@@ -297,15 +297,15 @@ nix develop --verbose -L "$source_checkout" --no-write-lock-file -c \
   "$source_checkout/scripts/luv" help
 echo "showcase: restarting $web_service"
 sudo systemctl restart "$web_service"
-for attempt in $(seq 1 30); do
-  echo "showcase: health check $attempt/30"
-  if curl --fail --silent --show-error --max-time 2 \
-      http://127.0.0.1:8765/healthz; then
-    echo "showcase: swa deployment healthy"
-    exit 0
-  fi
-done
+echo "showcase: waiting up to 30 seconds for the listener"
+if curl --fail --show-error --verbose --connect-timeout 2 --max-time 2 \
+    --retry 30 --retry-all-errors --retry-delay 1 --retry-max-time 30 \
+    http://127.0.0.1:8765/healthz; then
+  echo "showcase: swa deployment healthy"
+  exit 0
+fi
 sudo systemctl status --no-pager "$web_service" || true
+sudo journalctl -u "$web_service" -n 40 --no-pager || true
 exit 1
 REMOTE
 }
