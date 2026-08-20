@@ -90,6 +90,7 @@
                  (:file "phone")
                  (:file "tape")
                  (:file "capture")
+                 (:file "film")
                  (:file "mirror" :if-feature :darwin)
                  (:file "portal" :if-feature :darwin)
                  (:file "portal-server" :if-feature :darwin)

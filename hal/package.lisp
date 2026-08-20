@@ -643,4 +643,6 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:render-metal-slug-glyph
            #:render-metal-slug-text
            #:write-rgba-png
+           #:call-with-video-encoder
+           #:with-video-encoder
            #:close-canvas))

@@ -239,6 +239,7 @@ offsets and of headers."
      (:file "gpu")
      (:file "canvas")
      (:file "png")
+     (:file "video")
      (:module "vulkan-core"
       :pathname "vulkan"
       :serial t

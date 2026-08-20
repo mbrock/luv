@@ -88,7 +88,10 @@ each post, and a bouquet crowding the roof finial."
                       :hue (float (/ index count)))))
 
 (defun celebrate-birthday (&key name age fullscreen-p
-                                (provider luv:*gpu-provider*))
+                                (provider luv:*gpu-provider*)
+                                (visible-p t) width height
+                                (frames-per-second 60)
+                                (register-p t))
   "Throw the party: open the birthday meadow and decorate it.
 
 Loads or creates the party world under its own save file, raises the gazebo,
@@ -96,11 +99,14 @@ ties on the balloons, calls in the gnomes, scatters the funny balls, hangs
 the greeting in the air, pins the sky at dusk, and starts the fireworks.
 Returns the session; LUVCRAFT:STOP-PLAYING ends the party and saves it.
 
-NAME and AGE default by machine: see HONOREE-FOR-HOST."
+NAME and AGE default by machine: see HONOREE-FOR-HOST.  A film or capture
+passes :VISIBLE-P NIL, its exact :WIDTH and :HEIGHT, :FRAMES-PER-SECOND NIL,
+and :REGISTER-P NIL so the hidden party neither displaces nor becomes the
+interactive *SESSION*."
   (multiple-value-bind (host-name host-age) (party-honoree)
     (unless name (setf name host-name))
     (unless age (setf age host-age)))
-  (when luvcraft:*session*
+  (when (and register-p luvcraft:*session*)
     (luvcraft:stop-playing))
   (let ((pathname (birthday-world-pathname name)))
     (multiple-value-bind (world resume-description)
@@ -143,6 +149,8 @@ NAME and AGE default by machine: see HONOREE-FOR-HOST."
                                        name)
                         :world world :camera camera :player player
                         :fullscreen-p fullscreen-p
+                        :visible-p visible-p :width width :height height
+                        :frames-per-second frames-per-second
                         :checkpoint-writer writer))
               (unless session
                 (luvcraft::stop-world-checkpoint-writer writer)))
@@ -170,9 +178,47 @@ NAME and AGE default by machine: see HONOREE-FOR-HOST."
               (add-birthday-fireworks session
                                       :origin (list (+ x 3.0) 24.0
                                                     (+ z 20.0))))
-            (setf luvcraft::*checkpoint-writer* writer
-                  luvcraft:*session* session)
+            (when register-p
+              (setf luvcraft::*checkpoint-writer* writer
+                    luvcraft:*session* session))
             session))))))
+
+(defun film-birthday-party (pathname
+                            &key name age (seconds 12) (frame-rate 30)
+                                 (width 1280) (height 720)
+                                 (sweep 0.9) (lift 2.5)
+                                 (provider luv:*gpu-provider*))
+  "Film the birthday party into an MP4 at PATHNAME and return it.
+
+A hidden party session plays for SECONDS of real time while the camera
+swings SWEEP radians around the gazebo from the spawn vantage, rising LIFT
+cells and tilting up toward the bursts -- the fireworks open in the sky
+above the marquee, just over the spawn framing's top edge -- so the
+marquee, balloons, gnomes, and fireworks all pass through frame at their
+true animation speed."
+  (let ((session (celebrate-birthday
+                  :name name :age age :provider provider
+                  :visible-p nil :width width :height height
+                  :frames-per-second nil :register-p nil)))
+    (unwind-protect
+         (let* ((camera (luvcraft:luvcraft-session-camera session))
+                (radius 23.0d0)
+                (base-y (luvcraft:camera-y camera))
+                (frame-count (max 1 (round (* seconds frame-rate)))))
+           (luvcraft:film-luvcraft-session
+            session pathname
+            :seconds seconds :frame-rate frame-rate
+            :before-frame
+            (lambda (frame)
+              (let* ((progress (/ (float frame 1.0d0) frame-count))
+                     (angle (* sweep (- progress 0.5d0))))
+                (setf (luvcraft:camera-x camera) (- (* radius (sin angle)))
+                      (luvcraft:camera-z camera) (- (* radius (cos angle)))
+                      (luvcraft:camera-y camera) (+ base-y (* lift progress))
+                      (luvcraft:camera-yaw camera) angle
+                      (luvcraft:camera-pitch camera)
+                      (+ 0.08d0 (* 0.22d0 progress)))))))
+      (luvcraft:stop-luvcraft session))))
 
 ;;; The party as a verb in the game itself: M-x Celebrate Birthday.
 ;;;

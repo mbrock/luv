@@ -177,6 +177,7 @@
            #:capture-luvcraft-gazetteer-sequence
            #:capture-luvcraft-gazetteer-view
            #:capture-luvcraft-screenshot
+           #:film-luvcraft-session
            #:center-little-world-residency
            #:chunk-light-field
            #:chunk-light-field-block-levels

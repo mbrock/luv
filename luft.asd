@@ -27,6 +27,7 @@
                              (:file "lattice")
                              (:file "render")
                              (:file "studio")
+                             (:file "film")
                              (:file "architecture"))))
   :in-order-to ((test-op (test-op "luft/render/test"))))
 
