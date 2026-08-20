@@ -1,5 +1,49 @@
 (in-package #:luv.tests)
 
+(deftest vulkan-temporal-motion-format-is-r16g16-sfloat
+  (let ((descriptor
+          (luv:make-texture-descriptor
+           :size '(4 4) :dimensions :2d :format :rg16-float
+           :usage :render-attachment)))
+    (ok (eq :r16g16-sfloat
+            (luv::vulkan-gpu-format :rg16-float descriptor)))
+    (ok (= 83 (cffi:foreign-enum-value 'lvk::format :r16g16-sfloat)))))
+
+(deftest vulkan-render-pass-cache-keys-the-whole-color-cohort
+  (let* ((device
+           (make-instance
+            'luv::vulkan-gpu-device
+            :handle :fake-device :instance :fake-instance
+            :physical-device :fake-physical-device :queue-family 0))
+         (create-symbol 'luv.vulkan:create-color-render-pass)
+         (original-create (symbol-function create-symbol))
+         (native-formats '())
+         (descriptor
+           (luv:make-render-pass-descriptor :label "MRT cache probe")))
+    (unwind-protect
+         (progn
+           (setf (symbol-function create-symbol)
+                 (lambda (native-device formats &key depth-format
+                                                   depth-store-op)
+                   (declare (ignore native-device depth-format depth-store-op))
+                   (push (coerce formats 'list) native-formats)
+                   (list :render-pass (length native-formats))))
+           (let ((first
+                   (luv::vulkan-render-pass-for-format
+                    device '(:rgba16-float :rg16-float) descriptor))
+                 (same
+                   (luv::vulkan-render-pass-for-format
+                    device '(:rgba16-float :rg16-float) descriptor))
+                 (reversed
+                   (luv::vulkan-render-pass-for-format
+                    device '(:rg16-float :rgba16-float) descriptor)))
+             (ok (eq first same))
+             (ok (not (eq first reversed)))
+             (ok (equal '((:r16g16-sfloat :r16g16b16a16-sfloat)
+                          (:r16g16b16a16-sfloat :r16g16-sfloat))
+                        native-formats))))
+      (setf (symbol-function create-symbol) original-create))))
+
 (defclass vulkan-retirement-probe (luv::gpu-object luv::vulkan-gpu-object)
   ((attempts :initarg :attempts :reader vulkan-retirement-probe-attempts)
    (fail-p :initarg :fail-p :reader vulkan-retirement-probe-fail-p)))

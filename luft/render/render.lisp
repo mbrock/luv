@@ -2,20 +2,17 @@
 ;;; that draw it.
 ;;;
 ;;; Nothing here meshes.  The world is a 3-chain of solid cells; REFRESH-SCENE
-;;; takes its boundary, orders the resulting face sites by chunk, pads them to
-;;; whole bricks, and measures a bounding sphere per brick.  The renderer
-;;; uploads exactly those two arrays and one frame block, then either draws a
-;;; few vertices per site, each pulling its own site, or dispatches one task
-;;; workgroup per brick: the TECHNIQUE below.
+;;; takes its boundary and orders the resulting face sites by chunk.  The
+;;; renderer uploads that array and one frame block, then draws a few vertices
+;;; per site, each pulling its own site.
 
 (in-package #:luft.render)
 
 ;;; ------------------------------------------------------------------------
 ;;; Scenes
 
-(defconstant +brick-size+ shaders:+brick-size+)
 (defconstant +chunk-bits+ 3
-  "Sites are ordered by 8-cell chunk so a brick's faces stay close together.")
+  "Sites are ordered by 8-cell chunk so nearby faces stay close together.")
 
 ;;; ------------------------------------------------------------------------
 ;;; Worlds: a solid, and what every cell of it is cut from
@@ -126,14 +123,7 @@ rather than making an error."
    (sites
     :initform nil
     :accessor scene-sites
-    :documentation "Packed surface sites in brick order, zero-padded.")
-   (bricks
-    :initform nil
-    :accessor scene-bricks
-    :documentation "Four floats per brick: bounding sphere centre and radius.")
-   (brick-count
-    :initform 0
-    :accessor scene-brick-count)
+    :documentation "Packed surface sites in chunk order.")
    (cell-bits
     :initform nil
     :accessor scene-cell-bits
@@ -152,7 +142,11 @@ rather than making an error."
     :initform nil
     :accessor scene-slot-words
     :documentation "SLOTS packed eight nibbles to a word, as the GPU reads
-them: the same dense cell order as the occupancy bits."))
+them: the same dense cell order as the occupancy bits.")
+   (revision
+    :initform 0
+    :accessor scene-revision
+    :documentation "Monotonic publication number of the derived GPU products."))
   (:documentation "A solid world together with its drawable surface products."))
 
 (defun make-scene (domain &key (solid (luft:make-solid-chain domain))
@@ -177,42 +171,6 @@ them: the same dense cell order as the occupancy bits."))
 (defun order-sites-by-chunk (sites)
   "Return a fresh copy of the site-ordered SITES grouped by chunk."
   (stable-sort (copy-seq sites) #'< :key #'site-chunk-key))
-
-(defun brick-spheres (sites brick-count)
-  "Measure a bounding sphere for each brick of SITES as four floats each."
-  (let ((spheres (make-array (* 4 brick-count) :element-type 'single-float
-                                               :initial-element 0.0)))
-    (dotimes (brick brick-count spheres)
-      (let ((low-x nil) (low-y nil) (low-z nil)
-            (high-x nil) (high-y nil) (high-z nil))
-        (loop for index from (* brick +brick-size+)
-                below (* (1+ brick) +brick-size+)
-              for site = (aref sites index)
-              unless (zerop site)
-                do (let* ((x (luft:site-x site))
-                          (y (luft:site-y site))
-                          (z (luft:site-z site))
-                          (x-high (+ x (if (luft:site-extends-p site :x) 1 0)))
-                          (y-high (+ y (if (luft:site-extends-p site :y) 1 0)))
-                          (z-high (+ z (if (luft:site-extends-p site :z) 1 0))))
-                     (setf low-x (if low-x (min low-x x) x)
-                           low-y (if low-y (min low-y y) y)
-                           low-z (if low-z (min low-z z) z)
-                           high-x (if high-x (max high-x x-high) x-high)
-                           high-y (if high-y (max high-y y-high) y-high)
-                           high-z (if high-z (max high-z z-high) z-high))))
-        (when low-x
-          (let* ((center-x (/ (+ low-x high-x) 2.0))
-                 (center-y (/ (+ low-y high-y) 2.0))
-                 (center-z (/ (+ low-z high-z) 2.0))
-                 (radius (sqrt (+ (expt (- high-x center-x) 2)
-                                  (expt (- high-y center-y) 2)
-                                  (expt (- high-z center-z) 2)))))
-            (setf (aref spheres (* 4 brick)) (coerce center-x 'single-float)
-                  (aref spheres (+ 1 (* 4 brick))) (coerce center-y 'single-float)
-                  (aref spheres (+ 2 (* 4 brick))) (coerce center-z 'single-float)
-                  (aref spheres (+ 3 (* 4 brick)))
-                  (coerce radius 'single-float))))))))
 
 (defun site-solid-cell (site)
   "The X, Y, and Z of the solid cell a surface face SITE bounds.
@@ -268,24 +226,24 @@ its own packs to zeros, which is slot zero, which is *MATERIAL*."
     words))
 
 (defun refresh-scene (scene)
-  "Recompute SCENE's surface chain, brick-ordered sites, and brick spheres."
+  "Recompute SCENE's surface chain and chunk-ordered packed sites."
   (let* ((surface (luft:surface-chain (scene-solid scene)))
          (ordered (order-sites-by-chunk (luft:chain-sites surface)))
-         (brick-count (max 1 (ceiling (length ordered) +brick-size+)))
-         (sites (make-array (* brick-count +brick-size+)
+         ;; Vulkan storage buffers cannot have zero size.  An empty world
+         ;; keeps one absent site bound and records a zero-vertex draw.
+         ;; The surface chain itself needs only sixty bits; the fresh u64
+         ;; vector leaves room for the stock nibble stamped above it.
+         (sites (make-array (max 1 (length ordered))
                             :element-type '(unsigned-byte 64)
                             :initial-element 0)))
     (replace sites ordered)
     (setf (scene-surface scene) surface
           (scene-sites scene) sites
-          (scene-brick-count scene) brick-count
-          ;; Measured before the stock bits go on: past bit sixty a packed
-          ;; site is no longer a LUFT site, and nothing may read it as one.
-          (scene-bricks scene) (brick-spheres sites brick-count)
           (scene-cell-bits scene) (luft:chain-cell-bits (scene-solid scene)))
     (when (scene-slots scene)
       (stamp-site-stocks sites (scene-domain scene) (scene-slots scene)))
     (setf (scene-slot-words scene) (pack-slot-words scene))
+    (incf (scene-revision scene))
     scene))
 
 ;;; ------------------------------------------------------------------------
@@ -450,6 +408,87 @@ walked on, which is the whole argument for a world knowing its stocks."
 
 (defparameter *near-distance* 0.1)
 (defparameter *far-distance* 400.0)
+
+(defstruct (frame-view (:constructor %make-frame-view))
+  "An immutable camera sample used by every pass of one encoded frame.
+
+The interactive camera remains mutable, but temporal rendering must not read
+it twice: CURRENT and PREVIOUS only mean something when one coherent basis,
+projection, and jitter is frozen at the frame boundary.  #VATCML"
+  position right up forward projection jitter)
+
+(defun frame-projection (camera width height)
+  "Return CAMERA's four projection coefficients for WIDTH by HEIGHT."
+  (let* ((near *near-distance*)
+         (far *far-distance*)
+         (focal (/ (tan (/ (camera-field-of-view camera) 2.0))))
+         (aspect (/ (coerce width 'single-float) height)))
+    (vector (coerce (/ focal aspect) 'single-float)
+            (coerce focal 'single-float)
+            (coerce (/ far (- far near)) 'single-float)
+            (coerce (/ (- (* far near)) (- far near)) 'single-float))))
+
+(defun halton (index base)
+  "The radical-inverse sample INDEX in BASE, as a single float."
+  (check-type index (integer 1 *))
+  (check-type base (integer 2 *))
+  (loop with fraction = (/ 1.0 base)
+        with value = 0.0
+        while (plusp index)
+        do (incf value (* fraction (mod index base)))
+           (setf index (floor index base)
+                 fraction (/ fraction base))
+        finally (return (coerce value 'single-float))))
+
+(defun temporal-jitter (frame-index width height)
+  "Return sample FRAME-INDEX's Halton(2,3) offset in clip coordinates."
+  (let ((sample (1+ (mod frame-index 8))))
+    (vector (coerce (/ (* 2.0 (- (halton sample 2) 0.5))
+                       (max width 1))
+                    'single-float)
+            (coerce (/ (* 2.0 (- (halton sample 3) 0.5))
+                       (max height 1))
+                    'single-float))))
+
+(defun capture-frame-view (camera width height &optional (jitter #(0.0 0.0)))
+  "Freeze CAMERA and JITTER into the semantic view of one frame."
+  (multiple-value-bind (right up forward) (camera-basis camera)
+    (flet ((copy-vec3 (value)
+             (vec3:make-vec3 (vec3:vec3-x value)
+                             (vec3:vec3-y value)
+                             (vec3:vec3-z value))))
+      (%make-frame-view
+       :position (copy-vec3 (camera-position camera))
+       :right (copy-vec3 right)
+       :up (copy-vec3 up)
+       :forward (copy-vec3 forward)
+       :projection (frame-projection camera width height)
+       :jitter (map 'vector (lambda (value) (coerce value 'single-float))
+                    jitter)))))
+
+(defun frame-views-continuous-p (previous current)
+  "Whether PREVIOUS and CURRENT form motion, rather than a camera cut."
+  (and previous
+       (let* ((new-position (frame-view-position current))
+              (old-position (frame-view-position previous))
+              (delta (vec3:make-vec3
+                      (- (vec3:vec3-x new-position)
+                         (vec3:vec3-x old-position))
+                      (- (vec3:vec3-y new-position)
+                         (vec3:vec3-y old-position))
+                      (- (vec3:vec3-z new-position)
+                         (vec3:vec3-z old-position))))
+              (distance-squared (vec3:vec3-dot delta delta))
+              (facing (vec3:vec3-dot (frame-view-forward previous)
+                                     (frame-view-forward current)))
+              (old-projection (frame-view-projection previous))
+              (new-projection (frame-view-projection current)))
+         (and (< distance-squared 64.0)
+              (> facing 0.5)
+              (< (abs (- (aref old-projection 1)
+                         (aref new-projection 1)))
+                 0.25)))))
+
 (defparameter *sun-direction*
   (vec3:vec3-normalize (vec3:make-vec3 0.52 0.30 0.62))
   "The direction toward the key light, low enough to model the terraces.")
@@ -668,14 +707,27 @@ rubbish."
           (quad (list (material-grit material) 0.0 0.0 0.0)))))))
 
 (defun frame-uniform-data
-    (camera width height &optional domain (surface-width *bevel-radius*)
-                                  (surface-detail *arris-softness*))
-  "Pack the frame block: camera, basis, projection, sun, sky, and domain lanes.
+    (camera-or-view width height
+     &optional domain (surface-width *bevel-radius*)
+                      (surface-detail *arris-softness*)
+                      previous-view history-valid-p (history-weight 0.9))
+  "Pack the shared frame block from one frozen current and previous view.
 
-SURFACE-WIDTH is the style's rounding radius or chamfer width, and
-SURFACE-DETAIL its second lane: the arris softness of a chamfer, or the
-vertical radius of the field."
-  (multiple-value-bind (right up forward) (camera-basis camera)
+CAMERA-OR-VIEW accepts a mutable camera for callers outside the frame loop,
+but ENCODE-FRAME passes a FRAME-VIEW captured exactly once.  SURFACE-WIDTH is
+the style's rounding radius or chamfer width, and SURFACE-DETAIL its second
+lane: the arris softness of a chamfer, or the vertical radius of the field."
+  (let* ((view (if (frame-view-p camera-or-view)
+                   camera-or-view
+                   (capture-frame-view camera-or-view width height)))
+         (previous (or previous-view view))
+         (right (frame-view-right view))
+         (up (frame-view-up view))
+         (forward (frame-view-forward view))
+         (projection (frame-view-projection view))
+         (previous-projection (frame-view-projection previous))
+         (jitter (frame-view-jitter view))
+         (previous-jitter (frame-view-jitter previous)))
     (let* ((light (find-light *light*))
            (sun (if (light-sun light) (light-direction (light-sun light))
                     *sun-direction*))
@@ -696,11 +748,8 @@ vertical radius of the field."
            (fog (or (light-fog light) *fog-distance*))
            (shadow (or (light-shadow light) *shadow-strength*))
            (occlusion (or (light-occlusion light) *occlusion-strength*))
-           (near *near-distance*)
-           (far *far-distance*)
-           (focal (/ (tan (/ (camera-field-of-view camera) 2.0))))
-           (aspect (/ (coerce width 'single-float) height))
-           (data (make-array 76 :element-type 'single-float))
+           (data (make-array (* 4 (length shaders:*frame-uniform-members*))
+                             :element-type 'single-float))
            (index 0))
       (flet ((lane (vector fourth)
                (setf (aref data index) (coerce (vec3:vec3-x vector) 'single-float)
@@ -711,15 +760,16 @@ vertical radius of the field."
                      (aref data (+ index 3)) (coerce fourth 'single-float))
                (incf index 4))
              (quad (floats)
-               (loop for value in floats
-                     do (setf (aref data index) (coerce value 'single-float))
-                        (incf index))))
-        (lane (camera-position camera) 0.0)
+               (map nil
+                    (lambda (value)
+                      (setf (aref data index) (coerce value 'single-float))
+                      (incf index))
+                    floats)))
+        (lane (frame-view-position view) 0.0)
         (lane right 0.0)
         (lane up 0.0)
         (lane forward 0.0)
-        (lane (vec3:make-vec3 (/ focal aspect) focal (/ far (- far near)))
-              (/ (- (* far near)) (- far near)))
+        (quad projection)
         (lane sun ambient)
         (lane sky-colour fog)
         (lane (vec3:make-vec3
@@ -740,11 +790,49 @@ vertical radius of the field."
               (/ 1.0 (max 1 height)))
         (quad (deform-lane))
         (quad (deform-centre-lane domain))
-        (quad (arris-lane)))
+        (quad (arris-lane))
+        ;; Temporal lanes are append-only: the established material ABI above
+        ;; remains stable while motion and resolve share this same block.
+        (lane (frame-view-position previous) 0.0)
+        (lane (frame-view-right previous) 0.0)
+        (lane (frame-view-up previous) 0.0)
+        (lane (frame-view-forward previous) 0.0)
+        (quad previous-projection)
+        (quad (list (aref jitter 0) (aref jitter 1)
+                    (aref previous-jitter 0) (aref previous-jitter 1)))
+        (quad (list (/ 1.0 (max 1 width)) (/ 1.0 (max 1 height))
+                    (if history-valid-p 1.0 0.0) history-weight)))
       data)))
 
 ;;; ------------------------------------------------------------------------
 ;;; Renderer
+
+(defclass frame-surfaces ()
+  ((extent :initarg :extent :reader frame-surfaces-extent)
+   (color-texture :initarg :color-texture
+                  :reader frame-surfaces-color-texture)
+   (color-view :initarg :color-view :reader frame-surfaces-color-view)
+   (depth-texture :initarg :depth-texture
+                  :reader frame-surfaces-depth-texture)
+   (depth-view :initarg :depth-view :reader frame-surfaces-depth-view)
+   (scene-texture :initarg :scene-texture
+                  :reader frame-surfaces-scene-texture)
+   (scene-view :initarg :scene-view :reader frame-surfaces-scene-view)
+   (motion-texture :initarg :motion-texture :initform nil
+                   :reader frame-surfaces-motion-texture)
+   (motion-view :initarg :motion-view :initform nil
+                :reader frame-surfaces-motion-view)
+   (history-textures :initarg :history-textures :initform #()
+                     :reader frame-surfaces-history-textures)
+   (history-views :initarg :history-views :initform #()
+                  :reader frame-surfaces-history-views)
+   (temporal-bind-groups :initarg :temporal-bind-groups :initform #()
+                         :reader frame-surfaces-temporal-bind-groups)
+   (post-bind-groups :initarg :post-bind-groups :initform #()
+                     :reader frame-surfaces-post-bind-groups))
+  (:documentation
+   "One extent-sized, transactionally published cohort of frame resources.
+#T7RQTI"))
 
 (defclass renderer ()
   ((device :initarg :device :reader renderer-device)
@@ -754,24 +842,17 @@ vertical radius of the field."
    (camera :initarg :camera :accessor renderer-camera)
    (extent :initarg :extent :accessor renderer-extent)
    (color-format :initarg :color-format :reader renderer-color-format)
-   (color-texture :initform nil :accessor renderer-color-texture)
-   (color-view :initform nil :accessor renderer-color-view)
-   (depth-texture :initform nil :accessor renderer-depth-texture)
-   (depth-view :initform nil :accessor renderer-depth-view)
-   (scene-texture :initform nil :accessor renderer-scene-texture)
-   (scene-view :initform nil :accessor renderer-scene-view)
+   (surfaces :initform nil :accessor renderer-surfaces)
    (sampler :initform nil :accessor renderer-sampler)
    (lens-layout :initform nil :accessor renderer-lens-layout)
-   (lens-bind-group :initform nil :accessor renderer-lens-bind-group)
+   (temporal-layout :initform nil :accessor renderer-temporal-layout)
    (uniform-buffer :initform nil :accessor renderer-uniform-buffer)
    (sites-buffer :initform nil :accessor renderer-sites-buffer)
-   (bricks-buffer :initform nil :accessor renderer-bricks-buffer)
    (cells-buffer :initform nil :accessor renderer-cells-buffer)
    (stocks-buffer :initform nil :accessor renderer-stocks-buffer)
    (slots-buffer :initform nil :accessor renderer-slots-buffer)
    (slots-capacity :initform 0 :accessor renderer-slots-capacity)
    (sites-capacity :initform 0 :accessor renderer-sites-capacity)
-   (bricks-capacity :initform 0 :accessor renderer-bricks-capacity)
    (cells-capacity :initform 0 :accessor renderer-cells-capacity)
    (layout :initform nil :accessor renderer-layout)
    (bind-group :initform nil :accessor renderer-bind-group)
@@ -790,11 +871,40 @@ vertical radius of the field."
    (style :initarg :style :initform :bevel :accessor renderer-style
           :documentation
           "Which pipeline draws: :FLAT, :BEVEL (rounded), :CHAMFER, or :PAPER.")
-   (technique :initarg :technique :initform :vertex :reader renderer-technique
-              :documentation
-              "How sites become triangles: :VERTEX pulling or :MESH shaders.")
-   (uploaded-scene :initform nil :accessor renderer-uploaded-scene))
+   (uploaded-scene :initform nil :accessor renderer-uploaded-scene)
+   (uploaded-scene-revision :initform nil
+                            :accessor renderer-uploaded-scene-revision)
+   (frame-index :initform 0 :accessor renderer-frame-index)
+   (previous-view :initform nil :accessor renderer-previous-view)
+   (history-index :initform 0 :accessor renderer-history-index)
+   (history-valid-p :initform nil :accessor renderer-history-valid-p)
+   (history-used-p :initform nil :accessor renderer-history-used-p)
+   (history-key :initform nil :accessor renderer-history-key))
   (:documentation "GPU resources drawing one scene from one camera."))
+
+(defun renderer-color-texture (renderer)
+  (frame-surfaces-color-texture (renderer-surfaces renderer)))
+
+(defun renderer-color-view (renderer)
+  (frame-surfaces-color-view (renderer-surfaces renderer)))
+
+(defun renderer-depth-texture (renderer)
+  (frame-surfaces-depth-texture (renderer-surfaces renderer)))
+
+(defun renderer-depth-view (renderer)
+  (frame-surfaces-depth-view (renderer-surfaces renderer)))
+
+(defun renderer-scene-texture (renderer)
+  (frame-surfaces-scene-texture (renderer-surfaces renderer)))
+
+(defun renderer-scene-view (renderer)
+  (frame-surfaces-scene-view (renderer-surfaces renderer)))
+
+(defun renderer-motion-texture (renderer)
+  (frame-surfaces-motion-texture (renderer-surfaces renderer)))
+
+(defun renderer-motion-view (renderer)
+  (frame-surfaces-motion-view (renderer-surfaces renderer)))
 
 (defun frame-uniform-size ()
   (let ((size (shader:shader-uniform-block-byte-size (shaders:frame-uniform-block))))
@@ -828,42 +938,150 @@ remains the last durable line."
            (unless ,completed-p
              (log-event :luft "interrupted ~A" ,label)))))))
 
-(zdefun (create-renderer-targets :zone :luft/create-renderer-targets) (renderer)
+(defun frame-surfaces-resources (surfaces)
+  "Return SURFACES' dependents before their views and textures."
+  (when surfaces
+    (append (coerce (frame-surfaces-temporal-bind-groups surfaces) 'list)
+            (coerce (frame-surfaces-post-bind-groups surfaces) 'list)
+            (list (frame-surfaces-motion-view surfaces))
+            (coerce (frame-surfaces-history-views surfaces) 'list)
+            (list (frame-surfaces-scene-view surfaces)
+                  (frame-surfaces-color-view surfaces)
+                  (frame-surfaces-depth-view surfaces)
+                  (frame-surfaces-motion-texture surfaces))
+            (coerce (frame-surfaces-history-textures surfaces) 'list)
+            (list (frame-surfaces-scene-texture surfaces)
+                  (frame-surfaces-color-texture surfaces)
+                  (frame-surfaces-depth-texture surfaces)))))
+
+(defun destroy-frame-surfaces (surfaces)
+  "Release one whole extent cohort of SURFACES."
+  (dolist (resource (frame-surfaces-resources surfaces))
+    (when resource (ignore-errors (destroy resource))))
+  (values))
+
+(defun create-post-bind-group (renderer source label)
+  (create (renderer-device renderer)
+          (make-bind-group-descriptor
+           :label label
+           :layout (renderer-lens-layout renderer)
+           :entries
+           `((:binding ,shaders:+scene-binding+ :resource ,source)
+             (:binding ,shaders:+sampler-binding+
+              :resource ,(renderer-sampler renderer))
+             (:binding ,shaders:+lens-frame-binding+
+              :resource ,(renderer-uniform-buffer renderer))))))
+
+(defun create-temporal-bind-group (renderer surfaces history-view label)
+  (create (renderer-device renderer)
+          (make-bind-group-descriptor
+           :label label
+           :layout (renderer-temporal-layout renderer)
+           :entries
+           `((:binding ,shaders:+current-binding+
+              :resource ,(frame-surfaces-scene-view surfaces))
+             (:binding ,shaders:+motion-binding+
+              :resource ,(frame-surfaces-motion-view surfaces))
+             (:binding ,shaders:+history-binding+ :resource ,history-view)
+             (:binding ,shaders:+temporal-sampler-binding+
+              :resource ,(renderer-sampler renderer))
+             (:binding ,shaders:+temporal-frame-binding+
+              :resource ,(renderer-uniform-buffer renderer))))))
+
+(defun make-frame-surfaces (renderer extent)
+  "Assemble RENDERER's complete EXTENT-sized frame cohort transactionally."
   (let* ((device (renderer-device renderer))
-         (extent (renderer-extent renderer))
-         (color (create device
-                        (make-texture-descriptor
-                         :label "luft surface color"
-                         :size extent :dimensions :2d
-                         :format (renderer-color-format renderer)
-                         :usage '(:render-attachment :copy-src))))
-         (depth (create device
-                        (make-texture-descriptor
-                         :label "luft surface depth"
-                         :size extent :dimensions :2d
-                         :format :depth32-float
-                         :usage '(:render-attachment))))
-         ;; The world is drawn here and read by the focus pass; COLOR is what
-         ;; the focus pass writes and what a capture copies out.
-         (scene (create device
-                        (make-texture-descriptor
-                         :label "luft scene color"
-                         :size extent :dimensions :2d
-                         :format (renderer-color-format renderer)
-                         :usage '(:render-attachment :texture-binding)))))
-    (setf (renderer-color-texture renderer) color
-          (renderer-color-view renderer)
-          (create device (make-texture-view-descriptor :texture color))
-          (renderer-depth-texture renderer) depth
-          (renderer-depth-view renderer)
-          (create device (make-texture-view-descriptor :texture depth))
-          (renderer-scene-texture renderer) scene
-          (renderer-scene-view renderer)
-          (create device (make-texture-view-descriptor :texture scene))
-          (renderer-sampler renderer)
-          (create device (make-sampler-descriptor
-                          :label "luft scene sampler"
-                          :mag-filter :linear :min-filter :linear)))))
+         (temporal-p (renderer-effect-p renderer :taa))
+         (post-p (or temporal-p (renderer-effect-p renderer :lens)))
+         (scene-format (if temporal-p :rgba16-float
+                           (renderer-color-format renderer)))
+         (history-textures (if temporal-p
+                               (make-array 2 :initial-element nil) #()))
+         (history-views (if temporal-p
+                            (make-array 2 :initial-element nil) #()))
+         (temporal-bind-groups (if temporal-p
+                                   (make-array 2 :initial-element nil) #()))
+         (post-bind-groups
+           (if temporal-p
+               (make-array 2 :initial-element nil)
+               (if post-p (make-array 1 :initial-element nil) #())))
+         color color-view depth depth-view scene scene-view motion motion-view
+         surfaces (completed-p nil))
+    (labels ((texture (label format usage)
+               (create device
+                       (make-texture-descriptor
+                        :label label :size extent :dimensions :2d
+                        :format format :usage usage)))
+             (view (texture)
+               (create device (make-texture-view-descriptor
+                               :texture texture))))
+      (unwind-protect
+           (progn
+             (setf color (texture "luft frame color"
+                                  (renderer-color-format renderer)
+                                  '(:render-attachment :copy-src))
+                   color-view (view color)
+                   depth (texture "luft frame depth" :depth32-float
+                                  '(:render-attachment))
+                   depth-view (view depth))
+             (when post-p
+               (setf scene (texture "luft current color" scene-format
+                                    '(:render-attachment :texture-binding))
+                     scene-view (view scene)))
+             (when temporal-p
+               (setf motion (texture "luft current motion" :rg16-float
+                                     '(:render-attachment :texture-binding))
+                     motion-view (view motion))
+               (dotimes (index 2)
+                 (setf (aref history-textures index)
+                       (texture (format nil "luft history ~D" index)
+                                :rgba16-float
+                                '(:render-attachment :texture-binding
+                                  :copy-dst))
+                       (aref history-views index)
+                       (view (aref history-textures index)))))
+             ;; Publish the texture cohort locally before its bind groups are
+             ;; made; they refer only to this candidate, never to the live one.
+             (setf surfaces
+                   (make-instance
+                    'frame-surfaces :extent extent
+                    :color-texture color :color-view color-view
+                    :depth-texture depth :depth-view depth-view
+                    :scene-texture scene :scene-view scene-view
+                    :motion-texture motion :motion-view motion-view
+                    :history-textures history-textures
+                    :history-views history-views
+                    :temporal-bind-groups temporal-bind-groups
+                    :post-bind-groups post-bind-groups))
+             (when temporal-p
+               (dotimes (write-index 2)
+                 (let ((read-index (mod (1+ write-index) 2)))
+                   (setf (aref temporal-bind-groups write-index)
+                         (create-temporal-bind-group
+                          renderer surfaces (aref history-views read-index)
+                          (format nil "luft temporal bindings ~D" write-index))
+                         (aref post-bind-groups write-index)
+                         (create-post-bind-group
+                          renderer (aref history-views write-index)
+                          (format nil "luft history presentation ~D"
+                                  write-index))))))
+             (when (and post-p (not temporal-p))
+               (setf (aref post-bind-groups 0)
+                     (create-post-bind-group renderer scene-view
+                                             "luft lens bindings")))
+             (setf completed-p t)
+             surfaces)
+        (unless completed-p
+          (if surfaces
+              (destroy-frame-surfaces surfaces)
+              (dolist (resource
+                        (list motion-view motion scene-view scene color-view
+                              color depth-view depth))
+                (when resource (ignore-errors (destroy resource))))))))))
+
+(zdefun (create-renderer-targets :zone :luft/create-renderer-targets) (renderer)
+  (setf (renderer-surfaces renderer)
+        (make-frame-surfaces renderer (renderer-extent renderer))))
 
 (zdefun (ensure-renderer-extent :zone :luft/ensure-renderer-extent)
     (renderer extent)
@@ -876,130 +1094,35 @@ work is in flight because the GPU abstraction defers their native teardown."
   (unless (equal extent (renderer-extent renderer))
     (log-event :luft "reframing ~{~D~^x~} to ~{~D~^x~}"
                (renderer-extent renderer) extent)
-    (let ((device (renderer-device renderer))
-          color color-view depth depth-view scene scene-view lens-bind-group
-          (completed-p nil))
-      (unwind-protect
-           (progn
-             (setf color
-                   (create device
-                           (make-texture-descriptor
-                            :label "luft surface color"
-                            :size extent :dimensions :2d
-                            :format (renderer-color-format renderer)
-                            :usage '(:render-attachment :copy-src)))
-                   color-view
-                   (create device (make-texture-view-descriptor
-                                   :texture color))
-                   depth
-                   (create device
-                           (make-texture-descriptor
-                            :label "luft surface depth"
-                            :size extent :dimensions :2d
-                            :format :depth32-float
-                            :usage '(:render-attachment)))
-                   depth-view
-                   (create device (make-texture-view-descriptor
-                                   :texture depth))
-                   scene
-                   (create device
-                           (make-texture-descriptor
-                            :label "luft scene color"
-                            :size extent :dimensions :2d
-                            :format (renderer-color-format renderer)
-                            :usage '(:render-attachment :texture-binding)))
-                   scene-view
-                   (create device (make-texture-view-descriptor
-                                   :texture scene)))
-             (when (renderer-effect-p renderer :lens)
-               (setf lens-bind-group
-                     (create
-                      device
-                      (make-bind-group-descriptor
-                       :label "luft lens bindings"
-                       :layout (renderer-lens-layout renderer)
-                       :entries
-                       `((:binding ,shaders:+scene-binding+
-                          :resource ,scene-view)
-                         (:binding ,shaders:+sampler-binding+
-                          :resource ,(renderer-sampler renderer))
-                         (:binding ,shaders:+lens-frame-binding+
-                          :resource ,(renderer-uniform-buffer renderer)))))))
-             (let ((old-resources
-                     (list (renderer-lens-bind-group renderer)
-                           (renderer-scene-view renderer)
-                           (renderer-scene-texture renderer)
-                           (renderer-color-view renderer)
-                           (renderer-color-texture renderer)
-                           (renderer-depth-view renderer)
-                           (renderer-depth-texture renderer))))
-               (setf (renderer-extent renderer) extent
-                     (renderer-color-texture renderer) color
-                     (renderer-color-view renderer) color-view
-                     (renderer-depth-texture renderer) depth
-                     (renderer-depth-view renderer) depth-view
-                     (renderer-scene-texture renderer) scene
-                     (renderer-scene-view renderer) scene-view
-                     (renderer-lens-bind-group renderer) lens-bind-group
-                     completed-p t)
-               (dolist (resource old-resources)
-                 (when resource (destroy resource)))))
-        (unless completed-p
-          (dolist (resource (list lens-bind-group scene-view scene color-view
-                                  color depth-view depth))
-            (when resource (ignore-errors (destroy resource))))))))
+    (let* ((old (renderer-surfaces renderer))
+           (new (make-frame-surfaces renderer extent)))
+      (setf (renderer-extent renderer) extent
+            (renderer-surfaces renderer) new
+            (renderer-history-valid-p renderer) nil
+            (renderer-history-used-p renderer) nil
+            (renderer-history-key renderer) nil
+            (renderer-previous-view renderer) nil
+            (renderer-history-index renderer) 0)
+      (destroy-frame-surfaces old)))
   renderer)
 
 ;;; ------------------------------------------------------------------------
-;;; Techniques: how the surface chain becomes triangles
-;;;
-;;; Two ways exist to turn the uploaded site buffer into rasterized faces.
-;;; The :MESH technique dispatches task and mesh workgroups over bricks of
-;;; sites (#VAABY9); it needs VK_EXT_mesh_shader, which not every driver runs
-;;; as well as it advertises.  The :VERTEX technique draws K vertices per
-;;; site with no vertex buffer and lets each vertex shader invocation pull its
-;;; own site out of the very same buffer (luft/render/vertex-shaders.lisp);
-;;; it runs on any device.  The fragment stages, the frame block, the bind
-;;; group, and every frame-sized target are shared, so a technique is only
-;;; which modules are created, how a pipeline is described, and how a pass
-;;; is told to draw.  The names are the identity, and the three protocols
-;;; below are EQL methods on them.
+;;; The surface chain becomes triangles by vertex pulling: no vertex buffer,
+;;; one storage-buffer site per face, and a style-dependent number of vertex
+;;; shader invocations per site.
 
-(defparameter *default-technique* :vertex
-  "The technique a renderer uses unless told otherwise.
+(defparameter *surface-styles*
+  '(:flat :bevel :chamfer :paper :stock :field :soft :ink)
+  "Surface styles Luft can draw, in the order a menu would list them.")
 
-:VERTEX pulls sites in a vertex shader and runs on any Vulkan device; :MESH
-amplifies bricks with task and mesh shaders and needs VK_EXT_mesh_shader.")
+(defun default-renderer-effects ()
+  "The native atelier's full post stack.
 
-(defgeneric technique-styles (technique)
-  (:documentation
-   "The surface styles TECHNIQUE can draw, in the order a menu would list."))
-
-(defmethod technique-styles ((technique (eql :mesh)))
-  '(:flat :bevel :chamfer :paper :stock))
-
-(defmethod technique-styles ((technique (eql :vertex)))
-  '(:flat :bevel :chamfer :paper :stock :field :soft :ink))
-
-(defgeneric create-technique-pipelines (technique renderer)
-  (:documentation
-   "Create the shader modules and pipelines RENDERER's styles and effects need.
-
-Modules are pushed onto RENDERER-MODULES and pipelines installed under their
-style or effect name in RENDERER-PIPELINES; the bind group layouts already
-exist.  Each driver call is one traced, logged creation step."))
-
-(defgeneric draw-surface (technique pass scene style)
-  (:documentation
-   "Record into PASS the draw of SCENE's whole surface in STYLE.
-The pipeline and bind group are already set."))
-
-(defgeneric draw-screen (technique pass)
-  (:documentation
-   "Record into PASS the draw of one triangle covering the screen."))
-
-(defun technique-style-p (technique style)
-  (not (null (member style (technique-styles technique)))))
+Vulkan owns Luft's temporal resolve today.  Metal keeps the same renderer
+boundary; its temporal implementation is left for a MetalFX experiment.
+#D7GZA6"
+  #-darwin '(:sky :lens :taa)
+  #+darwin '(:sky :lens))
 
 (defun create-renderer-module (renderer zone label code)
   "Create a shader module from CODE and publish it as one of RENDERER's.
@@ -1029,137 +1152,80 @@ unwind cleanup sees partial work."
 may draw it first and the world still covers it."
   '(:format :depth32-float :depth-write-enabled nil :depth-compare :always))
 
-(defun fragment-stage (renderer module)
-  `(:module ,module :targets ((:format ,(renderer-color-format renderer)))))
+(defun surface-target-formats (renderer)
+  (if (renderer-effect-p renderer :taa)
+      '(:rgba16-float :rg16-float)
+      (list (renderer-color-format renderer))))
+
+(defun fragment-stage (module target-formats)
+  `(:module ,module
+    :targets ,(mapcar (lambda (format) `(:format ,format)) target-formats)))
 
 (defun create-renderer-fragment-modules (renderer)
   "Create the fragment modules RENDERER's styles and effects share.
 
-The values are the surface, chamfer, paper, sky, lens, field, ink, and
-stock fragment modules, each NIL when nothing configured wants it."
-  (let ((styles (renderer-pipeline-styles renderer)))
+The values are the surface, chamfer, paper, sky, lens, temporal, present,
+field, ink, and stock fragment modules, each NIL when nothing wants it."
+  (let ((styles (renderer-pipeline-styles renderer))
+        (temporal-p (renderer-effect-p renderer :taa)))
     (values
      (when (intersection styles '(:flat :bevel))
        (create-renderer-module renderer :luft/shader/surface-fragment
                                "luft surface fragment"
-                               (shaders:surface-fragment-shader)))
+                               (if temporal-p
+                                   (shaders:temporal-surface-fragment-shader)
+                                   (shaders:surface-fragment-shader))))
      (when (member :chamfer styles)
        (create-renderer-module renderer :luft/shader/chamfer-fragment
                                "luft chamfer fragment"
-                               (shaders:chamfer-fragment-shader)))
+                               (if temporal-p
+                                   (shaders:temporal-chamfer-fragment-shader)
+                                   (shaders:chamfer-fragment-shader))))
      (when (member :paper styles)
        (create-renderer-module renderer :luft/shader/paper-fragment
                                "luft paper fragment"
-                               (shaders:paper-fragment-shader)))
+                               (if temporal-p
+                                   (shaders:temporal-paper-fragment-shader)
+                                   (shaders:paper-fragment-shader))))
      (when (renderer-effect-p renderer :sky)
        (create-renderer-module renderer :luft/shader/sky-fragment
                                "luft sky fragment"
-                               (shaders:sky-fragment-shader)))
+                               (if temporal-p
+                                   (shaders:temporal-sky-fragment-shader)
+                                   (shaders:sky-fragment-shader))))
      (when (renderer-effect-p renderer :lens)
        (create-renderer-module renderer :luft/shader/lens-fragment
                                "luft lens fragment"
                                (shaders:lens-fragment-shader)))
+     (when (renderer-effect-p renderer :taa)
+       (create-renderer-module renderer :luft/shader/temporal-fragment
+                               "luft temporal resolve fragment"
+                               (shaders:temporal-resolve-fragment-shader)))
+     (when (renderer-effect-p renderer :taa)
+       (create-renderer-module renderer :luft/shader/present-fragment
+                               "luft presentation fragment"
+                               (shaders:present-fragment-shader)))
      (when (intersection styles '(:field :soft))
        (create-renderer-module renderer :luft/shader/field-fragment
                                "luft field fragment"
-                               (shaders:field-fragment-shader)))
+                               (if temporal-p
+                                   (shaders:temporal-field-fragment-shader)
+                                   (shaders:field-fragment-shader))))
      (when (member :ink styles)
        (create-renderer-module renderer :luft/shader/ink-fragment
                                "luft ink fragment"
-                               (shaders:ink-fragment-shader)))
+                               (if temporal-p
+                                   (shaders:temporal-ink-fragment-shader)
+                                   (shaders:ink-fragment-shader))))
      (when (member :stock styles)
        (create-renderer-module renderer :luft/shader/stock-fragment
                                "luft stock fragment"
-                               (shaders:stock-fragment-shader))))))
+                               (if temporal-p
+                                   (shaders:temporal-stock-fragment-shader)
+                                   (shaders:stock-fragment-shader)))))))
 
-;;; The mesh technique: one task workgroup per brick, one mesh lane per site.
-
-(defmethod create-technique-pipelines ((technique (eql :mesh)) renderer)
-  (let ((styles (renderer-pipeline-styles renderer))
-        task mesh bevel chamfer sky-mesh)
-    (when styles
-      (setf task (create-renderer-module renderer :luft/shader/surface-task
-                                         "luft surface task"
-                                         (shaders:surface-task-shader))))
-    (when (member :flat styles)
-      (setf mesh (create-renderer-module renderer :luft/shader/surface-mesh
-                                         "luft surface mesh"
-                                         (shaders:surface-mesh-shader))))
-    (when (member :bevel styles)
-      (setf bevel (create-renderer-module renderer :luft/shader/bevel-mesh
-                                          "luft bevel mesh"
-                                          (shaders:bevel-mesh-shader))))
-    (when (intersection styles '(:chamfer :paper :stock))
-      (setf chamfer (create-renderer-module renderer :luft/shader/chamfer-mesh
-                                            "luft chamfer mesh"
-                                            (shaders:chamfer-mesh-shader))))
-    (when (or (renderer-effect-p renderer :sky)
-              (renderer-effect-p renderer :lens))
-      (setf sky-mesh (create-renderer-module renderer :luft/shader/sky-mesh
-                                             "luft sky mesh"
-                                             (shaders:sky-mesh-shader))))
-    (multiple-value-bind (fragment chamfer-fragment paper-fragment
-                          sky-fragment lens-fragment field-fragment
-                          ink-fragment stock-fragment)
-        (create-renderer-fragment-modules renderer)
-      (declare (ignore field-fragment ink-fragment))
-      (flet ((pipeline (name zone label mesh-module fragment-module
-                        &key (task-module task)
-                             (layout (renderer-layout renderer))
-                             (depth (surface-depth-state)))
-               (install-renderer-pipeline
-                renderer name zone label
-                (make-mesh-render-pipeline-descriptor
-                 :label label
-                 :layout layout
-                 :task (and task-module `(:module ,task-module))
-                 :mesh `(:module ,mesh-module)
-                 :fragment (fragment-stage renderer fragment-module)
-                 :max-mesh-workgroups 1
-                 :depth-stencil depth))))
-        (when (member :flat styles)
-          (pipeline :flat :luft/pipeline/flat "luft surface pipeline"
-                    mesh fragment))
-        (when (member :bevel styles)
-          (pipeline :bevel :luft/pipeline/bevel "luft bevel pipeline"
-                    bevel fragment))
-        (when (member :chamfer styles)
-          (pipeline :chamfer :luft/pipeline/chamfer "luft chamfer pipeline"
-                    chamfer chamfer-fragment))
-        ;; The paper material draws the chamfered geometry: the glint it
-        ;; exists for lives on the planed facets.
-        (when (member :paper styles)
-          (pipeline :paper :luft/pipeline/paper "luft paper pipeline"
-                    chamfer paper-fragment))
-        (when (member :stock styles)
-          (pipeline :stock :luft/pipeline/stock "luft stock pipeline"
-                    chamfer stock-fragment))
-        ;; The background: no task stage to amplify, no depth to write, and
-        ;; it runs before anything that would hide it.
-        (when (renderer-effect-p renderer :sky)
-          (pipeline :sky :luft/pipeline/sky "luft sky pipeline"
-                    sky-mesh sky-fragment
-                    :task-module nil
-                    :depth (background-depth-state)))
-        ;; The lens draws the frame the world was drawn into, so it binds a
-        ;; group of textures rather than the world's sites.
-        (when (renderer-effect-p renderer :lens)
-          (pipeline :lens :luft/pipeline/lens "luft lens pipeline"
-                    sky-mesh lens-fragment
-                    :task-module nil
-                    :layout (renderer-lens-layout renderer)
-                    :depth nil))))))
-
-(defmethod draw-surface ((technique (eql :mesh)) pass scene style)
-  (declare (ignore style))
-  (draw-mesh-workgroups pass (scene-brick-count scene)))
-
-(defmethod draw-screen ((technique (eql :mesh)) pass)
-  (draw-mesh-workgroups pass 1))
-
-;;; The vertex technique: K vertices a site, each pulling its own site.
-
-(defmethod create-technique-pipelines ((technique (eql :vertex)) renderer)
+(defun create-renderer-pipelines (renderer)
+  "Create the vertex-pulling pipelines RENDERER's styles and effects need."
   (let ((styles (renderer-pipeline-styles renderer))
         surface bevel chamfer stock field screen)
     (when (intersection styles '(:flat :soft :ink))
@@ -1190,25 +1256,29 @@ stock fragment modules, each NIL when nothing configured wants it."
                    "luft field vertex"
                    (shaders:field-vertex-shader))))
     (when (or (renderer-effect-p renderer :sky)
-              (renderer-effect-p renderer :lens))
+              (renderer-effect-p renderer :lens)
+              (renderer-effect-p renderer :taa))
       (setf screen (create-renderer-module
                     renderer :luft/shader/sky-vertex
                     "luft sky vertex"
                     (shaders:sky-vertex-shader))))
     (multiple-value-bind (fragment chamfer-fragment paper-fragment
-                          sky-fragment lens-fragment field-fragment
-                          ink-fragment stock-fragment)
+                          sky-fragment lens-fragment temporal-fragment
+                          present-fragment field-fragment ink-fragment
+                          stock-fragment)
         (create-renderer-fragment-modules renderer)
       (flet ((pipeline (name zone label vertex-module fragment-module
                         &key (layout (renderer-layout renderer))
-                             (depth (surface-depth-state)))
+                             (depth (surface-depth-state))
+                             (target-formats
+                               (surface-target-formats renderer)))
                (install-renderer-pipeline
                 renderer name zone label
                 (make-render-pipeline-descriptor
                  :label label
                  :layout layout
                  :vertex `(:module ,vertex-module)
-                 :fragment (fragment-stage renderer fragment-module)
+                 :fragment (fragment-stage fragment-module target-formats)
                  :primitive '(:topology :triangle-list)
                  :depth-stencil depth))))
         (when (member :flat styles)
@@ -1247,16 +1317,28 @@ stock fragment modules, each NIL when nothing configured wants it."
           (pipeline :lens :luft/pipeline/lens "luft lens pipeline"
                     screen lens-fragment
                     :layout (renderer-lens-layout renderer)
-                    :depth nil))))))
+                    :depth nil
+                    :target-formats (list (renderer-color-format renderer))))
+        (when (renderer-effect-p renderer :taa)
+          (pipeline :taa :luft/pipeline/taa "luft temporal resolve pipeline"
+                    screen temporal-fragment
+                    :layout (renderer-temporal-layout renderer)
+                    :depth nil :target-formats '(:rgba16-float))
+          (pipeline :present :luft/pipeline/present
+                    "luft presentation pipeline"
+                    screen present-fragment
+                    :layout (renderer-lens-layout renderer)
+                    :depth nil
+                    :target-formats
+                    (list (renderer-color-format renderer))))))))
 
-(defmethod draw-surface ((technique (eql :vertex)) pass scene style)
-  ;; The site vector is padded to whole bricks; a zero site collapses its
-  ;; vertices in the shader, so the padding costs a few degenerate triangles
-  ;; and no bookkeeping.
+(defun draw-surface (pass scene style)
+  "Record the vertex-pulled draw of SCENE's whole surface in STYLE."
   (draw pass (* (shaders:surface-vertices-per-face style)
-                (length (scene-sites scene)))))
+                (luft:chain-count (scene-surface scene)))))
 
-(defmethod draw-screen ((technique (eql :vertex)) pass)
+(defun draw-screen (pass)
+  "Record one triangle covering the screen."
   (draw pass 3))
 
 ;;; ------------------------------------------------------------------------
@@ -1267,83 +1349,76 @@ stock fragment modules, each NIL when nothing configured wants it."
     (setf (renderer-lens-layout renderer)
           (with-renderer-creation-step
               (:luft/layout/lens "luft lens layout")
-            (create device
-                    (make-bind-group-layout-descriptor
-                     :label "luft lens layout"
-                     :entries `((:binding ,shaders:+scene-binding+
-                                 :type :texture)
-                                (:binding ,shaders:+sampler-binding+
-                                 :type :sampler)
-                                (:binding ,shaders:+lens-frame-binding+
-                                 :type :uniform-buffer)))))
-          (renderer-layout renderer)
+            (create
+             device
+             (make-bind-group-layout-descriptor
+              :label "luft lens layout"
+              :entries `((:binding ,shaders:+scene-binding+ :type :texture)
+                         (:binding ,shaders:+sampler-binding+ :type :sampler)
+                         (:binding ,shaders:+lens-frame-binding+
+                          :type :uniform-buffer))))))
+    (setf (renderer-layout renderer)
           (with-renderer-creation-step
               (:luft/layout/surface "luft surface layout")
-            (create device
-                    (make-bind-group-layout-descriptor
-                     :label "luft surface layout"
-                     :entries
-                     `((:binding ,shaders:+frame-binding+
-                        :type :uniform-buffer)
-                       (:binding ,shaders:+sites-binding+
-                        :type :storage-buffer)
-                       (:binding ,shaders:+bricks-binding+
-                        :type :storage-buffer)
-                       (:binding ,shaders:+cells-binding+
-                        :type :storage-buffer)
-                       (:binding ,shaders:+stocks-binding+
-                        :type :storage-buffer)
-                       (:binding ,shaders:+slots-binding+
-                        :type :storage-buffer))))))))
-
-(defun create-lens-bind-group (renderer)
-  (with-renderer-creation-step (:luft/bindings/lens "luft lens bindings")
-    (create (renderer-device renderer)
-            (make-bind-group-descriptor
-             :label "luft lens bindings"
-             :layout (renderer-lens-layout renderer)
-             :entries
-             `((:binding ,shaders:+scene-binding+
-                :resource ,(renderer-scene-view renderer))
-               (:binding ,shaders:+sampler-binding+
-                :resource ,(renderer-sampler renderer))
-               (:binding ,shaders:+lens-frame-binding+
-                :resource ,(renderer-uniform-buffer renderer)))))))
+            (create
+             device
+             (make-bind-group-layout-descriptor
+              :label "luft surface layout"
+              :entries
+              `((:binding ,shaders:+frame-binding+ :type :uniform-buffer)
+                (:binding ,shaders:+sites-binding+ :type :storage-buffer)
+                (:binding ,shaders:+cells-binding+ :type :storage-buffer)
+                (:binding ,shaders:+stocks-binding+ :type :storage-buffer)
+                (:binding ,shaders:+slots-binding+ :type :storage-buffer))))))
+    (when (renderer-effect-p renderer :taa)
+      (setf (renderer-temporal-layout renderer)
+            (with-renderer-creation-step
+                (:luft/layout/temporal "luft temporal layout")
+              (create
+               device
+               (make-bind-group-layout-descriptor
+                :label "luft temporal layout"
+                :entries
+                `((:binding ,shaders:+current-binding+ :type :texture)
+                  (:binding ,shaders:+motion-binding+ :type :texture)
+                  (:binding ,shaders:+history-binding+ :type :texture)
+                  (:binding ,shaders:+temporal-sampler-binding+
+                   :type :sampler)
+                  (:binding ,shaders:+temporal-frame-binding+
+                   :type :uniform-buffer)))))))))
 
 (zdefun (create-renderer-pipeline :zone :luft/create-renderer-pipeline) (renderer)
-  (create-renderer-layouts renderer)
-  (create-technique-pipelines (renderer-technique renderer) renderer)
-  (when (renderer-effect-p renderer :lens)
-    (setf (renderer-lens-bind-group renderer)
-          (create-lens-bind-group renderer))))
+  (create-renderer-pipelines renderer))
 
 (zdefun (make-renderer :zone :luft/make-renderer)
     (&key scene camera device
           (provider *gpu-provider*)
           (width 1280) (height 800)
           (color-format :rgba8-unorm-srgb)
-          (technique *default-technique*)
-          (style (if (technique-style-p technique :bevel) :bevel :chamfer))
-          (pipeline-styles (technique-styles technique))
-          (effects '(:sky :lens)))
+          (style :bevel)
+          (pipeline-styles *surface-styles*)
+          (effects (default-renderer-effects)))
   "Create every GPU object needed to draw SCENE from CAMERA at WIDTH by HEIGHT.
 
-TECHNIQUE is :VERTEX, which pulls sites in a vertex shader on any device, or
-:MESH, which dispatches task and mesh shaders where VK_EXT_mesh_shader works.
+Sites are pulled from storage by vertex shaders on every supported device.
 STYLE is :FLAT, :BEVEL (rounded), :CHAMFER (subtle planar crease
 relief), or :PAPER (the chamfered geometry in a matte, toothed material), and
 may be changed later to a member of PIPELINE-STYLES, which defaults to every
-style the technique draws.  Only those surface pipelines and the optional
-:SKY and :LENS EFFECTS are created; NIL/NIL is a clear-only renderer useful
+Luft style.  Only those surface pipelines and the optional :SKY, :LENS, and
+Vulkan :TAA EFFECTS are created; NIL/NIL is a clear-only renderer useful
 for reducing a suspect GPU frame to its presentation core.  Without DEVICE,
 one is requested from PROVIDER and owned by the renderer."
   (unless (or (null pipeline-styles) (member style pipeline-styles))
     (error "Renderer style ~S is absent from PIPELINE-STYLES ~S."
            style pipeline-styles))
-  (let ((foreign (set-difference pipeline-styles (technique-styles technique))))
+  (let ((foreign (set-difference pipeline-styles *surface-styles*)))
     (when foreign
-      (error "The ~S technique cannot draw ~S; it draws ~S."
-             technique foreign (technique-styles technique))))
+      (error "Luft cannot draw ~S; its surface styles are ~S."
+             foreign *surface-styles*)))
+  (let ((foreign (set-difference effects '(:sky :lens :taa))))
+    (when foreign
+      (error "Luft has no ~S effects; choose from :SKY, :LENS, and :TAA."
+             foreign)))
   (let* ((owns-device-p (null device))
          (device (or device
                      (request-gpu-device
@@ -1353,14 +1428,12 @@ one is requested from PROVIDER and owned by the renderer."
                                   :scene scene :camera camera
                                   :extent (list width height)
                                   :color-format color-format
-                                  :technique technique
                                   :style style
                                   :pipeline-styles pipeline-styles
                                   :effects effects))
          (completed-p nil))
     (unwind-protect
          (progn
-           (create-renderer-targets renderer)
            (setf (renderer-uniform-buffer renderer)
                  (create device
                          (make-buffer-descriptor
@@ -1375,7 +1448,14 @@ one is requested from PROVIDER and owned by the renderer."
                           :label "luft stock table"
                           :size (* 4 4 shaders:+stock-lanes+
                                    shaders:+stock-slots+)
-                          :usage '(:storage))))
+                          :usage '(:storage)))
+                 (renderer-sampler renderer)
+                 (create device
+                         (make-sampler-descriptor
+                          :label "luft frame sampler"
+                          :mag-filter :linear :min-filter :linear)))
+           (create-renderer-layouts renderer)
+           (create-renderer-targets renderer)
            (create-renderer-pipeline renderer)
            (upload-scene renderer)
            (setf completed-p t)
@@ -1385,36 +1465,35 @@ one is requested from PROVIDER and owned by the renderer."
 
 (defun destroy-renderer (renderer)
   "Release every GPU object of RENDERER, and its device when it owns one."
-  (dolist (resource (list* (renderer-bind-group renderer)
-                           (renderer-layout renderer)
-                           (loop for (nil pipeline) on (renderer-pipelines renderer)
-                                   by #'cddr
-                                 collect pipeline)))
-    (when resource (ignore-errors (destroy resource))))
+  ;; Tear dependents down before what they reference.  Backend retirement is
+  ;; deferred while work is in flight, but the Lisp ownership graph should
+  ;; still say exactly which generation is live.
+  (when (renderer-bind-group renderer)
+    (ignore-errors (destroy (renderer-bind-group renderer))))
+  (destroy-frame-surfaces (renderer-surfaces renderer))
+  (loop for (nil pipeline) on (renderer-pipelines renderer) by #'cddr
+        when pipeline do (ignore-errors (destroy pipeline)))
   (dolist (module (renderer-modules renderer))
     (ignore-errors (destroy module)))
-  (dolist (resource (list (renderer-lens-bind-group renderer)
-                          (renderer-lens-layout renderer)
-                          (renderer-sampler renderer)
-                          (renderer-scene-view renderer)
-                          (renderer-scene-texture renderer)
+  (dolist (layout (list (renderer-temporal-layout renderer)
+                        (renderer-lens-layout renderer)
+                        (renderer-layout renderer)))
+    (when layout (ignore-errors (destroy layout))))
+  (dolist (resource (list (renderer-sampler renderer)
                           (renderer-sites-buffer renderer)
-                          (renderer-bricks-buffer renderer)
                           (renderer-cells-buffer renderer)
                           (renderer-stocks-buffer renderer)
                           (renderer-slots-buffer renderer)
-                          (renderer-uniform-buffer renderer)
-                          (renderer-color-view renderer)
-                          (renderer-color-texture renderer)
-                          (renderer-depth-view renderer)
-                          (renderer-depth-texture renderer)))
+                          (renderer-uniform-buffer renderer)))
     (when resource (ignore-errors (destroy resource))))
   (setf (renderer-bind-group renderer) nil
         (renderer-pipelines renderer) nil
         (renderer-layout renderer) nil
+        (renderer-lens-layout renderer) nil
+        (renderer-temporal-layout renderer) nil
         (renderer-modules renderer) nil
+        (renderer-surfaces renderer) nil
         (renderer-sites-buffer renderer) nil
-        (renderer-bricks-buffer renderer) nil
         (renderer-cells-buffer renderer) nil
         (renderer-stocks-buffer renderer) nil
         (renderer-slots-buffer renderer) nil
@@ -1423,155 +1502,297 @@ one is requested from PROVIDER and owned by the renderer."
     (ignore-errors (destroy (renderer-device renderer))))
   (values))
 
-(defun ensure-storage-buffer (renderer accessor capacity-accessor
-                              needed label)
-  "Return a storage buffer of at least NEEDED bytes, recreating on growth.
+(defun storage-buffer-candidate
+    (renderer buffer capacity needed label replace-p)
+  "Return BUFFER or an unpublished replacement, its capacity, and NEW-P.
 
-The second value is true when a new buffer was created."
-  (let ((buffer (funcall accessor renderer)))
-    (if (and buffer (<= needed (funcall capacity-accessor renderer)))
-        (values buffer nil)
-        (let ((new (create (renderer-device renderer)
-                           (make-buffer-descriptor
-                            :label label :size needed
-                            :usage '(:storage)))))
-          (when buffer (destroy buffer))
-          (funcall (fdefinition `(setf ,accessor)) new renderer)
-          (funcall (fdefinition `(setf ,capacity-accessor)) needed renderer)
-          (values new t)))))
+When any member of the scene-buffer cohort must grow, REPLACE-P is true for
+all of them.  The live bind group therefore continues to name one entirely
+old generation until its entirely new replacement is ready."
+  (if (and buffer (not replace-p))
+      (values buffer capacity nil)
+      (let ((candidate-capacity
+              (if (> needed capacity)
+                  (max needed (* 2 capacity))
+                  capacity)))
+        (values (create (renderer-device renderer)
+                        (make-buffer-descriptor
+                         :label label :size candidate-capacity
+                         :usage '(:storage)))
+                candidate-capacity t))))
+
+(defun create-surface-bind-group
+    (renderer sites-buffer cells-buffer slots-buffer)
+  (create
+   (renderer-device renderer)
+   (make-bind-group-descriptor
+    :label "luft surface bindings"
+    :layout (renderer-layout renderer)
+    :entries
+    `((:binding ,shaders:+frame-binding+
+       :resource ,(renderer-uniform-buffer renderer))
+      (:binding ,shaders:+sites-binding+ :resource ,sites-buffer)
+      (:binding ,shaders:+cells-binding+ :resource ,cells-buffer)
+      (:binding ,shaders:+stocks-binding+
+       :resource ,(renderer-stocks-buffer renderer))
+      (:binding ,shaders:+slots-binding+ :resource ,slots-buffer)))))
 
 (zdefun (upload-scene :zone :luft/upload-scene
-                       :value (scene-brick-count scene))
+                       :value (luft:chain-count (scene-surface scene)))
     (renderer &optional (scene (renderer-scene renderer)))
-  "Upload SCENE's sites and brick spheres, rebinding when buffers grow."
+  "Upload SCENE and publish one coherent buffer/bind-group generation."
   (let* ((sites (scene-sites scene))
-         (bricks (scene-bricks scene))
-         (rebind-p (null (renderer-bind-group renderer))))
-    (multiple-value-bind (sites-buffer new-p)
-        (ensure-storage-buffer renderer 'renderer-sites-buffer
-                               'renderer-sites-capacity
-                               (* 8 (length sites)) "luft surface sites")
-      (when new-p (setf rebind-p t))
-      (write-buffer sites-buffer sites))
-    (multiple-value-bind (bricks-buffer new-p)
-        (ensure-storage-buffer renderer 'renderer-bricks-buffer
-                               'renderer-bricks-capacity
-                               (* 4 (length bricks)) "luft surface bricks")
-      (when new-p (setf rebind-p t))
-      (write-buffer bricks-buffer bricks))
-    (multiple-value-bind (cells-buffer new-p)
-        (ensure-storage-buffer renderer 'renderer-cells-buffer
-                               'renderer-cells-capacity
-                               (* 4 (length (scene-cell-bits scene)))
-                               "luft solid cells")
-      (when new-p (setf rebind-p t))
-      (write-buffer cells-buffer (scene-cell-bits scene)))
-    (multiple-value-bind (slots-buffer new-p)
-        (ensure-storage-buffer renderer 'renderer-slots-buffer
-                               'renderer-slots-capacity
-                               (* 4 (length (scene-slot-words scene)))
-                               "luft cell stocks")
-      (when new-p (setf rebind-p t))
-      (write-buffer slots-buffer (scene-slot-words scene)))
-    (when rebind-p
-      (when (renderer-bind-group renderer)
-        (destroy (renderer-bind-group renderer)))
-      (setf (renderer-bind-group renderer)
-            (create (renderer-device renderer)
-                    (make-bind-group-descriptor
-                     :label "luft surface bindings"
-                     :layout (renderer-layout renderer)
-                     :entries
-                     `((:binding ,shaders:+frame-binding+
-                        :resource ,(renderer-uniform-buffer renderer))
-                       (:binding ,shaders:+sites-binding+
-                        :resource ,(renderer-sites-buffer renderer))
-                       (:binding ,shaders:+bricks-binding+
-                        :resource ,(renderer-bricks-buffer renderer))
-                       (:binding ,shaders:+cells-binding+
-                        :resource ,(renderer-cells-buffer renderer))
-                       (:binding ,shaders:+stocks-binding+
-                        :resource ,(renderer-stocks-buffer renderer))
-                       (:binding ,shaders:+slots-binding+
-                        :resource ,(renderer-slots-buffer renderer)))))))
-    (setf (renderer-scene renderer) scene
-          (renderer-uploaded-scene renderer) scene)
-    renderer))
+         (sites-needed (* 8 (length sites)))
+         (cells-needed (* 4 (length (scene-cell-bits scene))))
+         (slots-needed (* 4 (length (scene-slot-words scene))))
+         (old-sites (renderer-sites-buffer renderer))
+         (old-cells (renderer-cells-buffer renderer))
+         (old-slots (renderer-slots-buffer renderer))
+         (old-bind-group (renderer-bind-group renderer))
+         (replace-p
+           (or (null old-bind-group)
+               (null old-sites) (null old-cells) (null old-slots)
+               (> sites-needed (renderer-sites-capacity renderer))
+               (> cells-needed (renderer-cells-capacity renderer))
+               (> slots-needed (renderer-slots-capacity renderer))))
+         sites-buffer sites-capacity sites-new-p
+         cells-buffer cells-capacity cells-new-p
+         slots-buffer slots-capacity slots-new-p
+         bind-group (completed-p nil))
+    (unwind-protect
+         (progn
+           (multiple-value-setq (sites-buffer sites-capacity sites-new-p)
+             (storage-buffer-candidate
+              renderer old-sites (renderer-sites-capacity renderer)
+              sites-needed "luft surface sites" replace-p))
+           (multiple-value-setq (cells-buffer cells-capacity cells-new-p)
+             (storage-buffer-candidate
+              renderer old-cells (renderer-cells-capacity renderer)
+              cells-needed "luft solid cells" replace-p))
+           (multiple-value-setq (slots-buffer slots-capacity slots-new-p)
+             (storage-buffer-candidate
+              renderer old-slots (renderer-slots-capacity renderer)
+              slots-needed "luft cell stocks" replace-p))
+           (write-buffer sites-buffer sites)
+           (write-buffer cells-buffer (scene-cell-bits scene))
+           (write-buffer slots-buffer (scene-slot-words scene))
+           (when replace-p
+             (setf bind-group
+                   (create-surface-bind-group
+                    renderer sites-buffer cells-buffer slots-buffer)))
+           (setf (renderer-sites-buffer renderer) sites-buffer
+                 (renderer-sites-capacity renderer) sites-capacity
+                 (renderer-cells-buffer renderer) cells-buffer
+                 (renderer-cells-capacity renderer) cells-capacity
+                 (renderer-slots-buffer renderer) slots-buffer
+                 (renderer-slots-capacity renderer) slots-capacity
+                 (renderer-bind-group renderer) (or bind-group old-bind-group)
+                 (renderer-scene renderer) scene
+                 (renderer-uploaded-scene renderer) scene
+                 (renderer-uploaded-scene-revision renderer)
+                 (scene-revision scene)
+                 (renderer-history-valid-p renderer) nil
+                 completed-p t)
+           ;; Only now can the previous generation stop being reachable.
+           (when bind-group
+             (when old-bind-group (ignore-errors (destroy old-bind-group)))
+             (when (and sites-new-p old-sites)
+               (ignore-errors (destroy old-sites)))
+             (when (and cells-new-p old-cells)
+               (ignore-errors (destroy old-cells)))
+             (when (and slots-new-p old-slots)
+               (ignore-errors (destroy old-slots))))
+           renderer)
+      (unless completed-p
+        (when bind-group (ignore-errors (destroy bind-group)))
+        (when (and sites-new-p sites-buffer)
+          (ignore-errors (destroy sites-buffer)))
+        (when (and cells-new-p cells-buffer)
+          (ignore-errors (destroy cells-buffer)))
+        (when (and slots-new-p slots-buffer)
+          (ignore-errors (destroy slots-buffer)))))))
+
+(defun renderer-surface-width (renderer)
+  (if (member (renderer-style renderer) '(:chamfer :paper :stock))
+      *chamfer-width*
+      *bevel-radius*))
+
+(defun renderer-surface-detail (renderer)
+  (if (member (renderer-style renderer) '(:field :soft :ink))
+      (or *field-vertical-radius* *bevel-radius*)
+      *arris-softness*))
+
+(defun temporal-history-key (renderer scene frame-data stock-data)
+  "The rendered state across which temporal history is semantically reusable.
+
+The first five frame lanes are the camera and projection; lanes five through
+eighteen are every light, material, lens, domain, and deformation value used
+to shade the frame.  The appended temporal lanes are deliberately excluded.
+#OWG6ZD"
+  (list scene (scene-revision scene) (renderer-style renderer) *draw-sky*
+        (subseq frame-data (* 4 5) (* 4 19)) stock-data))
+
+(defun frame-color-attachment (view clear)
+  `(:view ,view :load-op :clear :store-op :store :clear-value ,clear))
+
+(defun encode-post-pass (renderer encoder pipeline bind-group label)
+  (let ((pass
+          (begin-render-pass
+           encoder
+           (make-render-pass-descriptor
+            :label label
+            :color-attachments
+            (list (frame-color-attachment
+                   (renderer-color-view renderer) #(0.0 0.0 0.0 1.0)))))))
+    (set-pipeline pass pipeline)
+    (set-bind-group pass 0 bind-group)
+    (draw-screen pass)
+    (end-pass pass)))
 
 (zdefun (encode-frame :zone :luft/encode-frame) (renderer encoder)
-  "Encode one frame of RENDERER's scene into its color texture on ENCODER."
+  "Encode one coherent jittered frame and, when requested, its TAA resolve.
+#4I4Y3Z"
   (let* ((extent (renderer-extent renderer))
+         (width (first extent))
+         (height (second extent))
          (scene (renderer-scene renderer))
-         (technique (renderer-technique renderer))
+         (temporal-p (renderer-effect-p renderer :taa))
          (light (find-light *light*))
          (sky (if (light-sky light) (light-colour (light-sky light))
                   *sky-color*)))
-    (unless (eq scene (renderer-uploaded-scene renderer))
+    (unless (and (eq scene (renderer-uploaded-scene renderer))
+                 (eql (scene-revision scene)
+                      (renderer-uploaded-scene-revision renderer)))
       (upload-scene renderer scene))
-    (write-buffer (renderer-stocks-buffer renderer)
-                  (stock-table-data (scene-stocks scene)))
-    (write-buffer (renderer-uniform-buffer renderer)
-                  (frame-uniform-data (renderer-camera renderer)
-                                      (first extent) (second extent)
-                                      (scene-domain scene)
-                                      (if (member (renderer-style renderer)
-                                                  '(:chamfer :paper :stock))
-                                          *chamfer-width*
-                                          *bevel-radius*)
-                                      (if (member (renderer-style renderer)
-                                                  '(:field :soft :ink))
-                                          (or *field-vertical-radius*
-                                              *bevel-radius*)
-                                          *arris-softness*)))
-    (let* ((surface-pipeline
-             (getf (renderer-pipelines renderer) (renderer-style renderer)))
-           (sky-pipeline (getf (renderer-pipelines renderer) :sky))
-           (lens-pipeline (getf (renderer-pipelines renderer) :lens))
-           (lens-p (and lens-pipeline (plusp *aperture*)))
-           ;; With a lens the world is drawn into the scene texture and the
-           ;; focus pass writes the capture target; without one the world
-           ;; draws straight into it and no frame is copied twice.
-           (target (if lens-p
-                       (renderer-scene-view renderer)
-                       (renderer-color-view renderer)))
-           (pass (begin-render-pass
-                  encoder
-                  (make-render-pass-descriptor
-                   :label "luft surface pass"
-                   :color-attachments
-                   `((:view ,target
-                      :load-op :clear :store-op :store
-                      :clear-value ,(vector (vec3:vec3-x sky) (vec3:vec3-y sky)
-                                            (vec3:vec3-z sky) 1.0)))
-                   :depth-stencil-attachment
-                   `(:view ,(renderer-depth-view renderer)
-                     :depth-load-op :clear :depth-store-op :discard
-                     :depth-clear-value 1.0)))))
-      (when (and *draw-sky* sky-pipeline)
-        (set-pipeline pass sky-pipeline)
-        (set-bind-group pass 0 (renderer-bind-group renderer))
-        (draw-screen technique pass))
-      (when surface-pipeline
-        (set-pipeline pass surface-pipeline)
-        (set-bind-group pass 0 (renderer-bind-group renderer))
-        (draw-surface technique pass scene (renderer-style renderer)))
-      (end-pass pass)
-      (when lens-p
-        (prepare-texture encoder (renderer-scene-texture renderer)
-                         :texture-binding)
-        (let ((lens (begin-render-pass
-                     encoder
-                     (make-render-pass-descriptor
-                      :label "luft lens pass"
-                      :color-attachments
-                      `((:view ,(renderer-color-view renderer)
-                         :load-op :clear :store-op :store
-                         :clear-value #(0.0 0.0 0.0 1.0)))))))
-          (set-pipeline lens lens-pipeline)
-          (set-bind-group lens 0 (renderer-lens-bind-group renderer))
-          (draw-screen technique lens)
-          (end-pass lens))))
-    (renderer-color-texture renderer)))
+    (let* ((jitter (if temporal-p
+                       (temporal-jitter (renderer-frame-index renderer)
+                                        width height)
+                       #(0.0 0.0)))
+           (view (capture-frame-view (renderer-camera renderer)
+                                     width height jitter))
+           (previous (or (renderer-previous-view renderer) view))
+           (stock-data (stock-table-data (scene-stocks scene)))
+           ;; HISTORY-VALID-P is not known until the semantic key exists.
+           ;; Its lane is outside the key's stable slice and is patched below.
+           (frame-data
+             (frame-uniform-data view width height (scene-domain scene)
+                                 (renderer-surface-width renderer)
+                                 (renderer-surface-detail renderer)
+                                 previous nil 0.9))
+           (history-key (and temporal-p
+                             (temporal-history-key
+                              renderer scene frame-data stock-data)))
+           (history-valid-p
+             (and temporal-p
+                  (renderer-history-valid-p renderer)
+                  (equalp history-key (renderer-history-key renderer))
+                  (frame-views-continuous-p previous view))))
+      (setf (aref frame-data (- (length frame-data) 2))
+            (if history-valid-p 1.0 0.0))
+      (write-buffer (renderer-stocks-buffer renderer) stock-data)
+      (write-buffer (renderer-uniform-buffer renderer) frame-data)
+      (let* ((surface-pipeline
+               (getf (renderer-pipelines renderer) (renderer-style renderer)))
+             (sky-pipeline (getf (renderer-pipelines renderer) :sky))
+             (lens-pipeline (getf (renderer-pipelines renderer) :lens))
+             (lens-p (and lens-pipeline (plusp *aperture*)))
+             (surface-target
+               (if (or temporal-p lens-p)
+                   (renderer-scene-view renderer)
+                   (renderer-color-view renderer)))
+             (attachments
+               (if temporal-p
+                   (list
+                    (frame-color-attachment
+                     surface-target
+                     (vector (vec3:vec3-x sky) (vec3:vec3-y sky)
+                             (vec3:vec3-z sky) 1.0))
+                    (frame-color-attachment
+                     (renderer-motion-view renderer) #(0.0 0.0 0.0 0.0)))
+                   (list
+                    (frame-color-attachment
+                     surface-target
+                     (vector (vec3:vec3-x sky) (vec3:vec3-y sky)
+                             (vec3:vec3-z sky) 1.0)))))
+             (pass
+               (begin-render-pass
+                encoder
+                (make-render-pass-descriptor
+                 :label "luft surface pass"
+                 :color-attachments attachments
+                 :depth-stencil-attachment
+                 `(:view ,(renderer-depth-view renderer)
+                   :depth-load-op :clear :depth-store-op :discard
+                   :depth-clear-value 1.0)))))
+        (when (and *draw-sky* sky-pipeline)
+          (set-pipeline pass sky-pipeline)
+          (set-bind-group pass 0 (renderer-bind-group renderer))
+          (draw-screen pass))
+        (when surface-pipeline
+          (set-pipeline pass surface-pipeline)
+          (set-bind-group pass 0 (renderer-bind-group renderer))
+          (draw-surface pass scene (renderer-style renderer)))
+        (end-pass pass)
+        (cond
+          (temporal-p
+           (let* ((surfaces (renderer-surfaces renderer))
+                  (write-index (renderer-history-index renderer))
+                  (read-index (mod (1+ write-index) 2))
+                  (history-textures
+                    (frame-surfaces-history-textures surfaces))
+                  (history-views (frame-surfaces-history-views surfaces))
+                  (temporal-groups
+                    (frame-surfaces-temporal-bind-groups surfaces))
+                  (post-groups (frame-surfaces-post-bind-groups surfaces)))
+             (prepare-texture encoder (renderer-scene-texture renderer)
+                              :texture-binding)
+             (prepare-texture encoder (renderer-motion-texture renderer)
+                              :texture-binding)
+             (unless history-valid-p
+               (encode encoder
+                       (make-gpu-clear-texture-command
+                        :texture (aref history-textures read-index)
+                        :color #(0.0 0.0 0.0 0.0))))
+             (prepare-texture encoder (aref history-textures read-index)
+                              :texture-binding)
+             (let ((resolve
+                     (begin-render-pass
+                      encoder
+                      (make-render-pass-descriptor
+                       :label "luft temporal resolve"
+                       :color-attachments
+                       (list (frame-color-attachment
+                              (aref history-views write-index)
+                              #(0.0 0.0 0.0 0.0)))))))
+               (set-pipeline resolve (renderer-pipeline renderer :taa))
+               (set-bind-group resolve 0
+                               (aref temporal-groups write-index))
+               (draw-screen resolve)
+               (end-pass resolve))
+             (prepare-texture encoder (aref history-textures write-index)
+                              :texture-binding)
+             (encode-post-pass
+              renderer encoder
+              (if lens-p lens-pipeline (renderer-pipeline renderer :present))
+              (aref post-groups write-index)
+              (if lens-p "luft lens pass" "luft presentation pass"))
+             ;; Publish temporal state only after all three passes encoded.
+             (setf (renderer-previous-view renderer) view
+                   (renderer-history-valid-p renderer) t
+                   (renderer-history-used-p renderer) history-valid-p
+                   (renderer-history-key renderer) history-key
+                   (renderer-history-index renderer) read-index)
+             (incf (renderer-frame-index renderer))))
+          (lens-p
+           (prepare-texture encoder (renderer-scene-texture renderer)
+                            :texture-binding)
+           (encode-post-pass
+            renderer encoder lens-pipeline
+            (aref (frame-surfaces-post-bind-groups
+                   (renderer-surfaces renderer))
+                  0)
+            "luft lens pass"))))
+      (renderer-color-texture renderer))))
 
 (defun render-pixels (renderer)
   "Render one frame headlessly and return its packed pixel bytes.
@@ -1816,39 +2037,26 @@ many times oversize, and the frame is box-filtered down on the way out."
   (declare (ignore viewer canvas event))
   nil)
 
-(defun standalone-render-technique
-    (&optional (name (uiop:getenv "LUFT_RENDER_TECHNIQUE")))
-  "Return the technique standalone NAME asks for: vertex unless told mesh."
-  (let ((technique (string-downcase (or name "vertex"))))
-    (cond ((string= technique "vertex") :vertex)
-          ((string= technique "mesh") :mesh)
-          (t (error "Unknown LUFT_RENDER_TECHNIQUE ~S; use vertex or mesh."
-                    name)))))
-
 (defun standalone-render-options
-    (&optional (name (uiop:getenv "LUFT_RENDER_MODE"))
-               (technique (standalone-render-technique)))
-  "Return MODE, STYLE, PIPELINE-STYLES, EFFECTS, and TECHNIQUE for standalone NAME."
+    (&optional (name (uiop:getenv "LUFT_RENDER_MODE")))
+  "Return MODE, STYLE, PIPELINE-STYLES, and EFFECTS for standalone NAME."
   (let ((mode (string-downcase (or name "full")))
-        (styles (technique-styles technique)))
+        (styles *surface-styles*))
     (cond ((string= mode "clear")
-           (values :clear :flat nil nil technique))
+           (values :clear :flat nil nil))
           ((string= mode "sky")
-           (values :sky :flat nil '(:sky) technique))
+           (values :sky :flat nil '(:sky)))
           ((member mode '("flat" "bevel" "chamfer" "paper" "stock" "field"
                           "soft" "ink")
                    :test #'string=)
            (let ((style (intern (string-upcase mode) :keyword)))
-             (unless (member style styles)
-               (error "The ~(~A~) technique does not draw ~A; it draws ~
-~{~(~A~)~^, ~}." technique mode styles))
-             (values style style (list style) nil technique)))
+             (values style style (list style) nil)))
           ((string= mode "full")
            ;; The stock style is what the world is meant to be seen in: the
            ;; crisp chamfered geometry, the field's soft light, and every
            ;; cell drawn in whatever it is cut from.
            (values :full (if (member :stock styles) :stock :chamfer)
-                   styles '(:sky :lens) technique))
+                   styles (default-renderer-effects)))
           (t
            (error "Unknown LUFT_RENDER_MODE ~S; use clear, sky, flat, bevel, ~
 chamfer, paper, stock, field, soft, ink, or full." name)))))
@@ -1859,7 +2067,6 @@ chamfer, paper, stock, field, soft, ink, or full." name)))))
           (title "luft atelier")
           (width 1280) (height 800)
           (frames-per-second 60)
-          (technique *default-technique*)
           (style :flat)
           (pipeline-styles nil pipeline-styles-p)
           (effects nil)
@@ -1870,7 +2077,7 @@ Click to capture the pointer, Escape to release it; WASD, Space, and C move.
 The renderer stays available as (VIEWER-RENDERER *VIEWER*) for live tinkering.
 By default the viewer creates only the flat surface pipeline: pass explicit
 PIPELINE-STYLES and EFFECTS to add the complex geometry, sky, or lens.
-TECHNIQUE chooses vertex pulling or mesh shaders, as for MAKE-RENDERER."
+Every surface style uses vertex pulling, as for MAKE-RENDERER."
   (let ((canvas (make-sdl-canvas
                  :title title :width width :height height :visible-p nil
                  :presentation-api (sdl-presentation-api-for provider)))
@@ -1892,7 +2099,6 @@ TECHNIQUE chooses vertex pulling or mesh shaders, as for MAKE-RENDERER."
                                   :scene scene :camera camera :device device*
                                   :width (first extent) :height (second extent)
                                   :color-format (canvas-format context)
-                                  :technique technique
                                   :style style
                                   :pipeline-styles
                                   (if pipeline-styles-p

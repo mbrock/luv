@@ -37,6 +37,7 @@
                  (:file "voxel-fields-and-windows")
                  (:file "vocabularies")
                  (:file "luft")
+                 (:file "temporal-antialiasing")
                  (:file "wiki-site")
                  (:static-file "site.js")
                  (:static-file "images/dexp.png")

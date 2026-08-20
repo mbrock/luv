@@ -881,7 +881,7 @@ array of single-floats or unsigned bytes, words, or double words."
   (ecase format
     ((:rgba8-unorm :rgba8-unorm-srgb
       :bgra8-unorm :bgra8-unorm-srgb
-      :depth32-float :rg16-uint)
+      :depth32-float :rg16-uint :rg16-float)
      4)
     (:rgba16-float 8)))
 

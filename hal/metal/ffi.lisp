@@ -58,6 +58,7 @@
 (defconstant +pixel-format-r8-unorm+ 10)
 (defconstant +pixel-format-rg8-unorm+ 30)
 (defconstant +pixel-format-rg16-uint+ 63)
+(defconstant +pixel-format-rg16-float+ 65)
 (defconstant +pixel-format-rgba16-float+ 115)
 (defconstant +pixel-format-depth32-float+ 252)
 (defconstant +texture-type-2d+ 2)

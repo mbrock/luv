@@ -1,19 +1,14 @@
 ;;; The surface drawn by ordinary vertex shaders pulling packed sites.
 ;;;
-;;; Mesh shaders are a young extension and not every driver that advertises
-;;; them will run them; this is the same atelier on the oldest pipeline there
-;;; is.  Nothing changes in the representation: the host still uploads the
-;;; surface chain as one (unsigned-byte 64) site per face and builds no
-;;; vertex.  A draw of K vertices per face is issued with no vertex buffer at
-;;; all, and each vertex shader invocation divides its built-in index by K to
-;;; find its site and takes the remainder to learn which corner of which
-;;; triangle it is.  The fragment stages are the very same ones the mesh path
-;;; feeds: NORMAL, WORLD, UV, and for the chamfer FACE-NORMAL, at the same
-;;; locations.  #AGVXGM #VAABY9 #NV25VM
+;;; The host uploads the surface chain as one (unsigned-byte 64) site per face
+;;; and builds no vertex buffer.  A draw of K vertices per face is issued, and
+;;; each invocation divides its built-in index by K to find its site and takes
+;;; the remainder to learn which corner of which triangle it is.  Fragment
+;;; stages receive NORMAL, WORLD, UV, and for chamfers FACE-NORMAL.  #AGVXGM
+;;; #VAABY9 #NV25VM
 ;;;
-;;; A vertex cannot be skipped the way a mesh lane's output count is uniform,
-;;; so an absent or back-facing face collapses every one of its vertices onto
-;;; the anchor, where the rasterizer drops the degenerate triangle for free.
+;;; An absent or back-facing face collapses every one of its vertices onto the
+;;; anchor, where the rasterizer drops the degenerate triangle for free.
 
 (in-package #:luft.render.shaders)
 
@@ -26,9 +21,8 @@
 ;;;     (0 2 1) (0 3 2)        negative polarity, the same loop reversed
 ;;;
 ;;; Corners run anchor, +A, +A+B, +B, so corner C spans A when C is 1 or 2
-;;; and spans B when C is 2 or 3.  The reversal that polarity asks for is
-;;; the same swap the mesh shader makes between its second and third
-;;; primitive vertices.
+;;; and spans B when C is 2 or 3.  Polarity reverses the second and third
+;;; primitive vertices so either side remains counter-clockwise from outside.
 
 (define-shader-function quad-corner (vertex-in-quad negative-p)
   "The corner (0..3) that vertex VERTEX-IN-QUAD (0..5) of a quad draws,
@@ -116,22 +110,20 @@ The renderer multiplies this by the site count to size its draw."))
                           (swizzle up-vector :xyz)
                           (swizzle forward-vector :xyz)
                           projection-vector)))
-    (set-output position clip)
+    (set-output position (jitter-clip clip (swizzle jitter-vector :xy)))
     (set-output normal normal)
     (set-output world point)
     (set-output uv (vec2 a b))))
 
 ;;; Shaped faces: a point grid per site, one vertex per grid point
 ;;;
-;;; The mesh shaders of #6TEFOS and #RUAWR5 generate every grid point of a
-;;; face in one lane from sixteen gathered cells.  A vertex is one grid
-;;; point, so it needs only the star of its own nearest corner: six cells
+;;; Each invocation generates one grid point and needs only the star of its
+;;; own nearest corner: six cells
 ;;; beside the face's solid and air cells, across U, across V, and across
 ;;; both, toward that corner's side.  The same site rules then place it, and
 ;;; because every face incident to a site gathers the same star, the shaped
 ;;; faces still meet exactly.  The grid quads split along the diagonal toward
-;;; the nearest corner, exactly as the mesh shader's do, so a corner square
-;;; is two flat chamfer pieces.
+;;; the nearest corner, so a corner square is two flat chamfer pieces.
 ;;;
 ;;; One definition serves both rules.  The chamfer is one ring: a 4x4 grid,
 ;;; nine quads, fifty-four vertices a site, and only shared points move, by
@@ -139,8 +131,7 @@ The renderer multiplies this by the site count to size its draw."))
 ;;; a 6x6 grid, twenty-five quads, a hundred and fifty vertices a site; the
 ;;; shared points project onto their site's sphere or cylinder, the ring
 ;;; points onto the nearest crease's cylinder blended toward the corner's
-;;; sphere, as BEVEL-POINT-BINDINGS does for the mesh lane, but chosen at run
-;;; time from the vertex's own grid position instead of generated per point.
+;;; sphere, selected from the vertex's own grid position.
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun grid-vertices-per-face (rings)
@@ -320,7 +311,7 @@ everything it looks up in the lattice."
                 (camera (swizzle camera-vector :xyz))
                 ;; A shaped point's normal tilts well away from the face
                 ;; normal, so only faces turned well past grazing can be
-                ;; dropped: the same relaxed test as the mesh shader's.
+                ;; dropped with this deliberately relaxed facing test.
                 (toward (- camera (+ anchor (* (+ edge-a edge-b) 0.5))))
                 (toward-normal (dot normal toward))
                 (facing-p (if (> toward-normal 0.0)
@@ -551,7 +542,7 @@ everything it looks up in the lattice."
                                  (swizzle up-vector :xyz)
                                  (swizzle forward-vector :xyz)
                                  projection-vector)))
-           (set-output position clip)
+           (set-output position (jitter-clip clip (swizzle jitter-vector :xy)))
            (set-output normal out-normal)
            (set-output world point)
            (set-output uv (vec2 s t*))

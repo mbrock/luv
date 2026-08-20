@@ -256,7 +256,9 @@ of a pit reads more the nearer it is, smoothly, since the field is."
 
 SHADOW is :FIELD for the soft shadow sampled from the field, or :WALK for
 the cell walk every other style uses; OCCLUSION likewise :FIELD or :WALK."
-    `(define-shader field-fragment-shader
+    `(define-temporal-fragment-shaders
+         (field-fragment-shader temporal-field-fragment-shader
+          (world-motion world))
          (:stage :fragment
           :inputs ((normal :vec3 :location 0)
                    (world :vec3 :location 1)
@@ -348,7 +350,9 @@ the cell walk every other style uses; OCCLUSION likewise :FIELD or :WALK."
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun ink-fragment-shader-definition ()
     "The ink fragment shader, spliced around a field sample."
-    `(define-shader ink-fragment-shader
+    `(define-temporal-fragment-shaders
+         (ink-fragment-shader temporal-ink-fragment-shader
+          (world-motion world))
          (:stage :fragment
           :inputs ((normal :vec3 :location 0)
                    (world :vec3 :location 1)
