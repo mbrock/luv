@@ -7,10 +7,7 @@
 
 (defparameter *cat-name* "cat")
 (defparameter *cat-body-centre* 0.64)
-(defparameter *cat-figure-height* 1.31)
 (defparameter *cat-face-height* 0.94)
-(defparameter *cat-figure-radius* 0.74
-  "Conservative figure-space radius around *CAT-BODY-CENTRE*.")
 (defparameter *cat-audience-distance* 2.75)
 
 (defclass cat (embodied-agent) ()
@@ -24,13 +21,27 @@
   "How many world cells one cat figure unit occupies."
   (float luvcraft.shaders::*cat-stature* 1.0))
 
+(defun cat-figure-height ()
+  "The current top of the cat in figure space."
+  (max (float luvcraft.shaders::*cat-ear-height* 1.0)
+       (+ 0.94 (* (float luvcraft.shaders::*cat-head-size* 1.0)
+                  0.8947368))))
+
+(defun cat-figure-radius ()
+  "A conservative sphere following the cat's silhouette knobs."
+  (+ 0.05
+     (max *cat-body-centre*
+          (- (cat-figure-height) *cat-body-centre*)
+          (+ (float luvcraft.shaders::*cat-tail-reach* 1.0) 0.08)
+          (+ (float luvcraft.shaders::*cat-head-size* 1.0) 0.10))))
+
 (defmethod embodied-agent-name ((cat cat))
   (declare (ignore cat))
   *cat-name*)
 
 (defmethod embodied-agent-body-height ((cat cat))
   (declare (ignore cat))
-  (* *cat-figure-height* (cat-stature)))
+  (* (cat-figure-height) (cat-stature)))
 
 (defmethod embodied-agent-head-position ((cat cat) &optional (lift 0.0))
   (luvcraft::make-vec3 (+ (gnome-x cat) 0.5)
@@ -54,7 +65,12 @@
   (let* ((near 0d0)
          (far (coerce max-distance 'double-float))
          (stature (coerce (cat-stature) 'double-float))
-         (half-width (* 0.62d0 stature)))
+         (half-width
+           (* (coerce (max 0.62
+                           (+ luvcraft.shaders::*cat-tail-reach* 0.08)
+                           (+ luvcraft.shaders::*cat-head-size* 0.10))
+                      'double-float)
+              stature)))
     (flet ((slab (origin direction minimum maximum)
              (let ((origin (coerce origin 'double-float))
                    (direction (coerce direction 'double-float)))
@@ -74,7 +90,7 @@
              (slab (luvcraft::vec3-y origin) (luvcraft::vec3-y direction)
                    (gnome-y cat)
                    (+ (gnome-y cat)
-                      (* (coerce *cat-figure-height* 'double-float) stature)))
+                      (* (coerce (cat-figure-height) 'double-float) stature)))
              (slab (luvcraft::vec3-z origin) (luvcraft::vec3-z direction)
                    (- center-z half-width) (+ center-z half-width))
              near)))))
@@ -88,7 +104,7 @@
     (values (+ (gnome-x cat) 0.5)
             (+ (gnome-y cat) (* *cat-body-centre* stature) breath)
             (+ (gnome-z cat) 0.5)
-            (* *cat-figure-radius* stature))))
+            (* (cat-figure-radius) stature))))
 
 (defun ensure-cat-body (cat)
   (or (gnome-body cat)

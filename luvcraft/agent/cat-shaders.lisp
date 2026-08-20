@@ -6,22 +6,60 @@
 (defparameter *cat-stature* 0.82
   "World cells per cat figure unit; the sitting cat is 1.30 units high.")
 
+(defparameter *cat-head-size* 0.285
+  "The cat's head radius in figure units.")
+
+(defparameter *cat-ear-height* 1.31
+  "How high the ear tips stand above the cat's paws, in figure units.")
+
+(defparameter *cat-tail-reach* 0.54
+  "How far the question-mark tail sweeps out from the cat's side.")
+
+(defparameter *cat-eye-size* 0.13
+  "The angular radius of the cat's green eyes on its head.")
+
+(defparameter *cat-stripe-frequency* 31.0
+  "The tabby coat's vertical stripe frequency in figure space.")
+
+(defparameter *cat-stripe-strength* 0.72
+  "How strongly the tabby stripes darken the orange coat.")
+
 (defparameter *cat-rim-light* 0.11
   "The warm edge light separating the cat from the world behind it.")
 
-(luvcraft:define-knob cat-stature
-    (:group :cat
-     :quantity (:quantity :figure-proportion :unit :one)
-     :minimum 0.45 :maximum 1.40 :step 0.025
-     :documentation "The cat agent's scale in world cells per figure unit.")
-  *cat-stature*)
-
-(luvcraft:define-knob cat-rim-light
-    (:group :cat
-     :quantity (:quantity :figure-proportion :unit :one)
-     :minimum 0.0 :maximum 0.6 :step 0.01
-     :documentation "Warm outline around the cat's SDF silhouette.")
-  *cat-rim-light*)
+(macrolet
+    ((define-cat-knob (name place quantity minimum maximum step documentation)
+       `(luvcraft:define-knob ,name
+            (:group :cat
+             :quantity (:quantity ,quantity
+                        :unit ,(if (eq quantity :figure-extent) :cell :one))
+             :minimum ,minimum :maximum ,maximum :step ,step
+             :documentation ,documentation)
+          ,place)))
+  (define-cat-knob cat-stature *cat-stature*
+    :figure-proportion 0.45 1.40 0.025
+    "The cat agent's scale in world cells per figure unit.")
+  (define-cat-knob cat-head-size *cat-head-size*
+    :figure-extent 0.18 0.45 0.005
+    "The radius of the cat's head.")
+  (define-cat-knob cat-ear-height *cat-ear-height*
+    :figure-extent 1.08 1.75 0.01
+    "The height of the cat's pointed ear tips.")
+  (define-cat-knob cat-tail-reach *cat-tail-reach*
+    :figure-extent 0.32 0.90 0.01
+    "How far the cat's curled tail reaches to the side.")
+  (define-cat-knob cat-eye-size *cat-eye-size*
+    :figure-proportion 0.07 0.22 0.005
+    "The angular radius of the cat's green eyes.")
+  (define-cat-knob cat-stripe-frequency *cat-stripe-frequency*
+    :figure-proportion 8.0 52.0 1.0
+    "How many narrow tabby bands cross the cat's coat.")
+  (define-cat-knob cat-stripe-strength *cat-stripe-strength*
+    :figure-proportion 0.0 1.0 0.025
+    "How darkly the tabby bands mark the orange coat.")
+  (define-cat-knob cat-rim-light *cat-rim-light*
+    :figure-proportion 0.0 0.6 0.01
+    "Warm outline around the cat's SDF silhouette."))
 
 (define-shader-function cat-capsule-distance (point beginning end radius)
   "Signed distance to the round segment from BEGINNING to END."
@@ -49,7 +87,10 @@
 (define-shader-function cat-head-distance (point)
   "The cat's round head."
   (gnome-ellipsoid-distance
-   point (vec3 0.0 0.94 0.08) (vec3 0.285 0.255 0.265)))
+   point (vec3 0.0 0.94 0.08)
+   (vec3 cat-head-size
+         (* cat-head-size 0.8947368)
+         (* cat-head-size 0.9298246))))
 
 (define-shader-function cat-ear-distance (point)
   "Two compact tapered ears, mirrored around the face."
@@ -57,7 +98,7 @@
            (vec3 (- (abs (swizzle point :x)) 0.17)
                  (swizzle point :y)
                  (- (swizzle point :z) 0.045))))
-    (gnome-round-cone-distance ear-point 1.03 1.31 0.135 0.012)))
+    (gnome-round-cone-distance ear-point 1.03 cat-ear-height 0.135 0.012)))
 
 (define-shader-function cat-muzzle-distance (point)
   "The paired pale pads and small chin projecting from the face."
@@ -81,11 +122,14 @@
 (define-shader-function cat-tail-distance (point)
   "A three-segment question-mark tail rising along the cat's left side."
   (let* ((lower (cat-capsule-distance
-                 point (vec3 -0.24 0.24 -0.14) (vec3 -0.49 0.35 -0.10) 0.075))
+                 point (vec3 -0.24 0.24 -0.14)
+                 (vec3 (- cat-tail-reach) 0.35 -0.10) 0.075))
          (middle (cat-capsule-distance
-                  point (vec3 -0.49 0.35 -0.10) (vec3 -0.54 0.67 -0.04) 0.072))
+                  point (vec3 (- cat-tail-reach) 0.35 -0.10)
+                  (vec3 (- cat-tail-reach) 0.67 -0.04) 0.072))
          (tip (cat-capsule-distance
-               point (vec3 -0.54 0.67 -0.04) (vec3 -0.40 0.86 0.04) 0.068)))
+               point (vec3 (- cat-tail-reach) 0.67 -0.04)
+               (vec3 (- (* cat-tail-reach 0.74)) 0.86 0.04) 0.068)))
     (gnome-smooth-union
      (gnome-smooth-union lower middle 0.055) tip 0.05)))
 
@@ -127,10 +171,14 @@
          (eye-direction (normalize (vec3 0.39 0.16 0.86)))
          (eye-offset (- direction eye-direction))
          (eye-distance (gnome-length (* eye-offset (vec3 0.80 1.15 0.80))))
-         (eye (- 1.0 (smoothstep 0.105 0.155 eye-distance)))
+         (eye (- 1.0 (smoothstep (- cat-eye-size 0.025)
+                                 (+ cat-eye-size 0.025)
+                                 eye-distance)))
          (pupil-distance
            (gnome-length (* eye-offset (vec3 3.4 0.82 0.82))))
-         (pupil (- 1.0 (smoothstep 0.060 0.095 pupil-distance)))
+         (pupil (- 1.0 (smoothstep (* cat-eye-size 0.46)
+                                   (* cat-eye-size 0.73)
+                                   pupil-distance)))
          (glint (gnome-sphere-distance
                  direction (normalize (vec3 0.34 0.22 0.90)) 0.035))
          (glint-mask (- 1.0 (smoothstep 0.0 0.025 glint)))
@@ -156,11 +204,12 @@
          (paws (cat-paw-distance point))
          (tail (cat-tail-distance point))
          (grain (- (lattice-noise (* point (vec3 22.0 18.0 22.0))) 0.5))
-         (stripe-wave (sin (+ (* (swizzle point :y) 31.0)
-                              (* (swizzle point :x) 8.0))))
+         (stripe-wave (sin (+ (* (swizzle point :y) cat-stripe-frequency)
+                              (* (swizzle point :x)
+                                 (* cat-stripe-frequency 0.2580645)))))
          (stripe (smoothstep 0.48 0.88 stripe-wave))
          (coat (* (mix (vec3 0.48 0.17 0.045) (vec3 0.16 0.055 0.025)
-                       (* stripe 0.72))
+                       (* stripe cat-stripe-strength))
                   (+ 1.0 (* grain 0.18))))
          (cream (vec3 0.78 0.61 0.37))
          (ear-color (vec3 0.58 0.19 0.16))
