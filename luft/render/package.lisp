@@ -19,22 +19,36 @@
            #:+cells-binding+
            #:*frame-uniform-members*
            #:chamfer-fragment-shader
+           #:temporal-chamfer-fragment-shader
            #:paper-fragment-shader
+           #:temporal-paper-fragment-shader
            #:sky-fragment-shader
+           #:temporal-sky-fragment-shader
            #:surface-vertex-shader
            #:field-vertex-shader
            #:field-fragment-shader
+           #:temporal-field-fragment-shader
            #:ink-fragment-shader
+           #:temporal-ink-fragment-shader
            #:stock-fragment-shader
+           #:temporal-stock-fragment-shader
            #:bevel-vertex-shader
            #:chamfer-vertex-shader
            #:sky-vertex-shader
            #:surface-vertices-per-face
            #:lens-fragment-shader
+           #:present-fragment-shader
+           #:temporal-resolve-fragment-shader
            #:+scene-binding+
            #:+sampler-binding+
            #:+lens-frame-binding+
+           #:+current-binding+
+           #:+motion-binding+
+           #:+history-binding+
+           #:+temporal-sampler-binding+
+           #:+temporal-frame-binding+
            #:surface-fragment-shader
+           #:temporal-surface-fragment-shader
            #:frame-uniform-block))
 
 (defpackage #:luft.render
@@ -70,6 +84,7 @@ of packed LUFT sites, drawn by vertex shaders pulling sites.")
            #:scene-surface
            #:scene-sites
            #:scene-cell-bits
+           #:scene-revision
            #:refresh-scene
            #:fly-camera
            #:make-fly-camera

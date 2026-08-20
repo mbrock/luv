@@ -1,36 +1,17 @@
-;;; The surface of a solid world, drawn as packed sites.
+;;; Shared shader vocabulary for a solid world drawn from packed sites.
 ;;;
-;;; The host uploads two arrays and one small uniform block:
-;;;
-;;;   sites   (unsigned-byte 64)  the surface chain, one signed site per face
-;;;   bricks  vec4                a bounding sphere per +BRICK-SIZE+ sites
-;;;   frame   uniform block       camera basis, projection, sun, sky
-;;;
-;;; The task stage owns one brick per workgroup and decides, uniformly, whether
-;;; the brick's sphere meets the view frustum; if so it emits one mesh
-;;; workgroup and hands it the brick index.  Each mesh lane then unpacks one
-;;; site straight from the u64 array: anchor, extent, and polarity.  The extent
-;;; names the face's two spanning axes in canonical order, so their cross
-;;; product is the canonical orientation, and the site's polarity times that
-;;; orientation is the outward normal.  A lane whose face is absent, or which
-;;; faces away from the camera, collapses its quad to a point.  #AGVXGM #VAABY9
+;;; Ordinary vertex stages pull one signed u64 site per face and derive every
+;;; point directly.  The host also binds dense occupancy and stock tables plus
+;;; one frame block shared by geometry, shading, motion, and temporal resolve.
+;;; There is deliberately one geometry path now.  #AGVXGM #VAABY9
 
 (in-package #:luft.render.shaders)
 
-(defconstant +brick-size+ 5
-  "Sites per task workgroup and faces per mesh workgroup.
-
-Five faces subdivided into 6x6 grids are 180 vertices and 250 triangles,
-inside Vulkan's guaranteed limits of 256 mesh-output vertices and 256
-mesh-output primitives.  The old seven-face brick fit the vertex limit but
-declared 350 primitives, which could hang a driver instead of rejecting the
-pipeline; the flat pipeline uses the same bricks at four vertices a face.")
 (defconstant +frame-binding+ 0)
 (defconstant +sites-binding+ 1)
-(defconstant +bricks-binding+ 2)
-(defconstant +cells-binding+ 3)
-(defconstant +stocks-binding+ 4)
-(defconstant +slots-binding+ 5)
+(defconstant +cells-binding+ 2)
+(defconstant +stocks-binding+ 3)
+(defconstant +slots-binding+ 4)
 
 ;;; A LUFT site occupies sixty bits and travels to the GPU in sixty-four, so
 ;;; four bits are free above it.  The packed site spends them on which stock
@@ -50,6 +31,14 @@ does to the shape of the world rather than to its surface.")
 (defconstant +scene-binding+ 0)
 (defconstant +sampler-binding+ 1)
 (defconstant +lens-frame-binding+ 2)
+
+;;; Temporal resolve owns a separate group.  Its history texture changes each
+;;; frame while the current colour and motion attachments stay put.
+(defconstant +current-binding+ 0)
+(defconstant +motion-binding+ 1)
+(defconstant +history-binding+ 2)
+(defconstant +temporal-sampler-binding+ 3)
+(defconstant +temporal-frame-binding+ 4)
 
 ;;; Every stage declares the same frame block at the same binding: identical
 ;;; member order and offsets are the ABI, written once and spliced at read
@@ -83,7 +72,17 @@ lit: both the reach of shadows in cells and their cost per pixel.")
       ;; The lattice: how it is bent, and how wide its creases are planed.
       (deform-vector :vec4)      ; deformation index, strength, scale, spare
       (deform-centre-vector :vec4) ; the point every deformation fixes
-      (arris-vector :vec4))))    ; chamfer rule, convex and concave factors
+      (arris-vector :vec4)       ; chamfer rule, convex and concave factors
+      ;; A frozen predecessor and the sampling state of this frame.  Motion
+      ;; is current-to-previous in UV units and excludes jitter; the resolve
+      ;; adds the jitter delta when it addresses history.
+      (previous-camera-vector :vec4)
+      (previous-right-vector :vec4)
+      (previous-up-vector :vec4)
+      (previous-forward-vector :vec4)
+      (previous-projection-vector :vec4)
+      (jitter-vector :vec4)      ; current clip XY, previous clip XY
+      (temporal-vector :vec4)))) ; inverse extent, history valid, history weight
 
 (define-shader-function view-clip (point camera right up forward projection)
   "Homogeneous clip position of the world POINT.
@@ -99,140 +98,60 @@ lowering owns the target's flip."
           (+ (* view-z (swizzle projection :z)) (swizzle projection :w))
           view-z)))
 
+(define-shader-function jitter-clip (clip jitter)
+  "Move homogeneous CLIP by a two-component clip-space JITTER."
+  (vec4 (+ (swizzle clip :x) (* (swizzle jitter :x) (swizzle clip :w)))
+        (+ (swizzle clip :y) (* (swizzle jitter :y) (swizzle clip :w)))
+        (swizzle clip :z)
+        (swizzle clip :w)))
+
+(define-shader-function clip-uv (clip)
+  "Map a homogeneous framebuffer-oriented clip position to texture UV."
+  (+ (* (/ (swizzle clip :xy) (swizzle clip :w)) 0.5)
+     (vec2 0.5 0.5)))
+
+(define-shader-function point-motion
+    (current-point previous-point
+     current-camera current-right current-up current-forward current-projection
+     previous-camera previous-right previous-up previous-forward
+     previous-projection)
+  "Unjittered current-to-previous UV displacement between two world points."
+  (let* ((current
+           (view-clip current-point current-camera current-right current-up
+                      current-forward current-projection))
+         (previous
+           (view-clip previous-point previous-camera previous-right previous-up
+                      previous-forward previous-projection)))
+    (- (clip-uv previous) (clip-uv current))))
+
+(define-shader-abstraction world-motion (point)
+  "Motion of a static world POINT under the frame block's two views."
+  `(point-motion
+    ,point ,point
+    (swizzle camera-vector :xyz)
+    (swizzle right-vector :xyz) (swizzle up-vector :xyz)
+    (swizzle forward-vector :xyz) projection-vector
+    (swizzle previous-camera-vector :xyz)
+    (swizzle previous-right-vector :xyz) (swizzle previous-up-vector :xyz)
+    (swizzle previous-forward-vector :xyz) previous-projection-vector))
+
+(define-shader-abstraction direction-motion (direction)
+  "Motion of a world-space sky DIRECTION under the frame block's two views."
+  `(point-motion
+    (+ (swizzle camera-vector :xyz) ,direction)
+    (+ (swizzle previous-camera-vector :xyz) ,direction)
+    (swizzle camera-vector :xyz)
+    (swizzle right-vector :xyz) (swizzle up-vector :xyz)
+    (swizzle forward-vector :xyz) projection-vector
+    (swizzle previous-camera-vector :xyz)
+    (swizzle previous-right-vector :xyz) (swizzle previous-up-vector :xyz)
+    (swizzle previous-forward-vector :xyz) previous-projection-vector))
+
 (define-shader-function cross-product (a b)
   "The right-handed cross product of two vec3 values."
   (vec3 (- (* (swizzle a :y) (swizzle b :z)) (* (swizzle a :z) (swizzle b :y)))
         (- (* (swizzle a :z) (swizzle b :x)) (* (swizzle a :x) (swizzle b :z)))
         (- (* (swizzle a :x) (swizzle b :y)) (* (swizzle a :y) (swizzle b :x)))))
-
-(define-task-payload surface-brick-payload
-  (brick-index :uint))
-
-(define-shader surface-task-shader
-    (:stage :task
-     :workgroup-size (1 1 1)
-     :payload surface-brick-payload
-     :inputs ((lane :uint :built-in :local-invocation-index)
-              (group :uvec3 :built-in :workgroup-id))
-     :resources ((frame :uniform-block :binding #.+frame-binding+
-                        :members #.*frame-uniform-members*)
-                 (bricks :storage-buffer :binding #.+bricks-binding+
-                         :element :vec4)))
-  (let* ((brick (swizzle group :x))
-         (sphere (buffer-element bricks brick))
-         (center (swizzle sphere :xyz))
-         (radius (swizzle sphere :w))
-         (relative (- center (swizzle camera-vector :xyz)))
-         (view-x (dot relative (swizzle right-vector :xyz)))
-         (view-y (dot relative (swizzle up-vector :xyz)))
-         (view-z (dot relative (swizzle forward-vector :xyz)))
-         ;; A conservative frustum test: the sphere must reach past the eye
-         ;; plane and lie within the widening view pyramid at its far reach.
-         (reach (+ view-z radius))
-         (x-limit (+ (/ reach (swizzle projection-vector :x)) radius))
-         (y-limit (+ (/ reach (swizzle projection-vector :y)) radius))
-         (mesh-count
-           (if (> reach 0.0)
-               (if (< (abs view-x) x-limit)
-                   (if (< (abs view-y) y-limit) (uint 1.0) (uint 0.0))
-                   (uint 0.0))
-               (uint 0.0))))
-    (set-payload brick-index brick)
-    (emit-mesh-workgroups (uvec3 mesh-count (uint 1.0) (uint 1.0)))))
-
-(define-shader surface-mesh-shader
-    (:stage :mesh
-     :workgroup-size (#.+brick-size+ 1 1)
-     :payload surface-brick-payload
-     :inputs ((lane :uint :built-in :local-invocation-index))
-     :resources ((frame :uniform-block :binding #.+frame-binding+
-                        :members #.*frame-uniform-members*)
-                 (sites :storage-buffer :binding #.+sites-binding+
-                        :element :uint64))
-     :mesh-output
-     (:topology :triangles
-      :max-vertices #.(* 4 +brick-size+)
-      :max-primitives #.(* 2 +brick-size+)
-      :vertex ((position :vec4 :built-in :position)
-               (normal :vec3 :location 0)
-               (world :vec3 :location 1)
-               (uv :vec2 :location 2))))
-  (let* ((site (buffer-element
-                sites (+ (* brick-index (uint +brick-size+)) lane)))
-         ;; The signed site: XYZ extent in the low three bits, polarity in the
-         ;; fourth, then X, Y, Z anchors.
-         (extent (uint (ldb (byte luft:+extent-bits+ 0) site)))
-         (anchor
-           (vec3 (float (uint (ldb (byte luft:+horizontal-capacity-bits+
-                                          luft:+x-shift+)
-                                    site)))
-                 (float (uint (ldb (byte luft:+horizontal-capacity-bits+
-                                          luft:+y-shift+)
-                                    site)))
-                 (float (uint (ldb (byte luft:+vertical-coordinate-bits+
-                                          luft:+z-shift+)
-                                    site)))))
-         (negative-p (= (uint (ldb (byte 1 luft:+site-sign-bit+) site))
-                        (uint 1.0)))
-         (present-p (> extent (uint 0.0)))
-         (yz-face-p (= extent (uint luft:+yz-face-extent+)))
-         (xz-face-p (= extent (uint luft:+xz-face-extent+)))
-         (xy-face-p (= extent (uint luft:+xy-face-extent+)))
-         ;; The two spanning axes in canonical X<Y<Z order, and their cross
-         ;; product: the face's canonical orientation, which is also the
-         ;; orientation convention of the boundary operator.
-         (edge-a (if yz-face-p (vec3 0.0 1.0 0.0) (vec3 1.0 0.0 0.0)))
-         (edge-b (if xy-face-p (vec3 0.0 1.0 0.0) (vec3 0.0 0.0 1.0)))
-         (canonical (if yz-face-p
-                        (vec3 1.0 0.0 0.0)
-                        (if xz-face-p (vec3 0.0 -1.0 0.0) (vec3 0.0 0.0 1.0))))
-         (orientation (if negative-p -1.0 1.0))
-         (normal (* canonical orientation))
-         (camera (swizzle camera-vector :xyz))
-         (facing-p (> (dot normal (- camera anchor)) 0.0))
-         ;; Absent or back-facing lanes emit a point instead of a quad.
-         (scale (if present-p (if facing-p 1.0 0.0) 0.0))
-         (span-a (* edge-a scale))
-         (span-b (* edge-b scale))
-         (corner-0 anchor)
-         (corner-1 (+ anchor span-a))
-         (corner-2 (+ corner-1 span-b))
-         (corner-3 (+ anchor span-b))
-         (right (swizzle right-vector :xyz))
-         (up (swizzle up-vector :xyz))
-         (forward (swizzle forward-vector :xyz))
-         (clip-0 (view-clip corner-0 camera right up forward projection-vector))
-         (clip-1 (view-clip corner-1 camera right up forward projection-vector))
-         (clip-2 (view-clip corner-2 camera right up forward projection-vector))
-         (clip-3 (view-clip corner-3 camera right up forward projection-vector))
-         (vertex-0 (* lane (uint 4.0)))
-         (vertex-1 (+ vertex-0 (uint 1.0)))
-         (vertex-2 (+ vertex-0 (uint 2.0)))
-         (vertex-3 (+ vertex-0 (uint 3.0)))
-         (primitive-0 (* lane (uint 2.0)))
-         (primitive-1 (+ primitive-0 (uint 1.0)))
-         ;; Counter-clockwise from the outward side: reverse the loop when
-         ;; the polarity flips the canonical orientation.
-         (second-0 (if negative-p vertex-2 vertex-1))
-         (third-0 (if negative-p vertex-1 vertex-2))
-         (second-1 (if negative-p vertex-3 vertex-2))
-         (third-1 (if negative-p vertex-2 vertex-3)))
-    (set-mesh-output-counts (uint #.(* 4 +brick-size+))
-                            (uint #.(* 2 +brick-size+)))
-    (set-mesh-vertex vertex-0
-                     (position clip-0) (normal normal)
-                     (world corner-0) (uv (vec2 0.0 0.0)))
-    (set-mesh-vertex vertex-1
-                     (position clip-1) (normal normal)
-                     (world corner-1) (uv (vec2 1.0 0.0)))
-    (set-mesh-vertex vertex-2
-                     (position clip-2) (normal normal)
-                     (world corner-2) (uv (vec2 1.0 1.0)))
-    (set-mesh-vertex vertex-3
-                     (position clip-3) (normal normal)
-                     (world corner-3) (uv (vec2 0.0 1.0)))
-    (set-mesh-primitive primitive-0 (uvec3 vertex-0 second-0 third-0))
-    (set-mesh-primitive primitive-1 (uvec3 vertex-0 second-1 third-1))))
 
 ;;; ------------------------------------------------------------------------
 ;;; Shadow: a ray walked cell by cell through the occupancy bits
@@ -404,7 +323,32 @@ one where nothing is hidden."
          (fog (smoothstep (* 0.45 fog-far) fog-far distance)))
     (mix exposed sky fog)))
 
-(define-shader surface-fragment-shader
+(defmacro define-temporal-fragment-shaders
+    ((ordinary-name temporal-name motion-form) options &body body)
+  "Define matching ordinary and motion-writing fragment shaders.
+
+BODY must be one LET or LET* form.  The temporal shader gets a location-one
+motion output and writes MOTION-FORM in that form's lexical scope; the
+ordinary shader remains valid for a pipeline with only one colour target."
+  (unless (and (= (length body) 1)
+               (consp (first body))
+               (member (first (first body)) '(let let*)))
+    (error "A temporal fragment shader body must be one LET or LET* form."))
+  (let* ((temporal-options (copy-tree options))
+         (temporal-body (copy-tree body))
+         (scope (first temporal-body)))
+    (setf (getf temporal-options :outputs)
+          (append (getf temporal-options :outputs)
+                  '((motion :vec2 :location 1))))
+    (setf (cdr (last scope))
+          (list `(set-output motion ,motion-form)))
+    `(progn
+       (define-shader ,ordinary-name ,options ,@body)
+       (define-shader ,temporal-name ,temporal-options ,@temporal-body))))
+
+(define-temporal-fragment-shaders
+    (surface-fragment-shader temporal-surface-fragment-shader
+     (world-motion world))
     (:stage :fragment
      :inputs ((normal :vec3 :location 0)
               (world :vec3 :location 1)
@@ -558,12 +502,12 @@ cell.  Flat-shaded triangles are perfectly flat, and a little of the smooth
 variant across each face is what gives a low-poly surface its volume.")
 
   (defvar *bevel-rings* 2
-    "Subdivision rings inside the rounding radius while a mesh shader is
+    "Subdivision rings inside the rounding radius while a shaped stage is
 generated: one is a chamfer, two a fillet.  The grid has 2*(rings+1) points
 per side.")
 
   (defvar *bevel-rule* :round
-    "How shared points move while a mesh shader is generated: :ROUND projects
+    "How generated shared points move: :ROUND projects
 onto fillet cylinders and corner spheres, :CHAMFER onto flat 45-degree facets.")
 
   (defun bevel-grid-side ()
@@ -769,216 +713,15 @@ outright, which is exactly the rounded box.  Inner points stay on the plane."
               (,mixed-normal (mix ,base-normal ,sphere-normal ,weight))
               (,normal (normalize ,mixed-normal))))))
        `((,clip (view-clip ,point camera right up forward
-                           projection-vector))))))
-
-  (defun bevel-mesh-shader-definition
-      (&key (name 'bevel-mesh-shader) (rings 2) (rule :round))
-    "A mesh shader definition named NAME: sixteen gathers, eight site rules,
-a grid of RINGS rings of points moved by RULE, and their triangles per face.
-The chamfer rule also emits the face normal for facet shading."
-    (let* ((*bevel-rings* rings)
-           (*bevel-rule* rule)
-           (side (bevel-grid-side))
-           (points (* side side))
-           (primitives (* 2 (1- side) (1- side)))
-           (gathers
-             ;; name, solid-side-p, du, dv
-             '((solid-cu-pos t 1 0) (solid-eu-pos nil 1 0)
-               (solid-cu-neg t -1 0) (solid-eu-neg nil -1 0)
-               (solid-cv-pos t 0 1) (solid-ev-pos nil 0 1)
-               (solid-cv-neg t 0 -1) (solid-ev-neg nil 0 -1)
-               (solid-c-pos-pos t 1 1) (solid-e-pos-pos nil 1 1)
-               (solid-c-pos-neg t 1 -1) (solid-e-pos-neg nil 1 -1)
-               (solid-c-neg-pos t -1 1) (solid-e-neg-pos nil -1 1)
-               (solid-c-neg-neg t -1 -1) (solid-e-neg-neg nil -1 -1)))
-           (point-bindings '())
-           (vertex-statements '())
-           (primitive-statements '()))
-      (flet ((offset-form (du dv)
-               (cond ((and (/= du 0) (/= dv 0))
-                      `(+ (* edge-a ,(float du)) (* edge-b ,(float dv))))
-                     ((/= du 0) `(* edge-a ,(float du)))
-                     (t `(* edge-b ,(float dv))))))
-        (dotimes (i side)
-          (dotimes (j side)
-            (let ((name (format nil "~D~D" i j)))
-              (setf point-bindings
-                    (append point-bindings (bevel-point-bindings i j)))
-              (setf vertex-statements
-                    (append
-                     vertex-statements
-                     `((set-mesh-vertex
-                        (+ vertex-base (uint ,(float (bevel-grid-index i j))))
-                        (position ,(intern (format nil "CLIP-~A" name)))
-                        (normal ,(intern (format nil "NORMAL-~A" name)))
-                        (world ,(intern (format nil "POINT-~A" name)))
-                        (uv (vec2 ,(bevel-grid-parameter i)
-                                  ,(bevel-grid-parameter j)))
-                        ,@(when (eq rule :chamfer)
-                            '((face-normal normal) (stock stock-slot))))))))))
-        (dotimes (i (1- side))
-          (dotimes (j (1- side))
-            ;; Each quad's diagonal points at the nearest corner vertex, so a
-            ;; corner square splits into its two flat chamfer pieces.
-            (let* ((toward-corner-p
-                     (eq (< i (floor side 2)) (< j (floor side 2))))
-                   (a (float (bevel-grid-index i j)))
-                   (b (float (bevel-grid-index (1+ i) j)))
-                   (c (float (bevel-grid-index (1+ i) (1+ j))))
-                   (d (float (bevel-grid-index i (1+ j))))
-                   ;; Triangles (p q r) and (p r s) around the quad a b c d,
-                   ;; rotated so the diagonal is a-c or b-d.
-                   (p (if toward-corner-p a b))
-                   (q (if toward-corner-p b c))
-                   (r (if toward-corner-p c d))
-                   (s* (if toward-corner-p d a))
-                   (primitive (float (* 2 (+ (* i (1- side)) j)))))
-              (setf primitive-statements
-                    (append
-                     primitive-statements
-                     `((set-mesh-primitive
-                        (+ primitive-base (uint ,primitive))
-                        (uvec3 (+ vertex-base (uint ,p))
-                               (+ vertex-base (if negative-p (uint ,r)
-                                                  (uint ,q)))
-                               (+ vertex-base (if negative-p (uint ,q)
-                                                  (uint ,r)))))
-                       (set-mesh-primitive
-                        (+ primitive-base (uint ,(1+ primitive)))
-                        (uvec3 (+ vertex-base (uint ,p))
-                               (+ vertex-base (if negative-p (uint ,s*)
-                                                  (uint ,r)))
-                               (+ vertex-base (if negative-p (uint ,r)
-                                                  (uint ,s*)))))))))))
-        `(define-shader ,name
-             (:stage :mesh
-              :workgroup-size (,+brick-size+ 1 1)
-              :payload surface-brick-payload
-              :inputs ((lane :uint :built-in :local-invocation-index))
-              :resources ((frame :uniform-block :binding ,+frame-binding+
-                                 :members ,*frame-uniform-members*)
-                          (sites :storage-buffer :binding ,+sites-binding+
-                                 :element :uint64)
-                          (cells :storage-buffer :binding ,+cells-binding+
-                                 :element :uint))
-              :mesh-output
-              (:topology :triangles
-               :max-vertices ,(* points +brick-size+)
-               :max-primitives ,(* primitives +brick-size+)
-               :vertex ((position :vec4 :built-in :position)
-                        (normal :vec3 :location 0)
-                        (world :vec3 :location 1)
-                        (uv :vec2 :location 2)
-                        ,@(when (eq rule :chamfer)
-                            '((face-normal :vec3 :location 3)
-                              (stock :float :location 4))))))
-           (let* ((site (buffer-element
-                         sites (+ (* brick-index (uint ,+brick-size+)) lane)))
-                  (stock-slot (float (uint (ldb (byte ,+site-stock-bits+
-                                                     ,+site-stock-shift+)
-                                                site))))
-                  (extent (uint (ldb (byte luft:+extent-bits+ 0) site)))
-                  (anchor
-                    (vec3 (float (uint (ldb (byte luft:+horizontal-capacity-bits+
-                                                   luft:+x-shift+)
-                                             site)))
-                          (float (uint (ldb (byte luft:+horizontal-capacity-bits+
-                                                   luft:+y-shift+)
-                                             site)))
-                          (float (uint (ldb (byte luft:+vertical-coordinate-bits+
-                                                   luft:+z-shift+)
-                                             site)))))
-                  (negative-p (= (uint (ldb (byte 1 luft:+site-sign-bit+) site))
-                                 (uint 1.0)))
-                  (present-p (> extent (uint 0.0)))
-                  (yz-face-p (= extent (uint luft:+yz-face-extent+)))
-                  (xz-face-p (= extent (uint luft:+xz-face-extent+)))
-                  (xy-face-p (= extent (uint luft:+xy-face-extent+)))
-                  (edge-a (if yz-face-p (vec3 0.0 1.0 0.0) (vec3 1.0 0.0 0.0)))
-                  (edge-b (if xy-face-p (vec3 0.0 1.0 0.0) (vec3 0.0 0.0 1.0)))
-                  (canonical (if yz-face-p
-                                 (vec3 1.0 0.0 0.0)
-                                 (if xz-face-p
-                                     (vec3 0.0 -1.0 0.0)
-                                     (vec3 0.0 0.0 1.0))))
-                  (orientation (if negative-p -1.0 1.0))
-                  (normal (* canonical orientation))
-                  (axis (abs canonical))
-                  (camera (swizzle camera-vector :xyz))
-                  ;; A rounded boundary point's normal tilts up to about 55
-                  ;; degrees from the face normal, so only faces turned well
-                  ;; past grazing can be dropped: those whose centre lies more
-                  ;; than 145 degrees from the camera direction.
-                  (toward (- camera (+ anchor (* (+ edge-a edge-b) 0.5))))
-                  (toward-normal (dot normal toward))
-                  (facing-p (if (> toward-normal 0.0)
-                                (> 1.0 0.0)
-                                (< (* toward-normal toward-normal)
-                                   (* 0.72 (dot toward toward)))))
-                  (scale (if present-p (if facing-p 1.0 0.0) 0.0))
-                  (right (swizzle right-vector :xyz))
-                  (up (swizzle up-vector :xyz))
-                  (forward (swizzle forward-vector :xyz))
-                  (period-x (swizzle domain-vector :x))
-                  (period-y (swizzle domain-vector :y))
-                  (radius (swizzle domain-vector :z))
-                  ;; The face's own solid cell and air cell anchors.
-                  (positive-p (> (dot normal axis) 0.0))
-                  (solid-anchor (- anchor (* axis (if positive-p 1.0 0.0))))
-                  (air-anchor (- anchor (* axis (if positive-p 0.0 1.0))))
-                  ,@(loop for (name solid-p du dv) in gathers
-                          append (cell-solid-bindings
-                                  name
-                                  `(+ ,(if solid-p 'solid-anchor 'air-anchor)
-                                      ,(offset-form du dv))))
-                  ;; Site rules: four edges, four corners.
-                  (edge-u-pos-minority
-                    (edge-minority solid-cu-pos solid-eu-pos normal edge-a))
-                  (edge-u-neg-minority
-                    (edge-minority solid-cu-neg solid-eu-neg normal (- edge-a)))
-                  (edge-v-pos-minority
-                    (edge-minority solid-cv-pos solid-ev-pos normal edge-b))
-                  (edge-v-neg-minority
-                    (edge-minority solid-cv-neg solid-ev-neg normal (- edge-b)))
-                  (corner-pos-pos-minority
-                    (vertex-minority normal edge-a edge-b
-                                     solid-cu-pos solid-eu-pos
-                                     solid-cv-pos solid-ev-pos
-                                     solid-c-pos-pos solid-e-pos-pos))
-                  (corner-pos-neg-minority
-                    (vertex-minority normal edge-a (- edge-b)
-                                     solid-cu-pos solid-eu-pos
-                                     solid-cv-neg solid-ev-neg
-                                     solid-c-pos-neg solid-e-pos-neg))
-                  (corner-neg-pos-minority
-                    (vertex-minority normal (- edge-a) edge-b
-                                     solid-cu-neg solid-eu-neg
-                                     solid-cv-pos solid-ev-pos
-                                     solid-c-neg-pos solid-e-neg-pos))
-                  (corner-neg-neg-minority
-                    (vertex-minority normal (- edge-a) (- edge-b)
-                                     solid-cu-neg solid-eu-neg
-                                     solid-cv-neg solid-ev-neg
-                                     solid-c-neg-neg solid-e-neg-neg))
-                  ,@(bevel-corner-bindings)
-                  ,@point-bindings
-                  (vertex-base (* lane (uint ,(float points))))
-                  (primitive-base (* lane (uint ,(float primitives)))))
-             (set-mesh-output-counts (uint ,(float (* points +brick-size+)))
-                                     (uint ,(float (* primitives +brick-size+))))
-             ,@vertex-statements
-             ,@primitive-statements))))))
-
-#.(bevel-mesh-shader-definition)
-
-#.(bevel-mesh-shader-definition :name 'chamfer-mesh-shader :rings 1
-                                :rule :chamfer)
+                           projection-vector)))))))
 
 ;;; Fine woodworking shading: facets are flat, read from the screen-space
 ;;; derivatives of the world position, and only the arris between a face and
 ;;; its chamfer is sanded, by blending toward the face normal within a small
 ;;; band on either side of the chamfer line.
-(define-shader chamfer-fragment-shader
+(define-temporal-fragment-shaders
+    (chamfer-fragment-shader temporal-chamfer-fragment-shader
+     (world-motion world))
     (:stage :fragment
      :inputs ((normal :vec3 :location 0)
               (world :vec3 :location 1)
@@ -1035,38 +778,10 @@ The chamfer rule also emits the face normal for facet shading."
 ;;;
 ;;; The clear colour is a single flat tone, which is honest and which no
 ;;; photograph has.  This draws the background instead: one full-screen
-;;; triangle from a single mesh lane, shaded by the direction each pixel
+;;; triangle from the screen vertex stage, shaded by the direction each pixel
 ;;; looks along.  It carries the same SKY-VECTOR the fog converges to, so
 ;;; the horizon of the gradient and the far end of the fog are the same
 ;;; colour by construction, and the zenith is free to be deeper.
-
-(define-shader sky-mesh-shader
-    (:stage :mesh
-     :workgroup-size (1 1 1)
-     :inputs ((lane :uint :built-in :local-invocation-index))
-     :resources ((frame :uniform-block :binding #.+frame-binding+
-                        :members #.*frame-uniform-members*))
-     :mesh-output
-     (:topology :triangles
-      :max-vertices 3
-      :max-primitives 1
-      :vertex ((position :vec4 :built-in :position)
-               (ndc :vec2 :location 0))))
-  ;; The oversized triangle covering clip space: (-1,-1), (3,-1), (-1,3).
-  ;; Depth sits just inside the far plane so the pass may run first and the
-  ;; world still draws over it under an ordinary less-than test.
-  (let* ((ignored (float lane)))
-    (set-mesh-output-counts (uint 3.0) (uint 1.0))
-    (set-mesh-vertex (uint 0.0)
-                     (position (vec4 (+ -1.0 (* 0.0 ignored)) -1.0 0.99999 1.0))
-                     (ndc (vec2 -1.0 -1.0)))
-    (set-mesh-vertex (uint 1.0)
-                     (position (vec4 3.0 -1.0 0.99999 1.0))
-                     (ndc (vec2 3.0 -1.0)))
-    (set-mesh-vertex (uint 2.0)
-                     (position (vec4 -1.0 3.0 0.99999 1.0))
-                     (ndc (vec2 -1.0 3.0)))
-    (set-mesh-primitive (uint 0.0) (uvec3 (uint 0.0) (uint 1.0) (uint 2.0)))))
 
 (define-shader-function sky-radiance (direction sun-vector sun-colour-vector
                                       sky-vector ground-vector)
@@ -1095,7 +810,9 @@ what the fog converges to and what the background paints must agree."
          (glow (* radiance (+ halo disc))))
     (clamp (+ band glow) (vec3 0.0 0.0 0.0) (vec3 1.0 1.0 1.0))))
 
-(define-shader sky-fragment-shader
+(define-temporal-fragment-shaders
+    (sky-fragment-shader temporal-sky-fragment-shader
+     (direction-motion direction))
     (:stage :fragment
      :inputs ((ndc :vec2 :location 0))
      :outputs ((color :vec4 :location 0))
@@ -1103,11 +820,12 @@ what the fog converges to and what the background paints must agree."
                         :members #.*frame-uniform-members*)))
   ;; Invert VIEW-CLIP for a ray: clip x is view-x times the projection's x
   ;; scale over view-z, and clip y is that negated on the y scale.
-  (let* ((right (swizzle right-vector :xyz))
+  (let* ((sample-ndc (- ndc (swizzle jitter-vector :xy)))
+         (right (swizzle right-vector :xyz))
          (up (swizzle up-vector :xyz))
          (forward (swizzle forward-vector :xyz))
-         (x (/ (swizzle ndc :x) (swizzle projection-vector :x)))
-         (y (/ (swizzle ndc :y) (swizzle projection-vector :y)))
+         (x (/ (swizzle sample-ndc :x) (swizzle projection-vector :x)))
+         (y (/ (swizzle sample-ndc :y) (swizzle projection-vector :y)))
          (direction (normalize (+ forward (- (* right x) (* up y)))))
          (final (sky-radiance direction sun-vector sun-colour-vector
                               sky-vector ground-vector)))
@@ -1185,6 +903,120 @@ what the fog converges to and what the background paints must agree."
                                       luma))
                        (vec3 0.0 0.0 0.0) (vec3 1.0 1.0 1.0))))
     (set-output color (vec4 final 1.0))))
+
+;;; ------------------------------------------------------------------------
+;;; Temporal resolve and presentation
+
+(define-shader-function rgb-to-ycocg (rgb)
+  "Put RGB into a luminance/chroma space whose box is a useful colour clip."
+  (vec3 (+ (* (swizzle rgb :x) 0.25)
+           (* (swizzle rgb :y) 0.50)
+           (* (swizzle rgb :z) 0.25))
+        (* 0.5 (- (swizzle rgb :x) (swizzle rgb :z)))
+        (+ (* (swizzle rgb :x) -0.25)
+           (* (swizzle rgb :y) 0.50)
+           (* (swizzle rgb :z) -0.25))))
+
+(define-shader-function ycocg-to-rgb (value)
+  "Invert RGB-TO-YCOCG."
+  (vec3 (+ (swizzle value :x) (swizzle value :y)
+           (- (swizzle value :z)))
+        (+ (swizzle value :x) (swizzle value :z))
+        (+ (swizzle value :x) (- (swizzle value :y))
+           (- (swizzle value :z)))))
+
+(define-shader temporal-resolve-fragment-shader
+    (:stage :fragment
+     :inputs ((ndc :vec2 :location 0))
+     :outputs ((color :vec4 :location 0))
+     :resources
+     ((current :texture-2d :binding #.+current-binding+
+               :sample-transfer :identity)
+      (motion-texture :texture-2d :binding #.+motion-binding+
+                      :sample-transfer :identity)
+      (history :texture-2d :binding #.+history-binding+
+               :sample-transfer :identity)
+      (temporal-sampler :sampler :binding #.+temporal-sampler-binding+)
+      (frame :uniform-block :binding #.+temporal-frame-binding+
+             :members #.*frame-uniform-members*)))
+  (let* ((uv (+ (* ndc 0.5) (vec2 0.5 0.5)))
+         (texel (swizzle temporal-vector :xy))
+         (dx (vec2 (swizzle texel :x) 0.0))
+         (dy (vec2 0.0 (swizzle texel :y)))
+         (centre (sample current temporal-sampler uv))
+         (c00 (rgb-to-ycocg
+               (swizzle (sample current temporal-sampler (- (- uv dx) dy))
+                        :xyz)))
+         (c10 (rgb-to-ycocg
+               (swizzle (sample current temporal-sampler (- uv dy)) :xyz)))
+         (c20 (rgb-to-ycocg
+               (swizzle (sample current temporal-sampler (+ (- uv dy) dx))
+                        :xyz)))
+         (c01 (rgb-to-ycocg
+               (swizzle (sample current temporal-sampler (- uv dx)) :xyz)))
+         (c11 (rgb-to-ycocg (swizzle centre :xyz)))
+         (c21 (rgb-to-ycocg
+               (swizzle (sample current temporal-sampler (+ uv dx)) :xyz)))
+         (c02 (rgb-to-ycocg
+               (swizzle (sample current temporal-sampler (+ (- uv dx) dy))
+                        :xyz)))
+         (c12 (rgb-to-ycocg
+               (swizzle (sample current temporal-sampler (+ uv dy)) :xyz)))
+         (c22 (rgb-to-ycocg
+               (swizzle (sample current temporal-sampler (+ (+ uv dx) dy))
+                        :xyz)))
+         (neighbourhood-min (min c00 c10 c20 c01 c11 c21 c02 c12 c22))
+         (neighbourhood-max (max c00 c10 c20 c01 c11 c21 c02 c12 c22))
+         ;; Motion deliberately excludes jitter.  History contains last
+         ;; frame's jittered samples, so its address includes the clip-space
+         ;; jitter delta converted to UV units here, in one visible place.
+         ;; Velocity is categorical at geometry edges; filtering it would
+         ;; invent a third surface between foreground and background.  The
+         ;; shader language already has exact TEXEL-LOAD, so this needs no
+         ;; extra sampler or HAL operation.
+         (pixel (uvec2 (uint (/ (swizzle uv :x) (swizzle texel :x)))
+                       (uint (/ (swizzle uv :y) (swizzle texel :y)))))
+         (velocity (swizzle (texel-load motion-texture pixel) :xy))
+         (jitter-delta
+           (* (- (swizzle jitter-vector :zw) (swizzle jitter-vector :xy)) 0.5))
+         (history-uv (+ (+ uv velocity) jitter-delta))
+         (inside
+           (* (* (step 0.0 (swizzle history-uv :x))
+                 (step (swizzle history-uv :x) 1.0))
+              (* (step 0.0 (swizzle history-uv :y))
+                 (step (swizzle history-uv :y) 1.0))))
+         (old (rgb-to-ycocg
+               (swizzle (sample history temporal-sampler history-uv) :xyz)))
+         (clipped (clamp old neighbourhood-min neighbourhood-max))
+         ;; A rapid reprojection or a colour discontinuity should be more
+         ;; responsive.  The shaped AABB above remains the primary rejection
+         ;; mechanism; these factors make its edge cases settle promptly.
+         (speed (clamp (* (sqrt (dot velocity velocity)) 48.0) 0.0 1.0))
+         (difference
+           (clamp (* (abs (- (swizzle clipped :x) (swizzle c11 :x))) 4.0)
+                  0.0 1.0))
+         (configured-weight (swizzle temporal-vector :w))
+         (history-weight
+           (* (* (swizzle temporal-vector :z) inside)
+              (* configured-weight
+                 (* (- 1.0 (* speed 0.35)) (- 1.0 difference)))))
+         (resolved
+           (ycocg-to-rgb (mix c11 clipped history-weight))))
+    ;; Alpha is per-frame focus metadata, never temporal colour history.
+    (set-output color (vec4 resolved (swizzle centre :w)))))
+
+(define-shader present-fragment-shader
+    (:stage :fragment
+     :inputs ((ndc :vec2 :location 0))
+     :outputs ((color :vec4 :location 0))
+     :resources ((scene :texture-2d :binding #.+scene-binding+
+                        :sample-transfer :identity)
+                 (scene-sampler :sampler :binding #.+sampler-binding+)
+                 (frame :uniform-block :binding #.+lens-frame-binding+
+                        :members #.*frame-uniform-members*)))
+  (let* ((uv (+ (* ndc 0.5) (vec2 0.5 0.5)))
+         (value (sample scene scene-sampler uv)))
+    (set-output color (vec4 (swizzle value :xyz) 1.0))))
 
 ;;; ------------------------------------------------------------------------
 ;;; Paper: a matte material for photographing the chamfers
@@ -1286,7 +1118,9 @@ the white the tonemap defends."
          (fog (smoothstep (* 0.55 fog-far) fog-far distance)))
     (mix exposed sky fog)))
 
-(define-shader paper-fragment-shader
+(define-temporal-fragment-shaders
+    (paper-fragment-shader temporal-paper-fragment-shader
+     (world-motion world))
     (:stage :fragment
      :inputs ((normal :vec3 :location 0)
               (world :vec3 :location 1)

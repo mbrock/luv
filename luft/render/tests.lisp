@@ -62,6 +62,13 @@
     ;; The surface is closed: its boundary vanishes.
     (ok (zerop (luft:chain-count (luft:boundary-chain surface))))))
 
+(deftest refreshing-a-scene-publishes-a-new-revision
+  (let* ((scene (make-demo-scene))
+         (revision (scene-revision scene)))
+    (ok (plusp revision))
+    (ok (eq scene (refresh-scene scene)))
+    (ok (= (1+ revision) (scene-revision scene)))))
+
 (deftest packed-sites-carry-the-stock-of-the-solid-behind-them
   ;; A face is stamped with the stock of the cell it bounds, not of the air
   ;; on the other side, and the stamp lives above the sixty bits a LUFT
@@ -146,7 +153,7 @@
     (ok (eq :stock style))
     (ok (equal '(:flat :bevel :chamfer :paper :stock :field :soft :ink)
                pipelines))
-    (ok (equal '(:sky :lens) effects)))
+    (ok (equal (luft.render::default-renderer-effects) effects)))
   ;; A mode of its own selects only its own pipeline, the stock included.
   (multiple-value-bind (mode style pipelines effects)
       (luft.render::standalone-render-options "stock")
@@ -205,6 +212,54 @@
                     (count-pixels pixels width height #'sky-pixel-p)))))
       (destroy-renderer renderer))))
 
+(deftest temporal-jitter-and-frame-views-are-frame-sized-and-frozen
+  (let* ((width 320)
+         (height 200)
+         (samples (loop for index below 8
+                        collect (luft.render::temporal-jitter
+                                 index width height))))
+    (ok (= 8 (length (remove-duplicates samples :test #'equalp))))
+    (ok (every (lambda (jitter)
+                 (and (< (abs (* 0.5 width (aref jitter 0))) 0.5)
+                      (< (abs (* 0.5 height (aref jitter 1))) 0.5)))
+               samples))
+    (let* ((camera (make-fly-camera))
+           (view (luft.render::capture-frame-view
+                  camera width height (first samples)))
+           (old-x (vec3:vec3-x (luft.render::frame-view-position view))))
+      (setf (camera-position camera) (vec3:make-vec3 1.0 2.0 3.0))
+      (ok (= old-x
+             (vec3:vec3-x (luft.render::frame-view-position view))))
+      (let ((data (frame-uniform-data view width height nil 0.2 0.01
+                                      view t 0.875)))
+        (ok (= 104 (length data)))
+        (ok (= (aref (first samples) 0) (aref data 96)))
+        (ok (= (aref (first samples) 1) (aref data 97)))
+        (ok (= 1.0 (aref data 102)))
+        (ok (= 0.875 (aref data 103)))))))
+
+(deftest only-temporal-surface-shaders-write-motion
+  (dolist (pair (list
+                 (list (luft.render.shaders:surface-fragment-shader)
+                       (luft.render.shaders:temporal-surface-fragment-shader))
+                 (list (luft.render.shaders:chamfer-fragment-shader)
+                       (luft.render.shaders:temporal-chamfer-fragment-shader))
+                 (list (luft.render.shaders:paper-fragment-shader)
+                       (luft.render.shaders:temporal-paper-fragment-shader))
+                 (list (luft.render.shaders:sky-fragment-shader)
+                       (luft.render.shaders:temporal-sky-fragment-shader))
+                 (list (luft.render.shaders:field-fragment-shader)
+                       (luft.render.shaders:temporal-field-fragment-shader))
+                 (list (luft.render.shaders:ink-fragment-shader)
+                       (luft.render.shaders:temporal-ink-fragment-shader))
+                 (list (luft.render.shaders:stock-fragment-shader)
+                       (luft.render.shaders:temporal-stock-fragment-shader))))
+    (destructuring-bind (ordinary temporal) pair
+      (ok (= 1 (length (luv.shader:shader-specification-outputs ordinary))))
+      (let ((outputs (luv.shader:shader-specification-outputs temporal)))
+        (ok (= 2 (length outputs)))
+        (ok (= 1 (luv.shader:shader-interface-location (second outputs))))))))
+
 
 (defun probe-scene ()
   "A floor with a block and an L-shaped stack: pure, mixed, and concave stars."
@@ -218,6 +273,49 @@
           (luft:solid-cell-p solid 6 5 1) t
           (luft:solid-cell-p solid 6 5 2) t)
     (make-scene domain :solid solid)))
+
+#-darwin
+(deftest vulkan-temporal-history-resolves-ping-pongs-and-invalidates
+  (let* ((scene (probe-scene))
+         (camera (make-fly-camera
+                  :position (vec3:make-vec3 5.0 1.0 5.0)
+                  :yaw 1.6 :pitch -0.6))
+         (renderer (make-renderer :scene scene :camera camera
+                                  :width 96 :height 64
+                                  :style :flat :pipeline-styles '(:flat)
+                                  :effects '(:taa))))
+    (unwind-protect
+         (progn
+           (ok (eq :rgba16-float
+                   (luv:gpu-texture-format
+                    (luft.render::renderer-scene-texture renderer))))
+           (ok (eq :rg16-float
+                   (luv:gpu-texture-format
+                    (luft.render::renderer-motion-texture renderer))))
+           (ok (= (* 4 96 64) (length (render-pixels renderer))))
+           (ok (not (luft.render::renderer-history-used-p renderer)))
+           (render-pixels renderer)
+           (ok (luft.render::renderer-history-used-p renderer))
+           (ok (= 2 (luft.render::renderer-frame-index renderer)))
+           (ok (zerop (luft.render::renderer-history-index renderer)))
+           ;; The key is made from resolved uniform/material values, not just
+           ;; their preset names: hand-tuning an atelier knob is a cut too.
+           (let ((*exposure* (+ *exposure* 0.1)))
+             (render-pixels renderer)
+             (ok (not (luft.render::renderer-history-used-p renderer))))
+           ;; Refreshing the same object is a publication, not an identity
+           ;; change; its revision must still force a fresh history sample.
+           (refresh-scene scene)
+           (render-pixels renderer)
+           (ok (not (luft.render::renderer-history-used-p renderer)))
+           (ok (= (scene-revision scene)
+                  (luft.render::renderer-uploaded-scene-revision renderer)))
+           ;; Likewise a teleport is a cut, while an ordinary fly-camera
+           ;; step on the next frame resumes reprojection.
+           (setf (camera-position camera) (vec3:make-vec3 40.0 40.0 30.0))
+           (render-pixels renderer)
+           (ok (not (luft.render::renderer-history-used-p renderer))))
+      (destroy-renderer renderer))))
 
 (defun mixed-stock-scene ()
   "A floor of one stock carrying shapes of several others.

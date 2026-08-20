@@ -204,7 +204,9 @@ goes up."
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun stock-fragment-shader-definition ()
     "The stock fragment shader, spliced around one wide field sample."
-    `(define-shader stock-fragment-shader
+    `(define-temporal-fragment-shaders
+         (stock-fragment-shader temporal-stock-fragment-shader
+          (world-motion world))
          (:stage :fragment
           :inputs ((normal :vec3 :location 0)
                    (world :vec3 :location 1)
