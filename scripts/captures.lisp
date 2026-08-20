@@ -21,8 +21,12 @@
   (format stream "       scripts/captures render [--output DIRECTORY] [NAME...]~%"))
 
 (defun parse-capture-render-arguments (arguments)
-  (let ((directory
-          (merge-pathnames #P"build/wiki/media/" (capture-project-root)))
+  (let* ((configured (uiop:getenv "LUV_CAPTURE_OUTPUT_DIRECTORY"))
+         (directory
+           (if (and configured (plusp (length configured)))
+               (pathname configured)
+               (merge-pathnames #P"build/wiki/media/"
+                                (capture-project-root))))
         (names '()))
     (loop while arguments
           for argument = (pop arguments)
