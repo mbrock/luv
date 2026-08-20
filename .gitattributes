@@ -1,0 +1,2 @@
+media/** annex.largefiles=anything
+media/manifest.sexp annex.largefiles=nothing
