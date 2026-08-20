@@ -1087,12 +1087,16 @@ as its own element type rather than as reinterpreted floats."
                             (list :offset offset :size size)))
       (submitted-work-done
        (device-queue (vulkan-buffer-device buffer)))
+      ;; One memcpy into the pinned result vector, mirroring WRITE-BUFFER:
+      ;; a byte-at-a-time loop over a whole frame's readback is hundreds of
+      ;; milliseconds; this is the difference between a film and a slideshow.
       (let ((bytes (make-array size :element-type '(unsigned-byte 8)))
             (source (cffi:inc-pointer
                      (vulkan-buffer-mapped buffer) offset)))
-        (dotimes (index size bytes)
-          (setf (aref bytes index)
-                (cffi:mem-aref source :uint8 index)))))))
+        (sb-sys:with-pinned-objects (bytes)
+          (sb-kernel:system-area-ub8-copy
+           source 0 (sb-sys:vector-sap bytes) 0 size))
+        bytes))))
 
 (defmethod create
     ((device vulkan-gpu-device) (descriptor texture-descriptor))
