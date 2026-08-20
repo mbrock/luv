@@ -206,7 +206,6 @@
               pkgs.openssl
               pkgs.sdl3
               pkgs.sdl3-image
-              pkgs.sdl3-mixer
               pkgs.sdl3-ttf
               pkgs.vulkan-loader
             ] ++ nixpkgs.lib.optionals pkgs.stdenv.isDarwin [
@@ -409,6 +408,15 @@
           };
         in {
           default = env.pkgs.mkShell shellEnvironment;
+          # SDL_mixer is not used by luvcraft's audio path, and its Darwin
+          # build need not hold up the ordinary development shell.  Keep it
+          # available for experiments without making it a default dependency.
+          # Enter with `nix develop .#mixer` (or `direnv shell .#mixer`).
+          mixer = env.pkgs.mkShell (shellEnvironment // {
+            packages = shellEnvironment.packages ++ [ env.pkgs.sdl3-mixer ];
+            LD_LIBRARY_PATH = nixpkgs.lib.makeLibraryPath [ env.pkgs.sdl3-mixer ]
+              + ":${shellEnvironment.LD_LIBRARY_PATH}";
+          });
           # Tracy is intentionally opt-in: its viewer is a large C++ build
           # that should not hold up the ordinary Lisp development shell.
           # Enter with `nix develop .#tracy` (or `direnv shell .#tracy`).
