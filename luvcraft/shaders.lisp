@@ -2892,3 +2892,283 @@ disappeared into a dark background."
             (vec4 (* ink body) alpha)
             :quantity :linear-rgba :unit :one)))
     (set-output color-output rgba)))
+
+;;; ---------------------------------------------------------------------
+;;; The physics bodies as spheres, drawn the honest way.
+;;;
+;;; Every ball, marble, drop, and gobbet is really a sphere in the physics,
+;;; and here it finally looks like one: each body is a camera-facing quad
+;;; whose fragments send an exact ray at the analytic sphere -- one closed
+;;; quadratic, no marching -- and shade the true surface point with the true
+;;; normal.  The instance stream carries the body's centre and radius, its
+;;; orientation quaternion, an albedo and emission the CPU resolved from the
+;;; body-kind palette, and the sampled voxel light levels.  Patterns are
+;;; painted in the body's own frame: the fragment carries the world normal
+;;; back through the quaternion's conjugate, so a ball's band, a beach
+;;; ball's panels, and a smiley's face all tumble as the body rolls.
+;;;
+;;; The lowering has no fragment-depth output, so the quad cannot write the
+;;; sphere's own depth.  Instead the vertex stage slides the proxy toward
+;;; the eye by one radius: its depth is then conservatively near for every
+;;; point on the sphere, and a ball resting in a hollow is not eaten by the
+;;; terrain in front of its centre plane.  The draw itself tests depth
+;;; without writing it and blends premultiplied, with the CPU handing over
+;;; instances farthest first.
+
+(define-shader-function physics-sphere-length (vector)
+  "Euclidean length, floored away from the origin's derivative singularity."
+  (sqrt (max (dot vector vector) 1e-12)))
+
+(define-shader-function physics-sphere-cross (a b)
+  "The cross product, spelled out; the shader language keeps no such operator."
+  (vec3 (- (* (swizzle a :y) (swizzle b :z)) (* (swizzle a :z) (swizzle b :y)))
+        (- (* (swizzle a :z) (swizzle b :x)) (* (swizzle a :x) (swizzle b :z)))
+        (- (* (swizzle a :x) (swizzle b :y)) (* (swizzle a :y) (swizzle b :x)))))
+
+(define-shader-function physics-sphere-unspin (vector spin)
+  "VECTOR carried into the body's own frame: a turn by SPIN's conjugate.
+
+The physics keeps a unit quaternion (x y z w) purely for the eye.  A pattern
+painted on the body's own axes therefore visibly turns with the body when
+the world-space surface normal is unspun through the quaternion before the
+pattern reads it."
+  (let* ((axis (vec3 (- (swizzle spin :x))
+                     (- (swizzle spin :y))
+                     (- (swizzle spin :z))))
+         (turn (* (physics-sphere-cross axis vector) 2.0)))
+    (+ vector (+ (* turn (swizzle spin :w))
+                 (physics-sphere-cross axis turn)))))
+
+(define-shader-function physics-sphere-band-color (albedo local)
+  "The classic ball's pale band: a latitude ring in the pattern frame,
+so it sweeps visibly over the ball as it rolls."
+  (let* ((band (- 1.0 (smoothstep 0.10 0.22 (abs (swizzle local :y))))))
+    (mix albedo (vec3 0.89 0.84 0.75) (* band 0.85))))
+
+(define-shader-function physics-sphere-marble-color (albedo local)
+  "Glass with a vein through it: value noise in the pattern frame."
+  (let* ((vein (smoothstep 0.42 0.72 (lattice-noise (* local 2.6)))))
+    (mix albedo (vec3 0.94 0.97 1.0) (* vein 0.55))))
+
+(define-shader-function physics-sphere-beach-color (local)
+  "Six panels meeting at the poles, without an arc tangent.
+
+Three half-planes at sixty degrees classify the pattern-frame longitude:
+one sector satisfies exactly one of them and its neighbour exactly two, so
+the count alternates white with colour around the ball, and which pair
+holds names the colour.  A small white cap covers each pole, where every
+panel converges the way a real beach ball's cap does."
+  (let* ((x (swizzle local :x))
+         (z (swizzle local :z))
+         (s0 (step 0.0 x))
+         (s1 (step 0.0 (+ (* -0.5 x) (* 0.8660254 z))))
+         (s2 (step 0.0 (- (* -0.5 x) (* 0.8660254 z))))
+         (white (clamp (- 2.0 (+ s0 (+ s1 s2))) 0.0 1.0))
+         (red (* s0 (* s1 (- 1.0 s2))))
+         (yellow (* (- 1.0 s0) (* s1 s2)))
+         (blue (* s0 (* (- 1.0 s1) s2)))
+         (panel (+ (* (vec3 0.97 0.95 0.92) white)
+                   (+ (* (vec3 0.92 0.16 0.13) red)
+                      (+ (* (vec3 0.99 0.80 0.12) yellow)
+                         (* (vec3 0.16 0.36 0.90) blue)))))
+         (cap (smoothstep 0.92 0.97 (abs (swizzle local :y)))))
+    (mix panel (vec3 0.97 0.95 0.92) cap)))
+
+(define-shader-function physics-sphere-smiley-color (albedo local)
+  "Two eyes and a smile on the pattern frame's +z half, so the face tumbles.
+
+The features are placed by direction from the centre, the same trick the
+gnome's face uses: a direction does not care what radius the ball was drawn
+at.  The smile is the lower arc of a ring around a point above the mouth,
+masked to the face's lower half."
+  (let* ((mirrored (vec3 (abs (swizzle local :x))
+                         (swizzle local :y)
+                         (swizzle local :z)))
+         (eye (- 1.0 (smoothstep 0.13 0.19
+                                 (physics-sphere-length
+                                  (- mirrored (vec3 0.30 0.32 0.90))))))
+         (ring (physics-sphere-length (- local (vec3 0.0 0.35 0.94))))
+         (smile (* (- 1.0 (smoothstep 0.05 0.10 (abs (- ring 0.62))))
+                   (smoothstep 0.02 0.12 (- 0.0 (swizzle local :y)))))
+         (ink (clamp (+ eye smile) 0.0 1.0)))
+    (mix albedo (vec3 0.16 0.10 0.05) ink)))
+
+(define-shader-method shader-specification-for
+    physics-sphere-vertex-specification
+    ((role (eql :physics-sphere)) (stage (eql :vertex)))
+    (:stage :vertex
+     :inputs ((quad-corner :vec3 :location 0)
+              (sphere-instance :vec4 :location 1)
+              (spin-instance :vec4 :location 2)
+              (tint-instance :vec4 :location 3)
+              (shine-instance :vec4 :location 4))
+     :outputs ((clip-position :vec4 :built-in :position)
+               (proxy-world-position :vec3 :location 0)
+               (sphere-output :vec4 :location 1)
+               (spin-output :vec4 :location 2)
+               (tint-output :vec4 :location 3)
+               (light-fog-output :vec4 :location 4))
+     :resources
+     ((frame-state :uniform-block :set 0 :binding 2
+                   :members #.*frame-uniform-members*)))
+  (let* ((center (swizzle sphere-instance :xyz))
+         (radius (max (swizzle sphere-instance :w) 1e-4))
+         (camera (representation (swizzle camera-vector :xyz)))
+         (right (representation (swizzle right-vector :xyz)))
+         (up (representation (swizzle up-vector :xyz)))
+         (forward (representation (swizzle forward-vector :xyz)))
+         (corner-x (- (* (swizzle quad-corner :x) 2.0) 1.0))
+         (corner-y (- (* (swizzle quad-corner :y) 2.0) 1.0))
+         (to-camera (- camera center))
+         (camera-distance (physics-sphere-length to-camera))
+         ;; The proxy plane slides toward the eye by one radius, stopping
+         ;; short of the eye itself: its interpolated depth is then nearer
+         ;; than any point of the sphere, so the depth test against terrain
+         ;; can only err by letting a hidden ball show through a sliver, not
+         ;; by eating a resting ball at its contact circle.
+         (slide (min radius (max 0.0 (- camera-distance 0.25))))
+         (proxy-center (+ center (* (/ to-camera camera-distance) slide)))
+         ;; Exactly the half-extent the silhouette needs from the slid
+         ;; plane, capped so a ball against the eye stays finite.
+         (silhouette-run
+           (sqrt (max (- (* camera-distance camera-distance)
+                         (* radius radius))
+                      0.001)))
+         (half-extent
+           (min (* radius 4.0)
+                (* radius (/ (- camera-distance slide) silhouette-run))))
+         (world-position
+           (+ proxy-center (+ (* right (* corner-x half-extent))
+                              (* up (* corner-y half-extent)))))
+         (relative (- world-position camera))
+         (view-x (dot relative right))
+         (view-y (dot relative up))
+         (view-z (dot relative forward))
+         (x-scale (representation (swizzle projection-vector :x)))
+         (y-scale (representation (swizzle projection-vector :y)))
+         (z-scale (representation (swizzle projection-vector :z)))
+         (z-offset (representation (swizzle projection-vector :w)))
+         ;; Fog is measured once at the centre; a body is small enough to
+         ;; take one answer, and the quadratic law matches the terrain's.
+         (center-view-z (dot (- center camera) forward))
+         (fog-near (representation (swizzle fog-vector :x)))
+         (fog-far (representation (swizzle fog-vector :y)))
+         (fog-progress
+           (clamp (/ (- center-view-z fog-near)
+                     (max 1.0 (- fog-far fog-near)))
+                  0.0 1.0))
+         (fog-amount (* fog-progress fog-progress)))
+    (set-output clip-position
+                (vec4 (* view-x x-scale)
+                      (- (* view-y y-scale))
+                      (+ (* view-z z-scale) z-offset)
+                      view-z))
+    (set-output proxy-world-position world-position)
+    (set-output sphere-output sphere-instance)
+    (set-output spin-output spin-instance)
+    (set-output tint-output tint-instance)
+    (set-output light-fog-output
+                (vec4 (swizzle shine-instance :x)
+                      (swizzle shine-instance :y)
+                      (swizzle shine-instance :z)
+                      fog-amount))))
+
+(define-shader-method shader-specification-for
+    physics-sphere-fragment-specification
+    ((role (eql :physics-sphere)) (stage (eql :fragment)))
+    (:stage :fragment
+     :inputs ((proxy-world-position :vec3 :location 0)
+              (sphere-input :vec4 :location 1)
+              (spin-input :vec4 :location 2)
+              (tint-input :vec4 :location 3)
+              (light-fog-input :vec4 :location 4))
+     :outputs ((color-output :vec4 :location 0))
+     :resources
+     ((frame-state :uniform-block :set 0 :binding 2
+                   :members #.*frame-uniform-members*)))
+  (let* ((camera (representation (swizzle camera-vector :xyz)))
+         (center (swizzle sphere-input :xyz))
+         (radius (max (swizzle sphere-input :w) 1e-4))
+         (ray (normalize (- proxy-world-position camera)))
+         ;; The closed-form ray/sphere meeting: no march for a quadric.
+         (to-center (- camera center))
+         (half-b (dot to-center ray))
+         (gap (- (dot to-center to-center) (* radius radius)))
+         (discriminant (- (* half-b half-b) gap))
+         (coverage (step 0.0 discriminant))
+         (span (sqrt (max discriminant 0.0)))
+         (travel (max (- (- half-b) span) 0.0))
+         (point (+ camera (* ray travel)))
+         (normal (normalize (- point center)))
+         ;; The pattern frame: the normal unspun by the body's quaternion.
+         (local (physics-sphere-unspin normal spin-input))
+         (pattern (swizzle light-fog-input :z))
+         (base (swizzle tint-input :xyz))
+         (is-band (* (step 0.5 pattern) (step pattern 1.5)))
+         (is-marble (* (step 1.5 pattern) (step pattern 2.5)))
+         (is-beach (* (step 2.5 pattern) (step pattern 3.5)))
+         (is-smiley (step 3.5 pattern))
+         (albedo
+           (mix (mix (mix (mix base
+                               (physics-sphere-band-color base local)
+                               is-band)
+                          (physics-sphere-marble-color base local)
+                          is-marble)
+                     (physics-sphere-beach-color local)
+                     is-beach)
+                (physics-sphere-smiley-color base local)
+                is-smiley))
+         ;; The block world's light, in miniature: the sampled voxel levels
+         ;; response-curved the same way, the same sun gate, the same dome
+         ;; and torch colours, a wrapped diffuse in place of the flat one.
+         (sky-input (swizzle light-fog-input :x))
+         (block-input (swizzle light-fog-input :y))
+         (sky-level (* sky-input sky-input))
+         (block-level (* block-input block-input))
+         (sun-direction (representation (swizzle sun-vector :xyz)))
+         (day-factor (representation (swizzle sun-vector :w)))
+         (sun-color (representation (swizzle sun-color-vector :xyz)))
+         (ambient (representation (swizzle ambient-vector :xyz)))
+         (sun-visibility (smoothstep 0.90 1.0 sky-input))
+         (lambert (dot normal sun-direction))
+         (wrapped (max 0.0 (/ (+ lambert 0.30) 1.30)))
+         (facing-up (* 0.5 (+ 1.0 (swizzle normal :y))))
+         (dome (mix (representation (swizzle horizon-vector :xyz))
+                    (representation (swizzle zenith-vector :xyz))
+                    (* facing-up facing-up)))
+         (bounce (* (representation (swizzle fog-color-vector :xyz)) 0.9))
+         (environment (mix bounce (mix ambient dome 0.62) facing-up))
+         (sky-light (* environment (+ 0.030 (* 0.86 sky-level))))
+         (sun-light
+           (* sun-color
+              (* direct-light-gain
+                 (* wrapped (* sun-visibility day-factor)))))
+         (torch (* (vec3 1.0 0.82 0.58) block-level))
+         (emission (swizzle tint-input :w))
+         ;; One soft lobe for rubber, a tight bright one for glass, and a
+         ;; glassy rim only the marble wears.
+         (halfway (normalize (- sun-direction ray)))
+         (gloss (+ 18.0 (* 46.0 is-marble)))
+         (shine (+ 0.16 (* 0.40 is-marble)))
+         (specular
+           (* sun-color
+              (* shine
+                 (* (expt (max 0.0 (dot normal halfway)) gloss)
+                    (* sun-visibility
+                       (* day-factor (step 0.0 lambert)))))))
+         (view-facing (max 0.0 (dot normal (* ray -1.0))))
+         (rim (* is-marble (* 0.22 (expt (- 1.0 view-facing) 3.0))))
+         (radiance
+           (+ (* albedo (+ sky-light (+ sun-light torch)))
+              (+ specular
+                 (+ (vec3 rim rim rim) (* albedo emission)))))
+         ;; The same aerial perspective the terrain fades into.
+         (sun-elevation (swizzle sun-direction :y))
+         (low-sun (* day-factor (- 1.0 (smoothstep 0.02 0.45 sun-elevation))))
+         (fog-color
+           (aerial-perspective-color
+            (representation (swizzle fog-color-vector :xyz))
+            ray sun-direction low-sun day-factor))
+         (fogged (mix radiance fog-color (swizzle light-fog-input :w))))
+    ;; Premultiplied, so a missed fragment leaves no trace of the quad.
+    (set-output color-output (vec4 (* fogged coverage) coverage))))

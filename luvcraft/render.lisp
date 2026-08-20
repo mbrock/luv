@@ -20,6 +20,8 @@
                           :reader luvcraft-frame-critter-vertex-buffer)
    (physics-vertex-buffer :initarg :physics-vertex-buffer
                           :reader luvcraft-frame-physics-vertex-buffer)
+   (physics-instance-buffer :initarg :physics-instance-buffer
+                            :reader luvcraft-frame-physics-instance-buffer)
    (body-vertex-buffer :initarg :body-vertex-buffer
                        :reader luvcraft-frame-body-vertex-buffer)
    (scene-bind-group :initarg :scene-bind-group
@@ -55,6 +57,7 @@
           (luvcraft-frame-particle-vertex-buffer state)
           (luvcraft-frame-critter-vertex-buffer state)
           (luvcraft-frame-physics-vertex-buffer state)
+          (luvcraft-frame-physics-instance-buffer state)
           (luvcraft-frame-body-vertex-buffer state)
           (luvcraft-frame-uniform-buffer state)
           (coerce (luvcraft-frame-world-text-bind-groups state) 'list))
@@ -715,6 +718,99 @@ lands in a presentation image that is finally copied onto the drawable."
    :primitive '(:topology :triangle-list)
    :depth-stencil nil))
 
+;;; ---------------------------------------------------------------------
+;;; The physics sphere drawer: the live pipeline and shared quad behind the
+;;; scene pass's instanced body draw.  It registers through the overlay
+;;; protocol -- the renderer's own pipeline inventory is a closed slot set
+;;; -- so REFRESH-LUVCRAFT-SHADERS rebuilds its shader methods and session
+;;; teardown releases it, but its draw is not an overlay's: the bodies are
+;;; encoded with the rest of the world geometry, where the cubes drew.
+
+(defclass physics-sphere-drawer ()
+  ((pipeline :initarg :pipeline :accessor physics-sphere-drawer-pipeline)
+   (quad-buffer :initarg :quad-buffer
+                :accessor physics-sphere-drawer-quad-buffer))
+  (:documentation
+   "Owns the sphere pipeline and the one six-vertex quad every body shares."))
+
+(defmethod luvcraft-overlay-live-shader-pipelines
+    ((drawer physics-sphere-drawer))
+  (list (physics-sphere-drawer-pipeline drawer)))
+
+(defmethod encode-luvcraft-overlay
+    ((drawer physics-sphere-drawer) session pass surface-texture)
+  ;; Deliberately nothing: the bodies are drawn from the scene pass proper,
+  ;; before the player's arms and the particles, where the cubes once drew.
+  (declare (ignore session pass surface-texture))
+  nil)
+
+(defmethod release-luvcraft-overlay ((drawer physics-sphere-drawer))
+  (when (physics-sphere-drawer-pipeline drawer)
+    (release-live-shader-pipeline (physics-sphere-drawer-pipeline drawer))
+    (setf (physics-sphere-drawer-pipeline drawer) nil))
+  (when (physics-sphere-drawer-quad-buffer drawer)
+    (destroy (physics-sphere-drawer-quad-buffer drawer))
+    (setf (physics-sphere-drawer-quad-buffer drawer) nil))
+  (values))
+
+(defun luvcraft-session-physics-sphere-drawer (session)
+  (find-if (lambda (overlay) (typep overlay 'physics-sphere-drawer))
+           (luvcraft-session-overlays session)))
+
+(defun attach-physics-sphere-drawer (session)
+  "Create the sphere pipeline and quad for SESSION and register the drawer."
+  (let* ((device (luvcraft-session-device session))
+         (vertex-data (make-world-text-quad-vertices))
+         (quad-buffer nil)
+         (pipeline nil)
+         (completed-p nil))
+    (unwind-protect
+         (progn
+           (setf quad-buffer
+                 (create
+                  device
+                  (make-buffer-descriptor
+                   :label "physics sphere proxy quad"
+                   :size (* 4 (length vertex-data))
+                   :usage '(:vertex :copy-dst)))
+                 pipeline
+                 (make-live-shader-pipeline
+                  :role :physics-sphere
+                  :vertex-role :physics-sphere
+                  :label "physics body sphere pipeline"
+                  :device device
+                  :layout (luvcraft-session-layout session)
+                  :vertex-buffers
+                  '((:array-stride 12
+                     :attributes
+                     ((:shader-location 0 :offset 0 :format :float32x3)))
+                    (:array-stride 64 :step-mode :instance
+                     :attributes
+                     ((:shader-location 1 :offset 0 :format :float32x4)
+                      (:shader-location 2 :offset 16 :format :float32x4)
+                      (:shader-location 3 :offset 32 :format :float32x4)
+                      (:shader-location 4 :offset 48 :format :float32x4))))
+                  :target-format +luvcraft-scene-color-format+
+                  :target-blend :premultiplied-alpha
+                  :primitive '(:topology :triangle-list)
+                  ;; The lowering has no fragment-depth output, so the quads
+                  ;; test the terrain's depth without writing their own.
+                  :depth-stencil
+                  '(:format :depth32-float
+                    :depth-write-enabled nil
+                    :depth-compare :less)))
+           (write-buffer quad-buffer vertex-data)
+           (let ((drawer (make-instance 'physics-sphere-drawer
+                                        :pipeline pipeline
+                                        :quad-buffer quad-buffer)))
+             (setf completed-p t)
+             (add-luvcraft-overlay session drawer)
+             drawer))
+      (unless completed-p
+        (when pipeline
+          (ignore-errors (release-live-shader-pipeline pipeline)))
+        (when quad-buffer (ignore-errors (destroy quad-buffer)))))))
+
 (defun luvcraft-frame-state (session surface-texture)
   (let ((key
           (canvas-frame-resource-key
@@ -724,6 +820,7 @@ lands in a presentation image that is finally copied onto the drawable."
             (particle-vertex-buffer nil)
             (critter-vertex-buffer nil)
             (physics-vertex-buffer nil)
+            (physics-instance-buffer nil)
             (body-vertex-buffer nil)
             (scene-bind-group nil)
             (shadow-bind-group nil)
@@ -761,8 +858,15 @@ lands in a presentation image that is finally copied onto the drawable."
                      (create
                       (luvcraft-session-device session)
                       (make-buffer-descriptor
-                       :label "physics body vertices"
-                       :size +physics-vertex-buffer-size+
+                       :label "physics body shadow cube vertices"
+                       :size +physics-shadow-vertex-buffer-size+
+                       :usage '(:vertex)))
+                     physics-instance-buffer
+                     (create
+                      (luvcraft-session-device session)
+                      (make-buffer-descriptor
+                       :label "physics body sphere instances"
+                       :size +physics-instance-buffer-size+
                        :usage '(:vertex)))
                      body-vertex-buffer
                      (create
@@ -860,6 +964,7 @@ lands in a presentation image that is finally copied onto the drawable."
                         :particle-vertex-buffer particle-vertex-buffer
                         :critter-vertex-buffer critter-vertex-buffer
                         :physics-vertex-buffer physics-vertex-buffer
+                        :physics-instance-buffer physics-instance-buffer
                         :body-vertex-buffer body-vertex-buffer
                         :scene-bind-group scene-bind-group
                         :shadow-bind-group shadow-bind-group
@@ -891,6 +996,7 @@ lands in a presentation image that is finally copied onto the drawable."
             (when post-bind-group (destroy post-bind-group))
             (when post-uniform-buffer (destroy post-uniform-buffer))
             (when body-vertex-buffer (destroy body-vertex-buffer))
+            (when physics-instance-buffer (destroy physics-instance-buffer))
             (when physics-vertex-buffer (destroy physics-vertex-buffer))
             (when critter-vertex-buffer (destroy critter-vertex-buffer))
             (when particle-vertex-buffer (destroy particle-vertex-buffer))
@@ -1049,7 +1155,9 @@ submission that used them completes."
          (body-vertices (player-body-vertices session))
          (body-vertex-count
            (/ (length body-vertices) +block-mesh-floats-per-vertex+))
-         (physics-vertex-count (luvcraft-physics-vertex-count session)))
+         (physics-body-count (luvcraft-physics-body-count session))
+         (physics-shadow-vertex-count
+           (luvcraft-physics-shadow-vertex-count session)))
     (when (or sample (tracy-connected-p))
       (let ((mesh-vertices 0)
             (mesh-draws 0))
@@ -1082,14 +1190,16 @@ submission that used them completes."
                         ;; The animals are drawn twice: once into the shadow
                         ;; map and once into the scene.
                         (if (plusp critter-vertex-count) 2 0)
-                        (if (plusp physics-vertex-count) 2 0)
+                        ;; The bodies too: shadow cubes, then spheres.
+                        (if (plusp physics-body-count) 2 0)
                         (if (plusp body-vertex-count) 1 0)))
               (vertices (+ +block-world-crosshair-vertex-count+ 3
                            (* 6 text-glyph-count)
                            particle-vertex-count
                            body-vertex-count
                            (* 2 critter-vertex-count)
-                           (* 2 physics-vertex-count)
+                           physics-shadow-vertex-count
+                           (* 6 physics-body-count)
                            (* 2 mesh-vertices))))
           (when sample
             (setf (luvcraft-frame-sample-resident-chunk-count sample)
@@ -1135,10 +1245,13 @@ submission that used them completes."
         (write-buffer
          (luvcraft-frame-body-vertex-buffer frame)
          body-vertices))
-      (when (plusp physics-vertex-count)
+      (when (plusp physics-body-count)
         (write-buffer
          (luvcraft-frame-physics-vertex-buffer frame)
-         (luvcraft-physics-vertex-stream session))))
+         (luvcraft-physics-shadow-stream session))
+        (write-buffer
+         (luvcraft-frame-physics-instance-buffer frame)
+         (luvcraft-physics-instance-stream session))))
     (with-luvcraft-frame-timing
         (sample luvcraft-frame-sample-shadow-encode-seconds
                 :luvcraft/shadow-pass)
@@ -1166,11 +1279,13 @@ submission that used them completes."
           (set-vertex-buffer
            pass 0 (luvcraft-frame-critter-vertex-buffer frame))
           (draw pass critter-vertex-count))
-        ;; So do the balls, drops, and gobbets: things with weight.
-        (when (plusp physics-vertex-count)
+        ;; So do the balls, drops, and gobbets: things with weight.  The
+        ;; scene draws them as true spheres; a depth map is happy with the
+        ;; little turning cubes.
+        (when (plusp physics-body-count)
           (set-vertex-buffer
            pass 0 (luvcraft-frame-physics-vertex-buffer frame))
-          (draw pass physics-vertex-count))
+          (draw pass physics-shadow-vertex-count))
         (end-pass pass))
       (prepare-texture
        encoder (luvcraft-session-shadow-depth-texture session)
@@ -1208,10 +1323,26 @@ submission that used them completes."
           (set-vertex-buffer
            pass 0 (luvcraft-frame-critter-vertex-buffer frame))
           (draw pass critter-vertex-count))
-        (when (plusp physics-vertex-count)
-          (set-vertex-buffer
-           pass 0 (luvcraft-frame-physics-vertex-buffer frame))
-          (draw pass physics-vertex-count))
+        ;; The physics bodies, as ray-traced spheres: one instanced draw of
+        ;; camera-facing quads, records already ordered farthest first
+        ;; because the sphere pipeline blends without writing depth.  The
+        ;; block pipeline and its bindings are restored afterwards for the
+        ;; player body and the particles, which expect them.
+        (when (plusp physics-body-count)
+          (let ((drawer (luvcraft-session-physics-sphere-drawer session)))
+            (when drawer
+              (set-pipeline
+               pass (live-shader-pipeline-native-pipeline
+                     (physics-sphere-drawer-pipeline drawer)))
+              (set-vertex-buffer
+               pass 0 (physics-sphere-drawer-quad-buffer drawer))
+              (set-vertex-buffer
+               pass 1 (luvcraft-frame-physics-instance-buffer frame))
+              (set-bind-group pass 0 (luvcraft-frame-scene-bind-group frame))
+              (draw pass 6 physics-body-count)
+              (set-pipeline pass (luvcraft-session-pipeline session))
+              (set-bind-group
+               pass 0 (luvcraft-frame-scene-bind-group frame)))))
         ;; The player's own arms and whatever they hold, drawn in the scene
         ;; but not into the shadow map: a pair of floating forearms would
         ;; throw a shadow that explains nothing.
@@ -2219,6 +2350,7 @@ NIL to let the display choose a comfortable window."
                 (list atlas-width atlas-height))
                (setf session new-session)
                (update-luvcraft-session-title session)
+               (attach-physics-sphere-drawer session)
                (start-luvcraft-lobby session)
                (attach-luvcraft-hud session)
                (maintain-luvcraft-residency session)
