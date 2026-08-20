@@ -48,6 +48,7 @@
                  (:static-file "images/luft-clay-pearls.png")
                  (:static-file "images/luft-clay-bridges.png")
                  (:static-file "images/luft-clay-holm.png")
+                 (:static-file "images/luft-clay-trees.png")
                  (:static-file "images/luft-field-corners.png")
                  (:static-file "images/luft-ink.png")
                  (:static-file "images/analytic-roundrect-proof.png")

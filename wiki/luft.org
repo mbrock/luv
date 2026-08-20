@@ -794,6 +794,17 @@ reach, and the surface colour is the weight-averaged stock albedo.  A
 timber deck melting into a granite rampart blends its colour exactly
 where the geometry blends, and nowhere else.
 
+[[file:images/luft-clay-trees.png]]
+
+Clay also mixes with the other styles by stock rather than by scene:
+=*clay-stocks*= names materials the clay overlay owns, their packed
+slots ride a spare frame lane, each vertex stage collapses the faces the
+lane claims -- the clay rule draws exactly those -- and the clay field
+treats every unclaimed cell as air.  A world of chamfered masonry whose
+conifer and leaf crowns are full-radius clay blobs is then one extra
+draw, and the clay knobs ride two more spare lanes so the chamfer keeps
+its own width beside them.
+
 * The studio: a world of stars under the same cameras
 :PROPERTIES:
 :ID: UTRJ2T
