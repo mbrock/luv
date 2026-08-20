@@ -54,6 +54,20 @@
        (luft.render:film-atelier-flight
         (merge-pathnames #P"luft-flight-vertical.mp4" directory)
         :width 720 :height 1280 :field-scale 1.25))
+     (when (film-wanted-p :luft-clay-tour names)
+       (format t "~&Filming the clay width-and-rounding tour...~%")
+       (luft.render:film-clay-tour
+        (merge-pathnames #P"luft-clay-tour.mp4" directory)))
+     (when (film-wanted-p :luft-clay-flight names)
+       (format t "~&Filming the grotto and holm in clay...~%")
+       (let ((luft.render:*clay-width* 0.0)
+             (luft.render:*clay-round* 0.22))
+         (luft.render:film-atelier-flight
+          (merge-pathnames #P"luft-clay-flight.mp4" directory)
+          :pieces '(:grotto :holm)
+          :style :clay
+          :width 960 :height 540
+          :light :golden)))
      (when (member :luft-rise names)
        (format t "~&Filming the Luft holm rising from its cell chain...~%")
        (luft.render:film-atelier-construction

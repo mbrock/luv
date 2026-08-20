@@ -25,10 +25,11 @@
                              (:file "field")
                              (:file "material")
                              (:file "lattice")
+                             (:file "clay")
                              (:file "render")
                              (:file "studio")
-                             (:file "film")
-                             (:file "architecture"))))
+                             (:file "architecture")
+                             (:file "film"))))
   :in-order-to ((test-op (test-op "luft/render/test"))))
 
 (defsystem "luft/program"
