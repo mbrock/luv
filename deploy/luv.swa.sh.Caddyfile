@@ -1,9 +1,12 @@
 luv.swa.sh {
 	redir /video /video/
+	handle_path /video/dl/* {
+		root * /var/www/luv
+		header Content-Disposition attachment
+		file_server
+	}
 	handle_path /video/* {
 		root * /var/www/luv
-		@downloads path /dl/*
-		header @downloads Content-Disposition attachment
 		file_server browse
 	}
 	handle {
