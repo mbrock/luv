@@ -233,6 +233,7 @@
                              (:file "balloons")
                              (:file "gnomes")
                              (:file "fireworks")
+                             (:file "marquee")
                              (:file "party")))))
 
 (defsystem "luvcraft/program"

@@ -28,5 +28,8 @@
    ;; fireworks.lisp
    #:add-birthday-fireworks
    #:stop-birthday-fireworks
+   ;; marquee.lisp
+   #:add-birthday-marquee
+   #:remove-birthday-marquee
    ;; party.lisp
    #:celebrate-birthday))

@@ -60,7 +60,7 @@ each post, and a bouquet crowding the roof finial."
                       :phase (float (/ index count))
                       :hue (float (/ index count)))))
 
-(defun celebrate-birthday (&key (name "ALEX") fullscreen-p
+(defun celebrate-birthday (&key (name "ALEX") (age 4) fullscreen-p
                                 (provider luv:*gpu-provider*))
   "Throw the party: open the birthday meadow and decorate it.
 
@@ -111,16 +111,6 @@ Returns the session; LUVCRAFT:STOP-PLAYING ends the party and saves it."
                                        name)
                         :world world :camera camera :player player
                         :fullscreen-p fullscreen-p
-                        :world-text-string
-                        (format nil "HAPPY BIRTHDAY ~:@(~a~)!" name)
-                        ;; The banner must hang nearer than the gazebo's
-                        ;; front eave or the roof occludes it: the camera
-                        ;; stands 21 cells out, so 11 keeps the text plane
-                        ;; well in front with the greeting clear of the
-                        ;; apex sightline.
-                        :world-text-distance 11.0
-                        :world-text-lift 6.0
-                        :world-text-units-per-em 0.32
                         :checkpoint-writer writer))
               (unless session
                 (luvcraft::stop-world-checkpoint-writer writer)))
@@ -131,6 +121,10 @@ Returns the session; LUVCRAFT:STOP-PLAYING ends the party and saves it."
             (dolist (overlay (luvcraft::luvcraft-session-overlays session))
               (when (typep overlay 'mcluv::luvcraft-lobby-hud-overlay)
                 (luvcraft:remove-luvcraft-overlay session overlay)))
+            ;; The greeting is a marquee wall over the entrance: the name
+            ;; and the age in scrolling lights, mounted above the eave.
+            (add-birthday-marquee session
+                                  :text (format nil "~:@(~a~) ~d" name age))
             (add-birthday-balloons session (balloon-plan anchors))
             (add-dancing-gnomes session (gnome-ring world 0 0))
             (luvcraft::scatter-party-balls session :center '(3 8 -13)
