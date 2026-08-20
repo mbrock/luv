@@ -34,6 +34,33 @@
                  (cdr (assoc "type" output :test #'string=))))
     (ok (string= "call_1" (cdr (assoc "call_id" output :test #'string=))))))
 
+(defclass picture-tool (openai:tool) ())
+
+(defmethod openai:call-tool ((tool picture-tool) arguments agent)
+  (declare (ignore tool arguments agent))
+  (openai:make-tool-output
+   :text "a tiny picture"
+   :images
+   (list (openai:make-tool-output-image
+          (make-array 4 :element-type '(unsigned-byte 8)
+                        :initial-contents '(137 80 78 71))))))
+
+(deftest multimodal-tool-results-keep-text-and-image-together
+  (let* ((tool (make-instance 'picture-tool :name "picture"))
+         (agent (make-instance 'openai:agent :model "gpt-5.6-terra"
+                               :tools (list tool) :socket nil))
+         (item (openai::tool-result
+                agent '((:call-id . "call_2") (:name . "picture")
+                        (:arguments . "{}"))))
+         (content (cdr (assoc "output" item :test #'string=))))
+    (ok (= 2 (length content)))
+    (ok (string= "input_text"
+                 (cdr (assoc "type" (first content) :test #'string=))))
+    (ok (string= "input_image"
+                 (cdr (assoc "type" (second content) :test #'string=))))
+    (ok (search "data:image/png;base64,iVBORw=="
+                (cdr (assoc "image_url" (second content) :test #'string=))))))
+
 (deftest missing-api-key-is-restartable
   (ok (string= "from-restart"
                (handler-bind

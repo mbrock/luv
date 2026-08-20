@@ -222,7 +222,24 @@
                              (:file "shaders")
                              (:file "cat-shaders")
                              (:file "gnome")
-                             (:file "cat")))))
+                             (:file "cat")
+                             (:file "surroundings"))))
+  :in-order-to ((test-op (test-op "luvcraft/agent/test"))))
+
+(defsystem "luvcraft/agent/test"
+  :description "Tests for embodied agent observations and tools."
+  :depends-on ("luvcraft/agent" "rove")
+  :serial t
+  :components ((:module "luvcraft/agent/tests"
+                :serial t
+                :components ((:file "package")
+                             (:file "surroundings"))))
+  :perform (test-op (operation component)
+             (declare (ignore operation component))
+             (unless (uiop:symbol-call '#:rove '#:run-suite
+                                       (uiop:symbol-call '#:rove '#:find-suite
+                                                         '#:luvcraft.agent.tests))
+               (error "Luvcraft agent tests failed"))))
 
 (defsystem "luvcraft/birthday"
   :description "A birthday party in the little world: meadow, gazebo, balloons, gnomes, fireworks."

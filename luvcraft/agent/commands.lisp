@@ -40,8 +40,12 @@
       "you"
       (embodied-agent-name subject)))
 
-(defun command-subject-bearing (subject session)
-  "Return SUBJECT's YAW and PITCH, or NIL values when it has no facing yet."
+(defgeneric command-subject-bearing (subject session)
+  (:documentation
+   "Return SUBJECT's retained YAW and PITCH, or NIL values without a facing."))
+
+(defmethod command-subject-bearing ((subject t) session)
+  "Use physical motion as the open fallback for bodies without authored facing."
   (if (eq subject (luvcraft:luvcraft-session-player session))
       (let ((camera (luvcraft:luvcraft-session-camera session)))
         (values (luvcraft:camera-yaw camera) (luvcraft:camera-pitch camera)))

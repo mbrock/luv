@@ -234,6 +234,101 @@ version while the canvas never is.  A later duration bound can return a
 handle to the same action without changing either the command or movement
 protocol.
 
+* A glance is an image and the small truth that frames it
+:PROPERTIES:
+:ID: IFEAQ6
+:END:
+
+An embodied agent's =View Surroundings= is one observation at one canvas
+boundary, not a screenshot followed by unrelated queries.  Its image comes
+from a camera above and behind the body, aimed forward over its shoulder; its
+text names the body and camera poses, the player relative to the body, the
+world revision, and one exact integer box whose block population was counted.
+The box is deliberately called the /sampled neighbourhood/, not the viewport:
+a perspective frustum sees sky and distant geometry and has no honest voxel
+bounding box without reading depth back too.
+
+The observation keeps unavailable cells distinct from air (#YUBB7X).  It
+selects each intersecting resident chunk once, borrows that chunk's palette
+and dense index column, and counts raw lanes inside the box.  The retained
+result is a semantic object with an encoded PNG and a small material
+histogram; the model reads its compact textual presentation and the provider
+receives the same result's PNG as image content (#WS5OEX).  A glance therefore
+remains cheap enough to be an ordinary verb and rich enough to orient action.
+
+Facing belongs to the body rather than the observer.  Movement updates a
+retained yaw and stopping preserves it, so both the over-the-shoulder camera
+and the analytic gnome or cat field read the same direction.  The proxy quad
+may face the camera for conservative rasterization while the figure inside it
+looks where the agent is going; an avatar need not stare at every eye that can
+see it.
+
+/Evidence (2026-08-21)./ The first live gnome glance was an 819 by 614 clean
+PNG looking east over the gnome's back.  Its paired reading counted 10,625
+sites in =(-570 -2 -532)..(-546 14 -508)=: 9,375 resident, including 6,868
+air, and 1,250 unavailable.  The two SDF pipelines validated after their
+instance records gained facing, and the provider boundary received the
+observation as text plus image content.
+
+* IDEA Authored edits form sparse swaths, not another terrain field
+:PROPERTIES:
+:ID: 758F9X
+:END:
+
+/Intent./ Add a =Survey Edits= observation over the little world's sparse
+authored overlay.  Nearby edited sites should be clustered into
+semi-contiguous swaths and each swath presented by its integer bounding box,
+edited-site count, box fill ratio, and final block-kind distribution (with
+explicit air retained as a value).  This is archaeology of authored intent,
+not a census of the current materialized terrain.
+
+/Evidence./ =little-world-source-edits= already owns one hash entry per final
+authored site and survives chunk departure.  A neighbourhood query can filter
+those sparse keys before a bounded 26-neighbour or small-gap component walk;
+it need not scan chunks or retain an object per ordinary cell.
+
+/Done when./ A wall, a diagonally joined ornament, and two genuinely separate
+works produce stable, inspectable swaths without treating generated blocks as
+edits or merging distant work merely because their bounding boxes overlap.
+
+* IDEA Terrain summits are born at peaks and merge at saddles
+:PROPERTIES:
+:ID: ANOLKV
+:END:
+
+/Intent./ Add a =Survey Terrain= observation derived from a resident
+height-field window.  Besides elevation range, relief, and slope summaries,
+report the strongest summits by a discrete merge tree: descend through height
+levels, birth a component at each local maximum, and record the saddle where
+it joins a component with a higher peak.  Peak height minus that saddle is a
+useful topological persistence -- the playful "geotopological peak" with a
+real definition.
+
+/Evidence./ The block world is volumetric, while a landscape survey is a
+derived two-dimensional product: the highest occupied site per horizontal
+column plus an availability mask.  Naming that product prevents caves,
+unloaded columns, and absent terrain from being silently flattened into a
+height.  The descending component pass is then dense work over the finite
+window, not repeated sparse world lookup.
+
+/Done when./ Synthetic plateaus, twin peaks joined by a known saddle, a peak
+touching the window boundary, and unavailable columns have exact results; a
+live survey names a few durable landforms rather than dumping every local
+maximum.
+
+* DONE Give embodied agents a truthful third-person glance
+:PROPERTIES:
+:ID: AHAI6I
+:END:
+
+The basic =view-surroundings= verb now realizes #IFEAQ6: it captures on the
+canvas boundary under a temporary over-the-shoulder pose, restores the
+player's camera, retains one semantic observation, and sends its clean PNG
+beside the compact textual census.  Stable body yaw is shared by movement,
+=where-am-i=, capture, and the gnome and cat fields.  Dense census tests keep
+air separate from unavailable space; the shader validator covers both
+oriented figures.
+
 * DONE Wire three commands into an agent and draw their cassettes
 :PROPERTIES:
 :ID: YDAQNO

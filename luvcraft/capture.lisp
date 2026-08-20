@@ -2,17 +2,23 @@
 
 (in-package #:luvcraft)
 
-(defun capture-luvcraft-screenshot (session pathname)
+(defun capture-luvcraft-screenshot
+    (session pathname &key camera-pose metadata-function
+                           (include-hud-p t) (include-viewmodel-p t))
   "Render SESSION once on its canvas thread and write its color attachment to PNG.
 
 This works for both live and hidden sessions.  The call returns only after GPU
 readback and compressed PNG writing have completed; it does not inspect the
-host window or depend on the window being visible."
+host window or depend on the window being visible.  CAMERA-POSE may be a pose
+or a function of SESSION evaluated on the canvas thread; the session camera is
+restored before the call returns.  METADATA-FUNCTION, when supplied, is called
+there under the capture pose and its value is returned last."
   (unless (eq :open (canvas-state (luvcraft-session-canvas session)))
     (error "Cannot capture a closed luvcraft session."))
   (wait-for-luvcraft-products session)
   (let* ((context (luvcraft-session-context session))
          (extent (canvas-extent context))
+         (metadata nil)
          (buffer
            (create
             (luvcraft-session-device session)
@@ -26,14 +32,29 @@ host window or depend on the window being visible."
             context
             (lambda (surface-texture encoder presentation-time)
               (declare (ignore presentation-time))
-              (encode-luvcraft-frame
-               session surface-texture encoder :readback-buffer buffer)))
+              (let* ((camera (luvcraft-session-camera session))
+                     (saved-pose (camera-pose-from-camera camera))
+                     (pose (if (functionp camera-pose)
+                               (funcall camera-pose session)
+                               camera-pose)))
+                (unwind-protect
+                     (progn
+                       (when pose (set-camera-pose camera pose))
+                       (when metadata-function
+                         (setf metadata (funcall metadata-function session)))
+                       (encode-luvcraft-frame
+                        session surface-texture encoder
+                        :readback-buffer buffer
+                        :include-hud-p include-hud-p
+                        :include-viewmodel-p include-viewmodel-p))
+                  (set-camera-pose camera saved-pose)))))
            (ensure-directories-exist pathname)
            (let ((pixels (read-buffer buffer))
                  (format (canvas-format context)))
              (write-rgba-png
               pathname pixels (first extent) (second extent) format)
-             (values pathname pixels (first extent) (second extent) format)))
+             (values pathname pixels (first extent) (second extent) format
+                     metadata)))
       (destroy buffer))))
 
 (defun temporal-derivative-rgba

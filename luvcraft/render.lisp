@@ -1128,7 +1128,9 @@ submission that used them completes."
     extent))
 
 (zdefun (encode-luvcraft-frame :zone :luvcraft/encode-frame)
-    (session surface-texture encoder &key readback-buffer sample)
+    (session surface-texture encoder &key readback-buffer sample
+                                     (include-hud-p t)
+                                     (include-viewmodel-p t))
   ;; The canvas callback is the ownership boundary for all GPU replacement.
   ;; MOP notifications from SLY workers have only marked these artifacts dirty.
   (ensure-luvcraft-frame-extent session)
@@ -1388,20 +1390,22 @@ submission that used them completes."
         ;; First-person geometry is above every world participant regardless
         ;; of overlay attachment order.  It still lives in the scene texture
         ;; (and therefore the lens/grade chain), unlike the later HUD pass.
-        (dolist (overlay (reverse (luvcraft-session-overlays session)))
-          (when (eq :viewmodel (luvcraft-overlay-stage overlay))
-            (guarding-luvcraft-overlay (session overlay :overlay-encode)
-              (encode-luvcraft-overlay overlay session pass surface-texture))))
+        (when include-viewmodel-p
+          (dolist (overlay (reverse (luvcraft-session-overlays session)))
+            (when (eq :viewmodel (luvcraft-overlay-stage overlay))
+              (guarding-luvcraft-overlay (session overlay :overlay-encode)
+                (encode-luvcraft-overlay overlay session pass surface-texture)))))
         ;; A held item's own geometry follows the analytic hands so glass,
         ;; buttons, and live displays remain legible in the grip; neither body
         ;; nor item enters the shadow map.
-        (when (plusp body-vertex-count)
+        (when (and include-viewmodel-p (plusp body-vertex-count))
           (set-pipeline pass (luvcraft-session-pipeline session))
           (set-bind-group pass 0 (luvcraft-frame-scene-bind-group frame))
           (set-vertex-buffer
            pass 0 (luvcraft-frame-body-vertex-buffer frame))
           (draw pass body-vertex-count))
-        (unless (or (luvcraft-session-modal-focus session)
+        (unless (or (not include-viewmodel-p)
+                    (luvcraft-session-modal-focus session)
                     (not *luvcraft-crosshair-p*))
           (set-pipeline pass (luvcraft-session-crosshair-native-pipeline session))
           (set-bind-group pass 0 (luvcraft-frame-scene-bind-group frame))
@@ -1468,14 +1472,16 @@ submission that used them completes."
         (set-bind-group pass 0 (luvcraft-frame-post-bind-group frame))
         (set-vertex-buffer pass 0 (luvcraft-session-sky-vertex-buffer session))
         (draw pass 3)
-        (dolist (overlay (reverse (luvcraft-session-overlays session)))
-          (when (eq :hud (luvcraft-overlay-stage overlay))
-            (guarding-luvcraft-overlay (session overlay :overlay-encode)
-              (encode-luvcraft-overlay overlay session pass surface-texture))))
+        (when include-hud-p
+          (dolist (overlay (reverse (luvcraft-session-overlays session)))
+            (when (eq :hud (luvcraft-overlay-stage overlay))
+              (guarding-luvcraft-overlay (session overlay :overlay-encode)
+                (encode-luvcraft-overlay overlay session pass surface-texture)))))
         ;; KMSDRM has no native cursor plane.  A focused CLIM view still gets
         ;; the same absolute pointer events as any other backend, so draw the
         ;; crosshair geometry at their last position after the HUD itself.
-        (when (and (luvcraft-session-software-cursor-p session)
+        (when (and include-hud-p
+                   (luvcraft-session-software-cursor-p session)
                    (luvcraft-session-modal-focus session))
           ;; Motion events publish only the newest pointer state.  Consume it
           ;; once at the frame boundary, no matter how many reports SDL drained.

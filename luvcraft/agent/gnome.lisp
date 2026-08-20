@@ -94,6 +94,10 @@ GPU medium spells as a fully transparent fill.")
    (position :initarg :position :accessor embodied-agent-position)
    (velocity :initform (luvcraft::make-vec3 0d0 0d0 0d0)
              :accessor embodied-agent-velocity)
+   (facing-yaw :initarg :facing-yaw :initform 0d0
+               :accessor embodied-agent-facing-yaw
+               :documentation
+               "Retained body heading in radians, with +z as north.")
    (grounded-p :initform t :accessor embodied-agent-grounded-p)
    (movement-action :initform nil :accessor embodied-agent-movement-action)
    (movement-accumulator :initform 0d0
@@ -164,6 +168,10 @@ GPU medium spells as a fully transparent fill.")
 (defmethod luvcraft:body-velocity ((agent embodied-agent))
   (embodied-agent-velocity agent))
 
+(defmethod command-subject-bearing ((agent embodied-agent) session)
+  (declare (ignore session))
+  (values (embodied-agent-facing-yaw agent) 0d0))
+
 (defmethod luvcraft:body-half-width ((agent embodied-agent))
   (declare (ignore agent))
   0.28d0)
@@ -227,9 +235,10 @@ them from this registry.")
                   (= z (gnome-z agent))))
            *agents*))
 
-(defun attach-embodied-agent (class session x y z)
+(defun attach-embodied-agent (class session x y z &key (facing-yaw 0d0))
   "Make one CLASS at X,Y,Z and attach its semantic and render overlays."
   (let ((agent (make-instance class :session session :x x :y y :z z
+                              :facing-yaw (coerce facing-yaw 'double-float)
                               :position
                               (luvcraft::make-vec3 (+ x 0.5d0)
                                                    (coerce y 'double-float)
@@ -446,7 +455,8 @@ what you say short and in character.  Results may mention #ABCD handles; pass
 one back to describe-handle to read more.")
 
 (defparameter *gnome-tools*
-  '(com-say com-where-am-i com-move-to com-block-at com-place-block-at
+  '(com-say com-where-am-i com-view-surroundings
+    com-move-to com-block-at com-place-block-at
     com-describe-handle com-eval))
 
 (defmethod ensure-embodied-agent-agent ((gnome gnome))
@@ -685,14 +695,20 @@ title or bubble shows only what its pane draws."))
             (* (gnome-figure-radius) stature))))
 
 (defun place-gnome-body (overlay)
-  "Publish OVERLAY's agent-specific conservative center and radius."
-  (let ((data (gnome-body-instance-data overlay)))
+  "Publish OVERLAY's conservative sphere and retained forward direction."
+  (let* ((agent (body-overlay-gnome overlay))
+         (yaw (embodied-agent-facing-yaw agent))
+         (data (gnome-body-instance-data overlay)))
     (multiple-value-bind (x y z radius)
-        (embodied-agent-body-sphere (body-overlay-gnome overlay))
+        (embodied-agent-body-sphere agent)
       (setf (aref data 0) (coerce x 'single-float)
             (aref data 1) (coerce y 'single-float)
             (aref data 2) (coerce z 'single-float)
-            (aref data 3) (coerce radius 'single-float)))
+            (aref data 3) (coerce radius 'single-float)
+            (aref data 4) (coerce (sin yaw) 'single-float)
+            (aref data 5) 0.0
+            (aref data 6) (coerce (cos yaw) 'single-float)
+            (aref data 7) 0.0))
     (luv:write-buffer (gnome-body-instance-buffer overlay) data))
   overlay)
 
@@ -728,7 +744,7 @@ title or bubble shows only what its pane draws."))
   (let* ((session (gnome-session agent))
          (device (luvcraft:luvcraft-session-device session))
          (vertex-data (luvcraft::make-world-text-quad-vertices))
-         (instance-data (make-array 4 :element-type 'single-float))
+         (instance-data (make-array 8 :element-type 'single-float))
          (vertex-buffer nil)
          (instance-buffer nil)
          (pipeline nil)
@@ -762,9 +778,10 @@ title or bubble shows only what its pane draws."))
                       '((:array-stride 12
                          :attributes
                          ((:shader-location 0 :offset 0 :format :float32x3)))
-                        (:array-stride 16 :step-mode :instance
+                        (:array-stride 32 :step-mode :instance
                          :attributes
-                         ((:shader-location 1 :offset 0 :format :float32x4))))
+                         ((:shader-location 1 :offset 0 :format :float32x4)
+                          (:shader-location 2 :offset 16 :format :float32x4))))
                       :target-format luvcraft::+luvcraft-scene-color-format+
                       :target-blend :premultiplied-alpha
                       :primitive '(:topology :triangle-list)
@@ -1031,7 +1048,12 @@ title or bubble shows only what its pane draws."))
         do (when (luvcraft:body-movement-action agent)
              (luvcraft:advance-body-movement
               agent (luvcraft:luvcraft-session-world session)
-              luvcraft::+player-physics-step+))
+              luvcraft::+player-physics-step+)
+             (let* ((velocity (luvcraft:body-velocity agent))
+                    (x (luvcraft::vec3-x velocity))
+                    (z (luvcraft::vec3-z velocity)))
+               (when (> (+ (* x x) (* z z)) 1d-4)
+                 (setf (embodied-agent-facing-yaw agent) (atan x z)))))
            (decf (embodied-agent-movement-accumulator agent)
                  luvcraft::+player-physics-step+))
   ;; The public place follows the continuous base as it crosses cell bounds.
@@ -1075,7 +1097,9 @@ places."
       (error "Cell (~D ~D ~D) is occupied by terrain." x y z))
     (let ((existing (agent-at session x y z)))
       (cond ((null existing)
-             (attach-embodied-agent class session x y z))
+             (attach-embodied-agent
+              class session x y z
+              :facing-yaw (luvcraft:camera-yaw camera)))
             ((typep existing class) existing)
             (t (error "Cell (~D ~D ~D) is occupied by ~A."
                       x y z (embodied-agent-name existing)))))))
