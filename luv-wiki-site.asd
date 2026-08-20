@@ -42,6 +42,7 @@
                  (:static-file "site.js")
                  (:static-file "images/dexp.png")
                  (:static-file "images/luft-atelier.png")
+                 (:static-file "images/luft-clay-sheet.png")
                  (:static-file "images/luft-field-corners.png")
                  (:static-file "images/luft-ink.png")
                  (:static-file "images/analytic-roundrect-proof.png")

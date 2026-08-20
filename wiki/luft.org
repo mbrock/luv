@@ -649,6 +649,98 @@ three chamfer rules against eight lattices, three erosions, and an erosion
 and a twist together, over a scene of four stocks with every kind of star
 in it -- and no sky anywhere inside the floor.
 
+* The distance codomain was tried, and argued against itself
+:PROPERTIES:
+:ID: A7BV7E
+:END:
+
+[[file:images/luft-clay-sheet.png]]
+
+The reconstruction-alphabet note
+([[file:../luft/render/idea-for-reconstruction-alphabet.org][idea-for-reconstruction-alphabet.org]])
+asks what the star alphabet of #6TEFOS could grow into.  One candidate was
+a signed distance field: keep the same edge and vertex stars, counted
+exactly as #HJ6YTC counts them, and let an alphabet entry be a distance
+combinator instead of a moved point.  Box distances make the flat solid; a
+convex half-edge star subtracts a cut prism, a concave one unions a fill
+wedge, a pure one-cell corner is capped across its diagonal; smooth CSG
+over two frame-block knobs sweeps the whole family from planed chamfer to
+wide fillet; the mesh walks onto the field's own zero set by Newton steps,
+and the fragment stage does what only true distance can -- a sphere-traced
+sun shadow whose penumbra widens with how narrowly the ray misses, and
+occlusion read off distance taps along the normal.
+
+The promise that justified the experiment was /structural coherence/: a
+field is a function of position alone, so two faces cannot disagree about
+it, and the case-by-case watertightness discipline of #K5MKUT and #HJ6YTC
+would come for free.  The experiment ran all the way to the seamless sheet
+above -- flats exactly flat, both knobs live -- and still argued against
+itself, because the promise turned out to be false.  A star-local field is
+only defined from the eight cells around the nearest lattice vertex, so it
+is only trustworthy within about half a cell of the surface, and every
+authored term reaches farther than that unless it is individually fenced.
+Coherence was not structural; it was re-proven per term, which is the same
+discipline the mesh rules already impose -- except that a mesh tears
+loudly where a field paints its seams as quiet shading cracks, and the
+sky-through-the-floor test of #RUAWR5 has no analogue that catches them.
+
+Two other codomains fell out along the way.  Realizing the chamfer's own
+geometry as a field reproduces #RUAWR5 at great cost and adds nothing.
+The genuinely field-native codomain -- every solid cell a rounded box,
+smooth-unioned, so a lone cell is a sphere at radius one half and
+diagonal contacts grow bridges -- is a real look, but it cannot keep a
+flat continuation flat: coplanar cells always meet in a quilted seam,
+because per-primitive unions have no way to know two faces are one plane.
+Knowing that is exactly what the star classification is, and once it is
+back, the field is re-deriving #RUAWR5 with worse tools.
+
+The verdict: the tent field of #TI9NJP remains the right field answer --
+coherent by construction, flats flat, eight cheap reads -- and the site
+rules remain the right authored answer.  The one genuinely attractive
+remainder is true-distance lighting, and it does not need an alphabet
+codomain to exist; a conservative distance bound over the plain occupancy
+would serve it.  The full implementation, styles =:carve= and =:clay=,
+lives in the withdrawn commit
+[[https://github.com/mbrock/luv/commit/8e8cc65][8e8cc65]].
+
+** Every term needed a fence, and the fences were the finding
+:PROPERTIES:
+:ID: 4PX7PL
+:END:
+
+The evidence is the list of what the field needed before it stopped
+painting vertex-cube boundaries on the surface:
+
+- Every cut prism and fill wedge needed an axial bound overhanging its own
+  vertex by exactly one blend reach, so collinear half-edges overlap
+  seamlessly while an ending crease dies inside its cube.
+- Both needed quadrant legs -- clips against the crease's own face planes
+  -- without which a wedge reaches around a corner its cove never turned,
+  as half-cell fins of phantom material.
+- The legs then needed relaxing outward by the facet width, or the old
+  arris reads as a near-zero ridge that Newton mistakes for surface, and
+  the surface hugs a wall's face underneath the fill facet as a slot.
+- Corner caps are one cube's private term, so they needed a conical
+  spatial falloff on top of their legs.
+- The smooth-CSG reach needed a hard cap, $0.25 - 0.35\,w$, the reach at
+  which every term is either shared with the neighbouring vertex cube or
+  exactly inert toward it.
+- Newton onto a smooth-CSG field needed its step clamped both by length
+  and by a multiple of the distance value, because junction ridges cancel
+  a tetrahedral gradient and fling vertices as fins.
+- The box-union interior is full of near-zero phantoms -- internal cell
+  faces read as surface from inside -- so every consumer had to be audited
+  for which side of the trusted band it samples.
+
+Each fence is small and each was found honestly; the trouble is that the
+list is open-ended, mixed corners were still puckering when the experiment
+stopped, and closing them would have meant the full canonical case table
+the codomain was supposed to dissolve.  Method note for the next field
+experiment: a plain-Lisp replica of the shader algebra, probed with plane
+scans and zero-set root scans around one exhibit of #UTRJ2T, located every
+one of these failures in seconds, where staring at renders had only
+produced theories.
+
 * The studio: a world of stars under the same cameras
 :PROPERTIES:
 :ID: UTRJ2T
