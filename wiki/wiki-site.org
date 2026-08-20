@@ -119,7 +119,7 @@ the generated manifest binds both artifacts to their source revision.
 the wiki can show both media kinds without tracking their bytes, and no source
 file names a GPU host.
 
-* NEXT Publish generated media out of band
+* DONE Publish generated media out of band
 :PROPERTIES:
 :ID: 0BGP3P
 :END:
@@ -168,9 +168,33 @@ remotes, =showcase-render= only captures and publishes media,
 checkout must be clean and can advance only by fast-forward; a human edit on a
 deployment machine stops publication instead of being overwritten.
 
+/Operational evidence./ On 21 August 2026 Chapel rendered source
+=35ef9bafd893= through its Radeon Vulkan device, committed capture manifest
+=aaba121= on =showcase-media=, and served both annex keys to SWA over its
+explicit pinned =git-annex-shell=.  =https://luv.swa.sh/showcase/= then returned
+the manifest-backed page; Caddy returned =image/png= for the 960x640 still and
+=video/mp4= for the 960x640, 24 fps, four-second H.264 orbit.  A cold service
+restart became healthy on its sixth one-second connection attempt.
+
 /Done when./ The public showcase has been exercised end to end, including real
-image and video responses, and the remaining retention question has an answer:
-which historical annex keys remain reachable when recipes or figures change.
+image and video responses.
+
+* IDEA Give historical captures an annex retention policy
+:PROPERTIES:
+:ID: 9H2KVT
+:END:
+
+/Intent./ Decide which historical annex keys remain reachable when recipes or
+figures change, without turning the ordinary source clone into a media archive.
+
+/Evidence./ The initial publication keeps current keys in Chapel and SWA and
+keeps their metadata on the =git-annex= branch.  That is sufficient for current
+showcase publication but deliberately says nothing yet about pruning superseded
+captures or retaining named milestones.
+
+/Done when./ Publication has an explicit, inspectable rule for current,
+milestone, and unreferenced capture keys, plus a recovery story if Chapel is
+rebuilt.
 
 * The Org subset the reader understands
 :PROPERTIES:
