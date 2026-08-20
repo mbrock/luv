@@ -373,17 +373,19 @@
                 export LD_LIBRARY_PATH="$LUV_MESA_LIBRARY_PATH:$LD_LIBRARY_PATH"
               fi
 
-              if [ -z "''${SDL_VIDEODRIVER:-}" ] \
-                && [ -z "''${DISPLAY:-}" ] \
-                && [ -z "''${WAYLAND_DISPLAY:-}" ]; then
-                # A real Linux virtual terminal can own DRM master after its
-                # compositor exits; use it directly.  SSH, CI, and shell
-                # commands with no controlling terminal stay headless.
-                case "$(${env.pkgs.coreutils}/bin/tty 2>/dev/null || :)" in
-                  /dev/tty[0-9]*) export SDL_VIDEODRIVER=kmsdrm ;;
-                  *) export SDL_VIDEODRIVER=offscreen ;;
-                esac
-              fi
+              ${nixpkgs.lib.optionalString env.pkgs.stdenv.isLinux ''
+                if [ -z "''${SDL_VIDEODRIVER:-}" ] \
+                  && [ -z "''${DISPLAY:-}" ] \
+                  && [ -z "''${WAYLAND_DISPLAY:-}" ]; then
+                  # A real Linux virtual terminal can own DRM master after its
+                  # compositor exits; use it directly.  SSH, CI, and shell
+                  # commands with no controlling terminal stay headless.
+                  case "$(${env.pkgs.coreutils}/bin/tty 2>/dev/null || :)" in
+                    /dev/tty[0-9]*) export SDL_VIDEODRIVER=kmsdrm ;;
+                    *) export SDL_VIDEODRIVER=offscreen ;;
+                  esac
+                fi
+              ''}
 
               # SDL's KMSDRM backend sees physical scancodes but not the
               # console/XKB character layout.  Carry the host's Dvorak
