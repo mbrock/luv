@@ -75,7 +75,7 @@
                   "The world point the shadow texel lattice pivots about;
 SHADOW-FRAME-ROWS walks it after the camera in whole texels.")
    (player :initarg :player :initform nil :reader luvcraft-session-player)
-   (residency-radius :initarg :residency-radius :initform 8
+   (residency-radius :initarg :residency-radius :initform 6
                      :accessor luvcraft-session-residency-radius)
    (residency-center :initform nil
                      :accessor luvcraft-session-residency-center)
@@ -146,6 +146,10 @@ the arrow keys: a mouse for the mouseless console.")
    (pointer-dirty-p :initform t :accessor luvcraft-session-pointer-dirty-p)
    (software-cursor-p :initarg :software-cursor-p :initform nil
                       :reader luvcraft-session-software-cursor-p)
+   (quit-function :initarg :quit-function :initform nil
+                  :reader luvcraft-session-quit-function
+                  :documentation
+                  "A quick callback which begins orderly session teardown.")
    (pointer-capture-suspended-p
     :initform nil
     :accessor luvcraft-session-pointer-capture-suspended-p
@@ -606,6 +610,20 @@ attached overlay."))
   (declare (ignore session))
   nil)
 
+(defun request-luvcraft-quit (session)
+  "Publish SESSION as stopping and invoke its orderly quit callback.
+
+Return true when the callback took ownership of closing the canvas.  A raw
+START-LUVCRAFT session has no callback, so its caller retains the old direct
+close policy; PLAY supplies the callback which checkpoints and tears down the
+renderer before allowing the native window loop to end."
+  (let ((quit-function (luvcraft-session-quit-function session)))
+    (when (luvcraft-session-running-p session)
+      (setf (luvcraft-session-running-p session) nil)
+      (when quit-function
+        (funcall quit-function session)))
+    (not (null quit-function))))
+
 (defgeneric luvcraft-key-hint (thing)
   (:documentation
    "Return a short string naming the keystroke that reaches THING, or NIL.
@@ -631,6 +649,14 @@ and a rebound key changes the label on the button.")
   (when (shiftf (luvcraft-session-pointer-capture-suspended-p session) nil)
     (when (and (luvcraft-session-running-p session)
                (not (luvcraft-session-pointer-captured-p session)))
+      ;; Mouse input and the cinematic return cannot both own the camera.
+      ;; Finish the return before publishing capture, otherwise every mouse
+      ;; delta is followed by ADVANCE-LUVCRAFT-FOCUS-CAMERA pulling yaw and
+      ;; pitch back toward the pose saved on entry.
+      (alexandria:when-let
+          ((pose (luvcraft-session-return-camera-pose session)))
+        (set-camera-pose (luvcraft-session-camera session) pose)
+        (setf (luvcraft-session-focus-camera-origin session) nil))
       (set-canvas-relative-pointer-mode (luvcraft-session-canvas session) t)
       (setf (luvcraft-session-pointer-captured-p session) t)))
   session)
@@ -656,11 +682,15 @@ mounting a vehicle, and other interactions described by #8JCMA5."
   (when (null focus)
     (error "Use UNFOCUS-LUVCRAFT-SESSION to leave modal focus."))
   (unless (eq focus (luvcraft-session-modal-focus session))
+    ;; Return the previous interaction all the way to the player's pose first.
+    ;; A direct focus-to-focus transition then borrows that same pose anew;
+    ;; recording before UNFOCUS would let its resume path consume the origin
+    ;; and leave the second interaction with nothing to return to.
+    (unfocus-luvcraft-session session)
     (when (and (slot-boundp session 'camera)
                (null (luvcraft-session-focus-camera-origin session)))
       (setf (luvcraft-session-focus-camera-origin session)
             (camera-pose-from-camera (luvcraft-session-camera session))))
-    (unfocus-luvcraft-session session)
     ;; Read the capture back after the previous focus has returned it, so a
     ;; focus-to-focus move keeps mouse look owed to the player rather than
     ;; forgetting it halfway.

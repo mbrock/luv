@@ -298,7 +298,17 @@ the default hand holds things but does nothing with them."))
     (setf (player-body-pocket body)
           (remove item (player-body-pocket body))
           (player-body-hand-item body) item)
-    (hand-item-taken-out item body session)
+    (let ((completed-p nil))
+      (unwind-protect
+           (progn
+             (hand-item-taken-out item body session)
+             (setf completed-p t))
+        ;; An item whose display or other live attachment failed to open is
+        ;; not nevertheless published in the hand as an inert shell.  Pocket
+        ;; it so the next take-out is a real retry.
+        (unless completed-p
+          (setf (player-body-hand-item body) nil)
+          (pushnew item (player-body-pocket body)))))
     (update-luvcraft-session-title session))
   item)
 

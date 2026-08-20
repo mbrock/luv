@@ -82,9 +82,15 @@
     ((canvas recording-pointer-canvas) enabled)
   (setf (recording-canvas-relative-p canvas) (not (null enabled))))
 
+(deftest default-residency-radius-is-six-chunks
+  (ok (= 6 (luvcraft-session-residency-radius
+            (make-instance 'luvcraft-session)))))
+
 (deftest focus-borrows-mouse-look-and-hands-it-back
   (let* ((canvas (make-instance 'recording-pointer-canvas))
-         (session (make-instance 'luvcraft-session :canvas canvas))
+         (camera (make-instance 'fly-camera :yaw 0.25 :pitch -0.1))
+         (session (make-instance 'luvcraft-session :canvas canvas
+                                                    :camera camera))
          (first (make-instance 'recording-modal-focus))
          (second (make-instance 'recording-modal-focus)))
     (setf (recording-canvas-relative-p canvas) t
@@ -95,10 +101,19 @@
     ;; Moving straight from one interaction to another still owes the capture.
     (focus-luvcraft-session session second)
     (ok (not (recording-canvas-relative-p canvas)))
+    (setf (camera-yaw camera) 1.0
+          (camera-pitch camera) 0.4)
     (unfocus-luvcraft-session session)
     (ok (recording-canvas-relative-p canvas)
         "leaving focus puts the player back into mouse look")
     (ok (luvcraft::luvcraft-session-pointer-captured-p session))
+    (ok (null (luvcraft::luvcraft-session-focus-camera-origin session))
+        "mouse look cancels the competing cinematic return")
+    (ok (< (abs (- (camera-yaw camera) 0.25)) 1e-6))
+    (setf (camera-yaw camera) 0.7)
+    (luvcraft::advance-luvcraft-focus-camera session 0.1d0)
+    (ok (< (abs (- (camera-yaw camera) 0.7)) 1e-6)
+        "a subsequent mouse delta is not dragged back")
     ;; A player who was not in mouse look is not put into it by focusing.
     (setf (luvcraft::luvcraft-session-pointer-captured-p session) nil
           (recording-canvas-relative-p canvas) nil)
@@ -106,6 +121,82 @@
     (unfocus-luvcraft-session session)
     (ok (not (recording-canvas-relative-p canvas)))
     (ok (not (luvcraft::luvcraft-session-pointer-captured-p session)))))
+
+(deftest orderly-quit-callback-owns-native-close-once
+  (let* ((calls 0)
+         (session
+           (make-instance 'luvcraft-session
+                          :quit-function
+                          (lambda (stopping-session)
+                            (declare (ignore stopping-session))
+                            (incf calls))))
+         (event (make-instance 'luv:canvas-window-close-request-event
+                               :timestamp 0)))
+    (ok (eq :defer-canvas-close
+            (handle-canvas-event session nil event)))
+    (ok (eq :defer-canvas-close
+            (handle-canvas-event session nil event)))
+    (ok (= 1 calls))
+    (ok (not (luvcraft-session-running-p session)))))
+
+(defclass failing-hand-item () ())
+
+(defmethod luvcraft::hand-item-taken-out
+    ((item failing-hand-item) body session)
+  (declare (ignore item body session))
+  (error "fixture failed to open"))
+
+(deftest failed-hand-item-initialization-is-not-published-in-hand
+  (let ((body (make-instance 'player-body))
+        (item (make-instance 'failing-hand-item)))
+    (signals (luvcraft::take-out-hand-item body nil item))
+    (ok (null (player-body-hand-item body)))
+    (ok (member item (luvcraft::player-body-pocket body)))))
+
+(deftest failed-phone-mode-is-neither-cached-nor-left-overlaid
+  (let* ((phone (make-instance 'phone))
+         (display (list :incomplete-phone-display))
+         (removed nil)
+         (symbols '(luvcraft::terminal-grid-columns-for-rows
+                    luvcraft::phone-font-pathname
+                    luvcraft::make-terminal-display
+                    luvcraft::attach-terminal-display-shell
+                    luvcraft::change-terminal-display-mode
+                    luvcraft::remove-luvcraft-overlay))
+         (originals (mapcar #'symbol-function symbols)))
+    (unwind-protect
+         (progn
+           (setf (symbol-function (first symbols))
+                 (lambda (&rest arguments)
+                   (declare (ignore arguments))
+                   (values 40 20))
+                 (symbol-function (second symbols))
+                 (lambda (weight)
+                   (declare (ignore weight))
+                   #P"fixture.ttf")
+                 (symbol-function (third symbols))
+                 (lambda (&rest arguments)
+                   (declare (ignore arguments))
+                   display)
+                 (symbol-function (fourth symbols))
+                 (lambda (made-display)
+                   (declare (ignore made-display))
+                   t)
+                 (symbol-function (fifth symbols))
+                 (lambda (&rest arguments)
+                   (declare (ignore arguments))
+                   (error "fixture Telegram startup failed"))
+                 (symbol-function (sixth symbols))
+                 (lambda (session-display removed-display)
+                   (declare (ignore session-display))
+                   (setf removed removed-display)))
+           (let ((luvcraft::*phone-initial-mode* :telegram))
+             (signals (luvcraft::ensure-phone-display phone nil))
+             (ok (null (phone-display phone)))
+             (ok (eq display removed))))
+      (loop for symbol in symbols
+            for function in originals
+            do (setf (symbol-function symbol) function)))))
 
 (deftest software-cursor-follows-screen-pointer-coordinates
   (let ((center (luvcraft::make-luvcraft-cursor-vertices 200 100 100 50))

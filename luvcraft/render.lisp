@@ -1739,12 +1739,12 @@ here -- so an unconsumed wheel event is simply the end of the matter."
 (defmethod handle-canvas-event
     ((session luvcraft-session) canvas (event canvas-window-close-request-event))
   (declare (ignore canvas event))
-  (setf (luvcraft-session-running-p session) nil)
-  ;; The window is going; the film's sound must not outlive it, playing on
-  ;; from a session nobody can see until something releases it.
-  (alexandria:when-let ((screen (luvcraft-session-video-screen session)))
-    (hush-video-screen screen))
-  nil)
+  (let ((defer-close-p (request-luvcraft-quit session)))
+    ;; The window is going; the film's sound must not outlive it, playing on
+    ;; from a session nobody can see until something releases it.
+    (alexandria:when-let ((screen (luvcraft-session-video-screen session)))
+      (hush-video-screen screen))
+    (when defer-close-p :defer-canvas-close)))
 
 (defmethod handle-canvas-event
     ((session luvcraft-session) canvas (event canvas-event))
@@ -1869,6 +1869,7 @@ the replacement texture's width through the frame uniform."
                                 player
                                 (selected-block *stone-block*)
                                 (inventory (make-block-inventory))
+                                quit-function
                                 ;; A hidden capture wanting animals in frame
                                 ;; hands in a population it has already
                                 ;; placed; the ordinary game grows its own
@@ -1894,7 +1895,7 @@ the replacement texture's width through the frame uniform."
                                 (video-distance 13.0)
                                 (video-lift 4.5)
                                 (video-height 5.0)
-                                (residency-radius 8)
+                                (residency-radius 6)
                                 (publication-limit 2)
                                 (load-schedule-limit 4)
                                 (mesh-capture-limit 1))
@@ -2357,6 +2358,7 @@ NIL to let the display choose a comfortable window."
                      :production-system production-system
                      :camera camera
                      :player player
+                     :quit-function quit-function
                      :selected-block selected-block
                      :inventory inventory
                      :lighting-state lighting-state

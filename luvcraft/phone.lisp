@@ -310,11 +310,15 @@ that application-owned choice when LUVCRAFT/CORE is reloaded live.")
                       :screen-role :phone-screen
                       :faceplate-role :phone-glass))
                (attach-terminal-display-shell display)
-               (setf (phone-display phone) display
-                     completed-p t)
                (unless (eq *phone-initial-mode* :shell)
                  (change-terminal-display-mode display session
                                                *phone-initial-mode*))
+               ;; Publish only the complete display.  In particular, a
+               ;; Telegram startup failure must not leave a cached display in
+               ;; :TELEGRAM mode with no mode overlay -- a permanently black
+               ;; phone which ENSURE-PHONE-DISPLAY would otherwise never retry.
+               (setf (phone-display phone) display
+                     completed-p t)
                display)
           (unless (or completed-p (null display))
             (remove-luvcraft-overlay session display))))))

@@ -98,8 +98,9 @@
             :world-pathname world-pathname))
   (unwind-protect
        (let ((session *session*))
-         ;; A native close request ends SDL's event loop.  Wait for complete
-         ;; native teardown before releasing the session-owned GPU resources.
+         ;; Native close begins orderly teardown beside SDL's event loop; that
+         ;; teardown closes the canvas last.  Keep the executable alive until
+         ;; the native loop has observed that final close.
          (loop until (eq :closed
                          (luv:canvas-state
                           (luvcraft-session-canvas session)))

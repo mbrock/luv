@@ -304,15 +304,18 @@ have a main-thread host and execute directly."
 
 (defmethod sdl-presentation-window-flags ((presentation-api (eql :vulkan)))
   (declare (ignore presentation-api))
-  ;; The swapchain follows the window's pixel size, so a dense display should
-  ;; be presented to at its own resolution rather than upscaled from half of
-  ;; it -- the same bargain the Metal layer already makes.
-  '(:vulkan :high-pixel-density :resizable :hidden))
+  ;; On macOS a point already names a sufficiently fine game-rendering pixel.
+  ;; Asking SDL for high density doubles both drawable axes on Retina displays,
+  ;; quadrupling scene work and making point-sized embedded UI unnecessarily
+  ;; small.  Other platforms retain their native high-density drawable.
+  (append '(:vulkan)
+          #-darwin '(:high-pixel-density)
+          '(:resizable :hidden)))
 
 #+darwin
 (defmethod sdl-presentation-window-flags ((presentation-api (eql :metal)))
   (declare (ignore presentation-api))
-  '(:metal :high-pixel-density :resizable :hidden))
+  '(:metal :resizable :hidden))
 
 (defun sdl-canvas-window-flags (canvas)
   "The SDL window flags CANVAS needs: its presentation API plus its own state."
@@ -1156,6 +1159,20 @@ key, so the swap has to track the key itself.")
                     :width (sdl3:%data-1 event)
                     :height (sdl3:%data-2 event)))))
 
+(defun dispatch-sdl-canvas-close-request (canvas timestamp)
+  "Offer a native close to CANVAS and apply the default immediate policy.
+
+An application returning :DEFER-CANVAS-CLOSE has begun orderly teardown on
+another thread; its eventual CLOSE-CANVAS call ends the loop.  This lets it
+release resources layered above the presentation context before SDL destroys
+that context.  Every other handler retains the ordinary native close policy."
+  (unless (eq :defer-canvas-close
+              (dispatch-canvas-event
+               canvas
+               (make-instance 'canvas-window-close-request-event
+                              :timestamp timestamp)))
+    (setf (sdl-canvas-close-requested-p canvas) t)))
+
 (defun synchronize-sdl-canvas-logical-size (canvas timestamp)
   "Publish SDL's current logical size when it changed without RESIZED first."
   (multiple-value-bind (width height) (canvas-logical-size canvas)
@@ -1176,7 +1193,12 @@ key, so the swap has to track the key itself.")
   ;; cl-sdl3's static enum. Decode only the native events we understand.
   (cond
     ((= event-type (cffi:foreign-enum-value 'sdl3::event-type :quit))
-     (setf (sdl-canvas-close-requested-p canvas) t))
+     ;; macOS Command-Q is SDL_EVENT_QUIT rather than a window-close event.
+     ;; Give it the identical application teardown path.
+     (dispatch-sdl-canvas-close-request
+      canvas
+      (cffi:foreign-slot-value event '(:struct sdl3:common-event)
+                               'sdl3::%timestamp)))
     ((member event-type
              (list
               (cffi:foreign-enum-value 'sdl3::event-type
@@ -1200,9 +1222,8 @@ key, so the swap has to track the key itself.")
            ((= event-type
                (cffi:foreign-enum-value 'sdl3::event-type
                                         :window-close-requested))
-            (dispatch-sdl-window-event
-             canvas window-event 'canvas-window-close-request-event)
-            (setf (sdl-canvas-close-requested-p canvas) t))
+            (dispatch-sdl-canvas-close-request
+             canvas (sdl3:%timestamp window-event)))
            ((= event-type
                (cffi:foreign-enum-value 'sdl3::event-type
                                         :window-resized))

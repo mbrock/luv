@@ -98,8 +98,8 @@
   (let ((session (luvcraft-command-session)))
     (unwind-protect
          (export-luvcraft-presentation-timing session)
-      (setf (luvcraft:luvcraft-session-running-p session) nil)
-      (luv:close-canvas (luvcraft:luvcraft-session-canvas session)))))
+      (unless (luvcraft::request-luvcraft-quit session)
+        (luv:close-canvas (luvcraft:luvcraft-session-canvas session))))))
 
 ;;; Keyboard equivalents of the pointer buttons, for consoles and laptops
 ;;; without a working click.

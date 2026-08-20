@@ -59,6 +59,17 @@ game for later SLY evaluations.  STOP-PLAYING checkpoints and closes it."
                     :selected-block selected-block
                     :fullscreen-p fullscreen-p
                     :video-pathname video-pathname
+                    :quit-function
+                    (lambda (playing-session)
+                      ;; Native close and Command-Q arrive on Cocoa's event
+                      ;; thread.  Teardown owns frame-boundary waits, so run it
+                      ;; beside the canvas and let CLOSE-CANVAS end the loop
+                      ;; only after application GPU resources are released.
+                      (sb-thread:make-thread
+                       (lambda ()
+                         (when (eq playing-session *session*)
+                           (stop-playing)))
+                       :name "luvcraft native quit"))
                     :checkpoint-writer writer))
           (unless session
             (stop-world-checkpoint-writer writer)))
@@ -108,10 +119,5 @@ turning it rebuilds one.  Answered for the live session."
   (toggle-luvcraft-session-focus session))
 
 (define-action quit (:label "quit the game")
-  ;; The event thread cannot tear itself down: STOP-PLAYING waits for a
-  ;; frame boundary, so it runs beside the game, not inside it.
-  (sb-thread:make-thread
-   (lambda ()
-     (when (eq session *session*)
-       (stop-playing)))
-   :name "luvcraft quit"))
+  (unless (request-luvcraft-quit session)
+    (close-canvas (luvcraft-session-canvas session))))

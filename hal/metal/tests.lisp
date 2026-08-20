@@ -266,9 +266,9 @@
 
 (deftest canvas-presentation-policy-is-explicit-and-provider-specific
   (ok (equal (luv::sdl-presentation-window-flags :vulkan)
-             '(:vulkan :high-pixel-density :resizable :hidden)))
+             '(:vulkan :resizable :hidden)))
   (ok (equal (luv::sdl-presentation-window-flags :metal)
-             '(:metal :high-pixel-density :resizable :hidden)))
+             '(:metal :resizable :hidden)))
   (ok (eq :vulkan
           (luv::sdl-presentation-api-for
            (make-instance 'vulkan-gpu-provider))))
@@ -279,6 +279,31 @@
     (ok (signals
          (make-canvas-context canvas (make-instance 'metal-gpu-provider))
          'canvas-error))))
+
+(deftest native-close-can-be-deferred-for-application-teardown
+  (let ((canvas (make-sdl-canvas))
+        (timestamps nil))
+    (setf (canvas-event-handler canvas)
+          (lambda (native-canvas event)
+            (declare (ignore native-canvas))
+            (push (canvas-event-timestamp event) timestamps)
+            :defer-canvas-close))
+    (luv::dispatch-sdl-canvas-close-request canvas 0)
+    (ok (not (luv::sdl-canvas-close-requested-p canvas)))
+    ;; This is the SDL event macOS emits for Command-Q, distinct from clicking
+    ;; one window's close button.
+    (cffi:with-foreign-object (event '(:struct sdl3:common-event))
+      (setf (cffi:foreign-slot-value event '(:struct sdl3:common-event)
+                                     'sdl3::%timestamp)
+            17)
+      (luv::handle-sdl-canvas-event
+       canvas event
+       (cffi:foreign-enum-value 'sdl3::event-type :quit)))
+    (ok (equal '(17 0) timestamps))
+    (ok (not (luv::sdl-canvas-close-requested-p canvas)))
+    (setf (canvas-event-handler canvas) nil)
+    (luv::dispatch-sdl-canvas-close-request canvas 1)
+    (ok (luv::sdl-canvas-close-requested-p canvas))))
 
 (deftest metal-provider-owns-a-real-metal-4-queue
   (let ((device
