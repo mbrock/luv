@@ -48,6 +48,11 @@
        (format t "~&Filming the atelier drone flight...~%")
        (luft.render:film-atelier-flight
         (merge-pathnames #P"luft-flight.mp4" directory)))
+     (when (film-wanted-p :luft-flight-vertical names)
+       (format t "~&Filming the atelier drone flight, portrait...~%")
+       (luft.render:film-atelier-flight
+        (merge-pathnames #P"luft-flight-vertical.mp4" directory)
+        :width 720 :height 1280 :field-scale 1.25))
      (when (film-wanted-p :birthday names)
        (format t "~&Filming the birthday party cutscenes...~%")
        (luvcraft.birthday:film-birthday-cutscenes

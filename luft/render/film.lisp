@@ -205,7 +205,8 @@ CLEARANCE, names the piece and the sample and refuses to fly."
                                  (light :golden)
                                  (aperture 0.85)
                                  (effects (default-renderer-effects))
-                                 (look-distance 12.0))
+                                 (look-distance 12.0)
+                                 (field-scale 1.0))
   "Fly a drone through the atelier's architecture into an MP4 at PATHNAME.
 
 Each of PIECES gets one continuous shot: a Catmull-Rom flight through the
@@ -213,7 +214,9 @@ piece's own authored cameras, looking where each of them looked, easing
 in and out of the run.  STYLE defaults to :STOCK -- the chamfered
 multi-material style the wiki's stills use -- with CHAMFER-WIDTH of a
 sixth of a cell, wide enough that every arris reads as a planed band.
-Returns PATHNAME and the frame count."
+FIELD-SCALE widens every authored field of view; a portrait film scales
+it up, because the field of view is vertical and the authored views were
+composed for landscape.  Returns PATHNAME and the frame count."
   (let* ((*chamfer-width* chamfer-width)
          (*light* light)
          ;; The lens focuses at the centre of frame, where the flight is
@@ -283,7 +286,9 @@ Returns PATHNAME and the frame count."
                         (eased (* s s (- 3.0 (* 2.0 s))))
                         (position (aref flight frame))
                         (look (catmull-rom-sample looks eased))
-                        (field (first (catmull-rom-sample fields eased))))
+                        (field (* field-scale
+                                  (first (catmull-rom-sample fields
+                                                             eased)))))
                    (setf (renderer-camera renderer)
                          (studio-camera
                           (first position) (second position)
