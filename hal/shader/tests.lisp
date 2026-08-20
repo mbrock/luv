@@ -8,6 +8,7 @@
                     (#:math #:luv.arithmetic)
                     (#:lang #:luv.arithmetic.language)
                     (#:msl #:luv.msl)
+                    (#:wgsl #:luv.wgsl)
                     #+darwin
                     (#:objc #:luv.objective-c)
                     #+darwin

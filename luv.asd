@@ -66,6 +66,15 @@
   :components ((:file "hal/metal/msl/package")
                (:file "hal/metal/msl/lowering")))
 
+(defsystem "luv/wgsl"
+  :description "Structured WebGPU Shading Language lowering for luv's shader graph."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luv/shader")
+  :serial t
+  :components ((:file "hal/webgpu/wgsl/package")
+               (:file "hal/webgpu/wgsl/lowering")))
+
 (defsystem "luv/objective-c"
   :description "A declared Objective-C foreign object system with opt-in tracing."
   :version "0.0.1"
@@ -217,6 +226,7 @@ offsets and of headers."
                "luv/shader"
                "luv/spir-v"
                "luv/msl"
+               "luv/wgsl"
                (:feature :darwin "luv/objective-c")
                "cffi"
                "closer-mop"
