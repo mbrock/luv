@@ -384,6 +384,18 @@ some other space; the environment lanes are packed the same either way."
 (defparameter *luvcraft-exposure* 0.45
   "Overall scene exposure multiplied into the sky profile's own exposure.")
 
+(defparameter *luvcraft-crosshair-p* t
+  "Draw the crosshair.  A film shot is not aiming at anything.")
+
+(defparameter *luvcraft-focus-blur-p* nil
+  "Engage the focus-plane background blur without a modal focus.
+
+The focus plane is the depth at the centre of the frame, so a film shot
+that wants a subject sharp against a blurred background aims the centre
+ray at ground or blocks standing at the subject's distance.  A global
+rather than a binding because the presentation uniform is packed on the
+canvas thread, not the thread directing the film.")
+
 (defparameter *luvcraft-bloom-gain* 0.22
   "How much of the blurred bright-pass image is added back in linear light.
 
@@ -470,7 +482,9 @@ check in LUVCRAFT-POST-UNIFORM-SIZE keeps the two honest."
          (mapcar
           (lambda (value) (coerce value 'single-float))
           (list (/ 1.0 width) (/ 1.0 height)
-                (if (luvcraft-session-modal-focus session) 1.0 0.0)
+                (if (or (luvcraft-session-modal-focus session)
+                        *luvcraft-focus-blur-p*)
+                    1.0 0.0)
                 (* *luvcraft-exposure* (sky-frame-parameters-exposure sky))
                 *luvcraft-bloom-gain*
                 (* *luvcraft-shaft-gain* sun-weight)
@@ -1378,7 +1392,8 @@ submission that used them completes."
           (when (eq :scene (luvcraft-overlay-stage overlay))
             (guarding-luvcraft-overlay (session overlay :overlay-encode)
               (encode-luvcraft-overlay overlay session pass surface-texture))))
-        (unless (luvcraft-session-modal-focus session)
+        (unless (or (luvcraft-session-modal-focus session)
+                    (not *luvcraft-crosshair-p*))
           (set-pipeline pass (luvcraft-session-crosshair-native-pipeline session))
           (set-bind-group pass 0 (luvcraft-frame-scene-bind-group frame))
           (set-vertex-buffer

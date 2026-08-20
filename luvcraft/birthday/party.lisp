@@ -91,7 +91,8 @@ each post, and a bouquet crowding the roof finial."
                                 (provider luv:*gpu-provider*)
                                 (visible-p t) width height
                                 (frames-per-second 60)
-                                (register-p t))
+                                (register-p t)
+                                (sky-hour *party-sky-hour*))
   "Throw the party: open the birthday meadow and decorate it.
 
 Loads or creates the party world under its own save file, raises the gazebo,
@@ -155,7 +156,7 @@ interactive *SESSION*."
               (unless session
                 (luvcraft::stop-world-checkpoint-writer writer)))
             (let ((clock (luvcraft:luvcraft-session-sky-clock session)))
-              (setf (luvcraft::sky-clock-hour clock) *party-sky-hour*
+              (setf (luvcraft::sky-clock-hour clock) sky-hour
                     (luvcraft:sky-clock-paused-p clock) t))
             ;; The lobby's corner instrument has no place at a party.
             (dolist (overlay (luvcraft::luvcraft-session-overlays session))
@@ -218,6 +219,124 @@ true animation speed."
                       (luvcraft:camera-yaw camera) angle
                       (luvcraft:camera-pitch camera)
                       (+ 0.08d0 (* 0.22d0 progress)))))))
+      (luvcraft:stop-luvcraft session))))
+
+(defun add-afterparty-turtles (session)
+  "Pose turtles on the lawn: guests who stayed for the morning."
+  (let ((population (luvcraft::luvcraft-session-critters session)))
+    (loop for (x z yaw gait resting-p seed)
+            in '((12.3d0 1.8d0 2.0d0 1.2d0 nil 21)
+                 (11.6d0 -2.2d0 5.1d0 0d0 t 22)
+                 (3.5d0 4.5d0 0.8d0 0d0 t 23)
+                 (-2.0d0 6.5d0 2.5d0 2.6d0 nil 24)
+                 (-6.0d0 -3.0d0 4.2d0 0d0 t 25))
+          do (luvcraft::add-critter
+              population
+              (luvcraft::make-gazetteer-turtle x 7.0d0 z yaw gait
+                                               :resting-p resting-p
+                                               :seed seed)))))
+
+(defun film-birthday-cutscenes (pathname
+                                &key name age (frame-rate 20)
+                                     (width 1280) (height 720)
+                                     (evening-hour 18.0)
+                                     (morning-hour 7.2)
+                                     (provider luv:*gpu-provider*))
+  "Film the party as two acts cut together in one MP4.
+
+The evening act, under EVENING-HOUR dusk where the marquee burns
+brightest: an establishing sweep of the gazebo and a fireworks crescendo.
+Then the MORNING-HOUR afterparty: telephoto gnome portraits with the
+focus-plane blur engaged -- the centre ray rests on the lawn at the
+gnome's distance, so the gnome stays sharp while the gazebo melts behind
+it -- and a golden wide over the lawn where the turtles stayed."
+  (let ((session (celebrate-birthday
+                  :name name :age age :provider provider
+                  :visible-p nil :width width :height height
+                  :frames-per-second nil :register-p nil
+                  :sky-hour evening-hour)))
+    (add-afterparty-turtles session)
+    ;; A cutscene is cinema, not play: no hotbar, no inventory, no crosshair.
+    (dolist (overlay (luvcraft::luvcraft-session-overlays session))
+      (when (eq :hud (luvcraft::luvcraft-overlay-stage overlay))
+        (luvcraft:remove-luvcraft-overlay session overlay)))
+    (setf luvcraft::*luvcraft-crosshair-p* nil)
+    (unwind-protect
+         (let* ((camera (luvcraft:luvcraft-session-camera session))
+                (clock (luvcraft:luvcraft-session-sky-clock session))
+                (wide luvcraft::+luvcraft-camera-vertical-field-of-view+)
+                (shots
+                  ;; The morning sun stands due east (+x); the afterparty
+                  ;; wide runs the west side looking sunward for gold and
+                  ;; shafts, the first gnome is front-lit with the sun at the
+                  ;; camera's back, and the second is backlit into the glow.
+                  (flet ((ease (s) (* s s (- 3d0 (* 2d0 s)))))
+                    (list
+                     ;; Evening: the marquee in lights over the lawn.
+                     (list 9d0 evening-hour nil
+                           (lambda (s)
+                             (let ((angle (+ -0.35d0 (* 0.45d0 (ease s)))))
+                               (values (- (* 24d0 (sin angle)))
+                                       (+ 10.8d0 (* 1.2d0 s))
+                                       (- (* 24d0 (cos angle)))
+                                       0d0 12d0 0d0 wide))))
+                     ;; Evening: the fireworks crescendo over the finial.
+                     (list 7d0 evening-hour nil
+                           (lambda (s)
+                             (let ((angle (+ 0.1d0 (* 0.2d0 s))))
+                               (values (- (* 23d0 (sin angle)))
+                                       (+ 12d0 (* 1.5d0 s))
+                                       (- (* 23d0 (cos angle)))
+                                       0d0 (+ 15d0 (* 7d0 s)) 0d0 wide))))
+                     ;; Morning afterparty: a gnome in the early light,
+                     ;; telephoto, zooming in; the gazebo melts behind it.
+                     (list 7d0 morning-hour t
+                           (lambda (s)
+                             (values 17.8d0 7.9d0 (+ -1.2d0 (* 2.4d0 (ease s)))
+                                     10.5d0 7.0d0 0d0
+                                     (- 0.45d0 (* 0.13d0 (ease s))))))
+                     ;; Its neighbour across the ring, backlit into the sun.
+                     (list 6d0 morning-hour t
+                           (lambda (s)
+                             (values -17.8d0 7.8d0 (- 1.2d0 (* 2.2d0 (ease s)))
+                                     -10.5d0 7.0d0 0d0
+                                     (- 0.4d0 (* 0.1d0 (ease s))))))
+                     ;; Morning: golden wide over the lawn and its turtles.
+                     (list 7d0 morning-hour nil
+                           (lambda (s)
+                             (let ((angle (- 1.15d0 (* 0.4d0 (ease s)))))
+                               (values (- (* 24d0 (sin angle)))
+                                       (+ 10.5d0 s)
+                                       (- (* 24d0 (cos angle)))
+                                       0d0 10.5d0 0d0 wide)))))))
+                (seconds (reduce #'+ shots :key #'first)))
+           (luvcraft:film-luvcraft-session
+            session pathname
+            :seconds seconds :frame-rate frame-rate
+            :before-frame
+            (lambda (frame)
+              (let ((time (/ (float frame 1.0d0) frame-rate)))
+                (loop for (length hour focus-p pose) in shots
+                      when (< time length)
+                        do (multiple-value-bind (x y z tx ty tz fov)
+                               (funcall pose (/ time length))
+                             (let* ((dx (- tx x)) (dy (- ty y)) (dz (- tz z))
+                                    (flat (sqrt (+ (* dx dx) (* dz dz)))))
+                               (setf (luvcraft::sky-clock-hour clock) hour
+                                     luvcraft::*luvcraft-focus-blur-p* focus-p
+                                     (luvcraft:camera-x camera) x
+                                     (luvcraft:camera-y camera) y
+                                     (luvcraft:camera-z camera) z
+                                     (luvcraft:camera-yaw camera)
+                                     (atan dx dz)
+                                     (luvcraft:camera-pitch camera)
+                                     (atan dy flat)
+                                     (luvcraft:camera-field-of-view camera)
+                                     fov)))
+                           (return)
+                      do (decf time length))))))
+      (setf luvcraft::*luvcraft-focus-blur-p* nil
+            luvcraft::*luvcraft-crosshair-p* t)
       (luvcraft:stop-luvcraft session))))
 
 ;;; The party as a verb in the game itself: M-x Celebrate Birthday.

@@ -45,15 +45,13 @@
         :seconds 16
         :styles '(:flat :bevel :chamfer :paper :stock :field :soft :ink)))
      (when (film-wanted-p :birthday names)
-       (format t "~&Filming the birthday party...~%")
-       (luvcraft.birthday:film-birthday-party
-        (merge-pathnames #P"birthday.mp4" directory)
-        :seconds 24 :frame-rate 20))
+       (format t "~&Filming the birthday party cutscenes...~%")
+       (luvcraft.birthday:film-birthday-cutscenes
+        (merge-pathnames #P"birthday.mp4" directory)))
      (when (film-wanted-p :birthday-daniel names)
-       (format t "~&Filming Daniel's birthday party...~%")
-       (luvcraft.birthday:film-birthday-party
+       (format t "~&Filming Daniel's birthday party cutscenes...~%")
+       (luvcraft.birthday:film-birthday-cutscenes
         (merge-pathnames #P"birthday-daniel.mp4" directory)
         :name "DANIEL"
-        :age (luvcraft.birthday::birthday-age 1985 8 15)
-        :seconds 24 :frame-rate 20))
+        :age (luvcraft.birthday::birthday-age 1985 8 15)))
      (format t "~&Films written under ~A~%" directory))))

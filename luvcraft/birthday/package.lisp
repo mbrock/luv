@@ -33,4 +33,5 @@
    #:remove-birthday-marquee
    ;; party.lisp
    #:celebrate-birthday
-   #:film-birthday-party))
+   #:film-birthday-party
+   #:film-birthday-cutscenes))
