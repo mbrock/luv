@@ -202,16 +202,16 @@ CLEARANCE, names the piece and the sample and refuses to fly."
                                  (width 1280) (height 720)
                                  (style :stock)
                                  (chamfer-width (/ 1.0 6.0))
-                                 (light :golden)
+                                 (light :evening)
                                  (aperture 0.85)
                                  (effects (default-renderer-effects))
-                                 (look-distance 12.0)
                                  (field-scale 1.0))
   "Fly a drone through the atelier's architecture into an MP4 at PATHNAME.
 
 Each of PIECES gets one continuous shot: a Catmull-Rom flight through the
-piece's own authored cameras, looking where each of them looked, easing
-in and out of the run.  STYLE defaults to :STOCK -- the chamfered
+piece's ATELIER-FLIGHT waypoints -- through its arches, along its decks,
+around its shafts -- easing in and out of the run.  STYLE defaults to
+:STOCK -- the chamfered
 multi-material style the wiki's stills use -- with CHAMFER-WIDTH of a
 sixth of a cell, wide enough that every arris reads as a planed band.
 FIELD-SCALE widens every authored field of view; a portrait film scales
@@ -237,33 +237,12 @@ composed for landscape.  Returns PATHNAME and the frame count."
                               :format (renderer-color-format renderer))
            (dolist (piece pieces)
              (let* ((scene (atelier-scene piece))
-                    (cameras (mapcar #'cdr (atelier-cameras piece)))
-                    (positions
-                      (mapcar (lambda (camera)
-                                (let ((p (camera-position camera)))
-                                  (list (vec3:vec3-x p) (vec3:vec3-y p)
-                                        (vec3:vec3-z p))))
-                              cameras))
-                    (looks
-                      (mapcar (lambda (camera)
-                                (multiple-value-bind (right up forward)
-                                    (camera-basis camera)
-                                  (declare (ignore right up))
-                                  (let ((p (camera-position camera)))
-                                    (list (+ (vec3:vec3-x p)
-                                             (* look-distance
-                                                (vec3:vec3-x forward)))
-                                          (+ (vec3:vec3-y p)
-                                             (* look-distance
-                                                (vec3:vec3-y forward)))
-                                          (+ (vec3:vec3-z p)
-                                             (* look-distance
-                                                (vec3:vec3-z forward)))))))
-                              cameras))
-                    (fields
-                      (mapcar (lambda (camera)
-                                (list (camera-field-of-view camera)))
-                              cameras))
+                    (waypoints (atelier-flight piece))
+                    (positions (mapcar #'first waypoints))
+                    (looks (mapcar #'second waypoints))
+                    (fields (mapcar (lambda (waypoint)
+                                      (list (third waypoint)))
+                                    waypoints))
                     ;; The authored cameras say where to look; the flight
                     ;; between them is sampled at every frame, relaxed off
                     ;; the masonry, and then sworn clear: a drone that

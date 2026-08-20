@@ -980,6 +980,90 @@ knowing what it is cut from."
    (cons :town (studio-camera 58.0 6.0 46.0 :look-x 28.0 :look-y 50.0
                               :look-z 19.0 :field-of-view 0.76))))
 
+;;; ------------------------------------------------------------------------
+;;; Flights: how a drone moves through a piece
+;;;
+;;; A still camera says where to stand; a flight says where to go.  Each
+;;; waypoint is a position, the point the camera holds in view as it passes,
+;;; and a field of view: through the arch, along the deck, around the shaft.
+;;; FILM-ATELIER-FLIGHT splines through these and relaxes the path off the
+;;; masonry, so a waypoint may be bold about how close it comes.
+
+(defgeneric atelier-flight (piece)
+  (:documentation "The drone waypoints of PIECE: (position look fov) lists.")
+  (:method (piece)
+    ;; A piece without an authored flight flies its still cameras.
+    (mapcar (lambda (entry)
+              (let ((camera (cdr entry)))
+                (multiple-value-bind (right up forward) (camera-basis camera)
+                  (declare (ignore right up))
+                  (let ((p (camera-position camera)))
+                    (list (list (vec3:vec3-x p) (vec3:vec3-y p)
+                                (vec3:vec3-z p))
+                          (list (+ (vec3:vec3-x p) (* 12.0 (vec3:vec3-x forward)))
+                                (+ (vec3:vec3-y p) (* 12.0 (vec3:vec3-y forward)))
+                                (+ (vec3:vec3-z p) (* 12.0 (vec3:vec3-z forward))))
+                          (camera-field-of-view camera))))))
+            (atelier-cameras piece))))
+
+(defmethod atelier-flight ((piece (eql :arcade)))
+  ;; On axis over the lawn, through the middle bay, along the cloister
+  ;; walk, out through the third bay, and away looking back.
+  '(((32.0  4.0  9.0) (32.0 27.0 12.0) 0.85)
+    ((32.0 18.0 10.0) (32.0 28.0 12.0) 0.85)
+    ((32.0 27.5 10.0) (32.0 38.0 10.0) 0.88)
+    ((37.0 34.0  9.5) (50.0 28.0 10.0) 0.88)
+    ((50.0 27.5 10.0) (50.0 14.0  9.0) 0.88)
+    ((54.0 12.0 13.0) (32.0 27.0 13.0) 0.82)))
+
+(defmethod atelier-flight ((piece (eql :viaduct)))
+  ;; Up the canyon floor, through the middle arch, a bank past the mill,
+  ;; then climbing to cross the whole span along the deck.
+  '(((31.0  6.0  7.0) (31.0 30.0 12.0) 0.90)
+    ((31.0 22.0  8.0) (31.0 36.0 10.0) 0.90)
+    ((31.0 30.5  8.5) (28.0 44.0 10.0) 0.92)
+    ((26.0 42.0 12.0) (22.0 44.0  9.0) 0.90)
+    ((13.0 42.0 20.0) (30.0 31.0 24.0) 0.86)
+    (( 5.0 31.0 27.5) (30.0 30.5 26.0) 0.84)
+    ((30.0 30.5 27.5) (52.0 30.5 26.0) 0.84)
+    ((54.0 30.5 28.5) (68.0 30.0 22.0) 0.84)))
+
+(defmethod atelier-flight ((piece (eql :turret)))
+  ;; One full circle about the shaft, low to high, ending on the crown.
+  '(((30.0 13.0  7.0) (30.0 32.0 14.0) 0.85)
+    ((46.0 19.0 12.0) (30.0 32.0 16.0) 0.85)
+    ((49.0 43.0 16.0) (30.0 32.0 18.0) 0.85)
+    ((32.0 49.0 19.0) (30.0 32.0 20.0) 0.85)
+    ((16.0 41.0 22.0) (30.0 32.0 23.0) 0.85)
+    ((15.0 23.0 27.0) (30.0 32.0 26.0) 0.85)))
+
+(defmethod atelier-flight ((piece (eql :grotto)))
+  ;; Across the apron, through the mouth, a drift among the columns, and
+  ;; a slow turn back toward the only light.
+  '(((32.0  3.0  8.0) (32.0 30.0 13.0) 0.92)
+    ((32.0 19.0  9.0) (32.0 31.0 12.0) 0.92)
+    ((32.0 30.5  9.0) (32.0 44.0 10.0) 0.95)
+    ((34.5 40.0  9.0) (26.0 37.0 10.0) 0.95)
+    ((28.0 45.0  9.5) (32.0 28.0 12.0) 0.95)))
+
+(defmethod atelier-flight ((piece (eql :headland)))
+  ;; Along the strand under the cliff, then up and over the wooded top.
+  '((( 4.0  8.0  6.0) (30.0 30.0 12.0) 0.84)
+    ((16.0 14.0  9.0) (40.0 32.0 14.0) 0.84)
+    ((34.0 18.0 16.0) (44.0 40.0 18.0) 0.84)
+    ((50.0 30.0 24.0) (30.0 48.0 18.0) 0.82)
+    ((56.0 42.0 27.0) (24.0 44.0 16.0) 0.80)))
+
+(defmethod atelier-flight ((piece (eql :holm)))
+  ;; Down the causeway, over the bridge and the gate, and up across the
+  ;; town to the high oblique where the plan reads.
+  '(((30.0  1.0 17.0) (30.0 30.0 16.0) 0.86)
+    ((30.0 12.0 15.5) (30.0 40.0 19.0) 0.86)
+    ((30.0 26.0 15.5) (30.0 46.0 21.0) 0.86)
+    ((30.0 38.0 21.0) (30.0 50.0 22.0) 0.86)
+    ((36.0 47.0 29.0) (26.0 52.0 20.0) 0.84)
+    ((52.0 38.0 39.0) (28.0 50.0 19.0) 0.80)))
+
 (defun render-view (pathname piece camera &key (light *light*) (style :stock)
                                                (width 1200) (height 750)
                                                (supersample 2))

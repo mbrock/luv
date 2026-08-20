@@ -652,6 +652,15 @@ more than the edges of walls, the way weather wears a top.")
   :ambient 0.86 :fog 210.0 :exposure 0.92 :shadow 0.18 :occlusion 1.0
   :sheen 0.04)
 
+(define-light :daybreak
+  ;; The first minutes of direct sun: a fire-coloured key barely off the
+  ;; horizon, the air still blue in every hollow, fog holding the
+  ;; distances close.  The most dramatic hour the atelier has.
+  :sun '(0.80 0.42 0.14) :sun-color '(1.55 0.80 0.42)
+  :sky '(0.48 0.58 0.80) :ground '(0.24 0.19 0.17)
+  :fill '(-0.5 0.35 0.30) :fill-strength 0.36
+  :ambient 0.30 :fog 140.0 :exposure 1.32 :sheen 0.34)
+
 (define-light :golden
   ;; The hour the mountain games are graded for: the sun low and honeyed
   ;; out of the west, shadows long and gone a little blue, the sky still
