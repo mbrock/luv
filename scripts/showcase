@@ -86,8 +86,12 @@ if [ ! -d "$media_checkout/.git" ]; then
     git -C "$media_checkout" push -u origin "$media_branch"
   fi
 fi
-nix develop --verbose -L "$source_checkout" --no-write-lock-file -c \
-  git -C "$media_checkout" annex init "chapel showcase renderer"
+echo "showcase: resolving the pinned git-annex"
+annex_bin=$(nix develop --verbose -L "$source_checkout" --no-write-lock-file \
+  -c sh -c 'dirname "$(command -v git-annex)"')
+PATH=$annex_bin:$PATH
+export PATH
+git -C "$media_checkout" annex init "chapel showcase renderer"
 echo "showcase: chapel bootstrap complete"
 REMOTE
 }
@@ -131,8 +135,12 @@ if [ ! -d "$media_checkout/.git" ]; then
   git clone --progress --single-branch --branch "$media_branch" \
     "$repository" "$media_checkout"
 fi
-nix develop --verbose -L "$source_checkout" --no-write-lock-file -c \
-  git -C "$media_checkout" annex init "swa showcase web"
+echo "showcase: resolving the pinned git-annex"
+annex_bin=$(nix develop --verbose -L "$source_checkout" --no-write-lock-file \
+  -c sh -c 'dirname "$(command -v git-annex)"')
+PATH=$annex_bin:$PATH
+export PATH
+git -C "$media_checkout" annex init "swa showcase web"
 if git -C "$media_checkout" remote get-url chapel >/dev/null 2>&1; then
   git -C "$media_checkout" remote set-url chapel \
     "$render_host:$render_media_checkout"
@@ -157,6 +165,12 @@ case "$source_checkout" in /*) ;; *) source_checkout=$HOME/$source_checkout ;; e
 case "$media_checkout" in /*) ;; *) media_checkout=$HOME/$media_checkout ;; esac
 test -d "$source_checkout/.git" || { echo "showcase: run bootstrap first" >&2; exit 1; }
 test -d "$media_checkout/.git" || { echo "showcase: run bootstrap first" >&2; exit 1; }
+
+echo "showcase: resolving the pinned git-annex"
+annex_bin=$(nix develop --verbose -L "$source_checkout" --no-write-lock-file \
+  -c sh -c 'dirname "$(command -v git-annex)"')
+PATH=$annex_bin:$PATH
+export PATH
 
 echo "showcase: fast-forwarding chapel source"
 test -z "$(git -C "$source_checkout" status --porcelain)" || {
@@ -186,8 +200,7 @@ LUV_CAPTURE_OUTPUT_DIRECTORY="$media_checkout/media" \
     make -C "$source_checkout" capture
 
 echo "showcase: annexing rendered media"
-nix develop --verbose -L "$source_checkout" --no-write-lock-file -c \
-  git -C "$media_checkout" annex add media
+git -C "$media_checkout" annex add media
 git -C "$media_checkout" add media/manifest.sexp
 if test -n "$(git -C "$media_checkout" status --porcelain)"; then
   git -C "$media_checkout" commit -m "Capture showcase at $revision"
@@ -212,6 +225,12 @@ case "$media_checkout" in /*) ;; *) media_checkout=$HOME/$media_checkout ;; esac
 test -d "$source_checkout/.git" || { echo "showcase: run bootstrap first" >&2; exit 1; }
 test -d "$media_checkout/.git" || { echo "showcase: run bootstrap first" >&2; exit 1; }
 
+echo "showcase: resolving the pinned git-annex"
+annex_bin=$(nix develop --verbose -L "$source_checkout" --no-write-lock-file \
+  -c sh -c 'dirname "$(command -v git-annex)"')
+PATH=$annex_bin:$PATH
+export PATH
+
 echo "showcase: fast-forwarding swa source"
 test -z "$(git -C "$source_checkout" status --porcelain)" || {
   echo "showcase: refusing dirty swa source checkout" >&2
@@ -232,11 +251,9 @@ git -C "$media_checkout" fetch --progress origin "$media_branch" git-annex
 git -C "$media_checkout" switch "$media_branch"
 git -C "$media_checkout" merge --ff-only "origin/$media_branch"
 git -C "$media_checkout" fetch --progress chapel git-annex
-nix develop --verbose -L "$source_checkout" --no-write-lock-file -c \
-  git -C "$media_checkout" annex get --from chapel media
+git -C "$media_checkout" annex get --from chapel media
 
-missing=$(nix develop --verbose "$source_checkout" --no-write-lock-file -c \
-  git -C "$media_checkout" annex find --not --in here media)
+missing=$(git -C "$media_checkout" annex find --not --in here media)
 test -z "$missing" || {
   echo "showcase: annex content still missing:" >&2
   printf '%s\n' "$missing" >&2
