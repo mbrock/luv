@@ -147,3 +147,18 @@ Returns the session; LUVCRAFT:STOP-PLAYING ends the party and saves it."
             (setf luvcraft::*checkpoint-writer* writer
                   luvcraft:*session* session)
             session))))))
+
+;;; The party as a verb in the game itself: M-x Celebrate Birthday.
+;;;
+;;; Commands run on the canvas thread, and CELEBRATE-BIRTHDAY tears that
+;;; session down -- STOP-PLAYING waits for a frame boundary -- so like the
+;;; quit action it runs beside the game, not inside it.
+
+(clim:define-command (com-celebrate-birthday
+                      :command-table luvcraft.clim::luvcraft-world
+                      :name "Celebrate Birthday")
+    ()
+  (sb-thread:make-thread
+   (lambda ()
+     (celebrate-birthday))
+   :name "birthday party"))
