@@ -250,10 +250,11 @@ attachment—no window focus or operating-system screenshot automation involved:
 
 This builds a standalone Metal game, waits for quiet streaming, and writes a
 Tracy capture containing a half-second baseline followed by one natural chunk
-boundary crossing:
+boundary crossing.  Tracy is kept out of the default development shell because
+its viewer is slow to build; enter the optional shell when profiling:
 
 ```sh
-make tracy-streaming
+nix develop .#tracy -c make tracy-streaming
 ```
 
 And this regenerates the luvcraft and McCLIM images from the real renderers:

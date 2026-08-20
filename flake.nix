@@ -204,7 +204,6 @@
               libghosttyVt
               pkgs.harfbuzz
               pkgs.openssl
-              tracyClient
               pkgs.sdl3
               pkgs.sdl3-image
               pkgs.sdl3-mixer
@@ -314,8 +313,7 @@
             if system == "x86_64-linux" then "lvp_icd.x86_64.json"
             else if system == "aarch64-linux" then "lvp_icd.aarch64.json"
             else null;
-        in {
-          default = env.pkgs.mkShell ({
+          shellEnvironment = {
             packages = [
               env.pkgs.bashInteractive
               env.lisp
@@ -332,7 +330,6 @@
               env.pkgs.qrencode
               env.pkgs.sdl3
               env.pkgs.spirv-tools
-              env.tracyTools
               env.pkgs.urbit
               env.pkgs.vulkan-headers
               env.pkgs.vulkan-tools
@@ -354,9 +351,6 @@
             # deliberately built without it.
             LUV_BASH = "${env.pkgs.bashInteractive}/bin/bash";
             LUV_SLYNK_DIR = "${env.slyRoot}/slynk";
-            LUV_TRACY_CLIENT = env.tracyClientLibrary;
-            LUV_TRACY_CAPTURE = "${env.tracyTools}/bin/tracy-capture";
-            LUV_TRACY_PROFILER = "${env.tracyTools}/bin/tracy";
             LUV_FFMPEG_LIBDIR = env.ffmpegLibraryDirectory;
             LUV_MUPDF_LIBDIR = env.mupdfLibraryDirectory;
             LUV_YT_DLP = "${env.pkgs.yt-dlp}/bin/yt-dlp";
@@ -412,6 +406,22 @@
           } // nixpkgs.lib.optionalAttrs env.pkgs.stdenv.isDarwin {
             VK_DRIVER_FILES =
               "${env.pkgs.moltenvk}/share/vulkan/icd.d/MoltenVK_icd.json";
+          };
+        in {
+          default = env.pkgs.mkShell shellEnvironment;
+          # Tracy is intentionally opt-in: its viewer is a large C++ build
+          # that should not hold up the ordinary Lisp development shell.
+          # Enter with `nix develop .#tracy` (or `direnv shell .#tracy`).
+          tracy = env.pkgs.mkShell (shellEnvironment // {
+            packages = shellEnvironment.packages ++ [
+              env.tracyClient
+              env.tracyTools
+            ];
+            LD_LIBRARY_PATH = nixpkgs.lib.makeLibraryPath [ env.tracyClient ]
+              + ":${shellEnvironment.LD_LIBRARY_PATH}";
+            LUV_TRACY_CLIENT = env.tracyClientLibrary;
+            LUV_TRACY_CAPTURE = "${env.tracyTools}/bin/tracy-capture";
+            LUV_TRACY_PROFILER = "${env.tracyTools}/bin/tracy";
           });
         });
     };
