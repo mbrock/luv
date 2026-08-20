@@ -37,6 +37,29 @@ object represented as a CL-JSON alist.  Specialize CALL-TOOL for behavior."))
 (defgeneric call-tool (tool arguments agent)
   (:documentation "Run TOOL with decoded JSON ARGUMENTS for AGENT."))
 
+(defclass tool-output-image ()
+  ((octets :initarg :octets :reader tool-output-image-octets)
+   (media-type :initarg :media-type :initform "image/png"
+               :reader tool-output-image-media-type)
+   (detail :initarg :detail :initform "low" :reader tool-output-image-detail))
+  (:documentation "One encoded image carried back as part of a function result."))
+
+(defun make-tool-output-image (octets &key (media-type "image/png") (detail "low"))
+  "Make an image result from encoded OCTETS such as the bytes of a PNG."
+  (check-type octets (vector (unsigned-byte 8)))
+  (make-instance 'tool-output-image
+                 :octets octets :media-type media-type :detail detail))
+
+(defclass tool-output ()
+  ((text :initarg :text :initform "" :reader tool-output-text)
+   (images :initarg :images :initform '() :reader tool-output-images))
+  (:documentation
+   "Text plus encoded images returned by a client function to the model."))
+
+(defun make-tool-output (&key (text "") images)
+  "Make a multimodal function result whose TEXT and IMAGES travel together."
+  (make-instance 'tool-output :text text :images images))
+
 (defclass agent-response ()
   ((text :initarg :text :reader agent-response-text)
    (reasoning :initarg :reasoning :reader agent-response-reasoning)
@@ -246,6 +269,32 @@ previous response id, so each event carries only what is new."
 (defun tool-for-call (agent name)
   (find name (agent-tools agent) :key #'tool-name :test #'string=))
 
+(defgeneric encoded-tool-output (output)
+  (:documentation "Return OUTPUT in the Responses function-call-output shape."))
+
+(defmethod encoded-tool-output ((output string))
+  output)
+
+(defmethod encoded-tool-output ((output t))
+  (json-string output))
+
+(defun tool-output-image-data-url (image)
+  (format nil "data:~A;base64,~A"
+          (tool-output-image-media-type image)
+          (cl-base64:usb8-array-to-base64-string
+           (tool-output-image-octets image))))
+
+(defmethod encoded-tool-output ((output tool-output))
+  (append
+   (unless (string= (tool-output-text output) "")
+     (list (json-object "type" "input_text"
+                        "text" (tool-output-text output))))
+   (mapcar (lambda (image)
+             (json-object "type" "input_image"
+                          "image_url" (tool-output-image-data-url image)
+                          "detail" (tool-output-image-detail image)))
+           (tool-output-images output))))
+
 (defun tool-result (agent item)
   (let* ((call-id (json-value item :call-id))
          (name (json-value item :name))
@@ -257,7 +306,7 @@ previous response id, so each event carries only what is new."
         (let ((result (call-tool tool (decode-json arguments) agent)))
           (list (cons "type" "function_call_output")
                 (cons "call_id" call-id)
-                (cons "output" (if (stringp result) result (json-string result)))))
+                (cons "output" (encoded-tool-output result))))
       (error (condition)
         (list (cons "type" "function_call_output")
               (cons "call_id" call-id)

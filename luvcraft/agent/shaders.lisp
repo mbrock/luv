@@ -8,9 +8,9 @@
 ;;; genuinely three-dimensional.
 ;;;
 ;;; The figure is built in its own upright frame: feet at local y zero, +y up,
-;;; +z toward whoever is looking.  The gnome therefore always turns to face
-;;; the camera, which is both the cheapest orientation and the correct one for
-;;; someone whose whole job is to be addressed.  Every part is a small closed
+;;; +z along the embodied agent's retained heading.  The proxy still faces the
+;;; camera for conservative rasterization, but the gnome inside it looks where
+;;; he is actually going.  Every part is a small closed
 ;;; form -- a round cone for the robe and the hat, ellipsoids for the beard
 ;;; and the brim, spheres for head, nose, mittens and boots -- and the parts
 ;;; are welded with a polynomial smooth minimum so the joins read as one body
@@ -404,10 +404,12 @@ saturated primaries would read as a toy."
     ((role (eql :gnome-sdf)) (stage (eql :vertex)))
     (:stage :vertex
      :inputs ((quad-corner :vec3 :location 0)
-              (sphere-center-radius :vec4 :location 1))
+              (sphere-center-radius :vec4 :location 1)
+              (figure-facing :vec4 :location 2))
      :outputs ((clip-position :vec4 :built-in :position)
                (proxy-world-position :vec3 :location 0)
-               (sphere-output :vec4 :location 1))
+               (sphere-output :vec4 :location 1)
+               (facing-output :vec3 :location 2))
      :resources
      ((frame-state :uniform-block :set 0 :binding 2
                    :members #.*frame-uniform-members*)))
@@ -436,14 +438,16 @@ saturated primaries would read as a toy."
                       (+ (* view-z z-scale) z-offset)
                       view-z))
     (set-output proxy-world-position world-position)
-    (set-output sphere-output sphere-center-radius)))
+    (set-output sphere-output sphere-center-radius)
+    (set-output facing-output (swizzle figure-facing :xyz))))
 
 (define-shader-method shader-specification-for
     gnome-sdf-fragment-specification
     ((role (eql :gnome-sdf)) (stage (eql :fragment)))
     (:stage :fragment
      :inputs ((proxy-world-position :vec3 :location 0)
-              (sphere-input :vec4 :location 1))
+              (sphere-input :vec4 :location 1)
+              (facing-input :vec3 :location 2))
      :outputs ((color-output :vec4 :location 0))
      :resources
      ((frame-state :uniform-block :set 0 :binding 2
@@ -452,14 +456,11 @@ saturated primaries would read as a toy."
          (center (swizzle sphere-input :xyz))
          (radius (swizzle sphere-input :w))
          (ray (normalize (- proxy-world-position camera)))
-         ;; The figure's own upright frame: world up stays up, and +z points
-         ;; along the ground toward the eye, so he faces whoever addresses
-         ;; him.  RIGHT is the cross product of world up with FACING, written
-         ;; out by hand.
+         ;; The figure's own upright frame: world up stays up and +z is the
+         ;; body's retained forward direction.  RIGHT is the cross product of
+         ;; world up with FACING, written out by hand.
          (toward-eye (- camera center))
-         (facing (normalize (vec3 (swizzle toward-eye :x)
-                                  0.0
-                                  (swizzle toward-eye :z))))
+         (facing (normalize facing-input))
          (sideways (vec3 (swizzle facing :z) 0.0 (- (swizzle facing :x))))
          ;; The whole march happens in figure units, where the gnome is one
          ;; and three quarters tall whatever his stature: dividing the camera

@@ -107,11 +107,33 @@
   :depends-on ("luvcraft/core")
   :components ((:file "luvcraft/light-reference")))
 
+(defsystem "luvcraft/agent-bodies"
+  :description "The analytic gnome and cat body shaders and their live knobs."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luvcraft/core")
+  :serial t
+  :components ((:file "luvcraft/agent/shaders")
+               (:file "luvcraft/agent/cat-shaders")))
+
+(defsystem "luvcraft/body-gallery"
+  :description "Compile the analytic agent bodies to WGSL and serve their WebGPU gallery."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luvcraft/agent-bodies" "luv/wgsl" "cl-json" "uiop"
+               (:require #:sb-bsd-sockets))
+  :serial t
+  :components ((:file "luvcraft/body-gallery-package")
+               (:file "luvcraft/body-gallery")
+               (:static-file "luvcraft/web/body-gallery.html")
+               (:static-file "luvcraft/web/body-gallery.css")
+               (:static-file "luvcraft/web/body-gallery.js")))
+
 (defsystem "luvcraft/tools"
   :description "One-shot command-line tools for luvcraft development."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luvcraft/core" "mqtt/net" "uiop")
+  :depends-on ("luvcraft/core" "luvcraft/body-gallery" "mqtt/net" "uiop")
   :build-operation "program-op"
   :build-pathname "build/luv"
   :entry-point "luvcraft.tools:main"
@@ -123,6 +145,7 @@
                  (:file "runner")
                  (:file "block-world")
                  (:file "gazetteer")
+                 (:file "body-gallery")
                  (:file "lobby")))))
 
 (defsystem "luvcraft/mcclim"
@@ -207,7 +230,8 @@
   :description "An agent in the little world: tools as CLIM commands, results as presentations."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luvcraft" "openai" "mqtt/net" "alexandria" "sb-concurrency")
+  :depends-on ("luvcraft" "luvcraft/agent-bodies"
+               "openai" "mqtt/net" "alexandria" "sb-concurrency")
   :serial t
   :components ((:module "luvcraft/agent"
                 :serial t
@@ -219,10 +243,25 @@
                              (:file "commands")
                              (:file "hud")
                              (:file "wall")
-                             (:file "shaders")
-                             (:file "cat-shaders")
                              (:file "gnome")
-                             (:file "cat")))))
+                             (:file "cat")
+                             (:file "surroundings"))))
+  :in-order-to ((test-op (test-op "luvcraft/agent/test"))))
+
+(defsystem "luvcraft/agent/test"
+  :description "Tests for embodied agent observations and tools."
+  :depends-on ("luvcraft/agent" "rove")
+  :serial t
+  :components ((:module "luvcraft/agent/tests"
+                :serial t
+                :components ((:file "package")
+                             (:file "surroundings"))))
+  :perform (test-op (operation component)
+             (declare (ignore operation component))
+             (unless (uiop:symbol-call '#:rove '#:run-suite
+                                       (uiop:symbol-call '#:rove '#:find-suite
+                                                         '#:luvcraft.agent.tests))
+               (error "Luvcraft agent tests failed"))))
 
 (defsystem "luvcraft/birthday"
   :description "A birthday party in the little world: meadow, gazebo, balloons, gnomes, fireworks."
@@ -255,7 +294,8 @@
   :description "Executable claims for the world, shaders, and interactive slice."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luvcraft/core" "luvcraft/light-reference" "cl-dejavu" "rove")
+  :depends-on ("luvcraft/core" "luvcraft/light-reference"
+               "luvcraft/body-gallery" "cl-dejavu" "rove")
   :serial t
   :components ((:file "hal/shader/tests")
                (:file "luvcraft/world-tests")
@@ -265,6 +305,7 @@
                (:file "luvcraft/physics-tests")
                (:file "luvcraft/light-tests")
                (:file "hal/metal/msl/tests")
+               (:file "hal/webgpu/wgsl/tests")
                (:file "hal/metal/tests" :if-feature :darwin))
   :perform (test-op (operation component)
              (declare (ignore operation component))

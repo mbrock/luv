@@ -15,6 +15,7 @@
                     (#:mcluv #:mcluv)
                     (#:luvcraft #:luvcraft)
                     (#:luvcraft.clim #:luvcraft.clim)
+                    (#:world #:luvcraft.world)
                     (#:openai #:openai))
   (:export
    ;; Views and handles
@@ -25,7 +26,7 @@
    #:presentation-type-json-schema
    ;; Tools
    #:command-tool #:make-command-tool #:command-tool-command
-   #:command-tool-runs-on-canvas-p
+   #:command-tool-runs-on-canvas-p #:command-provider-output
    ;; The transcript
    #:tool-call #:tool-call-command #:tool-call-tool #:tool-call-arguments
    #:tool-call-status #:tool-call-result #:tool-call-error #:tool-call-output
@@ -36,7 +37,8 @@
    #:ask #:ask-and-wait #:transcript-lines #:print-transcript
    #:*agent*
    ;; Commands
-   #:luvcraft-agent #:com-where-am-i #:com-move-to #:com-place-block-at #:com-eval
+   #:luvcraft-agent #:com-where-am-i #:com-view-surroundings
+   #:com-move-to #:com-place-block-at #:com-eval
    #:com-describe-handle #:com-block-at
    ;; The HUD
    #:open-agent-hud #:close-agent-hud #:toggle-agent-hud

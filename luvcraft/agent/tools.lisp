@@ -95,6 +95,17 @@ so a list reads as Lisp rather than as a comma-separated sequence.")
    "How many lines COMMAND's result may run to before the model view folds it.")
   (:method ((command t)) *model-text-max-lines*))
 
+(defgeneric command-provider-output (command values text)
+  (:documentation
+   "Return the provider value for COMMAND after VALUES have produced TEXT.
+
+The default is the same textual transcript shown in the HUD.  An observational
+command may wrap that text with image content without changing the retained
+semantic result or its presentation.")
+  (:method ((command t) values text)
+    (declare (ignore command values))
+    text))
+
 (defgeneric settle-command-result (command value)
   (:documentation
    "Finish any off-canvas work represented by VALUE before presenting it.
@@ -152,6 +163,7 @@ without ever freezing rendering.")
 
 (defmethod openai:call-tool ((tool command-tool) arguments (agent world-agent))
   (let ((call (make-instance 'tool-call :tool tool :arguments arguments))
+        (provider-output nil)
         (*handles* (world-agent-handles agent)))
     (note-tool-call agent call)
     (handler-case
@@ -170,13 +182,16 @@ without ever freezing rendering.")
                                           :type (command-result-presentation-type
                                                  (car command) value)))
                                        values))))
-          (setf (tool-call-result call) (first values)
-                (tool-call-output call) (if (string= output "") "ok" output)
-                (tool-call-status call) :ok))
+          (let ((text (if (string= output "") "ok" output)))
+            (setf (tool-call-result call) (first values)
+                  (tool-call-output call) text
+                  (tool-call-status call) :ok
+                  provider-output
+                  (command-provider-output (car command) values text))))
       (error (condition)
         (setf (tool-call-error call) condition
               (tool-call-output call) (format nil "error: ~A" condition)
               (tool-call-status call) :error)))
     (setf (tool-call-finished call) (get-internal-real-time))
     (note-tool-call-finished agent call)
-    (tool-call-output call)))
+    (or provider-output (tool-call-output call))))

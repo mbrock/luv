@@ -238,10 +238,12 @@
     ((role (eql :cat-sdf)) (stage (eql :vertex)))
     (:stage :vertex
      :inputs ((quad-corner :vec3 :location 0)
-              (sphere-center-radius :vec4 :location 1))
+              (sphere-center-radius :vec4 :location 1)
+              (figure-facing :vec4 :location 2))
      :outputs ((clip-position :vec4 :built-in :position)
                (proxy-world-position :vec3 :location 0)
-               (sphere-output :vec4 :location 1))
+               (sphere-output :vec4 :location 1)
+               (facing-output :vec3 :location 2))
      :resources
      ((frame-state :uniform-block :set 0 :binding 2
                    :members #.*frame-uniform-members*)))
@@ -270,14 +272,16 @@
                       (+ (* view-z z-scale) z-offset)
                       view-z))
     (set-output proxy-world-position world-position)
-    (set-output sphere-output sphere-center-radius)))
+    (set-output sphere-output sphere-center-radius)
+    (set-output facing-output (swizzle figure-facing :xyz))))
 
 (define-shader-method shader-specification-for
     cat-sdf-fragment-specification
     ((role (eql :cat-sdf)) (stage (eql :fragment)))
     (:stage :fragment
      :inputs ((proxy-world-position :vec3 :location 0)
-              (sphere-input :vec4 :location 1))
+              (sphere-input :vec4 :location 1)
+              (facing-input :vec3 :location 2))
      :outputs ((color-output :vec4 :location 0))
      :resources
      ((frame-state :uniform-block :set 0 :binding 2
@@ -287,9 +291,7 @@
          (radius (swizzle sphere-input :w))
          (ray (normalize (- proxy-world-position camera)))
          (toward-eye (- camera center))
-         (facing (normalize (vec3 (swizzle toward-eye :x)
-                                  0.0
-                                  (swizzle toward-eye :z))))
+         (facing (normalize facing-input))
          (sideways (vec3 (swizzle facing :z) 0.0 (- (swizzle facing :x))))
          (local-camera (vec3 (/ (dot toward-eye sideways) cat-stature)
                              (+ (/ (swizzle toward-eye :y) cat-stature) 0.64)

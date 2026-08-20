@@ -8,7 +8,7 @@ The public protocol is intentionally small: streaming text and reasoning,
 and client function tools expressed as CLOS objects."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("cl-json" "websocket-driver-client")
+  :depends-on ("cl-base64" "cl-json" "websocket-driver-client")
   :serial t
   :components ((:module "openai"
                 :serial t
