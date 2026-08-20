@@ -652,6 +652,16 @@ more than the edges of walls, the way weather wears a top.")
   :ambient 0.86 :fog 210.0 :exposure 0.92 :shadow 0.18 :occlusion 1.0
   :sheen 0.04)
 
+(define-light :golden
+  ;; The hour the mountain games are graded for: the sun low and honeyed
+  ;; out of the west, shadows long and gone a little blue, the sky still
+  ;; bright enough to hold the tops.  Lonely Mountains: Downhill lives
+  ;; about here all day.
+  :sun '(-0.62 0.38 0.34) :sun-color '(1.22 1.00 0.72)
+  :sky '(0.60 0.75 0.96) :ground '(0.40 0.34 0.26)
+  :fill '(0.55 -0.40 0.32) :fill-strength 0.30
+  :ambient 0.44 :fog 300.0 :exposure 1.16 :sheen 0.22)
+
 (defmacro with-light ((name) &body body)
   "Evaluate BODY under the light called NAME."
   `(let ((*light* ,name)) ,@body))

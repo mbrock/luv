@@ -77,6 +77,70 @@ so the path passes through every point and starts and ends at rest."
               (point (1- index)) (point index)
               (point (1+ index)) (point (+ index 2))))))
 
+(defun flight-cell-solid-p (scene x y z)
+  "Whether the flight would be inside SCENE's masonry at cell X,Y,Z.
+
+Below the world's floor counts as solid -- a drone does not tunnel --
+and above its ceiling counts as sky."
+  (cond ((< z 0) t)
+        ((> z (- luft:+vertical-cell-rows+ 2)) nil)
+        (t (luft:solid-cell-p (scene-solid scene) x y z))))
+
+(defun flight-clearance-push (scene point radius)
+  "The push moving POINT away from solid cells within RADIUS, or NIL."
+  (let ((px (first point)) (py (second point)) (pz (third point))
+        (push-x 0.0) (push-y 0.0) (push-z 0.0)
+        (crowded-p nil))
+    (loop for x from (floor (- px radius)) to (floor (+ px radius))
+          do (loop for y from (floor (- py radius)) to (floor (+ py radius))
+                   do (loop for z from (floor (- pz radius))
+                              to (floor (+ pz radius))
+                            when (flight-cell-solid-p scene x y z)
+                              do (let* ((dx (- px (+ x 0.5)))
+                                        (dy (- py (+ y 0.5)))
+                                        (dz (- pz (+ z 0.5)))
+                                        (distance
+                                          (max (sqrt (+ (* dx dx) (* dy dy)
+                                                        (* dz dz)))
+                                               0.001)))
+                                   (when (< distance radius)
+                                     (setf crowded-p t)
+                                     (let ((weight (/ (- radius distance)
+                                                      distance)))
+                                       (incf push-x (* weight dx))
+                                       (incf push-y (* weight dy))
+                                       (incf push-z (* weight dz))))))))
+    (and crowded-p (list push-x push-y push-z))))
+
+(defun clear-flight-path (scene points
+                          &key (radius 1.7) (passes 40) (step 0.3)
+                               (smoothing 0.2))
+  "Relax POINTS away from SCENE's masonry into a flyable path.
+
+Each pass pushes every crowded point out of its clearance RADIUS by STEP
+of the accumulated push, then rounds the dodge back into an arc with a
+touch of Laplacian SMOOTHING; the endpoints, which are authored views,
+hold still.  Returns the relaxed list."
+  (let ((points (mapcar #'copy-list points))
+        (count (length points)))
+    (dotimes (pass passes points)
+      (loop for point in points
+            for index from 0
+            do (let ((push (flight-clearance-push scene point radius)))
+                 (when (and push (< 0 index (1- count)))
+                   (incf (first point) (* step (first push)))
+                   (incf (second point) (* step (second push)))
+                   (incf (third point) (* step (third push))))))
+      (loop for (previous current next) on points
+            while next
+            when (and previous current next)
+              do (loop for axis below 3
+                       do (setf (elt current axis)
+                                (+ (* (- 1.0 smoothing) (elt current axis))
+                                   (* smoothing
+                                      (* 0.5 (+ (elt previous axis)
+                                                (elt next axis)))))))))))
+
 (defun film-atelier-flight (pathname
                             &key (pieces '(:arcade :viaduct :turret
                                            :grotto :headland :holm))
@@ -84,6 +148,7 @@ so the path passes through every point and starts and ends at rest."
                                  (width 1280) (height 720)
                                  (style :stock)
                                  (chamfer-width (/ 1.0 6.0))
+                                 (light :golden)
                                  (effects (default-renderer-effects))
                                  (look-distance 12.0))
   "Fly a drone through the atelier's architecture into an MP4 at PATHNAME.
@@ -95,6 +160,7 @@ multi-material style the wiki's stills use -- with CHAMFER-WIDTH of a
 sixth of a cell, wide enough that every arris reads as a planed band.
 Returns PATHNAME and the frame count."
   (let* ((*chamfer-width* chamfer-width)
+         (*light* light)
          (piece-frames (max 1 (round (* seconds-per-piece frame-rate))))
          (first-piece (first pieces))
          (renderer (make-renderer
@@ -108,8 +174,8 @@ Returns PATHNAME and the frame count."
                               :frame-rate frame-rate
                               :format (renderer-color-format renderer))
            (dolist (piece pieces)
-             (setf (renderer-scene renderer) (atelier-scene piece))
-             (let* ((cameras (mapcar #'cdr (atelier-cameras piece)))
+             (let* ((scene (atelier-scene piece))
+                    (cameras (mapcar #'cdr (atelier-cameras piece)))
                     (positions
                       (mapcar (lambda (camera)
                                 (let ((p (camera-position camera)))
@@ -135,11 +201,22 @@ Returns PATHNAME and the frame count."
                     (fields
                       (mapcar (lambda (camera)
                                 (list (camera-field-of-view camera)))
-                              cameras)))
+                              cameras))
+                    ;; The authored cameras say where to look; the flight
+                    ;; between them is densified and relaxed off the
+                    ;; masonry, so the drone swings around a pier rather
+                    ;; than clipping through it.
+                    (flight
+                      (clear-flight-path
+                       scene
+                       (loop for sample below 48
+                             collect (catmull-rom-sample
+                                      positions (/ sample 47.0))))))
+               (setf (renderer-scene renderer) scene)
                (dotimes (frame piece-frames)
                  (let* ((s (/ (+ frame 0.5) piece-frames))
                         (eased (* s s (- 3.0 (* 2.0 s))))
-                        (position (catmull-rom-sample positions eased))
+                        (position (catmull-rom-sample flight eased))
                         (look (catmull-rom-sample looks eased))
                         (field (first (catmull-rom-sample fields eased))))
                    (setf (renderer-camera renderer)

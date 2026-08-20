@@ -490,6 +490,15 @@ the width along every axis.  #RUAWR5"
   (defvar *paper-grain* 0.085
     "How deeply the paper material's tooth modulates its tone.")
 
+  (defvar *stock-tooth* 0.055
+    "How deeply the fine matte tooth modulates every stock's tone.
+
+Lonely Mountains: Downhill maps a fine noise onto all objects to give
+them materiality -- the paper look -- over flat palette colours.  The
+stock style's figure, mottle, and drift are each per-material; this one
+grain is shared by everything, which is what makes the picture read as
+printed on one sheet.")
+
   (defvar *paper-variation* 0.11
     "How far one cell's tone may drift from its neighbour's, in value and
 in warmth.  Lonely Mountains: Downhill varies each object's colour a little

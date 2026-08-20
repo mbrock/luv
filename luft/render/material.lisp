@@ -116,6 +116,16 @@ directions from the plan instead."
          (fine (- (paper-noise (* world (* scale 3.4))) 0.5)))
     (+ 1.0 (* contrast (+ (* 0.7 coarse) (* 0.3 fine))))))
 
+(define-shader-function stock-tooth (point)
+  "The fine matte tooth every stock shares, one for none.
+
+The paper look's materiality: a high-frequency grain over whatever the
+material's own figure is doing, anchored in the lattice so it neither
+swims under the camera nor shimmers under temporal accumulation."
+  (let* ((coarse (paper-noise (* point 11.0)))
+         (fine (paper-noise (* point 31.0))))
+    (+ 1.0 (* #.*stock-tooth* (- (+ (* 0.55 coarse) (* 0.45 fine)) 0.5)))))
+
 ;;; ------------------------------------------------------------------------
 ;;; Light on a finished surface
 ;;;
@@ -334,7 +344,8 @@ goes up."
               (aged (mix tone patina-colour (* patina hollow)))
               ;; The planed facet: paler on wood, where the cut crosses the
               ;; fibre; brighter on metal, where handling polishes it.
-              (stock (* aged (mix 1.0 lift planed)))
+              (stock (* (* aged (stock-tooth rest))
+                        (mix 1.0 lift planed)))
               ;; The light lives in the lattice, not in the bent world:
               ;; the shadow ray is walked through the rest occupancy along
               ;; the sun's own direction, so shadows bend with the geometry
