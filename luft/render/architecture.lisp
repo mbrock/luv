@@ -1191,22 +1191,24 @@ lists, derived from the still cameras unless a piece authors its own."))
   ;; wall on the right and the grove on the left, easing out on a look
   ;; back up the vale.
   '((( 2.0 34.0 26.0) (26.0 30.0 10.0) 0.80)
-    ((16.0 30.0 24.0) (40.0 28.0 10.0) 0.80)
-    ((32.0 27.0 23.0) (54.0 26.0 12.0) 0.80)
-    ((48.0 26.0 24.0) (62.0 30.0 14.0) 0.78)
-    ((60.0 30.0 27.0) (30.0 34.0 12.0) 0.78)))
+    ((16.0 30.0 24.0) (40.0 30.0 12.0) 0.80)
+    ((32.0 27.0 23.0) (54.0 32.0 13.0) 0.80)
+    ((48.0 26.0 24.0) (62.0 34.0 15.0) 0.78)
+    ((60.0 30.0 27.0) (30.0 36.0 13.0) 0.78)))
 
 (defmethod atelier-flight ((piece (eql :vale)))
-  ;; The low pass, still gentle: in over the grove skimming the canopy,
+  ;; The low pass, still gentle: in over the grove riding the canopy,
   ;; down the slope out of the trees, along the stream with the meadow
-  ;; opening ahead, then a slow bank up the face of the wall and away.
-  '(((58.0 52.0 27.0) (30.0 48.0 16.0) 0.82)
-    ((42.0 50.0 24.0) (18.0 44.0 12.0) 0.84)
-    ((26.0 44.0 18.0) (10.0 32.0  8.0) 0.86)
+  ;; opening ahead, then rising down-vale past the wall's shoulder --
+  ;; never nose-first into the rock -- and easing out high on a look
+  ;; back up the whole valley.
+  '(((58.0 52.0 28.0) (30.0 48.0 16.0) 0.82)
+    ((42.0 50.0 26.0) (18.0 44.0 13.0) 0.84)
+    ((26.0 44.0 20.0) (10.0 32.0  8.0) 0.86)
     ((14.0 33.0 11.0) (30.0 26.0  8.0) 0.86)
-    ((30.0 28.0 10.0) (44.0 18.0 14.0) 0.86)
-    ((44.0 22.0 14.0) (40.0  6.0 22.0) 0.84)
-    ((50.0 30.0 24.0) (20.0 12.0 20.0) 0.80)))
+    ((30.0 30.0 12.0) (50.0 22.0 12.0) 0.86)
+    ((46.0 30.0 18.0) (61.0 26.0 16.0) 0.84)
+    ((56.0 36.0 26.0) (20.0 30.0 12.0) 0.80)))
 
 (defmethod atelier-flight ((piece (eql :holm)))
   ;; Down the causeway, over the bridge and the gate, and up across the
