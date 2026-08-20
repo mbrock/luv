@@ -28,6 +28,18 @@
   (let* ((x (shader:float (mod vertex-index (shader:uint 2.0)))))
     (shader:set-output clip-position (shader:vec4 x 0.0 0.0 1.0))))
 
+(shader:define-shader-function msl-reused-local (first second)
+  (let* ((sum (+ first first)))
+    (+ sum second)))
+
+(shader:define-shader msl-nested-inline-call-probe
+    (:stage :fragment
+     :inputs ((value :float :location 0))
+     :outputs ((result :float :location 0)))
+  (shader:set-output
+   result
+   (msl-reused-local (msl-reused-local value 1.0) 2.0)))
+
 (shader:define-task-payload msl-task-mesh-payload
   (payload-site :uint64)
   (payload-position (:array :vec4 32)))
@@ -128,6 +140,15 @@
     (ok (search "% uint(4096.0f)" source))
     (ok (search "/ uint(4096.0f)" source))
     (ok (search "float(" source))))
+
+(deftest nested-inline-call-materializes-each-local-once
+  (let* ((source
+           (msl:msl-document-source
+            (msl:compile-msl (msl-nested-inline-call-probe))))
+         (declaration "float msl_reused_local_1_local_1_sum ="))
+    (ok (search declaration source))
+    (ok (null (search declaration source
+                      :start2 (1+ (search declaration source)))))))
 
 (deftest vertex-index-is-a-direct-metal-built-in-parameter
   (let ((source

@@ -171,6 +171,9 @@
    (occurrence-expression
     :initform (make-hash-table :test #'eq)
     :reader msl-context-occurrence-expression)
+   (function-call-results
+    :initform (make-hash-table :test #'eq)
+    :reader msl-context-function-call-results)
    (pending-statements
     :initform nil :accessor msl-context-pending-statements)
    (fold-counter :initform 0 :accessor msl-context-fold-counter)))
@@ -484,57 +487,64 @@
 
 (defmethod lower-msl-expression
     ((context msl-lowering-context) (expression shader:shader-function-call))
-  (let ((outer-statements (drain-msl-pending-statements context))
-        (local-statements nil)
-        (saved-references nil))
-    (unwind-protect
-         (progn
-           (dolist (binding (shader:shader-function-call-bindings expression))
-             (unless (or (typep binding
-                                'shader:shader-function-parameter-binding)
-                         (nth-value 1
-                           (gethash binding
-                                    (msl-context-references context))))
-               (multiple-value-bind (old-reference old-reference-p)
-                   (gethash binding (msl-context-references context))
-                 (push (list binding old-reference old-reference-p)
-                       saved-references))
-               (let* ((binding-expression
-                        (shader:shader-binding-expression binding))
-                      (name
-                        (msl-identifier (shader:shader-object-name binding)))
-                      (value
-                        (lower-msl-expression context binding-expression)))
-                 (setf local-statements
-                       (nconc local-statements
-                              (drain-msl-pending-statements context))
-                       (gethash binding (msl-context-references context)) name)
-                 (setf local-statements
-                       (nconc
-                        local-statements
-                        (list
-                         (make-instance
-                          'msl-variable-statement
-                          :type (msl-type-name
-                                 (shader:shader-expression-type
-                                  binding-expression))
-                          :name name :value value :origin binding)))))))
-           (let ((result
-                   (lower-msl-expression
-                    context (shader:shader-function-call-result expression))))
-             (setf local-statements
-                   (nconc local-statements
-                          (drain-msl-pending-statements context))
-                   (msl-context-pending-statements context)
-                   (nconc outer-statements local-statements))
-             (note-msl-occurrence
-              context expression (msl-occurrence-text result))))
-      (dolist (saved saved-references)
-        (destructuring-bind (binding old-reference old-reference-p) saved
-          (if old-reference-p
-              (setf (gethash binding (msl-context-references context))
-                    old-reference)
-              (remhash binding (msl-context-references context))))))))
+  (multiple-value-bind (cached-result cached-p)
+      (gethash expression (msl-context-function-call-results context))
+    (if cached-p
+        (note-msl-occurrence context expression cached-result)
+        (let ((outer-statements (drain-msl-pending-statements context))
+              (local-statements nil)
+              (saved-references nil))
+          (unwind-protect
+               (progn
+                 (dolist (binding (shader:shader-function-call-bindings expression))
+                   (unless (or (typep binding
+                                      'shader:shader-function-parameter-binding)
+                               (nth-value 1
+                                 (gethash binding
+                                          (msl-context-references context))))
+                     (multiple-value-bind (old-reference old-reference-p)
+                         (gethash binding (msl-context-references context))
+                       (push (list binding old-reference old-reference-p)
+                             saved-references))
+                     (let* ((binding-expression
+                              (shader:shader-binding-expression binding))
+                            (name
+                              (msl-identifier (shader:shader-object-name binding)))
+                            (value
+                              (lower-msl-expression context binding-expression)))
+                       (setf local-statements
+                             (nconc local-statements
+                                    (drain-msl-pending-statements context))
+                             (gethash binding (msl-context-references context)) name)
+                       (setf local-statements
+                             (nconc
+                              local-statements
+                              (list
+                               (make-instance
+                                'msl-variable-statement
+                                :type (msl-type-name
+                                       (shader:shader-expression-type
+                                        binding-expression))
+                                :name name :value value :origin binding)))))))
+                 (let* ((result
+                          (lower-msl-expression
+                           context (shader:shader-function-call-result expression)))
+                        (result-text (msl-occurrence-text result)))
+                   (setf local-statements
+                         (nconc local-statements
+                                (drain-msl-pending-statements context))
+                         (msl-context-pending-statements context)
+                         (nconc outer-statements local-statements)
+                         (gethash expression
+                                  (msl-context-function-call-results context))
+                         result-text)
+                   (note-msl-occurrence context expression result-text)))
+            (dolist (saved saved-references)
+              (destructuring-bind (binding old-reference old-reference-p) saved
+                (if old-reference-p
+                    (setf (gethash binding (msl-context-references context))
+                          old-reference)
+                    (remhash binding (msl-context-references context))))))))))
 
 (defmethod lower-msl-expression
     ((context msl-lowering-context) (expression shader:shader-conditional))
