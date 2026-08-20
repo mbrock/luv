@@ -76,14 +76,20 @@
 own gravity on purpose: burst blooms should hang, and willows should droop
 slowly enough to watch.")
 
-(defparameter *firework-launch-interval* 2.5
+(defparameter *firework-launch-interval* 1.8
   "Seconds between shells before the per-shell spread is added.")
 
-(defparameter *firework-launch-spread* 1.5
+(defparameter *firework-launch-spread* 1.2
   "How many extra seconds the launch dial can add to the interval.")
 
 (defparameter *firework-trail-rate* 26.0
   "Trail sparks a climbing rocket sheds per second.")
+
+(defparameter *firework-grandeur* 2.6
+  "Scales every spark's drawn size and glow at pack time, leaving the
+simulation untouched.  One is the show as simulated; from across a meadow
+the sparks are subpixel at one, and grandeur is what keeps a distant
+burst legible instead of averaging away to dust.")
 
 (defstruct (firework-show (:constructor %make-firework-show) (:copier nil))
   "One continuous fireworks show: schedule, rockets, and spark columns.
@@ -637,8 +643,10 @@ and return how many instances are ready to draw."
         (glows (firework-show-spark-glow show))
         (ages (firework-show-spark-age show))
         (lives (firework-show-spark-life show))
+        (grandeur (coerce *firework-grandeur* 'single-float))
         (filled 0))
-    (declare (type fixnum count filled))
+    (declare (type fixnum count filled)
+             (type single-float grandeur))
     (dotimes (i count)
       (let* ((base (* filled 8))
              (worn (/ (aref ages i) (aref lives i)))
@@ -646,11 +654,11 @@ and return how many instances are ready to draw."
         (setf (aref data base) (aref xs i)
               (aref data (+ base 1)) (aref ys i)
               (aref data (+ base 2)) (aref zs i)
-              (aref data (+ base 3)) (aref sizes i)
+              (aref data (+ base 3)) (* (aref sizes i) grandeur)
               (aref data (+ base 4)) (aref reds i)
               (aref data (+ base 5)) (aref greens i)
               (aref data (+ base 6)) (aref blues i)
-              (aref data (+ base 7)) (* (aref glows i) fade))
+              (aref data (+ base 7)) (* (aref glows i) fade grandeur))
         (incf filled)))
     (dotimes (slot +firework-rocket-capacity+)
       (when (plusp (aref (firework-show-rocket-flag show) slot))

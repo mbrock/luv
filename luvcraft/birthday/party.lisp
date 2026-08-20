@@ -17,9 +17,10 @@
   (merge-pathnames #P"alex-birthday.sexp"
                    (luvcraft::default-luvcraft-world-pathname)))
 
-(defparameter *party-sky-hour* 19.35
-  "Pinned time of day: past the dusk keyframe, before deep night, so the
-sky still carries a warm band while the fireworks read against the dark.")
+(defparameter *party-sky-hour* 18.0
+  "Pinned time of day: past sunset, before deep night, so a warm band
+still hangs on the horizon while the stars and fireworks read against
+the indigo above it.")
 
 (defun birthday-surface-height (world x z)
   "The y of the highest solid block in the column, probing downward."
@@ -34,7 +35,7 @@ each post, and a bouquet crowding the roof finial."
   (let ((balloons '())
         (hue 0.0))
     (loop for (x y z) in (getf anchors :post-tops)
-          do (push (list :x (+ x 0.0) :y (+ y 2.1) :z (+ z 0.0)
+          do (push (list :x (+ x 0.0) :y (+ y 3.4) :z (+ z 0.0)
                          :radius 0.5 :hue hue :phase (* hue 7.0))
                    balloons)
              (incf hue 0.13))
@@ -79,7 +80,13 @@ Returns the session; LUVCRAFT:STOP-PLAYING ends the party and saves it."
       ;; same blocks, so the build is idempotent across reopenings.
       (luvcraft:center-little-world-residency
        (luvcraft::block-world-source world) world 0 0 :radius 3)
-      (let ((anchors (build-birthday-gazebo world :center-x 0 :center-z 0)))
+      ;; The meadow promises a flat lawn at *CLEARING-HEIGHT*, so the gazebo
+      ;; is told its ground rather than probing for it: the probe scans the
+      ;; column from above the top chunk layer, which a restored world's
+      ;; space rejects rather than reading as absent.
+      (let ((anchors (build-birthday-gazebo world :center-x 0 :center-z 0
+                                                  :ground-y
+                                                  (round *clearing-height*))))
         (luvcraft:relight-block-world world)
         (multiple-value-bind (camera player selected-block carried)
             (luvcraft::restore-luvcraft-resume-save-description
@@ -92,7 +99,7 @@ Returns the session; LUVCRAFT:STOP-PLAYING ends the party and saves it."
             (setf camera (make-instance 'luvcraft:fly-camera
                                         :position (luvcraft::make-vec3
                                                    0d0 10.5d0 -21d0)
-                                        :yaw 0.0d0 :pitch -0.12d0)
+                                        :yaw 0.0d0 :pitch 0.08d0)
                   player (luvcraft:make-player-for-camera camera)))
           (let ((writer (luvcraft::make-world-checkpoint-writer pathname))
                 (session nil))
@@ -106,21 +113,37 @@ Returns the session; LUVCRAFT:STOP-PLAYING ends the party and saves it."
                         :fullscreen-p fullscreen-p
                         :world-text-string
                         (format nil "HAPPY BIRTHDAY ~:@(~a~)!" name)
-                        :world-text-distance 13.0
-                        :world-text-lift 5.5
+                        ;; The banner must hang nearer than the gazebo's
+                        ;; front eave or the roof occludes it: the camera
+                        ;; stands 21 cells out, so 11 keeps the text plane
+                        ;; well in front with the greeting clear of the
+                        ;; apex sightline.
+                        :world-text-distance 11.0
+                        :world-text-lift 6.0
+                        :world-text-units-per-em 0.32
                         :checkpoint-writer writer))
               (unless session
                 (luvcraft::stop-world-checkpoint-writer writer)))
             (let ((clock (luvcraft:luvcraft-session-sky-clock session)))
               (setf (luvcraft::sky-clock-hour clock) *party-sky-hour*
                     (luvcraft:sky-clock-paused-p clock) t))
+            ;; The lobby's corner instrument has no place at a party.
+            (dolist (overlay (luvcraft::luvcraft-session-overlays session))
+              (when (typep overlay 'mcluv::luvcraft-lobby-hud-overlay)
+                (luvcraft:remove-luvcraft-overlay session overlay)))
             (add-birthday-balloons session (balloon-plan anchors))
             (add-dancing-gnomes session (gnome-ring world 0 0))
-            (luvcraft::scatter-party-balls session :center '(7 8 7) :count 24)
+            (luvcraft::scatter-party-balls session :center '(3 8 -13)
+                                                   :count 24)
+            ;; Shells rise from high behind the roof: from the lawn the
+            ;; launch point hides behind the gazebo, rockets crest the
+            ;; ridge, and every burst opens in the clear sky above the
+            ;; finial's balloon bouquet rather than behind the cap.
             (destructuring-bind (x y z) (getf anchors :roof-apex)
+              (declare (ignore y))
               (add-birthday-fireworks session
-                                      :origin (list (+ x 3.0) (+ y 2.0)
-                                                    (+ z 14.0))))
+                                      :origin (list (+ x 3.0) 24.0
+                                                    (+ z 20.0))))
             (setf luvcraft::*checkpoint-writer* writer
                   luvcraft:*session* session)
             session))))))
