@@ -2,8 +2,7 @@
 
 (in-package #:luft.render)
 
-(defun main ()
-  "Open the atelier and keep the process alive until its canvas closes."
+(defun run-standalone-viewer ()
   (multiple-value-bind (mode style pipeline-styles effects)
       (standalone-render-options)
     (log-event :luft "standalone render mode ~(~A~)" mode)
@@ -14,3 +13,7 @@
            (loop while (viewer-running-p viewer)
                  do (sleep 0.05))
         (stop-viewer viewer)))))
+
+(defun main ()
+  "Open the atelier and keep the process alive until its canvas closes."
+  (call-with-sdl-main-thread #'run-standalone-viewer))
