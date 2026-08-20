@@ -12,10 +12,37 @@
 
 (in-package #:luvcraft.birthday)
 
-(defun birthday-world-pathname ()
-  "The party world's save, beside the ordinary world under its own name."
-  (merge-pathnames #P"alex-birthday.sexp"
+(defun birthday-world-pathname (name)
+  "The party world's save, beside the ordinary world under NAME's name."
+  (merge-pathnames (format nil "~(~a~)-birthday.sexp" name)
                    (luvcraft::default-luvcraft-world-pathname)))
+
+(defun birthday-age (birth-year birth-month birth-day)
+  "How old someone born on that date is today, by the wall calendar."
+  (multiple-value-bind (second minute hour day month year)
+      (decode-universal-time (get-universal-time))
+    (declare (ignore second minute hour))
+    (- year birth-year
+       (if (or (< month birth-month)
+               (and (= month birth-month) (< day birth-day)))
+           1
+           0))))
+
+(defun honoree-for-host (host)
+  "(values name age) for the machine named HOST.
+
+The party follows the computer: on wigwam it is Daniel's, born the
+fifteenth of August 1985 -- belatedly, most years -- with his age read
+off the calendar rather than written down.  Everywhere else it is
+Alex's, who is four."
+  (let* ((dot (position #\. host))
+         (short (subseq host 0 (or dot (length host)))))
+    (if (string-equal short "wigwam")
+        (values "DANIEL" (birthday-age 1985 8 15))
+        (values "ALEX" 4))))
+
+(defun party-honoree ()
+  (honoree-for-host (machine-instance)))
 
 (defparameter *party-sky-hour* 18.0
   "Pinned time of day: past sunset, before deep night, so a warm band
@@ -60,17 +87,22 @@ each post, and a bouquet crowding the roof finial."
                       :phase (float (/ index count))
                       :hue (float (/ index count)))))
 
-(defun celebrate-birthday (&key (name "ALEX") (age 4) fullscreen-p
+(defun celebrate-birthday (&key name age fullscreen-p
                                 (provider luv:*gpu-provider*))
   "Throw the party: open the birthday meadow and decorate it.
 
 Loads or creates the party world under its own save file, raises the gazebo,
 ties on the balloons, calls in the gnomes, scatters the funny balls, hangs
 the greeting in the air, pins the sky at dusk, and starts the fireworks.
-Returns the session; LUVCRAFT:STOP-PLAYING ends the party and saves it."
+Returns the session; LUVCRAFT:STOP-PLAYING ends the party and saves it.
+
+NAME and AGE default by machine: see HONOREE-FOR-HOST."
+  (multiple-value-bind (host-name host-age) (party-honoree)
+    (unless name (setf name host-name))
+    (unless age (setf age host-age)))
   (when luvcraft:*session*
     (luvcraft:stop-playing))
-  (let ((pathname (birthday-world-pathname)))
+  (let ((pathname (birthday-world-pathname name)))
     (multiple-value-bind (world resume-description)
         (if (probe-file pathname)
             (luvcraft:read-luvcraft-save pathname)
