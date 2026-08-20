@@ -25,6 +25,7 @@
                              (:file "field")
                              (:file "material")
                              (:file "lattice")
+                             (:file "clay")
                              (:file "render")
                              (:file "studio")
                              (:file "film")

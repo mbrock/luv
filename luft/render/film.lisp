@@ -57,6 +57,61 @@ style throughout.  Returns PATHNAME and the frame count."
                (write-frame (render-pixels renderer)))))
       (destroy-renderer renderer))))
 
+(defun film-clay-breath (pathname
+                         &key (seconds 24) (frame-rate 30)
+                              (width 960) (height 540)
+                              (light :golden)
+                              (scene (make-studio-scene))
+                              (center-x 16.0) (center-y 14.0)
+                              (center-z 2.5)
+                              (orbit-radius 16.0) (camera-height 9.5)
+                              (field-of-view 0.85)
+                              (turns 2.0))
+  "Film the studio in :CLAY while the world breathes through knob space.
+
+The cell radius and the melt reach ride two incommensurate sine waves, so
+over TURNS orbits the same cells pass through tight quilting, pillowed
+masonry, full pearls, and deep bridging melt and back, continuously.  The
+knobs change every frame, so this film runs without temporal accumulation
+rather than pretending its history is reusable.  Returns PATHNAME and the
+frame count."
+  (let* ((*light* light)
+         (frame-count (max 1 (round (* seconds frame-rate))))
+         (renderer (make-renderer :scene scene
+                                  :camera (studio-camera
+                                           (+ center-x orbit-radius) center-y
+                                           camera-height
+                                           :look-x center-x :look-y center-y
+                                           :look-z center-z
+                                           :field-of-view field-of-view)
+                                  :width width :height height
+                                  :style :clay
+                                  :pipeline-styles '(:clay)
+                                  :effects '(:sky))))
+    (unwind-protect
+         (with-video-encoder (write-frame pathname width height
+                              :frame-rate frame-rate
+                              :format (renderer-color-format renderer))
+           (dotimes (frame frame-count)
+             (let* ((progress (/ (float frame 1.0) frame-count))
+                    (angle (* 2.0 pi turns progress))
+                    ;; Two incommensurate breaths through the knob plane.
+                    (*clay-radius*
+                      (+ 0.31 (* 0.19 (sin (* 2.0 pi 3.0 progress)))))
+                    (*clay-melt*
+                      (+ 0.20 (* 0.15 (sin (+ (* 2.0 pi 2.0 progress)
+                                              1.1))))))
+               (setf (renderer-camera renderer)
+                     (studio-camera
+                      (+ center-x (* orbit-radius (cos angle)))
+                      (+ center-y (* orbit-radius (sin angle)))
+                      camera-height
+                      :look-x center-x :look-y center-y
+                      :look-z center-z
+                      :field-of-view field-of-view))
+               (write-frame (render-pixels renderer)))))
+      (destroy-renderer renderer))))
+
 (defun catmull-rom-sample (points s)
   "Sample the Catmull-Rom spline through POINTS at S in [0,1].
 

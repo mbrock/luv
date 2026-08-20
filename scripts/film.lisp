@@ -54,6 +54,10 @@
        (luft.render:film-atelier-flight
         (merge-pathnames #P"luft-flight-vertical.mp4" directory)
         :width 720 :height 1280 :field-scale 1.25))
+     (when (film-wanted-p :luft-clay-breath names)
+       (format t "~&Filming the clay world breathing...~%")
+       (luft.render:film-clay-breath
+        (merge-pathnames #P"luft-clay-breath.mp4" directory)))
      (when (member :luft-rise names)
        (format t "~&Filming the Luft holm rising from its cell chain...~%")
        (luft.render:film-atelier-construction

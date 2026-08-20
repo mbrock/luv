@@ -394,6 +394,22 @@ everything it looks up in the lattice."
                 (t* ,(grid-parameter-form 'grid-j rings))
                 (flat (+ anchor (* edge-a s) (* edge-b t*)))
                 ,@(ecase rule
+                    (:clay
+                     ;; The clay union: every point, boundary or inner,
+                     ;; takes two Newton steps onto the zero set of the
+                     ;; rounded-cell field (luft/render/clay.lisp), the
+                     ;; gradient read by tetrahedron.
+                     `((melt (swizzle domain-vector :w))
+                       ,@(clay-newton-bindings 'clay-a 'flat
+                                               'radius 'melt)
+                       ,@(clay-newton-bindings 'clay-b 'clay-a-point
+                                               'radius 'melt)
+                       (shaped clay-b-point)
+                       (shaped-normal (if (> (dot clay-b-gradient
+                                                  clay-b-gradient)
+                                             0.0000001)
+                                          (normalize clay-b-gradient)
+                                          normal))))
                     (:field
                      ;; The level set: every point, boundary or inner, takes
                      ;; three Newton steps onto the half-level set of the

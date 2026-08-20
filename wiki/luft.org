@@ -694,14 +694,13 @@ because per-primitive unions have no way to know two faces are one plane.
 Knowing that is exactly what the star classification is, and once it is
 back, the field is re-deriving #RUAWR5 with worse tools.
 
-The verdict: the tent field of #TI9NJP remains the right field answer --
-coherent by construction, flats flat, eight cheap reads -- and the site
-rules remain the right authored answer.  The one genuinely attractive
-remainder is true-distance lighting, and it does not need an alphabet
-codomain to exist; a conservative distance bound over the plain occupancy
-would serve it.  The full implementation, styles =:carve= and =:clay=,
-lives in the withdrawn commit
-[[https://github.com/mbrock/luv/commit/8e8cc65][8e8cc65]].
+The verdict: the tent field of #TI9NJP remains the right field answer for
+a world that keeps its flats -- coherent by construction, eight cheap
+reads -- and the site rules remain the right authored answer.  The
+classified-field implementation lives in the withdrawn commit
+[[https://github.com/mbrock/luv/commit/8e8cc65][8e8cc65]] and stays
+withdrawn.  The rounded-cell variant is the one part that did exactly
+what it defined, and it came back as a style of its own: #2TQEBB.
 
 ** Every term needed a fence, and the fences were the finding
 :PROPERTIES:
@@ -740,6 +739,51 @@ experiment: a plain-Lisp replica of the shader algebra, probed with plane
 scans and zero-set root scans around one exhibit of #UTRJ2T, located every
 one of these failures in seconds, where staring at renders had only
 produced theories.
+
+* Clay: the golf ball, a field that is its own definition
+:PROPERTIES:
+:ID: 2TQEBB
+:END:
+
+[[file:images/luft-clay-pillow.png]]
+
+The one survivor of #A7BV7E, kept as the =:clay= style
+([[file:../luft/render/clay.lisp][luft/render/clay.lisp]]), because it
+meets the standard the classified field failed: the field /is/ its
+definition.  Every solid cell is a rounded box -- the cell's box shrunk by
+the radius, its distance lowered by the radius -- and the world is their
+smooth union at one melt reach.  The surface is that field's zero set,
+exactly; there is no target it approximates, no fence tuned against a
+picture, and nothing in it with a reach that needs policing.  A solid cell
+outside the star of the nearest lattice vertex stands at least half a cell
+from that vertex's cube, so with the melt at most one half the eight-cell
+reading agrees with the global union everywhere near the surface.
+
+What the object truly looks like: coplanar cells meet in a quilted seam
+-- the golf ball -- because per-cell primitives cannot know two faces are
+one plane; convex arrises round at the radius; coves fillet by the blend;
+and diagonally touching cells, which every mesh rule of #6TEFOS must keep
+separated, grow a bridge, because a smooth union cannot do otherwise.
+At a radius of one half a lone cell is exactly a sphere and a bar a
+string of pearls.
+
+[[file:images/luft-clay-quilt.png]]
+
+[[file:images/luft-clay-pearls.png]]
+
+[[file:images/luft-clay-bridges.png]]
+
+The mesh is the two-ring grid of #RUAWR5's family with every point walked
+onto the zero set by two Newton steps, tetrahedral gradients, the step
+clamped by length and by a multiple of the distance value so a medial-axis
+point cannot fling a vertex.  The shading is what true distance buys and
+the tent field of #TI9NJP cannot honestly offer: the sun shadow is sphere
+traced with a penumbra set by the narrowest miss along the ray -- a
+contact shadow that hugs the quilting -- and ambient occlusion is read
+off four distance taps along the normal.  =*clay-radius*= and
+=*clay-melt*= ride in the frame block, so a film can breathe them
+continuously; such a film runs without temporal accumulation rather than
+pretending its history is reusable.
 
 * The studio: a world of stars under the same cameras
 :PROPERTIES:
