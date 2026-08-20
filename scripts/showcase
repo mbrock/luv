@@ -43,6 +43,21 @@ ssh_run() {
   ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" sh -s -- "$@"
 }
 
+render_annex_shell() {
+  ssh -o BatchMode=yes -o ConnectTimeout=5 "$render_host" sh -s -- \
+    "$render_media_checkout" <<'REMOTE'
+set -eu
+media_checkout=$1
+case "$media_checkout" in /*) ;; *) media_checkout=$HOME/$media_checkout ;; esac
+annex_shell=$(git -C "$media_checkout" config --get showcase.annex-shell)
+test -x "$annex_shell" || {
+  echo "showcase: Chapel annex shell is not executable; run bootstrap" >&2
+  exit 1
+}
+printf '%s\n' "$annex_shell"
+REMOTE
+}
+
 bootstrap_render() {
   ssh_run "$render_host" "$render_checkout" "$render_media_checkout" \
     "$repository" "$media_branch" <<'REMOTE'
@@ -91,14 +106,18 @@ annex_bin=$(nix develop --verbose -L "$source_checkout" --no-write-lock-file \
   -c sh -c 'dirname "$(command -v git-annex)"')
 PATH=$annex_bin:$PATH
 export PATH
+git -C "$media_checkout" config showcase.annex-shell \
+  "$annex_bin/git-annex-shell"
 git -C "$media_checkout" annex init "chapel showcase renderer"
 echo "showcase: chapel bootstrap complete"
 REMOTE
 }
 
 bootstrap_web() {
+  chapel_annex_shell=$(render_annex_shell)
   ssh_run "$web_host" "$web_checkout" "$web_media_checkout" "$repository" \
-    "$media_branch" "$render_host" "$render_media_checkout" <<'REMOTE'
+    "$media_branch" "$render_host" "$render_media_checkout" \
+    "$chapel_annex_shell" <<'REMOTE'
 set -eu
 source_checkout=$1
 media_checkout=$2
@@ -106,6 +125,7 @@ repository=$3
 media_branch=$4
 render_host=$5
 render_media_checkout=$6
+chapel_annex_shell=$7
 case "$source_checkout" in /*) ;; *) source_checkout=$HOME/$source_checkout ;; esac
 case "$media_checkout" in /*) ;; *) media_checkout=$HOME/$media_checkout ;; esac
 case "$render_media_checkout" in /*) ;; *) render_media_checkout=$HOME/$render_media_checkout ;; esac
@@ -148,8 +168,12 @@ else
   git -C "$media_checkout" remote add chapel \
     "$render_host:$render_media_checkout"
 fi
+git -C "$media_checkout" config remote.chapel.annex-shell \
+  "$chapel_annex_shell"
+git -C "$media_checkout" config --unset-all remote.chapel.annex-ignore || true
 ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 \
   "$render_host" true </dev/null
+git -C "$media_checkout" annex enableremote chapel
 echo "showcase: swa bootstrap complete"
 REMOTE
 }
@@ -171,6 +195,8 @@ annex_bin=$(nix develop --verbose -L "$source_checkout" --no-write-lock-file \
   -c sh -c 'dirname "$(command -v git-annex)"')
 PATH=$annex_bin:$PATH
 export PATH
+git -C "$media_checkout" config showcase.annex-shell \
+  "$annex_bin/git-annex-shell"
 
 echo "showcase: fast-forwarding chapel source"
 test -z "$(git -C "$source_checkout" status --porcelain)" || {
@@ -213,13 +239,15 @@ REMOTE
 }
 
 deploy() {
+  chapel_annex_shell=$(render_annex_shell)
   ssh_run "$web_host" "$web_checkout" "$web_media_checkout" "$media_branch" \
-    "$web_service" <<'REMOTE'
+    "$web_service" "$chapel_annex_shell" <<'REMOTE'
 set -eu
 source_checkout=$1
 media_checkout=$2
 media_branch=$3
 web_service=$4
+chapel_annex_shell=$5
 case "$source_checkout" in /*) ;; *) source_checkout=$HOME/$source_checkout ;; esac
 case "$media_checkout" in /*) ;; *) media_checkout=$HOME/$media_checkout ;; esac
 test -d "$source_checkout/.git" || { echo "showcase: run bootstrap first" >&2; exit 1; }
@@ -230,6 +258,10 @@ annex_bin=$(nix develop --verbose -L "$source_checkout" --no-write-lock-file \
   -c sh -c 'dirname "$(command -v git-annex)"')
 PATH=$annex_bin:$PATH
 export PATH
+git -C "$media_checkout" config remote.chapel.annex-shell \
+  "$chapel_annex_shell"
+git -C "$media_checkout" config --unset-all remote.chapel.annex-ignore || true
+git -C "$media_checkout" annex enableremote chapel
 
 echo "showcase: fast-forwarding swa source"
 test -z "$(git -C "$source_checkout" status --porcelain)" || {
