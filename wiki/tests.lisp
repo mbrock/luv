@@ -141,6 +141,28 @@ Nothing here refers to anything.
     (ok (search "mention <a class=mention href=#XYZ123 title=\"First figure\">#XYZ123</a> with" html))
     (ok (search "<h3><span class=\"mark mark-next\">" html))))
 
+(deftest capture-links-transclude-generated-images-and-videos
+  (let* ((doc
+           (page
+            "#+title: Captures
+
+* Media
+:PROPERTIES:
+:ID: CAP12G
+:END:
+
+[[capture:CAP12G-still.png]]
+
+[[capture:CAP12G-orbit.mp4]]
+"))
+         (site (wiki:make-site (list doc)))
+         (html (wiki:render-document-string doc site)))
+    (ok (search "<figure class=\"capture image\"><img src=\"media/CAP12G-still.png\""
+                html))
+    (ok (search "<figure class=\"capture video\"><video" html))
+    (ok (search "<source src=\"media/CAP12G-orbit.mp4\" type=\"video/mp4\">"
+                html))))
+
 (deftest the-loaded-corpus-is-consistent
   ;; Depending on luv-wiki-site loads every page into its ORG-FILE component.
   (let* ((system (asdf:find-system :luv-wiki-site))

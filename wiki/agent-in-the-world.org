@@ -261,6 +261,10 @@ approval supplies a slowly orbiting camera pose, and the dialogue line offers
 judges is therefore recognizably the finished result, not a wireframe bill of
 materials.
 
+[[capture:Y7X7WK-construction-proposal-still.png]]
+
+[[capture:Y7X7WK-construction-proposal-orbit.mp4]]
+
 The first =Propose Block Box= primitive is intentionally additive and capped
 at 512 resident cells.  It refuses to replace an occupied cell, freezes air as
 the expected value, and rechecks every site immediately before one

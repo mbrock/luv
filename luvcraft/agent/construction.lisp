@@ -251,8 +251,14 @@
     (alexandria:when-let ((preview (construction-approval-preview approval)))
       (luvcraft:remove-luvcraft-overlay session preview)
       (setf (construction-approval-preview approval) nil))
-    (when (gnome-dialogue presence)
-      (repaint-gnome-dialogue presence)))
+    (alexandria:when-let ((dialogue (gnome-dialogue presence)))
+      ;; Session teardown may already have disowned this frame before it
+      ;; reaches the semantic gnome overlay.  A normal decision repaints; a
+      ;; dead mirror has nothing left to update.
+      (unless (eq :disowned
+                  (frame-state
+                   (mcluv:widget-overlay-frame dialogue)))
+        (repaint-gnome-dialogue presence))))
   approval)
 
 (defmethod tool-approval-focus-camera-pose

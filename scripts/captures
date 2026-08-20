@@ -1,0 +1,11 @@
+#!/bin/sh
+# Reproducible wiki media.  Run this script locally or invoke the checkout's
+# copy over SSH; the repository never names an execution host.
+
+set -eu
+
+project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+
+. "$project_root/scripts/require-nix-shell"
+
+exec sbcl --script "$project_root/scripts/captures.lisp" "$@"

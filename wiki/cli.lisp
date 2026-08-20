@@ -324,7 +324,8 @@ hex digits, which the reader takes for a colour."
                  (format t "~A~%" candidate)
                  (return)))))
 
-(defparameter *introspection-systems* '("luv" "luvcraft" "luv-wiki")
+(defparameter *introspection-systems*
+  '("luv" "luvcraft" "luv-wiki" "luft/render")
   "Systems loaded before gathering operator lambda lists.")
 
 (define-command introspect (&rest systems)

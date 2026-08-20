@@ -198,8 +198,11 @@ plain text; each element and inline class contributes its own method."))
   (let ((inlines (remove-if (lambda (x) (and (stringp x) (blank-line-p x)))
                             (element-children paragraph))))
     (spinneret:with-html
-      ;; A paragraph that is only an image link is a figure of its own.
+      ;; A paragraph containing only media is a figure of its own.
       (cond ((and (= (length inlines) 1) (typep (first inlines) 'link)
+                  (capture-link-p (first inlines)))
+             (render-capture-link (first inlines)))
+            ((and (= (length inlines) 1) (typep (first inlines) 'link)
                   (image-link-p (first inlines)))
              (:figure.image (:img :src (link-path (first inlines)) :alt "")))
             ((and (= (length inlines) 1) (typep (first inlines) 'link)
@@ -289,6 +292,35 @@ or NIL when the link cannot be resolved into the site.")
   (figure-href (link-path link) :from *rendering-document*))
 
 (defparameter *image-types* '("png" "jpg" "jpeg" "gif" "svg" "webp"))
+(defparameter *video-types* '("mp4" "webm"))
+
+(defun capture-link-p (link)
+  "True when LINK safely names generated media under the site's media cache."
+  (let ((path (link-path link)))
+    (and (equal (link-protocol link) "capture")
+         (null (element-children link))
+         (plusp (length path))
+         (every (lambda (character)
+                  (or (alphanumericp character)
+                      (find character "-_.")))
+                path)
+         (or (member (pathname-type path) *image-types* :test #'string-equal)
+             (member (pathname-type path) *video-types* :test #'string-equal)))))
+
+(defun render-capture-link (link)
+  "Transclude a generated image or video without requiring its bytes at build time."
+  (let* ((path (link-path link))
+         (type (string-downcase (pathname-type path)))
+         (source (concatenate 'string *page-prefix* "media/" path)))
+    (spinneret:with-html
+      (if (member type *image-types* :test #'string=)
+          (:figure.capture.image
+           (:img :src source :alt "" :loading "lazy"))
+          (:figure.capture.video
+           (:video :controls t :loop t :muted t :preload "metadata"
+                   (:source :src source
+                            :type (format nil "video/~A" type))
+                   "This browser cannot play the captured video."))))))
 
 (defun image-link-p (link)
   "True for a bare file: link to an image inside the wiki directory."
@@ -360,7 +392,9 @@ summary, and the form drawn as dexp boxes inside."
          (href (link-href protocol link))
          (description (or (element-children link) (list (link-path link)))))
     (spinneret:with-html
-      (cond ((image-link-p link)
+      (cond ((capture-link-p link)
+             (render-capture-link link))
+            ((image-link-p link)
              (:img.inline :src (link-path link) :alt ""))
             ((and (eq protocol :id) (null (element-children link)))
              ;; A bare [[id:X]] reads like the light mention #X.

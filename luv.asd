@@ -250,6 +250,7 @@ offsets and of headers."
      (:file "canvas")
      (:file "png")
      (:file "video")
+     (:file "capture-specification")
      (:module "vulkan-core"
       :pathname "vulkan"
       :serial t
@@ -316,6 +317,7 @@ offsets and of headers."
    (:file "arithmetic/lisp/tests")
    (:file "objective-c/tests" :if-feature :darwin)
    (:file "hal/gpu-tests")
+   (:file "hal/capture-specification-tests")
    (:file "hal/vulkan/tests")
    (:file "parinfer/tests"))
   :perform (test-op (operation component)
@@ -325,6 +327,18 @@ offsets and of headers."
                                                          '#:luv.tests)
                                        :style :luv)
                (error "luv tests failed"))))
+
+(defsystem "luv/showcase"
+  :description "Reproducible wiki screenshots and films rendered from named capture recipes."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luvcraft/agent" "luft/render")
+  :build-operation "luv:capture-op"
+  :serial t
+  :components ((:module "captures"
+                :serial t
+                :components ((:file "package")
+                             (:file "construction")))))
 
 (defsystem "luv/mcclim"
   :description "An experimental McCLIM backend presented through luv canvases."

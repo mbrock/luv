@@ -15,7 +15,8 @@
 
 (in-package #:luvcraft)
 
-(defun render-luvcraft-film-frame (session texture buffer)
+(defun render-luvcraft-film-frame
+    (session texture buffer &key (include-hud-p t) (include-viewmodel-p t))
   "Render SESSION once into TEXTURE on its canvas thread; return the pixels."
   (let ((device (luvcraft-session-device session)))
     (luv::call-on-sdl-canvas-thread
@@ -28,8 +29,10 @@
                       (create device
                               (make-command-encoder-descriptor
                                :label "luvcraft film frame")))
-                (encode-luvcraft-frame session texture encoder
-                                       :readback-buffer buffer)
+                (encode-luvcraft-frame
+                 session texture encoder :readback-buffer buffer
+                 :include-hud-p include-hud-p
+                 :include-viewmodel-p include-viewmodel-p)
                 (setf commands (finish encoder))
                 (submit (device-queue device) commands))
            (when commands (destroy commands))
@@ -37,13 +40,17 @@
     (read-buffer buffer)))
 
 (defun film-luvcraft-session (session pathname
-                              &key (seconds 8) (frame-rate 30) before-frame)
+                              &key (seconds 8) (frame-rate 30) before-frame
+                                   (include-hud-p t)
+                                   (include-viewmodel-p t))
   "Film SESSION for SECONDS of real time into an MP4 at PATHNAME.
 
 Frames are captured at FRAME-RATE, paced against the wall clock so that
 overlay animation driven by real time plays at its true speed.  BEFORE-FRAME,
 when given, is called with the frame index before each capture, and is the
-place to move the camera.  Returns PATHNAME and the frame count."
+place to move the camera.  INCLUDE-HUD-P and INCLUDE-VIEWMODEL-P choose the
+same compositing layers as a still capture.  Returns PATHNAME and the frame
+count."
   (unless (eq :open (canvas-state (luvcraft-session-canvas session)))
     (error "Cannot film a closed luvcraft session."))
   (wait-for-luvcraft-products
@@ -79,7 +86,10 @@ place to move the camera.  Returns PATHNAME and the frame count."
                (when before-frame
                  (funcall before-frame frame))
                (write-frame
-                (render-luvcraft-film-frame session texture buffer))
+                (render-luvcraft-film-frame
+                 session texture buffer
+                 :include-hud-p include-hud-p
+                 :include-viewmodel-p include-viewmodel-p))
                (let ((wait (- (+ start (* (1+ frame) frame-interval))
                               (/ (get-internal-real-time)
                                  (float internal-time-units-per-second

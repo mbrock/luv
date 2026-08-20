@@ -297,9 +297,9 @@ readable measure."
    :list-style none
    :padding-left 0
    ("li.level-2" :padding-left 1.5rem))
-  ("figure.image"
+  (("figure.image" "figure.capture")
    :margin 1.5rem 0)
-  (("figure.image img" "img.inline")
+  (("figure.image img" "figure.capture img" "figure.capture video" "img.inline")
    :max-width 100%
    :height auto
    :border-radius 0.4rem))

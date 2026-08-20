@@ -64,6 +64,81 @@ such as ="luv.wiki:org-file"=, which ASDF reads in its own package; that avoids
 interning anything into ASDF's package, which the manual asks extensions not to
 do.
 
+* Capture recipes are source; captured media is a cache
+:PROPERTIES:
+:ID: IVRWI8
+:END:
+
+Pictures that carry design evidence should be reproducible without making Git
+the video store.  =capture-specification= is the semantic boundary: a stable
+name, wiki figure ID, media kind, extension, description, and an ordinary named
+renderer function.  =define-capture= is only a thin definition-site macro over
+that object and function.  The body may assemble a gazetteer world, borrow an
+atelier camera flight, or set up a focused agent interaction; it still ends in
+the renderer which already owns those things.
+
+The deterministic filename joins figure and recipe, for example
+=Y7X7WK-construction-proposal-still.png=.  A bare
+=[[capture:Y7X7WK-construction-proposal-still.png]]= paragraph transcludes it
+from =media/=; MP4 and WebM links become native, muted, looping video figures.
+The HTML build does not require the bytes to exist.  This is important: prose
+and recipes remain cheap and portable, while a local build without the artifact
+has an honest missing image rather than silently substituting stale evidence.
+
+=capture-op= makes =(asdf:make :luv/showcase)= render the registered set into
+=build/wiki/media/=, which is already under the ignored =build/= tree.  Each
+run also writes a small manifest naming the source revision and every figure,
+recipe, kind, and filename.  =scripts/captures list= discovers the set and
+=scripts/captures render= can select a few recipes during iteration.  Captures
+announce progress because shader compilation, readback, and video encoding are
+real GPU work, not a reason for a silent build.
+
+Execution placement is deliberately outside this graph.  A GPU worker may run
+the same command through SSH, CI, or a future queue; its hostname and checkout
+path are deployment configuration, never recipe data.  Likewise Git annex is
+one possible publication cache, not part of capture identity: an annex pointer
+alone cannot serve a browser, so deployment would still have to fetch and copy
+the content.  Object storage, release assets, annex, and retention policy can
+be compared after the local build and transclusion contract has produced real
+artifacts.
+
+* DONE Make wiki media executable without committing it
+:PROPERTIES:
+:ID: S6I9C2
+:END:
+
+/Intent./ Establish the smallest end-to-end path from a figure-linked Lisp
+recipe to ignored image or video bytes and a wiki transclusion, while leaving
+machine selection and artifact publication open.
+
+/Evidence./ Two #Y7X7WK recipes construct the same inert six-block wall and
+gnome on a hidden luvcraft canvas.  One captures the final focused camera and
+one records its four-second orbit.  The registry has live-redefinition and
+stable-path tests; the wiki renderer tests image and video transclusion; and
+the generated manifest binds both artifacts to their source revision.
+
+/Done when./ A recipe is inspectable and selectable, ASDF can render the set,
+the wiki can show both media kinds without tracking their bytes, and no source
+file names a GPU host.
+
+* IDEA Publish generated media out of band
+:PROPERTIES:
+:ID: 0BGP3P
+:END:
+
+/Intent./ Put durable capture bytes somewhere the static site can fetch without
+growing the ordinary source clone, and run expensive recipes on a configured
+GPU executor.
+
+/Evidence./ The local contract in #IVRWI8 supplies deterministic paths and a
+source-revision manifest.  What remains is operational evidence comparing an
+annex-backed deployment fetch, object storage, and release artifacts, including
+cache invalidation, retention, and Pages URLs.
+
+/Done when./ A clean non-GPU site build can obtain the manifest and referenced
+media, a configured remote executor can publish them without repository host
+names, and pruning policy cannot break still-linked historical figures.
+
 * The Org subset the reader understands
 :PROPERTIES:
 :ID: NS35X9
@@ -76,10 +151,11 @@ items, =example= and =src= blocks, simple tables with an optional header rule,
 TeX math as =$x^2$= or =\(...\)= inline and =\[...\]= or =$$...$$= on
 display (drawn by KaTeX, loaded only when a page has math), Mermaid
 diagrams in =#+begin_src mermaid= blocks (likewise), bracket links with
-=file:=, =https:=, =id:=, =lisp:= or no scheme, a bare
+=file:=, =https:=, =id:=, =lisp:=, =capture:= or no scheme, a bare
 =file:= link to an image in the wiki directory as an inline image (a
 paragraph of only that link becomes a figure, and a paragraph of only a
-=lisp:= link becomes the definition it names), the light =#ABC123= mention,
+=lisp:= link becomes the definition it names), a bare =capture:= image or video
+as ignored generated media under =build/wiki/media/=, the light =#ABC123= mention,
 and the six emphasis markers with Org's pre- and post-character rules.  Anything else stays paragraph text, so an unfamiliar construct can
 never fail the build; it can only render plainly.
 

@@ -662,4 +662,19 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:write-rgba-png
            #:call-with-video-encoder
            #:with-video-encoder
+           ;; Reproducible wiki media
+           #:capture-specification
+           #:capture-specification-name
+           #:capture-specification-figure-id
+           #:capture-specification-kind
+           #:capture-specification-description
+           #:capture-specification-extension
+           #:define-capture
+           #:register-capture-specification
+           #:capture-specifications
+           #:find-capture-specification
+           #:capture-output-pathname
+           #:render-capture
+           #:render-capture-set
+           #:capture-op
            #:close-canvas))
