@@ -112,34 +112,88 @@ and above its ceiling counts as sky."
                                        (incf push-z (* weight dz))))))))
     (and crowded-p (list push-x push-y push-z))))
 
+(defun flight-nearest-opening (scene point &key (reach 8))
+  "The centre of the nearest empty cell within REACH of POINT, or NIL."
+  (let* ((px (first point)) (py (second point)) (pz (third point))
+         (cx (floor px)) (cy (floor py)) (cz (floor pz))
+         (best nil)
+         (best-distance nil))
+    (loop for x from (- cx reach) to (+ cx reach)
+          do (loop for y from (- cy reach) to (+ cy reach)
+                   do (loop for z from (- cz reach) to (+ cz reach)
+                            unless (flight-cell-solid-p scene x y z)
+                              do (let* ((dx (- (+ x 0.5) px))
+                                        (dy (- (+ y 0.5) py))
+                                        (dz (- (+ z 0.5) pz))
+                                        (distance (+ (* dx dx) (* dy dy)
+                                                     (* dz dz))))
+                                   (when (or (null best-distance)
+                                             (< distance best-distance))
+                                     (setf best-distance distance
+                                           best (list (+ x 0.5) (+ y 0.5)
+                                                      (+ z 0.5))))))))
+    best))
+
 (defun clear-flight-path (scene points
-                          &key (radius 1.7) (passes 40) (step 0.3)
-                               (smoothing 0.2))
+                          &key (radius 1.5) (passes 80) (step 0.25)
+                               (smoothing 0.12))
   "Relax POINTS away from SCENE's masonry into a flyable path.
 
-Each pass pushes every crowded point out of its clearance RADIUS by STEP
-of the accumulated push, then rounds the dodge back into an arc with a
-touch of Laplacian SMOOTHING; the endpoints, which are authored views,
-hold still.  Returns the relaxed list."
-  (let ((points (mapcar #'copy-list points))
-        (count (length points)))
+A point inside the masonry heads straight for the nearest opening --
+deep in a wall the clearance pushes cancel, so escape is its own move.
+Each pass then pushes every crowded point out of its clearance RADIUS by
+STEP of the accumulated push, and rounds the dodge back into an arc with
+a touch of Laplacian SMOOTHING on the interior.  Even the authored
+endpoints move when crowded: a view is negotiable, a collision is not.
+Returns the relaxed list."
+  (let ((points (mapcar #'copy-list points)))
     (dotimes (pass passes points)
-      (loop for point in points
-            for index from 0
-            do (let ((push (flight-clearance-push scene point radius)))
-                 (when (and push (< 0 index (1- count)))
-                   (incf (first point) (* step (first push)))
-                   (incf (second point) (* step (second push)))
-                   (incf (third point) (* step (third push))))))
+      (dolist (point points)
+        (if (flight-cell-solid-p scene
+                                 (floor (first point))
+                                 (floor (second point))
+                                 (floor (third point)))
+            (let ((opening (flight-nearest-opening scene point)))
+              (when opening
+                (loop for axis below 3
+                      do (incf (elt point axis)
+                               (* 0.5 (- (elt opening axis)
+                                         (elt point axis)))))))
+            (let ((push (flight-clearance-push scene point radius)))
+              (when push
+                (incf (first point) (* step (first push)))
+                (incf (second point) (* step (second push)))
+                (incf (third point) (* step (third push)))))))
       (loop for (previous current next) on points
             while next
-            when (and previous current next)
-              do (loop for axis below 3
-                       do (setf (elt current axis)
-                                (+ (* (- 1.0 smoothing) (elt current axis))
-                                   (* smoothing
-                                      (* 0.5 (+ (elt previous axis)
-                                                (elt next axis)))))))))))
+            do (loop for axis below 3
+                     do (setf (elt current axis)
+                              (+ (* (- 1.0 smoothing) (elt current axis))
+                                 (* smoothing
+                                    (* 0.5 (+ (elt previous axis)
+                                              (elt next axis)))))))))))
+
+(defun assert-flight-clear (piece scene points &key (clearance 0.6))
+  "Error unless every flight sample in POINTS stays clear of the masonry.
+
+Passing through a voxel is not a quality problem, it is a wrong film:
+a sample inside a solid cell, or with a solid cell's centre within
+CLEARANCE, names the piece and the sample and refuses to fly."
+  (loop for point in points
+        for index from 0
+        do (when (flight-cell-solid-p scene
+                                      (floor (first point))
+                                      (floor (second point))
+                                      (floor (third point)))
+             (error "The ~S flight is inside masonry at sample ~D, ~
+                     ~,2F ~,2F ~,2F."
+                    piece index (first point) (second point) (third point)))
+           (when (flight-clearance-push scene point clearance)
+             (error "The ~S flight grazes masonry at sample ~D, ~
+                     ~,2F ~,2F ~,2F: solid within ~,2F."
+                    piece index (first point) (second point) (third point)
+                    clearance)))
+  points)
 
 (defun film-atelier-flight (pathname
                             &key (pieces '(:arcade :viaduct :turret
@@ -149,6 +203,7 @@ hold still.  Returns the relaxed list."
                                  (style :stock)
                                  (chamfer-width (/ 1.0 6.0))
                                  (light :golden)
+                                 (aperture 0.85)
                                  (effects (default-renderer-effects))
                                  (look-distance 12.0))
   "Fly a drone through the atelier's architecture into an MP4 at PATHNAME.
@@ -161,6 +216,10 @@ sixth of a cell, wide enough that every arris reads as a planed band.
 Returns PATHNAME and the frame count."
   (let* ((*chamfer-width* chamfer-width)
          (*light* light)
+         ;; The lens focuses at the centre of frame, where the flight is
+         ;; always looking: with the aperture open, whatever stands beyond
+         ;; the subject melts, which is the mountain games' tilt-shift.
+         (*aperture* aperture)
          (piece-frames (max 1 (round (* seconds-per-piece frame-rate))))
          (first-piece (first pieces))
          (renderer (make-renderer
@@ -203,20 +262,26 @@ Returns PATHNAME and the frame count."
                                 (list (camera-field-of-view camera)))
                               cameras))
                     ;; The authored cameras say where to look; the flight
-                    ;; between them is densified and relaxed off the
-                    ;; masonry, so the drone swings around a pier rather
-                    ;; than clipping through it.
+                    ;; between them is sampled at every frame, relaxed off
+                    ;; the masonry, and then sworn clear: a drone that
+                    ;; passes through a voxel is an error, not a take.
                     (flight
-                      (clear-flight-path
-                       scene
-                       (loop for sample below 48
-                             collect (catmull-rom-sample
-                                      positions (/ sample 47.0))))))
+                      (coerce
+                       (assert-flight-clear
+                        piece scene
+                        (clear-flight-path
+                         scene
+                         (loop for frame below piece-frames
+                               for s = (/ (+ frame 0.5) piece-frames)
+                               for eased = (* s s (- 3.0 (* 2.0 s)))
+                               collect (catmull-rom-sample positions
+                                                           eased))))
+                       'vector)))
                (setf (renderer-scene renderer) scene)
                (dotimes (frame piece-frames)
                  (let* ((s (/ (+ frame 0.5) piece-frames))
                         (eased (* s s (- 3.0 (* 2.0 s))))
-                        (position (catmull-rom-sample flight eased))
+                        (position (aref flight frame))
                         (look (catmull-rom-sample looks eased))
                         (field (first (catmull-rom-sample fields eased))))
                    (setf (renderer-camera renderer)
