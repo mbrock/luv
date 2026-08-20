@@ -860,21 +860,30 @@ advertised is never placed in the query chain and is returned as NIL."
     (:discard :dont-care)))
 
 (defun create-color-render-pass
-    (device format &key depth-format (depth-store-op :discard))
-  (let ((attachment-count (if depth-format 2 1)))
+    (device formats &key depth-format (depth-store-op :discard))
+  "Create a pass whose color attachments have FORMATS in location order."
+  (let* ((formats (cond ((vectorp formats) formats)
+                        ((listp formats) (coerce formats 'vector))
+                        (t (vector formats))))
+         (color-count (length formats))
+         (attachment-count (+ color-count (if depth-format 1 0))))
     (cffi:with-foreign-object
         (attachments '(:struct attachment-description) attachment-count)
-      (fill-vk
-       (cffi:mem-aptr attachments '(:struct attachment-description) 0)
-       'attachment-description
-       :flags 0 :format format :samples :1
-       :load-op :clear :store-op :store
-       :stencil-load-op :dont-care :stencil-store-op :dont-care
-       :initial-layout :color-attachment-optimal
-       :final-layout :color-attachment-optimal)
+      (loop for format across formats
+            for index from 0
+            do (fill-vk
+                (cffi:mem-aptr
+                 attachments '(:struct attachment-description) index)
+                'attachment-description
+                :flags 0 :format format :samples :1
+                :load-op :clear :store-op :store
+                :stencil-load-op :dont-care :stencil-store-op :dont-care
+                :initial-layout :color-attachment-optimal
+                :final-layout :color-attachment-optimal))
       (when depth-format
         (fill-vk
-         (cffi:mem-aptr attachments '(:struct attachment-description) 1)
+         (cffi:mem-aptr
+          attachments '(:struct attachment-description) color-count)
          'attachment-description
          :flags 0 :format depth-format :samples :1
          :load-op :clear
@@ -882,15 +891,21 @@ advertised is never placed in the query chain and is returned as NIL."
          :stencil-load-op :dont-care :stencil-store-op :dont-care
          :initial-layout :depth-stencil-attachment-optimal
          :final-layout :depth-stencil-attachment-optimal))
-      (with-vk (color-reference attachment-reference
-                :attachment 0 :layout :color-attachment-optimal)
+      (cffi:with-foreign-object
+          (color-references '(:struct attachment-reference) color-count)
+        (dotimes (index color-count)
+          (fill-vk
+           (cffi:mem-aptr
+            color-references '(:struct attachment-reference) index)
+           'attachment-reference
+           :attachment index :layout :color-attachment-optimal))
         (labels ((create-with-depth-reference (depth-reference)
                    (with-vk (subpass subpass-description
                              :flags 0 :pipeline-bind-point :graphics
                              :input-attachment-count 0
                              :p-input-attachments (cffi:null-pointer)
-                             :color-attachment-count 1
-                             :p-color-attachments color-reference
+                             :color-attachment-count color-count
+                             :p-color-attachments color-references
                              :p-resolve-attachments (cffi:null-pointer)
                              :p-depth-stencil-attachment depth-reference
                              :preserve-attachment-count 0
@@ -904,7 +919,7 @@ advertised is never placed in the query chain and is returned as NIL."
                        (create-render-pass-handle device create-info)))))
           (if depth-format
               (with-vk (depth-reference attachment-reference
-                        :attachment 1
+                        :attachment color-count
                         :layout :depth-stencil-attachment-optimal)
                 (create-with-depth-reference depth-reference))
               (create-with-depth-reference (cffi:null-pointer))))))))
@@ -944,12 +959,16 @@ advertised is never placed in the query chain and is returned as NIL."
   (values))
 
 (defun create-framebuffer
-    (device render-pass image-view width height &key depth-view)
-  (let ((attachment-vector
-          (cond ((and image-view depth-view) (vector image-view depth-view))
-                (image-view (vector image-view))
-                (depth-view (vector depth-view))
-                (t (error "A framebuffer needs at least one attachment.")))))
+    (device render-pass image-views width height &key depth-view)
+  (let* ((image-views (cond ((null image-views) nil)
+                            ((listp image-views) image-views)
+                            ((vectorp image-views) (coerce image-views 'list))
+                            (t (list image-views))))
+         (attachment-vector
+           (coerce (append image-views (and depth-view (list depth-view)))
+                   'vector)))
+    (when (zerop (length attachment-vector))
+      (error "A framebuffer needs at least one attachment."))
     (with-foreign-array (attachments :pointer attachment-vector)
       (with-vk (create-info framebuffer-create-info
                 :flags 0 :render-pass render-pass
@@ -1015,11 +1034,38 @@ advertised is never placed in the query chain and is returned as NIL."
         (funcall function state))
       (funcall function (cffi:null-pointer))))
 
+(defun call-with-color-blend-attachments (blends function)
+  "Call FUNCTION with one Vulkan blend attachment per fragment target."
+  (if (null blends)
+      (funcall function 0 (cffi:null-pointer))
+      (cffi:with-foreign-object
+          (attachments '(:struct pipeline-color-blend-attachment-state)
+                       (length blends))
+        (loop for blend in blends
+              for index from 0
+              do (fill-vk
+                  (cffi:mem-aptr
+                   attachments
+                   '(:struct pipeline-color-blend-attachment-state)
+                   index)
+                  'pipeline-color-blend-attachment-state
+                  :blend-enable (if blend 1 0)
+                  :src-color-blend-factor :one
+                  :dst-color-blend-factor
+                  (if blend :one-minus-src-alpha :zero)
+                  :color-blend-op :add
+                  :src-alpha-blend-factor :one
+                  :dst-alpha-blend-factor
+                  (if blend :one-minus-src-alpha :zero)
+                  :alpha-blend-op :add
+                  :color-write-mask '(:r :g :b :a)))
+        (funcall function (length blends) attachments))))
+
 (defun create-graphics-pipeline
     (device vertex-module fragment-module layout render-pass
      &key (vertex-entry-point "main") (fragment-entry-point "main")
           (topology :triangle-strip) vertex-buffers
-          depth-compare depth-write-enabled blend)
+          depth-compare depth-write-enabled blends blend)
   (labels
       ((create-with-shader-names (vertex-name fragment-name)
          (let ((stage-count (if fragment-module 2 1)))
@@ -1133,23 +1179,9 @@ advertised is never placed in the query chain and is returned as NIL."
                                                :base-pipeline-index -1)
                                             (create-graphics-pipeline-handle
                                              device create-info)))))))))
-                            (if fragment-module
-                                (with-vk
-                                    (blend-attachment
-                                     pipeline-color-blend-attachment-state
-                                     :blend-enable (if blend 1 0)
-                                     :src-color-blend-factor :one
-                                     :dst-color-blend-factor
-                                     (if blend :one-minus-src-alpha :zero)
-                                     :color-blend-op :add
-                                     :src-alpha-blend-factor :one
-                                     :dst-alpha-blend-factor
-                                     (if blend :one-minus-src-alpha :zero)
-                                     :alpha-blend-op :add
-                                     :color-write-mask '(:r :g :b :a))
-                                  (create-with-blend 1 blend-attachment))
-                                (create-with-blend 0
-                                                   (cffi:null-pointer)))))))))))))))
+                            (call-with-color-blend-attachments
+                             (and fragment-module (or blends (list blend)))
+                             #'create-with-blend)))))))))))))
     (cffi:with-foreign-string (vertex-name vertex-entry-point)
       (if fragment-module
           (cffi:with-foreign-string (fragment-name fragment-entry-point)
@@ -1166,7 +1198,7 @@ advertised is never placed in the query chain and is returned as NIL."
     (device mesh-module fragment-module layout render-pass
      &key task-module (task-entry-point "main") (mesh-entry-point "main")
           (fragment-entry-point "main")
-          depth-compare depth-write-enabled blend)
+          depth-compare depth-write-enabled blends blend)
   "Link a task, mesh, and fragment stage into one VK_EXT_mesh_shader pipeline.
 
 A mesh pipeline draws no vertices, so it carries neither a vertex input nor
@@ -1265,21 +1297,9 @@ output topology."
                                         :base-pipeline-index -1)
                                      (create-graphics-pipeline-handle
                                       device create-info)))))))))
-                     (if fragment-module
-                         (with-vk (blend-attachment
-                                   pipeline-color-blend-attachment-state
-                                   :blend-enable (if blend 1 0)
-                                   :src-color-blend-factor :one
-                                   :dst-color-blend-factor
-                                   (if blend :one-minus-src-alpha :zero)
-                                   :color-blend-op :add
-                                   :src-alpha-blend-factor :one
-                                   :dst-alpha-blend-factor
-                                   (if blend :one-minus-src-alpha :zero)
-                                   :alpha-blend-op :add
-                                   :color-write-mask '(:r :g :b :a))
-                           (create-with-blend 1 blend-attachment))
-                         (create-with-blend 0 (cffi:null-pointer))))))))))
+                     (call-with-color-blend-attachments
+                      (and fragment-module (or blends (list blend)))
+                      #'create-with-blend))))))))
        (with-optional-string (value function)
          (if value
              (cffi:with-foreign-string (pointer value)
@@ -1691,25 +1711,35 @@ output topology."
   (values))
 
 (defun cmd-begin-color-render-pass
-    (command-buffer render-pass framebuffer width height clear-color
+    (command-buffer render-pass framebuffer width height clear-colors
      &key depth-clear-value)
-  (let ((clear-count (if depth-clear-value 2 1)))
+  (let* ((clear-colors
+           (if (and (vectorp clear-colors)
+                    (every #'realp clear-colors))
+               (list clear-colors)
+               (coerce clear-colors 'list)))
+         (color-count (length clear-colors))
+         (clear-count (+ color-count (if depth-clear-value 1 0))))
     (cffi:with-foreign-object (clears '(:union clear-value) clear-count)
       (clear-foreign-object clears '(:union clear-value) clear-count)
-      (let* ((color
-               (cffi:foreign-slot-pointer
-                (cffi:mem-aptr clears '(:union clear-value) 0)
-                '(:union clear-value) 'color))
-             (components
-               (cffi:foreign-slot-pointer
-                color '(:union clear-color-value) 'float-32)))
-        (loop for component across clear-color
-              for index below 4
-              do (setf (cffi:mem-aref components :float index) component)))
+      (loop for clear-color in clear-colors
+            for attachment-index from 0
+            for color =
+              (cffi:foreign-slot-pointer
+               (cffi:mem-aptr clears '(:union clear-value) attachment-index)
+               '(:union clear-value) 'color)
+            for components =
+              (cffi:foreign-slot-pointer
+               color '(:union clear-color-value) 'float-32)
+            do (loop for component across clear-color
+                     for component-index below 4
+                     do (setf (cffi:mem-aref
+                               components :float component-index)
+                              component)))
       (when depth-clear-value
         (fill-vk
          (cffi:foreign-slot-pointer
-          (cffi:mem-aptr clears '(:union clear-value) 1)
+          (cffi:mem-aptr clears '(:union clear-value) color-count)
           '(:union clear-value) 'depth-stencil)
          'clear-depth-stencil-value
          :depth (coerce depth-clear-value 'single-float)

@@ -2,11 +2,16 @@
 
 (deftest slug-formats-have-exact-portable-and-metal-storage
   (ok (= 4 (texture-format-bytes-per-texel :rg16-uint)))
+  (ok (= 4 (texture-format-bytes-per-texel :rg16-float)))
   (ok (= 8 (texture-format-bytes-per-texel :rgba16-float)))
   (ok (= metal:+pixel-format-rg16-uint+
          (luv::metal-resource-pixel-format
           :rg16-uint
           (make-texture-descriptor :format :rg16-uint))))
+  (ok (= metal:+pixel-format-rg16-float+
+         (luv::metal-resource-pixel-format
+          :rg16-float
+          (make-texture-descriptor :format :rg16-float))))
   (ok (= metal:+pixel-format-rgba16-float+
          (luv::metal-resource-pixel-format
           :rgba16-float

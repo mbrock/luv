@@ -159,6 +159,7 @@
            #:+pixel-format-rgba8-unorm+
            #:+pixel-format-rgba8-unorm-srgb+
            #:+pixel-format-rg16-uint+
+           #:+pixel-format-rg16-float+
            #:+pixel-format-rgba16-float+
            #:+pixel-format-depth32-float+
            #:+texture-usage-shader-read+

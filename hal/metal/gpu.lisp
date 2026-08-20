@@ -892,6 +892,7 @@ aligned to the element size."
     (:bgra8-unorm luv.metal:+pixel-format-bgra8-unorm+)
     (:bgra8-unorm-srgb luv.metal:+pixel-format-bgra8-unorm-srgb+)
     (:rg16-uint luv.metal:+pixel-format-rg16-uint+)
+    (:rg16-float luv.metal:+pixel-format-rg16-float+)
     (:rgba16-float luv.metal:+pixel-format-rgba16-float+)
     (:depth32-float luv.metal:+pixel-format-depth32-float+)
     (otherwise

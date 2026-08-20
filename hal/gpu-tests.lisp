@@ -1,5 +1,8 @@
 (in-package #:luv.tests)
 
+(deftest temporal-motion-format-has-two-half-float-lanes
+  (ok (= 4 (luv:texture-format-bytes-per-texel :rg16-float))))
+
 (defclass descriptor-probe-device (luv:gpu-device)
   ((operation :initform nil :accessor descriptor-probe-operation)
    (descriptor :initform nil :accessor descriptor-probe-descriptor)

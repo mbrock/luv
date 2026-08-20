@@ -108,6 +108,7 @@
   (:b8g8r8a8-unorm 44)
   (:b8g8r8a8-srgb 50)
   (:r16g16-uint 81)
+  (:r16g16-sfloat 83)
   (:r16g16b16a16-sfloat 97)
   (:r32g32-sfloat 103)
   (:r32g32b32-sfloat 106)
