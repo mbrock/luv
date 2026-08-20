@@ -158,10 +158,15 @@ The following are starting paths rather than a table of settled doctrine.
   agent surface in CLIM terms: tools as commands with presentation-typed
   arguments, results as presentations read under a model view, cassettes
   drawn on the HUD and committed to a wall, and an agent with a body.
-- [[file:luft.org][LUFT: packed sites, chains, and the mesh atelier]] names every vertex,
-  edge, face, and cell of a cubical world with one fixnum, treats a block
-  world as a 3-chain whose boundary is its surface, and draws that surface
-  with task and mesh shaders reading the packed words from a storage buffer.
+- [[file:luft.org][LUFT: packed sites, chains, and the atelier]] names every vertex, edge,
+  face, and cell of a cubical world with one fixnum, treats a block world as a
+  3-chain whose boundary is its surface, and draws that surface by vertex
+  shaders pulling the packed words directly from a storage buffer.
+- [[file:temporal-antialiasing.org][Temporal reconstruction in the Luft atelier]] follows a frozen jittered
+  view through Vulkan colour and motion attachments, ping-pong history,
+  YCoCg rejection, and lens presentation.  It records the resource-ownership
+  refactor TAA forced, the small MRT/format extension the HAL needed, and the
+  backend boundary left for MetalFX.
 - [[file:domains-and-bundles.org][Domains, bundles, and materialized worlds]] studies why CLOS and
   structure-of-arrays storage are compatible, and what chunking, level of
   detail, procedural generation, and streaming ask of the object model.

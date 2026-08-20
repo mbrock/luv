@@ -906,6 +906,7 @@ what the fog converges to and what the background paints must agree."
 
 ;;; ------------------------------------------------------------------------
 ;;; Temporal resolve and presentation
+;;; #C7WIN4 #C4ED2V
 
 (define-shader-function rgb-to-ycocg (rgb)
   "Put RGB into a luminance/chroma space whose box is a useful colour clip."

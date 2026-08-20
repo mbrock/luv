@@ -414,7 +414,7 @@ walked on, which is the whole argument for a world knowing its stocks."
 
 The interactive camera remains mutable, but temporal rendering must not read
 it twice: CURRENT and PREVIOUS only mean something when one coherent basis,
-projection, and jitter is frozen at the frame boundary."
+projection, and jitter is frozen at the frame boundary.  #VATCML"
   position right up forward projection jitter)
 
 (defun frame-projection (camera width height)
@@ -831,7 +831,8 @@ lane: the arris softness of a chamfer, or the vertical radius of the field."
    (post-bind-groups :initarg :post-bind-groups :initform #()
                      :reader frame-surfaces-post-bind-groups))
   (:documentation
-   "One extent-sized, transactionally published cohort of frame resources."))
+   "One extent-sized, transactionally published cohort of frame resources.
+#T7RQTI"))
 
 (defclass renderer ()
   ((device :initarg :device :reader renderer-device)
@@ -1118,7 +1119,8 @@ work is in flight because the GPU abstraction defers their native teardown."
   "The native atelier's full post stack.
 
 Vulkan owns Luft's temporal resolve today.  Metal keeps the same renderer
-boundary but will hand its jittered colour/depth inputs to MetalFX instead."
+boundary; its temporal implementation is left for a MetalFX experiment.
+#D7GZA6"
   #-darwin '(:sky :lens :taa)
   #+darwin '(:sky :lens))
 
@@ -1625,7 +1627,8 @@ old generation until its entirely new replacement is ready."
 
 The first five frame lanes are the camera and projection; lanes five through
 eighteen are every light, material, lens, domain, and deformation value used
-to shade the frame.  The appended temporal lanes are deliberately excluded."
+to shade the frame.  The appended temporal lanes are deliberately excluded.
+#OWG6ZD"
   (list scene (scene-revision scene) (renderer-style renderer) *draw-sky*
         (subseq frame-data (* 4 5) (* 4 19)) stock-data))
 
@@ -1647,7 +1650,8 @@ to shade the frame.  The appended temporal lanes are deliberately excluded."
     (end-pass pass)))
 
 (zdefun (encode-frame :zone :luft/encode-frame) (renderer encoder)
-  "Encode one coherent jittered frame and, when requested, its TAA resolve."
+  "Encode one coherent jittered frame and, when requested, its TAA resolve.
+#4I4Y3Z"
   (let* ((extent (renderer-extent renderer))
          (width (first extent))
          (height (second extent))

@@ -1,0 +1,288 @@
+#+title: Temporal reconstruction in the Luft atelier
+#+startup: overview
+
+Luft's first antialiasing pass is deliberately a renderer experiment rather
+than a new engine-wide temporal framework.  Vulkan draws a jittered scene,
+writes current-to-previous motion beside it, and resolves into one of two
+history images before the lens and presentation pass.  Metal keeps the same
+semantic frame boundary but not this resolve; the intended next experiment
+there is to give the jittered inputs to MetalFX.
+
+The work also answers two architectural questions the small greenfield
+renderer made cheap to ask.  The renderer wanted explicit owners for a frozen
+frame and for every extent-sized surface, plus revisions on published scene
+products.  The mathematical shader language already had all the expressions
+TAA needed.  The portable GPU layer needed one concrete capability: an ordered
+list of colour attachments on Vulkan, together with a two-half-float format for
+motion.
+
+* TAA reconstructs samples; it is not a blur
+:PROPERTIES:
+:ID: DOEDL3
+:END:
+
+One rasterized frame samples each pixel once.  Luft moves that sample to a
+different subpixel on each frame with an eight-sample Halton(2,3) sequence,
+then reprojects the last resolved picture so samples from different frames
+describe the same world points.  A static camera therefore gathers eight
+positions within a pixel instead of repeatedly gathering its centre.  A moving
+camera can keep the old evidence only where motion says where it went and the
+new neighbourhood says it is still plausible.
+
+This ordering matters.  The scene is jittered before rasterization; temporal
+resolve happens in linear floating-point colour; the photographic lens and the
+conversion to the final sRGB attachment happen afterward.  Applying a screen
+blur first would only soften one aliased sample.  Accumulating after the lens
+would feed its chromatic dispersion and focus blur back into history.
+
+* One frozen view defines one frame
+:PROPERTIES:
+:ID: VATCML
+:END:
+
+The fly camera is a mutable interactive object.  Reading it independently in
+the surface, sky, and resolve setup would let one encoded frame contain several
+moments.  [[lisp:luft.render::capture-frame-view]] instead copies position,
+basis, projection, and jitter into a =frame-view= once at
+the frame boundary.  That immutable value is /current/; the value published by
+the last completed encoding is /previous/.
+
+[[lisp:luft.render::temporal-jitter]] returns clip-space offsets, so one pixel
+of displacement is =2/width= by =2/height=.  Every terrain vertex adds the
+current offset times homogeneous W to its clip position.  The fullscreen sky
+does not move its triangle; it subtracts the same offset while reconstructing
+the view ray, which makes the sky and geometry samples belong to one jittered
+camera.
+
+The shared frame block grew append-only from nineteen to twenty-six vec4
+lanes.  Its established camera, lighting, material, lens, and deformation ABI
+did not move.  The suffix carries the previous view, current and previous
+jitter, inverse extent, history validity, and blend weight.
+
+* The frame graph has three passes and one ping-pong edge
+:PROPERTIES:
+:ID: 4I4Y3Z
+:END:
+
+#+begin_src mermaid
+flowchart TB
+  S["jittered surface + sky"] --> C["RGBA16F current colour"]
+  S --> M["RG16F current-to-previous motion"]
+  S --> D["D32 visibility"]
+  C --> R["temporal resolve"]
+  M --> R
+  A["old RGBA16F history"] --> R
+  R --> B["new RGBA16F history"]
+  B -. "swap roles next frame" .-> A
+  B --> P["lens or plain present"]
+  P --> O["output attachment"]
+#+end_src
+
+| Product | Format | Meaning |
+|-
+| Current colour | =RGBA16F= | This frame's jittered, pre-presentation colour; alpha is current focus metadata |
+| Motion | =RG16F= | Unjittered current-to-previous displacement in UV units |
+| Depth | =D32= | Surface visibility for this frame; not yet sampled by resolve |
+| History A/B | =RGBA16F= | Alternating resolve destination and reprojected source |
+| Output | Renderer format | Lens-processed or plainly presented result, normally sRGB |
+
+[[lisp:luft.render::encode-frame]] records the three passes in this order and
+uses explicit texture preparation between render-attachment and sampled
+states.  On a cold or invalid frame it clears the would-be history source and
+sets history weight to zero.  Only after all passes have encoded does it swap
+the history index and publish the frozen view.
+
+* Motion points from the current sample to its old address
+:PROPERTIES:
+:ID: C7WIN4
+:END:
+
+Let $q_t$ be the unjittered UV position of a world point under the current
+view, $q_{t-1}$ its position under the previous view, and $j_t$ the current
+clip-space jitter.  The motion attachment stores
+
+#+begin_example
+v = q(t-1) - q(t)
+#+end_example
+
+without jitter.  The current raster sample lies at $u=q_t+j_t/2$, so resolve
+addresses history at
+
+#+begin_example
+u + v + (j(t-1) - j(t))/2 = q(t-1) + j(t-1)/2.
+#+end_example
+
+Keeping the two terms separate makes their conventions inspectable:
+[[lisp:luft.render.shaders::point-motion]] owns reprojection and the resolve
+shader owns the sampling pattern.  Static terrain writes motion by projecting
+its interpolated world point through both frozen views; the sky projects the
+same world direction from each camera origin.  Motion is loaded with exact
+=texel-load= rather than filtered at silhouettes, where blending foreground
+and background velocities would invent a third surface.
+
+Ordinary and temporal surface fragments are paired from one source body.
+The ordinary form advertises only colour location zero; the temporal form adds
+motion at location one.  This keeps the existing one-target Metal pipelines
+valid while every Luft material -- flat, rounded, chamfered, field, ink,
+paper, stock, and sky -- follows the same motion convention on Vulkan.
+
+* Resolve admits old colour through a shaped neighbourhood
+:PROPERTIES:
+:ID: C4ED2V
+:END:
+
+[[lisp:luft.render.shaders:temporal-resolve-fragment-shader]] gathers the
+current 3×3 neighbourhood, converts it to YCoCg, and forms the componentwise
+minimum and maximum.  It bilinearly samples reprojected history and clips that
+colour to the box before blending.  YCoCg makes this a box in luminance and two
+chroma axes rather than three unrelated RGB axes, so clipping changes hue less
+readily.
+
+The configured history share is 0.9.  It falls as screen motion rises and as
+the clipped old luminance differs from the centre; an out-of-frame address or
+an invalid history makes it zero.  This is rejection rather than a claim that
+old colour is true.  Alpha is never accumulated: Luft's lens reads alpha as
+this frame's focus distance metadata, so resolve copies it from the current
+centre.
+
+* History is a semantic cache
+:PROPERTIES:
+:ID: OWG6ZD
+:END:
+
+A texture from the preceding submission is not necessarily history of the
+same picture.  Luft reuses it only when all of these remain true:
+
+- the scene object and its =scene-revision= are unchanged;
+- style, sky participation, the packed lighting/material/deformation lanes,
+  and the stock table compare equal;
+- extent is unchanged; and
+- [[lisp:luft.render::frame-views-continuous-p]] judges translation, rotation,
+  and focal change to be motion rather than a camera cut.
+
+The key contains the /resolved numbers/, not merely =*light*= and
+=*material*= names, so hand-tuning an atelier special invalidates history too.
+[[lisp:luft.render:refresh-scene]] increments a publication revision, which
+catches rebuilding the same scene object instead of relying on identity as a
+change detector.  Resize, buffer re-publication, style changes, and teleports
+all produce one current-only frame before accumulation resumes.
+
+* Frame resources are one extent-sized ownership cohort
+:PROPERTIES:
+:ID: T7RQTI
+:END:
+
+TAA made the old collection of renderer texture slots too easy to publish
+halfway through a resize.  A [[lisp:luft.render::frame-surfaces]] now owns the
+final colour and depth, optional current colour, motion, both histories, their
+views, and the bind groups that depend on them.  [[lisp:luft.render::make-frame-surfaces]]
+constructs a complete candidate; resize publishes it as one value, resets
+history, and then retires the old cohort.  Destruction walks the opposite
+dependency order: bind groups, views, textures, then the longer-lived layouts
+and device resources.
+
+Scene storage growth follows the same rule.  Sites, cell bits, cell stock
+slots, and their bind group form one generation.  If any buffer is too small,
+[[lisp:luft.render::upload-scene]] builds and fills replacements for all three,
+creates the candidate bind group, publishes them together, and only then
+retires the old generation.  Buffers that already fit are updated in place;
+capacities double on growth so editing does not rebuild the cohort for every
+new face.
+
+* The shader language was ready; the Vulkan HAL needed MRT
+:PROPERTIES:
+:ID: CZGBC9
+:END:
+
+No new mathematical shader operation was required.  The language already
+represented several location outputs, texture sampling, exact =texel-load=,
+uniform and storage resources, vector =min=/=max=/=clamp=, derivatives, and
+source abstractions.  A small Luft-local macro makes ordinary/temporal shader
+pairs; putting that policy into the generic graph would have confused a
+renderer variant with a new mathematical idea.
+
+The GPU layer did need to tell the truth about a fragment stage with more than
+one result.  =:rg16-float= now names two half-float motion lanes, including its
+four-byte texel size and native Vulkan and Metal formats.  Vulkan render
+pipelines, compatible-render-pass caching, attachment descriptions and
+references, blend states, framebuffers, clear values, and pass validation now
+all consume an ordered target list rather than silently selecting its first
+member.  The same generic descriptors still describe a one-target pass.
+
+This is the useful boundary: multiple render targets and a format are portable
+GPU vocabulary; temporal rejection, ping-pong history, and camera-cut policy
+belong to the renderer.
+
+* Vulkan owns this resolve; Metal keeps a MetalFX-shaped boundary
+:PROPERTIES:
+:ID: D7GZA6
+:END:
+
+On Vulkan, =:taa= is part of Luft's default full effect list.  On Darwin the
+default remains sky plus lens.  The current Metal backend understands the new
+=RG16F= portable format, but Luft's default does not compile the Vulkan-oriented
+resolve there and does not force motion location one into ordinary pipelines.
+
+That asymmetry is intentional while there is only one production consumer.
+The frozen current/previous views, jitter sequence, current colour, motion
+meaning, and extent cohort are backend-neutral semantic inputs.  A MetalFX
+integration can decide which of those its native contract actually consumes
+and add a backend-owned operation when there is concrete evidence for its
+shape, rather than making Vulkan's three-pass mechanism the portable API.
+
+* DONE First Vulkan temporal resolve
+:PROPERTIES:
+:ID: SL4ICD
+:END:
+
+/Intent./ Give the atelier stable subpixel edges under a still or flying
+camera, with motion for every surface style and without reviving a second
+terrain geometry path.
+
+/Evidence./ The renderer test renders real Vulkan =RGBA16F + RG16F= multiple
+targets, proves the first frame rejects history and the second uses it, observes
+the ping-pong index, and invalidates on a same-object scene refresh, an actual
+lighting value change, and a camera teleport.  Shader tests prove ordinary
+fragments expose one output and all temporal variants expose two.  An all-style
+probe compiles every temporal module and pipeline and renders two accumulated
+frames.
+
+/Done when./ Vulkan's full Luft renderer jitters geometry and sky, writes
+current-to-previous motion, resolves bounded history, presents it through the
+lens boundary, and survives scene publication and camera cuts.  Those
+conditions now hold.
+
+* What the first resolve deliberately leaves open
+:PROPERTIES:
+:ID: 3CW6GA
+:END:
+
+The first pass is a coherent baseline, not the last word in temporal quality.
+The next evidence should come from moving silhouettes and animated materials,
+where colour clipping alone has the least information.
+
+** TODO Make disocclusion depth-aware
+:PROPERTIES:
+:ID: 1MZC4T
+:END:
+
+/Intent./ Retain current depth for resolve, choose the frontmost velocity from
+a small neighbourhood at silhouettes, and reject history whose reprojected
+depth no longer describes the visible surface.  This is velocity dilation and
+disocclusion testing, one connected improvement rather than two unrelated
+filters.
+
+/Evidence./ Current motion is exact at its own pixel and the YCoCg box rejects
+many stale colours, but depth is discarded after visibility and cannot yet
+distinguish a newly revealed background from the foreground that occupied its
+old address.
+
+/Done when./ A camera orbit around the stock and field studio pieces leaves no
+foreground-coloured trail on newly exposed sky or wall, with a capture or
+pixel test that fails when depth rejection is disabled.
+
+After that proof, a reactive mask for changing highlights and procedural
+detail, higher-quality history sampling, and previous positions for genuinely
+animated geometry are local quality experiments.  Today a deformation change
+correctly invalidates the whole history; it does not pretend to have per-object
+motion that the scene model cannot yet express.

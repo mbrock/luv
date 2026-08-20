@@ -6,10 +6,10 @@ and cells of a cubical world with one fixnum each, and of treating a block
 world as algebra rather than as voxels with decorations.  Its first client
 is a greenfield renderer, an atelier free of the luvcraft mesher, that draws
 a textureless block world from shaders reading those fixnums straight from a
-GPU buffer -- by vertex pulling on any device, or by task and mesh shaders
-where those run.  This page records the vocabulary, the algebra that makes
-the surface fall out, the shader-language extensions the GPU path needed,
-and the shape of the pipeline.
+GPU buffer by vertex pulling.  This page records the vocabulary, the algebra
+that makes the surface fall out, the shader-language extensions the GPU path
+needed, and the shape of the atelier.  Its temporal frame graph now has a page
+of its own: [[file:temporal-antialiasing.org][Temporal reconstruction in the Luft atelier]].
 
 * A site is a lattice anchor, an extent mask, and a polarity
 :PROPERTIES:
@@ -61,8 +61,8 @@ anything.
 The luvcraft mesher walks chunk fields on the CPU and emits atlas-textured
 quads (see [[file:block-world.org][the block world]]); LUFT's
 [[lisp:luft:surface-chain]] is a pair of polarity ledgers holding signed face
-sites.  Both are right for their worlds; the second is what a mesh shader
-wants.
+sites.  Both are right for their worlds; the second lets a GPU invocation
+reconstruct a face without a CPU vertex product.
 
 * The GPU reads signed sites directly
 :PROPERTIES:
@@ -74,14 +74,15 @@ coefficient encoding.  It remains an immediate fixnum on 64-bit SBCL, and a
 specialized vector of sites can be copied directly into the
 =(unsigned-byte 64)= buffer the shader reads; no vertex is ever built on the
 CPU.  The renderer orders the sites by eight-cell chunk, pads them to whole
-/bricks/ of [[lisp:luft.render.shaders:+brick-size+]] sites, and measures one
-bounding sphere per brick as four floats —
-two arrays and one uniform block are the whole upload.
+chunks for locality, keeps one absent word for an empty surface, and binds the
+specialized vector as one storage buffer.  Dense occupancy bits and packed
+stock slots let shaders ask about the cells around each site without turning
+those cells into vertices first.
 
-The four buffer bits above the site are deliberately unearned.  A per-face
-material would fit there, but the occurrence is still a chain site, and
-materials belong to cells; the atelier is textureless on purpose until that
-question is asked properly.
+The four buffer bits above the site now carry the stock of the solid cell
+behind the face.  The chain itself still owns only the low sixty bits; stamping
+happens on the copied GPU product after its geometric ordering is complete
+(#PWMCOL).
 
 * Storage buffers and bit fields enter the shader language
 :PROPERTIES:
@@ -108,37 +109,41 @@ additions carry a site into a shader:
 Both are raw representations until interpreted: they carry no quantity, so an
 unannotated graph stays valid legacy source and an annotated one still
 refuses to mix.  The Metal HAL gained the matching =:storage= buffer usage,
-=:storage-buffer= binding type, typed =write-buffer= for unsigned arrays,
-and depth-stencil state on mesh pipelines.
+=:storage-buffer= binding type, and typed =write-buffer= for unsigned arrays.
+Those facilities now serve both backends and outlived the mesh experiment that
+first forced them.
 
-* Task workgroups cull bricks; mesh lanes unpack faces
+* The mesh-shader experiment found a budget, then ended
 :PROPERTIES:
 :ID: VAABY9
 :END:
 
 [[file:images/luft-atelier.png]]
 
-The pipeline in =luft/render/shaders.lisp= has three stages and no vertex
-buffer.  A task workgroup owns one brick: it reads the brick's sphere,
-tests it against the view pyramid with a workgroup-uniform expression, and
-emits one mesh workgroup or none, handing the brick index through a
-one-word payload.  Each mesh lane then loads one site with =buffer-element=,
-extracts anchor, extent, and polarity with =ldb=, and writes four vertices and
-two triangles.  The extent names the face's two spanning axes in canonical
-X<Y<Z order, their cross product is the canonical orientation, and the
-polarity times that orientation is the outward normal — the boundary
-operator's orientation rendered directly.  A lane whose site is zero, or
-whose face turns away from the camera by the exact plane test, scales its quad
-to a point instead of branching on output counts, which the language requires
-to be uniform.
+The first GPU path had task and mesh stages and no vertex buffer.  A task
+workgroup owned a small brick, culled its bounding sphere, and handed the brick
+index through a payload.  Mesh lanes loaded signed sites, unpacked anchor,
+extent, and polarity, and emitted their vertices and triangles.  It proved the
+central representation claim of #AGVXGM: the boundary operator's orientation
+can be rendered directly from its packed site.
 
-The rounded and chamfered mesh makes the brick grain a hardware contract, not
-just a batching choice.  One face's 6×6 point grid emits 36 vertices and 50
-triangles, so a five-face workgroup declares 180 vertices and 250 primitives,
-inside =VK_EXT_mesh_shader='s guaranteed minima of 256 for each.  The earlier
-seven-face brick declared only 252 vertices but 350 primitives; RADV accepted
-the pipeline and then reset the GPU on its first submission.  The generated
-SPIR-V and a host test now state both halves of the budget.
+Rounded faces made that brick size a hardware contract rather than merely a
+batching choice.  One 6×6 face grid emitted 36 vertices and 50 triangles, so a
+five-face group declared 180 vertices and 250 primitives, inside
+=VK_EXT_mesh_shader='s guaranteed minima of 256 for each.  The earlier
+seven-face group declared only 252 vertices but 350 primitives; RADV accepted
+the pipeline and then reset the GPU on first submission.  That failure remains
+useful evidence: every output budget matters even when pipeline creation does
+not reject an excess.
+
+The path then stopped earning its duplication.  Lavapipe executed it slowly;
+the project's RX 6600 XT advertised the extension and did not execute it
+reliably; and the ordinary vertex path below drew every style on Vulkan and
+Metal.  Keeping a non-default technique meant two shader implementations, two
+sets of scene resources, technique dispatch, and an environment switch for a
+mode nobody should select.  Luft removed the runtime mode, brick data, task
+payload, mesh definitions, and their pipelines.  The experiment stays here as
+design evidence, not as dormant source.
 
 The fragment stage is textureless by design: a top, side, and bottom tone,
 a soft line where faces meet, sun and ambient light, and fog toward the sky.
@@ -148,55 +153,35 @@ draws headlessly, and [[lisp:luft.render:start-viewer]] opens a window with a
 fly camera.  Its test turns the camera straight up and expects only sky,
 which is the frustum test doing real work.
 
-The standalone atelier creates only the flat surface pipeline by default.
+The standalone atelier still permits semantic reduction.
 =LUFT_RENDER_MODE=clear= submits a clear and copy with no shader pipeline;
-=sky= adds only the background; =flat=, =bevel=, =chamfer=, and =paper= each
-create only their named surface pipeline; =full= restores every style plus the
-sky and lens.  Thus a driver failure can be localized by increasing one
-semantic layer at a time rather than constructing and dispatching the entire
-atelier before the first frame.  =LUFT_RENDER_TECHNIQUE=mesh= asks for this
-mesh path at all; the default is the vertex pulling of #NV25VM.
+=sky= adds only the background; each style name creates only its own surface
+pipeline; =full= restores every style plus sky and lens, and on Vulkan the TAA
+graph of #DOEDL3.  Thus a driver failure can be localized by increasing one
+semantic layer at a time rather than constructing the entire atelier before
+the first frame.
 
-* Vertex shaders pull the same sites where mesh shaders will not run
+* Vertex shaders are the one terrain path
 :PROPERTIES:
 :ID: NV25VM
 :END:
 
-RADV on this project's RX 6600 XT advertises =VK_EXT_mesh_shader= and accepts
-the pipelines of #VAABY9, but does not reliably run them; lavapipe draws them
-correctly and slowly, which is how the flat style was first seen working
-here.  Rather than chase a young extension driver by driver, the atelier
-gained a second /technique/ that needs nothing beyond Vulkan 1.0 and changes
-nothing about the representation.
-A renderer is made with =:technique :vertex= (the default, and
-[[lisp:luft.render:*default-technique*]]) or =:technique :mesh=; the frame
-block, the site and cell buffers, the bind group, every fragment stage, the
-sky, and the lens are the same objects either way.  A technique is only
-which modules are created, how a pipeline is described, and how a pass is
-told to draw, and those three are EQL methods on the technique's name
-([[lisp:luft.render::create-technique-pipelines]],
-[[lisp:luft.render::draw-surface]], [[lisp:luft.render::draw-screen]]).
-
-The vertex path draws $K$ vertices per site with no vertex buffer at all.
+The renderer draws $K$ vertices per site with no vertex buffer at all.
 Each vertex shader invocation divides its built-in index by $K$ to find its
 site in the very same =(unsigned-byte 64)= buffer, takes the remainder to
 learn which corner of which triangle it is, and unpacks anchor, extent, and
-polarity with the same =ldb= forms as the mesh lane (#AGVXGM).  A flat face
+polarity with the same =ldb= forms as #AGVXGM.  A flat face
 is six vertices, the two triangles $(0\,1\,2)(0\,2\,3)$ around the anchor
 corner, reversed when the polarity is negative so the loop stays
-counter-clockwise from outside.  A vertex cannot be skipped the way a mesh
-lane's output count is uniform, so an absent site or a back-facing face
+counter-clockwise from outside.  An absent site or a back-facing face
 collapses every one of its vertices onto the anchor, and the rasterizer drops
-the degenerate triangle.  The brick spheres of #VAABY9 are still computed
-and uploaded but nothing culls by them; with no culling state in the
-pipeline and twelve thousand faces in the demonstration world, clipping is
-cheap enough that the first version simply draws everything.
+the degenerate triangle.  With twelve thousand faces in the demonstration
+world, clipping is cheap enough that the renderer simply draws everything.
 
 The chamfer of #RUAWR5 is the same grid at fifty-four vertices a face: nine
-quads of the $4	imes4$ point lattice, each split along the diagonal toward
-its nearest corner as the mesh shader splits them.  Where one mesh lane
-gathered all sixteen star cells and placed all sixteen points, a vertex is
-one point and needs only the star of its own nearest corner: six cells
+quads of the 4×4 point lattice, each split along the diagonal toward its
+nearest corner.  A vertex is one point and needs only the star of its own
+nearest corner: six cells
 beside the face's solid and air cells, across $U$, across $V$, and across
 both, toward that corner's side.  The site rules of #6TEFOS then move it --
 corner star at a corner, edge star along a boundary, nowhere inside -- and
@@ -206,8 +191,10 @@ again at two rings and a hundred and fifty vertices a face: the vertex's own
 grid position says whether it is a shared corner, a ring point, or an inner
 point, and the rules BEVEL-POINT-BINDINGS generates per point are chosen at
 run time from the same six-cell star.  The watertightness test that was
-Metal-only now runs on Linux over all four styles.  The vertex shaders live
-in =luft/render/vertex-shaders.lisp=.
+Metal-only now runs on Linux over every style.  The vertex shaders live
+in =luft/render/vertex-shaders.lisp=.  Temporal jitter changes only their last
+clip-space step; their world positions remain the stable inputs to motion
+(#C7WIN4).
 
 * Fillets and bevels belong to edge and vertex sites
 :PROPERTIES:
@@ -235,10 +222,10 @@ the nearest crease's cylinder or the corner's sphere (a pure one-cell corner
 is the exact rounded box), and mixed corners such as a block standing on a
 floor blend toward the vertex sphere by distance.  The only CPU help is
 [[lisp:luft:chain-cell-bits]], the solid chain as one bit per cell, from
-which each mesh lane gathers its sixteen star cells; the rounding radius is a
-live frame lane.  The exact morphological answer for the mixed stars would be
-a table over the 256 vertex configurations, which #WQ611A's wave-level work
-does not need and which this heuristic postpones.
+which each shaped vertex gathers the cells in its nearest corner's star; the
+rounding radius is a live frame lane.  The exact morphological answer for the
+mixed stars would be a table over the 256 vertex configurations, which this
+heuristic postpones.
 
 * Small planar facets soften convex and concave creases
 :PROPERTIES:
@@ -409,11 +396,11 @@ fills, the way a shop works from one board at a time:
 #+end_src
 
 [[lisp:luft.render:refresh-scene]] stamps each surface site from the cell it
-bounds, after the brick spheres are measured, since past bit sixty a packed
+bounds after the geometric sites are ordered, since past bit sixty a packed
 site is no longer a LUFT site and nothing may read it as one.  The sixteen
 stocks' numbers travel in a storage buffer of their own,
-[[lisp:luft.render:stock-table-data]], eight vec4 lanes apiece, rewritten
-every frame because it is two kilobytes.
+[[lisp:luft.render:stock-table-data]], nine vec4 lanes apiece, rewritten
+every frame because the whole table is only a little over two kilobytes.
 
 ** An hour is a set of the light knobs
 :PROPERTIES:
@@ -685,7 +672,7 @@ judged by rendering one.
 :END:
 
 /Intent./ Let the viewer place and remove cells by adding =∂cell= or its
-opposite to the surface chain (#9HLYEE), reorder only the touched bricks, and
+opposite to the surface chain (#9HLYEE), reorder only the touched chunks, and
 upload them, so an edit costs six ledger updates and one small =write-buffer=.
 
 /Evidence./ The whole-scene path already refreshes and re-uploads correctly;
@@ -696,24 +683,24 @@ upload them, so an edit costs six ledger updates and one small =write-buffer=.
 =surface-chain= recomputation, and a test shows the incremental surface equals
 the recomputed one.
 
-** IDEA Compact surviving faces inside a brick
+** IDEA Compact surviving faces only when measurement earns another path
 :PROPERTIES:
 :ID: WQ611A
 :END:
 
-/Intent./ Today a culled or back-facing lane still costs four vertices and
-two degenerate triangles because output counts must be uniform and the
-language has no workgroup memory, atomics, or subgroup ballots.  A ballot
-and prefix sum in the task stage would let a brick emit only its visible
-faces, and a mesh workgroup could serve several sparse bricks.
+/Intent./ If vertex invocations over absent or back-facing sites become a
+measured bottleneck, compact visible face indices before drawing.  Compute
+compaction plus an indirect draw and a future mesh/subgroup path are competing
+experiments; this mark does not pre-authorize a second permanent terrain mode.
 
-/Evidence./ The current world draws thousands of faces at trivial cost, so
-this is not yet a bottleneck; it is the natural next language extension
-after #HFX2LI, and the first that touches wave-level semantics on both
-Metal and SPIR-V.
+/Evidence./ The current world draws thousands of faces at trivial cost.  The
+mesh experiment of #VAABY9 duplicated substantial renderer and shader truth
+without becoming the reliable default, so it was removed.  A new path needs a
+profile and a deletion story before it needs subgroup vocabulary.
 
-/Done when./ A dense brick facing away from the camera emits zero mesh work,
-measured on Metal, without changing the surface encoding of #AGVXGM.
+/Done when./ A representative larger scene shows face reconstruction as a
+bottleneck, one compaction experiment improves measured frame cost on a real
+backend, and its surface input remains the encoding of #AGVXGM.
 
 ** IDEA Draw the torus, not only its fundamental domain
 :PROPERTIES:
@@ -722,9 +709,9 @@ measured on Metal, without changing the surface encoding of #AGVXGM.
 
 /Intent./ A camera outside the fundamental domain sees a cut world: faces at
 =x=0= that a solid neighbour at =x=period-1= cancels are honestly absent.
-The mesh lane could translate its anchor by the domain period toward the
-camera, or the task stage could dispatch each brick under the nearest
-translates, so the wrap becomes visible instead of surprising.
+The vertex stage could translate each site's anchor by the domain period
+toward the camera, or the host could draw the nearest translated instances,
+so the wrap becomes visible instead of surprising.
 
 /Evidence./ The first render, taken from =x=-6=, showed exactly this cut.
 
