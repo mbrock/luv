@@ -253,6 +253,56 @@ function formatValue(knob, value) {
   return `${value.toFixed(decimals)}${knob.unit}`;
 }
 
+function decimalPlaces(value) {
+  const text = `${value}`.toLowerCase();
+  if (text.includes("e-")) {
+    const [coefficient, exponent] = text.split("e-");
+    return Number(exponent) + (coefficient.split(".")[1] || "").length;
+  }
+  return (text.split(".")[1] || "").length;
+}
+
+function knobPrecision(knob) {
+  return Math.min(8, Math.max(
+    decimalPlaces(knob.minimum),
+    decimalPlaces(knob.maximum),
+    decimalPlaces(knob.default),
+    decimalPlaces(knob.step),
+  ));
+}
+
+function quantizeKnobValue(knob, raw) {
+  if (!Number.isFinite(raw)) return knob.default;
+  const snapped = knob.default + Math.round((raw - knob.default) / knob.step) * knob.step;
+  const clamped = Math.max(knob.minimum, Math.min(knob.maximum, snapped));
+  return Number(clamped.toFixed(knobPrecision(knob)));
+}
+
+function defaultValues(body) {
+  return new Map(body.knobs.map(knob => [knob.name, knob.default]));
+}
+
+function stateFromFragment() {
+  const parameters = new URLSearchParams(location.hash.slice(1));
+  const body = catalog.bodies.find(candidate => candidate.id === parameters.get("body"))
+    ?? catalog.bodies[0];
+  const values = new Map(body.knobs.map(knob => {
+    const encoded = parameters.get(knob.name);
+    const raw = encoded === null || encoded.trim() === "" ? knob.default : Number(encoded);
+    return [knob.name, quantizeKnobValue(knob, raw)];
+  }));
+  return { body, values };
+}
+
+function writeFragment() {
+  const parameters = new URLSearchParams();
+  parameters.set("body", selectedBody.id);
+  for (const knob of selectedBody.knobs) {
+    parameters.set(knob.name, `${currentValues.get(knob.name)}`);
+  }
+  history.replaceState(null, "", `#${parameters}`);
+}
+
 function buildKnobs() {
   knobsElement.replaceChildren();
   for (const knob of selectedBody.knobs) {
@@ -277,9 +327,7 @@ function buildKnobs() {
     input.value = currentValues.get(knob.name);
     output.value = formatValue(knob, Number(input.value));
     input.addEventListener("input", () => {
-      const raw = Number(input.value);
-      const snapped = knob.default + Math.round((raw - knob.default) / knob.step) * knob.step;
-      const value = Math.max(knob.minimum, Math.min(knob.maximum, snapped));
+      const value = quantizeKnobValue(knob, Number(input.value));
       input.value = value;
       currentValues.set(knob.name, value);
       if (knob.name === selectedBody.statureKnob) {
@@ -287,6 +335,7 @@ function buildKnobs() {
         cameraBufferDirty = true;
       }
       output.value = formatValue(knob, value);
+      writeFragment();
       rebuildPipeline().catch(fail);
     });
     line.append(label, output);
@@ -301,9 +350,9 @@ function buildKnobs() {
   }
 }
 
-async function selectBody(body) {
+async function selectBody(body, values = defaultValues(body)) {
   selectedBody = body;
-  currentValues = new Map(body.knobs.map(knob => [knob.name, knob.default]));
+  currentValues = new Map(values);
   instanceBufferDirty = true;
   cameraBufferDirty = true;
   title.textContent = body.label;
@@ -311,6 +360,7 @@ async function selectBody(body) {
     button.setAttribute("aria-current", button.dataset.body === body.id ? "true" : "false");
   }
   buildKnobs();
+  writeFragment();
   await rebuildPipeline();
 }
 
@@ -361,7 +411,8 @@ async function start() {
   catalog = await fetch("/bodies/bodies.json").then(response => response.json());
   buildPicker();
   resizeCanvas();
-  await selectBody(catalog.bodies[0]);
+  const fragmentState = stateFromFragment();
+  await selectBody(fragmentState.body, fragmentState.values);
   requestAnimationFrame(render);
 }
 
@@ -393,6 +444,12 @@ new ResizeObserver(() => {
 
 document.addEventListener("visibilitychange", () => {
   lastFrameTime = -Infinity;
+});
+
+window.addEventListener("hashchange", () => {
+  if (!catalog) return;
+  const fragmentState = stateFromFragment();
+  selectBody(fragmentState.body, fragmentState.values).catch(fail);
 });
 
 start().catch(fail);

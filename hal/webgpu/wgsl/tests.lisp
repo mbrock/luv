@@ -124,6 +124,13 @@
                          (luvcraft.web:web-response-body gallery-js)))
              (ok (search "if (!cameraBufferDirty) return;"
                          (luvcraft.web:web-response-body gallery-js)))
+             (ok (search "new URLSearchParams(location.hash.slice(1))"
+                         (luvcraft.web:web-response-body gallery-js)))
+             (ok (search "parameters.set(knob.name"
+                         (luvcraft.web:web-response-body gallery-js)))
+             (ok (search
+                  "history.replaceState(null, \"\", `#${parameters}`)"
+                  (luvcraft.web:web-response-body gallery-js)))
              (ok (search "@fragment"
                          (luvcraft.web:web-response-body shader)))
              (ok (search "/showcase/media/Y7X7WK-proposal-still.png"
