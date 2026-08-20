@@ -102,6 +102,9 @@ GPU medium spells as a fully transparent fill.")
    (movement-action :initform nil :accessor embodied-agent-movement-action)
    (movement-accumulator :initform 0d0
                          :accessor embodied-agent-movement-accumulator)
+   (pending-approval :initform nil :accessor embodied-agent-pending-approval
+                     :documentation
+                     "The one possible-world tool effect awaiting the player.")
    (agent :initform nil :accessor gnome-agent)
    (body :initform nil :accessor gnome-body)
    (bubbles :initform '() :accessor gnome-bubbles
@@ -359,28 +362,30 @@ taller hat pushes them up rather than growing through them."
 (defmethod luvcraft:luvcraft-focus-camera-pose ((gnome embodied-agent) session)
   "Step back to a conversational distance, look the gnome in the face, and
 leave room above its hat for the bubbles."
-  (let* ((camera (luvcraft:luvcraft-session-camera session))
-         (eye (luvcraft:camera-position camera))
-         (face (embodied-agent-face-position gnome))
-         (dx (- (luvcraft::vec3-x face) (luvcraft::vec3-x eye)))
-         (dz (- (luvcraft::vec3-z face) (luvcraft::vec3-z eye)))
-         (flat (max (sqrt (+ (* dx dx) (* dz dz))) 0.001))
-         (ux (/ dx flat)) (uz (/ dz flat))
-         (distance (embodied-agent-audience-distance gnome))
-         (position (luvcraft::make-vec3
-                    (- (luvcraft::vec3-x face) (* ux distance))
-                    (+ (luvcraft::vec3-y face) 0.10)
-                    (- (luvcraft::vec3-z face) (* uz distance))))
-         (target (embodied-agent-face-position gnome 0.02))
-         (tdx (- (luvcraft::vec3-x target) (luvcraft::vec3-x position)))
-         (tdy (- (luvcraft::vec3-y target) (luvcraft::vec3-y position)))
-         (tdz (- (luvcraft::vec3-z target) (luvcraft::vec3-z position)))
-         (tflat (max (sqrt (+ (* tdx tdx) (* tdz tdz))) 0.001)))
-    (luvcraft::make-camera-pose
-     position
-     (atan tdx tdz)
-     (atan tdy tflat)
-     luvcraft::+luvcraft-camera-focused-vertical-field-of-view+)))
+  (or (alexandria:when-let ((approval (embodied-agent-pending-approval gnome)))
+        (tool-approval-focus-camera-pose approval gnome session))
+      (let* ((camera (luvcraft:luvcraft-session-camera session))
+             (eye (luvcraft:camera-position camera))
+             (face (embodied-agent-face-position gnome))
+             (dx (- (luvcraft::vec3-x face) (luvcraft::vec3-x eye)))
+             (dz (- (luvcraft::vec3-z face) (luvcraft::vec3-z eye)))
+             (flat (max (sqrt (+ (* dx dx) (* dz dz))) 0.001))
+             (ux (/ dx flat)) (uz (/ dz flat))
+             (distance (embodied-agent-audience-distance gnome))
+             (position (luvcraft::make-vec3
+                        (- (luvcraft::vec3-x face) (* ux distance))
+                        (+ (luvcraft::vec3-y face) 0.10)
+                        (- (luvcraft::vec3-z face) (* uz distance))))
+             (target (embodied-agent-face-position gnome 0.02))
+             (tdx (- (luvcraft::vec3-x target) (luvcraft::vec3-x position)))
+             (tdy (- (luvcraft::vec3-y target) (luvcraft::vec3-y position)))
+             (tdz (- (luvcraft::vec3-z target) (luvcraft::vec3-z position)))
+             (tflat (max (sqrt (+ (* tdx tdx) (* tdz tdz))) 0.001)))
+        (luvcraft::make-camera-pose
+         position
+         (atan tdx tdz)
+         (atan tdy tflat)
+         luvcraft::+luvcraft-camera-focused-vertical-field-of-view+))))
 
 (defmethod luvcraft:luvcraft-focus-entered ((gnome embodied-agent) session)
   (ensure-gnome-dialogue gnome)
@@ -403,35 +408,49 @@ leave room above its hat for the bubbles."
     ((gnome embodied-agent) session canvas (event luv:canvas-key-press-event))
   (let ((key (luv:canvas-key-event-key-name event))
         (character (luv:canvas-key-event-character event))
+        (modifiers (luv:canvas-key-event-modifiers event))
+        (approval (embodied-agent-pending-approval gnome))
         (paste-p (and (eq (luv:canvas-key-event-key-name event) :v)
                       (intersection '(:super :control)
                                     (luv:canvas-key-event-modifiers event)))))
-    (case key
-      ((:escape :tab)
-       (luvcraft:unfocus-luvcraft-session session))
-      ((:return :keypad-enter)
-       (let ((prompt (string-trim " " (gnome-draft gnome))))
-         (setf (gnome-draft gnome) "")
-         (if (string= prompt "")
-             (luvcraft:unfocus-luvcraft-session session)
-             (handler-case (gnome-ask gnome prompt)
-               (error (condition)
-                 (gnome-say gnome (format nil "(~A)" condition)))))))
-      (:backspace
-       (let ((draft (gnome-draft gnome)))
-         (when (plusp (length draft))
-           (setf (gnome-draft gnome) (subseq draft 0 (1- (length draft)))))))
+    (cond
+      ((and approval (member :control modifiers) (eq key :y))
+       (approve-tool-approval approval))
+      ((and approval (member :control modifiers) (eq key :n))
+       (deny-tool-approval approval "The player declined this possible world."))
       (t
-       (cond
-         (paste-p
-          (alexandria:when-let ((text (luv:canvas-clipboard-text canvas)))
-            (setf (gnome-draft gnome)
-                  (concatenate 'string (gnome-draft gnome)
-                               (substitute #\Space #\Newline text)))))
-         ((and character (graphic-char-p character)
-               (< (length (gnome-draft gnome)) 400))
-          (setf (gnome-draft gnome)
-                (concatenate 'string (gnome-draft gnome) (string character)))))))
+       (case key
+         ((:escape :tab)
+          (luvcraft:unfocus-luvcraft-session session))
+         ((:return :keypad-enter)
+          (let ((prompt (string-trim " " (gnome-draft gnome))))
+            (setf (gnome-draft gnome) "")
+            (cond (approval
+                   (unless (string= prompt "")
+                     (steer-tool-approval approval prompt)))
+                  ((string= prompt "")
+                   (luvcraft:unfocus-luvcraft-session session))
+                  (t
+                   (handler-case (gnome-ask gnome prompt)
+                     (error (condition)
+                       (gnome-say gnome (format nil "(~A)" condition))))))))
+         (:backspace
+          (let ((draft (gnome-draft gnome)))
+            (when (plusp (length draft))
+              (setf (gnome-draft gnome)
+                    (subseq draft 0 (1- (length draft)))))))
+         (t
+          (cond
+            (paste-p
+             (alexandria:when-let ((text (luv:canvas-clipboard-text canvas)))
+               (setf (gnome-draft gnome)
+                     (concatenate 'string (gnome-draft gnome)
+                                  (substitute #\Space #\Newline text)))))
+            ((and character (graphic-char-p character)
+                  (< (length (gnome-draft gnome)) 400))
+             (setf (gnome-draft gnome)
+                   (concatenate 'string (gnome-draft gnome)
+                                (string character)))))))))
     (when (gnome-dialogue gnome)
       (repaint-gnome-dialogue gnome))
     t))
@@ -456,7 +475,7 @@ one back to describe-handle to read more.")
 
 (defparameter *gnome-tools*
   '(com-say com-where-am-i com-view-surroundings
-    com-move-to com-block-at com-place-block-at
+    com-move-to com-block-at com-place-block-at com-propose-block-box
     com-describe-handle com-eval))
 
 (defmethod ensure-embodied-agent-agent ((gnome gnome))
@@ -555,7 +574,12 @@ title or bubble shows only what its pane draws."))
          (said (gnome-said gnome))
          (said-age (/ (- (get-internal-real-time) (gnome-said-at gnome))
                       (float internal-time-units-per-second 1.0))))
-    (cond ((and focused-p (or (plusp (length draft)) (null said) (> said-age 20)))
+    (cond ((and focused-p (embodied-agent-pending-approval gnome)
+                (zerop (length draft)))
+           (list "proposal"
+                 "possible world · Ctrl-Y approve · Ctrl-N deny · type feedback + Enter"
+                 (make-rgb-color 0.45 0.95 1.0)))
+          ((and focused-p (or (plusp (length draft)) (null said) (> said-age 20)))
            (list "you" (concatenate 'string draft "_") *hud-text-ink*))
           ((and said (or focused-p (< said-age 20)))
            (list (embodied-agent-name gnome) said
@@ -1062,6 +1086,8 @@ title or bubble shows only what its pane draws."))
   agent)
 
 (defmethod luvcraft:release-luvcraft-overlay :after ((gnome embodied-agent))
+  (alexandria:when-let ((approval (embodied-agent-pending-approval gnome)))
+    (deny-tool-approval approval "The embodied agent left the world."))
   (setf *agents* (delete gnome *agents* :test #'eq))
   (when (and (gnome-agent gnome) (gnome-observer gnome))
     (remove-agent-observer (gnome-agent gnome) (gnome-observer gnome)))

@@ -242,9 +242,11 @@
                              (:file "agent")
                              (:file "tools")
                              (:file "commands")
+                             (:file "approval")
                              (:file "hud")
                              (:file "wall")
                              (:file "gnome")
+                             (:file "construction")
                              (:file "cat")
                              (:file "surroundings"))))
   :in-order-to ((test-op (test-op "luvcraft/agent/test"))))
@@ -256,7 +258,8 @@
   :components ((:module "luvcraft/agent/tests"
                 :serial t
                 :components ((:file "package")
-                             (:file "surroundings"))))
+                             (:file "surroundings")
+                             (:file "construction"))))
   :perform (test-op (operation component)
              (declare (ignore operation component))
              (unless (uiop:symbol-call '#:rove '#:run-suite

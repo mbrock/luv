@@ -30,6 +30,7 @@ command such as SAY can reach the agent's presence.")
 
 (defparameter *default-agent-tools*
   '(com-where-am-i com-move-to com-block-at com-place-block-at
+    com-propose-block-box
     com-describe-handle com-eval)
   "The commands an agent is handed by default.")
 

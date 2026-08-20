@@ -27,6 +27,8 @@
    ;; Tools
    #:command-tool #:make-command-tool #:command-tool-command
    #:command-tool-runs-on-canvas-p #:command-provider-output
+   #:tool-approval #:tool-approval-state #:tool-approval-note
+   #:approve-tool-approval #:deny-tool-approval #:steer-tool-approval
    ;; The transcript
    #:tool-call #:tool-call-command #:tool-call-tool #:tool-call-arguments
    #:tool-call-status #:tool-call-result #:tool-call-error #:tool-call-output
@@ -39,6 +41,7 @@
    ;; Commands
    #:luvcraft-agent #:com-where-am-i #:com-view-surroundings
    #:com-move-to #:com-place-block-at #:com-eval
+   #:com-propose-block-box
    #:com-describe-handle #:com-block-at
    ;; The HUD
    #:open-agent-hud #:close-agent-hud #:toggle-agent-hud
@@ -47,6 +50,7 @@
    #:ansi-view #:+ansi-view+
    ;; Embodied agents
    #:embodied-agent #:gnome #:cat
+   #:embodied-agent-pending-approval
    #:*agents* #:agents-in-session #:find-agent #:spawn-agent
    #:find-cat #:spawn-cat
    #:gnome-say #:gnome-agent #:com-say

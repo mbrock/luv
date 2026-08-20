@@ -234,6 +234,43 @@ version while the canvas never is.  A later duration bound can return a
 handle to the same action without changing either the command or movement
 protocol.
 
+* A proposal is a temporary possible world
+:PROPERTIES:
+:ID: Y7X7WK
+:END:
+
+A tool approval should show its consequence, not merely ask whether a verb may
+run.  Construction makes that unusually literal.  =tool-approval= retains an
+inert semantic payload, its =:proposed= state, and a private decision mailbox;
+the provider's turn may wait in =settle-command-result= while the canvas keeps
+rendering.  =validate-tool-approval=, =commit-tool-approval= and
+=detach-tool-approval= are the open CLOS protocol.  Approval validates the
+frozen expectations again and commits, denial drops the temporary presence,
+and typed feedback finishes as =:changes-requested= so the model can propose a
+different world.  There is no retained arbitrary thunk to become dangerous or
+opaque.
+
+The construction specialization carries a =block-change-set=: dense integer
+coordinate and value columns at the semantic boundary, plus a small lookup for
+counterfactual neighbour queries.  Its scene overlay uses the ordinary block
+mesh vertex product, atlas, material shader, depth and lighting vocabulary.
+Only the emission lane is raised, enough for the post stack to give the
+candidate a soft possible-world glow.  In focused conversation the same
+approval supplies a slowly orbiting camera pose, and the dialogue line offers
+=Ctrl-Y= approve, =Ctrl-N= deny, or prose plus Enter to steer.  What the player
+judges is therefore recognizably the finished result, not a wireframe bill of
+materials.
+
+The first =Propose Block Box= primitive is intentionally additive and capped
+at 512 resident cells.  It refuses to replace an occupied cell, freezes air as
+the expected value, and rechecks every site immediately before one
+=with-world-change-transaction= commit.  Additions can be drawn exactly over
+the current scene.  Removal and replacement previews need the next rendering
+step: candidate chunk products substituted for the live products in the
+affected window, so the possible world can hide geometry as truthfully as it
+adds it.  That extension changes the preview realization, not the approval
+protocol or change-set object.
+
 * A glance is an image and the small truth that frames it
 :PROPERTIES:
 :ID: IFEAQ6
@@ -328,6 +365,30 @@ beside the compact textual census.  Stable body yaw is shared by movement,
 =where-am-i=, capture, and the gnome and cat fields.  Dense census tests keep
 air separate from unavailable space; the shader validator covers both
 oriented figures.
+
+* DONE Give construction tools a visible possible world
+:PROPERTIES:
+:ID: YXUKSU
+:END:
+
+/Intent./ Let an embodied agent propose a voxel change set which remains inert
+while the player sees the actual candidate materials in the world, flies
+around them in focus chat, and approves, denies, or steers in ordinary words.
+
+/Evidence./ =Propose Block Box= installs a =construction-approval= and a
+GPU-owned =construction-preview-overlay=.  The focused tests freeze and stale
+check four cells, verify that one proposed block is the ordinary 36-vertex
+block mesh with the proposal emission lane, prove a finished approval does not
+wait, and find the command in the gnome toolbox.  On 2026-08-21 a live
+six-block stone-brick possible world rendered beside the gnome while the
+dialogue showed all three decisions and the focus camera orbited it; denial
+removed the GPU buffer without editing any cell.
+
+/Done when./ A proposal never edits terrain before approval; its candidate is
+visually legible as the after-world; focus supplies decision affordances and a
+cinematic view; approve revalidates and commits once; deny and steering release
+the preview and wake the waiting tool call; and the behavior has focused tests
+plus a live capture.
 
 * DONE Wire three commands into an agent and draw their cassettes
 :PROPERTIES:
