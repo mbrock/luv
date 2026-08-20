@@ -57,63 +57,6 @@ style throughout.  Returns PATHNAME and the frame count."
                (write-frame (render-pixels renderer)))))
       (destroy-renderer renderer))))
 
-(defun film-clay-tour (pathname
-                       &key (seconds 21) (frame-rate 30)
-                            (width 960) (height 540)
-                            (stops '((0.0 0.02) (0.12 0.02) (0.12 0.10)
-                                     (0.06 0.20) (0.0 0.25) (0.0 0.12)
-                                     (0.0 0.05)))
-                            (light :golden)
-                            (effects (default-renderer-effects))
-                            (scene (make-studio-scene))
-                            (center-x 16.0) (center-y 14.0)
-                            (center-z 2.5)
-                            (radius 16.0) (camera-height 9.5)
-                            (field-of-view 0.85))
-  "Film the studio orbit in the :CLAY style, stepping width and rounding.
-
-Each of STOPS is a (WIDTH ROUND) pair holding for an equal arc of one
-revolution: sharp voxels, then planed facets, then the facets rounding,
-then pure wide fillets, then back toward crisp.  The star alphabet never
-changes; only its codomain's two knobs turn, and every flat face stays a
-flat face throughout, which is the film's whole argument.  Every step
-honestly invalidates the temporal history, exactly as the style tour's
-cuts do.  Returns PATHNAME and the frame count."
-  (let* ((*light* light)
-         (frame-count (max 1 (round (* seconds frame-rate))))
-         (renderer (make-renderer :scene scene
-                                  :camera (studio-camera
-                                           (+ center-x radius) center-y
-                                           camera-height
-                                           :look-x center-x :look-y center-y
-                                           :look-z center-z
-                                           :field-of-view field-of-view)
-                                  :width width :height height
-                                  :style :clay
-                                  :pipeline-styles '(:clay)
-                                  :effects effects)))
-    (unwind-protect
-         (with-video-encoder (write-frame pathname width height
-                              :frame-rate frame-rate
-                              :format (renderer-color-format renderer))
-           (dotimes (frame frame-count)
-             (let* ((progress (/ (float frame 1.0) frame-count))
-                    (angle (* 2.0 pi progress))
-                    (stop (nth (min (1- (length stops))
-                                    (floor (* progress (length stops))))
-                               stops))
-                    (*clay-width* (first stop))
-                    (*clay-round* (second stop)))
-               (setf (renderer-camera renderer)
-                     (studio-camera (+ center-x (* radius (cos angle)))
-                                    (+ center-y (* radius (sin angle)))
-                                    camera-height
-                                    :look-x center-x :look-y center-y
-                                    :look-z center-z
-                                    :field-of-view field-of-view))
-               (write-frame (render-pixels renderer)))))
-      (destroy-renderer renderer))))
-
 (defun catmull-rom-sample (points s)
   "Sample the Catmull-Rom spline through POINTS at S in [0,1].
 

@@ -32,9 +32,6 @@
            #:temporal-ink-fragment-shader
            #:stock-fragment-shader
            #:temporal-stock-fragment-shader
-           #:clay-vertex-shader
-           #:clay-fragment-shader
-           #:temporal-clay-fragment-shader
            #:bevel-vertex-shader
            #:chamfer-vertex-shader
            #:sky-vertex-shader
@@ -116,8 +113,6 @@ of packed LUFT sites, drawn by vertex shaders pulling sites.")
            #:*chamfer-width*
            #:*arris-softness*
            #:*field-vertical-radius*
-           #:*clay-width*
-           #:*clay-round*
            #:light
            #:light-name
            #:define-light
@@ -203,7 +198,6 @@ of packed LUFT sites, drawn by vertex shaders pulling sites.")
            #:film-studio-orbit
            #:film-atelier-flight
            #:film-atelier-construction
-           #:film-clay-tour
            #:viewer
            #:main
            #:start-viewer

@@ -332,20 +332,7 @@ everything it looks up in the lattice."
                             '(if present-p (if facing-p 1.0 0.0) 0.0)))
                 (period-x (swizzle domain-vector :x))
                 (period-y (swizzle domain-vector :y))
-                ;; The in-plane band the grid reserves.  The clay rule
-                ;; shapes creases as wide as its width and rounding
-                ;; together, so its rings must reach that far even when
-                ;; the facet width alone is zero.
-                (radius ,(if (eq rule :clay)
-                             '(min 0.45
-                               (+ (swizzle domain-vector :z)
-                                  (clamp (swizzle domain-vector :w) 0.0
-                                         (max 0.001
-                                              (- 0.25
-                                                 (* 0.35
-                                                    (swizzle domain-vector
-                                                             :z)))))))
-                             '(swizzle domain-vector :z)))
+                (radius (swizzle domain-vector :z))
                 ;; The quad's diagonal points at the nearest corner of the
                 ;; face: rotate the corner loop by one when it does not, so
                 ;; that (p q r)(p r s) splits a b c d along b-d, not a-c.
@@ -407,28 +394,6 @@ everything it looks up in the lattice."
                 (t* ,(grid-parameter-form 'grid-j rings))
                 (flat (+ anchor (* edge-a s) (* edge-b t*)))
                 ,@(ecase rule
-                    (:clay
-                     ;; The clay field: every point, boundary or inner,
-                     ;; takes two Newton steps onto the zero set of the
-                     ;; star-carved field (luft/render/clay.lisp), the
-                     ;; gradient read by tetrahedron.  The rounding obeys
-                     ;; the same star-visibility bound as the fragment
-                     ;; stage's, so both stages walk one field.
-                     `((clay-width (swizzle domain-vector :z))
-                       (clay-round (clamp (swizzle domain-vector :w) 0.0
-                                          (max 0.001
-                                               (- 0.25
-                                                  (* 0.35 clay-width)))))
-                       ,@(clay-newton-bindings 'clay-a 'flat
-                                               'clay-width 'clay-round)
-                       ,@(clay-newton-bindings 'clay-b 'clay-a-point
-                                               'clay-width 'clay-round)
-                       (shaped clay-b-point)
-                       (shaped-normal (if (> (dot clay-b-gradient
-                                                  clay-b-gradient)
-                                             0.0000001)
-                                          (normalize clay-b-gradient)
-                                          normal))))
                     (:field
                      ;; The level set: every point, boundary or inner, takes
                      ;; three Newton steps onto the half-level set of the

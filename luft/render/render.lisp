@@ -870,20 +870,6 @@ the light as a band rather than a hairline, and still far short of the old
 
 Wider than the horizontal radius, it rounds the edges of floors and roofs
 more than the edges of walls, the way weather wears a top.")
-(defparameter *clay-width* 0.0
-  "The :CLAY style's crease facet width in cells, like *CHAMFER-WIDTH*.
-
-Zero planes nothing and leaves the rounding to *CLAY-ROUND* alone; wider
-values cut the same 45-degree facets the chamfer does, in field form.
-Flat continuations are box faces untouched by either knob.")
-(defparameter *clay-round* 0.22
-  "The :CLAY style's smooth-CSG reach in cells: how far every junction of
-the field's features is rounded.
-
-Capped in the shader at 0.25 - 0.35 * *CLAY-WIDTH*, the reach at which
-every term is either shared with, or exactly inert toward, the vertex
-cube next door.  Both knobs are frame-block lanes, so a film can turn
-them mid-reel and the temporal history honestly rejects each step.")
 
 ;;; ------------------------------------------------------------------------
 ;;; Lights: the hour a picture is taken at
@@ -1469,7 +1455,7 @@ work is in flight because the GPU abstraction defers their native teardown."
 ;;; shader invocations per site.
 
 (defparameter *surface-styles*
-  '(:flat :bevel :chamfer :paper :stock :field :soft :ink :clay)
+  '(:flat :bevel :chamfer :paper :stock :field :soft :ink)
   "Surface styles Luft can draw, in the order a menu would list them.")
 
 (defun default-renderer-effects ()
@@ -1522,8 +1508,7 @@ may draw it first and the world still covers it."
   "Create the fragment modules RENDERER's styles and effects share.
 
 The values are the surface, chamfer, paper, sky, lens, temporal, present,
-field, ink, stock, and clay fragment modules, each NIL when nothing wants
-it."
+field, ink, and stock fragment modules, each NIL when nothing wants it."
   (let ((styles (renderer-pipeline-styles renderer))
         (temporal-p (renderer-effect-p renderer :taa)))
     (values
@@ -1580,18 +1565,12 @@ it."
                                "luft stock fragment"
                                (if temporal-p
                                    (shaders:temporal-stock-fragment-shader)
-                                   (shaders:stock-fragment-shader))))
-     (when (member :clay styles)
-       (create-renderer-module renderer :luft/shader/clay-fragment
-                               "luft clay fragment"
-                               (if temporal-p
-                                   (shaders:temporal-clay-fragment-shader)
-                                   (shaders:clay-fragment-shader)))))))
+                                   (shaders:stock-fragment-shader)))))))
 
 (defun create-renderer-pipelines (renderer)
   "Create the vertex-pulling pipelines RENDERER's styles and effects need."
   (let ((styles (renderer-pipeline-styles renderer))
-        surface bevel chamfer stock field clay screen)
+        surface bevel chamfer stock field screen)
     (when (intersection styles '(:flat :soft :ink))
       (setf surface (create-renderer-module
                      renderer :luft/shader/surface-vertex
@@ -1602,11 +1581,6 @@ it."
                    renderer :luft/shader/bevel-vertex
                    "luft bevel vertex"
                    (shaders:bevel-vertex-shader))))
-    (when (member :clay styles)
-      (setf clay (create-renderer-module
-                  renderer :luft/shader/clay-vertex
-                  "luft clay vertex"
-                  (shaders:clay-vertex-shader))))
     (when (intersection styles '(:chamfer :paper))
       (setf chamfer (create-renderer-module
                      renderer :luft/shader/chamfer-vertex
@@ -1634,7 +1608,7 @@ it."
     (multiple-value-bind (fragment chamfer-fragment paper-fragment
                           sky-fragment lens-fragment temporal-fragment
                           present-fragment field-fragment ink-fragment
-                          stock-fragment clay-fragment)
+                          stock-fragment)
         (create-renderer-fragment-modules renderer)
       (flet ((pipeline (name zone label vertex-module fragment-module
                         &key (layout (renderer-layout renderer))
@@ -1678,11 +1652,6 @@ it."
         (when (member :ink styles)
           (pipeline :ink :luft/pipeline/ink "luft ink pipeline"
                     surface ink-fragment))
-        ;; Clay: the grid projected onto the rounded-cell distance field,
-        ;; under its light, radius and melt as frame-block knobs.
-        (when (member :clay styles)
-          (pipeline :clay :luft/pipeline/clay "luft clay pipeline"
-                    clay clay-fragment))
         (when (renderer-effect-p renderer :sky)
           (pipeline :sky :luft/pipeline/sky "luft sky pipeline"
                     screen sky-fragment
@@ -2076,16 +2045,14 @@ Return the number of bytes and write calls issued."
            (upload-scene renderer scene))))))
 
 (defun renderer-surface-width (renderer)
-  (cond ((member (renderer-style renderer) '(:chamfer :paper :stock))
-         *chamfer-width*)
-        ((eq (renderer-style renderer) :clay) *clay-width*)
-        (t *bevel-radius*)))
+  (if (member (renderer-style renderer) '(:chamfer :paper :stock))
+      *chamfer-width*
+      *bevel-radius*))
 
 (defun renderer-surface-detail (renderer)
-  (cond ((member (renderer-style renderer) '(:field :soft :ink))
-         (or *field-vertical-radius* *bevel-radius*))
-        ((eq (renderer-style renderer) :clay) *clay-round*)
-        (t *arris-softness*)))
+  (if (member (renderer-style renderer) '(:field :soft :ink))
+      (or *field-vertical-radius* *bevel-radius*)
+      *arris-softness*))
 
 (defun temporal-history-key (renderer scene frame-data stock-data)
   "The rendered state across which temporal history is semantically reusable.
