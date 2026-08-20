@@ -321,7 +321,7 @@ async function start() {
   // The body retains a world heading while the camera orbits it, matching the
   // native third-person glance instead of turning to face the viewer.
   device.queue.writeBuffer(facingBuffer, 0, new Float32Array([0, 0, 1, 0]));
-  catalog = await fetch("/bodies.json").then(response => response.json());
+  catalog = await fetch("/bodies/bodies.json").then(response => response.json());
   buildPicker();
   resizeCanvas();
   await selectBody(catalog.bodies[0]);

@@ -116,14 +116,15 @@
   :components ((:file "luvcraft/agent/shaders")
                (:file "luvcraft/agent/cat-shaders")))
 
-(defsystem "luvcraft/body-gallery"
-  :description "Compile the analytic agent bodies to WGSL and serve their WebGPU gallery."
+(defsystem "luvcraft/web"
+  :description "The luvcraft web application and its WebGPU agent-body page."
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on ("luvcraft/agent-bodies" "luv/wgsl" "cl-json" "uiop"
                (:require #:sb-bsd-sockets))
   :serial t
-  :components ((:file "luvcraft/body-gallery-package")
+  :components ((:file "luvcraft/web-package")
+               (:file "luvcraft/web-server")
                (:file "luvcraft/body-gallery")
                (:static-file "luvcraft/web/body-gallery.html")
                (:static-file "luvcraft/web/body-gallery.css")
@@ -133,7 +134,7 @@
   :description "One-shot command-line tools for luvcraft development."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luvcraft/core" "luvcraft/body-gallery" "mqtt/net" "uiop")
+  :depends-on ("luvcraft/core" "luvcraft/web" "mqtt/net" "uiop")
   :build-operation "program-op"
   :build-pathname "build/luv"
   :entry-point "luvcraft.tools:main"
@@ -145,7 +146,7 @@
                  (:file "runner")
                  (:file "block-world")
                  (:file "gazetteer")
-                 (:file "body-gallery")
+                 (:file "web")
                  (:file "lobby")))))
 
 (defsystem "luvcraft/mcclim"
@@ -295,7 +296,7 @@
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on ("luvcraft/core" "luvcraft/light-reference"
-               "luvcraft/body-gallery" "cl-dejavu" "rove")
+               "luvcraft/web" "cl-dejavu" "rove")
   :serial t
   :components ((:file "hal/shader/tests")
                (:file "luvcraft/world-tests")

@@ -12,7 +12,7 @@
   (format stream "             [--day-start R] [--day-step R] [--difference-scale R]~%")
   (format stream "             [--shadow-only 1]~%")
   (format stream "  eval FORM [--package PACKAGE]~%")
-  (format stream "  body-gallery [--host HOST] [--port PORT]~%")
+  (format stream "  web [--host HOST] [--port PORT]~%")
   (format stream "  lobby get KEY | put KEY [VALUE] | rm KEY | ls | host~%")
   (format stream "        (the tailnet lobby's value store; put without VALUE reads stdin)~%")
   (format stream "  help~%"))
@@ -130,8 +130,8 @@
      (command-block-world arguments))
     ((string= command "gazetteer")
      (command-gazetteer arguments))
-    ((string= command "body-gallery")
-     (command-body-gallery arguments))
+    ((string= command "web")
+     (command-web arguments))
     ((string= command "eval")
      (command-eval arguments))
     ((string= command "lobby")
@@ -154,7 +154,7 @@
 (defun main (&optional (arguments (uiop:command-line-arguments)))
   (handler-case
       (progn
-        (if (string= (or (first arguments) "") "body-gallery")
+        (if (string= (or (first arguments) "") "web")
             (dispatch-main arguments)
             (luv:call-with-sdl-main-thread
              (lambda ()

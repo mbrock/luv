@@ -6,7 +6,7 @@
 ;;;; billboard rasterizes.  Everything else -- WGSL and knob metadata -- is
 ;;;; derived from the same Lisp objects that the native game uses.
 
-(in-package #:luvcraft.body-gallery)
+(in-package #:luvcraft.web)
 
 (defclass web-body-type ()
   ((id :initarg :id :reader web-body-id)
@@ -91,7 +91,7 @@
       ("unit" . ,(luvcraft:knob-unit-label knob))
       ("stages" . ,(knob-stages knob bundle)))))
 
-(defun bundle-json-object (bundle)
+(defun bundle-json-object (bundle base-path)
   (let* ((body (body-gallery-bundle-body bundle))
          (id (web-body-id body))
          (knobs (luvcraft:knobs-in-group (web-body-knob-group body))))
@@ -100,59 +100,24 @@
       ("centerHeight" . ,(web-body-center-height body))
       ("radius" . ,(web-body-radius body))
       ("statureKnob" . ,(format nil "~A-stature" id))
-      ("vertexUrl" . ,(format nil "/body/~A/vertex.wgsl" id))
-      ("fragmentUrl" . ,(format nil "/body/~A/fragment.wgsl" id))
+      ("vertexUrl" . ,(format nil "~A/body/~A/vertex.wgsl" base-path id))
+      ("fragmentUrl" . ,(format nil "~A/body/~A/fragment.wgsl" base-path id))
       ("knobs" . ,(mapcar
                     (lambda (knob) (knob-json-object knob bundle))
                     knobs)))))
 
-(defun body-gallery-json (&optional (bundles (compile-body-gallery)))
+(defun body-gallery-json (&optional (bundles (compile-body-gallery))
+                           (base-path "/bodies"))
   "Encode the catalog and actual native knob metadata for JavaScript."
   (cl-json:encode-json-alist-to-string
-   `(("bodies" . ,(mapcar #'bundle-json-object bundles)))))
+   `(("bodies" . ,(mapcar (lambda (bundle)
+                             (bundle-json-object bundle base-path))
+                           bundles)))))
 
 (defun gallery-asset (name)
   (uiop:read-file-string
    (asdf:system-relative-pathname
-    "luvcraft/body-gallery" (format nil "luvcraft/web/~A" name))))
-
-(defun response-octet-length (string)
-  (length (sb-ext:string-to-octets string :external-format :utf-8)))
-
-(defun write-http-response (stream status content-type body)
-  (format stream "HTTP/1.1 ~A~C~C" status #\Return #\Linefeed)
-  (format stream "Content-Type: ~A~C~C" content-type #\Return #\Linefeed)
-  (format stream "Content-Length: ~D~C~C"
-          (response-octet-length body) #\Return #\Linefeed)
-  (format stream "Cache-Control: no-store~C~C" #\Return #\Linefeed)
-  (format stream "Connection: close~C~C~C~C" #\Return #\Linefeed
-          #\Return #\Linefeed)
-  (write-string body stream)
-  (finish-output stream))
-
-(defun bounded-read-line (stream limit)
-  (let ((line (read-line stream nil nil)))
-    (when (and line (> (length line) limit))
-      (error "HTTP line exceeds ~D characters." limit))
-    line))
-
-(defun discard-http-headers (stream)
-  (loop repeat 64
-        for line = (bounded-read-line stream 8192)
-        until (or (null line) (string= line "") (string= line (string #\Return)))
-        finally (unless (or (null line) (string= line "")
-                            (string= line (string #\Return)))
-                  (error "Too many HTTP headers."))))
-
-(defun request-path (request-line)
-  (let ((first-space (and request-line (position #\Space request-line)))
-        (second-space nil))
-    (when first-space
-      (setf second-space (position #\Space request-line :start (1+ first-space))))
-    (unless (and first-space second-space
-                 (string= "GET" request-line :end2 first-space))
-      (error "Only a well-formed GET request is supported."))
-    (subseq request-line (1+ first-space) second-space)))
+    "luvcraft/web" (format nil "luvcraft/web/~A" name))))
 
 (defun find-bundle (id bundles)
   (find id bundles :test #'string=
@@ -172,69 +137,46 @@
              (wgsl:wgsl-document-source
               (body-gallery-bundle-fragment bundle)))))))
 
-(defun serve-gallery-request (client bundles catalog-json)
-  (let ((stream (sb-bsd-sockets:socket-make-stream
-                 client :input t :output t :element-type 'character
-                 :buffering :full :external-format :utf-8)))
-    (unwind-protect
-         (handler-case
-             (let* ((line (bounded-read-line stream 8192))
-                    (path (request-path line)))
-               (discard-http-headers stream)
-               (format t "GET ~A~%" path)
-               (cond ((or (string= path "/") (string= path "/index.html"))
-                      (write-http-response stream "200 OK" "text/html; charset=utf-8"
-                                           (gallery-asset "body-gallery.html")))
-                     ((string= path "/gallery.js")
-                      (write-http-response stream "200 OK" "text/javascript; charset=utf-8"
-                                           (gallery-asset "body-gallery.js")))
-                     ((string= path "/gallery.css")
-                      (write-http-response stream "200 OK" "text/css; charset=utf-8"
-                                           (gallery-asset "body-gallery.css")))
-                     ((string= path "/bodies.json")
-                      (write-http-response stream "200 OK" "application/json; charset=utf-8"
-                                           catalog-json))
-                     ((string= path "/healthz")
-                      (write-http-response stream "200 OK" "text/plain; charset=utf-8"
-                                           (format nil "ok~%")))
-                     (t
-                      (let ((source (body-shader-response path bundles)))
-                        (if source
-                            (write-http-response stream "200 OK"
-                                                 "text/wgsl; charset=utf-8" source)
-                            (write-http-response stream "404 Not Found"
-                                                 "text/plain; charset=utf-8"
-                                                 (format nil "not found~%")))))))
-           (error (condition)
-             (format *error-output* "body gallery request failed: ~A~%" condition)
-             (ignore-errors
-              (write-http-response stream "400 Bad Request"
-                                   "text/plain; charset=utf-8"
-                                   (format nil "bad request~%")))))
-      (ignore-errors (close stream))
-      (ignore-errors (sb-bsd-sockets:socket-close client)))))
+(defclass body-gallery-page (web-page)
+  ((bundles :initarg :bundles :reader body-gallery-page-bundles)
+   (catalog-json :initarg :catalog-json :reader body-gallery-page-catalog-json)))
 
-(defun ipv4-address (host)
-  (sb-bsd-sockets:host-ent-address
-   (sb-bsd-sockets:get-host-by-name host)))
+(defun make-body-gallery-page (&optional (bundles (compile-body-gallery)))
+  (make-instance 'body-gallery-page
+                 :path "/bodies"
+                 :label "Agent bodies"
+                 :description "Gnomes and cats, compiled from luv shaders to live WebGPU."
+                 :bundles bundles
+                 :catalog-json (body-gallery-json bundles)))
 
-(defun serve-body-gallery (&key (host "127.0.0.1") (port 8765))
-  "Compile the body catalog once, then serve its WebGPU gallery until stopped."
-  (let* ((bundles (compile-body-gallery))
-         (catalog-json (body-gallery-json bundles))
-         (socket (make-instance 'sb-bsd-sockets:inet-socket
-                                :type :stream :protocol :tcp)))
-    (unwind-protect
-         (progn
-           (setf (sb-bsd-sockets:sockopt-reuse-address socket) t)
-           (sb-bsd-sockets:socket-bind socket (ipv4-address host) port)
-           (sb-bsd-sockets:socket-listen socket 16)
-           (format t "luvcraft body gallery: http://~A:~D/~%" host port)
-           (finish-output)
-           (handler-case
-               (loop
-                 for client = (sb-bsd-sockets:socket-accept socket)
-                 do (serve-gallery-request client bundles catalog-json))
-             (sb-sys:interactive-interrupt ()
-               (format t "Stopping luvcraft body gallery.~%"))))
-      (ignore-errors (sb-bsd-sockets:socket-close socket)))))
+(defmethod respond-to-web-request ((page body-gallery-page) path)
+  (cond ((or (string= path "/") (string= path "/index.html"))
+         (ok-response "text/html; charset=utf-8"
+                      (gallery-asset "body-gallery.html")))
+        ((string= path "/gallery.js")
+         (ok-response "text/javascript; charset=utf-8"
+                      (gallery-asset "body-gallery.js")))
+        ((string= path "/gallery.css")
+         (ok-response "text/css; charset=utf-8"
+                      (gallery-asset "body-gallery.css")))
+        ((string= path "/bodies.json")
+         (ok-response "application/json; charset=utf-8"
+                      (body-gallery-page-catalog-json page)))
+        (t
+         (let ((source (body-shader-response
+                        path (body-gallery-page-bundles page))))
+           (if source
+               (ok-response "text/wgsl; charset=utf-8" source)
+               (call-next-method))))))
+
+(defun make-luvcraft-web-application (&key bundles)
+  "Build the luvcraft web application and its currently installed pages."
+  (make-web-application
+   (if bundles
+       (make-body-gallery-page bundles)
+       (make-body-gallery-page))))
+
+(defun serve-luvcraft-web (&key (host "127.0.0.1") (port 8765))
+  "Compile the web-facing artifacts once, then serve luvcraft until stopped."
+  (serve-web-application (make-luvcraft-web-application)
+                         :host host :port port))

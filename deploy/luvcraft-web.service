@@ -1,0 +1,21 @@
+[Unit]
+Description=Luvcraft web server
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=mbrock
+Group=mbrock
+WorkingDirectory=/srv/luv
+Environment=HOME=/home/mbrock
+ExecStart=/nix/var/nix/profiles/default/bin/nix develop --no-write-lock-file -c ./scripts/luv web --host 127.0.0.1 --port 8765
+Restart=on-failure
+RestartSec=3
+KillSignal=SIGINT
+TimeoutStopSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,12 @@
+luv.swa.sh {
+	redir /video /video/
+	handle_path /video/* {
+		root * /var/www/luv
+		@downloads path /dl/*
+		header @downloads Content-Disposition attachment
+		file_server browse
+	}
+	handle {
+		reverse_proxy 127.0.0.1:8765
+	}
+}
