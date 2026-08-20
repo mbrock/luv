@@ -330,7 +330,6 @@
               env.ffmpeg
               env.ffmpeg.dev
               env.pkgs.go
-              env.pkgs.git-annex
               env.mupdf
               env.libghosttyVt
               env.pkgs.libffi
@@ -422,6 +421,13 @@
           };
         in {
           default = env.pkgs.mkShell shellEnvironment;
+          # Showcase publication alone needs git-annex.  It brings GHC and
+          # its closure, so keep ordinary Lisp and capture development lean.
+          # `scripts/showcase` enters this shell on Chapel and SWA itself.
+          # Enter with `nix develop .#annex` for direct annex work.
+          annex = env.pkgs.mkShell (shellEnvironment // {
+            packages = shellEnvironment.packages ++ [ env.pkgs.git-annex ];
+          });
           # SDL_mixer is not used by luvcraft's audio path, and its Darwin
           # build need not hold up the ordinary development shell.  Keep it
           # available for experiments without making it a default dependency.

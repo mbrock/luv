@@ -102,7 +102,7 @@ if [ ! -d "$media_checkout/.git" ]; then
   fi
 fi
 echo "showcase: resolving the pinned git-annex"
-annex_bin=$(nix develop --verbose -L "$source_checkout" --no-write-lock-file \
+annex_bin=$(nix develop --verbose -L "$source_checkout#annex" --no-write-lock-file \
   -c sh -c 'dirname "$(command -v git-annex)"')
 PATH=$annex_bin:$PATH
 export PATH
@@ -156,7 +156,7 @@ if [ ! -d "$media_checkout/.git" ]; then
     "$repository" "$media_checkout"
 fi
 echo "showcase: resolving the pinned git-annex"
-annex_bin=$(nix develop --verbose -L "$source_checkout" --no-write-lock-file \
+annex_bin=$(nix develop --verbose -L "$source_checkout#annex" --no-write-lock-file \
   -c sh -c 'dirname "$(command -v git-annex)"')
 PATH=$annex_bin:$PATH
 export PATH
@@ -191,7 +191,7 @@ test -d "$source_checkout/.git" || { echo "showcase: run bootstrap first" >&2; e
 test -d "$media_checkout/.git" || { echo "showcase: run bootstrap first" >&2; exit 1; }
 
 echo "showcase: resolving the pinned git-annex"
-annex_bin=$(nix develop --verbose -L "$source_checkout" --no-write-lock-file \
+annex_bin=$(nix develop --verbose -L "$source_checkout#annex" --no-write-lock-file \
   -c sh -c 'dirname "$(command -v git-annex)"')
 PATH=$annex_bin:$PATH
 export PATH
@@ -254,7 +254,7 @@ test -d "$source_checkout/.git" || { echo "showcase: run bootstrap first" >&2; e
 test -d "$media_checkout/.git" || { echo "showcase: run bootstrap first" >&2; exit 1; }
 
 echo "showcase: resolving the pinned git-annex"
-annex_bin=$(nix develop --verbose -L "$source_checkout" --no-write-lock-file \
+annex_bin=$(nix develop --verbose -L "$source_checkout#annex" --no-write-lock-file \
   -c sh -c 'dirname "$(command -v git-annex)"')
 PATH=$annex_bin:$PATH
 export PATH

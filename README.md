@@ -257,6 +257,15 @@ its viewer is slow to build; enter the optional shell when profiling:
 nix develop .#tracy -c make tracy-streaming
 ```
 
+The reproducible showcase stores its rendered images and video as annexed
+media.  Git-annex (and its GHC closure) stays out of ordinary development;
+`scripts/showcase` selects the dedicated shell on its two publishing hosts.
+For direct media-repository maintenance, enter it explicitly:
+
+```sh
+nix develop .#annex
+```
+
 And this regenerates the luvcraft and McCLIM images from the real renderers:
 
 ```sh
