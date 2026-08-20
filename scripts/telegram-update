@@ -1,7 +1,9 @@
 #!/bin/sh
-# Toss one progress note into the luv Telegram workshop chat.
+# Toss one progress note or artifact into the luv Telegram workshop chat.
 #
 #   scripts/telegram-update "The movement action now reaches its first cell."
+#   scripts/telegram-update --photo build/frame.png "Fresh from the live game."
+#   scripts/telegram-update --video build/walk.mp4 "The cat takes the scenic route."
 #
 # LUV_TELEGRAM_UPDATE_CHAT may name another dialog.  Authorization
 # comes from the same durable session and credentials as scripts/telegram.
@@ -9,15 +11,32 @@
 set -eu
 
 if [ "$#" -eq 0 ]; then
-  echo "usage: scripts/telegram-update TEXT..." >&2
+  echo "usage: scripts/telegram-update [--photo FILE | --video FILE] [TEXT...]" >&2
   exit 2
 fi
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
+LUV_TELEGRAM_UPDATE_KIND=text
+LUV_TELEGRAM_UPDATE_MEDIA=
+case $1 in
+  --photo|--video)
+    LUV_TELEGRAM_UPDATE_KIND=${1#--}
+    shift
+    if [ "$#" -eq 0 ] || [ ! -f "$1" ]; then
+      echo "telegram-update: $LUV_TELEGRAM_UPDATE_KIND file not found: ${1:-}" >&2
+      exit 2
+    fi
+    media_dir=$(CDPATH= cd -- "$(dirname -- "$1")" && pwd)
+    LUV_TELEGRAM_UPDATE_MEDIA=$media_dir/$(basename -- "$1")
+    shift
+    ;;
+esac
+
 LUV_TELEGRAM_UPDATE=$*
 LUV_TELEGRAM_UPDATE_CHAT=${LUV_TELEGRAM_UPDATE_CHAT:-Minecraft 100.0}
 export LUV_TELEGRAM_UPDATE LUV_TELEGRAM_UPDATE_CHAT
+export LUV_TELEGRAM_UPDATE_KIND LUV_TELEGRAM_UPDATE_MEDIA
 
 exec "$project_root/scripts/telegram" \
   '(handler-bind ((warning (function muffle-warning)))
@@ -33,7 +52,31 @@ exec "$project_root/scripts/telegram" \
             (let ((peer (telegram.chat:find-roster-peer roster title)))
               (unless peer
                 (error "Telegram dialog ~S was not found" title))
-              (telegram.chat:send-chat-message
-               roster peer (uiop:getenv "LUV_TELEGRAM_UPDATE")
-               :connection connection)))
+              (labels ((read-bytes (path)
+                         (with-open-file
+                             (stream path :element-type (quote (unsigned-byte 8)))
+                           (let ((bytes
+                                   (make-array
+                                    (file-length stream)
+                                    :element-type (quote (unsigned-byte 8)))))
+                             (read-sequence bytes stream)
+                             bytes))))
+                (let ((text (uiop:getenv "LUV_TELEGRAM_UPDATE"))
+                      (kind (uiop:getenv "LUV_TELEGRAM_UPDATE_KIND"))
+                      (path (uiop:getenv "LUV_TELEGRAM_UPDATE_MEDIA")))
+                  (cond
+                    ((string= kind "text")
+                     (telegram.chat:send-chat-message
+                      roster peer text :connection connection))
+                    ((string= kind "photo")
+                     (telegram.chat:send-chat-photo
+                      roster peer (read-bytes path)
+                      :caption text :name (file-namestring path)
+                      :connection connection))
+                    ((string= kind "video")
+                     (telegram.chat:send-chat-video
+                      roster peer (read-bytes path)
+                      :caption text :name (file-namestring path)
+                      :connection connection))
+                    (t (error "Unknown Telegram update kind ~S" kind)))))))
        (telegram.client:disconnect connection)))'

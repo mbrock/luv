@@ -23,8 +23,9 @@
 FUNCTION receives one argument, a writer to call with each frame's packed
 pixel bytes in FORMAT at WIDTH by HEIGHT.  Frames become an H.264 MP4 at
 FRAME-RATE via an ffmpeg subprocess; CONSTANT-RATE-FACTOR is x264's quality
-knob (lower is better, 18 is visually lossless).  Returns PATHNAME and the
-number of frames written."
+knob (lower is better, 18 is visually lossless).  An odd source dimension is
+padded by one pixel because broadly playable yuv420p requires even dimensions.
+Returns PATHNAME and the number of frames written."
   (check-type width (integer 1))
   (check-type height (integer 1))
   (ensure-directories-exist pathname)
@@ -40,6 +41,7 @@ number of frames written."
                   "-video_size" (format nil "~Dx~D" width height)
                   "-framerate" (format nil "~D" frame-rate)
                   "-i" "-"
+                  "-vf" "pad=ceil(iw/2)*2:ceil(ih/2)*2"
                   "-c:v" "libx264"
                   "-preset" "medium"
                   "-crf" (format nil "~D" constant-rate-factor)
@@ -49,21 +51,28 @@ number of frames written."
             :search t :wait nil
             :input :stream :output nil :error error-output)))
     (unwind-protect
-         (progn
-           (funcall function
-                    (lambda (pixels)
-                      (unless (= (length pixels) frame-bytes)
-                        (error "Expected ~D frame bytes, got ~D."
-                               frame-bytes (length pixels)))
-                      (write-sequence pixels (sb-ext:process-input process))
-                      (incf frame-count)))
-           (close (sb-ext:process-input process))
-           (sb-ext:process-wait process)
-           (let ((code (sb-ext:process-exit-code process)))
-             (unless (eql code 0)
-               (error "ffmpeg exited with code ~A:~%~A"
-                      code (get-output-stream-string error-output))))
-           (values pathname frame-count))
+         (handler-case
+             (progn
+               (funcall function
+                        (lambda (pixels)
+                          (unless (= (length pixels) frame-bytes)
+                            (error "Expected ~D frame bytes, got ~D."
+                                   frame-bytes (length pixels)))
+                          (write-sequence pixels (sb-ext:process-input process))
+                          (incf frame-count)))
+               (close (sb-ext:process-input process))
+               (sb-ext:process-wait process)
+               (let ((code (sb-ext:process-exit-code process)))
+                 (unless (eql code 0)
+                   (error "ffmpeg exited with code ~A:~%~A"
+                          code (get-output-stream-string error-output))))
+               (values pathname frame-count))
+           (sb-int:broken-pipe ()
+             (ignore-errors (close (sb-ext:process-input process) :abort t))
+             (sb-ext:process-wait process)
+             (error "ffmpeg stopped accepting frames (exit ~A):~%~A"
+                    (sb-ext:process-exit-code process)
+                    (get-output-stream-string error-output))))
       (when (sb-ext:process-alive-p process)
         (close (sb-ext:process-input process) :abort t)
         (sb-ext:process-wait process)))))
