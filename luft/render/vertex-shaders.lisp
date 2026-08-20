@@ -349,7 +349,7 @@ everything it looks up in the lattice."
                                     0.0)
                                '(if present-p (if facing-p 1.0 0.0) 0.0))
                           ,(if (eq rule :clay)
-                               'clay-claimed
+                               '(if (> clay-lane 0.5) clay-claimed 1.0)
                                '(- 1.0 clay-claimed))))
                 (period-x (swizzle domain-vector :x))
                 (period-y (swizzle domain-vector :y))

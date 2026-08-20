@@ -76,7 +76,7 @@ what SESSION must do after a change for the change to show."))
 
 (defparameter *knob-group-order*
   '(:grading :sun :sky :shadows :camera :player :streaming :critters
-    :gnome :riding :terminal :text)
+    :gnome :cat :riding :terminal :text)
   "The order the metabar shows groups in; a group not named here follows.")
 
 (defun knob-groups ()

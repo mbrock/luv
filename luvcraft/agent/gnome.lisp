@@ -83,7 +83,7 @@ sits -- and the sphere is the largest of them."
   "A pane background that paints nothing: colour with zero opacity, which the
 GPU medium spells as a fully transparent fill.")
 
-(defclass gnome ()
+(defclass embodied-agent ()
   ((session :initarg :session :reader gnome-session)
    (x :initarg :x :reader gnome-x)
    (y :initarg :y :reader gnome-y)
@@ -106,7 +106,42 @@ GPU medium spells as a fully transparent fill.")
   (:documentation
    "One embodied agent at a discrete cell: its thread, figure, and voice."))
 
-(defmethod print-object ((gnome gnome) stream)
+(defclass gnome (embodied-agent) ()
+  (:documentation "A small SDF-rendered garden gnome carrying a WORLD-AGENT."))
+
+(defgeneric embodied-agent-name (agent)
+  (:documentation "The short speaker name shown for AGENT."))
+
+(defmethod embodied-agent-name ((gnome gnome))
+  (declare (ignore gnome))
+  *gnome-name*)
+
+(defgeneric embodied-agent-body-height (agent)
+  (:documentation "AGENT's visible height above its occupied cell, in blocks."))
+
+(defgeneric embodied-agent-head-position (agent &optional lift)
+  (:documentation "The world point above AGENT, optionally LIFT blocks higher."))
+
+(defgeneric embodied-agent-face-position (agent &optional lift)
+  (:documentation "The world point AGENT looks from, optionally LIFT blocks higher."))
+
+(defgeneric embodied-agent-ray-distance (agent origin direction max-distance)
+  (:documentation "Where a ray enters AGENT's conservative body, or NIL."))
+
+(defgeneric embodied-agent-audience-distance (agent)
+  (:documentation "How far away the focused camera stands from AGENT."))
+
+(defgeneric ensure-embodied-agent-agent (agent)
+  (:documentation "Return AGENT's WORLD-AGENT, creating it when necessary."))
+
+(defgeneric ensure-embodied-agent-body (agent)
+  (:documentation "Return AGENT's render body, creating it when necessary."))
+
+(defgeneric embodied-agent-body-sphere (agent)
+  (:documentation
+   "Return AGENT's conservative SDF proxy as world-space X, Y, Z, RADIUS."))
+
+(defmethod print-object ((gnome embodied-agent) stream)
   (print-unreadable-object (gnome stream :type t)
     (format stream "~D ~D ~D" (gnome-x gnome) (gnome-y gnome) (gnome-z gnome))))
 
@@ -121,22 +156,30 @@ them from this registry.")
   "Return SESSION's embodied agents, newest first."
   (remove-if-not (lambda (agent) (eq session (gnome-session agent))) *agents*))
 
+(defun agent-at (session x y z)
+  "The embodied agent occupying X,Y,Z in SESSION, or NIL."
+  (find-if (lambda (agent)
+             (and (eq session (gnome-session agent))
+                  (= x (gnome-x agent))
+                  (= y (gnome-y agent))
+                  (= z (gnome-z agent))))
+           *agents*))
+
+(defun attach-embodied-agent (class session x y z)
+  "Make one CLASS at X,Y,Z and attach its semantic and render overlays."
+  (let ((agent (make-instance class :session session :x x :y y :z z)))
+    (ensure-embodied-agent-body agent)
+    (push agent *agents*)
+    (luvcraft:add-luvcraft-overlay session agent)
+    agent))
+
 (defun find-agent (session x y z &optional (make-p t))
   "Find the embodied agent occupying integer cell X,Y,Z in SESSION.
 
 When MAKE-P is true, create and attach one if the cell is unoccupied."
-  (or (find-if (lambda (agent)
-                 (and (eq session (gnome-session agent))
-                      (= x (gnome-x agent))
-                      (= y (gnome-y agent))
-                      (= z (gnome-z agent))))
-               *agents*)
+  (or (agent-at session x y z)
       (and make-p
-           (let ((agent (make-instance 'gnome :session session :x x :y y :z z)))
-             (ensure-gnome-body agent)
-             (push agent *agents*)
-             (luvcraft:add-luvcraft-overlay session agent)
-             agent))))
+           (attach-embodied-agent 'gnome session x y z))))
 
 (defun gnome-body-height ()
   "The height of the hat's tip above his feet, in figure units.
@@ -145,15 +188,23 @@ What is above a gnome -- his speech bubbles -- is measured from here, so a
 taller hat pushes them up rather than growing through them."
   (float luvcraft.shaders::*gnome-hat-height* 1.0))
 
-(defun gnome-head-position (gnome &optional (lift 0.0))
+(defmethod embodied-agent-body-height ((gnome gnome))
+  (declare (ignore gnome))
+  (* (gnome-body-height) (gnome-stature)))
+
+(defmethod embodied-agent-head-position ((gnome gnome) &optional (lift 0.0))
   "The point above the gnome's hat, LIFT blocks higher."
   (luvcraft::make-vec3 (+ (gnome-x gnome) 0.5)
                        (+ (gnome-y gnome)
-                          (* (gnome-body-height) (gnome-stature))
+                          (embodied-agent-body-height gnome)
                           lift)
                        (+ (gnome-z gnome) 0.5)))
 
-(defun gnome-face-position (gnome &optional (lift 0.0))
+(defun gnome-head-position (gnome &optional (lift 0.0))
+  "Compatibility name for EMBODIED-AGENT-HEAD-POSITION."
+  (embodied-agent-head-position gnome lift))
+
+(defmethod embodied-agent-face-position ((gnome gnome) &optional (lift 0.0))
   "The point between the gnome's eyes, LIFT blocks higher."
   (luvcraft::make-vec3 (+ (gnome-x gnome) 0.5)
                        (+ (gnome-y gnome)
@@ -161,28 +212,34 @@ taller hat pushes them up rather than growing through them."
                           lift)
                        (+ (gnome-z gnome) 0.5)))
 
+(defun gnome-face-position (gnome &optional (lift 0.0))
+  "Compatibility name for EMBODIED-AGENT-FACE-POSITION."
+  (embodied-agent-face-position gnome lift))
+
 ;;; ---------------------------------------------------------------------
 ;;; The embodied agent as an overlay and a focus
 
-(defmethod luvcraft:luvcraft-overlay-stage ((gnome gnome))
+(defmethod luvcraft:luvcraft-overlay-stage ((gnome embodied-agent))
   (declare (ignore gnome))
   :hud)
 
-(defmethod luvcraft:luvcraft-focus-score ((gnome gnome) session)
+(defmethod luvcraft:luvcraft-focus-score ((gnome embodied-agent) session)
   "Targetable by TAB when the view ray enters the agent before terrain."
   (let ((camera (luvcraft:luvcraft-session-camera session)))
     (multiple-value-bind (right up forward) (luvcraft:camera-basis camera)
       (declare (ignore right up))
       (let ((distance
-              (gnome-ray-distance gnome (luvcraft:camera-position camera)
-                                  forward luvcraft::+luvcraft-target-reach+)))
+              (embodied-agent-ray-distance
+               gnome (luvcraft:camera-position camera)
+               forward luvcraft::+luvcraft-target-reach+)))
         (when distance
           (let ((hit (luvcraft::luvcraft-session-target
                       session :max-distance luvcraft::+luvcraft-target-reach+)))
             (unless (and hit (< (luvcraft::block-ray-hit-distance hit) distance))
               distance)))))))
 
-(defun gnome-ray-distance (gnome origin direction max-distance)
+(defmethod embodied-agent-ray-distance
+    ((gnome gnome) origin direction max-distance)
   "Return where a ray enters GNOME's upright body, or NIL when it misses."
   (let* ((near 0d0)
          (far (coerce max-distance 'double-float))
@@ -213,25 +270,33 @@ taller hat pushes them up rather than growing through them."
                    (- center-z half-width) (+ center-z half-width))
              near)))))
 
+(defun gnome-ray-distance (gnome origin direction max-distance)
+  "Compatibility name for EMBODIED-AGENT-RAY-DISTANCE."
+  (embodied-agent-ray-distance gnome origin direction max-distance))
+
 (defparameter *gnome-audience-distance* 3.2
   "How far from the gnome the focused camera stands, in blocks.")
 
-(defmethod luvcraft:luvcraft-focus-camera-pose ((gnome gnome) session)
+(defmethod embodied-agent-audience-distance ((gnome gnome))
+  (declare (ignore gnome))
+  *gnome-audience-distance*)
+
+(defmethod luvcraft:luvcraft-focus-camera-pose ((gnome embodied-agent) session)
   "Step back to a conversational distance, look the gnome in the face, and
 leave room above its hat for the bubbles."
   (let* ((camera (luvcraft:luvcraft-session-camera session))
          (eye (luvcraft:camera-position camera))
-         (face (gnome-face-position gnome))
+         (face (embodied-agent-face-position gnome))
          (dx (- (luvcraft::vec3-x face) (luvcraft::vec3-x eye)))
          (dz (- (luvcraft::vec3-z face) (luvcraft::vec3-z eye)))
          (flat (max (sqrt (+ (* dx dx) (* dz dz))) 0.001))
          (ux (/ dx flat)) (uz (/ dz flat))
-         (distance *gnome-audience-distance*)
+         (distance (embodied-agent-audience-distance gnome))
          (position (luvcraft::make-vec3
                     (- (luvcraft::vec3-x face) (* ux distance))
                     (+ (luvcraft::vec3-y face) 0.10)
                     (- (luvcraft::vec3-z face) (* uz distance))))
-         (target (gnome-face-position gnome 0.02))
+         (target (embodied-agent-face-position gnome 0.02))
          (tdx (- (luvcraft::vec3-x target) (luvcraft::vec3-x position)))
          (tdy (- (luvcraft::vec3-y target) (luvcraft::vec3-y position)))
          (tdz (- (luvcraft::vec3-z target) (luvcraft::vec3-z position)))
@@ -242,24 +307,25 @@ leave room above its hat for the bubbles."
      (atan tdy tflat)
      luvcraft::+luvcraft-camera-focused-vertical-field-of-view+)))
 
-(defmethod luvcraft:luvcraft-focus-entered ((gnome gnome) session)
+(defmethod luvcraft:luvcraft-focus-entered ((gnome embodied-agent) session)
   (ensure-gnome-dialogue gnome)
   (setf (gnome-draft gnome) "")
   (repaint-gnome-dialogue gnome)
   gnome)
 
-(defmethod luvcraft:luvcraft-focus-left ((gnome gnome) session)
+(defmethod luvcraft:luvcraft-focus-left ((gnome embodied-agent) session)
   (setf (gnome-draft gnome) "")
   (when (gnome-dialogue gnome)
     (repaint-gnome-dialogue gnome))
   gnome)
 
 (defun gnome-ask (gnome text)
-  (let ((agent (or (gnome-agent gnome) (ensure-gnome-agent gnome))))
+  (let ((agent (or (gnome-agent gnome)
+                   (ensure-embodied-agent-agent gnome))))
     (ask text :agent agent)))
 
 (defmethod luvcraft:handle-luvcraft-focus-event
-    ((gnome gnome) session canvas (event luv:canvas-key-press-event))
+    ((gnome embodied-agent) session canvas (event luv:canvas-key-press-event))
   (let ((key (luv:canvas-key-event-key-name event))
         (character (luv:canvas-key-event-character event))
         (paste-p (and (eq (luv:canvas-key-event-key-name event) :v)
@@ -296,7 +362,7 @@ leave room above its hat for the bubbles."
     t))
 
 (defmethod luvcraft:handle-luvcraft-focus-event
-    ((gnome gnome) session canvas (event luv:canvas-event))
+    ((gnome embodied-agent) session canvas (event luv:canvas-event))
   (declare (ignore gnome session canvas event))
   t)
 
@@ -316,7 +382,7 @@ one back to describe-handle to read more.")
 (defparameter *gnome-tools*
   '(com-say com-where-am-i com-block-at com-place-block-at com-describe-handle com-eval))
 
-(defun ensure-gnome-agent (gnome)
+(defmethod ensure-embodied-agent-agent ((gnome gnome))
   (or (gnome-agent gnome)
       (let ((agent (make-world-agent
                     :session (gnome-session gnome)
@@ -329,6 +395,10 @@ one back to describe-handle to read more.")
               (gnome-agent gnome) agent)
         (add-agent-observer agent (gnome-observer gnome))
         agent)))
+
+(defun ensure-gnome-agent (gnome)
+  "Compatibility name for ENSURE-EMBODIED-AGENT-AGENT."
+  (ensure-embodied-agent-agent gnome))
 
 (defun make-gnome-observer (gnome)
   (lambda (agent kind object)
@@ -411,7 +481,8 @@ title or bubble shows only what its pane draws."))
     (cond ((and focused-p (or (plusp (length draft)) (null said) (> said-age 20)))
            (list "you" (concatenate 'string draft "_") *hud-text-ink*))
           ((and said (or focused-p (< said-age 20)))
-           (list *gnome-name* said (make-rgb-color 0.97 0.93 0.80)))
+           (list (embodied-agent-name gnome) said
+                 (make-rgb-color 0.97 0.93 0.80)))
           (t nil))))
 
 (defmethod handle-repaint ((pane gnome-dialogue-pane) region)
@@ -514,43 +585,52 @@ title or bubble shows only what its pane draws."))
 ;;; ---------------------------------------------------------------------
 ;;; The visible body: a sphere-traced scene object, not terrain.
 
-(defclass gnome-body-overlay ()
-  ((gnome :initarg :gnome :reader body-overlay-gnome)
+(defclass sdf-agent-body-overlay ()
+  ((agent :initarg :agent :initarg :gnome :reader body-overlay-gnome)
    (pipeline :initarg :pipeline :accessor gnome-body-pipeline)
    (vertex-buffer :initarg :vertex-buffer :accessor gnome-body-vertex-buffer)
    (instance-buffer :initarg :instance-buffer :accessor gnome-body-instance-buffer)
-   (instance-data :initarg :instance-data :reader gnome-body-instance-data)))
+   (instance-data :initarg :instance-data :reader gnome-body-instance-data))
+  (:documentation
+   "The shared conservative billboard and GPU resources for one SDF agent."))
+
+(defclass gnome-body-overlay (sdf-agent-body-overlay) ()
+  (:documentation "The gnome's SDF body overlay."))
 
 (defmethod luvcraft:luvcraft-focus-score
-    ((overlay gnome-body-overlay) session)
+    ((overlay sdf-agent-body-overlay) session)
   (declare (ignore overlay session))
   nil)
 
 (defmethod luvcraft::luvcraft-overlay-live-shader-pipelines
-    ((overlay gnome-body-overlay))
+    ((overlay sdf-agent-body-overlay))
   (list (gnome-body-pipeline overlay)))
 
-(defun place-gnome-body (overlay)
-  "Publish OVERLAY's center and radius, with a purely visual bob."
-  (let* ((gnome (body-overlay-gnome overlay))
-         (phase (/ (get-internal-real-time)
+(defmethod embodied-agent-body-sphere ((gnome gnome))
+  "The gnome's current conservative proxy, including his visual bob."
+  (let* ((phase (/ (get-internal-real-time)
                    (float internal-time-units-per-second 1.0)))
          (bob (* 0.025 (sin (* phase 2.2))))
-         (stature (gnome-stature))
-         (data (gnome-body-instance-data overlay)))
-    (setf (aref data 0) (coerce (+ (gnome-x gnome) 0.5) 'single-float)
-          (aref data 1) (coerce (+ (gnome-y gnome)
-                                   (* *gnome-body-centre* stature)
-                                   bob)
-                                'single-float)
-          (aref data 2) (coerce (+ (gnome-z gnome) 0.5) 'single-float)
-          (aref data 3) (coerce (* (gnome-figure-radius) stature)
-                                'single-float))
+         (stature (gnome-stature)))
+    (values (+ (gnome-x gnome) 0.5)
+            (+ (gnome-y gnome) (* *gnome-body-centre* stature) bob)
+            (+ (gnome-z gnome) 0.5)
+            (* (gnome-figure-radius) stature))))
+
+(defun place-gnome-body (overlay)
+  "Publish OVERLAY's agent-specific conservative center and radius."
+  (let ((data (gnome-body-instance-data overlay)))
+    (multiple-value-bind (x y z radius)
+        (embodied-agent-body-sphere (body-overlay-gnome overlay))
+      (setf (aref data 0) (coerce x 'single-float)
+            (aref data 1) (coerce y 'single-float)
+            (aref data 2) (coerce z 'single-float)
+            (aref data 3) (coerce radius 'single-float)))
     (luv:write-buffer (gnome-body-instance-buffer overlay) data))
   overlay)
 
 (defmethod luvcraft:encode-luvcraft-overlay
-    ((overlay gnome-body-overlay) session pass surface-texture)
+    ((overlay sdf-agent-body-overlay) session pass surface-texture)
   (place-gnome-body overlay)
   (let ((frame (luvcraft::luvcraft-frame-state session surface-texture)))
     (luv:set-pipeline
@@ -563,7 +643,7 @@ title or bubble shows only what its pane draws."))
     (luv:draw pass 6 1))
   overlay)
 
-(defmethod luvcraft:release-luvcraft-overlay ((overlay gnome-body-overlay))
+(defmethod luvcraft:release-luvcraft-overlay ((overlay sdf-agent-body-overlay))
   (when (gnome-body-pipeline overlay)
     (luvcraft::release-live-shader-pipeline (gnome-body-pipeline overlay))
     (setf (gnome-body-pipeline overlay) nil))
@@ -576,37 +656,37 @@ title or bubble shows only what its pane draws."))
     (setf (gnome-body (body-overlay-gnome overlay)) nil))
   (values))
 
-(defun ensure-gnome-body (gnome)
-  (or (gnome-body gnome)
-      (let* ((session (gnome-session gnome))
-             (device (luvcraft:luvcraft-session-device session))
-             (vertex-data (luvcraft::make-world-text-quad-vertices))
-             (instance-data (make-array 4 :element-type 'single-float))
-             (vertex-buffer nil)
-             (instance-buffer nil)
-             (pipeline nil)
-             (completed-p nil))
-        (unwind-protect
-             (progn
-               (setf vertex-buffer
+(defun make-sdf-agent-body (agent role label &key (class 'sdf-agent-body-overlay))
+  "Make and attach one ROLE pipeline body for AGENT."
+  (let* ((session (gnome-session agent))
+         (device (luvcraft:luvcraft-session-device session))
+         (vertex-data (luvcraft::make-world-text-quad-vertices))
+         (instance-data (make-array 4 :element-type 'single-float))
+         (vertex-buffer nil)
+         (instance-buffer nil)
+         (pipeline nil)
+         (completed-p nil))
+    (unwind-protect
+         (progn
+           (setf vertex-buffer
                      (luv:create
                       device
                       (luv:make-buffer-descriptor
-                       :label "gnome SDF proxy"
+                       :label (format nil "~A proxy" label)
                        :size (* 4 (length vertex-data))
                        :usage '(:vertex :copy-dst)))
                      instance-buffer
                      (luv:create
                       device
                       (luv:make-buffer-descriptor
-                       :label "gnome SDF instance"
+                       :label (format nil "~A instance" label)
                        :size (* 4 (length instance-data))
                        :usage '(:vertex :copy-dst)))
                      pipeline
                      (luvcraft::make-live-shader-pipeline
-                      :role :gnome-sdf
-                      :vertex-role :gnome-sdf
-                      :label "gnome sphere SDF pipeline"
+                      :role role
+                      :vertex-role role
+                      :label (format nil "~A pipeline" label)
                       :device device
                       :layout
                       (luvcraft::live-shader-pipeline-layout
@@ -625,23 +705,31 @@ title or bubble shows only what its pane draws."))
                       '(:format :depth32-float
                         :depth-write-enabled nil
                         :depth-compare :less)))
-               (luv:write-buffer vertex-buffer vertex-data)
-               (let ((overlay (make-instance 'gnome-body-overlay
-                                             :gnome gnome :pipeline pipeline
-                                             :vertex-buffer vertex-buffer
-                                             :instance-buffer instance-buffer
-                                             :instance-data instance-data)))
-                 (place-gnome-body overlay)
-                 (setf (gnome-body gnome) overlay
-                       completed-p t)
-                 (luvcraft:add-luvcraft-overlay session overlay)
-                 overlay))
-          (unless completed-p
-            (when pipeline
-              (ignore-errors
-                (luvcraft::release-live-shader-pipeline pipeline)))
-            (when instance-buffer (ignore-errors (luv:destroy instance-buffer)))
-            (when vertex-buffer (ignore-errors (luv:destroy vertex-buffer))))))))
+           (luv:write-buffer vertex-buffer vertex-data)
+           (let ((overlay (make-instance class
+                                         :agent agent :pipeline pipeline
+                                         :vertex-buffer vertex-buffer
+                                         :instance-buffer instance-buffer
+                                         :instance-data instance-data)))
+             (place-gnome-body overlay)
+             (setf (gnome-body agent) overlay
+                   completed-p t)
+             (luvcraft:add-luvcraft-overlay session overlay)
+             overlay))
+      (unless completed-p
+        (when pipeline
+          (ignore-errors
+            (luvcraft::release-live-shader-pipeline pipeline)))
+        (when instance-buffer (ignore-errors (luv:destroy instance-buffer)))
+        (when vertex-buffer (ignore-errors (luv:destroy vertex-buffer)))))))
+
+(defun ensure-gnome-body (gnome)
+  (or (gnome-body gnome)
+      (make-sdf-agent-body gnome :gnome-sdf "gnome SDF"
+                          :class 'gnome-body-overlay)))
+
+(defmethod ensure-embodied-agent-body ((gnome gnome))
+  (ensure-gnome-body gnome))
 
 (defun ensure-gnome-dialogue (gnome)
   (or (gnome-dialogue gnome)
@@ -749,7 +837,7 @@ title or bubble shows only what its pane draws."))
   "Face the camera from above the gnome, at the bubble's current lift."
   (let* ((gnome (bubble-overlay-gnome overlay))
          (camera (luvcraft:luvcraft-session-camera session))
-         (center (gnome-head-position gnome (bubble-lift overlay)))
+         (center (embodied-agent-head-position gnome (bubble-lift overlay)))
          (aspect (/ *bubble-width* *bubble-height*))
          (half-width (/ *bubble-world-width* 2.0))
          (half-height (/ half-width aspect)))
@@ -851,7 +939,7 @@ title or bubble shows only what its pane draws."))
                       (> (gnome-said-at gnome) (turn-started object)))
            (gnome-say gnome (turn-text object))))))))
 
-(defmethod luvcraft:refresh-luvcraft-overlay ((gnome gnome) session)
+(defmethod luvcraft:refresh-luvcraft-overlay ((gnome embodied-agent) session)
   (declare (ignore session))
   ;; The gnome itself draws nothing; its refresh is where the turn thread's
   ;; notes become bubbles and lines, and where old bubbles are taken down.
@@ -867,7 +955,7 @@ title or bubble shows only what its pane draws."))
       (clear-gnome-bubbles gnome)))
   gnome)
 
-(defmethod luvcraft:release-luvcraft-overlay :after ((gnome gnome))
+(defmethod luvcraft:release-luvcraft-overlay :after ((gnome embodied-agent))
   (setf *agents* (delete gnome *agents* :test #'eq))
   (when (and (gnome-agent gnome) (gnome-observer gnome))
     (remove-agent-observer (gnome-agent gnome) (gnome-observer gnome)))
@@ -877,8 +965,8 @@ title or bubble shows only what its pane draws."))
 ;;; ---------------------------------------------------------------------
 ;;; Spawning one
 
-(defun spawn-agent (&key (session luvcraft:*session*) x y z)
-  "Spawn an embodied agent at integer cell X,Y,Z and return it.
+(defun spawn-embodied-agent (class &key (session luvcraft:*session*) x y z)
+  "Spawn an embodied agent of CLASS at integer cell X,Y,Z and return it.
 
 With no coordinate, choose an empty cell a few steps ahead of the player and
 stand the agent on the first supporting block.  The cell is authoritative;
@@ -900,7 +988,16 @@ the figure's bobbing and any future step interpolation are only presentation."
       (error "An agent needs an integer cell, got (~S ~S ~S)." x y z))
     (when (luvcraft:world-block-at world x y z)
       (error "Cell (~D ~D ~D) is occupied by terrain." x y z))
-    (find-agent session x y z)))
+    (let ((existing (agent-at session x y z)))
+      (cond ((null existing)
+             (attach-embodied-agent class session x y z))
+            ((typep existing class) existing)
+            (t (error "Cell (~D ~D ~D) is occupied by ~A."
+                      x y z (embodied-agent-name existing)))))))
+
+(defun spawn-agent (&key (session luvcraft:*session*) x y z)
+  "Spawn a visible gnome agent, choosing a supported cell when omitted."
+  (spawn-embodied-agent 'gnome :session session :x x :y y :z z))
 
 (define-command (com-spawn-agent :command-table luvcraft.clim::luvcraft-world
                                   :name "Spawn Gnome")

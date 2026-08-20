@@ -218,7 +218,9 @@
                              (:file "hud")
                              (:file "wall")
                              (:file "shaders")
-                             (:file "gnome")))))
+                             (:file "cat-shaders")
+                             (:file "gnome")
+                             (:file "cat")))))
 
 (defsystem "luvcraft/birthday"
   :description "A birthday party in the little world: meadow, gazebo, balloons, gnomes, fireworks."

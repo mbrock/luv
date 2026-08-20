@@ -2621,7 +2621,7 @@ a ray never claims a cell it merely touches."
           ((string= mode "sky")
            (values :sky :flat nil '(:sky)))
           ((member mode '("flat" "bevel" "chamfer" "paper" "stock" "field"
-                          "soft" "ink")
+                          "soft" "ink" "clay")
                    :test #'string=)
            (let ((style (intern (string-upcase mode) :keyword)))
              (values style style (list style) nil)))
@@ -2633,7 +2633,7 @@ a ray never claims a cell it merely touches."
                    styles (default-renderer-effects)))
           (t
            (error "Unknown LUFT_RENDER_MODE ~S; use clear, sky, flat, bevel, ~
-chamfer, paper, stock, field, soft, ink, or full." name)))))
+chamfer, paper, stock, field, soft, ink, clay, or full." name)))))
 
 (zdefun (start-viewer :zone :luft/start-viewer)
     (&key (scene (make-demo-scene))

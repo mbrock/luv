@@ -106,6 +106,7 @@
            #:send-chat-message
            #:upload-chat-file
            #:send-chat-photo
+           #:send-chat-video
            #:mark-peer-read
            #:synchronize-chat-updates
            #:pull-chat-updates
@@ -995,6 +996,37 @@ of a field."
                   :media (tl:make-tl :input-media-uploaded-photo :file file)
                   :message caption
                   :random-id (fresh-random-id))))
+    (apply-chat-updates (tl-name answer) answer roster)
+    answer))
+
+(defun send-chat-video (roster peer bytes
+                        &key (caption "") (name "video.mp4")
+                          (mime-type "video/mp4") (duration 0.0d0)
+                          (width 0) (height 0) connection)
+  "Upload BYTES and post them to PEER as a streaming video.
+
+DURATION is in seconds.  WIDTH and HEIGHT describe the encoded picture; the
+file is still accepted when they are zero, but callers producing the video
+already know them and should preserve that metadata."
+  (let* ((file (upload-chat-file bytes :name name :connection connection))
+         (attributes
+           (vector
+            (tl:make-tl :document-attribute-video
+                        :supports-streaming t :nosound t
+                        :duration (coerce duration 'double-float)
+                        :w width :h height)
+            (tl:make-tl :document-attribute-filename :file-name name)))
+         (answer
+           (client:invoke
+            (client:current-connection connection)
+            :messages.send-media
+            :peer (peer-input-peer peer)
+            :media (tl:make-tl :input-media-uploaded-document
+                               :nosound-video t
+                               :file file :mime-type mime-type
+                               :attributes attributes)
+            :message caption
+            :random-id (fresh-random-id))))
     (apply-chat-updates (tl-name answer) answer roster)
     answer))
 

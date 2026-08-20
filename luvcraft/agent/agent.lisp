@@ -12,7 +12,7 @@
    (current-turn :initform nil :accessor world-agent-current-turn)
    (handles :initform (make-handle-table) :reader world-agent-handles)
    (presence :initform nil :accessor world-agent-presence
-             :documentation "The agent's body in the world -- a GNOME -- or NIL.")
+             :documentation "The agent's EMBODIED-AGENT body in the world, or NIL.")
    (observers :initform '() :accessor world-agent-observers
               :documentation
               "Functions of (AGENT EVENT-KIND OBJECT), told when the transcript changes.")
