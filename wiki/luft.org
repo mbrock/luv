@@ -785,6 +785,15 @@ off four distance taps along the normal.  =*clay-radius*= and
 continuously; such a film runs without temporal accumulation rather than
 pretending its history is reusable.
 
+[[file:images/luft-clay-holm.png]]
+
+The stocks of #ADEAKZ come along by the same definition rather than by a
+trick: a smooth union carries its own partition of unity, each cell's
+share being the softmin weight of its rounded-box distance over the melt
+reach, and the surface colour is the weight-averaged stock albedo.  A
+timber deck melting into a granite rampart blends its colour exactly
+where the geometry blends, and nowhere else.
+
 * The studio: a world of stars under the same cameras
 :PROPERTIES:
 :ID: UTRJ2T

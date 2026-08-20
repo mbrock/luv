@@ -58,58 +58,99 @@ style throughout.  Returns PATHNAME and the frame count."
       (destroy-renderer renderer))))
 
 (defun film-clay-breath (pathname
-                         &key (seconds 24) (frame-rate 30)
+                         &key (pieces '(:grotto :holm))
+                              (seconds-per-shot 9) (frame-rate 30)
                               (width 960) (height 540)
                               (light :golden)
-                              (scene (make-studio-scene))
-                              (center-x 16.0) (center-y 14.0)
-                              (center-z 2.5)
-                              (orbit-radius 16.0) (camera-height 9.5)
-                              (field-of-view 0.85)
-                              (turns 2.0))
-  "Film the studio in :CLAY while the world breathes through knob space.
+                              (aperture 0.5)
+                              (field-scale 1.0))
+  "Fly the atelier's architecture in :CLAY while the world breathes.
 
-The cell radius and the melt reach ride two incommensurate sine waves, so
-over TURNS orbits the same cells pass through tight quilting, pillowed
-masonry, full pearls, and deep bridging melt and back, continuously.  The
-knobs change every frame, so this film runs without temporal accumulation
-rather than pretending its history is reusable.  Returns PATHNAME and the
-frame count."
+Each of PIECES gets the same two shots the drone films cut together -- its
+authored aerial flyover, then its close route, both relaxed off the
+masonry and sworn collision-free -- while the cell radius and the melt
+reach ride two incommensurate sine waves over the whole reel, so the same
+walls pass continuously through tight quilting, pillowed masonry, full
+pearls, and deep bridging melt.  The clay surface never swells more than a
+quarter of the melt past its cells, well inside the flights' sworn
+clearance.  The knobs change every frame, so this film runs without
+temporal accumulation rather than pretending its history is reusable.
+Returns PATHNAME and the frame count."
   (let* ((*light* light)
-         (frame-count (max 1 (round (* seconds frame-rate))))
-         (renderer (make-renderer :scene scene
-                                  :camera (studio-camera
-                                           (+ center-x orbit-radius) center-y
-                                           camera-height
-                                           :look-x center-x :look-y center-y
-                                           :look-z center-z
-                                           :field-of-view field-of-view)
-                                  :width width :height height
-                                  :style :clay
-                                  :pipeline-styles '(:clay)
-                                  :effects '(:sky))))
+         (*aperture* aperture)
+         (shot-frames (max 1 (round (* seconds-per-shot frame-rate))))
+         (scenes (mapcar (lambda (piece) (cons piece (atelier-scene piece)))
+                         (remove-duplicates pieces)))
+         (shots (loop for piece in pieces
+                      append (list (list piece (atelier-flyover piece))
+                                   (list piece (atelier-flight piece)))))
+         (shot-count (length shots))
+         (total-frames (* shot-count shot-frames))
+         (frame-index 0)
+         (renderer (make-renderer
+                    :scene (cdr (first scenes))
+                    :camera (cdr (first (atelier-cameras (first pieces))))
+                    :width width :height height
+                    :style :clay :pipeline-styles '(:clay)
+                    :effects '(:sky :lens))))
     (unwind-protect
          (with-video-encoder (write-frame pathname width height
                               :frame-rate frame-rate
                               :format (renderer-color-format renderer))
-           (dotimes (frame frame-count)
-             (let* ((progress (/ (float frame 1.0) frame-count))
-                    (angle (* 2.0 pi turns progress))
-                    ;; Two incommensurate breaths through the knob plane.
-                    (*clay-radius*
-                      (+ 0.31 (* 0.19 (sin (* 2.0 pi 3.0 progress)))))
-                    (*clay-melt*
-                      (+ 0.20 (* 0.15 (sin (+ (* 2.0 pi 2.0 progress)
-                                              1.1))))))
-               (setf (renderer-camera renderer)
-                     (studio-camera
-                      (+ center-x (* orbit-radius (cos angle)))
-                      (+ center-y (* orbit-radius (sin angle)))
-                      camera-height
-                      :look-x center-x :look-y center-y
-                      :look-z center-z
-                      :field-of-view field-of-view))
-               (write-frame (render-pixels renderer)))))
+           (loop for (piece waypoints) in shots
+                 for shot from 0
+                 do (let* ((scene (cdr (assoc piece scenes)))
+                           (positions (mapcar #'first waypoints))
+                           (looks (mapcar #'second waypoints))
+                           (fields (mapcar (lambda (waypoint)
+                                             (list (third waypoint)))
+                                           waypoints))
+                           (flight
+                             (coerce
+                              (assert-flight-clear
+                               piece scene
+                               (clear-flight-path
+                                scene
+                                (loop for frame below shot-frames
+                                      for s = (/ (+ frame 0.5) shot-frames)
+                                      collect (catmull-rom-sample
+                                               positions
+                                               (flight-shot-progress
+                                                s shot shot-count)))))
+                              'vector)))
+                      (format t "~&clay breath: ~(~A~) shot ~D/~D~%"
+                              piece (1+ shot) shot-count)
+                      (finish-output)
+                      (setf (renderer-scene renderer) scene)
+                      (dotimes (frame shot-frames)
+                        (let* ((s (/ (+ frame 0.5) shot-frames))
+                               (eased (flight-shot-progress
+                                       s shot shot-count))
+                               (position (aref flight frame))
+                               (look (catmull-rom-sample looks eased))
+                               (field (* field-scale
+                                         (first (catmull-rom-sample
+                                                 fields eased))))
+                               (reel (/ (float frame-index 1.0)
+                                        total-frames))
+                               ;; Two incommensurate breaths through the
+                               ;; knob plane, over the whole reel.
+                               (*clay-radius*
+                                 (+ 0.31 (* 0.17 (sin (* 2.0 pi 3.0
+                                                         reel)))))
+                               (*clay-melt*
+                                 (+ 0.19 (* 0.14 (sin (+ (* 2.0 pi 2.0
+                                                            reel)
+                                                         1.1))))))
+                          (setf (renderer-camera renderer)
+                                (studio-camera
+                                 (first position) (second position)
+                                 (third position)
+                                 :look-x (first look) :look-y (second look)
+                                 :look-z (third look)
+                                 :field-of-view field))
+                          (write-frame (render-pixels renderer))
+                          (incf frame-index))))))
       (destroy-renderer renderer))))
 
 (defun catmull-rom-sample (points s)

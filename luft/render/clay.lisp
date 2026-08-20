@@ -158,6 +158,69 @@ have converged."
                                                     0.02))
                                         (max ,reach 0.000001))))))))))
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun clay-stock-tone-bindings (name field-prefix)
+    "LET* bindings blending the eight cells' stock albedos as NAME.
+
+The smooth union has a natural partition of unity: each cell's share of
+the surface at a point is its softmin weight, exp of minus its rounded-box
+distance over the melt reach.  The colour is the weight-averaged stock
+albedo, so a timber cell melting into a granite cell blends its colour
+exactly where the geometry blends, by the same definition.  Reuses
+FIELD-PREFIX's cell distances and vertex; reads STOCKS and SLOTS, and
+UP-PART and DOWN-PART from the enclosing shader for the face mix."
+    (let ((v (intern (format nil "~A-VERTEX" field-prefix)))
+          (dmin (intern (format nil "~A-DMIN" name)))
+          (sharp (intern (format nil "~A-SHARPNESS" name)))
+          (corners '((0 0 0) (1 0 0) (0 1 0) (1 1 0)
+                     (0 0 1) (1 0 1) (0 1 1) (1 1 1))))
+      (labels ((local (format-string &rest arguments)
+                 (intern (apply #'format nil format-string arguments)))
+               (d-of (i j k) (local "~A-D-~D~D~D" field-prefix i j k))
+               (sum (terms) (reduce (lambda (a b) `(+ ,a ,b)) terms)))
+        (append
+         `((,dmin (min (min (min ,(d-of 0 0 0) ,(d-of 1 0 0))
+                            (min ,(d-of 0 1 0) ,(d-of 1 1 0)))
+                       (min (min ,(d-of 0 0 1) ,(d-of 1 0 1))
+                            (min ,(d-of 0 1 1) ,(d-of 1 1 1)))))
+           (,sharp (/ 1.0 (max ,(intern (format nil "~A-MELT" field-prefix))
+                               0.02))))
+         (loop for (i j k) in corners
+               append
+               (append
+                (cell-stock-bindings
+                 (local "~A-SK-~D~D~D" name i j k)
+                 `(+ ,v (vec3 ,(if (= i 1) 0.0 -1.0)
+                              ,(if (= j 1) 0.0 -1.0)
+                              ,(if (= k 1) 0.0 -1.0))))
+                (let ((base (local "~A-BASE-~D~D~D" name i j k))
+                      (top (local "~A-TOP-~D~D~D" name i j k))
+                      (side (local "~A-SIDE-~D~D~D" name i j k))
+                      (bottom (local "~A-BOT-~D~D~D" name i j k)))
+                  `((,base (* (uint (+ ,(local "~A-SK-~D~D~D-SLOT"
+                                              name i j k)
+                                       0.25))
+                              (uint ,(float +stock-lanes+))))
+                    (,top (swizzle (buffer-element stocks ,base) :xyz))
+                    (,side (swizzle (buffer-element
+                                     stocks (+ ,base (uint 1.0)))
+                                    :xyz))
+                    (,bottom (swizzle (buffer-element
+                                       stocks (+ ,base (uint 2.0)))
+                                      :xyz))
+                    (,(local "~A-TONE-~D~D~D" name i j k)
+                     (mix (mix ,side ,bottom down-part) ,top up-part))
+                    (,(local "~A-W-~D~D~D" name i j k)
+                     (exp (* (- ,dmin ,(d-of i j k)) ,sharp)))))))
+         `((,(local "~A-DEN" name)
+            ,(sum (loop for (i j k) in corners
+                        collect (local "~A-W-~D~D~D" name i j k))))
+           (,name
+            (/ ,(sum (loop for (i j k) in corners
+                           collect `(* ,(local "~A-TONE-~D~D~D" name i j k)
+                                       ,(local "~A-W-~D~D~D" name i j k))))
+               (max ,(local "~A-DEN" name) 0.000001)))))))))
+
 (defmethod surface-vertices-per-face ((style (eql :clay)))
   (grid-vertices-per-face 2))
 
@@ -184,6 +247,10 @@ miss along the ray, scaled by this.")
           :resources ((frame :uniform-block :binding ,+frame-binding+
                              :members ,*frame-uniform-members*)
                       (cells :storage-buffer :binding ,+cells-binding+
+                             :element :uint)
+                      (stocks :storage-buffer :binding ,+stocks-binding+
+                              :element :vec4)
+                      (slots :storage-buffer :binding ,+slots-binding+
                              :element :uint)))
        (let* ((period-x (swizzle domain-vector :x))
               (period-y (swizzle domain-vector :y))
@@ -262,14 +329,15 @@ miss along the ray, scaled by this.")
                                     (* 0.9 (max 0.0 (- 0.50 tap-d))))))
                        0.0 1.0))
               (open (- 1.0 (* (swizzle occlusion-vector :x) crowding)))
-              ;; The materials meet across the rounding: turf thins as
-              ;; the ground turns downward, as the field style's does.
+              ;; The materials: each cell's stock albedo, blended by the
+              ;; smooth union's own partition of unity, so colour melts
+              ;; exactly where geometry does; and within one stock, turf
+              ;; thins as the ground turns downward.
               (upness (swizzle smooth :z))
-              (tone (mix (mix (swizzle side-vector :xyz)
-                              (swizzle bottom-vector :xyz)
-                              (smoothstep -0.35 -0.75 upness))
-                         (swizzle top-vector :xyz)
-                         (smoothstep 0.25 0.75 upness)))
+              (up-part (smoothstep 0.25 0.75 upness))
+              (down-part (smoothstep -0.35 -0.75 upness))
+              ,@(clay-stock-tone-bindings 'stock-tone 'probe-a)
+              (tone stock-tone)
               ;; One cell's tone drifts a little from its neighbour's.
               (cell (floor (- world (* smooth 0.25))))
               (patch (- (paper-noise (* cell 0.21)) 0.5))
