@@ -219,6 +219,22 @@
                              (:file "shaders")
                              (:file "gnome")))))
 
+(defsystem "luvcraft/birthday"
+  :description "A birthday party in the little world: meadow, gazebo, balloons, gnomes, fireworks."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luvcraft/agent")
+  :serial t
+  :components ((:module "luvcraft/birthday"
+                :serial t
+                :components ((:file "package")
+                             (:file "world")
+                             (:file "gazebo")
+                             (:file "balloons")
+                             (:file "gnomes")
+                             (:file "fireworks")
+                             (:file "party")))))
+
 (defsystem "luvcraft/program"
   :description "The standalone luvcraft executable with its live Slynk endpoint."
   :version "0.0.1"
