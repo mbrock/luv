@@ -56,3 +56,98 @@ style throughout.  Returns PATHNAME and the frame count."
                                     :field-of-view field-of-view))
                (write-frame (render-pixels renderer)))))
       (destroy-renderer renderer))))
+
+(defun catmull-rom-sample (points s)
+  "Sample the Catmull-Rom spline through POINTS at S in [0,1].
+
+POINTS is a list of same-length lists of numbers; endpoints are clamped,
+so the path passes through every point and starts and ends at rest."
+  (let* ((count (length points))
+         (segments (max 1 (1- count)))
+         (u (* (min (max s 0.0) 1.0) segments))
+         (index (min (floor u) (1- segments)))
+         (v (- u index)))
+    (flet ((point (i) (elt points (min (max i 0) (1- count)))))
+      (mapcar (lambda (a b c d)
+                (* 0.5
+                   (+ (* 2.0 b)
+                      (* v (- c a))
+                      (* v v (+ (* 2.0 a) (* -5.0 b) (* 4.0 c) (- d)))
+                      (* v v v (+ (- a) (* 3.0 b) (* -3.0 c) d)))))
+              (point (1- index)) (point index)
+              (point (1+ index)) (point (+ index 2))))))
+
+(defun film-atelier-flight (pathname
+                            &key (pieces '(:arcade :viaduct :turret
+                                           :grotto :headland :holm))
+                                 (seconds-per-piece 8) (frame-rate 30)
+                                 (width 1280) (height 720)
+                                 (style :stock)
+                                 (chamfer-width (/ 1.0 6.0))
+                                 (effects (default-renderer-effects))
+                                 (look-distance 12.0))
+  "Fly a drone through the atelier's architecture into an MP4 at PATHNAME.
+
+Each of PIECES gets one continuous shot: a Catmull-Rom flight through the
+piece's own authored cameras, looking where each of them looked, easing
+in and out of the run.  STYLE defaults to :STOCK -- the chamfered
+multi-material style the wiki's stills use -- with CHAMFER-WIDTH of a
+sixth of a cell, wide enough that every arris reads as a planed band.
+Returns PATHNAME and the frame count."
+  (let* ((*chamfer-width* chamfer-width)
+         (piece-frames (max 1 (round (* seconds-per-piece frame-rate))))
+         (first-piece (first pieces))
+         (renderer (make-renderer
+                    :scene (atelier-scene first-piece)
+                    :camera (cdr (first (atelier-cameras first-piece)))
+                    :width width :height height
+                    :style style :pipeline-styles (list style)
+                    :effects effects)))
+    (unwind-protect
+         (with-video-encoder (write-frame pathname width height
+                              :frame-rate frame-rate
+                              :format (renderer-color-format renderer))
+           (dolist (piece pieces)
+             (setf (renderer-scene renderer) (atelier-scene piece))
+             (let* ((cameras (mapcar #'cdr (atelier-cameras piece)))
+                    (positions
+                      (mapcar (lambda (camera)
+                                (let ((p (camera-position camera)))
+                                  (list (vec3:vec3-x p) (vec3:vec3-y p)
+                                        (vec3:vec3-z p))))
+                              cameras))
+                    (looks
+                      (mapcar (lambda (camera)
+                                (multiple-value-bind (right up forward)
+                                    (camera-basis camera)
+                                  (declare (ignore right up))
+                                  (let ((p (camera-position camera)))
+                                    (list (+ (vec3:vec3-x p)
+                                             (* look-distance
+                                                (vec3:vec3-x forward)))
+                                          (+ (vec3:vec3-y p)
+                                             (* look-distance
+                                                (vec3:vec3-y forward)))
+                                          (+ (vec3:vec3-z p)
+                                             (* look-distance
+                                                (vec3:vec3-z forward)))))))
+                              cameras))
+                    (fields
+                      (mapcar (lambda (camera)
+                                (list (camera-field-of-view camera)))
+                              cameras)))
+               (dotimes (frame piece-frames)
+                 (let* ((s (/ (+ frame 0.5) piece-frames))
+                        (eased (* s s (- 3.0 (* 2.0 s))))
+                        (position (catmull-rom-sample positions eased))
+                        (look (catmull-rom-sample looks eased))
+                        (field (first (catmull-rom-sample fields eased))))
+                   (setf (renderer-camera renderer)
+                         (studio-camera
+                          (first position) (second position)
+                          (third position)
+                          :look-x (first look) :look-y (second look)
+                          :look-z (third look)
+                          :field-of-view field))
+                   (write-frame (render-pixels renderer)))))))
+      (destroy-renderer renderer))))

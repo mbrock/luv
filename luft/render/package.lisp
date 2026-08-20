@@ -190,6 +190,7 @@ of packed LUFT sites, drawn by vertex shaders pulling sites.")
            #:studio-camera
            #:render-contact-sheet
            #:film-studio-orbit
+           #:film-atelier-flight
            #:viewer
            #:main
            #:start-viewer

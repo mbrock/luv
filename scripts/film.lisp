@@ -44,6 +44,10 @@
         (merge-pathnames #P"luft-styles.mp4" directory)
         :seconds 16
         :styles '(:flat :bevel :chamfer :paper :stock :field :soft :ink)))
+     (when (film-wanted-p :luft-flight names)
+       (format t "~&Filming the atelier drone flight...~%")
+       (luft.render:film-atelier-flight
+        (merge-pathnames #P"luft-flight.mp4" directory)))
      (when (film-wanted-p :birthday names)
        (format t "~&Filming the birthday party cutscenes...~%")
        (luvcraft.birthday:film-birthday-cutscenes
