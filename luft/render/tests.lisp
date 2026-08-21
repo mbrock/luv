@@ -150,6 +150,20 @@
       (ok (= revision (scene-revision scene)))
       (ok (equalp sites (scene-sites scene))))))
 
+(deftest foundation-records-follow-edits-across-chunk-boundaries
+  ;; These two cells meet across the Y=8 surface-chunk boundary.  Removing
+  ;; the first changes the corner and edge stars of faces on the second even
+  ;; though those faces remain members of the surface.
+  (let* ((domain (luft:make-world-domain :horizontal-bits 4))
+         (solid (luft:make-solid-chain domain)))
+    (setf (luft:solid-cell-p solid 7 7 2) t
+          (luft:solid-cell-p solid 7 8 2) t)
+    (let ((scene (make-scene domain :solid solid)))
+      (setf (scene-cell-p scene 7 7 2) nil)
+      (let ((incremental (scene-face-records scene)))
+        (refresh-scene scene)
+        (ok (equalp incremental (scene-face-records scene)))))))
+
 (deftest a-grid-ray-names-the-hit-cell-and-the-placement-cell
   (let ((scene (make-scene (luft:make-world-domain :horizontal-bits 4))))
     (setf (scene-cell-p scene 4 4 4) t)
