@@ -34,6 +34,7 @@
   (asdf:load-asd (merge-pathnames #P"telegram.asd" project-root))
   (asdf:load-asd (merge-pathnames #P"mqtt.asd" project-root))
   (asdf:load-asd (merge-pathnames #P"openai.asd" project-root))
+  (asdf:load-asd (merge-pathnames #P"chrome-cdp.asd" project-root))
   (asdf:load-system :luv)
   (asdf:load-system :luvcraft)
   (asdf:load-system :luvcraft/agent)

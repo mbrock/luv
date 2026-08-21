@@ -11,6 +11,7 @@
     (asdf:load-asd (truename "telegram.asd"))
     (asdf:load-asd (truename "mqtt.asd"))
     (asdf:load-asd (truename "openai.asd"))
+    (asdf:load-asd (truename "chrome-cdp.asd"))
     (asdf:load-asd (truename "luv-wiki.asd"))
     (asdf:load-asd (truename "luv-wiki-site.asd"))
     (asdf:load-asd (truename "luft.asd"))
@@ -20,7 +21,7 @@
     (setf (symbol-value (uiop:find-symbol* :*default-reporter* :rove)) :luv)
     (uiop:symbol-call :rove :use-reporter :luv)
     (dolist (system '(:luv :luv/ghostty :luv/libav :luvcraft :luvcraft/agent
-                      :mqtt :openai
+                      :mqtt :openai :chrome-cdp
                       :luv-wiki :luft :luft/render))
       (format t "~&~A~%" (string-downcase (asdf:component-name (asdf:find-system system))))
       (asdf:test-system system)
