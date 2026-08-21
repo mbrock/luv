@@ -1,187 +1,239 @@
-;;; The studio: small worlds built to show every kind of corner, cameras
-;;; that look at them closely, and contact sheets that put the views of
-;;; several styles side by side.
-;;;
-;;; A shaping rule is judged at its sites.  The demonstration world has
-;;; thousands of them and shows none well, so this file builds a world whose
-;;; every object is one star configuration -- a lone cube, a bar, an L, a
-;;; slab, a block standing on the floor, a pit, stairs, a pillar, a ledge,
-;;; two cubes meeting along an edge, two meeting at a vertex -- and renders
-;;; each style from the same cameras at several times the output size, box
-;;; filtered down, into one PNG.  Rows are cameras, columns are styles.
-
 (in-package #:luft.render)
 
-;;; ------------------------------------------------------------------------
-;;; A world of stars
+(defvar *viewer* nil)
 
-(defun make-studio-scene (&key (horizontal-bits 5) (floor-height 2))
-  "A floor carrying one exhibit of each crease and corner kind.
+(defclass fly-camera ()
+  ((position :initarg :position :accessor camera-position)
+   (yaw :initarg :yaw :initform 0.0 :accessor camera-yaw)
+   (pitch :initarg :pitch :initform 0.0 :accessor camera-pitch)
+   (field-of-view :initarg :field-of-view :initform (* 70.0 (/ pi 180))
+                  :accessor camera-field-of-view)))
 
-The exhibits stand far enough apart that no two share a star."
-  (let* ((world (make-world :horizontal-bits horizontal-bits))
-         (period (luft:world-domain-x-period (world-domain world)))
-         (z floor-height))
-    (dotimes (x period)
-      (dotimes (y period)
-        (dotimes (k floor-height)
-          (setf (world-cell-p world x y k) t))))
-    ;; Row one: convex things resting on the floor.
-    (fill-box world 3 3 3 3 z z)                  ; a cube on the floor
-    (fill-box world 7 8 3 3 z z)                  ; a bar
-    (fill-box world 12 13 3 3 z z)                ; an L
-    (fill-box world 12 12 4 4 z z)
-    (fill-box world 17 18 3 4 z z)                ; a 2x2 slab
-    (fill-box world 22 23 3 4 z (1+ z))           ; a 2x2x2 block
-    (fill-box world 27 27 3 3 z (+ z 3))          ; a pillar
-    ;; Row two: things in the air, whose every corner is pure.
-    (fill-box world 3 3 9 9 (+ z 2) (+ z 2))      ; a floating cube
-    (fill-box world 7 9 9 9 (+ z 2) (+ z 2))      ; a floating bar
-    (fill-box world 12 13 9 10 (+ z 2) (+ z 2))   ; a floating slab
-    (fill-box world 17 17 9 9 (+ z 2) (+ z 2))    ; two cubes meeting at an edge
-    (fill-box world 18 18 10 10 (+ z 2) (+ z 2))
-    (fill-box world 22 22 9 9 (+ z 2) (+ z 2))    ; two cubes meeting at a vertex
-    (fill-box world 23 23 10 10 (+ z 3) (+ z 3))
-    (fill-box world 27 27 9 9 (+ z 2) (+ z 2))    ; a cube under a cube, offset
-    (fill-box world 28 28 9 9 (+ z 3) (+ z 3))
-    ;; Row three: concave things cut into or built on the floor.
-    (fill-box world 3 3 15 15 (1- z) (1- z) nil)  ; a one-cell pit
-    (fill-box world 7 8 15 16 (1- z) (1- z) nil)  ; a 2x2 pit
-    (fill-box world 12 12 15 16 (1- z) (1- z) nil) ; a trench
-    (fill-box world 12 12 17 17 (1- z) (1- z) nil)
-    (loop for step from 0 below 3                 ; stairs
-          do (fill-box world (+ 17 step) (+ 17 step) 15 17 z (+ z step)))
-    (fill-box world 22 24 15 15 z (+ z 2))        ; a wall with a ledge
-    (fill-box world 22 24 16 16 (+ z 2) (+ z 2))
-    (fill-box world 27 29 15 17 z (+ z 1))        ; a block with an inner corner
-    (fill-box world 27 28 15 16 z (+ z 1) nil)
-    ;; Row four: a doorway through a wall, and a roofed nook.
-    (fill-box world 3 8 22 22 z (+ z 2))
-    (fill-box world 5 6 22 22 z (+ z 1) nil)
-    (fill-box world 12 15 22 25 z (+ z 2))
-    (fill-box world 13 14 23 24 z (+ z 1) nil)
-    (fill-box world 13 14 22 22 z (+ z 1) nil)
-    (world-scene world)))
+(defun make-fly-camera
+    (&key (position (vec3:make-vec3 16.954 -0.954 8.970))
+          (yaw 2.3561945) (pitch -0.44051066)
+          (field-of-view 0.9599311))
+  (make-instance 'fly-camera :position position :yaw yaw :pitch pitch
+                             :field-of-view field-of-view))
 
-;;; ------------------------------------------------------------------------
-;;; Cameras
+(defun camera-basis (camera)
+  (let* ((yaw (camera-yaw camera))
+         (pitch (camera-pitch camera))
+         (forward (vec3:make-vec3 (* (cos yaw) (cos pitch))
+                                  (* (sin yaw) (cos pitch))
+                                  (sin pitch)))
+         (right (vec3:make-vec3 (sin yaw) (- (cos yaw)) 0.0))
+         (up (vec3:vec3-cross right forward)))
+    (values right up forward)))
 
-(defun studio-camera (x y z &key (look-x 0.0) (look-y 0.0) (look-z 0.0)
-                                 (field-of-view 0.9))
-  "A camera at X,Y,Z looking at LOOK-X,LOOK-Y,LOOK-Z."
-  (let* ((dx (- look-x x)) (dy (- look-y y)) (dz (- look-z z))
-         (flat (sqrt (+ (* dx dx) (* dy dy)))))
-    (make-fly-camera :position (vec3:make-vec3 x y z)
-                     :yaw (atan dy dx)
-                     :pitch (atan dz flat)
-                     :field-of-view field-of-view)))
+(defun camera-uniform-data (camera width height)
+  (multiple-value-bind (right up forward) (camera-basis camera)
+    (let* ((near 0.1)
+           (far 200.0)
+           (focal (/ (tan (/ (camera-field-of-view camera) 2.0))))
+           (aspect (/ (coerce width 'single-float) height)))
+      (flet ((lane (vector fourth)
+               (list (vec3:vec3-x vector) (vec3:vec3-y vector)
+                     (vec3:vec3-z vector) fourth)))
+        (make-array
+         20 :element-type 'single-float
+         :initial-contents
+         (mapcar
+          (lambda (value) (coerce value 'single-float))
+          (append (lane (camera-position camera) 0.0)
+                  (lane right 0.0) (lane up 0.0) (lane forward 0.0)
+                  (list (/ focal aspect) focal
+                        (/ far (- far near))
+                        (/ (- (* far near)) (- far near))))))))))
 
-(defun studio-cameras ()
-  "Named views of the studio: an overview, then close-ups of the exhibits."
-  (list
-   (cons :overview (studio-camera 30.5 1.0 14.0 :look-x 14.0 :look-y 14.0
-                                  :look-z 2.0 :field-of-view 0.95))
-   (cons :cube (studio-camera 6.0 0.5 5.0 :look-x 3.5 :look-y 3.5 :look-z 2.5
-                              :field-of-view 0.7))
-   (cons :l (studio-camera 15.5 0.5 5.5 :look-x 13.0 :look-y 4.0 :look-z 2.5
-                           :field-of-view 0.7))
-   (cons :block (studio-camera 25.5 0.0 6.5 :look-x 23.0 :look-y 4.0
-                               :look-z 3.0 :field-of-view 0.75))
-   (cons :floating (studio-camera 9.0 5.0 7.5 :look-x 12.0 :look-y 10.0
-                                  :look-z 4.5 :field-of-view 0.8))
-   (cons :pits (studio-camera 5.0 11.0 6.0 :look-x 7.0 :look-y 15.5
-                              :look-z 1.5 :field-of-view 0.8))
-   (cons :stairs (studio-camera 21.5 12.0 5.5 :look-x 18.5 :look-y 16.0
-                                :look-z 3.0 :field-of-view 0.8))
-   (cons :nook (studio-camera 9.5 27.0 5.5 :look-x 13.5 :look-y 23.5
-                              :look-z 3.0 :field-of-view 0.8))))
+(defclass viewer (canvas-event-handler)
+  ((canvas :initarg :canvas :reader viewer-canvas)
+   (context :initarg :context :reader viewer-context)
+   (device :initarg :device :reader viewer-device)
+   (renderer :initarg :renderer :accessor viewer-renderer)
+   (camera :initarg :camera :reader viewer-camera)
+   (pressed-keys :initform (make-hash-table :test #'eq)
+                 :reader viewer-pressed-keys)
+   (pointer-captured-p :initform nil :accessor viewer-pointer-captured-p)
+   (last-timestamp :initform nil :accessor viewer-last-timestamp)
+   (speed :initarg :speed :initform 12.0 :accessor viewer-speed)
+   (sensitivity :initarg :sensitivity :initform 0.0032
+                :accessor viewer-sensitivity)
+   (running-p :initform t :accessor viewer-running-p)))
 
-;;; ------------------------------------------------------------------------
-;;; Contact sheets
+(defun viewer-key-down-p (viewer &rest names)
+  (some (lambda (name) (gethash name (viewer-pressed-keys viewer))) names))
 
-(defun blit-pixels (sheet sheet-width tile tile-width tile-height x0 y0)
-  "Copy the RGBA TILE into SHEET at X0,Y0."
-  (dotimes (y tile-height sheet)
-    (replace sheet tile
-             :start1 (* 4 (+ x0 (* (+ y0 y) sheet-width)))
-             :start2 (* 4 (* y tile-width))
-             :end2 (* 4 (* (1+ y) tile-width)))))
+(defun advance-viewer-camera (viewer timestamp)
+  (let* ((last (viewer-last-timestamp viewer))
+         (dt (if last (min 0.1 (max 0.0 (- timestamp last))) 0.0))
+         (camera (viewer-camera viewer))
+         (step (* dt (viewer-speed viewer)
+                  (if (viewer-key-down-p viewer :left-shift :right-shift)
+                      3.0 1.0))))
+    (setf (viewer-last-timestamp viewer) timestamp)
+    (multiple-value-bind (right up forward) (camera-basis camera)
+      (declare (ignore up))
+      (flet ((move (direction amount)
+               (let ((position (camera-position camera)))
+                 (setf (camera-position camera)
+                       (vec3:make-vec3
+                        (+ (vec3:vec3-x position)
+                           (* amount (vec3:vec3-x direction)))
+                        (+ (vec3:vec3-y position)
+                           (* amount (vec3:vec3-y direction)))
+                        (+ (vec3:vec3-z position)
+                           (* amount (vec3:vec3-z direction))))))))
+        (when (viewer-key-down-p viewer :w :up) (move forward step))
+        (when (viewer-key-down-p viewer :s :down) (move forward (- step)))
+        (when (viewer-key-down-p viewer :d :right) (move right step))
+        (when (viewer-key-down-p viewer :a :left) (move right (- step)))
+        (when (viewer-key-down-p viewer :space :e)
+          (move (vec3:make-vec3 0 0 1) step))
+        (when (viewer-key-down-p viewer :left-control :q :c)
+          (move (vec3:make-vec3 0 0 1) (- step)))))))
 
-(defun render-contact-sheet
-    (pathname &key (scene (make-studio-scene))
-                   (cameras (studio-cameras))
-                   (styles '(:flat :bevel :chamfer :paper))
-                   (columns (mapcar #'list styles))
-                   (width 320) (height 240) (supersample 3)
-                   (effects '(:sky))
-                   (renderer nil))
-  "Render every CAMERA in every column and tile them into one PNG at PATHNAME.
+(defun render-viewer-frame (viewer timestamp)
+  (declare (ignore timestamp))
+  (when (viewer-running-p viewer)
+    (present-canvas-frame
+     (viewer-context viewer)
+     (lambda (surface-texture encoder presentation-time)
+       (advance-viewer-camera viewer presentation-time)
+       (let ((extent (canvas-extent (viewer-context viewer))))
+         (encode-renderer-frame
+          (viewer-renderer viewer) encoder surface-texture
+          extent
+          (camera-uniform-data (viewer-camera viewer)
+                               (first extent) (second extent))))))))
 
-Each tile is WIDTH by HEIGHT, rendered SUPERSAMPLE times larger and box
-filtered down in linear light.  Rows are cameras; columns are STYLES, or
-COLUMNS given explicitly as lists of a style followed by special variables
-and values to bind while that column renders, so one sheet can compare one
-style under several knobs:
+(defmethod handle-canvas-event
+    ((viewer viewer) canvas (event canvas-window-close-request-event))
+  (declare (ignore canvas event))
+  (setf (viewer-running-p viewer) nil)
+  nil)
 
-  :columns ((:field) (:field *bevel-radius* 0.12 *field-vertical-radius* 0.45))
+(defmethod handle-canvas-event
+    ((viewer viewer) canvas (event canvas-key-press-event))
+  (let ((key (canvas-key-event-key-name event)))
+    (if (eq :escape key)
+        (when (viewer-pointer-captured-p viewer)
+          (set-canvas-relative-pointer-mode canvas nil)
+          (setf (viewer-pointer-captured-p viewer) nil))
+        (setf (gethash key (viewer-pressed-keys viewer)) t)))
+  nil)
 
-With RENDERER, that renderer (whose extent must match) draws instead of a
-fresh one; its scene and camera are restored afterwards."
-  (let* ((styles (remove-duplicates (mapcar #'first columns)))
-         (rows (length cameras))
-         (sheet-width (* (length columns) width))
-         (sheet-height (* rows height))
-         (sheet (make-array (* 4 sheet-width sheet-height)
-                            :element-type '(unsigned-byte 8)
-                            :initial-element 0))
-         (owned-p (null renderer))
-         (renderer (or renderer
-                       (make-renderer :scene scene
-                                      :camera (cdr (first cameras))
-                                      :width (* supersample width)
-                                      :height (* supersample height)
-                                      :style (first styles)
-                                      :pipeline-styles styles
-                                      :effects effects)))
-         (old-scene (renderer-scene renderer))
-         (old-camera (renderer-camera renderer))
-         (old-style (renderer-style renderer))
-         (format nil))
+(defmethod handle-canvas-event
+    ((viewer viewer) canvas (event canvas-key-release-event))
+  (declare (ignore canvas))
+  (remhash (canvas-key-event-key-name event) (viewer-pressed-keys viewer))
+  nil)
+
+(defmethod handle-canvas-event
+    ((viewer viewer) canvas (event canvas-pointer-button-press-event))
+  (when (and (eq :left (canvas-pointer-event-button event))
+             (not (viewer-pointer-captured-p viewer)))
+    (set-canvas-relative-pointer-mode canvas t)
+    (setf (viewer-pointer-captured-p viewer) t))
+  nil)
+
+(defmethod handle-canvas-event
+    ((viewer viewer) canvas (event canvas-pointer-motion-event))
+  (declare (ignore canvas))
+  (when (viewer-pointer-captured-p viewer)
+    (let ((camera (viewer-camera viewer))
+          (sensitivity (viewer-sensitivity viewer)))
+      (decf (camera-yaw camera)
+            (* (canvas-pointer-event-delta-x event) sensitivity))
+      (setf (camera-pitch camera)
+            (max -1.5 (min 1.5
+                           (- (camera-pitch camera)
+                              (* (canvas-pointer-event-delta-y event)
+                                 sensitivity)))))))
+  nil)
+
+(defmethod handle-canvas-event
+    ((viewer viewer) canvas (event canvas-window-focus-lost-event))
+  (declare (ignore canvas event))
+  (clrhash (viewer-pressed-keys viewer))
+  nil)
+
+(defmethod handle-canvas-event ((viewer viewer) canvas event)
+  (declare (ignore viewer canvas event))
+  nil)
+
+(defun start-viewer (&key
+                       (solid (make-demo-solid))
+                       (camera (make-fly-camera))
+                       (title "LUFT indexed faces")
+                       (width 1100) (height 800)
+                       (frames-per-second 60)
+                       (provider *gpu-provider*))
+  "Open the greenfield indexed-instanced LUFT atelier."
+  (let ((canvas
+          (make-sdl-canvas
+           :title title :width width :height height :visible-p nil
+           :presentation-api (sdl-presentation-api-for provider)))
+        (device nil)
+        (renderer nil)
+        (completed-p nil))
+    (open-canvas canvas)
     (unwind-protect
-         (progn
-           (setf (renderer-scene renderer) scene)
-           (loop for (nil . camera) in cameras
-                 for row from 0
-                 do (setf (renderer-camera renderer) camera)
-                    (loop for (style . specials) in columns
-                          for column from 0
-                          do (setf (renderer-style renderer) style)
-                             (multiple-value-bind (pixels big-width big-height
-                                                   pixel-format)
-                                 (let ((*ink-width* (* *ink-width* supersample)))
-                                   (progv (loop for (name nil) on specials
-                                                  by #'cddr
-                                                collect name)
-                                          (loop for (nil value) on specials
-                                                  by #'cddr
-                                                collect value)
-                                     (render-pixels renderer)))
-                               (setf format pixel-format)
-                               (multiple-value-bind (tile tile-width tile-height)
-                                   (if (> supersample 1)
-                                       (downsample-pixels
-                                        pixels big-width big-height supersample
-                                        :srgb-p (eq pixel-format
-                                                    :rgba8-unorm-srgb))
-                                       (values pixels big-width big-height))
-                                 (blit-pixels sheet sheet-width tile
-                                              tile-width tile-height
-                                              (* column width) (* row height))))))
-           (ensure-directories-exist pathname)
-           (write-rgba-png pathname sheet sheet-width sheet-height format)
-           pathname)
-      (if owned-p
-          (destroy-renderer renderer)
-          (setf (renderer-scene renderer) old-scene
-                (renderer-camera renderer) old-camera
-                (renderer-style renderer) old-style)))))
+         (let* ((device*
+                  (setf device
+                        (request-gpu-device
+                         provider (make-device-descriptor :label title))))
+                (context
+                  (make-canvas-context
+                   canvas provider
+                   (make-canvas-configuration
+                    :device device* :usage '(:render-attachment))))
+                (renderer*
+                  (setf renderer
+                        (make-renderer
+                         device* (make-face-materialization solid)
+                         (canvas-format context) (canvas-extent context))))
+                (viewer
+                  (make-instance 'viewer :canvas canvas :context context
+                                         :device device* :renderer renderer*
+                                         :camera camera)))
+           (setf (canvas-event-handler canvas) viewer)
+           (request-canvas-frame
+            canvas (lambda (timestamp) (render-viewer-frame viewer timestamp)))
+           (show-canvas canvas)
+           (setf (canvas-clock canvas)
+                 (make-cadence-clock
+                  (lambda (native-canvas timestamp)
+                    (declare (ignore native-canvas))
+                    (render-viewer-frame viewer timestamp))
+                  :frames-per-second frames-per-second))
+           (setf *viewer* viewer
+                 completed-p t)
+           viewer)
+      (unless completed-p
+        (when renderer (destroy-renderer renderer))
+        (when (eq :open (canvas-state canvas)) (close-canvas canvas))
+        (when device (ignore-errors (destroy device)))))))
+
+(defun stop-viewer (&optional (viewer *viewer*))
+  (when viewer
+    (setf (viewer-running-p viewer) nil)
+    (let ((canvas (viewer-canvas viewer)))
+      (when (eq :open (canvas-state canvas))
+        (when (viewer-pointer-captured-p viewer)
+          (set-canvas-relative-pointer-mode canvas nil)
+          (setf (viewer-pointer-captured-p viewer) nil))
+        (setf (canvas-clock canvas) (make-demand-clock)))
+      (when (viewer-renderer viewer)
+        (destroy-renderer (viewer-renderer viewer))
+        (setf (viewer-renderer viewer) nil))
+      (when (eq :open (canvas-state canvas)) (close-canvas canvas)))
+    (ignore-errors (destroy (viewer-device viewer)))
+    (when (eq viewer *viewer*) (setf *viewer* nil)))
+  (values))
+
+(defun run-standalone-viewer ()
+  (let ((viewer (start-viewer)))
+    (unwind-protect
+         (loop while (viewer-running-p viewer) do (sleep 0.05))
+      (stop-viewer viewer))))

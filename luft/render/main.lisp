@@ -1,19 +1,5 @@
-;;;; Standalone LUFT atelier entry point.
-
 (in-package #:luft.render)
 
-(defun run-standalone-viewer ()
-  (multiple-value-bind (mode style pipeline-styles effects)
-      (standalone-render-options)
-    (log-event :luft "standalone render mode ~(~A~)" mode)
-    (let ((viewer (start-viewer :style style
-                                :pipeline-styles pipeline-styles
-                                :effects effects)))
-      (unwind-protect
-           (loop while (viewer-running-p viewer)
-                 do (sleep 0.05))
-        (stop-viewer viewer)))))
-
 (defun main ()
-  "Open the atelier and keep the process alive until its canvas closes."
+  "Run the standalone atelier on the SDL/Cocoa main-thread host."
   (call-with-sdl-main-thread #'run-standalone-viewer))

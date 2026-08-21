@@ -1,14 +1,13 @@
 (in-package #:asdf-user)
 
 (defsystem "luft"
-  :description "Packed sites in a small cubical world."
+  :description "Canonical cubical topology and compact face realization."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :serial t
-  :components ((:file "luft/package")
-               (:file "luft/luft")
-               (:file "luft/chain"))
-  :in-order-to ((test-op (test-op "luft/test"))))
+  :components ((:file "luft/luft"))
+  :perform (test-op (operation component)
+             (declare (ignore operation component))
+             (uiop:symbol-call '#:luft '#:run-luft-tests)))
 
 (defsystem "luft/render"
   :description "A greenfield atelier drawing surface chains of packed sites."
@@ -21,15 +20,8 @@
                 :serial t
                 :components ((:file "package")
                              (:file "shaders")
-                             (:file "vertex-shaders")
-                             (:file "field")
-                             (:file "material")
-                             (:file "lattice")
-                             (:file "clay")
                              (:file "render")
-                             (:file "studio")
-                             (:file "film")
-                             (:file "architecture"))))
+                             (:file "studio"))))
   :in-order-to ((test-op (test-op "luft/render/test"))))
 
 (defsystem "luft/program"
@@ -44,7 +36,7 @@
   :entry-point "luft.render:main")
 
 (defsystem "luft/render/test"
-  :description "Executable claims for the packed-site renderer."
+  :description "Executable claims for the indexed-instanced renderer."
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on ("luft/render" "rove")
@@ -55,16 +47,3 @@
                                        (uiop:symbol-call '#:rove '#:find-suite
                                                          '#:luft.render.tests))
                (error "LUFT render tests failed"))))
-
-(defsystem "luft/test"
-  :description "Executable incidence laws for packed LUFT sites."
-  :version "0.0.1"
-  :author "Mikael Brockman"
-  :depends-on ("luft" "rove")
-  :components ((:file "luft/tests"))
-  :perform (test-op (operation component)
-             (declare (ignore operation component))
-             (unless (uiop:symbol-call '#:rove '#:run-suite
-                                       (uiop:symbol-call '#:rove '#:find-suite
-                                                         '#:luft.tests))
-               (error "LUFT tests failed"))))
