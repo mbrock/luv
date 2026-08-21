@@ -163,7 +163,7 @@
   nil)
 
 (defun start-viewer (&key
-                       (solid (make-demo-solid))
+                       (solid (make-gallery-solid))
                        (camera (make-fly-camera))
                        (title "LUFT indexed faces")
                        (width 1100) (height 800)
@@ -251,13 +251,13 @@
                            (canvas-format context)))
       (destroy buffer))))
 
-(defun refresh-viewer-renderer (&optional (viewer *viewer*))
+(defun refresh-viewer-renderer (&optional (viewer *viewer*)
+                                &key (solid (make-gallery-solid)))
   "Rebuild VIEWER's renderer so edited shaders and geometry take effect."
   (when viewer
     (let* ((context (viewer-context viewer))
            (old (viewer-renderer viewer))
-           (materialization
-             (make-face-materialization (make-demo-solid))))
+           (materialization (make-face-materialization solid)))
       (setf (viewer-running-p viewer) nil)
       (unwind-protect
            (setf (viewer-renderer viewer)

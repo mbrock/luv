@@ -39,6 +39,77 @@
       (publish-polarity nil))
     (%make-face-materialization domain words positive-count negative-count)))
 
+(defparameter *gallery*
+  ;; Each entry is one isolated complex, named by the star configuration it
+  ;; is there to exhibit.  Cells are offsets from the entry's plot origin.
+  '((:one-cell
+     ((0 0 0)))
+    (:face-pair
+     ((0 0 0) (1 0 0)))
+    (:edge-pair
+     ((0 0 0) (1 1 0)))
+    (:corner-pair
+     ((0 0 0) (1 1 1)))
+    (:l-tromino
+     ((0 0 0) (1 0 0) (0 1 0)))
+    (:square
+     ((0 0 0) (1 0 0) (0 1 0) (1 1 0)))
+    (:stair
+     ((0 0 0) (1 0 0) (1 0 1)))
+    (:concave-vertex
+     ((0 0 0) (1 0 0) (0 1 0) (1 1 0)
+      (0 0 1) (1 0 1) (0 1 1)))
+    (:six-of-eight
+     ((0 0 0) (1 0 0) (0 1 0) (1 1 0)
+      (0 0 1) (1 0 1)))
+    (:full-block
+     ((0 0 0) (1 0 0) (0 1 0) (1 1 0)
+      (0 0 1) (1 0 1) (0 1 1) (1 1 1)))
+    (:tower
+     ((0 0 0) (0 0 1) (0 0 2)))
+    (:cross
+     ((1 1 0) (0 1 0) (2 1 0) (1 0 0) (1 2 0) (1 1 1))))
+  "Small unconnected complexes, one per interesting occupancy star.")
+
+(defparameter *gallery-columns* 4)
+(defparameter *gallery-pitch* 6)
+
+(defun gallery-plot-origin (index)
+  "Return the lattice origin of gallery entry INDEX, laid out on a grid."
+  (multiple-value-bind (row column) (floor index *gallery-columns*)
+    (values (+ 2 (* column *gallery-pitch*))
+            (+ 2 (* row *gallery-pitch*))
+            1)))
+
+(defun make-gallery-solid (&key (entries *gallery*))
+  "Build one chain holding every gallery complex on its own plot.
+
+Nothing here touches anything else, so each patch shown is entirely the
+consequence of its own occupancy star and can be read on its own."
+  (let* ((domain (luft:make-world-domain :x-bits 6 :y-bits 6))
+         (builder (luft:make-chain-builder domain :initial-capacity 128))
+         (seen (make-hash-table :test #'eql)))
+    (loop for entry in entries
+          for index from 0
+          do (multiple-value-bind (ox oy oz) (gallery-plot-origin index)
+               (loop for (dx dy dz) in (second entry)
+                     for site = (luft:make-site domain (+ ox dx) (+ oy dy)
+                                                (+ oz dz)
+                                                luft:+cell-extent+ 1)
+                     unless (gethash site seen)
+                       do (setf (gethash site seen) t)
+                          (luft:chain-builder-add-site builder site))))
+    (luft:finish-chain-builder builder)))
+
+(defun gallery-plot-report (&key (entries *gallery*))
+  "Print where each gallery complex sits, so a capture can be aimed at one."
+  (loop for entry in entries
+        for index from 0
+        do (multiple-value-bind (x y z) (gallery-plot-origin index)
+             (format t "~&~2D ~24A origin ~D,~D,~D~%"
+                     index (first entry) x y z)))
+  (values))
+
 (defun make-demo-solid ()
   "Make a compact stair-and-bridge solid with convex and concave stars."
   (let* ((domain (luft:make-world-domain :x-bits 5 :y-bits 5))

@@ -14,6 +14,10 @@
            #:face-materialization-positive-count
            #:face-materialization-words
            #:make-demo-solid
+           #:make-gallery-solid
+           #:gallery-plot-report
+           #:gallery-plot-origin
+           #:*gallery*
            #:make-face-materialization
            #:renderer
            #:renderer-materialization
