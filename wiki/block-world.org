@@ -417,6 +417,41 @@ Solidity, opacity, and ordinary face material may be derived from a palette
 entry rather than copied into fields.  Lighting, fluids, or ecological
 readings may deserve separate fields when algorithms actually consume them.
 
+** TODO Seven ordinary stocks, exceptional behaviour as entities
+:PROPERTIES:
+:ID: CEDSL9
+:END:
+
+/Intent./ Let the authored ordinary vocabulary be grass, stone, sand, terminal,
+tree, snow, and crystal.  Old visual variants migrate at restore time to one of
+those stocks instead of remaining live merely because the atlas once had room
+for them.
+
+/Evidence./ Dirt, moss, and flowers can restore as grass; wood, leaves, planks,
+and cactus as tree; gravel, clay, mud, masonry, and slate as stone; sandstone as
+sand.  Tape and film, springs, and urbit are different: they carry behaviour or
+sparse state disguised as block kinds.  They must first become items or block
+entities, spring entities, and terminal modes.  Save and procedural-source
+format one both name the old vocabulary, so deletion requires an explicit
+versioned migration rather than aliases in the live palette.
+
+The rendering bridge has exactly seven LUFT slots, =#(:turf :granite :sand
+:terminal :tree :snow :crystal)=.  A cached vocabulary LUT and dense byte slot
+field belong to the resident LUFT materialization, not the authored
+=block-world=; atlas tiles, display colours, and old face materials are not its
+authority.  Current wood and leaves both map to tree, terminal retains its
+authored identity while its screen stays an overlay, and crystal surface
+radiance remains distinct from the propagated light it emits into air.  Turf is
+a green matte stock whose small-scale tooth, mottle, wear, and grit come from
+LUFT material detail rather than a repeated grass tile.
+
+/Done when./ New worlds and inventories contain exactly the seven ordinary
+kinds, version-one saves and generated terrain migrate without changing solid
+occupancy or tree geometry, exceptional devices retain their behaviour through
+entities, and unknown names still fail loudly.  Stock-only edits publish exact
+slot-word and exposed-face changes in one scene revision, while hidden faces do
+not force page rebuilds.
+
 * The first animal is an entity, not a field
 :PROPERTIES:
 :ID: KTRMAO
@@ -461,6 +496,26 @@ so a critter face takes the centred fraction of its tile which keeps texels
 roughly the same size everywhere on the animal.  Without that, a shell wears
 scutes the size of itself and smears the same scutes into bands around its
 rim.
+
+** TODO The turtle is one anonymous SDF critter
+:PROPERTIES:
+:ID: AYA88E
+:END:
+
+/Intent./ Keep the existing =critter= identity, deterministic behaviour,
+terrain body, picking, striking, and riding protocols, but replace every
+atlas-textured turtle box with one instance in a shared core-owned SDF draw.
+
+/Evidence./ The population is bounded and already emits one dense per-frame
+product.  An =embodied-agent= would pull dialogue, session, OpenAI, and overlay
+ownership downstream into a creature that needs none of them.  A turtle
+instance needs only current and previous pose, gait/rest state, scale/species,
+and material/light readings; one field can shape shell, plastron, head, tail,
+and legs for every turtle.
+
+/Done when./ The batch has bounded allocation, true hit depth, shadow and
+current-to-previous motion, preserves riding and collision tests unchanged,
+and leaves no turtle dependency on the block atlas.
 
 An animal also answers a ray for itself.  The lattice traversal of
 #B4K7WR is no use here, because a critter is not on the lattice; what the

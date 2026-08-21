@@ -30,6 +30,7 @@
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on ("luv"
+               "luft/render"
                "luv/ghostty"
                "luv/libav"
                "luv/terminal/canvas"
@@ -56,6 +57,7 @@
                  (:file "fields")
                  (:file "production")
                  (:file "blocks")
+                 (:file "luft-world")
                  (:file "inventory")
                  (:file "terrain")
                  (:file "light")
@@ -81,6 +83,7 @@
                  (:file "video-screen")
                  (:file "renderer")
                  (:file "app")
+                 (:file "luft-render")
                  (:file "riding")
                  (:file "body")
                  (:file "balls")
@@ -304,6 +307,8 @@
   :serial t
   :components ((:file "hal/shader/tests")
                (:file "luvcraft/world-tests")
+               (:file "luvcraft/luft-world-tests")
+               (:file "luvcraft/luft-render-tests")
                (:file "luvcraft/tests")
                (:file "luvcraft/renderer-tests")
                (:file "luvcraft/video-interop-tests")

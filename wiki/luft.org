@@ -863,7 +863,7 @@ bytes by itself.
 reference and GPU tests pass, clicks use the incremental path, and all three
 construction orders finish at the exact authored solid and boundary.
 
-** NEXT A resident luvcraft window is one LUFT scene
+** DONE A resident luvcraft window is one LUFT scene
 :PROPERTIES:
 :ID: 2TTUQD
 :END:
@@ -882,11 +882,58 @@ product, so [[lisp:luvcraft.world:add-block-world-observer]] now publishes cell
 and readable chunk-residency events to coarse observer objects without putting
 objects or dispatch inside dense cell loops.
 
-/Done when./ A resident materialization maps Luvcraft X/Z/Y into LUFT X/Y/Z,
-unwraps the torus around one explicit world window, agrees with a fresh rebuild
-after edits, arrivals, and departures, and draws the real game terrain through
-LUFT's vertex path.  The old mesh path remains only as a temporary visual
-comparison until that checkpoint is playable.
+/Done when./ Done: the resident materialization maps Luvcraft X/Z/Y into LUFT
+X/Y/Z, rejects ambiguous torus windows before publication, and agrees with a
+fresh rebuild after edits, arrivals, departures, aliases, and failed semantic
+classification.  A live 1344x840 Metal game drew 104,240 surface sites; its
+three acquired frame states independently reached scene revision two, the
+canvas remained healthy, and the complete session stopped cleanly.  CPU meshes
+remain only for the shadow pass and a live comparison switch until the next
+checkpoint replaces those consumers.
+
+** DONE Surface storage follows the acquired luvcraft frame
+:PROPERTIES:
+:ID: ERP9SK
+:END:
+
+/Intent./ Make LUFT's reusable surface drawer obey luvcraft's frames-in-flight
+ownership.  Pipeline layouts, modules, and pipelines belong to one static
+surface technique; every acquired frame slot owns its own uniform, site, cell,
+stock, and slot buffers plus the bind groups that name that exact cohort.
+
+/Evidence./ [[lisp:luv:write-buffer]] mutates persistently mapped or shared
+storage immediately on both backends.  A renderer-wide buffer can therefore be
+changed while an earlier submission still reads it.  Luvcraft already treats
+reacquiring a presentation slot as proof that its animated buffers are free,
+and [[lisp:luft.render:scene-changes-since]] lets each slot catch up from its own
+revision without forcing every slot through a full upload.
+
+/Done when./ Two independent frame states reach one scene revision through
+incremental history, share no mutable buffers, fall back to a full upload after
+a history gap, and are released before their shared technique.  The standalone
+atelier composes the same objects without changing its pictures.
+
+** TODO Voxel light inhabits LUFT cell pages
+:PROPERTIES:
+:ID: 5XV63M
+:END:
+
+/Intent./ Preserve the checked frontier programs and brightest-first
+materialization while replacing chunk-owned light fields with scene-aligned
+8x8x8 pages over the resident LUFT world.
+
+/Evidence./ Surface faces cannot be the light domain, and occupancy alone
+cannot distinguish resident air from unavailable terrain.  Each page therefore
+needs explicit availability beside packed sky and block-light values, an
+unwrapped world identity for its toroidal slot, and a mapping epoch that rejects
+publication into a reused slot.  Stock optical behavior remains one short LUT;
+crystal emission is a field source while crystal surface radiance stays a
+material fact.
+
+/Done when./ A scalar page reference agrees cell-for-cell with today's oracle;
+the compiled frontier lowers over 8x8x8 pages; edits, arrival, departure, and
+slot reuse publish exact changed-page cohorts; and the LUFT vertex path samples
+the packed result directly without relighting-triggered remeshing.
 
 ** IDEA Compact surviving faces only when measurement earns another path
 :PROPERTIES:

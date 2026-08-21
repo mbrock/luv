@@ -79,6 +79,24 @@
            #:*actions*
            #:attach-lighting-state
            #:detach-lighting-state
+           #:luft-world-materialization
+           #:make-luft-world-materialization
+           #:attach-luft-world-materialization
+           #:detach-luft-world-materialization
+           #:invalidate-luft-world-solidity
+           #:reconcile-luft-world-materialization
+           #:luft-world-materialization-world
+           #:luft-world-materialization-domain
+           #:luft-world-materialization-scene
+           #:luft-world-materialization-horizontal-bits
+           #:luft-world-materialization-vertical-origin
+           #:luft-world-materialization-resident-center
+           #:luft-world-cell-site
+           #:luft-frame-adapter
+           #:make-luft-frame-adapter
+           #:luft-frame-adapter-camera
+           #:update-luft-frame-adapter-camera
+           #:luft-frame-adapter-uniform-data
            #:benchmark-luvcraft-frame-performance
            #:block-chunk-load-payload
            #:block-chunk-load-request

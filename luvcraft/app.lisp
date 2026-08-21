@@ -33,6 +33,18 @@
    (device :initarg :device :reader luvcraft-session-device)
    (context :initarg :context :reader luvcraft-session-context)
    (world :initarg :world :reader luvcraft-session-world)
+   (luft-world-materialization
+    :initarg :luft-world-materialization
+    :initform nil
+    :accessor luvcraft-session-luft-world-materialization
+    :documentation
+    "The attached LUFT scene derived from the authored resident world.")
+   (luft-frame-adapter
+    :initarg :luft-frame-adapter
+    :initform nil
+    :accessor luvcraft-session-luft-frame-adapter
+    :documentation
+    "The reusable Y-up to Z-up camera and frame-uniform adapter.")
    (checkpoint-writer :initarg :checkpoint-writer :initform nil
                       :reader luvcraft-session-checkpoint-writer)
    (mesher :initarg :mesher :reader luvcraft-session-mesher)

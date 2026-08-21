@@ -74,6 +74,12 @@ rather than reproducing its private resource inventory."))
                             :reader luvcraft-renderer-bloom-vertical-pipeline)
    (sun-shaft-pipeline :initarg :sun-shaft-pipeline :initform nil
                        :reader luvcraft-renderer-sun-shaft-pipeline)
+   (surface-technique
+    :initarg :surface-technique
+    :initform nil
+    :accessor luvcraft-renderer-surface-technique
+    :documentation
+    "The shared linear LUFT stock pipeline technique.")
    ;; The cache and both inventories are private implementation details of
    ;; this owner.  A construction-time rollback list may precede it, but a
    ;; completed session has no second resource ledger.  See #V9VH79.

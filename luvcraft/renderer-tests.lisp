@@ -92,6 +92,109 @@
     (ok (equal (list resource)
                (luvcraft::luvcraft-renderer-resources renderer)))))
 
+(deftest live-session-luft-adoption-retires-pre-seam-frame-states
+  (let* ((resource (make-instance 'renderer-release-probe))
+         (state
+           (make-instance
+            'luvcraft::luvcraft-frame-state
+            :uniform-buffer resource
+            :particle-vertex-buffer resource
+            :critter-vertex-buffer resource
+            :physics-vertex-buffer resource
+            :physics-instance-buffer resource
+            :body-vertex-buffer resource
+            :scene-bind-group resource
+            :shadow-bind-group resource
+            :post-uniform-buffer resource
+            :post-bind-group resource
+            :bloom-scene-bind-group resource
+            :bloom-primary-bind-group resource
+            :bloom-secondary-bind-group resource))
+         (states (make-hash-table))
+         (materialization (gensym "MATERIALIZATION"))
+         (adapter (gensym "ADAPTER"))
+         (technique (gensym "TECHNIQUE"))
+         (renderer
+           (make-instance 'luvcraft-renderer
+                          :surface-technique technique
+                          :frame-states states
+                          :resources (list resource)))
+         (session
+           (make-instance 'luvcraft-session
+                          :renderer renderer
+                          :luft-world-materialization materialization
+                          :luft-frame-adapter adapter)))
+    (setf (gethash :retired-drawable states) state)
+    (multiple-value-bind (actual-materialization actual-adapter
+                          actual-technique)
+        (luvcraft::ensure-luvcraft-luft-integration session)
+      (ok (eq materialization actual-materialization))
+      (ok (eq adapter actual-adapter))
+      (ok (eq technique actual-technique)))
+    (ok (zerop (hash-table-count states)))
+    (ok (= 1 (renderer-release-probe-attempts resource)))
+    (ok (null (luvcraft::luvcraft-renderer-resources renderer)))))
+
+(deftest complete-live-session-luft-integration-keeps-frame-cache
+  (let* ((technique (gensym "TECHNIQUE"))
+         (surface-state
+           (make-instance 'luft.render:surface-frame-state
+                          :technique technique))
+         (state
+           (make-instance 'luvcraft::luvcraft-frame-state
+                          :surface-frame-state surface-state))
+         (states (make-hash-table))
+         (materialization (gensym "MATERIALIZATION"))
+         (adapter (gensym "ADAPTER"))
+         (renderer
+           (make-instance 'luvcraft-renderer
+                          :surface-technique technique
+                          :frame-states states))
+         (session
+           (make-instance 'luvcraft-session
+                          :renderer renderer
+                          :luft-world-materialization materialization
+                          :luft-frame-adapter adapter)))
+    (setf (gethash :current-drawable states) state)
+    (multiple-value-bind (actual-materialization actual-adapter
+                          actual-technique)
+        (luvcraft::ensure-luvcraft-luft-integration session)
+      (ok (eq materialization actual-materialization))
+      (ok (eq adapter actual-adapter))
+      (ok (eq technique actual-technique)))
+    (ok (eq state (gethash :current-drawable states)))
+    (ok (eq surface-state
+            (luvcraft::luvcraft-frame-surface-frame-state state)))))
+
+(deftest live-session-recovers-a-lost-technique-from-its-frame-state
+  (let* ((technique (gensym "TECHNIQUE"))
+         (surface-state
+           (make-instance 'luft.render:surface-frame-state
+                          :technique technique))
+         (state
+           (make-instance 'luvcraft::luvcraft-frame-state
+                          :surface-frame-state surface-state))
+         (states (make-hash-table))
+         (materialization (gensym "MATERIALIZATION"))
+         (adapter (gensym "ADAPTER"))
+         (renderer
+           (make-instance 'luvcraft-renderer :frame-states states))
+         (session
+           (make-instance 'luvcraft-session
+                          :renderer renderer
+                          :luft-world-materialization materialization
+                          :luft-frame-adapter adapter)))
+    (setf (gethash :current-drawable states) state)
+    (multiple-value-bind (actual-materialization actual-adapter
+                          actual-technique)
+        (luvcraft::ensure-luvcraft-luft-integration session)
+      (ok (eq materialization actual-materialization))
+      (ok (eq adapter actual-adapter))
+      (ok (eq technique actual-technique)))
+    (ok (eq technique
+            (luvcraft::luvcraft-renderer-surface-technique renderer)))
+    (ok (eq state (gethash :current-drawable states)))))
+
 (deftest renderer-resource-release-retains-a-failed-handle-for-retry
   (let* ((resource
            (make-instance 'renderer-release-probe :failures-remaining 1))
