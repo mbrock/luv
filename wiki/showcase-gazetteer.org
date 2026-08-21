@@ -343,7 +343,7 @@ the feature being shown.
 
 The diagnostic gazetteer remains valuable beside the editorial showcase.  Its
 existing views should be wrapped by small capture recipes instead of copied or
-retired: =little-world-noon=, =little-world-dusk=, =shadow-forest=,
+retired: =gazetteer-little-world-noon=, =little-world-dusk=, =shadow-forest=,
 =glow-floor=, =crystal-seam=, =turtle-meadow=, and =shadow-yard=.
 
 The broader reference shelf should add:
@@ -395,7 +395,7 @@ boundary.  A recipe should reuse one scene constructor across its still and
 film whenever they depict the same subject.  That makes their difference an
 authored camera or clock path rather than accidental world state.
 
-* NEXT Author the pre-noon ridge
+* DONE Author the pre-noon ridge
 :PROPERTIES:
 :ID: 2ILB5D
 :END:
@@ -415,3 +415,13 @@ showcase host, the still reads as warm pre-noon terrain rather than a diagnostic
 aerial, the film has responsive consecutive frames with no streaming pop or
 shadow shimmer, teardown leaves no surviving session, and both published cards
 are inspected at their actual browser size.
+
+The Chapel capture at source =2f251e7f5957= rendered the complete 81-chunk
+resident scene into both artifacts.  Every hidden Vulkan canvas closed; the
+published glide reached 1.43 seconds during browser playback with a visibly
+advanced camera and no changed terrain, while the still and film remained clean
+of HUD and viewmodel layers.
+
+[[capture:NLCFX0-pre-noon-ridge-still.png]]
+
+[[capture:NLCFX0-pre-noon-ridge-glide.mp4]]
