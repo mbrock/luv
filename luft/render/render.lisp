@@ -903,7 +903,7 @@ Far enough that a sixty-cell world does not dissolve at its own horizon:
 fog is for saying that distance exists, not for hiding the far bank.")
 (defparameter *bevel-radius* 0.22
   "The :BEVEL style's crease-rounding radius in cells, below one half.")
-(defparameter *chamfer-width* 0.11
+(defparameter *chamfer-width* 0.30
   "The :CHAMFER style's 45-degree crease relief in cells.
 
 Wide enough that the planed facet reads as a face of its own and catches
