@@ -332,7 +332,7 @@ offsets and of headers."
   :description "Reproducible wiki screenshots and films rendered from named capture recipes."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luvcraft/agent" "luft/render")
+  :depends-on ("luvcraft/agent")
   :build-operation "luv:capture-op"
   :serial t
   :components ((:module "captures"
@@ -350,8 +350,7 @@ offsets and of headers."
                              (:file "characters-instruments")
                              (:file "agent-construction")
                              (:file "terminal-cinema")
-                             (:file "reference-plates")
-                             (:file "luft-portraits")))))
+                             (:file "reference-plates")))))
 
 (defsystem "luv/mcclim"
   :description "An experimental McCLIM backend presented through luv canvases."

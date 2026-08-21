@@ -1,18 +1,27 @@
 (in-package #:asdf-user)
 
 (defsystem "luft"
-  :description "Packed sites in a small cubical world."
-  :version "0.0.1"
+  :description "The executable LUFT foundation: packed cubical sites, chains,
+the strict-minority chamfer classifier, and the face-record ABI."
+  :version "0.1.0"
   :author "Mikael Brockman"
-  :serial t
-  :components ((:file "luft/package")
-               (:file "luft/luft")
-               (:file "luft/chain"))
+  :components ((:file "luft/foundation"))
   :in-order-to ((test-op (test-op "luft/test"))))
 
+(defsystem "luft/test"
+  :description "The foundation's own executable invariants."
+  :version "0.1.0"
+  :author "Mikael Brockman"
+  :depends-on ("luft")
+  :perform (test-op (operation component)
+             (declare (ignore operation component))
+             (uiop:symbol-call '#:luft '#:run-tests)))
+
 (defsystem "luft/render"
-  :description "A greenfield atelier drawing surface chains of packed sites."
-  :version "0.0.1"
+  :description "A greenfield renderer drawing materialized face records:
+one 16-byte record per exposed face, realized on the GPU from the face site,
+its shape word, and the chamfer width alone."
+  :version "0.1.0"
   :author "Mikael Brockman"
   :depends-on ("luft" "luv")
   :serial t
@@ -21,20 +30,11 @@
                 :serial t
                 :components ((:file "package")
                              (:file "shaders")
-                             (:file "vertex-shaders")
-                             (:file "field")
-                             (:file "material")
-                             (:file "lattice")
-                             (:file "clay")
-                             (:file "render")
-                             (:file "studio")
-                             (:file "film")
-                             (:file "architecture"))))
-  :in-order-to ((test-op (test-op "luft/render/test"))))
+                             (:file "render")))))
 
 (defsystem "luft/program"
   :description "The standalone LUFT atelier executable."
-  :version "0.0.1"
+  :version "0.1.0"
   :author "Mikael Brockman"
   :depends-on ("luft/render")
   :serial t
@@ -42,29 +42,3 @@
   :build-operation "program-op"
   :build-pathname "build/luft"
   :entry-point "luft.render:main")
-
-(defsystem "luft/render/test"
-  :description "Executable claims for the packed-site renderer."
-  :version "0.0.1"
-  :author "Mikael Brockman"
-  :depends-on ("luft/render" "rove")
-  :components ((:file "luft/render/tests"))
-  :perform (test-op (operation component)
-             (declare (ignore operation component))
-             (unless (uiop:symbol-call '#:rove '#:run-suite
-                                       (uiop:symbol-call '#:rove '#:find-suite
-                                                         '#:luft.render.tests))
-               (error "LUFT render tests failed"))))
-
-(defsystem "luft/test"
-  :description "Executable incidence laws for packed LUFT sites."
-  :version "0.0.1"
-  :author "Mikael Brockman"
-  :depends-on ("luft" "rove")
-  :components ((:file "luft/tests"))
-  :perform (test-op (operation component)
-             (declare (ignore operation component))
-             (unless (uiop:symbol-call '#:rove '#:run-suite
-                                       (uiop:symbol-call '#:rove '#:find-suite
-                                                         '#:luft.tests))
-               (error "LUFT tests failed"))))

@@ -2,212 +2,46 @@
   (:use #:cl #:luv.shader)
   (:shadowing-import-from #:luv.shader #:step)
   (:documentation
-   "Vertex and fragment stages that draw a surface chain of packed sites.")
-  (:export #:+stocks-binding+
-           #:+slots-binding+
-           #:*deformations*
-           #:deformation-index
-           #:deform-point
-           #:deform-normal
-           #:stock-vertex-shader
-           #:+stock-slots+
-           #:+stock-lanes+
-           #:+site-stock-shift+
-           #:+site-stock-bits+
-           #:+frame-binding+
-           #:+sites-binding+
-           #:+cells-binding+
+   "The face-record vertex stage and its fragment stage.
+
+The vertex shader is a transliteration of LUFT:REALIZE-FACE-PATCH: it
+realizes one of the sixteen patch points of one exposed face from the
+oriented face site, the 32-bit shape word, and the chamfer width alone.
+No occupancy is bound; every classification was authored on the CPU into
+the shape word.")
+  (:export #:+frame-binding+
+           #:+faces-binding+
+           #:+template-binding+
            #:*frame-uniform-members*
-           #:chamfer-fragment-shader
-           #:temporal-chamfer-fragment-shader
-           #:paper-fragment-shader
-           #:temporal-paper-fragment-shader
-           #:sky-fragment-shader
-           #:temporal-sky-fragment-shader
-           #:surface-vertex-shader
-           #:field-vertex-shader
-           #:field-fragment-shader
-           #:temporal-field-fragment-shader
-           #:ink-fragment-shader
-           #:temporal-ink-fragment-shader
-           #:stock-fragment-shader
-           #:temporal-stock-fragment-shader
-           #:clay-vertex-shader
-           #:clay-fragment-shader
-           #:temporal-clay-fragment-shader
-           #:bevel-vertex-shader
-           #:chamfer-vertex-shader
-           #:sky-vertex-shader
-           #:surface-vertices-per-face
-           #:lens-fragment-shader
-           #:present-fragment-shader
-           #:temporal-resolve-fragment-shader
-           #:+scene-binding+
-           #:+sampler-binding+
-           #:+lens-frame-binding+
-           #:+current-binding+
-           #:+motion-binding+
-           #:+history-binding+
-           #:+temporal-sampler-binding+
-           #:+temporal-frame-binding+
-           #:surface-fragment-shader
-           #:temporal-surface-fragment-shader
-           #:frame-uniform-block))
+           #:+patch-vertices-per-face+
+           #:patch-vertex-shader
+           #:patch-fragment-shader))
 
 (defpackage #:luft.render
   (:use #:cl #:luv)
   (:local-nicknames (#:shaders #:luft.render.shaders)
-                    (#:shader #:luv.shader)
                     (#:vec3 #:luv.arithmetic.lisp.vec3))
   (:documentation
-   "A greenfield atelier renderer: a small block world as a boundary chain
-of packed LUFT sites, drawn by vertex shaders pulling sites.")
-  (:export #:world
-           #:make-world
-           #:world-domain
-           #:world-solid
-           #:world-slots
-           #:world-stocks
-           #:world-cell-p
-           #:world-stock-slot
-           #:world-vertical-p
-           #:world-scene
-           #:paint-cell
-           #:*stock*
-           #:with-stock
+   "A greenfield atelier drawing dense face records.
+
+The CPU end is LUFT:MATERIALIZE-SURFACE: occupancy -> solid 3-chain ->
+oriented surface 2-chain -> per-face shape words -> one 16-byte record per
+exposed face.  This package uploads those records and draws them.")
+  (:export #:make-atelier-world
            #:fill-box
-           #:scene
-           #:make-scene
-           #:scene-slots
-           #:scene-stocks
-           #:stock-table-data
-           #:make-demo-scene
-           #:scene-domain
-           #:scene-solid
-           #:scene-surface
-           #:scene-sites
-           #:scene-cell-bits
-           #:scene-revision
-           #:scene-cell-p
-           #:apply-scene-edit
-           #:refresh-scene
-           #:fly-camera
            #:make-fly-camera
            #:camera-position
            #:camera-yaw
            #:camera-pitch
-           #:camera-field-of-view
-           #:camera-basis
-           #:raycast-scene
-           #:frame-uniform-data
-           #:renderer
            #:make-renderer
-           #:renderer-device
-           #:renderer-scene
-           #:renderer-camera
-           #:renderer-extent
-           #:renderer-style
-           #:renderer-pipeline-styles
-           #:renderer-effects
-           #:renderer-last-scene-upload-kind
-           #:renderer-last-scene-upload-bytes
-           #:renderer-last-scene-upload-writes
-           #:*bevel-radius*
-           #:*chamfer-width*
-           #:*arris-softness*
-           #:*field-vertical-radius*
-           #:*clay-radius*
-           #:*clay-melt*
-           #:*clay-stocks*
-           #:light
-           #:light-name
-           #:define-light
-           #:find-light
-           #:light-names
-           #:*light*
-           #:with-light
-           #:*sun-direction*
-           #:*sun-color*
-           #:*sheen-strength*
-           #:*fill-direction*
-           #:*fill-strength*
-           #:*ambient-light*
-           #:*ground-color*
-           #:*occlusion-strength*
-           #:*wear-strength*
-           #:*ink-width*
-           #:*shadow-strength*
-           #:material
-           #:material-name
-           #:define-material
-           #:find-material
-           #:material-names
-           #:material-lanes
-           #:material-spacing
-           #:material-courses
-           #:material-chamfer
-           #:material-grit
-           #:material-albedo
-           #:*material*
-           #:*deformation*
-           #:*deform-strength*
-           #:*deform-scale*
-           #:*deform-centre*
-           #:*erode-strength*
-           #:*erode-grain*
-           #:*chamfer-rule*
-           #:*relief-convex*
-           #:*relief-concave*
-           #:*top-color*
-           #:*side-color*
-           #:*bottom-color*
-           #:*exposure*
-           #:*sky-color*
-           #:*draw-sky*
-           #:*focus-distance*
-           #:*aperture*
-           #:*fog-distance*
            #:destroy-renderer
-           #:upload-scene
-           #:encode-frame
-           #:render-pixels
+           #:renderer-camera
+           #:renderer-world
+           #:upload-world
            #:render-to-png
-           #:downsample-pixels
-           #:capture-demo-png
-           #:make-studio-scene
-           #:atelier-scene
-           #:atelier-cameras
-           #:atelier-pieces
-           #:render-piece-sheet
-           #:render-view
-           #:render-light-sheet
-           #:fill-disc
-           #:fill-ring
-           #:carve-arch
-           #:ring-arch
-           #:corbel
-           #:crenellate
-           #:crenellate-disc
-           #:fill-stairs
-           #:spiral-stair
-           #:ground-height
-           #:lay-ground
-           #:grass-the-flats
-           #:column-top
-           #:scatter-boulders
-           #:plant-tree
-           #:plant-wood
-           #:arch-rise
-           #:studio-cameras
-           #:studio-camera
-           #:render-contact-sheet
-           #:film-studio-orbit
-           #:film-atelier-flight
-           #:film-atelier-construction
-           #:film-clay-breath
-           #:viewer
-           #:main
+           #:capture-atelier-png
            #:start-viewer
            #:stop-viewer
            #:viewer-renderer
-           #:*viewer*))
+           #:*viewer*
+           #:main))
