@@ -19,12 +19,19 @@
 (defconstant +low-63-mask+ #x7fffffffffffffff)
 (defconstant +low-62-mask+ #x3fffffffffffffff)
 
+(defstruct (air-workspace
+             (:constructor %make-air-workspace
+                 (reachable-a reachable-b cell-queue run-offsets
+                  run-starts run-ends run-owners run-reached run-queue)))
+  reachable-a reachable-b cell-queue run-offsets
+  run-starts run-ends run-owners run-reached run-queue)
+
 (deftype u64-vector () '(simple-array (unsigned-byte 64) (*)))
 
 (defstruct (fiber-case
              (:constructor %make-fiber-case
                  (width pattern stride occupancy solid-count
-                  total-runs maximum-runs output)))
+                  total-runs maximum-runs output air-workspace)))
   (width 0 :type fixnum :read-only t)
   (pattern :terrain :type keyword :read-only t)
   (stride 0 :type fixnum :read-only t)
@@ -32,7 +39,8 @@
   (solid-count 0 :type fixnum :read-only t)
   (total-runs 0 :type fixnum :read-only t)
   (maximum-runs 0 :type fixnum :read-only t)
-  (output #() :type u64-vector :read-only t))
+  (output #() :type u64-vector :read-only t)
+  (air-workspace nil :type air-workspace :read-only t))
 
 (defstruct fiber-sample
   (width 0 :type fixnum)
@@ -44,6 +52,7 @@
   (fiber-count 0 :type fixnum)
   (solid-count 0 :type fixnum)
   (run-count 0 :type fixnum)
+  (air-run-count 0 :type fixnum)
   (face-count 0 :type fixnum)
   (elapsed-seconds 0d0 :type double-float)
   (bytes-consed 0 :type integer)
@@ -179,6 +188,45 @@
           (setf maximum (max maximum runs)))))
     (values total maximum)))
 
+(defun make-air-workspace (occupancy stride)
+  "Index every maximal empty Z interval in every haloed fiber."
+  (let* ((fiber-count (* stride stride))
+         (run-offsets (make-array (1+ fiber-count) :element-type 'fixnum))
+         (starts (make-array 64 :element-type '(unsigned-byte 8)
+                                :adjustable t :fill-pointer 0))
+         (ends (make-array 64 :element-type '(unsigned-byte 8)
+                              :adjustable t :fill-pointer 0))
+         (owners (make-array 64 :element-type 'fixnum
+                                :adjustable t :fill-pointer 0)))
+    (dotimes (fiber fiber-count)
+      (setf (aref run-offsets fiber) (length starts))
+      (let ((base (* fiber +fiber-words+))
+            (z 0))
+        (loop while (< z luft:+top-z+)
+              do (if (solid-bit-p occupancy base z)
+                     (incf z)
+                     (let ((start z))
+                       (loop while (and (< z luft:+top-z+)
+                                        (not (solid-bit-p occupancy base z)))
+                             do (incf z))
+                       (vector-push-extend start starts)
+                       (vector-push-extend (1- z) ends)
+                       (vector-push-extend fiber owners))))))
+    (setf (aref run-offsets fiber-count) (length starts))
+    (let ((run-count (length starts)))
+      (%make-air-workspace
+       (make-array (length occupancy) :element-type '(unsigned-byte 64)
+                                      :initial-element 0)
+       (make-array (length occupancy) :element-type '(unsigned-byte 64)
+                                      :initial-element 0)
+       (make-array (* fiber-count luft:+top-z+) :element-type 'fixnum)
+       run-offsets
+       (coerce starts '(simple-array (unsigned-byte 8) (*)))
+       (coerce ends '(simple-array (unsigned-byte 8) (*)))
+       (coerce owners '(simple-array fixnum (*)))
+       (make-array run-count :element-type 'bit :initial-element 0)
+       (make-array run-count :element-type 'fixnum)))))
+
 (defun make-fiber-case (width pattern)
   (check-type width (integer 1 256))
   (unless (member pattern '(:solid :terrain :architecture :caves :checkerboard))
@@ -191,7 +239,8 @@
        width pattern stride occupancy solid-count total-runs maximum-runs
        (make-array (* width width +direction-count+ +fiber-words+)
                    :element-type '(unsigned-byte 64)
-                   :initial-element 0)))))
+                   :initial-element 0)
+       (make-air-workspace occupancy stride)))))
 
 (declaim (inline write-vertical-masks))
 
@@ -380,6 +429,305 @@
                 (set-output-bit output output-base +minus-z+ z)))))))
     output))
 
+;;; Camera-connected air is a different question from the complete boundary.
+;;; The complete boundary includes sealed caves.  These kernels seed the air
+;;; containing a camera above the center fiber, discover only that component,
+;;; and then write the solid faces incident to it.  AIR-CELL is the obvious
+;;; oracle, AIR-BITS propagates directly through the four-word fibers, and
+;;; AIR-RUNS traverses maximal empty Z intervals joined by horizontal overlap.
+
+(declaim (inline reachable-bit-p mark-reachable-bit))
+
+(defun reachable-bit-p (reachable fiber z)
+  (declare (type u64-vector reachable)
+           (type fixnum fiber z)
+           (optimize (speed 3) (safety 0)))
+  (logbitp (logand z 63)
+           (aref reachable (+ (* fiber +fiber-words+) (ash z -6)))))
+
+(defun mark-reachable-bit (reachable fiber z)
+  (declare (type u64-vector reachable)
+           (type fixnum fiber z)
+           (optimize (speed 3) (safety 0)))
+  (let ((index (+ (* fiber +fiber-words+) (ash z -6))))
+    (setf (aref reachable index)
+          (logior (aref reachable index) (ash 1 (logand z 63))))))
+
+(defun camera-air-seed (case)
+  "Return the center fiber's top air cell, or NIL when the camera is obstructed."
+  (let* ((stride (fiber-case-stride case))
+         (center (floor stride 2))
+         (fiber (+ center (* center stride)))
+         (base (* fiber +fiber-words+))
+         (z (1- luft:+top-z+)))
+    (if (solid-bit-p (fiber-case-occupancy case) base z)
+        (values nil nil)
+        (values fiber z))))
+
+(declaim (inline write-reachable-range))
+
+(defun write-reachable-range (reachable fiber low high)
+  (declare (type u64-vector reachable)
+           (type fixnum fiber low high)
+           (optimize (speed 3) (safety 0)))
+  (let ((base (* fiber +fiber-words+))
+        (first-word (ash low -6))
+        (last-word (ash high -6)))
+    (loop for word fixnum from first-word to last-word
+          for word-low fixnum = (* word 64)
+          for local-low fixnum = (max 0 (- low word-low))
+          for local-high fixnum = (min 63 (- high word-low))
+          for mask = (logand +u64-mask+
+                             (- (ash 1 (1+ local-high))
+                                (ash 1 local-low)))
+          do (setf (aref reachable (+ base word))
+                   (logior (aref reachable (+ base word)) mask))))
+  reachable)
+
+(defun write-camera-boundary (case reachable)
+  "Write solid faces incident to REACHABLE air into CASE's output buffer."
+  (let ((width (fiber-case-width case))
+        (stride (fiber-case-stride case))
+        (occupancy (fiber-case-occupancy case))
+        (output (fiber-case-output case)))
+    (declare (type fixnum width stride)
+             (type u64-vector occupancy reachable output)
+             (optimize (speed 3) (safety 0)))
+    (dotimes (y width)
+      (dotimes (x width)
+        (let* ((input-base (input-base stride (1+ x) (1+ y)))
+               (output-base (output-base width x y))
+               (right (+ input-base +fiber-words+))
+               (left (- input-base +fiber-words+))
+               (front (+ input-base (* stride +fiber-words+)))
+               (back (- input-base (* stride +fiber-words+))))
+          (declare (type fixnum input-base output-base right left front back))
+          (dotimes (word +fiber-words+)
+            (let* ((solid (aref occupancy (+ input-base word)))
+                   (air (aref reachable (+ input-base word)))
+                   (previous (if (plusp word)
+                                 (aref reachable (+ input-base word -1))
+                                 0))
+                   (next (if (< word (1- +fiber-words+))
+                             (aref reachable (+ input-base word 1))
+                             0))
+                   (air-above (logior (ash air -1)
+                                      (ash (logand next 1) 63)))
+                   (air-below (logand +u64-mask+
+                                      (logior (ash air 1)
+                                              (ldb (byte 1 63) previous)))))
+              (setf
+               (aref output (+ output-base (* +plus-x+ +fiber-words+) word))
+               (logand solid (aref reachable (+ right word)))
+               (aref output (+ output-base (* +minus-x+ +fiber-words+) word))
+               (logand solid (aref reachable (+ left word)))
+               (aref output (+ output-base (* +plus-y+ +fiber-words+) word))
+               (logand solid (aref reachable (+ front word)))
+               (aref output (+ output-base (* +minus-y+ +fiber-words+) word))
+               (logand solid (aref reachable (+ back word)))
+               (aref output (+ output-base (* +plus-z+ +fiber-words+) word))
+               (logand solid air-above)
+               (aref output (+ output-base (* +minus-z+ +fiber-words+) word))
+               (logand solid air-below)))))))
+    output))
+
+(defun write-camera-boundary-cell-scan (case reachable)
+  "Slow, direct oracle for the packed camera-boundary writer."
+  (let ((width (fiber-case-width case))
+        (stride (fiber-case-stride case))
+        (occupancy (fiber-case-occupancy case))
+        (output (fiber-case-output case)))
+    (declare (type fixnum width stride)
+             (type u64-vector occupancy reachable output)
+             (optimize (speed 3) (safety 0)))
+    (fill output 0)
+    (dotimes (y width)
+      (dotimes (x width)
+        (let* ((input-base (input-base stride (1+ x) (1+ y)))
+               (input-fiber (floor input-base +fiber-words+))
+               (output-base (output-base width x y)))
+          (declare (type fixnum input-base input-fiber output-base))
+          (dotimes (z luft:+top-z+)
+            (when (solid-bit-p occupancy input-base z)
+              (when (reachable-bit-p reachable (1+ input-fiber) z)
+                (set-output-bit output output-base +plus-x+ z))
+              (when (reachable-bit-p reachable (1- input-fiber) z)
+                (set-output-bit output output-base +minus-x+ z))
+              (when (reachable-bit-p reachable (+ input-fiber stride) z)
+                (set-output-bit output output-base +plus-y+ z))
+              (when (reachable-bit-p reachable (- input-fiber stride) z)
+                (set-output-bit output output-base +minus-y+ z))
+              (when (and (< z (1- luft:+top-z+))
+                         (reachable-bit-p reachable input-fiber (1+ z)))
+                (set-output-bit output output-base +plus-z+ z))
+              (when (and (plusp z)
+                         (reachable-bit-p reachable input-fiber (1- z)))
+                (set-output-bit output output-base +minus-z+ z)))))))
+    output))
+
+(defun camera-boundary-cell-flood (case)
+  "Reference breadth-first search over individual empty cells."
+  (let* ((stride (fiber-case-stride case))
+         (fiber-count (* stride stride))
+         (occupancy (fiber-case-occupancy case))
+         (workspace (fiber-case-air-workspace case))
+         (reachable (air-workspace-reachable-a workspace))
+         (queue (air-workspace-cell-queue workspace))
+         (head 0)
+         (tail 0))
+    (declare (type fixnum stride fiber-count head tail)
+             (type u64-vector occupancy reachable)
+             (type (simple-array fixnum (*)) queue)
+             (optimize (speed 3) (safety 0)))
+    (fill reachable 0)
+    (labels ((visit (fiber z)
+               (declare (type fixnum fiber z))
+               (when (and (<= 0 fiber) (< fiber fiber-count)
+                          (<= 0 z) (< z luft:+top-z+)
+                          (not (solid-bit-p occupancy
+                                            (* fiber +fiber-words+) z))
+                          (not (reachable-bit-p reachable fiber z)))
+                 (mark-reachable-bit reachable fiber z)
+                 (setf (aref queue tail) (+ (* fiber luft:+top-z+) z))
+                 (incf tail))))
+      (multiple-value-bind (seed-fiber seed-z) (camera-air-seed case)
+        (when seed-fiber
+          (visit seed-fiber seed-z)))
+      (loop while (< head tail)
+            for packed fixnum = (aref queue head)
+            do (incf head)
+               (multiple-value-bind (fiber z)
+                   (floor packed luft:+top-z+)
+                 (declare (type fixnum fiber z))
+                 (let ((x (mod fiber stride)))
+                   (declare (type fixnum x))
+                   (when (plusp x) (visit (1- fiber) z))
+                   (when (< x (1- stride)) (visit (1+ fiber) z)))
+                 (when (>= fiber stride) (visit (- fiber stride) z))
+                 (when (< fiber (- fiber-count stride))
+                   (visit (+ fiber stride) z))
+                 (when (plusp z) (visit fiber (1- z)))
+                 (when (< z (1- luft:+top-z+)) (visit fiber (1+ z))))))
+    (write-camera-boundary-cell-scan case reachable)))
+
+(defun camera-boundary-bit-waves (case)
+  "Propagate reachable air through packed masks one cell per fixed-point wave."
+  (let* ((stride (fiber-case-stride case))
+         (fiber-count (* stride stride))
+         (occupancy (fiber-case-occupancy case))
+         (workspace (fiber-case-air-workspace case))
+         (source (air-workspace-reachable-a workspace))
+         (destination (air-workspace-reachable-b workspace)))
+    (declare (type fixnum stride fiber-count)
+             (type u64-vector occupancy source destination)
+             (optimize (speed 3) (safety 0)))
+    (fill source 0)
+    (fill destination 0)
+    (multiple-value-bind (seed-fiber seed-z) (camera-air-seed case)
+      (when seed-fiber
+        (mark-reachable-bit source seed-fiber seed-z)))
+    (loop
+      (let ((changed nil))
+        (dotimes (fiber fiber-count)
+          (let ((base (* fiber +fiber-words+))
+                (x (mod fiber stride)))
+            (declare (type fixnum base x))
+            (dotimes (word +fiber-words+)
+              (let* ((index (+ base word))
+                     (current (aref source index))
+                     (previous (if (plusp word)
+                                   (aref source (1- index)) 0))
+                     (next (if (< word (1- +fiber-words+))
+                               (aref source (1+ index)) 0))
+                     (neighbors
+                       (logior
+                        current
+                        (logand +u64-mask+
+                                (logior (ash current 1)
+                                        (ldb (byte 1 63) previous)))
+                        (logior (ash current -1)
+                                (ash (logand next 1) 63))
+                        (if (plusp x)
+                            (aref source (- index +fiber-words+)) 0)
+                        (if (< x (1- stride))
+                            (aref source (+ index +fiber-words+)) 0)
+                        (if (>= fiber stride)
+                            (aref source (- index (* stride +fiber-words+))) 0)
+                        (if (< fiber (- fiber-count stride))
+                            (aref source (+ index (* stride +fiber-words+))) 0)))
+                     (valid (if (= word 3) +low-63-mask+ +u64-mask+))
+                     (new (logand valid neighbors
+                                  (lognot (aref occupancy index)))))
+                (setf (aref destination index) new)
+                (unless (= new current)
+                  (setf changed t))))))
+        (unless changed
+          (return (write-camera-boundary case source)))
+        (rotatef source destination)))))
+
+(defun camera-boundary-run-flood (case)
+  "Flood maximal air intervals; horizontal overlap is the adjacency test."
+  (let* ((stride (fiber-case-stride case))
+         (workspace (fiber-case-air-workspace case))
+         (offsets (air-workspace-run-offsets workspace))
+         (starts (air-workspace-run-starts workspace))
+         (ends (air-workspace-run-ends workspace))
+         (owners (air-workspace-run-owners workspace))
+         (reached (air-workspace-run-reached workspace))
+         (queue (air-workspace-run-queue workspace))
+         (reachable (air-workspace-reachable-a workspace))
+         (head 0)
+         (tail 0))
+    (declare (type fixnum stride head tail)
+             (type (simple-array fixnum (*)) offsets owners queue)
+             (type (simple-array (unsigned-byte 8) (*)) starts ends)
+             (type simple-bit-vector reached)
+             (type u64-vector reachable)
+             (optimize (speed 3) (safety 0)))
+    (fill reached 0)
+    (fill reachable 0)
+    (labels ((admit (run)
+               (declare (type fixnum run))
+               (when (zerop (sbit reached run))
+                 (setf (sbit reached run) 1
+                       (aref queue tail) run)
+                 (incf tail)))
+             (visit-fiber (neighbor low high)
+               (declare (type fixnum neighbor low high))
+               (loop for run fixnum from (aref offsets neighbor)
+                     below (aref offsets (1+ neighbor))
+                     when (> (aref starts run) high)
+                       do (loop-finish)
+                     when (>= (aref ends run) low)
+                       do (admit run))))
+      (multiple-value-bind (seed-fiber seed-z) (camera-air-seed case)
+        (when seed-fiber
+          (loop for run fixnum from (aref offsets seed-fiber)
+                below (aref offsets (1+ seed-fiber))
+                when (<= (aref starts run) seed-z (aref ends run))
+                  do (admit run)
+                     (loop-finish))))
+      (loop while (< head tail)
+            for run fixnum = (aref queue head)
+            for fiber fixnum = (aref owners run)
+            for low fixnum = (aref starts run)
+            for high fixnum = (aref ends run)
+            do (incf head)
+               (let ((x (mod fiber stride)))
+                 (declare (type fixnum x))
+                 (when (plusp x) (visit-fiber (1- fiber) low high))
+                 (when (< x (1- stride))
+                   (visit-fiber (1+ fiber) low high)))
+               (when (>= fiber stride)
+                 (visit-fiber (- fiber stride) low high))
+               (when (< fiber (- (* stride stride) stride))
+                 (visit-fiber (+ fiber stride) low high)))
+      (dotimes (run (length starts))
+        (when (= 1 (sbit reached run))
+          (write-reachable-range reachable (aref owners run)
+                                 (aref starts run) (aref ends run)))))
+    (write-camera-boundary case reachable)))
+
 (defun output-face-count (output)
   (declare (type u64-vector output)
            (optimize (speed 3) (safety 0)))
@@ -397,7 +745,9 @@
            (progn (surface-masks-cell-scan case) (copy-output case)))
          (scalar-output
            (progn (surface-masks-scalar case) (copy-output case)))
-         (simd-families (remove :scalar (available-kernel-families))))
+         (simd-families (remove :scalar (available-kernel-families)))
+         (camera-cell-output
+           (progn (camera-boundary-cell-flood case) (copy-output case))))
     (unless (equalp cell-output scalar-output)
       (error "Cell and scalar-fiber masks disagree for ~D-wide ~(~A~)."
              (fiber-case-width case) (fiber-case-pattern case)))
@@ -406,6 +756,14 @@
       (unless (equalp scalar-output (fiber-case-output case))
         (error "Scalar and ~A masks disagree for ~D-wide ~(~A~)."
                simd-family (fiber-case-width case) (fiber-case-pattern case))))
+    (camera-boundary-bit-waves case)
+    (unless (equalp camera-cell-output (fiber-case-output case))
+      (error "Cell and bit-wave camera boundaries disagree for ~D-wide ~(~A~)."
+             (fiber-case-width case) (fiber-case-pattern case)))
+    (camera-boundary-run-flood case)
+    (unless (equalp camera-cell-output (fiber-case-output case))
+      (error "Cell and air-run camera boundaries disagree for ~D-wide ~(~A~)."
+             (fiber-case-width case) (fiber-case-pattern case)))
     (dotimes (y (fiber-case-width case))
       (dotimes (x (fiber-case-width case))
         (let ((base (input-base (fiber-case-stride case) (1+ x) (1+ y))))
@@ -414,10 +772,16 @@
             (error "Run counters disagree at (~D,~D) for ~(~A~)."
                    x y (fiber-case-pattern case))))))
     (surface-masks-scalar case)
-    (values (output-face-count scalar-output) simd-families)))
+    (values (output-face-count scalar-output)
+            (output-face-count camera-cell-output)
+            simd-families)))
 
 (defparameter +benchmark-phases+
-  '(:runs-scan :runs-bits :surface-cell :surface-scalar :surface-simd))
+  '(:runs-scan :runs-bits :surface-cell :surface-scalar :surface-simd
+    :air-cell :air-bits :air-runs))
+
+(defun camera-air-phase-p (phase)
+  (member phase '(:air-cell :air-bits :air-runs)))
 
 (defun phase-zone (phase)
   (ecase phase
@@ -425,7 +789,10 @@
     (:runs-bits :luft/z-fiber/runs-bits)
     (:surface-cell :luft/z-fiber/surface-cell)
     (:surface-scalar :luft/z-fiber/surface-scalar)
-    (:surface-simd :luft/z-fiber/surface-simd)))
+    (:surface-simd :luft/z-fiber/surface-simd)
+    (:air-cell :luft/z-fiber/camera-air-cell)
+    (:air-bits :luft/z-fiber/camera-air-bits)
+    (:air-runs :luft/z-fiber/camera-air-runs)))
 
 (defun count-runs-with (case function)
   (let ((total 0)
@@ -452,7 +819,10 @@
             (:surface-scalar
              (aref (surface-masks-scalar case) 0))
             (:surface-simd
-             (aref (funcall (surface-kernel simd-family) case) 0))))))
+             (aref (funcall (surface-kernel simd-family) case) 0))
+            (:air-cell (aref (camera-boundary-cell-flood case) 0))
+            (:air-bits (aref (camera-boundary-bit-waves case) 0))
+            (:air-runs (aref (camera-boundary-run-flood case) 0))))))
 
 (defun calibrate-iterations (case phase simd-family)
   (loop with iterations fixnum = 1
@@ -501,6 +871,9 @@
                                  (fiber-case-width case))
                  :solid-count (fiber-case-solid-count case)
                  :run-count (fiber-case-total-runs case)
+                 :air-run-count
+                 (length (air-workspace-run-starts
+                          (fiber-case-air-workspace case)))
                  :face-count face-count
                  :elapsed-seconds
                  (/ (luv:runtime-observation-elapsed-seconds observation)
@@ -538,10 +911,10 @@
 
 (defun write-csv-header (stream)
   (format stream
-          "width,pattern,phase,simd_family,sample,iterations,fibers,cells,solid_cells,runs,faces,output_bytes,elapsed_ms,allocated_bytes,gc_ms,batch_gc_count~%"))
+          "width,pattern,phase,simd_family,sample,iterations,fibers,cells,solid_cells,runs,air_runs,faces,output_bytes,elapsed_ms,allocated_bytes,gc_ms,batch_gc_count~%"))
 
 (defun write-sample-csv (sample stream)
-  (format stream "~D,~(~A~),~(~A~),~(~A~),~D,~D,~D,~D,~D,~D,~D,~D,~,6F,~D,~,6F,~D~%"
+  (format stream "~D,~(~A~),~(~A~),~(~A~),~D,~D,~D,~D,~D,~D,~D,~D,~D,~,6F,~D,~,6F,~D~%"
           (fiber-sample-width sample)
           (fiber-sample-pattern sample)
           (fiber-sample-phase sample)
@@ -552,6 +925,7 @@
           (* (fiber-sample-fiber-count sample) luft:+top-z+)
           (fiber-sample-solid-count sample)
           (fiber-sample-run-count sample)
+          (fiber-sample-air-run-count sample)
           (fiber-sample-face-count sample)
           (* (fiber-sample-fiber-count sample)
              +direction-count+ +fiber-words+ 8)
@@ -587,20 +961,27 @@
                   width width pattern)
           (force-output stream)
           (let ((case (make-fiber-case width pattern)))
-            (multiple-value-bind (face-count validated-family)
+            (multiple-value-bind
+                (face-count camera-face-count validated-families)
                 (validate-case case)
-              (declare (ignore validated-family))
+              (declare (ignore validated-families))
               (format stream
-                      "  ~:D solids, ~:D faces, ~:D runs (~,2F/fiber, max ~D); exact masks~%"
+                      "  ~:D solids, ~:D faces (~:D camera-air), ~:D runs (~,2F/fiber, max ~D), ~:D halo air runs; exact masks~%"
                       (fiber-case-solid-count case) face-count
+                      camera-face-count
                       (fiber-case-total-runs case)
                       (/ (fiber-case-total-runs case)
                          (* width width 1d0))
-                      (fiber-case-maximum-runs case))
+                      (fiber-case-maximum-runs case)
+                      (length (air-workspace-run-starts
+                               (fiber-case-air-workspace case))))
               (dolist (phase +benchmark-phases+)
-                (let ((samples
-                        (measure-phase case phase simd-family sample-count
-                                       warmup-count stream face-count)))
+                (let* ((phase-face-count
+                         (if (camera-air-phase-p phase)
+                             camera-face-count face-count))
+                       (samples
+                         (measure-phase case phase simd-family sample-count
+                                        warmup-count stream phase-face-count)))
                   (print-phase-summary case phase samples stream)
                   (loop for sample across samples
                         do (write-sample-csv sample csv)

@@ -34,6 +34,28 @@
           (ok (equalp scalar (z::fiber-case-output case))
               (format nil "~A agrees for ~A" family pattern)))))))
 
+(deftest camera-air-algorithms-find-the-same-boundary
+  (dolist (pattern '(:solid :terrain :architecture :caves :checkerboard))
+    (let* ((case (z::make-fiber-case 5 pattern))
+           (cell
+             (progn (z::camera-boundary-cell-flood case) (z::copy-output case)))
+           (bits
+             (progn (z::camera-boundary-bit-waves case) (z::copy-output case))))
+      (z::camera-boundary-run-flood case)
+      (ok (equalp cell bits)
+          (format nil "~A cell and bit-wave camera boundary" pattern))
+      (ok (equalp cell (z::fiber-case-output case))
+          (format nil "~A cell and air-run camera boundary" pattern)))))
+
+(deftest camera-air-excludes-the-ground-underside
+  (let* ((width 4)
+         (case (z::make-fiber-case width :terrain)))
+    (z::surface-masks-scalar case)
+    (let ((complete-faces (z::output-face-count (z::fiber-case-output case))))
+      (z::camera-boundary-run-flood case)
+      (ok (= (- complete-faces (* width width))
+             (z::output-face-count (z::fiber-case-output case)))))))
+
 (deftest full-height-solid-and-checkerboard-have-expected-shape
   (let ((solid (z::make-fiber-case 4 :solid))
         (checkerboard (z::make-fiber-case 4 :checkerboard)))

@@ -106,6 +106,34 @@ The first implementation should preserve the existing scalar classifier as an
 oracle.  A bit-fiber implementation must produce identical shape words and
 face records for every tested occupancy pattern.
 
+* Camera-connected air boundary
+
+The complete solid/air boundary is not necessarily the boundary useful to a
+camera above terrain.  It also contains the underside of the ground, sealed
+caves, and every other air pocket.  A second experiment instead starts at the
+top cell of the center fiber, finds that camera's connected air component,
+and emits only solid faces incident to it.
+
+There are three deliberately comparable ways to discover the component:
+
+- breadth-first search over individual air cells, as the simple oracle;
+- fixed-point propagation through the four-word occupancy masks;
+- breadth-first search over maximal empty Z runs, where runs in adjacent
+  fibers are connected exactly when their Z intervals overlap.
+
+The last form is the vertical-ray idea in discrete form.  One empty interval
+stands for a whole unobstructed segment of a Z ray; horizontal interval
+intersection says where air can cross into the neighboring ray.  After the
+reachable intervals are materialized as masks, Boolean neighbor operations
+produce the six oriented camera-air face masks.
+
+The benchmark keeps a one-fiber X/Y halo and does not treat missing residency
+as air.  Its interval index is built with the benchmark case and retained, so
+the timed =AIR-RUNS= phase measures traversal of a resident run representation,
+not construction of that representation.  The cell path constructs the face
+masks cell by cell and is the exact oracle for both reachability and packed
+boundary shifts.
+
 * SBCL SIMD shape
 
 Four =u64= words are one 256-bit fiber, making AVX2-width execution a natural
@@ -151,8 +179,20 @@ and reduced allocation from about 32.25 MiB to 24.23 MiB, but did not change
 the roughly 793 ms runtime.  This separates a useful allocation cleanup from
 the larger algorithmic target.
 
-These measurements motivate direct bit-fiber extraction.  They do not yet
-measure such an implementation.
+The executable =luft/z-fiber-benchmark.lisp= now measures the first direct
+bit-fiber implementation.  On the August 2026 x86-64 development machine, a
+16 by 16 terrain case takes approximately:
+
+- 0.94 ms for camera-air cell traversal and cell-by-cell boundary output;
+- 1.63 ms for whole-field one-cell-at-a-time bit-mask propagation;
+- 0.015 ms for traversal of 324 pre-indexed halo air runs and packed boundary
+  output.
+
+The cave case has 470 halo air runs and takes approximately 0.015 ms by the
+same interval path, versus 0.94 ms by the cell oracle.  These are traversal
+measurements rather than end-to-end residency construction measurements.
+They make the interval graph promising while also showing that naive global
+bitset fixed-point propagation is slower than the ordinary cell queue.
 
 * Evidence gates
 
