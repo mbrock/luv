@@ -83,36 +83,36 @@
     (with-output-to-string (stream)
       (format stream "printf '~C[2J~C[H'~%" escape escape)
       (format stream
-              "printf '%s\r\n' '~C[48;5;24m~C[1;38;5;230m  LUVCRAFT FIELD TERMINAL  ~C[0m'~%"
+              "printf '%s\\r\\n' '~C[48;5;24m~C[1;38;5;230m  LUVCRAFT FIELD TERMINAL  ~C[0m'~%"
               escape escape escape)
       (format stream
-              "printf '%s\r\n' '~C[38;5;109mstone shelter / terminal wall~C[0m'~%"
+              "printf '%s\\r\\n' '~C[38;5;109mstone shelter / terminal wall~C[0m'~%"
               escape escape)
-      (format stream "printf '\r\n'~%")
+      (format stream "printf '\\r\\n'~%")
       (format stream
-              "printf '%s\r\n' '~C[1;38;5;221m$ scene inspect terminal~C[0m'~%"
-              escape escape)
-      (format stream
-              "printf '%s\r\n' 'surface   ~C[38;5;81m4 x 3 blocks~C[0m'~%"
+              "printf '%s\\r\\n' '~C[1;38;5;221m$ scene inspect terminal~C[0m'~%"
               escape escape)
       (format stream
-              "printf '%s\r\n' 'grid      ~C[38;5;120mwhole-face fitted~C[0m'~%"
+              "printf '%s\\r\\n' 'surface   ~C[38;5;81m4 x 3 blocks~C[0m'~%"
               escape escape)
       (format stream
-              "printf '%s\r\n' 'renderer  ~C[38;5;213mGhostty + Slug~C[0m'~%"
+              "printf '%s\\r\\n' 'grid      ~C[38;5;120mwhole-face fitted~C[0m'~%"
               escape escape)
       (format stream
-              "printf '%s\r\n' 'glass     ~C[1;38;5;117mfaceplate last~C[0m'~%"
-              escape escape)
-      (format stream "printf '\r\n'~%")
-      (format stream
-              "printf '%s\r\n' '~C[1;38;5;221m$ printf ready~C[0m'~%"
+              "printf '%s\\r\\n' 'renderer  ~C[38;5;213mGhostty + Slug~C[0m'~%"
               escape escape)
       (format stream
-              "printf '%s\r\n' '~C[1;32mready: source-owned PTY~C[0m'~%"
+              "printf '%s\\r\\n' 'glass     ~C[1;38;5;117mfaceplate last~C[0m'~%"
+              escape escape)
+      (format stream "printf '\\r\\n'~%")
+      (format stream
+              "printf '%s\\r\\n' '~C[1;38;5;221m$ printf ready~C[0m'~%"
               escape escape)
       (format stream
-              "printf '%s\r\n' '~C[38;5;245moffline / credential-free~C[0m'~%"
+              "printf '%s\\r\\n' '~C[1;32mready: source-owned PTY~C[0m'~%"
+              escape escape)
+      (format stream
+              "printf '%s\\r\\n' '~C[38;5;245moffline / credential-free~C[0m'~%"
               escape escape))))
 
 (defun attach-terminal-cinema-shell-fixture (display)
