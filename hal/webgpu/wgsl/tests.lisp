@@ -78,9 +78,19 @@
              (write '(:version 1 :source-revision "abc123def456"
                       :captures
                       ((:name "proposal-still" :figure "Y7X7WK"
-                        :kind :image :file "Y7X7WK-proposal-still.png")
+                        :kind :image :file "Y7X7WK-proposal-still.png"
+                        :layout :landscape :width 1200 :height 800
+                        :variants
+                        ((:file "Y7X7WK-proposal-still-480w.webp"
+                          :type "image/webp" :width 480 :height 320)
+                         (:file "Y7X7WK-proposal-still-768w.webp"
+                          :type "image/webp" :width 768 :height 512)))
                        (:name "proposal-orbit" :figure "Y7X7WK"
-                        :kind :video :file "Y7X7WK-proposal-orbit.mp4")))
+                        :kind :video :file "Y7X7WK-proposal-orbit.mp4"
+                        :layout :portrait :width 720 :height 1280
+                        :poster
+                        (:file "Y7X7WK-proposal-orbit-poster-480w.webp"
+                         :type "image/webp" :width 480 :height 854))))
                     :stream stream))
            (let* ((bundles (luvcraft.web:compile-body-gallery))
                   (application
@@ -135,7 +145,21 @@
                          (luvcraft.web:web-response-body shader)))
              (ok (search "/showcase/media/Y7X7WK-proposal-still.png"
                          (luvcraft.web:web-response-body showcase)))
+             (ok (search "src=\"/showcase/media/Y7X7WK-proposal-still-768w.webp\""
+                         (luvcraft.web:web-response-body showcase)))
+             (ok (search "Y7X7WK-proposal-still-480w.webp 480w, /showcase/media/Y7X7WK-proposal-still-768w.webp 768w"
+                         (luvcraft.web:web-response-body showcase)))
+             (ok (search "sizes=\"(max-width: 59.5rem)"
+                         (luvcraft.web:web-response-body showcase)))
+             (ok (search "title=\"Open full-resolution image\""
+                         (luvcraft.web:web-response-body showcase)))
              (ok (search "/showcase/media/Y7X7WK-proposal-orbit.mp4"
+                         (luvcraft.web:web-response-body showcase)))
+             (ok (search "class=portrait><div class=\"media portrait\">"
+                         (luvcraft.web:web-response-body showcase)))
+             (ok (search "preload=none poster=\"/showcase/media/Y7X7WK-proposal-orbit-poster-480w.webp\""
+                         (luvcraft.web:web-response-body showcase)))
+             (ok (search ".media.portrait img,.media.portrait video{object-fit:contain}"
                          (luvcraft.web:web-response-body showcase)))
              (ok (search "abc123def456"
                          (luvcraft.web:web-response-body showcase)))

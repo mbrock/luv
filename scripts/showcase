@@ -8,6 +8,7 @@ set -eu
 render_host=${LUV_SHOWCASE_RENDER_HOST:-chapel}
 render_checkout=${LUV_SHOWCASE_RENDER_CHECKOUT:-luv-showcase}
 render_media_checkout=${LUV_SHOWCASE_RENDER_MEDIA_CHECKOUT:-luv-showcase-media}
+render_vulkan_icd=${LUV_SHOWCASE_VULKAN_ICD:-/run/opengl-driver/share/vulkan/icd.d/radeon_icd.x86_64.json}
 web_host=${LUV_SHOWCASE_WEB_HOST:-swa}
 web_checkout=${LUV_SHOWCASE_WEB_CHECKOUT:-/srv/luv}
 web_media_checkout=${LUV_SHOWCASE_WEB_MEDIA_CHECKOUT:-/var/www/luv/showcase}
@@ -35,6 +36,16 @@ valid_host() {
 
 valid_host "$render_host" || { echo "Invalid render host: $render_host" >&2; exit 2; }
 valid_host "$web_host" || { echo "Invalid web host: $web_host" >&2; exit 2; }
+case "$render_vulkan_icd" in
+  /*) ;;
+  *) echo "Invalid render Vulkan ICD path: $render_vulkan_icd" >&2; exit 2 ;;
+esac
+case "$render_vulkan_icd" in
+  *[!A-Za-z0-9._/-]*)
+    echo "Unsafe render Vulkan ICD path: $render_vulkan_icd" >&2
+    exit 2
+    ;;
+esac
 
 ssh_run() {
   host=$1
@@ -180,11 +191,14 @@ REMOTE
 
 render() {
   ssh_run "$render_host" "$render_checkout" "$render_media_checkout" \
-    "$media_branch" <<'REMOTE'
+    "$media_branch" "$render_vulkan_icd" <<'REMOTE'
 set -eu
 source_checkout=$1
 media_checkout=$2
 media_branch=$3
+vulkan_icd=$4
+expected_vulkan_device='AMD Radeon RX 6600 XT'
+expected_vulkan_driver=radv
 case "$source_checkout" in /*) ;; *) source_checkout=$HOME/$source_checkout ;; esac
 case "$media_checkout" in /*) ;; *) media_checkout=$HOME/$media_checkout ;; esac
 test -d "$source_checkout/.git" || { echo "showcase: run bootstrap first" >&2; exit 1; }
@@ -219,6 +233,50 @@ git -C "$media_checkout" fetch --progress origin "$media_branch" git-annex ||
 git -C "$media_checkout" switch "$media_branch"
 git -C "$media_checkout" merge --ff-only "origin/$media_branch"
 
+case "$vulkan_icd" in
+  /*) ;;
+  *) echo "showcase: Vulkan ICD path must be absolute: $vulkan_icd" >&2; exit 1 ;;
+esac
+test -r "$vulkan_icd" || {
+  echo "showcase: configured Vulkan ICD is not readable: $vulkan_icd" >&2
+  exit 1
+}
+echo "showcase: verifying RX 6600 XT RADV rendering through $vulkan_icd"
+vulkan_summary=$(
+  VK_DRIVER_FILES="$vulkan_icd" \
+    nix develop --verbose -L "$source_checkout" --no-write-lock-file -c \
+      vulkaninfo --summary
+)
+printf '%s\n' "$vulkan_summary"
+vulkan_device_type=$(printf '%s\n' "$vulkan_summary" | awk '
+  /^[[:space:]]*deviceType[[:space:]]*=/ {
+    sub(/^[^=]*=[[:space:]]*/, ""); print; exit
+  }')
+vulkan_device_name=$(printf '%s\n' "$vulkan_summary" | awk '
+  /^[[:space:]]*deviceName[[:space:]]*=/ {
+    sub(/^[^=]*=[[:space:]]*/, ""); print; exit
+  }')
+vulkan_driver_name=$(printf '%s\n' "$vulkan_summary" | awk '
+  /^[[:space:]]*driverName[[:space:]]*=/ {
+    sub(/^[^=]*=[[:space:]]*/, ""); print; exit
+  }')
+test "$vulkan_device_type" = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU || {
+  echo "showcase: refusing non-discrete Vulkan device: ${vulkan_device_type:-unresolved}" >&2
+  exit 1
+}
+case "$vulkan_device_name" in
+  *"$expected_vulkan_device"*) ;;
+  *)
+    echo "showcase: expected Vulkan device containing '$expected_vulkan_device', got '${vulkan_device_name:-unresolved}'" >&2
+    exit 1
+    ;;
+esac
+test "$vulkan_driver_name" = "$expected_vulkan_driver" || {
+  echo "showcase: expected Vulkan driver '$expected_vulkan_driver', got '${vulkan_driver_name:-unresolved}'" >&2
+  exit 1
+}
+echo "showcase: verified $vulkan_device_name with $vulkan_driver_name"
+
 revision=$(git -C "$source_checkout" rev-parse --short=12 HEAD)
 stage_root=$(mktemp -d /tmp/luv-showcase-render.XXXXXX)
 rendered_media=$stage_root/rendered-media
@@ -245,7 +303,8 @@ trap cleanup_render_stage EXIT HUP INT TERM
 mkdir -p "$rendered_media"
 
 echo "showcase: rendering source $revision on chapel into $rendered_media"
-LUV_CAPTURE_OUTPUT_DIRECTORY="$rendered_media" \
+VK_DRIVER_FILES="$vulkan_icd" \
+  LUV_CAPTURE_OUTPUT_DIRECTORY="$rendered_media" \
   nix develop --verbose -L "$source_checkout" --no-write-lock-file -c \
     make -C "$source_checkout" capture
 

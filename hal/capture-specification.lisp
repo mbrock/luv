@@ -13,6 +13,8 @@
    (description :initarg :description
                 :reader capture-specification-description)
    (extension :initarg :extension :reader capture-specification-extension)
+   (layout :initarg :layout :initform :landscape
+           :reader capture-specification-layout)
    (renderer :initarg :renderer :reader capture-specification-renderer))
   (:documentation
    "A named recipe for one generated wiki image or video.
@@ -23,6 +25,12 @@ under the capture output directory and do not belong in Git. #IVRWI8"))
 
 (defvar *capture-specifications* (make-hash-table :test #'equal))
 (defvar *capture-specification-order* '())
+
+(defconstant +capture-web-poster-width+ 480
+  "The maximum intrinsic width of a showcase video poster.")
+
+(defparameter *capture-web-image-widths* '(480 768)
+  "The deterministic responsive widths generated for each larger still.")
 
 (defun normalize-capture-name (name)
   (string-downcase
@@ -46,6 +54,11 @@ under the capture output directory and do not belong in Git. #IVRWI8"))
                  (every #'alphanumericp extension))
       (error "Capture extension ~S is not a simple file extension." extension))
     extension))
+
+(defun normalize-capture-layout (layout)
+  (unless (member layout '(:landscape :portrait))
+    (error "Capture layout ~S is not :LANDSCAPE or :PORTRAIT." layout))
+  layout)
 
 (defun register-capture-specification (specification)
   "Install SPECIFICATION by name, replacing a live redefinition in place."
@@ -72,11 +85,13 @@ under the capture output directory and do not belong in Git. #IVRWI8"))
           (t nil))))
 
 (defmacro define-capture
-    (name (&key figure kind extension (description "")) (pathname) &body body)
+    (name (&key figure kind extension (description "") (layout :landscape))
+     (pathname) &body body)
   "Define one inspectable wiki capture recipe.
 
 NAME is its command-line identity.  FIGURE is the stable six-character wiki
 figure ID; KIND is :IMAGE or :VIDEO; EXTENSION is the generated file suffix.
+LAYOUT is :LANDSCAPE by default or :PORTRAIT for uncropped 9:16 presentation.
 BODY is an ordinary named renderer function body with PATHNAME bound to its
 requested output.  Re-evaluating the definition replaces the recipe without
 leaving stale closures in the registry."
@@ -95,6 +110,7 @@ leaving stale closures in the registry."
          :kind ,kind
          :description ,description
          :extension ,(normalize-capture-extension extension)
+         :layout ,(normalize-capture-layout layout)
          :renderer #',renderer)))))
 
 (defun capture-output-pathname (specification directory)
@@ -105,6 +121,119 @@ leaving stale closures in the registry."
            (capture-specification-name specification)
            (capture-specification-extension specification))
    (uiop:ensure-directory-pathname directory)))
+
+(defun capture-derived-media-pathname (pathname suffix extension)
+  "Return PATHNAME with SUFFIX appended to its name and a new EXTENSION."
+  (make-pathname :name (format nil "~A~A" (pathname-name pathname) suffix)
+                 :type extension :defaults pathname))
+
+(defun capture-responsive-image-pathname
+    (pathname &optional (width +capture-web-image-width+))
+  "The deterministic card-sized WebP beside an original capture PATHNAME."
+  (capture-derived-media-pathname
+   pathname (format nil "-~Dw" width) "webp"))
+
+(defun capture-video-poster-pathname (pathname)
+  "The deterministic card-sized WebP poster beside a captured film."
+  (capture-derived-media-pathname
+   pathname (format nil "-poster-~Dw" +capture-web-poster-width+) "webp"))
+
+(defun capture-media-dimensions (pathname)
+  "Return the first video stream's WIDTH and HEIGHT using pinned FFprobe."
+  (let* ((output
+           (uiop:run-program
+            (list "ffprobe" "-v" "error" "-select_streams" "v:0"
+                  "-show_entries" "stream=width,height"
+                  "-of" "csv=s=x:p=0" (uiop:native-namestring pathname))
+            :output :string :error-output :interactive))
+         (dimensions (string-trim '(#\Space #\Tab #\Newline #\Return)
+                                  output))
+         (separator (position #\x dimensions)))
+    (unless separator
+      (error "FFprobe returned no dimensions for ~A: ~S."
+             pathname dimensions))
+    (values (parse-integer dimensions :end separator)
+            (parse-integer dimensions :start (1+ separator)))))
+
+(defun write-capture-web-image (source destination width)
+  "Downsample SOURCE to WIDTH as a deterministic photographic WebP."
+  (format t "capture web image: writing ~A at ~Dpx wide...~%"
+          destination width)
+  (finish-output)
+  (uiop:run-program
+   (list "ffmpeg" "-nostdin" "-hide_banner" "-loglevel" "error" "-y"
+         "-i" (uiop:native-namestring source)
+         "-frames:v" "1"
+         "-vf" (format nil "scale=~D:-2:flags=lanczos" width)
+         "-c:v" "libwebp" "-lossless" "0" "-preset" "photo"
+         "-quality" "82" "-map_metadata" "-1"
+         (uiop:native-namestring destination))
+   :output :interactive :error-output :interactive)
+  destination)
+
+(defun prepare-capture-web-media (specification pathname)
+  "Create the small public-index derivative for captured media at PATHNAME.
+
+Image originals get 480w and 768w WebPs whenever those are true downscales.
+Films get a card-sized WebP poster from their first frame.  Originals remain
+untouched and retain their stable capture identity. #IVRWI8"
+  (multiple-value-bind (width height) (capture-media-dimensions pathname)
+    (declare (ignore height))
+    (ecase (capture-specification-kind specification)
+      (:image
+       (dolist (responsive-width *capture-web-image-widths*)
+         (when (> width responsive-width)
+           (write-capture-web-image
+            pathname
+            (capture-responsive-image-pathname pathname responsive-width)
+            responsive-width))))
+      (:video
+       (write-capture-web-image
+        pathname (capture-video-poster-pathname pathname)
+        (min width +capture-web-poster-width+))))))
+
+(defun capture-manifest-entry (specification directory)
+  "Describe SPECIFICATION's original and any generated web derivative."
+  (let ((pathname (capture-output-pathname specification directory)))
+    (multiple-value-bind (width height) (capture-media-dimensions pathname)
+      (let ((entry
+              (list :name (capture-specification-name specification)
+                    :figure (capture-specification-figure-id specification)
+                    :kind (capture-specification-kind specification)
+                    :file (file-namestring pathname)
+                    :layout (capture-specification-layout specification)
+                    :width width :height height)))
+        (ecase (capture-specification-kind specification)
+          (:image
+           (let ((variants
+                   (loop for expected-width in *capture-web-image-widths*
+                         for responsive =
+                         (capture-responsive-image-pathname
+                          pathname expected-width)
+                         when (probe-file responsive)
+                           collect
+                           (multiple-value-bind
+                                 (responsive-width responsive-height)
+                               (capture-media-dimensions responsive)
+                             (list :file (file-namestring responsive)
+                                   :type "image/webp"
+                                   :width responsive-width
+                                   :height responsive-height)))))
+             (when variants
+               (setf entry (append entry (list :variants variants))))))
+          (:video
+           (let ((poster (capture-video-poster-pathname pathname)))
+             (when (probe-file poster)
+               (multiple-value-bind (poster-width poster-height)
+                   (capture-media-dimensions poster)
+                 (setf entry
+                       (append entry
+                               (list :poster
+                                     (list :file (file-namestring poster)
+                                           :type "image/webp"
+                                           :width poster-width
+                                           :height poster-height)))))))))
+        entry))))
 
 (defgeneric render-capture (specification pathname)
   (:documentation "Render SPECIFICATION to PATHNAME and return PATHNAME."))
@@ -133,14 +262,9 @@ leaving stale closures in the registry."
            `(:version 1
              :source-revision ,(capture-source-revision)
              :captures
-             ,(mapcar
-               (lambda (specification)
-                 (list :name (capture-specification-name specification)
-                       :figure (capture-specification-figure-id specification)
-                       :kind (capture-specification-kind specification)
-                       :file (file-namestring
-                              (capture-output-pathname specification directory))))
-               specifications))
+             ,(mapcar (lambda (specification)
+                        (capture-manifest-entry specification directory))
+                      specifications))
            stream))))
     pathname))
 
@@ -167,6 +291,7 @@ IDs, media kinds, filenames, and the source revision that produced the set."
         (unless (probe-file pathname)
           (error "Capture ~A returned without writing ~A."
                  (capture-specification-name specification) pathname))
+        (prepare-capture-web-media specification pathname)
         (format t "capture ~A: wrote ~A~%"
                 (capture-specification-name specification) pathname)
         (finish-output)))

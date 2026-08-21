@@ -669,6 +669,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:capture-specification-kind
            #:capture-specification-description
            #:capture-specification-extension
+           #:capture-specification-layout
            #:define-capture
            #:register-capture-specification
            #:capture-specifications

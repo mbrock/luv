@@ -86,6 +86,8 @@ PATHNAME and the frame count."
          (*aperture* aperture)
          (*temporal-surface-drift-p* t)
          (shot-frames (max 1 (round (* seconds-per-shot frame-rate))))
+         (progress-frames (max 1 (round frame-rate)))
+         (shot-seconds (ceiling shot-frames progress-frames))
          (scenes (mapcar (lambda (piece) (cons piece (atelier-scene piece)))
                          (remove-duplicates pieces)))
          (shots (loop for piece in pieces
@@ -106,6 +108,9 @@ PATHNAME and the frame count."
                               :format (renderer-color-format renderer))
            (loop for (piece waypoints) in shots
                  for shot from 0
+                 do (format t "~&clay breath: ~(~A~) shot ~D/~D~%"
+                            piece (1+ shot) shot-count)
+                    (finish-output)
                  do (let* ((scene (cdr (assoc piece scenes)))
                            (positions (mapcar #'first waypoints))
                            (looks (mapcar #'second waypoints))
@@ -125,9 +130,6 @@ PATHNAME and the frame count."
                                                (flight-shot-progress
                                                 s shot shot-count)))))
                               'vector)))
-                      (format t "~&clay breath: ~(~A~) shot ~D/~D~%"
-                              piece (1+ shot) shot-count)
-                      (finish-output)
                       (setf (renderer-scene renderer) scene)
                       (dotimes (frame shot-frames)
                         (let* ((s (/ (+ frame 0.5) shot-frames))
@@ -157,7 +159,15 @@ PATHNAME and the frame count."
                                  :look-z (third look)
                                  :field-of-view field))
                           (write-frame (render-pixels renderer))
-                          (incf frame-index))))))
+                          (incf frame-index)
+                          (when (or (zerop (mod (1+ frame) progress-frames))
+                                    (= frame (1- shot-frames)))
+                            (format t
+                                    "~&clay breath: ~(~A~) shot ~D/~D, second ~D/~D~%"
+                                    piece (1+ shot) shot-count
+                                    (ceiling (1+ frame) progress-frames)
+                                    shot-seconds)
+                            (finish-output)))))))
       (destroy-renderer renderer))))
 
 (defun catmull-rom-sample (points s)
@@ -541,6 +551,8 @@ masonry keeps its chamfers.  Returns PATHNAME and the frame count."
          ;; the subject melts, which is the mountain games' tilt-shift.
          (*aperture* aperture)
          (shot-frames (max 1 (round (* seconds-per-shot frame-rate))))
+         (progress-frames (max 1 (round frame-rate)))
+         (shot-seconds (ceiling shot-frames progress-frames))
          (scenes (mapcar (lambda (piece) (cons piece (atelier-scene piece)))
                          (remove-duplicates pieces)))
          (shots (loop for piece in pieces
@@ -562,6 +574,9 @@ masonry keeps its chamfers.  Returns PATHNAME and the frame count."
                               :format (renderer-color-format renderer))
            (loop for (piece waypoints) in shots
                  for shot from 0
+                 do (format t "~&atelier flight: ~(~A~) shot ~D/~D~%"
+                            piece (1+ shot) shot-count)
+                    (finish-output)
                  do (let* ((scene (cdr (assoc piece scenes)))
                            (positions (mapcar #'first waypoints))
                            (looks (mapcar #'second waypoints))
@@ -603,5 +618,13 @@ masonry keeps its chamfers.  Returns PATHNAME and the frame count."
                                  :look-x (first look) :look-y (second look)
                                  :look-z (third look)
                                  :field-of-view field))
-                          (write-frame (render-pixels renderer)))))))
+                          (write-frame (render-pixels renderer))
+                          (when (or (zerop (mod (1+ frame) progress-frames))
+                                    (= frame (1- shot-frames)))
+                            (format t
+                                    "~&atelier flight: ~(~A~) shot ~D/~D, second ~D/~D~%"
+                                    piece (1+ shot) shot-count
+                                    (ceiling (1+ frame) progress-frames)
+                                    shot-seconds)
+                            (finish-output)))))))
       (destroy-renderer renderer))))

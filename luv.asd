@@ -341,7 +341,9 @@ offsets and of headers."
                              (:file "construction")
                              (:file "pre-noon")
                              (:file "day-cycle")
-                             (:file "reference-plates")))))
+                             (:file "gallery")
+                             (:file "reference-plates")
+                             (:file "luft-portraits")))))
 
 (defsystem "luv/mcclim"
   :description "An experimental McCLIM backend presented through luv canvases."
