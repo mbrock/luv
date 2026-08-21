@@ -203,7 +203,7 @@ consequence of its own occupancy star and can be read on its own."
                  (create device
                          (make-buffer-descriptor
                           :label "luft inspection camera"
-                          :size 80 :usage '(:uniform :copy-dst)))
+                          :size 96 :usage '(:uniform :copy-dst)))
                  negative-index-buffer
                  (create device
                          (make-buffer-descriptor

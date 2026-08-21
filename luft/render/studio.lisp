@@ -2,6 +2,14 @@
 
 (defvar *viewer* nil)
 
+(defparameter *chamfer-width* 0.11
+  "The reserved chamfer band, in cells; the shape rule may fill 0 < w < 1/2.
+
+The pre-refoundation atelier used 0.11.  The width scales every displacement
+the shape word asks for, so it also scales the disagreement a mixed corner
+has with the creases running into it: at 0.20 that disagreement is a visible
+gouge, and at 0.11 it is the subtle break it was drawn as.")
+
 (defclass fly-camera ()
   ((position :initarg :position :accessor camera-position)
    (yaw :initarg :yaw :initform 0.0 :accessor camera-yaw)
@@ -36,7 +44,7 @@
                (list (vec3:vec3-x vector) (vec3:vec3-y vector)
                      (vec3:vec3-z vector) fourth)))
         (make-array
-         20 :element-type 'single-float
+         24 :element-type 'single-float
          :initial-contents
          (mapcar
           (lambda (value) (coerce value 'single-float))
@@ -44,7 +52,8 @@
                   (lane right 0.0) (lane up 0.0) (lane forward 0.0)
                   (list (/ focal aspect) focal
                         (/ far (- far near))
-                        (/ (- (* far near)) (- far near))))))))))
+                        (/ (- (* far near)) (- far near)))
+                  (list *chamfer-width* 0.0 0.0 0.0))))))))
 
 (defclass viewer (canvas-event-handler)
   ((canvas :initarg :canvas :reader viewer-canvas)

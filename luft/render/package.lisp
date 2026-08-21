@@ -36,6 +36,7 @@
            #:stop-viewer
            #:refresh-viewer-renderer
            #:capture-viewer-frame
+           #:*chamfer-width*
            #:viewer
            #:viewer-renderer
            #:viewer-running-p

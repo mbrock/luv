@@ -21,7 +21,8 @@
                             (camera-right :vec4)
                             (camera-up :vec4)
                             (camera-forward :vec4)
-                            (camera-projection :vec4)))))
+                            (camera-projection :vec4)
+                            (chamfer-parameters :vec4)))))
   (let* ((record (buffer-element faces instance-index))
          (site-low (swizzle record :x))
          (site-high (swizzle record :y))
@@ -60,7 +61,7 @@
          (face-normal (if (= negative one)
                           (* canonical-normal -1.0)
                           canonical-normal))
-         (width 0.20)
+         (width (swizzle chamfer-parameters :x))
          (lambda-i (if (= i zero) 0.0
                        (if (= i one) width
                            (if (= i (uint 2.0)) (- 1.0 width) 1.0))))
