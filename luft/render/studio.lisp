@@ -188,9 +188,7 @@ the selector is the whole of the difference."
   (let* ((last (viewer-last-timestamp viewer))
          (dt (if last (min 0.1 (max 0.0 (- timestamp last))) 0.0))
          (camera (viewer-camera viewer))
-         (step (* dt (viewer-speed viewer)
-                  (if (viewer-key-down-p viewer :left-shift :right-shift)
-                      3.0 1.0))))
+         (step (* dt (viewer-speed viewer))))
     (setf (viewer-last-timestamp viewer) timestamp)
     (multiple-value-bind (right up forward) (camera-basis camera)
       (declare (ignore up))
@@ -217,9 +215,9 @@ the selector is the whole of the difference."
           (when (viewer-key-down-p viewer :s :down) (move travel (- step))))
         (when (viewer-key-down-p viewer :d :right) (move right step))
         (when (viewer-key-down-p viewer :a :left) (move right (- step)))
-        (when (viewer-key-down-p viewer :space :e)
+        (when (viewer-key-down-p viewer :space)
           (move (vec3:make-vec3 0 0 1) step))
-        (when (viewer-key-down-p viewer :left-control :q :c)
+        (when (viewer-key-down-p viewer :left-shift :right-shift)
           (move (vec3:make-vec3 0 0 1) (- step)))))))
 
 (defun render-viewer-frame (viewer timestamp)
@@ -310,6 +308,7 @@ the selector is the whole of the difference."
   (let ((canvas
           (make-sdl-canvas
            :title title :width width :height height :visible-p nil
+           :high-pixel-density-p t
            :presentation-api (sdl-presentation-api-for provider)))
         (device nil)
         (renderer nil)

@@ -24,6 +24,12 @@
     :accessor canvas-fullscreen-p
     :documentation
     "Whether the window occupies its display's borderless fullscreen mode.")
+   (high-pixel-density-p
+    :initarg :high-pixel-density-p
+    :initform nil
+    :reader sdl-canvas-high-pixel-density-p
+    :documentation
+    "Whether this canvas explicitly asks SDL for a Retina-density drawable.")
    (x
     :initarg :x
     :initform nil
@@ -319,8 +325,11 @@ have a main-thread host and execute directly."
 
 (defun sdl-canvas-window-flags (canvas)
   "The SDL window flags CANVAS needs: its presentation API plus its own state."
-  (let ((flags (sdl-presentation-window-flags
-                (sdl-canvas-presentation-api canvas))))
+  (let ((flags (copy-list
+                (sdl-presentation-window-flags
+                 (sdl-canvas-presentation-api canvas)))))
+    (when (sdl-canvas-high-pixel-density-p canvas)
+      (pushnew :high-pixel-density flags))
     (if (canvas-fullscreen-p canvas)
         (cons :fullscreen flags)
         flags)))
@@ -433,6 +442,7 @@ arbitrary window dimensions commonly fail in SDL_Vulkan_CreateSurface."
 
 (defun make-sdl-canvas (&key (title "luv canvas") (width 800) (height 600)
                           x y (visible-p t) (fullscreen-p nil)
+                          (high-pixel-density-p nil)
                           (clock (make-demand-clock))
                           (time (make-lazy-clock))
                           (presentation-api :vulkan))
@@ -444,6 +454,7 @@ is finally created."
                               :x x :y y :visible-p visible-p
                               :clock clock :time time
                               :fullscreen-p fullscreen-p
+                              :high-pixel-density-p high-pixel-density-p
                               :presentation-api presentation-api))
 
 (defmethod canvas-size ((canvas sdl-canvas))
