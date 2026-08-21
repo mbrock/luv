@@ -184,6 +184,7 @@ of packed LUFT sites, drawn by vertex shaders pulling sites.")
            #:material-courses
            #:material-chamfer
            #:material-grit
+           #:material-emission
            #:material-albedo
            #:*material*
            #:*deformation*

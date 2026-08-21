@@ -137,8 +137,8 @@ swims under the camera nor shimmers under temporal accumulation."
 ;;; stone's silhouette catch the sky.
 
 (define-shader-function stock-radiance
-    (base normal world occlusion shade finish tint camera-vector sun-vector
-     sun-colour-vector fill-vector sky-vector ground-vector)
+    (base normal world occlusion shade finish tint emission camera-vector
+     sun-vector sun-colour-vector fill-vector sky-vector ground-vector)
   "The linear HDR radiance of BASE under the frame's lights.
 
 FINISH is the gloss strength, its power, the rim strength, and how metallic
@@ -150,7 +150,9 @@ A metal is not a brown surface with a white spot on it.  What makes bronze
 read as bronze is that it returns the whole sky along the mirror direction
 and almost nothing diffusely, so the hemisphere is sampled a second time
 about the reflected view and the diffuse term is turned down as the metal
-goes up."
+goes up.  EMISSION is the stock's own linear radiance; it is added before
+presentation so an embedded HDR owner can bloom it without conflating it
+with the propagated light the material may seed into neighbouring cells."
   (let* ((sun (swizzle sun-vector :xyz))
          (ambient (swizzle sun-vector :w))
          (sky (swizzle sky-vector :xyz))
@@ -197,7 +199,7 @@ goes up."
          (lit (+ (+ (* base (* light (- 1.0 (* 0.85 metallic)))) reflected)
                  (* (* radiance tint)
                     (* specular (* shade (max facing 0.0)))))))
-    lit))
+    (+ lit emission)))
 
 (define-shader-function present-stock-radiance
     (linear world camera-vector sky-vector ground-vector)
@@ -212,14 +214,14 @@ goes up."
     (mix exposed sky fog)))
 
 (define-shader-function stock-lighting
-    (base normal world occlusion shade finish tint camera-vector sun-vector
-     sun-colour-vector fill-vector sky-vector ground-vector)
+    (base normal world occlusion shade finish tint emission camera-vector
+     sun-vector sun-colour-vector fill-vector sky-vector ground-vector)
   "The lit, tonemapped, fogged colour of BASE under the frame's lights.
 
 The standalone paper renderer retains this composed entry point.  Embedded
 HDR renderers use STOCK-RADIANCE directly and own presentation themselves."
   (present-stock-radiance
-   (stock-radiance base normal world occlusion shade finish tint
+   (stock-radiance base normal world occlusion shade finish tint emission
                    camera-vector sun-vector sun-colour-vector fill-vector
                    sky-vector ground-vector)
    world camera-vector sky-vector ground-vector))
@@ -318,6 +320,10 @@ radiance for an enclosing HDR renderer and contains no tonemap or fog."
               (figure-lane (buffer-element stocks (+ slot (uint 5.0))))
               (mottle-lane (buffer-element stocks (+ slot (uint 6.0))))
               (patina-lane (buffer-element stocks (+ slot (uint 7.0))))
+              ;; The ninth lane is shared with the lattice stage: X is shape
+              ;; grit there, while YZW are otherwise spare and carry the
+              ;; stock's own linear surface radiance here.
+              (lattice-lane (buffer-element stocks (+ slot (uint 8.0))))
               (gloss (swizzle finish-lane :x))
               (power (swizzle finish-lane :y))
               (metallic (swizzle finish-lane :z))
@@ -334,6 +340,9 @@ radiance for an enclosing HDR renderer and contains no tonemap or fog."
               (patina (swizzle mottle-lane :w))
               (patina-colour (swizzle patina-lane :xyz))
               (rim (swizzle patina-lane :w))
+              (emission (vec3 (swizzle lattice-lane :y)
+                              (swizzle lattice-lane :z)
+                              (swizzle lattice-lane :w)))
               (upness (swizzle face :z))
               (albedo (if (> upness 0.5)
                           (swizzle top-lane :xyz)
@@ -396,11 +405,11 @@ radiance for an enclosing HDR renderer and contains no tonemap or fog."
               (finish (vec4 (* gloss (mix 1.0 2.2 planed)) power rim metallic))
               (final ,(if linear-p
                           '(stock-radiance
-                            stock sanded world open shade finish tint
+                            stock sanded world open shade finish tint emission
                             camera-vector sun-vector sun-colour-vector
                             fill-vector sky-vector ground-vector)
                           '(stock-lighting
-                            stock sanded world open shade finish tint
+                            stock sanded world open shade finish tint emission
                             camera-vector sun-vector sun-colour-vector
                             fill-vector sky-vector ground-vector)))
               ,@(unless linear-p
@@ -464,6 +473,13 @@ none, so the same noise that turns granite into rubble leaves the timber
 standing in it dead straight.  The value is smoothed over the cells around
 a point before it is used, which is what keeps it a function of position
 and so keeps the surface closed.")
+   (emission
+    :initarg :emission :initform '(0.0 0.0 0.0) :reader material-emission
+    :documentation "The stock's own linear RGB radiance.
+
+This is visible surface emission, not propagated voxel light.  An emissive
+mineral may own both facts, but they enter the renderer through different
+materializations and need not have the same colour or strength.")
    (chamfer
     :initarg :chamfer :initform 1.0 :reader material-chamfer
     :documentation "What the :STOCK chamfer rule multiplies a crease by.
@@ -559,6 +575,16 @@ is the whole of what it is cut from.  #PWMCOL")
   :gloss 0.02 :polish 12.0 :lift 1.06
   :mottle-scale 0.55 :mottle 0.34 :wear 0.35 :drift 0.10 :rim 0.05)
 
+(define-material :sand
+  ;; A warm, dry granular stock.  Its figure comes from fine world-space
+  ;; mottle and cell drift, never from a repeated beach-colour tile.
+  :top '(0.420 0.300 0.130) :side '(0.350 0.240 0.100)
+  :bottom '(0.180 0.120 0.050)
+  :grit 0.65
+  :chamfer 0.16
+  :gloss 0.025 :polish 10.0 :lift 1.04
+  :mottle-scale 3.4 :mottle 0.22 :wear 0.18 :drift 0.09 :rim 0.04)
+
 ;;; Wood.  The albedos are low because wood is dark: a mid-brown board is
 ;;; about a fifth of the light back, and anything written at the value the
 ;;; eye reads off a photograph comes out of the tonemap as terracotta.
@@ -585,6 +611,19 @@ is the whole of what it is cut from.  #PWMCOL")
   :grain-axis '(1.0 0.0 0.0) :spacing 3.9 :rings 10.0
   :ring-contrast 0.23 :wander 0.12
   :fibre 0.14 :drift 0.05 :mottle-scale 0.8 :mottle 0.08 :rim 0.05)
+
+(define-material :tree
+  ;; Luvcraft's one ordinary tree family: a dark organic green whose subtle
+  ;; rings and fibre keep trunks and crowns legible as one carved living mass.
+  :top '(0.080 0.120 0.038) :side '(0.055 0.074 0.026)
+  :bottom '(0.025 0.035 0.012)
+  :grit 0.22
+  :chamfer 0.50
+  :gloss 0.08 :polish 24.0 :lift 1.12
+  :grain-axis '(0.0 0.0 1.0) :spacing 4.5 :rings 8.0
+  :ring-contrast 0.12 :wander 0.45
+  :fibre 0.12 :drift 0.10 :mottle-scale 1.4 :mottle 0.20
+  :wear 0.10 :rim 0.05)
 
 (define-material :walnut
   ;; The dark stripe of the butcher block, nearly black in the latewood.
@@ -619,6 +658,37 @@ is the whole of what it is cut from.  #PWMCOL")
   :chamfer 0.15
   :gloss 0.14 :polish 30.0 :lift 1.26
   :mottle-scale 2.2 :mottle 0.42 :wear 0.48 :drift 0.17 :rim 0.11)
+
+(define-material :terminal
+  ;; The quiet graphite chassis only.  Luvcraft's screen, faceplate, text,
+  ;; film, and glow remain separate emitting overlays in front of this stock.
+  :top '(0.030 0.036 0.040) :side '(0.022 0.027 0.030)
+  :bottom '(0.010 0.013 0.015)
+  :grit 0.02
+  :chamfer 0.90
+  :gloss 0.38 :polish 70.0 :metallic 0.25 :lift 1.50
+  :mottle-scale 1.8 :mottle 0.05 :wear 0.35 :drift 0.025 :rim 0.16)
+
+(define-material :snow
+  ;; Compact blue-white snow: matte tooth and very quiet mottle keep a broad
+  ;; hillside from becoming either featureless white or glittering plastic.
+  :top '(0.700 0.760 0.820) :side '(0.520 0.600 0.680)
+  :bottom '(0.270 0.310 0.360)
+  :grit 0.12
+  :chamfer 0.55
+  :gloss 0.12 :polish 28.0 :lift 1.12
+  :mottle-scale 1.6 :mottle 0.06 :wear 0.12 :drift 0.025 :rim 0.15)
+
+(define-material :crystal
+  ;; An opaque cyan mineral.  Its visible HDR radiance is independent of the
+  ;; block-light source which the LUFT page field will later propagate.
+  :top '(0.035 0.340 0.420) :side '(0.018 0.220 0.300)
+  :bottom '(0.008 0.090 0.130)
+  :emission '(0.030 0.720 0.950)
+  :grit 0.08
+  :chamfer 0.90
+  :gloss 1.40 :polish 140.0 :metallic 0.15 :lift 1.75
+  :mottle-scale 2.5 :mottle 0.12 :wear 0.08 :drift 0.04 :rim 0.40)
 
 (define-material :slate
   ;; Nearly black, faintly blue, split in courses: a roof or a paving.

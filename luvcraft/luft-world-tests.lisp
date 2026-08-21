@@ -1,6 +1,7 @@
 (in-package #:luvcraft.tests)
 
 (defvar *counting-solid-dispatches* 0)
+(defvar *counting-stock-dispatches* 0)
 
 (defclass counting-solid-block (block-kind) ()
   (:metaclass luv.arithmetic.records:quantity-class))
@@ -13,20 +14,37 @@
 
 (defvar *mutable-block-solid-p* t)
 (defvar *mutable-block-solid-error-p* nil)
+(defvar *mutable-block-luft-stock* :granite)
+(defvar *mutable-block-luft-stock-error-p* nil)
 
 (defmethod block-solid-p ((block counting-solid-block))
   (incf *counting-solid-dispatches*)
   t)
 
+(defmethod block-luft-stock ((block counting-solid-block))
+  (declare (ignore block))
+  (incf *counting-stock-dispatches*)
+  :granite)
+
 (defmethod block-solid-p ((block failing-solid-block))
   (declare (ignore block))
   (error "Deliberate LUFT solid-table construction failure."))
+
+(defmethod block-luft-stock ((block failing-solid-block))
+  (declare (ignore block))
+  :granite)
 
 (defmethod block-solid-p ((block mutable-solid-block))
   (declare (ignore block))
   (when *mutable-block-solid-error-p*
     (error "Deliberate post-attach LUFT solidity failure."))
   *mutable-block-solid-p*)
+
+(defmethod block-luft-stock ((block mutable-solid-block))
+  (declare (ignore block))
+  (when *mutable-block-luft-stock-error-p*
+    (error "Deliberate post-attach LUFT stock failure."))
+  *mutable-block-luft-stock*)
 
 (defun make-counting-solid-block ()
   (make-instance 'counting-solid-block
@@ -39,7 +57,132 @@
        (equalp (luft:chain-sites (luft.render:scene-surface left))
                (luft:chain-sites (luft.render:scene-surface right)))
        (equalp (luft.render:scene-cell-bits left)
-               (luft.render:scene-cell-bits right))))
+               (luft.render:scene-cell-bits right))
+       (equalp (luft.render:scene-slots left)
+               (luft.render:scene-slots right))
+       (equalp (luft.render::scene-slot-words left)
+               (luft.render::scene-slot-words right))
+       ;; Stable page identities remember edit history, so compare the compact
+       ;; live packed-page contents (including their stamped stock bits).
+       (equalp (luft.render:scene-sites left)
+               (luft.render:scene-sites right))
+       (equalp (luft.render:scene-stocks left)
+               (luft.render:scene-stocks right))))
+
+(defun luft-world-scene-cell-slot (scene x y z)
+  (aref (luft.render:scene-slots scene)
+        (luft:cell-bit-index
+         (luft.render:scene-domain scene) x y z)))
+
+(deftest luvcraft-luft-palette-is-fixed-semantic-and-not-atlas-derived
+  (let* ((materialization
+           (luvcraft::make-luft-world-materialization
+            (make-block-world) :horizontal-bits 2))
+         (scene
+           (luvcraft::luft-world-materialization-scene materialization))
+         (aliases
+           '((:turf :grass :dirt :moss :flowers)
+             (:granite :stone :gravel :clay :mud :cobblestone
+              :stone-bricks :bricks :slate :fountain :lava-spring)
+             (:sand :sand :sandstone)
+             (:terminal :terminal :urbit :tape :film)
+             (:tree :wood :leaves :planks :cactus)
+             (:snow :snow)
+             (:crystal :crystal :orb-mote))))
+    (ok (equalp #(:turf :granite :sand :terminal :tree :snow :crystal)
+                (luft.render:scene-stocks scene)))
+    (ok (typep (luft.render:scene-slots scene)
+               '(simple-array (unsigned-byte 8) (*))))
+    (ok (= (luft:chain-cell-bit-count
+            (luft.render:scene-domain scene))
+           (length (luft.render:scene-slots scene))))
+    (ok (every #'zerop (luft.render:scene-slots scene)))
+    (loop for (stock . names) in aliases
+          do (loop for name in names
+                   for block = (make-instance
+                                'block-kind
+                                :name name
+                                :face-tiles '(:all :crystal)
+                                :display-color '(1.0 0.0 1.0)
+                                :surface-emission 9.0)
+                   do (ok (eq stock (block-luft-stock block)))))
+    ;; None of the legacy visual fields can override semantic identity.
+    (let ((misleading-stone
+            (make-instance 'block-kind
+                           :name :stone
+                           :face-tiles '(:all :grass-top)
+                           :display-color '(0.0 1.0 0.0)
+                           :surface-emission 14.0)))
+      (ok (eq :granite (block-luft-stock misleading-stone))))))
+
+(deftest ordinary-luvcraft-blocks-occupy-the-seven-fixed-stock-slots
+  (let* ((world (make-block-world :chunk-width 8
+                                  :chunk-height 1
+                                  :chunk-depth 1))
+         (chunk (ensure-world-chunk world 0 0 0))
+         (blocks
+           (vector luvcraft::*grass-block*
+                   luvcraft::*stone-block*
+                   luvcraft::*sand-block*
+                   luvcraft::*terminal-block*
+                   luvcraft::*wood-block*
+                   luvcraft::*leaf-block*
+                   luvcraft::*snow-block*
+                   luvcraft::*crystal-block*))
+         (expected #(0 1 2 3 4 4 5 6))
+         (crystal-emission (block-light-emission luvcraft::*crystal-block*))
+         (crystal-opacity (block-light-opacity luvcraft::*crystal-block*)))
+    (loop for block across blocks
+          for x from 0
+          do (setf (chunk-block-at chunk x 0 0) block))
+    (let* ((materialization
+             (luvcraft::attach-luft-world-materialization
+              world :horizontal-bits 4))
+           (scene
+             (luvcraft::luft-world-materialization-scene materialization)))
+      (multiple-value-bind (published changed)
+          (luvcraft::reconcile-luft-world-materialization materialization)
+        (ok (eq published scene))
+        (ok (= 8 changed)))
+      (loop for slot across expected
+            for x from 0
+            do (ok (= slot (luft-world-scene-cell-slot scene x 0 0))))
+      ;; Current procedural tree output uses these two identities, and both
+      ;; intentionally share LUFT's anonymous tree stock.
+      (ok (eq :tree (block-luft-stock luvcraft::*wood-block*)))
+      (ok (eq :tree (block-luft-stock luvcraft::*leaf-block*)))
+      (ok (eq :terminal (block-luft-stock luvcraft::*terminal-block*)))
+      (ok (eq :terminal (aref (luft.render:scene-stocks scene) 3)))
+      (ok (eq :crystal (block-luft-stock luvcraft::*crystal-block*)))
+      (ok (= crystal-emission
+             (block-light-emission luvcraft::*crystal-block*)))
+      (ok (= crystal-opacity
+             (block-light-opacity luvcraft::*crystal-block*))))))
+
+(deftest persisted-film-blocks-cross-the-terminal-transition-alias
+  (let* ((world (make-block-world :chunk-width 1
+                                  :chunk-height 1
+                                  :chunk-depth 1))
+         (chunk (ensure-world-chunk world 0 0 0))
+         (film
+           (make-instance 'luvcraft::film-block-kind
+                          :name :film
+                          :video-id "luft-stock-regression"
+                          :face-tiles '(:all :film-flange)
+                          :categories '(:building)
+                          :placeable-p nil)))
+    (setf (chunk-block-at chunk 0 0 0) film)
+    (let* ((materialization
+             (luvcraft::attach-luft-world-materialization
+              world :horizontal-bits 2))
+           (scene
+             (luvcraft::luft-world-materialization-scene materialization)))
+      (multiple-value-bind (published changed)
+          (luvcraft::reconcile-luft-world-materialization materialization)
+        (ok (eq published scene))
+        (ok (= 1 changed)))
+      (ok (eq :terminal (block-luft-stock film)))
+      (ok (= 3 (luft-world-scene-cell-slot scene 0 0 0))))))
 
 (deftest luvcraft-cells-map-to-wrapped-z-up-luft-sites
   (let* ((world (make-block-world))
@@ -63,12 +206,14 @@
     (dotimes (offset 8)
       (setf (chunk-block-at-offset chunk offset) block))
     (let* ((*counting-solid-dispatches* 0)
+           (*counting-stock-dispatches* 0)
            (materialization
              (luvcraft::attach-luft-world-materialization
               world :horizontal-bits 4))
            (scene
              (luvcraft::luft-world-materialization-scene materialization)))
       (ok (= 1 *counting-solid-dispatches*))
+      (ok (= 1 *counting-stock-dispatches*))
       (ok (= 8
              (hash-table-count
               (luvcraft::luft-world-materialization-pending-solid-cells
@@ -93,15 +238,19 @@
     (setf (chunk-block-at first 0 0 0) block
           (chunk-block-at second 0 0 0) block)
     (let* ((*counting-solid-dispatches* 0)
+           (*counting-stock-dispatches* 0)
            (materialization
              (luvcraft::attach-luft-world-materialization
               world :horizontal-bits 3)))
       (ok (= 1 *counting-solid-dispatches*))
+      (ok (= 1 *counting-stock-dispatches*))
       (multiple-value-bind (scene changed)
           (luvcraft::reconcile-luft-world-materialization materialization)
         (ok (= 2 changed))
         (ok (luft.render:scene-cell-p scene 0 0 0))
-        (ok (luft.render:scene-cell-p scene 1 0 0))))))
+        (ok (luft.render:scene-cell-p scene 1 0 0))
+        (ok (= 1 (luft-world-scene-cell-slot scene 0 0 0)))
+        (ok (= 1 (luft-world-scene-cell-slot scene 1 0 0)))))))
 
 (deftest non-cubic-chunks-use-their-domain-offset-order
   (let* ((world (make-block-world :chunk-width 2
@@ -131,6 +280,19 @@
     (ok (signals (luvcraft::attach-luft-world-materialization world) 'error))
     (ok (zerop (length (block-world-observers world))))))
 
+(deftest unknown-luft-stock-mapping-fails-loudly-and-unhooks
+  (let* ((world (make-block-world :chunk-width 1
+                                  :chunk-height 1
+                                  :chunk-depth 1))
+         (chunk (ensure-world-chunk world 0 0 0))
+         (block (make-instance 'block-kind
+                               :name :unmapped-authored-block
+                               :face-tiles '(:all :stone))))
+    (setf (chunk-block-at chunk 0 0 0) block)
+    (ok (signals (block-luft-stock block) 'error))
+    (ok (signals (luvcraft::attach-luft-world-materialization world) 'error))
+    (ok (zerop (length (block-world-observers world))))))
+
 (deftest oversized-dense-luft-worlds-are-rejected-before-allocation
   (ok (signals
        (luvcraft::make-luft-world-materialization
@@ -142,6 +304,8 @@
 (deftest explicit-solidity-invalidation-rebuilds-in-one-publication
   (let* ((*mutable-block-solid-p* t)
          (*mutable-block-solid-error-p* nil)
+         (*mutable-block-luft-stock* :granite)
+         (*mutable-block-luft-stock-error-p* nil)
          (world (make-block-world :chunk-width 2
                                   :chunk-height 1
                                   :chunk-depth 1))
@@ -177,6 +341,8 @@
 (deftest post-attach-classification-errors-recover-transactionally
   (let* ((*mutable-block-solid-p* t)
          (*mutable-block-solid-error-p* nil)
+         (*mutable-block-luft-stock* :granite)
+         (*mutable-block-luft-stock-error-p* nil)
          (world (make-block-world :chunk-width 1
                                   :chunk-height 1
                                   :chunk-depth 1))
@@ -190,14 +356,27 @@
                                :name :recoverable-solid
                                :face-tiles '(:all :stone))))
     (luvcraft::reconcile-luft-world-materialization materialization)
-    (let ((old-chunks
+    (let ((old-solid-lut
+            (luvcraft::luft-world-materialization-solid-lut
+             materialization))
+          (old-stock-lut
+            (luvcraft::luft-world-materialization-stock-lut
+             materialization))
+          (old-chunks
             (luvcraft::luft-world-materialization-resident-chunk-solids
+             materialization))
+          (old-chunk-stocks
+            (luvcraft::luft-world-materialization-resident-chunk-stocks
              materialization))
           (old-counts
             (luvcraft::luft-world-materialization-resident-solid-counts
              materialization))
+          (old-stock-counts
+            (luvcraft::luft-world-materialization-resident-stock-counts
+             materialization))
+          (old-scene-slots (copy-seq (luft.render:scene-slots scene)))
           (revision (luft.render:scene-revision scene)))
-      (setf *mutable-block-solid-error-p* t)
+      (setf *mutable-block-luft-stock-error-p* t)
       (ok (signals (setf (chunk-block-at chunk 0 0 0) block) 'error))
       ;; Authored content was already written before observer classification.
       (ok (eq block (chunk-block-at chunk 0 0 0)))
@@ -208,22 +387,44 @@
       (ok (signals
            (luvcraft::reconcile-luft-world-materialization materialization)
            'error))
+      (ok (eq old-solid-lut
+              (luvcraft::luft-world-materialization-solid-lut
+               materialization)))
+      (ok (eq old-stock-lut
+              (luvcraft::luft-world-materialization-stock-lut
+               materialization)))
       (ok (eq old-chunks
               (luvcraft::luft-world-materialization-resident-chunk-solids
+               materialization)))
+      (ok (eq old-chunk-stocks
+              (luvcraft::luft-world-materialization-resident-chunk-stocks
                materialization)))
       (ok (eq old-counts
               (luvcraft::luft-world-materialization-resident-solid-counts
                materialization)))
+      (ok (eq old-stock-counts
+              (luvcraft::luft-world-materialization-resident-stock-counts
+               materialization)))
+      (ok (equalp old-scene-slots (luft.render:scene-slots scene)))
       (ok (= revision (luft.render:scene-revision scene)))
       (ok (not (luft.render:scene-cell-p scene 0 0 0)))
       ;; Repairing the semantic method lets the next reconciliation recover.
-      (setf *mutable-block-solid-error-p* nil)
+      (setf *mutable-block-luft-stock-error-p* nil)
       (multiple-value-bind (published changed)
           (luvcraft::reconcile-luft-world-materialization materialization)
         (ok (eq published scene))
         (ok (= 1 changed)))
       (ok (= (1+ revision) (luft.render:scene-revision scene)))
       (ok (luft.render:scene-cell-p scene 0 0 0))
+      (ok (= 1 (luft-world-scene-cell-slot scene 0 0 0)))
+      (ok (not
+           (eq old-chunk-stocks
+               (luvcraft::luft-world-materialization-resident-chunk-stocks
+                materialization))))
+      (ok (not
+           (eq old-stock-counts
+               (luvcraft::luft-world-materialization-resident-stock-counts
+                materialization))))
       (ok (not
            (luvcraft::luft-world-materialization-solidity-rebuild-required-p
             materialization))))))
@@ -263,6 +464,37 @@
                  materialization))))
       (ok (= (1+ revision) (luft.render:scene-revision scene))))))
 
+(deftest solid-to-solid-stock-edits-coalesce-into-one-publication
+  (let* ((world (make-block-world :chunk-width 1
+                                  :chunk-height 1
+                                  :chunk-depth 1))
+         (chunk (ensure-world-chunk world 0 0 0)))
+    (setf (chunk-block-at chunk 0 0 0) luvcraft::*stone-block*)
+    (let* ((materialization
+             (luvcraft::attach-luft-world-materialization
+              world :horizontal-bits 2))
+           (scene
+             (luvcraft::luft-world-materialization-scene materialization)))
+      (luvcraft::reconcile-luft-world-materialization materialization)
+      (ok (= 1 (luft-world-scene-cell-slot scene 0 0 0)))
+      (let ((revision (luft.render:scene-revision scene)))
+        (setf (chunk-block-at chunk 0 0 0) luvcraft::*grass-block*)
+        (setf (chunk-block-at chunk 0 0 0) luvcraft::*sand-block*)
+        (setf (chunk-block-at chunk 0 0 0) luvcraft::*grass-block*)
+        (multiple-value-bind (published changed)
+            (luvcraft::reconcile-luft-world-materialization materialization)
+          (ok (eq published scene))
+          (ok (= 1 changed)))
+        (ok (= (1+ revision) (luft.render:scene-revision scene)))
+        (ok (luft.render:scene-cell-p scene 0 0 0))
+        (ok (zerop (luft-world-scene-cell-slot scene 0 0 0)))
+        (setf (chunk-block-at chunk 0 0 0) luvcraft::*grass-block*)
+        (multiple-value-bind (published changed)
+            (luvcraft::reconcile-luft-world-materialization materialization)
+          (ok (eq published scene))
+          (ok (zerop changed)))
+        (ok (= (1+ revision) (luft.render:scene-revision scene)))))))
+
 (deftest arrivals-departures-and-wrapped-replacements-stay-exact
   (let* ((world (make-block-world :chunk-width 2
                                   :chunk-height 2
@@ -276,19 +508,21 @@
              (luvcraft::luft-world-materialization-scene materialization)))
       (luvcraft::reconcile-luft-world-materialization materialization)
       (ok (luft.render:scene-cell-p scene 0 0 0))
+      (ok (= 1 (luft-world-scene-cell-slot scene 0 0 0)))
       (let ((revision (luft.render:scene-revision scene)))
         ;; The old cell at world X=0 departs before its torus alias at X=4
-        ;; arrives.  Its resident TRUE desire wins over the departed FALSE.
+        ;; arrives.  Occupancy remains true, but the replacement stock changes.
         (remove-world-chunk world 0 0 0)
         (let ((replacement (ensure-world-chunk world 2 0 0)))
           (setf (chunk-block-at replacement 0 0 0)
-                luvcraft::*stone-block*))
+                luvcraft::*grass-block*))
         (multiple-value-bind (published changed)
             (luvcraft::reconcile-luft-world-materialization materialization)
           (ok (eq published scene))
-          (ok (zerop changed)))
-        (ok (= revision (luft.render:scene-revision scene)))
-        (ok (luft.render:scene-cell-p scene 0 0 0)))
+          (ok (= 1 changed)))
+        (ok (= (1+ revision) (luft.render:scene-revision scene)))
+        (ok (luft.render:scene-cell-p scene 0 0 0))
+        (ok (zerop (luft-world-scene-cell-slot scene 0 0 0))))
       (remove-world-chunk world 2 0 0)
       (multiple-value-bind (published changed)
           (luvcraft::reconcile-luft-world-materialization materialization)
@@ -313,16 +547,18 @@
              (luvcraft::luft-world-materialization-scene materialization)))
       (luvcraft::reconcile-luft-world-materialization materialization)
       (ok (luft.render:scene-cell-p scene 0 0 0))
+      (ok (= 1 (luft-world-scene-cell-slot scene 0 0 0)))
       (let ((revision (luft.render:scene-revision scene))
             (transient (ensure-world-chunk world 0 0 0)))
-        (setf (chunk-block-at transient 0 0 0) luvcraft::*stone-block*)
+        (setf (chunk-block-at transient 0 0 0) luvcraft::*grass-block*)
         (remove-world-chunk world 0 0 0)
         (multiple-value-bind (published changed)
             (luvcraft::reconcile-luft-world-materialization materialization)
           (ok (eq published scene))
           (ok (zerop changed)))
         (ok (= revision (luft.render:scene-revision scene)))
-        (ok (luft.render:scene-cell-p scene 0 0 0))))))
+        (ok (luft.render:scene-cell-p scene 0 0 0))
+        (ok (= 1 (luft-world-scene-cell-slot scene 0 0 0)))))))
 
 (deftest incremental-luft-world-agrees-with-a-fresh-rebuild
   (let* ((world (make-block-world :chunk-width 2

@@ -23,8 +23,9 @@
 (defconstant +stock-lanes+ 9
   "Vec4 lanes a stock occupies in the table.
 
-Three albedos, five material lanes, and one for the lattice: what a stock
-does to the shape of the world rather than to its surface.")
+Three albedos, five material lanes, and one shared lattice/emission lane:
+X says what a stock does to the shape of the world, while YZW are its own
+linear surface radiance.")
 
 ;;; The focus pass reads a drawn frame rather than the world, and so binds a
 ;;; group of its own.

@@ -170,6 +170,7 @@
            #:block-particle-system
            #:block-particle-system-particles
            #:block-save-description
+           #:block-luft-stock
            #:block-solid-p
            #:block-surface-emission
            #:block-world-player

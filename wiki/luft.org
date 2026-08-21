@@ -939,6 +939,37 @@ pipeline and independent frame states; and a live 1344x840 Metal game rendered
 scene revision two, then stopped cleanly.  CPU terrain shadow meshes are now
 only the comparison-switch fallback.
 
+** DONE Seven luvcraft materials are LUFT stocks
+:PROPERTIES:
+:ID: 4YQR10
+:END:
+
+/Intent./ Retire the texture atlas as terrain material authority.  The authored
+block vocabulary remains free to carry behavior and persistence during the
+migration, but every resident solid resolves through the small physical palette
+=#(:turf :granite :sand :terminal :tree :snow :crystal)= and LUFT owns how those
+stocks look.  Grass can consequently be matte green material with continuous
+microtexture rather than a repeated cube face.
+
+/Evidence./ One open [[lisp:luvcraft:block-luft-stock]] protocol classifies each
+vocabulary member once per vocabulary revision.  Resident chunks retain dense
+eight-bit stock slots beside solidity, while exact per-slot canonical counts
+make torus aliases, replacement, and departure deterministic.  A reconcile
+publishes occupancy and stock changes as one [[lisp:luft.render:apply-scene-edit]]
+revision; hidden repaints touch only packed slot words and exposed repaints
+restamp just their stable face pages.  Transitional aliases include dirt as
+turf, wood and leaves as tree, and tape and film as terminal, without making
+the atlas or display colour authoritative again.
+
+/Done when./ Done: LUFT defines all seven procedural materials and packs direct
+HDR material emission in the stock table, so crystal surface glow is distinct
+from the propagated light field of #5XV63M.  All 47 LUFT renderer tests and 21
+focused bridge tests pass.  The broad 311-test Luvcraft run reaches only the
+known unrelated Tracy-alien and Metal slug-texture expectations.  A live
+1344x840 Metal game held the exact seven-keyword palette at scene revision two
+across all three acquired frame states, exercised six stocks in its resident
+window, ran for 4,216 responsive frames, and stopped cleanly.
+
 ** TODO Voxel light inhabits LUFT cell pages
 :PROPERTIES:
 :ID: 5XV63M

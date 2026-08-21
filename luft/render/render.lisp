@@ -106,8 +106,9 @@ page bound rather than a guessed reserve.  #3QNZC1")
         (progn
           (find-material material)
           (when (<= shaders:+stock-slots+ (fill-pointer stocks))
-            (error "A world holds ~D stocks; ~S would be the ~:*~R."
-                   shaders:+stock-slots+ material))
+            (error "A world holds ~D stocks; ~S would be the ~:R."
+                   shaders:+stock-slots+ material
+                   (1+ (fill-pointer stocks))))
           (vector-push-extend material stocks)
           (1- (fill-pointer stocks))))))
 
@@ -466,33 +467,122 @@ inspection and reference form, allocated only when a caller asks for it."
                         site solid-p))))
     sites))
 
+(defun scene-cell-bit-index (scene cell)
+  "The dense cell index named by canonical packed CELL in SCENE."
+  (luft:cell-bit-index
+   (scene-domain scene)
+   (luft:site-x cell) (luft:site-y cell) (luft:site-z cell)))
+
+(defun validate-scene-stock-edit
+    (scene stock-cells stock-slots stock-cells-p stock-slots-p)
+  "Return changed input indices after validating a stock edit batch.
+
+Cell polarity is immaterial here: STOCK-CELLS names cell geometries rather
+than signed chain coefficients, and repeated geometry is therefore an error."
+  (unless (eq stock-cells-p stock-slots-p)
+    (error "A scene stock edit requires both :STOCK-CELLS and :STOCK-SLOTS."))
+  (unless stock-cells-p
+    (return-from validate-scene-stock-edit
+      (make-array 0 :element-type 'fixnum)))
+  (unless (typep stock-cells '(array (unsigned-byte 64) (*)))
+    (error ":STOCK-CELLS must be a specialized unsigned-byte-64 vector, not ~S."
+           (type-of stock-cells)))
+  (unless (typep stock-slots '(array (unsigned-byte 8) (*)))
+    (error ":STOCK-SLOTS must be a specialized unsigned-byte-8 vector, not ~S."
+           (type-of stock-slots)))
+  (unless (= (length stock-cells) (length stock-slots))
+    (error "A scene stock edit has ~D cells but ~D slots."
+           (length stock-cells) (length stock-slots)))
+  (unless (scene-slots scene)
+    (error "A scene without stock slots cannot apply a stock edit."))
+  (let ((domain (scene-domain scene))
+        (palette-size (length (scene-stocks scene)))
+        (seen (make-hash-table :test #'eql))
+        (changes (make-array (length stock-cells)
+                             :element-type 'fixnum :fill-pointer 0)))
+    (loop for cell across stock-cells
+          for slot across stock-slots
+          for index from 0
+          do (unless (luft:site-valid-p domain cell)
+               (error "A scene stock edit contains noncanonical cell ~S." cell))
+             (unless (= (luft:site-extent cell) luft:+cell-extent+)
+               (error "A scene stock edit contains non-cell site ~S." cell))
+             (unless (world-vertical-p (luft:site-z cell))
+               (error "A scene stock edit contains out-of-world cell ~S." cell))
+             (let ((geometry (luft:site-geometry cell)))
+               (when (gethash geometry seen)
+                 (error "A scene stock edit contains repeated cell ~S." cell))
+               (setf (gethash geometry seen) t))
+             (unless (and (< slot shaders:+stock-slots+)
+                          (< slot palette-size))
+               (error "Stock slot ~D is not in this scene's ~D-entry, ~
+                       ~D-slot palette."
+                      slot palette-size shaders:+stock-slots+))
+             (unless (= slot
+                        (aref (scene-slots scene)
+                              (scene-cell-bit-index scene cell)))
+               (vector-push index changes)))
+    changes))
+
 (defun set-scene-cell-bit (scene site solid-p)
   "Set SITE's dense occupancy bit and return its changed word index."
-  (let* ((bit (luft:cell-bit-index
-               (scene-domain scene)
-               (luft:site-x site) (luft:site-y site) (luft:site-z site)))
+  (let* ((bit (scene-cell-bit-index scene site))
          (word (floor bit 32)))
     (setf (ldb (byte 1 (mod bit 32)) (aref (scene-cell-bits scene) word))
           (if solid-p 1 0))
     word))
 
-(defun apply-scene-edit (scene edit)
-  "Apply signed cell-chain EDIT to SCENE without remeshing the world.  #3QNZC1
+(defun set-scene-cell-slot (scene cell slot)
+  "Set CELL's stock SLOT and packed nibble, returning its changed word index."
+  (let* ((bit (scene-cell-bit-index scene cell))
+         (word (floor bit 8)))
+    (setf (aref (scene-slots scene) bit) slot)
+    (setf (ldb (byte 4 (* 4 (mod bit 8)))
+               (aref (scene-slot-words scene) word))
+          slot)
+    word))
+
+(defun mark-exposed-cell-chunks (scene cell chunks)
+  "Add chunks of final exposed signed faces owned by CELL to CHUNKS."
+  (let ((domain (scene-domain scene))
+        (surface (scene-surface scene)))
+    (luft:map-site-boundary
+     (lambda (face axis side)
+       (declare (ignore axis side))
+       ;; Exact polarity matters: an empty cell beside a solid sees the same
+       ;; face geometry, but the surface face is owned by the solid opposite it.
+       (when (luft:chain-site-p surface face)
+         (setf (gethash (site-chunk-index domain face) chunks) t)))
+     domain (luft:site-geometry cell)))
+  chunks)
+
+(defun apply-scene-edit
+    (scene edit &key
+                  (stock-cells nil stock-cells-p)
+                  (stock-slots nil stock-slots-p))
+  "Apply occupancy and stock edits to SCENE as one publication.  #3QNZC1
 
 If C is the solid and S its surface, EDIT is a sparse 3-chain delta and the
 publication is exactly
 
     C' = C + EDIT,        S' = S + boundary(EDIT) = boundary(C').
 
-Only chunk summands touched by BOUNDARY(EDIT) are reordered.  Inputs are
-validated completely before SCENE is mutated; repeated fills, repeated
-removals, non-cell sites, and foreign domains are errors."
-  (let ((sites (validate-scene-edit scene edit)))
-    (when (zerop (length sites))
+STOCK-CELLS and STOCK-SLOTS are parallel specialized u64/u8 vectors.  A stock
+change rewrites its packed nibble and only pages containing final exposed
+faces owned by that cell.  Cell polarity is ignored; geometry names the stock
+site.  Geometry and stock changes share one revision.  Every input is
+validated before SCENE is mutated."
+  (let* ((sites (validate-scene-edit scene edit))
+         (stock-change-indices
+           (validate-scene-stock-edit
+            scene stock-cells stock-slots stock-cells-p stock-slots-p)))
+    (when (and (zerop (length sites))
+               (zerop (length stock-change-indices)))
       (return-from apply-scene-edit scene))
     (let ((surface-change (luft:boundary-chain edit))
           (chunks (make-hash-table :test #'eql))
-          (cell-words (make-hash-table :test #'eql)))
+          (cell-words (make-hash-table :test #'eql))
+          (slot-words (make-hash-table :test #'eql)))
       (luft:add-chain (scene-solid scene) edit)
       (loop for site across sites
             do (setf (gethash
@@ -500,6 +590,16 @@ removals, non-cell sites, and foreign domains are errors."
                        scene site (luft:site-positive-p site))
                       cell-words)
                      t))
+      ;; Stock bytes and their GPU nibbles must agree before any face page is
+      ;; restamped from them.
+      (loop for change-index across stock-change-indices
+            for cell = (aref stock-cells change-index)
+            for slot = (aref stock-slots change-index)
+            do
+        (setf (gethash
+               (set-scene-cell-slot scene cell slot)
+               slot-words)
+              t))
       (luft:add-chain (scene-surface scene) surface-change)
       (luft:map-chain
        (lambda (face)
@@ -508,11 +608,16 @@ removals, non-cell sites, and foreign domains are errors."
            (luft:add-chain-site (surface-chunk-chain chunk) face)
            (setf (gethash index chunks) t)))
        surface-change)
+      ;; Read exposure only after the exact boundary delta has installed the
+      ;; final surface, so combined fills/removals stamp the resulting owner.
+      (loop for change-index across stock-change-indices
+            do (mark-exposed-cell-chunks
+                scene (aref stock-cells change-index) chunks))
       (maphash (lambda (index present-p)
                  (declare (ignore present-p))
                  (rebuild-surface-chunk scene index))
                chunks)
-      (publish-scene-change scene chunks cell-words)
+      (publish-scene-change scene chunks cell-words slot-words)
       scene)))
 
 (defun scene-cell-p (scene x y z)
@@ -1044,7 +1149,8 @@ may speak only of its finish and its figure."
   "The table the :STOCK style indexes with a site's four stock bits.
 
 Every slot takes +STOCK-LANES+ vec4s: the three albedos, the five lanes of
-MATERIAL-LANES, and one lattice lane.  STOCKS is a scene's palette of
+MATERIAL-LANES, and one lattice/emission lane.  Its X is shape grit and YZW
+are the stock's linear surface radiance.  STOCKS is a scene's palette of
 material names; a scene with none is drawn wholly in *MATERIAL*, and slots
 past the end of the palette repeat slot zero so a stale site can never read
 rubbish."
@@ -1071,8 +1177,11 @@ rubbish."
                 do (quad (list (vec3:vec3-x colour) (vec3:vec3-y colour)
                                (vec3:vec3-z colour) spare)))
           (mapc #'quad (material-lanes material))
-          ;; The lattice lane: what this stock does to the shape.
-          (quad (list (material-grit material) 0.0 0.0 0.0)))))))
+          ;; The lattice lane: what this stock does to the shape in X, and
+          ;; its own linear surface radiance in the otherwise spare YZW.
+          (destructuring-bind (red green blue)
+              (material-emission material)
+            (quad (list (material-grit material) red green blue))))))))
 
 (defun frame-uniform-data
     (camera-or-view width height

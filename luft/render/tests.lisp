@@ -209,6 +209,315 @@
          (zerop (luft:chain-count
                  (luft:boundary-chain (scene-surface scene)))))))
 
+(defun make-stock-edit-scene ()
+  "A palette scene with one hidden cell and one four-page exposed cell."
+  (let* ((domain (luft:make-world-domain :horizontal-bits 4))
+         (solid (luft:make-solid-chain domain))
+         (slots (make-array (luft:chain-cell-bit-count domain)
+                            :element-type '(unsigned-byte 8)
+                            :initial-element 0)))
+    ;; (3,3,3) is wholly hidden inside this cube.
+    (loop for x from 2 to 4
+          do (loop for y from 2 to 4
+                   do (loop for z from 2 to 4
+                            do (setf (luft:solid-cell-p solid x y z) t))))
+    ;; Each high face of (7,7,7) crosses one 8-cell page boundary, so this
+    ;; single exposed owner exercises the base, +X, +Y, and +Z pages.
+    (setf (luft:solid-cell-p solid 7 7 7) t)
+    (make-scene domain :solid solid :slots slots
+                        :stocks #(:turf :granite :oak :snow))))
+
+(defun stock-cell-vector (&rest cells)
+  (make-array (length cells) :element-type '(unsigned-byte 64)
+                              :initial-contents cells))
+
+(defun stock-slot-vector (&rest slots)
+  (make-array (length slots) :element-type '(unsigned-byte 8)
+                              :initial-contents slots))
+
+(defun scene-cell-slot-nibble (scene cell)
+  (let ((index (luft.render::scene-cell-bit-index scene cell)))
+    (ldb (byte 4 (* 4 (mod index 8)))
+         (aref (luft.render::scene-slot-words scene) (floor index 8)))))
+
+(defun scene-exposed-cell-stock-p (scene cell stock)
+  "Whether every final exposed face owned by CELL is stamped STOCK."
+  (let ((matches-p t)
+        (count 0)
+        (sites (scene-sites scene)))
+    (luft:map-site-boundary
+     (lambda (face axis side)
+       (declare (ignore axis side))
+       (when (luft:chain-site-p (scene-surface scene) face)
+         (incf count)
+         (let ((packed (find face sites :test #'= :key #'packed-site)))
+           (unless (and packed
+                        (= stock
+                           (ldb
+                            (byte luft.render.shaders:+site-stock-bits+
+                                  luft.render.shaders:+site-stock-shift+)
+                            packed)))
+             (setf matches-p nil)))))
+     (scene-domain scene) (luft:site-geometry cell))
+    (and (plusp count) matches-p)))
+
+(defun fresh-scene-reference (scene)
+  "Rebuild SCENE's authored solid and stock columns into a fresh scene."
+  (let ((solid (luft:make-chain (scene-domain scene))))
+    (loop for cell across (luft:chain-sites (scene-solid scene))
+          do (luft:add-chain-site solid cell))
+    (make-scene (scene-domain scene)
+                :solid solid
+                :slots (copy-seq (scene-slots scene))
+                :stocks (copy-seq (scene-stocks scene)))))
+
+(defun scene-equals-fresh-reference-p (scene)
+  (let ((fresh (fresh-scene-reference scene)))
+    (and (equalp (luft:chain-sites (scene-solid scene))
+                 (luft:chain-sites (scene-solid fresh)))
+         (equalp (luft:chain-sites (scene-surface scene))
+                 (luft:chain-sites (scene-surface fresh)))
+         (equalp (scene-cell-bits scene) (scene-cell-bits fresh))
+         (equalp (scene-slots scene) (scene-slots fresh))
+         (equalp (luft.render::scene-slot-words scene)
+                 (luft.render::scene-slot-words fresh))
+         (equalp (scene-sites scene) (scene-sites fresh)))))
+
+(deftest stock-only-edit-restamps-exposed-pages-and-one-packed-nibble
+  (let* ((scene (make-stock-edit-scene))
+         (domain (scene-domain scene))
+         (cell (luft:make-site domain 7 7 7 luft:+cell-extent+))
+         (cell-index (luft.render::scene-cell-bit-index scene cell))
+         (slot-word (floor cell-index 8))
+         (revision (scene-revision scene)))
+    (apply-scene-edit
+     scene (luft:make-chain domain)
+     :stock-cells (stock-cell-vector cell)
+     :stock-slots (stock-slot-vector 2))
+    (ok (= (1+ revision) (scene-revision scene)))
+    (ok (= 2 (aref (scene-slots scene) cell-index)))
+    (ok (= 2 (scene-cell-slot-nibble scene cell)))
+    (ok (scene-exposed-cell-stock-p scene cell 2))
+    (multiple-value-bind (chunks cell-words slot-words available-p)
+        (luft.render::scene-changes-since scene revision)
+      (ok available-p)
+      (ok (equalp #(0 1 2 4) chunks))
+      (ok (zerop (length cell-words)))
+      (ok (equalp (vector slot-word) slot-words)))))
+
+(deftest hidden-stock-edit-publishes-only-its-slot-word-and-no-op-stays-quiet
+  (let* ((scene (make-stock-edit-scene))
+         (domain (scene-domain scene))
+         (cell (luft:make-site domain 3 3 3 luft:+cell-extent+))
+         (cell-index (luft.render::scene-cell-bit-index scene cell))
+         (slot-word (floor cell-index 8))
+         (revision (scene-revision scene))
+         (sites (copy-seq (luft.render::scene-site-pages scene)))
+         (cell-bits (copy-seq (scene-cell-bits scene))))
+    (apply-scene-edit
+     scene (luft:make-chain domain)
+     :stock-cells (stock-cell-vector cell)
+     :stock-slots (stock-slot-vector 1))
+    (ok (= (1+ revision) (scene-revision scene)))
+    (ok (= 1 (aref (scene-slots scene) cell-index)))
+    (ok (= 1 (scene-cell-slot-nibble scene cell)))
+    (ok (equalp sites (luft.render::scene-site-pages scene)))
+    (ok (equalp cell-bits (scene-cell-bits scene)))
+    (multiple-value-bind (chunks cell-words slot-words available-p)
+        (luft.render::scene-changes-since scene revision)
+      (ok available-p)
+      (ok (zerop (length chunks)))
+      (ok (zerop (length cell-words)))
+      (ok (equalp (vector slot-word) slot-words)))
+    ;; Repainting the same slot is not a publication.
+    (let ((published (scene-revision scene)))
+      (apply-scene-edit
+       scene (luft:make-chain domain)
+       :stock-cells (stock-cell-vector cell)
+       :stock-slots (stock-slot-vector 1))
+      (ok (= published (scene-revision scene))))))
+
+(deftest empty-neighbor-stock-edit-does-not-claim-an-opposite-owned-face
+  (let* ((scene (make-stock-edit-scene))
+         (domain (scene-domain scene))
+         ;; This empty cell is immediately west of the exposed (7,7,7) solid.
+         ;; Their shared face geometry exists in the surface with the solid's
+         ;; opposite polarity, so geometry-only matching would restamp it.
+         (cell (luft:make-site domain 6 7 7 luft:+cell-extent+))
+         (cell-index (luft.render::scene-cell-bit-index scene cell))
+         (slot-word (floor cell-index 8))
+         (revision (scene-revision scene))
+         (sites (copy-seq (luft.render::scene-site-pages scene))))
+    (ok (not (scene-cell-p scene 6 7 7)))
+    (apply-scene-edit
+     scene (luft:make-chain domain)
+     :stock-cells (stock-cell-vector cell)
+     :stock-slots (stock-slot-vector 1))
+    (ok (= (1+ revision) (scene-revision scene)))
+    (ok (= 1 (aref (scene-slots scene) cell-index)))
+    (ok (= 1 (scene-cell-slot-nibble scene cell)))
+    (ok (equalp sites (luft.render::scene-site-pages scene)))
+    (multiple-value-bind (chunks cell-words slot-words available-p)
+        (luft.render::scene-changes-since scene revision)
+      (ok available-p)
+      (ok (zerop (length chunks)))
+      (ok (zerop (length cell-words)))
+      (ok (equalp (vector slot-word) slot-words)))))
+
+(deftest stock-only-publication-stays-sparse-in-a-surface-frame-state
+  (let* ((device (make-instance 'surface-publication-probe-device))
+         (technique (make-release-test-technique device))
+         (state nil)
+         (scene (make-stock-edit-scene))
+         (domain (scene-domain scene))
+         (cell (luft:make-site domain 7 7 7 luft:+cell-extent+)))
+    (unwind-protect
+         (progn
+           (setf state (make-surface-frame-state technique :scene scene))
+           (let* ((group (surface-frame-state-bind-group state))
+                  (sites
+                    (luft.render::surface-frame-state-sites-buffer state))
+                  (cells
+                    (luft.render::surface-frame-state-cells-buffer state))
+                  (slots
+                    (luft.render::surface-frame-state-slots-buffer state))
+                  (site-writes (surface-release-probe-writes sites))
+                  (cell-writes (surface-release-probe-writes cells))
+                  (slot-writes (surface-release-probe-writes slots)))
+             (apply-scene-edit
+              scene (luft:make-chain domain)
+              :stock-cells (stock-cell-vector cell)
+              :stock-slots (stock-slot-vector 1))
+             (synchronize-surface-frame-state state scene)
+             (ok (eq :incremental
+                     (surface-frame-state-last-scene-upload-kind state)))
+             (ok (= 5 (surface-frame-state-last-scene-upload-writes state)))
+             (ok (> (surface-frame-state-last-scene-upload-bytes state) 4))
+             (ok (eq group (surface-frame-state-bind-group state)))
+             (ok (eq sites
+                     (luft.render::surface-frame-state-sites-buffer state)))
+             (ok (eq cells
+                     (luft.render::surface-frame-state-cells-buffer state)))
+             (ok (eq slots
+                     (luft.render::surface-frame-state-slots-buffer state)))
+             (ok (= (+ 4 site-writes)
+                    (surface-release-probe-writes sites)))
+             (ok (= cell-writes (surface-release-probe-writes cells)))
+             (ok (= (1+ slot-writes)
+                    (surface-release-probe-writes slots)))))
+      (when state (destroy-surface-frame-state state))
+      (destroy-surface-technique technique))))
+
+(deftest combined-occupancy-and-stock-edit-publishes-one-exact-union
+  (let* ((scene (make-stock-edit-scene))
+         (domain (scene-domain scene))
+         (existing (luft:make-site domain 7 7 7 luft:+cell-extent+))
+         (added (luft:make-site domain 11 11 11 luft:+cell-extent+))
+         (edit (luft:make-chain domain))
+         (revision (scene-revision scene)))
+    (luft:add-chain-site edit added)
+    (apply-scene-edit
+     scene edit
+     :stock-cells (stock-cell-vector existing added)
+     :stock-slots (stock-slot-vector 2 3))
+    (ok (= (1+ revision) (scene-revision scene)))
+    (ok (scene-exposed-cell-stock-p scene existing 2))
+    (ok (scene-exposed-cell-stock-p scene added 3))
+    (ok (= 2 (scene-cell-slot-nibble scene existing)))
+    (ok (= 3 (scene-cell-slot-nibble scene added)))
+    (multiple-value-bind (chunks cell-words slot-words available-p)
+        (luft.render::scene-changes-since scene revision)
+      (let ((added-index (luft.render::scene-cell-bit-index scene added))
+            (existing-index
+              (luft.render::scene-cell-bit-index scene existing)))
+        (ok available-p)
+        (ok (equalp #(0 1 2 4 7) chunks))
+        (ok (equalp (vector (floor added-index 32)) cell-words))
+        (ok (equalp
+             (sort (vector (floor existing-index 8) (floor added-index 8)) #'<)
+             slot-words))))
+    (ok (scene-equals-fresh-reference-p scene))))
+
+(deftest invalid-stock-edit-inputs-leave-every-scene-product-unmodified
+  (let* ((scene (make-stock-edit-scene))
+         (domain (scene-domain scene))
+         (cell (luft:make-site domain 3 3 3 luft:+cell-extent+))
+         (wide-domain (luft:make-world-domain :horizontal-bits 5))
+         (noncanonical
+           (luft:make-site wide-domain 16 3 3 luft:+cell-extent+))
+         (face (luft:make-site domain 3 3 3 luft:+xy-face-extent+))
+         (negative (luft:opposite-site cell)))
+    (labels ((reject (target edit arguments)
+               (let ((revision (scene-revision target))
+                     (solid (luft:chain-sites (scene-solid target)))
+                     (surface (luft:chain-sites (scene-surface target)))
+                     (sites (copy-seq (luft.render::scene-site-pages target)))
+                     (cell-bits (copy-seq (scene-cell-bits target)))
+                     (slots (and (scene-slots target)
+                                 (copy-seq (scene-slots target))))
+                     (slot-words
+                       (copy-seq (luft.render::scene-slot-words target)))
+                     (changes (luft.render::scene-changes target)))
+                 (ok (signals
+                      (apply #'apply-scene-edit target edit arguments)
+                      'error))
+                 (ok (= revision (scene-revision target)))
+                 (ok (equalp solid (luft:chain-sites (scene-solid target))))
+                 (ok (equalp surface (luft:chain-sites (scene-surface target))))
+                 (ok (equalp sites (luft.render::scene-site-pages target)))
+                 (ok (equalp cell-bits (scene-cell-bits target)))
+                 (ok (equalp slots (scene-slots target)))
+                 (ok (equalp
+                      slot-words (luft.render::scene-slot-words target)))
+                 (ok (eq changes (luft.render::scene-changes target))))))
+      (let ((empty (luft:make-chain domain)))
+        (reject scene empty
+                (list :stock-cells (stock-cell-vector cell)))
+        (reject scene empty
+                (list :stock-cells
+                      (make-array 1 :element-type '(unsigned-byte 32)
+                                    :initial-element 0)
+                      :stock-slots (stock-slot-vector 1)))
+        (reject scene empty
+                (list :stock-cells (stock-cell-vector cell)
+                      :stock-slots #(1)))
+        (reject scene empty
+                (list :stock-cells (stock-cell-vector cell cell)
+                      :stock-slots (stock-slot-vector 1)))
+        (reject scene empty
+                (list :stock-cells (stock-cell-vector noncanonical)
+                      :stock-slots (stock-slot-vector 1)))
+        (reject scene empty
+                (list :stock-cells (stock-cell-vector face)
+                      :stock-slots (stock-slot-vector 1)))
+        (reject scene empty
+                (list :stock-cells (stock-cell-vector cell negative)
+                      :stock-slots (stock-slot-vector 1 2)))
+        (reject scene empty
+                (list :stock-cells (stock-cell-vector cell)
+                      :stock-slots (stock-slot-vector 4))))
+      ;; A valid occupancy delta is still untouched when its stock half fails.
+      (let ((edit (luft:make-chain domain)))
+        (luft:add-chain-site
+         edit (luft:make-site domain 11 11 11 luft:+cell-extent+))
+        (reject scene edit
+                (list :stock-cells (stock-cell-vector cell)
+                      :stock-slots (stock-slot-vector 4))))
+      (let ((slotless (make-scene domain)))
+        (reject slotless (luft:make-chain domain)
+                (list :stock-cells (stock-cell-vector cell)
+                      :stock-slots (stock-slot-vector 0))))
+      (let* ((wide-palette
+               (make-array 17 :initial-element :stock))
+             (slots (make-array (luft:chain-cell-bit-count domain)
+                                :element-type '(unsigned-byte 8)
+                                :initial-element 0))
+             (too-wide
+               (make-scene domain :slots slots :stocks wide-palette)))
+        (reject too-wide (luft:make-chain domain)
+                (list :stock-cells (stock-cell-vector cell)
+                      :stock-slots (stock-slot-vector 16)))))))
+
 (deftest signed-cell-edits-are-exactly-linear-boundary-updates
   ;; Cross ordinary and chunk boundaries, wrap around the horizontal torus,
   ;; and repeatedly remove cells.  At every publication the incremental
@@ -338,15 +647,20 @@
 
 (deftest a-world-holds-sixteen-stocks-at-most
   ;; Sixteen is what the four free bits above a packed site can name.
-  (let ((world (make-world :horizontal-bits 4))
-        (names (material-names)))
+  (let* ((world (make-world :horizontal-bits 4))
+         ;; The global atelier may know more materials than one particular
+         ;; world's four-bit palette.  Fill this world with any fifteen in
+         ;; addition to its conventional turf slot.
+         (names (subseq (remove :turf (material-names)) 0 15)))
     (ok (= 16 luft.render.shaders:+stock-slots+))
     ;; Slot zero is turf before anything asks for a slot at all.
     (ok (zerop (world-stock-slot world :turf)))
     ;; Each new stock takes the next slot, and asking twice is idempotent.
-    (let ((slots (mapcar (lambda (name) (world-stock-slot world name)) names)))
+    (let ((slots (cons 0
+                       (mapcar (lambda (name) (world-stock-slot world name))
+                               names))))
       (ok (equal slots (mapcar (lambda (name) (world-stock-slot world name))
-                               names)))
+                               (cons :turf names))))
       (ok (= (length slots) (length (remove-duplicates slots)))))
     ;; Past the sixteenth the world says so rather than truncating.  The
     ;; throwaway stocks live in a table of their own, or every later
@@ -362,6 +676,33 @@
                    'error)))
     ;; And an undefined stock is an error where it is asked for, not later.
     (ok (signals (world-stock-slot world :no-such-stock) 'error))))
+
+(deftest stock-table-packs-shape-grit-and-linear-emission-together
+  ;; The ninth stock lane is deliberately shared across stages: the vertex
+  ;; lattice reads X while the fragment material reads YZW.  Crystal owns
+  ;; visible HDR emission; terminal is only its dark chassis and stays dark.
+  (let* ((stocks #(:turf :granite :sand :terminal :tree :snow :crystal))
+         (data (stock-table-data stocks)))
+    (labels ((lane-start (name)
+               (* 4
+                  (+ (* (position name stocks)
+                        luft.render.shaders:+stock-lanes+)
+                     8)))
+             (lane (name)
+               (let ((start (lane-start name)))
+                 (subseq data start (+ start 4)))))
+      (let ((crystal (find-material :crystal))
+            (terminal (find-material :terminal)))
+        (ok (equalp (lane :crystal)
+                    (coerce (cons (material-grit crystal)
+                                  (material-emission crystal))
+                            '(simple-array single-float (4)))))
+        (ok (equalp (lane :terminal)
+                    (coerce (cons (material-grit terminal)
+                                  '(0.0 0.0 0.0))
+                            '(simple-array single-float (4)))))
+        (ok (some #'plusp (material-emission crystal)))
+        (ok (every #'zerop (material-emission terminal)))))))
 
 (deftest standalone-render-modes-select-only-their-own-pipelines
   (multiple-value-bind (mode style pipelines effects)
