@@ -77,3 +77,24 @@
                                        (uiop:symbol-call '#:rove '#:find-suite
                                                          '#:luft.benchmark.tests))
                (error "LUFT benchmark tests failed"))))
+
+(defsystem "luft/z-fiber-benchmark"
+  :description "Scalar and native-SIMD experiments for full-height LUFT fibers."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luft" "luv" "sb-simd")
+  :components ((:file "luft/z-fiber-benchmark"))
+  :in-order-to ((test-op (test-op "luft/z-fiber-benchmark/test"))))
+
+(defsystem "luft/z-fiber-benchmark/test"
+  :description "Differential checks for LUFT Z-fiber benchmark kernels."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luft/z-fiber-benchmark" "rove")
+  :components ((:file "luft/z-fiber-benchmark-tests"))
+  :perform (test-op (operation component)
+             (declare (ignore operation component))
+             (unless (uiop:symbol-call '#:rove '#:run-suite
+                                       (uiop:symbol-call '#:rove '#:find-suite
+                                                         '#:luft.z-fiber-benchmark.tests))
+               (error "LUFT Z-fiber benchmark tests failed"))))
