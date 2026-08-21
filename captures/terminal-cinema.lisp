@@ -269,12 +269,17 @@
            directory :validate t :if-does-not-exist :ignore))))))
 
 (defun play-terminal-cinema-clip (display clip)
-  "Put CLIP on DISPLAY through the required hardware-backed Film path."
+  "Put CLIP on DISPLAY through the bounded software Film path."
   (let ((screen
           (luvcraft:play-terminal-display-film
-           display clip :hardware :required)))
-    (unless (luvcraft::video-screen-hardware-p screen)
-      (error "Terminal cinema Film mode accepted a software video screen."))
+           display clip :hardware nil)))
+    ;; Chapel's RADV H.264 video queue currently loses the whole graphics
+    ;; device on its first decoded picture.  This authored 480x270 fixture is
+    ;; intentionally forced through the ordinary software upload path until
+    ;; that backend failure has its own proof and fix; :AUTO would still try
+    ;; the guilty hardware path first.
+    (when (luvcraft::video-screen-hardware-p screen)
+      (error "Terminal cinema Film mode unexpectedly used hardware decode."))
     screen))
 
 (luv:define-capture terminal-camp-golden-hour
@@ -308,7 +313,7 @@
 (luv:define-capture wall-cinema-at-dusk
     (:figure TWKA93 :kind :image :extension "png"
      :description
-     "A hardware-decoded stone-age cartoon letterboxed inside the dusk wall.")
+     "An authored stone-age cartoon letterboxed inside the dusk terminal wall.")
     (pathname)
   (call-with-terminal-cinema-clip
    (lambda (clip)
@@ -322,7 +327,7 @@
 (luv:define-capture wall-cinema-at-dusk-film
     (:figure TWKA93 :kind :video :extension "mp4"
      :description
-     "Three seconds of required hardware video moving behind the wall faceplate.")
+     "Three seconds of authored video moving behind the terminal faceplate.")
     (pathname)
   (call-with-terminal-cinema-clip
    (lambda (clip)
