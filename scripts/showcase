@@ -190,14 +190,6 @@ case "$media_checkout" in /*) ;; *) media_checkout=$HOME/$media_checkout ;; esac
 test -d "$source_checkout/.git" || { echo "showcase: run bootstrap first" >&2; exit 1; }
 test -d "$media_checkout/.git" || { echo "showcase: run bootstrap first" >&2; exit 1; }
 
-echo "showcase: resolving the pinned git-annex"
-annex_bin=$(nix develop --verbose -L "$source_checkout#annex" --no-write-lock-file \
-  -c sh -c 'dirname "$(command -v git-annex)"')
-PATH=$annex_bin:$PATH
-export PATH
-git -C "$media_checkout" config showcase.annex-shell \
-  "$annex_bin/git-annex-shell"
-
 echo "showcase: fast-forwarding chapel source"
 test -z "$(git -C "$source_checkout" status --porcelain)" || {
   echo "showcase: refusing dirty chapel source checkout" >&2
@@ -207,6 +199,14 @@ test -z "$(git -C "$source_checkout" status --porcelain)" || {
 git -C "$source_checkout" fetch --progress origin main
 git -C "$source_checkout" switch main
 git -C "$source_checkout" merge --ff-only origin/main
+
+echo "showcase: resolving the pinned git-annex"
+annex_bin=$(nix develop --verbose -L "$source_checkout#annex" --no-write-lock-file \
+  -c sh -c 'dirname "$(command -v git-annex)"')
+PATH=$annex_bin:$PATH
+export PATH
+git -C "$media_checkout" config showcase.annex-shell \
+  "$annex_bin/git-annex-shell"
 
 echo "showcase: fast-forwarding chapel media metadata"
 test -z "$(git -C "$media_checkout" status --porcelain)" || {
@@ -253,16 +253,6 @@ case "$media_checkout" in /*) ;; *) media_checkout=$HOME/$media_checkout ;; esac
 test -d "$source_checkout/.git" || { echo "showcase: run bootstrap first" >&2; exit 1; }
 test -d "$media_checkout/.git" || { echo "showcase: run bootstrap first" >&2; exit 1; }
 
-echo "showcase: resolving the pinned git-annex"
-annex_bin=$(nix develop --verbose -L "$source_checkout#annex" --no-write-lock-file \
-  -c sh -c 'dirname "$(command -v git-annex)"')
-PATH=$annex_bin:$PATH
-export PATH
-git -C "$media_checkout" config remote.chapel.annex-shell \
-  "$chapel_annex_shell"
-git -C "$media_checkout" config --unset-all remote.chapel.annex-ignore || true
-git -C "$media_checkout" annex enableremote chapel
-
 echo "showcase: fast-forwarding swa source"
 test -z "$(git -C "$source_checkout" status --porcelain)" || {
   echo "showcase: refusing dirty swa source checkout" >&2
@@ -272,6 +262,16 @@ test -z "$(git -C "$source_checkout" status --porcelain)" || {
 git -C "$source_checkout" fetch --progress origin main
 git -C "$source_checkout" switch main
 git -C "$source_checkout" merge --ff-only origin/main
+
+echo "showcase: resolving the pinned git-annex"
+annex_bin=$(nix develop --verbose -L "$source_checkout#annex" --no-write-lock-file \
+  -c sh -c 'dirname "$(command -v git-annex)"')
+PATH=$annex_bin:$PATH
+export PATH
+git -C "$media_checkout" config remote.chapel.annex-shell \
+  "$chapel_annex_shell"
+git -C "$media_checkout" config --unset-all remote.chapel.annex-ignore || true
+git -C "$media_checkout" annex enableremote chapel
 
 echo "showcase: fast-forwarding swa media metadata"
 test -z "$(git -C "$media_checkout" status --porcelain)" || {
