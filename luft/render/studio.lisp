@@ -186,8 +186,11 @@
                 (context
                   (make-canvas-context
                    canvas provider
+                   ;; :copy-src drops the Metal framebuffer-only contract so
+                   ;; CAPTURE-VIEWER-FRAME can read the drawable back.
                    (make-canvas-configuration
-                    :device device* :usage '(:render-attachment))))
+                    :device device*
+                    :usage '(:render-attachment :copy-src))))
                 (renderer*
                   (setf renderer
                         (make-renderer
@@ -214,6 +217,56 @@
         (when renderer (destroy-renderer renderer))
         (when (eq :open (canvas-state canvas)) (close-canvas canvas))
         (when device (ignore-errors (destroy device)))))))
+
+(defun capture-viewer-frame (pathname &optional (viewer *viewer*))
+  "Render one VIEWER frame on its canvas thread and write it to PATHNAME."
+  (let* ((context (viewer-context viewer))
+         (extent (canvas-extent context))
+         (pathname (merge-pathnames pathname))
+         (buffer
+           (create (viewer-device viewer)
+                   (make-buffer-descriptor
+                    :label "luft capture readback"
+                    :size (* 4 (first extent) (second extent))
+                    :usage '(:copy-dst)))))
+    (unwind-protect
+         (progn
+           (luv::call-on-sdl-canvas-thread
+            (viewer-canvas viewer)
+            (lambda ()
+              (present-canvas-frame
+               context
+               (lambda (surface-texture encoder presentation-time)
+                 (declare (ignore presentation-time))
+                 (encode-renderer-frame
+                  (viewer-renderer viewer) encoder surface-texture extent
+                  (camera-uniform-data (viewer-camera viewer)
+                                       (first extent) (second extent)))
+                 (encode encoder
+                         (make-gpu-copy-texture-to-buffer-command
+                          :source surface-texture :destination buffer))))))
+           (ensure-directories-exist pathname)
+           (write-rgba-png pathname (read-buffer buffer)
+                           (first extent) (second extent)
+                           (canvas-format context)))
+      (destroy buffer))))
+
+(defun refresh-viewer-renderer (&optional (viewer *viewer*))
+  "Rebuild VIEWER's renderer so edited shaders and geometry take effect."
+  (when viewer
+    (let* ((context (viewer-context viewer))
+           (old (viewer-renderer viewer))
+           (materialization
+             (make-face-materialization (make-demo-solid))))
+      (setf (viewer-running-p viewer) nil)
+      (unwind-protect
+           (setf (viewer-renderer viewer)
+                 (make-renderer (viewer-device viewer) materialization
+                                (canvas-format context)
+                                (canvas-extent context)))
+        (setf (viewer-running-p viewer) t))
+      (when old (destroy-renderer old))))
+  (values))
 
 (defun stop-viewer (&optional (viewer *viewer*))
   (when viewer

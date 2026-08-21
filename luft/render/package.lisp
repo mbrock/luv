@@ -30,6 +30,8 @@
            #:viewer-camera
            #:start-viewer
            #:stop-viewer
+           #:refresh-viewer-renderer
+           #:capture-viewer-frame
            #:viewer
            #:viewer-renderer
            #:viewer-running-p
