@@ -202,18 +202,10 @@ the selector is the whole of the difference."
                            (* amount (vec3:vec3-y direction)))
                         (+ (vec3:vec3-z position)
                            (* amount (vec3:vec3-z direction))))))))
-        ;; W/S are locomotion, independent of the wheel's isometric zoom.
-        ;; Flatten the heading so forward never steals Space/Shift's vertical
-        ;; axis merely because the camera is pitched down toward the scene.
-        (let* ((length (sqrt (+ (expt (vec3:vec3-x forward) 2)
-                                (expt (vec3:vec3-y forward) 2))))
-               (travel (if (plusp length)
-                           (vec3:make-vec3 (/ (vec3:vec3-x forward) length)
-                                           (/ (vec3:vec3-y forward) length)
-                                           0.0)
-                           forward)))
-          (when (viewer-key-down-p viewer :w :up) (move travel step))
-          (when (viewer-key-down-p viewer :s :down) (move travel (- step))))
+        ;; W/S dolly along the exact 3D viewing ray.  The wheel alone changes
+        ;; isometric scale; Space/Shift remain independent world-Z movement.
+        (when (viewer-key-down-p viewer :w :up) (move forward step))
+        (when (viewer-key-down-p viewer :s :down) (move forward (- step)))
         (when (viewer-key-down-p viewer :d :right) (move right step))
         (when (viewer-key-down-p viewer :a :left) (move right (- step)))
         (when (viewer-key-down-p viewer :space)
