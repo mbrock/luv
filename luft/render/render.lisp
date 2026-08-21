@@ -695,7 +695,12 @@ consequence of its own occupancy star and can be read on its own."
                                       :targets
                                       ((:format ,color-format
                                         :blend :premultiplied-alpha)))
-                          :primitive '(:topology :triangle-list))))
+                          :primitive '(:topology :triangle-list)
+                          :depth-stencil
+                          (unless temporal-p
+                            '(:format :depth32-float
+                              :depth-write-enabled nil
+                              :depth-compare :always)))))
            (when temporal-p
              (setf present-layout
                    (create device
@@ -804,19 +809,6 @@ consequence of its own occupancy star and can be read on its own."
     (draw pass 6))
   renderer)
 
-(defun encode-renderer-inspector (renderer encoder surface-texture extent rect)
-  (when (and rect (renderer-inspector-bind-group renderer))
-    (let ((pass
-            (begin-render-pass
-             encoder
-             (make-render-pass-descriptor
-              :label "luft site inspector"
-              :color-attachments
-              `((:view ,surface-texture :load-op :load :store-op :store))))))
-      (draw-renderer-inspector renderer pass extent rect)
-      (end-pass pass)))
-  renderer)
-
 (defun encode-renderer-frame
     (renderer encoder surface-texture extent camera-uniform-data
      &key jitter view inspector-texture inspector-rect)
@@ -862,6 +854,8 @@ consequence of its own occupancy star and can be read on its own."
     (when temporal-p
       (signal-temporal-scaler-inputs pass
                                      (renderer-temporal-scaler renderer)))
+    (unless temporal-p
+      (draw-renderer-inspector renderer pass extent inspector-rect))
     (end-pass pass)
     (when temporal-p
       (let ((scaler (renderer-temporal-scaler renderer))
@@ -896,10 +890,7 @@ consequence of its own occupancy star and can be read on its own."
         (setf (renderer-previous-view renderer) view
               (renderer-history-valid-p renderer) t
               (renderer-history-used-p renderer) history-valid-p)
-        (incf (renderer-frame-index renderer))))
-    (unless temporal-p
-      (encode-renderer-inspector
-       renderer encoder surface-texture extent inspector-rect)))
+        (incf (renderer-frame-index renderer)))))
   renderer)
 
 (defun destroy-renderer (renderer)
