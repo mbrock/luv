@@ -7,8 +7,7 @@
   :serial t
   :components ((:file "luft/package")
                (:file "luft/luft")
-               (:file "luft/chain")
-               (:file "luft/foundation"))
+               (:file "luft/chain"))
   :in-order-to ((test-op (test-op "luft/test"))))
 
 (defsystem "luft/render"

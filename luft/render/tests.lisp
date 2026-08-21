@@ -62,23 +62,6 @@
     ;; The surface is closed: its boundary vanishes.
     (ok (zerop (luft:chain-count (luft:boundary-chain surface))))))
 
-(deftest foundation-records-are-one-four-u32-record-per-face
-  (let* ((domain (luft:make-world-domain :horizontal-bits 3))
-         (scene (make-scene domain)))
-    (setf (scene-cell-p scene 2 2 2) t)
-    (let ((sites (scene-sites scene))
-          (records (scene-face-records scene)))
-      (ok (= 6 (length sites)))
-      (ok (= (* luft:+face-record-words+ (length sites))
-             (length records)))
-      (loop for site across sites
-            for offset from 0 by luft:+face-record-words+
-            do (multiple-value-bind (decorated shape reserved)
-                   (luft:unpack-face-record records offset)
-                 (ok (= site (ldb (byte 60 0) decorated)))
-                 (ok (typep shape '(unsigned-byte 32)))
-                 (ok (zerop reserved)))))))
-
 (deftest refreshing-a-scene-publishes-a-new-revision
   (let* ((scene (make-demo-scene))
          (revision (scene-revision scene)))
@@ -264,10 +247,6 @@
     (ok (equal '(:bevel :bevel (:bevel) nil)
                (list mode style pipelines effects))))
   (multiple-value-bind (mode style pipelines effects)
-      (luft.render::standalone-render-options "foundation")
-    (ok (equal '(:foundation :foundation (:foundation) nil)
-               (list mode style pipelines effects))))
-  (multiple-value-bind (mode style pipelines effects)
       (luft.render::standalone-render-options "clay")
     (ok (equal '(:clay :clay (:clay) nil)
                (list mode style pipelines effects))))
@@ -275,8 +254,7 @@
       (luft.render::standalone-render-options "full")
     (ok (eq :full mode))
     (ok (eq :stock style))
-    (ok (equal '(:foundation :flat :bevel :chamfer :paper :stock :field :soft
-                 :ink :clay)
+    (ok (equal '(:flat :bevel :chamfer :paper :stock :field :soft :ink :clay)
                pipelines))
     (ok (equal '(:sky :lens :taa) effects)))
   ;; A mode of its own selects only its own pipeline, the stock included.
@@ -284,19 +262,17 @@
       (luft.render::standalone-render-options "stock")
     (ok (equal '(:stock :stock (:stock) nil)
                (list mode style pipelines effects))))
-  ;; And with nothing named at all, the standalone begins at the supplied
-  ;; foundation ABI rather than the older multi-style showcase.
+  ;; And with nothing named at all, the atelier opens on the whole world.
   (multiple-value-bind (mode style)
       (luft.render::standalone-render-options nil)
-    (ok (eq :foundation mode))
-    (ok (eq :foundation style))))
+    (ok (eq :full mode))
+    (ok (eq :stock style))))
 
 (deftest vertex-pulling-draws-whole-grids-per-face
   ;; Six vertices draw a flat quad; the chamfer grid of one ring has four
   ;; points a side, nine quads, and so fifty-four vertices; the rounding's
   ;; two rings make six a side, twenty-five quads, a hundred and fifty.
   (ok (= 6 (luft.render.shaders:surface-vertices-per-face :flat)))
-  (ok (= 54 (luft.render.shaders:surface-vertices-per-face :foundation)))
   (ok (= 54 (luft.render.shaders:surface-vertices-per-face :chamfer)))
   (ok (= 54 (luft.render.shaders:surface-vertices-per-face :paper)))
   (ok (= 150 (luft.render.shaders:surface-vertices-per-face :bevel)))
@@ -357,10 +333,7 @@
            (render-pixels renderer)
            (ok (eq :incremental
                    (renderer-last-scene-upload-kind renderer)))
-           ;; One face page is two coherent GPU writes: packed sites for the
-           ;; established styles and foundation records for the new path.
-           ;; The changed occupancy word is the third write.
-           (ok (= 3 (renderer-last-scene-upload-writes renderer)))
+           (ok (= 2 (renderer-last-scene-upload-writes renderer)))
            (ok (< (renderer-last-scene-upload-bytes renderer) full-bytes))
            (ok (= (scene-revision scene)
                   (luft.render::renderer-uploaded-scene-revision renderer))))

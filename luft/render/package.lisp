@@ -5,7 +5,6 @@
    "Vertex and fragment stages that draw a surface chain of packed sites.")
   (:export #:+stocks-binding+
            #:+slots-binding+
-           #:+face-records-binding+
            #:*deformations*
            #:deformation-index
            #:deform-point
@@ -26,7 +25,6 @@
            #:sky-fragment-shader
            #:temporal-sky-fragment-shader
            #:surface-vertex-shader
-           #:foundation-vertex-shader
            #:field-vertex-shader
            #:field-fragment-shader
            #:temporal-field-fragment-shader
@@ -88,7 +86,6 @@ of packed LUFT sites, drawn by vertex shaders pulling sites.")
            #:scene-solid
            #:scene-surface
            #:scene-sites
-           #:scene-face-records
            #:scene-cell-bits
            #:scene-revision
            #:scene-cell-p
