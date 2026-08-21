@@ -1,0 +1,25 @@
+# Sourced by luv scripts that need SBCL or native development dependencies.
+#
+# Ordinary work uses the durable profile activation sourced by the login shell
+# or .envrc.  CI may still enter the equivalent locked dev shell once.  Both
+# set the same marker because both are generated from one flake attrset.
+
+if [ "${LUV_DEV_ENVIRONMENT:-}" != 1 ] \
+  && [ -r "$HOME/.nix-profile/share/luv/env.sh" ]; then
+  export PATH="$HOME/.nix-profile/bin:$PATH"
+  . "$HOME/.nix-profile/share/luv/env.sh"
+fi
+
+if [ "${LUV_DEV_ENVIRONMENT:-}" != 1 ]; then
+  cat >&2 <<'USAGE'
+luv: the development profile is not active, so SBCL and native library paths
+are not trustworthy. Install it once and activate it in this shell:
+
+  ./scripts/install-dev-profile
+  . "$HOME/.nix-profile/share/luv/env.sh"
+
+The repository .envrc performs only that source operation; it never evaluates
+Nix. CI may still use `nix develop -c COMMAND` as a from-scratch check.
+USAGE
+  exit 1
+fi

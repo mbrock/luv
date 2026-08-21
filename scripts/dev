@@ -1,21 +1,16 @@
 #!/bin/sh
 
-# Run one command in the checkout environment.
-#
-# This used to be the thing that *built* an environment -- a Nix profile
-# wrapper if one was installed, a `nix develop` subshell otherwise.  It no
-# longer builds anything: the dev shell is the environment, and a caller
-# outside it is told so rather than wrapped.
+# Run one clean command in the already-active development profile.
 
 set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
-. "$project_root/scripts/require-nix-shell"
+. "$project_root/scripts/require-dev-environment"
 
 if [ "${1:-}" = "--status" ]; then
   "$project_root/scripts/worktree-port" --explain
-  printf 'environment: current Nix dev shell\n'
+  printf 'environment: active luv development profile\n'
   printf 'SBCL: %s\nSBCL version: ' "$(command -v sbcl)"
   sbcl --version
   printf 'LUV_SLYNK_DIR: %s\n' "${LUV_SLYNK_DIR:-unset}"

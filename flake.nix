@@ -278,9 +278,113 @@
             inherit system;
             overlays = [ nix-wpe-webkit.overlays.default ];
           };
+          developmentPackages = [
+            pkgs.bashInteractive
+            lisp
+            ffmpeg
+            ffmpeg.dev
+            pkgs.go
+            mupdf
+            libghosttyVt
+            pkgs.libffi
+            pkgs.harfbuzz
+            pkgs.mesa
+            pkgs.python3
+            pkgs.pkg-config
+            pkgs.qrencode
+            pkgs.sdl3
+            pkgs.spirv-tools
+            pkgs.urbit
+            pkgs.vulkan-headers
+            pkgs.vulkan-tools
+            pkgs.vulkan-validation-layers
+            pkgs.yt-dlp
+          ];
+          lavapipeIcd =
+            if system == "x86_64-linux" then "lvp_icd.x86_64.json"
+            else if system == "aarch64-linux" then "lvp_icd.aarch64.json"
+            else null;
+          developmentEnvironment = {
+            LUV_DEV_ENVIRONMENT = "1";
+            LD_LIBRARY_PATH = nativeLibraryPath;
+            LUV_MESA_LIBRARY_PATH = mesaLibraryPath;
+            LUV_URBIT = "${pkgs.urbit}/bin/urbit";
+            LUV_GHOSTTY_LIBRARY = libghosttyVtLibrary;
+            LUV_BASH = "${pkgs.bashInteractive}/bin/bash";
+            LUV_SLYNK_DIR = "${slyRoot}/slynk";
+            LUV_FFMPEG_LIBDIR = ffmpegLibraryDirectory;
+            LUV_MUPDF_LIBDIR = mupdfLibraryDirectory;
+            LUV_YT_DLP = "${pkgs.yt-dlp}/bin/yt-dlp";
+            CL_SOURCE_REGISTRY = "${mcclim}//:${clSdl3WithoutMixer}//";
+            PKG_CONFIG_PATH = "${ffmpeg.dev}/lib/pkgconfig";
+            CPATH = "${pkgs.vulkan-headers}/include";
+            VK_LAYER_PATH =
+              "${pkgs.vulkan-validation-layers}/share/vulkan/explicit_layer.d";
+          } // nixpkgs.lib.optionalAttrs (lavapipeIcd != null) {
+            LUV_LAVAPIPE_ICD =
+              "${pkgs.mesa}/share/vulkan/icd.d/${lavapipeIcd}";
+          } // nixpkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
+            VK_DRIVER_FILES =
+              "${pkgs.moltenvk}/share/vulkan/icd.d/MoltenVK_icd.json";
+          };
+          developmentEnvironmentHook = ''
+            if [ "''${LUV_USE_NIX_MESA:-}" = 1 ]; then
+              export LD_LIBRARY_PATH="$LUV_MESA_LIBRARY_PATH:$LD_LIBRARY_PATH"
+            fi
+
+            ${nixpkgs.lib.optionalString pkgs.stdenv.isLinux ''
+              if [ -z "''${SDL_VIDEODRIVER:-}" ] \
+                && [ -z "''${DISPLAY:-}" ] \
+                && [ -z "''${WAYLAND_DISPLAY:-}" ]; then
+                case "$(${pkgs.coreutils}/bin/tty 2>/dev/null || :)" in
+                  /dev/tty[0-9]*) export SDL_VIDEODRIVER=kmsdrm ;;
+                  *) export SDL_VIDEODRIVER=offscreen ;;
+                esac
+              fi
+            ''}
+
+            if [ "''${SDL_VIDEODRIVER:-}" = kmsdrm ] \
+              && [ -z "''${LUV_KEYBOARD_LAYOUT+x}" ] \
+              && command -v localectl >/dev/null 2>&1 \
+              && [ "$(localectl status 2>/dev/null \
+                       | ${pkgs.gnused}/bin/sed -n \
+                           's/^[[:space:]]*X11 Variant:[[:space:]]*//p')" = dvorak ]; then
+              export LUV_KEYBOARD_LAYOUT=dvorak
+            fi
+
+            if [ "''${SDL_VIDEODRIVER:-}" = kmsdrm ] \
+              && [ -z "''${LUV_KEYBOARD_SWAP_CAPS_CONTROL+x}" ]; then
+              export LUV_KEYBOARD_SWAP_CAPS_CONTROL=1
+            fi
+
+            if [ -n "''${LUV_LAVAPIPE_ICD:-}" ] \
+              && [ -f "$LUV_LAVAPIPE_ICD" ] \
+              && [ -z "''${VK_DRIVER_FILES:-}" ] \
+              && [ "''${SDL_VIDEODRIVER:-}" = offscreen ]; then
+              export VK_DRIVER_FILES="$LUV_LAVAPIPE_ICD"
+            fi
+          '';
+          profileEnvironment = pkgs.writeTextFile {
+            name = "luv-development-environment";
+            destination = "/share/luv/env.sh";
+            text =
+              nixpkgs.lib.concatStringsSep "\n"
+                (nixpkgs.lib.mapAttrsToList
+                  (name: value:
+                    "export ${name}=${nixpkgs.lib.escapeShellArg value}")
+                  developmentEnvironment)
+              + "\n"
+              + developmentEnvironmentHook;
+          };
+          dev = pkgs.buildEnv {
+            name = "luv-dev";
+            paths = developmentPackages ++ [ profileEnvironment ];
+          };
         in
         {
           inherit pkgs wpePkgs sbcl lisp clSdl3WithoutMixer;
+          inherit dev developmentPackages developmentEnvironment;
+          inherit developmentEnvironmentHook;
           inherit nativeLibraryPath mesaLibraryPath slyRoot;
           inherit ffmpeg ffmpegLibraryDirectory mupdf mupdfLibraryDirectory;
           inherit libghosttyVt libghosttyVtLibrary;
@@ -304,6 +408,7 @@
         in {
           sbcl = env.sbcl;
           lisp = env.lisp;
+          dev = env.dev;
           inherit luv-lobby;
           ffmpeg = env.ffmpeg;
           libghostty-vt = env.libghosttyVt;
@@ -319,105 +424,9 @@
       devShells = forAllSystems (system:
         let
           env = environmentFor system;
-          lavapipeIcd =
-            if system == "x86_64-linux" then "lvp_icd.x86_64.json"
-            else if system == "aarch64-linux" then "lvp_icd.aarch64.json"
-            else null;
-          shellEnvironment = {
-            packages = [
-              env.pkgs.bashInteractive
-              env.lisp
-              env.ffmpeg
-              env.ffmpeg.dev
-              env.pkgs.go
-              env.mupdf
-              env.libghosttyVt
-              env.pkgs.libffi
-              env.pkgs.harfbuzz
-              env.pkgs.mesa
-              env.pkgs.python3
-              env.pkgs.pkg-config
-              env.pkgs.qrencode
-              env.pkgs.sdl3
-              env.pkgs.spirv-tools
-              env.pkgs.urbit
-              env.pkgs.vulkan-headers
-              env.pkgs.vulkan-tools
-              env.pkgs.vulkan-validation-layers
-              env.pkgs.yt-dlp
-            ];
-            LD_LIBRARY_PATH = env.nativeLibraryPath;
-            # On Linux the desktop owns the hardware Vulkan driver under
-            # /run/opengl-driver.  Mesa remains available for Lavapipe and
-            # deliberate driver experiments, but never wins discovery merely
-            # because a development shell was opened.
-            LUV_MESA_LIBRARY_PATH = env.mesaLibraryPath;
-            LUV_NIX_SHELL = "1";
-            # The real urbit runtime (vere), which an urbit wall boots.
-            LUV_URBIT = "${env.pkgs.urbit}/bin/urbit";
-            LUV_GHOSTTY_LIBRARY = env.libghosttyVtLibrary;
-            # Terminal walls need programmable completion for the user's
-            # ordinary interactive Bash startup files.  The stdenv Bash is
-            # deliberately built without it.
-            LUV_BASH = "${env.pkgs.bashInteractive}/bin/bash";
-            LUV_SLYNK_DIR = "${env.slyRoot}/slynk";
-            LUV_FFMPEG_LIBDIR = env.ffmpegLibraryDirectory;
-            LUV_MUPDF_LIBDIR = env.mupdfLibraryDirectory;
-            LUV_YT_DLP = "${env.pkgs.yt-dlp}/bin/yt-dlp";
-            CL_SOURCE_REGISTRY = "${mcclim}//:${env.clSdl3WithoutMixer}//";
-            CPATH = "${env.pkgs.vulkan-headers}/include";
-            VK_LAYER_PATH =
-              "${env.pkgs.vulkan-validation-layers}/share/vulkan/explicit_layer.d";
-            shellHook = ''
-              if [ "''${LUV_USE_NIX_MESA:-}" = 1 ]; then
-                export LD_LIBRARY_PATH="$LUV_MESA_LIBRARY_PATH:$LD_LIBRARY_PATH"
-              fi
-
-              ${nixpkgs.lib.optionalString env.pkgs.stdenv.isLinux ''
-                if [ -z "''${SDL_VIDEODRIVER:-}" ] \
-                  && [ -z "''${DISPLAY:-}" ] \
-                  && [ -z "''${WAYLAND_DISPLAY:-}" ]; then
-                  # A real Linux virtual terminal can own DRM master after its
-                  # compositor exits; use it directly.  SSH, CI, and shell
-                  # commands with no controlling terminal stay headless.
-                  case "$(${env.pkgs.coreutils}/bin/tty 2>/dev/null || :)" in
-                    /dev/tty[0-9]*) export SDL_VIDEODRIVER=kmsdrm ;;
-                    *) export SDL_VIDEODRIVER=offscreen ;;
-                  esac
-                fi
-              ''}
-
-              # SDL's KMSDRM backend sees physical scancodes but not the
-              # console/XKB character layout.  Carry the host's Dvorak
-              # variant into luv's scancode translator unless explicitly
-              # overridden by the caller.
-              if [ "''${SDL_VIDEODRIVER:-}" = kmsdrm ] \
-                && [ -z "''${LUV_KEYBOARD_LAYOUT+x}" ] \
-                && command -v localectl >/dev/null 2>&1 \
-                && [ "$(localectl status 2>/dev/null \
-                         | ${env.pkgs.gnused}/bin/sed -n \
-                             's/^[[:space:]]*X11 Variant:[[:space:]]*//p')" = dvorak ]; then
-                export LUV_KEYBOARD_LAYOUT=dvorak
-              fi
-
-              if [ "''${SDL_VIDEODRIVER:-}" = kmsdrm ] \
-                && [ -z "''${LUV_KEYBOARD_SWAP_CAPS_CONTROL+x}" ]; then
-                export LUV_KEYBOARD_SWAP_CAPS_CONTROL=1
-              fi
-
-              if [ -n "''${LUV_LAVAPIPE_ICD:-}" ] \
-                && [ -f "$LUV_LAVAPIPE_ICD" ] \
-                && [ -z "''${VK_DRIVER_FILES:-}" ] \
-                && [ "''${SDL_VIDEODRIVER:-}" = offscreen ]; then
-                export VK_DRIVER_FILES="$LUV_LAVAPIPE_ICD"
-              fi
-            '';
-          } // nixpkgs.lib.optionalAttrs (lavapipeIcd != null) {
-            LUV_LAVAPIPE_ICD =
-              "${env.pkgs.mesa}/share/vulkan/icd.d/${lavapipeIcd}";
-          } // nixpkgs.lib.optionalAttrs env.pkgs.stdenv.isDarwin {
-            VK_DRIVER_FILES =
-              "${env.pkgs.moltenvk}/share/vulkan/icd.d/MoltenVK_icd.json";
+          shellEnvironment = env.developmentEnvironment // {
+            packages = env.developmentPackages;
+            shellHook = env.developmentEnvironmentHook;
           };
         in {
           default = env.pkgs.mkShell shellEnvironment;

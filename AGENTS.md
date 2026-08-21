@@ -73,13 +73,15 @@ The surfaces have distinct jobs:
 - `build/luvcraft`: shipped/CI executable. `./sly --luvcraft ...` is only for
   deliberately attaching to that standalone process.
 
-# The dev shell is the environment
+# The development profile is the environment
 
-Every script here refuses to run outside the Nix dev shell rather than
-building an environment of its own, so enter one first: `direnv allow` once
-per checkout, `nix develop` for an explicit shell, or `nix develop -c CMD`
-for CI, cron, and other non-interactive callers. There is no profile to
-install and nothing to keep current.
+Ordinary development uses one durable Nix profile rather than evaluating a
+flake or entering a subshell per command. Install or refresh it explicitly
+with `./scripts/install-dev-profile`, then source
+`$HOME/.nix-profile/share/luv/env.sh` from the login shell. The checkout's
+`.envrc` performs only that source operation and is therefore instantaneous.
+Every script refuses to run when the profile is not active. `nix develop -c`
+remains a CI/from-scratch proof, not part of the edit/test loop.
 
 # Working style
 

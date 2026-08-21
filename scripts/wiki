@@ -6,7 +6,7 @@ set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
-. "$project_root/scripts/require-nix-shell"
+. "$project_root/scripts/require-dev-environment"
 
 exe="$project_root/build/wiki-cli"
 stale=$(find "$project_root/wiki" "$project_root/luv-wiki.asd" \
