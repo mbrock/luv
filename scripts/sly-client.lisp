@@ -1695,15 +1695,40 @@ shows them.~%" failure-count))))))
          (code
            (format nil
                    "(progn
-                      (unless luvcraft:*session*
-                        (error \"No game is playing here; run ./sly play first.\"))
-                      (multiple-value-bind (pathname pixels width height format)
-                          (luvcraft:capture-luvcraft-screenshot
-                           luvcraft:*session* ~S)
-                        (declare (ignore pixels))
-                        (list (namestring (truename pathname))
-                              width height format)))"
-                   pathname)))
+                      (cond
+                        (luvcraft:*session*
+                         (multiple-value-bind
+                               (pathname pixels width height format)
+                             (luvcraft:capture-luvcraft-screenshot
+                              luvcraft:*session* ~S)
+                           (declare (ignore pixels))
+                           (list (namestring (truename pathname))
+                                 width height format)))
+                        ((let* ((package (find-package \"LUFT.RENDER\"))
+                                (viewer-symbol
+                                  (and package (find-symbol \"*VIEWER*\" package))))
+                           (and viewer-symbol (boundp viewer-symbol)
+                                (symbol-value viewer-symbol)))
+                         (let* ((package (find-package \"LUFT.RENDER\"))
+                                (viewer
+                                  (symbol-value
+                                   (find-symbol \"*VIEWER*\" package)))
+                                (context
+                                  (funcall
+                                   (symbol-function
+                                    (find-symbol \"VIEWER-CONTEXT\" package))
+                                   viewer))
+                                (extent (luv:canvas-extent context)))
+                           (funcall
+                            (symbol-function
+                             (find-symbol \"CAPTURE-VIEWER-FRAME\" package))
+                            ~S viewer)
+                           (list (namestring (truename ~S))
+                                 (first extent) (second extent)
+                                 (luv:canvas-format context))))
+                        (t
+                         (error \"No luvcraft game or LUFT viewer is open.\"))))"
+                   pathname pathname pathname)))
     (evaluate code "LUVCRAFT")))
 
 (defun run-luvcraft-play (arguments)

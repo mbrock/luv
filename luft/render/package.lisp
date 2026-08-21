@@ -2,13 +2,18 @@
   (:use #:cl #:luv.shader)
   (:shadowing-import-from #:luv.shader #:step)
   (:export #:face-fragment-specification
-           #:face-vertex-specification))
+           #:face-vertex-specification
+           #:present-fragment-specification
+           #:present-vertex-specification))
 
 (defpackage #:luft.render
   (:use #:cl #:luv)
   (:local-nicknames (#:shaders #:luft.render.shaders)
                     (#:vec3 #:luv.arithmetic.lisp.vec3))
   (:export #:face-materialization
+           #:scene
+           #:scene-solid
+           #:make-mountain-sanctuary-scene
            #:face-materialization-domain
            #:face-materialization-negative-count
            #:face-materialization-positive-count
@@ -32,6 +37,7 @@
            #:camera-yaw
            #:camera-pitch
            #:viewer-camera
+           #:reset-viewer-camera
            #:start-viewer
            #:stop-viewer
            #:refresh-viewer-renderer

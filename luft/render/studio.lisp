@@ -24,7 +24,7 @@ An isometric picture has no vanishing point, so two chamfers the same width
 are the same width on screen wherever they sit.  That is what makes it the
 projection to judge a shape rule in.")
 
-(defparameter *isometric-height* 12.0
+(defparameter *isometric-height* 64.0
   "How many world units of height an isometric frame spans.")
 
 (defclass fly-camera ()
@@ -35,11 +35,24 @@ projection to judge a shape rule in.")
                   :accessor camera-field-of-view)))
 
 (defun make-fly-camera
-    (&key (position (vec3:make-vec3 16.954 -0.954 8.970))
-          (yaw 2.3561945) (pitch -0.44051066)
+    (&key (position (vec3:make-vec3 70.0 -18.0 50.0))
+          (yaw 2.2455373) (pitch -0.5165006)
           (field-of-view 0.9599311))
   (make-instance 'fly-camera :position position :yaw yaw :pitch pitch
                              :field-of-view field-of-view))
+
+(defun reset-viewer-camera (&optional (viewer *viewer*))
+  "Return VIEWER to the composed isometric sanctuary view."
+  (when viewer
+    (let ((camera (viewer-camera viewer)))
+      (setf (camera-position camera) (vec3:make-vec3 70.0 -18.0 50.0)
+            (camera-yaw camera) 2.2455373
+            (camera-pitch camera) -0.5165006
+            (camera-field-of-view camera) 0.9599311
+            *isometric-height* 64.0)
+      (when (viewer-renderer viewer)
+        (setf (renderer-history-valid-p (viewer-renderer viewer)) nil))))
+  viewer)
 
 (defun camera-basis (camera)
   (let* ((yaw (camera-yaw camera))
@@ -73,25 +86,85 @@ the selector is the whole of the difference."
                  (/ (- near) (- far near))
                  0.0))))))
 
-(defun camera-uniform-data (camera width height)
+(defstruct (frame-view (:constructor %make-frame-view))
+  "One immutable camera sample shared by geometry and temporal motion."
+  position right up forward projection divisor jitter)
+
+(defun halton (index base)
+  (loop with fraction = (/ 1.0 base)
+        with value = 0.0
+        while (plusp index)
+        do (incf value (* fraction (mod index base)))
+           (setf index (floor index base)
+                 fraction (/ fraction base))
+        finally (return (coerce value 'single-float))))
+
+(defun temporal-jitter (frame-index width height)
+  "Sample the eight-position Halton(2,3) sequence in clip coordinates."
+  (let ((sample (1+ (mod frame-index 8))))
+    (vector (coerce (/ (* 2.0 (- (halton sample 2) 0.5))
+                       (max width 1))
+                    'single-float)
+            (coerce (/ (* 2.0 (- (halton sample 3) 0.5))
+                       (max height 1))
+                    'single-float))))
+
+(defun capture-frame-view (camera width height jitter)
   (multiple-value-bind (right up forward) (camera-basis camera)
     (let ((near 0.1)
           (far 200.0))
-      (flet ((lane (vector fourth)
-               (list (vec3:vec3-x vector) (vec3:vec3-y vector)
-                     (vec3:vec3-z vector) fourth)))
-        (multiple-value-bind (px py pz pw divisor)
-            (projection-lane width height (camera-field-of-view camera)
-                             near far)
-          (make-array
-           24 :element-type 'single-float
-           :initial-contents
-           (mapcar
-            (lambda (value) (coerce value 'single-float))
-            (append (lane (camera-position camera) 0.0)
-                    (lane right 0.0) (lane up 0.0) (lane forward 0.0)
-                    (list px py pz pw)
-                    (list *chamfer-width* *wireframe* divisor 0.0)))))))))
+      (multiple-value-bind (px py pz pw divisor)
+          (projection-lane width height (camera-field-of-view camera)
+                           near far)
+        (%make-frame-view
+         :position (let ((position (camera-position camera)))
+                     (vec3:make-vec3 (vec3:vec3-x position)
+                                     (vec3:vec3-y position)
+                                     (vec3:vec3-z position)))
+         :right right :up up :forward forward
+         :projection (vector px py pz pw)
+         :divisor divisor :jitter jitter)))))
+
+(defun camera-uniform-data (view previous)
+  (flet ((lane (vector fourth)
+           (list (vec3:vec3-x vector) (vec3:vec3-y vector)
+                 (vec3:vec3-z vector) fourth)))
+    (make-array
+     48 :element-type 'single-float
+     :initial-contents
+     (mapcar
+      (lambda (value) (coerce value 'single-float))
+      (append (lane (frame-view-position view) 0.0)
+              (lane (frame-view-right view) 0.0)
+              (lane (frame-view-up view) 0.0)
+              (lane (frame-view-forward view) 0.0)
+              (coerce (frame-view-projection view) 'list)
+              (list *chamfer-width* *wireframe*
+                    (frame-view-divisor view) 0.0)
+              (lane (frame-view-position previous) 0.0)
+              (lane (frame-view-right previous) 0.0)
+              (lane (frame-view-up previous) 0.0)
+              (lane (frame-view-forward previous) 0.0)
+              (coerce (frame-view-projection previous) 'list)
+              (list (aref (frame-view-jitter view) 0)
+                    (aref (frame-view-jitter view) 1)
+                    (frame-view-divisor previous) 0.0))))))
+
+(defun encode-viewer-frame (viewer encoder surface-texture extent)
+  (let* ((renderer (viewer-renderer viewer))
+         (width (first extent))
+         (height (second extent))
+         (jitter (if (renderer-temporal-p renderer)
+                     (temporal-jitter (renderer-frame-index renderer)
+                                      width height)
+                     #(0.0 0.0)))
+         (view (capture-frame-view (viewer-camera viewer)
+                                   width height jitter))
+         (previous (or (renderer-previous-view renderer) view)))
+    (encode-renderer-frame
+     renderer encoder surface-texture extent
+     (camera-uniform-data view previous)
+     :jitter jitter :view view)))
 
 (defclass viewer (canvas-event-handler)
   ((canvas :initarg :canvas :reader viewer-canvas)
@@ -131,8 +204,17 @@ the selector is the whole of the difference."
                            (* amount (vec3:vec3-y direction)))
                         (+ (vec3:vec3-z position)
                            (* amount (vec3:vec3-z direction))))))))
-        (when (viewer-key-down-p viewer :w :up) (move forward step))
-        (when (viewer-key-down-p viewer :s :down) (move forward (- step)))
+        ;; Isometric navigation pans across the ground plane.  Looking down
+        ;; should not make W quietly descend through the landscape.
+        (let* ((length (sqrt (+ (expt (vec3:vec3-x forward) 2)
+                                (expt (vec3:vec3-y forward) 2))))
+               (travel (if (and (eq *projection* :isometric) (plusp length))
+                           (vec3:make-vec3 (/ (vec3:vec3-x forward) length)
+                                           (/ (vec3:vec3-y forward) length)
+                                           0.0)
+                           forward)))
+          (when (viewer-key-down-p viewer :w :up) (move travel step))
+          (when (viewer-key-down-p viewer :s :down) (move travel (- step))))
         (when (viewer-key-down-p viewer :d :right) (move right step))
         (when (viewer-key-down-p viewer :a :left) (move right (- step)))
         (when (viewer-key-down-p viewer :space :e)
@@ -148,11 +230,7 @@ the selector is the whole of the difference."
      (lambda (surface-texture encoder presentation-time)
        (advance-viewer-camera viewer presentation-time)
        (let ((extent (canvas-extent (viewer-context viewer))))
-         (encode-renderer-frame
-          (viewer-renderer viewer) encoder surface-texture
-          extent
-          (camera-uniform-data (viewer-camera viewer)
-                               (first extent) (second extent))))))))
+         (encode-viewer-frame viewer encoder surface-texture extent))))))
 
 (defmethod handle-canvas-event
     ((viewer viewer) canvas (event canvas-window-close-request-event))
@@ -163,11 +241,12 @@ the selector is the whole of the difference."
 (defmethod handle-canvas-event
     ((viewer viewer) canvas (event canvas-key-press-event))
   (let ((key (canvas-key-event-key-name event)))
-    (if (eq :escape key)
-        (when (viewer-pointer-captured-p viewer)
-          (set-canvas-relative-pointer-mode canvas nil)
-          (setf (viewer-pointer-captured-p viewer) nil))
-        (setf (gethash key (viewer-pressed-keys viewer)) t)))
+    (cond ((eq :escape key)
+           (when (viewer-pointer-captured-p viewer)
+             (set-canvas-relative-pointer-mode canvas nil)
+             (setf (viewer-pointer-captured-p viewer) nil)))
+          ((eq :r key) (reset-viewer-camera viewer))
+          (t (setf (gethash key (viewer-pressed-keys viewer)) t))))
   nil)
 
 (defmethod handle-canvas-event
@@ -182,6 +261,17 @@ the selector is the whole of the difference."
              (not (viewer-pointer-captured-p viewer)))
     (set-canvas-relative-pointer-mode canvas t)
     (setf (viewer-pointer-captured-p viewer) t))
+  nil)
+
+(defmethod handle-canvas-event
+    ((viewer viewer) canvas (event canvas-pointer-wheel-event))
+  (declare (ignore viewer canvas))
+  (when (eq *projection* :isometric)
+    (setf *isometric-height*
+          (max 6.0 (min 96.0
+                        (* *isometric-height*
+                           (expt 1.10
+                                 (canvas-pointer-event-delta-y event)))))))
   nil)
 
 (defmethod handle-canvas-event
@@ -210,9 +300,9 @@ the selector is the whole of the difference."
   nil)
 
 (defun start-viewer (&key
-                       (solid (make-gallery-solid))
+                       (solid (make-mountain-sanctuary-scene))
                        (camera (make-fly-camera))
-                       (title "LUFT indexed faces")
+                       (title "LUFT mountain sanctuary")
                        (width 1100) (height 800)
                        (frames-per-second 60)
                        (provider *gpu-provider*))
@@ -285,10 +375,7 @@ the selector is the whole of the difference."
                context
                (lambda (surface-texture encoder presentation-time)
                  (declare (ignore presentation-time))
-                 (encode-renderer-frame
-                  (viewer-renderer viewer) encoder surface-texture extent
-                  (camera-uniform-data (viewer-camera viewer)
-                                       (first extent) (second extent)))
+                 (encode-viewer-frame viewer encoder surface-texture extent)
                  (encode encoder
                          (make-gpu-copy-texture-to-buffer-command
                           :source surface-texture :destination buffer))))))
@@ -299,20 +386,23 @@ the selector is the whole of the difference."
       (destroy buffer))))
 
 (defun refresh-viewer-renderer (&optional (viewer *viewer*)
-                                &key (solid (make-gallery-solid)))
+                                &key (solid (make-mountain-sanctuary-scene)))
   "Rebuild VIEWER's renderer so edited shaders and geometry take effect."
   (when viewer
-    (let* ((context (viewer-context viewer))
-           (old (viewer-renderer viewer))
-           (materialization (make-face-materialization solid)))
-      (setf (viewer-running-p viewer) nil)
-      (unwind-protect
-           (setf (viewer-renderer viewer)
-                 (make-renderer (viewer-device viewer) materialization
-                                (canvas-format context)
-                                (canvas-extent context)))
-        (setf (viewer-running-p viewer) t))
-      (when old (destroy-renderer old))))
+    (luv::call-on-sdl-canvas-thread
+     (viewer-canvas viewer)
+     (lambda ()
+       (let* ((context (viewer-context viewer))
+              (old (viewer-renderer viewer))
+              (materialization (make-face-materialization solid)))
+         (setf (viewer-running-p viewer) nil)
+         (unwind-protect
+              (setf (viewer-renderer viewer)
+                    (make-renderer (viewer-device viewer) materialization
+                                   (canvas-format context)
+                                   (canvas-extent context)))
+           (setf (viewer-running-p viewer) t))
+         (when old (destroy-renderer old))))))
   (values))
 
 (defun stop-viewer (&optional (viewer *viewer*))

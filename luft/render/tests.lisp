@@ -22,17 +22,43 @@
         (ok (luft:shape-word-valid-p shape))
         (ok (<= 0 stock 3))))))
 
+(deftest the-mountain-scene-keeps-one-small-paper-palette
+  (let* ((scene (render:make-mountain-sanctuary-scene))
+         (materialization (render:make-face-materialization scene))
+         (domain (render:face-materialization-domain materialization))
+         (words (render:face-materialization-words materialization))
+         (count (+ (render:face-materialization-positive-count materialization)
+                   (render:face-materialization-negative-count materialization)))
+         (stocks (make-hash-table)))
+    (dotimes (index count)
+      (multiple-value-bind (face shape stock)
+          (luft:load-face-record words index domain)
+        (declare (ignore face shape))
+        (setf (gethash stock stocks) t)))
+    (ok (equal '(0 1 2 3)
+               (sort (loop for stock being the hash-keys of stocks collect stock)
+                     #'<)))))
+
 (deftest face-shaders-lower-through-both-conventional-backends
   (let* ((vertex (luft.render.shaders:face-vertex-specification))
          (fragment (luft.render.shaders:face-fragment-specification))
+         (present-vertex
+           (luft.render.shaders:present-vertex-specification))
+         (present-fragment
+           (luft.render.shaders:present-fragment-specification))
          (msl-source
-           (luv.msl:msl-document-source (luv.msl:compile-msl vertex))))
+           (luv.msl:msl-document-source (luv.msl:compile-msl vertex)))
+         (fragment-msl
+           (luv.msl:msl-document-source (luv.msl:compile-msl fragment))))
     (ok (search "[[vertex_id]]" msl-source))
     (ok (search "[[instance_id]]" msl-source))
     (ok (search "const device uint4* faces" msl-source))
     (ok (search "camera_position" msl-source))
+    (ok (search "motion_output" fragment-msl))
     (ok (luv.spir-v:compile-shader-specification vertex))
-    (ok (luv.spir-v:compile-shader-specification fragment))))
+    (ok (luv.spir-v:compile-shader-specification fragment))
+    (ok (luv.spir-v:compile-shader-specification present-vertex))
+    (ok (luv.spir-v:compile-shader-specification present-fragment))))
 
 (deftest the-camera-block-packs-both-projections
   ;; Perspective and isometric share the three projection rows and differ
@@ -41,13 +67,16 @@
   (let ((camera (render:make-fly-camera)))
     (flet ((lane (projection)
              (let ((render:*projection* projection))
-               (luft.render::camera-uniform-data camera 1100 800))))
+               (let ((view
+                       (luft.render::capture-frame-view
+                        camera 1100 800 #(0.0 0.0))))
+                 (luft.render::camera-uniform-data view view)))))
       (let ((perspective (lane :perspective))
             (isometric (lane :isometric))
             (near 0.1)
             (far 200.0))
-        (ok (= 24 (length perspective)))
-        (ok (typep perspective '(simple-array single-float (24))))
+        (ok (= 48 (length perspective)))
+        (ok (typep perspective '(simple-array single-float (48))))
         (dolist (data (list perspective isometric))
           (ok (> (aref data 16) 0.0))
           (ok (> (aref data 17) 0.0))
