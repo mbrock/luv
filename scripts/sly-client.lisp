@@ -1077,16 +1077,28 @@ nothing to reclaim.~%"
           (session (and session-symbol
                         (boundp session-symbol)
                         (symbol-value session-symbol)))
+          (viewer-symbol
+            (and (find-package :luft.render)
+                 (find-symbol \"*VIEWER*\" :luft.render)))
+          (viewer (and viewer-symbol
+                       (boundp viewer-symbol)
+                       (symbol-value viewer-symbol)))
+          (canvas
+            (cond
+              (session
+               (funcall (find-symbol \"LUVCRAFT-SESSION-CANVAS\" :luvcraft)
+                        session))
+              (viewer
+               (funcall (find-symbol \"VIEWER-CANVAS\" :luft.render)
+                        viewer))))
           (health
             (ignore-errors
-             (when session
+             (when canvas
                (funcall (find-symbol \"CANVAS-HEALTH\" :luv)
-                        (funcall (find-symbol \"LUVCRAFT-SESSION-CANVAS\"
-                                              :luvcraft)
-                                 session))))))
-     (princ (if session :playing :idle))
+                        canvas)))))
+     (princ (cond (session :luvcraft) (viewer :luft) (t :idle)))
      (when health (format t \" ~S\" health)))"
-  "Read out of the image: whether a game is playing, and its canvas health.
+  "Read out of the image: which interactive target is playing and its health.
 
 The health comes from the canvas's own loop counters rather than from asking
 the canvas thread anything, so it answers even when that thread is the thing
@@ -1115,7 +1127,7 @@ and ends itself if it does not recover (./sly log).~%"
           (failure
            (multiple-value-bind (second minute hour)
                (decode-universal-time (getf failure :universal-time))
-             (format t "The game's frames are PARKED: a frame failed at ~
+             (format t "The active window's frames are PARKED: a frame failed at ~
 ~2,'0D:~2,'0D:~2,'0D in ~(~A~) (loop iteration ~D):~%  ~A~%The window is ~
 still pumped. Fix the cause and ./sly resume; ./sly failures shows the ~
 backtrace.~%"
@@ -1136,7 +1148,7 @@ iterations); something is redefining the world.~%" ticks))
 shows them.~%" failure-count))))))
 
 (defun print-game-status ()
-  "Say whether luvcraft:play has a live game window in the image."
+  "Say which interactive target has a live window in the image."
   (let ((answer
           (ignore-errors
            (with-slynk-connection (stream)
@@ -1145,9 +1157,11 @@ shows them.~%" failure-count))))))
               stream *game-status-form* "CL-USER")))))
     (format t "~A~%"
             (cond ((null answer) "Game state unknown (image busy or not loaded).")
-                  ((search "PLAYING" (string-upcase (princ-to-string answer)))
-                   "A game is playing: ./sly screenshot PNG; ./sly stop-playing closes it.")
-                  (t "No game is playing: ./sly play starts one.")))
+                  ((search "LUVCRAFT" (string-upcase (princ-to-string answer)))
+                   "Luvcraft is playing: ./sly screenshot PNG; ./sly stop-playing closes it.")
+                  ((search "LUFT" (string-upcase (princ-to-string answer)))
+                   "LUFT is playing: ./sly screenshot PNG; ./sly stop-playing closes it.")
+                  (t "Nothing is playing: ./sly play [luvcraft|luft] starts it.")))
     (when answer
       (print-canvas-health (princ-to-string answer)))))
 
@@ -1439,12 +1453,12 @@ shows them.~%" failure-count))))))
 
 (defun usage (&optional (stream *standard-output*))
   (format stream "The ordinary workflow is one live Lisp and one game:~%")
-  (format stream "  ./sly play | status | screenshot PNG | stop-playing | restart~%")
+  (format stream "  ./sly play [luvcraft|luft] | status | screenshot PNG | stop-playing | restart~%")
   (format stream "PLAY starts the checkout's durable image when necessary. RESTART is the~%")
-  (format stream "explicit recovery path when that image is wrecked.~%")
+  (format stream "explicit recovery path when that image is wrecked. LUVCRAFT is PLAY's default.~%")
   (format stream "Prefix a client command with --luvcraft only to attach to a separate~%")
   (format stream "standalone build/luvcraft process.~%~%")
-  (format stream "Usage: ./sly play [--fullscreen]|stop-playing|status|restart~%")
+  (format stream "Usage: ./sly play [luvcraft|luft] [--fullscreen]|stop-playing|status|restart~%")
   (format stream "       ./sly start|stop|log|reclaim~%")
   (format stream "       ./sly screenshot PNG~%")
   (format stream "       ./sly eval CODE [--package PACKAGE]~%")
@@ -1687,7 +1701,7 @@ shows them.~%" failure-count))))))
                (t (error "Unknown option: ~A" option))))
     (values code package)))
 
-(defun run-luvcraft-screenshot (arguments)
+(defun run-screenshot (arguments)
   (unless (= (length arguments) 1)
     (error "screenshot requires exactly one PNG pathname"))
   (let* ((pathname
@@ -1731,25 +1745,65 @@ shows them.~%" failure-count))))))
                    pathname pathname pathname)))
     (evaluate code "LUVCRAFT")))
 
-(defun run-luvcraft-play (arguments)
-  (let ((fullscreen-p nil))
+(defun parse-play-arguments (arguments)
+  (let ((target :luvcraft)
+        (target-specified-p nil)
+        (fullscreen-p nil))
     (dolist (argument arguments)
-      (if (string= argument "--fullscreen")
-          (setf fullscreen-p t)
-          (error "play accepts only --fullscreen, not ~A" argument)))
+      (cond
+        ((string= argument "--fullscreen")
+         (setf fullscreen-p t))
+        ((member argument '("luvcraft" "luft") :test #'string-equal)
+         (when target-specified-p
+           (error "play accepts one target, not both ~A and ~A" target argument))
+         (setf target (intern (string-upcase argument) :keyword)
+               target-specified-p t))
+        ((and (> (length argument) 1)
+              (string= argument "--" :end1 2))
+         (error "Unknown play option: ~A" argument))
+        (t
+         (error "Unknown play target: ~A (expected luvcraft or luft)" argument))))
+    (values target fullscreen-p)))
+
+(defun run-play (arguments)
+  (multiple-value-bind (target fullscreen-p)
+      (parse-play-arguments arguments)
     (when (attach-only-p)
       (error "play owns the durable image; a standalone luvcraft is already playing"))
     (ensure-server)
-    (evaluate (if fullscreen-p "(play :fullscreen-p t)" "(play)")
-              "LUVCRAFT")))
+    (ecase target
+      (:luvcraft
+       (evaluate
+        (format nil
+                "(progn
+                   (when luft.render:*viewer*
+                     (error \"LUFT is already playing; call STOP-PLAYING first.\"))
+                   (luvcraft:play~:[~; :fullscreen-p t~]))"
+                fullscreen-p)
+        "CL-USER"))
+      (:luft
+       (evaluate
+        (format nil
+                "(progn
+                   (when luvcraft:*session*
+                     (error \"Luvcraft is already playing; call STOP-PLAYING first.\"))
+                   (when luft.render:*viewer*
+                     (error \"LUFT is already playing; call STOP-PLAYING first.\"))
+                   (luft.render:start-viewer~:[~; :fullscreen-p t~]))"
+                fullscreen-p)
+        "CL-USER")))))
 
-(defun run-luvcraft-stop-playing (arguments)
+(defun run-stop-playing (arguments)
   (when arguments
     (error "stop-playing does not accept arguments"))
   (when (attach-only-p)
     (error "stop-playing owns the durable image; close the standalone game normally"))
   (ensure-server)
-  (evaluate "(stop-playing)" "LUVCRAFT"))
+  (evaluate "(cond
+               (luvcraft:*session* (luvcraft:stop-playing))
+               (luft.render:*viewer* (luft.render:stop-viewer))
+               (t (values)))"
+            "CL-USER"))
 
 (defun parse-names (command arguments)
   (unless arguments
@@ -1884,10 +1938,10 @@ shows them.~%" failure-count))))))
        (start-server)
        0)
       ((string= command "play")
-       (run-luvcraft-play arguments)
+       (run-play arguments)
        0)
       ((string= command "stop-playing")
-       (run-luvcraft-stop-playing arguments)
+       (run-stop-playing arguments)
        0)
       ((string= command "reclaim")
        (when arguments
@@ -1900,7 +1954,7 @@ shows them.~%" failure-count))))))
        0)
       ((string= command "screenshot")
        (ensure-server)
-       (run-luvcraft-screenshot arguments)
+       (run-screenshot arguments)
        0)
       ((member command '("eval" "do") :test #'string=)
        (ensure-server)

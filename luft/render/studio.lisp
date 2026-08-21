@@ -445,12 +445,14 @@ the selector is the whole of the difference."
                        (camera (make-fly-camera))
                        (title "LUFT mountain sanctuary")
                        (width 1100) (height 800)
+                       fullscreen-p
                        (frames-per-second 60)
                        (provider *gpu-provider*))
   "Open the indexed-instanced LUFT renderer as a McCLIM atelier."
   (let ((canvas
           (make-sdl-canvas
            :title title :width width :height height :visible-p nil
+           :fullscreen-p fullscreen-p
            :high-pixel-density-p t
            :presentation-api (sdl-presentation-api-for provider)))
         (device nil)
