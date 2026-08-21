@@ -1,5 +1,11 @@
 (in-package #:luft.render)
 
+(defparameter *chamfer-width* 0.11
+  "Reserved chamfer band in cells; materialization and drawing share it.")
+
+(defparameter *wireframe* 1.0
+  "Global construction-edge strength.  The atelier toggles it between 0 and 1.")
+
 (defclass scene ()
   ((solid :initarg :solid :reader scene-solid)
    (architecture-cells :initarg :architecture-cells
@@ -277,10 +283,16 @@ game use dense resident occupancy without changing LUFT's immutable chains."
       (flet ((publish-polarity (positive-p)
                (loop for face across sites
                      when (eq positive-p (luft:site-positive-p face))
-                       do (luft:store-face-record
-                           words write domain face
-                           (luft:face-shape-word domain face occupancy)
-                           (funcall stock-function face))
+                       do (let* ((shape
+                                   (luft:face-shape-word
+                                    domain face occupancy))
+                                 (construction-mask
+                                   (luft:face-construction-mask
+                                    domain face shape *chamfer-width*)))
+                            (luft:store-face-record
+                             words write domain face shape
+                             (funcall stock-function face)
+                             construction-mask))
                           (incf write))))
         (publish-polarity t)
         (publish-polarity nil)))

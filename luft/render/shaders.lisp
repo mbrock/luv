@@ -95,7 +95,9 @@ world has the same problem in a starker form."))
                              :interpolation :flat)
                (lattice-output :vec2 :location 3)
                (current-clip-output :vec4 :location 4)
-               (previous-clip-output :vec4 :location 5))
+               (previous-clip-output :vec4 :location 5)
+               (construction-mask-output :float :location 6
+                                         :interpolation :flat))
      :resources ((faces :storage-buffer :binding 0 :element :uvec4)
                  (camera-state :uniform-block :binding 1
                   :members ((camera-position :vec4)
@@ -115,6 +117,7 @@ world has the same problem in a starker form."))
          (site-low (swizzle record :x))
          (site-high (swizzle record :y))
          (shape (swizzle record :z))
+         (construction-mask (swizzle record :w))
          (extent (uint (ldb (byte 3 0) site-low)))
          (negative (uint (ldb (byte 1 3) site-low)))
          (zero (uint 0.0))
@@ -225,7 +228,10 @@ world has the same problem in a starker form."))
     ;; stage, where the whole wireframe is one distance-to-integer field.
     (set-output lattice-output (vec2 (float i) (float j)))
     (set-output current-clip-output current-clip)
-    (set-output previous-clip-output previous-clip)))
+    (set-output previous-clip-output previous-clip)
+    ;; Twenty-one bits are exactly representable in a float and flat
+    ;; interpolation avoids spending another integer varying convention.
+    (set-output construction-mask-output (float construction-mask))))
 
 (define-shader face-fragment-specification
     (:stage :fragment
@@ -234,7 +240,9 @@ world has the same problem in a starker form."))
               (stock :float :location 2 :interpolation :flat)
               (lattice :vec2 :location 3)
               (current-clip :vec4 :location 4)
-              (previous-clip :vec4 :location 5))
+              (previous-clip :vec4 :location 5)
+              (construction-mask-value :float :location 6
+                                       :interpolation :flat))
      :outputs ((color-output :vec4 :location 0)
                (motion-output :vec2 :location 1))
      ;; The same block the vertex stage reads, declared identically so the
@@ -307,60 +315,113 @@ world has the same problem in a starker form."))
          (distance (sqrt (dot camera-delta camera-delta)))
          (fog (smoothstep 165.0 300.0 distance))
          (paper (mix mapped-paper sky fog))
-         ;; Every wire is one family of lattice lines, and a family is just
-         ;; the set where a linear lattice function hits an integer.  U and V
-         ;; are the 4x4 grid; U-V is the shared diagonal of both triangles in
-         ;; each cell, because within cell (i,j) the diagonal is exactly
-         ;; U-V = i-j.  Dividing the distance by the screen-space gradient
-         ;; gives pixels, so every wire is one pixel wide at any depth.
+         ;; Distance to the fixed 4x4 raster topology.  Derivatives establish
+         ;; screen-space width only; RECORD.W says which shared edges actually
+         ;; separate facets with different normals.  Each quad chooses the
+         ;; diagonal aimed at its nearest face corner, so its local equation
+         ;; alternates between U-V=0 and U+V=1.
          (u (swizzle lattice :x))
          (v (swizzle lattice :y))
-         (d (- u v))
+         (cell-u (floor (clamp u 0.0 2.9999)))
+         (cell-v (floor (clamp v 0.0 2.9999)))
+         (local-u (- u cell-u))
+         (local-v (- v cell-v))
+         (diagonal-toward-c00
+           (if (< cell-u 2.0) (< cell-v 2.0) (= cell-v 2.0)))
+         (d (if diagonal-toward-c00
+                (- local-u local-v)
+                (- (+ local-u local-v) 1.0)))
          (lattice-dx (derivative-x lattice))
          (lattice-dy (derivative-y lattice))
          (u-width (+ (abs (swizzle lattice-dx :x))
                      (abs (swizzle lattice-dy :x))))
          (v-width (+ (abs (swizzle lattice-dx :y))
                      (abs (swizzle lattice-dy :y))))
-         (d-width (+ (abs (- (swizzle lattice-dx :x) (swizzle lattice-dx :y)))
-                     (abs (- (swizzle lattice-dy :x) (swizzle lattice-dy :y)))))
+         (d-width
+           (if diagonal-toward-c00
+               (+ (abs (- (swizzle lattice-dx :x)
+                          (swizzle lattice-dx :y)))
+                  (abs (- (swizzle lattice-dy :x)
+                          (swizzle lattice-dy :y))))
+               (+ (abs (+ (swizzle lattice-dx :x)
+                          (swizzle lattice-dx :y)))
+                  (abs (+ (swizzle lattice-dy :x)
+                          (swizzle lattice-dy :y))))))
          (u-line (floor (+ u 0.5)))
          (v-line (floor (+ v 0.5)))
-         (d-line (floor (+ d 0.5)))
          (u-pixels (/ (abs (- u u-line)) (max u-width 0.000001)))
          (v-pixels (/ (abs (- v v-line)) (max v-width 0.000001)))
-         (d-pixels (/ (abs (- d d-line)) (max d-width 0.000001)))
-         ;; Lattice lines 0 and 3 are the face outline; 1 and 2 bound the
-         ;; chamfer skirt.  The outline gets the darker ink.
+         (d-pixels (/ (abs d) (max d-width 0.000001)))
+         (mask (uint construction-mask-value))
+         (u-bit
+           (uint (+ (* (clamp (- u-line 1.0) 0.0 1.0) 3.0) cell-v)))
+         (v-bit
+           (uint (+ 6.0
+                    (+ (* (clamp (- v-line 1.0) 0.0 1.0) 3.0)
+                       cell-u))))
+         (d-bit (uint (+ 12.0 (+ (* cell-u 3.0) cell-v))))
+         (u-approved
+           (if (= u-line 1.0)
+               (float (ldb (byte 1 u-bit) mask))
+               (if (= u-line 2.0)
+                   (float (ldb (byte 1 u-bit) mask))
+                   0.0)))
+         (v-approved
+           (if (= v-line 1.0)
+               (float (ldb (byte 1 v-bit) mask))
+               (if (= v-line 2.0)
+                   (float (ldb (byte 1 v-bit) mask))
+                   0.0)))
+         (d-approved (float (ldb (byte 1 d-bit) mask)))
+         ;; Outer rims are literal one-site boundaries of the cubical face;
+         ;; internal edges appear only when the adjacent triangle normals turn.
          (u-rim (- 1.0 (step 0.5 (min u-line (- 3.0 u-line)))))
          (v-rim (- 1.0 (step 0.5 (min v-line (- 3.0 v-line)))))
-         (u-wire (* (- 1.0 (smoothstep 0.4 1.4 u-pixels)) (mix 0.55 1.0 u-rim)))
-         (v-wire (* (- 1.0 (smoothstep 0.4 1.4 v-pixels)) (mix 0.55 1.0 v-rim)))
-         (d-wire (* (- 1.0 (smoothstep 0.2 1.0 d-pixels)) 0.22))
-         (wire (* (swizzle chamfer-parameters :y)
-                  (max (max u-wire v-wire) d-wire)))
-         ;; #JM9807 read a boundary as a drawing by inking where its smooth
-         ;; normal turned away from its carrier face.  Today's renderer has
-         ;; explicit relief facets instead of that field, so the same honest
-         ;; signal is the geometric facet turning away from FACE-NORMAL.
-         ;; Keep it local to the pointer: the atelier reveals construction
-         ;; where one is looking without making the whole sanctuary a debug
-         ;; grid.  CURRENT-CLIP is deliberately unjittered.
+         (u-wire (- 1.0 (smoothstep 0.35 1.15 u-pixels)))
+         (v-wire (- 1.0 (smoothstep 0.35 1.15 v-pixels)))
+         (d-wire (- 1.0 (smoothstep 0.35 1.15 d-pixels)))
+         (construction-wire
+           (* (swizzle chamfer-parameters :y)
+              (max (max (* u-wire (max (* u-rim 0.48) u-approved))
+                        (* v-wire (max (* v-rim 0.48) v-approved)))
+                   (* d-wire d-approved))))
+         ;; #JM9807 now survives as precise drafting semantics: the global
+         ;; layer draws actual facet-normal discontinuities, while the pointer
+         ;; lens exposes the complete local triangulation without any area fill.
+         ;; CURRENT-CLIP is deliberately unjittered.
          (fragment-uv (face-clip-uv current-clip))
          (pointer-delta
            (/ (- fragment-uv (swizzle inspection-parameters :xy))
               (max (swizzle inspection-parameters :zw)
                    (vec2 0.000001 0.000001))))
          (pointer-pixels (sqrt (dot pointer-delta pointer-delta)))
-         (pointer-gate
-           (* (swizzle chamfer-parameters :w)
-              (- 1.0 (smoothstep 72.0 148.0 pointer-pixels))))
-         (tilt (- 1.0 (abs (dot normal face-normal))))
-         (crease (smoothstep 0.012 0.24 tilt))
-         (local-wire (* pointer-gate
-                        (max crease (max (max u-wire v-wire) d-wire))))
-         (ink (vec3 0.055 0.060 0.075))
-         (radiance (mix paper ink (max wire local-wire))))
+         (pointer-enabled (swizzle chamfer-parameters :w))
+         (lens (* pointer-enabled
+                  (- 1.0 (smoothstep 34.0 46.0 pointer-pixels))))
+         (mesh-wire (* lens (max (max u-wire v-wire) d-wire)))
+         (ring (* pointer-enabled
+                  (- 1.0
+                     (smoothstep 0.35 1.25
+                                 (abs (- pointer-pixels 11.0))))))
+         (tick-range (* (step 14.0 pointer-pixels)
+                        (- 1.0 (step 23.0 pointer-pixels))))
+         (vertical-tick
+           (* pointer-enabled tick-range
+              (- 1.0
+                 (smoothstep 0.35 1.15
+                             (abs (swizzle pointer-delta :x))))))
+         (horizontal-tick
+           (* pointer-enabled tick-range
+              (- 1.0
+                 (smoothstep 0.35 1.15
+                             (abs (swizzle pointer-delta :y))))))
+         (center (* pointer-enabled
+                    (- 1.0 (smoothstep 0.7 1.8 pointer-pixels))))
+         (reticle (max center (max ring (max vertical-tick horizontal-tick))))
+         (construction-ink (vec3 0.055 0.16 0.22))
+         (blueprint (vec3 0.30 0.90 0.94))
+         (drafted (mix paper construction-ink construction-wire))
+         (radiance (mix drafted blueprint (max (* mesh-wire 0.72) reticle))))
     (set-output color-output (vec4 radiance 1.0))
     (set-output motion-output
                 (- (face-clip-uv previous-clip)

@@ -332,9 +332,13 @@ samples of the half-cell tent out from the point, nearer ones weighted more,
 replace the four cell walks of =crowded-sky= with a measure that is smooth
 because the field is ([[lisp:luft.render.shaders::field-occlusion]]).
 
-The indexed atelier revives the useful part of this reading at #UWRDQI: ink
-is now a local revelation around the pointer, where it can expose one site's
-relief and triangulation without turning the whole world into a debug grid.
+The indexed atelier revives the useful part of this reading at #UWRDQI, but
+with a sharper meaning.  The CPU compares the normals of the two realized
+triangles incident to each internal edge and records only genuine turns; the
+fragment's derivatives decide pixel width, never whether an edge exists.  A
+global construction mode draws that topology, while the pointer contributes
+only a precise reticle and a small lens onto the otherwise hidden triangle
+mesh.
 
 * A world knows what it is cut from
 :PROPERTIES:
@@ -870,13 +874,18 @@ returns one sparse [[lisp:luft.render:site-inspection]] at the semantic UI
 boundary: oriented face site, solid cell, hit point and distance, stock, and
 shape word.  The viewer presents those values through a McCLIM application
 pane mirrored into the existing canvas, so no second window or input owner is
-introduced.  The face shader simultaneously revives the crease reading of
-#JM9807 inside a soft pointer-distance halo and adds the local 4 by 4 lattice
-and shared diagonals; the rest of the sanctuary keeps its composed surface.
+introduced.  Each dense face record also carries a 21-bit construction mask:
+the internal U, V, and chosen diagonal edges whose two realized facet normals
+actually differ.  The fragment shader uses screen derivatives only to keep
+those approved edges crisp.  =C= toggles the resulting global construction
+drawing; a cyan reticle marks the ray intersection and reveals the complete
+local triangle lattice without an area fill or distance halo.  Face rims remain
+lighter evidence of the cubical complex that owns those triangles.
 
 /Done when./ Done: Escape releases the pointer, moving it ray-casts the world,
-the inspector follows semantic site crossings, and both crease ink and
-triangulation appear only near a ray that actually reaches the solid.
+the inspector follows semantic site crossings, =C= globally toggles stable
+construction lines, and a ray hit is a crisp blueprint reticle rather than a
+dark smudge.
 
 ** NEXT Grow the workbench and the game as one command vocabulary
 :PROPERTIES:

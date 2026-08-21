@@ -58,13 +58,13 @@
    ;; Face-record ABI.
    #:+face-record-word-count+ #:+face-record-byte-size+
    #:+face-record-site-low-word+ #:+face-record-site-high-word+
-   #:+face-record-shape-word+ #:+face-record-reserved-word+
+   #:+face-record-shape-word+ #:+face-record-construction-word+
    #:+decorated-site-stock-shift+
    #:decorate-site #:undecorated-site #:decorated-site-stock
    #:make-face-record-array #:store-face-record #:load-face-record
    #:make-face-record
    ;; Raster templates.
-   #:+face-index-count+ #:make-face-index-template
+   #:+face-index-count+ #:make-face-index-template #:face-construction-mask
    #:quad-diagonal-toward-corner
    #:positive-face-index-template #:negative-face-index-template
    ;; Tests.
@@ -974,7 +974,7 @@ whole patch consistently before Euclidean interpolation."
 (defconstant +face-record-site-low-word+ 0)
 (defconstant +face-record-site-high-word+ 1)
 (defconstant +face-record-shape-word+ 2)
-(defconstant +face-record-reserved-word+ 3)
+(defconstant +face-record-construction-word+ 3)
 (defconstant +decorated-site-stock-shift+ 60)
 
 (defun decorate-site (site stock)
@@ -995,14 +995,15 @@ whole patch consistently before Euclidean interpolation."
               :initial-element 0))
 
 (defun store-face-record (words record-index domain face shape-word
-                          &optional (stock 0))
-  "Store low site word, high site word, shape word, and zero reserved word."
+                          &optional (stock 0) (construction-mask 0))
+  "Store the packed site, shape, stock, and 21-bit construction-edge mask."
   (check-type words (array (unsigned-byte 32) (*)))
   (check-type record-index (integer 0 *))
   (%require-face domain face)
   (unless (shape-word-valid-p shape-word)
     (error "Invalid shape word ~S." shape-word))
   (check-type stock (unsigned-byte 4))
+  (check-type construction-mask (unsigned-byte 21))
   (let ((base (* record-index +face-record-word-count+)))
     (when (> (+ base +face-record-word-count+) (length words))
       (error "Record ~D is outside a ~D-word array." record-index (length words)))
@@ -1012,18 +1013,17 @@ whole patch consistently before Euclidean interpolation."
             (aref words (+ base +face-record-site-high-word+))
             (ldb (byte 32 32) decorated)
             (aref words (+ base +face-record-shape-word+)) shape-word
-            (aref words (+ base +face-record-reserved-word+)) 0)))
+            (aref words (+ base +face-record-construction-word+))
+            construction-mask)))
   words)
 
 (defun load-face-record (words record-index domain)
-  "Validate and return FACE, SHAPE-WORD, STOCK."
+  "Validate and return FACE, SHAPE-WORD, STOCK, CONSTRUCTION-MASK."
   (check-type words (array (unsigned-byte 32) (*)))
   (check-type record-index (integer 0 *))
   (let ((base (* record-index +face-record-word-count+)))
     (when (> (+ base +face-record-word-count+) (length words))
       (error "Record ~D is outside a ~D-word array." record-index (length words)))
-    (unless (zerop (aref words (+ base +face-record-reserved-word+)))
-      (error "Record ~D has nonzero reserved word." record-index))
     (let* ((decorated
              (logior (aref words (+ base +face-record-site-low-word+))
                      (ash (aref words
@@ -1031,15 +1031,21 @@ whole patch consistently before Euclidean interpolation."
                           32)))
            (face (undecorated-site decorated))
            (shape (aref words (+ base +face-record-shape-word+)))
-           (stock (decorated-site-stock decorated)))
+           (stock (decorated-site-stock decorated))
+           (construction-mask
+             (aref words (+ base +face-record-construction-word+))))
       (%require-face domain face)
       (unless (shape-word-valid-p shape)
         (error "Record ~D has invalid shape word ~S." record-index shape))
-      (values face shape stock))))
+      (unless (typep construction-mask '(unsigned-byte 21))
+        (error "Record ~D has invalid construction mask ~S."
+               record-index construction-mask))
+      (values face shape stock construction-mask))))
 
-(defun make-face-record (domain face shape-word &optional (stock 0))
+(defun make-face-record (domain face shape-word
+                         &optional (stock 0) (construction-mask 0))
   (let ((record (make-face-record-array 1)))
-    (store-face-record record 0 domain face shape-word stock)
+    (store-face-record record 0 domain face shape-word stock construction-mask)
     record))
 
 ;;; ---------------------------------------------------------------------------
@@ -1104,6 +1110,105 @@ past it, and the band ends in a fan instead."
   (%copy-u16-vector *positive-face-index-template*))
 (defun negative-face-index-template ()
   (%copy-u16-vector *negative-face-index-template*))
+
+;;; ---------------------------------------------------------------------------
+;;; Construction edges
+
+(defun %construction-edge-bit (a b)
+  "Return the compact bit for an internal edge between local points A and B."
+  (let ((ai (floor a 4)) (aj (mod a 4))
+        (bi (floor b 4)) (bj (mod b 4)))
+    (cond
+      ((= ai bi)
+       (and (<= 1 ai 2) (+ (* (1- ai) 3) (min aj bj))))
+      ((= aj bj)
+       (and (<= 1 aj 2) (+ 6 (* (1- aj) 3) (min ai bi))))
+      (t
+       (+ 12 (* (min ai bi) 3) (min aj bj))))))
+
+(defun %make-construction-edge-adjacencies ()
+  "Return BIT, TRIANGLE-A, TRIANGLE-B triples for all 21 internal edges."
+  (let ((incidences (make-hash-table :test #'equal))
+        (indices *positive-face-index-template*))
+    (dotimes (triangle 18)
+      (let* ((base (* triangle 3))
+             (a (aref indices base))
+             (b (aref indices (+ base 1)))
+             (c (aref indices (+ base 2))))
+        (dolist (edge (list (list a b) (list b c) (list c a)))
+          (destructuring-bind (left right) edge
+            (push triangle
+                  (gethash (list (min left right) (max left right))
+                           incidences))))))
+    (let ((triples '()))
+      (maphash
+       (lambda (edge triangles)
+         (when (= 2 (length triangles))
+           (let ((bit (%construction-edge-bit (first edge) (second edge))))
+             (unless bit
+               (error "Internal raster edge ~S has no construction bit." edge))
+             (push (list bit (first triangles) (second triangles)) triples))))
+       incidences)
+      (unless (= 21 (length triples))
+        (error "Expected 21 internal construction edges, got ~D."
+               (length triples)))
+      (coerce (sort triples #'< :key #'first) 'vector))))
+
+(defparameter *construction-edge-adjacencies*
+  (%make-construction-edge-adjacencies))
+
+(defun %triangle-unit-normal (points indices triangle)
+  (labels ((coordinate (vertex component)
+             (aref points (+ (* 3 vertex) component))))
+    (let* ((base (* triangle 3))
+           (a (aref indices base))
+           (b (aref indices (+ base 1)))
+           (c (aref indices (+ base 2)))
+           (abx (- (coordinate b 0) (coordinate a 0)))
+           (aby (- (coordinate b 1) (coordinate a 1)))
+           (abz (- (coordinate b 2) (coordinate a 2)))
+           (acx (- (coordinate c 0) (coordinate a 0)))
+           (acy (- (coordinate c 1) (coordinate a 1)))
+           (acz (- (coordinate c 2) (coordinate a 2)))
+           (nx (- (* aby acz) (* abz acy)))
+           (ny (- (* abz acx) (* abx acz)))
+           (nz (- (* abx acy) (* aby acx)))
+           (length (sqrt (+ (* nx nx) (* ny ny) (* nz nz)))))
+      (when (zerop length)
+        (error "Degenerate LUFT raster triangle ~D." triangle))
+      (values (/ nx length) (/ ny length) (/ nz length)))))
+
+(defun face-construction-mask (domain face shape-word width)
+  "Mark each internal raster edge whose two realized facet normals differ.
+
+The outer four rims are cubical-complex boundaries and are drawn separately.
+Bits 0..5 describe the two internal U lines, 6..11 the internal V lines,
+and 12..20 the nine quad diagonals.  A tiny tolerance rejects only numerical
+noise from coplanar triangles; screen-space derivatives later set line width,
+never edge meaning."
+  (let* ((points (realize-face-patch domain face shape-word width))
+         (indices *positive-face-index-template*)
+         (normals (make-array 54 :element-type 'double-float)))
+    (dotimes (triangle 18)
+      (multiple-value-bind (x y z)
+          (%triangle-unit-normal points indices triangle)
+        (let ((base (* triangle 3)))
+          (setf (aref normals base) x
+                (aref normals (+ base 1)) y
+                (aref normals (+ base 2)) z))))
+    (loop with mask = 0
+          for (bit left right) across *construction-edge-adjacencies*
+          for left-base = (* left 3)
+          for right-base = (* right 3)
+          for dot = (+ (* (aref normals left-base)
+                          (aref normals right-base))
+                       (* (aref normals (+ left-base 1))
+                          (aref normals (+ right-base 1)))
+                       (* (aref normals (+ left-base 2))
+                          (aref normals (+ right-base 2))))
+          when (< dot 0.999999d0)
+            do (setf mask (logior mask (ash 1 bit)))
+          finally (return mask))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Focused executable tests
@@ -1509,20 +1614,23 @@ past it, and the band ends in a fan instead."
                         (%check (= expected
                                    (shape-corner-code shape corner)))))))
                 (%check (plusp incidences)))))))
-      ;; Face records round-trip the exact four-u32 ABI and reject revision data.
+      ;; Face records round-trip the exact four-u32 ABI, including the compact
+      ;; normal-discontinuity mask consumed by construction rendering.
       (let* ((face (make-site domain 3 4 5 +xy-face-extent+ -1))
              (corner (encode-corner-code 0 0 0 1/2))
              (shape (pack-shape-word 0 1 2 0
                                      corner corner corner corner))
-             (record (make-face-record domain face shape 13)))
+             (record (make-face-record domain face shape 13 #x15555)))
         (%check (= (length record) +face-record-word-count+))
         (%check (= (* (length record) 4) +face-record-byte-size+))
-        (multiple-value-bind (loaded-face loaded-shape loaded-stock)
+        (multiple-value-bind
+              (loaded-face loaded-shape loaded-stock loaded-construction)
             (load-face-record record 0 domain)
           (%check (and (= face loaded-face)
                        (= shape loaded-shape)
-                       (= 13 loaded-stock))))
-        (setf (aref record +face-record-reserved-word+) 1)
+                       (= 13 loaded-stock)
+                       (= #x15555 loaded-construction))))
+        (setf (aref record +face-record-construction-word+) (ash 1 21))
         (%check (%signals-error-p
                  (lambda () (load-face-record record 0 domain))))))))
 
@@ -1656,6 +1764,20 @@ past it, and the band ends in a fan instead."
                       (aref negative (+ base 1))
                       (aref negative (+ base 2)))
                      -1))))
+      (let* ((domain (make-world-domain :x-bits 6 :y-bits 6))
+             (face (make-site domain 10 10 10 +xy-face-extent+ 1))
+             (flat-corner (encode-corner-code 0 0 0 1/2))
+             (flat-shape (pack-shape-word 0 0 0 0
+                                          flat-corner flat-corner
+                                          flat-corner flat-corner))
+             (bent-corner (encode-corner-code 1 0 1 1/2))
+             (bent-shape (pack-shape-word 0 0 0 0
+                                          bent-corner flat-corner
+                                          flat-corner flat-corner)))
+        (%check (zerop (face-construction-mask
+                        domain face flat-shape 0.11d0)))
+        (%check (plusp (face-construction-mask
+                        domain face bent-shape 0.11d0))))
       ;; Each consecutive pair shares a diagonal, not a boundary edge;
       ;; this excludes an equal-area overlap/gap pair as well as a bow tie.
       (dotimes (quad 9)

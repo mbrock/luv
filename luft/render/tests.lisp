@@ -36,6 +36,8 @@
                (luft.render::viewer-key-command viewer (key-release :w))))
     (ok (equal '(luft.render::com-reset-view)
                (luft.render::viewer-key-command viewer (key-press :r))))
+    (ok (equal '(luft.render::com-toggle-construction-lines)
+               (luft.render::viewer-key-command viewer (key-press :c))))
     (ok (equal '(luft.render::com-toggle-fullscreen)
                (luft.render::viewer-key-command viewer (key-press :f11))))
     (ok (equal '(luft.render::com-quit)
@@ -62,11 +64,12 @@
     (ok (= (length words)
            (* luft:+face-record-word-count+ (luft:chain-count surface))))
     (loop for index below (+ positive negative) do
-      (multiple-value-bind (face shape stock)
+      (multiple-value-bind (face shape stock construction-mask)
           (luft:load-face-record words index domain)
         (ok (eq (< index positive) (luft:site-positive-p face)))
         (ok (luft:shape-word-valid-p shape))
-        (ok (<= 0 stock 3))))))
+        (ok (<= 0 stock 3))
+        (ok (typep construction-mask '(unsigned-byte 21)))))))
 
 (deftest the-mountain-scene-keeps-one-small-paper-palette
   (let* ((scene (render:make-mountain-sanctuary-scene))
@@ -105,6 +108,7 @@
     (ok (search "const device uint4* faces" msl-source))
     (ok (search "camera_position" msl-source))
     (ok (search "motion_output" fragment-msl))
+    (ok (search "construction_mask" fragment-msl))
     (ok (luv.msl:compile-msl inspector-vertex))
     (ok (luv.msl:compile-msl inspector-fragment))
     (ok (luv.spir-v:compile-shader-specification vertex))

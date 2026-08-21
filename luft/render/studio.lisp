@@ -2,23 +2,8 @@
 
 (defvar *viewer* nil)
 
-(defparameter *chamfer-width* 0.11
-  "The reserved chamfer band, in cells; the shape rule may fill 0 < w < 1/2.
-
-The pre-refoundation atelier used 0.11.  The width scales every displacement
-the shape word asks for, so it also scales the disagreement a mixed corner
-has with the creases running into it: at 0.20 that disagreement is a visible
-gouge, and at 0.11 it is the subtle break it was drawn as.")
-
-(defparameter *wireframe* 0.0
-  "How strongly the lattice wireframe is inked over the surface, 0 to 1.
-
-The wires are the 4x4 point grid and each cell's shared diagonal, which is
-the way to read a triangulation and exactly the wrong way to judge whether a
-crease looks right: an inked crease reads as a fold whether or not it is one.")
-
 (defparameter *inspection-ink-p* t
-  "Whether the pointer locally reveals LUFT relief and triangulation.")
+  "Whether a ray hit gets a blueprint reticle and local triangle-edge lens.")
 
 (defparameter *inspection-reach* 200.0
   "How far, in cells, the atelier's pointer ray may inspect.")
@@ -420,10 +405,14 @@ the selector is the whole of the difference."
   "Draw VIEWER's current sparse ray hit as McCLIM presentations."
   (clim:draw-rectangle* stream 0 0 +site-inspector-width+
                         +site-inspector-height+
-                        :ink (clim:make-rgb-color 0.035 0.042 0.046))
-  (clim:draw-text* stream "LUFT SITE" 18 25 :align-y :center :text-size 15
+                        :ink (clim:make-rgb-color 0.025 0.070 0.090))
+  (clim:draw-text* stream
+                   (if (plusp *wireframe*)
+                       "LUFT SITE  ·  C CONSTRUCTION ON"
+                       "LUFT SITE  ·  C CONSTRUCTION OFF")
+                   18 25 :align-y :center :text-size 14
                    :text-face :bold
-                   :ink (clim:make-rgb-color 0.91 0.83 0.56))
+                   :ink (clim:make-rgb-color 0.42 0.91 0.94))
   (let ((inspection (viewer-inspection viewer)))
     (if (null inspection)
         (progn
@@ -648,6 +637,17 @@ the selector is the whole of the difference."
                                      :keystroke (:r))
     ()
   (reset-viewer-camera (viewer-command-viewer)))
+
+(clim:define-command (com-toggle-construction-lines
+                      :command-table luft-atelier
+                      :name "Toggle Construction Lines"
+                      :keystroke (:c))
+    ()
+  (let ((viewer (viewer-command-viewer)))
+    (setf *wireframe* (if (plusp *wireframe*) 0.0 1.0))
+    (when (viewer-renderer viewer)
+      (setf (renderer-history-valid-p (viewer-renderer viewer)) nil))
+    (refresh-viewer-inspector viewer)))
 
 (clim:define-command (com-release-pointer :command-table luft-window
                                           :name "Release Pointer"
