@@ -314,13 +314,17 @@ smaller portraits of the work that disappears in the ensemble.
 :END:
 
 Film walls and portals both put a moving image onto a world panel, but they
-prove different things.  Film uses the hardware-backed video path and can be
-captured on the showcase renderer with a tiny generated clip.  A portal shows
-another live luvcraft process through a shared IOSurface and is Darwin-only.
+prove different things.  Film can use the hardware-backed video path; the
+showcase renderer can also cross the same wall texture, screen-panel, and
+faceplate ownership with a tiny generated clip and a deliberately selected
+decoder.  A portal shows another live luvcraft process through a shared
+IOSurface and is Darwin-only.
 
 - =wall-cinema-at-dusk= — a deterministic locally generated film playing on a
   terminal rectangle while the faceplate, shelter, ground, and dusk light
   remain visible.
+- =wall-cinema-at-dusk-film= — three seconds of the same fixed theater view
+  while the source-owned stone-age car actually crosses the wall.
 - =choose-and-play-film= — authored sequence from Film mode, through the wall
   browser, to moving picture and back to Shell.
 - =film-reel-in-inventory= — the carried film's title, uploader, duration, and
@@ -466,3 +470,53 @@ the explicit RADV ICD to the discrete RX 6600 XT.
 [[capture:CSCFGF-party-ball-cascade-portrait.mp4]]
 
 [[capture:SY26PO-luft-holm-portrait.mp4]]
+
+* DONE Put action, inhabitants, and authored surfaces in the gallery
+:PROPERTIES:
+:ID: BX4TG3
+:END:
+
+/Intent./ Make the enlarged folio show things one can do as well as places one
+can admire: mine a wall, build a brick arch, converse through the focused-FOV
+inhabitant view, inspect the metabar and =M-x= command table, use a real
+terminal wall, and watch a locally authored film in a dusk shelter.
+
+/Evidence./ Source revision =e8b6fc8= registers twelve new recipes through the
+existing concrete owners, bringing the executable gallery to 51 cards: 34
+stills, 17 films, and 16 portrait compositions.  The two gameplay films call
+ordinary centre-ray =:remove= and =:place= edits and retain the crosshair,
+hotbar, and first-person body.  The gnome and cat pairs use the embodied-agent
+focus/dialogue path, with the cat pair composed at 720 by 1280.  The two
+instrument stills repaint the real McCLIM metabar and command-menu state.  The
+terminal pair runs a finite, credential-free shell through an actual PTY and
+Ghostty/Slug surface; the cinema pair generates and plays a deterministic H.264
+clip through the existing Film wall.
+
+Focused Chapel captures visually accepted every family.  The mining film
+opens a broad stone wall and throws brick fragments to reveal crystal; the
+building film completes a brick arch around its wooden scaffold.  Dialogue,
+instrument text, ANSI terminal lines, glass faceplate, shelter perspective,
+and the moving cinema picture all remain legible at their card shapes.
+
+Chapel's current RADV H.264 decode loses the graphics device at the first
+decoded picture.  The cinema recipe therefore selects software decode
+explicitly rather than disguising a failed hardware proof as =:auto= fallback;
+the world rendering itself remains on the fail-closed RX 6600 XT RADV route.
+The file-browser film choice remains deferred because its current entry point
+depends on the ambient home directory instead of a source-owned fixture.
+
+[[capture:P3L8YX-gameplay-smash-wall.mp4]]
+
+[[capture:P3L8YX-gameplay-build-brick-arch.mp4]]
+
+[[capture:2TMUKK-terminal-camp-golden-hour.png]]
+
+[[capture:TWKA93-wall-cinema-at-dusk-film.mp4]]
+
+[[capture:W7T2IT-gnome-garden-conversation.png]]
+
+[[capture:W7T2IT-cat-in-the-sun-focus-pull.mp4]]
+
+[[capture:DYJZBK-metabar-grading.png]]
+
+[[capture:DYJZBK-command-menu-filter.png]]
