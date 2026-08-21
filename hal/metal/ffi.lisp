@@ -85,6 +85,8 @@
 (defconstant +primitive-topology-class-triangle+ 3)
 (defconstant +primitive-type-triangle+ 3)
 (defconstant +primitive-type-triangle-strip+ 4)
+(defconstant +index-type-uint16+ 0)
+(defconstant +index-type-uint32+ 1)
 (defconstant +blend-state-enabled+ 1)
 (defconstant +blend-factor-one+ 1)
 (defconstant +blend-factor-one-minus-source-alpha+ 5)
@@ -1132,6 +1134,18 @@ rejection.  Source and names cross only as in-memory NSString objects."
   (vertex-start :uint64)
   (vertex-count :uint64)
   (instance-count :uint64)
+  (base-instance :uint64))
+
+(objc:define-objective-c-message draw-metal-indexed-primitives
+    ("drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferLength:instanceCount:baseVertex:baseInstance:"
+     :void)
+  (primitive-type :uint64)
+  (index-count :uint64)
+  (index-type :uint64)
+  (index-buffer :uint64)
+  (index-buffer-length :uint64)
+  (instance-count :uint64)
+  (base-vertex :int64)
   (base-instance :uint64))
 
 (objc:define-objective-c-message draw-metal-mesh-threadgroups

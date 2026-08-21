@@ -133,6 +133,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:cmd-bind-compute-descriptor-set
            #:cmd-bind-graphics-descriptor-set
            #:cmd-bind-vertex-buffer
+           #:cmd-bind-index-buffer
            #:cmd-dispatch
            #:cmd-begin-color-render-pass
            #:cmd-begin-depth-render-pass
@@ -140,6 +141,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:cmd-set-scissor
            #:cmd-end-render-pass
            #:cmd-draw
+           #:cmd-draw-indexed
            #:submit-command-buffers
            #:submit-command-buffer
            #:queue-wait-idle
@@ -304,6 +306,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:gpu-render-pass-command
            #:gpu-compute-pass-command
            #:gpu-draw-command
+           #:gpu-draw-indexed-command
            #:gpu-draw-mesh-command
            #:gpu-set-pipeline-command
            #:gpu-set-bind-group-command
@@ -340,6 +343,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:set-scissor-rect
            #:dispatch-workgroups
            #:draw
+           #:draw-indexed
            #:draw-mesh-workgroups
            #:make-device-descriptor
            #:make-buffer-descriptor
@@ -386,6 +390,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:make-gpu-set-vertex-buffer-command
            #:make-gpu-dispatch-workgroups-command
            #:make-gpu-draw-command
+           #:make-gpu-draw-indexed-command
            #:make-gpu-draw-mesh-command
            #:vulkan-gpu-provider
            #+darwin

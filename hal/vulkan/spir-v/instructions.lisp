@@ -430,7 +430,8 @@
   (primitive-point-indices-ext 5294)
   (primitive-line-indices-ext 5295)
   (primitive-triangle-indices-ext 5296)
-  (vertex-index 42))
+  (vertex-index 42)
+  (instance-index 43))
 (define-enumeration dim (2d 1))
 (define-enumeration image-format
   (unknown 0)

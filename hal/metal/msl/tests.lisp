@@ -23,9 +23,11 @@
 
 (shader:define-shader msl-vertex-index-probe
     (:stage :vertex
-     :inputs ((vertex-index :uint :built-in :vertex-index))
+     :inputs ((vertex-index :uint :built-in :vertex-index)
+              (instance-index :uint :built-in :instance-index))
      :outputs ((clip-position :vec4 :built-in :position)))
-  (let* ((x (shader:float (mod vertex-index (shader:uint 2.0)))))
+  (let* ((x (shader:float (mod (+ vertex-index instance-index)
+                               (shader:uint 2.0)))))
     (shader:set-output clip-position (shader:vec4 x 0.0 0.0 1.0))))
 
 (shader:define-shader-function msl-reused-local (first second)
@@ -155,8 +157,10 @@
           (msl:msl-document-source
            (msl:compile-msl (msl-vertex-index-probe)))))
     (ok (search "uint vertex_index [[vertex_id]]" source))
-    (ok (search "vertex_index % uint(2.0f)" source))
+    (ok (search "uint instance_index [[instance_id]]" source))
+    (ok (search "(vertex_index + instance_index) % uint(2.0f)" source))
     (ng (search "stage_in.vertex_index" source))
+    (ng (search "stage_in.instance_index" source))
     (ng (search "[[stage_in]]" source))))
 
 (deftest task-and-mesh-specifications-retain-their-workgroup-contracts

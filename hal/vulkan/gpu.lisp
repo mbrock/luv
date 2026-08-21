@@ -863,6 +863,7 @@ therefore be abandoned without replaying native calls which already returned."
               (:uniform :uniform)
               (:storage :storage)
               (:vertex :vertex)
+              (:index :index)
               (:copy-dst :transfer-dst)))
           usages))
 
@@ -1048,7 +1049,7 @@ therefore be abandoned without replaying native calls which already returned."
     ((buffer vulkan-gpu-buffer) data &key (offset 0))
   "Copy a one-dimensional numeric array into mapped coherent memory.
 
-DATA holds single-floats or unsigned 8-, 32-, or 64-bit integers; OFFSET is
+DATA holds single-floats or unsigned 8-, 16-, 32-, or 64-bit integers; OFFSET is
 aligned to the element size.  A storage buffer of packed sites arrives here
 as its own element type rather than as reinterpreted floats."
   (with-vulkan-gpu-driver-environment
@@ -2758,6 +2759,65 @@ lowering later without changing this queue-level operation."
        (vulkan-command-encoder-command-buffer
         (vulkan-render-pass-command-encoder pass))
        vertex-count instance-count first-vertex first-instance)))
+  pass)
+
+(defun vulkan-index-format-size (format)
+  (ecase format (:uint16 2) (:uint32 4)))
+
+(defmethod encode
+    ((pass vulkan-gpu-render-pass-encoder)
+     (command gpu-draw-indexed-command))
+  (with-vulkan-gpu-driver-environment
+    (ensure-vulkan-render-pass-state pass :draw-indexed)
+    (unless (and (vulkan-render-pass-pipeline pass)
+                 (vulkan-render-pass-bind-group pass)
+                 (every (lambda (description)
+                          (gethash (getf description :binding)
+                                   (vulkan-render-pass-vertex-buffers pass)))
+                        (vulkan-render-pipeline-vertex-buffers
+                         (vulkan-render-pass-pipeline pass))))
+      (error 'gpu-invalid-state-error
+             :object pass :operation :draw-indexed
+             :state :incomplete-bindings
+             :expected-state :pipeline-bind-group-and-vertex-buffers-bound))
+    (let* ((encoder (vulkan-render-pass-command-encoder pass))
+           (device (vulkan-command-encoder-device encoder))
+           (index-buffer (gpu-draw-indexed-command-index-buffer command))
+           (index-format (gpu-draw-indexed-command-index-format command))
+           (index-count (gpu-draw-indexed-command-index-count command))
+           (instance-count
+             (gpu-draw-indexed-command-instance-count command))
+           (first-index (gpu-draw-indexed-command-first-index command))
+           (base-vertex (gpu-draw-indexed-command-base-vertex command))
+           (first-instance
+             (gpu-draw-indexed-command-first-instance command)))
+      (unless (and (typep index-buffer 'vulkan-gpu-buffer)
+                   (member index-format '(:uint16 :uint32))
+                   (typep index-count '(integer 1 #.(- (ash 1 32) 1)))
+                   (typep instance-count '(integer 1 #.(- (ash 1 32) 1)))
+                   (typep first-index '(unsigned-byte 32))
+                   (typep base-vertex '(signed-byte 32))
+                   (typep first-instance '(unsigned-byte 32)))
+        (reject-gpu-request command :invalid-indexed-draw-arguments))
+      (ensure-vulkan-object-device
+       index-buffer (vulkan-buffer-device index-buffer) device :draw-indexed)
+      (unless (member :index (gpu-buffer-usage index-buffer))
+        (error 'gpu-usage-error
+               :object index-buffer :operation :draw-indexed
+               :required-usage :index
+               :actual-usage (gpu-buffer-usage index-buffer)))
+      (let* ((index-size (vulkan-index-format-size index-format))
+             (offset (* first-index index-size)))
+        (unless (<= (+ offset (* index-count index-size))
+                    (gpu-buffer-size index-buffer))
+          (reject-gpu-request command :index-buffer-range-exceeded))
+        (lvk:cmd-bind-index-buffer
+         (vulkan-command-encoder-command-buffer encoder)
+         (vulkan-handle index-buffer) offset index-format)
+        (retain-vulkan-resource encoder index-buffer)
+        (lvk:cmd-draw-indexed
+         (vulkan-command-encoder-command-buffer encoder)
+         index-count instance-count 0 base-vertex first-instance))))
   pass)
 
 (defmethod encode

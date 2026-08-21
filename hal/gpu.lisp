@@ -786,7 +786,7 @@ has completed."))
   size usage dimensions format)
 
 (defparameter +portable-buffer-usages+
-  '(:uniform :storage :vertex :copy-dst))
+  '(:uniform :storage :vertex :index :copy-dst))
 
 (defparameter +portable-texture-usages+
   '(:copy-src :copy-dst :storage-binding :texture-binding
@@ -888,12 +888,13 @@ has completed."))
 
 (defun buffer-data-foreign-type (data)
   "Return the CFFI element type and byte size for a one-dimensional DATA
-array of single-floats or unsigned bytes, words, or double words."
+array of single-floats or unsigned 8-, 16-, 32-, or 64-bit integers."
   (let ((element-type (and (arrayp data) (= 1 (array-rank data))
                            (array-element-type data))))
     (cond ((null element-type) nil)
           ((subtypep element-type 'single-float) (values :float 4))
           ((subtypep element-type '(unsigned-byte 8)) (values :uint8 1))
+          ((subtypep element-type '(unsigned-byte 16)) (values :uint16 2))
           ((subtypep element-type '(unsigned-byte 32)) (values :uint32 4))
           ((subtypep element-type '(unsigned-byte 64)) (values :uint64 8))
           (t nil))))
@@ -1012,6 +1013,15 @@ largest task-to-mesh amplification admitted by one task workgroup."
   vertex-count
   (instance-count 1)
   (first-vertex 0)
+  (first-instance 0))
+
+(defstruct (gpu-draw-indexed-command (:include gpu-render-pass-command))
+  index-buffer
+  (index-format :uint16)
+  index-count
+  (instance-count 1)
+  (first-index 0)
+  (base-vertex 0)
   (first-instance 0))
 
 (defstruct (gpu-draw-mesh-command (:include gpu-render-pass-command))
@@ -1141,6 +1151,20 @@ largest task-to-mesh amplification admitted by one task workgroup."
           (make-gpu-draw-command
            :vertex-count vertex-count :instance-count instance-count
            :first-vertex first-vertex :first-instance first-instance)))
+
+(defun draw-indexed (pass-encoder index-buffer index-format index-count
+                     &optional (instance-count 1) (first-index 0)
+                               (base-vertex 0) (first-instance 0))
+  "Draw indexed instances from INDEX-BUFFER.
+
+INDEX-FORMAT is :UINT16 or :UINT32.  The buffer is carried by the command so
+recorded work owns the complete indexed-draw dependency at one boundary."
+  (encode pass-encoder
+          (make-gpu-draw-indexed-command
+           :index-buffer index-buffer :index-format index-format
+           :index-count index-count :instance-count instance-count
+           :first-index first-index :base-vertex base-vertex
+           :first-instance first-instance)))
 
 (defun draw-mesh-workgroups (pass-encoder x &optional (y 1) (z 1))
   (encode pass-encoder

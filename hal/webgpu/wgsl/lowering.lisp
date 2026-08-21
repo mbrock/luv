@@ -597,6 +597,7 @@ defaults.  Other source values retain the native folded-literal semantics."))
                    (case built-in
                      (:position "position")
                      (:vertex-index "vertex_index")
+                     (:instance-index "instance_index")
                      (otherwise
                       (error 'shader:shader-language-error
                              :form source-form

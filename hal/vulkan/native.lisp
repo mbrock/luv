@@ -1823,6 +1823,18 @@ output topology."
              first-vertex first-instance)
   (values))
 
+(defun cmd-bind-index-buffer (command-buffer buffer offset index-type)
+  (vk:cmd-bind-index-buffer command-buffer buffer offset index-type)
+  (values))
+
+(defun cmd-draw-indexed
+    (command-buffer index-count &optional (instance-count 1)
+                                       (first-index 0) (vertex-offset 0)
+                                       (first-instance 0))
+  (vk:cmd-draw-indexed command-buffer index-count instance-count
+                       first-index vertex-offset first-instance)
+  (values))
+
 (defun fill-semaphore-submit-infos (pointer entries)
   "Fill POINTER, an array of VkSemaphoreSubmitInfo, from ENTRIES.
 

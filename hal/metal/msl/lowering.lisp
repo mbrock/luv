@@ -1032,6 +1032,9 @@
       ((and (eq stage :vertex) (eq direction :input)
             (eq built-in :vertex-index))
        "[[vertex_id]]")
+      ((and (eq stage :vertex) (eq direction :input)
+            (eq built-in :instance-index))
+       "[[instance_id]]")
       ((and (member stage '(:task :mesh)) (eq direction :input))
        (case built-in
          (:local-invocation-index "[[thread_index_in_threadgroup]]")

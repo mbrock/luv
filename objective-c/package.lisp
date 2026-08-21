@@ -120,6 +120,7 @@
            #:set-metal-render-argument-table
            #:set-metal-scissor-rect
            #:draw-metal-primitives
+           #:draw-metal-indexed-primitives
            #:draw-metal-mesh-threadgroups
            #:copy-metal-texture
            #:copy-metal-texture-to-buffer
@@ -150,6 +151,8 @@
            #:+primitive-topology-class-triangle+
            #:+primitive-type-triangle+
            #:+primitive-type-triangle-strip+
+           #:+index-type-uint16+
+           #:+index-type-uint32+
            #:+render-stage-vertex+
            #:+render-stage-fragment+
            #:+render-stage-object+

@@ -232,6 +232,9 @@
         (draw
           (objc:objective-c-message-description
            'metal:draw-metal-primitives))
+        (draw-indexed
+          (objc:objective-c-message-description
+           'metal:draw-metal-indexed-primitives))
         (draw-mesh
           (objc:objective-c-message-description
            'metal:draw-metal-mesh-threadgroups)))
@@ -245,6 +248,9 @@
                "setAddress:attributeStride:atIndex:"))
     (ok (equal (getf draw :selector)
                "drawPrimitives:vertexStart:vertexCount:instanceCount:baseInstance:"))
+    (ok (equal
+         (getf draw-indexed :selector)
+         "drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferLength:instanceCount:baseVertex:baseInstance:"))
     (ok (equal
          (getf draw-mesh :selector)
          "drawMeshThreadgroups:threadsPerObjectThreadgroup:threadsPerMeshThreadgroup:"))

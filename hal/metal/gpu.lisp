@@ -845,7 +845,7 @@ backend-local extension; ordinary callers use SUBMIT.  #T9K4RC"
     ((buffer metal-gpu-buffer) data &key (offset 0))
   "Copy a one-dimensional numeric array into shared Metal memory.
 
-DATA holds single-floats or unsigned 8-, 32-, or 64-bit integers; OFFSET is
+DATA holds single-floats or unsigned 8-, 16-, 32-, or 64-bit integers; OFFSET is
 aligned to the element size."
   (ensure-live-metal-object buffer :write-buffer)
   (multiple-value-bind (foreign-type element-size)
@@ -2476,6 +2476,81 @@ compiler boundary of #58IDSR."
        (metal-primitive-type pipeline) first-vertex vertex-count
        instance-count first-instance)
       command)))
+
+(defun metal-index-format (format)
+  (ecase format
+    (:uint16 (values luv.metal:+index-type-uint16+ 2))
+    (:uint32 (values luv.metal:+index-type-uint32+ 4))))
+
+(defmethod encode
+    ((pass metal-render-pass-encoder) (command gpu-draw-indexed-command))
+  (ensure-metal-render-pass-state pass :draw-indexed)
+  (let ((pipeline (metal-render-pass-pipeline pass))
+        (index-buffer (gpu-draw-indexed-command-index-buffer command)))
+    (unless pipeline
+      (error 'gpu-invalid-state-error :object pass :operation :draw-indexed
+             :state :no-pipeline :expected-state :pipeline-bound))
+    (when (typep pipeline 'metal-gpu-mesh-render-pipeline)
+      (reject-metal-gpu-request command :indexed-draw-with-mesh-pipeline))
+    (when (and (metal-render-pipeline-layout pipeline)
+               (null (metal-render-pass-bind-group pass)))
+      (error 'gpu-invalid-state-error :object pass :operation :draw-indexed
+             :state :bind-group-missing
+             :expected-state :pipeline-bind-group-and-vertex-buffers-bound))
+    (dolist (layout (metal-render-pipeline-vertex-buffers pipeline))
+      (unless (gethash (getf layout :binding)
+                       (metal-render-pass-vertex-bindings pass))
+        (error 'gpu-invalid-state-error :object pass :operation :draw-indexed
+               :state :vertex-buffer-missing
+               :expected-state :all-vertex-buffers-bound)))
+    (unless (typep index-buffer 'metal-gpu-buffer)
+      (reject-metal-gpu-request command :incompatible-index-buffer
+                                index-buffer))
+    (ensure-metal-object-device
+     index-buffer (metal-buffer-device index-buffer)
+     (metal-render-pipeline-device pipeline) :draw-indexed)
+    (unless (member :index (gpu-buffer-usage index-buffer))
+      (error 'gpu-usage-error
+             :object index-buffer :operation :draw-indexed
+             :required-usage :index
+             :actual-usage (gpu-buffer-usage index-buffer)))
+    (let ((index-count (gpu-draw-indexed-command-index-count command))
+          (instance-count
+            (gpu-draw-indexed-command-instance-count command))
+          (first-index (gpu-draw-indexed-command-first-index command))
+          (base-vertex (gpu-draw-indexed-command-base-vertex command))
+          (first-instance
+            (gpu-draw-indexed-command-first-instance command)))
+      (unless (and (typep index-count '(integer 1 *))
+                   (typep instance-count '(integer 1 *))
+                   (typep first-index '(unsigned-byte 64))
+                   (typep base-vertex '(signed-byte 64))
+                   (typep first-instance '(unsigned-byte 64)))
+        (reject-metal-gpu-request command :invalid-indexed-draw-range))
+      (multiple-value-bind (native-format index-size)
+          (metal-index-format (gpu-draw-indexed-command-index-format command))
+        (let ((offset (* first-index index-size)))
+          (unless (<= (+ offset (* index-count index-size))
+                      (gpu-buffer-size index-buffer))
+            (reject-metal-gpu-request command :index-buffer-range-exceeded))
+          (when (metal-render-pass-argument-table pass)
+            (luv.metal:set-metal-render-argument-table
+             (metal-render-pass-native-encoder pass)
+             (metal-render-pass-argument-table pass)
+             (logior luv.metal:+render-stage-vertex+
+                     (if (metal-render-pipeline-fragment-p pipeline)
+                         luv.metal:+render-stage-fragment+
+                         0))))
+          (retain-metal-resource (metal-render-pass-owner pass) index-buffer)
+          (luv.metal:draw-metal-indexed-primitives
+           (metal-render-pass-native-encoder pass)
+           (metal-primitive-type pipeline) index-count native-format
+           (+ (luv.metal:metal-buffer-gpu-address
+               (metal-native-object index-buffer))
+              offset)
+           (* index-count index-size) instance-count
+           base-vertex first-instance)
+          command)))))
 
 (defun metal-size-value (size)
   (destructuring-bind (width height depth) size

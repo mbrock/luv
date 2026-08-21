@@ -3,6 +3,13 @@
 (deftest temporal-motion-format-has-two-half-float-lanes
   (ok (= 4 (luv:texture-format-bytes-per-texel :rg16-float))))
 
+(deftest buffer-uploads-preserve-sixteen-bit-storage
+  (multiple-value-bind (foreign-type element-size)
+      (luv::buffer-data-foreign-type
+       (make-array 3 :element-type '(unsigned-byte 16)))
+    (ok (eq :uint16 foreign-type))
+    (ok (= 2 element-size))))
+
 (defclass descriptor-probe-device (luv:gpu-device)
   ((operation :initform nil :accessor descriptor-probe-operation)
    (descriptor :initform nil :accessor descriptor-probe-descriptor)
@@ -43,7 +50,7 @@
 
 (deftest portable-buffer-descriptors-reach-devices-in-one-canonical-shape
   (let* ((device (make-instance 'descriptor-probe-device))
-         (usage (vector :vertex :copy-dst :vertex))
+         (usage (vector :vertex :index :copy-dst :vertex))
          (source
            (luv:make-buffer-descriptor
             :label "probe buffer" :size 64 :usage usage))
@@ -51,7 +58,7 @@
     (ok (not (eq source canonical)))
     (ok (eq :create-buffer (descriptor-probe-operation device)))
     (ok (= 64 (luv::buffer-descriptor-size canonical)))
-    (ok (equal '(:vertex :copy-dst)
+    (ok (equal '(:vertex :index :copy-dst)
                (luv::buffer-descriptor-usage canonical)))
     (ok (eq usage (luv::buffer-descriptor-usage source)))
     (ok (string= "probe buffer" (luv::gpu-descriptor-label canonical)))))
@@ -93,7 +100,8 @@
                  (luv:create
                   device (luv:make-buffer-descriptor
                           :size size :usage :vertex)))))))
-    (dolist (usage '(nil :index (:vertex :index) #(:copy-dst :index)))
+    (dolist (usage '(nil :indirect (:vertex :indirect)
+                     #(:copy-dst :map-read)))
       (ok (eq :invalid-buffer-usage
               (gpu-request-reason
                (lambda ()

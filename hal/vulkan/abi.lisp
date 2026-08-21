@@ -123,6 +123,10 @@
   (:exclusive 0)
   (:concurrent 1))
 
+(cffi:defcenum (index-type :uint32)
+  (:uint16 0)
+  (:uint32 1))
+
 (cffi:defcenum (image-layout :uint32)
   (:undefined 0)
   (:general 1)
@@ -326,6 +330,7 @@
   (:transfer-dst #x2)
   (:uniform #x10)
   (:storage #x20)
+  (:index #x40)
   (:vertex #x80))
 
 (cffi:defbitfield (shader-stage-flags :uint32)
@@ -1559,6 +1564,13 @@
   (buffers :pointer)
   (offsets :pointer))
 
+(defvkfun "vkCmdBindIndexBuffer"
+    :void
+  (command-buffer :pointer)
+  (buffer :pointer)
+  (offset :uint64)
+  (index-type index-type))
+
 (defvkfun "vkCmdDispatch"
     :void
   (command-buffer :pointer)
@@ -1590,6 +1602,12 @@
   (command-buffer :pointer) (vertex-count :uint32)
   (instance-count :uint32) (first-vertex :uint32)
   (first-instance :uint32))
+
+(defvkfun "vkCmdDrawIndexed"
+    :void
+  (command-buffer :pointer) (index-count :uint32)
+  (instance-count :uint32) (first-index :uint32)
+  (vertex-offset :int32) (first-instance :uint32))
 
 (defvkfun "vkQueueSubmit2"
     checked-result
