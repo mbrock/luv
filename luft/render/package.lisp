@@ -21,6 +21,8 @@
            #:*frame-uniform-members*
            #:chamfer-fragment-shader
            #:temporal-chamfer-fragment-shader
+           #:foundation-fragment-shader
+           #:temporal-foundation-fragment-shader
            #:paper-fragment-shader
            #:temporal-paper-fragment-shader
            #:sky-fragment-shader

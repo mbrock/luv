@@ -1693,13 +1693,19 @@ may draw it first and the world still covers it."
 (defun create-renderer-fragment-modules (renderer)
   "Create the fragment modules RENDERER's styles and effects share.
 
-The values are the surface, chamfer, paper, sky, lens, temporal, present,
-field, ink, stock, and clay fragment modules, each NIL when nothing wants
-it."
+The values are the foundation, surface, chamfer, paper, sky, lens, temporal,
+present, field, ink, stock, and clay fragment modules, each NIL when nothing
+wants it."
   (let ((styles (renderer-pipeline-styles renderer))
         (temporal-p (renderer-effect-p renderer :taa)))
     (values
-     (when (intersection styles '(:foundation :flat :bevel))
+     (when (member :foundation styles)
+       (create-renderer-module renderer :luft/shader/foundation-fragment
+                               "luft foundation fragment"
+                               (if temporal-p
+                                   (shaders:temporal-foundation-fragment-shader)
+                                   (shaders:foundation-fragment-shader))))
+     (when (intersection styles '(:flat :bevel))
        (create-renderer-module renderer :luft/shader/surface-fragment
                                "luft surface fragment"
                                (if temporal-p
@@ -1809,7 +1815,8 @@ it."
                     renderer :luft/shader/sky-vertex
                     "luft sky vertex"
                     (shaders:sky-vertex-shader))))
-    (multiple-value-bind (fragment chamfer-fragment paper-fragment
+    (multiple-value-bind (foundation-fragment fragment
+                          chamfer-fragment paper-fragment
                           sky-fragment lens-fragment temporal-fragment
                           present-fragment field-fragment ink-fragment
                           stock-fragment clay-fragment)
@@ -1830,7 +1837,7 @@ it."
                  :depth-stencil depth))))
         (when (member :foundation styles)
           (pipeline :foundation :luft/pipeline/foundation
-                    "luft foundation pipeline" foundation fragment))
+                    "luft foundation pipeline" foundation foundation-fragment))
         (when (member :flat styles)
           (pipeline :flat :luft/pipeline/flat "luft surface pipeline"
                     surface fragment))
