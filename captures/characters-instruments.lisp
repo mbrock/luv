@@ -10,19 +10,19 @@
 (defun character-instrument-meadow-pose ()
   "A quiet midtone meadow view behind dialogue and instrument surfaces."
   (gallery-look-pose
-   8.0d0 4.1d0 2.0d0
-   8.0d0 2.8d0 8.0d0
+   8.0d0 (+ +gallery-stage-floor-y+ 3.1d0) 2.0d0
+   8.0d0 (+ +gallery-stage-floor-y+ 1.8d0) 8.0d0
    luvcraft::+luvcraft-camera-vertical-field-of-view+))
 
 (defun make-character-instrument-meadow-world ()
-  "The gazetteer meadow with a sparse, deterministic flower garden."
-  (let ((world (luvcraft::make-gazetteer-meadow-world)))
-    (dolist (coordinate '((6 1 7) (7 1 9) (9 1 6) (10 1 9)))
-      (destructuring-bind (x y z) coordinate
-        (setf (luvcraft:world-block-at world x y z)
-              luvcraft::*flowers-block*)))
-    (luvcraft:relight-block-world world)
-    world))
+  "A flower garden graded into the shared deterministic terrain and horizon."
+  (make-staged-gallery-terrain-world
+   (lambda (world floor-y)
+     (dolist (coordinate '((6 7) (7 9) (9 6) (10 9)))
+       (destructuring-bind (x z) coordinate
+         (setf (luvcraft:world-block-at world x (1+ floor-y) z)
+               luvcraft::*flowers-block*))))
+   :bounds '(4 4 12 12)))
 
 (defun call-with-character-instrument-session
     (function &key title width height (day-fraction 0.42))
@@ -35,7 +35,7 @@
    :sky-clock (luvcraft::make-pinned-sky-clock day-fraction)
    :sky-profile (luvcraft:make-default-sky-profile)
    :critters (make-instance 'luvcraft::critter-population)
-   :residency-radius 0 :clean-p t
+   :residency-radius +gallery-terrain-radius+ :clean-p t
    :exposure 0.52 :bloom-gain 0.12 :shaft-gain 0.18))
 
 (defun call-with-focused-character
@@ -63,10 +63,12 @@
    :title title :width width :height height :day-fraction day-fraction))
 
 (defun spawn-capture-gnome (session)
-  (agent:spawn-agent :session session :x 8 :y 2 :z 8))
+  (agent:spawn-agent :session session :x 8
+                     :y (1+ +gallery-stage-floor-y+) :z 8))
 
 (defun spawn-capture-cat (session)
-  (agent:spawn-cat :session session :x 8 :y 2 :z 8))
+  (agent:spawn-cat :session session :x 8
+                   :y (1+ +gallery-stage-floor-y+) :z 8))
 
 (defun film-character-focus-pull (session pathname target-pose label)
   "Film the real focused character while the camera eases to TARGET-POSE."
@@ -89,7 +91,7 @@
 ;;; a separately painted caption. #W7T2IT
 
 (luv:define-capture gnome-garden-conversation
-    (:figure W7T2IT :kind :image :extension "png"
+    (:figure W7T2IT :kind :image :extension "png" :section :inhabitants
      :description
      "A gnome at its real conversational FoV with source-owned dialogue.")
     (pathname)
@@ -106,7 +108,7 @@
    :day-fraction 0.42))
 
 (luv:define-capture gnome-garden-focus-pull
-    (:figure W7T2IT :kind :video :extension "mp4"
+    (:figure W7T2IT :kind :video :extension "mp4" :section :inhabitants
      :description
      "A short deterministic pull into the gnome's focused conversation view.")
     (pathname)
@@ -127,6 +129,7 @@
 
 (luv:define-capture cat-in-the-sun-conversation
     (:figure W7T2IT :kind :image :extension "png" :layout :portrait
+     :section :inhabitants
      :description
      "The seated cat in warm light, using its real focused dialogue surface.")
     (pathname)
@@ -144,6 +147,7 @@
 
 (luv:define-capture cat-in-the-sun-focus-pull
     (:figure W7T2IT :kind :video :extension "mp4" :layout :portrait
+     :section :inhabitants
      :description
      "A portrait pull into the cat's own audience distance and focused FoV.")
     (pathname)
@@ -181,7 +185,7 @@
     overlay))
 
 (luv:define-capture metabar-grading
-    (:figure DYJZBK :kind :image :extension "png"
+    (:figure DYJZBK :kind :image :extension "png" :section :surfaces
      :description
      "The real metabar's grading group, with light shafts selected in context.")
     (pathname)
@@ -208,7 +212,7 @@
     overlay))
 
 (luv:define-capture command-menu-filter
-    (:figure DYJZBK :kind :image :extension "png"
+    (:figure DYJZBK :kind :image :extension "png" :section :surfaces
      :description
      "The real M-x command table filtered by a useful partial query.")
     (pathname)

@@ -74,56 +74,56 @@
   pathname)
 
 (luv:define-capture gazetteer-little-world-noon
-    (:figure OK1OC8 :kind :image :extension "png"
+    (:figure OK1OC8 :kind :image :extension "png" :section :plates
      :description
      "The original aerial gazetteer terrain view at pinned noon for inspection.")
     (pathname)
   (render-gazetteer-reference-plate :little-world-noon pathname))
 
 (luv:define-capture little-world-dusk
-    (:figure OK1OC8 :kind :image :extension "png"
+    (:figure OK1OC8 :kind :image :extension "png" :section :plates
      :description
      "Generated little-world terrain under its deterministic warm dusk sky.")
     (pathname)
   (render-gazetteer-reference-plate :little-world-dusk pathname))
 
 (luv:define-capture shadow-forest
-    (:figure OK1OC8 :kind :image :extension "png"
+    (:figure OK1OC8 :kind :image :extension "png" :section :plates
      :description
      "Representative generated trees and terrain for cast-shadow inspection.")
     (pathname)
   (render-gazetteer-reference-plate :shadow-forest pathname))
 
 (luv:define-capture glow-floor
-    (:figure OK1OC8 :kind :image :extension "png"
+    (:figure OK1OC8 :kind :image :extension "png" :section :plates
      :description
      "A placed crystal proving material emission and blocklight after dark.")
     (pathname)
   (render-gazetteer-reference-plate :glow-floor pathname))
 
 (luv:define-capture crystal-seam
-    (:figure OK1OC8 :kind :image :extension "png"
+    (:figure OK1OC8 :kind :image :extension "png" :section :plates
      :description
      "A crystal lighting both sides of an exact chunk boundary.")
     (pathname)
   (render-gazetteer-reference-plate :crystal-seam pathname))
 
 (luv:define-capture turtle-meadow
-    (:figure OK1OC8 :kind :image :extension "png"
+    (:figure OK1OC8 :kind :image :extension "png" :section :plates
      :description
      "Three deterministic turtle poses for model, material, and shadow review.")
     (pathname)
   (render-gazetteer-reference-plate :turtle-meadow pathname))
 
 (luv:define-capture shadow-yard-still
-    (:figure OK1OC8 :kind :image :extension "png"
+    (:figure OK1OC8 :kind :image :extension "png" :section :plates
      :description
      "A low sun, flat receiver, and simple elevated casters for shadow review.")
     (pathname)
   (render-gazetteer-reference-plate :shadow-yard pathname))
 
 (luv:define-capture shadow-yard-motion
-    (:figure OK1OC8 :kind :video :extension "mp4"
+    (:figure OK1OC8 :kind :video :extension "mp4" :section :plates
      :description
      "A two-second consecutive sun sequence across the deterministic shadow yard.")
     (pathname)

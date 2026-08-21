@@ -12,6 +12,9 @@
                           :name name :figure-id "ABC12G" :kind :image
                           :description "second" :extension "webp"
                           :layout :portrait
+                          :section :inhabitants
+                          :credit "A small creature"
+                          :credit-url "https://example.test/creature"
                           :renderer #'identity)))
     (unwind-protect
          (progn
@@ -22,6 +25,10 @@
            (luv:register-capture-specification second)
            (ok (eq second (luv:find-capture-specification name)))
            (ok (eq :portrait (luv:capture-specification-layout second)))
+           (ok (eq :inhabitants
+                   (luv:capture-specification-section second)))
+           (ok (string= "A small creature"
+                        (luv:capture-specification-credit second)))
            (ok (= 1 (count name (luv:capture-specifications)
                            :key #'luv:capture-specification-name
                            :test #'string=))))
@@ -70,6 +77,9 @@
              (ok (string= "WEB12G-web-derivative-test.png"
                           (getf entry :file)))
              (ok (eq :landscape (getf entry :layout)))
+             (ok (eq :worlds (getf entry :section)))
+             (ok (string= "responsive image test"
+                          (getf entry :description)))
              (ok (equal '(480 768) (mapcar (lambda (item)
                                              (getf item :width))
                                            variants)))

@@ -125,12 +125,26 @@ without ever freezing rendering.")
                      (tool-argument-error-name condition)
                      (tool-argument-error-detail condition)))))
 
+(defun command-json-key-token (name)
+  "Canonicalize one provider-decoded object key for command lookup.
+
+The JSON schema spells compact coordinate names X1 and Y2.  Jonathan decodes
+those keys as keywords such as :X-1 and :Y-2; underscores can receive the same
+word-boundary treatment.  Removing those separators at this one JSON boundary
+restores the schema identity without changing CLIM argument names."
+  (remove-if (lambda (character) (find character "-_"))
+             (string-downcase (string name))))
+
+(defun command-json-key= (left right)
+  (string= (command-json-key-token left)
+           (command-json-key-token right)))
+
 (defun accept-command-argument (spec arguments)
   "Parse the JSON value for SPEC out of ARGUMENTS with its presentation type."
   (destructuring-bind (argument-name type &rest options) spec
     (declare (ignore options))
     (let* ((json-name (command-argument-json-name argument-name))
-           (cell (assoc json-name arguments :test #'string-equal))
+           (cell (assoc json-name arguments :test #'command-json-key=))
            (value (cdr cell)))
       (unless cell
         (error 'tool-argument-error :name json-name :detail "missing"))

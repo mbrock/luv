@@ -79,6 +79,8 @@
                       :captures
                       ((:name "proposal-still" :figure "Y7X7WK"
                         :kind :image :file "Y7X7WK-proposal-still.png"
+                        :section :play
+                        :description "A live construction proposal."
                         :layout :landscape :width 1200 :height 800
                         :variants
                         ((:file "Y7X7WK-proposal-still-480w.webp"
@@ -87,6 +89,10 @@
                           :type "image/webp" :width 768 :height 512)))
                        (:name "proposal-orbit" :figure "Y7X7WK"
                         :kind :video :file "Y7X7WK-proposal-orbit.mp4"
+                        :section :surfaces
+                        :description "A projected motion study."
+                        :credit "Fixture maker"
+                        :credit-url "https://example.test/fixture"
                         :layout :portrait :width 720 :height 1280
                         :poster
                         (:file "Y7X7WK-proposal-orbit-poster-480w.webp"
@@ -158,6 +164,14 @@
              (ok (search "class=portrait><div class=\"media portrait\">"
                          (luvcraft.web:web-response-body showcase)))
              (ok (search "preload=none poster=\"/showcase/media/Y7X7WK-proposal-orbit-poster-480w.webp\""
+                         (luvcraft.web:web-response-body showcase)))
+             (ok (search "<section class=collection id=play>"
+                         (luvcraft.web:web-response-body showcase)))
+             (ok (search "href=\"#surfaces\">Surfaces</a>"
+                         (luvcraft.web:web-response-body showcase)))
+             (ok (search "A live construction proposal."
+                         (luvcraft.web:web-response-body showcase)))
+             (ok (search "href=\"https://example.test/fixture\" rel=license>Fixture maker</a>"
                          (luvcraft.web:web-response-body showcase)))
              (ok (search ".media.portrait img,.media.portrait video{object-fit:contain}"
                          (luvcraft.web:web-response-body showcase)))

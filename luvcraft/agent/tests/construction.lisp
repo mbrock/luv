@@ -55,3 +55,8 @@
 
 (deftest propose-box-is-in-the-embodied-agent-toolbox
   (ok (member 'agent:com-propose-block-box agent::*gnome-tools*)))
+
+(deftest compact-coordinate-arguments-survive-provider-keyword-decoding
+  (let ((spec '(x1 integer :prompt "first x"))
+        (arguments '((:x-1 . 11))))
+    (ok (= 11 (agent::accept-command-argument spec arguments)))))

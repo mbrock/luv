@@ -6,6 +6,7 @@
 
 (luv:define-capture luft-holm-portrait
     (:figure SY26PO :kind :video :extension "mp4" :layout :portrait
+     :section :atelier
      :description
      "An upright aerial and close pass over the atelier's island architecture.")
     (pathname)
@@ -23,6 +24,7 @@
 
 (luv:define-capture luft-vale-portrait
     (:figure SY26PO :kind :video :extension "mp4" :layout :portrait
+     :section :atelier
      :description
      "An upright flight through the vale with its tree crowns modeled in clay.")
     (pathname)
@@ -43,6 +45,7 @@
 
 (luv:define-capture luft-clay-holm-breath
     (:figure 2TQEBB :kind :video :extension "mp4" :layout :portrait
+     :section :atelier
      :description
      "The holm's masonry breathing between quilted cells, pearls, and clay melt.")
     (pathname)

@@ -11,6 +11,7 @@
 (defconstant +terminal-cinema-film-frame-rate+ 12)
 (defconstant +terminal-cinema-clip-width+ 480)
 (defconstant +terminal-cinema-clip-height+ 270)
+(defconstant +terminal-open-movie-seconds+ 4)
 
 (defun terminal-cinema-look-pose
     (x y z target-x target-y target-z field-of-view)
@@ -28,8 +29,8 @@
 (defun terminal-cinema-environment-pose ()
   "The oblique shelter view shared by the shell and Film wall."
   (terminal-cinema-look-pose
-   1.4d0 4.7d0 2.0d0
-   7.0d0 3.4d0 12.0d0
+   1.4d0 (+ +gallery-stage-floor-y+ 4.7d0) 2.0d0
+   7.0d0 (+ +gallery-stage-floor-y+ 3.4d0) 12.0d0
    (* luvcraft::+luvcraft-camera-vertical-field-of-view+ 0.88d0)))
 
 (defun make-terminal-cinema-camera ()
@@ -38,44 +39,44 @@
     camera))
 
 (defun make-terminal-cinema-world ()
-  "Build the compact stone-and-wood shelter around one four-by-three wall."
-  (let ((world
-          (luvcraft::make-block-world
-           :source (make-instance 'luvcraft::gazetteer-open-sky-source))))
-    (luvcraft::ensure-world-chunk world 0 0 0)
+  "Build the shelter as a bounded clearing in deterministic seed terrain."
+  (make-staged-gallery-terrain-world
+   (lambda (world floor-y)
     ;; Meadow floor, stone threshold, and a warm timber path pull the terminal
     ;; into a place without competing with its luminous surface.
     (loop for x below 16 do
       (loop for z below 16 do
-        (setf (luvcraft:world-block-at world x 0 z)
+        (setf (luvcraft:world-block-at world x floor-y z)
               luvcraft::*grass-block*)))
     (loop for z from 3 to 12 do
       (loop for x from 5 to 9 do
-        (setf (luvcraft:world-block-at world x 1 z)
+        (setf (luvcraft:world-block-at world x (1+ floor-y) z)
               (if (oddp (+ x z))
                   luvcraft::*stone-block*
                   luvcraft::*bricks-block*))))
     ;; Back wall and deep frame.  The terminal sits one cell in front so its
     ;; :BACK face remains exposed toward the camera.
     (loop for x from 3 to 11 do
-      (loop for y from 1 to 6 do
-        (setf (luvcraft:world-block-at world x y 13)
-              (if (or (= x 3) (= x 11) (= y 1) (= y 6))
+      (loop for relative-y from 1 to 6 do
+        (setf (luvcraft:world-block-at
+               world x (+ floor-y relative-y) 13)
+              (if (or (= x 3) (= x 11)
+                      (= relative-y 1) (= relative-y 6))
                   luvcraft::*wood-block*
                   luvcraft::*stone-block*))))
     (loop for z from 10 to 14 do
       (loop for x from 2 to 12 do
-        (setf (luvcraft:world-block-at world x 7 z)
+        (setf (luvcraft:world-block-at world x (+ floor-y 7) z)
               luvcraft::*planks-block*)))
     (dolist (post '((2 10) (12 10) (2 14) (12 14)))
       (destructuring-bind (x z) post
-        (loop for y from 1 to 6 do
-          (setf (luvcraft:world-block-at world x y z)
+        (loop for relative-y from 1 to 6 do
+          (setf (luvcraft:world-block-at
+                 world x (+ floor-y relative-y) z)
                 luvcraft::*wood-block*))))
     (luvcraft:place-terminal-block-rectangle
-     world 5 2 12 :back 4 3)
-    (luvcraft:relight-block-world world)
-    world))
+     world 5 (+ floor-y 2) 12 :back 4 3))
+   :bounds '(0 1 14 15)))
 
 (defun terminal-cinema-shell-script ()
   "Return the bounded credential-free shell program for the showcase PTY."
@@ -139,7 +140,7 @@
             (progn
               (setf display
                     (luvcraft:open-terminal-display
-                     session 5 2 12 :back
+                     session 5 (+ +gallery-stage-floor-y+ 2) 12 :back
                      :rows-per-block 5 :fixture "" :font-scale 0.96))
               (when shell-p
                 (format t "capture terminal cinema: running PTY fixture...~%")
@@ -154,7 +155,7 @@
            (luvcraft:remove-luvcraft-overlay session display)))))
    :title "terminal cinema shelter"
    :width +terminal-cinema-width+ :height +terminal-cinema-height+
-   :clean-p t :residency-radius 0
+   :clean-p t :residency-radius +gallery-terrain-radius+
    :world (make-terminal-cinema-world)
    :camera (make-terminal-cinema-camera)
    :sky-clock (luvcraft::make-pinned-sky-clock day-fraction)
@@ -282,8 +283,17 @@
       (error "Terminal cinema Film mode unexpectedly used hardware decode."))
     screen))
 
+(defun terminal-open-movie-pathname ()
+  "The attributed repository fixture used by the open-movie cinema capture."
+  (let ((pathname
+          (asdf:system-relative-pathname
+           :luv/showcase "captures/fixtures/big-buck-bunny-meadow.mp4")))
+    (unless (probe-file pathname)
+      (error "The Big Buck Bunny showcase fixture is absent: ~A" pathname))
+    pathname))
+
 (luv:define-capture terminal-camp-golden-hour
-    (:figure 2TMUKK :kind :image :extension "png"
+    (:figure 2TMUKK :kind :image :extension "png" :section :surfaces
      :description
      "An actual styled PTY glowing obliquely inside its stone-and-wood shelter.")
     (pathname)
@@ -295,7 +305,7 @@
    :day-fraction 0.72 :shell-p t))
 
 (luv:define-capture terminal-shell-closeup
-    (:figure 2TMUKK :kind :image :extension "png"
+    (:figure 2TMUKK :kind :image :extension "png" :section :surfaces
      :description
      "The same styled PTY from the terminal's ordinary off-axis focus framing.")
     (pathname)
@@ -311,7 +321,7 @@
    :day-fraction 0.72 :shell-p t))
 
 (luv:define-capture wall-cinema-at-dusk
-    (:figure TWKA93 :kind :image :extension "png"
+    (:figure TWKA93 :kind :image :extension "png" :section :surfaces
      :description
      "An authored stone-age cartoon letterboxed inside the dusk terminal wall.")
     (pathname)
@@ -325,7 +335,7 @@
       :day-fraction 0.76))))
 
 (luv:define-capture wall-cinema-at-dusk-film
-    (:figure TWKA93 :kind :video :extension "mp4"
+    (:figure TWKA93 :kind :video :extension "mp4" :section :surfaces
      :description
      "Three seconds of authored video moving behind the terminal faceplate.")
     (pathname)
@@ -350,3 +360,36 @@
                      +terminal-cinema-film-seconds+)
              (finish-output)))))
       :day-fraction 0.76))))
+
+(luv:define-capture wall-cinema-open-movie
+    (:figure TWKA93 :kind :video :extension "mp4" :section :surfaces
+     :credit "(c) copyright 2008, Blender Foundation / www.bigbuckbunny.org"
+     :credit-url "https://peach.blender.org/about/"
+     :description
+     "Big Buck Bunny plays inside the real dusk terminal wall (CC BY 3.0).")
+    (pathname)
+  (call-with-terminal-cinema-session
+   (lambda (session display)
+     (let ((screen
+             (play-terminal-cinema-clip
+              display (terminal-open-movie-pathname)))
+           (frame-rate +terminal-cinema-film-frame-rate+))
+       (luvcraft:film-luvcraft-session
+        session pathname
+        :seconds +terminal-open-movie-seconds+
+        :frame-rate frame-rate
+        :include-hud-p nil :include-viewmodel-p nil
+        :before-frame
+        (lambda (frame)
+          ;; VIDEO-SCREEN normally follows wall time.  Give the authored film
+          ;; the capture clock so an offline render advances at exactly the
+          ;; same rate regardless of encoder or GPU speed.
+          (setf (luvcraft::video-screen-start screen)
+                (- (get-internal-real-time)
+                   (round (* (/ frame (coerce frame-rate 'double-float))
+                             internal-time-units-per-second))))
+          (when (zerop (mod frame frame-rate))
+            (format t "capture wall-cinema-open-movie: second ~D/~D~%"
+                    (1+ (/ frame frame-rate)) +terminal-open-movie-seconds+)
+            (finish-output))))))
+   :day-fraction 0.76))
