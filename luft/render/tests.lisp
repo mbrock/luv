@@ -408,8 +408,6 @@
 
 (deftest only-temporal-surface-shaders-write-motion
   (dolist (pair (list
-                 (list (luft.render.shaders:foundation-fragment-shader)
-                       (luft.render.shaders:temporal-foundation-fragment-shader))
                  (list (luft.render.shaders:surface-fragment-shader)
                        (luft.render.shaders:temporal-surface-fragment-shader))
                  (list (luft.render.shaders:chamfer-fragment-shader)

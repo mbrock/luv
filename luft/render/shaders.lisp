@@ -392,45 +392,6 @@ ordinary shader remains valid for a pipeline with only one colour target."
 
 
 ;;; ------------------------------------------------------------------------
-;;; Foundation inspection: honest facets under one neutral material
-;;;
-;;; The foundation path exists to make its discrete geometry legible before
-;;; richer material and temporal work can disguise it.  Derivatives recover
-;;; the plane each emitted triangle actually occupies; the original face
-;;; normal only orients that plane consistently.  No occupancy shadow or
-;;; crowding term participates, so a dark wedge here is geometry, not a ray
-;;; query through the solid.
-
-(define-temporal-fragment-shaders
-    (foundation-fragment-shader temporal-foundation-fragment-shader
-     (world-motion world))
-    (:stage :fragment
-     :inputs ((normal :vec3 :location 0)
-              (world :vec3 :location 1)
-              (uv :vec2 :location 2))
-     :outputs ((color :vec4 :location 0))
-     :resources ((frame :uniform-block :binding #.+frame-binding+
-                        :members #.*frame-uniform-members*)))
-  (let* ((raw-facet (cross-product (derivative-x world) (derivative-y world)))
-         (face (normalize normal))
-         (facet (normalize raw-facet))
-         (oriented (if (< (dot facet face) 0.0) (- facet) facet))
-         (width (swizzle domain-vector :z))
-         (softness (max (swizzle domain-vector :w) 0.0005))
-         (u (swizzle uv :x))
-         (v (swizzle uv :y))
-         (inset (min (min u (- 1.0 u)) (min v (- 1.0 v))))
-         (arris (- inset width))
-         (sanded (normalize (mix oriented face
-                                 (smoothstep (- softness) softness arris))))
-         (stone (vec3 0.62 0.61 0.57))
-         (final (surface-lighting stone sanded world 1.0 1.0
-                                  camera-vector sun-vector sun-colour-vector
-                                  fill-vector sky-vector ground-vector)))
-    (set-output color (vec4 final 1.0))))
-
-
-;;; ------------------------------------------------------------------------
 ;;; Bevelled and filleted faces
 ;;;
 ;;; The rounding of a crease belongs to the crease's site, not to either face
