@@ -17,7 +17,7 @@ The wires are the 4x4 point grid and each cell's shared diagonal, which is
 the way to read a triangulation and exactly the wrong way to judge whether a
 crease looks right: an inked crease reads as a fold whether or not it is one.")
 
-(defparameter *projection* :isometric
+(defparameter *projection* :perspective
   "Either :PERSPECTIVE or :ISOMETRIC.
 
 An isometric picture has no vanishing point, so two chamfers the same width
@@ -42,13 +42,14 @@ projection to judge a shape rule in.")
                              :field-of-view field-of-view))
 
 (defun reset-viewer-camera (&optional (viewer *viewer*))
-  "Return VIEWER to the composed isometric sanctuary view."
+  "Return VIEWER to the composed perspective sanctuary view."
   (when viewer
     (let ((camera (viewer-camera viewer)))
       (setf (camera-position camera) (vec3:make-vec3 70.0 -18.0 50.0)
             (camera-yaw camera) 2.2455373
             (camera-pitch camera) -0.5165006
             (camera-field-of-view camera) 0.9599311
+            *projection* :perspective
             *isometric-height* 64.0)
       (when (viewer-renderer viewer)
         (setf (renderer-history-valid-p (viewer-renderer viewer)) nil))))
@@ -176,7 +177,7 @@ the selector is the whole of the difference."
                  :reader viewer-pressed-keys)
    (pointer-captured-p :initform nil :accessor viewer-pointer-captured-p)
    (last-timestamp :initform nil :accessor viewer-last-timestamp)
-   (speed :initarg :speed :initform 12.0 :accessor viewer-speed)
+   (speed :initarg :speed :initform 4.0 :accessor viewer-speed)
    (sensitivity :initarg :sensitivity :initform 0.0032
                 :accessor viewer-sensitivity)
    (running-p :initform t :accessor viewer-running-p)))
@@ -210,7 +211,7 @@ the selector is the whole of the difference."
         (when (viewer-key-down-p viewer :a :left) (move right (- step)))
         (when (viewer-key-down-p viewer :space)
           (move (vec3:make-vec3 0 0 1) step))
-        (when (viewer-key-down-p viewer :left-shift :right-shift)
+        (when (viewer-key-down-p viewer :shift-left :shift-right)
           (move (vec3:make-vec3 0 0 1) (- step)))))))
 
 (defun render-viewer-frame (viewer timestamp)
@@ -256,13 +257,16 @@ the selector is the whole of the difference."
 
 (defmethod handle-canvas-event
     ((viewer viewer) canvas (event canvas-pointer-wheel-event))
-  (declare (ignore viewer canvas))
-  (when (eq *projection* :isometric)
-    (setf *isometric-height*
-          (max 6.0 (min 96.0
-                        (* *isometric-height*
-                           (expt 1.10
-                                 (- (canvas-pointer-event-scroll-y event))))))))
+  (declare (ignore canvas))
+  (let ((factor (expt 1.10 (- (canvas-pointer-event-scroll-y event)))))
+    (if (eq *projection* :isometric)
+        (setf *isometric-height*
+              (max 6.0 (min 96.0 (* *isometric-height* factor))))
+        (let ((camera (viewer-camera viewer)))
+          (setf (camera-field-of-view camera)
+                (max 0.43633232
+                     (min 1.7453293
+                          (* (camera-field-of-view camera) factor)))))))
   nil)
 
 (defmethod handle-canvas-event
