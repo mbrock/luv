@@ -127,7 +127,7 @@ the point is and of nothing else.  #86IMVU"
                `(* ,(if (= 1 (first c)) fx `(- 1.0 ,fx))
                    (* ,(if (= 1 (second c)) fy `(- 1.0 ,fy))
                       ,(if (= 1 (third c)) fz `(- 1.0 ,fz))))))
-        `((,p ,point-form)
+        `((,p (wrap-torus-point ,point-form period-x period-y))
           (,base (floor (- ,p (vec3 0.5 0.5 0.5))))
           (,frac (- (- ,p (vec3 0.5 0.5 0.5)) ,base))
           (,fx (swizzle ,frac :x))

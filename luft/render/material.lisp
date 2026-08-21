@@ -136,10 +136,10 @@ swims under the camera nor shimmers under temporal accumulation."
 ;;; it takes the colour of the metal under it, and a rim term that lets a
 ;;; stone's silhouette catch the sky.
 
-(define-shader-function stock-lighting
+(define-shader-function stock-radiance
     (base normal world occlusion shade finish tint camera-vector sun-vector
      sun-colour-vector fill-vector sky-vector ground-vector)
-  "The lit, tonemapped, fogged colour of BASE under the frame's lights.
+  "The linear HDR radiance of BASE under the frame's lights.
 
 FINISH is the gloss strength, its power, the rim strength, and how metallic
 the stock is; TINT is what the reflections are multiplied by, white for a
@@ -155,7 +155,6 @@ goes up."
          (ambient (swizzle sun-vector :w))
          (sky (swizzle sky-vector :xyz))
          (ground (swizzle ground-vector :xyz))
-         (exposure (swizzle ground-vector :w))
          (radiance (swizzle sun-colour-vector :xyz))
          (camera (swizzle camera-vector :xyz))
          (delta (- world camera))
@@ -197,11 +196,33 @@ goes up."
                        (* metallic (* occlusion (+ 1.0 (* 0.8 grazing))))))
          (lit (+ (+ (* base (* light (- 1.0 (* 0.85 metallic)))) reflected)
                  (* (* radiance tint)
-                    (* specular (* shade (max facing 0.0))))))
-         (exposed (paper-tonemap (* lit exposure)))
+                    (* specular (* shade (max facing 0.0)))))))
+    lit))
+
+(define-shader-function present-stock-radiance
+    (linear world camera-vector sky-vector ground-vector)
+  "Expose, tonemap, and fog LINEAR stock radiance for the paper renderer."
+  (let* ((sky (swizzle sky-vector :xyz))
+         (exposure (swizzle ground-vector :w))
+         (delta (- world (swizzle camera-vector :xyz)))
+         (distance (sqrt (dot delta delta)))
+         (exposed (paper-tonemap (* linear exposure)))
          (fog-far (swizzle sky-vector :w))
          (fog (smoothstep (* 0.55 fog-far) fog-far distance)))
     (mix exposed sky fog)))
+
+(define-shader-function stock-lighting
+    (base normal world occlusion shade finish tint camera-vector sun-vector
+     sun-colour-vector fill-vector sky-vector ground-vector)
+  "The lit, tonemapped, fogged colour of BASE under the frame's lights.
+
+The standalone paper renderer retains this composed entry point.  Embedded
+HDR renderers use STOCK-RADIANCE directly and own presentation themselves."
+  (present-stock-radiance
+   (stock-radiance base normal world occlusion shade finish tint
+                   camera-vector sun-vector sun-colour-vector fill-vector
+                   sky-vector ground-vector)
+   world camera-vector sky-vector ground-vector))
 
 ;;; ------------------------------------------------------------------------
 ;;; The stock fragment stage
@@ -212,11 +233,19 @@ goes up."
 ;;; face it cuts, which is exactly zero wherever the surface continues flat.
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (defun stock-fragment-shader-definition ()
-    "The stock fragment shader, spliced around one wide field sample."
-    `(define-temporal-fragment-shaders
-         (stock-fragment-shader temporal-stock-fragment-shader
-          (world-motion world))
+  (defun stock-fragment-shader-definition
+      (&key (name 'stock-fragment-shader)
+            (temporal-name 'temporal-stock-fragment-shader)
+            linear-p)
+    "A stock fragment shader definition, spliced around one field sample.
+
+The ordinary definition owns the paper presentation transform and may have a
+matching TEMPORAL-NAME.  With LINEAR-P, NAME instead writes unexposed linear
+radiance for an enclosing HDR renderer and contains no tonemap or fog."
+    `(,(if linear-p 'define-shader 'define-temporal-fragment-shaders)
+       ,(if linear-p
+            name
+            `(,name ,temporal-name (world-motion world)))
          (:stage :fragment
           :inputs ((normal :vec3 :location 0)
                    (world :vec3 :location 1)
@@ -240,6 +269,9 @@ goes up."
                               :element :vec4)))
        (let* ((period-x (swizzle domain-vector :x))
               (period-y (swizzle domain-vector :y))
+              ;; REST remains unwrapped for material figure and stable world
+              ;; detail; only dense field reads return to the torus period.
+              (sample-rest (wrap-torus-point rest period-x period-y))
               (softness (max (swizzle domain-vector :w) 0.0005))
               ;; Two facets, one in each space.  The rest facet says what
               ;; the geometry is -- flat wall or planed arris -- and cannot
@@ -335,7 +367,7 @@ goes up."
               ;; A third-cell tent, not a half-cell one: the band must hug
               ;; the arris, or the wear is a soft gradient down the whole
               ;; face and the crispness the chamfer was cut for is gone.
-              ,@(occupancy-field-bindings 'wide 'rest 0.32)
+              ,@(occupancy-field-bindings 'wide 'sample-rest 0.32)
               (relief (- (swizzle wide :w) 0.5))
               (ridge (smoothstep 0.02 0.34 (- relief)))
               (hollow (smoothstep 0.02 0.30 relief))
@@ -350,11 +382,11 @@ goes up."
               ;; the shadow ray is walked through the rest occupancy along
               ;; the sun's own direction, so shadows bend with the geometry
               ;; rather than being cast across it.
-              (lost (field-shadow rest (swizzle sun-vector :xyz)
+              (lost (field-shadow sample-rest (swizzle sun-vector :xyz)
                                   ,*field-shadow-steps*
                                   ,*field-shadow-reach*))
               (shade (mix 1.0 (- 1.0 lost) (swizzle occlusion-vector :y)))
-              (crowding (field-occlusion rest sanded-rest
+              (crowding (field-occlusion sample-rest sanded-rest
                                          ,*field-occlusion-steps*
                                          ,*field-occlusion-reach*))
               (open (- 1.0 (* (swizzle occlusion-vector :x) crowding)))
@@ -362,19 +394,29 @@ goes up."
               ;; An arris is the one line on a made thing that is always
               ;; polished, whatever the rest of the surface is doing.
               (finish (vec4 (* gloss (mix 1.0 2.2 planed)) power rim metallic))
-              (final (stock-lighting stock sanded world open shade
-                                     finish tint camera-vector sun-vector
-                                     sun-colour-vector fill-vector
-                                     sky-vector ground-vector))
-              ;; Alpha carries distance for the focus pass, as paper's does.
-              (delta (- world (swizzle camera-vector :xyz)))
-              (range (max (swizzle lens-vector :x) 1.0))
-              (reach (clamp (/ (sqrt (dot delta delta)) (* 2.0 range))
-                            0.0 1.0))
-              (depth (if (> (swizzle lens-vector :y) 0.0) reach 1.0)))
-         (set-output color (vec4 final depth))))))
+              (final ,(if linear-p
+                          '(stock-radiance
+                            stock sanded world open shade finish tint
+                            camera-vector sun-vector sun-colour-vector
+                            fill-vector sky-vector ground-vector)
+                          '(stock-lighting
+                            stock sanded world open shade finish tint
+                            camera-vector sun-vector sun-colour-vector
+                            fill-vector sky-vector ground-vector)))
+              ,@(unless linear-p
+                  '((delta (- world (swizzle camera-vector :xyz)))
+                    (range (max (swizzle lens-vector :x) 1.0))
+                    (reach (clamp (/ (sqrt (dot delta delta)) (* 2.0 range))
+                                  0.0 1.0))
+                    ;; Alpha carries distance for the focus pass, as
+                    ;; paper's does.
+                    (depth (if (> (swizzle lens-vector :y) 0.0) reach 1.0)))))
+         (set-output color (vec4 final ,(if linear-p 1.0 'depth)))))))
 
 #.(stock-fragment-shader-definition)
+
+#.(stock-fragment-shader-definition :name 'linear-stock-fragment-shader
+                                    :linear-p t)
 
 ;;; ------------------------------------------------------------------------
 ;;; The materials themselves

@@ -444,6 +444,41 @@
         (ok (= 2 (length outputs)))
         (ok (= 1 (luv.shader:shader-interface-location (second outputs))))))))
 
+(defun shader-specification-calls-p (specification function-name)
+  "Whether SPECIFICATION's typed graph calls shader FUNCTION-NAME."
+  (let ((definition
+          (luv.shader:shader-function-definition-for function-name)))
+    (find definition (luv.shader:shader-specification-expressions specification)
+          :test #'eq
+          :key (lambda (expression)
+                 (and (typep expression 'luv.shader:shader-function-call)
+                      (luv.shader:shader-function-call-definition
+                       expression))))))
+
+(deftest linear-stock-radiance-leaves-presentation-to-its-frame-owner
+  (let ((linear
+          (luft.render.shaders:linear-stock-fragment-shader))
+        (presented
+          (luft.render.shaders:stock-fragment-shader)))
+    (ok (= 1 (length (luv.shader:shader-specification-outputs linear))))
+    (ok (shader-specification-calls-p
+         linear 'luft.render.shaders::stock-radiance))
+    (dolist (presentation
+              '(luft.render.shaders::stock-lighting
+                luft.render.shaders::present-stock-radiance
+                luft.render.shaders::paper-tonemap))
+      (ok (not (shader-specification-calls-p linear presentation))))
+    ;; The standalone renderer still owns its original paper presentation.
+    (ok (shader-specification-calls-p
+         presented 'luft.render.shaders::stock-lighting))))
+
+(deftest surface-vertices-lift-packed-sites-to-the-camera-nearest-torus-image
+  (dolist (specification
+            (list (luft.render.shaders:surface-vertex-shader)
+                  (luft.render.shaders:stock-vertex-shader)))
+    (ok (shader-specification-calls-p
+         specification 'luft.render.shaders::camera-torus-anchor))))
+
 
 (defun probe-scene ()
   "A floor with a block and an L-shaped stack: pure, mixed, and concave stars."

@@ -31,6 +31,7 @@
            #:ink-fragment-shader
            #:temporal-ink-fragment-shader
            #:stock-fragment-shader
+           #:linear-stock-fragment-shader
            #:temporal-stock-fragment-shader
            #:clay-vertex-shader
            #:clay-fragment-shader

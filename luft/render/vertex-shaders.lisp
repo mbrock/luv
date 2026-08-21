@@ -43,6 +43,28 @@ with the loop reversed when NEGATIVE-P."
   "One when CORNER lies along the face's second spanning axis."
   (if (> corner 1.5) 1.0 0.0))
 
+(define-shader-function nearest-torus-coordinate (coordinate reference period)
+  "The periodic image of COORDINATE nearest REFERENCE."
+  (+ coordinate
+     (* period (floor (+ (/ (- reference coordinate) period) 0.5)))))
+
+(define-shader-function wrap-torus-point (point period-x period-y)
+  "Wrap POINT horizontally into the dense occupancy field's base period."
+  (vec3 (- (swizzle point :x)
+           (* period-x (floor (/ (swizzle point :x) period-x))))
+        (- (swizzle point :y)
+           (* period-y (floor (/ (swizzle point :y) period-y))))
+        (swizzle point :z)))
+
+(define-shader-function camera-torus-anchor
+    (packed camera period-x period-y)
+  "Lift PACKED's horizontal coordinates to the torus image nearest CAMERA."
+  (vec3 (nearest-torus-coordinate (swizzle packed :x)
+                                  (swizzle camera :x) period-x)
+        (nearest-torus-coordinate (swizzle packed :y)
+                                  (swizzle camera :y) period-y)
+        (swizzle packed :z)))
+
 ;;; ------------------------------------------------------------------------
 ;;; Flat faces: six vertices a site
 
@@ -71,7 +93,10 @@ The renderer multiplies this by the site count to size its draw."))
          ;; The signed site: XYZ extent in the low three bits, polarity in the
          ;; fourth, then X, Y, Z anchors.
          (extent (uint (ldb (byte luft:+extent-bits+ 0) site)))
-         (anchor
+         (camera (swizzle camera-vector :xyz))
+         (period-x (swizzle domain-vector :x))
+         (period-y (swizzle domain-vector :y))
+         (packed-anchor
            (vec3 (float (uint (ldb (byte luft:+horizontal-capacity-bits+
                                           luft:+x-shift+)
                                     site)))
@@ -81,6 +106,7 @@ The renderer multiplies this by the site count to size its draw."))
                  (float (uint (ldb (byte luft:+vertical-coordinate-bits+
                                           luft:+z-shift+)
                                     site)))))
+         (anchor (camera-torus-anchor packed-anchor camera period-x period-y))
          (negative-p (= (uint (ldb (byte 1 luft:+site-sign-bit+) site))
                         (uint 1.0)))
          (present-p (> extent (uint 0.0)))
@@ -97,7 +123,6 @@ The renderer multiplies this by the site count to size its draw."))
                         (if xz-face-p (vec3 0.0 -1.0 0.0) (vec3 0.0 0.0 1.0))))
          (orientation (if negative-p -1.0 1.0))
          (normal (* canonical orientation))
-         (camera (swizzle camera-vector :xyz))
          (facing-p (> (dot normal (- camera anchor)) 0.0))
          ;; Absent or back-facing faces collapse onto their anchor.
          (scale (if present-p (if facing-p 1.0 0.0) 0.0))
@@ -227,21 +252,79 @@ so that the two faces along a crease cannot disagree."
                                                         arris-concave)
                                      corner-stock))))))))
 
+  (defun perspective-grid-position-form (point-form)
+    "Project POINT-FORM through LUFT's jittered perspective camera."
+    `(jitter-clip
+      (view-clip ,point-form camera
+                 (swizzle right-vector :xyz)
+                 (swizzle up-vector :xyz)
+                 (swizzle forward-vector :xyz)
+                 projection-vector)
+      (swizzle jitter-vector :xy)))
+
+  (defun standard-grid-vertex-output-forms (position-form rule deform)
+    "The ordinary surface varyings after shaped-grid geometry is complete.
+
+POSITION-FORM is deliberately supplied by the caller.  A renderer embedding
+LUFT can therefore project POINT with its own camera or light transform while
+reusing the exact site, star, stock, deformation, normal, UV, and rest-point
+construction above it."
+    `((set-output position ,position-form)
+      (set-output normal out-normal)
+      (set-output world point)
+      (set-output uv (vec2 s t*))
+      ,@(when (eq rule :chamfer)
+          '((set-output face-normal normal)
+            (set-output stock stock-slot)))
+      ,@(when deform
+          '((set-output rest rest-point)
+            (set-output bent-normal bent-face)))))
+
   (defun grid-vertex-shader-definition (name rings rule
-                                        &key (widths :uniform) (deform nil))
+                                        &key
+                                          (widths :uniform)
+                                          (deform nil)
+                                          (face-culling :camera)
+                                          (projector
+                                            #'perspective-grid-position-form)
+                                          (emitter
+                                            #'standard-grid-vertex-output-forms)
+                                          (extra-resources '()))
     "A vertex shader definition named NAME: the grid of RINGS rings, each
 vertex placed by RULE, :CHAMFER or :ROUND, from its nearest corner's star.
 
 WIDTHS is :UNIFORM for one chamfer width over the whole world or :SITE for
 one per site.  With DEFORM the shaped point is passed through the lattice
-map of [[lattice.lisp]] before it is projected, and the shader also carries
-the undeformed rest position out to the fragment stage, which needs it for
-everything it looks up in the lattice."
+map of [[lattice.lisp]], and the shader also constructs its undeformed rest
+position.  PROJECTOR is a compile-time function from the final POINT form to
+a clip-position form.  EMITTER is a compile-time function of that position,
+RULE, and DEFORM; its forms run with POINT, OUT-NORMAL, S, T*, REST-POINT,
+NORMAL, STOCK-SLOT, and BENT-FACE in scope.  Thus another render pass can
+share the complete geometry construction without inheriting this renderer's
+perspective camera or varying convention.
+
+FACE-CULLING is :CAMERA for the ordinary draw or :NONE for a shadow/light
+projection.  EXTRA-RESOURCES extends the generated shader's resource list."
     (let* ((side (let ((*bevel-rings* rings)) (bevel-grid-side)))
            (quads (1- side))
            (last (float (1- side)))
            (half (float (floor side 2)))
-           (vertices (grid-vertices-per-face rings)))
+           (vertices (grid-vertices-per-face rings))
+           (visibility
+             (ecase face-culling
+               (:camera
+                (if deform
+                    '(if present-p
+                         (if (> (+ (abs (swizzle deform-vector :y))
+                                   (abs (swizzle deform-vector :w)))
+                                0.0)
+                             1.0
+                             (if facing-p 1.0 0.0))
+                         0.0)
+                    '(if present-p (if facing-p 1.0 0.0) 0.0)))
+               (:none '(if present-p 1.0 0.0))))
+           (position-form (funcall projector 'point))
+           (output-forms (funcall emitter position-form rule deform)))
       `(define-shader ,name
            (:stage :vertex
             :inputs ((vertex-index :uint :built-in :vertex-index))
@@ -258,7 +341,8 @@ everything it looks up in the lattice."
                         ,@(when (or (eq widths :site) (eq rule :clay))
                             `((slots :storage-buffer
                                      :binding ,+slots-binding+
-                                     :element :uint))))
+                                     :element :uint)))
+                        ,@extra-resources)
             :outputs ((position :vec4 :built-in :position)
                       (normal :vec3 :location 0)
                       (world :vec3 :location 1)
@@ -283,7 +367,10 @@ everything it looks up in the lattice."
                 (quad-i (float (/ quad (uint ,(float quads)))))
                 (quad-j (float (mod quad (uint ,(float quads)))))
                 (extent (uint (ldb (byte luft:+extent-bits+ 0) site)))
-                (anchor
+                (camera (swizzle camera-vector :xyz))
+                (period-x (swizzle domain-vector :x))
+                (period-y (swizzle domain-vector :y))
+                (packed-anchor
                   (vec3 (float (uint (ldb (byte luft:+horizontal-capacity-bits+
                                                  luft:+x-shift+)
                                            site)))
@@ -293,6 +380,11 @@ everything it looks up in the lattice."
                         (float (uint (ldb (byte luft:+vertical-coordinate-bits+
                                                  luft:+z-shift+)
                                            site)))))
+                (anchor
+                  (camera-torus-anchor packed-anchor camera period-x period-y))
+                ;; Geometry stays in the camera-nearest image.  Only dense
+                ;; occupancy/slot reads return to the base period.
+                (sample-anchor (wrap-torus-point anchor period-x period-y))
                 (negative-p (= (uint (ldb (byte 1 luft:+site-sign-bit+) site))
                                (uint 1.0)))
                 (present-p (> extent (uint 0.0)))
@@ -309,16 +401,17 @@ everything it looks up in the lattice."
                 (orientation (if negative-p -1.0 1.0))
                 (normal (* canonical orientation))
                 (axis (abs canonical))
-                (camera (swizzle camera-vector :xyz))
                 ;; A shaped point's normal tilts well away from the face
                 ;; normal, so only faces turned well past grazing can be
                 ;; dropped with this deliberately relaxed facing test.
-                (toward (- camera (+ anchor (* (+ edge-a edge-b) 0.5))))
-                (toward-normal (dot normal toward))
-                (facing-p (if (> toward-normal 0.0)
-                              (> 1.0 0.0)
-                              (< (* toward-normal toward-normal)
-                                 (* 0.72 (dot toward toward)))))
+                ,@(when (eq face-culling :camera)
+                    '((toward
+                        (- camera (+ anchor (* (+ edge-a edge-b) 0.5))))
+                      (toward-normal (dot normal toward))
+                      (facing-p (if (> toward-normal 0.0)
+                                    (> 1.0 0.0)
+                                    (< (* toward-normal toward-normal)
+                                       (* 0.72 (dot toward toward)))))))
                 ;; The packed clay stocks claim whole faces for the clay
                 ;; overlay: the clay rule draws exactly the claimed faces
                 ;; and every other rule leaves them to it.  The lane is
@@ -337,22 +430,10 @@ everything it looks up in the lattice."
                 ;; A bent lattice can turn a face toward the camera that
                 ;; the rest lattice had turned away, so a deforming shader
                 ;; keeps every present face and lets depth sort it out.
-                (scale (* ,(if deform
-                               '(if present-p
-                                    (if (> (+ (abs (swizzle deform-vector
-                                                            :y))
-                                              (abs (swizzle deform-vector
-                                                            :w)))
-                                           0.0)
-                                        1.0
-                                        (if facing-p 1.0 0.0))
-                                    0.0)
-                               '(if present-p (if facing-p 1.0 0.0) 0.0))
+                (scale (* ,visibility
                           ,(if (eq rule :clay)
                                '(if (> clay-lane 0.5) clay-claimed 1.0)
                                '(- 1.0 clay-claimed))))
-                (period-x (swizzle domain-vector :x))
-                (period-y (swizzle domain-vector :y))
                 ;; The in-plane band the grid reserves.  The clay rule's
                 ;; knobs ride the material lanes' spares, so a hybrid
                 ;; frame can carry another style's width here too.
@@ -388,8 +469,10 @@ everything it looks up in the lattice."
                 ;; The face's own solid cell and air cell anchors, and the
                 ;; six cells of the nearest corner's star beside them.
                 (positive-p (> (dot normal axis) 0.0))
-                (solid-anchor (- anchor (* axis (if positive-p 1.0 0.0))))
-                (air-anchor (- anchor (* axis (if positive-p 0.0 1.0))))
+                (solid-anchor
+                  (- sample-anchor (* axis (if positive-p 1.0 0.0))))
+                (air-anchor
+                  (- sample-anchor (* axis (if positive-p 0.0 1.0))))
                 ,@(cell-solid-bindings 'solid-cu '(+ solid-anchor u))
                 ,@(cell-solid-bindings 'solid-eu '(+ air-anchor u))
                 ,@(cell-solid-bindings 'solid-cv '(+ solid-anchor v))
@@ -419,6 +502,8 @@ everything it looks up in the lattice."
                 (s ,(grid-parameter-form 'grid-i rings))
                 (t* ,(grid-parameter-form 'grid-j rings))
                 (flat (+ anchor (* edge-a s) (* edge-b t*)))
+                (sample-flat
+                  (+ sample-anchor (* edge-a s) (* edge-b t*)))
                 ,@(ecase rule
                     (:clay
                      ;; The clay union: every point, boundary or inner,
@@ -426,11 +511,11 @@ everything it looks up in the lattice."
                      ;; rounded-cell field (luft/render/clay.lisp), the
                      ;; gradient read by tetrahedron.
                      `((melt (swizzle side-vector :w))
-                       ,@(clay-newton-bindings 'clay-a 'flat
+                       ,@(clay-newton-bindings 'clay-a 'sample-flat
                                                'radius 'melt)
                        ,@(clay-newton-bindings 'clay-b 'clay-a-point
                                                'radius 'melt)
-                       (shaped clay-b-point)
+                       (shaped (+ flat (- clay-b-point sample-flat)))
                        (shaped-normal (if (> (dot clay-b-gradient
                                                   clay-b-gradient)
                                              0.0000001)
@@ -443,15 +528,16 @@ everything it looks up in the lattice."
                      ;; its normal from the gradient there.
                      `((vertical-radius (swizzle domain-vector :w))
                        (reach (max radius vertical-radius))
-                       ,@(occupancy-field-bindings 'field-0 'flat 'radius
+                       ,@(occupancy-field-bindings 'field-0 'sample-flat 'radius
                                                    'vertical-radius)
-                       (point-1 (field-step flat field-0 reach))
+                       (point-1 (field-step sample-flat field-0 reach))
                        ,@(occupancy-field-bindings 'field-1 'point-1 'radius
                                                    'vertical-radius)
                        (point-2 (field-step point-1 field-1 reach))
                        ,@(occupancy-field-bindings 'field-2 'point-2 'radius
                                                    'vertical-radius)
-                       (shaped (field-step point-2 field-2 reach))
+                       (field-shaped (field-step point-2 field-2 reach))
+                       (shaped (+ flat (- field-shaped sample-flat)))
                        (shaped-normal (field-normal field-2 normal))))
                     (:chamfer
                      ;; Woodworking: shared points move to the meeting of
@@ -578,22 +664,8 @@ everything it looks up in the lattice."
                                                   deform-scale deform-centre
                                                   amplitude erode-grain)))
                       '((point rest-point)
-                        (out-normal shaped-normal)))
-                (clip (view-clip point camera
-                                 (swizzle right-vector :xyz)
-                                 (swizzle up-vector :xyz)
-                                 (swizzle forward-vector :xyz)
-                                 projection-vector)))
-           (set-output position (jitter-clip clip (swizzle jitter-vector :xy)))
-           (set-output normal out-normal)
-           (set-output world point)
-           (set-output uv (vec2 s t*))
-           ,@(when (eq rule :chamfer)
-               '((set-output face-normal normal)
-                 (set-output stock stock-slot)))
-           ,@(when deform
-               '((set-output rest rest-point)
-                 (set-output bent-normal bent-face))))))))
+                        (out-normal shaped-normal))))
+           ,@output-forms)))))
 
 (defmethod surface-vertices-per-face ((style (eql :chamfer)))
   (grid-vertices-per-face 1))
