@@ -24,6 +24,7 @@
            #:gallery-plot-origin
            #:*gallery*
            #:make-face-materialization
+           #:make-face-materialization-from-surface
            #:renderer
            #:renderer-materialization
            #:fly-camera

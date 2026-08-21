@@ -4,13 +4,18 @@ LUVCRAFT_BENCHMARK_FRAMES ?= 120
 LUVCRAFT_BENCHMARK_CSV ?= build/luvcraft-metal-benchmark.csv
 LUVCRAFT_BENCHMARK_SCENARIO ?= steady
 LUVCRAFT_STREAMING_BENCHMARK_CSV ?= build/luvcraft-metal-streaming-benchmark.csv
+LUFT_MESHER_BENCHMARK_CSV ?= build/luft-mesher-benchmark.csv
+LUFT_MESHER_BENCHMARK_SIZES ?= 8,16,32,64
+LUFT_MESHER_BENCHMARK_PATTERNS ?= solid,terrain,architecture,checkerboard
+LUFT_MESHER_BENCHMARK_SAMPLES ?= 15
+LUFT_MESHER_BENCHMARK_WARMUPS ?= 3
 TRACY_STREAMING_TRACE ?= build/luvcraft-streaming.tracy
 TRACY_MCCLIM_ROUNDRECT_TRACE ?= build/mcclim-roundrect.tracy
 TRACY_MCCLIM_PAINT_TRACE ?= build/mcclim-paints.tracy
 
 FASL_CACHE := $(HOME)/.cache/common-lisp
 
-.PHONY: all luvcraft luft run test capture showcase-bootstrap showcase-render showcase-deploy showcase-publish showcase-status clean-fasls parinfer-check shader-validate msl-validate smoke vulkan-smoke metal-smoke metal-text-closeup metal-benchmark metal-streaming-benchmark tracy-streaming tracy-mcclim-roundrect tracy-mcclim-paints readme-screenshots mcclim-gallery wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw roundrect-proof slug-proof slug-text-proof clean
+.PHONY: all luvcraft luft run test capture showcase-bootstrap showcase-render showcase-deploy showcase-publish showcase-status clean-fasls parinfer-check shader-validate msl-validate smoke vulkan-smoke metal-smoke metal-text-closeup metal-benchmark metal-streaming-benchmark luft-mesher-benchmark tracy-streaming tracy-mcclim-roundrect tracy-mcclim-paints readme-screenshots mcclim-gallery wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw roundrect-proof slug-proof slug-text-proof clean
 
 all: luvcraft luft
 
@@ -173,6 +178,15 @@ metal-benchmark: luvcraft
 
 metal-streaming-benchmark:
 	$(MAKE) metal-benchmark LUVCRAFT_BENCHMARK_SCENARIO=streaming LUVCRAFT_BENCHMARK_CSV=$(LUVCRAFT_STREAMING_BENCHMARK_CSV)
+
+luft-mesher-benchmark:
+	mkdir -p build
+	./scripts/dev sbcl --script scripts/luft-mesher-benchmark.lisp \
+		$(LUFT_MESHER_BENCHMARK_CSV) \
+		$(LUFT_MESHER_BENCHMARK_SIZES) \
+		$(LUFT_MESHER_BENCHMARK_PATTERNS) \
+		$(LUFT_MESHER_BENCHMARK_SAMPLES) \
+		$(LUFT_MESHER_BENCHMARK_WARMUPS)
 
 tracy-streaming: luvcraft
 	./scripts/trace-luvcraft-streaming $(TRACY_STREAMING_TRACE)

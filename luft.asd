@@ -30,6 +30,14 @@
   :components ((:file "luft/render/studio"))
   :in-order-to ((test-op (test-op "luft/render/test"))))
 
+(defsystem "luft/benchmark"
+  :description "Repeatable CPU materialization benchmarks for LUFT chunks."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luft/renderer")
+  :components ((:file "luft/benchmark"))
+  :in-order-to ((test-op (test-op "luft/benchmark/test"))))
+
 (defsystem "luft/program"
   :description "The standalone LUFT atelier executable."
   :version "0.0.1"
@@ -56,3 +64,16 @@
                                        (uiop:symbol-call '#:rove '#:find-suite
                                                          '#:luft.render.tests))
                (error "LUFT render tests failed"))))
+
+(defsystem "luft/benchmark/test"
+  :description "Executable claims for the LUFT CPU benchmark harness."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luft/benchmark" "rove")
+  :components ((:file "luft/benchmark-tests"))
+  :perform (test-op (operation component)
+             (declare (ignore operation component))
+             (unless (uiop:symbol-call '#:rove '#:run-suite
+                                       (uiop:symbol-call '#:rove '#:find-suite
+                                                         '#:luft.benchmark.tests))
+               (error "LUFT benchmark tests failed"))))

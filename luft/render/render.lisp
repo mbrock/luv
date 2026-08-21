@@ -252,25 +252,28 @@ curtain wall, paired turrets and an arcaded hall."
           (* 3 (luft:site-z face)) (luft:site-extent face))
        4))
 
-(defun make-face-materialization (source &key stock-function)
-  "Lower SOLID's boundary to positive then negative dense face records."
-  (let* ((scene (and (typep source 'scene) source))
-         (solid (if scene (scene-solid scene) source))
-         (stock-function (or stock-function
-                             (and scene
-                                  (lambda (face) (scene-face-stock scene face)))
-                             #'default-face-stock)))
-    (check-type solid luft:chain)
-    (let* ((domain (luft:chain-domain solid))
-           (surface (luft:surface-chain solid))
-           (sites (luft:chain-sites surface))
-           (positive-count
-             (loop for face across sites count (luft:site-positive-p face)))
-           (negative-count (- (length sites) positive-count))
-           (words (luft:make-face-record-array (length sites)))
-           (occupancy (lambda (x y z)
-                        (luft:chain-cell-occupancy-bit solid x y z)))
-           (write 0))
+(defun make-face-materialization-from-surface
+    (surface occupancy &key (stock-function #'default-face-stock))
+  "Lower an oriented SURFACE through OCCUPANCY to dense face records.
+
+SURFACE owns topology while OCCUPANCY supplies the stable cell window needed
+to classify its edge and corner stars.  Keeping this boundary explicit lets a
+game use dense resident occupancy without changing LUFT's immutable chains."
+  (check-type surface luft:chain)
+  (check-type occupancy function)
+  (check-type stock-function function)
+  (let* ((domain (luft:chain-domain surface))
+         (sites (luft:chain-sites surface))
+         (face-count (length sites))
+         (positive-count
+           (zone (:luft/count-polarities :value face-count)
+             (loop for face across sites count (luft:site-positive-p face))))
+         (negative-count (- face-count positive-count))
+         (words
+           (zone (:luft/allocate-face-records :value face-count)
+             (luft:make-face-record-array face-count)))
+         (write 0))
+    (zone (:luft/classify-and-pack :value face-count)
       (flet ((publish-polarity (positive-p)
                (loop for face across sites
                      when (eq positive-p (luft:site-positive-p face))
@@ -280,8 +283,27 @@ curtain wall, paired turrets and an arcaded hall."
                            (funcall stock-function face))
                           (incf write))))
         (publish-polarity t)
-        (publish-polarity nil))
-      (%make-face-materialization domain words positive-count negative-count))))
+        (publish-polarity nil)))
+    (%make-face-materialization domain words positive-count negative-count)))
+
+(defun make-face-materialization (source &key stock-function)
+  "Lower SOLID's boundary to positive then negative dense face records."
+  (let* ((scene (and (typep source 'scene) source))
+         (solid (if scene (scene-solid source) source))
+         (stock-function (or stock-function
+                             (and scene
+                                  (lambda (face) (scene-face-stock scene face)))
+                             #'default-face-stock)))
+    (check-type solid luft:chain)
+    (zone (:luft/rematerialize :value (luft:chain-count solid))
+      (let ((surface
+              (zone (:luft/surface :value (luft:chain-count solid))
+                (luft:surface-chain solid)))
+            (occupancy
+              (lambda (x y z)
+                (luft:chain-cell-occupancy-bit solid x y z))))
+        (make-face-materialization-from-surface
+         surface occupancy :stock-function stock-function)))))
 
 (defparameter *gallery*
   ;; Each entry is one isolated complex, named by the star configuration it

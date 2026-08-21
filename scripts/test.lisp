@@ -22,7 +22,7 @@
     (uiop:symbol-call :rove :use-reporter :luv)
     (dolist (system '(:luv :luv/ghostty :luv/libav :luvcraft :luvcraft/agent
                       :mqtt :openai :chrome-cdp
-                      :luv-wiki :luft :luft/render))
+                      :luv-wiki :luft :luft/render :luft/benchmark))
       (format t "~&~A~%" (string-downcase (asdf:component-name (asdf:find-system system))))
       (asdf:test-system system)
       (terpri))))
