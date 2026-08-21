@@ -134,6 +134,38 @@ not construction of that representation.  The cell path constructs the face
 masks cell by cell and is the exact oracle for both reachability and packed
 boundary shifts.
 
+** Maintaining the atmosphere boundary
+
+A resident chunk might retain not only its occupancy and air runs, but also
+the oriented face chain bounding the atmosphere-connected component.  The
+first maintenance benchmark exercises the narrow case whose topology is
+known not to change: it repeatedly removes and restores one exposed terrain
+cell.  The update changes one occupancy bit, one reachable-air bit, and the
+endpoint of the empty Z run above it, then refreshes the face bits owned by
+that cell and its six neighbors.
+
+The =AIR-EDIT-MAINTAIN= phase times this seven-cell update.  The
+=AIR-EDIT-REBUILD= oracle performs the same edit, reconstructs every empty Z
+run in the haloed chunk, floods the atmosphere component, and rewrites its
+complete boundary.  Thirty-two consecutive alternating edits are checked
+for exact occupancy, solid-count, air-run index, and oriented-face agreement
+between the two paths.
+
+On the August 2026 x86-64 development machine, the median costs are:
+
+| terrain width | maintained edit | full rebuild | rebuild allocation |
+|---------------+-----------------+--------------+--------------------|
+|            16 |          206 ns |       105 us |            710 KiB |
+|            32 |          244 ns |       359 us |          2,473 KiB |
+
+This is evidence for keeping the atmosphere chain as resident derived state,
+but not yet evidence for arbitrary incremental connectivity.  Opening a
+sealed cave or closing a narrow passage may change component membership far
+from the edited cell.  Those edits need a chunk-local component/portal graph,
+a dynamic-connectivity strategy, or an explicit invalidation and rebuild.
+The benchmark deliberately names the cheap topology-preserving case rather
+than hiding that distinction.
+
 * SBCL SIMD shape
 
 Four =u64= words are one 256-bit fiber, making AVX2-width execution a natural

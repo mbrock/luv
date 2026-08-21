@@ -36,11 +36,19 @@
   (pattern :terrain :type keyword :read-only t)
   (stride 0 :type fixnum :read-only t)
   (occupancy #() :type u64-vector :read-only t)
-  (solid-count 0 :type fixnum :read-only t)
+  (solid-count 0 :type fixnum)
   (total-runs 0 :type fixnum :read-only t)
   (maximum-runs 0 :type fixnum :read-only t)
   (output #() :type u64-vector :read-only t)
-  (air-workspace nil :type air-workspace :read-only t))
+  (air-workspace nil :type air-workspace))
+
+(defstruct (atmosphere-edit-case
+             (:constructor %make-atmosphere-edit-case (case x y z air-run)))
+  (case nil :type fiber-case :read-only t)
+  (x 0 :type fixnum :read-only t)
+  (y 0 :type fixnum :read-only t)
+  (z 0 :type fixnum :read-only t)
+  (air-run 0 :type fixnum :read-only t))
 
 (defstruct fiber-sample
   (width 0 :type fixnum)
@@ -728,6 +736,175 @@
                                  (aref starts run) (aref ends run)))))
     (write-camera-boundary case reachable)))
 
+;;; Maintaining the atmosphere chain is cheap when an edit is known not to
+;;; change the component topology.  The benchmark below repeatedly removes and
+;;; restores one exposed terrain cell.  Only that cell and its six solid
+;;; neighbors can gain or lose boundary faces.  Arbitrary edits still require
+;;; dynamic-connectivity machinery or the full rebuild used here as an oracle.
+
+(declaim (inline set-packed-bit set-output-bit-value))
+
+(defun set-packed-bit (words index value)
+  (declare (type u64-vector words)
+           (type fixnum index)
+           (type boolean value)
+           (optimize (speed 3) (safety 0)))
+  (let* ((word (ash index -6))
+         (mask (ash 1 (logand index 63))))
+    (setf (aref words word)
+          (if value
+              (logior (aref words word) mask)
+              (logand (aref words word) (lognot mask))))))
+
+(defun set-output-bit-value (output base direction z value)
+  (declare (type u64-vector output)
+           (type fixnum base direction z)
+           (type boolean value)
+           (optimize (speed 3) (safety 0)))
+  (set-packed-bit output
+                  (+ (* 64 base) (* direction +fiber-words+ 64) z)
+                  value))
+
+(defun reachable-cell-p (case local-x local-y z)
+  (declare (type fiber-case case)
+           (type fixnum local-x local-y z)
+           (optimize (speed 3) (safety 0)))
+  (and (<= 0 z) (< z luft:+top-z+)
+       (let* ((stride (fiber-case-stride case))
+              (fiber (+ local-x (* local-y stride)))
+              (reachable
+                (air-workspace-reachable-a
+                 (fiber-case-air-workspace case))))
+         (reachable-bit-p reachable fiber z))))
+
+(defun refresh-atmosphere-cell-faces (case x y z)
+  "Refresh every camera-air face owned by one central-domain cell."
+  (declare (type fiber-case case)
+           (type fixnum x y z)
+           (optimize (speed 3) (safety 0)))
+  (let ((width (fiber-case-width case)))
+    (when (and (<= 0 x) (< x width)
+               (<= 0 y) (< y width)
+               (<= 0 z) (< z luft:+top-z+))
+      (let* ((local-x (1+ x))
+             (local-y (1+ y))
+             (input (input-base (fiber-case-stride case) local-x local-y))
+             (output-base (output-base width x y))
+             (solid (solid-bit-p (fiber-case-occupancy case) input z))
+             (output (fiber-case-output case)))
+        (declare (type fixnum local-x local-y input output-base)
+                 (type boolean solid)
+                 (type u64-vector output))
+        (set-output-bit-value
+         output output-base +plus-x+ z
+         (and solid (reachable-cell-p case (1+ local-x) local-y z)))
+        (set-output-bit-value
+         output output-base +minus-x+ z
+         (and solid (reachable-cell-p case (1- local-x) local-y z)))
+        (set-output-bit-value
+         output output-base +plus-y+ z
+         (and solid (reachable-cell-p case local-x (1+ local-y) z)))
+        (set-output-bit-value
+         output output-base +minus-y+ z
+         (and solid (reachable-cell-p case local-x (1- local-y) z)))
+        (set-output-bit-value
+         output output-base +plus-z+ z
+         (and solid (reachable-cell-p case local-x local-y (1+ z))))
+        (set-output-bit-value
+         output output-base +minus-z+ z
+         (and solid (reachable-cell-p case local-x local-y (1- z)))))))
+  case)
+
+(defun toggle-edit-occupancy (edit)
+  "Toggle EDIT's voxel and return true when its new state is solid."
+  (let* ((case (atmosphere-edit-case-case edit))
+         (x (atmosphere-edit-case-x edit))
+         (y (atmosphere-edit-case-y edit))
+         (z (atmosphere-edit-case-z edit))
+         (base (input-base (fiber-case-stride case) (1+ x) (1+ y)))
+         (occupancy (fiber-case-occupancy case))
+         (was-solid (solid-bit-p occupancy base z))
+         (word (+ base (ash z -6)))
+         (mask (ash 1 (logand z 63))))
+    (declare (type fiber-case case)
+             (type fixnum x y z base word)
+             (type u64-vector occupancy)
+             (type boolean was-solid)
+             (optimize (speed 3) (safety 0)))
+    (setf (aref occupancy word) (logxor (aref occupancy word) mask))
+    (if was-solid
+        (decf (fiber-case-solid-count case))
+        (incf (fiber-case-solid-count case)))
+    (not was-solid)))
+
+(defun make-atmosphere-edit-case (width)
+  "Make a terrain case whose edit removes and restores one exposed cell."
+  (let* ((case (make-fiber-case width :terrain))
+         (x (floor width 2))
+         (y (floor width 2))
+         (base (input-base (fiber-case-stride case) (1+ x) (1+ y)))
+         (occupancy (fiber-case-occupancy case))
+         (z (loop for candidate fixnum downfrom (- luft:+top-z+ 2) to 0
+                  when (solid-bit-p occupancy base candidate)
+                    return candidate)))
+    (unless (and z
+                 (not (solid-bit-p occupancy base (1+ z))))
+      (error "No exposed terrain edit cell in ~D-wide case." width))
+    (camera-boundary-run-flood case)
+    (let* ((workspace (fiber-case-air-workspace case))
+           (offsets (air-workspace-run-offsets workspace))
+           (fiber (+ (1+ x) (* (1+ y) (fiber-case-stride case))))
+           (air-run
+             (loop for run fixnum from (aref offsets fiber)
+                   below (aref offsets (1+ fiber))
+                   when (<= (aref (air-workspace-run-starts workspace) run)
+                            (1+ z)
+                            (aref (air-workspace-run-ends workspace) run))
+                     return run)))
+      (unless air-run
+        (error "No atmosphere run above edit cell (~D,~D,~D)." x y z))
+      (%make-atmosphere-edit-case case x y z air-run))))
+
+(defun maintain-atmosphere-surface-edit (edit)
+  "Toggle a topology-preserving surface cell and update its boundary locally."
+  (let* ((case (atmosphere-edit-case-case edit))
+         (x (atmosphere-edit-case-x edit))
+         (y (atmosphere-edit-case-y edit))
+         (z (atmosphere-edit-case-z edit))
+         (stride (fiber-case-stride case))
+         (fiber (+ (1+ x) (* (1+ y) stride)))
+         (reachable
+           (air-workspace-reachable-a (fiber-case-air-workspace case)))
+         (now-solid (toggle-edit-occupancy edit)))
+    (declare (type fiber-case case)
+             (type fixnum x y z stride fiber)
+             (type u64-vector reachable)
+             (type boolean now-solid)
+             (optimize (speed 3) (safety 0)))
+    (setf (aref (air-workspace-run-starts
+                 (fiber-case-air-workspace case))
+                (atmosphere-edit-case-air-run edit))
+          (if now-solid (1+ z) z))
+    (set-packed-bit reachable (+ (* fiber +fiber-words+ 64) z)
+                    (not now-solid))
+    (refresh-atmosphere-cell-faces case x y z)
+    (refresh-atmosphere-cell-faces case (1+ x) y z)
+    (refresh-atmosphere-cell-faces case (1- x) y z)
+    (refresh-atmosphere-cell-faces case x (1+ y) z)
+    (refresh-atmosphere-cell-faces case x (1- y) z)
+    (refresh-atmosphere-cell-faces case x y (1+ z))
+    (refresh-atmosphere-cell-faces case x y (1- z))
+    (fiber-case-output case)))
+
+(defun rebuild-atmosphere-after-edit (edit)
+  "Toggle EDIT, rebuild the air-run index, and rediscover the atmosphere."
+  (let ((case (atmosphere-edit-case-case edit)))
+    (toggle-edit-occupancy edit)
+    (setf (fiber-case-air-workspace case)
+          (make-air-workspace (fiber-case-occupancy case)
+                              (fiber-case-stride case)))
+    (camera-boundary-run-flood case)))
+
 (defun output-face-count (output)
   (declare (type u64-vector output)
            (optimize (speed 3) (safety 0)))
@@ -780,6 +957,9 @@
   '(:runs-scan :runs-bits :surface-cell :surface-scalar :surface-simd
     :air-cell :air-bits :air-runs))
 
+(defparameter +atmosphere-edit-phases+
+  '(:air-edit-maintain :air-edit-rebuild))
+
 (defun camera-air-phase-p (phase)
   (member phase '(:air-cell :air-bits :air-runs)))
 
@@ -792,7 +972,9 @@
     (:surface-simd :luft/z-fiber/surface-simd)
     (:air-cell :luft/z-fiber/camera-air-cell)
     (:air-bits :luft/z-fiber/camera-air-bits)
-    (:air-runs :luft/z-fiber/camera-air-runs)))
+    (:air-runs :luft/z-fiber/camera-air-runs)
+    (:air-edit-maintain :luft/z-fiber/atmosphere-edit-maintain)
+    (:air-edit-rebuild :luft/z-fiber/atmosphere-edit-rebuild)))
 
 (defun count-runs-with (case function)
   (let ((total 0)
@@ -889,6 +1071,85 @@
       (terpri stream)
       samples)))
 
+(defun invoke-atmosphere-edit-phase (edit phase)
+  (setf *z-fiber-benchmark-sink*
+        (aref
+         (ecase phase
+           (:air-edit-maintain (maintain-atmosphere-surface-edit edit))
+           (:air-edit-rebuild (rebuild-atmosphere-after-edit edit)))
+         0)))
+
+(defun calibrate-atmosphere-edit-iterations (width phase)
+  (loop with iterations fixnum = 1
+        with target-seconds = 0.025d0
+        do (let ((edit (make-atmosphere-edit-case width))
+                 (observation (luv:make-runtime-observation)))
+             (luv:with-runtime-observation (observation)
+               (dotimes (index iterations)
+                 (declare (ignore index))
+                 (invoke-atmosphere-edit-phase edit phase)))
+             (when (or
+                    (>= (luv:runtime-observation-elapsed-seconds observation)
+                        target-seconds)
+                    (>= iterations 1048576))
+               (return iterations)))
+           (setf iterations (min 1048576 (* 2 iterations)))))
+
+(defun measure-atmosphere-edit-phase
+    (width phase sample-count warmup-count stream)
+  (format stream "  ~18A " phase)
+  (force-output stream)
+  (let ((warmup (make-atmosphere-edit-case width)))
+    (dotimes (index warmup-count)
+      (declare (ignore index))
+      (write-char #\w stream)
+      (force-output stream)
+      (invoke-atmosphere-edit-phase warmup phase)))
+  (let ((iterations (calibrate-atmosphere-edit-iterations width phase)))
+    (format stream " x~D " iterations)
+    (force-output stream)
+    (sb-ext:gc :full t)
+    (let ((samples (make-array sample-count)))
+      (dotimes (index sample-count)
+        (write-char #\. stream)
+        (force-output stream)
+        (let* ((edit (make-atmosphere-edit-case width))
+               (case (atmosphere-edit-case-case edit))
+               (face-count (output-face-count (fiber-case-output case)))
+               (air-run-count
+                 (length
+                  (air-workspace-run-starts
+                   (fiber-case-air-workspace case))))
+               (observation (luv:make-runtime-observation)))
+          (luv:with-runtime-observation (observation)
+            (luv:with-cpu-trace-zone
+                ((phase-zone phase) :tracy-value iterations)
+              (dotimes (iteration iterations)
+                (declare (ignore iteration))
+                (invoke-atmosphere-edit-phase edit phase))))
+          (setf (aref samples index)
+                (make-fiber-sample
+                 :width width :pattern :terrain :phase phase
+                 :simd-family :scalar :index index :iterations iterations
+                 :fiber-count (* width width)
+                 :solid-count (fiber-case-solid-count case)
+                 :run-count (fiber-case-total-runs case)
+                 :air-run-count air-run-count
+                 :face-count face-count
+                 :elapsed-seconds
+                 (/ (luv:runtime-observation-elapsed-seconds observation)
+                    iterations)
+                 :bytes-consed
+                 (round (/ (luv:runtime-observation-bytes-consed observation)
+                           iterations))
+                 :gc-seconds
+                 (/ (luv:runtime-observation-gc-seconds observation)
+                    iterations)
+                 :garbage-collections
+                 (luv:runtime-observation-garbage-collections observation)))))
+      (terpri stream)
+      samples)))
+
 (defun percentile (values fraction)
   (let* ((sorted (sort (copy-seq values) #'<))
          (index (round (* fraction (1- (length sorted))))))
@@ -898,16 +1159,21 @@
   (* 1000d0 (fiber-sample-elapsed-seconds sample)))
 
 (defun print-phase-summary (case phase samples stream)
-  (declare (ignore phase))
   (let ((milliseconds (map 'vector #'sample-elapsed-milliseconds samples))
         (bytes (map 'vector #'fiber-sample-bytes-consed samples)))
-    (format stream
-            "    p50 ~,4F ms  p95 ~,4F ms  ~,3F ns/fiber  ~,3F KiB~%"
-            (percentile milliseconds 0.50d0)
-            (percentile milliseconds 0.95d0)
-            (* 1d6 (percentile milliseconds 0.50d0)
-               (/ (* (fiber-case-width case) (fiber-case-width case))))
-            (/ (percentile bytes 0.50d0) 1024d0))))
+    (if (member phase +atmosphere-edit-phases+)
+        (format stream
+                "    p50 ~,1F ns/edit  p95 ~,1F ns/edit  ~,3F KiB/edit~%"
+                (* 1d6 (percentile milliseconds 0.50d0))
+                (* 1d6 (percentile milliseconds 0.95d0))
+                (/ (percentile bytes 0.50d0) 1024d0))
+        (format stream
+                "    p50 ~,4F ms  p95 ~,4F ms  ~,3F ns/fiber  ~,3F KiB~%"
+                (percentile milliseconds 0.50d0)
+                (percentile milliseconds 0.95d0)
+                (* 1d6 (percentile milliseconds 0.50d0)
+                   (/ (* (fiber-case-width case) (fiber-case-width case))))
+                (/ (percentile bytes 0.50d0) 1024d0)))))
 
 (defun write-csv-header (stream)
   (format stream
@@ -940,7 +1206,7 @@
           (sample-count 15) (warmup-count 3)
           (csv-pathname #P"build/luft-z-fiber-benchmark.csv")
           (stream *standard-output*))
-  "Benchmark per-cell, scalar bit-fiber, and native SIMD surface extraction."
+  "Benchmark Z-fiber extraction, camera air, and maintained surface edits."
   (check-type sample-count (integer 1 *))
   (check-type warmup-count (integer 0 *))
   (let ((simd-family (fastest-simd-family))
@@ -986,7 +1252,27 @@
                   (loop for sample across samples
                         do (write-sample-csv sample csv)
                            (push sample all-samples))))
-              (force-output csv))))))
+              (force-output csv)))))
+      (when (member :terrain patterns)
+        (dolist (width widths)
+          (let* ((edit (make-atmosphere-edit-case width))
+                 (case (atmosphere-edit-case-case edit)))
+            (format stream
+                    "~&Maintaining ~Dx~D terrain atmosphere boundary at (~D,~D,~D)...~%"
+                    width width
+                    (atmosphere-edit-case-x edit)
+                    (atmosphere-edit-case-y edit)
+                    (atmosphere-edit-case-z edit))
+            (force-output stream)
+            (dolist (phase +atmosphere-edit-phases+)
+              (let ((samples
+                      (measure-atmosphere-edit-phase
+                       width phase sample-count warmup-count stream)))
+                (print-phase-summary case phase samples stream)
+                (loop for sample across samples
+                      do (write-sample-csv sample csv)
+                         (push sample all-samples))))
+            (force-output csv)))))
     (format stream "~&Wrote ~:D samples to ~A~%"
             (length all-samples) csv-pathname)
     (values (coerce (nreverse all-samples) 'vector) csv-pathname)))
