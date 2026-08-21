@@ -69,7 +69,7 @@
         (ok (eq (< index positive) (luft:site-positive-p face)))
         (ok (luft:shape-word-valid-p shape))
         (ok (<= 0 stock 3))
-        (ok (typep construction-mask '(unsigned-byte 21)))))))
+        (ok (typep construction-mask '(unsigned-byte 29)))))))
 
 (deftest the-mountain-scene-keeps-one-small-paper-palette
   (let* ((scene (render:make-mountain-sanctuary-scene))
@@ -100,11 +100,21 @@
               7 (luft:classify-site-star
                  domain
                  (luft:make-site domain x y z luft:+vertex-extent+ 1)
+                 occupancy)))
+           (vertex-star (x y z)
+             (nth-value
+              8 (luft:classify-site-star
+                 domain
+                 (luft:make-site domain x y z luft:+vertex-extent+ 1)
                  occupancy))))
       ;; A solid four-cell floor under one, two, and three terrace cells.
       (ok (= 5 (vertex-count 4 3 2)))
       (ok (= 6 (vertex-count 5 3 2)))
-      (ok (= 7 (vertex-count 9 5 2))))
+      (ok (= 7 (vertex-count 9 5 2)))
+      ;; The right-hand wall end is the exact planar L that motivated the
+      ;; portrait; keep it tied to the new arc path rather than a near miss.
+      (ok (= #xcd (vertex-star 12 8 3)))
+      (ok (luft:star-miter-arc-p (vertex-star 12 8 3))))
     ;; The lower terrace ends while its neighbouring wall cells continue.
     (ok (= 1 (funcall occupancy 11 7 2)))
     (ok (= 0 (funcall occupancy 12 7 2)))
@@ -204,11 +214,110 @@
            (luft.render::site-inspection-shape-word inspection))))))
 
 ;;; A literal Lisp transcription of FACE-VERTEX-SPECIFICATION's position
-;;; arithmetic, reading the same face record the GPU reads.  It exists so a
-;;; disagreement between the shader and LUFT's CPU realization is a failing
-;;; test rather than something you have to see in a screenshot.
+;;; arithmetic, reading the same face record the GPU reads.  These helpers do
+;;; not call LUFT's classifiers: a disagreement between the packed-star shader
+;;; and the CPU reference must remain capable of becoming a failing test.
 
-(defun shader-realize-point (words record-index width i j)
+(defun shader-star-count (star)
+  (loop for sample below 8 sum (ldb (byte 1 sample) star)))
+
+(defun shader-star-minority-bit (star count sample)
+  (let ((solid (ldb (byte 1 sample) star)))
+    (cond ((= count 4) 0d0)
+          ((< count 4) (float solid 1d0))
+          (t (float (- 1 solid) 1d0)))))
+
+(defun shader-star-moment (star)
+  (let* ((count (shader-star-count star))
+         (b0 (shader-star-minority-bit star count 0))
+         (b1 (shader-star-minority-bit star count 1))
+         (b2 (shader-star-minority-bit star count 2))
+         (b3 (shader-star-minority-bit star count 3))
+         (b4 (shader-star-minority-bit star count 4))
+         (b5 (shader-star-minority-bit star count 5))
+         (b6 (shader-star-minority-bit star count 6))
+         (b7 (shader-star-minority-bit star count 7)))
+    (values (+ (- (+ b1 b3) (+ b0 b2))
+               (- (+ b5 b7) (+ b4 b6)))
+            (+ (- (+ b2 b3) (+ b0 b1))
+               (- (+ b6 b7) (+ b4 b5)))
+            (- (+ (+ b4 b5) (+ b6 b7))
+               (+ (+ b0 b1) (+ b2 b3)))
+            count)))
+
+(defun shader-star-miter-p (mx my mz count)
+  (let ((ax (abs mx)) (ay (abs my)) (az (abs mz)))
+    (and (= 3 (min count (- 8 count)))
+         (= 3 (max ax ay az))
+         (= 3 (* ax ay az)))))
+
+(defun shader-star-center-offset (star width)
+  (multiple-value-bind (mx my mz count) (shader-star-moment star)
+    (let* ((qx (signum mx)) (qy (signum my)) (qz (signum mz))
+           (ax (abs mx)) (ay (abs my)) (az (abs mz))
+           (ordinary-reach (if (= ax ay az 1d0) 0.6666667d0 0.5d0))
+           (radius (* width 0.5d0))
+           (diagonal (* radius 0.70710677d0)))
+      (if (shader-star-miter-p mx my mz count)
+          (values (* qx (if (= ax 3d0) radius diagonal))
+                  (* qy (if (= ay 3d0) radius diagonal))
+                  (* qz (if (= az 3d0) radius diagonal)))
+          (values (* qx width ordinary-reach)
+                  (* qy width ordinary-reach)
+                  (* qz width ordinary-reach))))))
+
+(defun shader-half-edge-count (star axis direction)
+  (loop for sample in
+        (ecase axis
+          (0 (if (minusp direction) '(0 2 4 6) '(1 3 5 7)))
+          (1 (if (minusp direction) '(0 1 4 5) '(2 3 6 7)))
+          (2 (if (minusp direction) '(0 1 2 3) '(4 5 6 7))))
+        sum (ldb (byte 1 sample) star)))
+
+(defun shader-star-half-offset
+    (star axis direction axis-vector edge-q width)
+  (multiple-value-bind (mx my mz count) (shader-star-moment star)
+    (let* ((moment (vector mx my mz))
+           (q (map 'vector #'signum moment))
+           (absolute (map 'vector #'abs moment))
+           (dominant
+             (map 'vector (lambda (m qq) (if (= m 3d0) qq 0d0))
+                  absolute q))
+           (axis-dominant (aref absolute axis))
+           (axis-q (aref q axis))
+           (other
+             (map 'vector #'- q dominant
+                  (map 'vector (lambda (c) (* c axis-q)) axis-vector)))
+           (radius (* width 0.5d0))
+           (arc-end
+             (map 'vector (lambda (d bend)
+                            (* radius (+ d bend)))
+                  dominant other))
+           (center
+             (multiple-value-call #'vector
+               (shader-star-center-offset star width)))
+           (ring
+             (map 'vector
+                  (lambda (axis-component edge-component)
+                    (+ (* axis-component direction width)
+                       (* edge-component radius)))
+                  axis-vector edge-q)))
+      (if (shader-star-miter-p mx my mz count)
+          (if (= axis-dominant 3d0)
+              (map 'vector (lambda (a b) (* 0.5d0 (+ a b))) center ring)
+              (if (= direction (- axis-q))
+                  arc-end
+                  (map 'vector
+                       (lambda (a b) (* 0.5d0 (+ a b))) center ring)))
+          (map 'vector (lambda (a b) (* 0.5d0 (+ a b))) center ring)))))
+
+(defun shader-axis-vector (axis)
+  (ecase axis
+    (0 #(1d0 0d0 0d0))
+    (1 #(0d0 1d0 0d0))
+    (2 #(0d0 0d0 1d0))))
+
+(defun shader-realize-local-point (words record-index width point-index)
   (let* ((base (* 4 record-index))
          (low (aref words base))
          (high (aref words (+ base 1)))
@@ -225,27 +334,53 @@
                           (t #(1d0 0d0 0d0))))
          (normal (if (= negative 1) (map 'vector #'- canonical) canonical))
          (w (float width 1d0))
+         (grid-point (< point-index 16))
+         (grid-index (if grid-point point-index 0))
+         (extra-index (if grid-point 0 (- point-index 16)))
+         (i (floor grid-index 4))
+         (j (mod grid-index 4))
          (i-boundary (or (= i 0) (= i 3)))
          (j-boundary (or (= j 0) (= j 3)))
-         (point-kind (if i-boundary (if j-boundary 2 1) (if j-boundary 1 0)))
+         (point-kind
+           (if grid-point
+               (if i-boundary
+                   (if j-boundary :center :edge)
+                   (if j-boundary :edge :interior))
+               :half))
+         (extra-corner (floor extra-index 2))
+         (extra-tangent-v (oddp extra-index))
+         (i-high (member i '(2 3)))
+         (j-high (member j '(2 3)))
+         (corner-index
+           (if grid-point
+               (+ (if i-high 2 0) (if j-high 1 0))
+               extra-corner))
+         (corner-u-high (>= corner-index 2))
+         (corner-v-high (oddp corner-index))
+         (star (ldb (byte 8 (* 8 corner-index)) shape))
          (lambda-i (ecase i (0 0d0) (1 w) (2 (- 1d0 w)) (3 1d0)))
          (lambda-j (ecase j (0 0d0) (1 w) (2 (- 1d0 w)) (3 1d0)))
          (flat (vector (+ x (* (aref u 0) lambda-i) (* (aref v 0) lambda-j))
                        (+ y (* (aref u 1) lambda-i) (* (aref v 1) lambda-j))
                        (+ z (* (aref u 2) lambda-i) (* (aref v 2) lambda-j))))
-         (corner-code
-           (if (= i 0)
-               (if (= j 0) (ldb (byte 6 8) shape) (ldb (byte 6 14) shape))
-               (if (= j 0) (ldb (byte 6 20) shape) (ldb (byte 6 26) shape))))
-         (direction (ldb (byte 5 0) corner-code))
-         (corner-q (vector (float (- (mod direction 3) 1) 1d0)
-                           (float (- (mod (floor direction 3) 3) 1) 1d0)
-                           (float (- (floor direction 9) 1) 1d0)))
-         (corner-reach (if (= 1 (ldb (byte 1 5) corner-code)) 2/3 1/2))
+         (vertex-position
+           (map 'vector #'+ (vector x y z)
+                (map 'vector
+                     (lambda (uu vv)
+                       (+ (* uu (if corner-u-high 1d0 0d0))
+                          (* vv (if corner-v-high 1d0 0d0))))
+                     u v)))
+         (u-axis (if (= extent 6) 1 0))
+         (v-axis (if (= extent 3) 1 2))
+         (grid-edge-axis (if i-boundary v-axis u-axis))
+         (grid-edge-direction
+           (if i-boundary (if (= j 1) 1 -1) (if (= i 1) 1 -1)))
+         (grid-edge-count
+           (shader-half-edge-count star grid-edge-axis grid-edge-direction))
          (edge-code
-           (if i-boundary
-               (if (= i 0) (ldb (byte 2 0) shape) (ldb (byte 2 2) shape))
-               (if (= j 0) (ldb (byte 2 4) shape) (ldb (byte 2 6) shape))))
+           (cond ((= grid-edge-count 1) 1)
+                 ((= grid-edge-count 2) 0)
+                 (t 2)))
          (tangent (if i-boundary u v))
          (side (if i-boundary (if (= i 0) -1d0 1d0) (if (= j 0) -1d0 1d0)))
          (outward (map 'vector (lambda (c) (* c side)) tangent))
@@ -255,30 +390,94 @@
                      (map 'vector #'-
                           (map 'vector (lambda (c) (* c normal-sign)) normal)
                           outward)))
-         (q (ecase point-kind (2 corner-q) (1 edge-q) (0 #(0d0 0d0 0d0))))
-         (reach (ecase point-kind (2 corner-reach) (1 1/2) (0 0))))
-    (map 'vector (lambda (f qq) (+ f (* qq w (float reach 1d0)))) flat q)))
+         (half-axis (if extra-tangent-v v-axis u-axis))
+         (half-axis-vector (if extra-tangent-v v u))
+         (half-direction
+           (if extra-tangent-v
+               (if corner-v-high -1 1)
+               (if corner-u-high -1 1)))
+         (half-outward-tangent (if extra-tangent-v u v))
+         (half-outward-side
+           (if extra-tangent-v
+               (if corner-u-high 1d0 -1d0)
+               (if corner-v-high 1d0 -1d0)))
+         (half-outward
+           (map 'vector (lambda (c) (* c half-outward-side))
+                half-outward-tangent))
+         (half-edge-count
+           (shader-half-edge-count star half-axis half-direction))
+         (half-edge-code
+           (cond ((= half-edge-count 1) 1)
+                 ((= half-edge-count 2) 0)
+                 (t 2)))
+         (half-normal-sign (if (= half-edge-code 1) -1d0 1d0))
+         (half-edge-q
+           (if (= half-edge-code 0)
+               #(0d0 0d0 0d0)
+               (map 'vector #'-
+                    (map 'vector (lambda (c) (* c half-normal-sign)) normal)
+                    half-outward)))
+         (center-offset
+           (multiple-value-call #'vector
+             (shader-star-center-offset star w)))
+         (half-offset
+           (shader-star-half-offset star half-axis half-direction
+                                    half-axis-vector half-edge-q w)))
+    (ecase point-kind
+      (:half (map 'vector #'+ vertex-position half-offset))
+      (:center (map 'vector #'+ vertex-position center-offset))
+      (:edge (map 'vector (lambda (f q) (+ f (* q w 0.5d0))) flat edge-q))
+      (:interior flat))))
 
 (deftest the-shader-realizes-exactly-what-the-cpu-reference-realizes
-  (let* ((width 0.20d0)
-         (materialization (render:make-face-materialization
-                           (render:make-gallery-solid)))
-         (domain (render:face-materialization-domain materialization))
-         (words (render:face-materialization-words materialization))
-         (count (+ (render:face-materialization-positive-count materialization)
-                   (render:face-materialization-negative-count materialization)))
-         (worst 0d0))
-    (ok (plusp count))
-    (dotimes (record count)
-      (multiple-value-bind (face shape) (luft:load-face-record words record domain)
-        (dotimes (i 4)
-          (dotimes (j 4)
-            (let ((shaded (shader-realize-point words record width i j)))
-              (multiple-value-bind (rx ry rz)
-                  (luft:realize-face-point domain face shape width i j)
-                (setf worst
-                      (max worst
-                           (abs (- (aref shaded 0) rx))
-                           (abs (- (aref shaded 1) ry))
-                           (abs (- (aref shaded 2) rz))))))))))
-    (ok (zerop worst))))
+  (let ((width 0.20d0)
+        (case-count 0)
+        (worst 0d0))
+    (flet ((compare-record (words record domain face shape)
+             (incf case-count)
+             (dotimes (point luft:+face-point-count+)
+               (let ((shaded
+                       (shader-realize-local-point
+                        words record width point)))
+                 (multiple-value-bind (rx ry rz)
+                     (luft:realize-face-local-point
+                      domain face shape width point)
+                   (setf worst
+                         (max worst
+                              (abs (- (aref shaded 0) rx))
+                              (abs (- (aref shaded 1) ry))
+                              (abs (- (aref shaded 2) rz)))))))))
+      ;; First exercise real materialization ordering and its mixed gallery.
+      (let* ((materialization (render:make-face-materialization
+                               (render:make-gallery-solid)))
+             (domain (render:face-materialization-domain materialization))
+             (words (render:face-materialization-words materialization))
+             (count
+               (+ (render:face-materialization-positive-count materialization)
+                  (render:face-materialization-negative-count materialization))))
+        (ok (plusp count))
+        (dotimes (record count)
+          (multiple-value-bind (face shape)
+              (luft:load-face-record words record domain)
+            (compare-record words record domain face shape))))
+      ;; Then exhaust every oriented face incidence of all 256 vertex stars;
+      ;; this covers every miter orientation, not just the portrait's #xCD.
+      (let* ((domain (luft:make-world-domain :x-bits 6 :y-bits 6))
+             (vertex
+               (luft:make-site domain 20 20 20 luft:+vertex-extent+ 1)))
+        (dotimes (mask 256)
+          (let ((occupancy (luft::%star-occupancy-function vertex mask)))
+            (dolist (geometric-face
+                     (luft::%faces-containing-vertex domain vertex))
+              (let ((face (luft:orient-face-outward
+                           domain geometric-face occupancy)))
+                (when face
+                  (let* ((shape (luft:face-shape-word
+                                 domain face occupancy))
+                         (words (luft:make-face-record
+                                 domain face shape)))
+                    (compare-record words 0 domain face shape)))))))))
+    (ok (plusp case-count))
+    ;; Shader literals are single-precision constants; the CPU oracle keeps
+    ;; doubles.  This bound is far below a float32 ULP at world scale.
+    (ok (< worst 1d-7) (format nil "worst CPU/GPU point delta: ~E" worst))))

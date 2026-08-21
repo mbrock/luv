@@ -243,13 +243,19 @@ surface remains watertight without stitching.
 [[lisp:luft:site-displacement]] places the shared point at
 $w\rho q$.  Ordinary creases use the half reach $\rho=\tfrac12$; a vertex
 whose raw moment is a unit cube diagonal uses the centroid reach
-$\rho=\tfrac23$.  Each oriented boundary face carries the resulting edge and
-corner decisions in one shape word.  The GPU realizes sixteen implicit points
-on a 4 by 4 patch and draws its fixed eighteen indexed triangles.  The current
-default [[lisp:luft.render:*chamfer-width*]] is 0.11 cell.
+$\rho=\tfrac23$.  Each oriented boundary face carries its four complete
+eight-cell vertex stars in one shape word, so the ABI preserves canonical
+occupancy facts rather than only their old edge and corner conclusions.
+
+The GPU realizes a fixed 24-point patch: the original 4 by 4 grid plus two
+site-owned half-edge points at each corner.  Its 26 indexed triangles leave
+ordinary stars exactly on the old planar surface because every added point is
+then the midpoint of an old edge.  The extra freedom is live only for the
+minimal miter below.  The current default
+[[lisp:luft.render:*chamfer-width*]] is 0.11 cell.
 
 The fragment shader recovers each planar facet normal from screen derivatives
-of world position.  A 21-bit construction mask records only those edges of
+of world position.  A 29-bit construction mask records only those edges of
 the fixed patch whose adjacent realized triangles actually turn, so the
 blueprint view reveals the geometric decision without drawing every hidden
 diagonal.  The CPU reference and shader realization are compared point for
@@ -260,22 +266,36 @@ point in the renderer tests.
 :ID: Z5NDTA
 :END:
 
-The shared-point rule of #RUAWR5 is compact and watertight, but it gives every
-incident chamfer strip only one place to end at a mixed vertex.  At the
-wall-side step this truncates a strip which should continue around the
-meeting: the long miter collapses into a narrow triangular fighter shape.
-A sharp Blender-like miter would at least extend that triangle; its outer
-miter arc is the better target, turning the collapsing region into a short
-wallward-widening quadrilateral strip.
+The original shared-point rule of #RUAWR5 was compact and watertight, but it
+gave every incident chamfer strip only one place to end at a mixed vertex.  At
+the wall-side step this truncated a strip which should continue around the
+meeting: the long miter collapsed into a narrow triangular fighter shape.
+The minimal outer arc now gives the two participating strips distinct
+endpoints and turns that collapsing region around the meeting.
+
+The case is recognized without a shape table.  A vertex star is a miter
+exactly when its strict minority has three cells and the magnitudes of its
+moment are a permutation of $(3,1,1)$.  This test is unchanged by complement,
+reflection, or axis permutation.  With $r=w/2$, the dominant component of the
+shared centre is $r$ and its two arc-plane components are $r/\sqrt2$, with the
+signs supplied by $q$.  Only the two directed half-edges pointing into the
+missing quadrant move to arc endpoints; the other four remain literal
+centre-to-ring midpoints.  Centre and endpoints therefore sample one circular
+quarter turn while uninterrupted face sectors stay planar.
+
+The ownership remains site-local: a centre is keyed by its vertex and an
+endpoint by its vertex plus directed half-edge.  Incident faces derive the
+same keys from the same complete star, so the new quadrilateral strips close
+without a stitching pass.
 
 An isolated seven-cell star at =w=0.20 made the defect look grotesque and hid
 its architectural scale.  [[lisp:luft.render:make-miter-study-scene]] instead
 builds a small Minecraft mountain against a continuous wall at the honest
 default =w=0.11.  One orthographic plate then retains the triangular innie and
-outie, the six-face hexagonal block party, and both wall terminations of the
-truncated fighter miter.  The scene is topology, not a hand-authored mesh: a
-regression checks that its five-, six-, and seven-cell vertex stars and its
-terrace-to-wall occupancy remain present.
+outie, the six-face hexagonal block party, and both wall terminations that
+formerly produced the truncated fighter miter.  The scene is topology, not a
+hand-authored mesh: a regression checks that its five-, six-, and seven-cell
+vertex stars and its terrace-to-wall occupancy remain present.
 
 [[capture:Z5NDTA-luft-miter-study.png]]
 
@@ -285,7 +305,7 @@ The image is a named =luv/showcase= recipe rather than checked-in evidence:
 scripts/captures render --output build/wiki/media luft-miter-study
 #+end_src
 
-** NEXT Give mixed chamfer vertices one minimal miter arc
+** DONE Give mixed chamfer vertices one minimal miter arc
 :PROPERTIES:
 :ID: 2PN62B
 :END:
@@ -296,22 +316,21 @@ arc.  This is not a general fillet or an arbitrary mesh.  It is the smallest
 bounded extension which lets a constant-width chamfer strip turn around a
 mixed vertex instead of terminating at the one displaced lattice point.
 
-/Evidence./ The current face ABI supplies one shape word and realizes one 4 by
-4 point patch with eighteen triangles.  Its half and centroid reaches produce
-good ordinary arrises, triangular innies and outies, but #Z5NDTA shows the
-remaining mixed-star failure at normal width.  A first sharp extension can
-separate missing miter reach from missing topology; the intended result is the
-minimal outer-arc construction in which the long triangular regions become
-the wallward-widening quadrilateral strips seen in a good bevel.
+/Evidence./ The face record remains exactly four =u32= words.  Its shape word
+now stores four complete stars; the fixed patch grows from 16 to 24 points and
+from 18 to 26 triangles.  Exhaustive CPU checks cover all 256 stars, all
+cubical symmetries, complement geometry, bit-identical incident-face sharing,
+and the nondegenerate outward winding of every realized triangle.  The shader
+is a separate literal derivation from the same four bytes and its gallery-wide
+point differential stays below $10^{-7}$ cell.  #Z5NDTA renders through the
+real Vulkan path at the default width with the former fighter tips opened into
+the two-segment arc construction.
 
-/Done when./ The CPU reference defines the new shared points from the canonical
-site star; every incident face agrees on their world positions; the GPU
-realization differentially matches that reference; winding and construction
-masks remain valid; and a before/after rendering of #Z5NDTA makes the innie,
-outie, six-face junction and both wall miters look deliberate at the default
-width.  The fixed per-face cost may grow by the smallest justified amount, but
-no per-cell object graph, global stitching pass, or general curve tessellator
-is introduced.
+/Done when./ Done: the CPU owns the canonical star rule, incident faces agree,
+SPIR-V and Metal lowerings share the 24-point ABI, the 29 construction bits
+survive exact float lanes, and the before/after #Z5NDTA plate retains its
+innie, outie, six-face junction, and wall terminations.  No per-cell object
+graph, global stitching pass, or general curve tessellator was introduced.
 
 * Rounding is the half-level set of the smoothed occupancy
 :PROPERTIES:
@@ -923,13 +942,14 @@ returns one sparse [[lisp:luft.render:site-inspection]] at the semantic UI
 boundary: oriented face site, solid cell, hit point and distance, stock, and
 shape word.  The viewer presents those values through a McCLIM application
 pane mirrored into the existing canvas, so no second window or input owner is
-introduced.  Each dense face record also carries a 21-bit construction mask:
-the internal U, V, and chosen diagonal edges whose two realized facet normals
-actually differ.  The fragment shader uses screen derivatives only to keep
-those approved edges crisp.  =C= toggles the resulting global construction
-drawing; a cyan reticle marks the ray intersection and reveals the complete
-local triangle lattice without an area fill or distance halo.  Face rims remain
-lighter evidence of the cubical complex that owns those triangles.
+introduced.  Each dense face record also carries a 29-bit construction mask:
+the internal U and V spans, five ordinary diagonals, and three corner spokes
+whose two realized facet normals actually differ.  The fragment shader uses
+screen derivatives only to keep those approved edges crisp.  =C= toggles the
+resulting global construction drawing; a cyan reticle marks the ray
+intersection and reveals the complete local triangle lattice without an area
+fill or distance halo.  Face rims remain lighter evidence of the cubical
+complex that owns those triangles.
 
 /Done when./ Done: Escape releases the pointer, moving it ray-casts the world,
 the inspector follows semantic site crossings, =C= globally toggles stable

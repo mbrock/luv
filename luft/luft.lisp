@@ -41,20 +41,20 @@
    ;; Face topology and shape words.
    #:local-edge #:local-corner
    #:+edge-balanced+ #:+edge-convex+ #:+edge-concave+
-   #:+shape-edge-field-bits+ #:+shape-corner-field-bits+
-   #:+shape-u-low-edge-shift+ #:+shape-u-high-edge-shift+
-   #:+shape-v-low-edge-shift+ #:+shape-v-high-edge-shift+
+   #:+shape-corner-field-bits+
    #:+shape-low-low-corner-shift+ #:+shape-low-high-corner-shift+
    #:+shape-high-low-corner-shift+ #:+shape-high-high-corner-shift+
    #:+corner-direction-mask+ #:+corner-two-thirds-mask+
    #:face-tangent-axes #:face-oriented-normal #:orient-face-outward
    #:face-edge-site #:face-corner-site
+   #:vertex-star-half-edge-mask #:star-miter-arc-p
    #:encode-corner-code #:decode-corner-code
    #:pack-shape-word #:unpack-shape-word #:shape-word-valid-p
-   #:shape-edge-code #:shape-corner-code
+   #:shape-edge-code #:shape-corner-code #:shape-corner-star-mask
    #:decode-face-edge-direction #:face-shape-word
    ;; Reference realization.
-   #:local-point-index #:realize-face-point #:realize-face-patch
+   #:+face-point-count+ #:local-point-index #:local-corner-half-point-index
+   #:realize-face-point #:realize-face-local-point #:realize-face-patch
    ;; Face-record ABI.
    #:+face-record-word-count+ #:+face-record-byte-size+
    #:+face-record-site-low-word+ #:+face-record-site-high-word+
@@ -611,14 +611,84 @@ the site on that axis (direction -1); one means the cell anchored at the site
         (classify-star-mask normal-mask mask)
       (values mx my mz qx qy qz reach k mask))))
 
+(defun vertex-star-half-edge-mask (occupancy-mask axis direction)
+  "Project a vertex OCCUPANCY-MASK onto one incident half-edge star.
+
+DIRECTION is -1 or +1 along AXIS.  The four retained samples are repacked in
+the canonical order of the other two axes, so CLASSIFY-STAR-MASK can consume
+the result directly.  Complementing the vertex mask complements this mask."
+  (check-type occupancy-mask (unsigned-byte 8))
+  (check-type axis axis)
+  (check-type direction (member -1 1))
+  (let ((axis-number (axis-index axis))
+        (result 0))
+    (dotimes (sample 8 result)
+      (when (eq (logbitp axis-number sample) (plusp direction))
+        (let ((projected 0)
+              (position 0))
+          (dotimes (other-axis 3)
+            (unless (= other-axis axis-number)
+              (when (logbitp other-axis sample)
+                (setf projected (logior projected (ash 1 position))))
+              (incf position)))
+          (when (logbitp sample occupancy-mask)
+            (setf result (logior result (ash 1 projected)))))))))
+
+(defun %miter-dominant-axis (mx my mz k)
+  "Return the dominant axis of a planar three-cell minority L, or NIL."
+  (when (= (min k (- 8 k)) 3)
+    (let ((ax (abs mx)) (ay (abs my)) (az (abs mz)))
+      (cond ((and (= ax 3) (= ay 1) (= az 1)) 0)
+            ((and (= ax 1) (= ay 3) (= az 1)) 1)
+            ((and (= ax 1) (= ay 1) (= az 3)) 2)))))
+
+(defun star-miter-arc-p (occupancy-mask)
+  "Whether OCCUPANCY-MASK is the complement-symmetric planar L miter star.
+
+Three strict-minority cells in one octant layer leave one missing quadrant in
+that layer.  Its two constant-width chamfer strips form exactly Blender's
+outer-miter situation: their sharp offset lines meet, but a round join has two
+endpoints and an arc between them."
+  (check-type occupancy-mask (unsigned-byte 8))
+  (multiple-value-bind (mx my mz qx qy qz reach k)
+      (classify-star-mask #b111 occupancy-mask)
+    (declare (ignore qx qy qz reach))
+    (not (null (%miter-dominant-axis mx my mz k)))))
+
+(defun %classified-star-center-displacement
+    (mx my mz qx qy qz reach k width)
+  (let ((dominant (%miter-dominant-axis mx my mz k)))
+    (if dominant
+        (let* ((radius (* width 1/2))
+               (diagonal (* radius 0.7071067811865476d0)))
+          (values (* qx (if (= dominant 0) radius diagonal))
+                  (* qy (if (= dominant 1) radius diagonal))
+                  (* qz (if (= dominant 2) radius diagonal))))
+        (let ((scale (* width reach)))
+          (values (* scale qx) (* scale qy) (* scale qz))))))
+
+(defun %star-center-displacement (occupancy-mask width)
+  "Return the shared site point displacement for a vertex star.
+
+Ordinary stars retain the strict-minority half/centroid rule.  A planar L
+uses the midpoint of the minimal circular outer miter: half width along the
+arc-plane normal and half width divided by sqrt(2) along its two arc axes."
+  (multiple-value-bind (mx my mz qx qy qz reach k)
+      (classify-star-mask #b111 occupancy-mask)
+    (%classified-star-center-displacement
+     mx my mz qx qy qz reach k width)))
+
 (defun site-displacement (domain site occupancy width)
   (unless (and (realp width) (> width 0) (< width 1/2))
     (error "Chamfer width must satisfy 0 < w < 1/2, not ~S." width))
-  (multiple-value-bind (mx my mz qx qy qz reach)
+  (multiple-value-bind (mx my mz qx qy qz reach k mask)
       (classify-site-star domain site occupancy)
-    (declare (ignore mx my mz))
-    (let ((scale (* width reach)))
-      (values (* scale qx) (* scale qy) (* scale qz)))))
+    (declare (ignore mask))
+    (if (= (site-extent site) +vertex-extent+)
+        (%classified-star-center-displacement
+         mx my mz qx qy qz reach k width)
+        (let ((scale (* width reach)))
+          (values (* scale qx) (* scale qy) (* scale qz))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Canonical face-local topology
@@ -723,26 +793,18 @@ the site on that axis (direction -1); one means the cell anchored at the site
 (defconstant +edge-concave+ 2)
 (defconstant +edge-reserved+ 3)
 
-;; These constants are the renderer-visible u32 shape ABI.
-(defconstant +shape-edge-field-bits+ 2)
-(defconstant +shape-corner-field-bits+ 6)
-(defconstant +shape-u-low-edge-shift+ 0)
-(defconstant +shape-u-high-edge-shift+ 2)
-(defconstant +shape-v-low-edge-shift+ 4)
-(defconstant +shape-v-high-edge-shift+ 6)
-(defconstant +shape-low-low-corner-shift+ 8)
-(defconstant +shape-low-high-corner-shift+ 14)
-(defconstant +shape-high-low-corner-shift+ 20)
-(defconstant +shape-high-high-corner-shift+ 26)
+;; The renderer-visible u32 shape ABI is the four complete vertex stars.  A
+;; face therefore carries canonical occupancy facts rather than a lossy cache
+;; of their edge and corner classifications.  Edge decisions, the ordinary
+;; site point, and the miter half-points are all derived from these same bytes.
+(defconstant +shape-corner-field-bits+ 8)
+(defconstant +shape-low-low-corner-shift+ 0)
+(defconstant +shape-low-high-corner-shift+ 8)
+(defconstant +shape-high-low-corner-shift+ 16)
+(defconstant +shape-high-high-corner-shift+ 24)
 (defconstant +corner-direction-mask+ #b11111)
 (defconstant +corner-two-thirds-mask+ #b100000)
 
-(defun %edge-shift (edge)
-  (ecase edge
-    (:u-low +shape-u-low-edge-shift+)
-    (:u-high +shape-u-high-edge-shift+)
-    (:v-low +shape-v-low-edge-shift+)
-    (:v-high +shape-v-high-edge-shift+)))
 (defun %corner-shift (corner)
   (ecase corner
     (:low-low +shape-low-low-corner-shift+)
@@ -778,42 +840,56 @@ the site on that axis (direction -1); one means the cell anchored at the site
   (decode-corner-code code)
   code)
 
-(defun pack-shape-word (u-low u-high v-low v-high
-                        low-low low-high high-low high-high)
-  (%check-edge-code u-low) (%check-edge-code u-high)
-  (%check-edge-code v-low) (%check-edge-code v-high)
-  (%check-corner-code low-low) (%check-corner-code low-high)
-  (%check-corner-code high-low) (%check-corner-code high-high)
-  (logior (ash u-low (%edge-shift :u-low))
-          (ash u-high (%edge-shift :u-high))
-          (ash v-low (%edge-shift :v-low))
-          (ash v-high (%edge-shift :v-high))
-          (ash low-low (%corner-shift :low-low))
+(defun pack-shape-word (low-low low-high high-low high-high)
+  (check-type low-low (unsigned-byte 8))
+  (check-type low-high (unsigned-byte 8))
+  (check-type high-low (unsigned-byte 8))
+  (check-type high-high (unsigned-byte 8))
+  (logior (ash low-low (%corner-shift :low-low))
           (ash low-high (%corner-shift :low-high))
           (ash high-low (%corner-shift :high-low))
           (ash high-high (%corner-shift :high-high))))
 
-(defun shape-edge-code (word edge)
+(defun shape-corner-star-mask (word corner)
   (check-type word (unsigned-byte 32))
-  (%check-edge-code (ldb (byte +shape-edge-field-bits+ (%edge-shift edge)) word)))
+  (ldb (byte +shape-corner-field-bits+ (%corner-shift corner)) word))
+
 (defun shape-corner-code (word corner)
+  "Return the legacy compact Q/reach view derived from CORNER's full star."
+  (multiple-value-bind (mx my mz qx qy qz reach)
+      (classify-star-mask #b111 (shape-corner-star-mask word corner))
+    (declare (ignore mx my mz))
+    (encode-corner-code qx qy qz reach)))
+
+(defun %face-edge-star-mask (face word edge)
+  (multiple-value-bind (u v) (%face-tangent-indices face)
+    (multiple-value-bind (corner axis-number)
+        (ecase edge
+          (:u-low (values :low-low v))
+          (:u-high (values :high-low v))
+          (:v-low (values :low-low u))
+          (:v-high (values :low-high u)))
+      (vertex-star-half-edge-mask
+       (shape-corner-star-mask word corner) (index-axis axis-number) 1))))
+
+(defun shape-edge-code (face word edge)
+  "Derive FACE's EDGE classification from either endpoint's complete star."
   (check-type word (unsigned-byte 32))
-  (%check-corner-code (ldb (byte +shape-corner-field-bits+ (%corner-shift corner)) word)))
+  (check-type edge local-edge)
+  (let ((k (logcount (%face-edge-star-mask face word edge))))
+    (ecase k
+      (1 +edge-convex+)
+      (2 +edge-balanced+)
+      (3 +edge-concave+))))
 
 (defun unpack-shape-word (word)
-  (values (shape-edge-code word :u-low)
-          (shape-edge-code word :u-high)
-          (shape-edge-code word :v-low)
-          (shape-edge-code word :v-high)
-          (shape-corner-code word :low-low)
-          (shape-corner-code word :low-high)
-          (shape-corner-code word :high-low)
-          (shape-corner-code word :high-high)))
+  (values (shape-corner-star-mask word :low-low)
+          (shape-corner-star-mask word :low-high)
+          (shape-corner-star-mask word :high-low)
+          (shape-corner-star-mask word :high-high)))
 
 (defun shape-word-valid-p (thing)
-  (and (typep thing '(unsigned-byte 32))
-       (handler-case (progn (unpack-shape-word thing) t)
-         (error () nil))))
+  (typep thing '(unsigned-byte 32)))
 
 (defun %edge-outward-vector (face edge)
   (multiple-value-bind (u v) (%face-tangent-indices face)
@@ -833,41 +909,45 @@ the site on that axis (direction -1); one means the cell anchored at the site
                     (- (* normal-sign ny) ty)
                     (- (* normal-sign nz) tz)))))))
 
-(defun %classify-edge-code (domain edge occupancy)
-  (multiple-value-bind (mx my mz qx qy qz reach k)
-      (classify-site-star domain edge occupancy)
-    (declare (ignore mx my mz qx qy qz reach))
-    (ecase k (1 +edge-convex+) (2 +edge-balanced+) (3 +edge-concave+))))
-
-(defun %classify-corner-code (domain vertex occupancy)
-  (multiple-value-bind (mx my mz qx qy qz reach)
-      (classify-site-star domain vertex occupancy)
-    (declare (ignore mx my mz))
-    (encode-corner-code qx qy qz reach)))
-
 (defun face-shape-word (domain face occupancy)
-  "Classify exactly four edge sites and four vertex sites for FACE."
+  "Pack the complete stars of FACE's four canonical vertex sites."
   (%require-face domain face)
   (unless (and (= 1 (%face-normal-side-occupancy domain face occupancy -1))
                (= 0 (%face-normal-side-occupancy domain face occupancy 1)))
     (error "Face ~S is not oriented from solid toward air." face))
   (pack-shape-word
-   (%classify-edge-code domain (face-edge-site domain face :u-low) occupancy)
-   (%classify-edge-code domain (face-edge-site domain face :u-high) occupancy)
-   (%classify-edge-code domain (face-edge-site domain face :v-low) occupancy)
-   (%classify-edge-code domain (face-edge-site domain face :v-high) occupancy)
-   (%classify-corner-code domain (face-corner-site domain face :low-low) occupancy)
-   (%classify-corner-code domain (face-corner-site domain face :low-high) occupancy)
-   (%classify-corner-code domain (face-corner-site domain face :high-low) occupancy)
-   (%classify-corner-code domain (face-corner-site domain face :high-high) occupancy)))
+   (site-star-occupancy-mask
+    domain (face-corner-site domain face :low-low) occupancy)
+   (site-star-occupancy-mask
+    domain (face-corner-site domain face :low-high) occupancy)
+   (site-star-occupancy-mask
+    domain (face-corner-site domain face :high-low) occupancy)
+   (site-star-occupancy-mask
+    domain (face-corner-site domain face :high-high) occupancy)))
 
 ;;; ---------------------------------------------------------------------------
-;;; CPU reference realization of the sixteen face points
+;;; CPU reference realization of the twenty-four face points
+
+(defconstant +face-point-count+ 24)
 
 (defun local-point-index (i j)
   (check-type i (integer 0 3))
   (check-type j (integer 0 3))
   (+ (* 4 i) j))
+
+(defun %corner-index (corner)
+  (ecase corner
+    (:low-low 0) (:low-high 1) (:high-low 2) (:high-high 3)))
+
+(defun %index-corner (index)
+  (ecase index
+    (0 :low-low) (1 :low-high) (2 :high-low) (3 :high-high)))
+
+(defun local-corner-half-point-index (corner tangent)
+  "Index the site-owned half-point along CORNER's U or V half-edge."
+  (check-type corner local-corner)
+  (check-type tangent (member :u :v))
+  (+ 16 (* 2 (%corner-index corner)) (if (eq tangent :v) 1 0)))
 
 (defun %lambda-coordinate (index width)
   (ecase index (0 0d0) (1 width) (2 (- 1d0 width)) (3 1d0)))
@@ -903,6 +983,71 @@ the site on that axis (direction -1); one means the cell anchored at the site
         ((and (= i 3) (= j 3)) :high-high)
         (t (error "(~D,~D) is not a corner." i j))))
 
+(defun %corner-high-p (corner tangent)
+  (ecase tangent
+    (:u (member corner '(:high-low :high-high)))
+    (:v (member corner '(:low-high :high-high)))))
+
+(defun %corner-half-edge-data (face corner tangent)
+  (multiple-value-bind (u v) (%face-tangent-indices face)
+    (let ((high-p (%corner-high-p corner tangent)))
+      (values (ecase tangent (:u u) (:v v))
+              (if high-p -1 1)))))
+
+(defun %star-half-point-displacement
+    (occupancy-mask axis-number direction width)
+  "Return the site-owned point between a vertex centre and one edge ring.
+
+Outside an outer miter it bisects the old centre-to-ring segment exactly, so
+the added topology leaves the old planar surface unchanged.  For the two
+planar-L boundary rays that point into the missing quadrant it lands on a
+circular-join endpoint, allowing the intervening face sectors to turn the
+strip instead of pinching it.  The other four rays remain midpoints: they
+cross an uninterrupted face or run along the layer normal."
+  (multiple-value-bind (mx my mz qx qy qz reach k)
+      (classify-star-mask #b111 occupancy-mask)
+    (let* ((dominant (%miter-dominant-axis mx my mz k))
+           (radius (* width 1/2)))
+      (when (and dominant
+                 (/= axis-number dominant)
+                 (= direction
+                    (- (ecase axis-number (0 qx) (1 qy) (2 qz)))))
+        (let ((other (- 3 dominant axis-number))
+              (dx 0d0) (dy 0d0) (dz 0d0))
+          (let ((dominant-amount
+                  (* radius (ecase dominant (0 qx) (1 qy) (2 qz)))))
+            (ecase dominant
+              (0 (setf dx dominant-amount))
+              (1 (setf dy dominant-amount))
+              (2 (setf dz dominant-amount))))
+          (let ((bend-amount
+                  (* radius (ecase other (0 qx) (1 qy) (2 qz)))))
+            (ecase other
+              (0 (setf dx bend-amount))
+              (1 (setf dy bend-amount))
+              (2 (setf dz bend-amount))))
+          (return-from %star-half-point-displacement
+            (values dx dy dz))))
+      (multiple-value-bind (cx cy cz)
+          (%classified-star-center-displacement
+           mx my mz qx qy qz reach k width)
+        (let* ((axis (index-axis axis-number))
+               (edge-mask
+                 (vertex-star-half-edge-mask occupancy-mask axis direction))
+               (normal-mask (logandc2 +cell-extent+ (ash 1 axis-number))))
+          (multiple-value-bind (mx my mz ex ey ez edge-reach)
+              (classify-star-mask normal-mask edge-mask)
+            (declare (ignore mx my mz edge-reach))
+            (let ((rx (+ (* ex radius)
+                         (if (= axis-number 0) (* direction width) 0)))
+                  (ry (+ (* ey radius)
+                         (if (= axis-number 1) (* direction width) 0)))
+                  (rz (+ (* ez radius)
+                         (if (= axis-number 2) (* direction width) 0))))
+              (values (* 1/2 (+ cx rx))
+                      (* 1/2 (+ cy ry))
+                      (* 1/2 (+ cz rz))))))))))
+
 (defun realize-face-point (domain face shape-word width i j)
   "Return one XYZ point as three DOUBLE-FLOAT values.
 
@@ -932,10 +1077,13 @@ whole patch consistently before Euclidean interpolation."
            (%offset-point bx by bz v (%lambda-coordinate j w)))))
       ((and ib jb)
        (let* ((corner (%corner-point-data i j))
-              (vertex (face-corner-site domain face corner)))
+              (vertex (face-corner-site domain face corner))
+              (star (shape-corner-star-mask shape-word corner)))
          (multiple-value-setq (bx by bz) (%double-anchor vertex))
-         (multiple-value-setq (qx qy qz reach)
-           (decode-corner-code (shape-corner-code shape-word corner)))))
+         (multiple-value-bind (dx dy dz)
+             (%star-center-displacement star w)
+           (return-from realize-face-point
+             (values (+ bx dx) (+ by dy) (+ bz dz))))))
       (t
        (multiple-value-bind (edge parameter) (%edge-point-data i j)
          (let ((edge-site (face-edge-site domain face edge)))
@@ -945,26 +1093,55 @@ whole patch consistently before Euclidean interpolation."
                             (%lambda-coordinate parameter w)))
            (multiple-value-setq (qx qy qz)
              (decode-face-edge-direction
-              face edge (shape-edge-code shape-word edge)))))))
+              face edge (shape-edge-code face shape-word edge)))))))
     (let ((scale (* w (coerce reach 'double-float))))
       (values (+ bx (* scale qx))
               (+ by (* scale qy))
               (+ bz (* scale qz))))))
 
-(defun realize-face-patch (domain face shape-word width)
-  "Return sixteen XYZ points as one 48-element unboxed double vector."
+(defun realize-face-half-point (domain face shape-word width corner tangent)
+  (let* ((w (coerce width 'double-float))
+         (vertex (face-corner-site domain face corner))
+         (star (shape-corner-star-mask shape-word corner)))
+    (multiple-value-bind (axis-number direction)
+        (%corner-half-edge-data face corner tangent)
+      (multiple-value-bind (dx dy dz)
+          (%star-half-point-displacement star axis-number direction w)
+        (multiple-value-bind (x y z) (%double-anchor vertex)
+          (values (+ x dx) (+ y dy) (+ z dz)))))))
+
+(defun realize-face-local-point (domain face shape-word width point-index)
+  "Return one of the fixed face patch's 24 implicit points."
   (%require-face domain face)
   (unless (shape-word-valid-p shape-word)
     (error "Invalid shape word ~S." shape-word))
-  (let ((points (make-array 48 :element-type 'double-float)))
-    (dotimes (i 4 points)
-      (dotimes (j 4)
-        (let ((base (* 3 (local-point-index i j))))
-          (multiple-value-bind (x y z)
-              (realize-face-point domain face shape-word width i j)
-            (setf (aref points base) x
-                  (aref points (+ base 1)) y
-                  (aref points (+ base 2)) z)))))))
+  (unless (and (realp width) (> width 0) (< width 1/2))
+    (error "Chamfer width must satisfy 0 < w < 1/2, not ~S." width))
+  (check-type point-index (integer 0 23))
+  (if (< point-index 16)
+      (multiple-value-bind (i j) (floor point-index 4)
+        (realize-face-point domain face shape-word width i j))
+      (multiple-value-bind (corner-index tangent-index)
+          (floor (- point-index 16) 2)
+        (realize-face-half-point
+         domain face shape-word width (%index-corner corner-index)
+         (if (zerop tangent-index) :u :v)))))
+
+(defun realize-face-patch (domain face shape-word width)
+  "Return 24 XYZ points as one 72-element unboxed double vector."
+  (%require-face domain face)
+  (unless (shape-word-valid-p shape-word)
+    (error "Invalid shape word ~S." shape-word))
+  (let ((points (make-array (* 3 +face-point-count+)
+                            :element-type 'double-float)))
+    (dotimes (point-index +face-point-count+ points)
+      (let ((base (* 3 point-index)))
+        (multiple-value-bind (x y z)
+            (realize-face-local-point
+             domain face shape-word width point-index)
+          (setf (aref points base) x
+                (aref points (+ base 1)) y
+                (aref points (+ base 2)) z))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Fixed 16-byte renderer-facing face-record ABI
@@ -996,14 +1173,14 @@ whole patch consistently before Euclidean interpolation."
 
 (defun store-face-record (words record-index domain face shape-word
                           &optional (stock 0) (construction-mask 0))
-  "Store the packed site, shape, stock, and 21-bit construction-edge mask."
+  "Store the packed site, four vertex stars, stock, and construction mask."
   (check-type words (array (unsigned-byte 32) (*)))
   (check-type record-index (integer 0 *))
   (%require-face domain face)
   (unless (shape-word-valid-p shape-word)
     (error "Invalid shape word ~S." shape-word))
   (check-type stock (unsigned-byte 4))
-  (check-type construction-mask (unsigned-byte 21))
+  (check-type construction-mask (unsigned-byte 29))
   (let ((base (* record-index +face-record-word-count+)))
     (when (> (+ base +face-record-word-count+) (length words))
       (error "Record ~D is outside a ~D-word array." record-index (length words)))
@@ -1037,7 +1214,7 @@ whole patch consistently before Euclidean interpolation."
       (%require-face domain face)
       (unless (shape-word-valid-p shape)
         (error "Record ~D has invalid shape word ~S." record-index shape))
-      (unless (typep construction-mask '(unsigned-byte 21))
+      (unless (typep construction-mask '(unsigned-byte 29))
         (error "Record ~D has invalid construction mask ~S."
                record-index construction-mask))
       (values face shape stock construction-mask))))
@@ -1051,7 +1228,7 @@ whole patch consistently before Euclidean interpolation."
 ;;; ---------------------------------------------------------------------------
 ;;; Canonical indexed raster topology
 
-(defconstant +face-index-count+ 54)
+(defconstant +face-index-count+ 78)
 
 (defun quad-diagonal-toward-corner (i j)
   "The diagonal of grid quad (I,J) that points at the nearest face corner.
@@ -1067,7 +1244,13 @@ past it, and the band ends in a fan instead."
   (if (if (< i 2) (< j 2) (= j 2)) :c00-c11 :c10-c01))
 
 (defun make-face-index-template (polarity &key (diagonal :toward-corner))
-  "Generate 18 consistently wound triangles over the 4x4 local point grid."
+  "Generate 26 consistently wound triangles over the fixed 24-point patch.
+
+The five non-corner quads retain their old splits.  Each corner is a hexagon:
+the shared site centre, two half-edge-owned points, the two old ring points,
+and the old inner point.  Four triangles replace the old two, which is the
+smallest fixed topology that turns both incident chamfer strips into quads
+while retaining a site-centred cap and indexed sharing."
   (check-type polarity (member 1 -1))
   (check-type diagonal (member :toward-corner :c00-c11 :c10-c01))
   (let ((indices (make-array +face-index-count+
@@ -1084,19 +1267,42 @@ past it, and the band ends in a fan instead."
                (incf write 3)))
       (dotimes (i 3)
         (dotimes (j 3)
-          (let ((c00 (local-point-index i j))
-                (c10 (local-point-index (1+ i) j))
-                (c11 (local-point-index (1+ i) (1+ j)))
-                (c01 (local-point-index i (1+ j))))
-            (ecase (if (eq diagonal :toward-corner)
-                       (quad-diagonal-toward-corner i j)
-                       diagonal)
-              (:c00-c11
-               (emit c00 c10 c11)
-               (emit c00 c11 c01))
-              (:c10-c01
-               (emit c00 c10 c01)
-               (emit c10 c11 c01)))))))
+          (unless (and (member i '(0 2)) (member j '(0 2)))
+            (let ((c00 (local-point-index i j))
+                  (c10 (local-point-index (1+ i) j))
+                  (c11 (local-point-index (1+ i) (1+ j)))
+                  (c01 (local-point-index i (1+ j))))
+              (ecase (if (eq diagonal :toward-corner)
+                         (quad-diagonal-toward-corner i j)
+                         diagonal)
+                (:c00-c11
+                 (emit c00 c10 c11)
+                 (emit c00 c11 c01))
+                (:c10-c01
+                 (emit c00 c10 c01)
+                 (emit c10 c11 c01)))))))
+      (dolist (spec '((:low-low 0 0 1 1)
+                      (:low-high 0 3 1 -1)
+                      (:high-low 3 0 -1 1)
+                      (:high-high 3 3 -1 -1)))
+        (destructuring-bind (corner i j su sv) spec
+          (let ((center (local-point-index i j))
+                (half-u (local-corner-half-point-index corner :u))
+                (half-v (local-corner-half-point-index corner :v))
+                (ring-u (local-point-index (+ i su) j))
+                (ring-v (local-point-index i (+ j sv)))
+                (inner (local-point-index (+ i su) (+ j sv))))
+            (flet ((corner-triangle (a b c)
+                     (if (plusp (* su sv))
+                         (emit a b c)
+                         (emit a c b))))
+              (corner-triangle center half-u inner)
+              (corner-triangle half-u ring-u inner)
+              (corner-triangle center inner half-v)
+              (corner-triangle half-v inner ring-v)))))
+      (unless (= write +face-index-count+)
+        (error "Wrote ~D face indices, expected ~D."
+               write +face-index-count+)))
     indices))
 
 (defparameter *positive-face-index-template* (make-face-index-template 1))
@@ -1114,23 +1320,69 @@ past it, and the band ends in a fan instead."
 ;;; ---------------------------------------------------------------------------
 ;;; Construction edges
 
-(defun %construction-edge-bit (a b)
-  "Return the compact bit for an internal edge between local points A and B."
-  (let ((ai (floor a 4)) (aj (mod a 4))
-        (bi (floor b 4)) (bj (mod b 4)))
-    (cond
-      ((= ai bi)
-       (and (<= 1 ai 2) (+ (* (1- ai) 3) (min aj bj))))
-      ((= aj bj)
-       (and (<= 1 aj 2) (+ 6 (* (1- aj) 3) (min ai bi))))
-      (t
-       (+ 12 (* (min ai bi) 3) (min aj bj))))))
+(defun %ordered-edge (a b)
+  (list (min a b) (max a b)))
+
+(defparameter *construction-noncorner-quads*
+  '((0 1) (1 0) (1 1) (1 2) (2 1)))
+
+(defun %make-construction-edge-pairs ()
+  "Return the 29 internal patch edges in renderer bit order."
+  (let ((pairs '()))
+    ;; Bits 0..5: the two internal constant-U lines, three spans each.
+    (dolist (i '(1 2))
+      (dotimes (j 3)
+        (push (%ordered-edge (local-point-index i j)
+                             (local-point-index i (1+ j)))
+              pairs)))
+    ;; Bits 6..11: the two internal constant-V lines, three spans each.
+    (dolist (j '(1 2))
+      (dotimes (i 3)
+        (push (%ordered-edge (local-point-index i j)
+                             (local-point-index (1+ i) j))
+              pairs)))
+    ;; Bits 12..16: diagonals of the five unchanged quads.
+    (dolist (cell *construction-noncorner-quads*)
+      (destructuring-bind (i j) cell
+        (let ((c00 (local-point-index i j))
+              (c10 (local-point-index (1+ i) j))
+              (c11 (local-point-index (1+ i) (1+ j)))
+              (c01 (local-point-index i (1+ j))))
+          (push (ecase (quad-diagonal-toward-corner i j)
+                  (:c00-c11 (%ordered-edge c00 c11))
+                  (:c10-c01 (%ordered-edge c10 c01)))
+                pairs))))
+    ;; Bits 17..28: centre and two half-point spokes in each corner.
+    (dolist (spec '((:low-low 0 0 1 1)
+                    (:low-high 0 3 1 -1)
+                    (:high-low 3 0 -1 1)
+                    (:high-high 3 3 -1 -1)))
+      (destructuring-bind (corner i j su sv) spec
+        (let ((center (local-point-index i j))
+              (inner (local-point-index (+ i su) (+ j sv))))
+          (push (%ordered-edge center inner) pairs)
+          (push (%ordered-edge
+                 (local-corner-half-point-index corner :u) inner)
+                pairs)
+          (push (%ordered-edge
+                 (local-corner-half-point-index corner :v) inner)
+                pairs))))
+    (let ((answer (coerce (nreverse pairs) 'vector)))
+      (unless (= 29 (length answer))
+        (error "Expected 29 construction edges, got ~D." (length answer)))
+      (unless (= 29 (length (remove-duplicates (coerce answer 'list)
+                                               :test #'equal)))
+        (error "Construction edge table contains duplicates."))
+      answer)))
+
+(defparameter *construction-edge-pairs*
+  (%make-construction-edge-pairs))
 
 (defun %make-construction-edge-adjacencies ()
-  "Return BIT, TRIANGLE-A, TRIANGLE-B triples for all 21 internal edges."
+  "Return BIT, TRIANGLE-A, TRIANGLE-B triples for all 29 internal edges."
   (let ((incidences (make-hash-table :test #'equal))
         (indices *positive-face-index-template*))
-    (dotimes (triangle 18)
+    (dotimes (triangle 26)
       (let* ((base (* triangle 3))
              (a (aref indices base))
              (b (aref indices (+ base 1)))
@@ -1140,19 +1392,24 @@ past it, and the band ends in a fan instead."
             (push triangle
                   (gethash (list (min left right) (max left right))
                            incidences))))))
-    (let ((triples '()))
-      (maphash
-       (lambda (edge triangles)
-         (when (= 2 (length triangles))
-           (let ((bit (%construction-edge-bit (first edge) (second edge))))
-             (unless bit
-               (error "Internal raster edge ~S has no construction bit." edge))
-             (push (list bit (first triangles) (second triangles)) triples))))
-       incidences)
-      (unless (= 21 (length triples))
-        (error "Expected 21 internal construction edges, got ~D."
-               (length triples)))
-      (coerce (sort triples #'< :key #'first) 'vector))))
+    (let ((triples (make-array 29)))
+      (dotimes (bit 29)
+        (let* ((edge (aref *construction-edge-pairs* bit))
+               (triangles (gethash edge incidences)))
+          (unless (= 2 (length triangles))
+            (error "Construction edge ~S has ~D incident triangles."
+                   edge (length triangles)))
+          (setf (aref triples bit)
+                (list bit (first triangles) (second triangles)))))
+      (let ((internal-count 0))
+        (maphash (lambda (edge triangles)
+                   (declare (ignore edge))
+                   (when (= 2 (length triangles)) (incf internal-count)))
+                 incidences)
+        (unless (= internal-count 29)
+          (error "Topology has ~D internal edges, expected 29."
+                 internal-count)))
+      triples)))
 
 (defparameter *construction-edge-adjacencies*
   (%make-construction-edge-adjacencies))
@@ -1183,13 +1440,14 @@ past it, and the band ends in a fan instead."
 
 The outer four rims are cubical-complex boundaries and are drawn separately.
 Bits 0..5 describe the two internal U lines, 6..11 the internal V lines,
-and 12..20 the nine quad diagonals.  A tiny tolerance rejects only numerical
-noise from coplanar triangles; screen-space derivatives later set line width,
-never edge meaning."
+12..16 the five ordinary diagonals, and 17..28 the three spokes of each
+corner hexagon.  A tiny tolerance rejects only numerical noise from coplanar
+triangles; screen-space derivatives later set line width, never edge meaning."
   (let* ((points (realize-face-patch domain face shape-word width))
          (indices *positive-face-index-template*)
-         (normals (make-array 54 :element-type 'double-float)))
-    (dotimes (triangle 18)
+         (normals (make-array +face-index-count+
+                              :element-type 'double-float)))
+    (dotimes (triangle 26)
       (multiple-value-bind (x y z)
           (%triangle-unit-normal points indices triangle)
         (let ((base (* triangle 3)))
@@ -1433,6 +1691,42 @@ never edge meaning."
               (incf three-cell-unit-diagonals)
               (%check (= reach 2/3))))))
       (%check (plusp three-cell-unit-diagonals)))
+    ;; Exactly the planar three-cell L stars and their complements acquire an
+    ;; arc.  The motivating wall termination is one member of that orbit.
+    (let ((miter-count 0))
+      (dotimes (mask 256)
+        (when (star-miter-arc-p mask) (incf miter-count)))
+      (%check (= miter-count 48))
+      (%check (star-miter-arc-p #xcd))
+      (%check (star-miter-arc-p (logxor #xff #xcd))))
+    ;; #xCD has moment (1,-3,1).  Its two strip endpoints and circular
+    ;; midpoint all lie at radius W/2 in the XZ arc plane and Y=-W/2.
+    (let* ((width 0.2d0)
+           (radius (* width 1/2))
+           (diagonal (* radius 0.7071067811865476d0)))
+      (multiple-value-bind (cx cy cz)
+          (%star-center-displacement #xcd width)
+        (%check (< (abs (- cx diagonal)) 1d-15))
+        (%check (< (abs (+ cy radius)) 1d-15))
+        (%check (< (abs (- cz diagonal)) 1d-15))
+        (%check (< (abs (- (sqrt (+ (* cx cx) (* cz cz))) radius))
+                   1d-15)))
+      (let ((x-ray-end
+              (multiple-value-list
+               (%star-half-point-displacement #xcd 0 -1 width)))
+            (z-ray-end
+              (multiple-value-list
+               (%star-half-point-displacement #xcd 2 -1 width)))
+            (uninterrupted-x
+              (multiple-value-list
+               (%star-half-point-displacement #xcd 0 1 width))))
+        (%check (equal x-ray-end (list 0d0 (- radius) radius)))
+        (%check (equal z-ray-end (list radius (- radius) 0d0)))
+        (%check
+         (equal uninterrupted-x
+                (list (* 1/2 (+ diagonal width))
+                      (* -1/2 radius)
+                      (* 1/2 diagonal))))))
     ;; Full equivariance under all six permutations and eight reflections.
     (let ((permutations
             #(#(0 1 2) #(0 2 1) #(1 0 2)
@@ -1458,6 +1752,63 @@ never edge meaning."
                           (%check (and (= nmx tmx) (= nmy tmy) (= nmz tmz)
                                        (= nqx tqx) (= nqy tqy) (= nqz tqz)
                                        (= nreach reach) (= nk k))))))))))))))
+    ;; The new derived geometry is itself complement invariant and equivariant
+    ;; under the whole cubical symmetry group, including its half-edge key.
+    (let ((permutations
+            #(#(0 1 2) #(0 2 1) #(1 0 2)
+              #(1 2 0) #(2 0 1) #(2 1 0)))
+          (width 0.2d0))
+      (dotimes (mask 256)
+        (let ((complement (logxor #xff mask)))
+          (%check (eq (star-miter-arc-p mask)
+                      (star-miter-arc-p complement)))
+          (%check
+           (equal (multiple-value-list
+                   (%star-center-displacement mask width))
+                  (multiple-value-list
+                   (%star-center-displacement complement width))))
+          (dotimes (axis-number 3)
+            (dolist (direction '(-1 1))
+              (%check
+               (equal
+                (multiple-value-list
+                 (%star-half-point-displacement
+                  mask axis-number direction width))
+                (multiple-value-list
+                 (%star-half-point-displacement
+                  complement axis-number direction width))))))
+          (loop for permutation across permutations do
+            (dotimes (reflection 8)
+              (multiple-value-bind (new-normal transformed-mask)
+                  (%transform-star #b111 mask permutation reflection)
+                (%check (= new-normal #b111))
+                (%check (eq (star-miter-arc-p mask)
+                            (star-miter-arc-p transformed-mask)))
+                (multiple-value-bind (dx dy dz)
+                    (%star-center-displacement mask width)
+                  (multiple-value-bind (tdx tdy tdz)
+                      (%transform-components
+                       dx dy dz permutation reflection)
+                    (multiple-value-bind (ndx ndy ndz)
+                        (%star-center-displacement transformed-mask width)
+                      (%check (and (= ndx tdx) (= ndy tdy) (= ndz tdz))))))
+                (dotimes (axis-number 3)
+                  (dolist (direction '(-1 1))
+                    (let* ((new-axis (position axis-number permutation))
+                           (new-direction
+                             (* direction
+                                (if (logbitp new-axis reflection) -1 1))))
+                      (multiple-value-bind (dx dy dz)
+                          (%star-half-point-displacement
+                           mask axis-number direction width)
+                        (multiple-value-bind (tdx tdy tdz)
+                            (%transform-components
+                             dx dy dz permutation reflection)
+                          (multiple-value-bind (ndx ndy ndz)
+                              (%star-half-point-displacement
+                               transformed-mask new-axis new-direction width)
+                            (%check
+                             (and (= ndx tdx) (= ndy tdy) (= ndz tdz)))))))))))))))
     ;; Missing vertical cells are centralized as air and never call OCCUPANCY.
     (let ((calls 0)
           (domain (make-world-domain :x-bits 2 :y-bits 2)))
@@ -1547,17 +1898,13 @@ never edge meaning."
               (multiple-value-bind (rx ry rz rr) (decode-corner-code code)
                 (%check (and (= qx rx) (= qy ry) (= qz rz)
                              (= reach rr)))))))))
-    (let* ((c0 (encode-corner-code 0 0 0 1/2))
-           (c1 (encode-corner-code -1 1 0 2/3))
-           (c2 (encode-corner-code 1 -1 1 1/2))
-           (c3 (encode-corner-code 1 1 -1 2/3))
-           (word (pack-shape-word 0 1 2 0 c0 c1 c2 c3)))
+    (let* ((stars '(#x00 #x5a #xa5 #xff))
+           (word (apply #'pack-shape-word stars)))
       (%check (shape-word-valid-p word))
       (%check (equal (multiple-value-list (unpack-shape-word word))
-                     (list 0 1 2 0 c0 c1 c2 c3)))
-      (%check (not (shape-word-valid-p (logior word #b11))))
-      (%check (not (shape-word-valid-p
-                    (dpb 27 (byte 5 (%corner-shift :low-low)) word)))))
+                     stars))
+      (%check (shape-word-valid-p #xffffffff))
+      (%check (not (shape-word-valid-p -1))))
     (let ((domain (make-world-domain :x-bits 6 :y-bits 6)))
       ;; Every exposed incidence of an edge reconstructs the literal moment Q.
       (dolist (extent (list +x-edge-extent+ +y-edge-extent+ +z-edge-extent+))
@@ -1569,7 +1916,12 @@ never edge meaning."
                       (incidences 0))
                   (multiple-value-bind (mx my mz qx qy qz reach)
                       (classify-site-star domain edge occupancy)
-                    (declare (ignore mx my mz reach))
+                    (declare (ignore mx my mz))
+                    (multiple-value-bind (dx dy dz)
+                        (site-displacement domain edge occupancy 1/5)
+                      (%check (and (= dx (* qx reach 1/5))
+                                   (= dy (* qy reach 1/5))
+                                   (= dz (* qz reach 1/5)))))
                     (dotimes (axis-number 3)
                       (unless (logbitp axis-number extent)
                         (let ((axis (index-axis axis-number)))
@@ -1582,11 +1934,17 @@ never edge meaning."
                                 (incf incidences)
                                 (let* ((local-edge
                                          (%find-local-edge domain face edge))
-                                       (code (ecase k
-                                               (1 +edge-convex+)
-                                               (2 +edge-balanced+)
-                                               (3 +edge-concave+))))
+                                       (shape
+                                         (face-shape-word
+                                          domain face occupancy))
+                                       (code
+                                         (shape-edge-code
+                                          face shape local-edge)))
                                   (%check local-edge)
+                                  (%check (= code (ecase k
+                                                    (1 +edge-convex+)
+                                                    (2 +edge-balanced+)
+                                                    (3 +edge-concave+))))
                                   (multiple-value-bind (dqx dqy dqz)
                                       (decode-face-edge-direction
                                        face local-edge code)
@@ -1611,15 +1969,15 @@ never edge meaning."
                       (let* ((corner (%find-local-corner domain face vertex))
                              (shape (face-shape-word domain face occupancy)))
                         (%check corner)
+                        (%check (= mask
+                                   (shape-corner-star-mask shape corner)))
                         (%check (= expected
                                    (shape-corner-code shape corner)))))))
                 (%check (plusp incidences)))))))
       ;; Face records round-trip the exact four-u32 ABI, including the compact
       ;; normal-discontinuity mask consumed by construction rendering.
       (let* ((face (make-site domain 3 4 5 +xy-face-extent+ -1))
-             (corner (encode-corner-code 0 0 0 1/2))
-             (shape (pack-shape-word 0 1 2 0
-                                     corner corner corner corner))
+             (shape (pack-shape-word #x12 #x34 #x56 #x78))
              (record (make-face-record domain face shape 13 #x15555)))
         (%check (= (length record) +face-record-word-count+))
         (%check (= (* (length record) 4) +face-record-byte-size+))
@@ -1630,24 +1988,36 @@ never edge meaning."
                        (= shape loaded-shape)
                        (= 13 loaded-stock)
                        (= #x15555 loaded-construction))))
-        (setf (aref record +face-record-construction-word+) (ash 1 21))
+        (setf (aref record +face-record-construction-word+) (ash 1 29))
         (%check (%signals-error-p
                  (lambda () (load-face-record record 0 domain))))))))
 
-(defun %boundary-point-key (domain face i j)
-  (let ((ib (or (= i 0) (= i 3)))
-        (jb (or (= j 0) (= j 3))))
-    (cond
-      ((and ib jb)
-       (list :vertex
-             (site-geometry
-              (face-corner-site domain face (%corner-point-data i j)))))
-      ((or ib jb)
-       (multiple-value-bind (edge parameter) (%edge-point-data i j)
-         (list :edge
-               (site-geometry (face-edge-site domain face edge))
-               parameter)))
-      (t nil))))
+(defun %boundary-point-key (domain face point-index)
+  (if (< point-index 16)
+      (multiple-value-bind (i j) (floor point-index 4)
+        (let ((ib (or (= i 0) (= i 3)))
+              (jb (or (= j 0) (= j 3))))
+          (cond
+            ((and ib jb)
+             (list :vertex-center
+                   (site-geometry
+                    (face-corner-site
+                     domain face (%corner-point-data i j)))))
+            ((or ib jb)
+             (multiple-value-bind (edge parameter) (%edge-point-data i j)
+               (list :edge
+                     (site-geometry (face-edge-site domain face edge))
+                     parameter)))
+            (t nil))))
+      (multiple-value-bind (corner-index tangent-index)
+          (floor (- point-index 16) 2)
+        (let* ((corner (%index-corner corner-index))
+               (tangent (if (zerop tangent-index) :u :v))
+               (vertex (face-corner-site domain face corner)))
+          (multiple-value-bind (axis-number direction)
+              (%corner-half-edge-data face corner tangent)
+            (list :vertex-half (site-geometry vertex)
+                  axis-number direction))))))
 
 (defun %test-realization-closure ()
   (%with-test-section ("reference face realization")
@@ -1667,22 +2037,59 @@ never edge meaning."
                 (let* ((shape (face-shape-word domain face occupancy))
                        (points (realize-face-patch
                                 domain face shape width)))
-                  (dotimes (i 4)
-                    (dotimes (j 4)
-                      (let ((key (%boundary-point-key domain face i j)))
-                        (when key
-                          (let* ((base (* 3 (local-point-index i j)))
-                                 (position
-                                   (list (aref points base)
-                                         (aref points (+ base 1))
-                                         (aref points (+ base 2))))
-                                 (old (assoc key seen :test #'equal)))
-                            (if old
-                                (progn
-                                  (incf duplicate-count)
-                                  (%check (every #'eql position (cdr old))))
-                                (push (cons key position) seen)))))))))))))
+                  (dotimes (point-index +face-point-count+)
+                    (let ((key (%boundary-point-key
+                                domain face point-index)))
+                      (when key
+                        (let* ((base (* 3 point-index))
+                               (position
+                                 (list (aref points base)
+                                       (aref points (+ base 1))
+                                       (aref points (+ base 2))))
+                               (old (assoc key seen :test #'equal)))
+                          (if old
+                              (progn
+                                (incf duplicate-count)
+                                (%check (every #'eql position (cdr old))))
+                              (push (cons key position) seen))))))))))))
       (%check (plusp duplicate-count)))
+    ;; Exhaust the actual 3D triangles, not merely the parameter template.
+    ;; Every exposed incidence of every vertex star must remain nondegenerate
+    ;; and outward-wound after the arc endpoints move.
+    (let* ((domain (make-world-domain :x-bits 6 :y-bits 6))
+           (vertex (make-site domain 20 20 20 +vertex-extent+ 1))
+           (width 1/5)
+           (face-count 0)
+           (triangle-count 0))
+      (dotimes (mask 256)
+        (let ((occupancy (%star-occupancy-function vertex mask)))
+          (dolist (geometric-face (%faces-containing-vertex domain vertex))
+            (let ((face (orient-face-outward
+                         domain geometric-face occupancy)))
+              (when face
+                (incf face-count)
+                (let* ((shape (face-shape-word domain face occupancy))
+                       (points (realize-face-patch
+                                domain face shape width))
+                       (indices (if (site-positive-p face)
+                                    *positive-face-index-template*
+                                    *negative-face-index-template*)))
+                  (%check (typep (face-construction-mask
+                                  domain face shape width)
+                                 '(unsigned-byte 29)))
+                  (multiple-value-bind (fx fy fz)
+                      (face-oriented-normal face)
+                    (dotimes (triangle 26)
+                      (incf triangle-count)
+                      (multiple-value-bind (nx ny nz)
+                          (%triangle-unit-normal points indices triangle)
+                        (let ((facing (+ (* nx fx) (* ny fy) (* nz fz))))
+                          (%check (plusp facing)
+                                  (format nil
+                                          "mask #x~2,'0X face ~S triangle ~D facing ~F"
+                                          mask face triangle facing))))))))))))
+      (%check (plusp face-count))
+      (%check (= triangle-count (* face-count 26))))
     ;; Integrate the same closure rule with a six-face surface chain.
     (let* ((domain (make-world-domain :x-bits 6 :y-bits 6))
            (cx 20) (cy 20) (cz 20)
@@ -1700,26 +2107,25 @@ never edge meaning."
          (let* ((shape (face-shape-word domain face occupancy))
                 (points (realize-face-patch domain face shape width)))
            (dolist (edge '(:u-low :u-high :v-low :v-high))
-             (%check (= (shape-edge-code shape edge) +edge-convex+)))
+             (%check (= (shape-edge-code face shape edge) +edge-convex+)))
            (dolist (corner '(:low-low :low-high :high-low :high-high))
              (multiple-value-bind (qx qy qz reach)
                  (decode-corner-code (shape-corner-code shape corner))
                (declare (ignore qx qy qz))
                (%check (= reach 2/3))))
-           (dotimes (i 4)
-             (dotimes (j 4)
-               (let ((key (%boundary-point-key domain face i j)))
-                 (when key
-                   (let* ((base (* 3 (local-point-index i j)))
-                          (position (list (aref points base)
-                                          (aref points (+ base 1))
-                                          (aref points (+ base 2))))
-                          (old (assoc key seen :test #'equal)))
-                     (if old
-                         (progn
-                           (incf duplicate-count)
-                           (%check (every #'eql position (cdr old))))
-                         (push (cons key position) seen)))))))))
+           (dotimes (point-index +face-point-count+)
+             (let ((key (%boundary-point-key domain face point-index)))
+               (when key
+                 (let* ((base (* 3 point-index))
+                        (position (list (aref points base)
+                                        (aref points (+ base 1))
+                                        (aref points (+ base 2))))
+                        (old (assoc key seen :test #'equal)))
+                   (if old
+                       (progn
+                         (incf duplicate-count)
+                         (%check (every #'eql position (cdr old))))
+                       (push (cons key position) seen))))))))
        surface)
       (%check (plusp duplicate-count))
       (%check (%signals-error-p
@@ -1731,13 +2137,30 @@ never edge meaning."
                                    occupancy)
                   1/2)))))))
 
-(defun %index-u (index) (floor index 4))
-(defun %index-v (index) (mod index 4))
+(defun %point-param-coordinates (index)
+  "Return exact doubled patch coordinates for topology tests."
+  (if (< index 16)
+      (multiple-value-bind (i j) (floor index 4)
+        (values (* 2 i) (* 2 j)))
+      (multiple-value-bind (corner-index tangent-index)
+          (floor (- index 16) 2)
+        (let* ((corner (%index-corner corner-index))
+               (tangent (if (zerop tangent-index) :u :v))
+               (u-high (%corner-high-p corner :u))
+               (v-high (%corner-high-p corner :v)))
+          (values (if (eq tangent :u)
+                      (if u-high 5 1)
+                      (if u-high 6 0))
+                  (if (eq tangent :v)
+                      (if v-high 5 1)
+                      (if v-high 6 0)))))))
+
 (defun %triangle-area2 (a b c)
-  (- (* (- (%index-u b) (%index-u a))
-        (- (%index-v c) (%index-v a)))
-     (* (- (%index-v b) (%index-v a))
-        (- (%index-u c) (%index-u a)))))
+  (multiple-value-bind (au av) (%point-param-coordinates a)
+    (multiple-value-bind (bu bv) (%point-param-coordinates b)
+      (multiple-value-bind (cu cv) (%point-param-coordinates c)
+        (- (* (- bu au) (- cv av))
+           (* (- bv av) (- cu au)))))))
 
 (defun %test-index-templates ()
   (%with-test-section ("raster index templates")
@@ -1745,70 +2168,55 @@ never edge meaning."
           (negative (negative-face-index-template)))
       (%check (= (length positive) +face-index-count+))
       (%check (= (length negative) +face-index-count+))
-      (%check (loop for index across positive always (<= 0 index 15)))
-      (%check (loop for index across negative always (<= 0 index 15)))
-      (dotimes (triangle 18)
+      (%check (loop for index across positive
+                    always (< -1 index +face-point-count+)))
+      (%check (loop for index across negative
+                    always (< -1 index +face-point-count+)))
+      (dotimes (triangle 26)
         (let ((base (* triangle 3)))
           (%check (= (aref negative base) (aref positive base)))
           (%check (= (aref negative (+ base 1))
                      (aref positive (+ base 2))))
           (%check (= (aref negative (+ base 2))
                      (aref positive (+ base 1))))
-          (%check (= (%triangle-area2
-                      (aref positive base)
-                      (aref positive (+ base 1))
-                      (aref positive (+ base 2)))
-                     1))
-          (%check (= (%triangle-area2
-                      (aref negative base)
-                      (aref negative (+ base 1))
-                      (aref negative (+ base 2)))
-                     -1))))
+          (%check (plusp (%triangle-area2
+                          (aref positive base)
+                          (aref positive (+ base 1))
+                          (aref positive (+ base 2)))))
+          (%check (minusp (%triangle-area2
+                           (aref negative base)
+                           (aref negative (+ base 1))
+                           (aref negative (+ base 2)))))))
       (let* ((domain (make-world-domain :x-bits 6 :y-bits 6))
              (face (make-site domain 10 10 10 +xy-face-extent+ 1))
-             (flat-corner (encode-corner-code 0 0 0 1/2))
-             (flat-shape (pack-shape-word 0 0 0 0
-                                          flat-corner flat-corner
-                                          flat-corner flat-corner))
-             (bent-corner (encode-corner-code 1 0 1 1/2))
-             (bent-shape (pack-shape-word 0 0 0 0
-                                          bent-corner flat-corner
-                                          flat-corner flat-corner)))
+             (flat-shape (pack-shape-word #x0f #x0f #x0f #x0f))
+             (bent-shape (pack-shape-word #x0e #x0f #x0f #x0f)))
         (%check (zerop (face-construction-mask
                         domain face flat-shape 0.11d0)))
         (%check (plusp (face-construction-mask
                         domain face bent-shape 0.11d0))))
-      ;; Each consecutive pair shares a diagonal, not a boundary edge;
-      ;; this excludes an equal-area overlap/gap pair as well as a bow tie.
-      (dotimes (quad 9)
-        (let* ((i (floor quad 3))
-               (j (mod quad 3))
-               (base (* quad 6))
-               (c00 (local-point-index i j))
-               (c10 (local-point-index (1+ i) j))
-               (c11 (local-point-index (1+ i) (1+ j)))
-               (c01 (local-point-index i (1+ j)))
-               (allowed (list c00 c10 c11 c01))
-               (first (loop for k from base below (+ base 3)
-                            collect (aref positive k)))
-               (second (loop for k from (+ base 3) below (+ base 6)
-                             collect (aref positive k)))
-               (used (append first second))
-               (shared (intersection first second)))
-          (%check (every (lambda (index) (member index allowed)) used))
-          (%check (= (length (remove-duplicates used)) 4))
-          (%check (= (length shared) 2))
-          (%check (or (and (member c00 shared) (member c11 shared))
-                      (and (member c10 shared) (member c01 shared))))
-          (%check (= (+ (%triangle-area2
-                         (aref positive base)
-                         (aref positive (+ base 1))
-                         (aref positive (+ base 2)))
-                        (%triangle-area2
-                         (aref positive (+ base 3))
-                         (aref positive (+ base 4))
-                         (aref positive (+ base 5))))
-                     2)))))))
+      ;; The indexed disk uses every point, 29 internal edges, and 20 boundary
+      ;; edges.  No triangle repeats a corner or overlaps by reversed winding.
+      (let ((incidences (make-hash-table :test #'equal))
+            (used '()))
+        (dotimes (triangle 26)
+          (let* ((base (* triangle 3))
+                 (a (aref positive base))
+                 (b (aref positive (+ base 1)))
+                 (c (aref positive (+ base 2))))
+            (%check (= 3 (length (remove-duplicates (list a b c)))))
+            (setf used (list* a b c used))
+            (dolist (edge (list (%ordered-edge a b)
+                                (%ordered-edge b c)
+                                (%ordered-edge c a)))
+              (incf (gethash edge incidences 0)))))
+        (%check (= +face-point-count+ (length (remove-duplicates used))))
+        (%check (= 29 (loop for count being the hash-values of incidences
+                            count (= count 2))))
+        (%check (= 20 (loop for count being the hash-values of incidences
+                            count (= count 1))))
+        (%check (loop for edge across *construction-edge-pairs*
+                      always (= 2 (gethash edge incidences 0))))))))
 
 (defun run-luft-tests (&key (stream *standard-output*))
   "Run the executable topology, representation, classification, and ABI tests.

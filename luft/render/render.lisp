@@ -220,7 +220,8 @@ curtain wall, paired turrets and an arcaded hall."
 
 The two L-shaped terraces retain five-, six-, and seven-cell vertex stars in
 one architectural context.  Their back edges meet a continuous wall so the
-same view also retains the truncated wall miter which motivates #2PN62B."
+same view retains the wall termination whose former truncated strip motivated
+#2PN62B and now exercises the minimal arc."
   (let ((builder (make-scene-builder :horizontal-bits 5)))
     ;; Broad plinth and continuous back wall.
     (scene-builder-box builder 2 14 2 8 0 1 :architecture-p t)
@@ -281,8 +282,9 @@ same view also retains the truncated wall miter which motivates #2PN62B."
   "Lower an oriented SURFACE through OCCUPANCY to dense face records.
 
 SURFACE owns topology while OCCUPANCY supplies the stable cell window needed
-to classify its edge and corner stars.  Keeping this boundary explicit lets a
-game use dense resident occupancy without changing LUFT's immutable chains."
+to pack each face's four complete vertex stars.  Keeping this boundary
+explicit lets a game use dense resident occupancy without changing LUFT's
+immutable chains."
   (check-type surface luft:chain)
   (check-type occupancy function)
   (check-type stock-function function)
