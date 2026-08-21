@@ -435,6 +435,17 @@ consequence of its own occupancy star and can be read on its own."
                             :accessor renderer-present-fragment-module)
    (present-pipeline :initform nil :accessor renderer-present-pipeline)
    (sampler :initform nil :accessor renderer-sampler)
+   (inspector-layout :initform nil :accessor renderer-inspector-layout)
+   (inspector-buffer :initform nil :accessor renderer-inspector-buffer)
+   (inspector-bind-group :initform nil
+                         :accessor renderer-inspector-bind-group)
+   (inspector-texture :initform nil :accessor renderer-inspector-texture)
+   (inspector-view :initform nil :accessor renderer-inspector-view)
+   (inspector-vertex-module :initform nil
+                            :accessor renderer-inspector-vertex-module)
+   (inspector-fragment-module :initform nil
+                              :accessor renderer-inspector-fragment-module)
+   (inspector-pipeline :initform nil :accessor renderer-inspector-pipeline)
    (extent :initform nil :accessor renderer-extent)
    (frame-index :initform 0 :accessor renderer-frame-index)
    (previous-view :initform nil :accessor renderer-previous-view)
@@ -559,7 +570,9 @@ consequence of its own occupancy star and can be read on its own."
          face-buffer camera-buffer positive-index-buffer negative-index-buffer
          layout bind-group vertex-module fragment-module pipeline
          present-layout present-bind-group present-vertex-module
-         present-fragment-module present-pipeline sampler renderer
+         present-fragment-module present-pipeline sampler
+         inspector-layout inspector-buffer inspector-vertex-module
+         inspector-fragment-module inspector-pipeline renderer
          (completed-p nil))
     (unwind-protect
          (progn
@@ -584,7 +597,7 @@ consequence of its own occupancy star and can be read on its own."
                  (create device
                          (make-buffer-descriptor
                           :label "luft inspection camera"
-                          :size 192 :usage '(:uniform :copy-dst)))
+                          :size 208 :usage '(:uniform :copy-dst)))
                  negative-index-buffer
                  (create device
                          (make-buffer-descriptor
@@ -631,6 +644,46 @@ consequence of its own occupancy star and can be read on its own."
                           :depth-stencil
                           '(:format :depth32-float :depth-write-enabled t
                             :depth-compare :less))))
+           (setf sampler
+                 (create device
+                         (make-sampler-descriptor
+                          :label "luft presentation sampler"
+                          :mag-filter :linear :min-filter :linear))
+                 inspector-layout
+                 (create device
+                         (make-bind-group-layout-descriptor
+                          :label "luft inspector layout"
+                          :entries '((:binding 0 :type :uniform-buffer)
+                                     (:binding 1 :type :texture)
+                                     (:binding 2 :type :sampler))))
+                 inspector-buffer
+                 (create device
+                         (make-buffer-descriptor
+                          :label "luft inspector rectangle"
+                          :size 16 :usage '(:uniform :copy-dst)))
+                 inspector-vertex-module
+                 (create device
+                         (make-shader-module-descriptor
+                          :label "luft inspector vertex"
+                          :language :mathematical
+                          :code (shaders:inspector-vertex-specification)))
+                 inspector-fragment-module
+                 (create device
+                         (make-shader-module-descriptor
+                          :label "luft inspector fragment"
+                          :language :mathematical
+                          :code (shaders:inspector-fragment-specification)))
+                 inspector-pipeline
+                 (create device
+                         (make-render-pipeline-descriptor
+                          :label "luft inspector pipeline"
+                          :layout inspector-layout
+                          :vertex `(:module ,inspector-vertex-module)
+                          :fragment `(:module ,inspector-fragment-module
+                                      :targets
+                                      ((:format ,color-format
+                                        :blend :premultiplied-alpha)))
+                          :primitive '(:topology :triangle-list))))
            (when temporal-p
              (setf present-layout
                    (create device
@@ -638,11 +691,6 @@ consequence of its own occupancy star and can be read on its own."
                             :label "luft presentation layout"
                             :entries '((:binding 0 :type :texture)
                                        (:binding 1 :type :sampler))))
-                   sampler
-                   (create device
-                           (make-sampler-descriptor
-                            :label "luft temporal sampler"
-                            :mag-filter :linear :min-filter :linear))
                    present-vertex-module
                    (create device
                            (make-shader-module-descriptor
@@ -684,22 +732,84 @@ consequence of its own occupancy star and can be read on its own."
                  (renderer-present-fragment-module renderer)
                  present-fragment-module
                  (renderer-present-pipeline renderer) present-pipeline)
+           (setf (renderer-inspector-layout renderer) inspector-layout
+                 (renderer-inspector-buffer renderer) inspector-buffer
+                 (renderer-inspector-vertex-module renderer)
+                 inspector-vertex-module
+                 (renderer-inspector-fragment-module renderer)
+                 inspector-fragment-module
+                 (renderer-inspector-pipeline renderer) inspector-pipeline)
            (create-frame-targets renderer extent)
            (setf completed-p t)
            renderer)
       (unless completed-p
         (when renderer (destroy-renderer renderer))
-        (dolist (resource (list present-pipeline present-fragment-module
+        (dolist (resource (list inspector-pipeline inspector-fragment-module
+                                inspector-vertex-module inspector-buffer
+                                inspector-layout
+                                present-pipeline present-fragment-module
                                 present-vertex-module sampler present-bind-group
                                 present-layout pipeline fragment-module
                                 vertex-module bind-group layout negative-index-buffer
                                 positive-index-buffer camera-buffer face-buffer))
           (when resource (ignore-errors (destroy resource))))))))
 
+(defun set-renderer-inspector-texture (renderer texture)
+  "Borrow TEXTURE from the atelier and bind it to RENDERER's overlay pass."
+  (unless (eq texture (renderer-inspector-texture renderer))
+    (when (renderer-inspector-bind-group renderer)
+      (destroy (renderer-inspector-bind-group renderer))
+      (setf (renderer-inspector-bind-group renderer) nil))
+    (when (renderer-inspector-view renderer)
+      (destroy (renderer-inspector-view renderer))
+      (setf (renderer-inspector-view renderer) nil))
+    (setf (renderer-inspector-texture renderer) texture)
+    (when texture
+      (let* ((device (renderer-device renderer))
+             (view (create device
+                           (make-texture-view-descriptor :texture texture)))
+             (group
+               (create device
+                       (make-bind-group-descriptor
+                        :label "luft inspector"
+                        :layout (renderer-inspector-layout renderer)
+                        :entries
+                        `((:binding 0
+                           :resource ,(renderer-inspector-buffer renderer))
+                          (:binding 1 :resource ,view)
+                          (:binding 2
+                           :resource ,(renderer-sampler renderer)))))))
+        (setf (renderer-inspector-view renderer) view
+              (renderer-inspector-bind-group renderer) group))))
+  renderer)
+
+(defun draw-renderer-inspector (renderer pass extent rect)
+  (when (and rect (renderer-inspector-bind-group renderer))
+    (write-buffer (renderer-inspector-buffer renderer) rect)
+    (set-pipeline pass (renderer-inspector-pipeline renderer))
+    (set-bind-group pass 0 (renderer-inspector-bind-group renderer))
+    (set-scissor-rect pass 0 0 (first extent) (second extent))
+    (draw pass 6))
+  renderer)
+
+(defun encode-renderer-inspector (renderer encoder surface-texture extent rect)
+  (when (and rect (renderer-inspector-bind-group renderer))
+    (let ((pass
+            (begin-render-pass
+             encoder
+             (make-render-pass-descriptor
+              :label "luft site inspector"
+              :color-attachments
+              `((:view ,surface-texture :load-op :load :store-op :store))))))
+      (draw-renderer-inspector renderer pass extent rect)
+      (end-pass pass)))
+  renderer)
+
 (defun encode-renderer-frame
     (renderer encoder surface-texture extent camera-uniform-data
-     &key jitter view)
+     &key jitter view inspector-texture inspector-rect)
   (ensure-renderer-extent renderer extent)
+  (set-renderer-inspector-texture renderer inspector-texture)
   (write-buffer (renderer-camera-buffer renderer) camera-uniform-data)
   (let* ((materialization (renderer-materialization renderer))
          (positive-count (face-materialization-positive-count materialization))
@@ -766,17 +876,31 @@ consequence of its own occupancy star and can be read on its own."
           (set-bind-group present-pass 0
                           (renderer-present-bind-group renderer))
           (draw present-pass 3)
+          ;; MetalFX publishes into this pass.  Keeping the atelier overlay in
+          ;; the same final pass makes it unambiguously later than the resolve.
+          (draw-renderer-inspector
+           renderer present-pass extent inspector-rect)
           (end-pass present-pass))
         (setf (renderer-previous-view renderer) view
               (renderer-history-valid-p renderer) t
               (renderer-history-used-p renderer) history-valid-p)
-        (incf (renderer-frame-index renderer)))))
+        (incf (renderer-frame-index renderer))))
+    (unless temporal-p
+      (encode-renderer-inspector
+       renderer encoder surface-texture extent inspector-rect)))
   renderer)
 
 (defun destroy-renderer (renderer)
   (destroy-renderer-targets renderer)
   (dolist (resource
-            (list (renderer-present-pipeline renderer)
+            (list (renderer-inspector-bind-group renderer)
+                  (renderer-inspector-view renderer)
+                  (renderer-inspector-pipeline renderer)
+                  (renderer-inspector-fragment-module renderer)
+                  (renderer-inspector-vertex-module renderer)
+                  (renderer-inspector-buffer renderer)
+                  (renderer-inspector-layout renderer)
+                  (renderer-present-pipeline renderer)
                   (renderer-present-fragment-module renderer)
                   (renderer-present-vertex-module renderer)
                   (renderer-sampler renderer)

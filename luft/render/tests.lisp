@@ -85,13 +85,17 @@
                (sort (loop for stock being the hash-keys of stocks collect stock)
                      #'<)))))
 
-(deftest face-shaders-lower-through-both-conventional-backends
+(deftest face-and-atelier-shaders-lower-through-both-conventional-backends
   (let* ((vertex (luft.render.shaders:face-vertex-specification))
          (fragment (luft.render.shaders:face-fragment-specification))
          (present-vertex
            (luft.render.shaders:present-vertex-specification))
          (present-fragment
            (luft.render.shaders:present-fragment-specification))
+         (inspector-vertex
+           (luft.render.shaders:inspector-vertex-specification))
+         (inspector-fragment
+           (luft.render.shaders:inspector-fragment-specification))
          (msl-source
            (luv.msl:msl-document-source (luv.msl:compile-msl vertex)))
          (fragment-msl
@@ -101,10 +105,14 @@
     (ok (search "const device uint4* faces" msl-source))
     (ok (search "camera_position" msl-source))
     (ok (search "motion_output" fragment-msl))
+    (ok (luv.msl:compile-msl inspector-vertex))
+    (ok (luv.msl:compile-msl inspector-fragment))
     (ok (luv.spir-v:compile-shader-specification vertex))
     (ok (luv.spir-v:compile-shader-specification fragment))
     (ok (luv.spir-v:compile-shader-specification present-vertex))
-    (ok (luv.spir-v:compile-shader-specification present-fragment))))
+    (ok (luv.spir-v:compile-shader-specification present-fragment))
+    (ok (luv.spir-v:compile-shader-specification inspector-vertex))
+    (ok (luv.spir-v:compile-shader-specification inspector-fragment))))
 
 (deftest the-camera-block-packs-both-projections
   ;; Perspective and isometric share the three projection rows and differ
@@ -116,13 +124,14 @@
                (let ((view
                        (luft.render::capture-frame-view
                         camera 1100 800 #(0.0 0.0))))
-                 (luft.render::camera-uniform-data view view)))))
+                 (luft.render::camera-uniform-data
+                  view view #(0.5 0.5 0.001 0.001) 1.0)))))
       (let ((perspective (lane :perspective))
             (isometric (lane :isometric))
             (near 0.1)
             (far 200.0))
-        (ok (= 48 (length perspective)))
-        (ok (typep perspective '(simple-array single-float (48))))
+        (ok (= 52 (length perspective)))
+        (ok (typep perspective '(simple-array single-float (52))))
         (dolist (data (list perspective isometric))
           (ok (> (aref data 16) 0.0))
           (ok (> (aref data 17) 0.0))
@@ -138,7 +147,34 @@
           (ok (< (abs (depth isometric near)) 1d-4))
           (ok (< (abs (- (depth isometric far) 1.0)) 1d-4)))
         (ok (= (aref perspective 20) render:*chamfer-width*))
-        (ok (= (aref perspective 21) render:*wireframe*))))))
+        (ok (= (aref perspective 21) render:*wireframe*))
+        (ok (= 1.0 (aref perspective 23)))
+        (ok (equalp #(0.5 0.5 0.001 0.001)
+                    (subseq perspective 48 52)))))))
+
+(deftest a-pointer-ray-retains-the-semantic-boundary-site
+  (let* ((domain (luft:make-world-domain :horizontal-bits 4))
+         (builder (luft:make-chain-builder domain)))
+    (luft:chain-builder-add-site
+     builder (luft:make-site domain 4 4 4 luft:+cell-extent+ 1))
+    (let* ((solid (luft:finish-chain-builder builder))
+           (inspection
+             (luft.render::raycast-site
+              solid
+              (luv.arithmetic.lisp.vec3:make-vec3 4.5 4.5 8.0)
+              (luv.arithmetic.lisp.vec3:make-vec3 0.0 0.0 -1.0)))
+           (site (luft.render::site-inspection-site inspection))
+           (cell (luft.render::site-inspection-cell inspection)))
+      (ok inspection)
+      (ok (= 3.0 (luft.render::site-inspection-distance inspection)))
+      (ok (= luft:+xy-face-extent+ (luft:site-extent site)))
+      (ok (luft:site-positive-p site))
+      (ok (= 4 (luft:site-x site) (luft:site-x cell)))
+      (ok (= 4 (luft:site-y site) (luft:site-y cell)))
+      (ok (= 5 (luft:site-z site)))
+      (ok (= 4 (luft:site-z cell)))
+      (ok (luft:shape-word-valid-p
+           (luft.render::site-inspection-shape-word inspection))))))
 
 ;;; A literal Lisp transcription of FACE-VERTEX-SPECIFICATION's position
 ;;; arithmetic, reading the same face record the GPU reads.  It exists so a

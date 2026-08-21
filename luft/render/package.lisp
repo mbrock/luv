@@ -3,6 +3,8 @@
   (:shadowing-import-from #:luv.shader #:step)
   (:export #:face-fragment-specification
            #:face-vertex-specification
+           #:inspector-fragment-specification
+           #:inspector-vertex-specification
            #:present-fragment-specification
            #:present-vertex-specification))
 
@@ -38,6 +40,15 @@
            #:camera-yaw
            #:camera-pitch
            #:viewer-camera
+           #:viewer-inspection
+           #:site-inspection
+           #:site-inspection-site
+           #:site-inspection-cell
+           #:site-inspection-point
+           #:site-inspection-distance
+           #:site-inspection-shape-word
+           #:site-inspection-stock
+           #:raycast-site
            #:reset-viewer-camera
            #:start-viewer
            #:stop-viewer
@@ -45,6 +56,8 @@
            #:capture-viewer-frame
            #:*chamfer-width*
            #:*wireframe*
+           #:*inspection-ink-p*
+           #:*inspection-reach*
            #:*projection*
            #:*isometric-height*
            #:viewer

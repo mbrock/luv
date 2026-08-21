@@ -17,6 +17,12 @@ The wires are the 4x4 point grid and each cell's shared diagonal, which is
 the way to read a triangulation and exactly the wrong way to judge whether a
 crease looks right: an inked crease reads as a fold whether or not it is one.")
 
+(defparameter *inspection-ink-p* t
+  "Whether the pointer locally reveals LUFT relief and triangulation.")
+
+(defparameter *inspection-reach* 200.0
+  "How far, in cells, the atelier's pointer ray may inspect.")
+
 (defparameter *projection* :perspective
   "Either :PERSPECTIVE or :ISOMETRIC.
 
@@ -33,6 +39,28 @@ projection to judge a shape rule in.")
    (pitch :initarg :pitch :initform 0.0 :accessor camera-pitch)
    (field-of-view :initarg :field-of-view :initform (* 70.0 (/ pi 180))
                   :accessor camera-field-of-view)))
+
+(defclass site-inspection ()
+  ((source :initarg :source :reader site-inspection-source)
+   (site :initarg :site :reader site-inspection-site)
+   (cell :initarg :cell :reader site-inspection-cell)
+   (point :initarg :point :reader site-inspection-point)
+   (distance :initarg :distance :reader site-inspection-distance)
+   (shape-word :initarg :shape-word :reader site-inspection-shape-word)
+   (stock :initarg :stock :reader site-inspection-stock))
+  (:documentation
+   "One retained semantic ray hit, suitable for sparse inspection.
+
+LUFT sites remain packed integers in dense products.  This object exists only
+at the atelier boundary where a person has selected one site."))
+
+(defmethod print-object ((inspection site-inspection) stream)
+  (print-unreadable-object (inspection stream :type t)
+    (let ((site (site-inspection-site inspection)))
+      (format stream "(~D ~D ~D) extent ~3,'0B ~:[-~;+~] at ~,2F"
+              (luft:site-x site) (luft:site-y site) (luft:site-z site)
+              (luft:site-extent site) (luft:site-positive-p site)
+              (site-inspection-distance inspection)))))
 
 (defun make-fly-camera
     (&key (position (vec3:make-vec3 70.0 -18.0 50.0))
@@ -64,6 +92,126 @@ projection to judge a shape rule in.")
          (right (vec3:make-vec3 (sin yaw) (- (cos yaw)) 0.0))
          (up (vec3:vec3-cross right forward)))
     (values right up forward)))
+
+(defun add-scaled-directions (origin &rest direction-scales)
+  (let ((x (vec3:vec3-x origin))
+        (y (vec3:vec3-y origin))
+        (z (vec3:vec3-z origin)))
+    (loop for (direction scale) on direction-scales by #'cddr
+          do (incf x (* (vec3:vec3-x direction) scale))
+             (incf y (* (vec3:vec3-y direction) scale))
+             (incf z (* (vec3:vec3-z direction) scale)))
+    (vec3:make-vec3 x y z)))
+
+(defgeneric inspection-source-solid (source)
+  (:documentation "Return SOURCE's packed solid chain for pointer queries."))
+
+(defmethod inspection-source-solid ((source t)) source)
+
+(defmethod inspection-source-solid ((source scene)) (scene-solid source))
+
+(defgeneric inspection-face-stock (source face)
+  (:documentation "Return the atelier stock at FACE in SOURCE."))
+
+(defmethod inspection-face-stock ((source t) face)
+  (default-face-stock face))
+
+(defmethod inspection-face-stock ((source scene) face)
+  (scene-face-stock source face))
+
+(defun ray-axis-crossings (position direction)
+  "Return grid STEP, first crossing distance, and crossing interval."
+  (cond ((plusp direction)
+         (values 1 (/ (- (1+ (floor position)) position) direction)
+                 (/ direction)))
+        ((minusp direction)
+         (values -1 (/ (- position (floor position)) (- direction))
+                 (/ (- direction))))
+        (t (values 0 most-positive-single-float most-positive-single-float))))
+
+(defun ray-entry-face (solid cell-x cell-y cell-z axis step)
+  "Return the outward face through which a ray entered CELL along AXIS."
+  (let* ((domain (luft:chain-domain solid))
+         (anchor-x (+ cell-x (if (and (eq axis :x) (minusp step)) 1 0)))
+         (anchor-y (+ cell-y (if (and (eq axis :y) (minusp step)) 1 0)))
+         (anchor-z (+ cell-z (if (and (eq axis :z) (minusp step)) 1 0)))
+         (extent (ecase axis
+                   (:x luft:+yz-face-extent+)
+                   (:y luft:+xz-face-extent+)
+                   (:z luft:+xy-face-extent+)))
+         (geometry (luft:make-site domain anchor-x anchor-y anchor-z extent 1))
+         (occupancy (lambda (x y z)
+                      (luft:chain-cell-occupancy-bit solid x y z))))
+    (luft:orient-face-outward domain geometry occupancy)))
+
+(defun make-site-inspection (source face cell-x cell-y cell-z point distance)
+  (let* ((solid (inspection-source-solid source))
+         (domain (luft:chain-domain solid))
+         (occupancy (lambda (x y z)
+                      (luft:chain-cell-occupancy-bit solid x y z)))
+         (cell (luft:make-site domain cell-x cell-y cell-z
+                               luft:+cell-extent+ 1)))
+    (make-instance
+     'site-inspection :source source :site face :cell cell :point point
+     :distance distance
+     :shape-word (luft:face-shape-word domain face occupancy)
+     :stock (inspection-face-stock source face))))
+
+(defun raycast-site (source origin direction
+                     &key (max-distance *inspection-reach*))
+  "Return the first outward LUFT face met by a continuous lattice ray.
+
+Tied edge and corner crossings advance together, so a ray never reports a
+cell it merely touches.  The returned SITE-INSPECTION is the one sparse object
+boundary over the packed chain and dense face records."
+  (let* ((solid (inspection-source-solid source))
+         (direction (vec3:vec3-normalize direction))
+         (x (floor (vec3:vec3-x origin)))
+         (y (floor (vec3:vec3-y origin)))
+         (z (floor (vec3:vec3-z origin)))
+         step-x step-y step-z
+         next-x next-y next-z
+         delta-x delta-y delta-z
+         (distance 0.0)
+         (entry-axis nil)
+         (entry-step 0))
+    (multiple-value-setq (step-x next-x delta-x)
+      (ray-axis-crossings (vec3:vec3-x origin) (vec3:vec3-x direction)))
+    (multiple-value-setq (step-y next-y delta-y)
+      (ray-axis-crossings (vec3:vec3-y origin) (vec3:vec3-y direction)))
+    (multiple-value-setq (step-z next-z delta-z)
+      (ray-axis-crossings (vec3:vec3-z origin) (vec3:vec3-z direction)))
+    (loop
+      (when (= 1 (luft:chain-cell-occupancy-bit solid x y z))
+        (when entry-axis
+          (let* ((face (ray-entry-face solid x y z entry-axis entry-step))
+                 (point (add-scaled-directions origin direction distance)))
+            (when face
+              (return
+                (make-site-inspection source face x y z point distance))))))
+      (let ((next (min next-x next-y next-z)))
+        (when (> next max-distance) (return nil))
+        (setf distance next
+              entry-axis nil)
+        ;; Remember one carrier face for tied crossings, choosing the axis
+        ;; most aligned with the ray.  All tied cells still advance together.
+        (flet ((remember (axis step component)
+                 (when (or (null entry-axis)
+                           (> (abs component)
+                              (abs (vec3:vec3-component direction entry-axis))))
+                   (setf entry-axis axis entry-step step))))
+          (when (<= next-x (+ next 1.0e-6))
+            (incf x step-x)
+            (incf next-x delta-x)
+            (remember :x step-x (vec3:vec3-x direction)))
+          (when (<= next-y (+ next 1.0e-6))
+            (incf y step-y)
+            (incf next-y delta-y)
+            (remember :y step-y (vec3:vec3-y direction)))
+          (when (<= next-z (+ next 1.0e-6))
+            (incf z step-z)
+            (incf next-z delta-z)
+            (remember :z step-z (vec3:vec3-z direction))))))))
 
 (defun projection-lane (width height field-of-view near far)
   "The four projection coefficients and the homogeneous-divisor selector.
@@ -126,12 +274,12 @@ the selector is the whole of the difference."
          :projection (vector px py pz pw)
          :divisor divisor :jitter jitter)))))
 
-(defun camera-uniform-data (view previous)
+(defun camera-uniform-data (view previous inspection-parameters ink-strength)
   (flet ((lane (vector fourth)
            (list (vec3:vec3-x vector) (vec3:vec3-y vector)
                  (vec3:vec3-z vector) fourth)))
     (make-array
-     48 :element-type 'single-float
+     52 :element-type 'single-float
      :initial-contents
      (mapcar
       (lambda (value) (coerce value 'single-float))
@@ -141,7 +289,7 @@ the selector is the whole of the difference."
               (lane (frame-view-forward view) 0.0)
               (coerce (frame-view-projection view) 'list)
               (list *chamfer-width* *wireframe*
-                    (frame-view-divisor view) 0.0)
+                    (frame-view-divisor view) ink-strength)
               (lane (frame-view-position previous) 0.0)
               (lane (frame-view-right previous) 0.0)
               (lane (frame-view-up previous) 0.0)
@@ -149,7 +297,74 @@ the selector is the whole of the difference."
               (coerce (frame-view-projection previous) 'list)
               (list (aref (frame-view-jitter view) 0)
                     (aref (frame-view-jitter view) 1)
-                    (frame-view-divisor previous) 0.0))))))
+                    (frame-view-divisor previous) 0.0)
+              (coerce inspection-parameters 'list))))))
+
+(defun viewer-logical-extent (viewer)
+  (let ((canvas (viewer-canvas viewer)))
+    (list (canvas-width canvas) (canvas-height canvas))))
+
+(defun viewer-pointer-position (viewer)
+  (let ((extent (viewer-logical-extent viewer)))
+    (if (viewer-pointer-captured-p viewer)
+        (values (/ (first extent) 2.0) (/ (second extent) 2.0))
+        (values (or (viewer-pointer-x viewer) (/ (first extent) 2.0))
+                (or (viewer-pointer-y viewer) (/ (second extent) 2.0))))))
+
+(defun viewer-pointer-ray (viewer)
+  "Return the world-space origin and direction through VIEWER's pointer."
+  (let* ((extent (viewer-logical-extent viewer))
+         (camera (viewer-camera viewer))
+         (width (first extent))
+         (height (second extent))
+         (view (capture-frame-view camera width height #(0.0 0.0)))
+         (projection (frame-view-projection view)))
+    (multiple-value-bind (pointer-x pointer-y)
+        (viewer-pointer-position viewer)
+      (let* ((ndc-x (- (* 2.0 (/ pointer-x width)) 1.0))
+             (ndc-y (- 1.0 (* 2.0 (/ pointer-y height))))
+             (right-scale (/ ndc-x (aref projection 0)))
+             (up-scale (/ (- ndc-y) (aref projection 1))))
+        (if (eq *projection* :perspective)
+            (values
+             (camera-position camera)
+             (vec3:vec3-normalize
+              (add-scaled-directions
+               (frame-view-forward view)
+               (frame-view-right view) right-scale
+               (frame-view-up view) up-scale)))
+            (values
+             (add-scaled-directions
+              (camera-position camera)
+              (frame-view-right view) right-scale
+              (frame-view-up view) up-scale)
+             (frame-view-forward view)))))))
+
+(defun same-inspected-site-p (left right)
+  (or (eq left right)
+      (and left right
+           (= (site-inspection-site left) (site-inspection-site right)))))
+
+(defun update-viewer-inspection (viewer)
+  (multiple-value-bind (origin direction) (viewer-pointer-ray viewer)
+    (let* ((inspection (raycast-site (viewer-source viewer) origin direction))
+           (changed-p
+             (not (same-inspected-site-p
+                   inspection (viewer-inspection viewer)))))
+      ;; Retain the exact current distance and point even while the semantic
+      ;; site remains the same; repaint McCLIM only at semantic boundaries.
+      (setf (viewer-inspection viewer) inspection)
+      (when changed-p (refresh-viewer-inspector viewer))
+      inspection)))
+
+(defun viewer-inspection-parameters (viewer extent)
+  (let ((logical-extent (viewer-logical-extent viewer)))
+    (multiple-value-bind (pointer-x pointer-y)
+        (viewer-pointer-position viewer)
+      (vector (coerce (/ pointer-x (first logical-extent)) 'single-float)
+              (coerce (/ pointer-y (second logical-extent)) 'single-float)
+              (coerce (/ (first extent)) 'single-float)
+              (coerce (/ (second extent)) 'single-float)))))
 
 (defun encode-viewer-frame (viewer encoder surface-texture extent)
   (let* ((renderer (viewer-renderer viewer))
@@ -161,27 +376,157 @@ the selector is the whole of the difference."
                      #(0.0 0.0)))
          (view (capture-frame-view (viewer-camera viewer)
                                    width height jitter))
-         (previous (or (renderer-previous-view renderer) view)))
+         (previous (or (renderer-previous-view renderer) view))
+         (inspection (update-viewer-inspection viewer)))
     (encode-renderer-frame
      renderer encoder surface-texture extent
-     (camera-uniform-data view previous)
-     :jitter jitter :view view)))
+     (camera-uniform-data
+      view previous (viewer-inspection-parameters viewer extent)
+      (if (and inspection *inspection-ink-p*) 1.0 0.0))
+     :jitter jitter :view view
+     :inspector-texture (viewer-inspector-texture viewer)
+     :inspector-rect (viewer-inspector-rect viewer extent))))
 
 (clim:define-command-table luft-window)
 (clim:define-command-table luft-window-release)
 (clim:define-command-table luft-atelier)
 (clim:define-command-table luft-atelier-release)
 
+(defconstant +site-inspector-width+ 372)
+(defconstant +site-inspector-height+ 306)
+
+(defclass site-inspector-pane (clim:application-pane) ())
+
+(clim:define-presentation-type luft-site ())
+
+(defun site-extent-label (site)
+  (with-output-to-string (stream)
+    (dolist (axis '(:x :y :z))
+      (when (luft:site-extends-p site axis)
+        (write-char (char (symbol-name axis) 0) stream)))))
+
+(defun inspector-row (stream y label value &key presentation)
+  (clim:draw-text* stream label 18 y :align-y :center :text-size 12
+                   :ink (clim:make-rgb-color 0.48 0.52 0.55))
+  (flet ((draw ()
+           (clim:draw-text* stream value 148 y :align-y :center :text-size 12
+                            :ink (clim:make-rgb-color 0.86 0.88 0.84))))
+    (if presentation
+        (clim:with-output-as-presentation (stream presentation 'luft-site)
+          (draw))
+        (draw))))
+
+(defun display-site-inspector (viewer stream)
+  "Draw VIEWER's current sparse ray hit as McCLIM presentations."
+  (clim:draw-rectangle* stream 0 0 +site-inspector-width+
+                        +site-inspector-height+
+                        :ink (clim:make-rgb-color 0.035 0.042 0.046))
+  (clim:draw-text* stream "LUFT SITE" 18 25 :align-y :center :text-size 15
+                   :text-face :bold
+                   :ink (clim:make-rgb-color 0.91 0.83 0.56))
+  (let ((inspection (viewer-inspection viewer)))
+    (if (null inspection)
+        (progn
+          (clim:draw-text* stream "point at the boundary" 18 60
+                           :align-y :center :text-size 13
+                           :ink (clim:make-rgb-color 0.58 0.62 0.62))
+          (clim:draw-text* stream "escape releases the pointer" 18 84
+                           :align-y :center :text-size 11
+                           :ink (clim:make-rgb-color 0.40 0.44 0.45)))
+        (let* ((site (site-inspection-site inspection))
+               (cell (site-inspection-cell inspection))
+               (point (site-inspection-point inspection))
+               (shape (site-inspection-shape-word inspection)))
+          (inspector-row
+           stream 57 "site"
+           (format nil "~D, ~D, ~D" (luft:site-x site)
+                   (luft:site-y site) (luft:site-z site))
+           :presentation site)
+          (inspector-row stream 80 "extent"
+                         (format nil "~A · dimension ~D"
+                                 (site-extent-label site)
+                                 (luft:site-dimension site)))
+          (inspector-row stream 103 "orientation"
+                         (if (luft:site-positive-p site) "+" "−"))
+          (inspector-row
+           stream 126 "solid cell"
+           (format nil "~D, ~D, ~D" (luft:site-x cell)
+                   (luft:site-y cell) (luft:site-z cell))
+           :presentation cell)
+          (inspector-row stream 149 "distance"
+                         (format nil "~,3F cells"
+                                 (site-inspection-distance inspection)))
+          (inspector-row stream 172 "world hit"
+                         (format nil "~,2F  ~,2F  ~,2F"
+                                 (vec3:vec3-x point) (vec3:vec3-y point)
+                                 (vec3:vec3-z point)))
+          (inspector-row stream 195 "stock"
+                         (format nil "~D" (site-inspection-stock inspection)))
+          (inspector-row stream 218 "shape word"
+                         (format nil "#x~8,'0X" shape))
+          (inspector-row stream 241 "edge stars"
+                         (format nil "~D  ~D  ~D  ~D"
+                                 (ldb (byte 2 0) shape)
+                                 (ldb (byte 2 2) shape)
+                                 (ldb (byte 2 4) shape)
+                                 (ldb (byte 2 6) shape)))
+          (inspector-row stream 264 "corner stars"
+                         (format nil "~2,'0X  ~2,'0X  ~2,'0X  ~2,'0X"
+                                 (ldb (byte 6 8) shape)
+                                 (ldb (byte 6 14) shape)
+                                 (ldb (byte 6 20) shape)
+                                 (ldb (byte 6 26) shape)))))))
+
+(defun refresh-viewer-inspector (viewer)
+  (let ((pane (ignore-errors (clim:find-pane-named viewer 'inspector))))
+    (when pane
+      (clim:redisplay-frame-pane viewer pane :force-p t)
+      ;; Application panes may follow their output cursor even without visible
+      ;; scroll bars; this inspector is a fixed HUD, so pin its origin.
+      (clim:scroll-extent pane 0 0)
+      (let ((mirror (clim:sheet-direct-mirror
+                     (clim:frame-top-level-sheet viewer))))
+        (setf (viewer-inspector-mirror viewer) mirror)
+        (mcluv:present-mirror mirror))))
+  viewer)
+
+(defun viewer-inspector-texture (viewer)
+  (let ((mirror (viewer-inspector-mirror viewer)))
+    (and mirror (mcluv:mirror-texture mirror))))
+
+(defun viewer-inspector-rect (viewer extent)
+  (declare (ignore extent))
+  (when (viewer-inspector-texture viewer)
+    (let* ((logical-extent (viewer-logical-extent viewer))
+           (width (first logical-extent))
+           (height (second logical-extent))
+           (margin 14.0)
+           (left (- 1.0 (* 2.0 (/ (+ margin +site-inspector-width+) width))))
+           (right (- 1.0 (* 2.0 (/ margin width))))
+           (top (- 1.0 (* 2.0 (/ margin height))))
+           (bottom (- 1.0
+                      (* 2.0 (/ (+ margin +site-inspector-height+) height)))))
+      (make-array 4 :element-type 'single-float
+                    :initial-contents (mapcar (lambda (value)
+                                                (coerce value 'single-float))
+                                              (list left top right bottom))))))
+
 (clim:define-application-frame viewer
     (clim:standard-application-frame canvas-event-handler)
   ((canvas :initarg :canvas :initform nil :reader viewer-canvas)
    (context :initarg :context :initform nil :reader viewer-context)
    (device :initarg :device :initform nil :reader viewer-device)
+   (source :initarg :source :initform (make-demo-solid)
+           :accessor viewer-source)
    (renderer :initarg :renderer :initform nil :accessor viewer-renderer)
    (camera :initarg :camera :initform (make-fly-camera) :reader viewer-camera)
    (controls :initform (make-hash-table :test #'eq)
              :reader viewer-controls)
    (pointer-captured-p :initform nil :accessor viewer-pointer-captured-p)
+   (pointer-x :initform nil :accessor viewer-pointer-x)
+   (pointer-y :initform nil :accessor viewer-pointer-y)
+   (inspection :initform nil :accessor viewer-inspection)
+   (inspector-mirror :initform nil :accessor viewer-inspector-mirror)
    (last-timestamp :initform nil :accessor viewer-last-timestamp)
    (speed :initarg :speed :initform 4.0 :accessor viewer-speed)
    (sensitivity :initarg :sensitivity :initform 0.0032
@@ -194,13 +539,24 @@ the selector is the whole of the difference."
    (stop-ready :initform (sb-thread:make-waitqueue
                           :name "LUFT viewer stopped")
                :reader viewer-stop-ready))
-  ;; The frame is the application even though it has no ordinary panes yet.
-  ;; Its command table inherits every input phase so McCLIM considers each
-  ;; command executable; event dispatch still chooses one phase explicitly.
+  ;; The frame is the application and the inspector is its first pane.  Its
+  ;; command table inherits every input phase so McCLIM considers each command
+  ;; executable; event dispatch still chooses one phase explicitly.
   (:command-table (luft-viewer
                    :inherit-from (luft-window luft-window-release
                                   luft-atelier luft-atelier-release)
                    :inherit-menu t))
+  (:panes
+   (inspector :application
+              :display-function 'display-site-inspector
+              :scroll-bars nil
+              :default-text-style (clim:make-text-style :sans-serif nil
+                                                        :normal)))
+  (:layouts
+   (default
+    (clim:horizontally (:width +site-inspector-width+
+                        :height +site-inspector-height+)
+      inspector)))
   (:menu-bar nil))
 
 (defun viewer-control-active-p (viewer direction)
@@ -392,6 +748,8 @@ the selector is the whole of the difference."
 
 (defmethod handle-canvas-event
     ((viewer viewer) canvas (event canvas-pointer-button-press-event))
+  (setf (viewer-pointer-x viewer) (canvas-pointer-event-x event)
+        (viewer-pointer-y viewer) (canvas-pointer-event-y event))
   (when (and (eq :left (canvas-pointer-event-button event))
              (not (viewer-pointer-captured-p viewer)))
     (set-canvas-relative-pointer-mode canvas t)
@@ -415,6 +773,8 @@ the selector is the whole of the difference."
 (defmethod handle-canvas-event
     ((viewer viewer) canvas (event canvas-pointer-motion-event))
   (declare (ignore canvas))
+  (setf (viewer-pointer-x viewer) (canvas-pointer-event-x event)
+        (viewer-pointer-y viewer) (canvas-pointer-event-y event))
   (when (viewer-pointer-captured-p viewer)
     (let ((camera (viewer-camera viewer))
           (sensitivity (viewer-sensitivity viewer)))
@@ -477,12 +837,21 @@ the selector is the whole of the difference."
                         (make-renderer
                          device* (make-face-materialization solid)
                          (canvas-format context) (canvas-extent context))))
+                (port (clim:find-port :server-path '(:luv-raster)))
+                (manager
+                  (or (first (clim-internals::frame-managers port))
+                      (make-instance 'mcluv:luv-frame-manager :port port)))
                 (viewer
-                  (clim:make-application-frame
-                   'viewer :canvas canvas :context context
-                           :device device* :renderer renderer*
-                           :camera camera)))
+                  (let ((mcluv:*embedded-mirror-target* canvas)
+                        (mcluv:*embedded-mirror-context* context)
+                        (mcluv:*embedded-mirror-device* device*))
+                    (clim:make-application-frame
+                     'viewer :frame-manager manager :enable t
+                             :canvas canvas :context context
+                             :device device* :renderer renderer*
+                             :camera camera :source solid))))
            (setf (canvas-event-handler canvas) viewer)
+           (refresh-viewer-inspector viewer)
            (request-canvas-frame
             canvas (lambda (timestamp) (render-viewer-frame viewer timestamp)))
            (show-canvas canvas)
@@ -546,7 +915,9 @@ the selector is the whole of the difference."
               (setf (viewer-renderer viewer)
                     (make-renderer (viewer-device viewer) materialization
                                    (canvas-format context)
-                                   (canvas-extent context)))
+                                   (canvas-extent context))
+                    (viewer-source viewer) solid
+                    (viewer-inspection viewer) nil)
            (setf (viewer-running-p viewer) was-running-p))
          (when old (destroy-renderer old))))))
   (values))
@@ -605,6 +976,9 @@ and an interactive STOP-VIEWER the same idempotent application operation."
                                 (destroy-renderer
                                  (viewer-renderer viewer))))
                      (setf (viewer-renderer viewer) nil))
+                   (unless (eq :disowned (clim:frame-state viewer))
+                     (release :inspector-frame
+                              (lambda () (clim:destroy-frame viewer))))
                    (when (member (canvas-state canvas) '(:opening :open))
                      (release :canvas (lambda () (close-canvas canvas))))
                    (when (viewer-device viewer)

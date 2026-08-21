@@ -109,7 +109,8 @@ world has the same problem in a starker form."))
                             (previous-camera-up :vec4)
                             (previous-camera-forward :vec4)
                             (previous-camera-projection :vec4)
-                            (temporal-parameters :vec4)))))
+                            (temporal-parameters :vec4)
+                            (inspection-parameters :vec4)))))
   (let* ((record (buffer-element faces instance-index))
          (site-low (swizzle record :x))
          (site-high (swizzle record :y))
@@ -250,7 +251,8 @@ world has the same problem in a starker form."))
                             (previous-camera-up :vec4)
                             (previous-camera-forward :vec4)
                             (previous-camera-projection :vec4)
-                            (temporal-parameters :vec4)))))
+                            (temporal-parameters :vec4)
+                            (inspection-parameters :vec4)))))
   (let* ((dx (derivative-x world-position))
          (dy (derivative-y world-position))
          (geometric-normal
@@ -337,8 +339,28 @@ world has the same problem in a starker form."))
          (d-wire (* (- 1.0 (smoothstep 0.2 1.0 d-pixels)) 0.22))
          (wire (* (swizzle chamfer-parameters :y)
                   (max (max u-wire v-wire) d-wire)))
+         ;; #JM9807 read a boundary as a drawing by inking where its smooth
+         ;; normal turned away from its carrier face.  Today's renderer has
+         ;; explicit relief facets instead of that field, so the same honest
+         ;; signal is the geometric facet turning away from FACE-NORMAL.
+         ;; Keep it local to the pointer: the atelier reveals construction
+         ;; where one is looking without making the whole sanctuary a debug
+         ;; grid.  CURRENT-CLIP is deliberately unjittered.
+         (fragment-uv (face-clip-uv current-clip))
+         (pointer-delta
+           (/ (- fragment-uv (swizzle inspection-parameters :xy))
+              (max (swizzle inspection-parameters :zw)
+                   (vec2 0.000001 0.000001))))
+         (pointer-pixels (sqrt (dot pointer-delta pointer-delta)))
+         (pointer-gate
+           (* (swizzle chamfer-parameters :w)
+              (- 1.0 (smoothstep 72.0 148.0 pointer-pixels))))
+         (tilt (- 1.0 (abs (dot normal face-normal))))
+         (crease (smoothstep 0.012 0.24 tilt))
+         (local-wire (* pointer-gate
+                        (max crease (max (max u-wire v-wire) d-wire))))
          (ink (vec3 0.055 0.060 0.075))
-         (radiance (mix paper ink wire)))
+         (radiance (mix paper ink (max wire local-wire))))
     (set-output color-output (vec4 radiance 1.0))
     (set-output motion-output
                 (- (face-clip-uv previous-clip)
@@ -364,3 +386,37 @@ world has the same problem in a starker form."))
   (let* ((uv (+ (* ndc 0.5) (vec2 0.5 0.5)))
          (value (sample scene scene-sampler uv)))
     (set-output color-output (vec4 (swizzle value :xyz) 1.0))))
+
+(define-shader inspector-vertex-specification
+    (:stage :vertex
+     :inputs ((vertex-index :uint :built-in :vertex-index))
+     :outputs ((clip-position :vec4 :built-in :position)
+               (uv-output :vec2 :location 0))
+     :resources ((inspector-state :uniform-block :binding 0
+                  :members ((inspector-rect :vec4)))))
+  (let* ((index (float vertex-index))
+         (right (if (= index 2.0) 1.0
+                    (if (= index 3.0) 1.0
+                        (if (= index 5.0) 1.0 0.0))))
+         (bottom (if (= index 1.0) 1.0
+                     (if (= index 4.0) 1.0
+                         (if (= index 5.0) 1.0 0.0))))
+         (x (mix (swizzle inspector-rect :x)
+                 (swizzle inspector-rect :z) right))
+         (y (mix (swizzle inspector-rect :y)
+                 (swizzle inspector-rect :w) bottom)))
+    (set-output clip-position (vec4 x y 0.0 1.0))
+    (set-output uv-output (vec2 right bottom))))
+
+(define-shader inspector-fragment-specification
+    (:stage :fragment
+     :inputs ((uv :vec2 :location 0))
+     :outputs ((color-output :vec4 :location 0))
+     :resources ((inspector :texture-2d :binding 1
+                  :sample-transfer :identity)
+                 (inspector-sampler :sampler :binding 2)))
+  ;; McCLIM's raster mirror has a top-left origin; sampled textures do not.
+  (set-output color-output
+              (sample inspector inspector-sampler
+                      (vec2 (swizzle uv :x)
+                            (- 1.0 (swizzle uv :y))))))

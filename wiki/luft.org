@@ -332,6 +332,10 @@ samples of the half-cell tent out from the point, nearer ones weighted more,
 replace the four cell walks of =crowded-sky= with a measure that is smooth
 because the field is ([[lisp:luft.render.shaders::field-occlusion]]).
 
+The indexed atelier revives the useful part of this reading at #UWRDQI: ink
+is now a local revelation around the pointer, where it can expose one site's
+relief and triangulation without turning the whole world into a debug grid.
+
 * A world knows what it is cut from
 :PROPERTIES:
 :ID: ADEAKZ
@@ -851,6 +855,28 @@ game's application glue in order to inherit its behaviour.
 ordinary CLIM commands covered by executable tests, the renderer loads without
 the atelier, and the existing luvcraft command layer uses the same event
 bridge.
+
+** DONE Pointing reveals a site's topology
+:PROPERTIES:
+:ID: UWRDQI
+:END:
+
+/Intent./ Make the first workbench pane answer the question the picture raises:
+which packed LUFT site is under the pointer, and how did its local shape rule
+turn that site into the geometry being seen?
+
+/Evidence./ [[lisp:luft.render:raycast-site]] walks the retained solid chain and
+returns one sparse [[lisp:luft.render:site-inspection]] at the semantic UI
+boundary: oriented face site, solid cell, hit point and distance, stock, and
+shape word.  The viewer presents those values through a McCLIM application
+pane mirrored into the existing canvas, so no second window or input owner is
+introduced.  The face shader simultaneously revives the crease reading of
+#JM9807 inside a soft pointer-distance halo and adds the local 4 by 4 lattice
+and shared diagonals; the rest of the sanctuary keeps its composed surface.
+
+/Done when./ Done: Escape releases the pointer, moving it ray-casts the world,
+the inspector follows semantic site crossings, and both crease ink and
+triangulation appear only near a ray that actually reaches the solid.
 
 ** NEXT Grow the workbench and the game as one command vocabulary
 :PROPERTIES:
