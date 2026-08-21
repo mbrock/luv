@@ -563,10 +563,30 @@ consumers should bind a chunk field once rather than resolving every site."
    "Accumulated lighting dirtiness for one world, owned by its session.
 
 Content edits and residency transitions feed this object through the
-world's hooks; RECONCILE-LIGHTING settles the queues and publishes."))
+world observer protocol; RECONCILE-LIGHTING settles the queues and publishes."))
+
+(defmethod observe-block-world-cell-change
+    ((state luvcraft-lighting-state) (world block-world) chunk x y z)
+  (declare (ignore chunk))
+  (unless (eq world (lighting-state-world state))
+    (error "Lighting state ~S observed its non-owned world ~S." state world))
+  (setf (gethash (make-world-coordinate x y z)
+                 (lighting-state-dirty-cells state))
+        t))
+
+(defmethod observe-block-world-residency-change
+    ((state luvcraft-lighting-state) (world block-world) chunk event)
+  (unless (eq world (lighting-state-world state))
+    (error "Lighting state ~S observed its non-owned world ~S." state world))
+  (let ((key (chunk-domain-coordinate (block-chunk-domain chunk))))
+    (ecase event
+      (:arrived
+       (setf (gethash key (lighting-state-arrivals state)) t))
+      (:departed
+       (setf (gethash key (lighting-state-departures state)) t)))))
 
 (defun attach-lighting-state (world)
-  "Subscribe a fresh lighting state to WORLD's content and residency hooks.
+  "Subscribe a fresh lighting state to WORLD's derived-product events.
 
 Chunks already resident at attachment are treated as arrivals, so the
 first reconcile lights a caller-built world without a separate protocol."
@@ -575,21 +595,13 @@ first reconcile lights a caller-built world without a separate protocol."
       (setf (gethash (chunk-domain-coordinate (block-chunk-domain chunk))
                      (lighting-state-arrivals state))
             t))
-    (setf (block-world-cell-change-hook world)
-          (lambda (chunk x y z)
-            (declare (ignore chunk))
-            (setf (gethash (make-world-coordinate x y z)
-                           (lighting-state-dirty-cells state))
-                  t))
-          (block-world-residency-change-hook world)
-          (lambda (x y z event)
-            (let ((key (make-chunk-coordinate x y z)))
-              (ecase event
-                (:arrived
-                 (setf (gethash key (lighting-state-arrivals state)) t))
-                (:departed
-                 (setf (gethash key (lighting-state-departures state)) t))))))
+    (add-block-world-observer world state)
     state))
+
+(defun detach-lighting-state (state)
+  "Stop STATE from observing its world, returning STATE."
+  (remove-block-world-observer (lighting-state-world state) state)
+  state)
 
 (defun lighting-state-dirty-p (state)
   (or (plusp (hash-table-count (lighting-state-dirty-cells state)))

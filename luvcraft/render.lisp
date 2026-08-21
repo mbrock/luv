@@ -1941,6 +1941,7 @@ NIL to let the display choose a comfortable window."
          (world-text-glyph-cache nil)
          (world-text-run nil)
          (video-screen nil)
+         (attached-lighting-state nil)
          (session nil) (production-system nil) (completed-p nil))
     ;; FFmpeg has to be dlopened before the canvas exists.  Film is now a live
     ;; terminal-wall mode, so waiting until the user opens its browser would
@@ -1965,7 +1966,9 @@ NIL to let the display choose a comfortable window."
            (flet ((keep (resource)
                     (push resource resources)
                     resource))
-             (let* ((lighting-state (attach-lighting-state world))
+             (let* ((lighting-state
+                      (setf attached-lighting-state
+                            (attach-lighting-state world)))
                   (extent (canvas-extent context))
                   ;; Every frame-sized image comes from one constructor, which
                   ;; a live window resize calls again with the new extent.
@@ -2452,6 +2455,9 @@ NIL to let the display choose a comfortable window."
         ;; than signalled -- signalling here would replace the error that
         ;; actually explains why the game did not open.
         (with-release-warnings
+          (when attached-lighting-state
+            (releasing :lighting-state
+              (detach-lighting-state attached-lighting-state)))
           (when session
             (releasing :lobby (stop-luvcraft-lobby session))
             (releasing :chunk-products
@@ -2508,6 +2514,10 @@ LUVCRAFT-RELEASE-ERROR.  See WITH-RELEASE-REPORT."
       ;; Stop CPU publication before releasing any render-owned destination.
       (releasing :production-system
         (stop-production-system (luvcraft-session-production-system session)))
+      (let ((lighting-state (luvcraft-session-lighting-state session)))
+        (when lighting-state
+          (releasing :lighting-state
+            (detach-lighting-state lighting-state))))
       (releasing :chunk-products (destroy-luvcraft-chunk-products session))
       (dolist (overlay (luvcraft-session-overlays session))
         (releasing :overlay (release-luvcraft-overlay overlay)))

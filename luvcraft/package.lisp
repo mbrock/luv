@@ -78,6 +78,7 @@
            #:run-action
            #:*actions*
            #:attach-lighting-state
+           #:detach-lighting-state
            #:benchmark-luvcraft-frame-performance
            #:block-chunk-load-payload
            #:block-chunk-load-request

@@ -54,13 +54,16 @@
            #:block-ray-hit-block
            #:block-ray-hit-coordinate
            #:block-ray-hit-distance
+           #:add-block-world-observer
            #:block-world
-           #:block-world-cell-change-hook
-           #:block-world-residency-change-hook
+           #:block-world-observers
            #:block-world-residency-revision
            #:block-world-revision
            #:block-world-source
            #:block-world-space
+           #:observe-block-world-cell-change
+           #:observe-block-world-residency-change
+           #:remove-block-world-observer
            #:borrow-block-content-storage
            #:call-with-world-change-transaction
            #:chunk-block-at

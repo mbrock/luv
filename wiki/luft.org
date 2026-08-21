@@ -863,6 +863,31 @@ bytes by itself.
 reference and GPU tests pass, clicks use the incremental path, and all three
 construction orders finish at the exact authored solid and boundary.
 
+** NEXT A resident luvcraft window is one LUFT scene
+:PROPERTIES:
+:ID: 2TTUQD
+:END:
+
+/Intent./ Let luvcraft inhabit the packed-site world instead of translating
+each resident chunk into a disposable CPU vertex mesh.  The authored block
+world remains the source of semantic cells and persistence; one finite LUFT
+scene is its resident spatial materialization, and rendering, collision, and
+light can borrow dense products from that shared domain.
+
+/Evidence./ The generated 13×13 window is 208 cells wide and therefore has an
+injective image in a 256×256 LUFT domain.  [[lisp:luft.render:apply-scene-edit]]
+already publishes exact surface, occupancy, and stable-page deltas.  Luvcraft's
+former single lighting callbacks could not coexist with another derived
+product, so [[lisp:luvcraft.world:add-block-world-observer]] now publishes cell
+and readable chunk-residency events to coarse observer objects without putting
+objects or dispatch inside dense cell loops.
+
+/Done when./ A resident materialization maps Luvcraft X/Z/Y into LUFT X/Y/Z,
+unwraps the torus around one explicit world window, agrees with a fresh rebuild
+after edits, arrivals, and departures, and draws the real game terrain through
+LUFT's vertex path.  The old mesh path remains only as a temporary visual
+comparison until that checkpoint is playable.
+
 ** IDEA Compact surviving faces only when measurement earns another path
 :PROPERTIES:
 :ID: WQ611A

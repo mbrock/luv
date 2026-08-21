@@ -1001,16 +1001,65 @@ work.  Whole-domain algorithms should use WITH-BLOCK-CONTENT-STORAGE."
    (revision :initform 0 :reader block-world-revision)
    (residency-revision :initform 0
                        :reader block-world-residency-revision)
-   ;; Derived-domain subscriptions.  The cell hook receives (CHUNK X Y Z)
-   ;; in world coordinates after an authored content change; the residency
-   ;; hook receives (X Y Z EVENT) with EVENT :ARRIVED or :DEPARTED in chunk
-   ;; coordinates after residency publication.
-   (cell-change-hook :initform nil :accessor block-world-cell-change-hook)
-   (residency-change-hook :initform nil
-                          :accessor block-world-residency-change-hook)
+   ;; A replacement vector is published when subscriptions change, while
+   ;; ordinary edits only walk the stable vector.  Cells remain dense values;
+   ;; observers are coarse derived-product owners such as lighting and the
+   ;; resident LUFT materialization.  #2TTUQD
+   (observers :initform #() :accessor block-world-observers)
    (next-chunk-incarnation :initform 0)
    (change-transaction-depth :initform 0)
    (change-pending-p :initform nil)))
+
+(defgeneric observe-block-world-cell-change (observer world chunk x y z)
+  (:documentation
+   "Tell OBSERVER that CHUNK's cell at world X,Y,Z has changed.
+
+The authoritative content has already been written.  Dispatch occurs once per
+authored edit, outside every dense derived-product loop."))
+
+(defgeneric observe-block-world-residency-change (observer world chunk event)
+  (:documentation
+   "Tell OBSERVER that CHUNK has :ARRIVED or :DEPARTED from WORLD.
+
+CHUNK remains readable for either event, including after departure, so a
+derived materialization can subtract its dense contents without consulting a
+world entry that no longer exists."))
+
+(defun add-block-world-observer (world observer)
+  "Subscribe OBSERVER to WORLD, returning OBSERVER.
+
+The observer vector is replaced transactionally and contains an object at most
+once by EQ identity.  Registration is a cold owner-boundary operation; content
+edits allocate nothing merely to notify it."
+  (check-type world block-world)
+  (let ((old (block-world-observers world)))
+    (unless (find observer old :test #'eq)
+      (let ((new (make-array (1+ (length old)))))
+        (replace new old)
+        (setf (aref new (length old)) observer
+              (block-world-observers world) new))))
+  observer)
+
+(defun remove-block-world-observer (world observer)
+  "Unsubscribe OBSERVER from WORLD and return whether it was present."
+  (check-type world block-world)
+  (let* ((old (block-world-observers world))
+         (index (position observer old :test #'eq)))
+    (when index
+      (let ((new (make-array (1- (length old)))))
+        (replace new old :end1 index :end2 index)
+        (replace new old :start1 index :start2 (1+ index))
+        (setf (block-world-observers world) new))
+      t)))
+
+(defun notify-block-world-cell-change (world chunk x y z)
+  (loop for observer across (block-world-observers world)
+        do (observe-block-world-cell-change observer world chunk x y z)))
+
+(defun notify-block-world-residency-change (world chunk event)
+  (loop for observer across (block-world-observers world)
+        do (observe-block-world-residency-change
+            observer world chunk event)))
 
 (defun note-block-world-change (world)
   (if (plusp (slot-value world 'change-transaction-depth))
@@ -1084,19 +1133,13 @@ including when FUNCTION exits non-locally after making a partial change."
    :change-hook
    (lambda (changed-chunk local-x local-y local-z)
      (note-block-world-change world)
-     (let ((cell-hook (block-world-cell-change-hook world)))
-       (when cell-hook
-         (let ((origin (chunk-domain-origin
-                        (block-chunk-domain changed-chunk))))
-           (funcall cell-hook changed-chunk
-                    (+ (world-coordinate-x origin) local-x)
-                    (+ (world-coordinate-y origin) local-y)
-                    (+ (world-coordinate-z origin) local-z))))))))
-
-(defun note-world-residency-event (world x y z event)
-  (let ((hook (block-world-residency-change-hook world)))
-    (when hook
-      (funcall hook x y z event))))
+     (let ((origin (chunk-domain-origin
+                    (block-chunk-domain changed-chunk))))
+       (notify-block-world-cell-change
+        world changed-chunk
+        (+ (world-coordinate-x origin) local-x)
+        (+ (world-coordinate-y origin) local-y)
+        (+ (world-coordinate-z origin) local-z))))))
 
 (defun ensure-world-chunk (world x y z)
   "Return the resident chunk at X,Y,Z, creating an all-air chunk if absent."
@@ -1110,7 +1153,7 @@ including when FUNCTION exits non-locally after making a partial change."
                 new-chunk)
           (incf (slot-value world 'residency-revision))
           (note-block-world-change world)
-          (note-world-residency-event world x y z :arrived)
+          (notify-block-world-residency-change world new-chunk :arrived)
           new-chunk))))
 
 (defun install-world-chunk-storage (world x y z content)
@@ -1131,7 +1174,7 @@ single-writer step."
     (setf (gethash (chunk-key x y z) (block-world-chunks world)) chunk)
     (incf (slot-value world 'residency-revision))
     (note-block-world-change world)
-    (note-world-residency-event world x y z :arrived)
+    (notify-block-world-residency-change world chunk :arrived)
     chunk))
 
 (defun remove-world-chunk (world x y z)
@@ -1145,7 +1188,7 @@ single-writer step."
       (remhash (chunk-key x y z) (block-world-chunks world))
       (incf (slot-value world 'residency-revision))
       (note-block-world-change world)
-      (note-world-residency-event world x y z :departed))
+      (notify-block-world-residency-change world chunk :departed))
     (values chunk present-p)))
 
 (defun resident-world-chunks (world)

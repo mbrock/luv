@@ -13,6 +13,60 @@
        (= (world-coordinate-y left) (world-coordinate-y right))
        (= (world-coordinate-z left) (world-coordinate-z right))))
 
+(defclass recording-block-world-observer ()
+  ((events :initform nil :accessor recording-block-world-observer-events)))
+
+(defmethod observe-block-world-cell-change
+    ((observer recording-block-world-observer) world chunk x y z)
+  (push (list :cell world chunk x y z)
+        (recording-block-world-observer-events observer)))
+
+(defmethod observe-block-world-residency-change
+    ((observer recording-block-world-observer) world chunk event)
+  (push (list event world chunk
+              (nth-value 1
+                         (world-chunk-at-coordinate
+                          world
+                          (chunk-domain-coordinate
+                           (block-chunk-domain chunk)))))
+        (recording-block-world-observer-events observer)))
+
+(deftest block-world-observers-see-published-cells-and-readable-departures
+  (let* ((world (make-block-world :chunk-width 2 :chunk-height 2 :chunk-depth 2))
+         (observer (make-instance 'recording-block-world-observer))
+         (stone (list :stone)))
+    (add-block-world-observer world observer)
+    ;; Identity makes duplicate subscription idempotent.
+    (add-block-world-observer world observer)
+    (ok (= 1 (length (block-world-observers world))))
+    (let ((chunk (ensure-world-chunk world -1 0 1)))
+      (setf (world-block-at world -1 0 2) stone)
+      (multiple-value-bind (removed present-p)
+          (remove-world-chunk world -1 0 1)
+        (ok present-p)
+        (ok (eq removed chunk))))
+    (destructuring-bind
+        ((departure departed-world departed-chunk resident-after-p)
+         (cell cell-world cell-chunk x y z)
+         (arrival arrived-world arrived-chunk resident-at-arrival-p))
+        (recording-block-world-observer-events observer)
+      (ok (eq departure :departed))
+      (ok (eq departed-world world))
+      (ok (typep departed-chunk 'block-chunk))
+      (ok (null resident-after-p))
+      (ok (eq cell :cell))
+      (ok (eq cell-world world))
+      (ok (eq cell-chunk departed-chunk))
+      (ok (equal (list x y z) '(-1 0 2)))
+      (ok (eq arrival :arrived))
+      (ok (eq arrived-world world))
+      (ok (eq arrived-chunk departed-chunk))
+      (ok resident-at-arrival-p))
+    (ok (remove-block-world-observer world observer))
+    (ok (null (remove-block-world-observer world observer)))
+    (ensure-world-chunk world 0 0 0)
+    (ok (= 3 (length (recording-block-world-observer-events observer))))))
+
 (deftest signed-world-coordinate-decomposition
   (let ((space (make-voxel-space
                 :chunk-shape (make-chunk-shape :width 16
