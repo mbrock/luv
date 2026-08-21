@@ -89,12 +89,21 @@
        (* 0.92d0 luvcraft::+luvcraft-camera-vertical-field-of-view+)))))
 
 (defun wait-for-gameplay-action-publication (session title &key (timeout 10d0))
-  "Wait for owner-side publication, reporting once a second until settled."
+  "Drive owner-side publication, reporting once a second until settled."
   (let ((deadline (+ (get-internal-real-time)
                      (round (* timeout internal-time-units-per-second))))
         (next-report (+ (get-internal-real-time)
                         internal-time-units-per-second)))
     (loop
+      ;; FILM-LUVCRAFT-SESSION calls this helper between encoded frames.  An
+      ;; edit has dirtied lighting at that point, but no ordinary frame can
+      ;; reconcile it until BEFORE-FRAME returns.  Give the canvas owner the
+      ;; same refresh turn explicitly, then inspect the resulting boundary.
+      do (luv:request-canvas-frame
+          (luvcraft:luvcraft-session-canvas session)
+          (lambda (timestamp)
+            (declare (ignore timestamp))
+            (luvcraft:refresh-luvcraft-mesh session)))
       for state = (luvcraft::luvcraft-streaming-trace-state session)
       do (when (plusp (getf state :errors))
            (error "Capture ~A production failed while publishing: ~S"
