@@ -262,7 +262,7 @@ the selector is the whole of the difference."
           (max 6.0 (min 96.0
                         (* *isometric-height*
                            (expt 1.10
-                                 (canvas-pointer-event-delta-y event)))))))
+                                 (- (canvas-pointer-event-scroll-y event))))))))
   nil)
 
 (defmethod handle-canvas-event
