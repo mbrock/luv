@@ -522,36 +522,6 @@ inspection and reference form, allocated only when a caller asks for it."
           (if solid-p 1 0))
     word))
 
-(defun mark-foundation-dependent-chunks (scene cells chunks)
-  "Add existing face chunks whose foundation records can read CELLS to CHUNKS.
-
-A face shape reads the occupancy stars of its four edges and four corners.
-Consequently one changed cell can alter still-present faces anchored one
-lattice step away, including across a surface-page boundary.  This editor-
-grain walk names that bounded dependency halo without scanning the surface or
-allocating empty chunk pages."
-  (let ((domain (scene-domain scene))
-        (surface-chunks (scene-surface-chunks scene)))
-    (loop for cell across cells
-          for x = (luft:site-x cell)
-          for y = (luft:site-y cell)
-          for z = (luft:site-z cell)
-          do (loop for dx from -1 to 1
-                   do (loop for dy from -1 to 1
-                            do (loop for dz from -1 to 1
-                                     for az = (+ z dz)
-                                     when (<= 0 az
-                                              (1- luft:+vertical-cell-rows+))
-                                       do (let* ((anchor
-                                                   (luft:make-site
-                                                    domain (+ x dx) (+ y dy) az))
-                                                 (index
-                                                   (site-chunk-index
-                                                    domain anchor)))
-                                            (when (aref surface-chunks index)
-                                              (setf (gethash index chunks) t)))))))
-    chunks))
-
 (defun apply-scene-edit (scene edit)
   "Apply signed cell-chain EDIT to SCENE without remeshing the world.  #3QNZC1
 
@@ -584,7 +554,6 @@ removals, non-cell sites, and foreign domains are errors."
            (luft:add-chain-site (surface-chunk-chain chunk) face)
            (setf (gethash index chunks) t)))
        surface-change)
-      (mark-foundation-dependent-chunks scene sites chunks)
       (maphash (lambda (index present-p)
                  (declare (ignore present-p))
                  (rebuild-surface-chunk scene index))
