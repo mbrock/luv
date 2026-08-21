@@ -12,7 +12,10 @@ Environment=HOME=/home/mbrock
 Environment=LUV_SHOWCASE_MEDIA_DIRECTORY=/var/www/luv/showcase/media
 Environment=LUV_SHOWCASE_MEDIA_PATH=/video/showcase/media
 ExecStart=/nix/var/nix/profiles/default/bin/nix develop --no-write-lock-file -c ./scripts/luv web --host 127.0.0.1 --port 8765
-Restart=on-failure
+# The Lisp server handles SIGINT as an orderly shutdown.  Recover when a
+# process-level interrupt or another clean exit reaches it; an explicit
+# `systemctl stop` still suppresses automatic restart.
+Restart=always
 RestartSec=3
 KillSignal=SIGINT
 TimeoutStopSec=15
