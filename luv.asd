@@ -342,6 +342,9 @@ offsets and of headers."
                              (:file "pre-noon")
                              (:file "day-cycle")
                              (:file "gallery")
+                             (:file "gameplay-actions")
+                             (:file "characters-instruments")
+                             (:file "terminal-cinema")
                              (:file "reference-plates")
                              (:file "luft-portraits")))))
 
