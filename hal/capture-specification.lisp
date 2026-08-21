@@ -12,12 +12,6 @@
    (kind :initarg :kind :reader capture-specification-kind)
    (description :initarg :description
                 :reader capture-specification-description)
-   (section :initarg :section :initform :worlds
-            :reader capture-specification-section)
-   (credit :initarg :credit :initform ""
-           :reader capture-specification-credit)
-   (credit-url :initarg :credit-url :initform nil
-               :reader capture-specification-credit-url)
    (extension :initarg :extension :reader capture-specification-extension)
    (layout :initarg :layout :initform :landscape
            :reader capture-specification-layout)
@@ -69,12 +63,6 @@ under the capture output directory and do not belong in Git. #IVRWI8"))
     (error "Capture layout ~S is not :LANDSCAPE or :PORTRAIT." layout))
   layout)
 
-(defun normalize-capture-section (section)
-  (unless (member section '(:worlds :play :inhabitants :surfaces
-                            :atelier :plates))
-    (error "Capture section ~S is not a public showcase collection." section))
-  section)
-
 (defun register-capture-specification (specification)
   "Install SPECIFICATION by name, replacing a live redefinition in place."
   (check-type specification capture-specification)
@@ -100,16 +88,13 @@ under the capture output directory and do not belong in Git. #IVRWI8"))
           (t nil))))
 
 (defmacro define-capture
-    (name (&key figure kind extension (description "") (layout :landscape)
-                (section :worlds) (credit "") credit-url)
+    (name (&key figure kind extension (description "") (layout :landscape))
      (pathname) &body body)
   "Define one inspectable wiki capture recipe.
 
 NAME is its command-line identity.  FIGURE is the stable six-character wiki
 figure ID; KIND is :IMAGE or :VIDEO; EXTENSION is the generated file suffix.
 LAYOUT is :LANDSCAPE by default or :PORTRAIT for uncropped 9:16 presentation.
-SECTION is one of six deliberately small public gallery collections.  CREDIT
-and CREDIT-URL keep third-party fixture attribution beside the rendered work.
 BODY is an ordinary named renderer function body with PATHNAME bound to its
 requested output.  Re-evaluating the definition replaces the recipe without
 leaving stale closures in the registry."
@@ -127,9 +112,6 @@ leaving stale closures in the registry."
          :figure-id ,(normalize-capture-figure-id figure)
          :kind ,kind
          :description ,description
-         :section ,(normalize-capture-section section)
-         :credit ,credit
-         :credit-url ,credit-url
          :extension ,(normalize-capture-extension extension)
          :layout ,(normalize-capture-layout layout)
          :renderer #',renderer)))))
@@ -222,11 +204,6 @@ untouched and retain their stable capture identity. #IVRWI8"
                     :figure (capture-specification-figure-id specification)
                     :kind (capture-specification-kind specification)
                     :file (file-namestring pathname)
-                    :description
-                    (capture-specification-description specification)
-                    :section (capture-specification-section specification)
-                    :credit (capture-specification-credit specification)
-                    :credit-url (capture-specification-credit-url specification)
                     :layout (capture-specification-layout specification)
                     :width width :height height)))
         (ecase (capture-specification-kind specification)

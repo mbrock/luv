@@ -11,72 +11,6 @@
 (defconstant +gallery-landscape-height+ 800)
 (defconstant +gallery-film-frame-rate+ 20)
 (defconstant +gallery-film-seconds+ 5)
-(defconstant +gallery-terrain-seed+ 33)
-(defconstant +gallery-terrain-radius+ 3)
-(defconstant +gallery-stage-floor-y+ 6)
-
-(defun grade-gallery-terrain-stage
-    (world minimum-x minimum-z maximum-x maximum-z
-     &key (floor-y +gallery-stage-floor-y+)
-       (surface luvcraft::*grass-block*))
-  "Grade one bounded stage into generated WORLD without replacing its horizon.
-
-Everything outside the inclusive X/Z rectangle remains seed terrain, including
-its hills, trees, biome changes, fog depth, and streamed chunk boundaries.  The
-stage is deliberately the small authored exception inside the real world, not
-a flat-world substitute for it. #GEA2VH"
-  (luvcraft::with-world-change-transaction (world)
-    (loop for x from minimum-x to maximum-x do
-      (loop for z from minimum-z to maximum-z do
-        (dotimes (y 16)
-          (setf (luvcraft:world-block-at world x y z)
-                (cond ((< y (- floor-y 2)) luvcraft::*stone-block*)
-                      ((< y floor-y) luvcraft::*dirt-block*)
-                      ((= y floor-y) surface)
-                      (t nil)))))))
-  world)
-
-(defun make-staged-gallery-terrain-world
-    (builder &key
-       (seed +gallery-terrain-seed+)
-       (radius +gallery-terrain-radius+)
-       (bounds '(0 0 15 15))
-       (floor-y +gallery-stage-floor-y+)
-       (surface luvcraft::*grass-block*))
-  "Make generated terrain, grade BOUNDS, then let BUILDER author its subject.
-
-BUILDER receives WORLD and FLOOR-Y.  Pre-materializing the resident window
-makes the stage and the surrounding landscape one deterministic source-owned
-fixture before any hidden rendering session begins. #GEA2VH"
-  (destructuring-bind (minimum-x minimum-z maximum-x maximum-z) bounds
-    (let ((world
-            (luvcraft:make-little-block-world
-             :seed seed :chunk-radius radius)))
-      (grade-gallery-terrain-stage
-       world minimum-x minimum-z maximum-x maximum-z
-       :floor-y floor-y :surface surface)
-      (funcall builder world floor-y)
-      (luvcraft:relight-block-world world)
-      world)))
-
-(defun call-with-staged-gallery-terrain-session
-    (function &key title pose day-fraction builder bounds width height clean-p
-                   (floor-y +gallery-stage-floor-y+)
-                   (seed +gallery-terrain-seed+)
-                   (surface luvcraft::*grass-block*) critters
-                   (exposure 0.48) (bloom-gain 0.18) (shaft-gain 0.28))
-  "Call FUNCTION in the ordinary deterministic terrain plus one bounded stage."
-  (call-with-gallery-session
-   function
-   :title title :width width :height height :clean-p clean-p
-   :world (make-staged-gallery-terrain-world
-           builder :seed seed :bounds bounds :floor-y floor-y :surface surface)
-   :camera (make-gallery-camera pose)
-   :sky-clock (luvcraft::make-pinned-sky-clock day-fraction)
-   :sky-profile (luvcraft:make-default-sky-profile)
-   :critters critters
-   :residency-radius +gallery-terrain-radius+
-   :exposure exposure :bloom-gain bloom-gain :shaft-gain shaft-gain))
 
 (defun gallery-look-pose (x y z target-x target-y target-z field-of-view)
   "Make a camera pose at X/Y/Z looking directly at TARGET-X/Y/Z."
@@ -259,7 +193,7 @@ fixture before any hidden rendering session begins. #GEA2VH"
    :clean-p t))
 
 (luv:define-capture ridge-play-view
-    (:figure NLCFX0 :kind :image :extension "png" :section :play
+    (:figure NLCFX0 :kind :image :extension "png"
      :description
      "The same ridge as ordinary play, retaining crosshair, hotbar, and body.")
     (pathname)
@@ -274,7 +208,7 @@ fixture before any hidden rendering session begins. #GEA2VH"
    :clean-p nil))
 
 (luv:define-capture ridge-walk-with-hud
-    (:figure NLCFX0 :kind :video :extension "mp4" :section :play
+    (:figure NLCFX0 :kind :video :extension "mp4"
      :description
      "A short real player walk with the ordinary crosshair, hotbar, and body.")
     (pathname)
@@ -347,39 +281,43 @@ fixture before any hidden rendering session begins. #GEA2VH"
 ;;; material, foliage, masonry, and depth all remain legible in one frame.
 
 (defun make-gallery-crystal-grove-world ()
-  (make-staged-gallery-terrain-world
-   (lambda (world floor-y)
-     (loop for x from 4 to 27 do
-       (loop for z from 4 to 27
-             when (or (<= 14 x 17) (<= 14 z 17))
-               do (setf (luvcraft:world-block-at world x floor-y z)
-                        luvcraft::*stone-block*)))
-     (dolist (coordinate '((15 1 15) (16 1 16) (17 1 17)
-                           (9 1 22) (22 1 21) (23 1 10)))
-       (destructuring-bind (x relative-y z) coordinate
-         (setf (luvcraft:world-block-at world x (+ floor-y relative-y) z)
-               luvcraft:*crystal-block*)))
-     (dolist (tree '((8 18 5) (24 14 6) (24 25 5)))
-       (destructuring-bind (x z relative-top) tree
-         (let ((top (+ floor-y relative-top)))
-           (loop for y from (1+ floor-y) below top do
-             (setf (luvcraft:world-block-at world x y z)
-                   luvcraft::*wood-block*))
-           (loop for dx from -2 to 2 do
-             (loop for dz from -2 to 2
-                   when (<= (+ (abs dx) (abs dz)) 3)
-                     do (setf (luvcraft:world-block-at
-                               world (+ x dx) top (+ z dz))
-                              luvcraft::*leaf-block*)))))))
-   :bounds '(3 3 28 28)))
+  (let ((world
+          (luvcraft::make-block-world
+           :source (make-instance 'luvcraft::gazetteer-open-sky-source))))
+    (dotimes (chunk-x 2)
+      (dotimes (chunk-z 2)
+        (luvcraft::ensure-world-chunk world chunk-x 0 chunk-z)))
+    (loop for x below 32 do
+      (loop for z below 32 do
+        (setf (luvcraft:world-block-at world x 0 z) luvcraft::*dirt-block*
+              (luvcraft:world-block-at world x 1 z)
+              (if (or (<= 14 x 17) (<= 14 z 17))
+                  luvcraft::*stone-block*
+                  luvcraft::*grass-block*))))
+    (dolist (coordinate '((15 2 15) (16 2 16) (17 2 17)
+                          (9 2 22) (22 2 21) (23 2 10)))
+      (destructuring-bind (x y z) coordinate
+        (setf (luvcraft:world-block-at world x y z)
+              luvcraft:*crystal-block*)))
+    (dolist (tree '((8 18 6) (24 14 7) (24 25 6)))
+      (destructuring-bind (x z top) tree
+        (loop for y from 2 below top do
+          (setf (luvcraft:world-block-at world x y z) luvcraft::*wood-block*))
+        (loop for dx from -2 to 2 do
+          (loop for dz from -2 to 2
+                when (<= (+ (abs dx) (abs dz)) 3)
+                  do (setf (luvcraft:world-block-at
+                            world (+ x dx) top (+ z dz))
+                           luvcraft::*leaf-block*)))))
+    (luvcraft:relight-block-world world)
+    world))
 
 (defun gallery-crystal-grove-pose (angle &key portrait-p)
   (let* ((centre-x 16.0d0) (centre-z 16.0d0) (radius 15.5d0)
          (x (+ centre-x (* radius (sin angle))))
          (z (- centre-z (* radius (cos angle)))))
     (gallery-look-pose
-     x (+ +gallery-stage-floor-y+ 4.2d0) z
-     centre-x (+ +gallery-stage-floor-y+ 2.0d0) centre-z
+     x 5.2d0 z centre-x 3.0d0 centre-z
      (* luvcraft::+luvcraft-camera-vertical-field-of-view+
         (if portrait-p 1.18d0 0.92d0)))))
 
@@ -387,7 +325,7 @@ fixture before any hidden rendering session begins. #GEA2VH"
   (call-with-gallery-session
    function
    :title "crystal grove afterglow" :width width :height height
-   :clean-p clean-p :residency-radius +gallery-terrain-radius+
+   :clean-p clean-p :residency-radius 0
    :world (make-gallery-crystal-grove-world)
    :camera (make-gallery-camera
             (gallery-crystal-grove-pose 0.0d0
@@ -443,44 +381,26 @@ fixture before any hidden rendering session begins. #GEA2VH"
          (x (+ centre-x (* radius (sin angle))))
          (z (- centre-z (* radius (cos angle)))))
     (gallery-look-pose
-     x (+ +gallery-stage-floor-y+ (if close-p 2.15d0 2.55d0)) z
-     centre-x (+ +gallery-stage-floor-y+ 1.45d0) centre-z
+     x (if close-p 3.15d0 3.55d0) z
+     centre-x 2.45d0 centre-z
      (* luvcraft::+luvcraft-camera-focused-vertical-field-of-view+
         (if portrait-p 1.28d0 1.0d0)))))
-
-(defun make-gallery-turtle-population ()
-  "Pose the established turtle cast on the shared generated-terrain stage."
-  (let ((population (make-instance 'luvcraft::critter-population))
-        (y (coerce (1+ +gallery-stage-floor-y+) 'double-float)))
-    (dolist (turtle
-             (list (luvcraft::make-gazetteer-turtle
-                    7.8d0 y 6.7d0 2.15d0 1.1d0 :seed 11)
-                   (luvcraft::make-gazetteer-turtle
-                    10.4d0 y 8.4d0 4.90d0 3.9d0 :seed 12)
-                   (luvcraft::make-gazetteer-turtle
-                    5.0d0 y 8.0d0 0.90d0 0d0 :resting-p t :seed 13)))
-      (luvcraft::add-critter population turtle))
-    population))
 
 (defun call-with-turtle-gallery-session (function width height)
   (call-with-gallery-session
    function
    :title "turtle meadow portrait" :width width :height height
-   :clean-p t :residency-radius +gallery-terrain-radius+
-   :world (make-staged-gallery-terrain-world
-           (lambda (world floor-y)
-             (declare (ignore world floor-y)))
-           :bounds '(3 3 13 12))
+   :clean-p t :residency-radius 0
+   :world (luvcraft::make-gazetteer-meadow-world)
    :camera (make-gallery-camera
             (gallery-turtle-pose 0.0d0 :portrait-p (> height width)))
-   :critters (make-gallery-turtle-population)
+   :critters (luvcraft::make-gazetteer-turtle-population)
    :sky-clock (luvcraft::make-pinned-sky-clock 0.42)
    :sky-profile (luvcraft:make-default-sky-profile)
    :exposure 0.52 :bloom-gain 0.12 :shaft-gain 0.18))
 
 (luv:define-capture turtle-meadow-portrait
     (:figure W7T2IT :kind :image :extension "png" :layout :portrait
-     :section :inhabitants
      :description
      "Three turtles at their own height: walking, turning, and resting poses.")
     (pathname)
@@ -491,7 +411,7 @@ fixture before any hidden rendering session begins. #GEA2VH"
    +gallery-portrait-width+ +gallery-portrait-height+))
 
 (luv:define-capture turtle-meadow-closeup
-    (:figure W7T2IT :kind :image :extension "png" :section :inhabitants
+    (:figure W7T2IT :kind :image :extension "png"
      :description
      "A low close meadow view preserving turtle scale, materials, and shadow.")
     (pathname)
@@ -505,7 +425,6 @@ fixture before any hidden rendering session begins. #GEA2VH"
 
 (luv:define-capture turtle-meadow-portrait-dolly
     (:figure W7T2IT :kind :video :extension "mp4" :layout :portrait
-     :section :inhabitants
      :description
      "A quiet phone-first dolly around the three posed meadow turtles.")
     (pathname)
@@ -525,35 +444,40 @@ fixture before any hidden rendering session begins. #GEA2VH"
 ;;; same fixed simulation to a settled composition.
 
 (defun make-gallery-ball-stair-world ()
-  (make-staged-gallery-terrain-world
-   (lambda (world floor-y)
+  (let ((world
+          (luvcraft::make-block-world
+           :source (make-instance 'luvcraft::gazetteer-open-sky-source))))
+    (luvcraft::ensure-world-chunk world 0 0 0)
+    (loop for x below 16 do
+      (loop for z below 16 do
+        (setf (luvcraft:world-block-at world x 0 z)
+              luvcraft::*stone-block*)))
     (loop for z from 5 to 14
           for step = (1+ (floor (- z 5) 2))
           do (loop for x from 3 to 12 do
                (loop for y from 1 to step do
-                 (setf (luvcraft:world-block-at world x (+ floor-y y) z)
+                 (setf (luvcraft:world-block-at world x y z)
                        (if (oddp step)
                            luvcraft::*bricks-block*
-                           luvcraft::*stone-block*))))))
-   :bounds '(2 3 13 15) :surface luvcraft::*stone-block*))
+                           luvcraft::*stone-block*)))))
+    (luvcraft:relight-block-world world)
+    world))
 
 (defun gallery-ball-stair-pose (&key portrait-p)
   (gallery-look-pose
-   8.0d0 (+ +gallery-stage-floor-y+ 5.8d0) -7.0d0
-   8.0d0 (+ +gallery-stage-floor-y+ 4.0d0) 9.0d0
+   8.0d0 5.8d0 -7.0d0
+   8.0d0 4.0d0 9.0d0
    (* luvcraft::+luvcraft-camera-vertical-field-of-view+
       (if portrait-p 1.18d0 0.92d0))))
 
 (defun call-with-ball-gallery-session (function width height)
   (call-with-gallery-session
    (lambda (session)
-     (luvcraft::scatter-party-balls
-      session
-      :center (list 8.0d0 (+ +gallery-stage-floor-y+ 10.0d0) 12.0d0)
-      :count 20)
+     (luvcraft::scatter-party-balls session :center '(8.0d0 10.0d0 12.0d0)
+                                           :count 20)
      (funcall function session))
    :title "party ball cascade" :width width :height height
-   :clean-p t :residency-radius +gallery-terrain-radius+
+   :clean-p t :residency-radius 0
    :world (make-gallery-ball-stair-world)
    :camera (make-gallery-camera
             (gallery-ball-stair-pose :portrait-p (> height width)))
@@ -571,7 +495,7 @@ fixture before any hidden rendering session begins. #GEA2VH"
       (finish-output))))
 
 (luv:define-capture party-ball-cascade-settled
-    (:figure CSCFGF :kind :image :extension "png" :section :play
+    (:figure CSCFGF :kind :image :extension "png"
      :description
      "Beach, smiley, and classic balls settled across source-owned stairs.")
     (pathname)
@@ -584,7 +508,6 @@ fixture before any hidden rendering session begins. #GEA2VH"
 
 (luv:define-capture party-ball-cascade-portrait-still
     (:figure CSCFGF :kind :image :extension "png" :layout :portrait
-     :section :play
      :description
      "The settled patterned-ball staircase composed vertically for a phone.")
     (pathname)
@@ -597,7 +520,6 @@ fixture before any hidden rendering session begins. #GEA2VH"
 
 (luv:define-capture party-ball-cascade-portrait
     (:figure CSCFGF :kind :video :extension "mp4" :layout :portrait
-     :section :play
      :description
      "A deterministic patterned-ball burst bouncing and settling down stairs.")
     (pathname)

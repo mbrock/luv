@@ -338,17 +338,12 @@ offsets and of headers."
   :components ((:module "captures"
                 :serial t
                 :components ((:file "package")
-                             (:module "fixtures"
-                              :components
-                              ((:static-file "README.md")
-                               (:static-file "big-buck-bunny-meadow.mp4")))
+                             (:file "construction")
                              (:file "pre-noon")
                              (:file "day-cycle")
                              (:file "gallery")
-                             (:file "construction")
                              (:file "gameplay-actions")
                              (:file "characters-instruments")
-                             (:file "agent-construction")
                              (:file "terminal-cinema")
                              (:file "reference-plates")
                              (:file "luft-portraits")))))

@@ -18,38 +18,33 @@
     (13 4 11) (14 4 11) (15 4 11) (16 4 11) (17 4 11))
   "The two posts and lintel placed by the building film, in play order.")
 
-(defun gameplay-stage-coordinate (coordinate)
-  "Lift one yard-relative block coordinate onto the showcase terrain stage."
-  (list (first coordinate)
-        (+ +gallery-stage-floor-y+ (second coordinate))
-        (third coordinate)))
-
-(defun gameplay-stage-coordinates (coordinates)
-  (mapcar #'gameplay-stage-coordinate coordinates))
-
 (defun make-gameplay-action-yard ()
-  "Make the bounded action yard inside a real deterministic terrain window."
-  (make-staged-gallery-terrain-world
-   (lambda (world floor-y)
-     (declare (ignore world floor-y)))
-   :bounds '(9 3 21 16)))
+  "Make the fully resident grass yard shared by the two action films."
+  (let ((world
+          (luvcraft::make-block-world
+           :source (make-instance 'luvcraft::gazetteer-open-sky-source))))
+    (dotimes (chunk-x 2)
+      (luvcraft::ensure-world-chunk world chunk-x 0 0))
+    (loop for x below 32 do
+      (loop for z below 16 do
+        (setf (luvcraft:world-block-at world x 0 z)
+              luvcraft::*grass-block*)))
+    world))
 
 (defun make-gameplay-smash-wall-world ()
   "Make a stone wall with one contrasting three-by-three brick panel."
   (let ((world (make-gameplay-action-yard)))
     (loop for x from 12 to 18 do
-      (loop for relative-y from 1 to 5 do
-        (setf (luvcraft:world-block-at
-               world x (+ +gallery-stage-floor-y+ relative-y) 11)
+      (loop for y from 1 to 5 do
+        (setf (luvcraft:world-block-at world x y 11)
               luvcraft::*stone-block*)))
-    (dolist (coordinate (gameplay-stage-coordinates *gameplay-smash-targets*))
+    (dolist (coordinate *gameplay-smash-targets*)
       (destructuring-bind (x y z) coordinate
         (setf (luvcraft:world-block-at world x y z)
               luvcraft::*bricks-block*)))
     ;; The opening reveals a luminous landmark instead of undifferentiated
     ;; empty ground after the brick panel is gone.
-    (setf (luvcraft:world-block-at
-           world 15 (1+ +gallery-stage-floor-y+) 14)
+    (setf (luvcraft:world-block-at world 15 1 14)
           luvcraft:*crystal-block*)
     (luvcraft:relight-block-world world)
     world))
@@ -61,12 +56,11 @@
     ;; from the authored play camera therefore hits its front face and asks
     ;; EDIT-LUVCRAFT-BLOCK to place the brick at Z=11.  The doorway's centre
     ;; has no scaffold, so it remains genuinely open in the finished shot.
-    (dolist (coordinate (gameplay-stage-coordinates *gameplay-arch-targets*))
+    (dolist (coordinate *gameplay-arch-targets*)
       (destructuring-bind (x y z) coordinate
         (setf (luvcraft:world-block-at world x y (1+ z))
               luvcraft::*wood-block*)))
-    (setf (luvcraft:world-block-at
-           world 15 (1+ +gallery-stage-floor-y+) 14)
+    (setf (luvcraft:world-block-at world 15 1 14)
           luvcraft:*crystal-block*)
     (luvcraft:relight-block-world world)
     world))
@@ -90,7 +84,7 @@
                 (* amount (- (nth index right) (nth index left)))
                 0.5d0)))
       (gallery-look-pose
-       15.5d0 (+ +gallery-stage-floor-y+ 2.62d0) 5.5d0
+       15.5d0 2.62d0 5.5d0
        (blend 0) (blend 1) (blend 2)
        (* 0.92d0 luvcraft::+luvcraft-camera-vertical-field-of-view+)))))
 
@@ -173,22 +167,21 @@
    :sky-profile (luvcraft:make-default-sky-profile)
    :width +gallery-landscape-width+
    :height +gallery-landscape-height+
-   :residency-radius +gallery-terrain-radius+
+   :residency-radius 0
    :clean-p nil
    :exposure 0.50
    :bloom-gain 0.20
    :shaft-gain 0.22))
 
 (luv:define-capture gameplay-smash-wall
-    (:figure P3L8YX :kind :video :extension "mp4" :section :play
+    (:figure P3L8YX :kind :video :extension "mp4"
      :description
      "First-person mining opens a brick panel with ordinary fragment bursts.")
     (pathname)
-  (let* ((frame-rate +gallery-film-frame-rate+)
+  (let ((frame-rate +gallery-film-frame-rate+)
         (seconds 7)
         (first-action-frame 20)
-        (frames-between-actions 10)
-        (targets (gameplay-stage-coordinates *gameplay-smash-targets*)))
+        (frames-between-actions 10))
     (call-with-gameplay-action-session
      (lambda (session)
        (luvcraft:film-luvcraft-session
@@ -199,7 +192,7 @@
           (luvcraft::set-camera-pose
            (luvcraft:luvcraft-session-camera session)
            (gameplay-action-camera-pose
-            targets frame
+            *gameplay-smash-targets* frame
             first-action-frame frames-between-actions))
           (luvcraft::advance-luvcraft-session-to
            session (/ frame (coerce frame-rate 'double-float)))
@@ -209,10 +202,10 @@
             (let ((action-index
                     (/ (- frame first-action-frame)
                        frames-between-actions)))
-              (when (< action-index (length targets))
+              (when (< action-index (length *gameplay-smash-targets*))
                 (perform-gameplay-centre-edit
                  session :remove
-                 (elt targets action-index)
+                 (elt *gameplay-smash-targets* action-index)
                  "gameplay-smash-wall"))))
           (when (zerop (mod frame frame-rate))
             (format t "capture gameplay-smash-wall: second ~D/~D~%"
@@ -221,24 +214,23 @@
      "gameplay-smash-wall"
      (make-gameplay-smash-wall-world)
      (gameplay-action-camera-pose
-      targets 0 first-action-frame frames-between-actions))))
+      *gameplay-smash-targets* 0 first-action-frame frames-between-actions))))
 
 (luv:define-capture gameplay-build-brick-arch
-    (:figure P3L8YX :kind :video :extension "mp4" :section :play
+    (:figure P3L8YX :kind :video :extension "mp4"
      :description
      "First-person placement raises two brick posts and closes their lintel.")
     (pathname)
-  (let* ((frame-rate +gallery-film-frame-rate+)
+  (let ((frame-rate +gallery-film-frame-rate+)
         (seconds 8)
         (first-action-frame 20)
         (frames-between-actions 10)
-        (targets (gameplay-stage-coordinates *gameplay-arch-targets*))
         (scaffold-targets
           (mapcar (lambda (coordinate)
                     (list (first coordinate)
                           (second coordinate)
                           (1+ (third coordinate))))
-                  targets)))
+                  *gameplay-arch-targets*)))
     (call-with-gameplay-action-session
      (lambda (session)
        (luvcraft:film-luvcraft-session
@@ -259,10 +251,10 @@
             (let ((action-index
                     (/ (- frame first-action-frame)
                        frames-between-actions)))
-              (when (< action-index (length targets))
+              (when (< action-index (length *gameplay-arch-targets*))
                 (perform-gameplay-centre-edit
                  session :place
-                 (elt targets action-index)
+                 (elt *gameplay-arch-targets* action-index)
                  "gameplay-build-brick-arch"))))
           (when (zerop (mod frame frame-rate))
             (format t "capture gameplay-build-brick-arch: second ~D/~D~%"

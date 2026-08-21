@@ -36,30 +36,6 @@ The first folio should be small enough to art-direct: the pre-noon ridge
 gazetteer prevents those hero shots from becoming the only visual memory of
 the game.
 
-* Showcase subjects live inside a world, not on a stage
-:PROPERTIES:
-:ID: GEA2VH
-:END:
-
-The default authored fixture is generated terrain from seed 33 with a
-seven-by-seven resident chunk window.  A recipe may grade one bounded clearing
-inside it, but the hills, trees, biome changes, fog depth, and streamed horizon
-outside that clearing remain the ordinary little world.  This is the baseline
-for README candidates: a gnome, terminal, crystal grove, or construction should
-look like a capability found somewhere in the game, not a model placed on a
-sixteen-block test plinth.
-
-[[file:../captures/gallery.lisp][The gallery fixture]] names this narrow
-convention =make-staged-gallery-terrain-world=.  Its builder receives the world
-and recorded floor height after the clearing is graded.  It is intentionally a
-concrete composition aid rather than a general scene graph.  Seed 33 keeps the
-clearing's six-block floor continuous with its immediate natural perimeter,
-then opens into ordinary rolling terrain across the wider resident window.
-Individual recipes
-still own their subjects, camera, light, motion, and cleanup.  Reference plates
-and exact boundary proofs may opt out when flatness is the fact they are meant
-to show.
-
 * Pre-noon light on the little world
 :PROPERTIES:
 :ID: NLCFX0
@@ -275,21 +251,9 @@ captured by #Y7X7WK: an inert possible world awaiting approval.
   existing recipes; add a future =construction-approve= film which ends with
   the preview becoming ordinary world geometry.
 
-Synthetic transcript objects keep typography and layout deterministic.
-
-** A real agent turn becomes a reviewed capture cassette
-:PROPERTIES:
-:ID: DT23EK
-:END:
-
-The exception is =gnome-builds-classic-arch=: one explicitly requested real
-API turn asks the embodied gnome to build a classic stone-brick arch through
-the ordinary proposal tool and player approvals.  The paid run is reduced to a
-reviewed cassette of its actual reasoning summary, ordered tool arguments,
-outputs, timings, and final speech.  The public film replays those typed events
-and commits the same approved edits without calling the provider again.  This
-makes the film an honest observation of a real turn and keeps the default
-capture set deterministic and credential-free.
+Synthetic transcript objects keep typography and layout deterministic.  A
+separate authored film may show a real model turn, but it should be presented
+as an observed session rather than as a reproducible capture recipe.
 
 * Physics is best shown with causality
 :PROPERTIES:
