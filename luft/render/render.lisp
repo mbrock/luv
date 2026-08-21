@@ -1221,13 +1221,17 @@ lane: the arris softness of a chamfer, or the vertical radius of the field."
    (target-formats :initarg :target-formats
                    :reader surface-technique-target-formats)
    (temporal-p :initarg :temporal-p :initform nil
-               :reader surface-technique-temporal-p))
+               :reader surface-technique-temporal-p)
+   (output-space :initarg :output-space :initform :presented
+                 :reader surface-technique-output-space))
   (:documentation
    "The immutable GPU technique shared by surface draws on one DEVICE.
 
 It owns the exact bind-group layout, shader modules, and style pipelines.
 Mutable frame and scene buffers deliberately live in SURFACE-FRAME-STATE, so
-several acquired frames can use this technique without sharing mapped state."))
+several acquired frames can use this technique without sharing mapped state.
+OUTPUT-SPACE says whether its fragment programs own presentation or return
+linear radiance to an enclosing frame owner."))
 
 (defclass surface-frame-state ()
   ((technique :initarg :technique :reader surface-frame-state-technique)
@@ -1729,7 +1733,8 @@ may draw it first and the world still covers it."
 The values are surface, chamfer, paper, field, ink, stock, and clay, each NIL
 when no selected style needs it."
   (let ((styles (surface-technique-pipeline-styles technique))
-        (temporal-p (surface-technique-temporal-p technique)))
+        (temporal-p (surface-technique-temporal-p technique))
+        (output-space (surface-technique-output-space technique)))
     (values
      (when (intersection styles '(:flat :bevel))
        (create-surface-technique-module
@@ -1764,9 +1769,13 @@ when no selected style needs it."
      (when (member :stock styles)
        (create-surface-technique-module
         technique :luft/shader/stock-fragment "luft stock fragment"
-        (if temporal-p
-            (shaders:temporal-stock-fragment-shader)
-            (shaders:stock-fragment-shader))))
+        (cond
+          (temporal-p
+           (shaders:temporal-stock-fragment-shader))
+          ((eq :linear output-space)
+           (shaders:linear-stock-fragment-shader))
+          (t
+           (shaders:stock-fragment-shader)))))
      (when (member :clay styles)
        (create-surface-technique-module
         technique :luft/shader/clay-fragment "luft clay fragment"
@@ -1877,17 +1886,30 @@ when no selected style needs it."
     (device &key
               (pipeline-styles *surface-styles*)
               (target-formats '(:rgba8-unorm-srgb))
-              temporal-p)
+              temporal-p
+              (output-space :presented))
   "Build a shareable LUFT surface technique for DEVICE.
 
 PIPELINE-STYLES selects the vertex-pulled styles.  TARGET-FORMATS are the
 exact render-pass color targets; TEMPORAL-P selects the matching two-output
-fragment variants.  The caller owns TECHNIQUE and may create any number of
-independent SURFACE-FRAME-STATE instances from it."
+fragment variants.  OUTPUT-SPACE is :PRESENTED when LUFT owns tone mapping
+and fog, or :LINEAR when an enclosing HDR frame owns presentation.  The
+currently exact linear contract is one non-temporal :STOCK pipeline.  The
+caller owns TECHNIQUE and may create any number of independent
+SURFACE-FRAME-STATE instances from it."
   (let ((foreign (set-difference pipeline-styles *surface-styles*)))
     (when foreign
       (error "Luft cannot draw ~S; its surface styles are ~S."
              foreign *surface-styles*)))
+  (unless (member output-space '(:presented :linear))
+    (error "A Luft surface technique output space is :PRESENTED or :LINEAR, not ~S."
+           output-space))
+  (when (eq :linear output-space)
+    (unless (equal pipeline-styles '(:stock))
+      (error "Linear Luft output currently requires exactly the :STOCK pipeline, not ~S."
+             pipeline-styles))
+    (when temporal-p
+      (error "Linear Luft output is not yet a temporal surface technique.")))
   (when (and temporal-p (/= 2 (length target-formats)))
     (error "A temporal surface technique needs color and motion targets, not ~S."
            target-formats))
@@ -1895,7 +1917,8 @@ independent SURFACE-FRAME-STATE instances from it."
                                   :device device
                                   :pipeline-styles (copy-list pipeline-styles)
                                   :target-formats (copy-list target-formats)
-                                  :temporal-p temporal-p))
+                                  :temporal-p temporal-p
+                                  :output-space output-space))
         (completed-p nil))
     (unwind-protect
          (progn

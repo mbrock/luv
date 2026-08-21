@@ -296,6 +296,9 @@
                                   :style :flat :effects nil)))
     (unwind-protect
          (progn
+           (ok (eq :presented
+                   (surface-technique-output-space
+                    (renderer-surface-technique renderer))))
            (let* ((pixels (render-pixels renderer))
                   (sky-above (count-pixels pixels width height #'sky-pixel-p
                                            :to-row 10))
@@ -471,6 +474,45 @@
     ;; The standalone renderer still owns its original paper presentation.
     (ok (shader-specification-calls-p
          presented 'luft.render.shaders::stock-lighting))))
+
+(deftest linear-surface-techniques-refuse-inexact-combinations-before-gpu-work
+  (ok (signals
+       (make-surface-technique
+        nil :pipeline-styles '(:stock) :output-space :display)))
+  (ok (signals
+       (make-surface-technique
+        nil :pipeline-styles '(:stock :flat) :output-space :linear)))
+  (ok (signals
+       (make-surface-technique
+        nil :pipeline-styles '(:stock)
+        :target-formats '(:rgba16-float :rg16-float)
+        :temporal-p t :output-space :linear))))
+
+#+darwin
+(deftest linear-stock-surface-technique-compiles-for-an-embedded-metal-hdr-pass
+  (let ((device
+          (luv:request-gpu-device (make-instance 'luv:metal-gpu-provider)))
+        (technique nil))
+    (unwind-protect
+         (progn
+           (setf technique
+                 (make-surface-technique
+                  device
+                  :pipeline-styles '(:stock)
+                  :target-formats '(:rgba16-float)
+                  :output-space :linear))
+           (ok (eq :linear (surface-technique-output-space technique)))
+           (ok (equal '(:stock)
+                      (surface-technique-pipeline-styles technique)))
+           (ok (equal '(:rgba16-float)
+                      (surface-technique-target-formats technique)))
+           (ok (not (surface-technique-temporal-p technique)))
+           ;; Pipeline creation is where Metal lowers and compiles both
+           ;; mathematical shader modules for this exact attachment format.
+           (ok (typep (surface-technique-pipeline technique :stock)
+                      'luv:metal-gpu-render-pipeline)))
+      (when technique (destroy-surface-technique technique))
+      (luv:destroy device))))
 
 (deftest surface-vertices-lift-packed-sites-to-the-camera-nearest-torus-image
   (dolist (specification

@@ -110,6 +110,7 @@ of packed LUFT sites, drawn by vertex shaders pulling sites.")
            #:surface-technique-pipeline-styles
            #:surface-technique-target-formats
            #:surface-technique-temporal-p
+           #:surface-technique-output-space
            #:surface-frame-state
            #:make-surface-frame-state
            #:destroy-surface-frame-state
