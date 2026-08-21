@@ -1,0 +1,417 @@
+#+title: The luvcraft showcase gazetteer
+#+startup: overview
+
+* The showcase is an atlas with three lanes
+:PROPERTIES:
+:ID: RFUR2R
+:END:
+
+The showcase should say what luvcraft can actually do, preserve good views of
+those things, and occasionally be beautiful enough to stand on its own.  Those
+are related jobs, but not identical ones.  The useful catalogue has three
+lanes:
+
+- *Scenes* are composed editorial images: terrain, inhabitants, architecture,
+  and light arranged as a picture.  They normally omit the crosshair, hotbar,
+  and first-person body.
+- *Surfaces* show interaction in context: a terminal wall, phone, inventory,
+  metabar, approval, or other pane at the moment its purpose is legible.  HUD
+  and viewmodel layers belong when they are part of that purpose.
+- *Plates* hold a camera and one variable still for comparison: materials,
+  hours, shadows, blocklight, glyphs, poses, and backend-sensitive effects.
+  These are reference imagery even when they are too diagnostic for the front
+  of the public page.
+
+This page is a source-backed roster, not a claim that all these recipes exist.
+Names in =verbatim= are proposed literal capture names.  Each figure can own a
+still and one or more films under the executable media contract #IVRWI8.  A
+recipe only joins =luv/showcase= when it can render from source without private
+ambient state; networked, credentialed, and Darwin-only views remain authored
+shots until they acquire a deterministic fixture.
+
+The first folio should be small enough to art-direct: the pre-noon ridge
+#NLCFX0, a crystal afterglow #Q8ZIFD, a terminal at home in the terrain
+#2TMUKK, the instrument family #DYJZBK, inhabitants #W7T2IT, physics
+#CSCFGF, and the already composed birthday world #L5G2WQ.  The rest of the
+gazetteer prevents those hero shots from becoming the only visual memory of
+the game.
+
+* Pre-noon light on the little world
+:PROPERTIES:
+:ID: NLCFX0
+:END:
+
+The principal landscape should be a recognizably generated little world, not a
+bespoke diorama.  [[file:../luvcraft/terrain.lisp][The terrain source]] already
+supplies rolling grass, sand, stone and snow with rocks and broad-canopied
+trees.  [[file:../luvcraft/sky.lisp][The sky]] can pin any hour, while the HDR
+presentation in [[file:../luvcraft/render.lisp][the renderer]] supplies fog,
+bloom, vignette, focus blur, and screen-space sunlight shafts.
+
+The composition wants a ridge or shallow valley from seed 121 or another
+recorded seed: warm light from the left at roughly ten in the morning, the sun
+just inside or just outside the frame, two or three tree crowns breaking it
+into shafts, a bright middle-distance slope, and a cooler fogged horizon.  The
+camera should be near human height rather than the old gazetteer's aerial
+debugging angle.  The grade may make the pre-noon sun warmer, but should not
+raise shaft or bloom gain until the entire frame looks veiled.
+
+- =pre-noon-ridge-still= — clean 3:2 hero still, no HUD or viewmodel.
+- =pre-noon-ridge-glide= — six to eight seconds moving slowly across the
+  foreground while keeping the ridge and sun relationship intact.
+- =pre-noon-under-the-trees= — a lower companion view with trunks and leaves
+  providing foreground occlusion and obvious shafts.
+
+The still establishes the picture.  The glide proves that shadows, fog, lens
+effects, streamed terrain products, and exposure remain coherent when the
+camera moves.
+
+* The sky deserves one fixed camera across a whole day
+:PROPERTIES:
+:ID: TRYHPN
+:END:
+
+A time-of-day folio should use one seed, one camera, one viewport, and one
+grade.  Only the pinned =sky-clock= reading changes.  That makes the default
+profile's midnight, sunrise, morning, noon, sunset, and dusk keyframes visible
+as a system rather than as unrelated pretty pictures.
+
+- =little-world-blue-hour= — the world still readable before sunrise.
+- =little-world-sunrise= — warm horizon, long shadows, cool zenith.
+- =little-world-pre-noon= — the neutral comparison for #NLCFX0.
+- =little-world-noon= — high sun, shortest shadows, strongest material read.
+- =little-world-sunset= — warm lateral light and fog colour.
+- =little-world-deep-night= — ambient silhouette without an artificial moon.
+- =little-world-one-day= — an eight-second authored time-lapse through the same
+  fixed view; no camera orbit to confuse lighting change with parallax.
+
+The six stills are reference plates.  The film is where continuous profile
+interpolation, shadow motion, cloud movement, and exposure transitions become
+visible.
+
+* Crystal afterglow shows luminous materials
+:PROPERTIES:
+:ID: Q8ZIFD
+:END:
+
+The crystal is simultaneously a textured material, a blocklight emitter, and
+an HDR surface emitter.  A small grove at late dusk can show all three: crystal
+light reaching grass, stone, trunks, and the underside of leaves; faceted
+normal relief on the near blocks; and a restrained bloom spread against a dark
+sky.  The existing =glow-floor= and =crystal-seam= gazetteer views already
+provide the diagnostic core in
+[[file:../luvcraft/gazetteer.lisp][luvcraft/gazetteer.lisp]].
+
+- =crystal-grove-afterglow-still= — a composed near/middle/far scene with one
+  crystal close enough to read its facets and several hidden among trees.
+- =crystal-grove-night-orbit= — a slow lateral arc, not a full turntable, so
+  changing occlusion shows the blocklight volume.
+- =crystal-chunk-seam-plate= — the existing flat seam proof promoted into the
+  capture system as reference imagery.
+- =crystal-bloom-ladder= — three fixed plates at zero, ordinary, and strong
+  bloom gain for tuning regressions; never a public hero card.
+
+* A terminal is a place, a pane, and a carried thing
+:PROPERTIES:
+:ID: 2TMUKK
+:END:
+
+[[file:../luvcraft/terminal-wall.lisp][The world terminal]] discovers an authored
+rectangle of blocks, sizes a Ghostty grid to it, draws styled cell backgrounds
+and Slug glyph geometry, and adds a separately lit screen panel and glass
+faceplate.  The same terminal surface protocol reaches the graphite slab in
+[[file:../luvcraft/phone.lisp][the player's hand]].  A terminal showcase should
+therefore keep enough oblique perspective for the rim, glass, and world
+placement to survive; a square-on crop makes the surface look like a pasted
+screenshot.
+
+- =terminal-camp-golden-hour= — a three-by-two or four-by-three shell wall in a
+  small stone-and-wood shelter, warm exterior light, luminous styled text, and
+  no modal HUD.
+- =terminal-shell-closeup= — the same deterministic fixture from its ordinary
+  off-axis focus pose, sharp enough to inspect bold and coloured cells.
+- =terminal-mode-hotbar= — focused wall plus the mode-aware hotbar showing
+  Shell, Film, and Telegram as the wall's own choices.
+- =phone-shell-in-hand= — first-person body and phone retained, terminal full
+  of a short deterministic fixture rather than a machine-specific prompt.
+- =phone-focus-pull= — a short film of taking the phone out, glancing at it,
+  focusing it, typing one line, leaving focus, and pocketing it while the shell
+  remains alive.
+
+The shell fixture should contain colour, bold text, a command and output, but
+no hostname, home directory, credential, or wall-clock reading.
+
+* Player instruments should be readable in context
+:PROPERTIES:
+:ID: DYJZBK
+:END:
+
+The main panes are already McCLIM frames composited into the one game canvas.
+They should be photographed over a quiet midtone landscape which gives their
+edges contrast without competing with their text.
+
+- =hotbar-material-palette= — the ordinary bottom hotbar with procedural block
+  icons, numbered wells, selection edge, and selected-material caption from
+  [[file:../mcclim/hotbar.lisp][mcclim/hotbar.lisp]].
+- =inventory-natural=, =inventory-building=, and =inventory-luminous= — the
+  category sidebar, paged item grid, quickbar, quantity, and item inspector
+  from [[file:../mcclim/inventory.lisp][mcclim/inventory.lisp]].  The building
+  plate should inspect a film so its title/uploader/duration specialization is
+  retained in visual memory.
+- =metabar-grading= — the grading group open over the #NLCFX0 scene, so
+  exposure, bloom, light-shaft, shaft-reach, and vignette controls are visibly
+  attached to their consequence.
+- =metabar-physics= — the physics group over a sleeping pile of balls; useful
+  as a reference for the knob/action vocabulary rather than a hero shot.
+- =keymap-legend= — the generated sections and live bindings from
+  [[file:../luvcraft/clim/legend.lisp][the keymap legend]].
+- =command-menu-filter= — =M-x= with a useful partial query and several matches,
+  showing that game commands are an inspectable command table.
+- =tape-prompt= — the small YouTube-code prompt with neutral fixture text and
+  its validation line.
+- =lobby-radio= — the quiet corner instrument in offline, connecting, and
+  two-peer fixture states; only the two-peer plate belongs on the public page.
+
+An authored =instrument-tour= film may open hotbar, inventory, metabar, legend,
+and command menu in a stable sequence, but the individual stills remain the
+better reference for typography and layout.
+
+* World-native panes should keep their depth cues
+:PROPERTIES:
+:ID: FSDUXL
+:END:
+
+Some panes live on world surfaces rather than in the HUD.  Their showcase
+pair is an environmental view proving placement and a close view proving
+content.  Both keep the surface slightly off-axis.
+
+- =film-browser-on-wall= — the stone-cased file browser from
+  [[file:../mcclim/terminal-film-browser.lisp][terminal-film-browser.lisp]],
+  with directories, playable films, sizes, paging marks, and footer message
+  supplied by a temporary deterministic fixture tree.
+- =communicator-dialogs-on-wall= — a credential-free Telegram console snapshot
+  containing avatar colours, dialog rows, transcript text, photo/video
+  thumbnails, composer, and scrollbar.  A live private account must never be
+  a capture dependency.
+- =paper-sheet-on-wall= — the separate =luvcraft/paper= system showing a known
+  repository PDF page with McCLIM text replayed as sharp world geometry.
+- =terminal-six-faces= — one compact reference scene exercising front, back,
+  left, right, top, and bottom terminal surface frames.
+
+The communicator and paper are real capabilities, but need small source-owned
+fixtures before they can enter the default Chapel render set.
+
+* Inhabitants need portraits and motion
+:PROPERTIES:
+:ID: W7T2IT
+:END:
+
+The little world now has box-built turtles and independently ray-marched gnome
+and cat bodies.  Their pictures should show scale against blocks and ground,
+not isolate them on a transparent turntable.
+
+- =turtle-meadow-portrait= — promote the three posed animals from the old
+  gazetteer into a warmer, lower composition with walking, turning, and resting
+  poses all readable.
+- =turtle-crossing= — a short lateral film of gait, rest, turning, cast shadow,
+  and a small terrain obstacle.
+- =ride-a-turtle= — first-person authored film of mounting with Tab, walking a
+  small path from the moving seat, and dismounting safely.
+- =gnome-garden-portrait= — one gnome at conversational distance among grass,
+  stone and flowers, preserving hat, beard, face, rim light, and world scale.
+- =cat-in-the-sun= — the seated cat in warm side light with the tail silhouette
+  clear against a simpler background.
+- =gnome-and-cat-two-shot= — the shared embodied-agent vocabulary made visible
+  without pretending the two bodies share a shader.
+- =inhabitant-turns= — a restrained film of turtle gait, gnome walking, and the
+  cat's breathing proxy, cut as three shots rather than one busy arena.
+
+* Agent work has four visible surfaces
+:PROPERTIES:
+:ID: HA4V5Q
+:END:
+
+The agent is visually larger than its gnome.  Its work appears as a top-right
+cassette HUD, bubbles and dialogue around an embodied presence, an ANSI
+transcript written onto a terminal wall, and a clean over-the-shoulder
+surroundings observation.  Construction adds the fifth special case already
+captured by #Y7X7WK: an inert possible world awaiting approval.
+
+- =agent-cassette-hud= — a source-owned synthetic turn with prompt, thought,
+  one running call, one completed call, elapsed times, output, and final text.
+  Do not call a model to render it.
+- =gnome-conversation= — the same synthetic records as world bubbles plus a
+  short dialogue subtitle, with the gnome itself in frame.
+- =agent-wall-transcript= — the records rendered as coloured Ghostty geometry
+  on a terminal wall, including prompt and one tool cassette.
+- =agent-surroundings-glance= — the clean third-person image from
+  =capture-surroundings-observation=, paired in the wiki with its pose and
+  voxel-census text.
+- =construction-proposal-still= and =construction-proposal-orbit= — retain the
+  existing recipes; add a future =construction-approve= film which ends with
+  the preview becoming ordinary world geometry.
+
+Synthetic transcript objects keep typography and layout deterministic.  A
+separate authored film may show a real model turn, but it should be presented
+as an observed session rather than as a reproducible capture recipe.
+
+* Physics is best shown with causality
+:PROPERTIES:
+:ID: CSCFGF
+:END:
+
+[[file:../luvcraft/balls.lisp][The physics presentation]] draws true patterned
+spheres, posts the player and animals as kinematic obstacles, and turns the
+fountain and lava spring blocks into persistent body sources.  A still can
+show materials and a settled pile; motion is required to show the system.
+
+- =ball-in-hand= — viewmodel reference with the worn banded ball carried low.
+- =throw-and-settle= — one throw, one bounce, a roll down a small slope, contact
+  with another ball, and sleep; keep the camera fixed so causality reads.
+- =party-ball-cascade= — beach, smiley, marble, and classic balls spilling down
+  stone steps under side light.
+- =turtle-and-ball= — a rolling ball deflected by a turtle, which visibly
+  startles; a playful proof that physics and critter protocols meet.
+- =fountain-courtyard= — water drops spraying from the fountain block and
+  splashing over a built basin.
+- =lava-spring-night= — glowing gobbets rising, falling, sticking, cooling, and
+  fading against a dark slate setting.
+- =dig-and-place-particles= — a close short film of one removal and placement,
+  preserving the ordinary block-particle feedback.
+
+The spring films need a bounded clock and fixed emission sequence so their
+authored motion remains repeatable enough to compare.
+
+* The birthday world is the authored ensemble shot
+:PROPERTIES:
+:ID: L5G2WQ
+:END:
+
+The =luvcraft/birthday= system is already a composed scene rather than a bag
+of demonstrations.  [[file:../luvcraft/birthday/party.lisp][The party owner]]
+places a gazebo in a flowered meadow, ties back-lit balloons to it, rings it
+with dancing gnomes and physical balls, runs a terminal-based marquee, pins
+the sky, and starts the fireworks.  It deserves both a coherent film and
+smaller portraits of the work that disappears in the ensemble.
+
+- =birthday-gazebo-golden-hour= — wide establishing still with meadow, flower
+  ring, gazebo, marquee, balloons, gnome troupe, and enough terrain beyond to
+  locate the party in a world.
+- =birthday-balloon-backlight= — close still with latex glint, transmitted
+  sunlight, strings, gazebo edge, and one dancing gnome for scale.
+- =birthday-marquee-and-gnomes= — medium still preserving animated banner
+  design and the troupe's individual colours.
+- =birthday-fireworks= — the existing staged party film or a six-to-ten-second
+  extract containing launch, peony, ring, and willow shapes over the gazebo.
+- =birthday-afterparty= — turtles entering after the main act among settled
+  party balls.
+- =birthday-cutscenes= — the complete authored two-act film remains a feature,
+  not a default looping card if its length overwhelms the rest of the page.
+
+* A world within a world needs its own folio
+:PROPERTIES:
+:ID: TWKA93
+:END:
+
+Film walls and portals both put a moving image onto a world panel, but they
+prove different things.  Film uses the hardware-backed video path and can be
+captured on the showcase renderer with a tiny generated clip.  A portal shows
+another live luvcraft process through a shared IOSurface and is Darwin-only.
+
+- =wall-cinema-at-dusk= — a deterministic locally generated film playing on a
+  terminal rectangle while the faceplate, shelter, ground, and dusk light
+  remain visible.
+- =choose-and-play-film= — authored sequence from Film mode, through the wall
+  browser, to moving picture and back to Shell.
+- =film-reel-in-inventory= — the carried film's title, uploader, duration, and
+  flange icon in the item inspector.
+- =terminal-portal= — a child little world framed by its parent's terminal
+  wall, with enough oblique perspective to show it is a transmission surface.
+- =portal-recursion= — an authored Darwin film moving the child camera while
+  the parent moves slightly too; the two parallax systems should remain
+  distinguishable and tear-free.
+
+Portal entries stay out of the Chapel default set unless the render host and
+capture operation acquire an explicit Darwin route.  “Hw accelerated” film
+captures require the hardware path; a silent software fallback does not prove
+the feature being shown.
+
+* Reference plates make failures legible
+:PROPERTIES:
+:ID: OK1OC8
+:END:
+
+The diagnostic gazetteer remains valuable beside the editorial showcase.  Its
+existing views should be wrapped by small capture recipes instead of copied or
+retired: =little-world-noon=, =little-world-dusk=, =shadow-forest=,
+=glow-floor=, =crystal-seam=, =turtle-meadow=, and =shadow-yard=.
+
+The broader reference shelf should add:
+
+- =material-raking-lineup= — every placeable block in category order under one
+  low neutral sun, including colour and generated normal relief.
+- =atlas-colour-and-normal= — exact colour and normal atlases as technical
+  plates, not upscaled screenshots of blocks.
+- =shadow-yard-still= and =shadow-yard-motion= — simple caster/receiver evidence
+  plus a consecutive camera or sun sequence.
+- =shadow-forest-motion= — representative trees and terrain paired with the
+  existing derivative diagnostics, keeping host timing out of a visual claim.
+- =world-text-closeup= — the existing Slug text proof at native resolution.
+- =terminal-type-plate= — regular/bold, ANSI colours, background cells, cursor,
+  and faceplate at near and far camera distances.
+- =body-proportion-plate= — gnome and cat at one block ruler for shader-knob
+  reviews.
+- =viewport-shapes= — the same quiet scene at landscape, square, portrait, and
+  a resized live viewport, preserving safe HUD insets.
+
+Reference captures should keep their ordinary PNGs and short MP4s available
+even when only selected scenes appear on the front showcase grid.  The current
+flat manifest does not need categories yet: the page can remain flat until
+enough real captures make navigation a demonstrated problem.
+
+* Every still has a motion companion when time matters
+:PROPERTIES:
+:ID: I380Q9
+:END:
+
+An orbit is useful when the claim is shape, depth, or attachment to the world.
+It is not a universal video template.  The film should move the variable that
+the subject owns:
+
+| Subject | Still establishes | Film must establish |
+|---------+-------------------+---------------------|
+| Terrain light | Composition and grade | Stable shafts, shadows, fog, streaming |
+| Day cycle | Keyframe appearances | Continuous interpolation and shadow motion |
+| Terminal | Glyph and surface quality | Focus, typing, mode and lifetime transitions |
+| Pane | Layout and legibility | Opening, selection, feedback and dismissal |
+| Inhabitant | Model, material and scale | Gait, breath, turn, ride or conversation |
+| Physics | Material and settled state | Contact, bounce, flow, cooling and sleep |
+| Proposal | Finished counterfactual | View-dependent orbit and approval transition |
+| Portal or film | Panel placement | Independent moving image without tearing |
+
+[[lisp:capture-luvcraft-screenshot]] already chooses HUD and viewmodel layers,
+and [[lisp:film-luvcraft-session]] gives authored code a =before-frame=
+boundary.  A recipe should reuse one scene constructor across its still and
+film whenever they depict the same subject.  That makes their difference an
+authored camera or clock path rather than accidental world state.
+
+* NEXT Author the pre-noon ridge
+:PROPERTIES:
+:ID: 2ILB5D
+:END:
+
+/Intent./ Turn #NLCFX0 into the first new subject after the construction
+proposal: one composed terrain still and one motion proof from the same hidden
+session, with the seed, camera, sky profile, clock, grade, and layer choices in
+source.
+
+/Evidence./ The current capture protocol already renders hidden sessions,
+stills, and MP4s; the terrain source supplies trees and relief; the post stack
+already exposes bloom and light shafts.  What is missing is art direction and
+visual acceptance, not another capture abstraction.
+
+/Done when./ =pre-noon-ridge-still= and =pre-noon-ridge-glide= render on the
+showcase host, the still reads as warm pre-noon terrain rather than a diagnostic
+aerial, the film has responsive consecutive frames with no streaming pop or
+shadow shimmer, teardown leaves no surviving session, and both published cards
+are inspected at their actual browser size.

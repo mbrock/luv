@@ -13,6 +13,7 @@
     :components ((:file "index")
                  (:file "technical-debt")
                  (:file "block-world")
+                 (:file "showcase-gazetteer")
                  (:file "world-terminal")
                  (:file "agent-harnesses")
                  (:file "autolith")

@@ -142,6 +142,10 @@ The following are starting paths rather than a table of settled doctrine.
 - [[file:block-world.org][The little block world and its possible worlds]] is the game-shaped starting
   path: what exists now, what kind of world it might become, and an order of
   experiments intended to stay fun.
+- [[file:showcase-gazetteer.org][The luvcraft showcase gazetteer]] maps the
+  executable capture system onto composed landscape and lighting scenes,
+  world-native panes, player instruments, inhabitants, agents, physics,
+  authored celebrations, and controlled reference plates.
 - [[file:world-terminal.org][A terminal in the little world]] joins libghostty-vt's terminal semantics and
   dirty render snapshots to luv's Slug text path and the existing world-overlay
   interaction seam.  Its first slice draws one fixed terminal row directly in
