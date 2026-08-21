@@ -1,0 +1,194 @@
+#+title: Z-fiber residency and meshing
+
+* Status
+
+This is a design note, not an implemented representation.  It records a
+promising resident-world layout suggested by the CPU mesher benchmark.
+
+LUFT's chains remain immutable algebraic values.  This note proposes a
+separate derived representation for a resident, editable block world and its
+hot meshing path.  It follows the separation already stated in
+[[file:luft-refoundation-brief.md][the refoundation brief]]: mutable occupancy
+must not dictate the mathematical chain representation.
+
+* Observation
+
+LUFT has 255 valid vertical cells, from ~z=0~ through ~z=254~.  Expected block
+worlds usually have simple vertical fibers: air above terrain, a few material
+strata, and occasional floors, roofs, caves, or edited cells.  Those material
+fibers should generally have few runs.
+
+The vertical extent also fits in 256 occupancy bits.  This makes a complete
+=(x,y)= fiber exactly four =u64= words, with bit 255 permanently zero.  The
+extra bit is a useful sentinel for the open top of the world.
+
+These two facts suggest parallel resident representations:
+
+- ordered material runs for semantic storage;
+- a 256-bit occupancy cache for hot local queries and Boolean meshing.
+
+RLE is not proposed as the inner-loop occupancy query.  Even short run lists
+would reintroduce searching where a fixed bit mask permits direct operations.
+
+* Proposed resident column
+
+A starting residency unit is a full-height horizontal column:
+
+#+begin_example
+16 x 16 x 255 resident cells
+16 x 16 x 16 independently replaceable mesh sections
+one fiber of X/Y halo around the resident column
+#+end_example
+
+A 16 by 16 column's occupancy cache occupies 8 KiB.  Including a one-fiber
+X/Y halo, 18 by 18 fibers occupy about 10 KiB.  A 32 by 32 column would occupy
+32 KiB before its halo and remains worth benchmarking as a coarser streaming
+unit.
+
+Residency and mesh publication need not have the same grain.  A full-height
+column may be loaded and edited as one semantic unit while its sixteen
+16-cell-high mesh sections are rebuilt and replaced independently.
+
+An unloaded neighboring column is not air.  Residency state must distinguish
+unavailable data from resident air.  Meshing may read halo fibers but emits
+only faces owned by the central mesh section.
+
+* Material fibers
+
+A material fiber is an ordered sequence of non-overlapping half-open runs
+=[z-min,z-max)= with a material value.  A resident fiber covers =[0,255)=;
+air is an ordinary material value rather than an absent neighbor.
+
+A single-cell edit splits at most one run into three.  Adjacent runs with the
+same material coalesce immediately.  The exact physical encoding, maximum run
+count, and fallback for noisy fibers remain measurements rather than design
+assumptions.
+
+The occupancy cache is updated with the same edit by setting or clearing one
+bit.  Material runs own meaning; occupancy bits are a cheap derived product.
+
+* Bit-fiber surface extraction
+
+Let =S(x,y)= be the 256-bit solid mask for one fiber.  Horizontal exposed-face
+masks are Boolean differences between neighboring fibers:
+
+#+begin_example
++X faces = S(x,y) AND NOT S(x+1,y)
+-X faces = S(x,y) AND NOT S(x-1,y)
++Y faces = S(x,y) AND NOT S(x,y+1)
+-Y faces = S(x,y) AND NOT S(x,y-1)
+#+end_example
+
+Vertical exposed-face masks are =S= combined with a one-bit vertical shift of
+=S=.  The implementation must explicitly carry bits across =u64= lanes and
+treat bit 255 and cells below zero as air.
+
+This route emits exposed faces directly.  It does not construct six boundary
+sites per solid cell, comparison-sort them, and cancel internal pairs.
+
+Set bits in each resulting mask identify the Z coordinates at which compact
+face records must be emitted.  A scalar trailing-zero loop is a natural first
+implementation.  Material lookup can walk the already ordered run list with a
+cursor while emitted Z coordinates are ascending.
+
+* Edge and corner classification
+
+LUFT classifies the occupancy star around each exposed face's four edges and
+four corners.  Neighboring fiber masks can express those star configurations
+as Boolean combinations:
+
+- four incident fibers determine an edge's configurations along Z;
+- neighboring fibers and one-bit vertical shifts determine corner
+  configurations;
+- result masks identify every Z position with a particular classification.
+
+The first implementation should preserve the existing scalar classifier as an
+oracle.  A bit-fiber implementation must produce identical shape words and
+face records for every tested occupancy pattern.
+
+* SBCL SIMD shape
+
+Four =u64= words are one 256-bit fiber, making AVX2-width execution a natural
+experiment with =sb-simd=.  SIMD is most promising for homogeneous Boolean
+work:
+
+- horizontal exposed-face masks;
+- vertical shifts and exposed-face masks;
+- edge and corner occupancy-pattern masks;
+- batches of adjacent fibers when wider vectors are available.
+
+SIMD is not automatically useful for RLE edits, variable-length material
+runs, set-bit enumeration, or variable-count record emission.  Those should
+remain scalar unless profiles say otherwise.
+
+Keep a straightforward scalar bit-fiber kernel.  Select a supported SIMD
+kernel outside the hot loop, compare its masks and records differentially, and
+inspect generated code before claiming a vector speedup.  Array layout and
+alignment must be measured with the actual =sb-simd= representation.
+
+* Current evidence
+
+The August 2026 deterministic CPU benchmark currently shows, for a solid
+64-cubed case:
+
+- complete chain-based materialization: about 960 ms;
+- surface-chain construction: about 800 ms;
+- chain-backed face classification: about 159 ms;
+- dense-window face classification: about 62 ms.
+
+Statistical profiling attributes about 75 percent of surface construction to
+sorting the boundary candidates.  It attributes about 73 percent of
+chain-backed face classification beneath chain occupancy lookup, including
+about 51 percent in the binary-search lower bound.
+
+Adding precise array and integer declarations to an isolated lower-bound
+experiment reduced chain-backed classification from about 159 ms to 101--102
+ms with bit-identical records.  It did not improve the roughly 800 ms surface
+construction: the general comparison sort remained dominant.
+
+Hoisting the per-cell boundary callback produced an identical surface chain
+and reduced allocation from about 32.25 MiB to 24.23 MiB, but did not change
+the roughly 793 ms runtime.  This separates a useful allocation cleanup from
+the larger algorithmic target.
+
+These measurements motivate direct bit-fiber extraction.  They do not yet
+measure such an implementation.
+
+* Evidence gates
+
+Before adopting the representation, build a scalar reference implementation
+and compare it with the existing chain path.  Require exact agreement for:
+
+- exposed oriented faces;
+- edge and corner shape words;
+- material/stock assignment;
+- faces crossing mesh-section and resident-column boundaries;
+- edits at ~z=0~ and ~z=254~;
+- unavailable neighbor handling;
+- solid, terrain, architecture, checkerboard, cave, and randomized corpora.
+
+Benchmark at least 8-, 16-, and 32-cell mesh-section widths, and 16- and
+32-cell resident-column widths.  Record wall time, allocation, occupied cells,
+material runs, emitted faces, dirty sections, halo crossings, and output
+bytes.  Measure scalar bit fibers before SIMD so vector speedup has an honest
+reference.
+
+The representation earns adoption if it removes surface sorting, keeps edit
+and publication granularity small, and improves end-to-end remeshing without
+making pathological material fibers or boundary semantics obscure.
+
+* Open questions
+
+- Should residency begin at 16 by 16 full-height columns, or should streaming
+  group several such columns under one owner?
+- Should material runs cover air explicitly or use a separate canonical air
+  convention at the semantic boundary?
+- How are transparent and non-solid materials represented in occupancy and
+  face ownership?
+- Can face records be emitted directly in the renderer's required polarity
+  order without a second sort?
+- Which edge and corner rules admit clear bit-sliced kernels, and which remain
+  clearer as scalar work over emitted faces?
+- When does a noisy fiber switch from runs to a dense material encoding?
+- How are derived occupancy, mesh-section revisions, and asynchronous
+  publication stamped so stale work cannot replace a newer edit?
