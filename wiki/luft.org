@@ -863,6 +863,32 @@ bytes by itself.
 reference and GPU tests pass, clicks use the incremental path, and all three
 construction orders finish at the exact authored solid and boundary.
 
+** DONE A parallel Luvcraft world is natively LUFT
+:PROPERTIES:
+:ID: 7J7N9W
+:END:
+
+/Intent./ Make the interesting migration be the deletion of Luvcraft terrain
+machinery, not the perfection of a bridge into it.  The new world therefore
+owns a LUFT solid, stock field, boundary scene, and packed fixnum cell sites
+directly.  The old block world remains beside it only as a temporary provider
+for player collision, entities, light, and persistence while those systems
+cross over in playable slices.
+
+/Evidence./ [[lisp:luvcraft:make-native-luvcraft-world]] authors rolling turf,
+stone, a sand path, snow terraces, trees, crystal columns, and a terminal
+shrine directly through LUFT construction operations.  Its first physical
+scene cohort contains fourteen stocks; four-bit scene slots are a present GPU
+encoding, not a seven-material ontology.  [[lisp:luvcraft:set-native-luvcraft-cell]]
+accepts a packed LUFT cell site and publishes the exact occupancy and stock
+boundary delta without a Luvcraft coordinate, chunk, mesher, or atlas.
+
+/Done when./ Done for the first visual checkpoint: the real 1344x840 Metal game
+draws and shadows the native scene in Luvcraft's linear HDR pass, starts at a
+native-owned view rather than a legacy saved pose, and remains responsive.
+The remaining systems migrate into this owner; none of them justify making the
+legacy block world authoritative again.
+
 ** DONE A resident luvcraft window is one LUFT scene
 :PROPERTIES:
 :ID: 2TTUQD
@@ -873,6 +899,10 @@ each resident chunk into a disposable CPU vertex mesh.  The authored block
 world remains the source of semantic cells and persistence; one finite LUFT
 scene is its resident spatial materialization, and rendering, collision, and
 light can borrow dense products from that shared domain.
+
+This completed bridge was the visual proof which made #7J7N9W possible.  It is
+not the destination: new world work now happens on the native LUFT owner, and
+the materialization disappears when its remaining legacy consumers do.
 
 /Evidence./ The generated 13×13 window is 208 cells wide and therefore has an
 injective image in a 256×256 LUFT domain.  [[lisp:luft.render:apply-scene-edit]]
@@ -939,17 +969,20 @@ pipeline and independent frame states; and a live 1344x840 Metal game rendered
 scene revision two, then stopped cleanly.  CPU terrain shadow meshes are now
 only the comparison-switch fallback.
 
-** DONE Seven luvcraft materials are LUFT stocks
+** DONE Seven bridge materials are LUFT stocks
 :PROPERTIES:
 :ID: 4YQR10
 :END:
 
-/Intent./ Retire the texture atlas as terrain material authority.  The authored
-block vocabulary remains free to carry behavior and persistence during the
-migration, but every resident solid resolves through the small physical palette
+/Intent./ Retire the texture atlas as terrain material authority in the first
+legacy-world bridge.  Its resident solids resolve through the small palette
 =#(:turf :granite :sand :terminal :tree :snow :crystal)= and LUFT owns how those
 stocks look.  Grass can consequently be matte green material with continuous
 microtexture rather than a repeated cube face.
+
+Seven was the smallest useful bridge proof, not a design limit.  The native
+world of #7J7N9W begins with fourteen stocks and may use different physical
+cohorts as the packed scene representation evolves.
 
 /Evidence./ One open [[lisp:luvcraft:block-luft-stock]] protocol classifies each
 vocabulary member once per vocabulary revision.  Resident chunks retain dense
@@ -970,27 +1003,48 @@ known unrelated Tracy-alien and Metal slug-texture expectations.  A live
 across all three acquired frame states, exercised six stocks in its resident
 window, ran for 4,216 responsive frames, and stopped cleanly.
 
-** TODO Voxel light inhabits LUFT cell pages
+** TODO Packed sites do not imply a torus
+:PROPERTIES:
+:ID: P3YW9B
+:END:
+
+/Intent./ Keep LUFT's fixnum site identity and incidence algebra while making
+topology an explicit property of a world or resident extent.  A whole Luvcraft
+world may deliberately wrap; an 8x8x8 residency or light page has boundaries
+and must not inherit a torus merely because its coordinates are packed.
+
+/Evidence./ Treating page slots as miniature tori forced unwrapped aliases,
+mapping epochs, and many-to-one composition into what should be a direct
+question: is the adjacent cell present in this bounded extent?  Conversely,
+changing the packed site ABI to signed object coordinates would discard the
+dense identity which is working well.  The separation belongs between packed
+coordinate capacity, world topology, and resident page availability.
+
+/Done when./ LUFT can construct bounded domains without horizontal masking or
+wraparound incidence, its existing toroidal constructor remains an explicit
+whole-world policy, surface anchoring follows the chosen topology, and the
+native Luvcraft world and its pages never need alias-recovery machinery.
+
+** TODO Native voxel light inhabits bounded LUFT cell pages
 :PROPERTIES:
 :ID: 5XV63M
 :END:
 
-/Intent./ Preserve the checked frontier programs and brightest-first
-materialization while replacing chunk-owned light fields with scene-aligned
-8x8x8 pages over the resident LUFT world.
+/Intent./ Give the native LUFT world its own checked brightest-first light
+field over bounded 8x8x8 resident pages.  This replaces the old chunk-owned
+fields; it is not another projection out of =block-world=.
 
 /Evidence./ Surface faces cannot be the light domain, and occupancy alone
 cannot distinguish resident air from unavailable terrain.  Each page therefore
-needs explicit availability beside packed sky and block-light values, an
-unwrapped world identity for its toroidal slot, and a mapping epoch that rejects
-publication into a reused slot.  Stock optical behavior remains one short LUT;
-crystal emission is a field source while crystal surface radiance stays a
-material fact.
+needs explicit availability beside packed sky and block-light values.  #P3YW9B
+makes its edges ordinary bounded-world relations rather than torus aliases.
+Stock optical behavior remains one short LUT; crystal emission is a field
+source while crystal surface radiance stays a material fact.
 
-/Done when./ A scalar page reference agrees cell-for-cell with today's oracle;
-the compiled frontier lowers over 8x8x8 pages; edits, arrival, departure, and
-slot reuse publish exact changed-page cohorts; and the LUFT vertex path samples
-the packed result directly without relighting-triggered remeshing.
+/Done when./ A scalar native-page reference handles air, unavailable cells,
+sky boundaries, and emitters; the compiled frontier lowers over the same
+relations; edits and residency changes publish exact changed-page cohorts; and
+the LUFT vertex path samples the packed result directly without any CPU mesher.
 
 ** IDEA Compact surviving faces only when measurement earns another path
 :PROPERTIES:

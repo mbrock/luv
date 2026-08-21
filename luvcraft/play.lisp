@@ -33,29 +33,38 @@ any call site: set it, STOP-PLAYING, and PLAY again.")
 
 (defun play (&key (provider luv:*gpu-provider*) tracy-p fullscreen-p
                   (video-pathname *video-pathname*)
+                  (native-world (make-native-luvcraft-world))
                   (world-pathname (default-luvcraft-world-pathname)))
-  "Open the ordinary persistent game in this Lisp and return the session.
+  "Open the ordinary game in this Lisp and return the session.
 
-Load or create WORLD-PATHNAME, restore its saved camera and player, start
-checkpointing, and open the visible game window, on the whole display when
-FULLSCREEN-P.  *SESSION* names the live
-game for later SLY evaluations.  STOP-PLAYING checkpoints and closes it."
+NATIVE-WORLD is the visible, authoritative LUFT world.  WORLD-PATHNAME still
+loads the old block world for systems which have not crossed over, but its
+saved player pose does not position a camera in an unrelated native world.
+Pass NATIVE-WORLD NIL only for the temporary legacy rendering fallback.
+Checkpointing remains active while persistence itself moves to LUFT.
+FULLSCREEN-P opens on the whole display.  *SESSION* names the live game for
+later SLY evaluations.  STOP-PLAYING checkpoints and closes it."
   (when *session*
     (error "A game is already playing; call STOP-PLAYING first."))
   (when tracy-p
     (start-luvcraft-tracy))
   (multiple-value-bind (world resume-description)
       (load-or-make-luvcraft-world world-pathname)
-    (multiple-value-bind (camera player selected-block carried)
+    (multiple-value-bind (saved-camera saved-player selected-block carried)
         (restore-luvcraft-resume-save-description resume-description)
-      (let ((writer (make-world-checkpoint-writer world-pathname))
+      (let ((camera (if native-world
+                        (make-native-luvcraft-spawn-camera)
+                        saved-camera))
+            (player (and (null native-world) saved-player))
+            (writer (make-world-checkpoint-writer world-pathname))
             (session nil))
         (unwind-protect
              (setf session
                    (start-luvcraft
                     :provider provider
                     :title "luvcraft — walk, jump, mine, and build"
-                    :world world :camera camera :player player
+                    :world world :native-world native-world
+                    :camera camera :player player
                     :selected-block selected-block
                     :fullscreen-p fullscreen-p
                     :video-pathname video-pathname

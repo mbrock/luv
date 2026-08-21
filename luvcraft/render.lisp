@@ -1338,17 +1338,16 @@ submission that used them completes."
   (luvcraft-surface-technique-shadow-capable-p
    (luft.render:surface-frame-state-technique surface-frame)))
 
-(defun ensure-luvcraft-luft-shadow-domain (materialization)
+(defun ensure-luvcraft-luft-shadow-domain (domain)
   "Reject a LUFT torus too small for Luvcraft's orthographic shadow footprint."
-  (let* ((domain (luft-world-materialization-domain materialization))
-         (diameter (* 2.0 +luvcraft-shadow-half-extent+))
+  (let* ((diameter (* 2.0 +luvcraft-shadow-half-extent+))
          (x-period (luft:world-domain-x-period domain))
          (z-period (luft:world-domain-y-period domain)))
     (unless (and (< diameter x-period) (< diameter z-period))
       (error "Luvcraft's ~,1F-cell shadow footprint must be smaller than ~
               its LUFT torus periods ~Dx~D."
              diameter x-period z-period)))
-  materialization)
+  domain)
 
 (defun encode-luvcraft-terrain-shadow
     (pass products surface-frame scene legacy-pipeline legacy-bind-group
@@ -1408,8 +1407,19 @@ submission that used them completes."
            (luvcraft-session-luft-world-materialization session))
          ;; Observer traffic is coalesced into one exact scene revision before
          ;; this acquired frame advances its own upload cursor.
-         (luft-scene
+         (bridge-scene
            (reconcile-luft-world-materialization luft-materialization))
+         (native-world (luvcraft-session-native-world session))
+         (luft-scene
+           (if native-world
+               (native-luvcraft-world-scene native-world)
+               bridge-scene))
+         (luft-domain (luft.render:scene-domain luft-scene))
+         (luft-vertical-origin
+           (if native-world
+               0
+               (luft-world-materialization-vertical-origin
+                luft-materialization)))
          (frame (luvcraft-frame-state session surface-texture))
          (luft-surface-frame
            (luft.render:synchronize-surface-frame-state
@@ -1507,7 +1517,7 @@ submission that used them completes."
         (sample luvcraft-frame-sample-uniform-seconds
                 :luvcraft/uniform-update)
       (when luft-shadow-frame-p
-        (ensure-luvcraft-luft-shadow-domain luft-materialization))
+        (ensure-luvcraft-luft-shadow-domain luft-domain))
       ;; This is the one evaluation which advances the persistent shadow
       ;; anchor.  Both terrain paradigms consume the rows captured in DATA.
       (setf frame-data
@@ -1520,18 +1530,17 @@ submission that used them completes."
        (luvcraft-post-uniform-data session (first extent) (second extent)))
       (luft.render:write-surface-frame-state
        luft-surface-frame
-       (luft-frame-adapter-uniform-data
+       (luft-frame-adapter-domain-uniform-data
         (luvcraft-session-luft-frame-adapter session)
-        session luft-materialization (first extent) (second extent))
+        session luft-domain luft-vertical-origin
+        (first extent) (second extent))
        (luft.render:stock-table-data
         (luft.render:scene-stocks luft-scene)))
       (when luft-shadow-frame-p
         (luft.render:write-surface-shadow-projector
          luft-surface-frame
          (luvcraft-frame-shadow-projector-data
-          frame-data
-          (luft-world-materialization-vertical-origin
-           luft-materialization))))
+          frame-data luft-vertical-origin)))
       (when (plusp particle-vertex-count)
         (write-buffer
          (luvcraft-frame-particle-vertex-buffer frame)
@@ -2160,6 +2169,7 @@ the replacement texture's width through the frame uniform."
                                 (visible-p t)
                                 (fullscreen-p nil)
                                 (world (make-empty-little-block-world))
+                                (native-world (make-native-luvcraft-world))
                                 (mesher (make-instance
                                          'exposed-face-mesher))
                                 (camera (make-instance 'fly-camera))
@@ -2198,11 +2208,11 @@ the replacement texture's width through the frame uniform."
                                 (mesh-capture-limit 1))
   "Open a little LUFT-rendered block world.
 
-The resident authored solid is materialized into one LUFT scene and drawn as
-linear stock radiance inside Luvcraft's HDR scene pass, with the same shaped
-surface cast through LUFT's orthographic depth technique.  CPU chunk meshes
-remain temporarily available for the live LUFT-terrain comparison switch while
-the migration is in progress.
+The visible terrain is authored directly as a LUFT solid, stock field, and
+incremental boundary scene, then drawn as linear stock radiance inside
+Luvcraft's HDR scene pass and cast through LUFT's orthographic depth technique.
+The former block world continues temporarily beside it while interaction,
+entities, light, and persistence move to packed fixnum sites in playable slices.
 
 Click to capture the pointer, look with the mouse, walk with WASD, and jump
 with Space.  Once captured, left click removes the block at the centre of view
@@ -2677,6 +2687,7 @@ NIL to let the display choose a comfortable window."
                      :video-screen screen
                      :canvas canvas :device device :context context
                      :world world :mesher mesher
+                     :native-world native-world
                      :luft-world-materialization luft-materialization
                      :luft-frame-adapter luft-adapter
                      :checkpoint-writer checkpoint-writer

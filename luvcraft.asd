@@ -52,6 +52,7 @@
                  (:file "arithmetic-package")
                  (:file "arithmetic")
                  (:file "knobs")
+                 (:file "native-world")
                  (:file "shaders")
                  (:file "player-body-shaders")
                  (:file "fields")
@@ -307,6 +308,7 @@
   :serial t
   :components ((:file "hal/shader/tests")
                (:file "luvcraft/world-tests")
+               (:file "luvcraft/native-world-tests")
                (:file "luvcraft/luft-world-tests")
                (:file "luvcraft/luft-render-tests")
                (:file "luvcraft/tests")

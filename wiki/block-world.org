@@ -417,15 +417,15 @@ Solidity, opacity, and ordinary face material may be derived from a palette
 entry rather than copied into fields.  Lighting, fluids, or ecological
 readings may deserve separate fields when algorithms actually consume them.
 
-** TODO Seven ordinary stocks, exceptional behaviour as entities
+** TODO Retire legacy block kinds after their native replacements exist
 :PROPERTIES:
 :ID: CEDSL9
 :END:
 
-/Intent./ Let the authored ordinary vocabulary be grass, stone, sand, terminal,
-tree, snow, and crystal.  Old visual variants migrate at restore time to one of
-those stocks instead of remaining live merely because the atlas once had room
-for them.
+/Intent./ Delete block kinds which exist only because the texture atlas once
+had room for them, without mistaking one early list of visible materials for a
+permanent ontology.  The native LUFT world chooses useful scene cohorts; sparse
+exceptional behaviour moves to entities or terminal modes.
 
 /Evidence./ Dirt, moss, and flowers can restore as grass; wood, leaves, planks,
 and cactus as tree; gravel, clay, mud, masonry, and slate as stone; sandstone as
@@ -435,22 +435,18 @@ entities, spring entities, and terminal modes.  Save and procedural-source
 format one both name the old vocabulary, so deletion requires an explicit
 versioned migration rather than aliases in the live palette.
 
-The rendering bridge has exactly seven LUFT slots, =#(:turf :granite :sand
-:terminal :tree :snow :crystal)=.  A cached vocabulary LUT and dense byte slot
-field belong to the resident LUFT materialization, not the authored
-=block-world=; atlas tiles, display colours, and old face materials are not its
-authority.  Current wood and leaves both map to tree, terminal retains its
-authored identity while its screen stays an overlay, and crystal surface
-radiance remains distinct from the propagated light it emits into air.  Turf is
-a green matte stock whose small-scale tooth, mottle, wear, and grit come from
-LUFT material detail rather than a repeated grass tile.
+The completed rendering bridge used exactly seven LUFT slots as a proof.  The
+native world of #7J7N9W already uses fourteen, including separate oak, leaf,
+conifer, limestone, terracotta, bronze, slate, and brick stocks.  Atlas tiles,
+display colours, and old face materials are not authoritative in either case.
+Terminal screens remain overlays, crystal surface radiance remains distinct
+from propagated light, and turf gets its continuous matte detail from LUFT.
 
-/Done when./ New worlds and inventories contain exactly the seven ordinary
-kinds, version-one saves and generated terrain migrate without changing solid
-occupancy or tree geometry, exceptional devices retain their behaviour through
-entities, and unknown names still fail loudly.  Stock-only edits publish exact
-slot-word and exposed-face changes in one scene revision, while hidden faces do
-not force page rebuilds.
+/Done when./ Native worlds and inventories no longer instantiate obsolete
+atlas-only block kinds; exceptional devices retain behaviour through entities;
+the old save/source format has either migrated or been deliberately discarded;
+and the block-world vocabulary, mesher, and atlas can be deleted as one dead
+compatibility island.
 
 * The first animal is an entity, not a field
 :PROPERTIES:

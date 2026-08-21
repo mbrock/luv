@@ -83,10 +83,14 @@
             :vertical-origin 0)))
     (let ((wide (materialization 8))
           (exact (materialization 7)))
-      (ok (eq wide (luvcraft::ensure-luvcraft-luft-shadow-domain wide)))
+      (ok (eq (luvcraft::luft-world-materialization-domain wide)
+              (luvcraft::ensure-luvcraft-luft-shadow-domain
+               (luvcraft::luft-world-materialization-domain wide))))
       ;; A footprint as wide as a torus period sees both periodic images at
       ;; its boundary; camera-nearest lifting is no longer one injective yard.
-      (signals (luvcraft::ensure-luvcraft-luft-shadow-domain exact)))))
+      (signals
+       (luvcraft::ensure-luvcraft-luft-shadow-domain
+        (luvcraft::luft-world-materialization-domain exact))))))
 
 (deftest luft-frame-adapter-reuses-one-camera-and-converts-the-complete-basis
   (let* ((source

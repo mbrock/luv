@@ -161,29 +161,28 @@ the enclosing Luvcraft HDR/post pipeline owns presentation."
      (aref data (1- (* 4 (1+ +luft-frame-ground-lane+))))))
   data)
 
-(defun luft-frame-adapter-uniform-data
-    (adapter session materialization width height &key (sky-p t))
-  "Pack one 104-float LUFT stock-surface frame for SESSION's resident world.
+(defun luft-frame-adapter-domain-uniform-data
+    (adapter session domain vertical-origin width height &key (sky-p t))
+  "Pack one 104-float LUFT stock-surface frame for a direct LUFT DOMAIN.
 
-ADAPTER's camera is updated in place.  MATERIALIZATION contributes the torus
-periods and vertical origin.  The stock chamfer and arris values deliberately
-come from LUFT itself, retaining its procedural material/microtexture model
-instead of importing Luvcraft's retired atlas assumptions.  With SKY-P,
-Luvcraft's evaluated sun and ambient replace LUFT's named atelier light."
+ADAPTER's camera is updated in place.  The stock chamfer and arris values come
+from LUFT itself, retaining its procedural material and microtexture model.
+With SKY-P, Luvcraft's evaluated sun and ambient replace LUFT's atelier light."
   (check-type adapter luft-frame-adapter)
   (check-type session luvcraft-session)
-  (check-type materialization luft-world-materialization)
+  (check-type domain luft:world-domain)
+  (check-type vertical-origin integer)
   (check-type width (integer 1 *))
   (check-type height (integer 1 *))
   (let* ((camera
            (update-luft-frame-adapter-camera
             adapter
             (luvcraft-session-camera session)
-            (luft-world-materialization-vertical-origin materialization)))
+            vertical-origin))
          (data
            (luft.render:frame-uniform-data
             camera width height
-            (luft-world-materialization-domain materialization)
+            domain
             luft.render:*chamfer-width*
             luft.render:*arris-softness*)))
     (unless (= +luft-frame-float-count+ (length data))
@@ -195,3 +194,12 @@ Luvcraft's evaluated sun and ambient replace LUFT's named atelier light."
        (sky-frame-parameters (luvcraft-session-sky-clock session)
                              (luvcraft-session-sky-profile session))))
     data))
+
+(defun luft-frame-adapter-uniform-data
+    (adapter session materialization width height &key (sky-p t))
+  "Pack a frame for the temporary legacy-world-to-LUFT materialization."
+  (luft-frame-adapter-domain-uniform-data
+   adapter session
+   (luft-world-materialization-domain materialization)
+   (luft-world-materialization-vertical-origin materialization)
+   width height :sky-p sky-p))

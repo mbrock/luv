@@ -85,6 +85,15 @@
            #:detach-luft-world-materialization
            #:invalidate-luft-world-solidity
            #:reconcile-luft-world-materialization
+           #:native-luvcraft-world
+           #:make-native-luvcraft-world
+           #:native-luvcraft-world-world
+           #:native-luvcraft-world-scene
+           #:native-luvcraft-world-domain
+           #:native-luvcraft-world-materials
+           #:native-luvcraft-cell-site
+           #:native-luvcraft-cell-p
+           #:set-native-luvcraft-cell
            #:luft-world-materialization-world
            #:luft-world-materialization-domain
            #:luft-world-materialization-scene
@@ -96,6 +105,7 @@
            #:make-luft-frame-adapter
            #:luft-frame-adapter-camera
            #:update-luft-frame-adapter-camera
+           #:luft-frame-adapter-domain-uniform-data
            #:luft-frame-adapter-uniform-data
            #:benchmark-luvcraft-frame-performance
            #:block-chunk-load-payload

@@ -33,6 +33,12 @@
    (device :initarg :device :reader luvcraft-session-device)
    (context :initarg :context :reader luvcraft-session-context)
    (world :initarg :world :reader luvcraft-session-world)
+   (native-world
+    :initarg :native-world
+    :initform nil
+    :accessor luvcraft-session-native-world
+    :documentation
+    "The directly authored LUFT world taking over from the legacy world.")
    (luft-world-materialization
     :initarg :luft-world-materialization
     :initform nil
