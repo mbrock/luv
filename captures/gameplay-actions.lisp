@@ -99,27 +99,27 @@
       ;; edit has dirtied lighting at that point, but no ordinary frame can
       ;; reconcile it until BEFORE-FRAME returns.  Give the canvas owner the
       ;; same refresh turn explicitly, then inspect the resulting boundary.
-      do (luv:request-canvas-frame
-          (luvcraft:luvcraft-session-canvas session)
-          (lambda (timestamp)
-            (declare (ignore timestamp))
-            (luvcraft:refresh-luvcraft-mesh session)))
-      for state = (luvcraft::luvcraft-streaming-trace-state session)
-      do (when (plusp (getf state :errors))
-           (error "Capture ~A production failed while publishing: ~S"
-                  title state))
-         (when (luvcraft::luvcraft-streaming-trace-state-quiescent-p state)
-           (return state))
-         (when (>= (get-internal-real-time) next-report)
-           (format t
-                   "capture ~A: publishing (~D outstanding, ~D staged)...~%"
-                   title (getf state :outstanding) (getf state :staged))
-           (finish-output)
-           (incf next-report internal-time-units-per-second))
-         (when (>= (get-internal-real-time) deadline)
-           (error "Capture ~A did not publish within ~,2F seconds: ~S"
-                  title timeout state))
-         (sleep 0.01))))
+      (luv:request-canvas-frame
+       (luvcraft:luvcraft-session-canvas session)
+       (lambda (timestamp)
+         (declare (ignore timestamp))
+         (luvcraft:refresh-luvcraft-mesh session)))
+      (let ((state (luvcraft::luvcraft-streaming-trace-state session)))
+        (when (plusp (getf state :errors))
+          (error "Capture ~A production failed while publishing: ~S"
+                 title state))
+        (when (luvcraft::luvcraft-streaming-trace-state-quiescent-p state)
+          (return state))
+        (when (>= (get-internal-real-time) next-report)
+          (format t
+                  "capture ~A: publishing (~D outstanding, ~D staged)...~%"
+                  title (getf state :outstanding) (getf state :staged))
+          (finish-output)
+          (incf next-report internal-time-units-per-second))
+        (when (>= (get-internal-real-time) deadline)
+          (error "Capture ~A did not publish within ~,2F seconds: ~S"
+                 title timeout state))
+        (sleep 0.01)))))
 
 (defun perform-gameplay-centre-edit (session action expected-coordinate title)
   "Perform and verify one ordinary player ACTION at EXPECTED-COORDINATE."
