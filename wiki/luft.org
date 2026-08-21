@@ -822,6 +822,59 @@ output size, box filtered down, into one PNG, cameras down and styles
 across.  The sheets in this page come from it, and a change to any rule is
 judged by rendering one.
 
+** DONE The atelier itself is a McCLIM application
+:PROPERTIES:
+:ID: OK62XM
+:END:
+
+/Intent./ Make McCLIM the application model of the new atelier, not a widget
+kit added after a renderer has already invented commands, focus, and
+lifecycle.  LUFT should be able to grow into the next game one feature at a
+time without growing a second application beside it.
+
+/Evidence./ [[lisp:luft.render:viewer]] is now both the canvas event handler
+and a =standard-application-frame=.  It deliberately has no frame process and
+no second native window: portable canvas events resolve through layered CLIM
+command tables and execute inline on the canvas owner.  Movement press and
+release, reset, pointer escape, fullscreen, and Control-Q are named commands.
+Native close, Control-Q, standalone cleanup, and interactive
+[[lisp:luft.render:stop-viewer]] converge on one idempotent teardown with a
+frame-boundary barrier before renderer resources disappear.
+
+The system boundary says which direction dependency flows.  =luft/renderer=
+owns packed-site shaders, materializations, and GPU resources;
+=luft/render= adds the McCLIM atelier.  The portable key-event/gesture bridge
+lives in =luv/mcclim= and luvcraft imports it, so LUFT did not copy the old
+game's application glue in order to inherit its behaviour.
+
+/Done when./ Done: the viewer is an application frame, its bindings are
+ordinary CLIM commands covered by executable tests, the renderer loads without
+the atelier, and the existing luvcraft command layer uses the same event
+bridge.
+
+** NEXT Grow the workbench and the game as one command vocabulary
+:PROPERTIES:
+:ID: WO50UR
+:END:
+
+/Intent./ Add atelier tools, authored-world interaction, and eventually game
+features as panes, presentations, commands, and command-table layers of this
+one frame.  A feature crosses from luvcraft when LUFT owns its semantic command
+and state transition; the old implementation remains an oracle until then and
+is deleted after the crossing.  Rendering continues to consume immutable
+scene/view snapshots rather than acquiring input or UI policy.
+
+/Evidence./ #OK62XM establishes the frame, owner thread, shared gesture bridge,
+and renderer/application split.  That is enough structure for a command menu,
+inspection panes, selection presentations, modal tools, and play controls to
+arrive incrementally without either a parallel event ladder or a second game
+shell.
+
+/Done when./ The atelier exposes its command vocabulary through a McCLIM
+surface, one editing tool uses presentations and a modal command layer, and
+the first luvcraft gameplay feature has crossed with its former application
+path removed rather than maintained in parallel.
+
 ** DONE Cell edits are linear boundary updates
 :PROPERTIES:
 :ID: 3QNZC1

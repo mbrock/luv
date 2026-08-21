@@ -167,23 +167,54 @@ the selector is the whole of the difference."
      (camera-uniform-data view previous)
      :jitter jitter :view view)))
 
-(defclass viewer (canvas-event-handler)
-  ((canvas :initarg :canvas :reader viewer-canvas)
-   (context :initarg :context :reader viewer-context)
-   (device :initarg :device :reader viewer-device)
-   (renderer :initarg :renderer :accessor viewer-renderer)
-   (camera :initarg :camera :reader viewer-camera)
-   (pressed-keys :initform (make-hash-table :test #'eq)
-                 :reader viewer-pressed-keys)
+(clim:define-command-table luft-window)
+(clim:define-command-table luft-window-release)
+(clim:define-command-table luft-atelier)
+(clim:define-command-table luft-atelier-release)
+
+(clim:define-application-frame viewer
+    (clim:standard-application-frame canvas-event-handler)
+  ((canvas :initarg :canvas :initform nil :reader viewer-canvas)
+   (context :initarg :context :initform nil :reader viewer-context)
+   (device :initarg :device :initform nil :reader viewer-device)
+   (renderer :initarg :renderer :initform nil :accessor viewer-renderer)
+   (camera :initarg :camera :initform (make-fly-camera) :reader viewer-camera)
+   (controls :initform (make-hash-table :test #'eq)
+             :reader viewer-controls)
    (pointer-captured-p :initform nil :accessor viewer-pointer-captured-p)
    (last-timestamp :initform nil :accessor viewer-last-timestamp)
    (speed :initarg :speed :initform 4.0 :accessor viewer-speed)
    (sensitivity :initarg :sensitivity :initform 0.0032
                 :accessor viewer-sensitivity)
-   (running-p :initform t :accessor viewer-running-p)))
+   (running-p :initform t :accessor viewer-running-p)
+   (quit-requested-p :initform nil :accessor viewer-quit-requested-p)
+   (stop-state :initform :running :accessor viewer-stop-state)
+   (stop-lock :initform (sb-thread:make-mutex :name "LUFT viewer stop")
+              :reader viewer-stop-lock)
+   (stop-ready :initform (sb-thread:make-waitqueue
+                          :name "LUFT viewer stopped")
+               :reader viewer-stop-ready))
+  ;; The frame is the application even though it has no ordinary panes yet.
+  ;; Its command table inherits every input phase so McCLIM considers each
+  ;; command executable; event dispatch still chooses one phase explicitly.
+  (:command-table (luft-viewer
+                   :inherit-from (luft-window luft-window-release
+                                  luft-atelier luft-atelier-release)
+                   :inherit-menu t))
+  (:menu-bar nil))
 
-(defun viewer-key-down-p (viewer &rest names)
-  (some (lambda (name) (gethash name (viewer-pressed-keys viewer))) names))
+(defun viewer-control-active-p (viewer direction)
+  (gethash direction (viewer-controls viewer)))
+
+(defun set-viewer-control (viewer direction active-p)
+  (if active-p
+      (setf (gethash direction (viewer-controls viewer)) t)
+      (remhash direction (viewer-controls viewer)))
+  viewer)
+
+(defun clear-viewer-controls (viewer)
+  (clrhash (viewer-controls viewer))
+  viewer)
 
 (defun advance-viewer-camera (viewer timestamp)
   (let* ((last (viewer-last-timestamp viewer))
@@ -205,13 +236,14 @@ the selector is the whole of the difference."
                            (* amount (vec3:vec3-z direction))))))))
         ;; W/S dolly along the exact 3D viewing ray.  The wheel alone changes
         ;; isometric scale; Space/Shift remain independent world-Z movement.
-        (when (viewer-key-down-p viewer :w :up) (move forward step))
-        (when (viewer-key-down-p viewer :s :down) (move forward (- step)))
-        (when (viewer-key-down-p viewer :d :right) (move right step))
-        (when (viewer-key-down-p viewer :a :left) (move right (- step)))
-        (when (viewer-key-down-p viewer :space)
+        (when (viewer-control-active-p viewer :forward) (move forward step))
+        (when (viewer-control-active-p viewer :backward)
+          (move forward (- step)))
+        (when (viewer-control-active-p viewer :right) (move right step))
+        (when (viewer-control-active-p viewer :left) (move right (- step)))
+        (when (viewer-control-active-p viewer :up)
           (move (vec3:make-vec3 0 0 1) step))
-        (when (viewer-key-down-p viewer :shift-left :shift-right)
+        (when (viewer-control-active-p viewer :down)
           (move (vec3:make-vec3 0 0 1) (- step)))))))
 
 (defun render-viewer-frame (viewer timestamp)
@@ -224,27 +256,138 @@ the selector is the whole of the difference."
        (let ((extent (canvas-extent (viewer-context viewer))))
          (encode-viewer-frame viewer encoder surface-texture extent))))))
 
+(defun viewer-command-viewer ()
+  "Return the LUFT application receiving the current McCLIM command."
+  clim:*application-frame*)
+
+(defun request-viewer-quit (viewer)
+  "Begin an orderly stop once and return true when this call began it."
+  (let ((begin-p nil))
+    (sb-thread:with-mutex ((viewer-stop-lock viewer))
+      (unless (viewer-quit-requested-p viewer)
+        (setf (viewer-quit-requested-p viewer) t
+              (viewer-running-p viewer) nil
+              begin-p t)))
+    (when begin-p
+      ;; A native close and a command both run on the canvas thread. Teardown
+      ;; establishes a canvas-thread barrier, so it must run beside that thread
+      ;; and let CLOSE-CANVAS end the loop after application resources are gone.
+      (sb-thread:make-thread
+       (lambda () (stop-viewer viewer))
+       :name "LUFT viewer quit"))
+    begin-p))
+
+(clim:define-command (com-start-moving :command-table luft-atelier
+                                       :name "Start Moving")
+    ((direction 'keyword :prompt "direction"))
+  (set-viewer-control (viewer-command-viewer) direction t))
+
+(clim:define-command (com-stop-moving :command-table luft-atelier-release
+                                      :name "Stop Moving")
+    ((direction 'keyword :prompt "direction"))
+  (set-viewer-control (viewer-command-viewer) direction nil))
+
+(clim:define-command (com-reset-view :command-table luft-atelier
+                                     :name "Reset View"
+                                     :keystroke (:r))
+    ()
+  (reset-viewer-camera (viewer-command-viewer)))
+
+(clim:define-command (com-release-pointer :command-table luft-window
+                                          :name "Release Pointer"
+                                          :keystroke (:escape))
+    ()
+  (let* ((viewer (viewer-command-viewer))
+         (canvas (viewer-canvas viewer)))
+    (when (viewer-pointer-captured-p viewer)
+      (set-canvas-relative-pointer-mode canvas nil)
+      (setf (viewer-pointer-captured-p viewer) nil))))
+
+(clim:define-command (com-toggle-fullscreen :command-table luft-window
+                                            :name "Toggle Fullscreen"
+                                            :keystroke (:f11))
+    ()
+  (let ((canvas (viewer-canvas (viewer-command-viewer))))
+    (set-canvas-fullscreen canvas (not (canvas-fullscreen-p canvas)))))
+
+(clim:define-command (com-quit :command-table luft-window
+                               :name "Quit"
+                               :keystroke (#\q :control))
+    ()
+  (request-viewer-quit (viewer-command-viewer)))
+
+(defparameter +viewer-movement-keys+
+  '((:w :forward) (:up :forward)
+    (:s :backward) (:down :backward)
+    (:a :left) (:left :left)
+    (:d :right) (:right :right)
+    (:space :up)
+    (:shift-left :down) (:shift-right :down))
+  "Physical keys whose press and release urge the inspection camera.")
+
+(defun install-viewer-movement-commands ()
+  "Install the atelier's held controls into their press and release tables."
+  (dolist (binding +viewer-movement-keys+)
+    (destructuring-bind (key direction) binding
+      (let ((gesture (list key :any)))
+        ;; Definition reloads replace the live vocabulary instead of stacking
+        ;; another item at the same gesture coordinate.
+        (dolist (table '(luft-atelier luft-atelier-release))
+          (clim:remove-keystroke-from-command-table
+           table gesture :errorp nil))
+        (flet ((command-item (command)
+                 (let ((direction direction))
+                   (lambda (gesture numeric-argument)
+                     (declare (ignore gesture numeric-argument))
+                     (list command direction)))))
+          (clim:add-keystroke-to-command-table
+           'luft-atelier gesture :function
+           (command-item 'com-start-moving) :errorp nil)
+          (clim:add-keystroke-to-command-table
+           'luft-atelier-release gesture :function
+           (command-item 'com-stop-moving) :errorp nil)))))
+  (values))
+
+(install-viewer-movement-commands)
+
+(defgeneric viewer-key-event-tables (event)
+  (:documentation "Return the window and atelier tables for key EVENT."))
+
+(defmethod viewer-key-event-tables ((event canvas-key-press-event))
+  (values 'luft-window 'luft-atelier))
+
+(defmethod viewer-key-event-tables ((event canvas-key-release-event))
+  (values 'luft-window-release 'luft-atelier-release))
+
+(defun viewer-key-command (viewer event)
+  "Return the named McCLIM command VIEWER binds to key EVENT, or NIL."
+  (multiple-value-bind (window atelier) (viewer-key-event-tables event)
+    (or (mcluv:canvas-key-event-command
+         viewer event :command-table window)
+        (mcluv:canvas-key-event-command
+         viewer event :command-table atelier))))
+
 (defmethod handle-canvas-event
     ((viewer viewer) canvas (event canvas-window-close-request-event))
   (declare (ignore canvas event))
-  (setf (viewer-running-p viewer) nil)
-  nil)
+  (request-viewer-quit viewer)
+  :defer-canvas-close)
 
 (defmethod handle-canvas-event
     ((viewer viewer) canvas (event canvas-key-press-event))
-  (let ((key (canvas-key-event-key-name event)))
-    (cond ((eq :escape key)
-           (when (viewer-pointer-captured-p viewer)
-             (set-canvas-relative-pointer-mode canvas nil)
-             (setf (viewer-pointer-captured-p viewer) nil)))
-          ((eq :r key) (reset-viewer-camera viewer))
-          (t (setf (gethash key (viewer-pressed-keys viewer)) t))))
+  (declare (ignore canvas))
+  (unless (canvas-key-event-repeat-p event)
+    (let ((command (viewer-key-command viewer event)))
+      (when command
+        (clim:execute-frame-command viewer command))))
   nil)
 
 (defmethod handle-canvas-event
     ((viewer viewer) canvas (event canvas-key-release-event))
   (declare (ignore canvas))
-  (remhash (canvas-key-event-key-name event) (viewer-pressed-keys viewer))
+  (let ((command (viewer-key-command viewer event)))
+    (when command
+      (clim:execute-frame-command viewer command)))
   nil)
 
 (defmethod handle-canvas-event
@@ -286,8 +429,11 @@ the selector is the whole of the difference."
 
 (defmethod handle-canvas-event
     ((viewer viewer) canvas (event canvas-window-focus-lost-event))
-  (declare (ignore canvas event))
-  (clrhash (viewer-pressed-keys viewer))
+  (declare (ignore event))
+  (clear-viewer-controls viewer)
+  (when (viewer-pointer-captured-p viewer)
+    (set-canvas-relative-pointer-mode canvas nil)
+    (setf (viewer-pointer-captured-p viewer) nil))
   nil)
 
 (defmethod handle-canvas-event ((viewer viewer) canvas event)
@@ -301,7 +447,7 @@ the selector is the whole of the difference."
                        (width 1100) (height 800)
                        (frames-per-second 60)
                        (provider *gpu-provider*))
-  "Open the greenfield indexed-instanced LUFT atelier."
+  "Open the indexed-instanced LUFT renderer as a McCLIM atelier."
   (let ((canvas
           (make-sdl-canvas
            :title title :width width :height height :visible-p nil
@@ -330,9 +476,10 @@ the selector is the whole of the difference."
                          device* (make-face-materialization solid)
                          (canvas-format context) (canvas-extent context))))
                 (viewer
-                  (make-instance 'viewer :canvas canvas :context context
-                                         :device device* :renderer renderer*
-                                         :camera camera)))
+                  (clim:make-application-frame
+                   'viewer :canvas canvas :context context
+                           :device device* :renderer renderer*
+                           :camera camera)))
            (setf (canvas-event-handler canvas) viewer)
            (request-canvas-frame
             canvas (lambda (timestamp) (render-viewer-frame viewer timestamp)))
@@ -390,32 +537,86 @@ the selector is the whole of the difference."
      (lambda ()
        (let* ((context (viewer-context viewer))
               (old (viewer-renderer viewer))
-              (materialization (make-face-materialization solid)))
+              (materialization (make-face-materialization solid))
+              (was-running-p (viewer-running-p viewer)))
          (setf (viewer-running-p viewer) nil)
          (unwind-protect
               (setf (viewer-renderer viewer)
                     (make-renderer (viewer-device viewer) materialization
                                    (canvas-format context)
                                    (canvas-extent context)))
-           (setf (viewer-running-p viewer) t))
+           (setf (viewer-running-p viewer) was-running-p))
          (when old (destroy-renderer old))))))
   (values))
 
 (defun stop-viewer (&optional (viewer *viewer*))
+  "Quiesce VIEWER, release its renderer, then close its canvas and device.
+
+The first caller owns teardown. Concurrent callers wait for that teardown to
+finish, which makes native close, Control-Q, the standalone unwind cleanup,
+and an interactive STOP-VIEWER the same idempotent application operation."
   (when viewer
-    (setf (viewer-running-p viewer) nil)
-    (let ((canvas (viewer-canvas viewer)))
-      (when (eq :open (canvas-state canvas))
-        (when (viewer-pointer-captured-p viewer)
-          (set-canvas-relative-pointer-mode canvas nil)
-          (setf (viewer-pointer-captured-p viewer) nil))
-        (setf (canvas-clock canvas) (make-demand-clock)))
-      (when (viewer-renderer viewer)
-        (destroy-renderer (viewer-renderer viewer))
-        (setf (viewer-renderer viewer) nil))
-      (when (eq :open (canvas-state canvas)) (close-canvas canvas)))
-    (ignore-errors (destroy (viewer-device viewer)))
-    (when (eq viewer *viewer*) (setf *viewer* nil)))
+    (let ((owner-p nil))
+      (sb-thread:with-mutex ((viewer-stop-lock viewer))
+        (case (viewer-stop-state viewer)
+          (:running
+           (setf (viewer-stop-state viewer) :stopping
+                 (viewer-running-p viewer) nil
+                 owner-p t))
+          (:stopping
+           (loop while (eq :stopping (viewer-stop-state viewer))
+                 do (sb-thread:condition-wait
+                     (viewer-stop-ready viewer) (viewer-stop-lock viewer))))))
+      (when owner-p
+        (let ((errors nil)
+              (canvas (viewer-canvas viewer)))
+          (labels ((release (part function)
+                     (handler-case (funcall function)
+                       (error (condition)
+                         (push (cons part condition) errors)))))
+            (unwind-protect
+                 (progn
+                   (clear-viewer-controls viewer)
+                   (when (member (canvas-state canvas) '(:opening :open))
+                     (release :clock
+                              (lambda ()
+                                (setf (canvas-clock canvas)
+                                      (make-demand-clock))))
+                     (when (viewer-pointer-captured-p viewer)
+                       (release :pointer-capture
+                                (lambda ()
+                                  (set-canvas-relative-pointer-mode
+                                   canvas nil)))
+                       (setf (viewer-pointer-captured-p viewer) nil))
+                     ;; The synchronous no-op is the owner-thread barrier: no
+                     ;; already-running frame can still hold renderer state.
+                     (release :canvas-quiescence
+                              (lambda ()
+                                (request-canvas-frame
+                                 canvas
+                                 (lambda (timestamp)
+                                   (declare (ignore timestamp)))))))
+                   (setf (canvas-event-handler canvas) nil)
+                   (when (viewer-renderer viewer)
+                     (release :renderer
+                              (lambda ()
+                                (destroy-renderer
+                                 (viewer-renderer viewer))))
+                     (setf (viewer-renderer viewer) nil))
+                   (when (member (canvas-state canvas) '(:opening :open))
+                     (release :canvas (lambda () (close-canvas canvas))))
+                   (when (viewer-device viewer)
+                     (release :device
+                              (lambda () (destroy (viewer-device viewer))))))
+              (when (eq viewer *viewer*)
+                (setf *viewer* nil))
+              (sb-thread:with-mutex ((viewer-stop-lock viewer))
+                (setf (viewer-stop-state viewer) :stopped)
+                (sb-thread:condition-broadcast (viewer-stop-ready viewer))))
+            (when errors
+              (warn "LUFT viewer release failed in ~{~A~^, ~}: ~A"
+                    (mapcar #'car (reverse errors))
+                    (cdar errors))))))))
   (values))
 
 (defun run-standalone-viewer ()

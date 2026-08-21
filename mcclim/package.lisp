@@ -38,6 +38,13 @@
            #:port-mirrors
            #:present-mirror
            #:repaint-gpu-mirror
+           ;; Portable luv key events as ordinary McCLIM gestures and
+           ;; commands. Applications keep their command tables and dispatch
+           ;; policy; this package owns only the event-vocabulary bridge.
+           #:canvas-key-event-matches-gesture-p
+           #:canvas-key-event-command
+           #:execute-canvas-key-event-command
+           #:format-gesture
            ;; Mounting a McCLIM pane inside the game: the overlay base class,
            ;; the specials that make a frame share luvcraft's one canvas
            ;; instead of asking for a second, and the compositor a HUD panel

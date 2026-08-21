@@ -36,20 +36,6 @@
                    luvcraft.clim::luvcraft-tape-prompt-overlay))
     (ok (subtypep class 'mcluv:luvcraft-hud-widget-overlay))))
 
-(deftest a-keystroke-is-a-place-on-the-keyboard
-  (ok (canvas-key-event-matches-gesture-p
-       (key-press :i :character #\i) '(#\i)))
-  (ok (canvas-key-event-matches-gesture-p (key-press :tab) '(:tab)))
-  ;; Caps lock does not stop a player playing.
-  (ok (canvas-key-event-matches-gesture-p
-       (key-press :i :character #\i :modifiers '(:caps-lock)) '(#\i)))
-  ;; A modifier the gesture does not name makes a different gesture.
-  (ok (not (canvas-key-event-matches-gesture-p
-            (key-press :i :character #\i :modifiers '(:control)) '(#\i))))
-  (ok (not (canvas-key-event-matches-gesture-p (key-press :tab) '(:tab :shift))))
-  (ok (canvas-key-event-matches-gesture-p
-       (key-press :tab :modifiers '(:shift)) '(:tab :shift))))
-
 (deftest keys-resolve-to-named-commands
   (let ((session (make-instance 'luvcraft:luvcraft-session)))
     (ok (equal '(com-toggle-inventory)

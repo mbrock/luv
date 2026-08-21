@@ -357,6 +357,7 @@ offsets and of headers."
   :components ((:module "mcclim"
                 :serial t
                 :components ((:file "package")
+                             (:file "input")
                              (:file "paint")
                              (:file "port")
                              (:file "mirror")

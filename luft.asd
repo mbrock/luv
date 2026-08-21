@@ -9,8 +9,8 @@
              (declare (ignore operation component))
              (uiop:symbol-call '#:luft '#:run-luft-tests)))
 
-(defsystem "luft/render"
-  :description "A greenfield atelier drawing surface chains of packed sites."
+(defsystem "luft/renderer"
+  :description "The GPU renderer for LUFT surface chains of packed sites."
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on ("luft" "luv")
@@ -20,8 +20,14 @@
                 :serial t
                 :components ((:file "package")
                              (:file "shaders")
-                             (:file "render")
-                             (:file "studio"))))
+                             (:file "render")))))
+
+(defsystem "luft/render"
+  :description "The McCLIM LUFT atelier over the packed-site renderer."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luft/renderer" "luv/mcclim")
+  :components ((:file "luft/render/studio"))
   :in-order-to ((test-op (test-op "luft/render/test"))))
 
 (defsystem "luft/program"
@@ -32,7 +38,10 @@
   :serial t
   :components ((:file "luft/render/main"))
   :build-operation "program-op"
-  :build-pathname "build/luft"
+  ;; BUILD/LUFT is the atelier's long-lived image/output directory. Keep the
+  ;; application beside it rather than making the two meanings fight over one
+  ;; pathname.
+  :build-pathname "build/luft-atelier"
   :entry-point "luft.render:main")
 
 (defsystem "luft/render/test"

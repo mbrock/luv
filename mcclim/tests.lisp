@@ -1,8 +1,33 @@
 (defpackage #:mcluv.tests
   (:use #:cl #:rove)
-  (:local-nicknames (#:shader #:luv.shader)))
+  (:local-nicknames (#:luv #:luv)
+                    (#:shader #:luv.shader)))
 
 (in-package #:mcluv.tests)
+
+(defun key-press (key-name &key character modifiers)
+  (make-instance 'luv:canvas-key-press-event
+                 :timestamp 0
+                 :key-name key-name
+                 :character character
+                 :unshifted-character character
+                 :modifiers modifiers))
+
+(deftest portable-canvas-keys-are-mcclim-gestures
+  (ok (mcluv:canvas-key-event-matches-gesture-p
+       (key-press :i :character #\i) '(#\i)))
+  (ok (mcluv:canvas-key-event-matches-gesture-p
+       (key-press :tab) '(:tab)))
+  ;; Locks do not stop an application command from being an application
+  ;; command, while an ordinary modifier still denotes another gesture.
+  (ok (mcluv:canvas-key-event-matches-gesture-p
+       (key-press :i :character #\i :modifiers '(:caps-lock)) '(#\i)))
+  (ok (not (mcluv:canvas-key-event-matches-gesture-p
+            (key-press :i :character #\i :modifiers '(:control)) '(#\i))))
+  (ok (mcluv:canvas-key-event-matches-gesture-p
+       (key-press :w :modifiers '(:shift)) '(:w :any)))
+  (ok (string= "Ctrl-Q" (mcluv:format-gesture '(#\q :control))))
+  (ok (string= "↑" (mcluv:format-gesture '(:up)))))
 
 (defun fresh-gpu-medium ()
   (make-instance 'mcluv:luv-gpu-medium))

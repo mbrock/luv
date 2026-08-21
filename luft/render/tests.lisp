@@ -1,8 +1,54 @@
 (defpackage #:luft.render.tests
   (:use #:cl #:rove)
-  (:local-nicknames (#:render #:luft.render)))
+  (:local-nicknames (#:clim #:clim)
+                    (#:climi #:clim-internals)
+                    (#:luv #:luv)
+                    (#:render #:luft.render)))
 
 (in-package #:luft.render.tests)
+
+(defun key-event (class key-name &key character modifiers repeat-p)
+  (make-instance class
+                 :timestamp 0
+                 :key-name key-name
+                 :character character
+                 :unshifted-character character
+                 :modifiers modifiers
+                 :repeat-p repeat-p))
+
+(defun key-press (key-name &key character modifiers repeat-p)
+  (key-event 'luv:canvas-key-press-event key-name
+             :character character :modifiers modifiers :repeat-p repeat-p))
+
+(defun key-release (key-name &key character modifiers)
+  (key-event 'luv:canvas-key-release-event key-name
+             :character character :modifiers modifiers))
+
+(deftest the-viewer-is-the-mcclim-application
+  (let ((viewer (clim:make-application-frame 'render:viewer)))
+    (ok (typep viewer 'clim:application-frame))
+    ;; No second CLIM process or native window: canvas delivery executes the
+    ;; atelier's commands inline on the renderer owner thread.
+    (ok (null (climi::frame-process viewer)))
+    (ok (equal '(luft.render::com-start-moving :forward)
+               (luft.render::viewer-key-command viewer (key-press :w))))
+    (ok (equal '(luft.render::com-stop-moving :forward)
+               (luft.render::viewer-key-command viewer (key-release :w))))
+    (ok (equal '(luft.render::com-reset-view)
+               (luft.render::viewer-key-command viewer (key-press :r))))
+    (ok (equal '(luft.render::com-toggle-fullscreen)
+               (luft.render::viewer-key-command viewer (key-press :f11))))
+    (ok (equal '(luft.render::com-quit)
+               (luft.render::viewer-key-command
+                viewer (key-press :q :character #\q
+                                     :modifiers '(:control)))))
+    (ok (null (luft.render::viewer-key-command viewer (key-press :f8))))
+    (clim:execute-frame-command
+     viewer (luft.render::viewer-key-command viewer (key-press :w)))
+    (ok (luft.render::viewer-control-active-p viewer :forward))
+    (clim:execute-frame-command
+     viewer (luft.render::viewer-key-command viewer (key-release :w)))
+    (ok (not (luft.render::viewer-control-active-p viewer :forward)))))
 
 (deftest face-materialization-is-a-polarity-partition-of-the-surface
   (let* ((solid (render:make-demo-solid))

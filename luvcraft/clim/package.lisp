@@ -17,6 +17,14 @@
   (:use #:clim-lisp #:clim)
   (:local-nicknames (#:luv #:luv)
                     (#:climi #:clim-internals))
+  ;; SHADOWING-IMPORT also makes this package definition a live migration:
+  ;; an image loaded before the bridge moved out of luvcraft may still own the
+  ;; four old symbols when DEFPACKAGE is evaluated again.
+  (:shadowing-import-from #:mcluv
+                          #:canvas-key-event-matches-gesture-p
+                          #:canvas-key-event-command
+                          #:execute-canvas-key-event-command
+                          #:format-gesture)
   (:export #:luvcraft-frame
            #:luvcraft-frame-session
            #:make-luvcraft-frame

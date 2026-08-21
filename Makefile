@@ -232,7 +232,7 @@ clean-fasls:
 
 clean:
 	rm -rf ./build/logs
-	rm -f ./build/luvcraft ./build/luft ./build/mcluv ./build/luvcraft-smoke.png ./build/luvcraft-metal-smoke.png
+	rm -f ./build/luvcraft ./build/luft-atelier ./build/mcluv ./build/luvcraft-smoke.png ./build/luvcraft-metal-smoke.png
 	rm -f ./build/block-world.vert.metal ./build/block-world.vert.air
 	rm -f ./build/block-world.frag.metal ./build/block-world.frag.air
 	rm -f ./build/slug-bezier.vert.spv ./build/slug-bezier.frag.spv
