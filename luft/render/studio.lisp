@@ -202,17 +202,20 @@ the selector is the whole of the difference."
                            (* amount (vec3:vec3-y direction)))
                         (+ (vec3:vec3-z position)
                            (* amount (vec3:vec3-z direction))))))))
-        ;; Isometric navigation pans across the ground plane.  Looking down
-        ;; should not make W quietly descend through the landscape.
-        (let* ((length (sqrt (+ (expt (vec3:vec3-x forward) 2)
-                                (expt (vec3:vec3-y forward) 2))))
-               (travel (if (and (eq *projection* :isometric) (plusp length))
-                           (vec3:make-vec3 (/ (vec3:vec3-x forward) length)
-                                           (/ (vec3:vec3-y forward) length)
-                                           0.0)
-                           forward)))
-          (when (viewer-key-down-p viewer :w :up) (move travel step))
-          (when (viewer-key-down-p viewer :s :down) (move travel (- step))))
+        ;; Translating along an orthographic camera's forward axis cannot
+        ;; move the picture toward you; projecting that axis onto the ground
+        ;; merely pans it upward.  In isometric mode W/S therefore change the
+        ;; view height itself: W goes in, S comes out.
+        (if (eq *projection* :isometric)
+            (progn
+              (when (viewer-key-down-p viewer :w :up)
+                (setf *isometric-height* (max 6.0 (- *isometric-height* step))))
+              (when (viewer-key-down-p viewer :s :down)
+                (setf *isometric-height* (min 96.0 (+ *isometric-height* step)))))
+            (progn
+              (when (viewer-key-down-p viewer :w :up) (move forward step))
+              (when (viewer-key-down-p viewer :s :down)
+                (move forward (- step)))))
         (when (viewer-key-down-p viewer :d :right) (move right step))
         (when (viewer-key-down-p viewer :a :left) (move right (- step)))
         (when (viewer-key-down-p viewer :space)
