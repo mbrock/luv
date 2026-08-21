@@ -80,6 +80,11 @@ rather than reproducing its private resource inventory."))
     :accessor luvcraft-renderer-surface-technique
     :documentation
     "The shared linear LUFT stock pipeline technique.")
+   (surface-technique-candidate
+    :initform nil
+    :accessor luvcraft-renderer-surface-technique-candidate
+    :documentation
+    "An unpublished LUFT technique retained solely for release retry.")
    ;; The cache and both inventories are private implementation details of
    ;; this owner.  A construction-time rollback list may precede it, but a
    ;; completed session has no second resource ledger.  See #V9VH79.

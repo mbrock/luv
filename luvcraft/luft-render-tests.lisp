@@ -10,6 +10,84 @@
        (luft-frame-close-p (vec3-y left) (vec3-y right))
        (luft-frame-close-p (vec3-z left) (vec3-z right))))
 
+(defun make-shadow-projector-test-frame ()
+  (let ((data (make-array 76 :element-type 'single-float
+                             :initial-element 0.0)))
+    (replace data
+             #(1.0 2.0 3.0 4.0
+               -5.0 6.0 -7.0 8.0
+               0.5 -1.5 2.5 -3.5
+               9.0 -10.0 11.0 -12.0)
+             :start1 60)
+    data))
+
+(defun shadow-projector-test-row-value (data offset x y z)
+  (+ (* (aref data offset) x)
+     (* (aref data (+ offset 1)) y)
+     (* (aref data (+ offset 2)) z)
+     (aref data (+ offset 3))))
+
+(deftest luvcraft-shadow-projector-converts-every-row-component-exactly
+  (let* ((frame (make-shadow-projector-test-frame))
+         (original (copy-seq frame))
+         (positive
+           (luvcraft::luvcraft-frame-shadow-projector-data frame 5))
+         (negative
+           (luvcraft::luvcraft-frame-shadow-projector-data frame -3)))
+    (ok (equalp
+         #(1.0 3.0 2.0 14.0
+           -5.0 -7.0 6.0 38.0
+           0.5 2.5 -1.5 -11.0
+           9.0 11.0 -10.0 -62.0)
+         positive))
+    (ok (equalp
+         #(1.0 3.0 2.0 -2.0
+           -5.0 -7.0 6.0 -10.0
+           0.5 2.5 -1.5 1.0
+           9.0 11.0 -10.0 18.0)
+         negative))
+    (ok (equalp original frame))))
+
+(deftest luvcraft-shadow-projector-preserves-points-and-buffer-contract
+  (let ((frame (make-shadow-projector-test-frame)))
+    (dolist (origin '(5 -3))
+      (let ((projector
+              (luvcraft::luvcraft-frame-shadow-projector-data frame origin)))
+        (ok (typep projector '(simple-array single-float (16))))
+        (ok (= 64 (* 4 (array-total-size projector))))
+        (ok (not
+             (eq projector
+                 (luvcraft::luvcraft-frame-shadow-projector-data
+                  frame origin))))
+        (dolist (point '((2.0 7.0 -4.0)
+                         (-1.5 0.25 9.0)
+                         (0.0 0.0 0.0)))
+          (destructuring-bind (x y z) point
+            (dotimes (row 4)
+              (ok
+               (luft-frame-close-p
+                (shadow-projector-test-row-value
+                 frame (+ 60 (* 4 row)) x y z)
+                (shadow-projector-test-row-value
+                 projector (* 4 row) x z (- y origin)))))))))))
+
+(deftest luvcraft-shadow-footprint-fits-strictly-inside-the-luft-torus
+  (flet ((materialization (horizontal-bits)
+           (make-instance
+            'luvcraft::luft-world-materialization
+            :world nil
+            :domain (luft:make-world-domain
+                     :horizontal-bits horizontal-bits)
+            :scene nil
+            :horizontal-bits horizontal-bits
+            :vertical-origin 0)))
+    (let ((wide (materialization 8))
+          (exact (materialization 7)))
+      (ok (eq wide (luvcraft::ensure-luvcraft-luft-shadow-domain wide)))
+      ;; A footprint as wide as a torus period sees both periodic images at
+      ;; its boundary; camera-nearest lifting is no longer one injective yard.
+      (signals (luvcraft::ensure-luvcraft-luft-shadow-domain exact)))))
+
 (deftest luft-frame-adapter-reuses-one-camera-and-converts-the-complete-basis
   (let* ((source
            (make-instance 'fly-camera

@@ -12,6 +12,9 @@
 
 (in-package #:luft.render.shaders)
 
+(defconstant +orthographic-shadow-projector-binding+ 5
+  "The per-frame four-row world-to-shadow projector binding.")
+
 ;;; ------------------------------------------------------------------------
 ;;; From a vertex index to a quad corner
 ;;;
@@ -262,6 +265,20 @@ so that the two faces along a crease cannot disagree."
                  projection-vector)
       (swizzle jitter-vector :xy)))
 
+  (defun orthographic-shadow-grid-position-form (point-form)
+    "Project POINT-FORM through the four row vectors of a shadow camera."
+    (let ((homogeneous `(vec4 ,point-form 1.0)))
+      `(vec4 (dot shadow-projector-row-0 ,homogeneous)
+             (dot shadow-projector-row-1 ,homogeneous)
+             (dot shadow-projector-row-2 ,homogeneous)
+             (dot shadow-projector-row-3 ,homogeneous))))
+
+  (defun position-only-grid-vertex-output-forms
+      (position-form rule deform)
+    "Emit only the clip position required by a depth-only pass."
+    (declare (ignore rule deform))
+    `((set-output position ,position-form)))
+
   (defun standard-grid-vertex-output-forms (position-form rule deform)
     "The ordinary surface varyings after shaped-grid geometry is complete.
 
@@ -289,7 +306,8 @@ construction above it."
                                             #'perspective-grid-position-form)
                                           (emitter
                                             #'standard-grid-vertex-output-forms)
-                                          (extra-resources '()))
+                                          (extra-resources '())
+                                          output-declarations)
     "A vertex shader definition named NAME: the grid of RINGS rings, each
 vertex placed by RULE, :CHAMFER or :ROUND, from its nearest corner's star.
 
@@ -304,7 +322,9 @@ share the complete geometry construction without inheriting this renderer's
 perspective camera or varying convention.
 
 FACE-CULLING is :CAMERA for the ordinary draw or :NONE for a shadow/light
-projection.  EXTRA-RESOURCES extends the generated shader's resource list."
+projection.  EXTRA-RESOURCES extends the generated shader's resource list.
+OUTPUT-DECLARATIONS may replace the ordinary varying interface, as a
+depth-only pass does when it emits position alone."
     (let* ((side (let ((*bevel-rings* rings)) (bevel-grid-side)))
            (quads (1- side))
            (last (float (1- side)))
@@ -343,16 +363,17 @@ projection.  EXTRA-RESOURCES extends the generated shader's resource list."
                                      :binding ,+slots-binding+
                                      :element :uint)))
                         ,@extra-resources)
-            :outputs ((position :vec4 :built-in :position)
-                      (normal :vec3 :location 0)
-                      (world :vec3 :location 1)
-                      (uv :vec2 :location 2)
-                      ,@(when (eq rule :chamfer)
-                          '((face-normal :vec3 :location 3)
-                            (stock :float :location 4)))
-                      ,@(when deform
-                          '((rest :vec3 :location 5)
-                            (bent-normal :vec3 :location 6)))))
+            :outputs ,(or output-declarations
+                          `((position :vec4 :built-in :position)
+                            (normal :vec3 :location 0)
+                            (world :vec3 :location 1)
+                            (uv :vec2 :location 2)
+                            ,@(when (eq rule :chamfer)
+                                '((face-normal :vec3 :location 3)
+                                  (stock :float :location 4)))
+                            ,@(when deform
+                                '((rest :vec3 :location 5)
+                                  (bent-normal :vec3 :location 6))))))
          (let* ((site (buffer-element
                        sites (/ vertex-index (uint ,(float vertices)))))
                 ;; The four bits above the site: which stock the solid

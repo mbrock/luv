@@ -7,6 +7,85 @@
   (push command (recording-command-encoder-commands encoder))
   encoder)
 
+(deftest luft-shadow-terrain-restores-the-legacy-secondary-caster-state
+  (let* ((encoder (make-instance 'recording-command-encoder))
+         (symbol 'luft.render:draw-surface-shadow-frame)
+         (original (symbol-function symbol)))
+    (unwind-protect
+         (progn
+           (setf (symbol-function symbol)
+                 (lambda (pass state scene)
+                   (declare (ignore state scene))
+                   (set-pipeline pass :luft-shadow-pipeline)
+                   (set-bind-group pass 0 :luft-shadow-group)
+                   (draw pass 54)))
+           (ok
+            (eq :luft
+                (luvcraft::encode-luvcraft-terrain-shadow
+                 encoder nil :surface-frame :scene
+                 :legacy-shadow-pipeline :legacy-shadow-group t)))
+           ;; This is the first secondary caster in the real pass.  Its two
+           ;; commands must follow restoration of both legacy group-zero
+           ;; objects, irrespective of whether any terrain chunk was drawn.
+           (set-vertex-buffer encoder 0 :critter-buffer)
+           (draw encoder 6)
+           (let ((commands
+                   (nreverse (recording-command-encoder-commands encoder))))
+             (ok (= 7 (length commands)))
+             (ok (eq :luft-shadow-pipeline
+                     (luv::gpu-set-pipeline-command-pipeline
+                      (first commands))))
+             (ok (eq :luft-shadow-group
+                     (luv::gpu-set-bind-group-command-bind-group
+                      (second commands))))
+             (ok (= 54 (luv::gpu-draw-command-vertex-count
+                        (third commands))))
+             (ok (eq :legacy-shadow-pipeline
+                     (luv::gpu-set-pipeline-command-pipeline
+                      (fourth commands))))
+             (ok (and (zerop
+                       (luv::gpu-set-bind-group-command-index
+                        (fifth commands)))
+                      (eq :legacy-shadow-group
+                          (luv::gpu-set-bind-group-command-bind-group
+                           (fifth commands)))))
+             (ok (eq :critter-buffer
+                     (luv::gpu-set-vertex-buffer-command-buffer
+                      (sixth commands))))
+             (ok (= 6 (luv::gpu-draw-command-vertex-count
+                       (seventh commands))))))
+      (setf (symbol-function symbol) original))))
+
+(deftest cpu-shadow-terrain-remains-the-complete-fallback
+  (let* ((vertices (make-array 14 :element-type 'single-float
+                                  :initial-element 0.0))
+         (mesh (make-instance 'block-mesh
+                              :vertices vertices
+                              :vertex-count 1
+                              :face-count 0))
+         (product
+           (make-instance 'luvcraft::luvcraft-chunk-product
+                          :mesh mesh :vertex-buffer :cpu-terrain-buffer))
+         (encoder (make-instance 'recording-command-encoder)))
+    (ok
+     (eq :cpu
+         (luvcraft::encode-luvcraft-terrain-shadow
+          encoder (list product) :surface-frame :scene
+          :legacy-shadow-pipeline :legacy-shadow-group nil)))
+    (let ((commands
+            (nreverse (recording-command-encoder-commands encoder))))
+      (ok (= 4 (length commands)))
+      (ok (eq :legacy-shadow-pipeline
+              (luv::gpu-set-pipeline-command-pipeline (first commands))))
+      (ok (eq :legacy-shadow-group
+              (luv::gpu-set-bind-group-command-bind-group
+               (second commands))))
+      (ok (eq :cpu-terrain-buffer
+              (luv::gpu-set-vertex-buffer-command-buffer
+               (third commands))))
+      (ok (= 1 (luv::gpu-draw-command-vertex-count
+                (fourth commands)))))))
+
 (defclass recording-chunk-window ()
   ((locations :initform nil :accessor recording-window-locations)))
 

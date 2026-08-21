@@ -385,6 +385,23 @@ would do with a stone that will not take an arris."
 #.(grid-vertex-shader-definition 'stock-vertex-shader 1 :chamfer
                                  :widths :site :deform t)
 
+;; The shadow pass is exactly the stock surface geometry above, including its
+;; per-site widths and lattice deformation.  It changes only visibility and
+;; projection, and emits no fragment varyings because depth is its sole result.
+#.(grid-vertex-shader-definition
+   'orthographic-stock-shadow-vertex-shader 1 :chamfer
+   :widths :site :deform t :face-culling :none
+   :projector #'orthographic-shadow-grid-position-form
+   :emitter #'position-only-grid-vertex-output-forms
+   :extra-resources
+   `((shadow-projector
+      :uniform-block :binding ,+orthographic-shadow-projector-binding+
+      :members ((shadow-projector-row-0 :vec4)
+                (shadow-projector-row-1 :vec4)
+                (shadow-projector-row-2 :vec4)
+                (shadow-projector-row-3 :vec4))))
+   :output-declarations '((position :vec4 :built-in :position)))
+
 ;;; ------------------------------------------------------------------------
 ;;; The knobs
 

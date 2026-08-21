@@ -16,6 +16,12 @@
 (defconstant +luft-frame-fill-lane+ 9)
 (defconstant +luft-frame-ground-lane+ 10)
 
+(defconstant +luvcraft-frame-shadow-row-offset+ 60
+  "The first float of Luvcraft's four captured shadow-projector rows.")
+
+(defconstant +luft-shadow-projector-float-count+ 16
+  "Four vec4 rows, suitable for one 64-byte LUFT projector buffer.")
+
 (defclass luft-frame-adapter ()
   ((camera
     :initform (luft.render:make-fly-camera)
@@ -71,6 +77,29 @@ Pitch and vertical field of view are invariant under the axis permutation."
           (aref data (+ offset 2)) (coerce z 'single-float)
           (aref data (+ offset 3)) (coerce w 'single-float)))
   data)
+
+(defun luvcraft-frame-shadow-projector-data (frame-data vertical-origin)
+  "Convert FRAME-DATA's captured Luvcraft shadow rows into LUFT coordinates.
+
+FRAME-DATA is the already packed 76-float Luvcraft frame block; this function
+does not evaluate SHADOW-FRAME-ROWS again.  For authored coordinates (X,Y,Z)
+and LUFT coordinates (X,Z,Y-VERTICAL-ORIGIN), each source row (A B C D) pulls
+back to (A C B D+B*VERTICAL-ORIGIN).  The result is a fresh simple array of
+sixteen single floats, exactly one 64-byte projector buffer payload."
+  (check-type frame-data (simple-array single-float (76)))
+  (check-type vertical-origin integer)
+  (let ((projector
+          (make-array +luft-shadow-projector-float-count+
+                      :element-type 'single-float))
+        (origin (coerce vertical-origin 'single-float)))
+    (dotimes (row 4 projector)
+      (let* ((source (+ +luvcraft-frame-shadow-row-offset+ (* 4 row)))
+             (a (aref frame-data source))
+             (b (aref frame-data (+ source 1)))
+             (c (aref frame-data (+ source 2)))
+             (d (aref frame-data (+ source 3))))
+        (set-luft-frame-lane
+         projector row a c b (+ d (* b origin)))))))
 
 (defun apply-luvcraft-sky-to-luft-frame (data sky)
   "Put Luvcraft's linear sun and isotropic ambient into LUFT frame DATA.

@@ -888,8 +888,8 @@ fresh rebuild after edits, arrivals, departures, aliases, and failed semantic
 classification.  A live 1344x840 Metal game drew 104,240 surface sites; its
 three acquired frame states independently reached scene revision two, the
 canvas remained healthy, and the complete session stopped cleanly.  CPU meshes
-remain only for the shadow pass and a live comparison switch until the next
-checkpoint replaces those consumers.
+remain behind a live comparison switch and for secondary consumers that have
+not yet moved to the resident scene.
 
 ** DONE Surface storage follows the acquired luvcraft frame
 :PROPERTIES:
@@ -912,6 +912,32 @@ revision without forcing every slot through a full upload.
 incremental history, share no mutable buffers, fall back to a full upload after
 a history gap, and are released before their shared technique.  The standalone
 atelier composes the same objects without changing its pictures.
+
+** DONE LUFT casts luvcraft's shaped terrain shadow
+:PROPERTIES:
+:ID: 24G9YF
+:END:
+
+/Intent./ Let the one resident LUFT surface own both visible terrain and its
+orthographic depth, while the legacy shadow layout remains available for
+critters and other secondary casters during their own migrations.
+
+/Evidence./ The stock-shaped vertex construction now has a vertex-only depth
+entry point whose four projector rows live in a separate 64-byte frame-slot
+buffer.  Luvcraft captures its stabilized shadow rows once, pulls each
+=(a b c d)= row through the X/Z/Y-origin coordinate map as
+=(a c b d+b*origin)=, draws LUFT terrain, and then restores the exact legacy
+pipeline and group zero before any secondary caster.  Full scene uploads build
+and publish a fresh pair of ordinary and shadow bind groups atomically; failed
+candidate or retired GPU handles remain in a retryable owner backlog rather
+than disappearing during hot reload or teardown.
+
+/Done when./ Done: the projector algebra and command ordering have focused
+regressions; all 40 LUFT renderer tests pass including a real Metal depth-only
+pipeline and independent frame states; and a live 1344x840 Metal game rendered
+104,240 shaped sites with three acquired =depth32-float= shadow cohorts at
+scene revision two, then stopped cleanly.  CPU terrain shadow meshes are now
+only the comparison-switch fallback.
 
 ** TODO Voxel light inhabits LUFT cell pages
 :PROPERTIES:

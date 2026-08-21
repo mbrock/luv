@@ -99,7 +99,7 @@
 (defparameter *luvcraft-shadow-maximum-filter-radius* 24.0
   "PCF radius in shadow texels at the sun's widest.")
 (defparameter *luvcraft-luft-terrain-p* t
-  "Whether the scene pass selects LUFT instead of retained CPU terrain.
+  "Whether the terrain passes select LUFT instead of retained CPU meshes.
 
 The resident LUFT scene and per-frame upload cursors remain current while this
 comparison switch is off, so turning it back on never needs a synchronous
@@ -1065,6 +1065,17 @@ attachments the renderer actually holds."
       (clrhash states)))
   (values))
 
+(defun release-luvcraft-surface-technique-candidate (renderer)
+  "Release RENDERER's unpublished LUFT candidate and forget it on success."
+  (let ((candidate
+          (luvcraft-renderer-surface-technique-candidate renderer)))
+    (when candidate
+      (luft.render:destroy-surface-technique candidate)
+      ;; A failed destruction never reaches this publication change, leaving
+      ;; the exact partial owner available for the next retry.
+      (setf (luvcraft-renderer-surface-technique-candidate renderer) nil)))
+  (values))
+
 (defmethod release-luvcraft-component ((renderer luvcraft-renderer))
   "Release RENDERER's pipelines and GPU resources exactly once."
   (with-release-report
@@ -1072,6 +1083,9 @@ attachments the renderer actually holds."
     ;; layout, so their owner cohort always retires first.
     (releasing :renderer-frame-states
       (discard-luvcraft-frame-states renderer))
+    (when (luvcraft-renderer-surface-technique-candidate renderer)
+      (releasing :luft-surface-technique-candidate
+        (release-luvcraft-surface-technique-candidate renderer)))
     (when (luvcraft-renderer-surface-technique renderer)
       (releasing :luft-surface-technique
         (luft.render:destroy-surface-technique
@@ -1103,12 +1117,20 @@ attachments the renderer actually holds."
   (values))
 
 (defun make-luvcraft-surface-technique (device)
-  "Make the linear LUFT technique embedded in Luvcraft's HDR scene pass."
+  "Make LUFT's linear scene and orthographic shadow terrain technique."
   (luft.render:make-surface-technique
    device
    :pipeline-styles '(:stock)
    :target-formats (list +luvcraft-scene-color-format+)
-   :output-space :linear))
+   :output-space :linear
+   :orthographic-shadow-depth-format :depth32-float))
+
+(defun luvcraft-surface-technique-shadow-capable-p (technique)
+  "Whether TECHNIQUE satisfies Luvcraft's exact terrain-shadow contract."
+  (and technique
+       (eq :depth32-float
+           (luft.render:surface-technique-orthographic-shadow-depth-format
+            technique))))
 
 (defun luvcraft-cached-surface-technique (renderer)
   "Return the one LUFT technique named by cached drawable states, or NIL.
@@ -1145,72 +1167,107 @@ the cache so every extant state and native handle remains reachable."
 
 Fresh sessions already satisfy this invariant.  The repair path matters when
 these classes are redefined inside a valuable running SLY image: newly added
-slots then contain NIL and cached drawable states have no LUFT cohort.  All
-fallible candidates are constructed before the old frame cache is disturbed,
-and new component slots are published only after that cache retires
-successfully.  A preexisting technique recovered from the cache is republished
-first because it is precisely the durable retry owner of those states."
-  (let* ((renderer (luvcraft-session-renderer session))
-         (materialization
-           (luvcraft-session-luft-world-materialization session))
-         (adapter (luvcraft-session-luft-frame-adapter session))
-         (technique (luvcraft-renderer-surface-technique renderer))
-         (made-materialization-p nil)
-         (made-technique-p nil)
-         (completed-p nil))
-    ;; A hot redefinition can add the renderer slot after frame states already
-    ;; exist.  Recover their exact technique instead of replacing it: the old
-    ;; object is their retry owner if native destruction ever fails.
-    (let ((cached-technique (luvcraft-cached-surface-technique renderer)))
-      (when (and technique cached-technique
-                 (not (eq technique cached-technique)))
-        (error "The renderer and its cached frames name different LUFT techniques."))
-      (when (and (null technique) cached-technique)
-        (setf technique cached-technique
-              (luvcraft-renderer-surface-technique renderer) technique)))
-    (let ((stale-frame-states-p
-            (luvcraft-frame-states-need-luft-rebuild-p renderer technique)))
-      (if (and materialization adapter technique
-               (not stale-frame-states-p))
-          (values materialization adapter technique)
-          (unwind-protect
-               (progn
-                 (unless technique
-                   (setf technique
-                         (make-luvcraft-surface-technique
-                          (luvcraft-session-device session))
-                         made-technique-p t))
-                 (unless materialization
-                   (setf materialization
-                         (attach-luft-world-materialization
-                          (luvcraft-session-world session))
-                         made-materialization-p t))
-                 (unless adapter
-                   (setf adapter (make-luft-frame-adapter)))
-                 ;; A state made before this seam has no LUFT buffers and must
-                 ;; be rebuilt against this technique's exact layout.
-                 (when stale-frame-states-p
-                   (discard-luvcraft-frame-states renderer))
-                 (when made-technique-p
-                   (setf (luvcraft-renderer-surface-technique renderer)
-                         technique))
-                 (when made-materialization-p
-                   (setf (luvcraft-session-luft-world-materialization session)
-                         materialization))
-                 (unless (luvcraft-session-luft-frame-adapter session)
-                   (setf (luvcraft-session-luft-frame-adapter session) adapter))
-                 (setf completed-p t)
-                 (values materialization adapter technique))
-            (unless completed-p
-              ;; Preserve the creation or retirement error that explains why
-              ;; adoption failed; cleanup trouble is important but secondary.
-              (with-release-warnings
-                (when made-materialization-p
-                  (releasing :luft-world-materialization-candidate
-                    (detach-luft-world-materialization materialization)))
-                (when made-technique-p
-                  (releasing :luft-surface-technique-candidate
-                    (luft.render:destroy-surface-technique technique))))))))))
+slots then contain NIL, cached drawable states have no LUFT cohort, or the
+published technique predates Luvcraft's orthographic shadow contract.  All
+fallible candidates are constructed before the old frame cache is disturbed.
+A recovered or published old technique remains the durable retry owner until
+its frame states and its own resources retire completely; only then is a
+capable replacement published."
+  (let ((renderer (luvcraft-session-renderer session)))
+    ;; A retained construction or rollback owner is cleanup debt, never a
+    ;; replacement candidate.  Service it before recovering the published
+    ;; technique or attempting any new construction.
+    (release-luvcraft-surface-technique-candidate renderer)
+    (let* ((materialization
+             (luvcraft-session-luft-world-materialization session))
+           (adapter (luvcraft-session-luft-frame-adapter session))
+           (technique (luvcraft-renderer-surface-technique renderer))
+           (made-materialization-p nil)
+           (completed-p nil))
+      ;; A hot redefinition can add the renderer slot after frame states already
+      ;; exist.  Recover their exact technique instead of replacing it: the old
+      ;; object is their retry owner if native destruction ever fails.
+      (let ((cached-technique (luvcraft-cached-surface-technique renderer)))
+        (when (and technique cached-technique
+                   (not (eq technique cached-technique)))
+          (error "The renderer and its cached frames name different LUFT techniques."))
+        (when (and (null technique) cached-technique)
+          (setf technique cached-technique
+                (luvcraft-renderer-surface-technique renderer) technique)))
+      (let* ((replace-technique-p
+               (not (luvcraft-surface-technique-shadow-capable-p technique)))
+             (stale-frame-states-p
+               (or replace-technique-p
+                   (luvcraft-frame-states-need-luft-rebuild-p
+                    renderer technique))))
+        (if (and materialization adapter technique
+                 (not replace-technique-p)
+                 (not stale-frame-states-p))
+            (values materialization adapter technique)
+            (unwind-protect
+                 (progn
+                   (when replace-technique-p
+                     (handler-case
+                         (setf
+                          (luvcraft-renderer-surface-technique-candidate
+                           renderer)
+                          (make-luvcraft-surface-technique
+                           (luvcraft-session-device session)))
+                       (luft.render:surface-technique-construction-error
+                           (condition)
+                         (setf
+                          (luvcraft-renderer-surface-technique-candidate
+                           renderer)
+                          (luft.render:surface-technique-construction-retry-owner
+                           condition))
+                         (error condition))))
+                   (unless materialization
+                     (setf materialization
+                           (attach-luft-world-materialization
+                            (luvcraft-session-world session))
+                           made-materialization-p t))
+                   (unless adapter
+                     (setf adapter (make-luft-frame-adapter)))
+                   ;; A state made before this seam has no LUFT buffers and must
+                   ;; be rebuilt against this technique's exact layout.
+                   (when stale-frame-states-p
+                     (discard-luvcraft-frame-states renderer))
+                   (when replace-technique-p
+                     ;; The renderer keeps naming the old technique throughout
+                     ;; its complete retirement.  If release fails, that exact
+                     ;; object remains the only durable owner to retry next frame.
+                     (when technique
+                       (luft.render:destroy-surface-technique technique))
+                     (let ((candidate
+                             (luvcraft-renderer-surface-technique-candidate
+                              renderer)))
+                       ;; Publication and transfer out of the retry slot are one
+                       ;; owner-boundary update after the old owner is fully dead.
+                       (setf technique candidate
+                             (luvcraft-renderer-surface-technique renderer)
+                             candidate
+                             (luvcraft-renderer-surface-technique-candidate
+                              renderer)
+                             nil)))
+                   (when made-materialization-p
+                     (setf (luvcraft-session-luft-world-materialization session)
+                           materialization))
+                   (unless (luvcraft-session-luft-frame-adapter session)
+                     (setf (luvcraft-session-luft-frame-adapter session) adapter))
+                   (setf completed-p t)
+                   (values materialization adapter technique))
+              (unless completed-p
+                ;; Preserve the creation or retirement error that explains why
+                ;; adoption failed; cleanup trouble is important but secondary.
+                (with-release-warnings
+                  (when made-materialization-p
+                    (releasing :luft-world-materialization-candidate
+                      (detach-luft-world-materialization materialization)))
+                  (when
+                      (luvcraft-renderer-surface-technique-candidate renderer)
+                    (releasing :luft-surface-technique-candidate
+                      (release-luvcraft-surface-technique-candidate
+                       renderer)))))))))))
 
 (defmethod resize-luvcraft-component
     ((renderer luvcraft-renderer) extent)
@@ -1276,6 +1333,46 @@ submission that used them completes."
       (resize-luvcraft-component (luvcraft-session-renderer session) extent))
     extent))
 
+(defun luvcraft-luft-shadow-capable-p (surface-frame)
+  "Whether SURFACE-FRAME owns LUFT's optional orthographic shadow resources."
+  (luvcraft-surface-technique-shadow-capable-p
+   (luft.render:surface-frame-state-technique surface-frame)))
+
+(defun ensure-luvcraft-luft-shadow-domain (materialization)
+  "Reject a LUFT torus too small for Luvcraft's orthographic shadow footprint."
+  (let* ((domain (luft-world-materialization-domain materialization))
+         (diameter (* 2.0 +luvcraft-shadow-half-extent+))
+         (x-period (luft:world-domain-x-period domain))
+         (z-period (luft:world-domain-y-period domain)))
+    (unless (and (< diameter x-period) (< diameter z-period))
+      (error "Luvcraft's ~,1F-cell shadow footprint must be smaller than ~
+              its LUFT torus periods ~Dx~D."
+             diameter x-period z-period)))
+  materialization)
+
+(defun encode-luvcraft-terrain-shadow
+    (pass products surface-frame scene legacy-pipeline legacy-bind-group
+     luft-shadow-frame-p)
+  "Draw terrain shadow casters, leaving PASS ready for legacy secondary ones."
+  (if luft-shadow-frame-p
+      (progn
+        (luft.render:draw-surface-shadow-frame pass surface-frame scene)
+        ;; HAL has one bind group.  Critters and physics cubes below use the
+        ;; unrelated legacy shadow layout, so both objects must be restored.
+        (set-pipeline pass legacy-pipeline)
+        (set-bind-group pass 0 legacy-bind-group)
+        :luft)
+      (progn
+        (set-pipeline pass legacy-pipeline)
+        (set-bind-group pass 0 legacy-bind-group)
+        (dolist (product products)
+          (let ((mesh (luvcraft-chunk-product-mesh product)))
+            (when (plusp (block-mesh-vertex-count mesh))
+              (set-vertex-buffer
+               pass 0 (luvcraft-chunk-product-vertex-buffer product))
+              (draw pass (block-mesh-vertex-count mesh)))))
+        :cpu)))
+
 (zdefun (encode-luvcraft-frame :zone :luvcraft/encode-frame)
     (session surface-texture encoder &key readback-buffer sample
                                      (include-hud-p t)
@@ -1317,6 +1414,13 @@ submission that used them completes."
          (luft-surface-frame
            (luft.render:synchronize-surface-frame-state
             (luvcraft-frame-surface-frame-state frame) luft-scene))
+         ;; One decision governs both terrain passes for the whole frame.  A
+         ;; live knob turn takes effect at the next acquired frame boundary.
+         (luft-terrain-p *luvcraft-luft-terrain-p*)
+         (luft-shadow-frame-p
+           (and luft-terrain-p
+                (luvcraft-luft-shadow-capable-p luft-surface-frame)))
+         (frame-data nil)
          (particle-vertices
            (block-particle-vertices
             (luvcraft-session-particle-system session)))
@@ -1402,9 +1506,15 @@ submission that used them completes."
     (with-luvcraft-frame-timing
         (sample luvcraft-frame-sample-uniform-seconds
                 :luvcraft/uniform-update)
+      (when luft-shadow-frame-p
+        (ensure-luvcraft-luft-shadow-domain luft-materialization))
+      ;; This is the one evaluation which advances the persistent shadow
+      ;; anchor.  Both terrain paradigms consume the rows captured in DATA.
+      (setf frame-data
+            (frame-uniform-data session (first extent) (second extent)))
       (write-buffer
        (luvcraft-frame-uniform-buffer frame)
-       (frame-uniform-data session (first extent) (second extent)))
+       frame-data)
       (write-buffer
        (luvcraft-frame-post-uniform-buffer frame)
        (luvcraft-post-uniform-data session (first extent) (second extent)))
@@ -1415,6 +1525,13 @@ submission that used them completes."
         session luft-materialization (first extent) (second extent))
        (luft.render:stock-table-data
         (luft.render:scene-stocks luft-scene)))
+      (when luft-shadow-frame-p
+        (luft.render:write-surface-shadow-projector
+         luft-surface-frame
+         (luvcraft-frame-shadow-projector-data
+          frame-data
+          (luft-world-materialization-vertical-origin
+           luft-materialization))))
       (when (plusp particle-vertex-count)
         (write-buffer
          (luvcraft-frame-particle-vertex-buffer frame)
@@ -1447,14 +1564,11 @@ submission that used them completes."
                   :depth-load-op :clear
                   :depth-store-op :store
                   :depth-clear-value 1.0)))))
-        (set-pipeline pass (luvcraft-session-shadow-native-pipeline session))
-        (set-bind-group pass 0 (luvcraft-frame-shadow-bind-group frame))
-        (dolist (product products)
-          (let ((mesh (luvcraft-chunk-product-mesh product)))
-            (when (plusp (block-mesh-vertex-count mesh))
-              (set-vertex-buffer
-               pass 0 (luvcraft-chunk-product-vertex-buffer product))
-              (draw pass (block-mesh-vertex-count mesh)))))
+        (encode-luvcraft-terrain-shadow
+         pass products luft-surface-frame luft-scene
+         (luvcraft-session-shadow-native-pipeline session)
+         (luvcraft-frame-shadow-bind-group frame)
+         luft-shadow-frame-p)
         ;; An animal standing in the sun casts a shadow like anything else
         ;; solid; a tumbling smash fragment deliberately does not.
         (when (plusp critter-vertex-count)
@@ -1495,7 +1609,7 @@ submission that used them completes."
          pass 0 (luvcraft-session-sky-vertex-buffer session))
         (draw pass 3)
         (set-pipeline pass (luvcraft-session-pipeline session))
-        (if *luvcraft-luft-terrain-p*
+        (if luft-terrain-p
             (progn
               (luft.render:draw-surface-frame
                pass luft-surface-frame luft-scene :stock)
@@ -2085,9 +2199,10 @@ the replacement texture's width through the frame uniform."
   "Open a little LUFT-rendered block world.
 
 The resident authored solid is materialized into one LUFT scene and drawn as
-linear stock radiance inside Luvcraft's HDR scene pass.  CPU chunk meshes remain
-temporarily available for the shadow pass and the live LUFT-terrain comparison
-switch while the migration is in progress.
+linear stock radiance inside Luvcraft's HDR scene pass, with the same shaped
+surface cast through LUFT's orthographic depth technique.  CPU chunk meshes
+remain temporarily available for the live LUFT-terrain comparison switch while
+the migration is in progress.
 
 Click to capture the pointer, look with the mouse, walk with WASD, and jump
 with Space.  Once captured, left click removes the block at the centre of view
@@ -2322,8 +2437,15 @@ NIL to let the display choose a comfortable window."
                                   (:binding 1 :type :sampler)
                                   (:binding 2 :type :uniform-buffer))))))
                   (luft-surface-technique
-                    (setf surface-technique
-                          (make-luvcraft-surface-technique device)))
+                    (handler-case
+                        (setf surface-technique
+                              (make-luvcraft-surface-technique device))
+                      (luft.render:surface-technique-construction-error
+                          (condition)
+                        (setf surface-technique
+                              (luft.render:surface-technique-construction-retry-owner
+                               condition))
+                        (error condition))))
                   (pipeline
                     (let ((artifact
                             (make-live-shader-pipeline

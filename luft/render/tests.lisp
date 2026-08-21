@@ -9,6 +9,7 @@
    (failures-remaining :initarg :failures-remaining :initform 0
                        :accessor surface-release-probe-failures-remaining)
    (attempts :initform 0 :accessor surface-release-probe-attempts)
+   (writes :initform 0 :accessor surface-release-probe-writes)
    (released-p :initform nil :accessor surface-release-probe-released-p)))
 
 (defmethod luv:destroy ((probe surface-release-probe))
@@ -23,11 +24,59 @@
   (setf (surface-release-probe-released-p probe) t)
   (values))
 
+(defmethod luv:write-buffer
+    ((probe surface-release-probe) data &key (offset 0))
+  (declare (ignore data offset))
+  (when (surface-release-probe-released-p probe)
+    (error "Writing released surface probe ~S."
+           (surface-release-probe-name probe)))
+  (incf (surface-release-probe-writes probe))
+  probe)
+
 (define-condition surface-construction-probe-error (error) ()
   (:report
    (lambda (condition stream)
      (declare (ignore condition))
      (write-string "Synthetic surface construction failure." stream))))
+
+(defclass surface-publication-probe-device ()
+  ((fail-shadow-bind-group-p
+    :initform nil :accessor surface-publication-fail-shadow-bind-group-p)
+   (fail-write-at :initform nil :accessor surface-publication-fail-write-at)
+   (write-attempts :initform 0 :accessor surface-publication-write-attempts)
+   (release-failure-labels
+    :initform nil :accessor surface-publication-release-failure-labels)
+   (resources :initform nil :accessor surface-publication-resources)))
+
+(defclass surface-publication-probe-resource (surface-release-probe)
+  ((device :initarg :device :reader surface-publication-resource-device)))
+
+(defmethod luv:write-buffer
+    ((resource surface-publication-probe-resource) data &key (offset 0))
+  (let* ((device (surface-publication-resource-device resource))
+         (attempt (incf (surface-publication-write-attempts device))))
+    (when (eql attempt (surface-publication-fail-write-at device))
+      (error 'surface-construction-probe-error)))
+  (call-next-method resource data :offset offset))
+
+(defmethod luv:create ((device surface-publication-probe-device) descriptor)
+  (let ((label (luv::gpu-descriptor-label descriptor)))
+    (when (and (surface-publication-fail-shadow-bind-group-p device)
+               (typep descriptor 'luv::bind-group-descriptor)
+               (string= label "luft orthographic shadow bindings"))
+      (error 'surface-construction-probe-error))
+    (let ((resource
+            (make-instance
+             'surface-publication-probe-resource
+             :name label :device device
+             :failures-remaining
+             (if (member label
+                         (surface-publication-release-failure-labels device)
+                         :test #'string=)
+                 1
+                 0))))
+      (push resource (surface-publication-resources device))
+      resource)))
 
 (defclass surface-construction-probe-device ()
   ((fail-on-create :initarg :fail-on-create
@@ -48,9 +97,7 @@
              'surface-release-probe
              :name index
              :failures-remaining
-             (if (member index (surface-construction-release-failures device))
-                 1
-                 0))))
+             (count index (surface-construction-release-failures device)))))
       (push resource (surface-construction-resources device))
       resource)))
 
@@ -655,21 +702,27 @@
                          :release-failure-indices '(2))))
     ;; :STOCK creates a layout, two modules, then its pipeline.  The pipeline
     ;; creation error must survive even when one cleanup member also fails.
-    (ok (signals
-         (make-surface-technique
-          device :pipeline-styles '(:stock)
-          :target-formats '(:rgba16-float) :output-space :linear)
-         'surface-construction-probe-error))
+    (let ((condition
+            (handler-case
+                (make-surface-technique
+                 device :pipeline-styles '(:stock)
+                 :target-formats '(:rgba16-float) :output-space :linear)
+              (surface-technique-construction-error (condition)
+                condition))))
+      (ok condition)
+      (ok (typep (surface-technique-construction-cause condition)
+                 'surface-construction-probe-error))
+      (let ((owner (surface-technique-construction-retry-owner condition)))
+        (ok (luft.render::surface-technique-resources-live-p owner))
+        (destroy-surface-technique owner)
+        (ok (not (luft.render::surface-technique-resources-live-p owner)))))
     (ok (= 4 (surface-construction-create-attempts device)))
     (ok (= 3 (length (surface-construction-resources device))))
-    (dolist (resource (surface-construction-resources device))
-      (ok (= 1 (surface-release-probe-attempts resource))))
-    ;; Finish the fake failed cleanup so the probe itself has no loose owner.
     (let ((failed
-            (find-if-not #'surface-release-probe-released-p
-                         (surface-construction-resources device))))
-      (ok failed)
-      (luv:destroy failed)))
+            (find 2 (surface-construction-resources device)
+                  :key #'surface-release-probe-name)))
+      (ok (= 2 (surface-release-probe-attempts failed)))
+      (ok (surface-release-probe-released-p failed))))
   (let* ((device
            (make-instance 'surface-construction-probe-device
                           :fail-on-create 2
@@ -685,6 +738,170 @@
       (ok (= 1 (surface-release-probe-attempts resource)))
       (destroy-surface-technique technique)
       (ok (= 2 (surface-release-probe-attempts resource))))
+    (ok (null (luft.render::surface-technique-frame-states technique)))))
+
+(deftest standalone-construction-propagates-the-partial-technique-owner
+  (let* ((device
+           (make-instance 'surface-construction-probe-device
+                          :fail-on-create 6
+                          :release-failure-indices '(4 4)))
+         (condition
+           (handler-case
+               (make-renderer
+                :device device :scene nil :camera nil
+                :style :stock :pipeline-styles '(:stock) :effects nil)
+             (surface-technique-construction-error (condition)
+               condition))))
+    (ok condition)
+    (ok (typep (surface-technique-construction-cause condition)
+               'surface-construction-probe-error))
+    (let* ((owner (surface-technique-construction-retry-owner condition))
+           (resource
+             (find 4 (surface-construction-resources device)
+                   :key #'surface-release-probe-name)))
+      ;; MAKE-SURFACE-TECHNIQUE tried once and MAKE-RENDERER's unwind tried
+      ;; again.  The same propagated condition still roots the live third try.
+      (ok (= 2 (surface-release-probe-attempts resource)))
+      (ok (luft.render::surface-technique-resources-live-p owner))
+      (destroy-surface-technique owner)
+      (ok (= 3 (surface-release-probe-attempts resource)))
+      (ok (not (luft.render::surface-technique-resources-live-p owner))))))
+
+(deftest orthographic-shadow-frame-resources-release-independently-and-retry
+  (let* ((technique
+           (make-instance
+            'surface-technique
+            :device nil :pipeline-styles '(:stock)
+            :target-formats '(:rgba16-float) :temporal-p nil
+            :output-space :linear
+            :orthographic-shadow-depth-format :depth32-float))
+         (shadow-group
+           (make-instance 'surface-release-probe
+                          :name :shadow-group :failures-remaining 1))
+         (group (make-instance 'surface-release-probe :name :group))
+         (projector (make-instance 'surface-release-probe :name :projector))
+         (uniform (make-instance 'surface-release-probe :name :uniform))
+         (state (make-instance 'surface-frame-state :technique technique)))
+    (setf (surface-frame-state-orthographic-shadow-bind-group state)
+          shadow-group
+          (surface-frame-state-bind-group state) group
+          (surface-frame-state-orthographic-shadow-projector-buffer state)
+          projector
+          (luft.render::surface-frame-state-uniform-buffer state) uniform)
+    (luft.render::register-surface-frame-state state)
+    (ok (signals (destroy-surface-frame-state state)
+                 'luft.render::surface-release-error))
+    (ok (eq shadow-group
+            (surface-frame-state-orthographic-shadow-bind-group state)))
+    (ok (null (surface-frame-state-bind-group state)))
+    (ok (null
+         (surface-frame-state-orthographic-shadow-projector-buffer state)))
+    (ok (= 1 (surface-release-probe-attempts projector)))
+    (ok (member state (luft.render::surface-technique-frame-states technique)
+                :test #'eq))
+    ;; The technique remains the durable owner and retries the failed group
+    ;; before retiring any of its own members.
+    (destroy-surface-technique technique)
+    (ok (= 2 (surface-release-probe-attempts shadow-group)))
+    (ok (null (luft.render::surface-technique-frame-states technique)))))
+
+(deftest frame-retirement-backlog-remains-owned-through-explicit-destroy
+  (let* ((technique (make-release-test-technique))
+         (layout (make-instance 'surface-release-probe :name :layout))
+         (retired
+           (make-instance 'surface-release-probe
+                          :name :retired :failures-remaining 2))
+         (state (make-instance 'surface-frame-state :technique technique)))
+    (setf (surface-technique-layout technique) layout)
+    (luft.render::register-surface-frame-state state)
+    (ok (= 1
+           (length
+            (luft.render::retire-surface-frame-resources
+             state (list (cons '(:retired-generation :probe) retired))))))
+    (ok (= 1 (length
+              (luft.render::surface-frame-state-retirements state))))
+    (ok (luft.render::surface-frame-state-resources-live-p state))
+    ;; The first technique attempt retries the backlog, retains the state, and
+    ;; cannot invalidate a layout that the failed frame owner still names.
+    (ok (signals (destroy-surface-technique technique)
+                 'luft.render::surface-release-error))
+    (ok (= 2 (surface-release-probe-attempts retired)))
+    (ok (zerop (surface-release-probe-attempts layout)))
+    (ok (member state (luft.render::surface-technique-frame-states technique)
+                :test #'eq))
+    ;; The next explicit owner retry drains the backlog and may retire layout.
+    (destroy-surface-technique technique)
+    (ok (= 3 (surface-release-probe-attempts retired)))
+    (ok (= 1 (surface-release-probe-attempts layout)))
+    (ok (null (luft.render::surface-frame-state-retirements state)))
+    (ok (null (luft.render::surface-technique-frame-states technique)))))
+
+(deftest orthographic-shadow-technique-members-are-retryable
+  (let* ((technique
+           (make-instance
+            'surface-technique
+            :device nil :pipeline-styles '(:stock)
+            :target-formats '(:rgba16-float) :temporal-p nil
+            :output-space :linear
+            :orthographic-shadow-depth-format :depth32-float))
+         (pipeline
+           (make-instance 'surface-release-probe
+                          :name :shadow-pipeline :failures-remaining 1))
+         (module (make-instance 'surface-release-probe :name :shadow-module))
+         (layout
+           (make-instance 'surface-release-probe
+                          :name :shadow-layout :failures-remaining 1)))
+    (setf (surface-technique-orthographic-shadow-pipeline technique) pipeline
+          (luft.render::surface-technique-orthographic-shadow-module technique)
+          module
+          (luft.render::surface-technique-orthographic-shadow-layout technique)
+          layout)
+    (ok (signals (destroy-surface-technique technique)
+                 'luft.render::surface-release-error))
+    (ok (eq pipeline
+            (surface-technique-orthographic-shadow-pipeline technique)))
+    (ok (null
+         (luft.render::surface-technique-orthographic-shadow-module technique)))
+    (ok (eq layout
+            (luft.render::surface-technique-orthographic-shadow-layout
+             technique)))
+    (dolist (resource (list pipeline module layout))
+      (ok (= 1 (surface-release-probe-attempts resource))))
+    (destroy-surface-technique technique)
+    (ok (= 2 (surface-release-probe-attempts pipeline)))
+    (ok (= 1 (surface-release-probe-attempts module)))
+    (ok (= 2 (surface-release-probe-attempts layout)))
+    (ok (null
+         (surface-technique-orthographic-shadow-pipeline technique)))
+    (ok (null
+         (luft.render::surface-technique-orthographic-shadow-layout
+          technique)))))
+
+(deftest shadow-frame-constructor-keeps-original-error-and-a-retry-owner
+  (let* ((device
+           (make-instance 'surface-construction-probe-device
+                          :fail-on-create 3
+                          :release-failure-indices '(2)))
+         (technique
+           (make-instance
+            'surface-technique
+            :device device :pipeline-styles '(:stock)
+            :target-formats '(:rgba16-float) :temporal-p nil
+            :output-space :linear
+            :orthographic-shadow-depth-format :depth32-float)))
+    ;; Uniform and stocks exist when projector creation fails.  Their cleanup
+    ;; cannot replace the projector's original construction condition.
+    (ok (signals (make-surface-frame-state technique)
+                 'surface-construction-probe-error))
+    (ok (= 1 (length
+              (luft.render::surface-technique-frame-states technique))))
+    (let ((stocks
+            (find 2 (surface-construction-resources device)
+                  :key #'surface-release-probe-name)))
+      (ok stocks)
+      (ok (= 1 (surface-release-probe-attempts stocks)))
+      (destroy-surface-technique technique)
+      (ok (= 2 (surface-release-probe-attempts stocks))))
     (ok (null (luft.render::surface-technique-frame-states technique)))))
 
 (deftest temporal-jitter-and-frame-views-are-frame-sized-and-frozen
@@ -746,6 +963,45 @@
                       (luv.shader:shader-function-call-definition
                        expression))))))
 
+(deftest orthographic-shadow-reuses-stock-geometry-with-a-four-row-projector
+  (let* ((specification
+           (luft.render.shaders:orthographic-stock-shadow-vertex-shader))
+         (resources
+           (luv.shader:shader-specification-resources specification))
+         (projector
+           (find luft.render.shaders:+orthographic-shadow-projector-binding+
+                 resources :key #'luv.shader:shader-resource-binding)))
+    (ok (eq :vertex
+            (luv.shader:shader-specification-stage specification)))
+    (ok (= 1 (length
+              (luv.shader:shader-specification-outputs specification))))
+    (ok (eq :position
+            (luv.shader:shader-interface-built-in
+             (first
+              (luv.shader:shader-specification-outputs specification)))))
+    (ok (equal '(0 1 2 3 4 5)
+               (mapcar #'luv.shader:shader-resource-binding resources)))
+    (ok (typep projector 'luv.shader:shader-uniform-block))
+    (ok (= 64 (luv.shader:shader-uniform-block-byte-size projector)))
+    (ok (equal '("SHADOW-PROJECTOR-ROW-0"
+                 "SHADOW-PROJECTOR-ROW-1"
+                 "SHADOW-PROJECTOR-ROW-2"
+                 "SHADOW-PROJECTOR-ROW-3")
+               (mapcar
+                (lambda (member)
+                  (symbol-name (luv.shader:shader-object-name member)))
+                (luv.shader:shader-uniform-block-members projector))))
+    ;; Camera binding zero still chooses the nearest periodic image; only
+    ;; final projection and face visibility differ from the stock pass.
+    (ok (shader-specification-calls-p
+         specification 'luft.render.shaders::camera-torus-anchor))
+    (ok (shader-specification-calls-p
+         specification 'luft.render.shaders:deform-point))
+    (ok (not (shader-specification-calls-p
+              specification 'luft.render.shaders::view-clip)))
+    (ok (not (shader-specification-calls-p
+              specification 'luft.render.shaders::jitter-clip)))))
+
 (deftest linear-stock-radiance-leaves-presentation-to-its-frame-owner
   (let ((linear
           (luft.render.shaders:linear-stock-fragment-shader))
@@ -802,6 +1058,56 @@
       (when technique (destroy-surface-technique technique))
       (luv:destroy device))))
 
+#+darwin
+(deftest orthographic-stock-shadow-compiles-with-independent-metal-frames
+  (let ((device
+          (luv:request-gpu-device (make-instance 'luv:metal-gpu-provider)))
+        (technique nil)
+        (first nil)
+        (second nil))
+    (unwind-protect
+         (let ((scene (probe-scene)))
+           (setf technique
+                 (make-surface-technique
+                  device
+                  :pipeline-styles '(:stock)
+                  :target-formats '(:rgba16-float)
+                  :output-space :linear
+                  :orthographic-shadow-depth-format :depth32-float))
+           (ok (eq :depth32-float
+                   (surface-technique-orthographic-shadow-depth-format
+                    technique)))
+           ;; Pipeline creation lowers the position-only shader and links a
+           ;; real Metal vertex-only depth pipeline with no color targets.
+           (ok (typep
+                (surface-technique-orthographic-shadow-pipeline technique)
+                'luv:metal-gpu-render-pipeline))
+           (setf first (make-surface-frame-state technique :scene scene)
+                 second (make-surface-frame-state technique :scene scene))
+           (ok (not
+                (eq
+                 (surface-frame-state-orthographic-shadow-projector-buffer
+                  first)
+                 (surface-frame-state-orthographic-shadow-projector-buffer
+                  second))))
+           (ok (not
+                (eq (surface-frame-state-orthographic-shadow-bind-group first)
+                    (surface-frame-state-orthographic-shadow-bind-group
+                     second))))
+           (let ((projector
+                   (make-array 16 :element-type 'single-float
+                                  :initial-element 0.0)))
+             (setf (aref projector 0) 1.0
+                   (aref projector 5) 1.0
+                   (aref projector 10) 1.0
+                   (aref projector 15) 1.0)
+             (write-surface-shadow-projector first projector)
+             (write-surface-shadow-projector second projector)))
+      (when second (destroy-surface-frame-state second))
+      (when first (destroy-surface-frame-state first))
+      (when technique (destroy-surface-technique technique))
+      (luv:destroy device))))
+
 (deftest surface-vertices-lift-packed-sites-to-the-camera-nearest-torus-image
   (dolist (specification
             (list (luft.render.shaders:surface-vertex-shader)
@@ -822,6 +1128,252 @@
           (luft:solid-cell-p solid 6 5 1) t
           (luft:solid-cell-p solid 6 5 2) t)
     (make-scene domain :solid solid)))
+
+(defun shadow-publication-scene ()
+  "A one-chunk seed in a domain with room to force later page growth."
+  (let* ((domain (luft:make-world-domain :horizontal-bits 5))
+         (solid (luft:make-solid-chain domain)))
+    (setf (luft:solid-cell-p solid 1 1 0) t)
+    (make-scene domain :solid solid)))
+
+(deftest shadow-and-surface-bind-groups-publish-as-one-frame-generation
+  (let* ((device (make-instance 'surface-publication-probe-device))
+         (technique
+           (make-instance
+            'surface-technique
+            :device device :pipeline-styles '(:stock)
+            :target-formats '(:rgba16-float) :temporal-p nil
+            :output-space :linear
+            :orthographic-shadow-depth-format :depth32-float))
+         (state (make-instance 'surface-frame-state :technique technique))
+         (scene (shadow-publication-scene)))
+    (setf (luft.render::surface-frame-state-uniform-buffer state)
+          (make-instance 'surface-release-probe :name :uniform)
+          (luft.render::surface-frame-state-stocks-buffer state)
+          (make-instance 'surface-release-probe :name :stocks)
+          (surface-frame-state-orthographic-shadow-projector-buffer state)
+          (make-instance 'surface-release-probe :name :projector))
+    (luft.render::register-surface-frame-state state)
+    (unwind-protect
+         (progn
+           (synchronize-surface-frame-state state scene)
+           (write-surface-shadow-projector
+            state (make-array 16 :element-type 'single-float
+                                 :initial-element 0.0))
+           (let ((ordinary (surface-frame-state-bind-group state))
+                 (shadow
+                   (surface-frame-state-orthographic-shadow-bind-group state)))
+             ;; A same-page edit is sparse: neither group nor any buffer
+             ;; binding moves under the frame in flight.
+             (setf (scene-cell-p scene 2 1 0) t)
+             (synchronize-surface-frame-state state scene)
+             (ok (eq :incremental
+                     (surface-frame-state-last-scene-upload-kind state)))
+             (ok (eq ordinary (surface-frame-state-bind-group state)))
+             (ok (eq shadow
+                     (surface-frame-state-orthographic-shadow-bind-group state)))
+             (let ((sites
+                     (luft.render::surface-frame-state-sites-buffer state))
+                   (cells
+                     (luft.render::surface-frame-state-cells-buffer state))
+                   (slots
+                     (luft.render::surface-frame-state-slots-buffer state)))
+               ;; Allocate face pages in many new chunks.  If shadow-group
+               ;; creation fails, the unpublished ordinary group and buffers
+               ;; are retired while every old live handle remains installed.
+               (dolist (x '(8 16 24))
+                 (dolist (y '(8 16 24))
+                   (setf (scene-cell-p scene x y 0) t)))
+               (setf (surface-publication-fail-shadow-bind-group-p device) t
+                     (surface-publication-release-failure-labels device)
+                     '("luft surface bindings" "luft surface sites"))
+               (ok (signals (synchronize-surface-frame-state state scene)
+                            'surface-construction-probe-error))
+               (ok (eq ordinary (surface-frame-state-bind-group state)))
+               (ok (eq shadow
+                       (surface-frame-state-orthographic-shadow-bind-group
+                        state)))
+               (ok (eq sites
+                       (luft.render::surface-frame-state-sites-buffer state)))
+               (ok (eq cells
+                       (luft.render::surface-frame-state-cells-buffer state)))
+               (ok (eq slots
+                       (luft.render::surface-frame-state-slots-buffer state)))
+               (ok (= 2 (length
+                         (luft.render::surface-frame-state-retirements state))))
+               (ok (null
+                    (set-exclusive-or
+                     '((:unpublished :bind-group)
+                       (:unpublished :sites-buffer))
+                     (mapcar
+                      #'luft.render::surface-frame-retirement-label
+                      (luft.render::surface-frame-state-retirements state))
+                     :test #'equal)))
+               ;; The next synchronization first drains the unpublished
+               ;; candidate debt.  It then publishes both new groups together.
+               (setf (surface-publication-fail-shadow-bind-group-p device) nil
+                     (surface-publication-release-failure-labels device) nil
+                     (surface-release-probe-failures-remaining ordinary) 1)
+               ;; Publication succeeds even though one member of the old
+               ;; generation cannot retire.  That labelled handle stays owned
+               ;; and the release condition reports the debt after publication.
+               (ok (signals (synchronize-surface-frame-state state scene)
+                            'luft.render::surface-release-error))
+               (ok (eq :full
+                       (surface-frame-state-last-scene-upload-kind state)))
+               (ok (not (eq ordinary
+                            (surface-frame-state-bind-group state))))
+               (ok (not
+                    (eq shadow
+                        (surface-frame-state-orthographic-shadow-bind-group
+                         state))))
+               (ok (not (surface-release-probe-released-p ordinary)))
+               (ok (surface-release-probe-released-p shadow))
+               (ok (= 1 (length
+                         (luft.render::surface-frame-state-retirements state))))
+               (ok (equal
+                    '(:retired-generation :bind-group)
+                    (luft.render::surface-frame-retirement-label
+                     (first
+                      (luft.render::surface-frame-state-retirements state)))))
+               ;; An otherwise up-to-date synchronize is still a retirement
+               ;; service point and converges without another upload.
+               (synchronize-surface-frame-state state scene)
+               (ok (surface-release-probe-released-p ordinary))
+               (ok (null
+                    (luft.render::surface-frame-state-retirements state))))))
+      (setf (surface-publication-fail-shadow-bind-group-p device) nil)
+      (destroy-surface-frame-state state)
+      (destroy-surface-technique technique))))
+
+(deftest failed-full-upload-write-cannot-corrupt-the-published-generation
+  (let* ((device (make-instance 'surface-publication-probe-device))
+         (technique
+           (make-instance
+            'surface-technique
+            :device device :pipeline-styles '(:stock)
+            :target-formats '(:rgba16-float) :temporal-p nil
+            :output-space :linear
+            :orthographic-shadow-depth-format :depth32-float))
+         (state (make-instance 'surface-frame-state :technique technique))
+         (old-scene (shadow-publication-scene))
+         (new-scene (shadow-publication-scene)))
+    (setf (luft.render::surface-frame-state-uniform-buffer state)
+          (make-instance 'surface-release-probe :name :uniform)
+          (luft.render::surface-frame-state-stocks-buffer state)
+          (make-instance 'surface-release-probe :name :stocks)
+          (surface-frame-state-orthographic-shadow-projector-buffer state)
+          (make-instance 'surface-release-probe :name :projector))
+    (luft.render::register-surface-frame-state state)
+    (unwind-protect
+         (progn
+           (synchronize-surface-frame-state state old-scene)
+           (let ((ordinary (surface-frame-state-bind-group state))
+                 (shadow
+                   (surface-frame-state-orthographic-shadow-bind-group state))
+                 (sites
+                   (luft.render::surface-frame-state-sites-buffer state))
+                 (cells
+                   (luft.render::surface-frame-state-cells-buffer state))
+                 (slots
+                   (luft.render::surface-frame-state-slots-buffer state))
+                 (revision
+                   (surface-frame-state-uploaded-scene-revision state)))
+             ;; NEW-SCENE fits the old capacities.  A full upload must still
+             ;; use fresh buffers: failure on write two of three cannot touch
+             ;; the generation which still advertises OLD-SCENE.
+             (setf (surface-publication-write-attempts device) 0
+                   (surface-publication-fail-write-at device) 2)
+             (ok (signals (synchronize-surface-frame-state state new-scene)
+                          'surface-construction-probe-error))
+             (ok (eq old-scene
+                     (surface-frame-state-uploaded-scene state)))
+             (ok (= revision
+                    (surface-frame-state-uploaded-scene-revision state)))
+             (ok (eq ordinary (surface-frame-state-bind-group state)))
+             (ok (eq shadow
+                     (surface-frame-state-orthographic-shadow-bind-group state)))
+             (ok (eq sites
+                     (luft.render::surface-frame-state-sites-buffer state)))
+             (ok (eq cells
+                     (luft.render::surface-frame-state-cells-buffer state)))
+             (ok (eq slots
+                     (luft.render::surface-frame-state-slots-buffer state)))
+             (ok (null
+                  (luft.render::surface-frame-state-retirements state)))
+             ;; The requested new scene is safely rejected by draw until a
+             ;; complete cohort has actually been published.
+             (ok (signals (draw-surface-frame nil state new-scene :stock)))
+             (setf (surface-publication-write-attempts device) 0
+                   (surface-publication-fail-write-at device) nil)
+             (synchronize-surface-frame-state state new-scene)
+             (ok (eq new-scene
+                     (surface-frame-state-uploaded-scene state)))
+             (ok (not (eq ordinary
+                          (surface-frame-state-bind-group state))))
+             (ok (not (eq shadow
+                          (surface-frame-state-orthographic-shadow-bind-group
+                           state))))
+             (ok (not
+                  (eq sites
+                      (luft.render::surface-frame-state-sites-buffer state))))))
+      (setf (surface-publication-fail-write-at device) nil)
+      (destroy-surface-frame-state state)
+      (destroy-surface-technique technique))))
+
+(deftest disabled-shadow-capability-allocates-nothing-and-guards-its-api
+  (let* ((technique (make-release-test-technique))
+         (state (make-instance 'surface-frame-state :technique technique))
+         (scene (probe-scene)))
+    (ok (null
+         (surface-technique-orthographic-shadow-depth-format technique)))
+    (ok (null
+         (surface-technique-orthographic-shadow-pipeline technique)))
+    (ok (null
+         (surface-frame-state-orthographic-shadow-projector-buffer state)))
+    (ok (null
+         (surface-frame-state-orthographic-shadow-bind-group state)))
+    (ok (signals
+         (write-surface-shadow-projector
+          state (make-array 16 :element-type 'single-float
+                               :initial-element 0.0))))
+    (ok (signals (draw-surface-shadow-frame nil state scene)))))
+
+(deftest shadow-projector-write-requires-an-exact-simple-float-block
+  (let* ((technique
+           (make-instance
+            'surface-technique
+            :device nil :pipeline-styles '(:stock)
+            :target-formats '(:rgba16-float) :temporal-p nil
+            :output-space :linear
+            :orthographic-shadow-depth-format :depth32-float))
+         (state (make-instance 'surface-frame-state :technique technique))
+         (projector (make-instance 'surface-release-probe :name :projector)))
+    (setf (surface-frame-state-orthographic-shadow-projector-buffer state)
+          projector)
+    (luft.render::register-surface-frame-state state)
+    (unwind-protect
+         (progn
+           (ok (signals
+                (write-surface-shadow-projector
+                 state (make-array 16 :element-type '(unsigned-byte 32)
+                                      :initial-element 0))))
+           (ok (signals
+                (write-surface-shadow-projector
+                 state (make-array 15 :element-type 'single-float
+                                      :initial-element 0.0))))
+           (ok (signals
+                (write-surface-shadow-projector
+                 state (make-array 16 :element-type 'single-float
+                                      :initial-element 0.0
+                                      :adjustable t))))
+           (ok (zerop (surface-release-probe-writes projector)))
+           (write-surface-shadow-projector
+            state (make-array 16 :element-type 'single-float
+                                 :initial-element 0.0))
+           (ok (= 1 (surface-release-probe-writes projector))))
+      (destroy-surface-frame-state state)
+      (destroy-surface-technique technique))))
 
 (deftest temporal-history-resolves-and-invalidates
   (let* ((scene (probe-scene))

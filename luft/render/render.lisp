@@ -1224,7 +1224,16 @@ lane: the arris softness of a chamfer, or the vertical radius of the field."
    (temporal-p :initarg :temporal-p :initform nil
                :reader surface-technique-temporal-p)
    (output-space :initarg :output-space :initform :presented
-                 :reader surface-technique-output-space))
+                 :reader surface-technique-output-space)
+   (orthographic-shadow-depth-format
+    :initarg :orthographic-shadow-depth-format :initform nil
+    :reader surface-technique-orthographic-shadow-depth-format)
+   (orthographic-shadow-layout
+    :initform nil :accessor surface-technique-orthographic-shadow-layout)
+   (orthographic-shadow-module
+    :initform nil :accessor surface-technique-orthographic-shadow-module)
+   (orthographic-shadow-pipeline
+    :initform nil :accessor surface-technique-orthographic-shadow-pipeline))
   (:documentation
    "The immutable GPU technique shared by surface draws on one DEVICE.
 
@@ -1246,6 +1255,13 @@ presentation or return linear radiance to an enclosing frame owner."))
    (sites-capacity :initform 0 :accessor surface-frame-state-sites-capacity)
    (cells-capacity :initform 0 :accessor surface-frame-state-cells-capacity)
    (bind-group :initform nil :accessor surface-frame-state-bind-group)
+   (orthographic-shadow-projector-buffer
+    :initform nil
+    :accessor surface-frame-state-orthographic-shadow-projector-buffer)
+   (orthographic-shadow-bind-group
+    :initform nil
+    :accessor surface-frame-state-orthographic-shadow-bind-group)
+   (retirements :initform nil :accessor surface-frame-state-retirements)
    (uploaded-scene :initform nil :accessor surface-frame-state-uploaded-scene)
    (uploaded-scene-revision :initform nil
                             :accessor surface-frame-state-uploaded-scene-revision)
@@ -1259,8 +1275,15 @@ presentation or return linear radiance to an enclosing frame owner."))
    "One acquired frame's mutable LUFT surface buffers and upload cursor.
 
 Every instance owns a distinct uniform, stock, site, cell, and slot buffer.
-Its uploaded revision is therefore an independent consumer cursor into a
-SCENE's bounded change history."))
+When its technique has the optional orthographic shadow pass, it also owns
+that frame's projector and shadow bind group.  Its uploaded revision is
+therefore an independent consumer cursor into a SCENE's bounded change
+history."))
+
+(defstruct (surface-frame-retirement
+             (:constructor make-surface-frame-retirement (label resource)))
+  "One labelled GPU handle whose destruction failed after it left a cohort."
+  label resource)
 
 (define-condition surface-release-error (error)
   ((owner :initarg :owner :reader surface-release-error-owner)
@@ -1277,6 +1300,19 @@ SCENE's bounded change history."))
                (mapcar (lambda (failure)
                          (list (car failure) (cdr failure)))
                        failures))))))
+
+(define-condition surface-technique-construction-error (error)
+  ((cause :initarg :cause
+          :reader surface-technique-construction-cause)
+   (technique :initarg :technique
+              :reader surface-technique-construction-retry-owner))
+  (:documentation
+   "A failed technique construction whose partially released owner is live.")
+  (:report
+   (lambda (condition stream)
+     (format stream "Surface technique construction failed: ~A~%~
+                     The partial technique remains available for release retry."
+             (surface-technique-construction-cause condition)))))
 
 (defun call-surface-release-step (name function)
   "Attempt one named release, returning success and its labelled failure."
@@ -1299,6 +1335,47 @@ SCENE's bounded change history."))
        (progn ,@body)
      (error () (values))))
 
+(defun retire-surface-frame-resources (state labelled-resources)
+  "Attempt LABELLED-RESOURCES and backlog every handle which fails.
+
+Each element is (LABEL . RESOURCE).  Successful handles are forgotten;
+failed ones become explicit STATE ownership and their labelled failures are
+returned without signalling, so unwind cleanup cannot replace its cause."
+  (let ((failures nil))
+    (dolist (entry labelled-resources)
+      (let ((label (car entry))
+            (resource (cdr entry)))
+        (when resource
+          (multiple-value-bind (released-p failure)
+              (call-surface-release-step label (lambda () (destroy resource)))
+            (unless released-p
+              (push (make-surface-frame-retirement label resource)
+                    (surface-frame-state-retirements state))
+              (push failure failures))))))
+    (nreverse failures)))
+
+(defun attempt-surface-frame-retirement-backlog (state)
+  "Retry every abandoned generation owned by STATE and return failures."
+  (let ((failures nil)
+        (retained nil))
+    (dolist (retirement (surface-frame-state-retirements state))
+      (multiple-value-bind (released-p failure)
+          (call-surface-release-step
+           (surface-frame-retirement-label retirement)
+           (lambda ()
+             (destroy (surface-frame-retirement-resource retirement))))
+        (unless released-p
+          (push retirement retained)
+          (push failure failures))))
+    (setf (surface-frame-state-retirements state) (nreverse retained))
+    (nreverse failures)))
+
+(defun service-surface-frame-retirements (state)
+  "Clear STATE's retirement debt before recording further GPU mutation."
+  (signal-surface-release-failures
+   state (attempt-surface-frame-retirement-backlog state))
+  state)
+
 (defun register-surface-frame-state (state)
   "Keep STATE reachable from its technique until complete release."
   (pushnew state
@@ -1316,12 +1393,26 @@ SCENE's bounded change history."))
 
 (defun surface-frame-state-resources-live-p (state)
   (some #'identity
-        (list (surface-frame-state-bind-group state)
+        (list (surface-frame-state-orthographic-shadow-bind-group state)
+              (surface-frame-state-bind-group state)
               (surface-frame-state-sites-buffer state)
               (surface-frame-state-cells-buffer state)
               (surface-frame-state-stocks-buffer state)
               (surface-frame-state-slots-buffer state)
+              (surface-frame-state-orthographic-shadow-projector-buffer state)
+              (surface-frame-state-retirements state)
               (surface-frame-state-uniform-buffer state))))
+
+(defun surface-technique-resources-live-p (technique)
+  "Whether TECHNIQUE still owns any handle requiring release or retry."
+  (some #'identity
+        (list (surface-technique-frame-states technique)
+              (surface-technique-orthographic-shadow-pipeline technique)
+              (surface-technique-pipelines technique)
+              (surface-technique-orthographic-shadow-module technique)
+              (surface-technique-modules technique)
+              (surface-technique-orthographic-shadow-layout technique)
+              (surface-technique-layout technique))))
 
 (defclass renderer ()
   ((device :initarg :device :reader renderer-device)
@@ -1945,12 +2036,64 @@ when no selected style needs it."
               (:binding ,shaders:+stocks-binding+ :type :storage-buffer)
               (:binding ,shaders:+slots-binding+ :type :storage-buffer)))))))
 
+(defun create-surface-technique-orthographic-shadow (technique)
+  "Create and publish TECHNIQUE's optional stock-shaped depth sub-technique."
+  (when (surface-technique-orthographic-shadow-depth-format technique)
+    (let ((device (surface-technique-device technique)))
+      (setf (surface-technique-orthographic-shadow-layout technique)
+            (with-renderer-creation-step
+                (:luft/layout/orthographic-shadow
+                 "luft orthographic shadow layout")
+              (create
+               device
+               (make-bind-group-layout-descriptor
+                :label "luft orthographic shadow layout"
+                :entries
+                `((:binding ,shaders:+frame-binding+ :type :uniform-buffer)
+                  (:binding ,shaders:+sites-binding+ :type :storage-buffer)
+                  (:binding ,shaders:+cells-binding+ :type :storage-buffer)
+                  (:binding ,shaders:+stocks-binding+ :type :storage-buffer)
+                  (:binding ,shaders:+slots-binding+ :type :storage-buffer)
+                  (:binding ,shaders:+orthographic-shadow-projector-binding+
+                   :type :uniform-buffer))))))
+      (setf (surface-technique-orthographic-shadow-module technique)
+            (with-renderer-creation-step
+                (:luft/shader/orthographic-stock-shadow-vertex
+                 "luft orthographic stock shadow vertex")
+              (create
+               device
+               (make-shader-module-descriptor
+                :label "luft orthographic stock shadow vertex"
+                :language :mathematical
+                :code
+                (shaders:orthographic-stock-shadow-vertex-shader)))))
+      (setf (surface-technique-orthographic-shadow-pipeline technique)
+            (with-renderer-creation-step
+                (:luft/pipeline/orthographic-stock-shadow
+                 "luft orthographic stock shadow pipeline")
+              (create
+               device
+               (make-render-pipeline-descriptor
+                :label "luft orthographic stock shadow pipeline"
+                :layout
+                (surface-technique-orthographic-shadow-layout technique)
+                :vertex
+                `(:module
+                  ,(surface-technique-orthographic-shadow-module technique))
+                :fragment nil
+                :primitive '(:topology :triangle-list)
+                :depth-stencil
+                `(:format
+                  ,(surface-technique-orthographic-shadow-depth-format technique)
+                  :depth-write-enabled t :depth-compare :less))))))))
+
 (zdefun (make-surface-technique :zone :luft/make-surface-technique)
     (device &key
               (pipeline-styles *surface-styles*)
               (target-formats '(:rgba8-unorm-srgb))
               temporal-p
-              (output-space :presented))
+              (output-space :presented)
+              orthographic-shadow-depth-format)
   "Build a shareable LUFT surface technique for DEVICE.
 
 PIPELINE-STYLES selects the vertex-pulled styles.  TARGET-FORMATS are the
@@ -1958,8 +2101,9 @@ exact render-pass color targets; TEMPORAL-P selects the matching two-output
 fragment variants.  OUTPUT-SPACE is :PRESENTED when LUFT owns tone mapping
 and fog, or :LINEAR when an enclosing HDR frame owns presentation.  The
 currently exact linear contract is one non-temporal :STOCK pipeline.  The
-caller owns TECHNIQUE and may create any number of independent
-SURFACE-FRAME-STATE instances from it."
+optional ORTHOGRAPHIC-SHADOW-DEPTH-FORMAT adds a vertex-only depth pipeline
+over the same shaped stock geometry.  The caller owns TECHNIQUE and may
+create any number of independent SURFACE-FRAME-STATE instances from it."
   (let ((foreign (set-difference pipeline-styles *surface-styles*)))
     (when foreign
       (error "Luft cannot draw ~S; its surface styles are ~S."
@@ -1981,17 +2125,22 @@ SURFACE-FRAME-STATE instances from it."
                                   :pipeline-styles (copy-list pipeline-styles)
                                   :target-formats (copy-list target-formats)
                                   :temporal-p temporal-p
-                                  :output-space output-space))
-        (completed-p nil))
-    (unwind-protect
-         (progn
-           (create-surface-technique-layout technique)
-           (create-surface-technique-pipelines technique)
-           (setf completed-p t)
-           technique)
-      (unless completed-p
+                                  :output-space output-space
+                                  :orthographic-shadow-depth-format
+                                  orthographic-shadow-depth-format)))
+    (handler-case
+        (progn
+          (create-surface-technique-layout technique)
+          (create-surface-technique-pipelines technique)
+          (create-surface-technique-orthographic-shadow technique)
+          technique)
+      (error (cause)
         (best-effort-surface-release
-          (destroy-surface-technique technique))))))
+          (destroy-surface-technique technique))
+        (if (surface-technique-resources-live-p technique)
+            (error 'surface-technique-construction-error
+                   :cause cause :technique technique)
+            (error cause))))))
 
 (defun destroy-surface-technique (technique)
   "Release TECHNIQUE and any dependent frame states still registered with it.
@@ -2014,6 +2163,16 @@ together."
     ;; technique member until every such dependent can forget its handles.
     (when (surface-technique-frame-states technique)
       (signal-surface-release-failures technique failures))
+    (let ((pipeline
+            (surface-technique-orthographic-shadow-pipeline technique)))
+      (when pipeline
+        (multiple-value-bind (released-p failure)
+            (call-surface-release-step
+             :orthographic-shadow-pipeline (lambda () (destroy pipeline)))
+          (if released-p
+              (setf (surface-technique-orthographic-shadow-pipeline technique)
+                    nil)
+              (push failure failures)))))
     (let ((retained nil))
       (loop for (style pipeline)
               on (surface-technique-pipelines technique) by #'cddr
@@ -2037,6 +2196,26 @@ together."
                    (push failure failures)
                    (push module retained))))
       (setf (surface-technique-modules technique) (nreverse retained)))
+    (let ((module
+            (surface-technique-orthographic-shadow-module technique)))
+      (when module
+        (multiple-value-bind (released-p failure)
+            (call-surface-release-step
+             :orthographic-shadow-module (lambda () (destroy module)))
+          (if released-p
+              (setf (surface-technique-orthographic-shadow-module technique)
+                    nil)
+              (push failure failures)))))
+    (let ((layout
+            (surface-technique-orthographic-shadow-layout technique)))
+      (when layout
+        (multiple-value-bind (released-p failure)
+            (call-surface-release-step
+             :orthographic-shadow-layout (lambda () (destroy layout)))
+          (if released-p
+              (setf (surface-technique-orthographic-shadow-layout technique)
+                    nil)
+              (push failure failures)))))
     (let ((layout (surface-technique-layout technique)))
       (when layout
         (multiple-value-bind (released-p failure)
@@ -2156,12 +2335,18 @@ together."
                    :type :uniform-buffer)))))))))
 
 (zdefun (create-renderer-pipeline :zone :luft/create-renderer-pipeline) (renderer)
-  (setf (renderer-surface-technique renderer)
-        (make-surface-technique
-         (renderer-device renderer)
-         :pipeline-styles (renderer-pipeline-styles renderer)
-         :target-formats (surface-target-formats renderer)
-         :temporal-p (renderer-effect-p renderer :taa)))
+  (handler-case
+      (setf (renderer-surface-technique renderer)
+            (make-surface-technique
+             (renderer-device renderer)
+             :pipeline-styles (renderer-pipeline-styles renderer)
+             :target-formats (surface-target-formats renderer)
+             :temporal-p (renderer-effect-p renderer :taa)))
+    (surface-technique-construction-error (condition)
+      ;; Publish the partial owner before MAKE-RENDERER's unwind retries it.
+      (setf (renderer-surface-technique renderer)
+            (surface-technique-construction-retry-owner condition))
+      (error condition)))
   (create-renderer-effect-pipelines renderer)
   renderer)
 
@@ -2311,7 +2496,17 @@ borrowed from another state, including the per-frame uniform and stock table."
                             :label "luft stock table"
                             :size (* 4 4 shaders:+stock-lanes+
                                      shaders:+stock-slots+)
-                            :usage '(:storage)))))
+                            :usage '(:storage))))
+             (when
+                 (surface-technique-orthographic-shadow-depth-format technique)
+               (setf
+                (surface-frame-state-orthographic-shadow-projector-buffer state)
+                (create
+                 device
+                 (make-buffer-descriptor
+                  :label "luft orthographic shadow projector"
+                  :size (* 4 4 4)
+                  :usage '(:uniform))))))
            (when scene (synchronize-surface-frame-state state scene))
            (setf completed-p t)
            state)
@@ -2326,6 +2521,8 @@ The state remains registered with its technique until every member is gone,
 so a failed release can be retried even after an enclosing frame cache has
 forgotten the state."
   (let ((failures nil))
+    (dolist (failure (attempt-surface-frame-retirement-backlog state))
+      (push failure failures))
     (labels ((release (name reader writer)
                (let ((resource (funcall reader state)))
                  (when resource
@@ -2335,6 +2532,9 @@ forgotten the state."
                      (if released-p
                          (funcall writer nil state)
                          (push failure failures)))))))
+      (release :orthographic-shadow-bind-group
+               #'surface-frame-state-orthographic-shadow-bind-group
+               #'(setf surface-frame-state-orthographic-shadow-bind-group))
       (release :bind-group #'surface-frame-state-bind-group
                #'(setf surface-frame-state-bind-group))
       (release :sites-buffer #'surface-frame-state-sites-buffer
@@ -2345,6 +2545,10 @@ forgotten the state."
                #'(setf surface-frame-state-stocks-buffer))
       (release :slots-buffer #'surface-frame-state-slots-buffer
                #'(setf surface-frame-state-slots-buffer))
+      (release :orthographic-shadow-projector-buffer
+               #'surface-frame-state-orthographic-shadow-projector-buffer
+               #'(setf
+                  surface-frame-state-orthographic-shadow-projector-buffer))
       (release :uniform-buffer #'surface-frame-state-uniform-buffer
                #'(setf surface-frame-state-uniform-buffer)))
     (unless (surface-frame-state-resources-live-p state)
@@ -2359,25 +2563,18 @@ forgotten the state."
       (unregister-surface-frame-state state))
     (signal-surface-release-failures state failures)))
 
-(defun storage-buffer-candidate
-    (state buffer capacity needed label replace-p)
-  "Return BUFFER or an unpublished replacement, its capacity, and NEW-P.
-
-When any member of the scene-buffer cohort must grow, REPLACE-P is true for
-all of them.  The live bind group therefore continues to name one entirely
-old generation until its entirely new replacement is ready."
-  (if (and buffer (not replace-p))
-      (values buffer capacity nil)
-      (let ((candidate-capacity
-              (if (> needed capacity)
-                  (max needed (* 2 capacity))
-                  capacity)))
-        (values (create (surface-technique-device
-                         (surface-frame-state-technique state))
-                        (make-buffer-descriptor
-                         :label label :size candidate-capacity
-                         :usage '(:storage)))
-                candidate-capacity t))))
+(defun storage-buffer-candidate (state capacity needed label)
+  "Create one unpublished full-upload buffer with reusable CAPACITY."
+  (let ((candidate-capacity
+          (if (> needed capacity)
+              (max needed (* 2 capacity))
+              capacity)))
+    (values (create (surface-technique-device
+                     (surface-frame-state-technique state))
+                    (make-buffer-descriptor
+                     :label label :size candidate-capacity
+                     :usage '(:storage)))
+            candidate-capacity)))
 
 (defun create-surface-bind-group
     (state sites-buffer cells-buffer slots-buffer)
@@ -2396,10 +2593,35 @@ old generation until its entirely new replacement is ready."
        :resource ,(surface-frame-state-stocks-buffer state))
       (:binding ,shaders:+slots-binding+ :resource ,slots-buffer)))))
 
+(defun create-surface-orthographic-shadow-bind-group
+    (state sites-buffer cells-buffer slots-buffer)
+  "Create the shadow view of one complete surface-buffer generation."
+  (let ((technique (surface-frame-state-technique state)))
+    (create
+     (surface-technique-device technique)
+     (make-bind-group-descriptor
+      :label "luft orthographic shadow bindings"
+      :layout (surface-technique-orthographic-shadow-layout technique)
+      :entries
+      `((:binding ,shaders:+frame-binding+
+         :resource ,(surface-frame-state-uniform-buffer state))
+        (:binding ,shaders:+sites-binding+ :resource ,sites-buffer)
+        (:binding ,shaders:+cells-binding+ :resource ,cells-buffer)
+        (:binding ,shaders:+stocks-binding+
+         :resource ,(surface-frame-state-stocks-buffer state))
+        (:binding ,shaders:+slots-binding+ :resource ,slots-buffer)
+        (:binding ,shaders:+orthographic-shadow-projector-binding+
+         :resource
+         ,(surface-frame-state-orthographic-shadow-projector-buffer state)))))))
+
 (zdefun (upload-surface-scene :zone :luft/upload-scene
                        :value (luft:chain-count (scene-surface scene)))
     (state scene)
-  "Upload SCENE and publish one coherent buffer/bind-group generation."
+  "Upload SCENE into an unpublished cohort, then publish it coherently.
+
+Every full upload is copy-on-publish, even when the current buffers have
+enough capacity.  Cross-scene and history-gap writes can therefore fail
+without modifying the generation which STATE still advertises."
   (let* ((sites (scene-site-pages scene))
          (sites-needed (* 8 (length sites)))
          (cells-needed (* 4 (length (scene-cell-bits scene))))
@@ -2408,36 +2630,39 @@ old generation until its entirely new replacement is ready."
          (old-cells (surface-frame-state-cells-buffer state))
          (old-slots (surface-frame-state-slots-buffer state))
          (old-bind-group (surface-frame-state-bind-group state))
-         (replace-p
-           (or (null old-bind-group)
-               (null old-sites) (null old-cells) (null old-slots)
-               (> sites-needed (surface-frame-state-sites-capacity state))
-               (> cells-needed (surface-frame-state-cells-capacity state))
-               (> slots-needed (surface-frame-state-slots-capacity state))))
-         sites-buffer sites-capacity sites-new-p
-         cells-buffer cells-capacity cells-new-p
-         slots-buffer slots-capacity slots-new-p
-         bind-group (completed-p nil))
+         (shadow-p
+           (not (null
+                 (surface-technique-orthographic-shadow-depth-format
+                  (surface-frame-state-technique state)))))
+         (old-shadow-bind-group
+           (surface-frame-state-orthographic-shadow-bind-group state))
+         sites-buffer sites-capacity
+         cells-buffer cells-capacity
+         slots-buffer slots-capacity
+         bind-group shadow-bind-group (completed-p nil))
     (unwind-protect
          (progn
-           (multiple-value-setq (sites-buffer sites-capacity sites-new-p)
+           (multiple-value-setq (sites-buffer sites-capacity)
              (storage-buffer-candidate
-              state old-sites (surface-frame-state-sites-capacity state)
-              sites-needed "luft surface sites" replace-p))
-           (multiple-value-setq (cells-buffer cells-capacity cells-new-p)
+              state (surface-frame-state-sites-capacity state)
+              sites-needed "luft surface sites"))
+           (multiple-value-setq (cells-buffer cells-capacity)
              (storage-buffer-candidate
-              state old-cells (surface-frame-state-cells-capacity state)
-              cells-needed "luft solid cells" replace-p))
-           (multiple-value-setq (slots-buffer slots-capacity slots-new-p)
+              state (surface-frame-state-cells-capacity state)
+              cells-needed "luft solid cells"))
+           (multiple-value-setq (slots-buffer slots-capacity)
              (storage-buffer-candidate
-              state old-slots (surface-frame-state-slots-capacity state)
-              slots-needed "luft cell stocks" replace-p))
+              state (surface-frame-state-slots-capacity state)
+              slots-needed "luft cell stocks"))
            (write-buffer sites-buffer sites)
            (write-buffer cells-buffer (scene-cell-bits scene))
            (write-buffer slots-buffer (scene-slot-words scene))
-           (when replace-p
-             (setf bind-group
-                   (create-surface-bind-group
+           (setf bind-group
+                 (create-surface-bind-group
+                  state sites-buffer cells-buffer slots-buffer))
+           (when shadow-p
+             (setf shadow-bind-group
+                   (create-surface-orthographic-shadow-bind-group
                     state sites-buffer cells-buffer slots-buffer)))
            (setf (surface-frame-state-sites-buffer state) sites-buffer
                  (surface-frame-state-sites-capacity state) sites-capacity
@@ -2446,7 +2671,9 @@ old generation until its entirely new replacement is ready."
                  (surface-frame-state-slots-buffer state) slots-buffer
                  (surface-frame-state-slots-capacity state) slots-capacity
                  (surface-frame-state-bind-group state)
-                 (or bind-group old-bind-group)
+                 bind-group
+                 (surface-frame-state-orthographic-shadow-bind-group state)
+                 shadow-bind-group
                  (surface-frame-state-uploaded-scene state) scene
                  (surface-frame-state-uploaded-scene-revision state)
                  (scene-revision scene)
@@ -2456,23 +2683,25 @@ old generation until its entirely new replacement is ready."
                  (surface-frame-state-last-scene-upload-writes state) 3
                  completed-p t)
            ;; Only now can the previous generation stop being reachable.
-           (when bind-group
-             (when old-bind-group (ignore-errors (destroy old-bind-group)))
-             (when (and sites-new-p old-sites)
-               (ignore-errors (destroy old-sites)))
-             (when (and cells-new-p old-cells)
-               (ignore-errors (destroy old-cells)))
-             (when (and slots-new-p old-slots)
-               (ignore-errors (destroy old-slots))))
+           (signal-surface-release-failures
+            state
+            (retire-surface-frame-resources
+             state
+             (list (cons '(:retired-generation :shadow-bind-group)
+                         old-shadow-bind-group)
+                   (cons '(:retired-generation :bind-group) old-bind-group)
+                   (cons '(:retired-generation :sites-buffer) old-sites)
+                   (cons '(:retired-generation :cells-buffer) old-cells)
+                   (cons '(:retired-generation :slots-buffer) old-slots))))
            state)
       (unless completed-p
-        (when bind-group (ignore-errors (destroy bind-group)))
-        (when (and sites-new-p sites-buffer)
-          (ignore-errors (destroy sites-buffer)))
-        (when (and cells-new-p cells-buffer)
-          (ignore-errors (destroy cells-buffer)))
-        (when (and slots-new-p slots-buffer)
-          (ignore-errors (destroy slots-buffer)))))))
+        (retire-surface-frame-resources
+         state
+         (list (cons '(:unpublished :shadow-bind-group) shadow-bind-group)
+               (cons '(:unpublished :bind-group) bind-group)
+               (cons '(:unpublished :sites-buffer) sites-buffer)
+               (cons '(:unpublished :cells-buffer) cells-buffer)
+               (cons '(:unpublished :slots-buffer) slots-buffer)))))))
 
 (defun write-buffer-index-ranges (buffer data indices element-size)
   "Write sorted INDICES from DATA in maximal adjacent ranges.
@@ -2539,6 +2768,7 @@ Return the number of bytes and write calls issued."
 
 Each state advances from its own uploaded revision.  If that revision has
 fallen out of SCENE's bounded history, a coherent full upload is used."
+  (service-surface-frame-retirements state)
   (cond
     ((not (eq scene (surface-frame-state-uploaded-scene state)))
      (upload-surface-scene state scene))
@@ -2567,6 +2797,26 @@ fallen out of SCENE's bounded history, a coherent full upload is used."
   (write-buffer (surface-frame-state-uniform-buffer state) frame-data)
   state)
 
+(defun write-surface-shadow-projector (state projector-data)
+  "Write STATE's orthographic world-to-shadow projector.
+
+PROJECTOR-DATA is sixteen consecutive single floats: four row vectors whose
+dots with (X Y Z 1) produce clip X, Y, Z, and W."
+  (unless
+      (surface-technique-orthographic-shadow-depth-format
+       (surface-frame-state-technique state))
+    (error "This Luft surface technique has no orthographic shadow pass."))
+  (unless (typep projector-data '(simple-array single-float (16)))
+    (error "An orthographic shadow projector must be a simple 16-element ~
+            SINGLE-FLOAT array, not ~S."
+           (type-of projector-data)))
+  (let ((buffer
+          (surface-frame-state-orthographic-shadow-projector-buffer state)))
+    (unless buffer
+      (error "This Luft surface frame has no live shadow projector buffer."))
+    (write-buffer buffer projector-data))
+  state)
+
 (defun draw-surface-frame (pass state scene style)
   "Bind STATE and draw SCENE through its shared technique's STYLE pipeline.
 
@@ -2585,6 +2835,31 @@ acquired frame with another scene publication."
                  (surface-frame-state-technique state) style))
   (set-bind-group pass 0 (surface-frame-state-bind-group state))
   (draw-surface pass scene style)
+  state)
+
+(defun draw-surface-shadow-frame (pass state scene)
+  "Bind STATE's orthographic sub-technique and draw stock-shaped SCENE depth."
+  (let ((technique (surface-frame-state-technique state)))
+    (unless
+        (surface-technique-orthographic-shadow-depth-format technique)
+      (error "This Luft surface technique has no orthographic shadow pass.")))
+  (unless (and (eq scene (surface-frame-state-uploaded-scene state))
+               (eql (scene-revision scene)
+                    (surface-frame-state-uploaded-scene-revision state)))
+    (error "Surface frame state is at ~S revision ~S, not ~S revision ~S."
+           (surface-frame-state-uploaded-scene state)
+           (surface-frame-state-uploaded-scene-revision state)
+           scene (scene-revision scene)))
+  (let* ((technique (surface-frame-state-technique state))
+         (pipeline
+           (surface-technique-orthographic-shadow-pipeline technique))
+         (bind-group
+           (surface-frame-state-orthographic-shadow-bind-group state)))
+    (unless (and pipeline bind-group)
+      (error "This Luft surface frame has no live orthographic shadow resources."))
+    (set-pipeline pass pipeline)
+    (set-bind-group pass 0 bind-group))
+  (draw-surface pass scene :stock)
   state)
 
 (defun upload-scene (renderer &optional (scene (renderer-scene renderer)))

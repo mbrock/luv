@@ -5,11 +5,13 @@
    "Vertex and fragment stages that draw a surface chain of packed sites.")
   (:export #:+stocks-binding+
            #:+slots-binding+
+           #:+orthographic-shadow-projector-binding+
            #:*deformations*
            #:deformation-index
            #:deform-point
            #:deform-normal
            #:stock-vertex-shader
+           #:orthographic-stock-shadow-vertex-shader
            #:+stock-slots+
            #:+stock-lanes+
            #:+site-stock-shift+
@@ -104,6 +106,9 @@ of packed LUFT sites, drawn by vertex shaders pulling sites.")
            #:surface-technique
            #:make-surface-technique
            #:destroy-surface-technique
+           #:surface-technique-construction-error
+           #:surface-technique-construction-cause
+           #:surface-technique-construction-retry-owner
            #:surface-technique-device
            #:surface-technique-layout
            #:surface-technique-pipeline
@@ -111,11 +116,15 @@ of packed LUFT sites, drawn by vertex shaders pulling sites.")
            #:surface-technique-target-formats
            #:surface-technique-temporal-p
            #:surface-technique-output-space
+           #:surface-technique-orthographic-shadow-depth-format
+           #:surface-technique-orthographic-shadow-pipeline
            #:surface-frame-state
            #:make-surface-frame-state
            #:destroy-surface-frame-state
            #:surface-frame-state-technique
            #:surface-frame-state-bind-group
+           #:surface-frame-state-orthographic-shadow-projector-buffer
+           #:surface-frame-state-orthographic-shadow-bind-group
            #:surface-frame-state-uploaded-scene
            #:surface-frame-state-uploaded-scene-revision
            #:surface-frame-state-last-scene-upload-kind
@@ -123,7 +132,9 @@ of packed LUFT sites, drawn by vertex shaders pulling sites.")
            #:surface-frame-state-last-scene-upload-writes
            #:synchronize-surface-frame-state
            #:write-surface-frame-state
+           #:write-surface-shadow-projector
            #:draw-surface-frame
+           #:draw-surface-shadow-frame
            #:renderer
            #:make-renderer
            #:renderer-device
