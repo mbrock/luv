@@ -159,6 +159,10 @@ rather than making an error."
     :initform nil
     :accessor scene-site-pages
     :documentation "Packed u64 face pages addressed by SURFACE-CHUNK-PAGE.")
+   (face-record-pages
+    :initform nil
+    :accessor scene-face-record-pages
+    :documentation "Four-u32 foundation records parallel to SITE-PAGES.")
    (page-count
     :initform 0
     :accessor scene-page-count
@@ -234,15 +238,23 @@ them: the same dense cell order as the occupancy bits.")
           return capacity))
 
 (defun ensure-scene-page-capacity (scene needed)
-  "Grow SCENE's CPU face-page arena geometrically to hold NEEDED pages."
+  "Grow SCENE's site and foundation-record arenas to hold NEEDED pages."
   (when (< (scene-page-capacity scene) needed)
     (let* ((capacity (page-capacity-for needed))
            (pages (make-array (* capacity +surface-chunk-capacity+)
                               :element-type '(unsigned-byte 64)
-                              :initial-element 0)))
+                              :initial-element 0))
+           (records
+             (make-array (* capacity +surface-chunk-capacity+
+                            luft:+face-record-words+)
+                         :element-type '(unsigned-byte 32)
+                         :initial-element 0)))
       (when (scene-site-pages scene)
         (replace pages (scene-site-pages scene)))
+      (when (scene-face-record-pages scene)
+        (replace records (scene-face-record-pages scene)))
       (setf (scene-site-pages scene) pages
+            (scene-face-record-pages scene) records
             (scene-page-capacity scene) capacity)))
   scene)
 
@@ -348,7 +360,7 @@ its own packs to zeros, which is slot zero, which is *MATERIAL*."
     words))
 
 (defun rebuild-surface-chunk (scene index)
-  "Reorder and restamp only SCENE's surface chunk at INDEX."
+  "Reorder and materialize only SCENE's surface chunk at INDEX."
   (let* ((chunk (aref (scene-surface-chunks scene) index))
          (raw (if chunk (luft:chain-sites (surface-chunk-chain chunk)) #()))
          (count (length raw)))
@@ -363,6 +375,16 @@ its own packs to zeros, which is slot zero, which is *MATERIAL*."
         (when (scene-slots scene)
           (stamp-site-stocks sites (scene-domain scene) (scene-slots scene)))
         (replace (scene-site-pages scene) sites :start1 start)
+        (loop with records = (scene-face-record-pages scene)
+              with occupancy = (lambda (x y z) (scene-cell-p scene x y z))
+              for decorated across sites
+              for face = (ldb (byte 60 0) decorated)
+              for record = (* luft:+face-record-words+ start)
+                then (+ record luft:+face-record-words+)
+              do (luft:pack-face-record
+                  records record decorated
+                  (luft:face-shape-word
+                   (scene-domain scene) face occupancy)))
         (setf (surface-chunk-count chunk) count)))
     count))
 
@@ -383,6 +405,25 @@ inspection and reference form, allocated only when a caller asks for it."
                           :start1 cursor :start2 start :end2 (+ start count))
                  (incf cursor count)))
     sites))
+
+(defun scene-face-records (scene)
+  "Return SCENE's compact foundation face records in chunk order."
+  (let ((records
+          (make-array (* luft:+face-record-words+
+                         (luft:chain-count (scene-surface scene)))
+                      :element-type '(unsigned-byte 32)))
+        (cursor 0))
+    (loop for chunk across (scene-surface-chunks scene)
+          when (and chunk (plusp (surface-chunk-count chunk)))
+            do (let* ((words (* luft:+face-record-words+
+                                (surface-chunk-count chunk)))
+                      (start (* luft:+face-record-words+
+                                +surface-chunk-capacity+
+                                (surface-chunk-page chunk))))
+                 (replace records (scene-face-record-pages scene)
+                          :start1 cursor :start2 start :end2 (+ start words))
+                 (incf cursor words)))
+    records))
 
 (defun refresh-scene (scene)
   "Recompute every derived product of SCENE from its solid reference chain."
@@ -414,6 +455,11 @@ inspection and reference form, allocated only when a caller asks for it."
               (scene-site-pages scene)
               (make-array (* page-capacity +surface-chunk-capacity+)
                           :element-type '(unsigned-byte 64)
+                          :initial-element 0)
+              (scene-face-record-pages scene)
+              (make-array (* page-capacity +surface-chunk-capacity+
+                             luft:+face-record-words+)
+                          :element-type '(unsigned-byte 32)
                           :initial-element 0)
               (scene-cell-bits scene)
               (luft:chain-cell-bits (scene-solid scene))
@@ -1225,11 +1271,14 @@ lane: the arris softness of a chamfer, or the vertical radius of the field."
    (temporal-layout :initform nil :accessor renderer-temporal-layout)
    (uniform-buffer :initform nil :accessor renderer-uniform-buffer)
    (sites-buffer :initform nil :accessor renderer-sites-buffer)
+   (face-records-buffer :initform nil :accessor renderer-face-records-buffer)
    (cells-buffer :initform nil :accessor renderer-cells-buffer)
    (stocks-buffer :initform nil :accessor renderer-stocks-buffer)
    (slots-buffer :initform nil :accessor renderer-slots-buffer)
    (slots-capacity :initform 0 :accessor renderer-slots-capacity)
    (sites-capacity :initform 0 :accessor renderer-sites-capacity)
+   (face-records-capacity :initform 0
+                          :accessor renderer-face-records-capacity)
    (cells-capacity :initform 0 :accessor renderer-cells-capacity)
    (layout :initform nil :accessor renderer-layout)
    (bind-group :initform nil :accessor renderer-bind-group)
@@ -1563,7 +1612,7 @@ work is in flight because the GPU abstraction defers their native teardown."
 ;;; shader invocations per site.
 
 (defparameter *surface-styles*
-  '(:flat :bevel :chamfer :paper :stock :field :soft :ink :clay)
+  '(:foundation :flat :bevel :chamfer :paper :stock :field :soft :ink :clay)
   "Surface styles Luft can draw, in the order a menu would list them.")
 
 (defun default-renderer-effects ()
@@ -1619,7 +1668,7 @@ it."
   (let ((styles (renderer-pipeline-styles renderer))
         (temporal-p (renderer-effect-p renderer :taa)))
     (values
-     (when (intersection styles '(:flat :bevel))
+     (when (intersection styles '(:foundation :flat :bevel))
        (create-renderer-module renderer :luft/shader/surface-fragment
                                "luft surface fragment"
                                (if temporal-p
@@ -1683,12 +1732,18 @@ it."
 (defun create-renderer-pipelines (renderer)
   "Create the vertex-pulling pipelines RENDERER's styles and effects need."
   (let ((styles (renderer-pipeline-styles renderer))
-        surface bevel chamfer stock field clay screen)
+        foundation surface bevel chamfer stock field clay screen)
     (when (intersection styles '(:flat :soft :ink))
       (setf surface (create-renderer-module
                      renderer :luft/shader/surface-vertex
                      "luft surface vertex"
                      (shaders:surface-vertex-shader))))
+    (when (member :foundation styles)
+      (setf foundation
+            (create-renderer-module
+             renderer :luft/shader/foundation-vertex
+             "luft foundation vertex"
+             (shaders:foundation-vertex-shader))))
     (when (member :bevel styles)
       (setf bevel (create-renderer-module
                    renderer :luft/shader/bevel-vertex
@@ -1742,6 +1797,9 @@ it."
                  :fragment (fragment-stage fragment-module target-formats)
                  :primitive '(:topology :triangle-list)
                  :depth-stencil depth))))
+        (when (member :foundation styles)
+          (pipeline :foundation :luft/pipeline/foundation
+                    "luft foundation pipeline" foundation fragment))
         (when (member :flat styles)
           (pipeline :flat :luft/pipeline/flat "luft surface pipeline"
                     surface fragment))
@@ -1842,7 +1900,9 @@ it."
                 (:binding ,shaders:+sites-binding+ :type :storage-buffer)
                 (:binding ,shaders:+cells-binding+ :type :storage-buffer)
                 (:binding ,shaders:+stocks-binding+ :type :storage-buffer)
-                (:binding ,shaders:+slots-binding+ :type :storage-buffer))))))
+                (:binding ,shaders:+slots-binding+ :type :storage-buffer)
+                (:binding ,shaders:+face-records-binding+
+                 :type :storage-buffer))))))
     (when (renderer-shader-temporal-p renderer)
       (setf (renderer-temporal-layout renderer)
             (with-renderer-creation-step
@@ -1954,6 +2014,7 @@ one is requested from PROVIDER and owned by the renderer."
     (when layout (ignore-errors (destroy layout))))
   (dolist (resource (list (renderer-sampler renderer)
                           (renderer-sites-buffer renderer)
+                          (renderer-face-records-buffer renderer)
                           (renderer-cells-buffer renderer)
                           (renderer-stocks-buffer renderer)
                           (renderer-slots-buffer renderer)
@@ -1967,6 +2028,7 @@ one is requested from PROVIDER and owned by the renderer."
         (renderer-modules renderer) nil
         (renderer-surfaces renderer) nil
         (renderer-sites-buffer renderer) nil
+        (renderer-face-records-buffer renderer) nil
         (renderer-cells-buffer renderer) nil
         (renderer-stocks-buffer renderer) nil
         (renderer-slots-buffer renderer) nil
@@ -1995,7 +2057,7 @@ old generation until its entirely new replacement is ready."
                 candidate-capacity t))))
 
 (defun create-surface-bind-group
-    (renderer sites-buffer cells-buffer slots-buffer)
+    (renderer sites-buffer cells-buffer slots-buffer face-records-buffer)
   (create
    (renderer-device renderer)
    (make-bind-group-descriptor
@@ -2008,27 +2070,35 @@ old generation until its entirely new replacement is ready."
       (:binding ,shaders:+cells-binding+ :resource ,cells-buffer)
       (:binding ,shaders:+stocks-binding+
        :resource ,(renderer-stocks-buffer renderer))
-      (:binding ,shaders:+slots-binding+ :resource ,slots-buffer)))))
+      (:binding ,shaders:+slots-binding+ :resource ,slots-buffer)
+      (:binding ,shaders:+face-records-binding+ :resource ,face-records-buffer)))))
 
 (zdefun (upload-scene :zone :luft/upload-scene
                        :value (luft:chain-count (scene-surface scene)))
     (renderer &optional (scene (renderer-scene renderer)))
   "Upload SCENE and publish one coherent buffer/bind-group generation."
   (let* ((sites (scene-site-pages scene))
+         (face-records (scene-face-record-pages scene))
          (sites-needed (* 8 (length sites)))
+         (face-records-needed (* 4 (length face-records)))
          (cells-needed (* 4 (length (scene-cell-bits scene))))
          (slots-needed (* 4 (length (scene-slot-words scene))))
          (old-sites (renderer-sites-buffer renderer))
+         (old-face-records (renderer-face-records-buffer renderer))
          (old-cells (renderer-cells-buffer renderer))
          (old-slots (renderer-slots-buffer renderer))
          (old-bind-group (renderer-bind-group renderer))
          (replace-p
            (or (null old-bind-group)
-               (null old-sites) (null old-cells) (null old-slots)
+               (null old-sites) (null old-face-records)
+               (null old-cells) (null old-slots)
                (> sites-needed (renderer-sites-capacity renderer))
+               (> face-records-needed
+                  (renderer-face-records-capacity renderer))
                (> cells-needed (renderer-cells-capacity renderer))
                (> slots-needed (renderer-slots-capacity renderer))))
          sites-buffer sites-capacity sites-new-p
+         face-records-buffer face-records-capacity face-records-new-p
          cells-buffer cells-capacity cells-new-p
          slots-buffer slots-capacity slots-new-p
          bind-group (completed-p nil))
@@ -2038,6 +2108,12 @@ old generation until its entirely new replacement is ready."
              (storage-buffer-candidate
               renderer old-sites (renderer-sites-capacity renderer)
               sites-needed "luft surface sites" replace-p))
+           (multiple-value-setq
+               (face-records-buffer face-records-capacity face-records-new-p)
+             (storage-buffer-candidate
+              renderer old-face-records
+              (renderer-face-records-capacity renderer)
+              face-records-needed "luft foundation face records" replace-p))
            (multiple-value-setq (cells-buffer cells-capacity cells-new-p)
              (storage-buffer-candidate
               renderer old-cells (renderer-cells-capacity renderer)
@@ -2047,14 +2123,19 @@ old generation until its entirely new replacement is ready."
               renderer old-slots (renderer-slots-capacity renderer)
               slots-needed "luft cell stocks" replace-p))
            (write-buffer sites-buffer sites)
+           (write-buffer face-records-buffer face-records)
            (write-buffer cells-buffer (scene-cell-bits scene))
            (write-buffer slots-buffer (scene-slot-words scene))
            (when replace-p
              (setf bind-group
                    (create-surface-bind-group
-                    renderer sites-buffer cells-buffer slots-buffer)))
+                    renderer sites-buffer cells-buffer slots-buffer
+                    face-records-buffer)))
            (setf (renderer-sites-buffer renderer) sites-buffer
                  (renderer-sites-capacity renderer) sites-capacity
+                 (renderer-face-records-buffer renderer) face-records-buffer
+                 (renderer-face-records-capacity renderer)
+                 face-records-capacity
                  (renderer-cells-buffer renderer) cells-buffer
                  (renderer-cells-capacity renderer) cells-capacity
                  (renderer-slots-buffer renderer) slots-buffer
@@ -2066,8 +2147,8 @@ old generation until its entirely new replacement is ready."
                  (scene-revision scene)
                  (renderer-last-scene-upload-kind renderer) :full
                  (renderer-last-scene-upload-bytes renderer)
-                 (+ sites-needed cells-needed slots-needed)
-                 (renderer-last-scene-upload-writes renderer) 3
+                 (+ sites-needed face-records-needed cells-needed slots-needed)
+                 (renderer-last-scene-upload-writes renderer) 4
                  (renderer-history-valid-p renderer) nil
                  completed-p t)
            ;; Only now can the previous generation stop being reachable.
@@ -2075,6 +2156,8 @@ old generation until its entirely new replacement is ready."
              (when old-bind-group (ignore-errors (destroy old-bind-group)))
              (when (and sites-new-p old-sites)
                (ignore-errors (destroy old-sites)))
+             (when (and face-records-new-p old-face-records)
+               (ignore-errors (destroy old-face-records)))
              (when (and cells-new-p old-cells)
                (ignore-errors (destroy old-cells)))
              (when (and slots-new-p old-slots)
@@ -2084,6 +2167,8 @@ old generation until its entirely new replacement is ready."
         (when bind-group (ignore-errors (destroy bind-group)))
         (when (and sites-new-p sites-buffer)
           (ignore-errors (destroy sites-buffer)))
+        (when (and face-records-new-p face-records-buffer)
+          (ignore-errors (destroy face-records-buffer)))
         (when (and cells-new-p cells-buffer)
           (ignore-errors (destroy cells-buffer)))
         (when (and slots-new-p slots-buffer)
@@ -2129,7 +2214,17 @@ Return the number of bytes and write calls issued."
                  (write-buffer (renderer-sites-buffer renderer) sites
                                :offset (* 8 start))
                  (incf bytes (* 8 count))
-                 (incf writes)))
+                 (incf writes)
+                 (let* ((record-start (* luft:+face-record-words+ start))
+                        (record-count (* luft:+face-record-words+ count))
+                        (records
+                          (subseq (scene-face-record-pages scene)
+                                  record-start
+                                  (+ record-start record-count))))
+                   (write-buffer (renderer-face-records-buffer renderer)
+                                 records :offset (* 4 record-start))
+                   (incf bytes (* 4 record-count))
+                   (incf writes))))
     (multiple-value-bind (range-bytes range-writes)
         (write-buffer-index-ranges
          (renderer-cells-buffer renderer) (scene-cell-bits scene) cell-words 4)
@@ -2156,6 +2251,8 @@ Return the number of bytes and write calls issued."
      renderer)
     ((or (> (* 8 (length (scene-site-pages scene)))
             (renderer-sites-capacity renderer))
+         (> (* 4 (length (scene-face-record-pages scene)))
+            (renderer-face-records-capacity renderer))
          (> (* 4 (length (scene-cell-bits scene)))
             (renderer-cells-capacity renderer))
          (> (* 4 (length (scene-slot-words scene)))
@@ -2169,7 +2266,8 @@ Return the number of bytes and write calls issued."
            (upload-scene renderer scene))))))
 
 (defun renderer-surface-width (renderer)
-  (if (member (renderer-style renderer) '(:chamfer :paper :stock))
+  (if (member (renderer-style renderer)
+              '(:foundation :chamfer :paper :stock))
       *chamfer-width*
       *bevel-radius*))
 
@@ -2722,13 +2820,13 @@ a ray never claims a cell it merely touches."
 (defun standalone-render-options
     (&optional (name (uiop:getenv "LUFT_RENDER_MODE")))
   "Return MODE, STYLE, PIPELINE-STYLES, and EFFECTS for standalone NAME."
-  (let ((mode (string-downcase (or name "full")))
+  (let ((mode (string-downcase (or name "foundation")))
         (styles *surface-styles*))
     (cond ((string= mode "clear")
            (values :clear :flat nil nil))
           ((string= mode "sky")
            (values :sky :flat nil '(:sky)))
-          ((member mode '("flat" "bevel" "chamfer" "paper" "stock" "field"
+          ((member mode '("foundation" "flat" "bevel" "chamfer" "paper" "stock" "field"
                           "soft" "ink" "clay")
                    :test #'string=)
            (let ((style (intern (string-upcase mode) :keyword)))
@@ -2740,7 +2838,7 @@ a ray never claims a cell it merely touches."
            (values :full (if (member :stock styles) :stock :chamfer)
                    styles (default-renderer-effects)))
           (t
-           (error "Unknown LUFT_RENDER_MODE ~S; use clear, sky, flat, bevel, ~
+           (error "Unknown LUFT_RENDER_MODE ~S; use clear, sky, foundation, flat, bevel, ~
 chamfer, paper, stock, field, soft, ink, clay, or full." name)))))
 
 (zdefun (start-viewer :zone :luft/start-viewer)

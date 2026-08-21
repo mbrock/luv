@@ -115,6 +115,138 @@ The renderer multiplies this by the site count to size its draw."))
     (set-output world point)
     (set-output uv (vec2 a b))))
 
+;;; ------------------------------------------------------------------------
+;;; Foundation records: sixteen realized points, eighteen triangles
+;;;
+;;; This path consumes exactly the four-u32 ABI of luft-foundation.lisp.
+;;; Occupancy has already become a discrete shape word on the CPU; the GPU
+;;; only decodes that word and realizes the shared points of the patch.
+
+(defmethod surface-vertices-per-face ((style (eql :foundation))) 54)
+
+(define-shader foundation-vertex-shader
+    (:stage :vertex
+     :inputs ((vertex-index :uint :built-in :vertex-index))
+     :resources ((frame :uniform-block :binding #.+frame-binding+
+                        :members #.*frame-uniform-members*)
+                 (records :storage-buffer :binding #.+face-records-binding+
+                          :element :uint))
+     :outputs ((position :vec4 :built-in :position)
+               (normal :vec3 :location 0)
+               (world :vec3 :location 1)
+               (uv :vec2 :location 2)))
+  (let* ((face-index (/ vertex-index (uint 54.0)))
+         (record-index (* face-index (uint 4.0)))
+         (low (buffer-element records record-index))
+         (high (buffer-element records (+ record-index (uint 1.0))))
+         (shape (buffer-element records (+ record-index (uint 2.0))))
+         (vertex-in-face (mod vertex-index (uint 54.0)))
+         (quad-index (/ vertex-in-face (uint 6.0)))
+         (vertex-in-quad (mod vertex-in-face (uint 6.0)))
+         (quad-i (/ quad-index (uint 3.0)))
+         (quad-j (mod quad-index (uint 3.0)))
+         (extent (uint (ldb (byte luft:+extent-bits+ 0) low)))
+         (negative-p (= (uint (ldb (byte 1 luft:+site-sign-bit+) low))
+                        (uint 1.0)))
+         ;; X is wholly in LOW.  Y straddles the words at bit 28; Z and the
+         ;; material nibble are wholly in HIGH.  No shader int64 is needed.
+         (x (float (uint (ldb (byte 24 4) low))))
+         (y-low (uint (ldb (byte 4 28) low)))
+         (y-high (uint (ldb (byte 20 0) high)))
+         (y (float (+ y-low (* y-high (uint 16.0)))))
+         (z (float (uint (ldb (byte 8 20) high))))
+         (anchor (vec3 x y z))
+         (yz-face-p (= extent (uint luft:+yz-face-extent+)))
+         (xz-face-p (= extent (uint luft:+xz-face-extent+)))
+         (edge-a (if yz-face-p (vec3 0.0 1.0 0.0)
+                     (vec3 1.0 0.0 0.0)))
+         (edge-b (if (= extent (uint luft:+xy-face-extent+))
+                     (vec3 0.0 1.0 0.0)
+                     (vec3 0.0 0.0 1.0)))
+         (canonical (if yz-face-p
+                        (vec3 1.0 0.0 0.0)
+                        (if xz-face-p (vec3 0.0 -1.0 0.0)
+                            (vec3 0.0 0.0 1.0))))
+         (outward (* canonical (if negative-p -1.0 1.0)))
+         (corner (quad-corner vertex-in-quad negative-p))
+         (grid-i (+ quad-i
+                    (uint (corner-spans-a corner))))
+         (grid-j (+ quad-j
+                    (uint (corner-spans-b corner))))
+         (i (float grid-i))
+         (j (float grid-j))
+         (width (swizzle domain-vector :z))
+         (s (if (< i 0.5) 0.0
+                (if (< i 1.5) width
+                    (if (< i 2.5) (- 1.0 width) 1.0))))
+         (t* (if (< j 0.5) 0.0
+                 (if (< j 1.5) width
+                     (if (< j 2.5) (- 1.0 width) 1.0))))
+         (u-low-p (< i 0.5))
+         (u-high-p (> i 2.5))
+         (v-low-p (< j 0.5))
+         (v-high-p (> j 2.5))
+         (on-u-p (if u-low-p (> 1.0 0.0) u-high-p))
+         (on-v-p (if v-low-p (> 1.0 0.0) v-high-p))
+         ;; Edge fields occupy the low byte in U-low, U-high, V-low,
+         ;; V-high order.  A two-bit code is balanced, convex, or concave.
+         (edge-code
+           (if on-u-p
+               (if u-low-p
+                   (uint (ldb (byte 2 0) shape))
+                   (uint (ldb (byte 2 2) shape)))
+               (if v-low-p
+                   (uint (ldb (byte 2 4) shape))
+                   (uint (ldb (byte 2 6) shape)))))
+         (tangent (if on-u-p
+                      (* edge-a (if u-low-p -1.0 1.0))
+                      (* edge-b (if v-low-p -1.0 1.0))))
+         (edge-q
+           (if (= edge-code (uint 1.0))
+               (- (- outward) tangent)
+               (if (= edge-code (uint 2.0))
+                   (- outward tangent)
+                   (vec3 0.0 0.0 0.0))))
+         ;; Corner fields are six bits each.  Their low five bits encode a
+         ;; world-space ternary direction; bit five selects reach 2/3.
+         (corner-code
+           (if u-low-p
+               (if v-low-p
+                   (uint (ldb (byte 6 8) shape))
+                   (uint (ldb (byte 6 14) shape)))
+               (if v-low-p
+                   (uint (ldb (byte 6 20) shape))
+                   (uint (ldb (byte 6 26) shape)))))
+         (direction (uint (ldb (byte 5 0) corner-code)))
+         (qx (- (float (mod direction (uint 3.0))) 1.0))
+         (qy (- (float (mod (/ direction (uint 3.0)) (uint 3.0))) 1.0))
+         (qz (- (float (/ direction (uint 9.0))) 1.0))
+         (corner-q (vec3 qx qy qz))
+         (corner-reach
+           (if (= (uint (ldb (byte 1 5) corner-code)) (uint 1.0))
+               (/ 2.0 3.0) 0.5))
+         (displacement
+           (if on-u-p
+               (if on-v-p (* corner-q (* width corner-reach))
+                   (* edge-q (* width 0.5)))
+               (if on-v-p (* edge-q (* width 0.5))
+                   (vec3 0.0 0.0 0.0))))
+         (realized (+ anchor (+ (* edge-a s) (* edge-b t*)) displacement))
+         (camera (swizzle camera-vector :xyz))
+         ;; A nominally side-facing patch can bend upward at a chamfer.  The
+         ;; foundation records describe a closed surface, so retain it all
+         ;; and let depth/rasterization decide visibility.
+         (point realized)
+         (clip (view-clip point camera
+                          (swizzle right-vector :xyz)
+                          (swizzle up-vector :xyz)
+                          (swizzle forward-vector :xyz)
+                          projection-vector)))
+    (set-output position (jitter-clip clip (swizzle jitter-vector :xy)))
+    (set-output normal outward)
+    (set-output world point)
+    (set-output uv (vec2 s t*))))
+
 ;;; Shaped faces: a point grid per site, one vertex per grid point
 ;;;
 ;;; Each invocation generates one grid point and needs only the star of its

@@ -73,4 +73,10 @@
    #:+vertical-cell-rows+
    #:cell-bit-index
    #:chain-cell-bit-count
-   #:chain-cell-bits))
+   #:chain-cell-bits
+   ;; Foundation face-record ABI
+   #:+face-record-words+
+   #:face-shape-word
+   #:decorated-site
+   #:pack-face-record
+   #:unpack-face-record))

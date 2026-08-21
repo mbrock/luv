@@ -12,6 +12,7 @@
 (defconstant +cells-binding+ 2)
 (defconstant +stocks-binding+ 3)
 (defconstant +slots-binding+ 4)
+(defconstant +face-records-binding+ 5)
 
 ;;; A LUFT site occupies sixty bits and travels to the GPU in sixty-four, so
 ;;; four bits are free above it.  The packed site spends them on which stock
