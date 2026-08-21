@@ -1261,6 +1261,7 @@ surface still cannot supply an image and this frame should be skipped."
                               (mapcar
                                (lambda (usage)
                                  (ecase usage
+                                   (:copy-src :transfer)
                                    (:copy-dst :transfer)
                                    (:render-attachment
                                     :color-attachment-output)))

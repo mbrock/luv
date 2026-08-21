@@ -351,8 +351,11 @@ the selector is the whole of the difference."
               (coerce (/ (first extent)) 'single-float)
               (coerce (/ (second extent)) 'single-float)))))
 
+(declaim (ftype function viewer-surface-view))
+
 (defun encode-viewer-frame (viewer encoder surface-texture extent)
   (let* ((renderer (viewer-renderer viewer))
+         (surface-view (viewer-surface-view viewer surface-texture))
          (width (first extent))
          (height (second extent))
          (jitter (if (renderer-temporal-p renderer)
@@ -364,7 +367,7 @@ the selector is the whole of the difference."
          (previous (or (renderer-previous-view renderer) view))
          (inspection (update-viewer-inspection viewer)))
     (encode-renderer-frame
-     renderer encoder surface-texture extent
+     renderer encoder surface-view extent
      (camera-uniform-data
       view previous (viewer-inspection-parameters viewer extent)
       (if (and inspection *inspection-ink-p*) 1.0 0.0))
@@ -509,6 +512,8 @@ the selector is the whole of the difference."
            :accessor viewer-source)
    (renderer :initarg :renderer :initform nil :accessor viewer-renderer)
    (camera :initarg :camera :initform (make-fly-camera) :reader viewer-camera)
+   (surface-views :initform (make-hash-table :test #'eql)
+                  :reader viewer-surface-views)
    (controls :initform (make-hash-table :test #'eq)
              :reader viewer-controls)
    (pointer-captured-p :initform nil :accessor viewer-pointer-captured-p)
@@ -547,6 +552,30 @@ the selector is the whole of the difference."
                         :height +site-inspector-height+)
       inspector)))
   (:menu-bar nil))
+
+(defun viewer-surface-view (viewer surface)
+  "Return VIEWER's texture view for the current presentation slot."
+  (let* ((context (viewer-context viewer))
+         (key (canvas-frame-resource-key context surface))
+         (views (viewer-surface-views viewer))
+         (view (gethash key views)))
+    (when (and view (not (eq surface (gpu-texture-view-texture view))))
+      ;; Metal returns a fresh borrowed wrapper when it revisits a drawable.
+      ;; Keep the stable slot but never let its view retain the old wrapper.
+      (destroy view)
+      (setf view nil))
+    (or view
+        (setf (gethash key views)
+              (create (viewer-device viewer)
+                      (make-texture-view-descriptor :texture surface))))))
+
+(defun release-viewer-surface-views (viewer)
+  (maphash (lambda (key view)
+             (declare (ignore key))
+             (destroy view))
+           (viewer-surface-views viewer))
+  (clrhash (viewer-surface-views viewer))
+  (values))
 
 (defun viewer-control-active-p (viewer direction)
   (gethash direction (viewer-controls viewer)))
@@ -970,6 +999,9 @@ and an interactive STOP-VIEWER the same idempotent application operation."
                                  (lambda (timestamp)
                                    (declare (ignore timestamp)))))))
                    (setf (canvas-event-handler canvas) nil)
+                   (release :surface-views
+                            (lambda ()
+                              (release-viewer-surface-views viewer)))
                    (when (viewer-renderer viewer)
                      (release :renderer
                               (lambda ()
