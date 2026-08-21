@@ -290,6 +290,9 @@ scenes."
                         (written pixels frame-width frame-height format)
                         (capture-luvcraft-screenshot session pathname)
                       (push written outputs)
+                      (format t "~&capture ~A: frame ~D/~D~%"
+                              pathname-prefix (1+ index) count)
+                      (finish-output)
                       (when (and difference-scale previous-pixels)
                         (multiple-value-bind
                             (difference mean maximum changed)

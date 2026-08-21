@@ -20,7 +20,9 @@ presentation; deterministic captures wait for the broader default set."
                       (min 9 (hash-table-count
                               (luvcraft-session-desired-chunks session)))))
          (deadline (+ (get-internal-real-time)
-                      (round (* timeout internal-time-units-per-second)))))
+                      (round (* timeout internal-time-units-per-second))))
+         (next-report (+ (get-internal-real-time)
+                         internal-time-units-per-second)))
     (loop
       (let ((products nil))
         (request-canvas-frame
@@ -32,6 +34,11 @@ presentation; deterministic captures wait for the broader default set."
                  (hash-table-count (luvcraft-session-chunk-products session)))))
         (when (>= products minimum)
           (return session))
+        (when (>= (get-internal-real-time) next-report)
+          (format t "~&luvcraft: waiting for chunk meshes (~D/~D)~%"
+                  products minimum)
+          (finish-output)
+          (incf next-report internal-time-units-per-second))
         (when (>= (get-internal-real-time) deadline)
           (error "Only ~D chunk meshes arrived within ~,2F seconds; expected ~D.~@[ Last worker error: ~A~]"
                  products

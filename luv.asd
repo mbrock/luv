@@ -338,7 +338,10 @@ offsets and of headers."
   :components ((:module "captures"
                 :serial t
                 :components ((:file "package")
-                             (:file "construction")))))
+                             (:file "construction")
+                             (:file "pre-noon")
+                             (:file "day-cycle")
+                             (:file "reference-plates")))))
 
 (defsystem "luv/mcclim"
   :description "An experimental McCLIM backend presented through luv canvases."
