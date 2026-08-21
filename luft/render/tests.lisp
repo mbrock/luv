@@ -339,6 +339,63 @@
                   (luft.render::renderer-uploaded-scene-revision renderer))))
       (destroy-renderer renderer))))
 
+(deftest surface-frame-states-have-independent-buffers-and-revision-cursors
+  (let* ((scene (probe-scene))
+         (renderer
+           (make-renderer
+            :scene scene
+            :camera (make-fly-camera
+                     :position (vec3:make-vec3 5.0 1.0 5.0)
+                     :yaw 1.6 :pitch -0.6)
+            :width 96 :height 64
+            :style :flat :pipeline-styles '(:flat) :effects nil))
+         (first (renderer-surface-frame-state renderer))
+         (second
+           (make-surface-frame-state
+            (renderer-surface-technique renderer) :scene scene)))
+    (unwind-protect
+         (progn
+           ;; A shared immutable technique must not imply shared mutable GPU
+           ;; storage between acquired frames.
+           (ok (not (eq (luft.render::surface-frame-state-uniform-buffer first)
+                        (luft.render::surface-frame-state-uniform-buffer second))))
+           (ok (not (eq (luft.render::surface-frame-state-sites-buffer first)
+                        (luft.render::surface-frame-state-sites-buffer second))))
+           (ok (not (eq (luft.render::surface-frame-state-cells-buffer first)
+                        (luft.render::surface-frame-state-cells-buffer second))))
+           (let ((shared-revision (scene-revision scene)))
+             (ok (= shared-revision
+                    (surface-frame-state-uploaded-scene-revision first)))
+             (ok (= shared-revision
+                    (surface-frame-state-uploaded-scene-revision second)))
+             ;; FIRST advances while SECOND remains a valid independent
+             ;; consumer cursor.  SECOND then folds both publications into
+             ;; one incremental catch-up.
+             (setf (scene-cell-p scene 5 4 1) t
+                   (scene-cell-p scene 5 5 1) t)
+             (synchronize-surface-frame-state first scene)
+             (ok (= (scene-revision scene)
+                    (surface-frame-state-uploaded-scene-revision first)))
+             (ok (= shared-revision
+                    (surface-frame-state-uploaded-scene-revision second)))
+             (synchronize-surface-frame-state second scene)
+             (ok (eq :incremental
+                     (surface-frame-state-last-scene-upload-kind second)))
+             (ok (= (scene-revision scene)
+                    (surface-frame-state-uploaded-scene-revision second))))
+           ;; Falling behind the bounded history is an ordinary full-upload
+           ;; fallback local to the lagging state.
+           (let ((luft.render::*scene-change-history-limit* 1))
+             (setf (scene-cell-p scene 5 6 1) t
+                   (scene-cell-p scene 5 7 1) t))
+           (synchronize-surface-frame-state second scene)
+           (ok (eq :full
+                   (surface-frame-state-last-scene-upload-kind second)))
+           (ok (= (scene-revision scene)
+                  (surface-frame-state-uploaded-scene-revision second))))
+      (destroy-surface-frame-state second)
+      (destroy-renderer renderer))))
+
 (deftest temporal-jitter-and-frame-views-are-frame-sized-and-frozen
   (let* ((width 320)
          (height 200)

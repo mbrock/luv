@@ -100,6 +100,28 @@ of packed LUFT sites, drawn by vertex shaders pulling sites.")
            #:camera-basis
            #:raycast-scene
            #:frame-uniform-data
+           #:surface-technique
+           #:make-surface-technique
+           #:destroy-surface-technique
+           #:surface-technique-device
+           #:surface-technique-layout
+           #:surface-technique-pipeline
+           #:surface-technique-pipeline-styles
+           #:surface-technique-target-formats
+           #:surface-technique-temporal-p
+           #:surface-frame-state
+           #:make-surface-frame-state
+           #:destroy-surface-frame-state
+           #:surface-frame-state-technique
+           #:surface-frame-state-bind-group
+           #:surface-frame-state-uploaded-scene
+           #:surface-frame-state-uploaded-scene-revision
+           #:surface-frame-state-last-scene-upload-kind
+           #:surface-frame-state-last-scene-upload-bytes
+           #:surface-frame-state-last-scene-upload-writes
+           #:synchronize-surface-frame-state
+           #:write-surface-frame-state
+           #:draw-surface-frame
            #:renderer
            #:make-renderer
            #:renderer-device
@@ -109,6 +131,8 @@ of packed LUFT sites, drawn by vertex shaders pulling sites.")
            #:renderer-style
            #:renderer-pipeline-styles
            #:renderer-effects
+           #:renderer-surface-technique
+           #:renderer-surface-frame-state
            #:renderer-last-scene-upload-kind
            #:renderer-last-scene-upload-bytes
            #:renderer-last-scene-upload-writes
