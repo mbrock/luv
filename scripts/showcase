@@ -220,14 +220,47 @@ git -C "$media_checkout" switch "$media_branch"
 git -C "$media_checkout" merge --ff-only "origin/$media_branch"
 
 revision=$(git -C "$source_checkout" rev-parse --short=12 HEAD)
-echo "showcase: rendering source $revision on chapel"
-LUV_CAPTURE_OUTPUT_DIRECTORY="$media_checkout/media" \
+stage_root=$(mktemp -d /tmp/luv-showcase-render.XXXXXX)
+rendered_media=$stage_root/rendered-media
+previous_media=$stage_root/previous-media
+swapped=0
+had_previous=0
+cleanup_render_stage() {
+  status=$?
+  trap - EXIT HUP INT TERM
+  set +e
+  if [ "$swapped" -eq 1 ] && [ "$had_previous" -eq 1 ]; then
+    if [ -d "$media_checkout/media" ]; then
+      mv "$media_checkout/media" "$stage_root/failed-media"
+    fi
+    mv "$previous_media" "$media_checkout/media"
+  fi
+  case "$stage_root" in
+    /tmp/luv-showcase-render.*) find "$stage_root" -depth -delete ;;
+    *) echo "showcase: refusing unsafe staging cleanup: $stage_root" >&2 ;;
+  esac
+  exit "$status"
+}
+trap cleanup_render_stage EXIT HUP INT TERM
+mkdir -p "$rendered_media"
+
+echo "showcase: rendering source $revision on chapel into $rendered_media"
+LUV_CAPTURE_OUTPUT_DIRECTORY="$rendered_media" \
   nix develop --verbose -L "$source_checkout" --no-write-lock-file -c \
     make -C "$source_checkout" capture
 
+echo "showcase: replacing the published media tree"
+if [ -d "$media_checkout/media" ]; then
+  mv "$media_checkout/media" "$previous_media"
+  had_previous=1
+  swapped=1
+fi
+mv "$rendered_media" "$media_checkout/media"
+swapped=0
+
 echo "showcase: annexing rendered media"
 git -C "$media_checkout" annex add media
-git -C "$media_checkout" add media/manifest.sexp
+git -C "$media_checkout" add -A media
 if test -n "$(git -C "$media_checkout" status --porcelain)"; then
   git -C "$media_checkout" commit -m "Capture showcase at $revision"
 else
