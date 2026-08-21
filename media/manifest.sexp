@@ -1,5 +1,5 @@
 
-(:VERSION 1 :SOURCE-REVISION "a3283ebe9a0a22f0a7f1f55911ca4e0fca32b400"
+(:VERSION 1 :SOURCE-REVISION "2dfe05b32072c2f3ec4cae086884da315c69f5d5"
  :CAPTURES
  ((:NAME "construction-proposal-still" :FIGURE "Y7X7WK" :KIND :IMAGE :FILE
    "Y7X7WK-construction-proposal-still.png" :LAYOUT :LANDSCAPE :WIDTH 960
@@ -167,6 +167,78 @@
    :HEIGHT 1280 :POSTER
    (:FILE "CSCFGF-party-ball-cascade-portrait-poster-480w.webp" :TYPE
     "image/webp" :WIDTH 480 :HEIGHT 854))
+  (:NAME "gameplay-smash-wall" :FIGURE "P3L8YX" :KIND :VIDEO :FILE
+   "P3L8YX-gameplay-smash-wall.mp4" :LAYOUT :LANDSCAPE :WIDTH 1200 :HEIGHT 800
+   :POSTER
+   (:FILE "P3L8YX-gameplay-smash-wall-poster-480w.webp" :TYPE "image/webp"
+    :WIDTH 480 :HEIGHT 320))
+  (:NAME "gameplay-build-brick-arch" :FIGURE "P3L8YX" :KIND :VIDEO :FILE
+   "P3L8YX-gameplay-build-brick-arch.mp4" :LAYOUT :LANDSCAPE :WIDTH 1200
+   :HEIGHT 800 :POSTER
+   (:FILE "P3L8YX-gameplay-build-brick-arch-poster-480w.webp" :TYPE
+    "image/webp" :WIDTH 480 :HEIGHT 320))
+  (:NAME "gnome-garden-conversation" :FIGURE "W7T2IT" :KIND :IMAGE :FILE
+   "W7T2IT-gnome-garden-conversation.png" :LAYOUT :LANDSCAPE :WIDTH 1200
+   :HEIGHT 800 :VARIANTS
+   ((:FILE "W7T2IT-gnome-garden-conversation-480w.webp" :TYPE "image/webp"
+     :WIDTH 480 :HEIGHT 320)
+    (:FILE "W7T2IT-gnome-garden-conversation-768w.webp" :TYPE "image/webp"
+     :WIDTH 768 :HEIGHT 512)))
+  (:NAME "gnome-garden-focus-pull" :FIGURE "W7T2IT" :KIND :VIDEO :FILE
+   "W7T2IT-gnome-garden-focus-pull.mp4" :LAYOUT :LANDSCAPE :WIDTH 1200 :HEIGHT
+   800 :POSTER
+   (:FILE "W7T2IT-gnome-garden-focus-pull-poster-480w.webp" :TYPE "image/webp"
+    :WIDTH 480 :HEIGHT 320))
+  (:NAME "cat-in-the-sun-conversation" :FIGURE "W7T2IT" :KIND :IMAGE :FILE
+   "W7T2IT-cat-in-the-sun-conversation.png" :LAYOUT :PORTRAIT :WIDTH 720
+   :HEIGHT 1280 :VARIANTS
+   ((:FILE "W7T2IT-cat-in-the-sun-conversation-480w.webp" :TYPE "image/webp"
+     :WIDTH 480 :HEIGHT 854)))
+  (:NAME "cat-in-the-sun-focus-pull" :FIGURE "W7T2IT" :KIND :VIDEO :FILE
+   "W7T2IT-cat-in-the-sun-focus-pull.mp4" :LAYOUT :PORTRAIT :WIDTH 720 :HEIGHT
+   1280 :POSTER
+   (:FILE "W7T2IT-cat-in-the-sun-focus-pull-poster-480w.webp" :TYPE
+    "image/webp" :WIDTH 480 :HEIGHT 854))
+  (:NAME "metabar-grading" :FIGURE "DYJZBK" :KIND :IMAGE :FILE
+   "DYJZBK-metabar-grading.png" :LAYOUT :LANDSCAPE :WIDTH 1200 :HEIGHT 800
+   :VARIANTS
+   ((:FILE "DYJZBK-metabar-grading-480w.webp" :TYPE "image/webp" :WIDTH 480
+     :HEIGHT 320)
+    (:FILE "DYJZBK-metabar-grading-768w.webp" :TYPE "image/webp" :WIDTH 768
+     :HEIGHT 512)))
+  (:NAME "command-menu-filter" :FIGURE "DYJZBK" :KIND :IMAGE :FILE
+   "DYJZBK-command-menu-filter.png" :LAYOUT :LANDSCAPE :WIDTH 1200 :HEIGHT 800
+   :VARIANTS
+   ((:FILE "DYJZBK-command-menu-filter-480w.webp" :TYPE "image/webp" :WIDTH 480
+     :HEIGHT 320)
+    (:FILE "DYJZBK-command-menu-filter-768w.webp" :TYPE "image/webp" :WIDTH 768
+     :HEIGHT 512)))
+  (:NAME "terminal-camp-golden-hour" :FIGURE "2TMUKK" :KIND :IMAGE :FILE
+   "2TMUKK-terminal-camp-golden-hour.png" :LAYOUT :LANDSCAPE :WIDTH 1200
+   :HEIGHT 800 :VARIANTS
+   ((:FILE "2TMUKK-terminal-camp-golden-hour-480w.webp" :TYPE "image/webp"
+     :WIDTH 480 :HEIGHT 320)
+    (:FILE "2TMUKK-terminal-camp-golden-hour-768w.webp" :TYPE "image/webp"
+     :WIDTH 768 :HEIGHT 512)))
+  (:NAME "terminal-shell-closeup" :FIGURE "2TMUKK" :KIND :IMAGE :FILE
+   "2TMUKK-terminal-shell-closeup.png" :LAYOUT :LANDSCAPE :WIDTH 1200 :HEIGHT
+   800 :VARIANTS
+   ((:FILE "2TMUKK-terminal-shell-closeup-480w.webp" :TYPE "image/webp" :WIDTH
+     480 :HEIGHT 320)
+    (:FILE "2TMUKK-terminal-shell-closeup-768w.webp" :TYPE "image/webp" :WIDTH
+     768 :HEIGHT 512)))
+  (:NAME "wall-cinema-at-dusk" :FIGURE "TWKA93" :KIND :IMAGE :FILE
+   "TWKA93-wall-cinema-at-dusk.png" :LAYOUT :LANDSCAPE :WIDTH 1200 :HEIGHT 800
+   :VARIANTS
+   ((:FILE "TWKA93-wall-cinema-at-dusk-480w.webp" :TYPE "image/webp" :WIDTH 480
+     :HEIGHT 320)
+    (:FILE "TWKA93-wall-cinema-at-dusk-768w.webp" :TYPE "image/webp" :WIDTH 768
+     :HEIGHT 512)))
+  (:NAME "wall-cinema-at-dusk-film" :FIGURE "TWKA93" :KIND :VIDEO :FILE
+   "TWKA93-wall-cinema-at-dusk-film.mp4" :LAYOUT :LANDSCAPE :WIDTH 1200 :HEIGHT
+   800 :POSTER
+   (:FILE "TWKA93-wall-cinema-at-dusk-film-poster-480w.webp" :TYPE "image/webp"
+    :WIDTH 480 :HEIGHT 320))
   (:NAME "gazetteer-little-world-noon" :FIGURE "OK1OC8" :KIND :IMAGE :FILE
    "OK1OC8-gazetteer-little-world-noon.png" :LAYOUT :LANDSCAPE :WIDTH 960
    :HEIGHT 640 :VARIANTS
