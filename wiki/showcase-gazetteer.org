@@ -425,3 +425,44 @@ of HUD and viewmodel layers.
 [[capture:NLCFX0-pre-noon-ridge-still.png]]
 
 [[capture:NLCFX0-pre-noon-ridge-glide.mp4]]
+
+* DONE Open the phone-first gallery
+:PROPERTIES:
+:ID: GS5XNW
+:END:
+
+/Intent./ Grow the first folio into something that can be browsed for pleasure:
+dozens of distinct stills and films, with clean portrait compositions taking
+the lead on phones and a smaller set of landscape play views retaining the
+crosshair, hotbar, and first-person body when those are the subject.
+
+/Evidence./ Source revision =a3283ebe9a0a= publishes 39 capture recipes: 27
+stills and 12 films, including 14 portrait cards.  The portrait films use the
+LUFT Atelier vocabulary from #SY26PO: a 720 by 1280 frame, authored
+position/look/FOV paths, eased Catmull-Rom travel, field scale 1.25, collision
+clearance, and a clean presentation.  New terrain, day-cycle, crystal,
+inhabitant, and physics subjects sit beside one ordinary landscape walk with
+its HUD and viewmodel.
+
+The public index serves 480-pixel WebP stills and video posters, with
+768-pixel WebP alternatives for landscape stills; the PNG and MP4 originals
+remain linked.  At a 390 by 844 browser viewport, all 39 phone-card assets
+total 503,406 bytes.  The 12 videos remain at media =readyState= zero until the
+visitor plays one.  Browser acceptance played the LUFT clay flight, crystal
+night arc, party-ball cascade, and landscape HUD walk; each decoded at its
+declared 720 by 1280 or 1200 by 800 dimensions and advanced continuously.
+
+Chapel's RX 6600 XT rendered two raw Vulkan jobs in 10.195 seconds in parallel
+versus 20.276 seconds sequentially, with byte-identical PNG frames.  Parallel
+x264 did not pass the stronger film gate: encoded files and decoded frames
+differed from an isolated render even with one encoder thread.  The published
+path therefore remains sequential and now fails closed unless Vulkan resolves
+the explicit RADV ICD to the discrete RX 6600 XT.
+
+[[capture:NLCFX0-pre-noon-under-the-trees-portrait.png]]
+
+[[capture:Q8ZIFD-crystal-grove-night-portrait.mp4]]
+
+[[capture:CSCFGF-party-ball-cascade-portrait.mp4]]
+
+[[capture:SY26PO-luft-holm-portrait.mp4]]
