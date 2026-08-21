@@ -1216,6 +1216,7 @@ lane: the arris softness of a chamfer, or the vertical radius of the field."
    (layout :initform nil :accessor surface-technique-layout)
    (modules :initform nil :accessor surface-technique-modules)
    (pipelines :initform nil :accessor surface-technique-pipelines)
+   (frame-states :initform nil :accessor surface-technique-frame-states)
    (pipeline-styles :initarg :pipeline-styles
                     :reader surface-technique-pipeline-styles)
    (target-formats :initarg :target-formats
@@ -1227,11 +1228,12 @@ lane: the arris softness of a chamfer, or the vertical radius of the field."
   (:documentation
    "The immutable GPU technique shared by surface draws on one DEVICE.
 
-It owns the exact bind-group layout, shader modules, and style pipelines.
-Mutable frame and scene buffers deliberately live in SURFACE-FRAME-STATE, so
-several acquired frames can use this technique without sharing mapped state.
-OUTPUT-SPACE says whether its fragment programs own presentation or return
-linear radiance to an enclosing frame owner."))
+It owns the exact bind-group layout, shader modules, and style pipelines, and
+tracks every dependent SURFACE-FRAME-STATE until that state's owned resources
+have all been released.  Mutable frame and scene buffers deliberately live in
+those states, so several acquired frames can use this technique without
+sharing mapped state.  OUTPUT-SPACE says whether its fragment programs own
+presentation or return linear radiance to an enclosing frame owner."))
 
 (defclass surface-frame-state ()
   ((technique :initarg :technique :reader surface-frame-state-technique)
@@ -1260,10 +1262,71 @@ Every instance owns a distinct uniform, stock, site, cell, and slot buffer.
 Its uploaded revision is therefore an independent consumer cursor into a
 SCENE's bounded change history."))
 
+(define-condition surface-release-error (error)
+  ((owner :initarg :owner :reader surface-release-error-owner)
+   (failures :initarg :failures :reader surface-release-error-failures))
+  (:documentation
+   "Owned surface resources which could not all be released.")
+  (:report
+   (lambda (condition stream)
+     (let ((failures (surface-release-error-failures condition)))
+       (format stream "~D ~A release step~:P failed.~
+                       ~:{~2%~S:~%  ~A~}"
+               (length failures)
+               (type-of (surface-release-error-owner condition))
+               (mapcar (lambda (failure)
+                         (list (car failure) (cdr failure)))
+                       failures))))))
+
+(defun call-surface-release-step (name function)
+  "Attempt one named release, returning success and its labelled failure."
+  (handler-case
+      (progn
+        (funcall function)
+        (values t nil))
+    (error (condition)
+      (values nil (cons name condition)))))
+
+(defun signal-surface-release-failures (owner failures)
+  (when failures
+    (error 'surface-release-error
+           :owner owner :failures (nreverse failures)))
+  (values))
+
+(defmacro best-effort-surface-release (&body body)
+  "Attempt unwind cleanup without replacing the error already in flight."
+  `(handler-case
+       (progn ,@body)
+     (error () (values))))
+
+(defun register-surface-frame-state (state)
+  "Keep STATE reachable from its technique until complete release."
+  (pushnew state
+           (surface-technique-frame-states
+            (surface-frame-state-technique state))
+           :test #'eq)
+  state)
+
+(defun unregister-surface-frame-state (state)
+  (let ((technique (surface-frame-state-technique state)))
+    (setf (surface-technique-frame-states technique)
+          (remove state (surface-technique-frame-states technique)
+                  :test #'eq)))
+  state)
+
+(defun surface-frame-state-resources-live-p (state)
+  (some #'identity
+        (list (surface-frame-state-bind-group state)
+              (surface-frame-state-sites-buffer state)
+              (surface-frame-state-cells-buffer state)
+              (surface-frame-state-stocks-buffer state)
+              (surface-frame-state-slots-buffer state)
+              (surface-frame-state-uniform-buffer state))))
+
 (defclass renderer ()
   ((device :initarg :device :reader renderer-device)
    (owns-device-p :initarg :owns-device-p :initform nil
-                  :reader renderer-owns-device-p)
+                  :accessor renderer-owns-device-p)
    (scene :initarg :scene :accessor renderer-scene)
    (camera :initarg :camera :accessor renderer-camera)
    (extent :initarg :extent :accessor renderer-extent)
@@ -1927,21 +1990,61 @@ SURFACE-FRAME-STATE instances from it."
            (setf completed-p t)
            technique)
       (unless completed-p
-        (destroy-surface-technique technique)))))
+        (best-effort-surface-release
+          (destroy-surface-technique technique))))))
 
 (defun destroy-surface-technique (technique)
-  "Release TECHNIQUE after all frame states made from it are destroyed."
-  (loop for (nil pipeline) on (surface-technique-pipelines technique)
-          by #'cddr
-        when pipeline do (ignore-errors (destroy pipeline)))
-  (dolist (module (surface-technique-modules technique))
-    (ignore-errors (destroy module)))
-  (when (surface-technique-layout technique)
-    (ignore-errors (destroy (surface-technique-layout technique))))
-  (setf (surface-technique-pipelines technique) nil
-        (surface-technique-modules technique) nil
-        (surface-technique-layout technique) nil)
-  (values))
+  "Release TECHNIQUE and any dependent frame states still registered with it.
+
+Every frame state is attempted first.  A state which retains any failed
+member prevents the technique resources it names from being destroyed.  Each
+successful technique member is forgotten immediately; failed handles remain
+installed for a later retry, and all failures from one tier are reported
+together."
+  (let ((failures nil))
+    (loop for state in (copy-list
+                        (surface-technique-frame-states technique))
+          for index from 0
+          do (multiple-value-bind (released-p failure)
+                 (call-surface-release-step
+                  (list :frame-state index)
+                  (lambda () (destroy-surface-frame-state state)))
+               (unless released-p (push failure failures))))
+    ;; A failed state still names this layout.  Do not invalidate any
+    ;; technique member until every such dependent can forget its handles.
+    (when (surface-technique-frame-states technique)
+      (signal-surface-release-failures technique failures))
+    (let ((retained nil))
+      (loop for (style pipeline)
+              on (surface-technique-pipelines technique) by #'cddr
+            when pipeline
+              do (multiple-value-bind (released-p failure)
+                     (call-surface-release-step
+                      (list :pipeline style) (lambda () (destroy pipeline)))
+                   (unless released-p
+                     (push failure failures)
+                     (push (cons style pipeline) retained))))
+      (setf (surface-technique-pipelines technique)
+            (loop for (style . pipeline) in (nreverse retained)
+                  append (list style pipeline))))
+    (let ((retained nil))
+      (loop for module in (surface-technique-modules technique)
+            for index from 0
+            do (multiple-value-bind (released-p failure)
+                   (call-surface-release-step
+                    (list :module index) (lambda () (destroy module)))
+                 (unless released-p
+                   (push failure failures)
+                   (push module retained))))
+      (setf (surface-technique-modules technique) (nreverse retained)))
+    (let ((layout (surface-technique-layout technique)))
+      (when layout
+        (multiple-value-bind (released-p failure)
+            (call-surface-release-step :layout (lambda () (destroy layout)))
+          (if released-p
+              (setf (surface-technique-layout technique) nil)
+              (push failure failures)))))
+    (signal-surface-release-failures technique failures)))
 
 (defun create-renderer-effect-pipelines (renderer)
   "Create only the standalone renderer's sky, lens, and temporal passes."
@@ -2120,38 +2223,68 @@ one is requested from PROVIDER and owned by the renderer."
            (setf completed-p t)
            renderer)
       (unless completed-p
-        (destroy-renderer renderer)))))
+        (best-effort-surface-release
+          (destroy-renderer renderer))))))
 
 (defun destroy-renderer (renderer)
-  "Release every GPU object of RENDERER, and its device when it owns one."
+  "Attempt every GPU owner of RENDERER and retain failed surface ownership."
   ;; Tear dependents down before what they reference.  Backend retirement is
   ;; deferred while work is in flight, but the Lisp ownership graph should
   ;; still say exactly which generation is live.
-  (destroy-frame-surfaces (renderer-surfaces renderer))
-  (loop for (nil pipeline) on (renderer-pipelines renderer) by #'cddr
-        when pipeline do (ignore-errors (destroy pipeline)))
-  (dolist (module (renderer-modules renderer))
-    (ignore-errors (destroy module)))
-  (dolist (layout (list (renderer-temporal-layout renderer)
-                        (renderer-lens-layout renderer)))
-    (when layout (ignore-errors (destroy layout))))
-  (when (renderer-sampler renderer)
-    (ignore-errors (destroy (renderer-sampler renderer))))
-  (when (renderer-surface-frame-state renderer)
-    (destroy-surface-frame-state (renderer-surface-frame-state renderer)))
-  (when (renderer-surface-technique renderer)
-    (destroy-surface-technique (renderer-surface-technique renderer)))
-  (setf (renderer-pipelines renderer) nil
-        (renderer-lens-layout renderer) nil
-        (renderer-temporal-layout renderer) nil
-        (renderer-modules renderer) nil
-        (renderer-surfaces renderer) nil
-        (renderer-sampler renderer) nil
-        (renderer-surface-frame-state renderer) nil
-        (renderer-surface-technique renderer) nil)
-  (when (renderer-owns-device-p renderer)
-    (ignore-errors (destroy (renderer-device renderer))))
-  (values))
+  (let ((failures nil))
+    (destroy-frame-surfaces (renderer-surfaces renderer))
+    (loop for (nil pipeline) on (renderer-pipelines renderer) by #'cddr
+          when pipeline do (ignore-errors (destroy pipeline)))
+    (dolist (module (renderer-modules renderer))
+      (ignore-errors (destroy module)))
+    (dolist (layout (list (renderer-temporal-layout renderer)
+                          (renderer-lens-layout renderer)))
+      (when layout (ignore-errors (destroy layout))))
+    (when (renderer-sampler renderer)
+      (ignore-errors (destroy (renderer-sampler renderer))))
+    (let ((state (renderer-surface-frame-state renderer)))
+      (when state
+        (multiple-value-bind (released-p failure)
+            (call-surface-release-step
+             :surface-frame-state
+             (lambda () (destroy-surface-frame-state state)))
+          (if released-p
+              (setf (renderer-surface-frame-state renderer) nil)
+              (push failure failures)))))
+    ;; Even when the direct state step failed, the technique remains its
+    ;; durable retry owner and gets a chance to finish it in this same pass.
+    (let ((technique (renderer-surface-technique renderer)))
+      (when technique
+        (multiple-value-bind (released-p failure)
+            (call-surface-release-step
+             :surface-technique
+             (lambda () (destroy-surface-technique technique)))
+          (if released-p
+              (setf (renderer-surface-technique renderer) nil)
+              (push failure failures)))))
+    ;; A successful technique retry may have drained the state whose direct
+    ;; step failed.  Forget that empty wrapper, but never a retryable handle.
+    (let ((state (renderer-surface-frame-state renderer)))
+      (when (and state (not (surface-frame-state-resources-live-p state)))
+        (setf (renderer-surface-frame-state renderer) nil)))
+    (setf (renderer-pipelines renderer) nil
+          (renderer-lens-layout renderer) nil
+          (renderer-temporal-layout renderer) nil
+          (renderer-modules renderer) nil
+          (renderer-surfaces renderer) nil
+          (renderer-sampler renderer) nil)
+    ;; The device is the ultimate owner.  A persistent surface failure keeps
+    ;; it live; a failed device release likewise remains explicitly retryable.
+    (when (and (renderer-owns-device-p renderer)
+               (null (renderer-surface-frame-state renderer))
+               (null (renderer-surface-technique renderer)))
+      (multiple-value-bind (released-p failure)
+          (call-surface-release-step
+           :device (lambda () (destroy (renderer-device renderer))))
+        (if released-p
+            (setf (renderer-owns-device-p renderer) nil)
+            (push failure failures))))
+    (signal-surface-release-failures renderer failures)))
 
 (defun make-surface-frame-state (technique &key scene)
   "Create one independent mutable frame state for TECHNIQUE.
@@ -2160,6 +2293,9 @@ When SCENE is supplied it is synchronized before publication.  No buffer is
 borrowed from another state, including the per-frame uniform and stock table."
   (let ((state (make-instance 'surface-frame-state :technique technique))
         (completed-p nil))
+    ;; Registration begins before allocation: if construction and its cleanup
+    ;; both fail, the technique remains the retry owner of the partial state.
+    (register-surface-frame-state state)
     (unwind-protect
          (progn
            (let ((device (surface-technique-device technique)))
@@ -2180,34 +2316,48 @@ borrowed from another state, including the per-frame uniform and stock table."
            (setf completed-p t)
            state)
       (unless completed-p
-        (destroy-surface-frame-state state)))))
+        (best-effort-surface-release
+          (destroy-surface-frame-state state))))))
 
 (defun destroy-surface-frame-state (state)
-  "Release all mutable buffers and the bind group owned by STATE."
-  (when (surface-frame-state-bind-group state)
-    (ignore-errors (destroy (surface-frame-state-bind-group state))))
-  (dolist (resource
-            (list (surface-frame-state-sites-buffer state)
-                  (surface-frame-state-cells-buffer state)
-                  (surface-frame-state-stocks-buffer state)
-                  (surface-frame-state-slots-buffer state)
-                  (surface-frame-state-uniform-buffer state)))
-    (when resource (ignore-errors (destroy resource))))
-  (setf (surface-frame-state-bind-group state) nil
-        (surface-frame-state-sites-buffer state) nil
-        (surface-frame-state-cells-buffer state) nil
-        (surface-frame-state-stocks-buffer state) nil
-        (surface-frame-state-slots-buffer state) nil
-        (surface-frame-state-uniform-buffer state) nil
-        (surface-frame-state-sites-capacity state) 0
-        (surface-frame-state-cells-capacity state) 0
-        (surface-frame-state-slots-capacity state) 0
-        (surface-frame-state-uploaded-scene state) nil
-        (surface-frame-state-uploaded-scene-revision state) nil
-        (surface-frame-state-last-scene-upload-kind state) nil
-        (surface-frame-state-last-scene-upload-bytes state) 0
-        (surface-frame-state-last-scene-upload-writes state) 0)
-  (values))
+  "Attempt every resource owned by STATE and retain only failed handles.
+
+The state remains registered with its technique until every member is gone,
+so a failed release can be retried even after an enclosing frame cache has
+forgotten the state."
+  (let ((failures nil))
+    (labels ((release (name reader writer)
+               (let ((resource (funcall reader state)))
+                 (when resource
+                   (multiple-value-bind (released-p failure)
+                       (call-surface-release-step
+                        name (lambda () (destroy resource)))
+                     (if released-p
+                         (funcall writer nil state)
+                         (push failure failures)))))))
+      (release :bind-group #'surface-frame-state-bind-group
+               #'(setf surface-frame-state-bind-group))
+      (release :sites-buffer #'surface-frame-state-sites-buffer
+               #'(setf surface-frame-state-sites-buffer))
+      (release :cells-buffer #'surface-frame-state-cells-buffer
+               #'(setf surface-frame-state-cells-buffer))
+      (release :stocks-buffer #'surface-frame-state-stocks-buffer
+               #'(setf surface-frame-state-stocks-buffer))
+      (release :slots-buffer #'surface-frame-state-slots-buffer
+               #'(setf surface-frame-state-slots-buffer))
+      (release :uniform-buffer #'surface-frame-state-uniform-buffer
+               #'(setf surface-frame-state-uniform-buffer)))
+    (unless (surface-frame-state-resources-live-p state)
+      (setf (surface-frame-state-sites-capacity state) 0
+            (surface-frame-state-cells-capacity state) 0
+            (surface-frame-state-slots-capacity state) 0
+            (surface-frame-state-uploaded-scene state) nil
+            (surface-frame-state-uploaded-scene-revision state) nil
+            (surface-frame-state-last-scene-upload-kind state) nil
+            (surface-frame-state-last-scene-upload-bytes state) 0
+            (surface-frame-state-last-scene-upload-writes state) 0)
+      (unregister-surface-frame-state state))
+    (signal-surface-release-failures state failures)))
 
 (defun storage-buffer-candidate
     (state buffer capacity needed label replace-p)

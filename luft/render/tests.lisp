@@ -4,6 +4,85 @@
 
 (in-package #:luft.render.tests)
 
+(defclass surface-release-probe ()
+  ((name :initarg :name :reader surface-release-probe-name)
+   (failures-remaining :initarg :failures-remaining :initform 0
+                       :accessor surface-release-probe-failures-remaining)
+   (attempts :initform 0 :accessor surface-release-probe-attempts)
+   (released-p :initform nil :accessor surface-release-probe-released-p)))
+
+(defmethod luv:destroy ((probe surface-release-probe))
+  (when (surface-release-probe-released-p probe)
+    (error "Surface release probe ~S was released twice."
+           (surface-release-probe-name probe)))
+  (incf (surface-release-probe-attempts probe))
+  (when (plusp (surface-release-probe-failures-remaining probe))
+    (decf (surface-release-probe-failures-remaining probe))
+    (error "Synthetic failure releasing surface probe ~S."
+           (surface-release-probe-name probe)))
+  (setf (surface-release-probe-released-p probe) t)
+  (values))
+
+(define-condition surface-construction-probe-error (error) ()
+  (:report
+   (lambda (condition stream)
+     (declare (ignore condition))
+     (write-string "Synthetic surface construction failure." stream))))
+
+(defclass surface-construction-probe-device ()
+  ((fail-on-create :initarg :fail-on-create
+                   :reader surface-construction-probe-fail-on-create)
+   (release-failure-indices :initarg :release-failure-indices :initform nil
+                            :reader surface-construction-release-failures)
+   (create-attempts :initform 0
+                    :accessor surface-construction-create-attempts)
+   (resources :initform nil :accessor surface-construction-resources)))
+
+(defmethod luv:create ((device surface-construction-probe-device) descriptor)
+  (declare (ignore descriptor))
+  (let ((index (incf (surface-construction-create-attempts device))))
+    (when (eql index (surface-construction-probe-fail-on-create device))
+      (error 'surface-construction-probe-error))
+    (let ((resource
+            (make-instance
+             'surface-release-probe
+             :name index
+             :failures-remaining
+             (if (member index (surface-construction-release-failures device))
+                 1
+                 0))))
+      (push resource (surface-construction-resources device))
+      resource)))
+
+(defun make-release-test-technique (&optional device)
+  (make-instance 'surface-technique
+                 :device device
+                 :pipeline-styles '(:stock)
+                 :target-formats '(:rgba16-float)
+                 :temporal-p nil
+                 :output-space :linear))
+
+(defun make-release-test-renderer (failures)
+  (let* ((device (make-instance 'surface-release-probe :name :device))
+         (technique (make-release-test-technique device))
+         (state (make-instance 'surface-frame-state :technique technique))
+         (resource
+           (make-instance 'surface-release-probe
+                          :name :state-resource
+                          :failures-remaining failures))
+         (layout (make-instance 'surface-release-probe :name :layout))
+         (renderer
+           (make-instance 'renderer
+                          :device device :owns-device-p t
+                          :scene nil :camera nil :extent '(1 1)
+                          :color-format :rgba8-unorm-srgb)))
+    (setf (luft.render::surface-frame-state-uniform-buffer state) resource
+          (surface-technique-layout technique) layout
+          (renderer-surface-frame-state renderer) state
+          (renderer-surface-technique renderer) technique)
+    (luft.render::register-surface-frame-state state)
+    (values renderer state technique resource layout device)))
+
 (defun sky-pixel-p (pixels offset)
   ;; The clear colour is a pale blue: blue clearly above red.
   (> (aref pixels (+ offset 2)) (+ 30 (aref pixels offset))))
@@ -398,6 +477,215 @@
                   (surface-frame-state-uploaded-scene-revision second))))
       (destroy-surface-frame-state second)
       (destroy-renderer renderer))))
+
+(deftest surface-frame-state-release-attempts-all-members-and-remains-retryable
+  (let* ((technique (make-release-test-technique))
+         (bind-group (make-instance 'surface-release-probe :name :bind-group))
+         (sites (make-instance 'surface-release-probe
+                               :name :sites :failures-remaining 1))
+         (cells (make-instance 'surface-release-probe :name :cells))
+         (stocks (make-instance 'surface-release-probe :name :stocks))
+         (slots (make-instance 'surface-release-probe :name :slots))
+         (uniform (make-instance 'surface-release-probe :name :uniform))
+         (layout (make-instance 'surface-release-probe :name :layout))
+         (state (make-instance 'surface-frame-state :technique technique))
+         (scene (gensym "SCENE")))
+    (setf (luft.render::surface-frame-state-bind-group state) bind-group
+          (luft.render::surface-frame-state-sites-buffer state) sites
+          (luft.render::surface-frame-state-cells-buffer state) cells
+          (luft.render::surface-frame-state-stocks-buffer state) stocks
+          (luft.render::surface-frame-state-slots-buffer state) slots
+          (luft.render::surface-frame-state-uniform-buffer state) uniform
+          (luft.render::surface-frame-state-sites-capacity state) 64
+          (luft.render::surface-frame-state-cells-capacity state) 32
+          (luft.render::surface-frame-state-slots-capacity state) 16
+          (luft.render::surface-frame-state-uploaded-scene state) scene
+          (luft.render::surface-frame-state-uploaded-scene-revision state) 7
+          (surface-technique-layout technique) layout)
+    (luft.render::register-surface-frame-state state)
+    (let ((condition
+            (handler-case
+                (progn (destroy-surface-frame-state state) nil)
+              (luft.render::surface-release-error (condition) condition))))
+      (ok condition)
+      (ok (= 1 (length
+                (luft.render::surface-release-error-failures condition)))))
+    ;; Every member was attempted even though SITES failed.  Successful
+    ;; handles are forgotten immediately; only SITES remains retryable.
+    (dolist (resource (list bind-group sites cells stocks slots uniform))
+      (ok (= 1 (surface-release-probe-attempts resource))))
+    (ok (eq sites (luft.render::surface-frame-state-sites-buffer state)))
+    (ok (null (surface-frame-state-bind-group state)))
+    (ok (null (luft.render::surface-frame-state-cells-buffer state)))
+    (ok (null (luft.render::surface-frame-state-stocks-buffer state)))
+    (ok (null (luft.render::surface-frame-state-slots-buffer state)))
+    (ok (null (luft.render::surface-frame-state-uniform-buffer state)))
+    (ok (eq scene (surface-frame-state-uploaded-scene state)))
+    (ok (member state (luft.render::surface-technique-frame-states technique)
+                :test #'eq))
+    ;; The technique is the durable retry owner after an enclosing cache has
+    ;; forgotten STATE: it finishes the state before invalidating its layout.
+    (destroy-surface-technique technique)
+    (ok (= 2 (surface-release-probe-attempts sites)))
+    (ok (= 1 (surface-release-probe-attempts layout)))
+    (ok (null (luft.render::surface-technique-frame-states technique)))
+    (ok (null (surface-technique-layout technique)))
+    (ok (zerop (luft.render::surface-frame-state-sites-capacity state)))
+    (ok (null (surface-frame-state-uploaded-scene state)))
+    ;; Fully released owners are idempotent and do not repeat native calls.
+    (destroy-surface-technique technique)
+    (ok (= 2 (surface-release-probe-attempts sites)))
+    (ok (= 1 (surface-release-probe-attempts layout)))))
+
+(deftest persistent-frame-state-release-blocks-technique-members
+  (let* ((technique (make-release-test-technique))
+         (resource
+           (make-instance 'surface-release-probe
+                          :name :persistent :failures-remaining 2))
+         (layout (make-instance 'surface-release-probe :name :layout))
+         (state (make-instance 'surface-frame-state :technique technique)))
+    (setf (luft.render::surface-frame-state-uniform-buffer state) resource
+          (surface-technique-layout technique) layout)
+    (luft.render::register-surface-frame-state state)
+    (ok (signals (destroy-surface-frame-state state)
+                 'luft.render::surface-release-error))
+    (ok (signals (destroy-surface-technique technique)
+                 'luft.render::surface-release-error))
+    (ok (= 2 (surface-release-probe-attempts resource)))
+    (ok (member state (luft.render::surface-technique-frame-states technique)
+                :test #'eq))
+    (ok (zerop (surface-release-probe-attempts layout)))
+    (ok (eq layout (surface-technique-layout technique)))
+    ;; Let a later retry prove that the blocked owner can still finish.
+    (destroy-surface-technique technique)
+    (ok (= 3 (surface-release-probe-attempts resource)))
+    (ok (= 1 (surface-release-probe-attempts layout)))))
+
+(deftest standalone-renderer-aggregates-surface-release-and-retains-owners
+  ;; One direct failure is reported, but the technique retries the registered
+  ;; state in the same pass and lets the standalone owner finish completely.
+  (multiple-value-bind (renderer state technique resource layout device)
+      (make-release-test-renderer 1)
+    (declare (ignore state technique))
+    (let ((condition
+            (handler-case
+                (progn (destroy-renderer renderer) nil)
+              (luft.render::surface-release-error (condition) condition))))
+      (ok condition)
+      (ok (= 1 (length
+                (luft.render::surface-release-error-failures condition)))))
+    (ok (= 2 (surface-release-probe-attempts resource)))
+    (ok (= 1 (surface-release-probe-attempts layout)))
+    (ok (= 1 (surface-release-probe-attempts device)))
+    (ok (null (renderer-surface-frame-state renderer)))
+    (ok (null (renderer-surface-technique renderer)))
+    (ok (not (luft.render::renderer-owns-device-p renderer)))
+    (destroy-renderer renderer)
+    (ok (= 1 (surface-release-probe-attempts device))))
+  ;; A failure which survives both state attempts blocks the technique and
+  ;; device, retaining both renderer handles for the next owner retry.
+  (multiple-value-bind (renderer state technique resource layout device)
+      (make-release-test-renderer 2)
+    (ok (signals (destroy-renderer renderer)
+                 'luft.render::surface-release-error))
+    (ok (= 2 (surface-release-probe-attempts resource)))
+    (ok (eq state (renderer-surface-frame-state renderer)))
+    (ok (eq technique (renderer-surface-technique renderer)))
+    (ok (zerop (surface-release-probe-attempts layout)))
+    (ok (zerop (surface-release-probe-attempts device)))
+    (ok (luft.render::renderer-owns-device-p renderer))
+    (destroy-renderer renderer)
+    (ok (= 3 (surface-release-probe-attempts resource)))
+    (ok (= 1 (surface-release-probe-attempts layout)))
+    (ok (= 1 (surface-release-probe-attempts device)))
+    (ok (null (renderer-surface-frame-state renderer)))
+    (ok (null (renderer-surface-technique renderer)))
+    (ok (not (luft.render::renderer-owns-device-p renderer)))))
+
+(deftest surface-technique-release-aggregates-and-retains-failed-members
+  (let* ((pipeline-failure
+           (make-instance 'surface-release-probe
+                          :name :pipeline-failure :failures-remaining 1))
+         (pipeline-success
+           (make-instance 'surface-release-probe :name :pipeline-success))
+         (module-failure
+           (make-instance 'surface-release-probe
+                          :name :module-failure :failures-remaining 1))
+         (module-success
+           (make-instance 'surface-release-probe :name :module-success))
+         (layout
+           (make-instance 'surface-release-probe
+                          :name :layout :failures-remaining 1))
+         (technique (make-release-test-technique)))
+    (setf (luft.render::surface-technique-pipelines technique)
+          (list :stock pipeline-failure :flat pipeline-success)
+          (luft.render::surface-technique-modules technique)
+          (list module-failure module-success)
+          (surface-technique-layout technique) layout)
+    (let ((condition
+            (handler-case
+                (progn (destroy-surface-technique technique) nil)
+              (luft.render::surface-release-error (condition) condition))))
+      (ok condition)
+      (ok (= 3 (length
+                (luft.render::surface-release-error-failures condition)))))
+    (dolist (resource (list pipeline-failure pipeline-success
+                            module-failure module-success layout))
+      (ok (= 1 (surface-release-probe-attempts resource))))
+    (ok (equal (list :stock pipeline-failure)
+               (luft.render::surface-technique-pipelines technique)))
+    (ok (equal (list module-failure)
+               (luft.render::surface-technique-modules technique)))
+    (ok (eq layout (surface-technique-layout technique)))
+    (destroy-surface-technique technique)
+    (ok (= 2 (surface-release-probe-attempts pipeline-failure)))
+    (ok (= 1 (surface-release-probe-attempts pipeline-success)))
+    (ok (= 2 (surface-release-probe-attempts module-failure)))
+    (ok (= 1 (surface-release-probe-attempts module-success)))
+    (ok (= 2 (surface-release-probe-attempts layout)))
+    (ok (null (luft.render::surface-technique-pipelines technique)))
+    (ok (null (luft.render::surface-technique-modules technique)))
+    (ok (null (surface-technique-layout technique)))
+    (destroy-surface-technique technique)))
+
+(deftest surface-constructor-unwind-preserves-creation-errors-and-retry-owners
+  (let ((device
+          (make-instance 'surface-construction-probe-device
+                         :fail-on-create 4
+                         :release-failure-indices '(2))))
+    ;; :STOCK creates a layout, two modules, then its pipeline.  The pipeline
+    ;; creation error must survive even when one cleanup member also fails.
+    (ok (signals
+         (make-surface-technique
+          device :pipeline-styles '(:stock)
+          :target-formats '(:rgba16-float) :output-space :linear)
+         'surface-construction-probe-error))
+    (ok (= 4 (surface-construction-create-attempts device)))
+    (ok (= 3 (length (surface-construction-resources device))))
+    (dolist (resource (surface-construction-resources device))
+      (ok (= 1 (surface-release-probe-attempts resource))))
+    ;; Finish the fake failed cleanup so the probe itself has no loose owner.
+    (let ((failed
+            (find-if-not #'surface-release-probe-released-p
+                         (surface-construction-resources device))))
+      (ok failed)
+      (luv:destroy failed)))
+  (let* ((device
+           (make-instance 'surface-construction-probe-device
+                          :fail-on-create 2
+                          :release-failure-indices '(1)))
+         (technique (make-release-test-technique device)))
+    ;; A partial frame state has a durable retry owner even though its
+    ;; constructor cannot return the state alongside the original error.
+    (ok (signals (make-surface-frame-state technique)
+                 'surface-construction-probe-error))
+    (ok (= 1 (length
+              (luft.render::surface-technique-frame-states technique))))
+    (let ((resource (first (surface-construction-resources device))))
+      (ok (= 1 (surface-release-probe-attempts resource)))
+      (destroy-surface-technique technique)
+      (ok (= 2 (surface-release-probe-attempts resource))))
+    (ok (null (luft.render::surface-technique-frame-states technique)))))
 
 (deftest temporal-jitter-and-frame-views-are-frame-sized-and-frozen
   (let* ((width 320)
