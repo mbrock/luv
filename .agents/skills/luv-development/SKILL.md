@@ -1,6 +1,6 @@
 ---
 name: luv-development
-description: Use when starting or diagnosing development in a luv checkout or worktree; running builds, tests, or SBCL scripts; managing the durable ./sly image or a live luvcraft process; checking the Nix dev shell or ASDF cache; or investigating slow, stale, crossed, or apparently hung Lisp work.
+description: Use when starting or diagnosing development in a luv checkout or worktree; running builds, tests, or SBCL scripts; managing the durable ./sly image or a live luvcraft process; checking the Nix development profile or ASDF cache; or investigating slow, stale, crossed, or apparently hung Lisp work.
 ---
 
 # Luv development
@@ -40,19 +40,20 @@ the whole workflow — do not invent another:
 3. Run `./sly status`. A linked worktree has its own stable port and image; the primary checkout keeps port 4005.
 4. Prefer `./scripts/dev COMMAND` for one-shot native tools and `./sly COMMAND` for Lisp exploration. Do not invoke an ambient Homebrew or system SBCL.
 
-The Nix dev shell is the environment, and the only one. Every script refuses
-to run outside it rather than building one of its own, so enter it first:
+The durable Nix development profile is the ordinary environment. Install or
+refresh it only when locked dependencies change:
 
 ```sh
-direnv allow         # once per checkout; every shell here has it after that
-nix develop          # an explicit shell, now
-nix develop -c CMD   # one command, for CI and other non-interactive callers
+./scripts/install-dev-profile
+. "$HOME/.nix-profile/share/luv/env.sh"
+direnv allow         # once; .envrc only sources the same activation file
 ```
 
-There is no profile to install and no wrapper to keep current. `direnv`
-re-evaluates when `flake.nix` or `flake.lock` changes, so the shell cannot
-quietly describe an old world; an already-running image still can, so restart
-the checkout's image after an environment change.
+Normal commands do not evaluate Nix and do not enter a subshell. The profile
+is a deliberate GC-rooted dependency checkpoint; `flake.lock` still makes it
+reproducible when refreshed. CI may enter the equivalent environment once
+around a whole job with `nix develop -c`. Restart the checkout's durable image
+after refreshing the profile.
 
 ## Choose the execution path
 
@@ -82,7 +83,8 @@ If the image lacks a new system, package, readtable, native dependency, or metho
 
 1. Check `./sly status` and `./sly log`.
 2. Stop it with `./sly stop` when it is managed by this checkout and no interactive client needs its state.
-3. Leave and re-enter the dev shell if the flake environment changed.
+3. Refresh and reactivate the development profile if the flake environment
+   changed.
 4. Run `./sly start`, then confirm the missing capability with a small eval.
 
 Never kill an image reported as belonging to another checkout or as Emacs/external. Stop it through its owner.
@@ -125,7 +127,7 @@ The layer is packaged but not loaded; a run asks for it, and it has to be
 asked before the image starts, because the instance is created once:
 
 ```sh
-nix develop -c env VK_LOADER_LAYERS_ENABLE='*validation*' ./sly start
+env VK_LOADER_LAYERS_ENABLE='*validation*' ./sly start
 ```
 
 luv installs its own debug messenger whenever `VK_EXT_debug_utils` is

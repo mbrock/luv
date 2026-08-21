@@ -30,6 +30,19 @@ normally runs inside it:
 `build/luvcraft` is the shipped/CI executable, not the ordinary development
 entry point.
 
+Install the native and Lisp dependencies once as a durable Nix profile:
+
+```sh
+./scripts/install-dev-profile
+. "$HOME/.nix-profile/share/luv/env.sh"
+```
+
+The login shell and the checkout's `.envrc` source that static activation
+file. Ordinary `sbcl`, `./sly`, test, and build commands do not evaluate Nix
+or enter a subshell. Refresh the profile explicitly only after changing the
+locked dependency environment; `nix develop -c` remains the CI/from-scratch
+path.
+
 ## A GPU system we can understand
 
 The HAL borrows the useful shape of WebGPU—devices, queues, resources,
