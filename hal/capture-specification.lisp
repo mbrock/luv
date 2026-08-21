@@ -26,6 +26,9 @@ under the capture output directory and do not belong in Git. #IVRWI8"))
 (defvar *capture-specifications* (make-hash-table :test #'equal))
 (defvar *capture-specification-order* '())
 
+(defconstant +capture-web-image-width+ 768
+  "The default intrinsic width of a showcase card image derivative.")
+
 (defconstant +capture-web-poster-width+ 480
   "The maximum intrinsic width of a showcase video poster.")
 
