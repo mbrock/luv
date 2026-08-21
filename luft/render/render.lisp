@@ -215,6 +215,24 @@ curtain wall, paired turrets and an arcaded hall."
                                 (cons 55 55)))
     (finish-scene-builder builder)))
 
+(defun make-miter-study-scene ()
+  "Build the wall-side stepped mountain used to judge mixed miters. #Z5NDTA
+
+The two L-shaped terraces retain five-, six-, and seven-cell vertex stars in
+one architectural context.  Their back edges meet a continuous wall so the
+same view also retains the truncated wall miter which motivates #2PN62B."
+  (let ((builder (make-scene-builder :horizontal-bits 5)))
+    ;; Broad plinth and continuous back wall.
+    (scene-builder-box builder 2 14 2 8 0 1 :architecture-p t)
+    (scene-builder-box builder 2 14 8 9 0 7 :architecture-p t)
+    ;; The lower L supplies the outie, straight six-cell run, innie, and the
+    ;; first wall termination.  The upper L repeats them without isolation.
+    (scene-builder-box builder 4 11 5 7 2 2 :architecture-p t)
+    (scene-builder-box builder 4 8 3 4 2 2 :architecture-p t)
+    (scene-builder-box builder 5 10 6 7 3 3 :architecture-p t)
+    (scene-builder-box builder 5 7 4 5 3 3 :architecture-p t)
+    (finish-scene-builder builder)))
+
 (defun face-solid-cell (solid face)
   "Return the occupied cell incident to boundary FACE and which side it is on."
   (let* ((domain (luft:chain-domain solid))

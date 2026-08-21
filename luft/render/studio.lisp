@@ -353,7 +353,8 @@ the selector is the whole of the difference."
 
 (declaim (ftype function viewer-surface-view))
 
-(defun encode-viewer-frame (viewer encoder surface-texture extent)
+(defun encode-viewer-frame
+    (viewer encoder surface-texture extent &key (inspector-p t))
   (let* ((renderer (viewer-renderer viewer))
          (surface-view (viewer-surface-view viewer surface-texture))
          (width (first extent))
@@ -365,15 +366,16 @@ the selector is the whole of the difference."
          (view (capture-frame-view (viewer-camera viewer)
                                    width height jitter))
          (previous (or (renderer-previous-view renderer) view))
-         (inspection (update-viewer-inspection viewer)))
+         (inspection (and inspector-p (update-viewer-inspection viewer))))
     (encode-renderer-frame
      renderer encoder surface-view extent
      (camera-uniform-data
       view previous (viewer-inspection-parameters viewer extent)
       (if (and inspection *inspection-ink-p*) 1.0 0.0))
      :jitter jitter :view view
-     :inspector-texture (viewer-inspector-texture viewer)
-     :inspector-rect (viewer-inspector-rect viewer extent))))
+     :inspector-texture (and inspector-p (viewer-inspector-texture viewer))
+     :inspector-rect (and inspector-p
+                          (viewer-inspector-rect viewer extent)))))
 
 (clim:define-command-table luft-window)
 (clim:define-command-table luft-window-release)
@@ -898,8 +900,12 @@ the selector is the whole of the difference."
         (when (eq :open (canvas-state canvas)) (close-canvas canvas))
         (when device (ignore-errors (destroy device)))))))
 
-(defun capture-viewer-frame (pathname &optional (viewer *viewer*))
-  "Render one VIEWER frame on its canvas thread and write it to PATHNAME."
+(defun capture-viewer-frame
+    (pathname &optional (viewer *viewer*) &key (inspector-p t))
+  "Render one VIEWER frame on its canvas thread and write it to PATHNAME.
+
+INSPECTOR-P is true by default.  A source-defined evidence capture may make it
+false when the subject is the geometry rather than the atelier UI."
   (let* ((context (viewer-context viewer))
          (extent (canvas-extent context))
          (pathname (merge-pathnames pathname))
@@ -918,7 +924,9 @@ the selector is the whole of the difference."
                context
                (lambda (surface-texture encoder presentation-time)
                  (declare (ignore presentation-time))
-                 (encode-viewer-frame viewer encoder surface-texture extent)
+                 (encode-viewer-frame
+                  viewer encoder surface-texture extent
+                  :inspector-p inspector-p)
                  (encode encoder
                          (make-gpu-copy-texture-to-buffer-command
                           :source surface-texture :destination buffer))))))

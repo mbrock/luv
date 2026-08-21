@@ -16,6 +16,7 @@
            #:scene
            #:scene-solid
            #:make-mountain-sanctuary-scene
+           #:make-miter-study-scene
            #:face-materialization-domain
            #:face-materialization-negative-count
            #:face-materialization-positive-count

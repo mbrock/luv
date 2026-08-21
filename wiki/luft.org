@@ -232,35 +232,86 @@ heuristic postpones.
 :ID: RUAWR5
 :END:
 
-The =:chamfer= style is the one-ring, planar case of #6TEFOS.  It applies the
-same symmetric star classification as the rounded style: a convex crease
-moves toward its minority solid cells, a concave crease moves toward its
-minority air cells, and flat or saddle stars do not move.  Thus both exposed
-silhouettes and inside meetings lose the perfectly sharp edge that makes a
-block world look synthetic, without pretending the geometry is literal
-woodworking.
+The refounded indexed chamfer is the planar case of #6TEFOS.  Every canonical
+edge or vertex site reads its complete occupancy star, chooses the strict
+minority, and reduces that minority's moment to a signed direction $q$.
+Convex creases therefore move toward minority solid cells, concave creases
+toward minority air cells, and balanced stars do not move.  The decision is a
+property of the shared site rather than of any incident face, so the realized
+surface remains watertight without stitching.
 
-A shared point on a crease moves by exactly $\tfrac{w}{2}\,q$, half the
-setback along its clamped minority direction: the midline of a flat
-45-degree facet between two offset faces.  At a pure corner three such
-facets meet, and a corner planed by three 45-degree cuts should end in a
-triangle, not run to a point: the corner is truncated by a plane across all
-three axes, an equilateral triangle whose vertices are the offset faces'
-corners and whose edge midpoints are the facets' midlines.  Each face's
-corner grid square is one planar kite of that triangle once the corner point
-moves to its centroid, $\tfrac{2w}{3}$ along every axis
-([[lisp:luft.render.shaders::chamfer-point]]); mixed corners keep the
-midline rule.  The default =*chamfer-width*= is 0.045 cell:
-enough to catch the studio lights and soften terrain notches without bringing
-back the old 0.22-cell carved coves.  The rounded style keeps its independent
-=*bevel-radius*=.
+[[lisp:luft:site-displacement]] places the shared point at
+$w\rho q$.  Ordinary creases use the half reach $\rho=\tfrac12$; a vertex
+whose raw moment is a unit cube diagonal uses the centroid reach
+$\rho=\tfrac23$.  Each oriented boundary face carries the resulting edge and
+corner decisions in one shape word.  The GPU realizes sixteen implicit points
+on a 4 by 4 patch and draws its fixed eighteen indexed triangles.  The current
+default [[lisp:luft.render:*chamfer-width*]] is 0.11 cell.
 
-Shading comes from the geometry rather than interpolated vertex normals:
-=chamfer-fragment-shader= reads each facet's normal from screen-space
-derivatives of world position.  Only the arris where the original face meets
-the cut receives a narrow =*arris-softness*= transition, currently 0.004 cell;
-the chamfer itself stays planar.  The overhead view regression now exercises
-rounded, flat, and chamfered pipelines and finds no sky-visible cracks.
+The fragment shader recovers each planar facet normal from screen derivatives
+of world position.  A 21-bit construction mask records only those edges of
+the fixed patch whose adjacent realized triangles actually turn, so the
+blueprint view reveals the geometric decision without drawing every hidden
+diagonal.  The CPU reference and shader realization are compared point for
+point in the renderer tests.
+
+* The miter family portrait keeps the awkward stars in context
+:PROPERTIES:
+:ID: Z5NDTA
+:END:
+
+The shared-point rule of #RUAWR5 is compact and watertight, but it gives every
+incident chamfer strip only one place to end at a mixed vertex.  At the
+wall-side step this truncates a strip which should continue around the
+meeting: the long miter collapses into a narrow triangular fighter shape.
+A sharp Blender-like miter would at least extend that triangle; its outer
+miter arc is the better target, turning the collapsing region into a short
+wallward-widening quadrilateral strip.
+
+An isolated seven-cell star at =w=0.20 made the defect look grotesque and hid
+its architectural scale.  [[lisp:luft.render:make-miter-study-scene]] instead
+builds a small Minecraft mountain against a continuous wall at the honest
+default =w=0.11.  One orthographic plate then retains the triangular innie and
+outie, the six-face hexagonal block party, and both wall terminations of the
+truncated fighter miter.  The scene is topology, not a hand-authored mesh: a
+regression checks that its five-, six-, and seven-cell vertex stars and its
+terrace-to-wall occupancy remain present.
+
+[[capture:Z5NDTA-luft-miter-study.png]]
+
+The image is a named =luv/showcase= recipe rather than checked-in evidence:
+
+#+begin_src sh
+scripts/captures render --output build/wiki/media luft-miter-study
+#+end_src
+
+** NEXT Give mixed chamfer vertices one minimal miter arc
+:PROPERTIES:
+:ID: 2PN62B
+:END:
+
+/Intent./ Preserve LUFT's site-local, complement-symmetric and watertight
+construction while adding only the corner freedom needed for an outer miter
+arc.  This is not a general fillet or an arbitrary mesh.  It is the smallest
+bounded extension which lets a constant-width chamfer strip turn around a
+mixed vertex instead of terminating at the one displaced lattice point.
+
+/Evidence./ The current face ABI supplies one shape word and realizes one 4 by
+4 point patch with eighteen triangles.  Its half and centroid reaches produce
+good ordinary arrises, triangular innies and outies, but #Z5NDTA shows the
+remaining mixed-star failure at normal width.  A first sharp extension can
+separate missing miter reach from missing topology; the intended result is the
+minimal outer-arc construction in which the long triangular regions become
+the wallward-widening quadrilateral strips seen in a good bevel.
+
+/Done when./ The CPU reference defines the new shared points from the canonical
+site star; every incident face agrees on their world positions; the GPU
+realization differentially matches that reference; winding and construction
+masks remain valid; and a before/after rendering of #Z5NDTA makes the innie,
+outie, six-face junction and both wall miters look deliberate at the default
+width.  The fixed per-face cost may grow by the smallest justified amount, but
+no per-cell object graph, global stitching pass, or general curve tessellator
+is introduced.
 
 * Rounding is the half-level set of the smoothed occupancy
 :PROPERTIES:
@@ -818,17 +869,15 @@ its own width beside them.
 :ID: UTRJ2T
 :END:
 
-A shaping rule is judged at its sites, and the demonstration world has
-thousands of them and shows none well.  [[lisp:luft.render:make-studio-scene]]
-builds a floor carrying one exhibit of each crease and corner kind -- a lone
-cube, a bar, an L, a slab, a block, a pillar; the same things floating so
-every corner is pure; two cubes meeting along an edge and two at a vertex; a
-pit, a trench, stairs, a ledge, an inner corner; a doorway and a roofed nook
--- and [[lisp:luft.render:render-contact-sheet]] renders every named camera
-of [[lisp:luft.render:studio-cameras]] in every style at several times the
-output size, box filtered down, into one PNG, cameras down and styles
-across.  The sheets in this page come from it, and a change to any rule is
-judged by rendering one.
+A shaping rule is judged at its sites, and a demonstration world with
+thousands of them shows none well.  The refounded atelier therefore keeps two
+complementary fixtures.  [[lisp:luft.render:make-gallery-solid]] isolates the
+small occupancy stars on separate plots; [[lisp:luft.render:make-miter-study-scene]]
+composes the mixed stars into the wall-side stepped mountain of #Z5NDTA.  Both
+run through the ordinary [[lisp:luft.render:start-viewer]] and
+[[lisp:luft.render:capture-viewer-frame]] paths.  Named =luv/showcase= recipes
+own cameras and output sizes when a picture becomes durable evidence, while
+the live atelier remains free to orbit, point at, and reload the same scene.
 
 ** DONE The atelier itself is a McCLIM application
 :PROPERTIES:

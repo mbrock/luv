@@ -88,6 +88,29 @@
                (sort (loop for stock being the hash-keys of stocks collect stock)
                      #'<)))))
 
+(deftest the-miter-study-retains-its-star-family-and-wall-termination
+  (let* ((scene (render:make-miter-study-scene))
+         (solid (render:scene-solid scene))
+         (domain (luft:chain-domain solid))
+         (occupancy
+           (lambda (x y z)
+             (luft:chain-cell-occupancy-bit solid x y z))))
+    (flet ((vertex-count (x y z)
+             (nth-value
+              7 (luft:classify-site-star
+                 domain
+                 (luft:make-site domain x y z luft:+vertex-extent+ 1)
+                 occupancy))))
+      ;; A solid four-cell floor under one, two, and three terrace cells.
+      (ok (= 5 (vertex-count 4 3 2)))
+      (ok (= 6 (vertex-count 5 3 2)))
+      (ok (= 7 (vertex-count 9 5 2))))
+    ;; The lower terrace ends while its neighbouring wall cells continue.
+    (ok (= 1 (funcall occupancy 11 7 2)))
+    (ok (= 0 (funcall occupancy 12 7 2)))
+    (ok (= 1 (funcall occupancy 11 8 2)))
+    (ok (= 1 (funcall occupancy 12 8 2)))))
+
 (deftest face-and-atelier-shaders-lower-through-both-conventional-backends
   (let* ((vertex (luft.render.shaders:face-vertex-specification))
          (fragment (luft.render.shaders:face-fragment-specification))
