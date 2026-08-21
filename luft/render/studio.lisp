@@ -10,6 +10,23 @@ the shape word asks for, so it also scales the disagreement a mixed corner
 has with the creases running into it: at 0.20 that disagreement is a visible
 gouge, and at 0.11 it is the subtle break it was drawn as.")
 
+(defparameter *wireframe* 0.0
+  "How strongly the lattice wireframe is inked over the surface, 0 to 1.
+
+The wires are the 4x4 point grid and each cell's shared diagonal, which is
+the way to read a triangulation and exactly the wrong way to judge whether a
+crease looks right: an inked crease reads as a fold whether or not it is one.")
+
+(defparameter *projection* :isometric
+  "Either :PERSPECTIVE or :ISOMETRIC.
+
+An isometric picture has no vanishing point, so two chamfers the same width
+are the same width on screen wherever they sit.  That is what makes it the
+projection to judge a shape rule in.")
+
+(defparameter *isometric-height* 12.0
+  "How many world units of height an isometric frame spans.")
+
 (defclass fly-camera ()
   ((position :initarg :position :accessor camera-position)
    (yaw :initarg :yaw :initform 0.0 :accessor camera-yaw)
@@ -34,26 +51,47 @@ gouge, and at 0.11 it is the subtle break it was drawn as.")
          (up (vec3:vec3-cross right forward)))
     (values right up forward)))
 
+(defun projection-lane (width height field-of-view near far)
+  "The four projection coefficients and the homogeneous-divisor selector.
+
+Both projections use the same three rows: clip X and Y are the view
+coordinates scaled, and clip Z is an affine function of view depth.  The
+perspective divisor is the view depth and the isometric divisor is one, so
+the selector is the whole of the difference."
+  (let ((aspect (/ (coerce width 'single-float) height)))
+    (ecase *projection*
+      (:perspective
+       (let ((focal (/ (tan (/ field-of-view 2.0)))))
+         (values (/ focal aspect) focal
+                 (/ far (- far near))
+                 (/ (- (* far near)) (- far near))
+                 1.0)))
+      (:isometric
+       (let ((half (/ *isometric-height* 2.0)))
+         (values (/ 1.0 (* half aspect)) (/ 1.0 half)
+                 (/ 1.0 (- far near))
+                 (/ (- near) (- far near))
+                 0.0))))))
+
 (defun camera-uniform-data (camera width height)
   (multiple-value-bind (right up forward) (camera-basis camera)
-    (let* ((near 0.1)
-           (far 200.0)
-           (focal (/ (tan (/ (camera-field-of-view camera) 2.0))))
-           (aspect (/ (coerce width 'single-float) height)))
+    (let ((near 0.1)
+          (far 200.0))
       (flet ((lane (vector fourth)
                (list (vec3:vec3-x vector) (vec3:vec3-y vector)
                      (vec3:vec3-z vector) fourth)))
-        (make-array
-         24 :element-type 'single-float
-         :initial-contents
-         (mapcar
-          (lambda (value) (coerce value 'single-float))
-          (append (lane (camera-position camera) 0.0)
-                  (lane right 0.0) (lane up 0.0) (lane forward 0.0)
-                  (list (/ focal aspect) focal
-                        (/ far (- far near))
-                        (/ (- (* far near)) (- far near)))
-                  (list *chamfer-width* 0.0 0.0 0.0))))))))
+        (multiple-value-bind (px py pz pw divisor)
+            (projection-lane width height (camera-field-of-view camera)
+                             near far)
+          (make-array
+           24 :element-type 'single-float
+           :initial-contents
+           (mapcar
+            (lambda (value) (coerce value 'single-float))
+            (append (lane (camera-position camera) 0.0)
+                    (lane right 0.0) (lane up 0.0) (lane forward 0.0)
+                    (list px py pz pw)
+                    (list *chamfer-width* *wireframe* divisor 0.0)))))))))
 
 (defclass viewer (canvas-event-handler)
   ((canvas :initarg :canvas :reader viewer-canvas)

@@ -282,7 +282,7 @@ consequence of its own occupancy star and can be read on its own."
              :label "luft indexed faces"
              :color-attachments
              `((:view ,surface-texture :load-op :clear :store-op :store
-                :clear-value #(0.055 0.065 0.085 1.0)))
+                :clear-value #(0.10 0.11 0.13 1.0)))
              :depth-stencil-attachment
              `(:view ,(renderer-depth-view renderer)
                :depth-load-op :clear :depth-store-op :discard

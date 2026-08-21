@@ -65,6 +65,7 @@
    #:make-face-record
    ;; Raster templates.
    #:+face-index-count+ #:make-face-index-template
+   #:quad-diagonal-toward-corner
    #:positive-face-index-template #:negative-face-index-template
    ;; Tests.
    #:run-luft-tests))
@@ -1046,10 +1047,23 @@ whole patch consistently before Euclidean interpolation."
 
 (defconstant +face-index-count+ 54)
 
-(defun make-face-index-template (polarity &key (diagonal :c00-c11))
+(defun quad-diagonal-toward-corner (i j)
+  "The diagonal of grid quad (I,J) that points at the nearest face corner.
+
+A corner quad is not planar: its four realized points straddle a chamfer, so
+the two ways of splitting it are two different surfaces.  Splitting along the
+diagonal that reaches the face corner keeps the corner on the fold, which is
+what makes a chamfer band close against its neighbours as a flat miter.  The
+other split leaves the corner hanging off one triangle and the fold running
+past it, and the band ends in a fan instead."
+  (check-type i (integer 0 2))
+  (check-type j (integer 0 2))
+  (if (if (< i 2) (< j 2) (= j 2)) :c00-c11 :c10-c01))
+
+(defun make-face-index-template (polarity &key (diagonal :toward-corner))
   "Generate 18 consistently wound triangles over the 4x4 local point grid."
   (check-type polarity (member 1 -1))
-  (check-type diagonal (member :c00-c11 :c10-c01))
+  (check-type diagonal (member :toward-corner :c00-c11 :c10-c01))
   (let ((indices (make-array +face-index-count+
                              :element-type '(unsigned-byte 16)))
         (write 0))
@@ -1068,7 +1082,9 @@ whole patch consistently before Euclidean interpolation."
                 (c10 (local-point-index (1+ i) j))
                 (c11 (local-point-index (1+ i) (1+ j)))
                 (c01 (local-point-index i (1+ j))))
-            (ecase diagonal
+            (ecase (if (eq diagonal :toward-corner)
+                       (quad-diagonal-toward-corner i j)
+                       diagonal)
               (:c00-c11
                (emit c00 c10 c11)
                (emit c00 c11 c01))

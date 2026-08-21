@@ -113,12 +113,16 @@
          (view-x (dot relative (swizzle camera-right :xyz)))
          (view-y (dot relative (swizzle camera-up :xyz)))
          (view-z (dot relative (swizzle camera-forward :xyz))))
+    ;; The projection lane is packed so that both projections share these
+    ;; three rows; only the homogeneous divisor tells them apart.  Dividing
+    ;; by the view depth is what makes a picture perspective, and dividing
+    ;; by one is what makes it isometric.
     (set-output clip-position
                 (vec4 (* view-x (swizzle camera-projection :x))
                       (- (* view-y (swizzle camera-projection :y)))
                       (+ (* view-z (swizzle camera-projection :z))
                          (swizzle camera-projection :w))
-                      view-z))
+                      (mix 1.0 view-z (swizzle chamfer-parameters :z))))
     (set-output world-position-output world-position)
     (set-output face-normal-output face-normal)
     (set-output stock-output stock)
@@ -132,7 +136,16 @@
               (face-normal :vec3 :location 1 :interpolation :flat)
               (stock :float :location 2 :interpolation :flat)
               (lattice :vec2 :location 3))
-     :outputs ((color-output :vec4 :location 0)))
+     :outputs ((color-output :vec4 :location 0))
+     ;; The same block the vertex stage reads, declared identically so the
+     ;; one uniform buffer serves both stages.
+     :resources ((camera-state :uniform-block :binding 1
+                  :members ((camera-position :vec4)
+                            (camera-right :vec4)
+                            (camera-up :vec4)
+                            (camera-forward :vec4)
+                            (camera-projection :vec4)
+                            (chamfer-parameters :vec4)))))
   (let* ((dx (derivative-x world-position))
          (dy (derivative-y world-position))
          (geometric-normal
@@ -146,10 +159,21 @@
          (normal (if (< (dot geometric-normal face-normal) 0.0)
                      (* geometric-normal -1.0)
                      geometric-normal))
-         (sun (normalize (vec3 0.35 -0.45 0.82)))
-         (lambert (max 0.0 (dot normal sun)))
-         (sky (+ 0.30 (* 0.10 (max 0.0 (swizzle normal :z)))))
-         (paper (* (vec3 0.80 0.80 0.79) (+ sky (* lambert 0.55))))
+         ;; A studio: one warm key over the left shoulder, a cool hemisphere
+         ;; for the sky with a dim warm bounce off the floor, and a weak cool
+         ;; fill opposite the key, so a face turned away from everything
+         ;; still reads as a plane instead of a silhouette.
+         (albedo (vec3 0.58 0.58 0.57))
+         (sun (normalize (vec3 0.42 -0.55 0.72)))
+         (fill-direction (normalize (vec3 -0.62 0.44 0.18)))
+         (key (max 0.0 (dot normal sun)))
+         (fill (max 0.0 (dot normal fill-direction)))
+         (sky-mix (+ 0.5 (* 0.5 (swizzle normal :z))))
+         (ambient (mix (vec3 0.17 0.15 0.13) (vec3 0.33 0.37 0.44) sky-mix))
+         (paper (* albedo
+                   (+ ambient
+                      (+ (* (vec3 1.02 0.96 0.85) key)
+                         (* (vec3 0.15 0.18 0.24) fill)))))
          ;; Every wire is one family of lattice lines, and a family is just
          ;; the set where a linear lattice function hits an integer.  U and V
          ;; are the 4x4 grid; U-V is the shared diagonal of both triangles in
@@ -180,7 +204,8 @@
          (u-wire (* (- 1.0 (smoothstep 0.4 1.4 u-pixels)) (mix 0.55 1.0 u-rim)))
          (v-wire (* (- 1.0 (smoothstep 0.4 1.4 v-pixels)) (mix 0.55 1.0 v-rim)))
          (d-wire (* (- 1.0 (smoothstep 0.2 1.0 d-pixels)) 0.22))
-         (wire (max (max u-wire v-wire) d-wire))
+         (wire (* (swizzle chamfer-parameters :y)
+                  (max (max u-wire v-wire) d-wire)))
          (ink (vec3 0.06 0.07 0.10))
          (radiance (mix paper ink wire)))
     (set-output color-output (vec4 radiance 1.0))))

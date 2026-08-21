@@ -37,6 +37,9 @@
            #:refresh-viewer-renderer
            #:capture-viewer-frame
            #:*chamfer-width*
+           #:*wireframe*
+           #:*projection*
+           #:*isometric-height*
            #:viewer
            #:viewer-renderer
            #:viewer-running-p

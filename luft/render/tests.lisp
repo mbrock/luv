@@ -34,15 +34,36 @@
     (ok (luv.spir-v:compile-shader-specification vertex))
     (ok (luv.spir-v:compile-shader-specification fragment))))
 
-(deftest fly-camera-packs-a-perspective-frame
-  (let* ((camera (render:make-fly-camera))
-         (data (luft.render::camera-uniform-data camera 1100 800)))
-    (ok (= 24 (length data)))
-    (ok (typep data '(simple-array single-float (24))))
-    (ok (> (aref data 16) 0.0))
-    (ok (> (aref data 17) 0.0))
-    (ok (> (aref data 18) 1.0))
-    (ok (< (aref data 19) 0.0))))
+(deftest the-camera-block-packs-both-projections
+  ;; Perspective and isometric share the three projection rows and differ
+  ;; only in the homogeneous divisor, so the test that they agree on depth
+  ;; is the test that the shared rows really are shared.
+  (let ((camera (render:make-fly-camera)))
+    (flet ((lane (projection)
+             (let ((render:*projection* projection))
+               (luft.render::camera-uniform-data camera 1100 800))))
+      (let ((perspective (lane :perspective))
+            (isometric (lane :isometric))
+            (near 0.1)
+            (far 200.0))
+        (ok (= 24 (length perspective)))
+        (ok (typep perspective '(simple-array single-float (24))))
+        (dolist (data (list perspective isometric))
+          (ok (> (aref data 16) 0.0))
+          (ok (> (aref data 17) 0.0))
+          (ok (> (aref data 18) 0.0))
+          (ok (< (aref data 19) 0.0)))
+        (ok (= 1.0 (aref perspective 22)))
+        (ok (= 0.0 (aref isometric 22)))
+        (flet ((depth (data view-z)
+                 (let ((clip (+ (* view-z (aref data 18)) (aref data 19))))
+                   (if (zerop (aref data 22)) clip (/ clip view-z)))))
+          (ok (< (abs (depth perspective near)) 1d-4))
+          (ok (< (abs (- (depth perspective far) 1.0)) 1d-4))
+          (ok (< (abs (depth isometric near)) 1d-4))
+          (ok (< (abs (- (depth isometric far) 1.0)) 1d-4)))
+        (ok (= (aref perspective 20) render:*chamfer-width*))
+        (ok (= (aref perspective 21) render:*wireframe*))))))
 
 ;;; A literal Lisp transcription of FACE-VERTEX-SPECIFICATION's position
 ;;; arithmetic, reading the same face record the GPU reads.  It exists so a
