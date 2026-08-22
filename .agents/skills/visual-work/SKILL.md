@@ -58,6 +58,9 @@ effort, and the false authority of a large green test count.
   user explicitly waives it. Before signoff, say that the result is ready for
   review or awaiting approval; do not say that it looks correct or mark it
   complete.
+- Preserve the user's own problem framing and reference artifacts when they
+  expose the feature more clearly than the implementation's showcase does.
+  Do not replace a tight diagnostic closeup with a broad beauty shot.
 - Report exactly which artifact was inspected, at what resolution and state.
   Preserve uncertainty when the framing or image quality limits judgment.
 
@@ -165,3 +168,11 @@ At handoff, distinguish:
 
 Never use the quantity of structural evidence as a substitute for the missing
 perceptual gate.
+
+## Worked failures
+
+For a concrete mesh-review failure in which a watertight, exhaustively tested
+patch rendered successfully but visibly regressed into a pinwheel of slivers,
+read [the LUFT bevel-miter example](examples/luft-miter.md). Use it when a
+user-supplied closeup, a claimed-success capture, and an external geometric
+reference disagree.
