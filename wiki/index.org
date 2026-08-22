@@ -170,6 +170,12 @@ The following are starting paths rather than a table of settled doctrine.
   correct-by-construction structure, the mixed-vertex collapse, the rejected
   pinwheel transition, and the Blender Arc reference without pretending that
   the next representation has already been chosen.
+- [[file:luft-sites.org][The beveled surface is a sum over sites]] answers that page: every bevel
+  vertex is an integer offset-line intersection, junctions are fans of one
+  equilateral tile counted by turning, sharp miters leave a (3,1,1)
+  fingerprint that the Arc policy removes, and the renderer becomes three
+  instance streams — faces, bands, and fans — checked against Blender's Arc
+  bevel as an executable oracle.
 - [[file:temporal-antialiasing.org][Temporal reconstruction in the Luft atelier]] follows a frozen jittered
   view through Vulkan colour and motion attachments, ping-pong history,
   YCoCg rejection, and lens presentation.  It records the resource-ownership

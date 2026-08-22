@@ -1,0 +1,291 @@
+#+title: The beveled surface is a sum over sites
+#+startup: overview
+
+This page records the offset construction that came out of the miter study
+(#2H7DL8, #GBCLEV) and is intended as the backbone of the next LUFT
+renderer.  The short version: the beveled voxel surface decomposes exactly
+into face sites, crease-edge sites, and junction-vertex sites; every vertex
+of every piece is an intersection of offset lines and therefore an integer
+lattice point; junctions are fans of one equilateral tile counted by how far
+the bevel band turns; and Blender's Arc bevel realizes the same integers, so
+it serves as an executable oracle rather than a mood board.
+
+* Every vertex is an offset-line intersection
+:PROPERTIES:
+:ID: IQC0Y4
+:END:
+
+The sharp system's site map #2H7DL8 sends a site to one point $G(s)$.  The
+generalization that resolves the mixed junction of #DJK8HW is not a richer
+mystery object: it is the observation that every vertex the bevel ever needs
+is an intersection of /offset lines/ — axis-aligned lattice lines displaced
+by the bevel offset $m$ along one or two axes, intersected inside the flat
+face planes they share.  Band rails, flare points, hexagon corners: each
+coordinate is (lattice coordinate) $\pm\, m$ and nothing else ever appears.
+
+With cell size $a$ and integer $m$, every vertex of the entire surface is an
+integer triple.  Watertightness becomes equality of integers rather than
+agreement to a floating-point tolerance, which retroactively addresses the
+oracle gap recorded in #7LEM72: closure can be tested exactly, and so can
+planarity ($x{+}y{+}z$ constant across a candidate cap is an integer
+predicate).  The chamfer width is $w=\sqrt2\,m$ on the diagonal.
+
+The choice luv is making: cells at $a=8$ lattice units with $m=1$ — an
+eighth-cell bevel, visually indistinguishable from the production 0.11-cell
+chamfer of #Z5NDTA — so that chunk-local vertex coordinates fit in small
+integers all the way into the shaders.  This carries LUFT's packed-word idea
+(#RUAWR5) further down: not only the sites but the realized geometry lives
+on a lattice.
+
+* One tile counts every junction by its turning
+:PROPERTIES:
+:ID: EUZLR8
+:END:
+
+There is exactly one corner primitive: the equilateral triangle of side $w$
+lying in a body-diagonal $\{111\}$ plane.  A junction vertex is filled by a
+fan of $k$ such tiles, where $k$ is the turn the skirt boundary makes there,
+in units of 60°:
+
+| junction                          | $k$ | fill                        |
+|-----------------------------------+-----+-----------------------------|
+| convex or concave corner          |   1 | the tile itself             |
+| mixed wall-end flare              |   3 | isosceles trapezoid         |
+| diagonal staircase saddle         |   6 | flat regular hexagon        |
+
+The trapezoid has legs $w$, near base $w$, far base $2w$ — three tiles in a
+strip, which is half of a regular hexagon cut along its long diagonal.  The
+saddle hexagon's vertices are the six permutations of $(m,-m,0)$ around the
+vertex, all on the plane $x{+}y{+}z=0$: the regular hexagon section of the
+cube.  Computed in the session and confirmed by the oracle of #WK4YU4.
+
+Each tile vertex carries exactly ±30° of discrete Gaussian curvature.  A
+chamfered cube corner pays its 90° deficit as three +30° quanta; the saddle
+pays −180° as six −30° quanta.  Flat regions and band interiors carry
+nothing.  The whole junction alphabet is ±30° curvature quanta arranged
+around the vertex according to its star, with tiles as the carriers.
+
+* The skirt is the atomic bevel operation
+:PROPERTIES:
+:ID: C2VXFE
+:END:
+
+What beveling does to one isolated flat face is: keep the face, emit a
+collar of four edge quads and four corner tiles.  Every shape in this study
+is flat faces plus composed skirts.  The skirt carries exactly 2π of
+curvature — four tiles × three vertices × 30° — which is Gauss–Bonnet made
+discrete: turning "up-facing" into "side-facing" costs a full turn, and the
+one annulus pays all of it while the face inside and the walls below stay
+flat.  On the Gauss sphere the skirt populates precisely the $\{110\}$ and
+$\{111\}$ latitude ring between a face normal and its equator.
+
+Stacking skirts is corner-cutting subdivision: the inner rail is a 4-gon,
+the outer an 8-gon, and each additional ring halves the corner angles —
+Chaikin's algorithm in 3D, whose limit is the smooth cupola.  A skirt is one
+iteration of "round this edge".  No skirt is ever emitted as a unit by the
+renderer of #8UGGY0, but it remains the right proof object: every face's
+skirt is covered by its incident sites' emissions, with shared vertices
+equal as integers.
+
+* Three plane families and one width dial
+:PROPERTIES:
+:ID: W5L4L3
+:END:
+
+Every face of the beveled world, at every offset, has its normal among the 6
+axis directions $\{100\}$, the 12 edge diagonals $\{110\}$, or the 8 body
+diagonals $\{111\}$ — 26 directions, fixed for all $m$.  The bevel never
+invents a direction; it only moves area between the families.  Dihedral
+angles never change as $m$ grows: the beveled cell is the Minkowski sum of a
+cube of side $a-2m$ and an octahedron of scale $m$, so the dial is a linear
+crossfade between two polytopes.
+
+The endpoint $m=a/2$ is a critical point.  Cell faces degenerate to 45°
+diamonds; on a unit staircase the convex chamfer through $(x{+}z=c-m)$ and
+the concave fillet through $(x{+}z=c-a+m)$ land in the same plane, so the
+whole slope fuses into one exact 45° ramp; and the fused diagonal plane is
+tiled by the trihexagonal (kagome) pattern — hexagons and triangles, the
+classic $(111)$ section of cubic packing.  Between the endpoints the
+axis-aligned faces act as spacers of width $a-2m$ holding parallel diagonal
+planes apart; "suddenly everything becomes the slope" at the end is just the
+moment the spacer width reaches zero.  For luvcraft this is a roundness dial
+with exact integer geometry at every stop: $m=1$ is blocks wearing chamfers,
+$m=a/4$ is blocks wearing architecture, $m=a/2$ is terrain with honest
+45° hillsides where staircases are ramps.
+
+* Turn, don't die: sharp miters leave a (3,1,1) fingerprint
+:PROPERTIES:
+:ID: GT4Y9J
+:END:
+
+The policy decision the miter study was circling (#DJK8HW, #RJ0RLN) has a
+crisp algebraic form.  Observed in Blender (cell 4, offset 1), sweeping
+every face normal of six voxel test objects against the 26-direction
+alphabet:
+
+- With the default /sharp/ outer miter, every terrain grows isosceles
+  triangles with edge lengths $\sqrt2 m,\sqrt6 m,\sqrt6 m$ and normals of
+  type $(3,1,1)$ — outside the alphabet — wherever a band terminates into
+  transverse geometry: staircase noses dying into a side wall, both base
+  corners of a wall end, a 2/1/0 height junction.  The sharp miter is
+  exactly the band-collapse aesthetic LUFT already rejected, and the
+  $(3,1,1)$ triangle is its footprint.
+
+- With the /Arc/ outer miter, all such faces vanish: every normal is
+  $\{100\}/\{110\}/\{111\}$, every vertex integer, and each mixed junction
+  is the half-hexagon trapezoid of #EUZLR8 (measured at a wall end and at
+  the 2/1/0 star; the flat "creases-flat" pieces merge seamlessly into the
+  adjacent face n-gons).
+
+So the invariants of #IQC0Y4 and #W5L4L3 are not properties of beveling in
+general; they are properties of the turn-don't-die policy.  Bands must turn
+through junctions as continuous loops — quad face loops whose poles are
+exiled to flat regions where coplanar triangles cost nothing — never
+terminate at a shared point.  That is the design content the 4724734
+experiment (#RJ0RLN) was missing: it moved points but left the topology
+face-owned and centre-fanned.
+
+* Blender's Arc bevel is an executable oracle
+:PROPERTIES:
+:ID: WK4YU4
+:END:
+
+Because all vertices are integers, Blender stops being a visual reference
+(#DJK8HW) and becomes a specification that can be diffed exactly: build a
+star as a voxel mesh, apply the bevel modifier (offset $m$, one segment,
+Arc outer miter), and compare vertex sets and face census against the
+tables.  A first sweep of this kind ran during the session that produced
+this page:
+
+[[file:images/luft-site-demos.png]]
+
+Left to right: the fully beveled diagonal staircase fused into a kagome
+slope ($m=a/2$), the 2/1/0 junction star, the wall-end miter with Arc and
+with sharp outer miters side by side, the diagonal ziggurat with its saddle
+hexagons, the axis staircase with its coplanar nose bands, and the single
+cell wearing its skirt.
+
+The census check: for the diagonal ziggurat (5×5 columns, height
+$\max(0,4-(i{+}j))$ cells), a twenty-line combinatorial site counter gives
+60 exposed faces, 84 crease edges, 44 turning junctions; Blender's Arc
+bevel of the same voxels authors exactly 60 $\{100\}$ faces, 84 $\{110\}$
+faces, and 44 $\{111\}$ faces.  The site decomposition and the modifier
+agree category by category, which is the independent geometric oracle that
+#7LEM72 demanded — exact, automated, and not a screenshot.
+
+* Faces, bands, and fans: three instance streams
+:PROPERTIES:
+:ID: 8UGGY0
+:END:
+
+The renderer paradigm this fixes: the mesh is not a property of cells — a
+cell's relevant neighborhood is 26 cells, whose configuration space is
+astronomically large and whose geometry is shared anyway — it is a sum over
+sites, each drawn as an instance of a fixed template:
+
+- /Face sites/: every exposed cell face emits one inset quad.  Class is one
+  bit.
+- /Crease-edge sites/: every creased lattice edge emits one band quad.
+  Class is the edge's 4-cell star — 16 configurations: chamfer, fillet,
+  flat, checkerboard — with end positions (square, stretched, mitered rung)
+  determined by the vertex stars at its ends.
+- /Junction-vertex sites/: every turning vertex emits a fan of $k$ tiles,
+  $k$ from the 256-entry vertex-star table of #WJRRK7.
+
+A record is chunk-local site coordinates plus a class byte; the vertex
+shader decodes class → offset table → lattice ± $m$, in integers.  This
+keeps the refoundation's CPU/GPU boundary — the CPU classifies, the shader
+realizes — while redistributing the shape word of #RUAWR5: the edge stars
+move to the edge stream, the vertex stars to the vertex stream, and the
+face record shrinks to almost nothing.  Junction geometry structurally
+cannot be triangulated into a face patch, which is the failure mode of
+#RJ0RLN made unrepresentable.
+
+Classification visits every lattice vertex of a chunk once (17³ ≈ 5k
+byte-wise star reads for a 16³ chunk) but emission scales with surface: the
+ziggurat of #WK4YU4 is 144 quad instances plus 44 fans — roughly 350
+triangles, every vertex an integer triple.  The instance streams are
+literally the crease graph of the terrain with templates stamped on its
+elements.
+
+* Bands and fans carry material semantics
+:PROPERTIES:
+:ID: 41HEJ1
+:END:
+
+Assigning shared geometry to one face's skirt forces arbitrary ownership
+conventions and loses information; the site decomposition keeps it.  A band
+site structurally knows both of its faces, so it is the natural place for
+material blending — grass-top to dirt-side across the band's width, with a
+canonical rail-to-rail parameter.  A fan knows all the faces around its
+vertex and blends them at corners.  And the class id carries the semantic
+bit art direction wants most: convex bands are where wear, chipping, and
+edge highlights go; concave fillets are where dirt, moss, and occlusion
+accumulate.  The creases stop being a rendering problem and become a
+material vocabulary — fitting, for a system that began as "make the edges
+look good".
+
+* Coplanar merging is exact level of detail
+:PROPERTIES:
+:ID: YGP21F
+:END:
+
+Wherever a staircase recedes in both axes, flat $\{111\}$ regions grow as
+triangles — the plane meets the three axes symmetrically, so its boundary
+against axis geometry runs along the 60° directions — and the construction
+is scale-covariant, so the same motif appears at cell scale, step scale,
+and terrain scale: a hierarchy of triangles, the octree showing through the
+geometry.  Because coplanarity is an exact integer test, dissolving the
+interior edges of a coplanar region loses nothing: not a normal, not a
+silhouette, not a depth value.  Distant terrain can render the merged
+triangle hierarchy while near terrain renders the full ornament, with no
+popping, because both meshes are the same surface.  This is a compression
+pass over the streams of #8UGGY0, not an ownership decision in the
+representation.
+
+* NEXT Implement the site-stream LUFT renderer backbone
+:PROPERTIES:
+:ID: RO2OCL
+:END:
+
+/Intent./ Rebuild LUFT's surface rendering on the decomposition of #8UGGY0:
+integer lattice cells ($a=8$, $m=1$ to start), three instance streams with
+fixed templates, CPU-side star classification into per-site records, and
+turn-don't-die junctions per #GT4Y9J.
+
+/Evidence./ The offset construction and tile alphabet are verified at the
+computed sites (#EUZLR8) and empirically across six test objects by the
+Blender oracle (#WK4YU4), including the exact census match on the ziggurat.
+The sharp/Arc contrast (#GT4Y9J) shows what the current sharp system's
+collapse looks like algebraically and that the Arc policy stays inside the
+26-normal integer alphabet.
+
+/Done when./ A chunk of luvcraft terrain renders through the three streams
+with every emitted vertex an integer triple; a closure check verifies
+shared vertices by integer equality across stream boundaries; the wall-end
+fixture of #Z5NDTA shows the trapezoid junction instead of the collapse of
+#DJK8HW, captured with the same construction-on and construction-off
+closeups as the sharp baseline (#L7N4MO) for side-by-side review.
+
+* TODO Sweep the 256 vertex stars with the integer oracle
+:PROPERTIES:
+:ID: WJRRK7
+:END:
+
+/Intent./ Build the vertex-star table that #8UGGY0's fan stream reads:
+for each of the 256 stars, derive the incident bands, their offset-line
+intersections, the turn count $k$, and the tile fan, entirely in integer
+arithmetic; state the width and planarity predicates explicitly rather than
+authoring entries by eye.
+
+/Evidence./ The turn-counting law of #EUZLR8 is verified at the convex
+corner, wall end, and saddle; the 2/1/0 star initially looked like an
+exception (a skew quad) but resolved to the standard trapezoid under the
+Arc policy (#GT4Y9J), which suggests the alphabet is closed — that claim is
+exactly what the sweep must decide.
+
+/Done when./ The table exists as data with its generating predicate in the
+repository; every entry is checked against Blender's Arc bevel of the
+corresponding voxel star by exact vertex-set comparison; any star that
+falls outside the tile alphabet is documented as its own figure rather
+than special-cased silently.

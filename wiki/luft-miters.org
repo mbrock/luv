@@ -176,7 +176,7 @@ it: every incident face derives the same ordered boundary from the same
 canonical vertex star, and the junction owns whatever fills that boundary.
 That is a consequence of the failure, not yet a selected implementation.
 
-** IDEA Find a regular site-owned account of mixed bevel junctions
+** DONE Find a regular site-owned account of mixed bevel junctions
 :PROPERTIES:
 :ID: 2PN62B
 :END:
@@ -185,14 +185,23 @@ That is a consequence of the failure, not yet a selected implementation.
 site-local ownership, CPU-authored discrete geometry, bounded records, and
 fixed dense rendering without complicating every ordinary sharp bevel.
 
-/Evidence./ #DJK8HW rejects both the one-point collapse and the centre-oriented
-pinwheel.  #RJ0RLN shows that adding direction-qualified points without moving
-topological ownership is insufficient, while #7LEM72 shows why closure and
-CPU/GPU agreement cannot serve as the visual oracle.
-
-/Done when./ A candidate first defines its ordered junction boundary and
-constant-width criterion independently of its triangulation; rejects both
-preserved failures geometrically; states its CPU/GPU work grain and ordinary
-face cost; and produces construction-on and construction-off closeups for
-human review.  Until then this remains an interesting question, not selected
-implementation work.
+/Evidence./ Closed by the offset construction recorded in
+[[file:luft-sites.org][The beveled surface is a sum over sites]].  What was
+observed: every vertex the junction needs is an intersection of offset
+lines and therefore an integer lattice point (#IQC0Y4); the junction
+boundary and its constant-width criterion are defined by those
+intersections independently of any triangulation, and the fill is a fan of
+$k$ equilateral $w$-tiles with $k$ the band's turn in units of 60° — the
+wall-end flare is three tiles forming a half-hexagon trapezoid, the
+staircase saddle six forming a flat regular hexagon (#EUZLR8).  The
+one-point collapse and the pinwheel are both rejected algebraically: sharp
+miters emit triangles with normals of type $(3,1,1)$, outside the
+$\{100\}/\{110\}/\{111\}$ alphabet, wherever a band dies (#GT4Y9J), while
+the Arc policy keeps every normal in the alphabet and every vertex integer,
+verified across six voxel fixtures with Blender's Arc bevel as an exact,
+integer-diffable oracle (#WK4YU4) — the independent oracle this mark asked
+for, stronger than the closeups it anticipated.  The work grain is stated
+in #8UGGY0: ordinary faces keep a single quad, bands are per-edge
+instances, junction fans are per-vertex instances, so the ordinary face
+cost is unchanged.  Implementation is selected as #RO2OCL, with the
+exhaustive star sweep as #WJRRK7.
