@@ -295,6 +295,13 @@ The sharp/Arc contrast (#GT4Y9J) shows what the current sharp system's
 collapse looks like algebraically and that the Arc policy stays inside the
 26-normal integer alphabet.
 
+/Spike./ The old face-patch ABI has been removed.  The renderer now consumes
+one CPU-authored integer triangle mesh containing the three families above,
+through one =uvec4= vertex stream and one =uint32= index stream.  The retained
+atelier, temporal resolve, camera, and material shader render the isolated
+=06=, =18=, and =69= singular fixtures; exact geometric edge counts close all
+three.  Terrain and #Z5NDTA remain the acceptance boundary for this mark.
+
 /Done when./ A chunk of luvcraft terrain renders through the three streams
 with every emitted vertex an integer triple; a closure check verifies
 shared vertices by integer equality across stream boundaries; the wall-end
@@ -322,6 +329,15 @@ regular stars in 12 rotation classes satisfy the integer, normal, rotation,
 and complement invariants, while all 128 singular stars make Blender leave at
 least one of them (#TQ8FUN).  The oracle has established the regular domain;
 the remaining implementation work is LUFT's generator and singular policy.
+
+/Spike./ LUFT now walks an occupied-side link graph and splits edge-touching
+and corner-touching occupied components into regular sheet cycles.  The
+committed regular corpus realizes those cycles exactly, with executable
+coverage for =06=, =18=, and =69=.  A high-occupancy case such as =6f= exposes
+the next representation boundary: one link cycle may revisit a radial
+direction through distinct topological copies, so it requires a covered
+junction rather than another ordinary eight-bit mask.  The implementation
+signals that case instead of importing Blender's singular answer.
 
 /Done when./ The table exists as data with its generating predicate in the
 repository; every regular entry is checked against the committed Blender Arc

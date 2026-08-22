@@ -31,7 +31,7 @@ projection to judge a shape rule in.")
    (cell :initarg :cell :reader site-inspection-cell)
    (point :initarg :point :reader site-inspection-point)
    (distance :initarg :distance :reader site-inspection-distance)
-   (shape-word :initarg :shape-word :reader site-inspection-shape-word)
+   (star-mask :initarg :star-mask :reader site-inspection-star-mask)
    (stock :initarg :stock :reader site-inspection-stock))
   (:documentation
    "One retained semantic ray hit, suitable for sparse inspection.
@@ -48,19 +48,19 @@ at the atelier boundary where a person has selected one site."))
               (site-inspection-distance inspection)))))
 
 (defun make-fly-camera
-    (&key (position (vec3:make-vec3 70.0 -18.0 50.0))
-          (yaw 2.2455373) (pitch -0.5165006)
+    (&key (position (vec3:make-vec3 28.0 -2.0 13.0))
+          (yaw 2.3562) (pitch -0.393)
           (field-of-view 0.9599311))
   (make-instance 'fly-camera :position position :yaw yaw :pitch pitch
                              :field-of-view field-of-view))
 
 (defun reset-viewer-camera (&optional (viewer *viewer*))
-  "Return VIEWER to the composed perspective sanctuary view."
+  "Return VIEWER to the manifold-star spike view."
   (when viewer
     (let ((camera (viewer-camera viewer)))
-      (setf (camera-position camera) (vec3:make-vec3 70.0 -18.0 50.0)
-            (camera-yaw camera) 2.2455373
-            (camera-pitch camera) -0.5165006
+      (setf (camera-position camera) (vec3:make-vec3 28.0 -2.0 13.0)
+            (camera-yaw camera) 2.3562
+            (camera-pitch camera) -0.393
             (camera-field-of-view camera) 0.9599311
             *projection* :perspective
             *isometric-height* 64.0)
@@ -139,7 +139,11 @@ at the atelier boundary where a person has selected one site."))
     (make-instance
      'site-inspection :source source :site face :cell cell :point point
      :distance distance
-     :shape-word (luft:face-shape-word domain face occupancy)
+     :star-mask
+     (luft:site-star-occupancy-mask
+      domain
+      (luft:make-site domain cell-x cell-y cell-z luft:+vertex-extent+ 1)
+      occupancy)
      :stock (inspection-face-stock source face))))
 
 (defun raycast-site (source origin direction
@@ -273,7 +277,8 @@ the selector is the whole of the difference."
               (lane (frame-view-up view) 0.0)
               (lane (frame-view-forward view) 0.0)
               (coerce (frame-view-projection view) 'list)
-              (list *chamfer-width* *wireframe*
+              (list (/ luft:+mesh-bevel-width+ luft:+mesh-cell-size+)
+                    *wireframe*
                     (frame-view-divisor view) ink-strength)
               (lane (frame-view-position previous) 0.0)
               (lane (frame-view-right previous) 0.0)
@@ -430,7 +435,7 @@ the selector is the whole of the difference."
         (let* ((site (site-inspection-site inspection))
                (cell (site-inspection-cell inspection))
                (point (site-inspection-point inspection))
-               (shape (site-inspection-shape-word inspection)))
+               (star-mask (site-inspection-star-mask inspection)))
           (inspector-row
            stream 57 "site"
            (format nil "~D, ~D, ~D" (luft:site-x site)
@@ -456,20 +461,18 @@ the selector is the whole of the difference."
                                  (vec3:vec3-z point)))
           (inspector-row stream 195 "stock"
                          (format nil "~D" (site-inspection-stock inspection)))
-          (inspector-row stream 218 "shape word"
-                         (format nil "#x~8,'0X" shape))
-          (inspector-row stream 241 "edge kinds"
-                         (format nil "~D  ~D  ~D  ~D"
-                                 (ldb (byte 2 0) shape)
-                                 (ldb (byte 2 2) shape)
-                                 (ldb (byte 2 4) shape)
-                                 (ldb (byte 2 6) shape)))
-          (inspector-row stream 264 "corner codes"
-                         (format nil "~2,'0X  ~2,'0X  ~2,'0X  ~2,'0X"
-                                 (ldb (byte 6 8) shape)
-                                 (ldb (byte 6 14) shape)
-                                 (ldb (byte 6 20) shape)
-                                 (ldb (byte 6 26) shape)))))))
+          (inspector-row stream 218 "cell-corner star"
+                         (format nil "#x~2,'0X" star-mask))
+          (inspector-row stream 241 "star topology"
+                         (if (luft:star-singular-p star-mask)
+                             "singular · split sheets"
+                             "regular"))
+          (inspector-row
+           stream 264 "spike junction"
+           (handler-case
+               (format nil "~D regular sheet~:P"
+                       (length (luft:decompose-star-mask star-mask)))
+             (error () "covered junction · next spike")))))))
 
 (defun refresh-viewer-inspector (viewer)
   (let ((pane (ignore-errors (clim:find-pane-named viewer 'inspector))))
@@ -510,7 +513,7 @@ the selector is the whole of the difference."
   ((canvas :initarg :canvas :initform nil :reader viewer-canvas)
    (context :initarg :context :initform nil :reader viewer-context)
    (device :initarg :device :initform nil :reader viewer-device)
-   (source :initarg :source :initform (make-demo-solid)
+   (source :initarg :source :initform (make-manifold-spike-scene)
            :accessor viewer-source)
    (renderer :initarg :renderer :initform nil :accessor viewer-renderer)
    (camera :initarg :camera :initform (make-fly-camera) :reader viewer-camera)
@@ -832,9 +835,9 @@ the selector is the whole of the difference."
   nil)
 
 (defun start-viewer (&key
-                       (solid (make-mountain-sanctuary-scene))
+                       (solid (make-manifold-spike-scene))
                        (camera (make-fly-camera))
-                       (title "LUFT mountain sanctuary")
+                       (title "LUFT manifold-sheet spike")
                        (width 1100) (height 800)
                        fullscreen-p
                        (frames-per-second 60)
@@ -866,7 +869,7 @@ the selector is the whole of the difference."
                 (renderer*
                   (setf renderer
                         (make-renderer
-                         device* (make-face-materialization solid)
+                         device* (make-render-mesh solid)
                          (canvas-format context) (canvas-extent context))))
                 (port (clim:find-port :server-path '(:luv-raster)))
                 (manager
@@ -937,7 +940,7 @@ false when the subject is the geometry rather than the atelier UI."
       (destroy buffer))))
 
 (defun refresh-viewer-renderer (&optional (viewer *viewer*)
-                                &key (solid (make-mountain-sanctuary-scene)))
+                                &key (solid (make-manifold-spike-scene)))
   "Rebuild VIEWER's renderer so edited shaders and geometry take effect."
   (when viewer
     (luv::call-on-sdl-canvas-thread
@@ -945,12 +948,12 @@ false when the subject is the geometry rather than the atelier UI."
      (lambda ()
        (let* ((context (viewer-context viewer))
               (old (viewer-renderer viewer))
-              (materialization (make-face-materialization solid))
+              (mesh (make-render-mesh solid))
               (was-running-p (viewer-running-p viewer)))
          (setf (viewer-running-p viewer) nil)
          (unwind-protect
               (setf (viewer-renderer viewer)
-                    (make-renderer (viewer-device viewer) materialization
+                    (make-renderer (viewer-device viewer) mesh
                                    (canvas-format context)
                                    (canvas-extent context))
                     (viewer-source viewer) solid

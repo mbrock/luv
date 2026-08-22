@@ -1,8 +1,8 @@
 (defpackage #:luft.render.shaders
   (:use #:cl #:luv.shader)
   (:shadowing-import-from #:luv.shader #:step)
-  (:export #:face-fragment-specification
-           #:face-vertex-specification
+  (:export #:mesh-fragment-specification
+           #:mesh-vertex-specification
            #:inspector-fragment-specification
            #:inspector-vertex-specification
            #:present-fragment-specification
@@ -12,24 +12,19 @@
   (:use #:cl #:luv)
   (:local-nicknames (#:shaders #:luft.render.shaders)
                     (#:vec3 #:luv.arithmetic.lisp.vec3))
-  (:export #:face-materialization
-           #:scene
+  (:export #:scene
            #:scene-solid
+           #:make-manifold-spike-scene
            #:make-mountain-sanctuary-scene
            #:make-miter-study-scene
-           #:face-materialization-domain
-           #:face-materialization-negative-count
-           #:face-materialization-positive-count
-           #:face-materialization-words
            #:make-demo-solid
            #:make-gallery-solid
            #:gallery-plot-report
            #:gallery-plot-origin
            #:*gallery*
-           #:make-face-materialization
-           #:make-face-materialization-from-surface
+           #:make-render-mesh
            #:renderer
-           #:renderer-materialization
+           #:renderer-mesh
            #:fly-camera
            #:make-fly-camera
            #:camera-position
@@ -47,7 +42,7 @@
            #:site-inspection-cell
            #:site-inspection-point
            #:site-inspection-distance
-           #:site-inspection-shape-word
+           #:site-inspection-star-mask
            #:site-inspection-stock
            #:raycast-site
            #:reset-viewer-camera
@@ -55,7 +50,6 @@
            #:stop-viewer
            #:refresh-viewer-renderer
            #:capture-viewer-frame
-           #:*chamfer-width*
            #:*wireframe*
            #:*inspection-ink-p*
            #:*inspection-reach*

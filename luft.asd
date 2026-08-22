@@ -1,17 +1,20 @@
 (in-package #:asdf-user)
 
 (defsystem "luft"
-  :description "Canonical cubical topology and compact face realization."
+  :description "Canonical cubical topology and integer manifold-sheet meshing."
   :version "0.0.1"
   :author "Mikael Brockman"
+  :serial t
   :components ((:file "luft/luft")
-               (:static-file "luft/blender-arc-stars.sexp"))
+               (:static-file "luft/blender-arc-stars.sexp")
+               (:file "luft/mesh")
+               (:file "luft/tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
              (uiop:symbol-call '#:luft '#:run-luft-tests)))
 
 (defsystem "luft/renderer"
-  :description "The GPU renderer for LUFT surface chains of packed sites."
+  :description "The indexed integer-mesh GPU renderer for LUFT solids."
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on ("luft" "luv")
@@ -31,14 +34,6 @@
   :components ((:file "luft/render/studio"))
   :in-order-to ((test-op (test-op "luft/render/test"))))
 
-(defsystem "luft/benchmark"
-  :description "Repeatable CPU materialization benchmarks for LUFT chunks."
-  :version "0.0.1"
-  :author "Mikael Brockman"
-  :depends-on ("luft/renderer")
-  :components ((:file "luft/benchmark"))
-  :in-order-to ((test-op (test-op "luft/benchmark/test"))))
-
 (defsystem "luft/program"
   :description "The standalone LUFT atelier executable."
   :version "0.0.1"
@@ -54,7 +49,7 @@
   :entry-point "luft.render:main")
 
 (defsystem "luft/render/test"
-  :description "Executable claims for the indexed-instanced renderer."
+  :description "Executable claims for the indexed integer-mesh renderer."
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on ("luft/render" "rove")
@@ -65,19 +60,6 @@
                                        (uiop:symbol-call '#:rove '#:find-suite
                                                          '#:luft.render.tests))
                (error "LUFT render tests failed"))))
-
-(defsystem "luft/benchmark/test"
-  :description "Executable claims for the LUFT CPU benchmark harness."
-  :version "0.0.1"
-  :author "Mikael Brockman"
-  :depends-on ("luft/benchmark" "rove")
-  :components ((:file "luft/benchmark-tests"))
-  :perform (test-op (operation component)
-             (declare (ignore operation component))
-             (unless (uiop:symbol-call '#:rove '#:run-suite
-                                       (uiop:symbol-call '#:rove '#:find-suite
-                                                         '#:luft.benchmark.tests))
-               (error "LUFT benchmark tests failed"))))
 
 (defsystem "luft/z-fiber-benchmark"
   :description "Scalar and native-SIMD experiments for full-height LUFT fibers."

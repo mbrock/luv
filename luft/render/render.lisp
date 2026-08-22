@@ -1,8 +1,5 @@
 (in-package #:luft.render)
 
-(defparameter *chamfer-width* 0.11
-  "Reserved chamfer band in cells; materialization and drawing share it.")
-
 (defparameter *wireframe* 1.0
   "Global construction-edge strength.  The atelier toggles it between 0 and 1.")
 
@@ -133,6 +130,25 @@ not put objects or material records on every cell."))
                    :architecture-cells
                    (scene-builder-architecture-cells builder))))
 
+(defun make-manifold-spike-scene ()
+  "Three isolated singular-star fixtures for the manifold-sheet spike.
+
+The plots exercise an edge-touching pair, a corner-touching pair, and the
+four-sheet parity star.  Nothing else in the scene can hide their junctions."
+  (let ((builder (make-scene-builder :horizontal-bits 6)))
+    (labels ((place-star (mask centre-x)
+               (dotimes (sample 8)
+                 (when (logbitp sample mask)
+                   (scene-builder-cell
+                    builder
+                    (+ centre-x (if (logbitp 0 sample) 0 -1))
+                    (+ 10 (if (logbitp 1 sample) 0 -1))
+                    (+ 6 (if (logbitp 2 sample) 0 -1)))))))
+      (place-star #x06 10)
+      (place-star #x18 16)
+      (place-star #x69 22))
+    (finish-scene-builder builder)))
+
 (defun make-mountain-sanctuary-scene ()
   "A Lonely-Mountains landscape carrying a bridge and walled sanctuary.
 
@@ -262,62 +278,13 @@ same view also retains the truncated wall miter preserved by #DJK8HW."
           ((eq side :backward) 0)
           (t 2))))
 
-(defstruct (face-materialization
-             (:constructor %make-face-materialization
-                 (domain words positive-count negative-count))
-             (:copier nil))
-  (domain nil :type luft:world-domain :read-only t)
-  (words #() :type (simple-array (unsigned-byte 32) (*)) :read-only t)
-  (positive-count 0 :type (integer 0 *) :read-only t)
-  (negative-count 0 :type (integer 0 *) :read-only t))
-
 (defun default-face-stock (face)
   (mod (+ (luft:site-x face) (* 2 (luft:site-y face))
           (* 3 (luft:site-z face)) (luft:site-extent face))
        4))
 
-(defun make-face-materialization-from-surface
-    (surface occupancy &key (stock-function #'default-face-stock))
-  "Lower an oriented SURFACE through OCCUPANCY to dense face records.
-
-SURFACE owns topology while OCCUPANCY supplies the stable cell window needed
-to classify its edge and corner stars.  Keeping this boundary explicit lets a
-game use dense resident occupancy without changing LUFT's immutable chains."
-  (check-type surface luft:chain)
-  (check-type occupancy function)
-  (check-type stock-function function)
-  (let* ((domain (luft:chain-domain surface))
-         (sites (luft:chain-sites surface))
-         (face-count (length sites))
-         (positive-count
-           (zone (:luft/count-polarities :value face-count)
-             (loop for face across sites count (luft:site-positive-p face))))
-         (negative-count (- face-count positive-count))
-         (words
-           (zone (:luft/allocate-face-records :value face-count)
-             (luft:make-face-record-array face-count)))
-         (write 0))
-    (zone (:luft/classify-and-pack :value face-count)
-      (flet ((publish-polarity (positive-p)
-               (loop for face across sites
-                     when (eq positive-p (luft:site-positive-p face))
-                       do (let* ((shape
-                                   (luft:face-shape-word
-                                    domain face occupancy))
-                                 (construction-mask
-                                   (luft:face-construction-mask
-                                    domain face shape *chamfer-width*)))
-                            (luft:store-face-record
-                             words write domain face shape
-                             (funcall stock-function face)
-                             construction-mask))
-                          (incf write))))
-        (publish-polarity t)
-        (publish-polarity nil)))
-    (%make-face-materialization domain words positive-count negative-count)))
-
-(defun make-face-materialization (source &key stock-function)
-  "Lower SOLID's boundary to positive then negative dense face records."
+(defun make-render-mesh (source &key stock-function)
+  "Lower SOURCE directly to the indexed integer triangle ABI."
   (let* ((scene (and (typep source 'scene) source))
          (solid (if scene (scene-solid source) source))
          (stock-function (or stock-function
@@ -326,14 +293,7 @@ game use dense resident occupancy without changing LUFT's immutable chains."
                              #'default-face-stock)))
     (check-type solid luft:chain)
     (zone (:luft/rematerialize :value (luft:chain-count solid))
-      (let ((surface
-              (zone (:luft/surface :value (luft:chain-count solid))
-                (luft:surface-chain solid)))
-            (occupancy
-              (lambda (x y z)
-                (luft:chain-cell-occupancy-bit solid x y z))))
-        (make-face-materialization-from-surface
-         surface occupancy :stock-function stock-function)))))
+      (luft:make-surface-mesh solid :stock-function stock-function))))
 
 (defparameter *gallery*
   ;; Each entry is one isolated complex, named by the star configuration it
@@ -434,13 +394,10 @@ consequence of its own occupancy star and can be read on its own."
 
 (defclass renderer ()
   ((device :initarg :device :reader renderer-device)
-   (materialization :initarg :materialization :reader renderer-materialization)
-   (face-buffer :initarg :face-buffer :accessor renderer-face-buffer)
+   (mesh :initarg :mesh :reader renderer-mesh)
+   (vertex-buffer :initarg :vertex-buffer :accessor renderer-vertex-buffer)
    (camera-buffer :initarg :camera-buffer :accessor renderer-camera-buffer)
-   (positive-index-buffer :initarg :positive-index-buffer
-                          :accessor renderer-positive-index-buffer)
-   (negative-index-buffer :initarg :negative-index-buffer
-                          :accessor renderer-negative-index-buffer)
+   (index-buffer :initarg :index-buffer :accessor renderer-index-buffer)
    (layout :initarg :layout :accessor renderer-layout)
    (bind-group :initarg :bind-group :accessor renderer-bind-group)
    (vertex-module :initarg :vertex-module :accessor renderer-vertex-module)
@@ -592,12 +549,12 @@ consequence of its own occupancy star and can be read on its own."
     (create-frame-targets renderer extent))
   renderer)
 
-(defun make-renderer (device materialization color-format extent)
+(defun make-renderer (device mesh color-format extent)
   (let* ((temporal-p (metal-temporal-device-p device))
          (target-formats (if temporal-p
                              '(:rgba16-float :rg16-float)
                              (list color-format)))
-         face-buffer camera-buffer positive-index-buffer negative-index-buffer
+         vertex-buffer camera-buffer index-buffer
          layout bind-group vertex-module fragment-module pipeline
          present-layout present-bind-group present-vertex-module
          present-fragment-module present-pipeline sampler
@@ -606,64 +563,56 @@ consequence of its own occupancy star and can be read on its own."
          (completed-p nil))
     (unwind-protect
          (progn
-           (setf face-buffer
+           (setf vertex-buffer
                  (create device
                          (make-buffer-descriptor
-                          :label "luft face records"
-                          :size (max luft:+face-record-byte-size+
-                                     (* luft:+face-record-byte-size+
-                                        (+ (face-materialization-positive-count
-                                            materialization)
-                                           (face-materialization-negative-count
-                                            materialization))))
+                          :label "luft integer mesh vertices"
+                          :size (max 16
+                                     (* 4 (length
+                                           (luft:surface-mesh-vertex-words
+                                            mesh))))
                           :usage '(:storage :copy-dst)))
-                 positive-index-buffer
+                 index-buffer
                  (create device
                          (make-buffer-descriptor
-                          :label "luft positive winding"
-                          :size (* 2 luft:+face-index-count+)
+                          :label "luft integer mesh indices"
+                          :size (max 4
+                                     (* 4 (luft:surface-mesh-index-count mesh)))
                           :usage '(:index :copy-dst)))
                  camera-buffer
                  (create device
                          (make-buffer-descriptor
                           :label "luft inspection camera"
-                          :size 208 :usage '(:uniform :copy-dst)))
-                 negative-index-buffer
-                 (create device
-                         (make-buffer-descriptor
-                          :label "luft negative winding"
-                          :size (* 2 luft:+face-index-count+)
-                          :usage '(:index :copy-dst))))
-           (write-buffer face-buffer (face-materialization-words materialization))
-           (write-buffer positive-index-buffer (luft:positive-face-index-template))
-           (write-buffer negative-index-buffer (luft:negative-face-index-template))
+                          :size 208 :usage '(:uniform :copy-dst))))
+           (write-buffer vertex-buffer (luft:surface-mesh-vertex-words mesh))
+           (write-buffer index-buffer (luft:surface-mesh-indices mesh))
            (setf layout
                  (create device
                          (make-bind-group-layout-descriptor
-                          :label "luft face layout"
+                          :label "luft mesh layout"
                           :entries '((:binding 0 :type :storage-buffer)
                                      (:binding 1 :type :uniform-buffer))))
                  bind-group
                  (create device
                          (make-bind-group-descriptor
-                          :label "luft face records" :layout layout
-                          :entries `((:binding 0 :resource ,face-buffer)
+                          :label "luft mesh vertices" :layout layout
+                          :entries `((:binding 0 :resource ,vertex-buffer)
                                      (:binding 1 :resource ,camera-buffer))))
                  vertex-module
                  (create device
                          (make-shader-module-descriptor
-                          :label "luft face realization vertex"
+                          :label "luft mesh vertex"
                           :language :mathematical
-                          :code (shaders:face-vertex-specification)))
+                          :code (shaders:mesh-vertex-specification)))
                  fragment-module
                  (create device
                          (make-shader-module-descriptor
-                          :label "luft face fragment" :language :mathematical
-                          :code (shaders:face-fragment-specification)))
+                          :label "luft mesh fragment" :language :mathematical
+                          :code (shaders:mesh-fragment-specification)))
                  pipeline
                  (create device
                          (make-render-pipeline-descriptor
-                          :label "luft indexed face pipeline" :layout layout
+                          :label "luft indexed mesh pipeline" :layout layout
                           :vertex `(:module ,vertex-module)
                           :fragment `(:module ,fragment-module
                                       :targets
@@ -749,13 +698,12 @@ consequence of its own occupancy star and can be read on its own."
                             :primitive '(:topology :triangle-list)))))
            (setf renderer
                  (make-instance 'renderer
-                                :device device :materialization materialization
+                                :device device :mesh mesh
                                 :color-format color-format
                                 :temporal-p temporal-p
-                                :face-buffer face-buffer
+                                :vertex-buffer vertex-buffer
                                 :camera-buffer camera-buffer
-                                :positive-index-buffer positive-index-buffer
-                                :negative-index-buffer negative-index-buffer
+                                :index-buffer index-buffer
                                 :layout layout :bind-group bind-group
                                 :vertex-module vertex-module
                                 :fragment-module fragment-module
@@ -785,8 +733,8 @@ consequence of its own occupancy star and can be read on its own."
                                 present-pipeline present-fragment-module
                                 present-vertex-module sampler present-bind-group
                                 present-layout pipeline fragment-module
-                                vertex-module bind-group layout negative-index-buffer
-                                positive-index-buffer camera-buffer face-buffer))
+                                vertex-module bind-group layout index-buffer
+                                camera-buffer vertex-buffer))
           (when resource (ignore-errors (destroy resource))))))))
 
 (defun set-renderer-inspector-texture (renderer texture)
@@ -833,9 +781,8 @@ consequence of its own occupancy star and can be read on its own."
   (ensure-renderer-extent renderer extent)
   (set-renderer-inspector-texture renderer inspector-texture)
   (write-buffer (renderer-camera-buffer renderer) camera-uniform-data)
-  (let* ((materialization (renderer-materialization renderer))
-         (positive-count (face-materialization-positive-count materialization))
-         (negative-count (face-materialization-negative-count materialization))
+  (let* ((mesh (renderer-mesh renderer))
+         (index-count (luft:surface-mesh-index-count mesh))
          (temporal-p (renderer-temporal-p renderer))
          (color-view (if temporal-p
                          (renderer-scene-view renderer)
@@ -853,7 +800,7 @@ consequence of its own occupancy star and can be read on its own."
            (begin-render-pass
             encoder
             (make-render-pass-descriptor
-             :label "luft indexed faces"
+             :label "luft indexed mesh"
              :color-attachments color-attachments
              :depth-stencil-attachment
              `(:view ,(renderer-depth-view renderer)
@@ -862,13 +809,9 @@ consequence of its own occupancy star and can be read on its own."
                :depth-clear-value 1.0)))))
     (set-pipeline pass (renderer-pipeline renderer))
     (set-bind-group pass 0 (renderer-bind-group renderer))
-    (when (plusp positive-count)
-      (draw-indexed pass (renderer-positive-index-buffer renderer)
-                    :uint16 luft:+face-index-count+ positive-count))
-    (when (plusp negative-count)
-      (draw-indexed pass (renderer-negative-index-buffer renderer)
-                    :uint16 luft:+face-index-count+ negative-count 0 0
-                    positive-count))
+    (when (plusp index-count)
+      (draw-indexed pass (renderer-index-buffer renderer)
+                    :uint32 index-count))
     (when temporal-p
       (signal-temporal-scaler-inputs pass
                                      (renderer-temporal-scaler renderer)))
@@ -929,11 +872,10 @@ consequence of its own occupancy star and can be read on its own."
                   (renderer-pipeline renderer) (renderer-fragment-module renderer)
                   (renderer-vertex-module renderer) (renderer-bind-group renderer)
                   (renderer-layout renderer)
-                  (renderer-negative-index-buffer renderer)
-                  (renderer-positive-index-buffer renderer)
+                  (renderer-index-buffer renderer)
                   (and (slot-boundp renderer 'camera-buffer)
                        (renderer-camera-buffer renderer))
-                  (renderer-face-buffer renderer)))
+                  (renderer-vertex-buffer renderer)))
     (when resource (ignore-errors (destroy resource))))
   (setf (renderer-present-pipeline renderer) nil
         (renderer-present-fragment-module renderer) nil
@@ -945,8 +887,7 @@ consequence of its own occupancy star and can be read on its own."
         (renderer-vertex-module renderer) nil
         (renderer-bind-group renderer) nil
         (renderer-layout renderer) nil
-        (renderer-negative-index-buffer renderer) nil
-        (renderer-positive-index-buffer renderer) nil
+        (renderer-index-buffer renderer) nil
         (renderer-camera-buffer renderer) nil
-        (renderer-face-buffer renderer) nil)
+        (renderer-vertex-buffer renderer) nil)
   (values))
