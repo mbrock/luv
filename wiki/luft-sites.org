@@ -173,6 +173,41 @@ faces, and 44 $\{111\}$ faces.  The site decomposition and the modifier
 agree category by category, which is the independent geometric oracle that
 #7LEM72 demanded — exact, automated, and not a screenshot.
 
+* The Arc oracle has a manifold domain
+:PROPERTIES:
+:ID: TQ8FUN
+:END:
+
+The improvised scene established the attractive cases, but did not establish
+the domain on which Blender is a specification.  The repository now contains
+a headless [[file:../scripts/luft-blender-star-oracle.py][generator]] and its
+[[file:../luft/blender-arc-stars.sexp][canonical mapping]].  It constructs the
+welded cubical boundary for every one of the 256 vertex stars, applies the
+recorded one-segment Arc modifier, extracts the central junction, and checks
+integer coordinates, the 26-normal alphabet, all 24 proper rotations, and
+occupancy complement.  The corpus is regenerated and compared with:
+
+#+begin_example
+make luft-blender-oracle-check
+#+end_example
+
+The exhaustive result splits exactly in half.  All 128 /regular/ stars — 12
+proper-rotation classes whose boundary is edge-manifold and whose vertex link
+is connected — have integer vertices, only $\{100\}/\{110\}/\{111\}$ normals,
+rotation-equivariant polygons, and identical unoriented geometry under
+occupancy complement.  The other 128 stars are precisely the singular ones:
+120 have a non-manifold boundary edge and eight join otherwise separate
+surface sheets only at the vertex.  On those inputs Blender emits non-planar
+polygons, non-integer points, normals outside the alphabet, or results that
+change under a proper rotation.  They remain in the mapping as counterexamples,
+not templates.
+
+Blender's Arc bevel is therefore an exact independent oracle for regular
+cubical boundary stars, not a policy for singular chains.  LUFT must either
+exclude those local occupancies from a terrain materialization, split their
+surface sheets before beveling, or state a separate singular-junction rule.
+The table of #WJRRK7 cannot silently assign Blender's arbitrary answer to them.
+
 * Faces, bands, and fans: three instance streams
 :PROPERTIES:
 :ID: 8UGGY0
@@ -267,25 +302,29 @@ fixture of #Z5NDTA shows the trapezoid junction instead of the collapse of
 #DJK8HW, captured with the same construction-on and construction-off
 closeups as the sharp baseline (#L7N4MO) for side-by-side review.
 
-* TODO Sweep the 256 vertex stars with the integer oracle
+* TODO Derive the regular vertex-star table and choose singular topology
 :PROPERTIES:
 :ID: WJRRK7
 :END:
 
 /Intent./ Build the vertex-star table that #8UGGY0's fan stream reads:
-for each of the 256 stars, derive the incident bands, their offset-line
-intersections, the turn count $k$, and the tile fan, entirely in integer
-arithmetic; state the width and planarity predicates explicitly rather than
-authoring entries by eye.
+for each regular star, derive the incident bands, their offset-line
+intersections, the turn count $k$, and the tile fan entirely in integer
+arithmetic.  Separately choose whether singular stars are rejected, split into
+regular surface sheets, or given their own topology; do not author their
+Blender accidents into the table.
 
 /Evidence./ The turn-counting law of #EUZLR8 is verified at the convex
 corner, wall end, and saddle; the 2/1/0 star initially looked like an
 exception (a skew quad) but resolved to the standard trapezoid under the
-Arc policy (#GT4Y9J), which suggests the alphabet is closed — that claim is
-exactly what the sweep must decide.
+Arc policy (#GT4Y9J).  The exhaustive external corpus now exists: all 128
+regular stars in 12 rotation classes satisfy the integer, normal, rotation,
+and complement invariants, while all 128 singular stars make Blender leave at
+least one of them (#TQ8FUN).  The oracle has established the regular domain;
+the remaining implementation work is LUFT's generator and singular policy.
 
 /Done when./ The table exists as data with its generating predicate in the
-repository; every entry is checked against Blender's Arc bevel of the
-corresponding voxel star by exact vertex-set comparison; any star that
-falls outside the tile alphabet is documented as its own figure rather
-than special-cased silently.
+repository; every regular entry is checked against the committed Blender Arc
+mapping by exact oriented polygon comparison; and every singular entry is
+rejected or decomposed by an explicit topological rule with its own executable
+tests and visual fixture.

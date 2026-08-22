@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if [[ -x /Applications/Blender.app/Contents/MacOS/Blender ]]; then
+  blender_bin=/Applications/Blender.app/Contents/MacOS/Blender
+elif command -v blender >/dev/null 2>&1; then
+  blender_bin=$(command -v blender)
+else
+  echo "Blender is required to generate the LUFT Arc oracle." >&2
+  exit 1
+fi
+
+exec "$blender_bin" \
+  --background \
+  --factory-startup \
+  --python "$script_dir/luft-blender-star-oracle.py" \
+  -- "$@"

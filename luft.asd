@@ -4,7 +4,8 @@
   :description "Canonical cubical topology and compact face realization."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :components ((:file "luft/luft"))
+  :components ((:file "luft/luft")
+               (:static-file "luft/blender-arc-stars.sexp"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
              (uiop:symbol-call '#:luft '#:run-luft-tests)))
