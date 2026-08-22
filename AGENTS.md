@@ -113,7 +113,10 @@ designing a new subsystem or refactoring dispatch code. Start with
 `luv-systems-design` for performance-sensitive architecture involving dense
 iteration, allocation and extent, materialized fields, SIMD, voxel/chunk
 work, quantities, or the arithmetic language; use it alongside `clos-design`
-when both representation and dispatch are at issue.
+when both representation and dispatch are at issue. Start with `visual-work`
+for rendered geometry, shaders, game presentation, screenshots, films, or UI;
+it treats code-defined captures, adversarial inspection, and human signoff as
+part of the implementation rather than polish after it.
 
 # The wiki and scripts/wiki
 

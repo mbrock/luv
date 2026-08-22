@@ -1,0 +1,4 @@
+interface:
+  display_name: "Visual Work"
+  short_description: "Adversarial visual and geometric validation"
+  default_prompt: "Use $visual-work to implement and validate this visual result with inspectable captures and human signoff."
