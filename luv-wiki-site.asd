@@ -38,6 +38,7 @@
                  (:file "voxel-fields-and-windows")
                  (:file "vocabularies")
                  (:file "luft")
+                 (:file "luft-miters")
                  (:file "temporal-antialiasing")
                  (:file "wiki-site")
                  (:static-file "site.js")

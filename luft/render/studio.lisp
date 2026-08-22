@@ -460,16 +460,16 @@ the selector is the whole of the difference."
                          (format nil "#x~8,'0X" shape))
           (inspector-row stream 241 "edge kinds"
                          (format nil "~D  ~D  ~D  ~D"
-                                 (luft:shape-edge-code site shape :u-low)
-                                 (luft:shape-edge-code site shape :u-high)
-                                 (luft:shape-edge-code site shape :v-low)
-                                 (luft:shape-edge-code site shape :v-high)))
-          (inspector-row stream 264 "corner stars"
+                                 (ldb (byte 2 0) shape)
+                                 (ldb (byte 2 2) shape)
+                                 (ldb (byte 2 4) shape)
+                                 (ldb (byte 2 6) shape)))
+          (inspector-row stream 264 "corner codes"
                          (format nil "~2,'0X  ~2,'0X  ~2,'0X  ~2,'0X"
-                                 (luft:shape-corner-star-mask shape :low-low)
-                                 (luft:shape-corner-star-mask shape :low-high)
-                                 (luft:shape-corner-star-mask shape :high-low)
-                                 (luft:shape-corner-star-mask shape :high-high)))))))
+                                 (ldb (byte 6 8) shape)
+                                 (ldb (byte 6 14) shape)
+                                 (ldb (byte 6 20) shape)
+                                 (ldb (byte 6 26) shape)))))))
 
 (defun refresh-viewer-inspector (viewer)
   (let ((pane (ignore-errors (clim:find-pane-named viewer 'inspector))))

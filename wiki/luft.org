@@ -243,19 +243,13 @@ surface remains watertight without stitching.
 [[lisp:luft:site-displacement]] places the shared point at
 $w\rho q$.  Ordinary creases use the half reach $\rho=\tfrac12$; a vertex
 whose raw moment is a unit cube diagonal uses the centroid reach
-$\rho=\tfrac23$.  Each oriented boundary face carries its four complete
-eight-cell vertex stars in one shape word, so the ABI preserves canonical
-occupancy facts rather than only their old edge and corner conclusions.
-
-The GPU realizes a fixed 24-point patch: the original 4 by 4 grid plus two
-site-owned half-edge points at each corner.  Its 26 indexed triangles leave
-ordinary stars exactly on the old planar surface because every added point is
-then the midpoint of an old edge.  The extra freedom is currently used only by
-the attempted minimal miter below.  The current default
-[[lisp:luft.render:*chamfer-width*]] is 0.11 cell.
+$\rho=\tfrac23$.  Each oriented boundary face carries the resulting edge and
+corner decisions in one shape word.  The GPU realizes sixteen implicit points
+on a 4 by 4 patch and draws its fixed eighteen indexed triangles.  The current
+default [[lisp:luft.render:*chamfer-width*]] is 0.11 cell.
 
 The fragment shader recovers each planar facet normal from screen derivatives
-of world position.  A 29-bit construction mask records only those edges of
+of world position.  A 21-bit construction mask records only those edges of
 the fixed patch whose adjacent realized triangles actually turn, so the
 blueprint view reveals the geometric decision without drawing every hidden
 diagonal.  The CPU reference and shader realization are compared point for
@@ -266,45 +260,22 @@ point in the renderer tests.
 :ID: Z5NDTA
 :END:
 
-The original shared-point rule of #RUAWR5 was compact and watertight, but it
-gave every incident chamfer strip only one place to end at a mixed vertex.  At
-the wall-side step this truncated a strip which should continue around the
-meeting: the long miter collapsed into a narrow triangular fighter shape.
-
-The first attempted fix gave the two participating strips distinct endpoints,
-but retained the displaced shared centre and triangulated the enlarged patch
-back into it.  The result is not an arc miter.  It turns the old collapsed
-triangle into a larger high-valence pinwheel with thin triangles and visible
-creases.  A broad context plate made that regression easy to miss; the tight
-problem framing and Blender reference in #DJK8HW make it unmistakable.
-
-The case is recognized without a shape table.  A vertex star is a miter
-exactly when its strict minority has three cells and the magnitudes of its
-moment are a permutation of $(3,1,1)$.  This test is unchanged by complement,
-reflection, or axis permutation.  With $r=w/2$, the dominant component of the
-shared centre is $r$ and its two arc-plane components are $r/\sqrt2$, with the
-signs supplied by $q$.  Only the two directed half-edges pointing into the
-missing quadrant move to arc endpoints; the other four remain literal
-centre-to-ring midpoints.  Centre and endpoints were intended to sample one
-circular quarter turn while uninterrupted face sectors stayed planar.  That
-pointwise circle condition is not a sufficient visual or topological
-specification: the resulting crease graph still converges on the old singular
-centre instead of carrying a coherent band around the corner.
-
-The attempted ownership remains site-local: a centre is keyed by its vertex and
-an endpoint by its vertex plus directed half-edge.  Incident faces derive the
-same keys from the same complete star, so the patch is watertight without a
-stitching pass.  Watertightness and incident-face agreement are necessary, but
-the failed image demonstrates that they do not establish the intended miter.
+The shared-point rule of #RUAWR5 is compact and watertight, but it gives every
+incident chamfer strip only one place to end at a mixed vertex.  At the
+wall-side step this truncates a strip which should continue around the
+meeting: the long miter collapses into a narrow triangular fighter shape.
+That is the coherent sharp-miter construction reaching the boundary of what
+one shared point can express, not a crack or an inconsistency in its ordinary
+bevel geometry.
 
 An isolated seven-cell star at =w=0.20 made the defect look grotesque and hid
 its architectural scale.  [[lisp:luft.render:make-miter-study-scene]] instead
 builds a small Minecraft mountain against a continuous wall at the honest
 default =w=0.11.  One orthographic plate then retains the triangular innie and
-outie, the six-face hexagonal block party, and both wall terminations that
-formerly produced the truncated fighter miter.  The scene is topology, not a
-hand-authored mesh: a regression checks that its five-, six-, and seven-cell
-vertex stars and its terrace-to-wall occupancy remain present.
+outie, the six-face hexagonal block party, and both wall terminations of the
+truncated fighter miter.  The scene is topology, not a hand-authored mesh: a
+regression checks that its five-, six-, and seven-cell vertex stars and its
+terrace-to-wall occupancy remain present.
 
 [[capture:Z5NDTA-luft-miter-study.png]]
 
@@ -314,68 +285,11 @@ The image is a named =luv/showcase= recipe rather than checked-in evidence:
 scripts/captures render --output build/wiki/media luft-miter-study
 #+end_src
 
-** A miter arc carries the band; it does not decorate a singularity
-:PROPERTIES:
-:ID: DJK8HW
-:END:
-
-Three user-supplied screenshots preserve the actual visual argument.  The
-first is the original LUFT defect, deliberately zoomed and framed on the one
-mixed vertex: the green chamfer strip narrows to a point instead of continuing
-around the meeting.
-
-[[file:images/luft-miter-initial-collapse.jpg]]
-
-The second crops the attempted fix at the same kind of site.  Extra points do
-not carry the strip around the corner; they form a larger central pinwheel of
-skinny triangles.  Rendering successfully, agreeing with the CPU oracle, and
-remaining watertight did not prevent a visibly worse result.
-
-[[file:images/luft-miter-failed-pinwheel.jpg]]
-
-The third is Blender's Bevel modifier with =Outer Miter= set to =Arc=.  It is
-the visual oracle, not a mandate to copy Blender's whole mesh representation.
-The bevel bands remain broad and coherent as they turn through mixed corners.
-There is no central star, no sliver fan, and no strip collapsing to a point.
-Blender's own [[https://docs.blender.org/manual/en/latest/modeling/meshes/editing/edge/bevel.html][bevel documentation]] describes the Arc choice as two vertices
-near the meeting joined by a curved arc.
-
-[[file:images/luft-miter-blender-arc.jpg]]
-
-These source-resolution images are durable review evidence, not generated
-goldens.  A future implementation should reproduce the /relationship/ they
-show---continuous approximate width and a carried turn---under LUFT's own
-site-local and complement-symmetric constraints.  The exact user-framed LUFT
-site remains the primary closeup; a wide architectural plate is context only.
-
-** NEXT Replace the mixed-vertex pinwheel with a carried arc band
-:PROPERTIES:
-:ID: 2PN62B
-:END:
-
-/Intent./ Preserve LUFT's site-local, complement-symmetric and watertight
-construction while replacing the mixed vertex's central fan with the smallest
-patch that visibly carries a roughly constant-width chamfer band around the
-outer meeting.  This is not a general fillet, but it must match the topology
-and visual relationship established by #DJK8HW rather than merely place three
-points on a circle.
-
-/Evidence./ The attempted fixed patch keeps the face record at four =u32=
-words, stores four complete stars, and grows from 16 to 24 points and from 18
-to 26 triangles.  Exhaustive CPU checks cover all 256 stars, cubical
-symmetries, complement geometry, shared incident-face positions, winding, and
-CPU/shader agreement below $10^{-7}$ cell.  Nevertheless, the user-framed
-closeup in #DJK8HW shows a visibly worse high-valence pinwheel.  The structural
-evidence validates the implementation of the attempted specification; it does
-not validate that specification as a bevel.
-
-/Done when./ The original problem site is captured at comparable close range
-with construction lines both on and off.  Its bevel strips keep approximately
-constant width through the turn, the crease graph has no central star or
-skinny fan, and a contextual #Z5NDTA plate shows that the rule behaves across
-the retained five-, six-, and seven-cell stars.  Independent geometric tests
-reject the old collapse and the attempted pinwheel.  The user has inspected
-the closeup and approved it.
+The attempted transition, the rejected pinwheel, the Blender comparison, and
+the representation questions they expose now live together in
+[[file:luft-miters.org][The bevel junction is an open problem]].  #DJK8HW keeps
+the closeup as primary evidence; #2PN62B deliberately remains an idea rather
+than the next implementation step.
 
 * Rounding is the half-level set of the smoothed occupancy
 :PROPERTIES:
@@ -987,14 +901,13 @@ returns one sparse [[lisp:luft.render:site-inspection]] at the semantic UI
 boundary: oriented face site, solid cell, hit point and distance, stock, and
 shape word.  The viewer presents those values through a McCLIM application
 pane mirrored into the existing canvas, so no second window or input owner is
-introduced.  Each dense face record also carries a 29-bit construction mask:
-the internal U and V spans, five ordinary diagonals, and three corner spokes
-whose two realized facet normals actually differ.  The fragment shader uses
-screen derivatives only to keep those approved edges crisp.  =C= toggles the
-resulting global construction drawing; a cyan reticle marks the ray
-intersection and reveals the complete local triangle lattice without an area
-fill or distance halo.  Face rims remain lighter evidence of the cubical
-complex that owns those triangles.
+introduced.  Each dense face record also carries a 21-bit construction mask:
+the internal U, V, and chosen diagonal edges whose two realized facet normals
+actually differ.  The fragment shader uses screen derivatives only to keep
+those approved edges crisp.  =C= toggles the resulting global construction
+drawing; a cyan reticle marks the ray intersection and reveals the complete
+local triangle lattice without an area fill or distance halo.  Face rims remain
+lighter evidence of the cubical complex that owns those triangles.
 
 /Done when./ Done: Escape releases the pointer, moving it ray-casts the world,
 the inspector follows semantic site crossings, =C= globally toggles stable

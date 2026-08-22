@@ -44,6 +44,55 @@
             luft.render:*wireframe* old-wireframe
             luft.render:*inspection-ink-p* old-inspection-ink-p))))
 
+(defun capture-luft-miter-closeup (pathname wireframe title)
+  "Capture the #xCD wall termination at the normal chamfer width. #L7N4MO"
+  (let ((viewer nil)
+        (old-projection luft.render:*projection*)
+        (old-isometric-height luft.render:*isometric-height*)
+        (old-chamfer-width luft.render:*chamfer-width*)
+        (old-wireframe luft.render:*wireframe*)
+        (old-inspection-ink-p luft.render:*inspection-ink-p*))
+    (unwind-protect
+         (progn
+           (setf luft.render:*projection* :isometric
+                 luft.render:*isometric-height* 1.0
+                 luft.render:*chamfer-width* 0.11
+                 luft.render:*wireframe* wireframe
+                 luft.render:*inspection-ink-p* nil)
+           ;; At this yaw/pitch the camera lies backward from the motivating
+           ;; vertex (12,8,3), placing that exact join at frame centre.
+           (setf viewer
+                 (luft.render:start-viewer
+                  :solid (luft.render:make-miter-study-scene)
+                  :camera
+                  (luft.render:make-fly-camera
+                   :position
+                   (luv.arithmetic.lisp.vec3:make-vec3 20.02 -5.89 8.51)
+                   :yaw 2.0899425 :pitch -0.33)
+                  :title title :width 1200 :height 1200))
+           (luft.render:capture-viewer-frame
+            pathname viewer :inspector-p nil))
+      (when viewer (luft.render:stop-viewer viewer))
+      (setf luft.render:*projection* old-projection
+            luft.render:*isometric-height* old-isometric-height
+            luft.render:*chamfer-width* old-chamfer-width
+            luft.render:*wireframe* old-wireframe
+            luft.render:*inspection-ink-p* old-inspection-ink-p))))
+
+(luv:define-capture luft-miter-closeup-construction
+    (:figure 78WA2W :kind :image :extension "png" :layout :landscape
+     :description
+     "The sharp #xCD miter at one-cell scale with construction edges visible.")
+  (pathname)
+  (capture-luft-miter-closeup pathname 1.0 "LUFT sharp miter construction"))
+
+(luv:define-capture luft-miter-closeup-clean
+    (:figure 6X0WRV :kind :image :extension "png" :layout :landscape
+     :description
+     "The same sharp #xCD miter at one-cell scale without construction ink.")
+  (pathname)
+  (capture-luft-miter-closeup pathname 0.0 "LUFT sharp miter clean"))
+
 (luv:define-capture luft-holm-portrait
     (:figure SY26PO :kind :video :extension "mp4" :layout :portrait
      :description
