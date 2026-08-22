@@ -1,25 +1,37 @@
 # Sourced by luv scripts that need SBCL or native development dependencies.
 #
-# Ordinary work uses the durable profile activation sourced by the login shell
-# or .envrc.  CI may still enter the equivalent locked dev shell once.  Both
-# set the same marker because both are generated from one flake attrset.
+# Activation is owned by the profile's env.sh: it puts the profile's bin
+# first on PATH and exports the registry and library variables.  The marker
+# LUV_DEV_ENVIRONMENT=1 alone is not proof of a usable environment -- it is
+# an exported variable and survives any later PATH reshuffling, so a shell
+# can inherit the marker while `sbcl` still resolves to Homebrew's.  Check
+# the thing the marker exists to protect -- which sbcl wins -- and re-source
+# the activation when the answer is wrong.  CI's `nix develop` shell passes
+# the same check because its sbcl resolves into /nix/store.
 
-if [ "${LUV_DEV_ENVIRONMENT:-}" != 1 ] \
+luv_sbcl_trustworthy() {
+  case "$(command -v sbcl 2>/dev/null)" in
+    "$HOME/.nix-profile/"*|/nix/store/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+if { [ "${LUV_DEV_ENVIRONMENT:-}" != 1 ] || ! luv_sbcl_trustworthy; } \
   && [ -r "$HOME/.nix-profile/share/luv/env.sh" ]; then
-  export PATH="$HOME/.nix-profile/bin:$PATH"
   . "$HOME/.nix-profile/share/luv/env.sh"
 fi
 
-if [ "${LUV_DEV_ENVIRONMENT:-}" != 1 ]; then
+if [ "${LUV_DEV_ENVIRONMENT:-}" != 1 ] || ! luv_sbcl_trustworthy; then
   cat >&2 <<'USAGE'
 luv: the development profile is not active, so SBCL and native library paths
-are not trustworthy. Install it once and activate it in this shell:
+are not trustworthy (`command -v sbcl` must resolve into ~/.nix-profile or
+/nix/store).  Install or refresh the profile once:
 
   ./scripts/install-dev-profile
-  . "$HOME/.nix-profile/share/luv/env.sh"
 
-The repository .envrc performs only that source operation; it never evaluates
-Nix. CI may still use `nix develop -c COMMAND` as a from-scratch check.
+Scripts and the repository .envrc activate it by sourcing the profile's
+env.sh; nothing on the edit/test path evaluates Nix.  CI may still use
+`nix develop -c COMMAND` as a from-scratch check.
 USAGE
   exit 1
 fi

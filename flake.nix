@@ -368,7 +368,18 @@
             name = "luv-development-environment";
             destination = "/share/luv/env.sh";
             text =
-              nixpkgs.lib.concatStringsSep "\n"
+              ''
+                # Activation owns PATH: the profile's tools must win name
+                # resolution, or the registry and library variables below
+                # describe an environment a Homebrew sbcl never sees.
+                # Idempotent -- once the profile bin is already first, a
+                # repeated source changes nothing.
+                case "$PATH" in
+                  "$HOME/.nix-profile/bin:"*) ;;
+                  *) export PATH="$HOME/.nix-profile/bin:$PATH" ;;
+                esac
+              ''
+              + nixpkgs.lib.concatStringsSep "\n"
                 (nixpkgs.lib.mapAttrsToList
                   (name: value:
                     "export ${name}=${nixpkgs.lib.escapeShellArg value}")
