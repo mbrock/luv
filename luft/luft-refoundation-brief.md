@@ -56,6 +56,8 @@ The renderer uploads one storage buffer and one `uint32` index buffer, then
 issues one indexed draw. The vertex shader only decodes this record, projects
 it, and emits temporal motion. The fragment shader retains the paper palette,
 lighting, fog, MetalFX motion output, and barycentric construction lines.
+Construction mode also projects the nearest integer lattice vertex through the
+same camera and marks it with a fixed-size warm dot and dark drafting halo.
 
 ## Executable scope
 

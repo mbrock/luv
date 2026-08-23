@@ -227,6 +227,30 @@
            (* (swizzle render-parameters :y)
               (- 1.0 (smoothstep 0.45 1.15 edge-pixels))))
          (fragment-uv (mesh-clip-uv current-clip))
+         (lattice-point (floor (+ world-position (vec3 0.5 0.5 0.5))))
+         (lattice-offset (- world-position lattice-point))
+         (lattice-distance
+           (sqrt (dot lattice-offset lattice-offset)))
+         (lattice-clip
+           (mesh-view-clip lattice-point camera-position camera-right
+                           camera-up camera-forward camera-projection
+                           (swizzle render-parameters :z)))
+         (lattice-pixel-offset
+           (/ (- fragment-uv (mesh-clip-uv lattice-clip))
+              (max (swizzle inspection-parameters :zw)
+                   (vec2 0.000001 0.000001))))
+         (lattice-pixels
+           (sqrt (dot lattice-pixel-offset lattice-pixel-offset)))
+         (lattice-near
+           (- 1.0 (smoothstep 0.22 0.27 lattice-distance)))
+         (lattice-halo
+           (* (swizzle render-parameters :y)
+              (* lattice-near
+                 (- 1.0 (smoothstep 5.5 8.0 lattice-pixels)))))
+         (lattice-marker
+           (* (swizzle render-parameters :y)
+              (* lattice-near
+                 (- 1.0 (smoothstep 2.5 5.0 lattice-pixels)))))
          (pointer-delta
            (/ (- fragment-uv (swizzle inspection-parameters :xy))
               (max (swizzle inspection-parameters :zw)
@@ -241,9 +265,12 @@
                     (- 1.0 (smoothstep 0.7 1.8 pointer-pixels))))
          (reticle (max center ring))
          (construction-ink (vec3 0.055 0.16 0.22))
+         (lattice-ink (vec3 0.95 0.31 0.13))
          (blueprint (vec3 0.30 0.90 0.94))
          (drafted (mix paper construction-ink construction-wire))
-         (radiance (mix drafted blueprint reticle)))
+         (haloed (mix drafted construction-ink lattice-halo))
+         (marked (mix haloed lattice-ink lattice-marker))
+         (radiance (mix marked blueprint reticle)))
     (set-output color-output (vec4 radiance 1.0))
     (set-output motion-output
                 (- (mesh-clip-uv previous-clip)
