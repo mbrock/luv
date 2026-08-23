@@ -950,14 +950,23 @@ star corpus; signal that boundary explicitly instead of silently welding it."
               site origin right left normal :junction #b001)
              stock :junction)))))))
 
-(defun %emit-boundary-derived-fans (builder)
+(defun %vertex-fan-uses-center-p (domain occupancy site cycle)
+  (let ((mask (%vertex-star-mask domain occupancy site)))
+    (or (%cycle-planar-through-site-p site cycle)
+        ;; Four cells forming the floor plus one cell on its other side is the
+        ;; ordinary concave corner: its surface really passes through SITE and
+        ;; the surrounding sectors meet there.  The six- and seven-cell
+        ;; chamfer/fillet runs do not; coning those creates the ornaments.
+        (= 5 (logcount mask)))))
+
+(defun %emit-boundary-derived-fans (builder domain occupancy)
   "Close each face/band boundary loop with a local lattice-site fan template."
   (dolist (entry (%boundary-cycles-by-site builder))
     (let ((site (first entry)))
       (dolist (cycle (rest entry))
         (cond ((= 3 (length cycle))
                (%emit-triangular-boundary-cap builder site cycle))
-              ((%cycle-planar-through-site-p site cycle)
+              ((%vertex-fan-uses-center-p domain occupancy site cycle)
                (%emit-centered-boundary-fan builder site cycle))
               (t
                (%emit-boundary-strip builder site cycle)))))))
@@ -998,5 +1007,5 @@ STOCK-FUNCTION is called with an oriented boundary face."
       (%emit-edge-bands builder domain occupancy edge stock-function))
     (let ((vertices (%collect-vertex-keys solid)))
       (%count-singular-vertex-stars builder domain occupancy vertices))
-    (%emit-boundary-derived-fans builder)
+    (%emit-boundary-derived-fans builder domain occupancy)
     (%finish-surface-mesh builder)))

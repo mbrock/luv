@@ -187,6 +187,29 @@
           for count = (aref ranges (1+ (* 2 template-id)))
           always (= 3 count))))
 
+(defun %fan-site-used-as-vertex-p (mesh site)
+  (let ((templates (surface-mesh-template-vertex-words mesh))
+        (ranges (surface-mesh-template-ranges mesh))
+        (instances (surface-mesh-fan-instance-words mesh)))
+    (loop for offset from 0 below (length instances) by 4
+          thereis
+          (and (loop for axis below 3
+                     always (= (nth axis site)
+                               (aref instances (+ offset axis))))
+               (let* ((template-id
+                        (ldb (byte 16 0) (aref instances (+ offset 3))))
+                      (start (aref ranges (* 2 template-id)))
+                      (count (aref ranges (1+ (* 2 template-id)))))
+                 (loop for vertex from start below (+ start count)
+                       thereis
+                       (loop for axis below 3
+                             always
+                             (= +mesh-template-coordinate-bias+
+                                (aref templates
+                                      (+ (* vertex
+                                            +mesh-template-vertex-word-count+)
+                                         axis))))))))))
+
 (defun %test-surface-mesh ()
   (%with-test-section ("integer site streams")
     (%check (equal '(0 -1 0) (%normal-direction-code '(0 -2 0))))
@@ -210,6 +233,10 @@
       (%check (%stream-template-coordinates-within-p
                pair (surface-mesh-fan-instance-words pair) -1 1))
       (%check (%fan-templates-are-triangles-p pair)))
+    (let ((concave-corner (make-surface-mesh (%solid-for-star #x8f)))
+          (concave-run (make-surface-mesh (%solid-for-star #xcf))))
+      (%check (%fan-site-used-as-vertex-p concave-corner '(8 8 8)))
+      (%check (not (%fan-site-used-as-vertex-p concave-run '(8 8 8)))))
     (dolist (mask '(#x06 #x18 #x69))
       (let ((mesh (make-surface-mesh (%solid-for-star mask))))
         (%check (plusp (surface-mesh-singular-star-count mesh))
