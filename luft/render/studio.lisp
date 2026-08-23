@@ -18,6 +18,9 @@ projection to judge a shape rule in.")
 (defparameter *isometric-height* 18.0
   "How many world units of height an isometric frame spans.")
 
+(defconstant +orthographic-near+ -4096.0)
+(defconstant +orthographic-far+ 4096.0)
+
 (defclass fly-camera ()
   ((position :initarg :position :accessor camera-position)
    (yaw :initarg :yaw :initform 0.0 :accessor camera-yaw)
@@ -249,8 +252,10 @@ the selector is the whole of the difference."
 
 (defun capture-frame-view (camera width height jitter)
   (multiple-value-bind (right up forward) (camera-basis camera)
-    (let ((near 0.1)
-          (far 200.0))
+    (let ((near (if (eq *projection* :isometric)
+                    +orthographic-near+ 0.1))
+          (far (if (eq *projection* :isometric)
+                   +orthographic-far+ 200.0)))
       (multiple-value-bind (px py pz pw divisor)
           (projection-lane width height (camera-field-of-view camera)
                            near far)
@@ -430,7 +435,7 @@ the selector is the whole of the difference."
           (clim:draw-text* stream "point at the boundary" 18 60
                            :align-y :center :text-size 13
                            :ink (clim:make-rgb-color 0.58 0.62 0.62))
-          (clim:draw-text* stream "escape releases the pointer" 18 84
+          (clim:draw-text* stream "escape releases input; click locks it" 18 84
                            :align-y :center :text-size 11
                            :ink (clim:make-rgb-color 0.40 0.44 0.45)))
         (let* ((site (site-inspection-site inspection))
@@ -701,6 +706,7 @@ the selector is the whole of the difference."
     ()
   (let* ((viewer (viewer-command-viewer))
          (canvas (viewer-canvas viewer)))
+    (clear-viewer-controls viewer)
     (when (viewer-pointer-captured-p viewer)
       (set-canvas-relative-pointer-mode canvas nil)
       (setf (viewer-pointer-captured-p viewer) nil))))
@@ -763,11 +769,13 @@ the selector is the whole of the difference."
 
 (defun viewer-key-command (viewer event)
   "Return the named McCLIM command VIEWER binds to key EVENT, or NIL."
-  (multiple-value-bind (window atelier) (viewer-key-event-tables event)
-    (or (mcluv:canvas-key-event-command
-         viewer event :command-table window)
-        (mcluv:canvas-key-event-command
-         viewer event :command-table atelier))))
+  (when (or (viewer-pointer-captured-p viewer)
+            (eq :escape (canvas-key-event-key-name event)))
+    (multiple-value-bind (window atelier) (viewer-key-event-tables event)
+      (or (mcluv:canvas-key-event-command
+           viewer event :command-table window)
+          (mcluv:canvas-key-event-command
+           viewer event :command-table atelier)))))
 
 (defmethod handle-canvas-event
     ((viewer viewer) canvas (event canvas-window-close-request-event))
@@ -796,8 +804,7 @@ the selector is the whole of the difference."
     ((viewer viewer) canvas (event canvas-pointer-button-press-event))
   (setf (viewer-pointer-x viewer) (canvas-pointer-event-x event)
         (viewer-pointer-y viewer) (canvas-pointer-event-y event))
-  (when (and (eq :left (canvas-pointer-event-button event))
-             (not (viewer-pointer-captured-p viewer)))
+  (when (not (viewer-pointer-captured-p viewer))
     (set-canvas-relative-pointer-mode canvas t)
     (setf (viewer-pointer-captured-p viewer) t))
   nil)
