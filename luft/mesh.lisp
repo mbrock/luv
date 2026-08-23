@@ -26,7 +26,7 @@
                   singular-star-count))
              (:copier nil))
   (domain nil :type world-domain :read-only t)
-  (bevel-width +mesh-bevel-width+ :type (integer 1 3) :read-only t)
+  (bevel-width +mesh-bevel-width+ :type (integer 1 4) :read-only t)
   (template-vertex-words #()
                          :type (simple-array (unsigned-byte 32) (*))
                          :read-only t)
@@ -272,7 +272,7 @@ star corpus; signal that boundary explicitly instead of silently welding it."
 (defstruct (surface-mesh-builder
              (:constructor %make-surface-mesh-builder (domain bevel-width)))
   (domain nil :type world-domain :read-only t)
-  (bevel-width +mesh-bevel-width+ :type (integer 1 3) :read-only t)
+  (bevel-width +mesh-bevel-width+ :type (integer 1 4) :read-only t)
   (templates nil :type list)
   (template-table (make-hash-table :test #'equal) :type hash-table)
   (face-instances nil :type list)
@@ -971,20 +971,51 @@ star corpus; signal that boundary explicitly instead of silently welding it."
         ;; chamfer/fillet runs do not; coning those creates the ornaments.
         (member (logcount mask) '(3 5)))))
 
+(defun %rescale-boundary-point (point site source-width target-width)
+  "Evaluate POINT's site-local affine bevel coordinates at TARGET-WIDTH."
+  (loop for coordinate in point
+        for site-coordinate in site
+        for origin = (* +mesh-cell-size+ site-coordinate)
+        for numerator = (* (- coordinate origin) target-width)
+        do (unless (zerop (rem numerator source-width))
+             (error "Boundary coordinate ~S at site ~S has no integer ~D/~D limit."
+                    point site target-width source-width))
+        collect (+ origin (truncate numerator source-width))))
+
+(defun %rescale-boundary-cycle (cycle site source-width target-width)
+  (loop for (left right stock) in cycle
+        collect (list (%rescale-boundary-point
+                       left site source-width target-width)
+                      (%rescale-boundary-point
+                       right site source-width target-width)
+                      stock)))
+
 (defun %emit-boundary-derived-fans
-    (builder domain occupancy chamfer-stock-function)
-  "Close each face/band boundary loop with a local lattice-site fan template."
-  (dolist (entry (%boundary-cycles-by-site builder))
-    (let ((site (first entry)))
-      (dolist (cycle (rest entry))
-        (let ((stock (funcall chamfer-stock-function
-                              (mapcar #'third cycle))))
-          (cond ((= 3 (length cycle))
-                 (%emit-triangular-boundary-cap builder site cycle stock))
-                ((%vertex-fan-uses-center-p domain occupancy site cycle)
-                 (%emit-centered-boundary-fan builder site cycle stock))
-                (t
-                 (%emit-boundary-strip builder site cycle stock))))))))
+    (builder domain occupancy chamfer-stock-function
+     &optional (boundary-builder builder))
+  "Close BOUNDARY-BUILDER's loops with site-local templates in BUILDER."
+  (let ((source-width
+          (surface-mesh-builder-bevel-width boundary-builder))
+        (target-width (surface-mesh-builder-bevel-width builder)))
+    (dolist (entry (%boundary-cycles-by-site boundary-builder))
+      (let ((site (first entry)))
+        (dolist (source-cycle (rest entry))
+          (let ((cycle
+                  (if (= source-width target-width)
+                      source-cycle
+                      (%rescale-boundary-cycle
+                       source-cycle site source-width target-width))))
+            (let ((stock (funcall chamfer-stock-function
+                                  (mapcar #'third cycle))))
+              (cond ((= 3 (length cycle))
+                     (%emit-triangular-boundary-cap
+                      builder site cycle stock))
+                    ((%vertex-fan-uses-center-p domain occupancy site cycle)
+                     (%emit-centered-boundary-fan
+                      builder site cycle stock))
+                    (t
+                     (%emit-boundary-strip
+                      builder site cycle stock))))))))))
 
 (defun %count-singular-vertex-stars (builder domain occupancy vertices)
   (dolist (vertex vertices)
@@ -997,10 +1028,12 @@ star corpus; signal that boundary explicitly instead of silently welding it."
                 (bevel-width +mesh-bevel-width+))
   "Classify SOLID into exact integer face, edge, and vertex instance streams.
 
-Every exposed cell face emits the same width-dependent central square.
-Coplanar collars and bevel bands are edge-owned.  Site-local fans, caps, and
-strips close the remaining lattice-vertex boundaries.  Each stream is sorted
-by template so the renderer can issue direct instanced draws.
+Below the medial limit, every exposed cell face emits the same width-dependent
+central square and crease edges own the intervening bands.  At the half-cell
+limit those two families become zero-area seams: a sub-medial witness retains
+their boundary cycles while only the expanded site-local patches are emitted.
+Each stream is sorted by template so the renderer can issue direct instanced
+draws.
 STOCK-FUNCTION is called with an oriented boundary face.  CHAMFER-STOCK-FUNCTION
 receives the face stocks incident to one edge-owned collar, bevel, or
 lattice-site closure.  It must return one stock for that entire chamfer."
@@ -1008,11 +1041,16 @@ lattice-site closure.  It must return one stock for that entire chamfer."
   (check-type stock-function function)
   (check-type chamfer-stock-function function)
   (unless (and (integerp bevel-width)
-               (< 0 bevel-width (/ +mesh-cell-size+ 2)))
-    (error "Bevel width ~S must be an integer between one and three ticks."
+               (<= 1 bevel-width (/ +mesh-cell-size+ 2)))
+    (error "Bevel width ~S must be an integer between one and four ticks."
            bevel-width))
   (let* ((domain (chain-domain solid))
          (builder (%make-surface-mesh-builder domain bevel-width))
+         (boundary-builder
+           (if (= bevel-width (/ +mesh-cell-size+ 2))
+               (%make-surface-mesh-builder
+                domain (1- (/ +mesh-cell-size+ 2)))
+               builder))
          (occupancy (lambda (x y z)
                       (chain-cell-occupancy-bit solid x y z))))
     (loop for cell across (chain-sites solid) do
@@ -1025,13 +1063,14 @@ lattice-site closure.  It must return one stock for that entire chamfer."
             (when (= 0 (%occupancy-at
                         domain occupancy
                         (%offset-coordinates coordinates axis-number side)))
-              (%emit-cell-face builder domain occupancy cell axis-number side
+              (%emit-cell-face boundary-builder domain occupancy cell
+                               axis-number side
                                stock-function chamfer-stock-function))))))
     (dolist (edge (%collect-edge-keys solid))
-      (%emit-edge-bands builder domain occupancy edge stock-function
+      (%emit-edge-bands boundary-builder domain occupancy edge stock-function
                         chamfer-stock-function))
     (let ((vertices (%collect-vertex-keys solid)))
       (%count-singular-vertex-stars builder domain occupancy vertices))
     (%emit-boundary-derived-fans builder domain occupancy
-                                 chamfer-stock-function)
+                                 chamfer-stock-function boundary-builder)
     (%finish-surface-mesh builder)))

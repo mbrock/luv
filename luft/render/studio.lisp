@@ -430,6 +430,12 @@ the selector is the whole of the difference."
             (/ bevel-width divisor)
             (/ luft:+mesh-cell-size+ divisor))))
 
+(defun next-bevel-width (bevel-width)
+  (case bevel-width
+    (1 2)
+    (2 4)
+    (otherwise 1)))
+
 (defun display-site-inspector (viewer stream)
   "Draw VIEWER's current sparse ray hit as McCLIM presentations."
   (clim:draw-rectangle* stream 0 0 +site-inspector-width+
@@ -726,7 +732,7 @@ the selector is the whole of the difference."
                       :keystroke (:b))
     ()
   (let* ((viewer (viewer-command-viewer))
-         (bevel-width (if (= 1 (viewer-bevel-width viewer)) 2 1)))
+         (bevel-width (next-bevel-width (viewer-bevel-width viewer))))
     (refresh-viewer-renderer
      viewer :solid (viewer-source viewer) :bevel-width bevel-width)
     (refresh-viewer-inspector viewer)))

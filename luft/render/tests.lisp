@@ -27,6 +27,10 @@
 (deftest the-viewer-is-the-mcclim-application
   (ok (string= "1/8" (luft.render::bevel-width-label 1)))
   (ok (string= "1/4" (luft.render::bevel-width-label 2)))
+  (ok (string= "1/2" (luft.render::bevel-width-label 4)))
+  (ok (= 2 (luft.render::next-bevel-width 1)))
+  (ok (= 4 (luft.render::next-bevel-width 2)))
+  (ok (= 1 (luft.render::next-bevel-width 4)))
   (let ((viewer (clim:make-application-frame 'render:viewer)))
     (ok (typep viewer 'clim:application-frame))
     (ok (null (climi::frame-process viewer)))
@@ -95,13 +99,18 @@
                     luft:+mesh-template-vertex-word-count+)))))
 
 (deftest the-connected-miter-study-uses-the-site-stream-abi
-  (dolist (bevel-width '(1 2))
+  (dolist (bevel-width '(1 2 4))
     (let ((mesh (render:make-render-mesh
                  (render:make-miter-study-scene)
                  :bevel-width bevel-width)))
       (ok (= bevel-width (luft:surface-mesh-bevel-width mesh)))
-      (ok (plusp (luft:surface-mesh-face-triangle-count mesh)))
-      (ok (plusp (luft:surface-mesh-band-triangle-count mesh)))
+      (if (= bevel-width 4)
+          (progn
+            (ok (zerop (luft:surface-mesh-face-triangle-count mesh)))
+            (ok (zerop (luft:surface-mesh-band-triangle-count mesh))))
+          (progn
+            (ok (plusp (luft:surface-mesh-face-triangle-count mesh)))
+            (ok (plusp (luft:surface-mesh-band-triangle-count mesh)))))
       (ok (plusp (luft:surface-mesh-fan-triangle-count mesh)))
       (ok (zerop (luft:surface-mesh-singular-star-count mesh)))
       (ok (luft::%mesh-closed-p mesh))

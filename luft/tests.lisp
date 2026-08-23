@@ -159,6 +159,27 @@
   (loop for count being the hash-values of (%mesh-geometric-edge-counts mesh)
         always (= count 2)))
 
+(defun %mesh-nondegenerate-p (mesh)
+  (let ((nondegenerate-p t))
+    (%map-mesh-triangles
+     (lambda (kind a b c)
+       (declare (ignore kind))
+       (when (every #'zerop
+                    (%cross (%point- b a) (%point- c a)))
+         (setf nondegenerate-p nil)))
+     mesh)
+    nondegenerate-p))
+
+(defun %mesh-unique-points (mesh)
+  (let ((points (make-hash-table :test #'equal)))
+    (%map-mesh-triangles
+     (lambda (kind a b c)
+       (declare (ignore kind))
+       (dolist (point (list a b c))
+         (setf (gethash point points) t)))
+     mesh)
+    (loop for point being the hash-keys of points collect point)))
+
 (defun %stream-template-coordinates-within-p (mesh instance-words low high)
   (let ((templates (surface-mesh-template-vertex-words mesh))
         (ranges (surface-mesh-template-ranges mesh)))
@@ -240,7 +261,7 @@
 (defun %test-surface-mesh ()
   (%with-test-section ("integer site streams")
     (%check (equal '(0 -1 0) (%normal-direction-code '(0 -2 0))))
-    (dolist (bevel-width '(1 2))
+    (dolist (bevel-width '(1 2 3))
       (flet ((mesh-for-star (mask)
                (make-surface-mesh (%solid-for-star mask)
                                   :bevel-width bevel-width)))
@@ -283,7 +304,30 @@
             (%check (%mesh-closed-p mesh)
                     (format nil "width ~D mask ~2,'0X"
                             bevel-width mask))))))
-    (dolist (width '(0 4 1/2))
+    (let* ((medial
+             (make-surface-mesh (%solid-for-star #x01) :bevel-width 4))
+           (points (%mesh-unique-points medial)))
+      (%check (= 4 (surface-mesh-bevel-width medial)))
+      (%check (zerop (surface-mesh-face-instance-count medial)))
+      (%check (zerop (surface-mesh-band-instance-count medial)))
+      (%check (= 8 (surface-mesh-fan-instance-count medial)))
+      (%check (= 8 (surface-mesh-triangle-count medial)))
+      (%check (= 6 (length points)))
+      (%check
+       (every (lambda (point)
+                (= 2 (count 4 point :key (lambda (coordinate)
+                                          (mod coordinate 8)))))
+              points))
+      (%check (%mesh-closed-p medial))
+      (%check (%mesh-nondegenerate-p medial)))
+    (dotimes (mask 256)
+      (let ((mesh
+              (make-surface-mesh (%solid-for-star mask) :bevel-width 4)))
+        (%check (%mesh-closed-p mesh)
+                (format nil "medial mask ~2,'0X" mask))
+        (%check (%mesh-nondegenerate-p mesh)
+                (format nil "medial mask ~2,'0X" mask))))
+    (dolist (width '(0 5 1/2))
       (%check (%signals-error-p
                (lambda ()
                  (make-surface-mesh (%solid-for-star #x01)
