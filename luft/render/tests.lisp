@@ -1165,7 +1165,23 @@
     (ok (= 1 (aref widths luft.render::+foundation-stone-stock+)))
     (ok (= 2 (aref widths luft.render::+turf-set-stone-stock+)))
     (ok (= 2 (aref widths luft.render::+soil-set-stone-stock+)))
-    (ok (= 2 (aref widths luft.render::+deep-set-stone-stock+)))))
+    (ok (= 2 (aref widths luft.render::+deep-set-stone-stock+)))
+    (multiple-value-bind (stock-masks site-widths)
+        (luft.render::compile-material-bevel-site-policy profile)
+      (ok (= luft.render::+material-bevel-terrain-mask+
+             (aref stock-masks luft.render::+grass-stock+)))
+      (ok (= luft.render::+material-bevel-architecture-mask+
+             (aref stock-masks luft.render::+stone-stock+)))
+      (ok (= (logior luft.render::+material-bevel-terrain-mask+
+                     luft.render::+material-bevel-architecture-mask+)
+             (aref stock-masks luft.render::+turf-set-stone-stock+)))
+      (ok (= 4 (aref site-widths
+                     luft.render::+material-bevel-terrain-mask+)))
+      (ok (= 1 (aref site-widths
+                     luft.render::+material-bevel-architecture-mask+)))
+      (ok (= 2 (aref site-widths
+                     (logior luft.render::+material-bevel-terrain-mask+
+                             luft.render::+material-bevel-architecture-mask+)))))))
 
 (deftest material-bevel-policy-builds-one-closed-site-local-surface
   (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
@@ -1176,14 +1192,111 @@
               builder 5 6 5 6 3 5 :architecture-p t)
              (luft.render::finish-scene-builder builder)))
          (profile (render:make-material-bevel-profile))
-         (mesh (render:make-material-bevel-mesh scene profile))
          (meshes (render:make-material-bevel-meshes scene profile)))
-    (ok (= 4 (luft:surface-mesh-bevel-width mesh)))
+    (multiple-value-bind (mesh width-census)
+        (render:make-material-bevel-mesh scene profile)
+      (ok (= 4 (luft:surface-mesh-bevel-width mesh)))
+      (ok (luft::%mesh-closed-p mesh))
+      (ok (luft::%mesh-nondegenerate-p mesh))
+      (ok (plusp (aref width-census 1)))
+      (ok (plusp (aref width-census 2)))
+      (ok (zerop (aref width-census 3)))
+      (ok (plusp (aref width-census 4)))
+      (ok (= 1 (length meshes)))
+      (ok (= 0 (caar meshes)))
+      (ok (luft::%mesh-closed-p (cdar meshes))))))
+
+(defun mesh-triangle-quality (mesh)
+  "Return minimum angle, maximum longest-edge/altitude ratio, and sliver count."
+  (let ((minimum-angle 180.0d0)
+        (maximum-aspect 0.0d0)
+        (aspect-over-five 0))
+    (labels ((distance-squared (left right)
+               (loop for l in left
+                     for r in right
+                     sum (expt (- l r) 2)))
+             (angle (left-squared right-squared opposite-squared)
+               (* (/ 180.0d0 pi)
+                  (acos
+                   (max -1.0d0
+                        (min 1.0d0
+                             (/ (- (+ left-squared right-squared)
+                                   opposite-squared)
+                                (* 2.0d0
+                                   (sqrt (* left-squared
+                                            right-squared))))))))))
+      (luft::%map-mesh-triangles
+       (lambda (kind a b c)
+         (declare (ignore kind))
+         (let* ((ab2 (distance-squared a b))
+                (bc2 (distance-squared b c))
+                (ca2 (distance-squared c a))
+                (cross
+                  (luft::%cross (luft::%point- b a)
+                                (luft::%point- c a)))
+                (cross2
+                  (loop for component in cross
+                        sum (* component component)))
+                (aspect
+                  (/ (float (max ab2 bc2 ca2) 1.0d0)
+                     (sqrt cross2))))
+           (setf minimum-angle
+                 (min minimum-angle
+                      (angle ab2 ca2 bc2)
+                      (angle ab2 bc2 ca2)
+                      (angle bc2 ca2 ab2))
+                 maximum-aspect (max maximum-aspect aspect))
+           (when (> aspect 5.0d0)
+             (incf aspect-over-five))))
+       mesh))
+    (values minimum-angle maximum-aspect aspect-over-five)))
+
+(deftest material-bevel-transition-contracts-the-medial-t-junction
+  (let* ((scene (render:make-material-bevel-transition-study-scene))
+         (width-one (render:make-render-mesh scene :bevel-width 1)))
+    (multiple-value-bind (mesh width-census diagnostics)
+        (render:make-material-bevel-mesh
+         scene (render:make-material-bevel-profile))
+      (ok (plusp (aref width-census 1)))
+      (ok (plusp (aref width-census 2)))
+      (ok (plusp (aref width-census 4)))
+      (ok (= 3 (getf diagnostics :unmatched-edge-count)))
+      (ok (= 1 (getf diagnostics :repaired-edge-count)))
+      (ok (luft::%mesh-closed-p mesh))
+      (ok (luft::%mesh-nondegenerate-p mesh))
+      ;; Contracting the medial T-junction may subdivide a neighbour, but it
+      ;; must not make triangle quality worse than the width-one topology
+      ;; witness from which the mixed surface was evaluated.
+      (multiple-value-bind (minimum-angle maximum-aspect sliver-count)
+          (mesh-triangle-quality mesh)
+        (multiple-value-bind
+              (witness-minimum-angle witness-maximum-aspect
+               witness-sliver-count)
+            (mesh-triangle-quality width-one)
+          (ok (>= minimum-angle (- witness-minimum-angle 1.0d-9)))
+          (ok (<= maximum-aspect (+ witness-maximum-aspect 1.0d-9)))
+          (ok (<= sliver-count witness-sliver-count)))))))
+
+(defun check-authored-stair-boundary (boundary)
+  (multiple-value-bind (mesh width-census diagnostics)
+      (render:make-material-bevel-mesh
+       (render:make-mountain-sanctuary-scene :stair-boundary boundary)
+       (render:make-material-bevel-profile))
+    (declare (ignore diagnostics))
+    (ok (plusp (aref width-census 1)))
+    (ok (plusp (aref width-census 2)))
+    (ok (plusp (aref width-census 4)))
     (ok (luft::%mesh-closed-p mesh))
-    (ok (luft::%mesh-nondegenerate-p mesh))
-    (ok (= 1 (length meshes)))
-    (ok (= 0 (caar meshes)))
-    (ok (luft::%mesh-closed-p (cdar meshes)))))
+    (ok (luft::%mesh-nondegenerate-p mesh))))
+
+(deftest open-stair-remains-an-ordinary-closed-material-surface
+  (check-authored-stair-boundary :open))
+
+(deftest bordered-stair-remains-an-ordinary-closed-material-surface
+  (check-authored-stair-boundary :border))
+
+(deftest low-wall-stair-remains-an-ordinary-closed-material-surface
+  (check-authored-stair-boundary :low-wall))
 
 (deftest terrain-chamfers-distinguish-the-living-top-edge
   (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))

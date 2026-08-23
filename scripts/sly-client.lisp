@@ -918,7 +918,8 @@ the frames after CODE failed, else 0."
   (parse-integer
    (string-trim
     '(#\Space #\Tab #\Newline #\Return)
-    (evaluate-captured-output-on stream "(princ (sb-posix:getpid))"))))
+    (evaluate-captured-output-on stream
+                                 "(princ (slynk-backend::getpid))"))))
 
 (defun listener-process-id ()
   (when (connection-available-p)

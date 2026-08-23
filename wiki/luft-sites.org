@@ -260,6 +260,61 @@ accumulate.  The creases stop being a rendering problem and become a
 material vocabulary — fitting, for a system that began as "make the edges
 look good".
 
+* Authored support geometry protects mixed bevel transitions
+:PROPERTIES:
+:ID: WSEK3C
+:END:
+
+The first material-width experiment makes the site's ownership concrete.
+Every packed surface stock compiles once to a terrain or architecture bit;
+each canonical lattice vertex ORs the bits of its incident stocks and chooses
+one width for every primitive that uses it.  Terrain-only sites take width
+four, architecture-only sites width one, and genuinely mixed sites width two.
+This makes the contact width live without letting adjacent triangles disagree
+about their shared point.
+
+Width four is the cubical medial limit.  Many witness triangles collapse
+there deliberately, but a mixed field exposed one real topology defect: one
+collapsed triangle could leave a neighbour's long edge meeting two shorter
+edges.  The variable-width evaluator now contracts that exact T-junction by
+retaining the collinear middle point in the surviving neighbour.  In the
+five-cell regression [[lisp:luft.render:make-material-bevel-transition-study-scene]],
+three unmatched edges become one repair and a closed surface.  Its triangle
+quality is no worse than the width-one topology witness:
+
+| policy | triangles | minimum angle | maximum aspect | aspect over 5 |
+|-
+| mixed 1/2/4 | 190 | 9.46° | 6.17 | 16 |
+| width 1 | 220 | 9.46° | 6.17 | 40 |
+| width 2 | 220 | 26.57° | 2.50 | 0 |
+| width 4 | 68 | 35.26° | 2.12 | 0 |
+
+Automatic transition geometry is still only the fallback.  A modeler protects
+an important edge by authoring nearby solid, just as a support loop protects a
+classical deformation.  [[lisp:luft.render::scene-builder-staircase]] therefore
+offers the sanctuary stair in three otherwise identical forms: open, a flat
+one-cell stone border, and a border raised one course as a low wall.  These are
+ordinary scene cells and material placements; the mesher has no staircase
+case and still evaluates one width per site.
+
+The production measurements show how local the intervention is:
+
+| stair | width 1 sites | width 2 sites | width 4 sites | unmatched before contraction | repairs | triangles |
+|-
+| open | 7858 | 1002 | 27739 | 459 | 153 | 325512 |
+| flat border | 7877 | 1008 | 27712 | 462 | 154 | 325752 |
+| low wall | 7897 | 1006 | 27704 | 459 | 153 | 325834 |
+
+The flat border merely relocates the mixed fans and reads as a fussy stepped
+edge in the clean plate.  The low wall does something stronger: it keeps the
+width-one tread grid and its silhouette inside authored masonry, then moves
+the width-two transition to the wall's exterior contact with terrain.  Its
+topological repair count is exactly the open baseline's.  That is a promising
+division of labour: the automatic site rule closes arbitrary material fields;
+authored support geometry decides where an important architectural line should
+survive them.  The sanctuary now authors the low wall by default; =:open= and
+=:border= remain named experimental variants under the same capture camera.
+
 * Coplanar merging is exact level of detail
 :PROPERTIES:
 :ID: YGP21F
@@ -318,7 +373,10 @@ one CPU-authored integer triangle mesh containing the three families above,
 through one =uvec4= vertex stream and one =uint32= index stream.  The retained
 atelier, temporal resolve, camera, and material shader render the isolated
 =06=, =18=, and =69= singular fixtures; exact geometric edge counts close all
-three.  Terrain and #Z5NDTA remain the acceptance boundary for this mark.
+three.  The material-width pass now also evaluates widths one, two, and four
+on one canonical site field, contracts medial T-junctions exactly, and lets
+authored support geometry protect the sanctuary stair (#WSEK3C).  Terrain and
+#Z5NDTA remain the acceptance boundary for this mark.
 
 /Done when./ A chunk of luvcraft terrain renders through the three streams
 with every emitted vertex an integer triple; a closure check verifies

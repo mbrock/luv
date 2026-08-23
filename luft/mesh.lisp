@@ -1787,6 +1787,34 @@ on, one tick above, or one tick below its owning lattice plane."
                     coordinate)))))
     (values (nreverse site) (nreverse direction))))
 
+(defun %point-distance-squared (left right)
+  (loop for l in left
+        for r in right
+        sum (let ((difference (- r l))) (* difference difference))))
+
+(defun %collapsed-triangle-split (a b c)
+  "Return the long edge and its interior point for a collinear triangle.
+
+When three distinct transformed points become collinear, dropping their
+triangle leaves a long edge on one neighbour opposite two shorter edges on the
+others.  The returned split is the exact T-junction contraction needed to make
+those three neighbours share the same two edges."
+  (let ((points (remove-duplicates (list a b c) :test #'equal)))
+    (when (= 3 (length points))
+      (destructuring-bind (a b c) points
+        (let ((candidates
+                (list (list (%point-distance-squared a b) a b c)
+                      (list (%point-distance-squared b c) b c a)
+                      (list (%point-distance-squared c a) c a b))))
+          (destructuring-bind (length left right middle)
+              (reduce (lambda (left right)
+                        (if (> (first left) (first right)) left right))
+                      candidates)
+            (declare (ignore length))
+            (values (%ordered-point-edge left right) middle)))))))
+
+(declaim (ftype function %triangulate-coplanar-loop))
+
 (defun vary-surface-mesh-bevel-widths (witness width-function)
   "Evaluate one width-one WITNESS at a locally selected width per vertex site.
 
@@ -1799,10 +1827,18 @@ four.
 Every witness vertex has the exact affine form 8*S + Q with Q in {-1,0,1}^3.
 The result replaces it by 8*S + WIDTH(S)*Q.  Since every incident primitive
 uses the same canonical S, shared vertices remain equal without stitching.
-Zero-area triangles at the medial limit are omitted.  WITNESS remains the
-rebuild oracle for topology and uniform-width geometry.  Transition triangles
-may leave the uniform mesher's 26 exact normal directions; the current packed
-render ABI consequently shades them with its usual sign-quantized normal."
+At the medial limit a witness triangle can collapse to three collinear points.
+The result contracts that triangle by splitting its surviving neighbour's long
+edge at the middle point, eliminating the otherwise visible T-junction without
+inventing a surface.  WITNESS remains the rebuild oracle for topology and
+uniform-width geometry.  Transition triangles may leave the uniform mesher's
+26 exact normal directions.  The packed trit normal remains an orientation
+witness; fragment shading derives the actual primitive normal from world-space
+position derivatives, so the new directions are not lighting-quantized.
+
+The second value is a five-entry site census indexed by width.  The third is a
+diagnostic plist containing the collapsed-triangle, unmatched-edge, and
+repaired-edge counts observed before contraction."
   (check-type witness surface-mesh)
   (check-type width-function function)
   (unless (= 1 (surface-mesh-bevel-width witness))
@@ -1813,6 +1849,8 @@ render ABI consequently shades them with its usual sign-quantized normal."
   ;; same site field densely without changing the affine invariant above.
   (let ((stocks-by-site (make-hash-table :test #'eql))
         (width-by-site (make-hash-table :test #'eql))
+        (width-census (make-array 5 :element-type '(unsigned-byte 32)
+                                   :initial-element 0))
         (maximum-width 1))
     (%map-surface-mesh-triangle-records
      (lambda (kind stock ambient mask normal a b c)
@@ -1843,10 +1881,15 @@ render ABI consequently shades them with its usual sign-quantized normal."
                               (%lattice-key-y key)
                               (%lattice-key-z key))))
          (setf (gethash key width-by-site) width
-               maximum-width (max maximum-width width))))
+               maximum-width (max maximum-width width))
+         (incf (aref width-census width))))
      stocks-by-site)
     (let ((builder (%make-surface-mesh-builder
-                    (surface-mesh-domain witness) maximum-width)))
+                    (surface-mesh-domain witness) maximum-width))
+          (edge-counts (make-hash-table :test #'equal))
+          (candidate-splits (make-hash-table :test #'equal))
+          (repair-splits (make-hash-table :test #'equal))
+          (collapsed-triangle-count 0))
       (setf (surface-mesh-builder-singular-star-count builder)
             (surface-mesh-singular-star-count witness))
       (labels ((transformed-point (point)
@@ -1863,7 +1906,53 @@ render ABI consequently shades them with its usual sign-quantized normal."
                            for component in direction
                            collect (+ (* +mesh-cell-size+ coordinate)
                                       (* width component))))))
-               (emit (kind stock ambient mask normal a b c)
+               (count-edge (left right)
+                 (incf (gethash (%ordered-point-edge left right)
+                                edge-counts 0)))
+               (scan-transition (kind stock ambient mask normal a b c)
+                 (declare (ignore kind stock ambient mask normal))
+                 (let* ((ta (transformed-point a))
+                        (tb (transformed-point b))
+                        (tc (transformed-point c))
+                        (cross (%point-cross ta tb tc)))
+                   (if (every #'zerop cross)
+                       (progn
+                         (incf collapsed-triangle-count)
+                         (multiple-value-bind (edge middle)
+                             (%collapsed-triangle-split ta tb tc)
+                           (when edge
+                             (pushnew middle (gethash edge candidate-splits)
+                                      :test #'equal))))
+                       (progn
+                         (count-edge ta tb)
+                         (count-edge tb tc)
+                         (count-edge tc ta)))))
+               (edge-splits (left right)
+                 (sort (copy-list
+                        (gethash (%ordered-point-edge left right)
+                                 repair-splits))
+                       #'<
+                       :key (lambda (point)
+                              (%point-distance-squared left point))))
+               (edge-points (left right)
+                 (append (list left) (edge-splits left right) (list right)))
+               (mark-visible-edge (table left right bit mask)
+                 (when (logtest bit mask)
+                   (loop for points on (edge-points left right)
+                         while (rest points)
+                         do (setf (gethash
+                                   (%ordered-point-edge
+                                    (first points) (second points))
+                                   table)
+                                  t))))
+               (triangle-boundary-mask (visible a b c)
+                 (logior (if (gethash (%ordered-point-edge b c) visible)
+                             #b001 0)
+                         (if (gethash (%ordered-point-edge c a) visible)
+                             #b010 0)
+                         (if (gethash (%ordered-point-edge a b) visible)
+                             #b100 0)))
+               (emit-transition (kind stock ambient mask normal a b c)
                  (let* ((ta (transformed-point a))
                         (tb (transformed-point b))
                         (tc (transformed-point c))
@@ -1872,12 +1961,84 @@ render ABI consequently shades them with its usual sign-quantized normal."
                      (unless (plusp (%point-dot cross normal))
                        (error "Site-local bevel folded ~S triangle ~S ~S ~S into ~S ~S ~S."
                               kind a b c ta tb tc))
-                     (%emit-global-triangle
-                      builder kind stock ambient mask
-                      (%primitive-plane-normal ta tb tc)
-                      (list ta tb tc))))))
-        (%map-surface-mesh-triangle-records #'emit witness))
-      (%finish-surface-mesh builder))))
+                     (let ((ab (edge-splits ta tb))
+                           (bc (edge-splits tb tc))
+                           (ca (edge-splits tc ta)))
+                       (if (not (or ab bc ca))
+                           (%emit-global-triangle
+                            builder kind stock ambient mask
+                            (%primitive-plane-normal ta tb tc)
+                            (list ta tb tc))
+                           (let* ((loop (append (list ta) ab (list tb) bc
+                                                (list tc) ca))
+                                  (triangles
+                                    (%triangulate-coplanar-loop loop cross))
+                                  (visible (make-hash-table :test #'equal)))
+                             (unless triangles
+                               (error "Could not contract site-local bevel T-junction around ~S."
+                                      loop))
+                             (mark-visible-edge visible ta tb #b100 mask)
+                             (mark-visible-edge visible tb tc #b001 mask)
+                             (mark-visible-edge visible tc ta #b010 mask)
+                             (dolist (triangle triangles)
+                               (destructuring-bind (a b c) triangle
+                                 (%emit-global-triangle
+                                  builder kind stock ambient
+                                  (triangle-boundary-mask visible a b c)
+                                  (%primitive-plane-normal a b c)
+                                  triangle))))))))))
+        ;; First find the exact geometric edge mismatch caused only by
+        ;; collinear medial-limit collapses.  Uniform width-four regions have
+        ;; no mismatch and consequently receive no needless subdivisions.
+        (%map-surface-mesh-triangle-records #'scan-transition witness)
+        (let ((unmatched-edge-count
+                (loop for count being the hash-values of edge-counts
+                      count (/= count 2))))
+          (maphash
+           (lambda (edge points)
+             (when (= 1 (gethash edge edge-counts 0))
+               (destructuring-bind (left right) edge
+                 (let* ((points
+                          (sort (copy-list points) #'<
+                                :key (lambda (point)
+                                       (%point-distance-squared left point))))
+                        (chain (append (list left) points (list right))))
+                   (when (loop for tail on chain
+                               while (rest tail)
+                               always (= 1 (gethash
+                                            (%ordered-point-edge
+                                             (first tail) (second tail))
+                                            edge-counts 0)))
+                     (setf (gethash edge repair-splits) points))))))
+           candidate-splits)
+          ;; Prove that the selected contractions account for the entire
+          ;; mismatch before changing any triangles.  A new failure mode must
+          ;; become explicit rather than rendering another hairline crack.
+          (maphash
+           (lambda (edge points)
+             (decf (gethash edge edge-counts))
+             (destructuring-bind (left right) edge
+               (loop for tail on (append (list left) points (list right))
+                     while (rest tail)
+                     do (incf (gethash
+                               (%ordered-point-edge
+                                (first tail) (second tail))
+                               edge-counts 0)))))
+           repair-splits)
+          (let ((residual-edge-count
+                  (loop for count being the hash-values of edge-counts
+                        count (not (or (zerop count) (= count 2))))))
+            (unless (zerop residual-edge-count)
+              (error "Site-local bevel contraction left ~D of ~D unmatched edges after ~D repairs."
+                     residual-edge-count unmatched-edge-count
+                     (hash-table-count repair-splits)))
+            (%map-surface-mesh-triangle-records #'emit-transition witness)
+            (values
+             (%finish-surface-mesh builder)
+             width-census
+             (list :collapsed-triangle-count collapsed-triangle-count
+                   :unmatched-edge-count unmatched-edge-count
+                   :repaired-edge-count (hash-table-count repair-splits)))))))))
 
 (defun %coplanar-group-loops (triangles)
   "Return oriented boundary loops, or NIL when the union is not simple."

@@ -1,6 +1,11 @@
 ;;;; Standalone Slynk server bootstrap for ./sly.
 
 (require :asdf)
+(handler-bind ((warning #'muffle-warning))
+  ;; build-progress.lisp uses these SBCL contrib packages at read time, just
+  ;; like the standalone luvcraft and LUFT build bootstraps do.
+  (require :sb-concurrency)
+  (require :sb-posix))
 
 (defparameter cl-user::*luv-project-root* nil)
 (defparameter cl-user::*luv-slynk-port* nil)

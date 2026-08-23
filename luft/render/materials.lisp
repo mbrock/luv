@@ -288,31 +288,42 @@
                      (surface-assembly-tertiary assembly)))
    :test #'eq))
 
+(defconstant +material-bevel-terrain-mask+ #b01)
+(defconstant +material-bevel-architecture-mask+ #b10)
+
+(defun surface-reading-material-bevel-mask (reading)
+  (if (architecture-surface-reading-p reading)
+      +material-bevel-architecture-mask+
+      +material-bevel-terrain-mask+))
+
+(defun surface-assembly-material-bevel-mask (assembly)
+  "Return the terrain/architecture bits represented by ASSEMBLY.
+
+A face is owned by its primary authored reading.  Secondary soil readings on
+foundation faces describe weathering and therefore do not turn a homogeneous
+architectural site into a material contact.  Bands and junctions retain every
+incident reading, so their mask records a genuine mixed relation."
+  (if (eq :face (surface-assembly-relation assembly))
+      (surface-reading-material-bevel-mask
+       (surface-assembly-primary assembly))
+      (reduce #'logior (surface-assembly-readings assembly)
+              :key #'surface-reading-material-bevel-mask
+              :initial-value 0)))
+
 (defgeneric material-bevel-width (profile assembly)
   (:documentation
    "Return the integer LUFT bevel width assigned to semantic ASSEMBLY."))
 
 (defmethod material-bevel-width
     ((profile material-bevel-profile) (assembly surface-assembly))
-  (let* ((readings (surface-assembly-readings assembly))
-         (architecture-p (some #'architecture-surface-reading-p readings))
-         (terrain-p (some (complement #'architecture-surface-reading-p)
-                          readings)))
-    (cond
-      ;; A face remains owned by its primary authored reading.  Foundation
-      ;; faces carry soil readings for weathering without becoming a geometric
-      ;; material contact.
-      ((eq :face (surface-assembly-relation assembly))
-       (if (architecture-surface-reading-p
-            (surface-assembly-primary assembly))
-           (material-bevel-profile-architecture-width profile)
-           (material-bevel-profile-terrain-width profile)))
-      ((and architecture-p terrain-p)
-       (material-bevel-profile-contact-width profile))
-      (architecture-p
-       (material-bevel-profile-architecture-width profile))
-      (t
-       (material-bevel-profile-terrain-width profile)))))
+  (ecase (surface-assembly-material-bevel-mask assembly)
+    (#.+material-bevel-terrain-mask+
+     (material-bevel-profile-terrain-width profile))
+    (#.+material-bevel-architecture-mask+
+     (material-bevel-profile-architecture-width profile))
+    (#.(logior +material-bevel-terrain-mask+
+               +material-bevel-architecture-mask+)
+     (material-bevel-profile-contact-width profile))))
 
 (defun compile-material-bevel-profile
     (profile &optional (vocabulary *surface-assembly-vocabulary*))
@@ -329,6 +340,36 @@
                       width assembly))
              (setf (aref widths stock) width))
     widths))
+
+(defun compile-material-bevel-site-policy
+    (profile &optional (vocabulary *surface-assembly-vocabulary*))
+  "Compile PROFILE into dense stock masks and site widths.
+
+The first value is one terrain/architecture bit mask per packed assembly
+stock.  The second is a four-entry byte table indexed by the OR of every
+incident stock mask: terrain-only, architecture-only, and mixed sites select
+the profile's terrain, architecture, and contact widths respectively."
+  (check-type profile material-bevel-profile)
+  ;; Compile the ordinary stock widths as the validation oracle.  In
+  ;; particular, a profile made without MAKE-MATERIAL-BEVEL-PROFILE must not
+  ;; smuggle an out-of-range width into the site table.
+  (compile-material-bevel-profile profile vocabulary)
+  (let* ((members (domains:identity-vocabulary-members vocabulary))
+         (stock-masks
+           (make-array (length members) :element-type '(unsigned-byte 8)))
+         (site-widths
+           (make-array
+            4 :element-type '(unsigned-byte 8)
+            :initial-contents
+            (list 0
+                  (material-bevel-profile-terrain-width profile)
+                  (material-bevel-profile-architecture-width profile)
+                  (material-bevel-profile-contact-width profile)))))
+    (loop for assembly across members
+          for stock from 0
+          do (setf (aref stock-masks stock)
+                   (surface-assembly-material-bevel-mask assembly)))
+    (values stock-masks site-widths)))
 
 ;; The first nine vocabulary members are the stable renderer ABI.  The tests
 ;; rebuild this exact prefix from the semantic objects, so these literals are
