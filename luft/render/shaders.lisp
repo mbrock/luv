@@ -1055,31 +1055,33 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
          (primary-tone (swizzle primary :xyz))
          (secondary-tone (swizzle secondary :xyz))
          (tertiary-tone (swizzle tertiary :xyz))
-         (kernel (swizzle primary :w))
+         ;; `kernel` is a Metal address-space keyword, so keep the closed
+         ;; material-kernel discriminator explicit in generated MSL.
+         (kernel-code (swizzle primary :w))
          (contact-variant (swizzle secondary :w))
          (earth-set-p
-           (if (< (abs (- kernel 1.0)) 0.5) 1.0 0.0))
+           (if (< (abs (- kernel-code 1.0)) 0.5) 1.0 0.0))
          (tone
-           (if (< kernel 0.5)
+           (if (< kernel-code 0.5)
                primary-tone
-               (if (< kernel 1.5)
+               (if (< kernel-code 1.5)
                    (earth-set-stone-tone
                     material-point normal ambient-occlusion contact-variant
                     primary-tone secondary-tone tertiary-tone)
-                   (if (< kernel 2.5)
+                   (if (< kernel-code 2.5)
                        (turf-edge-tone material-point normal
                                        primary-tone secondary-tone)
-                       (if (< kernel 3.5)
+                       (if (< kernel-code 3.5)
                            (foundation-stone-tone
                             material-point primary-tone secondary-tone
                             tertiary-tone)
-                           (if (< kernel 4.5)
+                           (if (< kernel-code 4.5)
                                (dressed-stone-tone
                                 material-point normal primary-tone)
-                               (if (< kernel 5.5)
+                               (if (< kernel-code 5.5)
                                    (natural-earth-tone
                                     material-point normal primary-tone 0.0)
-                                   (if (< kernel 6.5)
+                                   (if (< kernel-code 6.5)
                                        (natural-earth-tone
                                         material-point normal primary-tone 1.0)
                                        (natural-earth-tone
