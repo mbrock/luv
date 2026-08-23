@@ -8,7 +8,6 @@
   (require :sb-posix))
 
 (defparameter cl-user::*luv-project-root* nil)
-(defparameter cl-user::*luv-slynk-port* nil)
 
 (defun getenv-or (name default)
   (or (uiop:getenv name) default))
@@ -20,58 +19,98 @@
              name))
     (uiop:ensure-directory-pathname value)))
 
+(defun emit-swash-event (session event message &rest fields)
+  (let ((swash (or (uiop:getenv "LUV_SWASH")
+                   (error "LUV_SWASH is not set"))))
+    (let ((process
+            (uiop:launch-program
+             (append (list swash "emit" session
+                           "--event" event "--message" message)
+                     (loop for field in fields append (list "--field" field)))
+             :input nil :output nil :error-output *error-output*)))
+      (unless (zerop (uiop:wait-process process))
+        (error "Could not publish Swash event ~A for ~A" event session)))))
+
 (let* ((project-root
          (uiop:pathname-directory-pathname *load-truename*))
        (slynk-root (required-directory "LUV_SLYNK_DIR"))
-       (port (parse-integer (getenv-or "LUV_SLYNK_PORT" "4005"))))
-  (setf cl-user::*luv-project-root* project-root
-        cl-user::*luv-slynk-port* port)
+       (requested-port (parse-integer (getenv-or "LUV_SLYNK_PORT" "0")))
+       (session (or (uiop:getenv "SWASH_SESSION")
+                    (error "sly-server.lisp must run inside a Swash session")))
+       (name (getenv-or "LUV_NAME" session)))
+  (setf cl-user::*luv-project-root* project-root)
   (asdf:initialize-source-registry
    `(:source-registry
      (:tree ,(namestring slynk-root))
+     (:directory ,(namestring project-root))
      :inherit-configuration))
-  (asdf:load-asd (merge-pathnames #P"slynk.asd" slynk-root))
+  ;; A dependency-core boot already has Slynk registered and loaded. Loading
+  ;; its ASD again invalidates that completed operation and noisily reloads it.
+  (unless (asdf:find-system :slynk nil)
+    (asdf:load-asd (merge-pathnames #P"slynk.asd" slynk-root)))
   ;; Slynk first, so the wiki's IN-READTABLE forms can register their
   ;; readtables while the durable image is assembled.
   (asdf:load-system :slynk)
-  (asdf:load-asd (merge-pathnames #P"luv.asd" project-root))
-  (asdf:load-asd (merge-pathnames #P"luvcraft.asd" project-root))
-  (asdf:load-asd (merge-pathnames #P"luv-wiki.asd" project-root))
-  (asdf:load-asd (merge-pathnames #P"luft.asd" project-root))
-  (asdf:load-asd (merge-pathnames #P"telegram.asd" project-root))
-  (asdf:load-asd (merge-pathnames #P"mqtt.asd" project-root))
-  (asdf:load-asd (merge-pathnames #P"openai.asd" project-root))
-  (asdf:load-asd (merge-pathnames #P"chrome-cdp.asd" project-root))
-  ;; This is a separate top-level form from the LUV-BUILD uses below.  LOAD
-  ;; reads and evaluates source one form at a time, so a genuinely fresh Lisp
-  ;; now has both the package and its functions before reading that next form.
-  (load (merge-pathnames #P"luvcraft/build-progress.lisp" project-root)))
-
-(let ((project-root cl-user::*luv-project-root*)
-      (port cl-user::*luv-slynk-port*)
-      (systems '(:luv :luvcraft :luvcraft/agent :luvcraft/birthday
-                 :luv-wiki :luft/render)))
+  ;; One aggregate gives ASDF one plan instead of making it rediscover the
+  ;; overlapping closure separately for every requested root.
+  (load (merge-pathnames #P"scripts/sly-asdf-status.lisp" project-root))
+  (load (merge-pathnames #P"luvcraft/build-progress.lisp" project-root))
+  (let ((systems '(:luv-workbench)))
     ;; The server's outer log is relayed by ./sly while this boot runs, so keep
     ;; narration there. Per-file compiler/toolchain chatter still gets the
     ;; build progress module's focused logs.
-    (luv-build:start project-root :system systems :invocation "sly boot"
-                     :redirect-output-p nil)
-    (handler-case
-        (progn
-          (dolist (system systems)
-            (asdf:load-system system))
-          (luv-build:finish :done))
-      (luv-build:deadline-exceeded ()
-        (luv-build:finish :deadline)
-        (sb-ext:exit :code 1 :abort t))
-      (error (condition)
-        (luv-build:failed (princ-to-string condition))
-        (luv-build:finish :error)
-        (error condition)))
-  (format t "~&Starting luv Slynk on 127.0.0.1:~D.~%" port)
-  (funcall (find-symbol "CREATE-SERVER" "SLYNK")
-           :interface "127.0.0.1"
-           :port port
-           :dont-close t)
-  (format t "~&Luv Slynk is ready on 127.0.0.1:~D.~%" port)
-  (loop (sleep 3600)))
+    (labels ((build-call (name &rest arguments)
+               (apply (symbol-function (find-symbol name "LUV-BUILD"))
+                      arguments))
+             (deadline-exceeded-p (condition)
+               (typep condition
+                      (find-symbol "DEADLINE-EXCEEDED" "LUV-BUILD"))))
+      (build-call "START" project-root :system systems :invocation "sly boot"
+                  :redirect-output-p nil :report-plan-p nil
+                  :defer-archive-p t)
+      (handler-case
+          (progn
+            (asdf:load-system "luv-workbench")
+            (build-call "FINISH" :done))
+        (error (condition)
+          (if (deadline-exceeded-p condition)
+              (progn
+                (build-call "FINISH" :deadline)
+                (sb-ext:exit :code 1 :abort t))
+              (progn
+                (build-call "FAILED" (princ-to-string condition))
+                (build-call "FINISH" :error)
+                (error condition)))))))
+  (format t "~&Starting luv Slynk on a kernel-assigned loopback port.~%")
+  (force-output)
+  (let ((port
+          (funcall (find-symbol "CREATE-SERVER" "SLYNK")
+                   :interface "127.0.0.1"
+                   :port requested-port
+                   :dont-close t)))
+    (emit-swash-event
+     session "slynk-ready" (format nil "Lisp ~A is ready" name)
+     "LUV_KIND=LISP"
+     (format nil "LUV_ROOT=~A" (namestring project-root))
+     (format nil "LUV_NAME=~A" name)
+     (format nil "LUV_SLYNK_PORT=~D" port)
+     (format nil "LUV_SLYNK_PID=~D" (sb-posix:getpid)))
+    (format t "~&Luv Slynk is ready on 127.0.0.1:~D (Swash ~A).~%"
+            port session)
+    (force-output)
+    (sb-thread:make-thread
+     (lambda ()
+       (handler-case
+           (multiple-value-bind (archive count)
+               (funcall (find-symbol "ARCHIVE-DEFERRED-LOGS" "LUV-BUILD"))
+             (when archive
+               (format t "~&Packed deferred build logs into ~A (~D build~:P).~%"
+                       (namestring (uiop:enough-pathname archive project-root))
+                       count)
+               (force-output)))
+         (error (condition)
+           (format *error-output* "~&Deferred build-log packing failed: ~A~%"
+                   condition)
+           (force-output *error-output*))))
+     :name "Sly build-log packer")
+    (loop (sleep 3600))))

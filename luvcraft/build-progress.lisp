@@ -35,8 +35,8 @@
 
 (defpackage #:luv-build
   (:use #:cl)
-  (:export #:start #:finish #:failed #:deadline-exceeded #:deadline-exceeded-label
-           #:*log-directory*))
+  (:export #:start #:finish #:failed #:archive-deferred-logs
+           #:deadline-exceeded #:deadline-exceeded-label #:*log-directory*))
 
 (in-package #:luv-build)
 
@@ -58,6 +58,8 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
   "What this build is making, as ASDF names it.")
 (defvar *invocation* "make"
   "How the narrated operation names itself in its opening comment.")
+(defvar *defer-archive-p* nil
+  "Whether a successful build leaves log packing to ARCHIVE-DEFERRED-LOGS.")
 
 (defparameter *id-characters* "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
   "The wiki's alphabet for short references; a build gets one of the same shape.")
@@ -163,12 +165,13 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
 
 (defun action-line (state label)
   "Where a file stands in the plan, said before it is compiled."
-  (say (format nil "~5,1,,,'0Fs~V@A  ~A"
-               (since-start state)
-               *counter-width*
-               (format nil "~D/~D" (1+ (display-compiles-done state))
-                       (or (display-compiles-total state) 0))
-               label)))
+  (let ((place
+          (if (display-compiles-total state)
+              (format nil "~D/~D" (1+ (display-compiles-done state))
+                      (display-compiles-total state))
+              (format nil "~D" (1+ (display-compiles-done state))))))
+    (say (format nil "~5,1,,,'0Fs~V@A  ~A"
+                 (since-start state) *counter-width* place label))))
 
 (defun here (path)
   "A path in the checkout, said the way one would type it."
@@ -318,14 +321,20 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
 (defun report-archive (state raw)
   "Pack every build's logs away, and say what that came to."
   (declare (ignorable state))
-  (multiple-value-bind (archive count) (compact-logs)
-    (if archive
-        (remark "Logs packed into ~A: ~A became ~A, ~D build~:P archived."
-                (namestring (uiop:enough-pathname archive *project-root*))
-                (human-bytes raw) (human-bytes (file-bytes archive)) count)
-        (remark "Logs are in ~A." (in-logs ""))))
-  (remark)
-  (report-cost))
+  (if *defer-archive-p*
+      (progn
+        (remark "Logs will be packed after the service is ready (~A)."
+                (in-logs ""))
+        (remark))
+      (progn
+        (multiple-value-bind (archive count) (compact-logs)
+          (if archive
+              (remark "Logs packed into ~A: ~A became ~A, ~D build~:P archived."
+                      (namestring (uiop:enough-pathname archive *project-root*))
+                      (human-bytes raw) (human-bytes (file-bytes archive)) count)
+              (remark "Logs are in ~A." (in-logs ""))))
+        (remark)
+        (report-cost))))
 
 (defun report-cost ()
   (remark "Note: Build logs take ~A of the ~A build directory."
@@ -599,13 +608,21 @@ Returns the current build's archive, and how many were made."
                           (merge-pathnames "latest" (logs-root))))))
     (values current count)))
 
+(defun archive-deferred-logs ()
+  "Pack logs left unpacked so a service could announce readiness first."
+  (multiple-value-prog1 (compact-logs)
+    (setf *defer-archive-p* nil)))
+
 ;;; Entry points
 
 (defun start (project-root &key system (invocation "make")
-                                  (redirect-output-p t))
+                                  (redirect-output-p t)
+                                  (report-plan-p t)
+                                  (defer-archive-p nil))
   (setf *project-root* project-root
         *system* system
         *invocation* invocation
+        *defer-archive-p* defer-archive-p
         *build-id* (make-build-id)
         *log-directory* (merge-pathnames (format nil "build/logs/~A/" *build-id*)
                                          project-root)
@@ -630,7 +647,7 @@ Returns the current build's archive, and how many were made."
   (when redirect-output-p
     (redirect-output-to (build-log)))
   (link-latest-logs)
-  (when system (report-plan system))
+  (when (and system report-plan-p) (report-plan system))
   (send :header)
   (values))
 

@@ -11,10 +11,10 @@ It is all rather experimental. The point is not to hide graphics programming
 behind an enormous engine. The point is to make the interesting machinery small
 enough to inspect, change, and keep running while we change it.
 
-## Start with one live Lisp
+## Start with a managed live Lisp
 
-Everything happens in one durable SBCL image per checkout, and the game
-normally runs inside it:
+Swash supervises the durable SBCL images across all checkouts, and the game
+normally runs inside one of them:
 
 ```sh
 ./sly play                              # boot the image and open the real game
@@ -22,13 +22,32 @@ normally runs inside it:
 ./sly screenshot build/frame.png        # capture what the game is showing
 ./sly stop-playing                      # checkpoint and close the game
 ./sly restart                           # explicit recovery if the image is wrecked
+./sly list                              # every running Lisp, across worktrees
+./sly systems                           # live ASDF state for this checkout
+./sly system luv/test                   # dependencies, ASDF stamps, pending actions
+./sly stale                             # loaded systems ASDF would update
 ```
 
-`play` starts the checkout's durable image when necessary. `eval`, `inspect`,
-`describe`, `apropos`, `edit`, and `xref` all talk to that same process, where
-`luvcraft:*session*` names the game. `./sly --help` is the command map.
+`play` starts a Lisp for this checkout when necessary. `eval`, `inspect`,
+`describe`, `apropos`, `edit`, and `xref` select that same process, where
+`luvcraft:*session*` names the game. More than one Lisp is intentional and
+visible: name one with `./sly start --name experiment`, then address it with
+`./sly --lisp experiment ...` or its six-character Swash ID. An unqualified
+command refuses to guess when several Lisps belong to the checkout.
+`./sly --help` is the command map.
 `build/luvcraft` is the shipped/CI executable, not the ordinary development
 entry point.
+
+The ASDF reports distinguish a system that has successfully loaded at some
+point from one that is current now. Freshness is computed by constructing a
+read-only `load-op` plan: an empty plan is current, while a nonempty plan lists
+the compile and load actions ASDF would perform. These commands inspect the
+selected live image; they do not load or rebuild anything.
+
+The command client is itself the `sly-client` ASDF program system. `./sly`
+executes a checkout-local cached SBCL core from `build/sly-client`, rebuilding
+it automatically when the client, Parinfer implementation, system definition,
+or profile SBCL changes. `make sly-client` performs the same build explicitly.
 
 Install the native and Lisp dependencies once as a durable Nix profile:
 

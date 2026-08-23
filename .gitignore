@@ -1,7 +1,4 @@
 .claude/worktrees
-.sly-server.log
-.sly-server.pid
-.sly-server.start.lock
 build/
 capture.png
 capture.ppm

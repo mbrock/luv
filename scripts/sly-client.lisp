@@ -1,40 +1,40 @@
-;;;; Lisp entry point run by the Nix-backed ./sly launcher.
-
-(defparameter cl-user::*sly-client-directory*
-  (make-pathname :name nil :type nil :defaults *load-truename*))
-
-(load (merge-pathnames
-       #P"../parinfer/implementation.lisp"
-       cl-user::*sly-client-directory*))
+;;;; The short-lived command client for a managed Luv Lisp image. ASDF's
+;;;; PROGRAM-OP freezes this file and its dependencies into build/sly-client.
 
 (defpackage #:sly-client
-  (:use #:cl))
+  (:use #:cl)
+  (:export #:entry-point))
 
 (in-package #:sly-client)
 
-(require :sb-bsd-sockets)
-(require :sb-posix)
-
-(defparameter *host* (or (sb-ext:posix-getenv "LUV_SLYNK_HOST") "127.0.0.1"))
-(defparameter *port*
-  (parse-integer (or (sb-ext:posix-getenv "LUV_SLYNK_PORT") "4005")))
-(defparameter *expected-listener-pid*
-  (let ((value (sb-ext:posix-getenv "LUV_SLYNK_PID")))
-    (and value (parse-integer value :junk-allowed t))))
+(defparameter *host* "127.0.0.1")
+(defparameter *port* 0)
+(defparameter *expected-listener-pid* nil)
 (defparameter *project-root*
-  (truename
-   (merge-pathnames
-    #P"../"
-    cl-user::*sly-client-directory*)))
-(defparameter *server-pid-path*
-  (merge-pathnames #P".sly-server.pid" *project-root*))
-(defparameter *server-log-path*
-  (merge-pathnames #P".sly-server.log" *project-root*))
-(defparameter *server-start-lock-path*
-  (merge-pathnames #P".sly-server.start.lock" *project-root*))
+  (asdf:system-source-directory "sly-client"))
+(defparameter *swash* nil)
+(defparameter *lisp-selector* nil)
+(defparameter *managed-lisp* nil)
+(defparameter *current-command* nil)
 (defparameter *server-start-timeout* 120)
 (defparameter *slynk-handshake-timeout* 3)
 (defparameter *default-output-limit* (* 256 1024))
+
+(defun configure-from-environment ()
+  "Read invocation-specific state after the cached core starts."
+  (let ((listener-pid (sb-ext:posix-getenv "LUV_SLYNK_PID")))
+    (setf *host* (or (sb-ext:posix-getenv "LUV_SLYNK_HOST") "127.0.0.1")
+          *port* (parse-integer
+                  (or (sb-ext:posix-getenv "LUV_SLYNK_PORT") "0"))
+          *expected-listener-pid*
+          (and listener-pid
+               (parse-integer listener-pid :junk-allowed t))
+          *swash*
+          (or (sb-ext:posix-getenv "LUV_SWASH")
+              (error "LUV_SWASH is not set; refresh the luv development profile"))
+          *lisp-selector* (sb-ext:posix-getenv "LUV_LISP_SELECTOR")
+          *managed-lisp* nil
+          *current-command* nil)))
 
 (define-condition slynk-handshake-timeout (error) ()
   (:report
@@ -236,42 +236,6 @@ wedged image looks like, and the difference has to be visible from here.")
            (error () nil))
       (ignore-errors (sb-bsd-sockets:socket-close socket)))))
 
-(defun shell-quote (string)
-  (with-output-to-string (output)
-    (write-char #\' output)
-    (loop for character across string
-          do (if (char= character #\')
-                 (write-string "'\\''" output)
-                 (write-char character output)))
-    (write-char #\' output)))
-
-(defun run-shell (command)
-  "Run COMMAND under /bin/sh, letting it speak, and return its exit code.
-
-The streams are inherited rather than discarded.  SB-EXT:RUN-PROGRAM reads
-NIL as /dev/null, not as \"inherit\", so a command told to print swallowed
-its own output here: `./sly log` shelled out to tail and threw the tail
-away, leaving a header with nothing under it.  Every caller that wants
-silence redirects for itself."
-  (let ((process
-          (sb-ext:run-program
-           "/bin/sh" (list "-c" command)
-           :search nil
-           :output t
-           :error t
-           :wait t)))
-    (sb-ext:process-exit-code process)))
-
-(defun run-shell-output (command)
-  "Run COMMAND under /bin/sh and return its standard output as a string."
-  (with-output-to-string (output)
-    (sb-ext:run-program
-     "/bin/sh" (list "-c" command)
-     :search nil
-     :output output
-     :error nil
-     :wait t)))
-
 (defun split-lines (text)
   (loop with start = 0
         for newline = (position #\Newline text :start start)
@@ -279,245 +243,323 @@ silence redirects for itself."
         while newline
         do (setf start (1+ newline))))
 
-(defstruct (port-holder (:constructor make-port-holder (pid command)))
-  pid
-  command)
+(defstruct lisp-instance
+  id name root started last-activity activity state port pid)
 
-(defun port-holders (&optional (port *port*))
-  "The processes holding a listening socket on PORT, as lsof reports them.
+(defun run-swash-output (&rest arguments)
+  (let ((output (make-string-output-stream))
+        (errors (make-string-output-stream)))
+    (let* ((process (sb-ext:run-program
+                     *swash* arguments
+                     :search nil :input nil :output output :error errors :wait t))
+           (stdout (get-output-stream-string output))
+           (stderr (get-output-stream-string errors))
+           (code (sb-ext:process-exit-code process)))
+      (unless (zerop code)
+        (error "swash ~{~A~^ ~} failed (~D):~%~A"
+               arguments code stderr))
+      stdout)))
 
-A dead image's shell can outlive it still holding the inherited listening
-socket, which is exactly the state where the port accepts TCP and answers
-nothing."
-  (let ((pid nil)
-        (holders nil))
-    (dolist (line (split-lines
-                   (run-shell-output
-                    (format nil "lsof -nP -iTCP:~D -sTCP:LISTEN -Fpc 2>/dev/null"
-                            port)))
-             (nreverse holders))
-      (when (plusp (length line))
-        (case (char line 0)
-          (#\p (setf pid (parse-integer (subseq line 1) :junk-allowed t)))
-          (#\c (when pid
-                 (push (make-port-holder pid (subseq line 1)) holders)
-                 (setf pid nil))))))))
+(defun run-swash (&rest arguments)
+  (let ((process (sb-ext:run-program
+                  *swash* arguments
+                  :search nil :input nil :output t :error t :wait t)))
+    (unless (zerop (sb-ext:process-exit-code process))
+      (error "swash ~{~A~^ ~} failed with exit code ~D"
+             arguments (sb-ext:process-exit-code process)))))
 
-(defun lisp-holder-p (holder)
-  "True when HOLDER looks like a Lisp image rather than a leaked descriptor.
+(defun json-value (name object)
+  (cdr (assoc name object :test #'string=)))
 
-./sly reclaims a squatted port by killing what holds it, and a Lisp is the
-one kind of holder that might be somebody's live image: it is reported, never
-killed."
-  (let ((command (string-downcase (port-holder-command holder))))
-    (or (search "sbcl" command)
-        (search "lisp" command)
-        (search "emacs" command)
-        (search "luvcraft" command))))
+(defun decode-event-lines (text)
+  (loop for line in (split-lines text)
+        unless (zerop (length line))
+          collect (let ((json:*json-identifier-name-to-lisp* #'identity)
+                        (json:*identifier-name-to-key* #'identity))
+                    (json:decode-json-from-string line))))
 
-(defun describe-port-holders (holders &optional (stream *error-output*))
-  (dolist (holder holders)
-    (format stream "  pid ~D ~A~%"
-            (port-holder-pid holder)
-            (port-holder-command holder))))
+(defun swash-events (&rest filters)
+  (decode-event-lines
+   (apply #'run-swash-output "events" "--json" filters)))
 
-(defun pid-from-file (pathname)
-  (with-open-file (stream pathname :if-does-not-exist nil)
-    (and stream
-         (parse-integer (string-trim '(#\Space #\Tab #\Newline #\Return)
-                                     (read-line stream nil ""))
-                        :junk-allowed t))))
+(defun event-fields (event)
+  (json-value "fields" event))
 
-(defun pid-file-pid ()
-  (pid-from-file *server-pid-path*))
+(defun event-field (name event)
+  (json-value name (event-fields event)))
 
-(defun pid-alive-p (pid)
-  (and pid
-       (zerop
-        (run-shell
-         (format nil "kill -0 ~D >/dev/null 2>&1" pid)))))
+(defun event-name (event)
+  (or (event-field "SWASH_EVENT" event) "output"))
 
-(defun remove-stale-pid-file ()
-  (let ((pid (pid-file-pid)))
-    (unless (pid-alive-p pid)
-      (ignore-errors (delete-file *server-pid-path*)))))
+(defun parse-decimal (value)
+  (and value (parse-integer value :junk-allowed t)))
 
-(defun print-server-log-tail (&optional (lines 80))
-  (when (probe-file *server-log-path*)
-    (format *error-output* "~&--- ~A tail ---~%" *server-log-path*)
-    (run-shell
-     (format nil "tail -n ~D ~A >&2"
-             lines
-             (shell-quote (namestring *server-log-path*))))))
+(defun lisp-instances ()
+  "Reconstruct the Lisp registry from portable Swash journal events."
+  (let ((by-id (make-hash-table :test #'equal)))
+    (dolist (event (swash-events "--field" "LUV_KIND=LISP"))
+      (let* ((id (event-field "SWASH_SESSION" event))
+             (name (event-name event))
+             (instance (gethash id by-id)))
+        (when (and (member name '("started" "lisp-starting") :test #'string=)
+                   (null instance))
+          (setf instance
+                (make-lisp-instance
+                 :id id
+                 :name (or (event-field "LUV_NAME" event) id)
+                 :root (event-field "LUV_ROOT" event)
+                 :started (json-value "timestamp" event)
+                 :state :starting)
+                (gethash id by-id) instance))
+        (when instance
+          (setf (lisp-instance-last-activity instance) (json-value "timestamp" event)
+                (lisp-instance-activity instance) name)
+          (cond
+            ((string= name "slynk-ready")
+             (setf (lisp-instance-port instance)
+                   (parse-decimal (event-field "LUV_SLYNK_PORT" event))
+                   (lisp-instance-pid instance)
+                   (parse-decimal (event-field "LUV_SLYNK_PID" event))
+                   (lisp-instance-state instance) :ready))
+            ((string= name "exited")
+             (setf (lisp-instance-state instance) :exited))))))
+    ;; Sessions started by the immediately preceding Swash revision did not
+    ;; copy tags onto lifecycle events. Fold untagged exits during migration;
+    ;; this is also harmless insurance for imported journals.
+    (dolist (event (swash-events "--event" "exited"))
+      (let ((instance (gethash (event-field "SWASH_SESSION" event) by-id)))
+        (when instance
+          (setf (lisp-instance-state instance) :exited
+                (lisp-instance-last-activity instance) (json-value "timestamp" event)
+                (lisp-instance-activity instance) "exited"))))
+    (sort (loop for instance being each hash-value of by-id collect instance)
+          #'string< :key #'lisp-instance-started)))
 
-(defun acquire-start-lock ()
-  (loop repeat (* 10 *server-start-timeout*)
-        do (let ((stream
-                   (open *server-start-lock-path*
-                         :direction :output
-                         :if-exists nil
-                         :if-does-not-exist :create)))
-             (if stream
-                 (progn
-                   (unwind-protect
-                        (format stream "~D~%" (sb-posix:getpid))
-                     (close stream))
-                   (return-from acquire-start-lock t))
-                 (let ((owner (pid-from-file *server-start-lock-path*))
-                       (written-at (file-write-date *server-start-lock-path*)))
-                   (cond
-                     ((and owner (not (pid-alive-p owner)))
-                      (ignore-errors (delete-file *server-start-lock-path*)))
-                     ((and (null owner) written-at
-                           (> (- (get-universal-time) written-at) 5))
-                      (ignore-errors (delete-file *server-start-lock-path*)))))))
-           (sleep 0.1)
-        finally (error "Timed out waiting for Slynk startup lock ~A"
-                       *server-start-lock-path*)))
+(defun running-lisp-p (instance)
+  (not (eq (lisp-instance-state instance) :exited)))
 
-(defun release-start-lock ()
-  (when (eql (pid-from-file *server-start-lock-path*) (sb-posix:getpid))
-    (ignore-errors (delete-file *server-start-lock-path*))))
+(defun same-root-p (left right)
+  (and left right
+       (string= (string-right-trim "/" left)
+                (string-right-trim "/" right))))
 
-(defun spawn-server (&key quiet)
-  (remove-stale-pid-file)
-  (let* ((server-path (merge-pathnames #P"sly-server.lisp" *project-root*))
-         (command
-           (format nil
-                   "(cd ~A && exec sbcl --noinform --disable-debugger --load ~A) > ~A 2>&1 & echo $! > ~A"
-                   (shell-quote (namestring *project-root*))
-                   (shell-quote (namestring server-path))
-                   (shell-quote (namestring *server-log-path*))
-                   (shell-quote (namestring *server-pid-path*)))))
-    (unless (probe-file server-path)
-      (error "Missing server bootstrap: ~A" server-path))
-    (unless (zerop (run-shell command))
-      (error "Could not spawn luv Slynk server"))
-    (labels ((relay-server-output (position)
-               (if (probe-file *server-log-path*)
-                   (with-open-file (input *server-log-path*)
-                     (file-position input (min position (file-length input)))
-                     (loop for line = (read-line input nil nil)
-                           while line do (format t "~A~%" line))
-                     (finish-output)
-                     (file-position input))
-                   position)))
-      (loop with log-position = 0
-            repeat (* 10 *server-start-timeout*)
-            do (setf log-position (relay-server-output log-position))
-          when (connection-available-p)
-            do (progn
-                 (setf log-position (relay-server-output log-position))
-                 (assert-listener-project)
-                 (unless (eql (pid-file-pid) (listener-process-id))
-                   (error "Slynk startup pid ~A does not own port ~D (listener pid ~A)"
-                          (pid-file-pid) *port* (listener-process-id)))
-                 (unless quiet
-                   (format t "luv Slynk is listening on ~A:~D.~%"
-                           *host* *port*))
-                 (return-from spawn-server t))
-          unless (pid-alive-p (pid-file-pid))
-            do (progn
-                 (print-server-log-tail)
-                 (error "luv Slynk server exited during startup"))
-          do (sleep 0.1)))
-    (print-server-log-tail)
-    (error "Timed out waiting for luv Slynk on ~A:~D" *host* *port*)))
+(defun timestamp-display (timestamp)
+  (if (and timestamp (>= (length timestamp) 19))
+      (let ((copy (subseq timestamp 0 19)))
+        (setf (char copy 10) #\Space)
+        copy)
+      "-"))
 
-(defun kill-port-holders (holders signal)
-  (dolist (holder holders)
-    (run-shell (format nil "kill -~A ~D >/dev/null 2>&1"
-                       signal (port-holder-pid holder)))))
+(defun print-lisp-list (&key all (stream *standard-output*))
+  (let ((instances (if all
+                       (lisp-instances)
+                       (remove-if-not #'running-lisp-p (lisp-instances)))))
+    (if (null instances)
+        (format stream "No ~:[running ~;~]Swash-managed Lisps.~%" all)
+        (progn
+          (format stream "~6A  ~16A ~8A ~7A ~5A  ~19A  ~19A  ~A~%"
+                  "ID" "NAME" "STATE" "PID" "PORT" "STARTED" "ACTIVE" "ROOT")
+          (dolist (instance instances)
+            (format stream "~6A  ~16A ~8A ~7A ~5A  ~19A  ~19A  ~A~%"
+                    (lisp-instance-id instance)
+                    (lisp-instance-name instance)
+                    (string-downcase (symbol-name (lisp-instance-state instance)))
+                    (or (lisp-instance-pid instance) "-")
+                    (or (lisp-instance-port instance) "-")
+                    (timestamp-display (lisp-instance-started instance))
+                    (timestamp-display (lisp-instance-last-activity instance))
+                    (or (lisp-instance-root instance) "-")))))
+    instances))
 
-(defun reclaim-port (&key quiet)
-  "Free *PORT* when it accepts TCP but no Slynk answers behind it.
+(defun matching-lisps (selector instances)
+  (or (let ((exact
+              (remove-if-not
+               (lambda (instance)
+                 (string= selector (lisp-instance-id instance)))
+               instances)))
+        (and exact exact))
+      (remove-if-not
+       (lambda (instance)
+         (or (string= selector (lisp-instance-name instance))
+             (and (<= (length selector) (length (lisp-instance-id instance)))
+                  (string= selector (lisp-instance-id instance)
+                           :end2 (length selector)))))
+       instances)))
 
-The usual cause is a descriptor a dead image left behind: a shell it spawned
-in the terminal wall inherited the listening socket and outlived it, so the
-kernel keeps the port bound for a process that will never accept anything.
-Nothing can close another process's descriptor, so the holders are killed --
-except a Lisp, which might be somebody's live image and is only reported."
-  (let* ((holders (port-holders))
-         (lisps (remove-if-not #'lisp-holder-p holders))
-         (leftovers (remove-if #'lisp-holder-p holders)))
+(defun choose-lisp (&key start-if-missing (instances nil instances-supplied-p))
+  (let* ((running (remove-if-not
+                   #'running-lisp-p
+                   (if instances-supplied-p instances (lisp-instances))))
+         (candidates
+           (if *lisp-selector*
+               (matching-lisps *lisp-selector* running)
+               (remove-if-not
+                (lambda (instance)
+                  (same-root-p (lisp-instance-root instance)
+                               (namestring *project-root*)))
+                running))))
     (cond
-      ((null holders)
-       (unless quiet
-         (format *error-output*
-                 "Port ~D answered no Slynk handshake and nothing holds it now.~%"
-                 *port*))
-       t)
-      (lisps
-       (format *error-output*
-               "Port ~D is held by a Lisp that answers no Slynk handshake:~%"
-               *port*)
-       (describe-port-holders lisps)
-       (format *error-output*
-               "Kill it yourself, or set LUV_SLYNK_PORT to another port.~%")
-       nil)
-      (t
-       (format *error-output*
-               "Port ~D answers no Slynk handshake, so nothing is listening ~
-there in any useful sense.  Killing what holds it:~%"
-               *port*)
-       (describe-port-holders leftovers)
-       (kill-port-holders leftovers "TERM")
-       (loop repeat 20
-             while (port-holders)
-             do (sleep 0.1))
-       (when (port-holders)
-         (kill-port-holders (port-holders) "KILL")
-         (loop repeat 20
-               while (port-holders)
-               do (sleep 0.1)))
-       (let ((remaining (port-holders)))
-         (cond
-           (remaining
-            (format *error-output* "Port ~D is still held after SIGKILL:~%" *port*)
-            (describe-port-holders remaining)
-            nil)
-           (t
-            (format *error-output* "Reclaimed port ~D.~%" *port*)
-            t)))))))
+      ((null candidates)
+       (cond
+         (*lisp-selector*
+          (print-lisp-list)
+          (error "No running Lisp matches ~S" *lisp-selector*))
+         (start-if-missing (start-server :quiet t))
+         (t nil)))
+      ((cdr candidates)
+       (print-lisp-list)
+       (if *lisp-selector*
+           (error "Selector ~S matches ~D running Lisps; use ./sly --lisp ID ..."
+                  *lisp-selector* (length candidates))
+           (error "This checkout has ~D running Lisps; use ./sly --lisp ID ..."
+                  (length candidates))))
+      (t (first candidates)))))
 
-(defun live-listener-p (&key quiet)
-  "True when a Slynk belonging to this checkout is listening on *PORT*.
+(defun select-managed-lisp (instance)
+  (unless (and (lisp-instance-port instance) (lisp-instance-pid instance))
+    (error "Lisp ~A has not published a Slynk endpoint"
+           (lisp-instance-id instance)))
+  (setf *managed-lisp* instance
+        *host* "127.0.0.1"
+        *port* (lisp-instance-port instance)
+        *expected-listener-pid* (lisp-instance-pid instance))
+  instance)
 
-A port that accepts TCP and then says nothing is not a listener at all; it is
-reclaimed here so the caller can start a real image on it."
-  (handler-case
-      (and (connection-available-p)
-           (progn (assert-listener-project) t))
-    (slynk-handshake-timeout ()
-      (unless (reclaim-port :quiet quiet)
-        (error "Cannot start luv Slynk: port ~D is occupied and could not be reclaimed"
-               *port*))
-      nil)))
+(defun session-events (session)
+  (swash-events "--session" session))
 
-(defun start-server (&key quiet)
-  (when (live-listener-p :quiet quiet)
-    (unless quiet
-      (format t "luv Slynk is already listening on ~A:~D for ~A.~%"
-              *host* *port* *project-root*))
-    (return-from start-server t))
-  (acquire-start-lock)
-  (unwind-protect
-       (if (live-listener-p :quiet quiet)
-           (progn
-             (unless quiet
-               (format t "luv Slynk is already listening on ~A:~D for ~A.~%"
-                       *host* *port* *project-root*))
-             t)
-           (spawn-server :quiet quiet))
-    (release-start-lock)))
+(defun ready-instance-from-event (instance event)
+  (setf (lisp-instance-port instance)
+        (parse-decimal (event-field "LUV_SLYNK_PORT" event))
+        (lisp-instance-pid instance)
+        (parse-decimal (event-field "LUV_SLYNK_PID" event))
+        (lisp-instance-state instance) :ready
+        (lisp-instance-last-activity instance) (json-value "timestamp" event)
+        (lisp-instance-activity instance) "slynk-ready")
+  instance)
+
+(defun wait-for-lisp (instance &key follow-process quiet)
+  (let ((deadline (+ (get-internal-real-time)
+                     (* *server-start-timeout* internal-time-units-per-second)))
+        (next-notice (+ (get-internal-real-time)
+                        (* 5 internal-time-units-per-second))))
+    (unwind-protect
+         (loop
+           (let* ((events (session-events (lisp-instance-id instance)))
+                  (ready (find "slynk-ready" events
+                               :key #'event-name :test #'string= :from-end t))
+                  (exited (find "exited" events
+                                :key #'event-name :test #'string= :from-end t)))
+             (when exited
+               (error "Lisp ~A exited before publishing its Slynk endpoint; run ./sly --lisp ~A log"
+                      (lisp-instance-id instance) (lisp-instance-id instance)))
+             (when ready
+               (ready-instance-from-event instance ready)
+               (select-managed-lisp instance)
+               (assert-listener-project)
+               (unless quiet
+                 (format t "Lisp ~A (~A) is ready on ~A:~D (pid ~D).~%"
+                         (lisp-instance-id instance)
+                         (lisp-instance-name instance)
+                         *host* *port* *expected-listener-pid*))
+               (return instance)))
+           (when (> (get-internal-real-time) deadline)
+             (ignore-errors (run-swash "stop" (lisp-instance-id instance)))
+             (error "Timed out after ~D seconds waiting for Lisp ~A"
+                    *server-start-timeout* (lisp-instance-id instance)))
+           (when (> (get-internal-real-time) next-notice)
+             (format *error-output* "sly: Lisp ~A is still starting; waiting for slynk-ready.~%"
+                     (lisp-instance-id instance))
+             (force-output *error-output*)
+             (incf next-notice (* 5 internal-time-units-per-second)))
+           (sleep 0.5))
+      (when (and follow-process (sb-ext:process-alive-p follow-process))
+        (sb-ext:process-kill follow-process 15))
+      (when follow-process
+        (ignore-errors (sb-ext:process-wait follow-process))))))
+
+(defun default-lisp-name ()
+  (let* ((directory (pathname-directory *project-root*))
+         (name (car (last directory))))
+    (princ-to-string name)))
+
+(defun valid-session-id-p (value)
+  (and (= (length value) 6)
+       (every #'upper-case-p (subseq value 0 3))
+       (every #'digit-char-p (subseq value 3))))
+
+(defun ensure-sly-dependency-core ()
+  (let* ((builder
+           (merge-pathnames #P"scripts/build-sly-dependency-core"
+                            *project-root*))
+         (core (merge-pathnames #P"build/sly-dependencies.core"
+                                *project-root*))
+         (process
+           (sb-ext:run-program
+            (namestring builder) nil
+            :search nil :input nil :output t :error t :wait t)))
+    (unless (zerop (sb-ext:process-exit-code process))
+      (error "Could not build the Sly dependency core"))
+    (unless (probe-file core)
+      (error "Sly dependency core builder did not produce ~A" core))
+    core))
+
+(defun start-server (&key quiet (name (default-lisp-name)))
+  "Start a new Lisp incarnation. Explicit START intentionally permits peers."
+  (let* ((dependency-core (ensure-sly-dependency-core))
+         (server-path (merge-pathnames #P"sly-server.lisp" *project-root*))
+         (output
+           (run-swash-output
+            "start"
+            "--tag" "LUV_KIND=LISP"
+            "--tag" (format nil "LUV_ROOT=~A" (namestring *project-root*))
+            "--tag" (format nil "LUV_NAME=~A" name)
+            "--" "env" (format nil "LUV_NAME=~A" name)
+            "sbcl" "--core" (namestring dependency-core)
+            "--noinform" "--disable-debugger"
+            "--load" (namestring server-path)))
+         (separator (or (position-if (lambda (character)
+                                       (find character " \t\r\n"))
+                                     output)
+                        (length output)))
+         (session (subseq output 0 separator)))
+    (unless (valid-session-id-p session)
+      (error "Could not read Swash session ID from: ~S" output))
+    (format t "Started Lisp ~A (~A) under Swash.~%" session name)
+    (force-output)
+    (run-swash-output "emit" session
+                      "--event" "lisp-starting"
+                      "--message" (format nil "Starting Lisp ~A" name)
+                      "--field" "LUV_KIND=LISP"
+                      "--field" (format nil "LUV_ROOT=~A" (namestring *project-root*))
+                      "--field" (format nil "LUV_NAME=~A" name))
+    (let* ((instance
+             (make-lisp-instance
+              :id session :name name :root (namestring *project-root*)
+              :state :starting))
+           (follow
+             (sb-ext:run-program
+              *swash* (list "follow" session)
+              :search nil :input nil :output t :error t :wait nil)))
+      (wait-for-lisp instance :follow-process follow :quiet quiet))))
+
+(defun emit-lisp-activity ()
+  (when (and *managed-lisp* *current-command*)
+    (run-swash-output "emit" (lisp-instance-id *managed-lisp*)
+                      "--event" "sly-activity"
+                      "--message" (format nil "./sly ~A" *current-command*)
+                      "--field" (format nil "LUV_COMMAND=~A" *current-command*))))
 
 (defun ensure-server ()
   (if (attach-only-p)
       (unless (connection-available-p)
         (error "The requested external Slynk endpoint is not accepting connections on ~A:~D"
                *host* *port*))
-      (unless (live-listener-p :quiet t)
-        (start-server :quiet t))))
+      (let ((instance (choose-lisp :start-if-missing t)))
+        (if (eq (lisp-instance-state instance) :ready)
+            (select-managed-lisp instance)
+            (wait-for-lisp instance :quiet nil))
+        (emit-lisp-activity))))
 
 (defmacro with-slynk-connection ((stream) &body body)
   `(let ((socket (make-instance 'sb-bsd-sockets:inet-socket
@@ -970,7 +1012,8 @@ the frames after CODE failed, else 0."
   (let ((root (listener-project-root-on stream))
         (pid (and *expected-listener-pid* (listener-process-id-on stream))))
     (unless (listener-for-project-p root)
-      (error "Slynk port ~D belongs to ~A, not this checkout ~A. Set LUV_SLYNK_PORT to an unused port if these checkout-derived ports collided."
+      (error "Slynk endpoint ~A:~D reports checkout ~A, not ~A"
+             *host*
              *port* (or root "an unidentified Lisp image") *project-root*))
     (when (and *expected-listener-pid* (not (eql pid *expected-listener-pid*)))
       (error "Slynk port ~D belongs to pid ~A, not expected luvcraft pid ~A"
@@ -991,36 +1034,28 @@ the frames after CODE failed, else 0."
           (format t "The external Slynk endpoint is not running on ~A:~D.~%"
                   *host* *port*)))
     (return-from stop-server nil))
-  (let ((connection-p (connection-available-p))
-        (pid (pid-file-pid))
-        (listener-pid (listener-process-id))
-        (listener-root (listener-project-root)))
-    (cond
-      ((and connection-p (not (listener-for-project-p listener-root)))
-       (format t "Slynk port ~D belongs to ~A; leaving that checkout running.~%"
-               *port* (or listener-root "an unidentified Lisp image")))
-      ((and listener-pid (not (eql pid listener-pid)))
-       (ignore-errors (delete-file *server-pid-path*))
-       (format t
-               "luv Slynk pid ~D is owned by Emacs or another process; leaving it running.~%"
-               listener-pid))
-      ((and connection-p (null listener-pid))
-       (format t
-               "luv Slynk is listening on ~A:~D, but its owner could not be identified; leaving it running.~%"
-               *host* *port*))
-      ((not (pid-alive-p pid))
-       (ignore-errors (delete-file *server-pid-path*))
-       (format t "luv Slynk is not running.~%"))
-      (t
-       (run-shell (format nil "kill ~D >/dev/null 2>&1" pid))
-       (loop repeat 100
-             unless (pid-alive-p pid)
-               do (progn
-                    (ignore-errors (delete-file *server-pid-path*))
-                    (format t "Stopped luv Slynk pid ~D.~%" pid)
-                    (return-from stop-server t))
-             do (sleep 0.1))
-       (error "Timed out stopping luv Slynk pid ~D" pid)))))
+  (let ((instance (choose-lisp)))
+    (if (null instance)
+        (progn
+          (format t "This checkout has no running Lisp.~%")
+          nil)
+        (progn
+          (run-swash "stop" (lisp-instance-id instance))
+          (format t "Stopped Lisp ~A (~A).~%"
+                  (lisp-instance-id instance) (lisp-instance-name instance))
+          t))))
+
+(defun restart-server ()
+  (when (attach-only-p)
+    (error "restart manages a Swash Lisp, not a standalone luvcraft"))
+  (let ((instance (choose-lisp)))
+    (if instance
+        (let ((name (lisp-instance-name instance)))
+          (run-swash "stop" (lisp-instance-id instance))
+          (format t "Stopped Lisp ~A (~A).~%"
+                  (lisp-instance-id instance) name)
+          (start-server :name name))
+        (start-server))))
 
 (defun server-status ()
   (when (attach-only-p)
@@ -1031,57 +1066,26 @@ the frames after CODE failed, else 0."
           (format t "External Slynk is not accepting connections on ~A:~D.~%"
                   *host* *port*)))
     (return-from server-status nil))
-  (let ((pid (pid-file-pid)))
-    (multiple-value-bind (listener-pid listener-root handshake-error)
-        (listener-identity)
-      (let ((connection-p (or listener-pid listener-root handshake-error)))
-        (cond
-          (handshake-error
-           (format t "Port ~D accepts TCP but did not complete a Slynk handshake: ~A~%"
-                   *port* handshake-error)
-           (let ((holders (port-holders)))
-             (when holders
-               (format t "It is held by:~%")
-               (describe-port-holders holders *standard-output*)))
-           (format t "./sly reclaim frees the port; ./sly start does it for you.~%"))
-          ((and connection-p (not (listener-for-project-p listener-root)))
-           (format t "Slynk port ~D belongs to ~A, not this checkout ~A.~%"
-                   *port* (or listener-root "an unidentified Lisp image") *project-root*))
-          (listener-pid
-           (unless (eql pid listener-pid)
-             (ignore-errors (delete-file *server-pid-path*)))
-           (format t "luv Slynk is listening on ~A:~D (pid ~D, ~A, checkout ~A).~%"
-                   *host* *port* listener-pid
-                   (if (eql pid listener-pid)
-                       "managed by ./sly"
-                       "Emacs/external")
-                   listener-root)
-           (print-game-status))
-          (connection-p
-           (format t "luv Slynk is listening on ~A:~D (owner unavailable).~%"
-                   *host* *port*))
-          ((pid-alive-p pid)
-           (format t "luv Slynk pid ~D exists, but ~A:~D is not accepting connections.~%"
-                   pid *host* *port*))
-          (t
-           (ignore-errors (delete-file *server-pid-path*))
-           (format t "luv Slynk is not running.~%")))))))
+  (let* ((instances (print-lisp-list))
+         (instance (choose-lisp :instances instances)))
+    (when (and instance (eq (lisp-instance-state instance) :ready))
+      (select-managed-lisp instance)
+      (format t "~%Selected ~A (~A) for this checkout.~%"
+              (lisp-instance-id instance) (lisp-instance-name instance))
+      (handler-case
+          (progn
+            (assert-listener-project)
+            (print-game-status))
+        (error (condition)
+          (format t "Slynk health: ~A~%" condition))))))
 
-(defun run-reclaim ()
-  "Free the Slynk port, unless a working Slynk is the thing holding it."
-  (multiple-value-bind (listener-pid listener-root handshake-error)
-      (listener-identity)
-    (cond
-      ((and (null handshake-error) (or listener-pid listener-root))
-       (format t "Port ~D is a working Slynk (pid ~A, checkout ~A); ~
-nothing to reclaim.~%"
-               *port* (or listener-pid "unknown") (or listener-root "unknown"))
-       0)
-      ((null (port-holders))
-       (format t "Nothing is holding port ~D.~%" *port*)
-       0)
-      ((reclaim-port) 0)
-      (t 1))))
+(defun print-server-log-tail ()
+  (when (attach-only-p)
+    (error "log is available for Swash-managed Lisps, not standalone luvcraft"))
+  (let ((instance (choose-lisp)))
+    (if instance
+        (run-swash "poll" (lisp-instance-id instance))
+        (format t "This checkout has no running Lisp.~%"))))
 
 (defparameter *game-status-form*
   "(let* ((session-symbol
@@ -1465,14 +1469,18 @@ shows them.~%" failure-count))))))
         (terpri)))))
 
 (defun usage (&optional (stream *standard-output*))
-  (format stream "The ordinary workflow is one live Lisp and one game:~%")
-  (format stream "  ./sly play [luvcraft|luft] | status | screenshot PNG | stop-playing | restart~%")
-  (format stream "PLAY starts the checkout's durable image when necessary. RESTART is the~%")
-  (format stream "explicit recovery path when that image is wrecked. LUVCRAFT is PLAY's default.~%")
+  (format stream "Lisps are named Swash sessions, visible across all checkouts:~%")
+  (format stream "  ./sly list [--all]~%")
+  (format stream "  ./sly start [--name NAME]~%")
+  (format stream "  ./sly --lisp ID-or-NAME COMMAND ...~%~%")
+  (format stream "Without --lisp, a command selects the sole running Lisp for this checkout.~%")
+  (format stream "If there is none, work commands start one; if there are several, selection~%")
+  (format stream "is intentionally required. RESTART creates a new Swash incarnation.~%")
   (format stream "Prefix a client command with --luvcraft only to attach to a separate~%")
   (format stream "standalone build/luvcraft process.~%~%")
   (format stream "Usage: ./sly play [luvcraft|luft] [--fullscreen]|stop-playing|status|restart~%")
-  (format stream "       ./sly start|stop|log|reclaim~%")
+  (format stream "       ./sly list [--all]|start [--name NAME]|stop|log~%")
+  (format stream "       ./sly systems [--all]|system NAME|stale~%")
   (format stream "       ./sly screenshot PNG~%")
   (format stream "       ./sly eval CODE [--package PACKAGE]~%")
   (format stream "       ./sly do CODE [--package PACKAGE]   (synonym for eval)~%")
@@ -1784,6 +1792,12 @@ shows them.~%" failure-count))))))
     (when (attach-only-p)
       (error "play owns the durable image; a standalone luvcraft is already playing"))
     (ensure-server)
+    (when *managed-lisp*
+      (format t "Opening ~A in Lisp ~A (~A).~%"
+              (string-downcase (symbol-name target))
+              (lisp-instance-id *managed-lisp*)
+              (lisp-instance-name *managed-lisp*))
+      (force-output))
     (ecase target
       (:luvcraft
        (evaluate
@@ -1918,19 +1932,71 @@ shows them.~%" failure-count))))))
       (error "xref requires a type and symbol name"))
     (values type (nreverse names) package)))
 
+(defun parse-start-arguments (arguments)
+  (cond
+    ((null arguments) (default-lisp-name))
+    ((and (= (length arguments) 2)
+          (string= (first arguments) "--name")
+          (plusp (length (second arguments))))
+     (second arguments))
+    (t (error "start accepts only --name NAME"))))
+
+(defun run-captured-report (form)
+  (format *error-output* "Inspecting live ASDF state...~%")
+  (force-output *error-output*)
+  (ensure-server)
+  (with-verified-slynk-connection (stream)
+    (let ((output (evaluate-captured-output-on stream form "CL-USER")))
+      (write-string output)
+      (unless (or (zerop (length output))
+                  (char= (char output (1- (length output))) #\Newline))
+        (terpri))
+      (force-output))))
+
+(defun run-systems (arguments)
+  (cond
+    ((null arguments)
+     (run-captured-report
+      (format nil "(luv.sly.asdf:print-systems :root (pathname ~S))"
+              (namestring *project-root*))))
+    ((equal arguments '("--all"))
+     (run-captured-report
+      (format nil "(luv.sly.asdf:print-systems :root (pathname ~S) :all t)"
+              (namestring *project-root*))))
+    (t (error "systems accepts only --all"))))
+
+(defun run-system-status (arguments)
+  (unless (= (length arguments) 1)
+    (error "system requires exactly one ASDF system name"))
+  (run-captured-report
+   (format nil "(luv.sly.asdf:print-system ~S :root (pathname ~S))"
+           (first arguments) (namestring *project-root*))))
+
+(defun run-stale-systems (arguments)
+  (when arguments
+    (error "stale does not accept arguments"))
+  (run-captured-report
+   (format nil "(luv.sly.asdf:print-stale-systems :root (pathname ~S))"
+           (namestring *project-root*))))
+
 (defun main (arguments)
   (unless arguments
     (usage *error-output*)
     (return-from main 2))
   (let ((command (pop arguments)))
+    (setf *current-command* command)
     (cond
       ((member command '("-h" "--help") :test #'string=)
        (usage)
        0)
       ((string= command "start")
-       (when arguments
-         (error "start does not accept arguments"))
-       (start-server)
+       (start-server :name (parse-start-arguments arguments))
+       0)
+      ((string= command "list")
+       (cond
+         ((null arguments) (print-lisp-list))
+         ((equal arguments '("--all")) (print-lisp-list :all t))
+         (t (error "list accepts only --all")))
        0)
       ((string= command "stop")
        (when arguments
@@ -1942,13 +2008,19 @@ shows them.~%" failure-count))))))
          (error "status does not accept arguments"))
        (server-status)
        0)
+      ((string= command "systems")
+       (run-systems arguments)
+       0)
+      ((string= command "system")
+       (run-system-status arguments)
+       0)
+      ((string= command "stale")
+       (run-stale-systems arguments)
+       0)
       ((string= command "restart")
        (when arguments
          (error "restart does not accept arguments"))
-       (when (attach-only-p)
-         (error "restart manages the durable image, not a standalone luvcraft"))
-       (stop-server)
-       (start-server)
+       (restart-server)
        0)
       ((string= command "play")
        (run-play arguments)
@@ -1956,10 +2028,6 @@ shows them.~%" failure-count))))))
       ((string= command "stop-playing")
        (run-stop-playing arguments)
        0)
-      ((string= command "reclaim")
-       (when arguments
-         (error "reclaim does not accept arguments"))
-       (run-reclaim))
       ((string= command "log")
        (when arguments
          (error "log does not accept arguments"))
@@ -2054,37 +2122,40 @@ shows them.~%" failure-count))))))
       (t
        (error "Unknown command: ~A" command)))))
 
-(let* ((original-output *standard-output*)
-       (original-error *error-output*)
-       (limit (handler-case
-                  (configured-output-limit)
-                (error (condition)
-                  (format original-error "sly: ~A~%" condition)
-                  (sb-ext:exit :code 1))))
-       (budget (and (plusp limit)
-                    (make-output-budget :limit limit)))
-       (exit-code
-         (let ((*standard-output*
-                 (if budget
-                     (make-instance 'limited-output-stream
-                                    :target original-output
-                                    :budget budget)
-                     original-output))
-               (*error-output*
-                 (if budget
-                     (make-instance 'limited-output-stream
-                                    :target original-error
-                                    :budget budget)
-                     original-error)))
-           (handler-case
-               (main (cdr sb-ext:*posix-argv*))
-             (error (condition)
-               (format *error-output* "sly: ~A~%" condition)
-               1)))))
-  (when (and budget (output-budget-truncated-p budget))
-    (force-output original-output)
-    (format original-error
-            "~&[sly output truncated after ~D bytes; set LUV_SLY_MAX_OUTPUT=0 for unlimited]~%"
-            limit)
-    (force-output original-error))
-  (sb-ext:exit :code exit-code))
+(defun entry-point ()
+  (let* ((original-output *standard-output*)
+         (original-error *error-output*)
+         (limit (handler-case
+                    (configured-output-limit)
+                  (error (condition)
+                    (format original-error "sly: ~A~%" condition)
+                    (sb-ext:exit :code 1))))
+         (budget (and (plusp limit)
+                      (make-output-budget :limit limit)))
+         (exit-code
+           (let ((*standard-output*
+                   (if budget
+                       (make-instance 'limited-output-stream
+                                      :target original-output
+                                      :budget budget)
+                       original-output))
+                 (*error-output*
+                   (if budget
+                       (make-instance 'limited-output-stream
+                                      :target original-error
+                                      :budget budget)
+                       original-error)))
+             (handler-case
+                 (progn
+                   (configure-from-environment)
+                   (main (cdr sb-ext:*posix-argv*)))
+               (error (condition)
+                 (format *error-output* "sly: ~A~%" condition)
+                 1)))))
+    (when (and budget (output-budget-truncated-p budget))
+      (force-output original-output)
+      (format original-error
+              "~&[sly output truncated after ~D bytes; set LUV_SLY_MAX_OUTPUT=0 for unlimited]~%"
+              limit)
+      (force-output original-error))
+    (sb-ext:exit :code exit-code)))
