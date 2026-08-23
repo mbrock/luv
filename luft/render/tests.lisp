@@ -175,7 +175,8 @@
 
 (deftest player-gait-anchors-stance-feet-and-rises-over-support
   (let ((step-length 0.65625)
-        (leg-length 1.15))
+        (leg-length 1.06196)
+        (hip-height 1.01))
     (labels ((foot-sample (step-coordinate parity)
                (let* ((cycle (* 0.5 (- step-coordinate parity)))
                       (cycle-index (floor cycle))
@@ -215,7 +216,19 @@
       ;; A fixed leg is shortest at double support and tallest over the
       ;; planted foot at mid-stance, giving the body its non-arbitrary bob.
       (ok (= (pelvis-height 0.0) (pelvis-height 1.0)))
-      (ok (> (pelvis-height 0.5) (pelvis-height 0.0))))))
+      (ok (> (pelvis-height 0.5) (pelvis-height 0.0)))
+      ;; The height equation now uses the same hip and ankle centres as the
+      ;; rendered SDF.  Its stance-leg reach is constant at the endpoints and
+      ;; over the support contact, rather than only looking approximately so.
+      (let* ((half-step (* step-length 0.5))
+             (contact-height (pelvis-height 0.0))
+             (mid-height (pelvis-height 0.5))
+             (stance-reach
+               (sqrt (+ (* contact-height contact-height)
+                        (* half-step half-step)))))
+        (ok (< (abs (- contact-height hip-height)) 1e-4))
+        (ok (< (abs (- stance-reach leg-length)) 1e-6))
+        (ok (< (abs (- mid-height leg-length)) 1e-6))))))
 
 (defun instance-signature (base-x base-y base-z packed vertices start count)
   (let ((signature

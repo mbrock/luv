@@ -115,7 +115,11 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
 -D/2 and the pelvis rises naturally over mid-stance."
   (let* ((step-length 0.65625)
          (half-step (* step-length 0.5))
-         (leg-length 1.15)
+         ;; The ankle centre is Z=.26 and the hip is Z=1.27 at double
+         ;; support.  This reach therefore makes the stance constraint agree
+         ;; with the actual SDF joint centres, rather than merely producing a
+         ;; plausible amount of bob.
+         (leg-length 1.06196)
          (phase (fract (player-step-coordinate gait)))
          (support-offset (* step-length (- 0.5 phase)))
          (height (sqrt (max (- (* leg-length leg-length)
@@ -154,11 +158,11 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
   (player-sdf-ellipsoid point (vec3 0.0 -0.285 1.66)
                         (vec3 0.37 0.21 0.47)))
 
-(define-shader-function player-leg-distance (point gait direction)
-  (let* ((side (if (< (swizzle point :x) 0.0) -1.0 1.0))
-         (step-length 0.65625)
+(define-shader-function player-one-leg-distance
+    (point gait direction side parity)
+  "A continuous two-bone leg field with an analytic knee solution."
+  (let* ((step-length 0.65625)
          (step-coordinate (player-step-coordinate gait))
-         (parity (if (< side 0.0) 0.0 1.0))
          ;; One foot cycle spans two half-steps.  Its first half is stance;
          ;; its second half is the swing to the next fixed contact.
          (cycle (* 0.5 (- step-coordinate parity)))
@@ -178,11 +182,36 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
          (hip (vec3 (* side 0.22) 0.0
                     (+ 1.27 pelvis-lift)))
          (ankle (vec3 (* side 0.22) swing (+ 0.26 lift)))
-         (leg (player-sdf-capsule point hip ankle 0.17))
+         ;; Equal 0.56-cell bones solve the knee on the forward-bending side
+         ;; of the hip/ankle chord.  Keeping a little flex even at maximum
+         ;; stance reach gives the silhouette a readable knee instead of a
+         ;; rubbery telescoping capsule.
+         (axis (- ankle hip))
+         (axis-length (player-sdf-length axis))
+         (half-axis (* axis 0.5))
+         (bone-length 0.56)
+         (knee-reach
+           (sqrt (max (- (* bone-length bone-length)
+                         (* 0.25 (* axis-length axis-length)))
+                      0.0)))
+         (knee-forward
+           (/ (vec3 0.0 (- (swizzle axis :z)) (swizzle axis :y))
+              axis-length))
+         (knee (+ hip (+ half-axis (* knee-forward knee-reach))))
+         (thigh (player-sdf-capsule point hip knee 0.18))
+         (shin (player-sdf-capsule point knee ankle 0.155))
+         (leg (player-sdf-smooth-union thigh shin 0.065))
          (boot (player-sdf-ellipsoid
                 point (vec3 (* side 0.22) (+ swing 0.09) (+ 0.16 lift))
                 (vec3 0.22 0.31 0.16))))
-    (player-sdf-smooth-union leg boot 0.075)))
+    (player-sdf-smooth-union leg boot 0.065)))
+
+(define-shader-function player-leg-distance (point gait direction)
+  ;; Evaluate both fields everywhere.  Selecting a leg from POINT.x used to
+  ;; put a discontinuity through the centre plane, visibly slicing the
+  ;; screen-left leg open whenever its diagonal silhouette crossed that plane.
+  (min (player-one-leg-distance point gait direction -1.0 0.0)
+       (player-one-leg-distance point gait direction 1.0 1.0)))
 
 (define-shader-function player-arm-distance (point gait)
   (let* ((side (if (< (swizzle point :x) 0.0) -1.0 1.0))
