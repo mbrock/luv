@@ -355,6 +355,90 @@
    :scene-maker #'luft.render:make-mountain-sanctuary-scene
    :title "LUFT traveler on the bridge"))
 
+(defun aim-luft-camera (camera x y z)
+  "Aim CAMERA at the world-space point X/Y/Z without changing its lens."
+  (let* ((position (luft.render:camera-position camera))
+         (dx (- x (luv.arithmetic.lisp.vec3:vec3-x position)))
+         (dy (- y (luv.arithmetic.lisp.vec3:vec3-y position)))
+         (dz (- z (luv.arithmetic.lisp.vec3:vec3-z position)))
+         (flat (sqrt (+ (* dx dx) (* dy dy)))))
+    (setf (luft.render:camera-yaw camera) (atan dy dx)
+          (luft.render:camera-pitch camera) (atan dz flat)))
+  camera)
+
+(defun film-luft-wizard-bridge-walk
+    (pathname &key (seconds 8) (frame-rate 24))
+  "Film the real walking wizard crossing the authored sanctuary bridge."
+  (let ((viewer nil)
+        (old-projection luft.render:*projection*)
+        (old-wireframe luft.render:*wireframe*)
+        (old-inspection-ink-p luft.render:*inspection-ink-p*)
+        (old-character-time luft.render:*character-time*))
+    (unwind-protect
+         (let* ((origin-x luft.render::+sanctuary-origin-x+)
+                (origin-y luft.render::+sanctuary-origin-y+)
+                (start-y (+ origin-y 10.5))
+                (camera
+                  (luft.render:make-fly-camera
+                   :position
+                   (luv.arithmetic.lisp.vec3:make-vec3
+                    (+ origin-x 52.0) (- start-y 12.0) 23.5)
+                   :field-of-view (* 46.0 (/ pi 180.0))))
+                ;; Movement remains camera-relative in play.  Keep its authored
+                ;; +Y bridge direction independent of the filming camera.
+                (walking-camera
+                  (luft.render:make-fly-camera :yaw (/ pi 2.0) :pitch 0.0)))
+           (setf luft.render:*projection* :perspective
+                 luft.render:*wireframe* 0.0
+                 luft.render:*inspection-ink-p* nil
+                 luft.render:*character-time* nil)
+           (setf viewer
+                 (luft.render:start-viewer
+                  :solid (luft.render:make-mountain-sanctuary-scene)
+                  :bevel-width luft:+mesh-bevel-width+
+                  :bevel-profile (luft.render:make-material-bevel-profile)
+                  :camera camera :title "LUFT wizard bridge walk"
+                  :width 1280 :height 720))
+           (setf (luft.render:viewer-player viewer)
+                 (luft.render:make-walking-player
+                  :position
+                  (luv.arithmetic.lisp.vec3:make-vec3
+                   (+ origin-x 29.5) start-y 14.0)
+                  :heading-x 0.0 :heading-y 1.0 :speed 3.0))
+           (luft.render:film-viewer
+            viewer pathname :seconds seconds :frame-rate frame-rate
+            :before-frame
+            (lambda (frame)
+              (declare (ignore frame))
+              (let* ((player (luft.render:viewer-player viewer))
+                     (dt (/ 1.0 frame-rate))
+                     (player-position
+                       (luft.render:walking-player-position player))
+                     (player-y
+                       (luv.arithmetic.lisp.vec3:vec3-y player-position))
+                     (camera-position (luft.render:camera-position camera)))
+                (luft.render::advance-walking-player
+                 player (luft.render::viewer-source viewer)
+                 walking-camera 1.0 0.0 dt)
+                ;; A parallel dolly keeps the wizard readable while successive
+                ;; arches, piers, and finally the gate move through the frame.
+                (setf (luv.arithmetic.lisp.vec3:vec3-y camera-position)
+                      (- player-y 12.0))
+                (aim-luft-camera
+                 camera (+ origin-x 29.5) (+ player-y 3.0) 15.8)))))
+      (when viewer (luft.render:stop-viewer viewer))
+      (setf luft.render:*projection* old-projection
+            luft.render:*wireframe* old-wireframe
+            luft.render:*inspection-ink-p* old-inspection-ink-p
+            luft.render:*character-time* old-character-time))))
+
+(luv:define-capture luft-wizard-bridge-walk
+    (:figure WZBRDG :kind :video :extension "mp4" :layout :landscape
+     :description
+     "The sanctuary wizard walks its bridge under a restrained perspective lens.")
+  (pathname)
+  (film-luft-wizard-bridge-walk pathname))
+
 ;;; The streamed highlands. These two cameras retain the regional read and the
 ;;; citadel-scale read that caught the old sine terrain's repetition. #H1GHLD
 
