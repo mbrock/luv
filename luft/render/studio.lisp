@@ -51,22 +51,22 @@ at the atelier boundary where a person has selected one site."))
               (site-inspection-distance inspection)))))
 
 (defun make-fly-camera
-    (&key (position (vec3:make-vec3 28.0 -2.0 13.0))
-          (yaw 2.3562) (pitch -0.393)
+    (&key (position (vec3:make-vec3 70.0 -18.0 50.0))
+          (yaw 2.2455373) (pitch -0.5165006)
           (field-of-view 0.9599311))
   (make-instance 'fly-camera :position position :yaw yaw :pitch pitch
                              :field-of-view field-of-view))
 
 (defun reset-viewer-camera (&optional (viewer *viewer*))
-  "Return VIEWER to the connected miter-study view."
+  "Return VIEWER to the composed isometric sanctuary view."
   (when viewer
     (let ((camera (viewer-camera viewer)))
-      (setf (camera-position camera) (vec3:make-vec3 28.0 -2.0 13.0)
-            (camera-yaw camera) 2.3562
-            (camera-pitch camera) -0.393
+      (setf (camera-position camera) (vec3:make-vec3 70.0 -18.0 50.0)
+            (camera-yaw camera) 2.2455373
+            (camera-pitch camera) -0.5165006
             (camera-field-of-view camera) 0.9599311
             *projection* :isometric
-            *isometric-height* 18.0)
+            *isometric-height* 64.0)
       (when (viewer-renderer viewer)
         (setf (renderer-history-valid-p (viewer-renderer viewer)) nil))))
   viewer)
@@ -539,7 +539,7 @@ the selector is the whole of the difference."
   ((canvas :initarg :canvas :initform nil :reader viewer-canvas)
    (context :initarg :context :initform nil :reader viewer-context)
    (device :initarg :device :initform nil :reader viewer-device)
-   (source :initarg :source :initform (make-miter-study-scene)
+   (source :initarg :source :initform (make-mountain-sanctuary-scene)
            :accessor viewer-source)
    (renderer :initarg :renderer :initform nil :accessor viewer-renderer)
    (bevel-width :initarg :bevel-width :initform luft:+mesh-bevel-width+
@@ -890,10 +890,10 @@ the selector is the whole of the difference."
   nil)
 
 (defun start-viewer (&key
-                       (solid (make-miter-study-scene))
+                       (solid (make-mountain-sanctuary-scene))
                        (bevel-width luft:+mesh-bevel-width+)
                        (camera (make-fly-camera))
-                       (title "LUFT miter-study spike")
+                       (title "LUFT mountain sanctuary")
                        (width 1100) (height 800)
                        fullscreen-p
                        (inspector-p nil)
@@ -1012,7 +1012,7 @@ the atelier UI."
       (destroy buffer))))
 
 (defun refresh-viewer-renderer (&optional (viewer *viewer*)
-                                &key (solid (make-miter-study-scene))
+                                &key (solid (make-mountain-sanctuary-scene))
                                      bevel-width)
   "Rebuild VIEWER at BEVEL-WIDTH so edited geometry and shaders take effect."
   (when viewer
