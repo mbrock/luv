@@ -165,6 +165,103 @@
     (ok (zerop (mod (length templates)
                     luft:+mesh-template-vertex-word-count+)))))
 
+(defun instance-signature (base-x base-y base-z packed vertices start count)
+  (let ((signature
+          (make-array (+ 5 (* count luft:+mesh-template-vertex-word-count+))
+                      :element-type '(unsigned-byte 32))))
+    (setf (aref signature 0) base-x
+          (aref signature 1) base-y
+          (aref signature 2) base-z
+          (aref signature 3) (logand packed #xffff0000)
+          (aref signature 4) count)
+    (replace signature vertices :start1 5
+                                :start2 (* start
+                                           luft:+mesh-template-vertex-word-count+)
+                                :end2 (* (+ start count)
+                                         luft:+mesh-template-vertex-word-count+))
+    signature))
+
+(defun word-vector< (left right)
+  (loop for a across left
+        for b across right
+        when (/= a b) return (< a b)
+        finally (return (< (length left) (length right)))))
+
+(defun mesh-instance-signatures (mesh)
+  (let ((ranges (luft:surface-mesh-template-ranges mesh))
+        (vertices (luft:surface-mesh-template-vertex-words mesh))
+        (signatures nil))
+    (dolist (words (list (luft:surface-mesh-face-instance-words mesh)
+                         (luft:surface-mesh-band-instance-words mesh)
+                         (luft:surface-mesh-fan-instance-words mesh)))
+      (loop for offset from 0 below (length words) by 4
+            for packed = (aref words (+ offset 3))
+            for template-id = (ldb (byte 16 0) packed)
+            for start = (aref ranges (* 2 template-id))
+            for count = (aref ranges (1+ (* 2 template-id)))
+            do (push (instance-signature
+                      (aref words offset) (aref words (+ offset 1))
+                      (aref words (+ offset 2)) packed vertices start count)
+                     signatures)))
+    signatures))
+
+(defun population-instance-signatures (population)
+  (let* ((words (luft.render::render-population-instance-words population))
+         (vertices (luft.render::render-population-template-words population))
+         (triangle-count
+           (luft.render::render-population-triangle-instance-count population))
+         (signatures nil))
+    (loop for offset from 0 below (length words) by 4
+          for instance-index from 0
+          for packed = (aref words (+ offset 3))
+          for template-id = (ldb (byte 16 0) packed)
+          for count = (if (< instance-index triangle-count) 3 6)
+          for start = (* template-id luft.render::+render-template-vertex-count+)
+          do (push (instance-signature
+                    (aref words offset) (aref words (+ offset 1))
+                    (aref words (+ offset 2)) packed vertices start count)
+                   signatures))
+    signatures))
+
+(deftest resident-meshes-form-one-exact-two-draw-population
+  (let* ((miter (render:make-render-mesh (render:make-miter-study-scene)))
+         (spike (render:make-render-mesh (render:make-manifold-spike-scene)))
+         (meshes (list miter spike))
+         (population (luft.render::make-render-population meshes))
+         (source-signatures
+           (mapcan #'mesh-instance-signatures meshes))
+         (population-signatures
+           (population-instance-signatures population))
+         (triangle-count
+           (luft.render::render-population-triangle-instance-count population))
+         (quad-count
+           (luft.render::render-population-quad-instance-count population)))
+    (ok (equalp (sort source-signatures #'word-vector<)
+                (sort population-signatures #'word-vector<)))
+    (ok (= (+ triangle-count quad-count)
+           (+ (luft:surface-mesh-face-instance-count miter)
+              (luft:surface-mesh-band-instance-count miter)
+              (luft:surface-mesh-fan-instance-count miter)
+              (luft:surface-mesh-face-instance-count spike)
+              (luft:surface-mesh-band-instance-count spike)
+              (luft:surface-mesh-fan-instance-count spike))))
+    (ok (<= (+ (if (plusp triangle-count) 1 0)
+               (if (plusp quad-count) 1 0))
+            2))))
+
+(deftest canonical-templates-are-shared-between-resident-meshes
+  (let* ((mesh (render:make-render-mesh (render:make-miter-study-scene)))
+         (single (luft.render::make-render-population (list mesh)))
+         (double (luft.render::make-render-population (list mesh mesh)))
+         (stride (* luft.render::+render-template-vertex-count+
+                    luft:+mesh-template-vertex-word-count+)))
+    (ok (= (/ (length (luft.render::render-population-template-words single))
+              stride)
+           (/ (length (luft.render::render-population-template-words double))
+              stride)))
+    (ok (= (* 2 (length (luft.render::render-population-instance-words single)))
+           (length (luft.render::render-population-instance-words double))))))
+
 (deftest the-connected-miter-study-uses-the-site-stream-abi
   (dolist (bevel-width '(1 2 4))
     (let ((mesh (render:make-render-mesh

@@ -1,8 +1,9 @@
 (in-package #:luft.render.shaders)
 
-;;; Site-stream rendering.  One UVec4 instance selects a lattice base and
-;;; template; the template vertex is a small exact offset plus geometric
-;;; attributes.  The CPU classifies sites and the vertex shader realizes them.
+;;; Site-stream rendering. One UVec4 instance selects a lattice base and a
+;;; canonical fixed-stride template; the template vertex is a small exact
+;;; offset plus geometric attributes. The CPU classifies sites and the vertex
+;;; shader realizes the renderer-global triangle and quad populations.
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defvar *stock-tooth* 0.055)
@@ -100,7 +101,11 @@
                             (temporal-parameters :vec4)
                             (inspection-parameters :vec4)))))
   (let* ((instance (buffer-element instances instance-index))
-         (template-vertex (buffer-element template-vertices vertex-index))
+         (template-id
+           (uint (ldb (byte 16 0) (swizzle instance :w))))
+         (template-index
+           (+ (* template-id (uint 6.0)) vertex-index))
+         (template-vertex (buffer-element template-vertices template-index))
          (attributes (swizzle template-vertex :w))
          (world-position
            (/ (+ (* (vec3 (float (swizzle instance :x))
