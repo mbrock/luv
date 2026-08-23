@@ -83,7 +83,7 @@
       *sanctuary-material-frame*
       (ensure-semantic-instance
        *sanctuary-material-frame* 'material-frame
-       :name :sanctuary :origin '(30 54 19)
+       :name :sanctuary :origin '(32 24 0)
        :axes '((1 0 0) (0 1 0) (0 0 1)))
       *terrain-material-placement*
       (ensure-semantic-instance
@@ -105,7 +105,7 @@
 (setf *grass-reading*
       (ensure-semantic-instance
        *grass-reading* 'surface-reading :name :grass
-       :kind *earth-material* :tone '(0.17 0.36 0.11) :finish :living
+       :kind *earth-material* :tone '(0.18 0.31 0.105) :finish :living
        :frame *world-material-frame* :role :exposed-top)
       *soil-reading*
       (ensure-semantic-instance
@@ -202,7 +202,10 @@
 (defun surface-kernel-code (kernel)
   "Compile the intentionally closed shader-kernel ABI."
   (ecase kernel
-    ((:grass :soil :subsoil :stone) 0)
+    (:grass 7)
+    (:soil 5)
+    (:subsoil 6)
+    (:stone 4)
     (:earth-set-stone 1)
     (:turf-edge 2)
     (:foundation-stone 3)))

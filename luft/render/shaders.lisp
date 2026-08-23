@@ -125,18 +125,98 @@
   (let* ((weather
            (paper-noise (+ (* point (vec3 1.9 1.9 3.7))
                            (vec3 23.3 8.7 5.1))))
+         (clump
+           (paper-noise (+ (* point (vec3 0.63 0.63 1.15))
+                           (vec3 3.7 27.1 14.3))))
          (grit (paper-noise (+ (* point 8.0) (vec3 5.7 17.9 37.1))))
          (height (fract (swizzle point :z)))
          (earth
            (- 1.0
-              (smoothstep 0.10 0.52
-                          (+ height (* 0.22 (- weather 0.5))))))
+              (smoothstep 0.07 0.61
+                          (+ height (* 0.32 (- weather 0.5))
+                             (* 0.20 (- clump 0.5))))))
          (weathered-stone
            (mix stone-tone soil-tone (+ 0.16 (* 0.10 grit))))
          (earth-pigment
            (mix soil-tone subsoil-tone (+ 0.25 (* 0.45 grit)))))
     (* (mix weathered-stone earth-pigment earth)
        (- 1.0 (* 0.12 earth)))))
+
+(define-shader-function material-frame-point
+    (point origin x-axis y-axis z-axis)
+  "Express POINT in the authored material placement's coordinate frame."
+  (let* ((relative (- point origin)))
+    (vec3 (dot relative x-axis)
+          (dot relative y-axis)
+          (dot relative z-axis))))
+
+(define-shader-function dressed-stone-tone (point normal stone-tone)
+  "Suggest laid courses and hand-dressed blocks without texture coordinates."
+  (let* ((x (swizzle point :x))
+         (y (swizzle point :y))
+         (z (swizzle point :z))
+         (course-coordinate (* z 2.0))
+         (course (floor course-coordinate))
+         (jitter
+           (- (paper-noise (+ (* point 1.7) (vec3 17.1 4.3 9.7))) 0.5))
+         (tangent
+           (if (> (abs (swizzle normal :x))
+                  (abs (swizzle normal :y)))
+               y x))
+         (stagger (* 0.5 (fract (* course 0.5))))
+         (course-phase
+           (fract (+ course-coordinate (* jitter 0.085))))
+         (joint-phase
+           (fract (+ (/ tangent 1.35) stagger (* jitter 0.11))))
+         (course-distance (min course-phase (- 1.0 course-phase)))
+         (joint-distance (min joint-phase (- 1.0 joint-phase)))
+         (vertical-face
+           (- 1.0 (smoothstep 0.55 0.85 (abs (swizzle normal :z)))))
+         (horizontal-mortar
+           (- 1.0 (smoothstep 0.018 0.052 course-distance)))
+         (vertical-mortar
+           (* vertical-face
+              (- 1.0 (smoothstep 0.016 0.046 joint-distance))))
+         (broken-joint
+           (smoothstep 0.46 0.78
+                       (paper-noise
+                        (+ (vec3 (floor (+ x stagger))
+                                 (floor (+ y stagger)) course)
+                           (vec3 5.3 21.7 11.9)))))
+         (mortar
+           (clamp (+ horizontal-mortar (* vertical-mortar broken-joint))
+                  0.0 1.0))
+         (block-value
+           (paper-noise
+            (+ (* (floor (+ point (vec3 stagger stagger 0.0))) 0.73)
+               (vec3 29.1 7.7 3.1))))
+         (dressed
+           (* stone-tone (+ 0.90 (* 0.20 block-value)
+                            (* 0.05 jitter))))
+         (mortar-tone (* stone-tone 0.78)))
+    (mix dressed mortar-tone (* mortar 0.58))))
+
+(define-shader-function natural-earth-tone
+    (point normal earth-tone depth)
+  "Break exposed earth into continuous strata, clumps, and damp recesses."
+  (let* ((broad
+           (paper-noise (+ (* point (vec3 0.38 0.38 0.72))
+                           (vec3 7.3 19.1 2.7))))
+         (clump
+           (paper-noise (+ (* point (vec3 2.3 2.3 3.7))
+                           (vec3 31.7 5.1 13.9))))
+         (stratum
+           (paper-noise
+            (vec3 (* (swizzle point :x) 0.18)
+                  (* (swizzle point :y) 0.18)
+                  (+ (* (swizzle point :z) 1.65) (* broad 0.75)))))
+         (side-weight
+           (- 1.0 (smoothstep 0.48 0.86 (abs (swizzle normal :z)))))
+         (value
+           (+ 0.84 (* broad 0.18) (* clump 0.10)
+              (* side-weight (- stratum 0.5) 0.22)
+              (* depth -0.06))))
+    (* earth-tone value)))
 
 (define-shader-function paper-tonemap (radiance)
   (let* ((numerator
@@ -747,7 +827,6 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
          (normal (if (< (dot geometric-normal mesh-normal) 0.0)
                      (* geometric-normal -1.0)
                      geometric-normal))
-         (paper-point (paper-space world-position))
          (descriptor-row (uint (* assembly-id 7.0)))
          (primary
            (buffer-element material-descriptors descriptor-row))
@@ -757,6 +836,24 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
          (tertiary
            (buffer-element material-descriptors
                            (+ descriptor-row (uint 2.0))))
+         (frame-origin
+           (buffer-element material-descriptors
+                           (+ descriptor-row (uint 3.0))))
+         (frame-x
+           (buffer-element material-descriptors
+                           (+ descriptor-row (uint 4.0))))
+         (frame-y
+           (buffer-element material-descriptors
+                           (+ descriptor-row (uint 5.0))))
+         (frame-z
+           (buffer-element material-descriptors
+                           (+ descriptor-row (uint 6.0))))
+         (material-point
+           (material-frame-point
+            world-position (swizzle frame-origin :xyz)
+            (swizzle frame-x :xyz) (swizzle frame-y :xyz)
+            (swizzle frame-z :xyz)))
+         (paper-point (paper-space material-point))
          (primary-tone (swizzle primary :xyz))
          (secondary-tone (swizzle secondary :xyz))
          (tertiary-tone (swizzle tertiary :xyz))
@@ -769,14 +866,27 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
                primary-tone
                (if (< kernel 1.5)
                    (earth-set-stone-tone
-                    world-position normal ambient-occlusion contact-variant
+                    material-point normal ambient-occlusion contact-variant
                     primary-tone secondary-tone tertiary-tone)
                    (if (< kernel 2.5)
-                       (turf-edge-tone world-position normal
+                       (turf-edge-tone material-point normal
                                        primary-tone secondary-tone)
-                       (foundation-stone-tone
-                        world-position primary-tone secondary-tone
-                        tertiary-tone)))))
+                       (if (< kernel 3.5)
+                           (foundation-stone-tone
+                            material-point primary-tone secondary-tone
+                            tertiary-tone)
+                           (if (< kernel 4.5)
+                               (dressed-stone-tone
+                                material-point normal primary-tone)
+                               (if (< kernel 5.5)
+                                   (natural-earth-tone
+                                    material-point normal primary-tone 0.0)
+                                   (if (< kernel 6.5)
+                                       (natural-earth-tone
+                                        material-point normal primary-tone 1.0)
+                                       (natural-earth-tone
+                                        material-point normal primary-tone
+                                        -0.5)))))))))
          (bloom
            (paper-noise (+ (* paper-point 0.17) (vec3 2.7 17.1 8.3))))
          (mottle
@@ -815,7 +925,7 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
                      ambient-occlusion)))
          (light (+ (* sun-color wrapped)
                    (* indirect-light ambient-accessibility)))
-         (lit (* base (* light (stock-tooth world-position))))
+         (lit (* base (* light (stock-tooth material-point))))
          (mapped-paper (paper-tonemap (* lit 1.16)))
          (camera-delta (- world-position (swizzle camera-position :xyz)))
          (distance (sqrt (dot camera-delta camera-delta)))

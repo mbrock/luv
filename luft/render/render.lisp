@@ -615,6 +615,9 @@ so the complete surface needs at most two direct instanced draws."
         (quad-words
           (make-array 256 :element-type '(unsigned-byte 32)
                           :adjustable t :fill-pointer 0))
+        (assembly-count
+          (length (domains:identity-vocabulary-members
+                   *surface-assembly-vocabulary*)))
         (triangle-count 0)
         (quad-count 0))
     (labels ((intern-template (mesh template-id)
@@ -660,12 +663,18 @@ so the complete surface needs at most two direct instanced draws."
                        by luft:+mesh-instance-word-count+
                      for packed = (aref words (+ offset 3))
                      for local-id = (ldb (byte 16 0) packed)
+                     for assembly-id =
+                       (ldb (byte luft:+mesh-instance-stock-bit-count+ 16)
+                            packed)
                      for global-id = (aref global-ids local-id)
                      for vertex-count = (aref vertex-counts local-id)
                      for destination = (if (= vertex-count 3)
                                            triangle-words
                                            quad-words)
-                     do (loop for word-offset below 3
+                     do (unless (< assembly-id assembly-count)
+                          (error "LUFT surface assembly ~D is outside the resident vocabulary of ~D entries."
+                                 assembly-id assembly-count))
+                        (loop for word-offset below 3
                               do (vector-push-extend
                                   (aref words (+ offset word-offset))
                                   destination))

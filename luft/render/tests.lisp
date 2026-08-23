@@ -334,12 +334,12 @@
   (let ((words (luft.render::surface-assembly-descriptor-words)))
     (ok (= (* 9 luft.render::+surface-assembly-descriptor-row-count+ 4)
            (length words)))
-    (ok (equalp #(0.17 0.36 0.11 0.0) (subseq words 0 4)))
+    (ok (equalp #(0.18 0.31 0.105 7.0) (subseq words 0 4)))
     (let ((contact (* luft.render::+turf-set-stone-stock+
                       luft.render::+surface-assembly-descriptor-row-count+ 4)))
       (ok (equalp #(0.53 0.49 0.39 1.0)
                   (subseq words contact (+ contact 4))))
-      (ok (equalp #(0.17 0.36 0.11 0.0)
+      (ok (equalp #(0.18 0.31 0.105 0.0)
                   (subseq words (+ contact 4) (+ contact 8)))))))
 
 (deftest surface-assembly-ids-use-the-widened-instance-field
@@ -357,7 +357,10 @@
       (ok (loop for offset from 3 below (length words) by 4
                 always (= assembly-id
                           (ldb (byte luft:+mesh-instance-stock-bit-count+ 16)
-                               (aref words offset))))))))
+                               (aref words offset))))))
+    (ok (handler-case
+            (progn (luft.render::make-render-population (list mesh)) nil)
+          (error () t)))))
 
 (deftest player-gait-anchors-stance-feet-and-rises-over-support
   (let ((step-length 0.75)

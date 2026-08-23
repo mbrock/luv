@@ -96,8 +96,8 @@
   (pathname)
   (capture-luft-material-contact
    pathname
-   (luv.arithmetic.lisp.vec3:make-vec3 22.7 38.3 38.8)
-   4.0 "LUFT material contact closeup"
+   (luv.arithmetic.lisp.vec3:make-vec3 25.0 38.0 38.0)
+   6.0 "LUFT material contact closeup"
    :yaw 0.90 :pitch -0.5165006))
 
 (luv:define-capture luft-material-contact-stairs
