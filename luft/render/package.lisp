@@ -24,6 +24,7 @@
            #:scene-solid
            #:light
            #:*light*
+           #:make-bevel-limit-study-scene
            #:make-manifold-spike-scene
            #:make-mountain-sanctuary-scene
            #:make-material-bevel-transition-study-scene

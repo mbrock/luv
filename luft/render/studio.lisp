@@ -1022,6 +1022,7 @@ the selector is the whole of the difference."
                        (solid (make-mountain-sanctuary-scene))
                        (bevel-width 2)
                        bevel-profile
+                       surface-mesh
                        (camera (make-fly-camera))
                        (title "LUFT — walk the mountain · WASD · mouse orbit")
                        (width 1100) (height 800)
@@ -1033,9 +1034,16 @@ the selector is the whole of the difference."
 
 BEVEL-PROFILE enables the experimental material-selected width cohorts for a
 non-streaming scene.  BEVEL-WIDTH remains the camera/inspection reference and
-the uniform fallback."
+the uniform fallback.  SURFACE-MESH supplies an already constructed diagnostic
+mesh while retaining SOLID as the semantic inspection source."
   (when (and bevel-profile (typep solid 'streaming-scene))
     (error "Material bevel profiles do not yet support streaming scenes."))
+  (when surface-mesh
+    (check-type surface-mesh luft:surface-mesh)
+    (when bevel-profile
+      (error "Specify either SURFACE-MESH or BEVEL-PROFILE, not both."))
+    (when (typep solid 'streaming-scene)
+      (error "An explicit surface mesh requires a non-streaming scene.")))
   (let ((canvas
           (make-sdl-canvas
            :title title :width width :height height :visible-p nil
@@ -1090,12 +1098,16 @@ the uniform fallback."
                              :bevel-profile bevel-profile
                              :inspector-p inspector-p))))
            (unless (typep solid 'streaming-scene)
-             (if bevel-profile
-                 (renderer-set-meshes
-                  renderer* (make-material-bevel-meshes solid bevel-profile))
-                 (renderer-set-mesh renderer* 0
-                                    (make-render-mesh
-                                     solid :bevel-width bevel-width))))
+             (cond
+               (surface-mesh
+                (renderer-set-mesh renderer* 0 surface-mesh))
+               (bevel-profile
+                (renderer-set-meshes
+                 renderer* (make-material-bevel-meshes solid bevel-profile)))
+               (t
+                (renderer-set-mesh renderer* 0
+                                   (make-render-mesh
+                                    solid :bevel-width bevel-width)))))
            (setf (canvas-event-handler canvas) viewer)
            (when inspector-p
              (refresh-viewer-inspector viewer)

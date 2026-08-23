@@ -1815,7 +1815,8 @@ those three neighbours share the same two edges."
 
 (declaim (ftype function %triangulate-coplanar-loop))
 
-(defun vary-surface-mesh-bevel-widths (witness width-function)
+(defun vary-surface-mesh-bevel-widths
+    (witness width-function &key (contract-t-junctions-p t))
   "Evaluate one width-one WITNESS at a locally selected width per vertex site.
 
 WIDTH-FUNCTION is called once for each canonical lattice vertex as
@@ -1837,8 +1838,13 @@ witness; fragment shading derives the actual primitive normal from world-space
 position derivatives, so the new directions are not lighting-quantized.
 
 The second value is a five-entry site census indexed by width.  The third is a
-diagnostic plist containing the collapsed-triangle, unmatched-edge, and
-repaired-edge counts observed before contraction."
+diagnostic plist containing the collapsed-triangle, unmatched-edge, repaired-
+edge, and residual-edge counts.
+
+CONTRACT-T-JUNCTIONS-P defaults true.  NIL deliberately omits collapsed
+triangles without subdividing their surviving neighbours, returning the open
+diagnostic surface that motivates the contraction.  Production callers should
+retain the default; the uncontracted surface exists only for topology study."
   (check-type witness surface-mesh)
   (check-type width-function function)
   (unless (= 1 (surface-mesh-bevel-width witness))
@@ -1994,41 +2000,44 @@ repaired-edge counts observed before contraction."
         (let ((unmatched-edge-count
                 (loop for count being the hash-values of edge-counts
                       count (/= count 2))))
-          (maphash
-           (lambda (edge points)
-             (when (= 1 (gethash edge edge-counts 0))
+          (when contract-t-junctions-p
+            (maphash
+             (lambda (edge points)
+               (when (= 1 (gethash edge edge-counts 0))
+                 (destructuring-bind (left right) edge
+                   (let* ((points
+                            (sort (copy-list points) #'<
+                                  :key (lambda (point)
+                                         (%point-distance-squared left point))))
+                          (chain (append (list left) points (list right))))
+                     (when (loop for tail on chain
+                                 while (rest tail)
+                                 always (= 1 (gethash
+                                              (%ordered-point-edge
+                                               (first tail) (second tail))
+                                              edge-counts 0)))
+                       (setf (gethash edge repair-splits) points))))))
+             candidate-splits)
+            ;; Prove that the selected contractions account for the entire
+            ;; mismatch before changing any triangles.  A new failure mode
+            ;; must become explicit rather than rendering another hairline
+            ;; crack.
+            (maphash
+             (lambda (edge points)
+               (decf (gethash edge edge-counts))
                (destructuring-bind (left right) edge
-                 (let* ((points
-                          (sort (copy-list points) #'<
-                                :key (lambda (point)
-                                       (%point-distance-squared left point))))
-                        (chain (append (list left) points (list right))))
-                   (when (loop for tail on chain
-                               while (rest tail)
-                               always (= 1 (gethash
-                                            (%ordered-point-edge
-                                             (first tail) (second tail))
-                                            edge-counts 0)))
-                     (setf (gethash edge repair-splits) points))))))
-           candidate-splits)
-          ;; Prove that the selected contractions account for the entire
-          ;; mismatch before changing any triangles.  A new failure mode must
-          ;; become explicit rather than rendering another hairline crack.
-          (maphash
-           (lambda (edge points)
-             (decf (gethash edge edge-counts))
-             (destructuring-bind (left right) edge
-               (loop for tail on (append (list left) points (list right))
-                     while (rest tail)
-                     do (incf (gethash
-                               (%ordered-point-edge
-                                (first tail) (second tail))
-                               edge-counts 0)))))
-           repair-splits)
+                 (loop for tail on (append (list left) points (list right))
+                       while (rest tail)
+                       do (incf (gethash
+                                 (%ordered-point-edge
+                                  (first tail) (second tail))
+                                 edge-counts 0)))))
+             repair-splits))
           (let ((residual-edge-count
                   (loop for count being the hash-values of edge-counts
                         count (not (or (zerop count) (= count 2))))))
-            (unless (zerop residual-edge-count)
+            (when (and contract-t-junctions-p
+                       (plusp residual-edge-count))
               (error "Site-local bevel contraction left ~D of ~D unmatched edges after ~D repairs."
                      residual-edge-count unmatched-edge-count
                      (hash-table-count repair-splits)))
@@ -2038,7 +2047,15 @@ repaired-edge counts observed before contraction."
              width-census
              (list :collapsed-triangle-count collapsed-triangle-count
                    :unmatched-edge-count unmatched-edge-count
-                   :repaired-edge-count (hash-table-count repair-splits)))))))))
+                   :repaired-edge-count (hash-table-count repair-splits)
+                   :residual-edge-count residual-edge-count
+                   :candidate-splits
+                   (loop for edge being the hash-keys of candidate-splits
+                           using (hash-value points)
+                         append
+                         (loop for point in points
+                               collect (list (first edge) point
+                                             (second edge))))))))))))
 
 (defun %coplanar-group-loops (triangles)
   "Return oriented boundary loops, or NIL when the union is not simple."
@@ -2150,6 +2167,53 @@ repaired-edge counts observed before contraction."
        (first normal) (second normal) (third normal))
       (%emit-instance builder kind (first base) (second base) (third base)
                       stock ambient 3))))
+
+(defun surface-mesh-with-triangle-ink (mesh)
+  "Return MESH's exact triangles with every primitive edge marked visible.
+
+The geometry, stock, ambient value, primitive class, and winding are retained.
+Only the three construction-mask bits change.  This diagnostic realization
+exposes connectivity that the ordinary semantic edge mask intentionally hides;
+it must not be substituted for the production mesh outside topology captures."
+  (check-type mesh surface-mesh)
+  (let ((builder (%make-surface-mesh-builder
+                  (surface-mesh-domain mesh) (surface-mesh-bevel-width mesh))))
+    (setf (surface-mesh-builder-singular-star-count builder)
+          (surface-mesh-singular-star-count mesh))
+    (%map-surface-mesh-triangle-records
+     (lambda (kind stock ambient mask normal a b c)
+       (declare (ignore mask))
+       (%emit-global-triangle builder kind stock ambient #b111 normal
+                              (list a b c)))
+     mesh)
+    (%finish-surface-mesh builder)))
+
+(defun surface-mesh-split-neighborhood (mesh split)
+  "Return only the triangles incident to the three points in SPLIT.
+
+SPLIT is (LEFT MIDDLE RIGHT), as reported in the :CANDIDATE-SPLITS bevel
+diagnostic.  A triangle is retained when two or more of its vertices are
+split points, so the result is the smallest actual mesh patch that contrasts
+one long edge with its two short neighbours.  Every retained edge is marked
+visible; no vertex or triangle geometry is otherwise changed.  This is the
+executable closeup used by the mixed-bevel degeneracy atlas. #WSEK3C"
+  (check-type mesh surface-mesh)
+  (unless (and (listp split) (= 3 (length split)))
+    (error "A mesh split neighborhood needs (LEFT MIDDLE RIGHT), not ~S."
+           split))
+  (let ((builder (%make-surface-mesh-builder
+                  (surface-mesh-domain mesh) (surface-mesh-bevel-width mesh))))
+    (%map-surface-mesh-triangle-records
+     (lambda (kind stock ambient mask normal a b c)
+       (declare (ignore mask))
+       (when (>= (count-if (lambda (point)
+                             (member point split :test #'equal))
+                           (list a b c))
+                 2)
+         (%emit-global-triangle builder kind stock ambient #b111 normal
+                                (list a b c))))
+     mesh)
+    (%finish-surface-mesh builder)))
 
 (defun %coplanar-group-key< (left right)
   (flet ((numeric-key (key)
