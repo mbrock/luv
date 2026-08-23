@@ -278,6 +278,16 @@ popping, because both meshes are the same surface.  This is a compression
 pass over the streams of #8UGGY0, not an ownership decision in the
 representation.
 
+The first streaming realization deliberately proves a narrower step.  Its
+far tier greedily merges equal-stock faces of the exact /cubical/ boundary,
+so large shelves and cliffs become maximal rectangles and chunk seams remain
+identical, but bevel ornament disappears at the tier boundary.  In the
+16-chunk highland view, the seven far chunks became 9,170 rectangles (18,340
+triangles total), and one representative far chunk materialized in 17 ms.
+This is useful distance geometry, not yet the stronger same-beveled-surface
+compression claimed above; dissolving coplanar face, band, and fan edges is
+still the path to a literally pop-free tier.
+
 * NEXT Implement the site-stream LUFT renderer backbone
 :PROPERTIES:
 :ID: RO2OCL

@@ -35,7 +35,8 @@
   "Default bevel width in eighth-cell integer ticks (one quarter cell).")
 (defconstant +mesh-instance-word-count+ 4)
 (defconstant +mesh-template-vertex-word-count+ 4)
-(defconstant +mesh-template-coordinate-bias+ 16)
+(defconstant +mesh-template-coordinate-bit-count+ 12)
+(defconstant +mesh-template-coordinate-bias+ 2048)
 (defconstant +mesh-instance-stock-shift+ 16)
 (defconstant +mesh-instance-stock-bit-count+ 12)
 (defconstant +mesh-instance-ambient-occlusion-shift+ 28)
@@ -494,16 +495,24 @@ Bit conventions match SITE-STAR-OCCUPANCY-MASK on a vertex site."
   (vertices (make-array 0 :element-type 'fixnum)
             :type (simple-array fixnum (*)) :read-only t))
 
-(defconstant +mesh-vertex-attribute-shift+ 15)
+(defconstant +mesh-vertex-attribute-shift+
+  (* 3 +mesh-template-coordinate-bit-count+))
 
 (declaim (inline %pack-template-vertex))
 (defun %pack-template-vertex (x y z attributes)
-  (unless (and (<= -16 x 15) (<= -16 y 15) (<= -16 z 15))
-    (error "Template coordinate ~S does not fit the signed five-bit ABI."
-           (list x y z)))
+  (unless (and (<= (- +mesh-template-coordinate-bias+) x
+                   (1- +mesh-template-coordinate-bias+))
+               (<= (- +mesh-template-coordinate-bias+) y
+                   (1- +mesh-template-coordinate-bias+))
+               (<= (- +mesh-template-coordinate-bias+) z
+                   (1- +mesh-template-coordinate-bias+)))
+    (error "Template coordinate ~S does not fit the signed ~D-bit ABI."
+           (list x y z) +mesh-template-coordinate-bit-count+))
   (logior (+ x +mesh-template-coordinate-bias+)
-          (ash (+ y +mesh-template-coordinate-bias+) 5)
-          (ash (+ z +mesh-template-coordinate-bias+) 10)
+          (ash (+ y +mesh-template-coordinate-bias+)
+               +mesh-template-coordinate-bit-count+)
+          (ash (+ z +mesh-template-coordinate-bias+)
+               (* 2 +mesh-template-coordinate-bit-count+))
           (ash attributes +mesh-vertex-attribute-shift+)))
 
 (defstruct (instance-stream (:constructor %make-instance-stream ()))
@@ -1161,13 +1170,19 @@ right12<<12 | stock12, where the 12-bit points are anchor-local."
                         (oy (* +mesh-cell-size+ base-y))
                         (oz (* +mesh-cell-size+ base-z)))
                    (flet ((global-x (vertex)
-                            (+ ox (- (ldb (byte 5 0) (aref vertices vertex))
+                            (+ ox (- (ldb (byte +mesh-template-coordinate-bit-count+
+                                               0)
+                                          (aref vertices vertex))
                                      +mesh-template-coordinate-bias+)))
                           (global-y (vertex)
-                            (+ oy (- (ldb (byte 5 5) (aref vertices vertex))
+                            (+ oy (- (ldb (byte +mesh-template-coordinate-bit-count+
+                                               +mesh-template-coordinate-bit-count+)
+                                          (aref vertices vertex))
                                      +mesh-template-coordinate-bias+)))
                           (global-z (vertex)
-                            (+ oz (- (ldb (byte 5 10) (aref vertices vertex))
+                            (+ oz (- (ldb (byte +mesh-template-coordinate-bit-count+
+                                               (* 2 +mesh-template-coordinate-bit-count+))
+                                          (aref vertices vertex))
                                      +mesh-template-coordinate-bias+))))
                      (loop for triangle from 0 below (length vertices) by 3
                            do (dotimes (index 3)
@@ -1557,9 +1572,17 @@ witness scan."
               (aref ranges (1+ (* 2 (mesh-template-id template))))
               (length vertices))
         (loop for vertex across vertices
-              do (setf (aref words write) (ldb (byte 5 0) vertex)
-                       (aref words (+ write 1)) (ldb (byte 5 5) vertex)
-                       (aref words (+ write 2)) (ldb (byte 5 10) vertex)
+              do (setf (aref words write)
+                       (ldb (byte +mesh-template-coordinate-bit-count+ 0)
+                            vertex)
+                       (aref words (+ write 1))
+                       (ldb (byte +mesh-template-coordinate-bit-count+
+                                  +mesh-template-coordinate-bit-count+)
+                            vertex)
+                       (aref words (+ write 2))
+                       (ldb (byte +mesh-template-coordinate-bit-count+
+                                  (* 2 +mesh-template-coordinate-bit-count+))
+                            vertex)
                        (aref words (+ write 3))
                        (ash vertex (- +mesh-vertex-attribute-shift+)))
                  (incf write 4))
@@ -1726,22 +1749,148 @@ lattice-site closure.  It must return one stock for that entire chamfer."
             (%emit-cell-face target field domain cell axis-number side
                              stock-function chamfer-stock-function)))))))
 
+(defconstant +planar-coordinate-bit-count+ 16)
+
+(declaim (inline %pack-planar-coordinate %planar-coordinate-u
+                 %planar-coordinate-v))
+(defun %pack-planar-coordinate (u v)
+  (logior u (ash v +planar-coordinate-bit-count+)))
+
+(defun %planar-coordinate-u (coordinate)
+  (ldb (byte +planar-coordinate-bit-count+ 0) coordinate))
+
+(defun %planar-coordinate-v (coordinate)
+  (ldb (byte +planar-coordinate-bit-count+
+             +planar-coordinate-bit-count+)
+       coordinate))
+
+(defun %planar-face-group< (left right)
+  (loop for l in left
+        for r in right
+        when (/= l r) return (< l r)
+        finally (return nil)))
+
+(defun %emit-greedy-planar-faces
+    (builder field domain cells stock-function)
+  "Merge exposed cubical faces into maximal coplanar rectangles. #YGP21F
+
+Faces merge only when their axis, orientation, plane, and stock agree. The
+pass therefore changes neither position, normal, material, silhouette, nor
+depth relative to the cubical boundary; it only dissolves interior edges."
+  (let ((groups (make-hash-table :test #'equal)))
+    (loop for cell across cells do
+      (let ((coordinates (vector (site-x cell) (site-y cell) (site-z cell))))
+        (dotimes (axis-number 3)
+          (dolist (side '(-1 1))
+            (let ((x (svref coordinates 0))
+                  (y (svref coordinates 1))
+                  (z (svref coordinates 2)))
+              (case axis-number
+                (0 (incf x side))
+                (1 (incf y side))
+                (t (incf z side)))
+              (when (= 0 (%occupied-bit field domain x y z))
+                (let* ((u (svref +axis-u+ axis-number))
+                       (v (svref +axis-v+ axis-number))
+                       (face
+                         (if (minusp side)
+                             (site-boundary-low
+                              domain cell (index-axis axis-number))
+                             (site-boundary-high
+                              domain cell (index-axis axis-number))))
+                       (stock (funcall stock-function face))
+                       (plane (+ (svref coordinates axis-number)
+                                 (if (plusp side) 1 0)))
+                       (group-key (list axis-number side plane stock))
+                       (group
+                         (or (gethash group-key groups)
+                             (setf (gethash group-key groups)
+                                   (make-hash-table :test #'eql)))))
+                  (setf (gethash
+                         (%pack-planar-coordinate
+                          (svref coordinates u) (svref coordinates v))
+                         group)
+                        t))))))))
+    (let ((group-keys
+            (sort (loop for key being the hash-keys of groups collect key)
+                  #'%planar-face-group<)))
+      (dolist (group-key group-keys)
+        (destructuring-bind (axis-number side plane stock) group-key
+          (let* ((u-axis (svref +axis-u+ axis-number))
+                 (v-axis (svref +axis-v+ axis-number))
+                 (group (gethash group-key groups))
+                 (nx (if (= axis-number 0) side 0))
+                 (ny (if (= axis-number 1) side 0))
+                 (nz (if (= axis-number 2) side 0)))
+            (loop while (plusp (hash-table-count group)) do
+              (let* ((first
+                       (loop for coordinate being the hash-keys of group
+                             minimize coordinate))
+                     (u0 (%planar-coordinate-u first))
+                     (v0 (%planar-coordinate-v first))
+                     (u1
+                       (loop for u from u0
+                             while (gethash (%pack-planar-coordinate u v0)
+                                            group)
+                             finally (return u)))
+                     (v1
+                       (loop for v from (1+ v0)
+                             while (loop for u from u0 below u1
+                                         always
+                                         (gethash
+                                          (%pack-planar-coordinate u v)
+                                          group))
+                             finally (return v))))
+                (loop for v from v0 below v1 do
+                  (loop for u from u0 below u1 do
+                    (remhash (%pack-planar-coordinate u v) group)))
+                (let ((base (vector 0 0 0))
+                      (p0 (vector 0 0 0)) (p1 (vector 0 0 0))
+                      (p2 (vector 0 0 0)) (p3 (vector 0 0 0)))
+                  (setf (svref base axis-number) plane
+                        (svref base u-axis) u0
+                        (svref base v-axis) v0)
+                  (flet ((set-point (point u v)
+                           (setf (svref point axis-number)
+                                 (* +mesh-cell-size+ plane)
+                                 (svref point u-axis) (* +mesh-cell-size+ u)
+                                 (svref point v-axis) (* +mesh-cell-size+ v))))
+                    (set-point p0 u0 v0)
+                    (set-point p1 u1 v0)
+                    (set-point p2 u1 v1)
+                    (set-point p3 u0 v1)
+                    (%emit-quad builder :face
+                                (svref base 0) (svref base 1) (svref base 2)
+                                p0 p1 p2 p3 nx ny nz stock 0)))))))))))
+
+(defun %make-planar-merged-chunk-mesh
+    (domain bevel-width field cells stock-function)
+  (let ((builder (%make-surface-mesh-builder domain bevel-width)))
+    (%emit-greedy-planar-faces builder field domain cells stock-function)
+    (%finish-surface-mesh builder)))
+
 (defun mesh-chunk
     (chunk chunk-key
      &key (stock-function (constantly 0))
           (chamfer-stock-function (lambda (stocks) (first stocks)))
-          (bevel-width +mesh-bevel-width+))
+          (bevel-width +mesh-bevel-width+)
+          planar-merge-p)
   "Classify one chunk's solid CHUNK into the instance-stream ABI.
 
 CHUNK holds exactly the cells of the chunk named by CHUNK-KEY.  Probes
 leaving the chunk signal MISSING-CHUNK once per neighboring chunk -- bind a
 handler that answers USE-CHUNK from a store, or TREAT-AS-AIR to fill in --
-and probes past the world's box signal OUTSIDE-DOMAIN; MESH-CHUNK sets no
-policy of its own.  The mesh ships only what this chunk owns: faces of its
+  and probes past the world's box signal OUTSIDE-DOMAIN; MESH-CHUNK sets no
+  policy of its own.  The mesh ships only what this chunk owns: faces of its
 own solid cells, bands whose edge anchors lie inside it, and fans at its
 own lattice vertices.  Witness faces and bands are recomputed from the
-one-cell halo and scanned but never shipped, so seam fans close exactly as
-a whole-world mesh would close them."
+  one-cell halo and scanned but never shipped, so seam fans close exactly as
+  a whole-world mesh would close them.
+
+When PLANAR-MERGE-P is true, emit the exact unbeveled cubical boundary as
+greedily merged coplanar rectangles. This far-distance representation keeps
+occupancy, normals, materials, silhouette, and chunk seams while omitting
+bevel ornament and all geometrically redundant interior face edges."
   (check-type chunk chain)
   (check-type stock-function function)
   (check-type chamfer-stock-function function)
@@ -1767,6 +1916,10 @@ a whole-world mesh would close them."
     (loop for cell across (%chain-sites chunk) do
       (unless (= (site-chunk-key cell) chunk-key)
         (error "Cell ~S does not belong to chunk ~D." cell chunk-key)))
+    (when planar-merge-p
+      (return-from mesh-chunk
+        (%make-planar-merged-chunk-mesh
+         domain bevel-width field (%chain-sites chunk) stock-function)))
     ;; Owned sites are the half-open coordinate box of this chunk's grid
     ;; cell; anchors on the far seam belong to the next chunk over.  Owned
     ;; sites' cell stars reach exactly one cell below the origin per axis,

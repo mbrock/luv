@@ -92,7 +92,7 @@
       (ok (zerop (hash-table-count
                   (luft.render::streaming-scene-loaded scene)))))))
 
-(deftest a-streaming-window-assigns-medial-meshes-only-to-its-far-ring
+(deftest a-streaming-window-assigns-planar-meshes-only-to-its-far-ring
   (let ((builder (luft.render::make-scene-builder :horizontal-bits 9)))
     (dotimes (chunk-x 5)
       (dotimes (chunk-y 5)
@@ -133,6 +133,63 @@
                (ok (not (luft.render::current-streaming-mesh-request-p
                          scene request)))))
         (production:stop-production-system system)))))
+
+(deftest a-planar-chunk-merges-a-four-by-four-slab-into-six-rectangles
+  (let ((builder (luft.render::make-scene-builder :horizontal-bits 6)))
+    (loop for y from 4 below 8 do
+      (loop for x from 4 below 8 do
+        (luft.render::scene-builder-cell builder x y 1)))
+    (let* ((scene (luft.render::finish-scene-builder builder))
+           (key (luft:chunk-key-at 4 4))
+           (chunks (make-hash-table :test #'eql)))
+      (luft:map-chain-chunks
+       (lambda (chunk-key chain)
+         (setf (gethash chunk-key chunks) chain))
+       (luft.render::scene-solid scene))
+      (handler-bind
+          ((luft:missing-chunk
+             (lambda (condition)
+               (declare (ignore condition))
+               (invoke-restart 'luft:treat-as-air)))
+           (luft:outside-domain
+             (lambda (condition)
+               (declare (ignore condition))
+               (invoke-restart 'luft:treat-as-air))))
+        (let ((mesh
+                (luft:mesh-chunk
+                 (gethash key chunks) key :planar-merge-p t)))
+          (ok (= 6 (luft:surface-mesh-face-instance-count mesh)))
+          (ok (= 12 (luft:surface-mesh-triangle-count mesh)))
+          (ok (zerop (luft:surface-mesh-band-instance-count mesh)))
+          (ok (zerop (luft:surface-mesh-fan-instance-count mesh)))
+          (ok (luft::%mesh-closed-p mesh)))))))
+
+(deftest a-planar-chunk-keeps-a-tall-cliff-in-one-rectangle
+  (let ((builder (luft.render::make-scene-builder :horizontal-bits 6)))
+    (dotimes (z 64)
+      (luft.render::scene-builder-cell builder 4 4 z))
+    (let* ((scene (luft.render::finish-scene-builder builder))
+           (key (luft:chunk-key-at 4 4))
+           (chunk nil))
+      (luft:map-chain-chunks
+       (lambda (chunk-key chain)
+         (when (= chunk-key key) (setf chunk chain)))
+       (luft.render::scene-solid scene))
+      (handler-bind
+          ((luft:missing-chunk
+             (lambda (condition)
+               (declare (ignore condition))
+               (invoke-restart 'luft:treat-as-air)))
+           (luft:outside-domain
+             (lambda (condition)
+               (declare (ignore condition))
+               (invoke-restart 'luft:treat-as-air))))
+        (let ((mesh (luft:mesh-chunk chunk key :planar-merge-p t)))
+          (ok (= 6 (luft:surface-mesh-face-instance-count mesh)))
+          (ok (= 12 (luft:surface-mesh-triangle-count mesh)))
+          (ok (find (+ luft:+mesh-template-coordinate-bias+ 512)
+                    (luft:surface-mesh-template-vertex-words mesh)))
+          (ok (luft::%mesh-closed-p mesh)))))))
 
 (deftest a-pure-lod-shift-remeshes-only-chunks-whose-tier-changed
   (let ((builder (luft.render::make-scene-builder :horizontal-bits 8)))

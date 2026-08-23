@@ -308,7 +308,7 @@ for completely static geometry."
         (- (vec3 (float (swizzle template-vertex :x))
                  (float (swizzle template-vertex :y))
                  (float (swizzle template-vertex :z)))
-           (vec3 16.0 16.0 16.0)))
+           (vec3 2048.0 2048.0 2048.0)))
      8.0))
 
 (define-shader-function light-clip-position

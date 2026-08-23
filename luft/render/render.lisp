@@ -1825,11 +1825,12 @@ cohort untouched. No frame can interleave with the owner-thread publication."
 
 (defstruct (streaming-mesh-snapshot
              (:constructor %make-streaming-mesh-snapshot
-                 (scene key bevel-width neighborhood stamp)))
+                 (scene key bevel-width planar-merge-p neighborhood stamp)))
   "Immutable CPU input for one chunk mesh request."
   (scene nil :read-only t)
   (key 0 :type luft:chunk-key :read-only t)
   (bevel-width luft:+mesh-bevel-width+ :read-only t)
+  (planar-merge-p nil :type boolean :read-only t)
   (neighborhood nil :type hash-table :read-only t)
   (stamp nil :read-only t))
 
@@ -1841,9 +1842,10 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                  (far-bevel-width 4))
   "Wrap SCENE in bounded camera-driven chunk residency.
 
-When LOD-RADIUS is non-NIL, chunks beyond that Chebyshev distance use the
-medial FAR-BEVEL-WIDTH mesh tier. The tier retains the same occupied cells and
-chunk boundaries while omitting the zero-area face and edge-band families."
+When LOD-RADIUS is non-NIL, chunks beyond that Chebyshev distance use a
+greedily merged planar mesh tier. The tier retains the same cubical occupancy,
+materials, silhouette, and chunk boundaries while dissolving redundant
+coplanar edges. FAR-BEVEL-WIDTH names the tier in residency state."
   (let ((streaming (make-instance
                     'streaming-scene
                     :solid (scene-solid scene)
@@ -1886,6 +1888,12 @@ chunk boundaries while omitting the zero-area face and edge-band families."
              (> (streaming-scene-key-distance key focus) lod-radius))
         (streaming-scene-far-bevel-width scene)
         near-bevel-width)))
+
+(defun streaming-scene-planar-p-at (scene key focus)
+  "Whether KEY uses SCENE's exact coplanar far tier under FOCUS."
+  (let ((lod-radius (streaming-scene-lod-radius scene)))
+    (and focus lod-radius
+         (> (streaming-scene-key-distance key focus) lod-radius))))
 
 (defun retarget-streaming-scene
     (scene production-system bevel-width world-x world-y)
@@ -1948,20 +1956,25 @@ chunk boundaries while omitting the zero-area face and edge-band families."
             do (push candidate keys))
     (sort keys #'<)))
 
-(defun streaming-scene-mesh-stamp (scene key bevel-width)
+(defun streaming-scene-mesh-stamp (scene key bevel-width planar-merge-p)
   "Name the exact residency and geometry parameters observed by KEY's mesh."
-  (list bevel-width (gethash key (streaming-scene-loaded scene))
+  (list bevel-width planar-merge-p
+        (gethash key (streaming-scene-loaded scene))
         (streaming-scene-neighborhood-keys scene key)))
 
 (defun make-streaming-mesh-snapshot (scene key bevel-width)
   "Capture immutable chains for the neighborhood KEY currently observes."
   (let ((neighborhood (make-hash-table :test #'eql))
-        (store (streaming-scene-store scene)))
+        (store (streaming-scene-store scene))
+        (planar-merge-p
+          (streaming-scene-planar-p-at
+           scene key (streaming-scene-focus scene))))
     (dolist (neighbor (streaming-scene-neighborhood-keys scene key))
       (setf (gethash neighbor neighborhood) (gethash neighbor store)))
     (%make-streaming-mesh-snapshot
-     scene key bevel-width neighborhood
-     (streaming-scene-mesh-stamp scene key bevel-width))))
+     scene key bevel-width planar-merge-p neighborhood
+     (streaming-scene-mesh-stamp
+      scene key bevel-width planar-merge-p))))
 
 (defun mesh-streaming-snapshot (snapshot)
   "Mesh one worker-owned residency snapshot without reading owner state."
@@ -1990,7 +2003,10 @@ chunk boundaries while omitting the zero-area face and edge-band families."
                            :stock-function stock-function
                            :chamfer-stock-function chamfer-stock-function
                            :bevel-width
-                           (streaming-mesh-snapshot-bevel-width snapshot)))))))
+                           (streaming-mesh-snapshot-bevel-width snapshot)
+                           :planar-merge-p
+                           (streaming-mesh-snapshot-planar-merge-p
+                            snapshot)))))))
 
 (defun mesh-streaming-chunk (scene key bevel-width)
   "Synchronously mesh KEY from the same immutable snapshot workers receive."
@@ -2020,7 +2036,8 @@ chunk boundaries while omitting the zero-area face and edge-band families."
                 (streaming-scene-mesh-stamp
                  scene
                  (streaming-mesh-snapshot-key snapshot)
-                 (streaming-mesh-snapshot-bevel-width snapshot))))))
+                 (streaming-mesh-snapshot-bevel-width snapshot)
+                 (streaming-mesh-snapshot-planar-merge-p snapshot))))))
 
 (defun accept-streaming-mesh-result (scene request mesh)
   "Stage MESH when REQUEST is still the latest description of its chunk."

@@ -333,7 +333,7 @@
         when (and (plusp loaded) (zerop outstanding)
                   (null (luft.render::streaming-scene-cohort scene)))
           do (format t
-                     "capture LUFT highlands: ready with ~D near and ~D medial chunks~%"
+                     "capture LUFT highlands: ready with ~D near and ~D planar chunks~%"
                      (loop for width being the hash-values of
                            (luft.render::streaming-scene-loaded scene)
                            count (< width 4))
@@ -401,7 +401,7 @@
 (luv:define-capture luft-highland-lod-distance
     (:figure L0DDST :kind :image :extension "png" :layout :landscape
      :description
-     "The widened highland horizon with full-detail near chunks and medial far chunks.")
+     "The widened highland horizon with full-detail near chunks and coplanar-merged far chunks.")
   (pathname)
   (capture-luft-highland-landscape
    pathname
