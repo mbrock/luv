@@ -66,6 +66,14 @@
               for expected from 0
               always (= expected index)))))
 
+(deftest the-connected-miter-study-lowers-to-one-mesh
+  (let ((mesh (render:make-render-mesh
+               (render:make-miter-study-scene))))
+    (ok (plusp (luft:surface-mesh-face-triangle-count mesh)))
+    (ok (plusp (luft:surface-mesh-band-triangle-count mesh)))
+    (ok (plusp (luft:surface-mesh-junction-triangle-count mesh)))
+    (ok (zerop (luft:surface-mesh-singular-star-count mesh)))))
+
 (deftest mesh-and-atelier-shaders-lower-through-both-conventional-backends
   (let* ((vertex (luft.render.shaders:mesh-vertex-specification))
          (fragment (luft.render.shaders:mesh-fragment-specification))

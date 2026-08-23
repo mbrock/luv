@@ -139,6 +139,7 @@
 
 (defun %test-surface-mesh ()
   (%with-test-section ("integer surface mesh")
+    (%check (equal '(0 -1 0) (%normal-direction-code '(0 -2 0))))
     (let ((one (make-surface-mesh (%solid-for-star #x01))))
       (%check (= 12 (surface-mesh-face-triangle-count one)))
       (%check (= 24 (surface-mesh-band-triangle-count one)))
@@ -150,6 +151,11 @@
                     (surface-mesh-index-count one))
                  (length (surface-mesh-vertex-words one))))
       (%check (%mesh-closed-p one)))
+    ;; A face-connected pair suppresses flat continuation bands and remains
+    ;; one closed surface across its internal cell boundary.
+    (let ((pair (make-surface-mesh (%solid-for-star #x03))))
+      (%check (zerop (surface-mesh-singular-star-count pair)))
+      (%check (%mesh-closed-p pair)))
     (dolist (mask '(#x06 #x18 #x69))
       (let ((mesh (make-surface-mesh (%solid-for-star mask))))
         (%check (plusp (surface-mesh-singular-star-count mesh))

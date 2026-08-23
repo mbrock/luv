@@ -59,7 +59,7 @@ lighting, fog, MetalFX motion output, and barycentric construction lines.
 
 ## Executable scope
 
-The first visual scene contains:
+The isolated topology fixture contains:
 
 - `#x06`, an edge-touching occupied pair;
 - `#x18`, a corner-touching occupied pair;
@@ -69,10 +69,23 @@ These cases decompose into ordinary regular-star junctions and are checked for
 geometric closure by exact integer edge equality. The exhaustive link walk
 also checks all 256 masks and classifies 128 as singular.
 
+The viewer now opens on the connected miter study: a plinth, wall, and two
+L-shaped terraces containing ordinary convex, concave, five-, six-, and
+seven-cell stars. Flat face continuations no longer emit spurious bevel bands,
+and exact polygon normals are reduced to signed direction codes only at the
+packed GPU boundary.
+
+That first connected render also names the next geometric problem. The Arc
+junction corpus can meet an exposed face along a diagonal corner cut, while the
+spike still emits every inset face as a rectangle. The resulting mixed miters
+render, but retain visible triangular folds or gaps and 126 unmatched exact
+triangle edges in the study. Face corners must therefore be clipped by their
+adjacent junction boundary before this is a watertight bevel mesher.
+
 This is not yet the final 256-star mesher. Some connected high-occupancy
 singular stars, such as `#x6f`, produce a link cycle that revisits a geometric
 radial direction through distinct topological copies. No ordinary eight-bit
-star can encode that junction. The spike signals this case explicitly. The
-next step is a covered-junction representation whose vertices are keyed by
-sheet copy as well as radial direction, followed by the terrain and wall-end
-acceptance scenes.
+star can encode that junction. The spike signals this case explicitly. After
+the regular face-to-junction seams close, the remaining singular work is a
+covered-junction representation whose vertices are keyed by sheet copy as well
+as radial direction, followed by the terrain acceptance scene.

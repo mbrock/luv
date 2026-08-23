@@ -55,7 +55,7 @@ at the atelier boundary where a person has selected one site."))
                              :field-of-view field-of-view))
 
 (defun reset-viewer-camera (&optional (viewer *viewer*))
-  "Return VIEWER to the manifold-star spike view."
+  "Return VIEWER to the connected miter-study view."
   (when viewer
     (let ((camera (viewer-camera viewer)))
       (setf (camera-position camera) (vec3:make-vec3 28.0 -2.0 13.0)
@@ -513,7 +513,7 @@ the selector is the whole of the difference."
   ((canvas :initarg :canvas :initform nil :reader viewer-canvas)
    (context :initarg :context :initform nil :reader viewer-context)
    (device :initarg :device :initform nil :reader viewer-device)
-   (source :initarg :source :initform (make-manifold-spike-scene)
+   (source :initarg :source :initform (make-miter-study-scene)
            :accessor viewer-source)
    (renderer :initarg :renderer :initform nil :accessor viewer-renderer)
    (camera :initarg :camera :initform (make-fly-camera) :reader viewer-camera)
@@ -835,9 +835,9 @@ the selector is the whole of the difference."
   nil)
 
 (defun start-viewer (&key
-                       (solid (make-manifold-spike-scene))
+                       (solid (make-miter-study-scene))
                        (camera (make-fly-camera))
-                       (title "LUFT manifold-sheet spike")
+                       (title "LUFT miter-study spike")
                        (width 1100) (height 800)
                        fullscreen-p
                        (frames-per-second 60)
@@ -940,7 +940,7 @@ false when the subject is the geometry rather than the atelier UI."
       (destroy buffer))))
 
 (defun refresh-viewer-renderer (&optional (viewer *viewer*)
-                                &key (solid (make-manifold-spike-scene)))
+                                &key (solid (make-miter-study-scene)))
   "Rebuild VIEWER's renderer so edited shaders and geometry take effect."
   (when viewer
     (luv::call-on-sdl-canvas-thread

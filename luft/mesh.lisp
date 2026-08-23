@@ -256,19 +256,27 @@ star corpus; signal that boundary explicitly instead of silently welding it."
 (defun %dot (left right)
   (reduce #'+ (mapcar #'* left right)))
 
+(defun %normal-direction-code (normal)
+  "Reduce an exact polygon normal to the trit direction stored by the ABI."
+  (unless (and (= 3 (length normal))
+               (every #'integerp normal)
+               (some (complement #'zerop) normal))
+    (error "Mesh normal is not a nonzero integer direction: ~S." normal))
+  (mapcar #'signum normal))
+
 (defun %pack-mesh-attributes (normal stock barycentric-index kind)
-  (unless (and (every (lambda (component) (<= -1 component 1)) normal)
-               (typep stock '(unsigned-byte 4))
-               (<= 0 barycentric-index 2))
-    (error "Unpackable mesh attributes: ~S ~S ~S."
-           normal stock barycentric-index))
-  (let ((kind-code (ecase kind (:face 0) (:band 1) (:junction 2))))
-    (logior (+ 1 (first normal))
-            (ash (+ 1 (second normal)) 2)
-            (ash (+ 1 (third normal)) 4)
-            (ash stock 6)
-            (ash barycentric-index 10)
-            (ash kind-code 12))))
+  (let ((normal (%normal-direction-code normal)))
+    (unless (and (typep stock '(unsigned-byte 4))
+                 (<= 0 barycentric-index 2))
+      (error "Unpackable mesh attributes: ~S ~S ~S."
+             normal stock barycentric-index))
+    (let ((kind-code (ecase kind (:face 0) (:band 1) (:junction 2))))
+      (logior (+ 1 (first normal))
+              (ash (+ 1 (second normal)) 2)
+              (ash (+ 1 (third normal)) 4)
+              (ash stock 6)
+              (ash barycentric-index 10)
+              (ash kind-code 12)))))
 
 (defun %emit-triangle (builder a b c normal stock kind)
   (let ((orientation (%dot (%cross (%point- b a) (%point- c a)) normal)))
@@ -483,6 +491,11 @@ star corpus; signal that boundary explicitly instead of silently welding it."
   (let ((a (%normal-key left)) (b (%normal-key right)))
     (if (< a b) (cons a b) (cons b a))))
 
+(defun %parallel-normal-p (left right)
+  (let ((left-key (%normal-key left)))
+    (or (= left-key (%normal-key right))
+        (= left-key (%normal-key (mapcar #'- right))))))
+
 (defun %boundary-edge-normal (mask edge)
   (let* ((low (%cube-edge-low edge))
          (high (%cube-edge-high edge))
@@ -499,8 +512,7 @@ star corpus; signal that boundary explicitly instead of silently welding it."
   (loop for pair in (%radial-transition-groups mask axis-number sign)
         for left = (%boundary-edge-normal mask (first pair))
         for right = (%boundary-edge-normal mask (second pair))
-        unless (and (= (%normal-key left)
-                       (%normal-key (mapcar #'- right))))
+        unless (%parallel-normal-p left right)
           collect (%band-pair-key left right)))
 
 (defun %vertex-star-mask (domain occupancy coordinates)
@@ -539,8 +551,10 @@ star corpus; signal that boundary explicitly instead of silently welding it."
                      (second group)))
              (left-normal (getf left :normal))
              (right-normal (getf right :normal)))
-        (unless (= (%normal-key left-normal)
-                   (%normal-key (mapcar #'- right-normal)))
+        ;; Equal normals are one flat face continued across a cell boundary;
+        ;; opposite normals are two sheets touching at the lattice edge.
+        ;; Neither relation owns a bevel band between the faces.
+        (unless (%parallel-normal-p left-normal right-normal)
           (let* ((pair-key (%band-pair-key left-normal right-normal))
                  (high-vertex (%offset-coordinates anchor axis-number 1))
                  (low-coordinate
