@@ -287,13 +287,15 @@
   (+ (* (/ (swizzle clip :xy) (swizzle clip :w)) 0.5)
      (vec2 0.5 0.5)))
 
-(define-shader-function mesh-temporal-motion
-    (previous-clip current-clip temporal-parameters)
-  "Return previous-minus-current motion at the actual jittered raster sites."
-  (- (+ (mesh-clip-uv previous-clip)
-        (* (swizzle temporal-parameters :zw) 0.5))
-     (+ (mesh-clip-uv current-clip)
-        (* (swizzle temporal-parameters :xy) 0.5))))
+(define-shader-function mesh-temporal-motion (previous-clip current-clip)
+  "Return the unjittered previous-minus-current motion MetalFX expects.
+
+The scaler receives the current sampling offset independently through
+JITTER-OFFSET-{X,Y}.  Its default contract consumes these vectors directly,
+so adding either frame's Halton offset here would invent screen-wide motion
+for completely static geometry."
+  (- (mesh-clip-uv previous-clip)
+     (mesh-clip-uv current-clip)))
 
 (define-shader-function mesh-world-position (instance template-vertex)
   "Decode the one world position shared by the scene and shadow passes."
@@ -917,8 +919,7 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
          (radiance (+ paper (* (vec3 0.20 0.42 0.48) (* rim 0.07)))))
     (set-output color-output (vec4 (* radiance coverage) coverage))
     (set-output motion-output
-                (mesh-temporal-motion previous-clip current-clip
-                                      temporal-parameters))))
+                (mesh-temporal-motion previous-clip current-clip))))
 
 (define-shader mesh-vertex-specification
     (:stage :vertex
@@ -974,10 +975,6 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
            (vec3 (- (float (ldb (byte 2 0) attributes)) 1.0)
                  (- (float (ldb (byte 2 2) attributes)) 1.0)
                  (- (float (ldb (byte 2 4) attributes)) 1.0)))
-         (front-facing-p
-           (>= (dot mesh-normal
-                    (- (swizzle camera-position :xyz) world-position))
-               0.0))
          (assembly-id (float (ldb (byte 12 16) (swizzle instance :w))))
          (ambient-occlusion
            (/ (float (ldb (byte 2 28) (swizzle instance :w))) 3.0))
@@ -1002,15 +999,17 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
            (light-clip-position world-position shadow-row-x shadow-row-y
                                 shadow-row-z shadow-row-w))
          (jitter (swizzle temporal-parameters :xy)))
+    ;; Do not emulate face culling by moving a vertex off screen.  The
+    ;; facing test is per vertex, so a triangle crossing its threshold turns
+    ;; into an enormous sliver as the camera moves.  The closed surface's
+    ;; normal depth test already hides its far side coherently.
     (set-output clip-position
-                (if front-facing-p
-                    (vec4 (+ (swizzle current-clip :x)
-                             (* (swizzle jitter :x) (swizzle current-clip :w)))
-                          (+ (swizzle current-clip :y)
-                             (* (swizzle jitter :y) (swizzle current-clip :w)))
-                          (swizzle current-clip :z)
-                          (swizzle current-clip :w))
-                    (vec4 2.0 2.0 2.0 1.0)))
+                (vec4 (+ (swizzle current-clip :x)
+                         (* (swizzle jitter :x) (swizzle current-clip :w)))
+                      (+ (swizzle current-clip :y)
+                         (* (swizzle jitter :y) (swizzle current-clip :w)))
+                      (swizzle current-clip :z)
+                      (swizzle current-clip :w)))
     (set-output world-position-output world-position)
     (set-output mesh-normal-output mesh-normal)
     (set-output assembly-output assembly-id)
@@ -1283,8 +1282,7 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
          (radiance (mix drafted blueprint reticle)))
     (set-output color-output (vec4 radiance 1.0))
     (set-output motion-output
-                (mesh-temporal-motion previous-clip current-clip
-                                      temporal-parameters))))
+                (mesh-temporal-motion previous-clip current-clip))))
 
 (define-shader shadow-vertex-specification
     (:stage :vertex

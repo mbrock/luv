@@ -6,6 +6,13 @@
 (defparameter *render-scale* 0.5
   "Linear internal resolution of the LUFT scene before temporal upscaling.")
 
+(defparameter *temporal-upscaling-p* t
+  "Whether LUFT may use the experimental MetalFX temporal path.
+
+The direct HDR presentation remains the default until its temporal inputs have
+a stable motion-validation fixture.  A shimmering reconstruction is worse
+than a stable lower-resolution image.")
+
 (defconstant +sanctuary-origin-x+ 32)
 (defconstant +sanctuary-origin-y+ 24)
 (defparameter *sanctuary-beacon-x* 58)
@@ -851,7 +858,7 @@ so the complete surface needs at most two direct instanced draws."
    (history-used-p :initform nil :accessor renderer-history-used-p)))
 
 (defun metal-temporal-device-p (device)
-  #+darwin (typep device 'metal-gpu-device)
+  #+darwin (and *temporal-upscaling-p* (typep device 'metal-gpu-device))
   #-darwin (declare (ignore device))
   #-darwin nil)
 

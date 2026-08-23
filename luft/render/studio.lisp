@@ -299,10 +299,10 @@ the selector is the whole of the difference."
                 (lane (frame-view-up previous) 0.0)
                 (lane (frame-view-forward previous) 0.0)
                 (coerce (frame-view-projection previous) 'list)
-                ;; MetalFX's default contract expects motion between the
-                ;; jittered current and previous raster positions.  Keep both
-                ;; clip-space offsets together; a projection-mode change
-                ;; invalidates history rather than reprojecting across modes.
+                ;; MetalFX receives the current sample offset separately and
+                ;; its default motion-vector contract is unjittered.  Retain
+                ;; the previous lane shape for ABI stability, but only the
+                ;; current two components participate in rasterization.
                 (list (aref (frame-view-jitter view) 0)
                       (aref (frame-view-jitter view) 1)
                       (aref (frame-view-jitter previous) 0)
