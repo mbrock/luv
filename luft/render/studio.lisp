@@ -335,13 +335,15 @@ the selector is the whole of the difference."
   (flet ((lane (vector fourth)
            (list (vec3:vec3-x vector) (vec3:vec3-y vector)
                  (vec3:vec3-z vector) fourth)))
-    (multiple-value-bind (character previous-character character-direction)
+    (multiple-value-bind (character previous-character character-direction
+                          ball previous-ball)
         (if player
             (walking-player-render-lanes player)
             (values '(0.0 0.0 0.0 0.0) '(0.0 0.0 0.0 0.0)
-                    '(0.0 1.0 0.0 1.0)))
+                    '(0.0 1.0 0.0 1.0)
+                    '(0.0 0.0 0.0 0.0) '(0.0 0.0 0.0 0.0)))
       (make-array
-       100 :element-type 'single-float
+       108 :element-type 'single-float
        :initial-contents
        (mapcar
         (lambda (value) (coerce value 'single-float))
@@ -369,7 +371,7 @@ the selector is the whole of the difference."
                 (coerce inspection-parameters 'list)
                 character
                 (light-uniform-data *light* (frame-view-position view))
-                previous-character character-direction))))))
+                previous-character character-direction ball previous-ball))))))
 
 (defun viewer-logical-extent (viewer)
   (let ((canvas (viewer-canvas viewer)))
@@ -646,6 +648,8 @@ the selector is the whole of the difference."
    (speed :initarg :speed :initform 4.0 :accessor viewer-speed)
    (sensitivity :initarg :sensitivity :initform 0.0032
                 :accessor viewer-sensitivity)
+   (shader-revision :initform 0 :accessor viewer-shader-revision)
+   (shader-diagnostic :initform nil :accessor viewer-shader-diagnostic)
    (running-p :initform t :accessor viewer-running-p)
    (quit-requested-p :initform nil :accessor viewer-quit-requested-p)
    (stop-state :initform :running :accessor viewer-stop-state)
@@ -762,6 +766,17 @@ the selector is the whole of the difference."
 (defun render-viewer-frame (viewer timestamp)
   (declare (ignore timestamp))
   (when (viewer-running-p viewer)
+    (let ((revision (luv.shader:shader-source-revision)))
+      (cond
+        ((zerop (viewer-shader-revision viewer))
+         (setf (viewer-shader-revision viewer) revision))
+        ((> revision (viewer-shader-revision viewer))
+         (setf (viewer-shader-revision viewer) revision)
+         (handler-case (%refresh-viewer-shaders viewer)
+           (error (condition)
+             ;; Keep drawing the last complete renderer.  The failed source
+             ;; remains inspectable and a later edit advances REVISION again.
+             (setf (viewer-shader-diagnostic viewer) condition))))))
     (advance-viewer-streaming viewer)
     (present-canvas-frame
      (viewer-context viewer)
@@ -942,7 +957,8 @@ the selector is the whole of the difference."
     (set-canvas-relative-pointer-mode canvas t)
     (setf (viewer-pointer-captured-p viewer) t))
   (when (viewer-player viewer)
-    (cast-walking-player-spell (viewer-player viewer)))
+    (multiple-value-bind (origin direction) (viewer-pointer-ray viewer)
+      (throw-walking-player-ball (viewer-player viewer) origin direction)))
   nil)
 
 (defmethod handle-canvas-event
@@ -1174,6 +1190,42 @@ the atelier UI."
          (when old-production-system
            (production:stop-production-system old-production-system))
          (when old (destroy-renderer old))))))
+  (values))
+
+(defun %refresh-viewer-shaders (viewer)
+  "Transactionally recompile VIEWER's shader pipelines, retaining its meshes.
+
+A failed edit leaves the last good renderer installed and records the
+condition in VIEWER-SHADER-DIAGNOSTIC.  Successful publication retires the old
+GPU cohort only after the complete candidate exists."
+  (let* ((old (viewer-renderer viewer))
+         (candidate nil)
+         (completed-p nil))
+    (unwind-protect
+         (progn
+             (setf candidate
+                   (make-renderer (viewer-device viewer)
+                                  (canvas-format (viewer-context viewer))
+                                  (canvas-extent (viewer-context viewer))))
+             (dolist (key (renderer-slot-order old))
+               (renderer-set-mesh
+                candidate key
+                (mesh-slot-mesh (gethash key (renderer-mesh-slots old)))))
+             (setf (viewer-renderer viewer) candidate
+                   (viewer-shader-diagnostic viewer) nil
+                   candidate nil
+                   completed-p t)
+             (destroy-renderer old))
+      (unless completed-p
+        (when candidate (destroy-renderer candidate)))))
+  (values))
+
+(defun refresh-viewer-shaders (&optional (viewer *viewer*))
+  "Recompile VIEWER's shaders on its canvas thread."
+  (when viewer
+    (luv::call-on-sdl-canvas-thread
+     (viewer-canvas viewer)
+     (lambda () (%refresh-viewer-shaders viewer))))
   (values))
 
 (defun stop-viewer (&optional (viewer *viewer*))

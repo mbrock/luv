@@ -13,6 +13,8 @@
 (defconstant +walking-player-speed+ 7.0)
 (defconstant +walking-player-gravity+ -24.0)
 (defconstant +walking-player-jump-speed+ 9.0)
+(defconstant +thrown-ball-speed+ 18.0)
+(defconstant +thrown-ball-radius+ 0.32)
 
 (defgeneric inspection-source-solid (source)
   (:documentation "Return SOURCE's packed solid chain for sparse queries."))
@@ -41,7 +43,12 @@
    (grounded-p :initform t :accessor walking-player-grounded-p)
    (jump-requested-p :initform nil
                      :accessor walking-player-jump-requested-p)
-   (spell-flash :initform 0.0 :accessor walking-player-spell-flash))
+   (spell-flash :initform 0.0 :accessor walking-player-spell-flash)
+   (ball-position :initform nil :accessor walking-player-ball-position)
+   (previous-ball-position :initform nil
+                           :accessor walking-player-previous-ball-position)
+   (ball-velocity :initform nil :accessor walking-player-ball-velocity)
+   (ball-age :initform 0.0 :accessor walking-player-ball-age))
   (:documentation
    "The continuous, player-owned state of LUFT's walking character.
 
@@ -133,6 +140,57 @@ for a remote roof, so a wall cannot teleport the player onto its top."
   (setf (walking-player-spell-flash player) 1.0)
   player)
 
+(defun throw-walking-player-ball (player origin direction)
+  "Throw (or replace) PLAYER's ball from ORIGIN along DIRECTION."
+  (let ((position (add-scaled-directions origin direction 1.15)))
+    (setf (walking-player-ball-position player) position
+          (walking-player-previous-ball-position player)
+          (vec3:make-vec3 (vec3:vec3-x position) (vec3:vec3-y position)
+                          (vec3:vec3-z position))
+          (walking-player-ball-velocity player)
+          (vec3:make-vec3 (* +thrown-ball-speed+ (vec3:vec3-x direction))
+                          (* +thrown-ball-speed+ (vec3:vec3-y direction))
+                          (* +thrown-ball-speed+ (vec3:vec3-z direction)))
+          (walking-player-ball-age player) 0.0
+          (walking-player-spell-flash player) 1.0))
+  player)
+
+(defun advance-walking-player-ball (player source seconds)
+  (let ((position (walking-player-ball-position player))
+        (velocity (walking-player-ball-velocity player)))
+    (when (and position velocity)
+      (let ((previous (walking-player-previous-ball-position player)))
+        (setf (vec3:vec3-x previous) (vec3:vec3-x position)
+              (vec3:vec3-y previous) (vec3:vec3-y position)
+              (vec3:vec3-z previous) (vec3:vec3-z position)))
+      (incf (walking-player-ball-age player) seconds)
+      (incf (vec3:vec3-z velocity) (* +walking-player-gravity+ seconds))
+      (let ((solid (inspection-source-solid source)))
+        (dolist (axis '(:x :y :z))
+          (flet ((component (vector)
+                   (ecase axis
+                     (:x (vec3:vec3-x vector)) (:y (vec3:vec3-y vector))
+                     (:z (vec3:vec3-z vector))))
+                 ((setf component) (value vector)
+                   (ecase axis
+                     (:x (setf (vec3:vec3-x vector) value))
+                     (:y (setf (vec3:vec3-y vector) value))
+                     (:z (setf (vec3:vec3-z vector) value)))))
+            (let* ((candidate (+ (component position)
+                                 (* (component velocity) seconds)))
+                 (x (if (eq axis :x) candidate (vec3:vec3-x position)))
+                 (y (if (eq axis :y) candidate (vec3:vec3-y position)))
+                 (z (if (eq axis :z) candidate (vec3:vec3-z position))))
+              (if (plusp (luft:chain-cell-occupancy-bit
+                          solid (floor x) (floor y) (floor z)))
+                  (setf (component velocity) (* -0.58 (component velocity)))
+                  (setf (component position) candidate))))))
+      (when (> (walking-player-ball-age player) 8.0)
+        (setf (walking-player-ball-position player) nil
+              (walking-player-previous-ball-position player) nil
+              (walking-player-ball-velocity player) nil))))
+  player)
+
 (defun advance-walking-player-vertical (player source seconds)
   "Apply Luvcraft-strength gravity to LUFT's Z-up walking controller."
   (let* ((position (walking-player-position player))
@@ -200,6 +258,7 @@ for a remote roof, so a wall cannot teleport the player onto its top."
                 (max (- maximum-change)
                      (min maximum-change difference))))))
   (advance-walking-player-vertical player source seconds)
+  (advance-walking-player-ball player source seconds)
   (setf (walking-player-spell-flash player)
         (max 0.0 (- (walking-player-spell-flash player) (* 2.4 seconds))))
   player)
@@ -244,4 +303,14 @@ for a remote roof, so a wall cannot teleport the player onto its top."
      (list (walking-player-heading-x player)
            (walking-player-heading-y player)
            (walking-player-previous-heading-x player)
-           (walking-player-spell-flash player)))))
+           (walking-player-spell-flash player))
+     (let ((position (walking-player-ball-position player)))
+       (if position
+           (list (vec3:vec3-x position) (vec3:vec3-y position)
+                 (vec3:vec3-z position) +thrown-ball-radius+)
+           '(0.0 0.0 0.0 0.0)))
+     (let ((position (walking-player-previous-ball-position player)))
+       (if position
+           (list (vec3:vec3-x position) (vec3:vec3-y position)
+                 (vec3:vec3-z position) +thrown-ball-radius+)
+           '(0.0 0.0 0.0 0.0))))))

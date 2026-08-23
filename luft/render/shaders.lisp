@@ -13,8 +13,10 @@
   (defvar *screen-ambient-occlusion-radius* 0.95)
   (defvar *ambient-pigment-strength* 0.82)
   (defvar *earth-set-stone-strength* 0.72)
-  (defvar *highlight-glow-threshold* 0.82)
-  (defvar *highlight-glow-strength* 0.24))
+  ;; Match Luvcraft's scene-linear lens defaults.  LUFT uses the same bright
+  ;; signal and gain while retaining its compact presentation gather.
+  (defvar *highlight-glow-threshold* 1.5)
+  (defvar *highlight-glow-strength* 0.22))
 
 (define-shader-function paper-hash (site)
   (let* ((scattered (fract (* site 0.1031)))
@@ -1130,7 +1132,8 @@ that he is standing on something."
 
 (define-shader player-sdf-vertex-specification
     (:stage :vertex
-     :inputs ((vertex-index :uint :built-in :vertex-index))
+     :inputs ((vertex-index :uint :built-in :vertex-index)
+              (instance-index :uint :built-in :instance-index))
      :outputs ((clip-position :vec4 :built-in :position)
                (proxy-world-position-output :vec3 :location 0)
                (center-radius-output :vec4 :location 1)
@@ -1161,7 +1164,9 @@ that he is standing on something."
                             (shadow-row-w :vec4)
                             (shadow-control :vec4)
                             (previous-character-parameters :vec4)
-                            (character-direction :vec4)))
+                            (character-direction :vec4)
+                            (ball-parameters :vec4)
+                            (previous-ball-parameters :vec4)))
                  (shadow-map :depth-texture-2d :binding 1)
                  (shadow-sampler :sampler :binding 2)))
   (let* ((index (float vertex-index))
@@ -1177,16 +1182,16 @@ that he is standing on something."
          ;; extra room goes rather than into a square nobody looks at.
          (across (- (* right-corner 2.0) 1.0))
          (vertical (- (* bottom-corner 2.0) 1.0))
-         (corner (vec2 (* across 1.45)
-                       (if (> vertical 0.0) (* vertical 1.85) vertical)))
-         (center (vec3 (swizzle character-parameters :x)
-                       (swizzle character-parameters :y)
-                       (swizzle character-parameters :z)))
+         (ball-p (> (float instance-index) 0.5))
+         (corner (if ball-p (vec2 across vertical)
+                     (vec2 (* across 1.45)
+                           (if (> vertical 0.0) (* vertical 1.85) vertical))))
+         (center (if ball-p (swizzle ball-parameters :xyz)
+                     (swizzle character-parameters :xyz)))
          (previous-center
-           (vec3 (swizzle previous-character-parameters :x)
-                 (swizzle previous-character-parameters :y)
-                 (swizzle previous-character-parameters :z)))
-         (radius 2.05)
+           (if ball-p (swizzle previous-ball-parameters :xyz)
+               (swizzle previous-character-parameters :xyz)))
+         (radius (if ball-p (swizzle ball-parameters :w) 2.05))
          (proxy-world-position
            (+ (- center (* (swizzle camera-forward :xyz) radius))
               (+ (* (swizzle camera-right :xyz)
@@ -1256,11 +1261,14 @@ that he is standing on something."
                             (shadow-row-w :vec4)
                             (shadow-control :vec4)
                             (previous-character-parameters :vec4)
-                            (character-direction :vec4)))
+                            (character-direction :vec4)
+                            (ball-parameters :vec4)
+                            (previous-ball-parameters :vec4)))
                  (shadow-map :depth-texture-2d :binding 1)
                  (shadow-sampler :sampler :binding 2)))
   (let* ((center (swizzle center-radius :xyz))
          (radius (swizzle center-radius :w))
+         (ball-p (< radius 1.0))
          (gait (swizzle character-parameters :w))
          (spell-flash (swizzle character-direction :w))
          ;; The game controller rotates world space into the traveler's local
@@ -1287,8 +1295,11 @@ that he is standing on something."
                                  (dot relative-xy heading)
                                  (+ (swizzle relative :z) 1.48)))
                     (distance
-                      (min (player-distance local gait direction)
-                           (player-wizard-orb-distance local))))
+                      (if ball-p
+                          (- (sqrt (dot (- world-point center)
+                                        (- world-point center))) radius)
+                          (min (player-distance local gait direction)
+                               (player-wizard-orb-distance local)))))
                (if (< distance 0.0025)
                    ray-distance
                    (if (> ray-distance (* radius 2.0))
@@ -1296,14 +1307,21 @@ that he is standing on something."
                        (+ ray-distance (max (* distance 0.82) 0.0025)))))))
          (world-point (+ origin (* ray travel)))
          (relative (- world-point center))
+         (ball-offset (- world-point center))
          (relative-xy (swizzle relative :xy))
          (local (vec3 (dot relative-xy player-right)
                       (dot relative-xy heading)
                       (+ (swizzle relative :z) 1.48)))
-         (player-surface-distance (player-distance local gait direction))
-         (orb-surface-distance (player-wizard-orb-distance local))
-         (orb-p (< orb-surface-distance player-surface-distance))
-         (surface-distance (min player-surface-distance orb-surface-distance))
+         (player-surface-distance
+           (if ball-p (- (sqrt (dot ball-offset ball-offset)) radius)
+               (player-distance local gait direction)))
+         (orb-surface-distance
+           (if ball-p 1000.0 (player-wizard-orb-distance local)))
+         (orb-p (if ball-p (< radius 0.0)
+                    (< orb-surface-distance player-surface-distance)))
+         (surface-distance (if ball-p player-surface-distance
+                               (min player-surface-distance
+                                    orb-surface-distance)))
          (coverage (- 1.0 (step 0.006 surface-distance)))
          (local-normal
            (if orb-p
@@ -1312,9 +1330,12 @@ that he is standing on something."
                ;; glow read as one spell instead of pixel speckle.
                (normalize (- local (vec3 0.640 0.195 3.34)))
                (player-normal local gait direction)))
-         (normal (normalize (player-world-direction local-normal heading)))
-         (albedo (if orb-p (vec3 0.42 0.88 1.0)
-                     (player-albedo local gait direction)))
+         (normal
+           (if ball-p (normalize (- world-point center))
+               (normalize (player-world-direction local-normal heading))))
+         (albedo (if ball-p (vec3 0.92 0.16 0.075)
+                     (if orb-p (vec3 0.42 0.88 1.0)
+                         (player-albedo local gait direction))))
          (sun (swizzle sun-vector :xyz))
          (sun-color (swizzle sun-color-vector :xyz))
          (sky (swizzle sky-color-vector :xyz))
@@ -1381,9 +1402,10 @@ that he is standing on something."
                   (swizzle deck-clip :z))
             (vec3 0.0 0.0 1.0) sun shadow-control))
          (contact
-           (* (* (player-contact-shade origin ray center sun deck-height)
-                 deck-lit)
-              (- 1.0 coverage)))
+           (if ball-p 0.0
+               (* (* (player-contact-shade origin ray center sun deck-height)
+                     deck-lit)
+                  (- 1.0 coverage))))
          (shade-color (* (vec3 0.155 0.140 0.205) contact))
          (composite-alpha (+ coverage contact)))
     (set-output color-output
@@ -1942,6 +1964,30 @@ that he is standing on something."
                             (character-parameters :vec4)))))
   (let* ((uv (+ (* ndc 0.5) (vec2 0.5 0.5)))
          (value (sample scene scene-sampler uv))
+         ;; A sparse whole-frame luminance probe gives the paper camera an
+         ;; exposure of its own.  This intentionally ignores the outermost
+         ;; border (where sky would dominate) and clamps to a three-stop
+         ;; operating range, so entering a gate adapts without a flash.
+         (probe-a (sample scene scene-sampler (vec2 0.25 0.25)))
+         (probe-b (sample scene scene-sampler (vec2 0.50 0.25)))
+         (probe-c (sample scene scene-sampler (vec2 0.75 0.25)))
+         (probe-d (sample scene scene-sampler (vec2 0.25 0.50)))
+         (probe-e (sample scene scene-sampler (vec2 0.50 0.50)))
+         (probe-f (sample scene scene-sampler (vec2 0.75 0.50)))
+         (probe-g (sample scene scene-sampler (vec2 0.25 0.75)))
+         (probe-h (sample scene scene-sampler (vec2 0.50 0.75)))
+         (probe-i (sample scene scene-sampler (vec2 0.75 0.75)))
+         (probe-total
+           (+ (+ (+ (swizzle probe-a :xyz) (swizzle probe-b :xyz))
+                 (+ (swizzle probe-c :xyz) (swizzle probe-d :xyz)))
+              (+ (+ (swizzle probe-e :xyz) (swizzle probe-f :xyz))
+                 (+ (+ (swizzle probe-g :xyz) (swizzle probe-h :xyz))
+                    (swizzle probe-i :xyz)))))
+         (average-luminance
+           (* (/ 1.0 9.0)
+              (dot probe-total (vec3 0.2126 0.7152 0.0722))))
+         (auto-exposure (clamp (/ 0.42 (+ average-luminance 0.08))
+                               0.38 1.55))
          (texel (swizzle inspection-parameters :zw))
          (near (* texel 3.0))
          (far (* texel 11.0))
@@ -2147,10 +2193,12 @@ that he is standing on something."
                  (swizzle (sample scene scene-sampler
                                   (- uv (vec2 0.0 (swizzle blur-radius :y))))
                           :xyz))))
-         (glowing (mix (swizzle pigmented :xyz) blurred (* tilt 0.52)))
+         (bloomed (+ (swizzle pigmented :xyz)
+                     (* glow #.*highlight-glow-strength*)))
+         (glowing (mix bloomed blurred (* tilt 0.52)))
          ;; MetalFX has already reconstructed GLowing at this point.  Grade
          ;; it once, with a little exposure headroom for the sunlit grass and
          ;; the wizard's HDR spell rather than clipping both into parchment.
-         (mapped (paper-grade (paper-tonemap (* glowing 0.82)))))
+         (mapped (paper-grade (paper-tonemap (* glowing auto-exposure)))))
     (set-output color-output
                 (vec4 mapped 1.0))))

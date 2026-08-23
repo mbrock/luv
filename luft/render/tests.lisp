@@ -201,6 +201,23 @@
                (luv.arithmetic.lisp.vec3:vec3-x
                 (render:walking-player-position player))))))))
 
+(deftest click-thrown-ball-has-motion-and-render-state
+  (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
+         (scene (luft.render::finish-scene-builder builder :player-p t))
+         (player (render:make-walking-player))
+         (origin (luv.arithmetic.lisp.vec3:make-vec3 2.0 2.0 4.0))
+         (direction (luv.arithmetic.lisp.vec3:make-vec3 1.0 0.0 0.0)))
+    (luft.render::throw-walking-player-ball player origin direction)
+    (let ((before (luv.arithmetic.lisp.vec3:vec3-x
+                   (luft.render::walking-player-ball-position player))))
+      (luft.render::advance-walking-player-ball player scene 0.1)
+      (ok (> (luv.arithmetic.lisp.vec3:vec3-x
+              (luft.render::walking-player-ball-position player)) before)))
+    (multiple-value-bind (character previous direction-lane ball previous-ball)
+        (luft.render::walking-player-render-lanes player)
+      (declare (ignore character previous direction-lane previous-ball))
+      (ok (= luft.render::+thrown-ball-radius+ (fourth ball))))))
+
 (deftest the-spike-scene-is-three-site-instance-streams
   (let* ((mesh (render:make-render-mesh
                 (render:make-manifold-spike-scene)))
@@ -991,8 +1008,8 @@
                          camera 1100 800 #(0.0 0.0))))
                   (luft.render::camera-uniform-data
                    view view #(0.5 0.5 0.001 0.001) 1.0 player 1)))))
-        (ok (= 100 (length perspective)))
-        (ok (typep perspective '(simple-array single-float (100))))
+        (ok (= 108 (length perspective)))
+        (ok (typep perspective '(simple-array single-float (108))))
         (ok (= 1.0 (aref perspective 22)))
         (ok (= 0.0 (aref isometric 22)))
         (flet ((depth (data view-z)
@@ -1024,7 +1041,7 @@
                (aref perspective 91)))
         (ok (equalp #(61.5 48.5 15.48 0.0)
                     (subseq perspective 92 96)))
-        (ok (equalp #(0.0 1.0 0.0 1.0)
+        (ok (equalp #(0.0 1.0 0.0 0.0)
                     (subseq perspective 96 100)))))))
 
 (deftest the-light-frame-is-texel-stable-under-subtexel-camera-motion

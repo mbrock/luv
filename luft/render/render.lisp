@@ -1307,7 +1307,7 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                  (create device
                          (make-buffer-descriptor
                           :label "luft frame state"
-                          :size 400 :usage '(:uniform :copy-dst)))
+                          :size 432 :usage '(:uniform :copy-dst)))
                  shadow-texture
                  (create device
                          (make-texture-descriptor
@@ -1619,7 +1619,7 @@ cohort untouched. No frame can interleave with the owner-thread publication."
     (when player-p
       (set-pipeline pass (renderer-player-sdf-pipeline renderer))
       (set-bind-group pass 0 (renderer-player-sdf-bind-group renderer))
-      (draw pass 6))
+      (draw pass 6 2))
     (when construction-p
       (set-pipeline pass (renderer-lattice-point-pipeline renderer))
       (dolist (key (renderer-slot-order renderer))

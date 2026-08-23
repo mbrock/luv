@@ -65,6 +65,7 @@
            #:start-viewer
            #:stop-viewer
            #:refresh-viewer-renderer
+           #:refresh-viewer-shaders
            #:capture-viewer-frame
            #:*wireframe*
            #:*inspection-ink-p*
@@ -74,6 +75,7 @@
            #:*character-time*
            #:viewer
            #:viewer-renderer
+           #:viewer-shader-diagnostic
            #:viewer-running-p
            #:*viewer*
            #:main
