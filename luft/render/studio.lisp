@@ -633,6 +633,8 @@ the selector is the whole of the difference."
                       :accessor viewer-production-system)
    (bevel-width :initarg :bevel-width :initform 2
                 :accessor viewer-bevel-width)
+   (bevel-profile :initarg :bevel-profile :initform nil
+                  :accessor viewer-bevel-profile)
    (camera :initarg :camera :initform (make-fly-camera) :reader viewer-camera)
    (player :initarg :player :initform (make-walking-player)
            :accessor viewer-player)
@@ -847,6 +849,8 @@ the selector is the whole of the difference."
       (setf (renderer-history-valid-p (viewer-renderer viewer)) nil))
     (refresh-viewer-inspector viewer)))
 
+(declaim (ftype function refresh-viewer-renderer))
+
 (clim:define-command (com-toggle-bevel-width
                       :command-table luft-atelier
                       :name "Toggle Bevel Width"
@@ -855,7 +859,8 @@ the selector is the whole of the difference."
   (let* ((viewer (viewer-command-viewer))
          (bevel-width (next-bevel-width (viewer-bevel-width viewer))))
     (refresh-viewer-renderer
-     viewer :solid (viewer-source viewer) :bevel-width bevel-width)
+     viewer :solid (viewer-source viewer) :bevel-width bevel-width
+            :bevel-profile nil)
     (refresh-viewer-inspector viewer)))
 
 (clim:define-command (com-release-pointer :command-table luft-window
@@ -1014,6 +1019,7 @@ the selector is the whole of the difference."
 (defun start-viewer (&key
                        (solid (make-mountain-sanctuary-scene))
                        (bevel-width 2)
+                       bevel-profile
                        (camera (make-fly-camera))
                        (title "LUFT — walk the mountain · WASD · mouse orbit")
                        (width 1100) (height 800)
@@ -1021,7 +1027,13 @@ the selector is the whole of the difference."
                        (inspector-p nil)
                        (frames-per-second 60)
                        (provider *gpu-provider*))
-  "Open the indexed-instanced LUFT renderer as a McCLIM atelier."
+  "Open the indexed-instanced LUFT renderer as a McCLIM atelier.
+
+BEVEL-PROFILE enables the experimental material-selected width cohorts for a
+non-streaming scene.  BEVEL-WIDTH remains the camera/inspection reference and
+the uniform fallback."
+  (when (and bevel-profile (typep solid 'streaming-scene))
+    (error "Material bevel profiles do not yet support streaming scenes."))
   (let ((canvas
           (make-sdl-canvas
            :title title :width width :height height :visible-p nil
@@ -1073,11 +1085,15 @@ the selector is the whole of the difference."
                                           (scene-player-p solid)
                                           (make-walking-player))
                              :bevel-width bevel-width
+                             :bevel-profile bevel-profile
                              :inspector-p inspector-p))))
            (unless (typep solid 'streaming-scene)
-             (renderer-set-mesh renderer* 0
-                                (make-render-mesh solid
-                                                  :bevel-width bevel-width)))
+             (if bevel-profile
+                 (renderer-set-meshes
+                  renderer* (make-material-bevel-meshes solid bevel-profile))
+                 (renderer-set-mesh renderer* 0
+                                    (make-render-mesh
+                                     solid :bevel-width bevel-width))))
            (setf (canvas-event-handler canvas) viewer)
            (when inspector-p
              (refresh-viewer-inspector viewer)
@@ -1236,9 +1252,16 @@ production gets the same opportunity to publish as it does in the window."
 
 (defun refresh-viewer-renderer (&optional (viewer *viewer*)
                                 &key (solid (make-mountain-sanctuary-scene))
-                                     bevel-width)
-  "Rebuild VIEWER at BEVEL-WIDTH so edited geometry and shaders take effect."
+                                     (bevel-width
+                                       (and viewer
+                                            (viewer-bevel-width viewer)))
+                                     (bevel-profile
+                                       (and viewer
+                                            (viewer-bevel-profile viewer))))
+  "Rebuild VIEWER at BEVEL-WIDTH or its material BEVEL-PROFILE."
   (when viewer
+    (when (and bevel-profile (typep solid 'streaming-scene))
+      (error "Material bevel profiles do not yet support streaming scenes."))
     (luv::call-on-sdl-canvas-thread
      (viewer-canvas viewer)
      (lambda ()
@@ -1257,13 +1280,19 @@ production gets the same opportunity to publish as it does in the window."
                                 (make-renderer (viewer-device viewer)
                                                (canvas-format context)
                                                (canvas-extent context)))))
-                    (if (typep solid 'streaming-scene)
-                        (setf production-system
-                              (production:make-single-worker-production-system
-                               :name "LUFT mesh producer"))
-                        (renderer-set-mesh renderer 0
-                                           (make-render-mesh
-                                            solid :bevel-width bevel-width)))
+                    (cond
+                      ((typep solid 'streaming-scene)
+                       (setf production-system
+                             (production:make-single-worker-production-system
+                              :name "LUFT mesh producer")))
+                      (bevel-profile
+                       (renderer-set-meshes
+                        renderer
+                        (make-material-bevel-meshes solid bevel-profile)))
+                      (t
+                       (renderer-set-mesh renderer 0
+                                          (make-render-mesh
+                                           solid :bevel-width bevel-width))))
                     (setf (viewer-renderer viewer) renderer
                           (viewer-production-system viewer) production-system
                           (viewer-source viewer) solid
@@ -1272,6 +1301,7 @@ production gets the same opportunity to publish as it does in the window."
                                (or (viewer-player viewer)
                                    (make-walking-player)))
                           (viewer-bevel-width viewer) bevel-width
+                          (viewer-bevel-profile viewer) bevel-profile
                           (viewer-inspection viewer) nil
                           candidate-renderer nil))
                 (error (condition)

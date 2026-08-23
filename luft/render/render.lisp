@@ -546,6 +546,45 @@ from an exposed or buried foundation without adding per-site material objects."
                                    chamfer-stock-function
                                    :bevel-width bevel-width))))
 
+(defun make-material-bevel-meshes (scene profile)
+  "Build material-selected uniform-width cohorts for experimental rendering.
+
+PROFILE is compiled to a dense stock-to-width lane.  For every selected width
+the ordinary uniform mesher remains the geometry oracle; its instance streams
+are then partitioned by stock and returned as an alist of width to mesh.  Every
+rendered primitive therefore comes from one existing exact LUFT construction.
+
+This proof does not solve unequal-width junction geometry.  Neighboring
+cohorts can expose the seam between their independently constructed surfaces;
+that visible failure is evidence for the eventual transition rule."
+  (check-type scene scene)
+  (check-type profile material-bevel-profile)
+  ;; The chamfer stock function can intern authored material assemblies while
+  ;; the first mesh is built.  Discover that complete vocabulary before
+  ;; freezing the dense profile lane.
+  (let* ((discovery-width luft:+mesh-bevel-width+)
+         (discovery-mesh
+           (make-render-mesh scene :bevel-width discovery-width))
+         (width-table (compile-material-bevel-profile profile))
+         (widths (sort (remove-duplicates (coerce width-table 'list)) #'<))
+         (result nil))
+    (dolist (width widths (nreverse result))
+      (let* ((mesh (if (= width discovery-width)
+                       discovery-mesh
+                       (make-render-mesh scene :bevel-width width)))
+             (selected
+               (luft:select-surface-mesh-stocks
+                mesh
+                (lambda (stock)
+                  (unless (< stock (length width-table))
+                    (error "Mesh stock ~D is outside the compiled material bevel profile of ~D entries."
+                           stock (length width-table)))
+                  (= width (aref width-table stock))))))
+        (unless (and (zerop (luft:surface-mesh-face-instance-count selected))
+                     (zerop (luft:surface-mesh-band-instance-count selected))
+                     (zerop (luft:surface-mesh-fan-instance-count selected)))
+          (push (cons width selected) result))))))
+
 (defparameter *gallery*
   ;; Each entry is one isolated complex, named by the star configuration it
   ;; is there to exhibit.  Cells are offsets from the entry's plot origin.

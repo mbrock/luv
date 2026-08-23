@@ -44,7 +44,7 @@
 
 (defun capture-luft-material-contact
     (pathname position isometric-height title
-     &key (yaw 2.2455373) (pitch -0.5165006) player-p)
+     &key (yaw 2.2455373) (pitch -0.5165006) player-p bevel-profile)
   (let ((viewer nil)
         (old-projection luft.render:*projection*)
         (old-isometric-height luft.render:*isometric-height*)
@@ -66,6 +66,7 @@
                       (setf (slot-value scene 'luft.render::player-p) nil))
                     scene)
                   :bevel-width luft:+mesh-bevel-width+
+                  :bevel-profile bevel-profile
                   :camera
                   (luft.render:make-fly-camera
                    :position position
@@ -152,6 +153,40 @@
    (luv.arithmetic.lisp.vec3:make-vec3 112.0 50.0 42.0)
    10.0 "LUFT ridge beacon material frame"
    :yaw 2.2455373 :pitch -0.5165006))
+
+(luv:define-capture luft-material-bevel-policy-high-country
+    (:figure W1D4TH :kind :image :extension "png" :layout :landscape
+     :description
+     "A material bevel experiment: broad terrain at width four and crisp sanctuary stone at width one.")
+  (pathname)
+  (capture-luft-material-contact
+   pathname
+   (luv.arithmetic.lisp.vec3:make-vec3 117.0 59.0 50.0)
+   14.0 "LUFT material bevel policy - high country"
+   :yaw 2.3561945 :pitch -0.545
+   :bevel-profile (luft.render:make-material-bevel-profile)))
+
+(luv:define-capture luft-material-bevel-policy-mountain
+    (:figure M1XWTH :kind :image :extension "png" :layout :landscape
+     :description
+     "The authored mountain under terrain-four, architecture-one, and mixed-contact-two bevel cohorts.")
+  (pathname)
+  (capture-luft-material-contact
+   pathname
+   (luv.arithmetic.lisp.vec3:make-vec3 102.0 6.0 50.0)
+   32.0 "LUFT material bevel policy - mountain"
+   :bevel-profile (luft.render:make-material-bevel-profile)))
+
+(luv:define-capture luft-material-bevel-policy-contact
+    (:figure J01NTS :kind :image :extension "png" :layout :landscape
+     :description
+     "A close view of the unresolved junction between independently meshed material widths.")
+  (pathname)
+  (capture-luft-material-contact
+   pathname
+   (luv.arithmetic.lisp.vec3:make-vec3 80.0 43.0 32.0)
+   7.0 "LUFT material bevel policy - contact"
+   :bevel-profile (luft.render:make-material-bevel-profile)))
 
 (defun capture-luft-miter-closeup (pathname wireframe title)
   "Capture the #xCD wall termination at the normal chamfer width. #L7N4MO"

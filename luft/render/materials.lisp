@@ -252,6 +252,84 @@
 (defun surface-assembly-at (offset)
   (domains:identity-vocabulary-member *surface-assembly-vocabulary* offset))
 
+;;; Geometry policy is semantic at this boundary and dense below it.  The
+;;; proof-of-concept profile compiles once to a stock-indexed byte lane; mesh
+;;; instance partitioning never dispatches on material objects.
+
+(defclass material-bevel-profile ()
+  ((terrain-width :initarg :terrain-width :initform 4
+                  :reader material-bevel-profile-terrain-width)
+   (architecture-width :initarg :architecture-width :initform 1
+                       :reader material-bevel-profile-architecture-width)
+   (contact-width :initarg :contact-width :initform 2
+                  :reader material-bevel-profile-contact-width))
+  (:documentation
+   "A semantic assignment of LUFT integer bevel widths to material relations."))
+
+(defun make-material-bevel-profile
+    (&key (terrain-width 4) (architecture-width 1) (contact-width 2))
+  (dolist (width (list terrain-width architecture-width contact-width))
+    (unless (and (integerp width)
+                 (<= 1 width (/ luft:+mesh-cell-size+ 2)))
+      (error "Material bevel width ~S must be an integer between one and four ticks."
+             width)))
+  (make-instance 'material-bevel-profile
+                 :terrain-width terrain-width
+                 :architecture-width architecture-width
+                 :contact-width contact-width))
+
+(defun architecture-surface-reading-p (reading)
+  (member (surface-reading-role reading) '(:architecture :foundation)))
+
+(defun surface-assembly-readings (assembly)
+  (remove-duplicates
+   (remove nil (list (surface-assembly-primary assembly)
+                     (surface-assembly-secondary assembly)
+                     (surface-assembly-tertiary assembly)))
+   :test #'eq))
+
+(defgeneric material-bevel-width (profile assembly)
+  (:documentation
+   "Return the integer LUFT bevel width assigned to semantic ASSEMBLY."))
+
+(defmethod material-bevel-width
+    ((profile material-bevel-profile) (assembly surface-assembly))
+  (let* ((readings (surface-assembly-readings assembly))
+         (architecture-p (some #'architecture-surface-reading-p readings))
+         (terrain-p (some (complement #'architecture-surface-reading-p)
+                          readings)))
+    (cond
+      ;; A face remains owned by its primary authored reading.  Foundation
+      ;; faces carry soil readings for weathering without becoming a geometric
+      ;; material contact.
+      ((eq :face (surface-assembly-relation assembly))
+       (if (architecture-surface-reading-p
+            (surface-assembly-primary assembly))
+           (material-bevel-profile-architecture-width profile)
+           (material-bevel-profile-terrain-width profile)))
+      ((and architecture-p terrain-p)
+       (material-bevel-profile-contact-width profile))
+      (architecture-p
+       (material-bevel-profile-architecture-width profile))
+      (t
+       (material-bevel-profile-terrain-width profile)))))
+
+(defun compile-material-bevel-profile
+    (profile &optional (vocabulary *surface-assembly-vocabulary*))
+  "Compile PROFILE to one unsigned-byte width per packed assembly stock."
+  (check-type profile material-bevel-profile)
+  (let* ((members (domains:identity-vocabulary-members vocabulary))
+         (widths (make-array (length members) :element-type '(unsigned-byte 8))))
+    (loop for assembly across members
+          for stock from 0
+          for width = (material-bevel-width profile assembly)
+          do (unless (and (integerp width)
+                          (<= 1 width (/ luft:+mesh-cell-size+ 2)))
+               (error "Material bevel policy assigned invalid width ~S to ~S."
+                      width assembly))
+             (setf (aref widths stock) width))
+    widths))
+
 ;; The first nine vocabulary members are the stable renderer ABI.  The tests
 ;; rebuild this exact prefix from the semantic objects, so these literals are
 ;; available while this file itself is being compiled in a clean image.

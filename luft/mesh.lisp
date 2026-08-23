@@ -1646,6 +1646,47 @@ witness scan."
            face-triangles band-triangles fan-triangles
            (surface-mesh-builder-singular-star-count builder)))))))
 
+(defun select-surface-mesh-stocks (mesh predicate)
+  "Return MESH's instances whose packed stock satisfies PREDICATE.
+
+The exact template vocabulary and geometry width remain borrowed from MESH;
+only the three dense instance streams are partitioned.  This is intended for
+coarse materialization policy such as independently resident material cohorts,
+not as a substitute for a variable-width junction construction."
+  (check-type mesh surface-mesh)
+  (check-type predicate function)
+  (labels ((selected-stream (words)
+             (let ((stream (%make-instance-stream)))
+               (loop for offset from 0 below (length words)
+                       by +mesh-instance-word-count+
+                     for meta = (aref words (+ offset 3))
+                     for stock =
+                       (ldb (byte +mesh-instance-stock-bit-count+
+                                  +mesh-instance-stock-shift+)
+                            meta)
+                     when (funcall predicate stock)
+                       do (loop for word-offset below
+                                +mesh-instance-word-count+
+                                do (vector-push-extend
+                                    (aref words (+ offset word-offset))
+                                    (instance-stream-words stream))))
+               (%finish-instance-stream
+                stream (surface-mesh-template-ranges mesh)))))
+    (multiple-value-bind (face-words face-draws face-triangles)
+        (selected-stream (surface-mesh-face-instance-words mesh))
+      (multiple-value-bind (band-words band-draws band-triangles)
+          (selected-stream (surface-mesh-band-instance-words mesh))
+        (multiple-value-bind (fan-words fan-draws fan-triangles)
+            (selected-stream (surface-mesh-fan-instance-words mesh))
+          (%make-surface-mesh
+           (surface-mesh-domain mesh)
+           (surface-mesh-bevel-width mesh)
+           (surface-mesh-template-vertex-words mesh)
+           (surface-mesh-template-ranges mesh)
+           face-words face-draws band-words band-draws fan-words fan-draws
+           face-triangles band-triangles fan-triangles
+           (surface-mesh-singular-star-count mesh)))))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Exact coplanar compression
 

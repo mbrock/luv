@@ -65,6 +65,7 @@
    #:surface-mesh-band-triangle-count #:surface-mesh-fan-triangle-count
    #:surface-mesh-singular-star-count
    #:star-singular-p #:decompose-star-mask #:make-surface-mesh #:mesh-chunk
+   #:select-surface-mesh-stocks
    ;; Tests.
    #:run-luft-tests))
 
