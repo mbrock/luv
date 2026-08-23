@@ -72,7 +72,20 @@
     (ok (plusp (luft:surface-mesh-face-triangle-count mesh)))
     (ok (plusp (luft:surface-mesh-band-triangle-count mesh)))
     (ok (plusp (luft:surface-mesh-junction-triangle-count mesh)))
-    (ok (zerop (luft:surface-mesh-singular-star-count mesh)))))
+    (ok (zerop (luft:surface-mesh-singular-star-count mesh)))
+    (let ((vertices (luft:surface-mesh-vertex-words mesh))
+          (lattice (luft.render::mesh-lattice-point-words mesh)))
+      (ok (loop for offset from 3 below (length vertices)
+                  by luft:+mesh-vertex-word-count+
+                always (plusp (ldb (byte 3 14) (aref vertices offset)))))
+      (ok (loop for offset from 3 below (length vertices)
+                  by luft:+mesh-vertex-word-count+
+                thereis (/= #b111
+                            (ldb (byte 3 14) (aref vertices offset)))))
+      (ok (loop for offset from 3 below (length lattice) by 4
+                thereis (zerop (aref lattice offset))))
+      (ok (loop for offset from 3 below (length lattice) by 4
+                thereis (= 1 (aref lattice offset)))))))
 
 (deftest mesh-and-atelier-shaders-lower-through-both-conventional-backends
   (let* ((vertex (luft.render.shaders:mesh-vertex-specification))

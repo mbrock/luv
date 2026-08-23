@@ -562,22 +562,51 @@ consequence of its own occupancy star and can be read on its own."
   renderer)
 
 (defun mesh-lattice-point-words (mesh)
-  "Unique emitted mesh positions, retained in exact eighth-cell coordinates."
-  (let ((seen (make-hash-table :test #'equal))
+  "Mesh vertices and eighth-step samples along axis-aligned boundary edges."
+  (let ((points (make-hash-table :test #'equal))
         (result (make-array 64 :element-type '(unsigned-byte 32)
                               :adjustable t :fill-pointer 0))
         (words (luft:surface-mesh-vertex-words mesh)))
-    (loop for offset from 0 below (length words) by luft:+mesh-vertex-word-count+
-          for x = (aref words offset)
-          for y = (aref words (+ offset 1))
-          for z = (aref words (+ offset 2))
-          for point = (list x y z)
-          unless (gethash point seen)
-            do (setf (gethash point seen) t)
-               (vector-push-extend x result)
-               (vector-push-extend y result)
-               (vector-push-extend z result)
-               (vector-push-extend 0 result))
+    (labels ((vertex-position (vertex)
+               (let ((offset (* vertex luft:+mesh-vertex-word-count+)))
+                 (list (aref words offset)
+                       (aref words (+ offset 1))
+                       (aref words (+ offset 2)))))
+             (remember (point mesh-vertex-p)
+               (setf (gethash point points)
+                     (max (if mesh-vertex-p 1 0)
+                          (gethash point points 0))))
+             (sample-axis-edge (left right)
+               (let ((different
+                       (loop for axis below 3
+                             unless (= (nth axis left) (nth axis right))
+                               collect axis)))
+                 (when (= 1 (length different))
+                   (let* ((axis (first different))
+                          (low (min (nth axis left) (nth axis right)))
+                          (high (max (nth axis left) (nth axis right))))
+                     (loop for coordinate from low to high do
+                       (let ((point (copy-list left)))
+                         (setf (nth axis point) coordinate)
+                         (remember point nil))))))))
+      (loop for vertex below (/ (length words) luft:+mesh-vertex-word-count+)
+            do (remember (vertex-position vertex) t))
+      (loop for triangle-base from 0
+              below (/ (length words) luft:+mesh-vertex-word-count+) by 3
+            for attributes =
+              (aref words (+ (* triangle-base luft:+mesh-vertex-word-count+) 3))
+            for edge-mask = (ldb (byte 3 14) attributes)
+            for a = (vertex-position triangle-base)
+            for b = (vertex-position (+ triangle-base 1))
+            for c = (vertex-position (+ triangle-base 2))
+            when (logbitp 0 edge-mask) do (sample-axis-edge b c)
+            when (logbitp 1 edge-mask) do (sample-axis-edge a c)
+            when (logbitp 2 edge-mask) do (sample-axis-edge a b)))
+    (maphash
+     (lambda (point mesh-vertex-p)
+       (dolist (coordinate point) (vector-push-extend coordinate result))
+       (vector-push-extend mesh-vertex-p result))
+     points)
     (coerce result '(simple-array (unsigned-byte 32) (*)))))
 
 (defun make-renderer (device mesh color-format extent)

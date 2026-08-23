@@ -76,7 +76,9 @@
                (barycentric-output :vec3 :location 3)
                (current-clip-output :vec4 :location 4)
                (previous-clip-output :vec4 :location 5)
-               (kind-output :float :location 6 :interpolation :flat))
+               (kind-output :float :location 6 :interpolation :flat)
+               (boundary-edge-mask-output :uint :location 7
+                                          :interpolation :flat))
      :resources ((vertices :storage-buffer :binding 0 :element :uvec4)
                  (camera-state :uniform-block :binding 1
                   :members ((camera-position :vec4)
@@ -106,6 +108,7 @@
          (stock (float (ldb (byte 4 6) attributes)))
          (barycentric-index (uint (ldb (byte 2 10) attributes)))
          (kind (float (ldb (byte 2 12) attributes)))
+         (boundary-edge-mask (uint (ldb (byte 3 14) attributes)))
          (barycentric
            (if (= barycentric-index (uint 0.0))
                (vec3 1.0 0.0 0.0)
@@ -135,7 +138,8 @@
     (set-output barycentric-output barycentric)
     (set-output current-clip-output current-clip)
     (set-output previous-clip-output previous-clip)
-    (set-output kind-output kind)))
+    (set-output kind-output kind)
+    (set-output boundary-edge-mask-output boundary-edge-mask)))
 
 (define-shader mesh-fragment-specification
     (:stage :fragment
@@ -145,7 +149,8 @@
               (barycentric :vec3 :location 3)
               (current-clip :vec4 :location 4)
               (previous-clip :vec4 :location 5)
-              (kind :float :location 6 :interpolation :flat))
+              (kind :float :location 6 :interpolation :flat)
+              (boundary-edge-mask :uint :location 7 :interpolation :flat))
      :outputs ((color-output :vec4 :location 0)
                (motion-output :vec2 :location 1))
      :resources ((camera-state :uniform-block :binding 1
@@ -216,16 +221,26 @@
          (barycentric-dx (derivative-x barycentric))
          (barycentric-dy (derivative-y barycentric))
          (barycentric-width (+ (abs barycentric-dx) (abs barycentric-dy)))
-         (edge-pixels
-           (min (min (/ (swizzle barycentric :x)
-                        (max (swizzle barycentric-width :x) 0.000001))
-                     (/ (swizzle barycentric :y)
-                        (max (swizzle barycentric-width :y) 0.000001)))
-                (/ (swizzle barycentric :z)
-                   (max (swizzle barycentric-width :z) 0.000001))))
+         (edge-x (/ (swizzle barycentric :x)
+                    (max (swizzle barycentric-width :x) 0.000001)))
+         (edge-y (/ (swizzle barycentric :y)
+                    (max (swizzle barycentric-width :y) 0.000001)))
+         (edge-z (/ (swizzle barycentric :z)
+                    (max (swizzle barycentric-width :z) 0.000001)))
+         (edge-pixels (min (min edge-x edge-y) edge-z))
+         (boundary-edge-pixels
+           (min (min (if (= (ldb (byte 1 0) boundary-edge-mask) (uint 1.0))
+                         edge-x 10000.0)
+                     (if (= (ldb (byte 1 1) boundary-edge-mask) (uint 1.0))
+                         edge-y 10000.0))
+                (if (= (ldb (byte 1 2) boundary-edge-mask) (uint 1.0))
+                    edge-z 10000.0)))
+         (all-wire (- 1.0 (smoothstep 0.45 1.15 edge-pixels)))
+         (boundary-wire
+           (- 1.0 (smoothstep 0.45 1.15 boundary-edge-pixels)))
          (construction-wire
            (* (swizzle render-parameters :y)
-              (- 1.0 (smoothstep 0.45 1.15 edge-pixels))))
+              (min 1.0 (+ (* all-wire 0.18) (* boundary-wire 0.82)))))
          (fragment-uv (mesh-clip-uv current-clip))
          (pointer-delta
            (/ (- fragment-uv (swizzle inspection-parameters :xy))
@@ -256,7 +271,9 @@
      :outputs ((clip-position :vec4 :built-in :position)
                (marker-coordinate-output :vec2 :location 0)
                (current-clip-output :vec4 :location 1)
-               (previous-clip-output :vec4 :location 2))
+               (previous-clip-output :vec4 :location 2)
+               (mesh-vertex-output :float :location 3
+                                   :interpolation :flat))
      :resources ((lattice-points :storage-buffer :binding 0 :element :uvec4)
                  (camera-state :uniform-block :binding 1
                   :members ((camera-position :vec4)
@@ -287,6 +304,7 @@
                          (if (= index 5.0) 1.0 0.0))))
          (coordinate (vec2 (- (* right 2.0) 1.0)
                            (- (* bottom 2.0) 1.0)))
+         (mesh-vertex (if (> (swizzle record :w) (uint 0.0)) 1.0 0.0))
          (current-clip
            (mesh-view-clip world-position camera-position camera-right
                            camera-up camera-forward camera-projection
@@ -297,7 +315,7 @@
                            previous-camera-forward previous-camera-projection
                            (swizzle temporal-parameters :z)))
          (pixel-size (swizzle inspection-parameters :zw))
-         (radius 6.5)
+         (radius (if (> mesh-vertex 0.5) 6.5 2.6))
          (jitter (swizzle temporal-parameters :xy)))
     (set-output
      clip-position
@@ -316,18 +334,22 @@
            (swizzle current-clip :w)))
     (set-output marker-coordinate-output coordinate)
     (set-output current-clip-output current-clip)
-    (set-output previous-clip-output previous-clip)))
+    (set-output previous-clip-output previous-clip)
+    (set-output mesh-vertex-output mesh-vertex)))
 
 (define-shader lattice-point-fragment-specification
     (:stage :fragment
      :inputs ((marker-coordinate :vec2 :location 0)
               (current-clip :vec4 :location 1)
-              (previous-clip :vec4 :location 2))
+              (previous-clip :vec4 :location 2)
+              (mesh-vertex :float :location 3 :interpolation :flat))
      :outputs ((color-output :vec4 :location 0)
                (motion-output :vec2 :location 1)))
   (let* ((radius (sqrt (dot marker-coordinate marker-coordinate)))
          (coverage (- 1.0 (smoothstep 0.82 1.0 radius)))
-         (center (- 1.0 (smoothstep 0.40 0.62 radius)))
+         (center (- 1.0 (smoothstep (if (> mesh-vertex 0.5) 0.40 0.18)
+                                    (if (> mesh-vertex 0.5) 0.62 0.52)
+                                    radius)))
          (rim (vec3 0.035 0.075 0.095))
          (ink (vec3 1.0 0.30 0.10))
          (color (mix rim ink center))

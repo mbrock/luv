@@ -264,7 +264,8 @@ star corpus; signal that boundary explicitly instead of silently welding it."
     (error "Mesh normal is not a nonzero integer direction: ~S." normal))
   (mapcar #'signum normal))
 
-(defun %pack-mesh-attributes (normal stock barycentric-index kind)
+(defun %pack-mesh-attributes
+    (normal stock barycentric-index kind boundary-edge-mask)
   (let ((normal (%normal-direction-code normal)))
     (unless (and (typep stock '(unsigned-byte 4))
                  (<= 0 barycentric-index 2))
@@ -276,9 +277,11 @@ star corpus; signal that boundary explicitly instead of silently welding it."
               (ash (+ 1 (third normal)) 4)
               (ash stock 6)
               (ash barycentric-index 10)
-              (ash kind-code 12)))))
+              (ash kind-code 12)
+              (ash boundary-edge-mask 14)))))
 
-(defun %emit-triangle (builder a b c normal stock kind)
+(defun %emit-triangle
+    (builder a b c normal stock kind boundary-edge-mask)
   (let ((orientation (%dot (%cross (%point- b a) (%point- c a)) normal)))
     (when (zerop orientation)
       (error "Degenerate ~A triangle ~S ~S ~S." kind a b c))
@@ -299,18 +302,24 @@ star corpus; signal that boundary explicitly instead of silently welding it."
              (vector-push-extend
               coordinate (surface-mesh-builder-vertex-words builder)))
            (vector-push-extend
-            (%pack-mesh-attributes normal stock barycentric-index kind)
+            (%pack-mesh-attributes normal stock barycentric-index kind
+                                   boundary-edge-mask)
             (surface-mesh-builder-vertex-words builder))
            (vector-push-extend vertex-index
                                (surface-mesh-builder-indices builder))))
 
 (defun %emit-polygon (builder points normal stock kind)
   (when (>= (length points) 3)
-    (loop for tail on (rest points)
+    (loop with first-tail = (rest points)
+          with last = (car (last points))
+          for tail on first-tail
           while (rest tail)
           do (%emit-triangle builder (first points)
                              (first tail) (second tail)
-                             normal stock kind))))
+                             normal stock kind
+                             (logior #b001
+                                     (if (equal (second tail) last) #b010 0)
+                                     (if (eq tail first-tail) #b100 0))))))
 
 (defun %simple-u32-vector (source)
   (let ((copy (make-array (length source) :element-type '(unsigned-byte 32))))

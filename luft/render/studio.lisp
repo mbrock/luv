@@ -621,10 +621,10 @@ the selector is the whole of the difference."
             (let ((zoom-rate (* dt (viewer-speed viewer) 0.12)))
               (when (viewer-control-active-p viewer :forward)
                 (setf *isometric-height*
-                      (max 6.0 (* *isometric-height* (exp (- zoom-rate))))))
+                      (* *isometric-height* (exp (- zoom-rate)))))
               (when (viewer-control-active-p viewer :backward)
                 (setf *isometric-height*
-                      (min 96.0 (* *isometric-height* (exp zoom-rate))))))
+                      (* *isometric-height* (exp zoom-rate)))))
             (progn
               (when (viewer-control-active-p viewer :forward)
                 (move forward step))
@@ -807,8 +807,7 @@ the selector is the whole of the difference."
   (declare (ignore canvas))
   (let ((factor (expt 1.10 (- (canvas-pointer-event-scroll-y event)))))
     (if (eq *projection* :isometric)
-        (setf *isometric-height*
-              (max 6.0 (min 96.0 (* *isometric-height* factor))))
+        (setf *isometric-height* (* *isometric-height* factor))
         (let ((camera (viewer-camera viewer)))
           (setf (camera-field-of-view camera)
                 (max 0.43633232
