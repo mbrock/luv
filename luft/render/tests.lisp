@@ -157,6 +157,22 @@
                   (loop for offset from 3 below (length words) by 4
                         collect (ldb (byte 4 16) (aref words offset))))))))
 
+(deftest directional-star-ambient-occlusion-measures-the-outward-hemisphere
+  (ok (= 0 (luft::%directional-star-ambient-occlusion #b00000000 '(0 0 1))))
+  (ok (= 1 (luft::%directional-star-ambient-occlusion #b00010000 '(0 0 1))))
+  (ok (= 3 (luft::%directional-star-ambient-occlusion #b11110000 '(0 0 1))))
+  (ok (= 3 (luft::%directional-star-ambient-occlusion #b10001000 '(1 1 0)))))
+
+(deftest topology-ao-is-confined-to-bevels-and-junctions
+  (let ((mesh (render:make-render-mesh (render:make-miter-study-scene))))
+    (flet ((levels (words)
+             (loop for offset from 3 below (length words) by 4
+                   collect (ldb (byte 2 20) (aref words offset)))))
+      (ok (every #'zerop (levels (luft:surface-mesh-face-instance-words mesh))))
+      (ok (some #'plusp
+                (append (levels (luft:surface-mesh-band-instance-words mesh))
+                        (levels (luft:surface-mesh-fan-instance-words mesh))))))))
+
 (deftest mesh-and-presentation-shaders-lower-through-both-conventional-backends
   (let* ((vertex (luft.render.shaders:mesh-vertex-specification))
          (fragment (luft.render.shaders:mesh-fragment-specification))

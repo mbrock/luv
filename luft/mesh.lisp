@@ -5,9 +5,10 @@
 ;;; Geometry is a sum over lattice sites.  Face records select a fixed inset
 ;;; square, edge records select flat collars or crease bands, and vertex records
 ;;; select flat corner patches or Arc junction fans.  Records contain only a
-;;; lattice base coordinate, a stock, and a template index.  Template vertices
-;;; are exact small integer offsets from that base; vertex-owned offsets stay
-;;; inside the configured bevel-width domain around the lattice site.
+;;; lattice base coordinate, a stock, local ambient accessibility, and a
+;;; template index.  Template vertices are exact small integer offsets from
+;;; that base; vertex-owned offsets stay inside the configured bevel-width
+;;; domain around the lattice site.
 
 (defconstant +mesh-cell-size+ 8)
 (defconstant +mesh-bevel-width+ 1
@@ -15,6 +16,8 @@
 (defconstant +mesh-instance-word-count+ 4)
 (defconstant +mesh-template-vertex-word-count+ 4)
 (defconstant +mesh-template-coordinate-bias+ 16)
+(defconstant +mesh-instance-stock-shift+ 16)
+(defconstant +mesh-instance-ambient-occlusion-shift+ 20)
 
 (defstruct (surface-mesh
              (:constructor %make-surface-mesh
@@ -264,9 +267,11 @@ star corpus; signal that boundary explicitly instead of silently welding it."
   (vertices nil :type list :read-only t))
 
 (defstruct (mesh-instance
-             (:constructor %make-mesh-instance (base stock template)))
+             (:constructor %make-mesh-instance
+                 (base stock ambient-occlusion template)))
   (base nil :type list :read-only t)
   (stock 0 :type (unsigned-byte 4) :read-only t)
+  (ambient-occlusion 0 :type (unsigned-byte 2) :read-only t)
   (template nil :type mesh-template :read-only t))
 
 (defstruct (surface-mesh-builder
@@ -361,20 +366,23 @@ star corpus; signal that boundary explicitly instead of silently welding it."
                       (list template)))
         template)))
 
-(defun %emit-template-instance (builder base vertices stock kind)
+(defun %emit-template-instance
+    (builder base vertices stock kind &optional (ambient-occlusion 0))
   (check-type stock (unsigned-byte 4))
+  (check-type ambient-occlusion (unsigned-byte 2))
   (let* ((template (%intern-mesh-template builder vertices))
-         (instance (%make-mesh-instance base stock template)))
+         (instance (%make-mesh-instance base stock ambient-occlusion template)))
     (ecase kind
       (:face (push instance (surface-mesh-builder-face-instances builder)))
       (:band (push instance (surface-mesh-builder-band-instances builder)))
       (:junction (push instance (surface-mesh-builder-fan-instances builder))))
     instance))
 
-(defun %emit-polygon (builder base points normal stock kind)
+(defun %emit-polygon
+    (builder base points normal stock kind &optional (ambient-occlusion 0))
   (%emit-template-instance
    builder base (%polygon-template-vertices base points normal kind)
-   stock kind))
+   stock kind ambient-occlusion))
 
 (defun %simple-u32-vector (source)
   (let ((copy (make-array (length source) :element-type '(unsigned-byte 32))))
@@ -438,7 +446,10 @@ star corpus; signal that boundary explicitly instead of silently welding it."
              (setf (aref words
                          (+ (* instance-index +mesh-instance-word-count+) 3))
                    (logior template-id
-                           (ash (mesh-instance-stock instance) 16)))
+                           (ash (mesh-instance-stock instance)
+                                +mesh-instance-stock-shift+)
+                           (ash (mesh-instance-ambient-occlusion instance)
+                                +mesh-instance-ambient-occlusion-shift+)))
              (incf triangle-count (/ vertex-count 3))
              (let ((draw (first draws)))
                (if (and draw (= template-id (first draw)))
@@ -568,13 +579,13 @@ star corpus; signal that boundary explicitly instead of silently welding it."
                     (v1 (aref v-cuts (1+ v-cell))))
                 (when (and (< u0 u1) (< v0 v1)
                            (or (= u-cell 1) (= v-cell 1)))
-                  (let ((kind (if (and (= u-cell 1) (= v-cell 1))
-                                  :face
-                                  :band)))
+                  (let* ((kind (if (and (= u-cell 1) (= v-cell 1))
+                                   :face
+                                   :band))
+                         (base (site-base (if (= u-cell 2) 1 0)
+                                          (if (= v-cell 2) 1 0))))
                     (%emit-polygon
-                     builder
-                     (site-base (if (= u-cell 2) 1 0)
-                                (if (= v-cell 2) 1 0))
+                     builder base
                      (list (point u0 v0) (point u1 v0)
                            (point u1 v1) (point u0 v1))
                      normal (if (eq kind :face) stock chamfer-stock)
@@ -682,6 +693,27 @@ star corpus; signal that boundary explicitly instead of silently welding it."
               (third coordinates) +vertex-extent+ 1)
    occupancy))
 
+(defun %directional-star-ambient-occlusion (mask normal)
+  "Quantize occupancy in NORMAL's outward local hemisphere to two AO bits."
+  (check-type mask (unsigned-byte 8))
+  (let ((samples 0)
+        (occupied 0))
+    (dotimes (sample 8)
+      (when (loop for component in normal
+                  for axis-number below 3
+                  always (or (zerop component)
+                             (= (signum component)
+                                (if (logbitp axis-number sample) 1 -1))))
+        (incf samples)
+        (when (logbitp sample mask)
+          (incf occupied))))
+    (floor (+ (* 3 occupied) (floor samples 2)) samples)))
+
+(defun %local-ambient-occlusion (domain occupancy coordinates normal)
+  "Return a two-bit local accessibility loss at COORDINATES along NORMAL."
+  (%directional-star-ambient-occlusion
+   (%vertex-star-mask domain occupancy coordinates) normal))
+
 (defun %emit-edge-bands
     (builder domain occupancy key stock-function chamfer-stock-function)
   (let* ((bevel-width (surface-mesh-builder-bevel-width builder))
@@ -721,7 +753,9 @@ star corpus; signal that boundary explicitly instead of silently welding it."
                    (funcall chamfer-stock-function
                             (list (funcall stock-function (getf left :face))
                                   (funcall stock-function
-                                           (getf right :face))))))
+                                           (getf right :face)))))
+                 (ambient-occlusion
+                   (%local-ambient-occlusion domain occupancy anchor normal)))
             (labels ((rail (data coordinate)
                        (%point-with-component
                         (mapcar #'+ base (getf data :offset))
@@ -731,7 +765,7 @@ star corpus; signal that boundary explicitly instead of silently welding it."
                         builder site-base
                         (list (rail left low) (rail right low)
                               (rail right high) (rail left high))
-                        normal stock :band)))
+                        normal stock :band ambient-occlusion)))
               ;; The edge owns the middle after both vertex-site domains are
               ;; removed.  Those width-sized ends belong to the two fans.
               (patch anchor
@@ -856,14 +890,16 @@ star corpus; signal that boundary explicitly instead of silently welding it."
            collect (cons site (%boundary-edge-cycles edges site)))
      #'%point-lexicographically-less-p :key #'first)))
 
-(defun %emit-triangular-boundary-cap (builder site cycle stock)
+(defun %emit-triangular-boundary-cap
+    (builder site cycle stock star-mask)
   (let* ((a (first (first cycle)))
          (b (first (second cycle)))
          (c (first (third cycle)))
          (normal (%cross (%point- c a) (%point- b a))))
     ;; The observed loop follows the existing surface winding.  Reverse its
     ;; order so the cap pairs every boundary edge with opposite winding.
-    (%emit-polygon builder site (list a c b) normal stock :junction)))
+    (%emit-polygon builder site (list a c b) normal stock :junction
+                   (%directional-star-ambient-occlusion star-mask normal))))
 
 (defun %squared-distance (left right)
   (reduce #'+ (mapcar (lambda (l r)
@@ -900,16 +936,17 @@ star corpus; signal that boundary explicitly instead of silently welding it."
           (if (gethash (%geometric-edge-key a b) boundary-stocks) #b100 0)))
 
 (defun %emit-boundary-strip-triangle
-    (builder site a b c boundary-stocks stock)
+    (builder site a b c boundary-stocks stock star-mask)
   (let ((normal (%cross (%point- b a) (%point- c a))))
     (%emit-template-instance
      builder site
      (%triangle-template-vertices
       site a b c normal :junction
-      (%triangle-boundary-mask a b c boundary-stocks))
-     stock :junction)))
+     (%triangle-boundary-mask a b c boundary-stocks))
+     stock :junction
+     (%directional-star-ambient-occlusion star-mask normal))))
 
-(defun %emit-boundary-strip (builder site cycle stock)
+(defun %emit-boundary-strip (builder site cycle stock star-mask)
   "Triangulate CYCLE without introducing its lattice-site origin as geometry."
   (let ((points (mapcar #'first cycle))
         (boundary-stocks (%cycle-boundary-stock-table cycle)))
@@ -925,19 +962,19 @@ star corpus; signal that boundary explicitly instead of silently welding it."
                 (%squared-distance first penultimate))
             (progn
               (%emit-boundary-strip-triangle
-               builder site first last second
-               boundary-stocks stock)
+               builder site first last second boundary-stocks stock star-mask)
               (setf points (rest points)))
             (progn
               (%emit-boundary-strip-triangle
-               builder site first last penultimate
-               boundary-stocks stock)
+               builder site first last penultimate boundary-stocks stock
+               star-mask)
               (setf points (butlast points))))))
     (destructuring-bind (a b c) points
       (%emit-boundary-strip-triangle
-       builder site a c b boundary-stocks stock))))
+       builder site a c b boundary-stocks stock star-mask))))
 
-(defun %emit-centered-boundary-fan (builder site cycle stock)
+(defun %emit-centered-boundary-fan
+    (builder site cycle stock star-mask)
   (let ((origin (mapcar (lambda (coordinate)
                           (* +mesh-cell-size+ coordinate))
                         site)))
@@ -960,16 +997,16 @@ star corpus; signal that boundary explicitly instead of silently welding it."
             (%emit-template-instance
              builder site
              (%triangle-template-vertices
-              site origin right left normal :junction #b001)
-             stock :junction)))))))
+             site origin right left normal :junction #b001)
+             stock :junction
+             (%directional-star-ambient-occlusion star-mask normal))))))))
 
-(defun %vertex-fan-uses-center-p (domain occupancy site cycle)
-  (let ((mask (%vertex-star-mask domain occupancy site)))
-    (or (%cycle-planar-through-site-p site cycle)
-        ;; The ordinary five-cell concave corner and its upside-down three-cell
-        ;; complement both pass through SITE.  The six- and seven-cell
-        ;; chamfer/fillet runs do not; coning those creates the ornaments.
-        (member (logcount mask) '(3 5)))))
+(defun %vertex-fan-uses-center-p (site cycle star-mask)
+  (or (%cycle-planar-through-site-p site cycle)
+      ;; The ordinary five-cell concave corner and its upside-down three-cell
+      ;; complement both pass through SITE.  The six- and seven-cell
+      ;; chamfer/fillet runs do not; coning those creates the ornaments.
+      (member (logcount star-mask) '(3 5))))
 
 (defun %rescale-boundary-point (point site source-width target-width)
   "Evaluate POINT's site-local affine bevel coordinates at TARGET-WIDTH."
@@ -998,7 +1035,8 @@ star corpus; signal that boundary explicitly instead of silently welding it."
           (surface-mesh-builder-bevel-width boundary-builder))
         (target-width (surface-mesh-builder-bevel-width builder)))
     (dolist (entry (%boundary-cycles-by-site boundary-builder))
-      (let ((site (first entry)))
+      (let ((site (first entry))
+            (star-mask (%vertex-star-mask domain occupancy (first entry))))
         (dolist (source-cycle (rest entry))
           (let ((cycle
                   (if (= source-width target-width)
@@ -1009,13 +1047,13 @@ star corpus; signal that boundary explicitly instead of silently welding it."
                                   (mapcar #'third cycle))))
               (cond ((= 3 (length cycle))
                      (%emit-triangular-boundary-cap
-                      builder site cycle stock))
-                    ((%vertex-fan-uses-center-p domain occupancy site cycle)
+                      builder site cycle stock star-mask))
+                    ((%vertex-fan-uses-center-p site cycle star-mask)
                      (%emit-centered-boundary-fan
-                      builder site cycle stock))
+                      builder site cycle stock star-mask))
                     (t
                      (%emit-boundary-strip
-                      builder site cycle stock))))))))))
+                      builder site cycle stock star-mask))))))))))
 
 (defun %count-singular-vertex-stars (builder domain occupancy vertices)
   (dolist (vertex vertices)

@@ -6,7 +6,8 @@
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defvar *stock-tooth* 0.055)
-  (defvar *paper-variation* 0.11))
+  (defvar *paper-variation* 0.11)
+  (defvar *local-ambient-occlusion-strength* 0.28))
 
 (define-shader-function paper-hash (site)
   (let* ((scattered (fract (* site 0.1031)))
@@ -79,6 +80,8 @@
                (previous-clip-output :vec4 :location 5)
                (kind-output :float :location 6 :interpolation :flat)
                (boundary-edge-mask-output :uint :location 7
+                                          :interpolation :flat)
+               (ambient-occlusion-output :float :location 8
                                           :interpolation :flat))
      :resources ((instances :storage-buffer :binding 0 :element :uvec4)
                  (template-vertices :storage-buffer :binding 1 :element :uvec4)
@@ -114,6 +117,8 @@
                  (- (float (ldb (byte 2 2) attributes)) 1.0)
                  (- (float (ldb (byte 2 4) attributes)) 1.0)))
          (stock (float (ldb (byte 4 16) (swizzle instance :w))))
+         (ambient-occlusion
+           (/ (float (ldb (byte 2 20) (swizzle instance :w))) 3.0))
          (barycentric-index (uint (ldb (byte 2 6) attributes)))
          (kind (float (ldb (byte 2 8) attributes)))
          (boundary-edge-mask (uint (ldb (byte 3 10) attributes)))
@@ -147,7 +152,8 @@
     (set-output current-clip-output current-clip)
     (set-output previous-clip-output previous-clip)
     (set-output kind-output kind)
-    (set-output boundary-edge-mask-output boundary-edge-mask)))
+    (set-output boundary-edge-mask-output boundary-edge-mask)
+    (set-output ambient-occlusion-output ambient-occlusion)))
 
 (define-shader mesh-fragment-specification
     (:stage :fragment
@@ -158,7 +164,8 @@
               (current-clip :vec4 :location 4)
               (previous-clip :vec4 :location 5)
               (kind :float :location 6 :interpolation :flat)
-              (boundary-edge-mask :uint :location 7 :interpolation :flat))
+              (boundary-edge-mask :uint :location 7 :interpolation :flat)
+              (ambient-occlusion :float :location 8 :interpolation :flat))
      :outputs ((color-output :vec4 :location 0)
                (motion-output :vec2 :location 1))
      :resources ((camera-state :uniform-block :binding 2
@@ -217,9 +224,14 @@
          (upness (swizzle normal :z))
          (sky-weight (+ 0.5 (* 0.5 upness)))
          (ground-weight (- 0.5 (* 0.5 upness)))
+         (indirect-light
+           (+ (* sky (+ (* 0.44 sky-weight) fill))
+              (* ground (* 0.44 ground-weight))))
+         (ambient-accessibility
+           (- 1.0 (* #.*local-ambient-occlusion-strength*
+                     ambient-occlusion)))
          (light (+ (* sun-color wrapped)
-                   (+ (* sky (+ (* 0.44 sky-weight) fill))
-                      (* ground (* 0.44 ground-weight)))))
+                   (* indirect-light ambient-accessibility)))
          (lit (* base (* light (stock-tooth world-position))))
          (mapped-paper (paper-tonemap (* lit 1.16)))
          (camera-delta (- world-position (swizzle camera-position :xyz)))
