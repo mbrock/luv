@@ -3,19 +3,23 @@
 (defparameter *wireframe* 0.0
   "Global construction-edge strength.  The atelier toggles it between 0 and 1.")
 
-(defconstant +grass-stock+ 0)
-(defconstant +soil-stock+ 1)
-(defconstant +subsoil-stock+ 2)
-(defconstant +stone-stock+ 3)
-(defconstant +turf-set-stone-stock+ 4
+(defconstant +grass-stock+ (surface-assembly-offset *grass-surface*))
+(defconstant +soil-stock+ (surface-assembly-offset *soil-surface*))
+(defconstant +subsoil-stock+ (surface-assembly-offset *subsoil-surface*))
+(defconstant +stone-stock+ (surface-assembly-offset *stone-surface*))
+(defconstant +turf-set-stone-stock+
+  (surface-assembly-offset *turf-set-stone-surface*)
   "Stone at a chamfer shared with a grassy terrain top.")
-(defconstant +soil-set-stone-stock+ 5
+(defconstant +soil-set-stone-stock+
+  (surface-assembly-offset *soil-set-stone-surface*)
   "Stone at a chamfer shared with an exposed terrain side.")
-(defconstant +deep-set-stone-stock+ 6
+(defconstant +deep-set-stone-stock+
+  (surface-assembly-offset *deep-set-stone-surface*)
   "Stone at a chamfer shared with a terrain underside.")
-(defconstant +turf-edge-stock+ 7
+(defconstant +turf-edge-stock+ (surface-assembly-offset *turf-edge-surface*)
   "The living transition where a grassy terrain top rolls into exposed soil.")
-(defconstant +foundation-stone-stock+ 8
+(defconstant +foundation-stone-stock+
+  (surface-assembly-offset *foundation-stone-surface*)
   "The lowest exposed course of stone borne by a terrain cell.")
 
 (defconstant +sanctuary-origin-x+ 32)
@@ -25,23 +29,26 @@
 
 (defclass scene ()
   ((solid :initarg :solid :reader scene-solid)
-   (architecture-cells :initarg :architecture-cells
-                       :reader scene-architecture-cells)
+   (material-vocabulary :initarg :material-vocabulary
+                        :reader scene-material-vocabulary)
+   (material-cells :initarg :material-cells :reader scene-material-cells)
    (player-p :initarg :player-p :initform nil :reader scene-player-p))
   (:documentation
-   "One authored solid and the cells whose faces read as cut stone.
+   "One authored solid and its vocabulary-closed material-placement field.
 
-The solid remains LUFT's dense topological truth.  The sparse architectural
-set is only the semantic distinction the four-bit face stock needs; it does
-not put objects or material records on every cell."))
+The solid remains LUFT's topological truth. The sparse authored field stores
+only dense vocabulary offsets; semantic material objects remain at the scene
+boundary rather than being allocated per cell."))
 
 (defclass scene-builder ()
   ((domain :initarg :domain :reader scene-builder-domain)
    (origin-x :initarg :origin-x :initform 0 :reader scene-builder-origin-x)
    (origin-y :initarg :origin-y :initform 0 :reader scene-builder-origin-y)
    (cells :initform (make-hash-table :test #'eql) :reader scene-builder-cells)
-   (architecture-cells :initform (make-hash-table :test #'eql)
-                       :reader scene-builder-architecture-cells)))
+   (material-vocabulary :initform (make-scene-material-vocabulary)
+                        :reader scene-builder-material-vocabulary)
+   (material-cells :initform (make-hash-table :test #'eql)
+                   :reader scene-builder-material-cells)))
 
 (defun make-scene-builder (&key (horizontal-bits 6) (origin-x 0) (origin-y 0))
   (make-instance 'scene-builder
@@ -49,7 +56,8 @@ not put objects or material records on every cell."))
                           :x-bits horizontal-bits :y-bits horizontal-bits)
                  :origin-x origin-x :origin-y origin-y))
 
-(defun scene-builder-cell (builder x y z &key (solid-p t) architecture-p)
+(defun scene-builder-cell
+    (builder x y z &key (solid-p t) architecture-p (material nil material-p))
   (when (<= 0 z 254)
     (let ((site (luft:make-site
                  (scene-builder-domain builder)
@@ -57,14 +65,18 @@ not put objects or material records on every cell."))
                  (+ y (scene-builder-origin-y builder))
                  z luft:+cell-extent+ 1)))
       (if solid-p
-          (progn
-            (setf (gethash site (scene-builder-cells builder)) t)
-            (when architecture-p
-              (setf (gethash site (scene-builder-architecture-cells builder))
-                    t)))
+          (let ((placement
+                  (if material-p material
+                      (if architecture-p *sanctuary-material-placement*
+                          *terrain-material-placement*))))
+            (check-type placement material-placement)
+            (setf (gethash site (scene-builder-cells builder)) t
+                  (gethash site (scene-builder-material-cells builder))
+                  (domains:identity-vocabulary-offset
+                   (scene-builder-material-vocabulary builder) placement)))
           (progn
             (remhash site (scene-builder-cells builder))
-            (remhash site (scene-builder-architecture-cells builder))))))
+            (remhash site (scene-builder-material-cells builder))))))
   builder)
 
 (defun scene-builder-box (builder x0 x1 y0 y1 z0 z1
@@ -155,8 +167,9 @@ not put objects or material records on every cell."))
     (make-instance 'scene
                    :solid (luft:finish-chain-builder chain-builder)
                    :player-p player-p
-                   :architecture-cells
-                   (scene-builder-architecture-cells builder))))
+                   :material-vocabulary
+                   (scene-builder-material-vocabulary builder)
+                   :material-cells (scene-builder-material-cells builder))))
 
 (defun make-manifold-spike-scene ()
   "Three isolated singular-star fixtures for the manifold-sheet spike.
@@ -396,19 +409,31 @@ same view also retains the truncated wall miter preserved by #DJK8HW."
         (and (= 1 (luft:chain-cell-occupancy-bit
                    (scene-solid scene)
                    (luft:site-x below) (luft:site-y below) (luft:site-z below)))
-             (not (gethash below (scene-architecture-cells scene))))))))
+             (eq :terrain
+                 (material-placement-role
+                  (scene-material-placement-at scene below))))))))
 
-(defun scene-face-stock (scene face)
-  "The paper surface-palette slot for FACE in SCENE."
+(defun scene-material-placement-at (scene cell)
+  "Return the authored placement at occupied CELL in SCENE."
+  (multiple-value-bind (offset present-p)
+      (gethash cell (scene-material-cells scene))
+    (unless present-p
+      (error "Occupied scene cell ~S has no authored material placement." cell))
+    (domains:identity-vocabulary-member
+     (scene-material-vocabulary scene) offset)))
+
+(defun scene-face-reading (scene face)
+  "Derive FACE's semantic reading without allocating a per-face object."
   (multiple-value-bind (cell axis side)
       (face-solid-cell (scene-solid scene) face)
-    (cond ((gethash cell (scene-architecture-cells scene))
-           (if (scene-foundation-cell-p scene cell)
-               +foundation-stone-stock+
-               +stone-stock+))
-          ((not (eq axis :z)) +soil-stock+)
-          ((eq side :backward) +grass-stock+)
-          (t +subsoil-stock+))))
+    (let ((placement (scene-material-placement-at scene cell)))
+      (material-face-reading (material-placement-kind placement)
+                             placement scene cell axis side))))
+
+(defun scene-face-stock (scene face)
+  "The current packed assembly offset for FACE in SCENE."
+  (surface-assembly-offset
+   (face-reading-assembly (scene-face-reading scene face))))
 
 (defun scene-chamfer-stock (stocks)
   "Resolve one whole chamfer from its incident face STOCKS.
@@ -418,26 +443,8 @@ underside is dark soil.  A unanimous closure continues that face material;
 a mixed terrain chamfer exposes soil.  Stone--terrain chamfers retain the
 deepest incident substrate, so the shader can weather a turf line differently
 from an exposed or buried foundation without adding per-site material objects."
-  (flet ((stone-p (stock)
-           (member stock (list +stone-stock+ +foundation-stone-stock+))))
-    (cond ((and (some #'stone-p stocks)
-                (member +subsoil-stock+ stocks))
-           +deep-set-stone-stock+)
-          ((and (some #'stone-p stocks)
-                (member +soil-stock+ stocks))
-           +soil-set-stone-stock+)
-          ((and (some #'stone-p stocks)
-                (member +grass-stock+ stocks))
-           +turf-set-stone-stock+)
-          ((every (lambda (stock) (= stock (first stocks))) (rest stocks))
-           (first stocks))
-          ((some #'stone-p stocks) +stone-stock+)
-          ((and (member +grass-stock+ stocks)
-                (some (lambda (stock)
-                        (<= +soil-stock+ stock +subsoil-stock+))
-                      stocks))
-           +turf-edge-stock+)
-          (t +soil-stock+))))
+  (surface-assembly-offset
+   (closure-surface-assembly (mapcar #'surface-assembly-at stocks))))
 
 (defun default-face-stock (face)
   (mod (+ (luft:site-x face) (* 2 (luft:site-y face))
@@ -1542,7 +1549,8 @@ cohort untouched. No frame can interleave with the owner-thread publication."
   (let ((streaming (make-instance
                     'streaming-scene
                     :solid (scene-solid scene)
-                    :architecture-cells (scene-architecture-cells scene)
+                    :material-vocabulary (scene-material-vocabulary scene)
+                    :material-cells (scene-material-cells scene)
                     :frames-per-load frames-per-load))
         (keys '()))
     (luft:map-chain-chunks

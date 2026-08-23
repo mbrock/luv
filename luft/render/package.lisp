@@ -12,7 +12,8 @@
 
 (defpackage #:luft.render
   (:use #:cl #:luv)
-  (:local-nicknames (#:shaders #:luft.render.shaders)
+  (:local-nicknames (#:domains #:luv.domains)
+                    (#:shaders #:luft.render.shaders)
                     (#:production #:luv.production)
                     (#:vec3 #:luv.arithmetic.lisp.vec3))
   (:export #:scene

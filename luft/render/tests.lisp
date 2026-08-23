@@ -187,13 +187,14 @@
 (deftest the-sanctuary-curtain-is-bedded-into-the-mountain
   (let* ((scene (render:make-mountain-sanctuary-scene))
          (solid (luft.render::scene-solid scene))
-         (architecture (luft.render::scene-architecture-cells scene))
          (domain (luft:chain-domain solid)))
     (flet ((occupied-p (x y z)
              (= 1 (luft:chain-cell-occupancy-bit solid x y z)))
            (architecture-p (x y z)
-             (gethash (luft:make-site domain x y z luft:+cell-extent+ 1)
-                      architecture)))
+             (eq :architecture
+                 (luft.render::material-placement-role
+                  (luft.render::scene-material-placement-at
+                   scene (luft:make-site domain x y z luft:+cell-extent+ 1))))))
       ;; The front curtain and both round keeps have continuous stone shoes
       ;; where the procedural ridge can otherwise fall below their fixed base.
       (dolist (point '((20 45) (40 45) (15 41) (45 41)))
@@ -227,6 +228,107 @@
               (luft.render::mountain-sanctuary-terrain-height
                luft.render::*sanctuary-beacon-x*
                luft.render::*sanctuary-beacon-y*)))))))
+
+(deftest scene-cells-store-vocabulary-closed-material-offsets
+  (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
+         (scene (progn
+                  (luft.render::scene-builder-cell builder 2 2 2)
+                  (luft.render::scene-builder-cell
+                   builder 2 2 3 :architecture-p t)
+                  (luft.render::finish-scene-builder builder)))
+         (domain (luft:chain-domain (luft.render::scene-solid scene)))
+         (earth-site (luft:make-site domain 2 2 2 luft:+cell-extent+ 1))
+         (stone-site (luft:make-site domain 2 2 3 luft:+cell-extent+ 1)))
+    (ok (every (lambda (offset) (typep offset '(unsigned-byte 16)))
+               (loop for offset being the hash-values
+                       of (luft.render::scene-material-cells scene)
+                     collect offset)))
+    (ok (eq luft.render::*terrain-material-placement*
+            (luft.render::scene-material-placement-at scene earth-site)))
+    (ok (eq luft.render::*sanctuary-material-placement*
+            (luft.render::scene-material-placement-at scene stone-site)))
+    (ok (eq luft.render::*sanctuary-material-frame*
+            (luft.render::material-placement-frame
+             (luft.render::scene-material-placement-at scene stone-site))))))
+
+(deftest semantic-surface-assemblies-retain-the-legacy-render-oracle
+  (ok (equal
+       (loop for assembly across
+               (luv.domains:identity-vocabulary-members
+                luft.render::*surface-assembly-vocabulary*)
+             collect (luft.render::surface-assembly-name assembly))
+       '(:grass :soil :subsoil :limestone :turf-set-limestone
+         :soil-set-limestone :deep-set-limestone :turf-edge
+         :foundation-limestone)))
+  (ok (equal (loop for offset below 9 collect offset)
+             (list luft.render::+grass-stock+ luft.render::+soil-stock+
+                   luft.render::+subsoil-stock+ luft.render::+stone-stock+
+                   luft.render::+turf-set-stone-stock+
+                   luft.render::+soil-set-stone-stock+
+                   luft.render::+deep-set-stone-stock+
+                   luft.render::+turf-edge-stock+
+                   luft.render::+foundation-stone-stock+))))
+
+(deftest semantic-material-migration-is-byte-identical-to-the-stock-oracle
+  (labels ((legacy-face-stock (scene face)
+             (multiple-value-bind (cell axis side)
+                 (luft.render::face-solid-cell
+                  (luft.render::scene-solid scene) face)
+               (let ((placement
+                       (luft.render::scene-material-placement-at scene cell)))
+                 (cond ((eq :architecture
+                            (luft.render::material-placement-role placement))
+                        (if (luft.render::scene-foundation-cell-p scene cell)
+                            luft.render::+foundation-stone-stock+
+                            luft.render::+stone-stock+))
+                       ((not (eq axis :z)) luft.render::+soil-stock+)
+                       ((eq side :backward) luft.render::+grass-stock+)
+                       (t luft.render::+subsoil-stock+)))))
+           (legacy-chamfer-stock (stocks)
+             (flet ((stone-p (stock)
+                      (member stock
+                              (list luft.render::+stone-stock+
+                                    luft.render::+foundation-stone-stock+))))
+               (cond ((and (some #'stone-p stocks)
+                           (member luft.render::+subsoil-stock+ stocks))
+                      luft.render::+deep-set-stone-stock+)
+                     ((and (some #'stone-p stocks)
+                           (member luft.render::+soil-stock+ stocks))
+                      luft.render::+soil-set-stone-stock+)
+                     ((and (some #'stone-p stocks)
+                           (member luft.render::+grass-stock+ stocks))
+                      luft.render::+turf-set-stone-stock+)
+                     ((every (lambda (stock) (= stock (first stocks)))
+                             (rest stocks))
+                      (first stocks))
+                     ((some #'stone-p stocks) luft.render::+stone-stock+)
+                     ((and (member luft.render::+grass-stock+ stocks)
+                           (some (lambda (stock)
+                                   (<= luft.render::+soil-stock+ stock
+                                       luft.render::+subsoil-stock+))
+                                 stocks))
+                      luft.render::+turf-edge-stock+)
+                     (t luft.render::+soil-stock+))))
+           (same-mesh-p (left right)
+             (every #'identity
+                    (list
+                     (equalp (luft:surface-mesh-template-vertex-words left)
+                             (luft:surface-mesh-template-vertex-words right))
+                     (equalp (luft:surface-mesh-template-ranges left)
+                             (luft:surface-mesh-template-ranges right))
+                     (equalp (luft:surface-mesh-face-instance-words left)
+                             (luft:surface-mesh-face-instance-words right))
+                     (equalp (luft:surface-mesh-band-instance-words left)
+                             (luft:surface-mesh-band-instance-words right))
+                     (equalp (luft:surface-mesh-fan-instance-words left)
+                             (luft:surface-mesh-fan-instance-words right))))))
+    (dolist (scene (list (render:make-mountain-sanctuary-scene)
+                         (render:make-miter-study-scene)))
+      (ok (same-mesh-p
+           (render:make-render-mesh scene)
+           (render:make-render-mesh
+            scene :stock-function (lambda (face) (legacy-face-stock scene face))
+                  :chamfer-stock-function #'legacy-chamfer-stock))))))
 
 (deftest player-gait-anchors-stance-feet-and-rises-over-support
   (let ((step-length 0.75)

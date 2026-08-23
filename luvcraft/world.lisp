@@ -677,10 +677,7 @@ BODY returns."
 ;;; offsets never move, so a shape change leaves every existing column and
 ;;; derived product valid.  See #CPCZDB.
 
-(defclass block-vocabulary ()
-  ((members :initarg :members :reader block-vocabulary-members)
-   (offsets :initarg :offsets :reader %block-vocabulary-offsets)
-   (revision :initform 0 :reader block-vocabulary-revision))
+(defclass block-vocabulary (domains:identity-vocabulary-domain) ()
   (:documentation
    "An append-only finite domain of block objects; NIL is always offset 0.
 
@@ -689,44 +686,28 @@ it as a palette is the ordinary way whole-domain code reads block identity."))
 
 (defun make-block-vocabulary (&key members)
   "Return a vocabulary with NIL at offset 0 followed by MEMBERS in order."
-  (let ((vector (make-array 1 :adjustable t :fill-pointer 1
-                              :initial-element nil))
-        (offsets (make-hash-table :test #'eq)))
-    (setf (gethash nil offsets) 0)
-    (let ((vocabulary (make-instance 'block-vocabulary
-                                     :members vector :offsets offsets)))
-      (when members
-        (loop for block across members
-              do (block-vocabulary-offset vocabulary block)))
-      vocabulary)))
+  (make-instance 'block-vocabulary
+                 :members (cons nil (coerce members 'list))
+                 :limit #x10000))
+
+(defun block-vocabulary-members (vocabulary)
+  (domains:identity-vocabulary-members vocabulary))
+
+(defun block-vocabulary-revision (vocabulary)
+  (domains:identity-vocabulary-revision vocabulary))
 
 (defun block-vocabulary-cardinality (vocabulary)
-  (length (block-vocabulary-members vocabulary)))
-
-(defmethod domains:domain-cardinality ((vocabulary block-vocabulary))
-  (block-vocabulary-cardinality vocabulary))
+  (domains:domain-cardinality vocabulary))
 
 (defun block-vocabulary-member (vocabulary offset)
   "Return the block object interpreted by OFFSET under VOCABULARY."
-  (aref (block-vocabulary-members vocabulary) offset))
+  (domains:identity-vocabulary-member vocabulary offset))
 
 (defun block-vocabulary-offset (vocabulary block &optional (intern-p t))
   "Return BLOCK's dense offset, appending it when INTERN-P and it is new.
 
 Return NIL for an unknown block when INTERN-P is false."
-  (let ((offsets (%block-vocabulary-offsets vocabulary)))
-    (multiple-value-bind (offset present-p) (gethash block offsets)
-      (cond (present-p offset)
-            ((not intern-p) nil)
-            (t
-             (let* ((members (block-vocabulary-members vocabulary))
-                    (next (length members)))
-               (unless (<= next #xffff)
-                 (error "A block vocabulary cannot contain more than 65536 members."))
-               (vector-push-extend block members)
-               (setf (gethash block offsets) next)
-               (incf (slot-value vocabulary 'revision))
-               next))))))
+  (domains:identity-vocabulary-offset vocabulary block intern-p))
 
 (defun block-vocabulary-translation (source target)
   "Return a u16 vector mapping every SOURCE offset to its TARGET offset.

@@ -1,5 +1,26 @@
 (in-package #:luv.tests)
 
+(deftest identity-vocabulary-offsets-are-stable-and-closed
+  (let* ((stone (list :stone))
+         (earth (list :earth))
+         (vocabulary
+           (luv.domains:make-identity-vocabulary-domain
+            :members (list nil stone) :limit 3)))
+    (ok (= 2 (luv.domains:domain-cardinality vocabulary)))
+    (ok (= 0 (luv.domains:identity-vocabulary-offset vocabulary nil nil)))
+    (ok (= 1 (luv.domains:identity-vocabulary-offset vocabulary stone nil)))
+    (ok (eq stone (luv.domains:identity-vocabulary-member vocabulary 1)))
+    (ok (null (luv.domains:identity-vocabulary-offset
+               vocabulary (list :stone) nil)))
+    (ok (zerop (luv.domains:identity-vocabulary-revision vocabulary)))
+    (ok (= 2 (luv.domains:identity-vocabulary-offset vocabulary earth)))
+    (ok (= 1 (luv.domains:identity-vocabulary-revision vocabulary)))
+    (ok (= 1 (luv.domains:identity-vocabulary-offset vocabulary stone)))
+    (ok (signals (luv.domains:identity-vocabulary-offset vocabulary (list :air))
+                 'error))
+    (ok (signals (luv.domains:identity-vocabulary-member vocabulary 3)
+                 'error))))
+
 (deftest keyword-vocabularies-close-dense-offsets-over-an-explicit-domain
   (let* ((first
            (luv.domains:make-keyword-vocabulary-domain

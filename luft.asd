@@ -23,6 +23,7 @@
                 :pathname "luft/render"
                 :serial t
                 :components ((:file "package")
+                             (:file "materials")
                              (:file "shaders")
                              (:file "render")))))
 
