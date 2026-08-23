@@ -391,36 +391,3 @@
   (let* ((uv (+ (* ndc 0.5) (vec2 0.5 0.5)))
          (value (sample scene scene-sampler uv)))
     (set-output color-output (vec4 (swizzle value :xyz) 1.0))))
-
-(define-shader inspector-vertex-specification
-    (:stage :vertex
-     :inputs ((vertex-index :uint :built-in :vertex-index))
-     :outputs ((clip-position :vec4 :built-in :position)
-               (uv-output :vec2 :location 0))
-     :resources ((inspector-state :uniform-block :binding 0
-                  :members ((inspector-rect :vec4)))))
-  (let* ((index (float vertex-index))
-         (right (if (= index 2.0) 1.0
-                    (if (= index 3.0) 1.0
-                        (if (= index 5.0) 1.0 0.0))))
-         (bottom (if (= index 1.0) 1.0
-                     (if (= index 4.0) 1.0
-                         (if (= index 5.0) 1.0 0.0))))
-         (x (mix (swizzle inspector-rect :x)
-                 (swizzle inspector-rect :z) right))
-         (y (mix (swizzle inspector-rect :y)
-                 (swizzle inspector-rect :w) bottom)))
-    (set-output clip-position (vec4 x y 0.0 1.0))
-    (set-output uv-output (vec2 right bottom))))
-
-(define-shader inspector-fragment-specification
-    (:stage :fragment
-     :inputs ((uv :vec2 :location 0))
-     :outputs ((color-output :vec4 :location 0))
-     :resources ((inspector :texture-2d :binding 1
-                  :sample-transfer :identity)
-                 (inspector-sampler :sampler :binding 2)))
-  (set-output color-output
-              (sample inspector inspector-sampler
-                      (vec2 (swizzle uv :x)
-                            (- 1.0 (swizzle uv :y))))))

@@ -109,7 +109,7 @@
                                 (zerop (mod (aref lattice (+ offset 2))
                                             8)))))))))
 
-(deftest mesh-and-atelier-shaders-lower-through-both-conventional-backends
+(deftest mesh-and-presentation-shaders-lower-through-both-conventional-backends
   (let* ((vertex (luft.render.shaders:mesh-vertex-specification))
          (fragment (luft.render.shaders:mesh-fragment-specification))
          (lattice-vertex
@@ -120,10 +120,6 @@
            (luft.render.shaders:present-vertex-specification))
          (present-fragment
            (luft.render.shaders:present-fragment-specification))
-         (inspector-vertex
-           (luft.render.shaders:inspector-vertex-specification))
-         (inspector-fragment
-           (luft.render.shaders:inspector-fragment-specification))
          (vertex-msl
            (luv.msl:msl-document-source (luv.msl:compile-msl vertex)))
          (fragment-msl
@@ -138,16 +134,12 @@
                 (luv.msl:msl-document-source
                  (luv.msl:compile-msl lattice-vertex))))
     (ok (luv.msl:compile-msl lattice-fragment))
-    (ok (luv.msl:compile-msl inspector-vertex))
-    (ok (luv.msl:compile-msl inspector-fragment))
     (ok (luv.spir-v:compile-shader-specification vertex))
     (ok (luv.spir-v:compile-shader-specification fragment))
     (ok (luv.spir-v:compile-shader-specification lattice-vertex))
     (ok (luv.spir-v:compile-shader-specification lattice-fragment))
     (ok (luv.spir-v:compile-shader-specification present-vertex))
-    (ok (luv.spir-v:compile-shader-specification present-fragment))
-    (ok (luv.spir-v:compile-shader-specification inspector-vertex))
-    (ok (luv.spir-v:compile-shader-specification inspector-fragment))))
+    (ok (luv.spir-v:compile-shader-specification present-fragment))))
 
 (deftest the-camera-block-packs-both-projections
   (let ((camera (render:make-fly-camera)))

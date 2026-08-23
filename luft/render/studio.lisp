@@ -384,9 +384,12 @@ the selector is the whole of the difference."
      (if (and inspection *inspection-ink-p*) 1.0 0.0))
      :jitter jitter :view view
      :construction-p (plusp *wireframe*)
-     :inspector-texture (and inspector-p (viewer-inspector-texture viewer))
-     :inspector-rect (and inspector-p
-                          (viewer-inspector-rect viewer extent)))))
+     :overlay-encoder
+     (and inspector-p
+          (lambda (pass)
+            (mcluv:encode-direct-gpu-mirror
+             (viewer-inspector-compositor viewer) pass surface-texture
+             (viewer-inspector-state viewer extent)))))))
 
 (clim:define-command-table luft-window)
 (clim:define-command-table luft-window-release)
@@ -493,26 +496,24 @@ the selector is the whole of the difference."
         (mcluv:present-mirror mirror))))
   viewer)
 
-(defun viewer-inspector-texture (viewer)
-  (let ((mirror (viewer-inspector-mirror viewer)))
-    (and mirror (mcluv:mirror-texture mirror))))
-
-(defun viewer-inspector-rect (viewer extent)
+(defun viewer-inspector-state (viewer extent)
   (declare (ignore extent))
-  (when (viewer-inspector-texture viewer)
+  (when (viewer-inspector-mirror viewer)
     (let* ((logical-extent (viewer-logical-extent viewer))
            (width (first logical-extent))
            (height (second logical-extent))
            (margin 14.0)
-           (left (- 1.0 (* 2.0 (/ (+ margin +site-inspector-width+) width))))
-           (right (- 1.0 (* 2.0 (/ margin width))))
-           (top (- 1.0 (* 2.0 (/ margin height))))
-           (bottom (- 1.0
-                      (* 2.0 (/ (+ margin +site-inspector-height+) height)))))
-      (make-array 4 :element-type 'single-float
-                    :initial-contents (mapcar (lambda (value)
-                                                (coerce value 'single-float))
-                                              (list left top right bottom))))))
+           (half-width (/ +site-inspector-width+ width))
+           (half-height (/ +site-inspector-height+ height))
+           (center-x (- 1.0 (/ (* 2.0 margin) width) half-width))
+           (center-y (- 1.0 (/ (* 2.0 margin) height) half-height)))
+      (make-array
+       12 :element-type 'single-float
+       :initial-contents
+       (mapcar (lambda (value) (coerce value 'single-float))
+               (list center-x center-y 0.0 1.0
+                     half-width 0.0 0.0 0.0
+                     0.0 half-height 0.0 0.0))))))
 
 (clim:define-application-frame viewer
     (clim:standard-application-frame canvas-event-handler)
@@ -532,6 +533,8 @@ the selector is the whole of the difference."
    (pointer-y :initform nil :accessor viewer-pointer-y)
    (inspection :initform nil :accessor viewer-inspection)
    (inspector-mirror :initform nil :accessor viewer-inspector-mirror)
+   (inspector-compositor :initform nil
+                         :accessor viewer-inspector-compositor)
    (last-timestamp :initform nil :accessor viewer-last-timestamp)
    (speed :initarg :speed :initform 4.0 :accessor viewer-speed)
    (sensitivity :initarg :sensitivity :initform 0.0032
@@ -889,7 +892,7 @@ the selector is the whole of the difference."
                         (make-renderer
                          device* (make-render-mesh solid)
                          (canvas-format context) (canvas-extent context))))
-                (port (clim:find-port :server-path '(:luv-raster)))
+                (port (clim:find-port :server-path '(:luv-gpu)))
                 (manager
                   (or (first (clim-internals::frame-managers port))
                       (make-instance 'mcluv:luv-frame-manager :port port)))
@@ -904,6 +907,15 @@ the selector is the whole of the difference."
                              :camera camera :source solid))))
            (setf (canvas-event-handler canvas) viewer)
            (refresh-viewer-inspector viewer)
+           (let* ((mirror (viewer-inspector-mirror viewer))
+                  (compositor
+                    (make-instance 'mcluv:direct-gpu-mirror-compositor
+                                   :mirror mirror)))
+             (setf (mcluv:mirror-compositor mirror) compositor
+                   (viewer-inspector-compositor viewer) compositor)
+             ;; Realization painted before the compositor existed; repaint so
+             ;; its semantic stream is prepared for direct final-pass replay.
+             (mcluv:repaint-gpu-mirror mirror))
            (request-canvas-frame
             canvas (lambda (timestamp) (render-viewer-frame viewer timestamp)))
            (show-canvas canvas)

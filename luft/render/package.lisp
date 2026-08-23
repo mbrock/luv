@@ -5,8 +5,6 @@
            #:lattice-point-vertex-specification
            #:mesh-fragment-specification
            #:mesh-vertex-specification
-           #:inspector-fragment-specification
-           #:inspector-vertex-specification
            #:present-fragment-specification
            #:present-vertex-specification))
 

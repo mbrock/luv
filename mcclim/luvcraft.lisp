@@ -4,30 +4,10 @@
 
 (in-package #:mcluv)
 
-(defclass luvcraft-widget-overlay (spinning-texture-compositor)
-  ((session :initarg :session :reader widget-overlay-session)
-   (frame :initarg :frame :reader widget-overlay-frame)
-   (mirror :initarg :mirror :reader widget-overlay-mirror)
-   ;; Where the widget is in the world.  Written once for a widget fixed to
-   ;; a wall, and each frame for one carried in the hand.
-   (center :initarg :center :initform nil :accessor widget-overlay-center)
-   (right-axis :initarg :right-axis :initform nil
-               :accessor widget-overlay-right-axis)
-   (up-axis :initarg :up-axis :initform nil :accessor widget-overlay-up-axis)
-   (normal-axis :initarg :normal-axis :initform nil
-                :accessor widget-overlay-normal-axis)
-   (height-scale :initarg :height-scale :initform 2.0
-                 :reader widget-overlay-height-scale)
+(defclass direct-gpu-mirror-compositor ()
+  ((mirror :initarg :mirror :reader widget-overlay-mirror)
    (render-state :initform nil :accessor widget-overlay-render-state)
-   (relief-layout :initform nil :accessor widget-overlay-relief-layout)
-   (relief-vertex-module :initform nil
-                         :accessor widget-overlay-relief-vertex-module)
-   (relief-fragment-module :initform nil
-                           :accessor widget-overlay-relief-fragment-module)
-   (relief-pipeline :initform nil :accessor widget-overlay-relief-pipeline)))
-
-(defclass luvcraft-direct-widget-overlay (luvcraft-widget-overlay)
-  ((direct-device :initform nil :accessor direct-widget-device)
+   (direct-device :initform nil :accessor direct-widget-device)
    (direct-target-format :initform nil :accessor direct-widget-target-format)
    (direct-depth-stencil :initform nil :accessor direct-widget-depth-stencil)
    (direct-shape-layout :initform nil :accessor direct-widget-shape-layout)
@@ -58,6 +38,32 @@
    (text-bind-groups
     :initform (make-hash-table :test #'equal)
     :reader world-widget-text-bind-groups))
+  (:documentation
+   "A textureless McCLIM mirror replayed affinely into an existing GPU pass."))
+
+(defclass luvcraft-widget-overlay
+    (direct-gpu-mirror-compositor spinning-texture-compositor)
+  ((session :initarg :session :reader widget-overlay-session)
+   (frame :initarg :frame :reader widget-overlay-frame)
+   ;; Where the widget is in the world.  Written once for a widget fixed to
+   ;; a wall, and each frame for one carried in the hand.
+   (center :initarg :center :initform nil :accessor widget-overlay-center)
+   (right-axis :initarg :right-axis :initform nil
+               :accessor widget-overlay-right-axis)
+   (up-axis :initarg :up-axis :initform nil :accessor widget-overlay-up-axis)
+   (normal-axis :initarg :normal-axis :initform nil
+                :accessor widget-overlay-normal-axis)
+   (height-scale :initarg :height-scale :initform 2.0
+                 :reader widget-overlay-height-scale)
+   (relief-layout :initform nil :accessor widget-overlay-relief-layout)
+   (relief-vertex-module :initform nil
+                         :accessor widget-overlay-relief-vertex-module)
+   (relief-fragment-module :initform nil
+                           :accessor widget-overlay-relief-fragment-module)
+   (relief-pipeline :initform nil :accessor widget-overlay-relief-pipeline)))
+
+(defclass luvcraft-direct-widget-overlay (luvcraft-widget-overlay)
+  ()
   (:documentation
    "A McCLIM surface whose ordered semantic commands enter its final pass.
 
@@ -298,8 +304,12 @@ actual destination pixel."))
   overlay)
 
 (defmethod release-raster-mirror-compositor :before
-    ((overlay luvcraft-direct-widget-overlay))
+    ((overlay direct-gpu-mirror-compositor))
   (clear-world-widget-text-resources overlay))
+
+(defmethod release-raster-mirror-compositor
+    ((compositor direct-gpu-mirror-compositor))
+  compositor)
 
 (defgeneric direct-widget-text-target-format
     (overlay session surface-texture)
@@ -329,6 +339,23 @@ actual destination pixel."))
     ((overlay luvcraft-hud-widget-overlay))
   (declare (ignore overlay))
   nil)
+
+(defmethod direct-widget-text-depth-stencil
+    ((compositor direct-gpu-mirror-compositor))
+  (declare (ignore compositor))
+  nil)
+
+(defgeneric set-direct-gpu-mirror-scissor
+    (pass compositor mirror surface-texture clip))
+
+(defmethod set-direct-gpu-mirror-scissor
+    (pass (compositor direct-gpu-mirror-compositor) mirror surface-texture clip)
+  (declare (ignore compositor mirror clip))
+  (destructuring-bind (width height &rest ignored)
+      (luv:gpu-texture-size surface-texture)
+    (declare (ignore ignored))
+    (luv:set-scissor-rect pass 0 0 width height)
+    t))
 
 (defun ensure-world-widget-text-pipeline (overlay target-format depth-stencil)
   (let ((device (mirror-device (widget-overlay-mirror overlay))))
@@ -1009,6 +1036,49 @@ for a wall the answer is the same every frame and costs a few vector ops."
       (luv:write-buffer (direct-widget-frame-buffer frame-state) state)
       frame-state)))
 
+(luv:zdefun (encode-direct-gpu-mirror
+             :zone :mcluv/encode-direct-mirror
+             :value
+             (length
+              (gpu-mirror-prepared-commands
+               (widget-overlay-mirror compositor))))
+    (compositor pass surface-texture state)
+  "Replay COMPOSITOR's textureless McCLIM mirror into PASS under affine STATE."
+  (let* ((mirror (widget-overlay-mirror compositor))
+         (commands (gpu-mirror-prepared-commands mirror))
+         (source-state (gpu-mirror-prepared-frame-state mirror)))
+    (when (and commands source-state)
+      (ensure-world-widget-text-pipeline
+       compositor (luv:gpu-texture-format surface-texture)
+       (direct-widget-text-depth-stencil compositor))
+      (let* ((frame-state
+               (ensure-direct-widget-frame-state compositor surface-texture))
+             (encode-context
+               (make-direct-widget-command-encode-context
+                :overlay compositor
+                :surface-texture surface-texture
+                :destination-state frame-state
+                :source-state source-state))
+             (active-clip (list :unset))
+             (clip-visible-p t))
+        (declare (dynamic-extent encode-context))
+        (setf (widget-overlay-render-state compositor) state)
+        (luv:write-buffer (direct-widget-frame-buffer frame-state) state)
+        (dolist (command commands)
+          (let ((clip (gpu-command-clip command)))
+            (unless (equal clip active-clip)
+              (setf active-clip clip
+                    clip-visible-p
+                    (set-direct-gpu-mirror-scissor
+                     pass compositor mirror surface-texture clip))))
+          (when clip-visible-p
+            (encode-gpu-command command pass encode-context)))
+        (destructuring-bind (width height &rest ignored)
+            (luv:gpu-texture-size surface-texture)
+          (declare (ignore ignored))
+          (luv:set-scissor-rect pass 0 0 width height)))))
+  compositor)
+
 (luv:zdefmethod (luvcraft:encode-luvcraft-overlay :zone :mcluv/encode-chassis)
     ((overlay luvcraft-widget-overlay) session pass surface-texture)
   (let ((mirror (widget-overlay-mirror overlay)))
@@ -1093,6 +1163,12 @@ for a wall the answer is the same every frame and costs a few vector ops."
                   (luv:set-scissor-rect pass x y width height)
                   t))))))))
 
+(defmethod set-direct-gpu-mirror-scissor
+    (pass (overlay luvcraft-direct-widget-overlay)
+     mirror surface-texture clip)
+  (set-world-widget-text-scissor
+   pass overlay mirror surface-texture clip))
+
 (defmethod luvcraft:encode-luvcraft-overlay :before
     ((overlay luvcraft-direct-widget-overlay) session pass surface-texture)
   (declare (ignore session pass surface-texture))
@@ -1110,35 +1186,8 @@ for a wall the answer is the same every frame and costs a few vector ops."
     :after
     ((overlay luvcraft-direct-widget-overlay) session pass surface-texture)
   "Replay OVERLAY's retained McCLIM commands in exact painter order."
-  (let* ((mirror (widget-overlay-mirror overlay))
-         (commands (gpu-mirror-prepared-commands mirror))
-         (source-state (gpu-mirror-prepared-frame-state mirror)))
-    (when (and commands source-state (widget-overlay-render-state overlay))
-      (let* ((frame-state
-               (ensure-direct-widget-frame-state overlay surface-texture))
-             (encode-context
-               (make-direct-widget-command-encode-context
-                :overlay overlay
-                :surface-texture surface-texture
-                :destination-state frame-state
-                :source-state source-state))
-             (active-clip (list :unset))
-             (clip-visible-p t))
-        (declare (dynamic-extent encode-context))
-        (dolist (command commands)
-          (let ((clip (gpu-command-clip command)))
-            (unless (equal clip active-clip)
-              (setf active-clip clip
-                    clip-visible-p
-                    (set-world-widget-text-scissor
-                     pass overlay mirror surface-texture clip))))
-          (when clip-visible-p
-            (encode-gpu-command command pass encode-context)))
-        ;; Overlay encoding continues in the same scene pass.
-        (destructuring-bind (width height &rest ignored)
-            (luv:gpu-texture-size surface-texture)
-          (declare (ignore ignored))
-          (luv:set-scissor-rect pass 0 0 width height)))))
+  (alexandria:when-let ((state (widget-overlay-render-state overlay)))
+    (encode-direct-gpu-mirror overlay pass surface-texture state))
   overlay)
 
 (defun barycentric-coordinates (x y a b c)

@@ -28,6 +28,8 @@
            #:luv-gpu-mirror
            #:luv-raster-medium
            #:luv-gpu-medium
+           #:direct-gpu-mirror-compositor
+           #:encode-direct-gpu-mirror
            #:luv-pointer
            #:mirror-sheet
            #:mirror-target

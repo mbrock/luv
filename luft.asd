@@ -30,7 +30,7 @@
   :description "The McCLIM LUFT atelier over the packed-site renderer."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luft/renderer" "luv/mcclim")
+  :depends-on ("luft/renderer" "luvcraft/mcclim")
   :components ((:file "luft/render/studio"))
   :in-order-to ((test-op (test-op "luft/render/test"))))
 
