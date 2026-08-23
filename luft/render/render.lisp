@@ -415,35 +415,34 @@ consequence of its own occupancy star and can be read on its own."
       (box 7 8 7 8 3 3))
     (luft:finish-chain-builder builder)))
 
+(defstruct (mesh-slot (:constructor %make-mesh-slot) (:copier nil))
+  "One mesh's GPU residency: buffers and bind groups for its three streams."
+  (mesh nil)
+  (template-buffer nil)
+  (face-buffer nil)
+  (band-buffer nil)
+  (fan-buffer nil)
+  (face-group nil)
+  (band-group nil)
+  (fan-group nil)
+  (lattice-point-buffer nil)
+  (lattice-point-count 0)
+  (lattice-point-group nil))
+
 (defclass renderer ()
   ((device :initarg :device :reader renderer-device)
-   (mesh :initarg :mesh :reader renderer-mesh)
-   (template-buffer :initarg :template-buffer :accessor renderer-template-buffer)
-   (face-instance-buffer :initarg :face-instance-buffer
-                         :accessor renderer-face-instance-buffer)
-   (band-instance-buffer :initarg :band-instance-buffer
-                         :accessor renderer-band-instance-buffer)
-   (fan-instance-buffer :initarg :fan-instance-buffer
-                        :accessor renderer-fan-instance-buffer)
+   ;; Chunk key (or any EQL key) to resident MESH-SLOT; SLOT-ORDER is the
+   ;; sorted key list frames draw in.
+   (mesh-slots :initform (make-hash-table :test #'eql)
+               :reader renderer-mesh-slots)
+   (slot-order :initform nil :accessor renderer-slot-order)
    (camera-buffer :initarg :camera-buffer :accessor renderer-camera-buffer)
    (layout :initarg :layout :accessor renderer-layout)
-   (face-bind-group :initarg :face-bind-group
-                    :accessor renderer-face-bind-group)
-   (band-bind-group :initarg :band-bind-group
-                    :accessor renderer-band-bind-group)
-   (fan-bind-group :initarg :fan-bind-group
-                   :accessor renderer-fan-bind-group)
    (vertex-module :initarg :vertex-module :accessor renderer-vertex-module)
    (fragment-module :initarg :fragment-module :accessor renderer-fragment-module)
    (pipeline :initarg :pipeline :accessor renderer-pipeline)
-   (lattice-point-buffer :initarg :lattice-point-buffer
-                         :accessor renderer-lattice-point-buffer)
    (lattice-point-layout :initarg :lattice-point-layout
                          :accessor renderer-lattice-point-layout)
-   (lattice-point-count :initarg :lattice-point-count
-                        :reader renderer-lattice-point-count)
-   (lattice-point-bind-group :initarg :lattice-point-bind-group
-                             :accessor renderer-lattice-point-bind-group)
    (lattice-point-vertex-module :initarg :lattice-point-vertex-module
                                 :accessor renderer-lattice-point-vertex-module)
    (lattice-point-fragment-module :initarg :lattice-point-fragment-module
@@ -658,18 +657,127 @@ consequence of its own occupancy star and can be read on its own."
      points)
     (coerce result '(simple-array (unsigned-byte 32) (*)))))
 
-(defun make-renderer (device mesh color-format extent)
+(defun %destroy-mesh-slot (slot)
+  (dolist (resource (list (mesh-slot-face-group slot)
+                          (mesh-slot-band-group slot)
+                          (mesh-slot-fan-group slot)
+                          (mesh-slot-lattice-point-group slot)
+                          (mesh-slot-template-buffer slot)
+                          (mesh-slot-face-buffer slot)
+                          (mesh-slot-band-buffer slot)
+                          (mesh-slot-fan-buffer slot)
+                          (mesh-slot-lattice-point-buffer slot)))
+    (when resource (ignore-errors (destroy resource))))
+  (values))
+
+(defun %make-renderer-mesh-slot (renderer mesh)
+  "Upload MESH's streams and bind them against the renderer's layouts."
+  (let* ((device (renderer-device renderer))
+         (layout (renderer-layout renderer))
+         (camera-buffer (renderer-camera-buffer renderer))
+         (lattice-point-words (mesh-lattice-point-words mesh))
+         (lattice-point-count (/ (length lattice-point-words) 4))
+         (slot (%make-mesh-slot :mesh mesh
+                                :lattice-point-count lattice-point-count))
+         (completed-p nil))
+    (flet ((stream-buffer (label words)
+             (let ((buffer (create device
+                                   (make-buffer-descriptor
+                                    :label label
+                                    :size (max 16 (* 4 (length words)))
+                                    :usage '(:storage :copy-dst)))))
+               (when (plusp (length words))
+                 (write-buffer buffer words))
+               buffer))
+           (stream-group (label buffer template-buffer)
+             (create device
+                     (make-bind-group-descriptor
+                      :label label :layout layout
+                      :entries `((:binding 0 :resource ,buffer)
+                                 (:binding 1 :resource ,template-buffer)
+                                 (:binding 2 :resource ,camera-buffer))))))
+      (unwind-protect
+           (progn
+             (setf (mesh-slot-template-buffer slot)
+                   (stream-buffer "luft site template vertices"
+                                  (luft:surface-mesh-template-vertex-words
+                                   mesh))
+                   (mesh-slot-face-buffer slot)
+                   (stream-buffer "luft face site instances"
+                                  (luft:surface-mesh-face-instance-words mesh))
+                   (mesh-slot-band-buffer slot)
+                   (stream-buffer "luft edge site instances"
+                                  (luft:surface-mesh-band-instance-words mesh))
+                   (mesh-slot-fan-buffer slot)
+                   (stream-buffer "luft vertex site instances"
+                                  (luft:surface-mesh-fan-instance-words mesh))
+                   (mesh-slot-lattice-point-buffer slot)
+                   (stream-buffer "luft unique eighth-cell lattice points"
+                                  lattice-point-words))
+             (setf (mesh-slot-face-group slot)
+                   (stream-group "luft face sites"
+                                 (mesh-slot-face-buffer slot)
+                                 (mesh-slot-template-buffer slot))
+                   (mesh-slot-band-group slot)
+                   (stream-group "luft edge sites"
+                                 (mesh-slot-band-buffer slot)
+                                 (mesh-slot-template-buffer slot))
+                   (mesh-slot-fan-group slot)
+                   (stream-group "luft vertex sites"
+                                 (mesh-slot-fan-buffer slot)
+                                 (mesh-slot-template-buffer slot))
+                   (mesh-slot-lattice-point-group slot)
+                   (create device
+                           (make-bind-group-descriptor
+                            :label "luft eighth-cell lattice points"
+                            :layout (renderer-lattice-point-layout renderer)
+                            :entries
+                            `((:binding 0
+                               :resource ,(mesh-slot-lattice-point-buffer
+                                           slot))
+                              (:binding 1 :resource ,camera-buffer)))))
+             (setf completed-p t)
+             slot)
+        (unless completed-p
+          (%destroy-mesh-slot slot))))))
+
+(defun %refresh-renderer-slot-order (renderer)
+  (let ((keys '()))
+    (loop for key being the hash-keys of (renderer-mesh-slots renderer)
+          do (push key keys))
+    (setf (renderer-slot-order renderer) (sort keys #'<))))
+
+(defun renderer-set-mesh (renderer key mesh)
+  "Make MESH resident under KEY, replacing any previous resident mesh."
+  (let ((old (gethash key (renderer-mesh-slots renderer)))
+        (slot (%make-renderer-mesh-slot renderer mesh)))
+    (setf (gethash key (renderer-mesh-slots renderer)) slot)
+    (%refresh-renderer-slot-order renderer)
+    (when old (%destroy-mesh-slot old))
+    slot))
+
+(defun renderer-remove-mesh (renderer key)
+  (let ((slot (gethash key (renderer-mesh-slots renderer))))
+    (when slot
+      (remhash key (renderer-mesh-slots renderer))
+      (%refresh-renderer-slot-order renderer)
+      (%destroy-mesh-slot slot))
+    (values)))
+
+(defun renderer-clear-meshes (renderer)
+  (loop for key in (copy-list (renderer-slot-order renderer))
+        do (renderer-remove-mesh renderer key)))
+
+(defun make-renderer (device color-format extent)
+  "Create the shared LUFT pipeline state; meshes arrive via RENDERER-SET-MESH."
   (let* ((temporal-p (metal-temporal-device-p device))
          (target-formats (if temporal-p
                              '(:rgba16-float :rg16-float)
                              (list color-format)))
-         (lattice-point-words (mesh-lattice-point-words mesh))
-         (lattice-point-count (/ (length lattice-point-words) 4))
-         template-buffer face-instance-buffer band-instance-buffer
-         fan-instance-buffer camera-buffer lattice-point-buffer
-         layout face-bind-group band-bind-group fan-bind-group
+         camera-buffer
+         layout
          vertex-module fragment-module pipeline
-         lattice-point-layout lattice-point-bind-group lattice-point-vertex-module
+         lattice-point-layout lattice-point-vertex-module
          lattice-point-fragment-module lattice-point-pipeline
          present-layout present-bind-group present-vertex-module
          present-fragment-module present-pipeline sampler
@@ -677,60 +785,11 @@ consequence of its own occupancy star and can be read on its own."
          (completed-p nil))
     (unwind-protect
          (progn
-           (setf template-buffer
-                 (create device
-                         (make-buffer-descriptor
-                          :label "luft site template vertices"
-                          :size (max 16
-                                     (* 4 (length
-                                           (luft:surface-mesh-template-vertex-words
-                                            mesh))))
-                          :usage '(:storage :copy-dst)))
-                 face-instance-buffer
-                 (create device
-                         (make-buffer-descriptor
-                          :label "luft face site instances"
-                          :size (max 16 (* 4 (length
-                                              (luft:surface-mesh-face-instance-words
-                                               mesh))))
-                          :usage '(:storage :copy-dst)))
-                 band-instance-buffer
-                 (create device
-                         (make-buffer-descriptor
-                          :label "luft edge site instances"
-                          :size (max 16 (* 4 (length
-                                              (luft:surface-mesh-band-instance-words
-                                               mesh))))
-                          :usage '(:storage :copy-dst)))
-                 fan-instance-buffer
-                 (create device
-                         (make-buffer-descriptor
-                          :label "luft vertex site instances"
-                          :size (max 16 (* 4 (length
-                                              (luft:surface-mesh-fan-instance-words
-                                               mesh))))
-                          :usage '(:storage :copy-dst)))
-                 camera-buffer
+           (setf camera-buffer
                  (create device
                          (make-buffer-descriptor
                           :label "luft inspection camera"
-                          :size 208 :usage '(:uniform :copy-dst)))
-                 lattice-point-buffer
-                 (create device
-                         (make-buffer-descriptor
-                          :label "luft unique eighth-cell lattice points"
-                          :size (max 16 (* 4 (length lattice-point-words)))
-                          :usage '(:storage :copy-dst))))
-           (write-buffer template-buffer
-                         (luft:surface-mesh-template-vertex-words mesh))
-           (write-buffer face-instance-buffer
-                         (luft:surface-mesh-face-instance-words mesh))
-           (write-buffer band-instance-buffer
-                         (luft:surface-mesh-band-instance-words mesh))
-           (write-buffer fan-instance-buffer
-                         (luft:surface-mesh-fan-instance-words mesh))
-           (when (plusp lattice-point-count)
-             (write-buffer lattice-point-buffer lattice-point-words))
+                          :size 208 :usage '(:uniform :copy-dst))))
            (setf layout
                  (create device
                          (make-bind-group-layout-descriptor
@@ -738,27 +797,6 @@ consequence of its own occupancy star and can be read on its own."
                           :entries '((:binding 0 :type :storage-buffer)
                                      (:binding 1 :type :storage-buffer)
                                      (:binding 2 :type :uniform-buffer))))
-                 face-bind-group
-                 (create device
-                         (make-bind-group-descriptor
-                          :label "luft face sites" :layout layout
-                          :entries `((:binding 0 :resource ,face-instance-buffer)
-                                     (:binding 1 :resource ,template-buffer)
-                                     (:binding 2 :resource ,camera-buffer))))
-                 band-bind-group
-                 (create device
-                         (make-bind-group-descriptor
-                          :label "luft edge sites" :layout layout
-                          :entries `((:binding 0 :resource ,band-instance-buffer)
-                                     (:binding 1 :resource ,template-buffer)
-                                     (:binding 2 :resource ,camera-buffer))))
-                 fan-bind-group
-                 (create device
-                         (make-bind-group-descriptor
-                          :label "luft vertex sites" :layout layout
-                          :entries `((:binding 0 :resource ,fan-instance-buffer)
-                                     (:binding 1 :resource ,template-buffer)
-                                     (:binding 2 :resource ,camera-buffer))))
                  vertex-module
                  (create device
                          (make-shader-module-descriptor
@@ -790,13 +828,6 @@ consequence of its own occupancy star and can be read on its own."
                           :label "luft lattice point layout"
                           :entries '((:binding 0 :type :storage-buffer)
                                      (:binding 1 :type :uniform-buffer))))
-                 lattice-point-bind-group
-                 (create device
-                         (make-bind-group-descriptor
-                          :label "luft eighth-cell lattice points"
-                          :layout lattice-point-layout
-                          :entries `((:binding 0 :resource ,lattice-point-buffer)
-                                     (:binding 1 :resource ,camera-buffer))))
                  lattice-point-vertex-module
                  (create device
                          (make-shader-module-descriptor
@@ -862,25 +893,15 @@ consequence of its own occupancy star and can be read on its own."
                             :primitive '(:topology :triangle-list)))))
            (setf renderer
                  (make-instance 'renderer
-                                :device device :mesh mesh
+                                :device device
                                 :color-format color-format
                                 :temporal-p temporal-p
-                                :template-buffer template-buffer
-                                :face-instance-buffer face-instance-buffer
-                                :band-instance-buffer band-instance-buffer
-                                :fan-instance-buffer fan-instance-buffer
                                 :camera-buffer camera-buffer
                                 :layout layout
-                                :face-bind-group face-bind-group
-                                :band-bind-group band-bind-group
-                                :fan-bind-group fan-bind-group
                                 :vertex-module vertex-module
                                 :fragment-module fragment-module
                                 :pipeline pipeline
-                                :lattice-point-buffer lattice-point-buffer
                                 :lattice-point-layout lattice-point-layout
-                                :lattice-point-count lattice-point-count
-                                :lattice-point-bind-group lattice-point-bind-group
                                 :lattice-point-vertex-module
                                 lattice-point-vertex-module
                                 :lattice-point-fragment-module
@@ -903,13 +924,9 @@ consequence of its own occupancy star and can be read on its own."
                                 present-layout lattice-point-pipeline
                                 lattice-point-fragment-module
                                 lattice-point-vertex-module
-                                lattice-point-bind-group lattice-point-layout
-                                lattice-point-buffer
+                                lattice-point-layout
                                 pipeline fragment-module
-                                vertex-module fan-bind-group band-bind-group
-                                face-bind-group layout camera-buffer
-                                fan-instance-buffer band-instance-buffer
-                                face-instance-buffer template-buffer))
+                                vertex-module layout camera-buffer))
           (when resource (ignore-errors (destroy resource))))))))
 
 (defun draw-site-stream (pass bind-group draws)
@@ -927,8 +944,7 @@ consequence of its own occupancy star and can be read on its own."
      &key jitter view construction-p overlay-encoder)
   (ensure-renderer-extent renderer extent)
   (write-buffer (renderer-camera-buffer renderer) camera-uniform-data)
-  (let* ((mesh (renderer-mesh renderer))
-         (temporal-p (renderer-temporal-p renderer))
+  (let* ((temporal-p (renderer-temporal-p renderer))
          (color-view (if temporal-p
                          (renderer-scene-view renderer)
                          surface-texture))
@@ -953,17 +969,22 @@ consequence of its own occupancy star and can be read on its own."
                :depth-store-op ,(if temporal-p :store :discard)
                :depth-clear-value 1.0)))))
     (set-pipeline pass (renderer-pipeline renderer))
-    (draw-site-stream pass (renderer-face-bind-group renderer)
-                      (luft:surface-mesh-face-draws mesh))
-    (draw-site-stream pass (renderer-band-bind-group renderer)
-                      (luft:surface-mesh-band-draws mesh))
-    (draw-site-stream pass (renderer-fan-bind-group renderer)
-                      (luft:surface-mesh-fan-draws mesh))
-    (when (and construction-p
-               (plusp (renderer-lattice-point-count renderer)))
+    (dolist (key (renderer-slot-order renderer))
+      (let* ((slot (gethash key (renderer-mesh-slots renderer)))
+             (mesh (mesh-slot-mesh slot)))
+        (draw-site-stream pass (mesh-slot-face-group slot)
+                          (luft:surface-mesh-face-draws mesh))
+        (draw-site-stream pass (mesh-slot-band-group slot)
+                          (luft:surface-mesh-band-draws mesh))
+        (draw-site-stream pass (mesh-slot-fan-group slot)
+                          (luft:surface-mesh-fan-draws mesh))))
+    (when construction-p
       (set-pipeline pass (renderer-lattice-point-pipeline renderer))
-      (set-bind-group pass 0 (renderer-lattice-point-bind-group renderer))
-      (draw pass 6 (renderer-lattice-point-count renderer)))
+      (dolist (key (renderer-slot-order renderer))
+        (let ((slot (gethash key (renderer-mesh-slots renderer))))
+          (when (plusp (mesh-slot-lattice-point-count slot))
+            (set-bind-group pass 0 (mesh-slot-lattice-point-group slot))
+            (draw pass 6 (mesh-slot-lattice-point-count slot))))))
     (when temporal-p
       (signal-temporal-scaler-inputs pass
                                      (renderer-temporal-scaler renderer)))
@@ -1008,6 +1029,7 @@ consequence of its own occupancy star and can be read on its own."
 
 (defun destroy-renderer (renderer)
   (destroy-renderer-targets renderer)
+  (renderer-clear-meshes renderer)
   (dolist (resource
             (list (renderer-present-pipeline renderer)
                   (renderer-present-fragment-module renderer)
@@ -1017,21 +1039,12 @@ consequence of its own occupancy star and can be read on its own."
                   (renderer-lattice-point-pipeline renderer)
                   (renderer-lattice-point-fragment-module renderer)
                   (renderer-lattice-point-vertex-module renderer)
-                  (renderer-lattice-point-bind-group renderer)
                   (renderer-lattice-point-layout renderer)
-                  (renderer-lattice-point-buffer renderer)
                   (renderer-pipeline renderer) (renderer-fragment-module renderer)
                   (renderer-vertex-module renderer)
-                  (renderer-fan-bind-group renderer)
-                  (renderer-band-bind-group renderer)
-                  (renderer-face-bind-group renderer)
                   (renderer-layout renderer)
                   (and (slot-boundp renderer 'camera-buffer)
-                       (renderer-camera-buffer renderer))
-                  (renderer-fan-instance-buffer renderer)
-                  (renderer-band-instance-buffer renderer)
-                  (renderer-face-instance-buffer renderer)
-                  (renderer-template-buffer renderer)))
+                       (renderer-camera-buffer renderer))))
     (when resource (ignore-errors (destroy resource))))
   (setf (renderer-present-pipeline renderer) nil
         (renderer-present-fragment-module renderer) nil
@@ -1041,19 +1054,138 @@ consequence of its own occupancy star and can be read on its own."
         (renderer-lattice-point-pipeline renderer) nil
         (renderer-lattice-point-fragment-module renderer) nil
         (renderer-lattice-point-vertex-module renderer) nil
-        (renderer-lattice-point-bind-group renderer) nil
         (renderer-lattice-point-layout renderer) nil
-        (renderer-lattice-point-buffer renderer) nil
         (renderer-pipeline renderer) nil
         (renderer-fragment-module renderer) nil
         (renderer-vertex-module renderer) nil
-        (renderer-fan-bind-group renderer) nil
-        (renderer-band-bind-group renderer) nil
-        (renderer-face-bind-group renderer) nil
         (renderer-layout renderer) nil
-        (renderer-camera-buffer renderer) nil
-        (renderer-fan-instance-buffer renderer) nil
-        (renderer-band-instance-buffer renderer) nil
-        (renderer-face-instance-buffer renderer) nil
-        (renderer-template-buffer renderer) nil)
+        (renderer-camera-buffer renderer) nil)
   (values))
+
+;;; ---------------------------------------------------------------------------
+;;; Streaming chunk scenes
+;;;
+;;; A streaming scene is an ordinary authored scene whose solid is split into
+;;; its chunk chains.  Chunks become resident one at a time -- the mock of a
+;;; real async store -- and each residency change remeshes the arrivals and
+;;; their already-resident neighbors.  MESH-CHUNK's probes into non-resident
+;;; neighbors signal MISSING-CHUNK; the scene's handler answers USE-CHUNK for
+;;; resident chunks and TREAT-AS-AIR otherwise, so the loading frontier shows
+;;; honest cliff walls that heal as neighbors arrive.
+
+(defclass streaming-scene (scene)
+  ((store :initform (make-hash-table :test #'eql)
+          :reader streaming-scene-store)
+   (pending :initform nil :accessor streaming-scene-pending)
+   (loaded :initform (make-hash-table :test #'eql)
+           :reader streaming-scene-loaded)
+   (frames-per-load :initarg :frames-per-load :initform 15
+                    :accessor streaming-scene-frames-per-load)
+   (frame-counter :initform 0 :accessor streaming-scene-frame-counter)))
+
+(defun make-streaming-scene (scene &key (frames-per-load 15))
+  "Wrap SCENE for chunk-at-a-time residency, loading nearest chunks first."
+  (let ((streaming (make-instance
+                    'streaming-scene
+                    :solid (scene-solid scene)
+                    :architecture-cells (scene-architecture-cells scene)
+                    :frames-per-load frames-per-load))
+        (keys '()))
+    (luft:map-chain-chunks
+     (lambda (key chain)
+       (setf (gethash key (streaming-scene-store streaming)) chain)
+       (push key keys))
+     (scene-solid scene))
+    (let* ((domain (luft:chain-domain (scene-solid scene)))
+           (centre-x (/ (luft:world-domain-x-limit domain) 2))
+           (centre-y (/ (luft:world-domain-y-limit domain) 2)))
+      (setf (streaming-scene-pending streaming)
+            (sort keys #'<
+                  :key (lambda (key)
+                         (let ((dx (- (+ (luft:chunk-origin-x key)
+                                         (/ luft:+chunk-size+ 2))
+                                      centre-x))
+                               (dy (- (+ (luft:chunk-origin-y key)
+                                         (/ luft:+chunk-size+ 2))
+                                      centre-y)))
+                           (+ (* dx dx) (* dy dy)))))))
+    streaming))
+
+(defun mesh-streaming-chunk (scene key bevel-width)
+  "Mesh one resident chunk against the scene's current residency."
+  (let ((store (streaming-scene-store scene))
+        (loaded (streaming-scene-loaded scene)))
+    (handler-bind
+        ((luft:missing-chunk
+           (lambda (condition)
+             (let ((neighbor-key (luft:missing-chunk-key condition)))
+               (if (gethash neighbor-key loaded)
+                   (invoke-restart 'luft:use-chunk
+                                   (gethash neighbor-key store))
+                   (invoke-restart 'luft:treat-as-air)))))
+         (luft:outside-domain
+           (lambda (condition)
+             (declare (ignore condition))
+             (invoke-restart 'luft:treat-as-air))))
+      (let ((chain (gethash key store)))
+        (zone (:luft/rematerialize :value (luft:chain-count chain))
+          (luft:mesh-chunk chain key
+                           :stock-function
+                           (lambda (face) (scene-face-stock scene face))
+                           :chamfer-stock-function #'scene-chamfer-stock
+                           :bevel-width bevel-width))))))
+
+(defun advance-streaming-scene (scene renderer bevel-width)
+  "Make the next pending chunk resident; heal resident neighbor seams.
+
+Returns the newly resident chunk key, or NIL when everything is resident."
+  (let ((key (pop (streaming-scene-pending scene))))
+    (when key
+      (setf (gethash key (streaming-scene-loaded scene)) t)
+      (renderer-set-mesh renderer key
+                         (mesh-streaming-chunk scene key bevel-width))
+      (let ((grid-x (luft:chunk-key-x key))
+            (grid-y (luft:chunk-key-y key)))
+        (loop for dx from -1 to 1 do
+          (loop for dy from -1 to 1 do
+            (unless (and (zerop dx) (zerop dy))
+              (let ((nx (+ grid-x dx)) (ny (+ grid-y dy)))
+                (when (and (<= 0 nx) (<= 0 ny))
+                  (let ((neighbor (luft:chunk-key-at
+                                   (ash nx luft:+chunk-bits+)
+                                   (ash ny luft:+chunk-bits+))))
+                    (when (gethash neighbor (streaming-scene-loaded scene))
+                      (renderer-set-mesh
+                       renderer neighbor
+                       (mesh-streaming-chunk scene neighbor
+                                             bevel-width))))))))))
+      key)))
+
+(defun make-highland-sanctuary-scene (&key (horizontal-bits 8))
+  "Rolling highlands spanning many chunks, studded with watchtowers."
+  (let* ((builder (make-scene-builder :horizontal-bits horizontal-bits))
+         (size (ash 1 horizontal-bits)))
+    (flet ((terrain-height (x y)
+             (max 1 (floor (+ 9.0
+                              (* 5.0 (sin (* x 0.043)) (cos (* y 0.037)))
+                              (* 3.0 (sin (+ (* x 0.11) (* y 0.073))))
+                              (* 1.5 (cos (+ (* x 0.021) (* y 0.19)))))))))
+      (dotimes (x size)
+        (dotimes (y size)
+          (let ((height (terrain-height x y)))
+            (dotimes (z height)
+              (scene-builder-cell builder x y z)))))
+      ;; A watchtower near the middle of every chunk.
+      (loop for tower-x from 32 below size by luft:+chunk-size+ do
+        (loop for tower-y from 32 below size by luft:+chunk-size+ do
+          (let ((base (terrain-height tower-x tower-y)))
+            (scene-builder-disc builder tower-x tower-y 4
+                                (1- base) base :architecture-p t)
+            (scene-builder-ring builder tower-x tower-y 2 3
+                                (1+ base) (+ base 7) :architecture-p t)
+            (scene-builder-ring builder tower-x tower-y 2 4
+                                (+ base 8) (+ base 9) :architecture-p t)
+            (scene-builder-disc builder tower-x tower-y 3
+                                (+ base 9) (+ base 9)
+                                :architecture-p t)))))
+    (finish-scene-builder builder)))

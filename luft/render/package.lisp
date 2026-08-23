@@ -24,7 +24,10 @@
            #:*gallery*
            #:make-render-mesh
            #:renderer
-           #:renderer-mesh
+           #:renderer-set-mesh #:renderer-remove-mesh #:renderer-clear-meshes
+           #:streaming-scene #:make-streaming-scene
+           #:advance-streaming-scene #:mesh-streaming-chunk
+           #:make-highland-sanctuary-scene
            #:fly-camera
            #:make-fly-camera
            #:camera-position

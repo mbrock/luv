@@ -385,7 +385,7 @@ the selector is the whole of the difference."
      (camera-uniform-data
       view previous (viewer-inspection-parameters viewer extent)
       (if (and inspection *inspection-ink-p*) 1.0 0.0)
-      (luft:surface-mesh-bevel-width (renderer-mesh renderer)))
+      (viewer-bevel-width viewer))
      :jitter jitter :view view
      :construction-p (plusp *wireframe*)
      :overlay-encoder
@@ -668,9 +668,22 @@ the selector is the whole of the difference."
         (when (viewer-control-active-p viewer :down)
           (move (vec3:make-vec3 0 0 1) (- step)))))))
 
+(defun advance-viewer-streaming (viewer)
+  "Tick the mock chunk stream: one residency change every few frames."
+  (let ((source (viewer-source viewer)))
+    (when (and (typep source 'streaming-scene)
+               (streaming-scene-pending source))
+      (incf (streaming-scene-frame-counter source))
+      (when (>= (streaming-scene-frame-counter source)
+                (streaming-scene-frames-per-load source))
+        (setf (streaming-scene-frame-counter source) 0)
+        (advance-streaming-scene source (viewer-renderer viewer)
+                                 (viewer-bevel-width viewer))))))
+
 (defun render-viewer-frame (viewer timestamp)
   (declare (ignore timestamp))
   (when (viewer-running-p viewer)
+    (advance-viewer-streaming viewer)
     (present-canvas-frame
      (viewer-context viewer)
      (lambda (surface-texture encoder presentation-time)
@@ -926,9 +939,8 @@ the selector is the whole of the difference."
                 (renderer*
                   (setf renderer
                         (make-renderer
-                         device* (make-render-mesh solid
-                                                  :bevel-width bevel-width)
-                         (canvas-format context) (canvas-extent context))))
+                         device* (canvas-format context)
+                         (canvas-extent context))))
                 (port (clim:find-port :server-path '(:luv-gpu)))
                 (manager
                   (or (first (clim-internals::frame-managers port))
@@ -944,6 +956,10 @@ the selector is the whole of the difference."
                              :camera camera :source solid
                              :bevel-width bevel-width
                              :inspector-p inspector-p))))
+           (unless (typep solid 'streaming-scene)
+             (renderer-set-mesh renderer* 0
+                                (make-render-mesh solid
+                                                  :bevel-width bevel-width)))
            (setf (canvas-event-handler canvas) viewer)
            (when inspector-p
              (refresh-viewer-inspector viewer)
@@ -1022,17 +1038,20 @@ the atelier UI."
        (let* ((bevel-width (or bevel-width (viewer-bevel-width viewer)))
               (context (viewer-context viewer))
               (old (viewer-renderer viewer))
-              (mesh (make-render-mesh solid :bevel-width bevel-width))
               (was-running-p (viewer-running-p viewer)))
          (setf (viewer-running-p viewer) nil)
          (unwind-protect
-              (setf (viewer-renderer viewer)
-                    (make-renderer (viewer-device viewer) mesh
-                                   (canvas-format context)
-                                   (canvas-extent context))
-                    (viewer-source viewer) solid
-                    (viewer-bevel-width viewer) bevel-width
-                    (viewer-inspection viewer) nil)
+              (let ((renderer (make-renderer (viewer-device viewer)
+                                             (canvas-format context)
+                                             (canvas-extent context))))
+                (unless (typep solid 'streaming-scene)
+                  (renderer-set-mesh renderer 0
+                                     (make-render-mesh
+                                      solid :bevel-width bevel-width)))
+                (setf (viewer-renderer viewer) renderer
+                      (viewer-source viewer) solid
+                      (viewer-bevel-width viewer) bevel-width
+                      (viewer-inspection viewer) nil))
            (setf (viewer-running-p viewer) was-running-p))
          (when old (destroy-renderer old))))))
   (values))
