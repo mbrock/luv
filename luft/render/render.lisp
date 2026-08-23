@@ -3,15 +3,11 @@
 (defparameter *wireframe* 0.0
   "Global construction-edge strength.  The atelier toggles it between 0 and 1.")
 
-(defparameter *render-scale* 0.5
+(defparameter *render-scale* 0.75
   "Linear internal resolution of the LUFT scene before temporal upscaling.")
 
 (defparameter *temporal-upscaling-p* t
-  "Whether LUFT may use the experimental MetalFX temporal path.
-
-The direct HDR presentation remains the default until its temporal inputs have
-a stable motion-validation fixture.  A shimmering reconstruction is worse
-than a stable lower-resolution image.")
+  "Whether LUFT uses MetalFX temporal reconstruction on Metal devices.")
 
 (defconstant +sanctuary-origin-x+ 32)
 (defconstant +sanctuary-origin-y+ 24)
