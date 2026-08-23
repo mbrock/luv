@@ -11,6 +11,8 @@
 (defconstant +walking-player-maximum-drop+ 2)
 (defconstant +walking-player-half-step+ 0.75)
 (defconstant +walking-player-speed+ 7.0)
+(defconstant +walking-player-gravity+ -24.0)
+(defconstant +walking-player-jump-speed+ 9.0)
 
 (defgeneric inspection-source-solid (source)
   (:documentation "Return SOURCE's packed solid chain for sparse queries."))
@@ -33,7 +35,12 @@
                        :accessor walking-player-previous-heading-y)
    (gait :initform 0.0 :accessor walking-player-gait)
    (previous-gait :initform 0.0 :accessor walking-player-previous-gait)
-   (speed :initarg :speed :initform 4.0 :accessor walking-player-speed))
+   (speed :initarg :speed :initform +walking-player-speed+
+          :accessor walking-player-speed)
+   (vertical-velocity :initform 0.0 :accessor walking-player-vertical-velocity)
+   (grounded-p :initform t :accessor walking-player-grounded-p)
+   (jump-requested-p :initform nil
+                     :accessor walking-player-jump-requested-p))
   (:documentation
    "The continuous, player-owned state of LUFT's walking character.
 
@@ -115,6 +122,36 @@ for a remote roof, so a wall cannot teleport the player onto its top."
             (vec3:vec3-z position) support)
       t)))
 
+(defun request-walking-player-jump (player)
+  "Request one grounded jump on PLAYER's next simulation step."
+  (setf (walking-player-jump-requested-p player) t)
+  player)
+
+(defun advance-walking-player-vertical (player source seconds)
+  "Apply Luvcraft-strength gravity to LUFT's Z-up walking controller."
+  (let* ((position (walking-player-position player))
+         (jump-p (walking-player-jump-requested-p player)))
+    (setf (walking-player-jump-requested-p player) nil)
+    (when (and jump-p (walking-player-grounded-p player))
+      (setf (walking-player-vertical-velocity player)
+            +walking-player-jump-speed+
+            (walking-player-grounded-p player) nil))
+    (unless (walking-player-grounded-p player)
+      (incf (walking-player-vertical-velocity player)
+            (* +walking-player-gravity+ seconds))
+      (incf (vec3:vec3-z position)
+            (* (walking-player-vertical-velocity player) seconds)))
+    (let ((support (walking-player-support-height
+                    source (vec3:vec3-x position) (vec3:vec3-y position)
+                    (vec3:vec3-z position))))
+      (when (and support
+                 (<= (walking-player-vertical-velocity player) 0.0)
+                 (<= (vec3:vec3-z position) support))
+        (setf (vec3:vec3-z position) support
+              (walking-player-vertical-velocity player) 0.0
+              (walking-player-grounded-p player) t))))
+  player)
+
 (defun advance-walking-player (player source camera forward right seconds)
   "Advance PLAYER from camera-relative movement axes for SECONDS."
   (begin-walking-player-frame player)
@@ -129,8 +166,13 @@ for a remote roof, so a wall cannot teleport the player onto its top."
                (position (walking-player-position player))
                (before-x (vec3:vec3-x position))
                (before-y (vec3:vec3-y position)))
-          (try-walking-player-axis player source :x (* direction-x distance))
-          (try-walking-player-axis player source :y (* direction-y distance))
+          (if (walking-player-grounded-p player)
+              (progn
+                (try-walking-player-axis player source :x (* direction-x distance))
+                (try-walking-player-axis player source :y (* direction-y distance)))
+              (let ((position (walking-player-position player)))
+                (incf (vec3:vec3-x position) (* direction-x distance))
+                (incf (vec3:vec3-y position) (* direction-y distance))))
           (let* ((dx (- (vec3:vec3-x position) before-x))
                  (dy (- (vec3:vec3-y position) before-y))
                  (travelled (sqrt (+ (* dx dx) (* dy dy)))))
@@ -151,23 +193,34 @@ for a remote roof, so a wall cannot teleport the player onto its top."
           (incf (walking-player-gait player)
                 (max (- maximum-change)
                      (min maximum-change difference))))))
+  (advance-walking-player-vertical player source seconds)
   player)
 
-(defun follow-walking-player (camera player &key (distance 18.0))
-  "Put CAMERA on its orbit behind PLAYER while preserving yaw and pitch."
+(defun follow-walking-player (camera player &key (distance 18.0) seconds)
+  "Follow PLAYER with a soft look-ahead rather than a rigid camera weld."
   (multiple-value-bind (right up forward) (camera-basis camera)
     (declare (ignore right up))
-    (let ((player-position (walking-player-position player))
-          (camera-position (camera-position camera)))
+    (let* ((player-position (walking-player-position player))
+           (heading-x (walking-player-heading-x player))
+           (heading-y (walking-player-heading-y player))
+           ;; Showing more of where the traveler is going makes movement legible.
+           (aim-x (+ (vec3:vec3-x player-position) (* 2.4 heading-x)))
+           (aim-y (+ (vec3:vec3-y player-position) (* 2.4 heading-y)))
+           (aim-z (+ (vec3:vec3-z player-position) 1.45))
+           (target-x (- aim-x (* distance (vec3:vec3-x forward))))
+           (target-y (- aim-y (* distance (vec3:vec3-y forward))))
+           (target-z (- aim-z (* distance (vec3:vec3-z forward))))
+           (camera-position (camera-position camera))
+           (blend (if seconds (min 1.0 (* seconds 8.0)) 1.0)))
       (setf (vec3:vec3-x camera-position)
-            (- (vec3:vec3-x player-position)
-               (* distance (vec3:vec3-x forward)))
+            (+ (vec3:vec3-x camera-position)
+               (* blend (- target-x (vec3:vec3-x camera-position))))
             (vec3:vec3-y camera-position)
-            (- (vec3:vec3-y player-position)
-               (* distance (vec3:vec3-y forward)))
+            (+ (vec3:vec3-y camera-position)
+               (* blend (- target-y (vec3:vec3-y camera-position))))
             (vec3:vec3-z camera-position)
-            (- (+ (vec3:vec3-z player-position) 1.45)
-               (* distance (vec3:vec3-z forward))))))
+            (+ (vec3:vec3-z camera-position)
+               (* blend (- target-z (vec3:vec3-z camera-position)))))))
   camera)
 
 (defun walking-player-render-lanes (player)

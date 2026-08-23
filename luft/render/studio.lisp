@@ -676,7 +676,7 @@ the selector is the whole of the difference."
           (advance-walking-player (viewer-player viewer)
                                   (viewer-source viewer) camera
                                   forward right dt)
-          (follow-walking-player camera (viewer-player viewer)))
+          (follow-walking-player camera (viewer-player viewer) :seconds dt))
         (multiple-value-bind (right up forward) (camera-basis camera)
           (flet ((move (direction amount)
                    (let ((position (camera-position camera)))
@@ -756,6 +756,13 @@ the selector is the whole of the difference."
                                      :keystroke (:r))
     ()
   (reset-viewer-camera (viewer-command-viewer)))
+
+(clim:define-command (com-jump :command-table luft-atelier
+                                :name "Jump"
+                                :keystroke (:space))
+    ()
+  (let ((player (viewer-player (viewer-command-viewer))))
+    (when player (request-walking-player-jump player))))
 
 (clim:define-command (com-toggle-construction-lines
                       :command-table luft-atelier
