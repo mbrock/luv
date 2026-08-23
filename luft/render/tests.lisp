@@ -334,6 +334,118 @@
             scene :stock-function (lambda (face) (legacy-face-stock scene face))
                   :chamfer-stock-function #'legacy-chamfer-stock))))))
 
+(deftest material-semantics-compile-once-before-dense-meshing
+  (let ((luft.render::*material-placement-compilation-count* 0))
+    (let* ((scene (render:make-mountain-sanctuary-scene))
+           (compilations
+             luft.render::*material-placement-compilation-count*)
+           (placement-count
+             (length
+              (luv.domains:identity-vocabulary-members
+               (luft.render::scene-material-vocabulary scene))))
+           (program (luft.render::scene-material-program scene)))
+      (ok (= placement-count compilations))
+      (ok (typep
+           (luft.render::material-program-placement-face-stocks program)
+           '(simple-array (unsigned-byte 16) (*))))
+      (ok (typep (luft.render::material-program-placement-flags program)
+                 '(simple-array (unsigned-byte 8) (*))))
+      (render:make-render-mesh scene)
+      (ok (= compilations
+             luft.render::*material-placement-compilation-count*)))))
+
+(deftest compiled-placement-local-materials-match-the-semantic-oracle
+  (labels ((same-mesh-p (left right)
+             (every #'equalp
+                    (list (luft:surface-mesh-template-vertex-words left)
+                          (luft:surface-mesh-template-ranges left)
+                          (luft:surface-mesh-face-instance-words left)
+                          (luft:surface-mesh-band-instance-words left)
+                          (luft:surface-mesh-fan-instance-words left))
+                    (list (luft:surface-mesh-template-vertex-words right)
+                          (luft:surface-mesh-template-ranges right)
+                          (luft:surface-mesh-face-instance-words right)
+                          (luft:surface-mesh-band-instance-words right)
+                          (luft:surface-mesh-fan-instance-words right)))))
+    (let ((scene (render:make-mountain-sanctuary-scene)))
+      (ok
+       (same-mesh-p
+        (render:make-render-mesh scene)
+        (render:make-render-mesh
+         scene
+         :stock-function
+         (lambda (face)
+           (luft.render::surface-assembly-offset
+            (luft.render::face-reading-assembly
+             (luft.render::scene-face-reading scene face))))
+         :chamfer-stock-function
+         (lambda (stocks)
+           (luft.render::surface-assembly-offset
+            (luft.render::closure-surface-assembly
+             (mapcar #'luft.render::surface-assembly-at stocks))))))))))
+
+(deftest compiled-contacts-retain-both-authored-placement-frames
+  (let* ((earth-frame
+           (make-instance 'luft.render::material-frame
+                          :name :test-earth :origin '(4 4 2)
+                          :axes '((1 0 0) (0 1 0) (0 0 1))))
+         (stone-frame
+           (make-instance 'luft.render::material-frame
+                          :name :test-stone :origin '(5 5 3)
+                          :axes '((0 1 0) (-1 0 0) (0 0 1))))
+         (earth
+           (make-instance 'luft.render::material-placement
+                          :name :test-earth :kind luft.render::*earth-material*
+                          :finish :living :frame earth-frame :role :terrain))
+         (stone
+           (make-instance
+            'luft.render::material-placement
+            :name :test-stone :kind luft.render::*limestone-material*
+            :finish :dressed :frame stone-frame :role :architecture))
+         (builder (luft.render::make-scene-builder :horizontal-bits 4))
+         (scene
+           (progn
+             (luft.render::scene-builder-box
+              builder 4 6 4 6 2 2 :material earth)
+             (luft.render::scene-builder-cell
+              builder 5 5 3 :material stone)
+             (luft.render::finish-scene-builder builder)))
+         (compiled (render:make-render-mesh scene))
+         (semantic
+           (render:make-render-mesh
+            scene
+            :stock-function
+            (lambda (face)
+              (luft.render::surface-assembly-offset
+               (luft.render::face-reading-assembly
+                (luft.render::scene-face-reading scene face))))
+            :chamfer-stock-function
+            (lambda (stocks)
+              (luft.render::surface-assembly-offset
+               (luft.render::closure-surface-assembly
+                (mapcar #'luft.render::surface-assembly-at stocks)))))))
+    (ok
+     (every #'equalp
+            (list (luft:surface-mesh-face-instance-words compiled)
+                  (luft:surface-mesh-band-instance-words compiled)
+                  (luft:surface-mesh-fan-instance-words compiled))
+            (list (luft:surface-mesh-face-instance-words semantic)
+                  (luft:surface-mesh-band-instance-words semantic)
+                  (luft:surface-mesh-fan-instance-words semantic))))
+    (ok
+     (find-if
+      (lambda (assembly)
+        (and (eq :contact
+                 (luft.render::surface-assembly-relation assembly))
+             (eq stone-frame
+                 (luft.render::surface-reading-frame
+                  (luft.render::surface-assembly-primary assembly)))
+             (eq earth-frame
+                 (luft.render::surface-reading-frame
+                  (luft.render::surface-assembly-secondary assembly)))))
+      (luv.domains:identity-vocabulary-members
+       luft.render::*surface-assembly-vocabulary*)))))
+
 (deftest surface-assembly-descriptors-compile-semantic-material-data
   (let ((words (luft.render::surface-assembly-descriptor-words)))
     (ok (<= (* 9 luft.render::+surface-assembly-descriptor-row-count+ 4)

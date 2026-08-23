@@ -3,25 +3,6 @@
 (defparameter *wireframe* 0.0
   "Global construction-edge strength.  The atelier toggles it between 0 and 1.")
 
-(defconstant +grass-stock+ (surface-assembly-offset *grass-surface*))
-(defconstant +soil-stock+ (surface-assembly-offset *soil-surface*))
-(defconstant +subsoil-stock+ (surface-assembly-offset *subsoil-surface*))
-(defconstant +stone-stock+ (surface-assembly-offset *stone-surface*))
-(defconstant +turf-set-stone-stock+
-  (surface-assembly-offset *turf-set-stone-surface*)
-  "Stone at a chamfer shared with a grassy terrain top.")
-(defconstant +soil-set-stone-stock+
-  (surface-assembly-offset *soil-set-stone-surface*)
-  "Stone at a chamfer shared with an exposed terrain side.")
-(defconstant +deep-set-stone-stock+
-  (surface-assembly-offset *deep-set-stone-surface*)
-  "Stone at a chamfer shared with a terrain underside.")
-(defconstant +turf-edge-stock+ (surface-assembly-offset *turf-edge-surface*)
-  "The living transition where a grassy terrain top rolls into exposed soil.")
-(defconstant +foundation-stone-stock+
-  (surface-assembly-offset *foundation-stone-surface*)
-  "The lowest exposed course of stone borne by a terrain cell.")
-
 (defconstant +sanctuary-origin-x+ 32)
 (defconstant +sanctuary-origin-y+ 24)
 (defparameter *sanctuary-beacon-x* 58)
@@ -32,6 +13,8 @@
    (material-vocabulary :initarg :material-vocabulary
                         :reader scene-material-vocabulary)
    (material-cells :initarg :material-cells :reader scene-material-cells)
+   (material-program :initarg :material-program
+                     :reader scene-material-program)
    (player-p :initarg :player-p :initform nil :reader scene-player-p))
   (:documentation
    "One authored solid and its vocabulary-closed material-placement field.
@@ -176,6 +159,9 @@ boundary rather than being allocated per cell."))
                    :player-p player-p
                    :material-vocabulary
                    (scene-builder-material-vocabulary builder)
+                   :material-program
+                   (make-material-program
+                    (scene-builder-material-vocabulary builder))
                    :material-cells (scene-builder-material-cells builder))))
 
 (defun make-manifold-spike-scene ()
@@ -417,9 +403,15 @@ same view also retains the truncated wall miter preserved by #DJK8HW."
         (and (= 1 (luft:chain-cell-occupancy-bit
                    (scene-solid scene)
                    (luft:site-x below) (luft:site-y below) (luft:site-z below)))
-             (eq :terrain
-                 (material-placement-role
-                  (scene-material-placement-at scene below))))))))
+             (multiple-value-bind (offset present-p)
+                 (gethash below (scene-material-cells scene))
+               (and present-p
+                    (logtest
+                     +material-placement-earth-flag+
+                     (aref
+                      (material-program-placement-flags
+                       (scene-material-program scene))
+                      offset)))))))))
 
 (defun scene-material-placement-at (scene cell)
   "Return the authored placement at occupied CELL in SCENE."
@@ -438,12 +430,65 @@ same view also retains the truncated wall miter preserved by #DJK8HW."
       (material-face-reading (material-placement-kind placement)
                              placement scene cell axis side))))
 
+(defun make-scene-face-stock-function (scene)
+  "Capture SCENE's dense material tables for repeated face classification."
+  (let* ((solid (scene-solid scene))
+         (domain (luft:chain-domain solid))
+         (material-cells (scene-material-cells scene))
+         (program (scene-material-program scene))
+         (placement-flags
+           (the (simple-array (unsigned-byte 8) (*))
+                (material-program-placement-flags program)))
+         (face-stocks
+           (the (simple-array (unsigned-byte 16) (*))
+                (material-program-placement-face-stocks program))))
+    (labels ((foundation-p (cell)
+               (let ((z (luft:site-z cell)))
+                 (when (plusp z)
+                   (let ((below
+                           (luft:make-site
+                            domain
+                            (luft:site-x cell) (luft:site-y cell) (1- z)
+                            luft:+cell-extent+ 1)))
+                     (and (= 1 (luft:chain-cell-occupancy-bit
+                                solid
+                                (luft:site-x below)
+                                (luft:site-y below)
+                                (luft:site-z below)))
+                          (multiple-value-bind (offset present-p)
+                              (gethash below material-cells)
+                            (and present-p
+                                 (logtest
+                                  +material-placement-earth-flag+
+                                  (aref placement-flags offset))))))))))
+      (lambda (face)
+        (declare (optimize (speed 3) (safety 1)))
+        (multiple-value-bind (cell axis side)
+            (face-solid-cell solid face)
+          (multiple-value-bind (placement-offset present-p)
+              (gethash cell material-cells)
+            (unless present-p
+              (error "Occupied scene cell ~S has no authored material placement."
+                     cell))
+            (let* ((flags (aref placement-flags placement-offset))
+                   (face-index
+                     (if (and
+                          (logtest +material-placement-architecture-flag+
+                                   flags)
+                          (foundation-p cell))
+                         6
+                         (+ (* (ecase axis (:x 0) (:y 1) (:z 2)) 2)
+                            (if (eq side :forward) 1 0)))))
+              (aref face-stocks
+                    (+ (* placement-offset
+                          +material-placement-face-stride+)
+                       face-index)))))))))
+
 (defun scene-face-stock (scene face)
   "The current packed assembly offset for FACE in SCENE."
-  (surface-assembly-offset
-   (face-reading-assembly (scene-face-reading scene face))))
+  (funcall (make-scene-face-stock-function scene) face))
 
-(defun scene-chamfer-stock (stocks)
+(defun scene-chamfer-stock (stocks &optional material-program)
   "Resolve one whole chamfer from its incident face STOCKS.
 
 The paper palette's terrain top is grass, terrain side is soil, and terrain
@@ -451,8 +496,10 @@ underside is dark soil.  A unanimous closure continues that face material;
 a mixed terrain chamfer exposes soil.  Stone--terrain chamfers retain the
 deepest incident substrate, so the shader can weather a turf line differently
 from an exposed or buried foundation without adding per-site material objects."
-  (surface-assembly-offset
-   (closure-surface-assembly (mapcar #'surface-assembly-at stocks))))
+  (if material-program
+      (compiled-material-chamfer-stock material-program stocks)
+      (surface-assembly-offset
+       (closure-surface-assembly (mapcar #'surface-assembly-at stocks)))))
 
 (defun default-face-stock (face)
   (mod (+ (luft:site-x face) (* 2 (luft:site-y face))
@@ -465,14 +512,15 @@ from an exposed or buried foundation without adding per-site material objects."
   "Classify SOURCE into the face, edge, and vertex template-instance ABI."
   (let* ((scene (and (typep source 'scene) source))
          (solid (if scene (scene-solid source) source))
+         (material-program (and scene (scene-material-program scene)))
          (stock-function (or stock-function
-                             (and scene
-                                  (lambda (face) (scene-face-stock scene face)))
+                             (and scene (make-scene-face-stock-function scene))
                              #'default-face-stock))
          (chamfer-stock-function
            (or chamfer-stock-function
                (if scene
-                   #'scene-chamfer-stock
+                   (make-compiled-material-chamfer-stock-function
+                    material-program)
                    (lambda (stocks) (first stocks))))))
     (check-type solid luft:chain)
     (zone (:luft/rematerialize :value (luft:chain-count solid))
@@ -1711,6 +1759,7 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                     :solid (scene-solid scene)
                     :material-vocabulary (scene-material-vocabulary scene)
                     :material-cells (scene-material-cells scene)
+                    :material-program (scene-material-program scene)
                     :frames-per-load frames-per-load))
         (keys '()))
     (luft:map-chain-chunks
@@ -1760,9 +1809,13 @@ cohort untouched. No frame can interleave with the owner-thread publication."
 
 (defun mesh-streaming-snapshot (snapshot)
   "Mesh one worker-owned residency snapshot without reading owner state."
-  (let ((scene (streaming-mesh-snapshot-scene snapshot))
-        (key (streaming-mesh-snapshot-key snapshot))
-        (neighborhood (streaming-mesh-snapshot-neighborhood snapshot)))
+  (let* ((scene (streaming-mesh-snapshot-scene snapshot))
+         (key (streaming-mesh-snapshot-key snapshot))
+         (neighborhood (streaming-mesh-snapshot-neighborhood snapshot))
+         (stock-function (make-scene-face-stock-function scene))
+         (chamfer-stock-function
+           (make-compiled-material-chamfer-stock-function
+            (scene-material-program scene))))
     (handler-bind
         ((luft:missing-chunk
            (lambda (condition)
@@ -1778,9 +1831,8 @@ cohort untouched. No frame can interleave with the owner-thread publication."
       (let ((chain (gethash key neighborhood)))
         (zone (:luft/rematerialize :value (luft:chain-count chain))
           (luft:mesh-chunk chain key
-                           :stock-function
-                           (lambda (face) (scene-face-stock scene face))
-                           :chamfer-stock-function #'scene-chamfer-stock
+                           :stock-function stock-function
+                           :chamfer-stock-function chamfer-stock-function
                            :bevel-width
                            (streaming-mesh-snapshot-bevel-width snapshot)))))))
 

@@ -239,6 +239,19 @@
 (defun surface-assembly-at (offset)
   (domains:identity-vocabulary-member *surface-assembly-vocabulary* offset))
 
+;; The first nine vocabulary members are the stable renderer ABI.  The tests
+;; rebuild this exact prefix from the semantic objects, so these literals are
+;; available while this file itself is being compiled in a clean image.
+(defconstant +grass-stock+ 0)
+(defconstant +soil-stock+ 1)
+(defconstant +subsoil-stock+ 2)
+(defconstant +stone-stock+ 3)
+(defconstant +turf-set-stone-stock+ 4)
+(defconstant +soil-set-stone-stock+ 5)
+(defconstant +deep-set-stone-stock+ 6)
+(defconstant +turf-edge-stock+ 7)
+(defconstant +foundation-stone-stock+ 8)
+
 (defconstant +surface-assembly-descriptor-row-count+ 7)
 
 (defun surface-kernel-code (kernel)
@@ -472,3 +485,318 @@ in semantic identities rather than numeric ranges."
               (t *soil-surface*))
         (chamfer-surface-assembly
          (mapcar #'surface-assembly-primary assemblies)))))
+
+;;; ---------------------------------------------------------------------------
+;;; Scene material compilation
+
+(defconstant +material-placement-face-stride+ 7)
+(defconstant +material-placement-architecture-flag+ #x01)
+(defconstant +material-placement-earth-flag+ #x02)
+
+(defconstant +assembly-legacy-flag+ #x01)
+(defconstant +assembly-legacy-stone-flag+ #x02)
+(defconstant +assembly-legacy-grass-flag+ #x04)
+(defconstant +assembly-legacy-soil-flag+ #x08)
+(defconstant +assembly-legacy-subsoil-flag+ #x10)
+
+(defconstant +assembly-primary-stone-flag+ #x01)
+(defconstant +assembly-primary-grass-flag+ #x02)
+(defconstant +assembly-primary-soil-flag+ #x04)
+(defconstant +assembly-primary-subsoil-flag+ #x08)
+
+(defclass material-program ()
+  ((placement-face-stocks :initarg :placement-face-stocks
+                          :reader material-program-placement-face-stocks)
+   (placement-flags :initarg :placement-flags
+                    :reader material-program-placement-flags)
+   (assembly-flags :initarg :assembly-flags
+                   :reader material-program-assembly-flags)
+   (assembly-primary-flags :initarg :assembly-primary-flags
+                           :reader material-program-assembly-primary-flags)
+   (assembly-primary-reading-offsets
+    :initarg :assembly-primary-reading-offsets
+    :reader material-program-assembly-primary-reading-offsets)
+   (assembly-face-stocks :initarg :assembly-face-stocks
+                         :reader material-program-assembly-face-stocks)
+   (reading-contact-stocks :initarg :reading-contact-stocks
+                           :reader material-program-reading-contact-stocks)
+   (reading-count :initarg :reading-count
+                  :reader material-program-reading-count))
+  (:documentation
+   "Scene-closed dense decisions consumed by face, band, and fan meshing."))
+
+(defgeneric compile-material-placement (kind placement)
+  (:documentation
+   "Compile PLACEMENT once into six oriented readings and one foundation row."))
+
+(defvar *material-placement-compilation-count* 0
+  "Dynamically bindable witness for the cold semantic compilation boundary.")
+
+(defmethod compile-material-placement
+    ((kind earth-material-kind) placement)
+  (declare (ignore kind))
+  (incf *material-placement-compilation-count*)
+  (let ((side (placement-surface-reading
+               placement :exposed-side :soil '(0.42 0.32 0.21) :cut))
+        (top (placement-surface-reading
+              placement :exposed-top :grass '(0.18 0.31 0.105) :living))
+        (underside (placement-surface-reading
+                    placement :underside :subsoil '(0.24 0.18 0.13) :broken)))
+    (vector side side side side top underside nil)))
+
+(defmethod compile-material-placement
+    ((kind stone-material-kind) placement)
+  (declare (ignore kind))
+  (incf *material-placement-compilation-count*)
+  (let ((architecture
+          (placement-surface-reading
+           placement :architecture :dressed-limestone '(0.53 0.49 0.39)
+           :dressed))
+        (foundation
+          (placement-surface-reading
+           placement :foundation :foundation-limestone '(0.53 0.49 0.39)
+           :earth-weathered)))
+    (vector architecture architecture architecture architecture
+            architecture architecture foundation)))
+
+(defun legacy-surface-assembly-p (assembly)
+  (member assembly
+          (list *grass-surface* *soil-surface* *subsoil-surface*
+                *stone-surface* *turf-set-stone-surface*
+                *soil-set-stone-surface* *deep-set-stone-surface*
+                *turf-edge-surface* *foundation-stone-surface*)))
+
+(defun ensure-reading-closure-assemblies (reading)
+  "Intern the face result that the dense resolver may select for READING."
+  (face-reading-assembly reading))
+
+(defun earth-contact-reading-p (reading)
+  (and (typep (surface-reading-kind reading) 'earth-material-kind)
+       (member (surface-reading-role reading)
+               '(:exposed-top :exposed-side :underside))))
+
+(defun make-material-program (placement-vocabulary)
+  "Bind semantic placement and assembly meaning once into dense stock tables."
+  (let* ((placements
+           (domains:identity-vocabulary-members placement-vocabulary))
+         (placement-count (length placements))
+         (placement-readings (make-array placement-count))
+         (placement-face-stocks
+           (make-array (* placement-count +material-placement-face-stride+)
+                       :element-type '(unsigned-byte 16)))
+         (placement-flags
+           (make-array placement-count :element-type '(unsigned-byte 8)
+                                       :initial-element 0)))
+    ;; This is the only material-kind generic dispatch in scene compilation.
+    (loop for placement across placements
+          for placement-offset from 0
+          for readings = (compile-material-placement
+                          (material-placement-kind placement) placement)
+          do (setf (aref placement-readings placement-offset) readings)
+             (when (eq :architecture (material-placement-role placement))
+               (setf (aref placement-flags placement-offset)
+                     (logior (aref placement-flags placement-offset)
+                             +material-placement-architecture-flag+)))
+             (when (typep (material-placement-kind placement)
+                          'earth-material-kind)
+               (setf (aref placement-flags placement-offset)
+                     (logior (aref placement-flags placement-offset)
+                             +material-placement-earth-flag+)))
+             (loop for reading across readings
+                   when reading do (ensure-reading-closure-assemblies reading)))
+    ;; A previous scene may have extended the renderer-global assembly ABI.
+    ;; Close those primaries too before fixing this program's array bounds.
+    (loop for assembly across
+          (copy-seq
+           (domains:identity-vocabulary-members *surface-assembly-vocabulary*))
+          do (ensure-reading-closure-assemblies
+              (surface-assembly-primary assembly)))
+    ;; Intern the cross-product of authored stone and earth readings once.  A
+    ;; contact then retains both placements' tone and frame without a hot hash.
+    (let ((primary-readings
+            (make-array 16 :adjustable t :fill-pointer 0))
+          (primary-reading-offsets (make-hash-table :test #'eq)))
+      (loop for assembly across
+            (domains:identity-vocabulary-members
+             *surface-assembly-vocabulary*)
+            for reading = (surface-assembly-primary assembly)
+            unless (gethash reading primary-reading-offsets) do
+              (setf (gethash reading primary-reading-offsets)
+                    (length primary-readings))
+              (vector-push-extend reading primary-readings))
+      (loop for stone across primary-readings
+            when (stone-reading-p stone) do
+              (loop for earth across primary-readings
+                    when (earth-contact-reading-p earth) do
+                      (chamfer-surface-assembly (list stone earth))))
+      ;; All assembly interning is complete before the arrays receive their size.
+      (let* ((assemblies
+               (domains:identity-vocabulary-members
+                *surface-assembly-vocabulary*))
+             (assembly-count (length assemblies))
+             (reading-count (length primary-readings))
+             (assembly-flags
+               (make-array assembly-count :element-type '(unsigned-byte 8)
+                                          :initial-element 0))
+             (primary-flags
+               (make-array assembly-count :element-type '(unsigned-byte 8)
+                                          :initial-element 0))
+             (assembly-reading-offsets
+               (make-array assembly-count :element-type '(unsigned-byte 16)))
+             (face-stocks
+               (make-array assembly-count :element-type '(unsigned-byte 16)))
+             (reading-contacts
+               (make-array (* reading-count reading-count)
+                           :element-type '(unsigned-byte 16)
+                           :initial-element +soil-stock+)))
+        (loop for readings across placement-readings
+              for placement-offset from 0
+              do (loop for reading across readings
+                       for face from 0
+                       when reading do
+                         (setf (aref placement-face-stocks
+                                     (+ (* placement-offset
+                                           +material-placement-face-stride+)
+                                        face))
+                               (surface-assembly-offset
+                                (face-reading-assembly reading)))))
+        (loop for assembly across assemblies
+              for stock from 0
+              for primary = (surface-assembly-primary assembly)
+              for role = (surface-reading-role primary)
+              for stone-p = (stone-reading-p primary)
+              do (setf (aref assembly-reading-offsets stock)
+                       (gethash primary primary-reading-offsets)
+                       (aref face-stocks stock)
+                       (surface-assembly-offset
+                        (face-reading-assembly primary)))
+                 (when (legacy-surface-assembly-p assembly)
+                   (setf (aref assembly-flags stock)
+                         (logior +assembly-legacy-flag+
+                                 (cond
+                                   ((member assembly
+                                            (list *stone-surface*
+                                                  *foundation-stone-surface*))
+                                    +assembly-legacy-stone-flag+)
+                                   ((eq assembly *grass-surface*)
+                                    +assembly-legacy-grass-flag+)
+                                   ((eq assembly *soil-surface*)
+                                    +assembly-legacy-soil-flag+)
+                                   ((eq assembly *subsoil-surface*)
+                                    +assembly-legacy-subsoil-flag+)
+                                   (t 0)))))
+                 (setf (aref primary-flags stock)
+                       (cond (stone-p +assembly-primary-stone-flag+)
+                             ((eq role :exposed-top)
+                              +assembly-primary-grass-flag+)
+                             ((eq role :exposed-side)
+                              +assembly-primary-soil-flag+)
+                             ((eq role :underside)
+                              +assembly-primary-subsoil-flag+)
+                             (t 0))))
+        (loop for stone across primary-readings
+              for stone-offset from 0
+              when (stone-reading-p stone) do
+                (loop for earth across primary-readings
+                      for earth-offset from 0
+                      when (earth-contact-reading-p earth) do
+                        (setf (aref reading-contacts
+                                    (+ (* stone-offset reading-count)
+                                       earth-offset))
+                              (surface-assembly-offset
+                               (chamfer-surface-assembly
+                                (list stone earth))))))
+        (make-instance
+         'material-program
+         :placement-face-stocks placement-face-stocks
+         :placement-flags placement-flags
+         :assembly-flags assembly-flags
+         :assembly-primary-flags primary-flags
+         :assembly-primary-reading-offsets assembly-reading-offsets
+         :assembly-face-stocks face-stocks
+         :reading-contact-stocks reading-contacts
+         :reading-count reading-count)))))
+
+(defun make-compiled-material-chamfer-stock-function (program)
+  "Capture PROGRAM's dense lanes as one dispatch-free chamfer resolver."
+  (let ((assembly-flags
+          (the (simple-array (unsigned-byte 8) (*))
+               (material-program-assembly-flags program)))
+        (primary-flags
+          (the (simple-array (unsigned-byte 8) (*))
+               (material-program-assembly-primary-flags program)))
+        (face-stocks
+          (the (simple-array (unsigned-byte 16) (*))
+               (material-program-assembly-face-stocks program)))
+        (reading-offsets
+          (the (simple-array (unsigned-byte 16) (*))
+               (material-program-assembly-primary-reading-offsets program)))
+        (reading-contacts
+          (the (simple-array (unsigned-byte 16) (*))
+               (material-program-reading-contact-stocks program)))
+        (reading-count
+          (the (integer 0 #x1000)
+               (material-program-reading-count program))))
+    (lambda (stocks)
+      (declare (optimize (speed 3) (safety 1)))
+      (let ((all-legacy-p t)
+            (same-stock-p t)
+            (same-primary-p t)
+            (first-stock (the (unsigned-byte 16) (first stocks)))
+            (first-primary (aref face-stocks (first stocks)))
+            legacy-stone legacy-grass-p legacy-soil-p legacy-subsoil-p
+            primary-stone primary-grass primary-soil primary-subsoil)
+        (dolist (stock stocks)
+          (declare (type (unsigned-byte 16) stock))
+          (let ((legacy (aref assembly-flags stock))
+                (primary (aref primary-flags stock)))
+            (unless (logtest +assembly-legacy-flag+ legacy)
+              (setf all-legacy-p nil))
+            (unless (= stock first-stock) (setf same-stock-p nil))
+            (unless (= (aref face-stocks stock) first-primary)
+              (setf same-primary-p nil))
+            (when (logtest +assembly-legacy-stone-flag+ legacy)
+              (unless legacy-stone (setf legacy-stone stock)))
+            (when (logtest +assembly-legacy-grass-flag+ legacy)
+              (setf legacy-grass-p t))
+            (when (logtest +assembly-legacy-soil-flag+ legacy)
+              (setf legacy-soil-p t))
+            (when (logtest +assembly-legacy-subsoil-flag+ legacy)
+              (setf legacy-subsoil-p t))
+            (when (logtest +assembly-primary-stone-flag+ primary)
+              (unless primary-stone (setf primary-stone stock)))
+            (when (logtest +assembly-primary-grass-flag+ primary)
+              (unless primary-grass (setf primary-grass stock)))
+            (when (logtest +assembly-primary-soil-flag+ primary)
+              (unless primary-soil (setf primary-soil stock)))
+            (when (logtest +assembly-primary-subsoil-flag+ primary)
+              (unless primary-subsoil (setf primary-subsoil stock)))))
+        (if all-legacy-p
+            (cond ((and legacy-stone legacy-subsoil-p)
+                   +deep-set-stone-stock+)
+                  ((and legacy-stone legacy-soil-p) +soil-set-stone-stock+)
+                  ((and legacy-stone legacy-grass-p) +turf-set-stone-stock+)
+                  (same-stock-p first-stock)
+                  (legacy-stone +stone-stock+)
+                  ((and legacy-grass-p (or legacy-soil-p legacy-subsoil-p))
+                   +turf-edge-stock+)
+                  (t +soil-stock+))
+            (flet ((contact (stone earth)
+                     (aref reading-contacts
+                           (+ (* (aref reading-offsets stone) reading-count)
+                              (aref reading-offsets earth)))))
+              (cond ((and primary-stone primary-subsoil)
+                     (contact primary-stone primary-subsoil))
+                    ((and primary-stone primary-soil)
+                     (contact primary-stone primary-soil))
+                    ((and primary-stone primary-grass)
+                     (contact primary-stone primary-grass))
+                    (same-primary-p first-primary)
+                    (primary-stone (aref face-stocks primary-stone))
+                    ((and primary-grass (or primary-soil primary-subsoil))
+                     +turf-edge-stock+)
+                    (t +soil-stock+))))))))
+
+(defun compiled-material-chamfer-stock (program stocks)
+  "Resolve STOCKS through a freshly captured PROGRAM, for inspection/tests."
+  (funcall (make-compiled-material-chamfer-stock-function program) stocks))
