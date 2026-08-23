@@ -241,6 +241,9 @@ same view also retains the truncated wall miter preserved by #DJK8HW."
     ;; Broad plinth and continuous back wall.
     (scene-builder-box builder 2 14 2 8 0 1 :architecture-p t)
     (scene-builder-box builder 2 14 8 9 0 7 :architecture-p t)
+    ;; One isolated terrain cell makes the ordinary boulder-on-ground contact
+    ;; inspectable beside the architectural mixed-miter cases.
+    (scene-builder-cell builder 13 4 2)
     ;; The lower L supplies the outie, straight six-cell run, innie, and the
     ;; first wall termination.  The upper L repeats them without isolation.
     (scene-builder-box builder 4 11 5 7 2 2 :architecture-p t)
