@@ -165,6 +165,14 @@
     (ok (zerop (mod (length templates)
                     luft:+mesh-template-vertex-word-count+)))))
 
+(deftest the-walking-player-belongs-to-the-sanctuary
+  (ok (luft.render::scene-player-p
+       (render:make-mountain-sanctuary-scene)))
+  (ok (not (luft.render::scene-player-p
+            (render:make-manifold-spike-scene))))
+  (ok (not (luft.render::scene-player-p
+            (render:make-miter-study-scene)))))
+
 (defun instance-signature (base-x base-y base-z packed vertices start count)
   (let ((signature
           (make-array (+ 5 (* count luft:+mesh-template-vertex-word-count+))
@@ -358,6 +366,10 @@
            (luft.render.shaders:lattice-point-vertex-specification))
          (lattice-fragment
            (luft.render.shaders:lattice-point-fragment-specification))
+         (player-vertex
+           (luft.render.shaders:player-sdf-vertex-specification))
+         (player-fragment
+           (luft.render.shaders:player-sdf-fragment-specification))
          (present-vertex
            (luft.render.shaders:present-vertex-specification))
          (present-fragment
@@ -384,6 +396,10 @@
     (ok (luv.spir-v:compile-shader-specification fragment))
     (ok (luv.spir-v:compile-shader-specification lattice-vertex))
     (ok (luv.spir-v:compile-shader-specification lattice-fragment))
+    (ok (luv.msl:compile-msl player-vertex))
+    (ok (luv.msl:compile-msl player-fragment))
+    (ok (luv.spir-v:compile-shader-specification player-vertex))
+    (ok (luv.spir-v:compile-shader-specification player-fragment))
     (ok (luv.spir-v:compile-shader-specification present-vertex))
     (ok (luv.spir-v:compile-shader-specification present-fragment))))
 
@@ -395,7 +411,7 @@
                        (luft.render::capture-frame-view
                         camera 1100 800 #(0.0 0.0))))
                  (luft.render::camera-uniform-data
-                  view view #(0.5 0.5 0.001 0.001) 1.0)))))
+                  view view #(0.5 0.5 0.001 0.001) 1.0 7.25)))))
       (let ((perspective (lane :perspective))
             (isometric (lane :isometric))
             (quarter
@@ -404,9 +420,9 @@
                         (luft.render::capture-frame-view
                          camera 1100 800 #(0.0 0.0))))
                   (luft.render::camera-uniform-data
-                   view view #(0.5 0.5 0.001 0.001) 1.0 2)))))
-        (ok (= 52 (length perspective)))
-        (ok (typep perspective '(simple-array single-float (52))))
+                   view view #(0.5 0.5 0.001 0.001) 1.0 7.25 2)))))
+        (ok (= 56 (length perspective)))
+        (ok (typep perspective '(simple-array single-float (56))))
         (ok (= 1.0 (aref perspective 22)))
         (ok (= 0.0 (aref isometric 22)))
         (flet ((depth (data view-z)
@@ -423,7 +439,9 @@
         (ok (= (aref quarter 20) 0.25))
         (ok (= (aref perspective 21) render:*wireframe*))
         (ok (equalp #(0.5 0.5 0.001 0.001)
-                    (subseq perspective 48 52)))))))
+                    (subseq perspective 48 52)))
+        (ok (equalp #(29.5 24.5 15.48 7.25)
+                    (subseq perspective 52 56)))))))
 
 (deftest a-pointer-ray-retains-the-semantic-boundary-site
   (let* ((domain (luft:make-world-domain :horizontal-bits 4))

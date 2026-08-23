@@ -3,6 +3,8 @@
   (:shadowing-import-from #:luv.shader #:step)
   (:export #:lattice-point-fragment-specification
            #:lattice-point-vertex-specification
+           #:player-sdf-fragment-specification
+           #:player-sdf-vertex-specification
            #:mesh-fragment-specification
            #:mesh-vertex-specification
            #:present-fragment-specification

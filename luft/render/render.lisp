@@ -6,7 +6,8 @@
 (defclass scene ()
   ((solid :initarg :solid :reader scene-solid)
    (architecture-cells :initarg :architecture-cells
-                       :reader scene-architecture-cells))
+                       :reader scene-architecture-cells)
+   (player-p :initarg :player-p :initform nil :reader scene-player-p))
   (:documentation
    "One authored solid and the cells whose faces read as cut stone.
 
@@ -116,7 +117,7 @@ not put objects or material records on every cell."))
                (scene-builder-cell builder x y (1+ z) :architecture-p t)))
   builder)
 
-(defun finish-scene-builder (builder)
+(defun finish-scene-builder (builder &key player-p)
   (let* ((cells (scene-builder-cells builder))
          (chain-builder
            (luft:make-chain-builder (scene-builder-domain builder)
@@ -127,6 +128,7 @@ not put objects or material records on every cell."))
              cells)
     (make-instance 'scene
                    :solid (luft:finish-chain-builder chain-builder)
+                   :player-p player-p
                    :architecture-cells
                    (scene-builder-architecture-cells builder))))
 
@@ -229,7 +231,7 @@ curtain wall, paired turrets and an arcaded hall."
     (dolist (bay '(25 30 35))
       (scene-builder-carve-arch builder bay (1+ plateau) (+ plateau 3) 2
                                 (cons 55 55)))
-    (finish-scene-builder builder)))
+    (finish-scene-builder builder :player-p t)))
 
 (defun make-miter-study-scene ()
   "Build the wall-side stepped mountain used to judge mixed miters. #Z5NDTA
@@ -571,6 +573,16 @@ so the complete surface needs at most two direct instanced draws."
    (vertex-module :initarg :vertex-module :accessor renderer-vertex-module)
    (fragment-module :initarg :fragment-module :accessor renderer-fragment-module)
    (pipeline :initarg :pipeline :accessor renderer-pipeline)
+   (player-sdf-layout :initarg :player-sdf-layout
+                      :accessor renderer-player-sdf-layout)
+   (player-sdf-bind-group :initarg :player-sdf-bind-group
+                          :accessor renderer-player-sdf-bind-group)
+   (player-sdf-vertex-module :initarg :player-sdf-vertex-module
+                             :accessor renderer-player-sdf-vertex-module)
+   (player-sdf-fragment-module :initarg :player-sdf-fragment-module
+                               :accessor renderer-player-sdf-fragment-module)
+   (player-sdf-pipeline :initarg :player-sdf-pipeline
+                        :accessor renderer-player-sdf-pipeline)
    (lattice-point-layout :initarg :lattice-point-layout
                          :accessor renderer-lattice-point-layout)
    (lattice-point-vertex-module :initarg :lattice-point-vertex-module
@@ -987,6 +999,8 @@ cohort untouched. No frame can interleave with the owner-thread publication."
          camera-buffer
          layout
          vertex-module fragment-module pipeline
+         player-sdf-layout player-sdf-bind-group player-sdf-vertex-module
+         player-sdf-fragment-module player-sdf-pipeline
          lattice-point-layout lattice-point-vertex-module
          lattice-point-fragment-module lattice-point-pipeline
          present-layout present-bind-group present-vertex-module
@@ -999,7 +1013,7 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                  (create device
                          (make-buffer-descriptor
                           :label "luft inspection camera"
-                          :size 208 :usage '(:uniform :copy-dst))))
+                          :size 224 :usage '(:uniform :copy-dst))))
            (setf layout
                  (create device
                          (make-bind-group-layout-descriptor
@@ -1032,6 +1046,47 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                           :depth-stencil
                           '(:format :depth32-float :depth-write-enabled t
                             :depth-compare :less))))
+           (setf player-sdf-layout
+                 (create device
+                         (make-bind-group-layout-descriptor
+                          :label "luft player sdf layout"
+                          :entries '((:binding 0 :type :uniform-buffer))))
+                 player-sdf-vertex-module
+                 (create device
+                         (make-shader-module-descriptor
+                          :label "luft player sdf vertex"
+                          :language :mathematical
+                          :code (shaders:player-sdf-vertex-specification)))
+                 player-sdf-fragment-module
+                 (create device
+                         (make-shader-module-descriptor
+                          :label "luft player sdf fragment"
+                          :language :mathematical
+                          :code (shaders:player-sdf-fragment-specification)))
+                 player-sdf-pipeline
+                 (create device
+                         (make-render-pipeline-descriptor
+                          :label "luft walking player sdf pipeline"
+                          :layout player-sdf-layout
+                          :vertex `(:module ,player-sdf-vertex-module)
+                          :fragment
+                          `(:module ,player-sdf-fragment-module
+                            :targets
+                            ,(loop for format in target-formats
+                                   for first = t then nil
+                                   collect `(:format ,format
+                                             ,@(when first
+                                                 '(:blend :premultiplied-alpha)))))
+                          :primitive '(:topology :triangle-list)
+                          :depth-stencil
+                          '(:format :depth32-float :depth-write-enabled nil
+                            :depth-compare :less)))
+                 player-sdf-bind-group
+                 (create device
+                         (make-bind-group-descriptor
+                          :label "luft walking player sdf"
+                          :layout player-sdf-layout
+                          :entries `((:binding 0 :resource ,camera-buffer)))))
            (setf lattice-point-layout
                  (create device
                          (make-bind-group-layout-descriptor
@@ -1113,6 +1168,12 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                                 :vertex-module vertex-module
                                 :fragment-module fragment-module
                                 :pipeline pipeline
+                                :player-sdf-layout player-sdf-layout
+                                :player-sdf-bind-group player-sdf-bind-group
+                                :player-sdf-vertex-module player-sdf-vertex-module
+                                :player-sdf-fragment-module
+                                player-sdf-fragment-module
+                                :player-sdf-pipeline player-sdf-pipeline
                                 :lattice-point-layout lattice-point-layout
                                 :lattice-point-vertex-module
                                 lattice-point-vertex-module
@@ -1139,6 +1200,9 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                                 lattice-point-fragment-module
                                 lattice-point-vertex-module
                                 lattice-point-layout
+                                player-sdf-bind-group player-sdf-pipeline
+                                player-sdf-fragment-module
+                                player-sdf-vertex-module player-sdf-layout
                                 pipeline fragment-module
                                 vertex-module layout camera-buffer))
           (when resource (ignore-errors (destroy resource))))))))
@@ -1184,6 +1248,9 @@ cohort untouched. No frame can interleave with the owner-thread publication."
           (draw pass 3 triangle-count))
         (when (plusp quad-count)
           (draw pass 6 quad-count 0 triangle-count))))
+    (set-pipeline pass (renderer-player-sdf-pipeline renderer))
+    (set-bind-group pass 0 (renderer-player-sdf-bind-group renderer))
+    (draw pass 6)
     (when construction-p
       (set-pipeline pass (renderer-lattice-point-pipeline renderer))
       (dolist (key (renderer-slot-order renderer))
@@ -1251,6 +1318,11 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                   (renderer-lattice-point-fragment-module renderer)
                   (renderer-lattice-point-vertex-module renderer)
                   (renderer-lattice-point-layout renderer)
+                  (renderer-player-sdf-bind-group renderer)
+                  (renderer-player-sdf-pipeline renderer)
+                  (renderer-player-sdf-fragment-module renderer)
+                  (renderer-player-sdf-vertex-module renderer)
+                  (renderer-player-sdf-layout renderer)
                   (renderer-pipeline renderer) (renderer-fragment-module renderer)
                   (renderer-vertex-module renderer)
                   (renderer-layout renderer)
@@ -1266,6 +1338,11 @@ cohort untouched. No frame can interleave with the owner-thread publication."
         (renderer-lattice-point-fragment-module renderer) nil
         (renderer-lattice-point-vertex-module renderer) nil
         (renderer-lattice-point-layout renderer) nil
+        (renderer-player-sdf-bind-group renderer) nil
+        (renderer-player-sdf-pipeline renderer) nil
+        (renderer-player-sdf-fragment-module renderer) nil
+        (renderer-player-sdf-vertex-module renderer) nil
+        (renderer-player-sdf-layout renderer) nil
         (renderer-pipeline renderer) nil
         (renderer-fragment-module renderer) nil
         (renderer-vertex-module renderer) nil

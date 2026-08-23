@@ -269,13 +269,13 @@ the selector is the whole of the difference."
          :divisor divisor :jitter jitter)))))
 
 (defun camera-uniform-data
-    (view previous inspection-parameters ink-strength
+    (view previous inspection-parameters ink-strength character-time
      &optional (bevel-width luft:+mesh-bevel-width+))
   (flet ((lane (vector fourth)
            (list (vec3:vec3-x vector) (vec3:vec3-y vector)
                  (vec3:vec3-z vector) fourth)))
     (make-array
-     52 :element-type 'single-float
+     56 :element-type 'single-float
      :initial-contents
      (mapcar
       (lambda (value) (coerce value 'single-float))
@@ -295,7 +295,9 @@ the selector is the whole of the difference."
               (list (aref (frame-view-jitter view) 0)
                     (aref (frame-view-jitter view) 1)
                     (frame-view-divisor previous) 0.0)
-              (coerce inspection-parameters 'list))))))
+              (coerce inspection-parameters 'list)
+              ;; Bridge centre, body-sphere centre height, animation clock.
+              (list 29.5 24.5 15.48 character-time))))))
 
 (defun viewer-logical-extent (viewer)
   (let ((canvas (viewer-canvas viewer)))
@@ -385,6 +387,10 @@ the selector is the whole of the difference."
      (camera-uniform-data
       view previous (viewer-inspection-parameters viewer extent)
       (if (and inspection *inspection-ink-p*) 1.0 0.0)
+      (if (and (typep (viewer-source viewer) 'scene)
+               (scene-player-p (viewer-source viewer)))
+          (/ (renderer-frame-index renderer) 60.0)
+          -1.0)
       (viewer-bevel-width viewer))
      :jitter jitter :view view
      :construction-p (plusp *wireframe*)
@@ -544,7 +550,7 @@ the selector is the whole of the difference."
    (renderer :initarg :renderer :initform nil :accessor viewer-renderer)
    (production-system :initarg :production-system :initform nil
                       :accessor viewer-production-system)
-   (bevel-width :initarg :bevel-width :initform luft:+mesh-bevel-width+
+   (bevel-width :initarg :bevel-width :initform 2
                 :accessor viewer-bevel-width)
    (camera :initarg :camera :initform (make-fly-camera) :reader viewer-camera)
    (surface-views :initform (make-hash-table :test #'eql)
@@ -912,7 +918,7 @@ the selector is the whole of the difference."
 
 (defun start-viewer (&key
                        (solid (make-mountain-sanctuary-scene))
-                       (bevel-width luft:+mesh-bevel-width+)
+                       (bevel-width 2)
                        (camera (make-fly-camera))
                        (title "LUFT mountain sanctuary")
                        (width 1100) (height 800)

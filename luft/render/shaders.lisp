@@ -72,6 +72,307 @@
   (+ (* (/ (swizzle clip :xy) (swizzle clip :w)) 0.5)
      (vec2 0.5 0.5)))
 
+;;; A small, rounded traveler for the sanctuary bridge.  The proxy is only a
+;;; conservative raster bound; every visible contour below comes from this
+;;; analytic field.  LUFT is Z-up, unlike luvcraft's first-person figures.
+
+(define-shader-function player-sdf-length (vector)
+  (sqrt (max (dot vector vector) 1e-12)))
+
+(define-shader-function player-sdf-smooth-union (first second width)
+  (let* ((safe-width (max width 1e-5))
+         (blend (clamp (+ 0.5 (* 0.5 (/ (- second first) safe-width)))
+                       0.0 1.0)))
+    (- (mix second first blend)
+       (* width (* blend (- 1.0 blend))))))
+
+(define-shader-function player-sdf-sphere (point center radius)
+  (- (player-sdf-length (- point center)) radius))
+
+(define-shader-function player-sdf-ellipsoid (point center radii)
+  (let* ((offset (/ (- point center) radii))
+         (outer (player-sdf-length offset))
+         (gradient (player-sdf-length (/ offset radii))))
+    (/ (* outer (- outer 1.0)) (max gradient 1e-6))))
+
+(define-shader-function player-sdf-capsule (point beginning end radius)
+  (let* ((offset (- point beginning))
+         (axis (- end beginning))
+         (fraction (clamp (/ (dot offset axis)
+                             (max (dot axis axis) 1e-6))
+                          0.0 1.0)))
+    (- (player-sdf-length (- offset (* axis fraction))) radius)))
+
+(define-shader-function player-walk-pose (point gait)
+  "Walk the sample point back into the figure's gently bobbing local frame."
+  (vec3 (swizzle point :x)
+        (swizzle point :y)
+        (- (swizzle point :z) (* 0.055 (abs (sin gait))))))
+
+(define-shader-function player-tunic-distance (point)
+  (player-sdf-ellipsoid point (vec3 0.0 0.0 1.67)
+                        (vec3 0.50 0.32 0.64)))
+
+(define-shader-function player-head-distance (point)
+  (player-sdf-ellipsoid point (vec3 0.0 -0.035 2.56)
+                        (vec3 0.39 0.35 0.38)))
+
+(define-shader-function player-face-distance (point)
+  (player-sdf-sphere point (vec3 0.0 0.335 2.54) 0.13))
+
+(define-shader-function player-hair-distance (point)
+  (player-sdf-ellipsoid point (vec3 0.0 -0.11 2.70)
+                        (vec3 0.405 0.31 0.285)))
+
+(define-shader-function player-collar-distance (point)
+  (player-sdf-ellipsoid point (vec3 0.0 -0.015 2.20)
+                        (vec3 0.39 0.31 0.14)))
+
+(define-shader-function player-pack-distance (point)
+  (player-sdf-ellipsoid point (vec3 0.0 -0.285 1.66)
+                        (vec3 0.37 0.21 0.47)))
+
+(define-shader-function player-leg-distance (point gait)
+  (let* ((side (if (< (swizzle point :x) 0.0) -1.0 1.0))
+         (swing (* side (* 0.22 (sin gait))))
+         (hip (vec3 (* side 0.22) 0.0 1.27))
+         (ankle (vec3 (* side 0.22) swing 0.26))
+         (leg (player-sdf-capsule point hip ankle 0.17))
+         (boot (player-sdf-ellipsoid
+                point (vec3 (* side 0.22) (+ swing 0.09) 0.16)
+                (vec3 0.22 0.31 0.16))))
+    (player-sdf-smooth-union leg boot 0.075)))
+
+(define-shader-function player-arm-distance (point gait)
+  (let* ((side (if (< (swizzle point :x) 0.0) -1.0 1.0))
+         (swing (* side (* -0.19 (sin gait))))
+         (shoulder (vec3 (* side 0.46) 0.0 1.91))
+         (hand (vec3 (* side 0.55) swing 1.18)))
+    (player-sdf-capsule point shoulder hand 0.16)))
+
+(define-shader-function player-hand-distance (point gait)
+  (let* ((side (if (< (swizzle point :x) 0.0) -1.0 1.0))
+         (swing (* side (* -0.19 (sin gait)))))
+    (player-sdf-sphere point (vec3 (* side 0.55) swing 1.13) 0.19)))
+
+(define-shader-function player-distance (point gait)
+  (let* ((posed (player-walk-pose point gait))
+         (body (player-sdf-smooth-union
+                (player-tunic-distance posed)
+                (player-head-distance posed) 0.095))
+         (face (player-face-distance posed))
+         (hair (player-hair-distance posed))
+         (collar (player-collar-distance posed))
+         (pack (player-pack-distance posed))
+         (legs (player-leg-distance posed gait))
+         (arms (player-arm-distance posed gait))
+         (hands (player-hand-distance posed gait)))
+    (player-sdf-smooth-union
+     (player-sdf-smooth-union
+      (player-sdf-smooth-union
+       (player-sdf-smooth-union body face 0.055)
+       (player-sdf-smooth-union hair collar 0.06) 0.055)
+      (player-sdf-smooth-union pack legs 0.075) 0.065)
+     (player-sdf-smooth-union arms hands 0.07) 0.075)))
+
+(define-shader-function player-normal (point gait)
+  (let* ((reach 0.004)
+         (a (vec3 1.0 -1.0 -1.0))
+         (b (vec3 -1.0 -1.0 1.0))
+         (c (vec3 -1.0 1.0 -1.0))
+         (d (vec3 1.0 1.0 1.0)))
+    (normalize
+     (+ (+ (* a (player-distance (+ point (* a reach)) gait))
+           (* b (player-distance (+ point (* b reach)) gait)))
+        (+ (* c (player-distance (+ point (* c reach)) gait))
+           (* d (player-distance (+ point (* d reach)) gait)))))))
+
+(define-shader-function player-albedo (point gait)
+  (let* ((posed (player-walk-pose point gait))
+         (tunic (min (player-tunic-distance posed)
+                     (player-arm-distance posed gait)))
+         (skin (min (min (player-head-distance posed)
+                         (player-face-distance posed))
+                    (player-hand-distance posed gait)))
+         (hair (player-hair-distance posed))
+         (collar (player-collar-distance posed))
+         (pack (player-pack-distance posed))
+         (legs (player-leg-distance posed gait))
+         (skin-near (step skin tunic))
+         (first (mix (vec3 0.105 0.25 0.29)
+                     (vec3 0.68 0.43 0.29) skin-near))
+         (distance (min tunic skin))
+         (hair-near (step hair distance))
+         (second (mix first (vec3 0.115 0.075 0.050) hair-near))
+         (distance-2 (min distance hair))
+         (collar-near (step collar distance-2))
+         (third (mix second (vec3 0.68 0.39 0.10) collar-near))
+         (distance-3 (min distance-2 collar))
+         (pack-near (step pack distance-3))
+         (fourth (mix third (vec3 0.28 0.17 0.095) pack-near))
+         (distance-4 (min distance-3 pack))
+         (leg-near (step legs distance-4)))
+    (mix fourth (vec3 0.16 0.12 0.095) leg-near)))
+
+(define-shader player-sdf-vertex-specification
+    (:stage :vertex
+     :inputs ((vertex-index :uint :built-in :vertex-index))
+     :outputs ((clip-position :vec4 :built-in :position)
+               (proxy-world-position-output :vec3 :location 0)
+               (center-radius-output :vec4 :location 1)
+               (current-clip-output :vec4 :location 2)
+               (previous-clip-output :vec4 :location 3))
+     :resources ((camera-state :uniform-block :binding 0
+                  :members ((camera-position :vec4)
+                            (camera-right :vec4)
+                            (camera-up :vec4)
+                            (camera-forward :vec4)
+                            (camera-projection :vec4)
+                            (render-parameters :vec4)
+                            (previous-camera-position :vec4)
+                            (previous-camera-right :vec4)
+                            (previous-camera-up :vec4)
+                            (previous-camera-forward :vec4)
+                            (previous-camera-projection :vec4)
+                            (temporal-parameters :vec4)
+                            (inspection-parameters :vec4)
+                            (character-parameters :vec4)))))
+  (let* ((index (float vertex-index))
+         (right-corner (if (= index 2.0) 1.0
+                           (if (= index 3.0) 1.0
+                               (if (= index 5.0) 1.0 0.0))))
+         (bottom-corner (if (= index 1.0) 1.0
+                            (if (= index 4.0) 1.0
+                                (if (= index 5.0) 1.0 0.0))))
+         (corner (vec2 (- (* right-corner 2.0) 1.0)
+                       (- (* bottom-corner 2.0) 1.0)))
+         (time (swizzle character-parameters :w))
+         (previous-time (- time 0.0166667))
+         (path (* time 0.34))
+         (previous-path (* previous-time 0.34))
+         (center (vec3 (swizzle character-parameters :x)
+                       (+ (swizzle character-parameters :y)
+                          (* 10.5 (sin path)))
+                       (swizzle character-parameters :z)))
+         (previous-center (vec3 (swizzle character-parameters :x)
+                                (+ (swizzle character-parameters :y)
+                                   (* 10.5 (sin previous-path)))
+                                (swizzle character-parameters :z)))
+         (radius 1.72)
+         (proxy-world-position
+           (+ (- center (* (swizzle camera-forward :xyz) radius))
+              (+ (* (swizzle camera-right :xyz)
+                    (* (swizzle corner :x) radius))
+                 (* (swizzle camera-up :xyz)
+                    (* (swizzle corner :y) radius)))))
+         (previous-proxy-world-position
+           (+ (- previous-center
+                 (* (swizzle previous-camera-forward :xyz) radius))
+              (+ (* (swizzle previous-camera-right :xyz)
+                    (* (swizzle corner :x) radius))
+                 (* (swizzle previous-camera-up :xyz)
+                    (* (swizzle corner :y) radius)))))
+         (current-clip
+           (mesh-view-clip proxy-world-position camera-position camera-right
+                           camera-up camera-forward camera-projection
+                           (swizzle render-parameters :z)))
+         (previous-clip
+           (mesh-view-clip previous-proxy-world-position
+                           previous-camera-position previous-camera-right
+                           previous-camera-up previous-camera-forward
+                           previous-camera-projection
+                           (swizzle temporal-parameters :z)))
+         (jitter (swizzle temporal-parameters :xy)))
+    (set-output clip-position
+                (vec4 (+ (swizzle current-clip :x)
+                         (* (swizzle jitter :x) (swizzle current-clip :w)))
+                      (+ (swizzle current-clip :y)
+                         (* (swizzle jitter :y) (swizzle current-clip :w)))
+                      (swizzle current-clip :z)
+                      (swizzle current-clip :w)))
+    (set-output proxy-world-position-output proxy-world-position)
+    (set-output center-radius-output (vec4 center radius))
+    (set-output current-clip-output current-clip)
+    (set-output previous-clip-output previous-clip)))
+
+(define-shader player-sdf-fragment-specification
+    (:stage :fragment
+     :inputs ((proxy-world-position :vec3 :location 0)
+              (center-radius :vec4 :location 1)
+              (current-clip :vec4 :location 2)
+              (previous-clip :vec4 :location 3))
+     :outputs ((color-output :vec4 :location 0)
+               (motion-output :vec2 :location 1))
+     :resources ((camera-state :uniform-block :binding 0
+                  :members ((camera-position :vec4)
+                            (camera-right :vec4)
+                            (camera-up :vec4)
+                            (camera-forward :vec4)
+                            (camera-projection :vec4)
+                            (render-parameters :vec4)
+                            (previous-camera-position :vec4)
+                            (previous-camera-right :vec4)
+                            (previous-camera-up :vec4)
+                            (previous-camera-forward :vec4)
+                            (previous-camera-projection :vec4)
+                            (temporal-parameters :vec4)
+                            (inspection-parameters :vec4)
+                            (character-parameters :vec4)))))
+  (let* ((center (swizzle center-radius :xyz))
+         (radius (swizzle center-radius :w))
+         (time (swizzle character-parameters :w))
+         (path (* time 0.34))
+         (direction (if (< (cos path) 0.0) -1.0 1.0))
+         (gait (* time 4.6))
+         (ray (if (< (swizzle render-parameters :z) 0.5)
+                  (normalize (swizzle camera-forward :xyz))
+                  (normalize (- proxy-world-position
+                                (swizzle camera-position :xyz)))))
+         (origin proxy-world-position)
+         (travel
+           (counted-fold (march 58.0 ray-distance 0.0)
+             (let* ((world-point (+ origin (* ray ray-distance)))
+                    (relative (- world-point center))
+                    (local (vec3 (swizzle relative :x)
+                                 (* direction (swizzle relative :y))
+                                 (+ (swizzle relative :z) 1.48)))
+                    (distance (player-distance local gait)))
+               (if (< distance 0.0025)
+                   ray-distance
+                   (if (> ray-distance (* radius 2.0))
+                       ray-distance
+                       (+ ray-distance (max (* distance 0.82) 0.0025)))))))
+         (world-point (+ origin (* ray travel)))
+         (relative (- world-point center))
+         (local (vec3 (swizzle relative :x)
+                      (* direction (swizzle relative :y))
+                      (+ (swizzle relative :z) 1.48)))
+         (surface-distance (player-distance local gait))
+         (coverage (* (step 0.0 time)
+                      (- 1.0 (step 0.006 surface-distance))))
+         (local-normal (player-normal local gait))
+         (normal (normalize (vec3 (swizzle local-normal :x)
+                                  (* direction (swizzle local-normal :y))
+                                  (swizzle local-normal :z))))
+         (albedo (player-albedo local gait))
+         (sun (normalize (vec3 -0.62 0.38 0.34)))
+         (sun-color (vec3 1.22 1.00 0.72))
+         (sky (vec3 0.60 0.75 0.96))
+         (ground (vec3 0.40 0.34 0.26))
+         (wrapped (expt (clamp (+ 0.5 (* 0.5 (dot normal sun)))
+                               0.0 1.0) 1.55))
+         (upness (swizzle normal :z))
+         (indirect (+ (* sky (* 0.44 (+ 0.5 (* 0.5 upness))))
+                      (* ground (* 0.44 (- 0.5 (* 0.5 upness))))))
+         (lit (* albedo (+ (* sun-color wrapped) indirect)))
+         (paper (paper-tonemap (* lit 1.16)))
+         (rim (expt (- 1.0 (max 0.0 (dot normal (* ray -1.0)))) 3.0))
+         (radiance (+ paper (* (vec3 0.20 0.42 0.48) (* rim 0.07)))))
+    (set-output color-output (vec4 (* radiance coverage) coverage))
+    (set-output motion-output
+                (- (mesh-clip-uv previous-clip)
+                   (mesh-clip-uv current-clip)))))
+
 (define-shader mesh-vertex-specification
     (:stage :vertex
      :inputs ((vertex-index :uint :built-in :vertex-index)
@@ -103,7 +404,8 @@
                             (previous-camera-forward :vec4)
                             (previous-camera-projection :vec4)
                             (temporal-parameters :vec4)
-                            (inspection-parameters :vec4)))))
+                            (inspection-parameters :vec4)
+                            (character-parameters :vec4)))))
   (let* ((instance (buffer-element instances instance-index))
          (template-id
            (uint (ldb (byte 16 0) (swizzle instance :w))))
@@ -190,7 +492,8 @@
                             (previous-camera-forward :vec4)
                             (previous-camera-projection :vec4)
                             (temporal-parameters :vec4)
-                            (inspection-parameters :vec4)))))
+                            (inspection-parameters :vec4)
+                            (character-parameters :vec4)))))
   (let* ((dx (derivative-x world-position))
          (dy (derivative-y world-position))
          (geometric-normal
@@ -332,7 +635,8 @@
                             (previous-camera-forward :vec4)
                             (previous-camera-projection :vec4)
                             (temporal-parameters :vec4)
-                            (inspection-parameters :vec4)))))
+                            (inspection-parameters :vec4)
+                            (character-parameters :vec4)))))
   (let* ((record (buffer-element lattice-points instance-index))
          (world-position
            (/ (vec3 (float (swizzle record :x))
