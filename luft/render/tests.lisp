@@ -175,8 +175,8 @@
             (render:make-miter-study-scene)))))
 
 (deftest player-gait-anchors-stance-feet-and-rises-over-support
-  (let ((step-length 0.875)
-        (leg-length 1.10066)
+  (let ((step-length 0.75)
+        (leg-length 1.07737)
         (hip-height 1.01))
     (labels ((foot-sample (step-coordinate parity)
                (let* ((cycle (* 0.5 (- step-coordinate parity)))
@@ -185,13 +185,15 @@
                       (swing-time
                         (min 1.0 (max 0.0 (* 2.0 (- phase 0.5)))))
                       (swing-weight
-                        (* swing-time swing-time
-                           (- 3.0 (* 2.0 swing-time)))))
+                        (* swing-time swing-time swing-time
+                           (+ 10.0
+                              (* swing-time
+                                 (+ -15.0 (* 6.0 swing-time)))))))
                  (values
                   (* step-length
                      (+ parity (* 2.0 cycle-index) 0.5
                         (* 2.0 swing-weight)))
-                  (* 0.24 4.0 swing-time (- 1.0 swing-time)))))
+                  (* 0.19 (sin (* pi swing-time))))))
              (pelvis-height (step-coordinate)
                (let* ((phase (- step-coordinate (floor step-coordinate)))
                       (offset (* step-length (- 0.5 phase))))
@@ -209,11 +211,11 @@
           (ok (zerop right-a-lift))
           (ok (zerop right-b-lift))))
       ;; The other foot clears the deck during transfer and lands at zero
-      ;; height; twelve half-steps span the bridge's 10.5-cell half-route.
+      ;; height; fourteen half-steps span the bridge's 10.5-cell half-route.
       (multiple-value-bind (mid-swing mid-lift) (foot-sample 0.5 1.0)
         (declare (ignore mid-swing))
-        (ok (> mid-lift 0.23)))
-      (ok (= 10.5 (* 12 step-length)))
+        (ok (> mid-lift 0.18)))
+      (ok (= 10.5 (* 14 step-length)))
       ;; A fixed leg is shortest at double support and tallest over the
       ;; planted foot at mid-stance, giving the body its non-arbitrary bob.
       (ok (= (pelvis-height 0.0) (pelvis-height 1.0)))
