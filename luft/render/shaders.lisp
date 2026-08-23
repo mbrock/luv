@@ -1940,6 +1940,72 @@ that he is standing on something."
          (far (- 1.0 (smoothstep (* radius 0.62) radius delta))))
     (* near far)))
 
+(define-shader-function painted-sky
+    (ndc camera-right camera-up camera-forward camera-projection divisor
+     sun-vector sun-color-vector sky-color-vector)
+  "A view-stable late-afternoon atmosphere for background-depth fragments."
+  (let* ((perspective-ray
+           (normalize
+            (+ (swizzle camera-forward :xyz)
+               (* (swizzle camera-right :xyz)
+                  (/ (swizzle ndc :x)
+                     (swizzle camera-projection :x)))
+               (* (swizzle camera-up :xyz)
+                  (/ (- (swizzle ndc :y))
+                     (swizzle camera-projection :y))))))
+         ;; Isometric studies still deserve a vertical wash instead of one
+         ;; flat clear colour, while perspective gets a true world-space ray.
+         (isometric-ray
+           (normalize
+            (+ (swizzle camera-forward :xyz)
+               (* (swizzle camera-up :xyz)
+                  (* (- (swizzle ndc :y)) 0.38)))))
+         (ray (mix isometric-ray perspective-ray divisor))
+         (height (swizzle ray :z))
+         (upness (clamp height 0.0 1.0))
+         (horizon-weight (smoothstep -0.10 0.42 height))
+         (base-sky (swizzle sky-color-vector :xyz))
+         (horizon (vec3 0.58 0.78 1.06))
+         (zenith (* base-sky (vec3 0.34 0.58 0.94)))
+         (horizon-haze
+           (- 1.0 (smoothstep 0.01 0.26 (abs height))))
+         (atmosphere
+           (mix (mix horizon zenith horizon-weight)
+                (vec3 1.12 0.68 0.38)
+                (* horizon-haze 0.13)))
+         ;; Broad directional noise makes sparse watercolor cloud banks.  The
+         ;; envelope keeps them above the haze and below the clear zenith.
+         (cloud-point
+           (vec3 (* (swizzle ray :x) 5.0)
+                 (* (swizzle ray :y) 5.0)
+                 (* height 12.0)))
+         (cloud-coarse (paper-noise (+ cloud-point (vec3 3.1 11.7 5.3))))
+         (cloud-fine
+           (paper-noise
+            (+ (* cloud-point (vec3 2.3 2.3 1.4))
+               (vec3 17.9 2.7 31.1))))
+         (cloud-shape
+           (smoothstep 0.52 0.72 (+ (* cloud-coarse 0.72)
+                                    (* cloud-fine 0.28))))
+         (cloud-height
+           (* (smoothstep 0.05 0.20 upness)
+              (- 1.0 (smoothstep 0.58 0.90 upness))))
+         (sun (normalize (swizzle sun-vector :xyz)))
+         (sun-facing (max 0.0 (dot ray sun)))
+         (sun-halo (smoothstep 0.965 0.9992 sun-facing))
+         (sun-disc (smoothstep 0.99925 0.99982 sun-facing))
+         (cloud-light
+           (mix (vec3 0.76 0.88 1.10)
+                (vec3 1.34 0.78 0.42)
+                (smoothstep 0.72 0.98 sun-facing)))
+         (clouded
+           (mix atmosphere cloud-light (* cloud-shape cloud-height 0.26)))
+         (radiance
+           (+ clouded
+              (* (swizzle sun-color-vector :xyz)
+                 (+ (* sun-halo 0.10) (* sun-disc 2.8))))))
+    (paper-grade (paper-tonemap radiance))))
+
 (define-shader present-fragment-specification
     (:stage :fragment
      :inputs ((ndc :vec2 :location 0))
@@ -1961,7 +2027,10 @@ that he is standing on something."
                             (previous-camera-projection :vec4)
                             (temporal-parameters :vec4)
                             (inspection-parameters :vec4)
-                            (character-parameters :vec4)))))
+                            (character-parameters :vec4)
+                            (sun-vector :vec4)
+                            (sun-color-vector :vec4)
+                            (sky-color-vector :vec4)))))
   (let* ((uv (+ (* ndc 0.5) (vec2 0.5 0.5)))
          (value (sample scene scene-sampler uv))
          ;; A sparse whole-frame luminance probe gives the paper camera an
@@ -2199,6 +2268,11 @@ that he is standing on something."
          ;; MetalFX has already reconstructed GLowing at this point.  Grade
          ;; it once, with a little exposure headroom for the sunlit grass and
          ;; the wizard's HDR spell rather than clipping both into parchment.
-         (mapped (paper-grade (paper-tonemap (* glowing auto-exposure)))))
+         (mapped (paper-grade (paper-tonemap (* glowing auto-exposure))))
+         (sky
+           (painted-sky ndc camera-right camera-up camera-forward
+                        camera-projection divisor sun-vector
+                        sun-color-vector sky-color-vector))
+         (presented (if (< depth 0.9999) mapped sky)))
     (set-output color-output
-                (vec4 mapped 1.0))))
+                (vec4 presented 1.0))))
