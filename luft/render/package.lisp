@@ -67,6 +67,7 @@
            #:refresh-viewer-renderer
            #:refresh-viewer-shaders
            #:capture-viewer-frame
+           #:film-viewer
            #:*wireframe*
            #:*inspection-ink-p*
            #:*inspection-reach*

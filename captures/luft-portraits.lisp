@@ -407,3 +407,58 @@
    pathname
    (luv.arithmetic.lisp.vec3:make-vec3 122.0 91.0 78.0)
    2.20 -0.20 "LUFT highland LoD distance"))
+
+(defun film-luft-highland-flight (pathname &key (seconds 8) (frame-rate 24))
+  "Film a slow highland traverse that crosses streaming chunk boundaries."
+  (let ((viewer nil)
+        (old-projection luft.render:*projection*)
+        (old-wireframe luft.render:*wireframe*)
+        (old-inspection-ink-p luft.render:*inspection-ink-p*))
+    (unwind-protect
+         (progn
+           (setf luft.render:*projection* :perspective
+                 luft.render:*wireframe* 0.0
+                 luft.render:*inspection-ink-p* nil)
+           (format t "LUFT film: building deterministic highlands~%")
+           (force-output)
+           (let ((camera
+                   (luft.render:make-fly-camera
+                    :position
+                    (luv.arithmetic.lisp.vec3:make-vec3 122.0 91.0 78.0)
+                    :yaw 2.20 :pitch -0.20)))
+             (setf viewer
+                   (luft.render:start-viewer
+                    :solid (luft.render:make-highland-sanctuary-scene)
+                    :bevel-width luft:+mesh-bevel-width+
+                    :camera camera :title "LUFT highland LoD flight"
+                    :width 1280 :height 720))
+             (wait-for-luft-landscape-residency viewer)
+             (let ((frame-count (max 1 (round (* seconds frame-rate)))))
+               (luft.render:film-viewer
+                viewer pathname :seconds seconds :frame-rate frame-rate
+                :before-frame
+                (lambda (frame)
+                  (let* ((u (/ frame (float (max 1 (1- frame-count)))))
+                         (ease (- (* 3.0 u u) (* 2.0 u u u)))
+                         (position (luft.render:camera-position camera)))
+                    (setf (luv.arithmetic.lisp.vec3:vec3-x position)
+                          (+ 122.0 (* 116.0 ease))
+                          (luv.arithmetic.lisp.vec3:vec3-y position)
+                          (+ 91.0 (* 78.0 ease))
+                          (luv.arithmetic.lisp.vec3:vec3-z position)
+                          (+ 78.0 (* 10.0 (sin (* pi u))))
+                          (luft.render:camera-yaw camera)
+                          (+ 2.20 (* -0.24 ease))
+                          (luft.render:camera-pitch camera)
+                          (+ -0.20 (* -0.04 (sin (* pi u)))))))))))
+      (when viewer (luft.render:stop-viewer viewer))
+      (setf luft.render:*projection* old-projection
+            luft.render:*wireframe* old-wireframe
+            luft.render:*inspection-ink-p* old-inspection-ink-p))))
+
+(luv:define-capture luft-highland-lod-flight
+    (:figure L0DDST :kind :video :extension "mp4" :layout :landscape
+     :description
+     "A slow flight across the widened highlands and their three streaming LoD rings.")
+  (pathname)
+  (film-luft-highland-flight pathname))

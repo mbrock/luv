@@ -1147,6 +1147,93 @@ the atelier UI."
                            (canvas-format context)))
       (destroy buffer))))
 
+(defun render-viewer-film-frame (viewer texture buffer extent)
+  "Render VIEWER once into TEXTURE on its canvas thread; return the pixels."
+  (let ((device (viewer-device viewer)))
+    (luv::call-on-sdl-canvas-thread
+     (viewer-canvas viewer)
+     (lambda ()
+       (let ((encoder nil)
+             (commands nil))
+         (unwind-protect
+              (progn
+                (setf encoder
+                      (create device
+                              (make-command-encoder-descriptor
+                               :label "LUFT film frame")))
+                (encode-viewer-frame
+                 viewer encoder texture extent :inspector-p nil)
+                (encode encoder
+                        (make-gpu-copy-texture-to-buffer-command
+                         :source texture :destination buffer))
+                (setf commands (finish encoder))
+                (submit (device-queue device) commands))
+           (when commands (destroy commands))
+           (when encoder (destroy encoder))))))
+    (read-buffer buffer)))
+
+(defun film-viewer (viewer pathname
+                    &key (seconds 8) (frame-rate 30) before-frame)
+  "Film VIEWER offscreen into an MP4 at PATHNAME.
+
+BEFORE-FRAME, when supplied, receives the frame index before streaming and
+rendering that frame.  Recording is paced in real time so asynchronous chunk
+production gets the same opportunity to publish as it does in the window."
+  (unless (eq :open (canvas-state (viewer-canvas viewer)))
+    (error "Cannot film a closed LUFT viewer."))
+  (let* ((context (viewer-context viewer))
+         (extent (canvas-extent context))
+         (width (first extent))
+         (height (second extent))
+         (device (viewer-device viewer))
+         (frame-count (max 1 (round (* seconds frame-rate))))
+         (frame-interval (/ 1.0d0 frame-rate))
+         (was-running-p (viewer-running-p viewer))
+         (texture
+           (create device
+                   (make-texture-descriptor
+                    :label "LUFT film target"
+                    :size extent :dimensions :2d
+                    :format (canvas-format context)
+                    :usage '(:render-attachment :copy-src :copy-dst))))
+         (buffer
+           (create device
+                   (make-buffer-descriptor
+                    :label "LUFT film readback"
+                    :size (* 4 width height)
+                    :usage '(:copy-dst)))))
+    (unwind-protect
+         (progn
+           (setf (viewer-running-p viewer) nil)
+           (luv:with-video-encoder
+               (write-frame pathname width height
+                :frame-rate frame-rate :format (canvas-format context))
+             (let ((start (/ (get-internal-real-time)
+                             (float internal-time-units-per-second 1.0d0))))
+               (dotimes (frame frame-count)
+                 (when before-frame (funcall before-frame frame))
+                 (advance-viewer-streaming viewer)
+                 (write-frame
+                  (render-viewer-film-frame viewer texture buffer extent))
+                 (when (zerop (mod frame frame-rate))
+                   (format t "LUFT film: frame ~D / ~D~%" frame frame-count)
+                   (force-output))
+                 (let ((wait
+                         (- (+ start (* (1+ frame) frame-interval))
+                            (/ (get-internal-real-time)
+                               (float internal-time-units-per-second
+                                      1.0d0)))))
+                   (when (plusp wait) (sleep wait)))))))
+      ;; The film texture has a cached view alongside swapchain views.  Release
+      ;; all of them while the texture is still alive; presentation recreates
+      ;; its borrowed views lazily on the next window frame.
+      (luv::call-on-sdl-canvas-thread
+       (viewer-canvas viewer)
+       (lambda () (release-viewer-surface-views viewer)))
+      (destroy buffer)
+      (destroy texture)
+      (setf (viewer-running-p viewer) was-running-p))))
+
 (defun refresh-viewer-renderer (&optional (viewer *viewer*)
                                 &key (solid (make-mountain-sanctuary-scene))
                                      bevel-width)
