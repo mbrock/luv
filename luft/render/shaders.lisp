@@ -150,6 +150,42 @@
           (dot relative y-axis)
           (dot relative z-axis))))
 
+(define-shader-function material-relief (point profile)
+  "One continuous height field used for pigment, normal, and roughness."
+  (let* ((granular
+           (+ (* 0.62
+                 (paper-noise (+ (* point 2.7) (vec3 11.3 5.7 23.9))))
+              (* 0.38
+                 (paper-noise (+ (* point 9.1) (vec3 3.1 29.7 7.3))))))
+         (stone-grain
+           (paper-noise (+ (* point 3.8) (vec3 31.1 7.9 13.7))))
+         (stone-pit
+           (paper-noise
+            (+ (* (swizzle point :zxy) 10.7) (vec3 5.3 19.1 37.7))))
+         (weathered-stone
+           (+ (* 0.72 stone-grain) (* 0.28 stone-pit))))
+    (- (if (< profile 1.5) granular weathered-stone) 0.5)))
+
+(define-shader-function material-relief-gradient
+    (point profile x-axis y-axis z-axis)
+  "Central-difference the exact relief field and return its world gradient."
+  (let* ((epsilon 0.075)
+         (offset-x (vec3 epsilon 0.0 0.0))
+         (offset-y (vec3 0.0 epsilon 0.0))
+         (offset-z (vec3 0.0 0.0 epsilon))
+         (scale (/ 1.0 (* 2.0 epsilon)))
+         (gradient-x
+           (* (- (material-relief (+ point offset-x) profile)
+                 (material-relief (- point offset-x) profile)) scale))
+         (gradient-y
+           (* (- (material-relief (+ point offset-y) profile)
+                 (material-relief (- point offset-y) profile)) scale))
+         (gradient-z
+           (* (- (material-relief (+ point offset-z) profile)
+                 (material-relief (- point offset-z) profile)) scale)))
+    (+ (+ (* x-axis gradient-x) (* y-axis gradient-y))
+       (* z-axis gradient-z))))
+
 (define-shader-function dressed-stone-tone (point normal stone-tone)
   "Suggest laid courses and hand-dressed blocks without texture coordinates."
   (let* ((x (swizzle point :x))
@@ -1051,6 +1087,24 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
             world-position (swizzle frame-origin :xyz)
             (swizzle frame-x :xyz) (swizzle frame-y :xyz)
             (swizzle frame-z :xyz)))
+         (relief-profile (swizzle frame-origin :w))
+         (relief-amplitude (swizzle frame-x :w))
+         (relief-height (material-relief material-point relief-profile))
+         (relief-gradient
+           (material-relief-gradient
+            material-point relief-profile
+            (swizzle frame-x :xyz) (swizzle frame-y :xyz)
+            (swizzle frame-z :xyz)))
+         (tangent-relief-gradient
+           (- relief-gradient (* normal (dot relief-gradient normal))))
+         (shading-normal
+           (normalize (- normal (* tangent-relief-gradient relief-amplitude))))
+         (relief-slope
+           (sqrt (dot tangent-relief-gradient tangent-relief-gradient)))
+         (roughness
+           (clamp (+ (swizzle tertiary :w)
+                     (* 0.11 (clamp relief-slope 0.0 1.5)))
+                  0.16 0.99))
          (paper-point (paper-space material-point))
          (primary-tone (swizzle primary :xyz))
          (secondary-tone (swizzle secondary :xyz))
@@ -1105,20 +1159,20 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
                               (* 0.25 (- fiber 0.5))))))
          (warmth (mix (vec3 0.965 0.99 1.04) (vec3 1.04 1.01 0.96)
                       (smoothstep 0.18 0.82 mottle)))
-         (base (* tone (* warmth value)))
+         (base (* tone (* warmth (* value (+ 1.0 (* relief-height 0.028))))))
          (sun (swizzle sun-vector :xyz))
          (sun-color (swizzle sun-color-vector :xyz))
          (sky (swizzle sky-color-vector :xyz))
          (ground (swizzle ground-color-vector :xyz))
-         (facing (dot normal sun))
+         (facing (dot shading-normal sun))
          (direct-shape (smoothstep 0.0 0.72 (max 0.0 facing)))
          (sampled-shadow
            (soft-shadow-visibility shadow-map shadow-sampler shadow-sample
-                                   normal sun shadow-control))
+                                   shading-normal sun shadow-control))
          (direct-visibility
            (mix 1.0 sampled-shadow
                 (smoothstep 0.03 0.18 (max 0.0 facing))))
-         (upness (swizzle normal :z))
+         (upness (swizzle shading-normal :z))
          (sky-weight (+ 0.5 (* 0.5 upness)))
          (ground-weight (- 0.5 (* 0.5 upness)))
          (indirect-light
@@ -1129,7 +1183,39 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
                      ambient-occlusion)))
          (light (+ (* sun-color (* direct-shape direct-visibility))
                    (* indirect-light ambient-accessibility)))
-         (lit (* base (* light (stock-tooth material-point))))
+         (view-direction
+           (normalize (- (swizzle camera-position :xyz) world-position)))
+         (half-vector (normalize (+ view-direction sun)))
+         (n-dot-v (max 0.0 (dot shading-normal view-direction)))
+         (n-dot-h (max 0.0 (dot shading-normal half-vector)))
+         (n-dot-l (max facing 0.0))
+         (v-dot-h (max 0.0 (dot view-direction half-vector)))
+         (alpha (* roughness roughness))
+         (alpha-squared (* alpha alpha))
+         (distribution-denominator
+           (+ (* (* n-dot-h n-dot-h) (- alpha-squared 1.0)) 1.0))
+         (distribution
+           (/ alpha-squared
+              (max 0.0001
+                   (* 3.14159265
+                      (* distribution-denominator distribution-denominator)))))
+         (visibility-light
+           (* n-dot-v
+              (sqrt (+ (* (* n-dot-l n-dot-l) (- 1.0 alpha-squared))
+                       alpha-squared))))
+         (visibility-view
+           (* n-dot-l
+              (sqrt (+ (* (* n-dot-v n-dot-v) (- 1.0 alpha-squared))
+                       alpha-squared))))
+         (visibility
+           (/ 0.5 (max 0.0001 (+ visibility-light visibility-view))))
+         (fresnel (+ 0.04 (* 0.96 (expt (- 1.0 v-dot-h) 5.0))))
+         (specular
+           (* sun-color
+              (* (* 0.34 direct-visibility)
+                 (* distribution
+                    (* visibility (* fresnel n-dot-l))))))
+         (lit (+ (* base (* light (stock-tooth material-point))) specular))
          (mapped-paper (paper-tonemap (* lit 1.16)))
          (camera-delta (- world-position (swizzle camera-position :xyz)))
          (distance (sqrt (dot camera-delta camera-delta)))

@@ -79,17 +79,23 @@ boundary rather than being allocated per cell."))
             (remhash site (scene-builder-material-cells builder))))))
   builder)
 
-(defun scene-builder-box (builder x0 x1 y0 y1 z0 z1
-                           &key (solid-p t) architecture-p)
+(defun scene-builder-box
+    (builder x0 x1 y0 y1 z0 z1
+     &key (solid-p t) architecture-p
+       (material (if architecture-p *sanctuary-material-placement*
+                     *terrain-material-placement*)))
   (loop for z from z0 to z1 do
     (loop for y from y0 to y1 do
       (loop for x from x0 to x1 do
         (scene-builder-cell builder x y z :solid-p solid-p
-                                           :architecture-p architecture-p))))
+                                           :material material))))
   builder)
 
-(defun scene-builder-disc (builder cx cy radius z0 z1
-                            &key (solid-p t) architecture-p)
+(defun scene-builder-disc
+    (builder cx cy radius z0 z1
+     &key (solid-p t) architecture-p
+       (material (if architecture-p *sanctuary-material-placement*
+                     *terrain-material-placement*)))
   (let ((limit (expt (+ radius 0.5) 2)))
     (loop for x from (- cx (ceiling radius)) to (+ cx (ceiling radius)) do
       (loop for y from (- cy (ceiling radius)) to (+ cy (ceiling radius))
@@ -98,12 +104,14 @@ boundary rather than being allocated per cell."))
             when (<= (+ (* dx dx) (* dy dy)) limit)
               do (loop for z from z0 to z1 do
                    (scene-builder-cell builder x y z :solid-p solid-p
-                                                      :architecture-p
-                                                      architecture-p)))))
+                                                      :material material)))))
   builder)
 
-(defun scene-builder-ring (builder cx cy inner outer z0 z1
-                            &key (solid-p t) architecture-p)
+(defun scene-builder-ring
+    (builder cx cy inner outer z0 z1
+     &key (solid-p t) architecture-p
+       (material (if architecture-p *sanctuary-material-placement*
+                     *terrain-material-placement*)))
   (let ((low (expt (+ inner 0.5) 2))
         (high (expt (+ outer 0.5) 2)))
     (loop for x from (- cx (ceiling outer)) to (+ cx (ceiling outer)) do
@@ -114,8 +122,7 @@ boundary rather than being allocated per cell."))
             when (and (< low distance) (<= distance high))
               do (loop for z from z0 to z1 do
                    (scene-builder-cell builder x y z :solid-p solid-p
-                                                      :architecture-p
-                                                      architecture-p)))))
+                                                      :material material)))))
   builder)
 
 (defun arch-rise (offset radius)
@@ -223,7 +230,8 @@ four-sheet parity star.  Nothing else in the scene can hide their junctions."
               (max water (+ plateau (* 9.0 inland))))))
        (t water)))))
 
-(defun make-mountain-sanctuary-scene ()
+(defun make-mountain-sanctuary-scene
+    (&key (beacon-placement *beacon-material-placement*))
   "A broad Lonely-Mountains world carrying a bridge and walled sanctuary.
 
 This is the old Holm's architectural sentence with its material menagerie
@@ -331,13 +339,13 @@ turrets, an arcaded hall and a remote ridge beacon."
              (beacon-y *sanctuary-beacon-y*)
              (base (mountain-sanctuary-terrain-height beacon-x beacon-y)))
         (scene-builder-disc builder beacon-x beacon-y 3 base (1+ base)
-                            :architecture-p t)
+                            :material beacon-placement)
         (scene-builder-ring builder beacon-x beacon-y 1 2 (+ base 2)
-                            (+ base 6) :architecture-p t)
+                            (+ base 6) :material beacon-placement)
         (scene-builder-ring builder beacon-x beacon-y 1 3 (+ base 7)
-                            (+ base 8) :architecture-p t)
+                            (+ base 8) :material beacon-placement)
         (scene-builder-disc builder beacon-x beacon-y 1 (+ base 8)
-                            (+ base 8) :architecture-p t))
+                            (+ base 8) :material beacon-placement))
       ;; An old eight-pillar sun court occupies the open lowland beside the
       ;; processional way.  Its diagonal stones echo the landscape's oblique
       ;; ridges without competing with the sanctuary's larger silhouette.

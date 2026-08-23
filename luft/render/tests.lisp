@@ -253,10 +253,12 @@
 
 (deftest semantic-surface-assemblies-retain-the-legacy-render-oracle
   (ok (equal
-       (loop for assembly across
-               (luv.domains:identity-vocabulary-members
-                luft.render::*surface-assembly-vocabulary*)
-             collect (luft.render::surface-assembly-name assembly))
+       (subseq
+        (loop for assembly across
+                (luv.domains:identity-vocabulary-members
+                 luft.render::*surface-assembly-vocabulary*)
+              collect (luft.render::surface-assembly-name assembly))
+        0 9)
        '(:grass :soil :subsoil :limestone :turf-set-limestone
          :soil-set-limestone :deep-set-limestone :turf-edge
          :foundation-limestone)))
@@ -322,7 +324,9 @@
                              (luft:surface-mesh-band-instance-words right))
                      (equalp (luft:surface-mesh-fan-instance-words left)
                              (luft:surface-mesh-fan-instance-words right))))))
-    (dolist (scene (list (render:make-mountain-sanctuary-scene)
+    (dolist (scene (list (render:make-mountain-sanctuary-scene
+                          :beacon-placement
+                          luft.render::*sanctuary-material-placement*)
                          (render:make-miter-study-scene)))
       (ok (same-mesh-p
            (render:make-render-mesh scene)
@@ -332,8 +336,8 @@
 
 (deftest surface-assembly-descriptors-compile-semantic-material-data
   (let ((words (luft.render::surface-assembly-descriptor-words)))
-    (ok (= (* 9 luft.render::+surface-assembly-descriptor-row-count+ 4)
-           (length words)))
+    (ok (<= (* 9 luft.render::+surface-assembly-descriptor-row-count+ 4)
+            (length words)))
     (ok (equalp #(0.18 0.31 0.105 7.0) (subseq words 0 4)))
     (let ((contact (* luft.render::+turf-set-stone-stock+
                       luft.render::+surface-assembly-descriptor-row-count+ 4)))
@@ -341,6 +345,37 @@
                   (subseq words contact (+ contact 4))))
       (ok (equalp #(0.18 0.31 0.105 0.0)
                   (subseq words (+ contact 4) (+ contact 8)))))))
+
+(deftest authored-placement-frames-compile-to-distinct-dense-assemblies
+  (let* ((scene (render:make-mountain-sanctuary-scene))
+         (domain (luft:chain-domain (luft.render::scene-solid scene)))
+         (x (+ luft.render::+sanctuary-origin-x+
+               luft.render::*sanctuary-beacon-x*))
+         (y (+ luft.render::+sanctuary-origin-y+
+               luft.render::*sanctuary-beacon-y*))
+         (z (+ 8 (luft.render::mountain-sanctuary-terrain-height
+                  luft.render::*sanctuary-beacon-x*
+                  luft.render::*sanctuary-beacon-y*)))
+         (cell (luft:make-site domain x y z luft:+cell-extent+ 1)))
+    (ok (eq luft.render::*beacon-material-placement*
+            (luft.render::scene-material-placement-at scene cell)))
+    (render:make-render-mesh scene)
+    (let* ((assembly
+             (find luft.render::*beacon-material-frame*
+                   (luv.domains:identity-vocabulary-members
+                    luft.render::*surface-assembly-vocabulary*)
+                   :key (lambda (candidate)
+                          (luft.render::surface-reading-frame
+                           (luft.render::surface-assembly-primary candidate)))))
+           (offset (luft.render::surface-assembly-offset assembly))
+           (row (* offset
+                   luft.render::+surface-assembly-descriptor-row-count+ 4))
+           (words (luft.render::surface-assembly-descriptor-words)))
+      (ok assembly)
+      (ok (equalp #(90.0 78.0 0.0 2.0)
+                  (subseq words (+ row 12) (+ row 16))))
+      (ok (equalp #(0.70710677 0.70710677 0.0 0.02)
+                  (subseq words (+ row 16) (+ row 20)))))))
 
 (deftest surface-assembly-ids-use-the-widened-instance-field
   (let* ((assembly-id #xabc)

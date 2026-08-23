@@ -142,6 +142,17 @@
    (luv.arithmetic.lisp.vec3:make-vec3 75.0 19.0 20.0)
    7.0 "LUFT bridge foundation contacts"))
 
+(luv:define-capture luft-material-ridge-beacon
+    (:figure B3ACON :kind :image :extension "png" :layout :landscape
+     :description
+     "The ridge beacon's locally framed limestone courses and earth-set foot.")
+  (pathname)
+  (capture-luft-material-contact
+   pathname
+   (luv.arithmetic.lisp.vec3:make-vec3 112.0 50.0 42.0)
+   10.0 "LUFT ridge beacon material frame"
+   :yaw 2.2455373 :pitch -0.5165006))
+
 (defun capture-luft-miter-closeup (pathname wireframe title)
   "Capture the #xCD wall termination at the normal chamfer width. #L7N4MO"
   (let ((viewer nil)
