@@ -651,6 +651,24 @@
         (ok (member luft.render::+turf-edge-stock+ stocks))
         (ok (member luft.render::+soil-stock+ stocks))))))
 
+(deftest arris-masks-exclude-quad-ends-and-junction-triangulation
+  ;; A band quad can run in either lattice direction.  Its two longer rails
+  ;; are beauty arrises; its short ends and diagonal remain construction-only.
+  (ok (equal '(#b001 #b010)
+             (multiple-value-list (luft::%quad-arris-masks 1 4 36))))
+  (ok (equal '(#b100 #b001)
+             (multiple-value-list (luft::%quad-arris-masks 1 36 4))))
+  (ok (equal '(0 0)
+             (multiple-value-list (luft::%quad-arris-masks 0 4 36))))
+  (ok (equal '(0 0)
+             (multiple-value-list (luft::%quad-arris-masks 2 4 36)))))
+
+(deftest triangle-edge-masks-follow-winding-repair
+  (ok (= #b001 (luft::%swap-triangle-bc-mask #b001)))
+  (ok (= #b100 (luft::%swap-triangle-bc-mask #b010)))
+  (ok (= #b010 (luft::%swap-triangle-bc-mask #b100)))
+  (ok (= #b110 (luft::%swap-triangle-bc-mask #b110))))
+
 (deftest flat-terrain-closures-retain-a-living-edge-reading
   (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
          (scene (progn

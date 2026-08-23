@@ -958,7 +958,9 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
                (boundary-edge-mask-output :uint :location 7
                                           :interpolation :flat)
                (ambient-occlusion-output :float :location 8
-                                          :interpolation :flat))
+                                          :interpolation :flat)
+               (arris-edge-mask-output :uint :location 9
+                                       :interpolation :flat))
      :resources ((instances :storage-buffer :binding 0 :element :uvec4)
                  (template-vertices :storage-buffer :binding 1 :element :uvec4)
                  (camera-state :uniform-block :binding 2
@@ -1002,6 +1004,7 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
            (/ (float (ldb (byte 2 28) (swizzle instance :w))) 3.0))
          (barycentric-index (uint (ldb (byte 2 6) attributes)))
          (boundary-edge-mask (uint (ldb (byte 3 10) attributes)))
+         (arris-edge-mask (uint (ldb (byte 3 13) attributes)))
          (barycentric
            (if (= barycentric-index (uint 0.0))
                (vec3 1.0 0.0 0.0)
@@ -1039,7 +1042,8 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
                       (+ (* (swizzle light-clip :y) 0.5) 0.5)
                       (swizzle light-clip :z)))
     (set-output boundary-edge-mask-output boundary-edge-mask)
-    (set-output ambient-occlusion-output ambient-occlusion)))
+    (set-output ambient-occlusion-output ambient-occlusion)
+    (set-output arris-edge-mask-output arris-edge-mask)))
 
 (define-shader mesh-fragment-specification
     (:stage :fragment
@@ -1051,7 +1055,8 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
               (previous-clip :vec4 :location 5)
               (shadow-sample :vec3 :location 6)
               (boundary-edge-mask :uint :location 7 :interpolation :flat)
-              (ambient-occlusion :float :location 8 :interpolation :flat))
+              (ambient-occlusion :float :location 8 :interpolation :flat)
+              (arris-edge-mask :uint :location 9 :interpolation :flat))
      :outputs ((color-output :vec4 :location 0)
                (motion-output :vec2 :location 1))
      :resources ((camera-state :uniform-block :binding 2
@@ -1285,6 +1290,13 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
                          edge-y 10000.0))
                 (if (= (ldb (byte 1 2) boundary-edge-mask) (uint 1.0))
                     edge-z 10000.0)))
+         (arris-edge-pixels
+           (min (min (if (= (ldb (byte 1 0) arris-edge-mask) (uint 1.0))
+                         edge-x 10000.0)
+                     (if (= (ldb (byte 1 1) arris-edge-mask) (uint 1.0))
+                         edge-y 10000.0))
+                (if (= (ldb (byte 1 2) arris-edge-mask) (uint 1.0))
+                    edge-z 10000.0)))
          (all-wire (- 1.0 (smoothstep 0.45 1.15 edge-pixels)))
          (boundary-wire
            (- 1.0 (smoothstep 0.45 1.15 boundary-edge-pixels)))
@@ -1299,7 +1311,7 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
          (cut-edge
            (* #.*cut-edge-lift-strength*
               chamferness
-              (- 1.0 (smoothstep 0.20 1.45 boundary-edge-pixels))
+              (- 1.0 (smoothstep 0.20 1.45 arris-edge-pixels))
               (+ 0.18 (* 0.82 direct-shape))
               (mix 0.22 1.0 direct-visibility)
               ;; Earth-filled contacts should not receive the pristine white
