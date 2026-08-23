@@ -299,9 +299,14 @@ the selector is the whole of the difference."
                 (lane (frame-view-up previous) 0.0)
                 (lane (frame-view-forward previous) 0.0)
                 (coerce (frame-view-projection previous) 'list)
+                ;; MetalFX's default contract expects motion between the
+                ;; jittered current and previous raster positions.  Keep both
+                ;; clip-space offsets together; a projection-mode change
+                ;; invalidates history rather than reprojecting across modes.
                 (list (aref (frame-view-jitter view) 0)
                       (aref (frame-view-jitter view) 1)
-                      (frame-view-divisor previous) 0.0)
+                      (aref (frame-view-jitter previous) 0)
+                      (aref (frame-view-jitter previous) 1))
                 (coerce inspection-parameters 'list)
                 character
                 (light-uniform-data *light* (frame-view-position view))

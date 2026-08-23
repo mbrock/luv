@@ -287,6 +287,14 @@
   (+ (* (/ (swizzle clip :xy) (swizzle clip :w)) 0.5)
      (vec2 0.5 0.5)))
 
+(define-shader-function mesh-temporal-motion
+    (previous-clip current-clip temporal-parameters)
+  "Return previous-minus-current motion at the actual jittered raster sites."
+  (- (+ (mesh-clip-uv previous-clip)
+        (* (swizzle temporal-parameters :zw) 0.5))
+     (+ (mesh-clip-uv current-clip)
+        (* (swizzle temporal-parameters :xy) 0.5))))
+
 (define-shader-function mesh-world-position (instance template-vertex)
   "Decode the one world position shared by the scene and shadow passes."
   (/ (+ (* (vec3 (float (swizzle instance :x))
@@ -787,7 +795,7 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
                            previous-camera-position previous-camera-right
                            previous-camera-up previous-camera-forward
                            previous-camera-projection
-                           (swizzle temporal-parameters :z)))
+                           (swizzle render-parameters :z)))
          (jitter (swizzle temporal-parameters :xy)))
     (set-output clip-position
                 (vec4 (+ (swizzle current-clip :x)
@@ -909,8 +917,8 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
          (radiance (+ paper (* (vec3 0.20 0.42 0.48) (* rim 0.07)))))
     (set-output color-output (vec4 (* radiance coverage) coverage))
     (set-output motion-output
-                (- (mesh-clip-uv previous-clip)
-                   (mesh-clip-uv current-clip)))))
+                (mesh-temporal-motion previous-clip current-clip
+                                      temporal-parameters))))
 
 (define-shader mesh-vertex-specification
     (:stage :vertex
@@ -989,7 +997,7 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
            (mesh-view-clip world-position previous-camera-position
                            previous-camera-right previous-camera-up
                            previous-camera-forward previous-camera-projection
-                           (swizzle temporal-parameters :z)))
+                           (swizzle render-parameters :z)))
          (light-clip
            (light-clip-position world-position shadow-row-x shadow-row-y
                                 shadow-row-z shadow-row-w))
@@ -1275,8 +1283,8 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
          (radiance (mix drafted blueprint reticle)))
     (set-output color-output (vec4 radiance 1.0))
     (set-output motion-output
-                (- (mesh-clip-uv previous-clip)
-                   (mesh-clip-uv current-clip)))))
+                (mesh-temporal-motion previous-clip current-clip
+                                      temporal-parameters))))
 
 (define-shader shadow-vertex-specification
     (:stage :vertex
@@ -1369,7 +1377,7 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
            (mesh-view-clip world-position previous-camera-position
                            previous-camera-right previous-camera-up
                            previous-camera-forward previous-camera-projection
-                           (swizzle temporal-parameters :z)))
+                           (swizzle render-parameters :z)))
          (pixel-size (swizzle inspection-parameters :zw))
          (radius (if (> marker-kind 1.5) 8.5
                      (if (> marker-kind 0.5) 6.5 2.6)))
@@ -1416,8 +1424,8 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
          (alpha (* coverage 0.96)))
     (set-output color-output (vec4 (* color alpha) alpha))
     (set-output motion-output
-                (- (mesh-clip-uv previous-clip)
-                   (mesh-clip-uv current-clip)))))
+                (mesh-temporal-motion previous-clip current-clip
+                                      temporal-parameters))))
 
 (define-shader present-vertex-specification
     (:stage :vertex
