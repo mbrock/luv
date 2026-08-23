@@ -103,11 +103,12 @@
                           0.0 1.0)))
     (- (player-sdf-length (- offset (* axis fraction))) radius)))
 
-(define-shader-function player-walk-pose (point gait)
-  "Walk the sample point back into the figure's gently bobbing local frame."
+(define-shader-function player-walk-pose (point gait activity)
+  "Walk the sample point back into the figure's gently weighted body frame."
   (vec3 (swizzle point :x)
         (swizzle point :y)
-        (- (swizzle point :z) (* 0.055 (abs (sin gait))))))
+        (- (swizzle point :z)
+           (* 0.060 (* activity (abs (sin gait)))))))
 
 (define-shader-function player-tunic-distance (point)
   (player-sdf-ellipsoid point (vec3 0.0 0.0 1.67)
@@ -132,14 +133,20 @@
   (player-sdf-ellipsoid point (vec3 0.0 -0.285 1.66)
                         (vec3 0.37 0.21 0.47)))
 
-(define-shader-function player-leg-distance (point gait)
+(define-shader-function player-leg-distance (point gait activity)
   (let* ((side (if (< (swizzle point :x) 0.0) -1.0 1.0))
-         (swing (* side (* 0.22 (sin gait))))
-         (hip (vec3 (* side 0.22) 0.0 1.27))
-         (ankle (vec3 (* side 0.22) swing 0.26))
+         ;; The stride radius equals bridge-speed / gait-speed.  During each
+         ;; stance half-cycle one ankle therefore cancels the root motion in
+         ;; world space instead of skating across the stone.
+         (swing (* side (* 0.279 (sin gait))))
+         (lift (* 0.17
+                  (* activity (max 0.0 (* side (cos gait))))))
+         (hip (vec3 (* side 0.22) 0.0
+                    (+ 1.27 (* 0.035 (* activity (abs (sin gait)))))))
+         (ankle (vec3 (* side 0.22) swing (+ 0.26 lift)))
          (leg (player-sdf-capsule point hip ankle 0.17))
          (boot (player-sdf-ellipsoid
-                point (vec3 (* side 0.22) (+ swing 0.09) 0.16)
+                point (vec3 (* side 0.22) (+ swing 0.09) (+ 0.16 lift))
                 (vec3 0.22 0.31 0.16))))
     (player-sdf-smooth-union leg boot 0.075)))
 
@@ -155,8 +162,8 @@
          (swing (* side (* -0.19 (sin gait)))))
     (player-sdf-sphere point (vec3 (* side 0.55) swing 1.13) 0.19)))
 
-(define-shader-function player-distance (point gait)
-  (let* ((posed (player-walk-pose point gait))
+(define-shader-function player-distance (point gait activity)
+  (let* ((posed (player-walk-pose point gait activity))
          (body (player-sdf-smooth-union
                 (player-tunic-distance posed)
                 (player-head-distance posed) 0.095))
@@ -164,7 +171,9 @@
          (hair (player-hair-distance posed))
          (collar (player-collar-distance posed))
          (pack (player-pack-distance posed))
-         (legs (player-leg-distance posed gait))
+         ;; Legs use the un-bobbed frame: the planted boot stays on the deck
+         ;; while the hips and upper body carry the weight shift.
+         (legs (player-leg-distance point gait activity))
          (arms (player-arm-distance posed gait))
          (hands (player-hand-distance posed gait)))
     (player-sdf-smooth-union
@@ -175,20 +184,20 @@
       (player-sdf-smooth-union pack legs 0.075) 0.065)
      (player-sdf-smooth-union arms hands 0.07) 0.075)))
 
-(define-shader-function player-normal (point gait)
+(define-shader-function player-normal (point gait activity)
   (let* ((reach 0.004)
          (a (vec3 1.0 -1.0 -1.0))
          (b (vec3 -1.0 -1.0 1.0))
          (c (vec3 -1.0 1.0 -1.0))
          (d (vec3 1.0 1.0 1.0)))
     (normalize
-     (+ (+ (* a (player-distance (+ point (* a reach)) gait))
-           (* b (player-distance (+ point (* b reach)) gait)))
-        (+ (* c (player-distance (+ point (* c reach)) gait))
-           (* d (player-distance (+ point (* d reach)) gait)))))))
+     (+ (+ (* a (player-distance (+ point (* a reach)) gait activity))
+           (* b (player-distance (+ point (* b reach)) gait activity)))
+        (+ (* c (player-distance (+ point (* c reach)) gait activity))
+           (* d (player-distance (+ point (* d reach)) gait activity)))))))
 
-(define-shader-function player-albedo (point gait)
-  (let* ((posed (player-walk-pose point gait))
+(define-shader-function player-albedo (point gait activity)
+  (let* ((posed (player-walk-pose point gait activity))
          (tunic (min (player-tunic-distance posed)
                      (player-arm-distance posed gait)))
          (skin (min (min (player-head-distance posed)
@@ -197,7 +206,7 @@
          (hair (player-hair-distance posed))
          (collar (player-collar-distance posed))
          (pack (player-pack-distance posed))
-         (legs (player-leg-distance posed gait))
+         (legs (player-leg-distance point gait activity))
          (skin-near (step skin tunic))
          (first (mix (vec3 0.105 0.25 0.29)
                      (vec3 0.68 0.43 0.29) skin-near))
@@ -248,8 +257,8 @@
                        (- (* bottom-corner 2.0) 1.0)))
          (time (swizzle character-parameters :w))
          (previous-time (- time 0.0166667))
-         (path (* time 0.34))
-         (previous-path (* previous-time 0.34))
+         (path (* time 0.22))
+         (previous-path (* previous-time 0.22))
          (center (vec3 (swizzle character-parameters :x)
                        (+ (swizzle character-parameters :y)
                           (* 10.5 (sin path)))
@@ -321,9 +330,13 @@
   (let* ((center (swizzle center-radius :xyz))
          (radius (swizzle center-radius :w))
          (time (swizzle character-parameters :w))
-         (path (* time 0.34))
+         (path (* time 0.22))
          (direction (if (< (cos path) 0.0) -1.0 1.0))
-         (gait (* time 4.6))
+         (activity (abs (cos path)))
+         ;; Six exact gait cycles from bridge centre to either turnaround.
+         ;; Deriving phase from path position keeps cadence proportional to
+         ;; travel speed and lets the figure settle before changing direction.
+         (gait (* 37.6991118 (sin path)))
          (ray (if (< (swizzle render-parameters :z) 0.5)
                   (normalize (swizzle camera-forward :xyz))
                   (normalize (- proxy-world-position
@@ -336,7 +349,7 @@
                     (local (vec3 (swizzle relative :x)
                                  (* direction (swizzle relative :y))
                                  (+ (swizzle relative :z) 1.48)))
-                    (distance (player-distance local gait)))
+                    (distance (player-distance local gait activity)))
                (if (< distance 0.0025)
                    ray-distance
                    (if (> ray-distance (* radius 2.0))
@@ -347,14 +360,14 @@
          (local (vec3 (swizzle relative :x)
                       (* direction (swizzle relative :y))
                       (+ (swizzle relative :z) 1.48)))
-         (surface-distance (player-distance local gait))
+         (surface-distance (player-distance local gait activity))
          (coverage (* (step 0.0 time)
                       (- 1.0 (step 0.006 surface-distance))))
-         (local-normal (player-normal local gait))
+         (local-normal (player-normal local gait activity))
          (normal (normalize (vec3 (swizzle local-normal :x)
                                   (* direction (swizzle local-normal :y))
                                   (swizzle local-normal :z))))
-         (albedo (player-albedo local gait))
+         (albedo (player-albedo local gait activity))
          (sun (normalize (vec3 -0.62 0.38 0.34)))
          (sun-color (vec3 1.22 1.00 0.72))
          (sky (vec3 0.60 0.75 0.96))
