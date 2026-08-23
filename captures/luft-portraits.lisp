@@ -250,3 +250,72 @@
    :field-scale 1.25
    :light :golden
    :aperture 0.85))
+
+;;; The traveler.  Both plates hold the animation clock still: a character
+;;; recipe that cannot ask for the same pose twice is not a recipe. #TR4VLR
+
+(defun capture-luft-traveler
+    (pathname &key (character-time 0.5) (yaw 2.2455373) (pitch -0.5165006)
+                   (isometric-height 5.0) (aim-height 15.2) (distance 24.0)
+                   (scene-maker #'luft.render:make-traveler-study-scene)
+                   (title "LUFT traveler study") (width 900) (height 900))
+  (let ((viewer nil)
+        (old-projection luft.render:*projection*)
+        (old-isometric-height luft.render:*isometric-height*)
+        (old-wireframe luft.render:*wireframe*)
+        (old-inspection-ink-p luft.render:*inspection-ink-p*)
+        (old-character-time luft.render:*character-time*))
+    (unwind-protect
+         (let* ((forward-x (* (cos yaw) (cos pitch)))
+                (forward-y (* (sin yaw) (cos pitch)))
+                (forward-z (sin pitch))
+                ;; The traveler's own world position, from the same three
+                ;; numbers the frame uniform packs for the shader.
+                (target-x (+ 29.5 luft.render::+sanctuary-origin-x+))
+                (target-y (+ (+ 24.5 luft.render::+sanctuary-origin-y+)
+                             (* 10.5 (sin (* character-time 0.22))))))
+           (setf luft.render:*projection* :isometric
+                 luft.render:*isometric-height* isometric-height
+                 luft.render:*wireframe* 0.0
+                 luft.render:*inspection-ink-p* nil
+                 luft.render:*character-time* character-time)
+           (setf viewer
+                 (luft.render:start-viewer
+                  :solid (funcall scene-maker)
+                  :bevel-width luft:+mesh-bevel-width+
+                  :camera
+                  (luft.render:make-fly-camera
+                   :position
+                   (luv.arithmetic.lisp.vec3:make-vec3
+                    (- target-x (* forward-x distance))
+                    (- target-y (* forward-y distance))
+                    (- aim-height (* forward-z distance)))
+                   :yaw yaw :pitch pitch)
+                  :title title :width width :height height))
+           (luft.render:capture-viewer-frame
+            pathname viewer :inspector-p nil))
+      (when viewer (luft.render:stop-viewer viewer))
+      (setf luft.render:*projection* old-projection
+            luft.render:*isometric-height* old-isometric-height
+            luft.render:*wireframe* old-wireframe
+            luft.render:*inspection-ink-p* old-inspection-ink-p
+            luft.render:*character-time* old-character-time))))
+
+(luv:define-capture luft-traveler-portrait
+    (:figure TR4VLR :kind :image :extension "png" :layout :landscape
+     :description
+     "The sanctuary's hermit on a bare dais: linen robe, copper braid, staff.")
+  (pathname)
+  (capture-luft-traveler pathname :character-time 0.5
+                                  :yaw -1.5707963 :pitch -0.16
+                                  :isometric-height 4.4 :aim-height 15.0))
+
+(luv:define-capture luft-traveler-on-the-bridge
+    (:figure TR4VBR :kind :image :extension "png" :layout :landscape
+     :description
+     "The traveler at the sanctuary's own camera angle, shadow on the deck.")
+  (pathname)
+  (capture-luft-traveler
+   pathname :character-time 0.5 :isometric-height 7.0
+   :scene-maker #'luft.render:make-mountain-sanctuary-scene
+   :title "LUFT traveler on the bridge"))

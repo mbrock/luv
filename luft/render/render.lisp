@@ -356,6 +356,17 @@ turrets, an arcaded hall and a remote ridge beacon."
                                 (+ base 5) :architecture-p t))))
       (finish-scene-builder builder :player-p t)))
 
+(defun make-traveler-study-scene ()
+  "A bare limestone dais under the traveler, clear from every direction.
+
+The sanctuary is the scene he belongs in, but it is also a scene in which
+half the useful camera angles look through a parapet.  This fixture keeps
+his exact world position and his exact deck height and removes everything
+else, so a turnaround can be shot around him without moving him."
+  (let ((builder (make-scene-builder :horizontal-bits 7)))
+    (scene-builder-box builder 56 67 40 58 11 13 :architecture-p t)
+    (finish-scene-builder builder :player-p t)))
+
 (defun make-miter-study-scene ()
   "Build the wall-side stepped mountain used to judge mixed miters. #Z5NDTA
 

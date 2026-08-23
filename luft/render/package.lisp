@@ -24,6 +24,7 @@
            #:make-manifold-spike-scene
            #:make-mountain-sanctuary-scene
            #:make-miter-study-scene
+           #:make-traveler-study-scene
            #:make-demo-solid
            #:make-gallery-solid
            #:gallery-plot-report
@@ -70,6 +71,7 @@
            #:*inspection-reach*
            #:*projection*
            #:*isometric-height*
+           #:*character-time*
            #:viewer
            #:viewer-renderer
            #:viewer-running-p

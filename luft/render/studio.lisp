@@ -18,6 +18,13 @@ projection to judge a shape rule in.")
 (defparameter *isometric-height* 18.0
   "How many world units of height an isometric frame spans.")
 
+(defparameter *character-time* nil
+  "Animation clock, in seconds, to hold the traveler at, or NIL to run free.
+
+A character plate needs the same pose every time it is rendered.  The viewer
+otherwise derives the clock from its own frame counter, which no capture can
+predict.")
+
 (defconstant +orthographic-near+ -4096.0)
 (defconstant +orthographic-far+ 4096.0)
 
