@@ -12,7 +12,7 @@
     flake = false;
   };
   inputs.swash = {
-    url = "github:lessrest/swash/8ee11223130647ea12bbb7832e4b083af03b7421";
+    url = "github:lessrest/swash/7693999a872c36b88a87b3d4dad4918e6a4a724e";
     flake = false;
   };
   # Keep this tag equal to the Tracy profiler you actually run: the client and
