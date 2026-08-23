@@ -77,6 +77,10 @@
 (deftest mesh-and-atelier-shaders-lower-through-both-conventional-backends
   (let* ((vertex (luft.render.shaders:mesh-vertex-specification))
          (fragment (luft.render.shaders:mesh-fragment-specification))
+         (lattice-vertex
+           (luft.render.shaders:lattice-point-vertex-specification))
+         (lattice-fragment
+           (luft.render.shaders:lattice-point-fragment-specification))
          (present-vertex
            (luft.render.shaders:present-vertex-specification))
          (present-fragment
@@ -94,10 +98,16 @@
     (ok (search "const device uint4* vertices" vertex-msl))
     (ok (search "barycentric" fragment-msl))
     (ok (search "motion_output" fragment-msl))
+    (ok (search "[[instance_id]]"
+                (luv.msl:msl-document-source
+                 (luv.msl:compile-msl lattice-vertex))))
+    (ok (luv.msl:compile-msl lattice-fragment))
     (ok (luv.msl:compile-msl inspector-vertex))
     (ok (luv.msl:compile-msl inspector-fragment))
     (ok (luv.spir-v:compile-shader-specification vertex))
     (ok (luv.spir-v:compile-shader-specification fragment))
+    (ok (luv.spir-v:compile-shader-specification lattice-vertex))
+    (ok (luv.spir-v:compile-shader-specification lattice-fragment))
     (ok (luv.spir-v:compile-shader-specification present-vertex))
     (ok (luv.spir-v:compile-shader-specification present-fragment))
     (ok (luv.spir-v:compile-shader-specification inspector-vertex))

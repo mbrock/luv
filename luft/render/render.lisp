@@ -403,6 +403,18 @@ consequence of its own occupancy star and can be read on its own."
    (vertex-module :initarg :vertex-module :accessor renderer-vertex-module)
    (fragment-module :initarg :fragment-module :accessor renderer-fragment-module)
    (pipeline :initarg :pipeline :accessor renderer-pipeline)
+   (lattice-point-buffer :initarg :lattice-point-buffer
+                         :accessor renderer-lattice-point-buffer)
+   (lattice-point-count :initarg :lattice-point-count
+                        :reader renderer-lattice-point-count)
+   (lattice-point-bind-group :initarg :lattice-point-bind-group
+                             :accessor renderer-lattice-point-bind-group)
+   (lattice-point-vertex-module :initarg :lattice-point-vertex-module
+                                :accessor renderer-lattice-point-vertex-module)
+   (lattice-point-fragment-module :initarg :lattice-point-fragment-module
+                                  :accessor renderer-lattice-point-fragment-module)
+   (lattice-point-pipeline :initarg :lattice-point-pipeline
+                           :accessor renderer-lattice-point-pipeline)
    (color-format :initarg :color-format :reader renderer-color-format)
    (temporal-p :initarg :temporal-p :reader renderer-temporal-p)
    (depth-texture :initform nil :accessor renderer-depth-texture)
@@ -549,13 +561,36 @@ consequence of its own occupancy star and can be read on its own."
     (create-frame-targets renderer extent))
   renderer)
 
+(defun mesh-lattice-point-words (mesh)
+  "Unique emitted mesh positions, retained in exact eighth-cell coordinates."
+  (let ((seen (make-hash-table :test #'equal))
+        (result (make-array 64 :element-type '(unsigned-byte 32)
+                              :adjustable t :fill-pointer 0))
+        (words (luft:surface-mesh-vertex-words mesh)))
+    (loop for offset from 0 below (length words) by luft:+mesh-vertex-word-count+
+          for x = (aref words offset)
+          for y = (aref words (+ offset 1))
+          for z = (aref words (+ offset 2))
+          for point = (list x y z)
+          unless (gethash point seen)
+            do (setf (gethash point seen) t)
+               (vector-push-extend x result)
+               (vector-push-extend y result)
+               (vector-push-extend z result)
+               (vector-push-extend 0 result))
+    (coerce result '(simple-array (unsigned-byte 32) (*)))))
+
 (defun make-renderer (device mesh color-format extent)
   (let* ((temporal-p (metal-temporal-device-p device))
          (target-formats (if temporal-p
                              '(:rgba16-float :rg16-float)
                              (list color-format)))
-         vertex-buffer camera-buffer index-buffer
+         (lattice-point-words (mesh-lattice-point-words mesh))
+         (lattice-point-count (/ (length lattice-point-words) 4))
+         vertex-buffer camera-buffer index-buffer lattice-point-buffer
          layout bind-group vertex-module fragment-module pipeline
+         lattice-point-bind-group lattice-point-vertex-module
+         lattice-point-fragment-module lattice-point-pipeline
          present-layout present-bind-group present-vertex-module
          present-fragment-module present-pipeline sampler
          inspector-layout inspector-buffer inspector-vertex-module
@@ -583,9 +618,17 @@ consequence of its own occupancy star and can be read on its own."
                  (create device
                          (make-buffer-descriptor
                           :label "luft inspection camera"
-                          :size 208 :usage '(:uniform :copy-dst))))
+                          :size 208 :usage '(:uniform :copy-dst)))
+                 lattice-point-buffer
+                 (create device
+                         (make-buffer-descriptor
+                          :label "luft unique eighth-cell lattice points"
+                          :size (max 16 (* 4 (length lattice-point-words)))
+                          :usage '(:storage :copy-dst))))
            (write-buffer vertex-buffer (luft:surface-mesh-vertex-words mesh))
            (write-buffer index-buffer (luft:surface-mesh-indices mesh))
+           (when (plusp lattice-point-count)
+             (write-buffer lattice-point-buffer lattice-point-words))
            (setf layout
                  (create device
                          (make-bind-group-layout-descriptor
@@ -622,6 +665,42 @@ consequence of its own occupancy star and can be read on its own."
                           :primitive '(:topology :triangle-list)
                           :depth-stencil
                           '(:format :depth32-float :depth-write-enabled t
+                            :depth-compare :less))))
+           (setf lattice-point-bind-group
+                 (create device
+                         (make-bind-group-descriptor
+                          :label "luft eighth-cell lattice points" :layout layout
+                          :entries `((:binding 0 :resource ,lattice-point-buffer)
+                                     (:binding 1 :resource ,camera-buffer))))
+                 lattice-point-vertex-module
+                 (create device
+                         (make-shader-module-descriptor
+                          :label "luft lattice point vertex"
+                          :language :mathematical
+                          :code (shaders:lattice-point-vertex-specification)))
+                 lattice-point-fragment-module
+                 (create device
+                         (make-shader-module-descriptor
+                          :label "luft lattice point fragment"
+                          :language :mathematical
+                          :code (shaders:lattice-point-fragment-specification)))
+                 lattice-point-pipeline
+                 (create device
+                         (make-render-pipeline-descriptor
+                          :label "luft eighth-cell lattice point pipeline"
+                          :layout layout
+                          :vertex `(:module ,lattice-point-vertex-module)
+                          :fragment
+                          `(:module ,lattice-point-fragment-module
+                            :targets
+                            ,(loop for format in target-formats
+                                   for first = t then nil
+                                   collect `(:format ,format
+                                             ,@(when first
+                                                 '(:blend :premultiplied-alpha)))))
+                          :primitive '(:topology :triangle-list)
+                          :depth-stencil
+                          '(:format :depth32-float :depth-write-enabled nil
                             :depth-compare :less))))
            (setf sampler
                  (create device
@@ -707,7 +786,15 @@ consequence of its own occupancy star and can be read on its own."
                                 :layout layout :bind-group bind-group
                                 :vertex-module vertex-module
                                 :fragment-module fragment-module
-                                :pipeline pipeline))
+                                :pipeline pipeline
+                                :lattice-point-buffer lattice-point-buffer
+                                :lattice-point-count lattice-point-count
+                                :lattice-point-bind-group lattice-point-bind-group
+                                :lattice-point-vertex-module
+                                lattice-point-vertex-module
+                                :lattice-point-fragment-module
+                                lattice-point-fragment-module
+                                :lattice-point-pipeline lattice-point-pipeline))
            (setf (renderer-present-layout renderer) present-layout
                  (renderer-sampler renderer) sampler
                  (renderer-present-vertex-module renderer)
@@ -732,7 +819,11 @@ consequence of its own occupancy star and can be read on its own."
                                 inspector-layout
                                 present-pipeline present-fragment-module
                                 present-vertex-module sampler present-bind-group
-                                present-layout pipeline fragment-module
+                                present-layout lattice-point-pipeline
+                                lattice-point-fragment-module
+                                lattice-point-vertex-module
+                                lattice-point-bind-group lattice-point-buffer
+                                pipeline fragment-module
                                 vertex-module bind-group layout index-buffer
                                 camera-buffer vertex-buffer))
           (when resource (ignore-errors (destroy resource))))))))
@@ -777,7 +868,7 @@ consequence of its own occupancy star and can be read on its own."
 
 (defun encode-renderer-frame
     (renderer encoder surface-texture extent camera-uniform-data
-     &key jitter view inspector-texture inspector-rect)
+     &key jitter view construction-p inspector-texture inspector-rect)
   (ensure-renderer-extent renderer extent)
   (set-renderer-inspector-texture renderer inspector-texture)
   (write-buffer (renderer-camera-buffer renderer) camera-uniform-data)
@@ -812,6 +903,11 @@ consequence of its own occupancy star and can be read on its own."
     (when (plusp index-count)
       (draw-indexed pass (renderer-index-buffer renderer)
                     :uint32 index-count))
+    (when (and construction-p
+               (plusp (renderer-lattice-point-count renderer)))
+      (set-pipeline pass (renderer-lattice-point-pipeline renderer))
+      (set-bind-group pass 0 (renderer-lattice-point-bind-group renderer))
+      (draw pass 6 (renderer-lattice-point-count renderer)))
     (when temporal-p
       (signal-temporal-scaler-inputs pass
                                      (renderer-temporal-scaler renderer)))
@@ -869,6 +965,11 @@ consequence of its own occupancy star and can be read on its own."
                   (renderer-present-vertex-module renderer)
                   (renderer-sampler renderer)
                   (renderer-present-layout renderer)
+                  (renderer-lattice-point-pipeline renderer)
+                  (renderer-lattice-point-fragment-module renderer)
+                  (renderer-lattice-point-vertex-module renderer)
+                  (renderer-lattice-point-bind-group renderer)
+                  (renderer-lattice-point-buffer renderer)
                   (renderer-pipeline renderer) (renderer-fragment-module renderer)
                   (renderer-vertex-module renderer) (renderer-bind-group renderer)
                   (renderer-layout renderer)
@@ -882,6 +983,11 @@ consequence of its own occupancy star and can be read on its own."
         (renderer-present-vertex-module renderer) nil
         (renderer-sampler renderer) nil
         (renderer-present-layout renderer) nil
+        (renderer-lattice-point-pipeline renderer) nil
+        (renderer-lattice-point-fragment-module renderer) nil
+        (renderer-lattice-point-vertex-module renderer) nil
+        (renderer-lattice-point-bind-group renderer) nil
+        (renderer-lattice-point-buffer renderer) nil
         (renderer-pipeline renderer) nil
         (renderer-fragment-module renderer) nil
         (renderer-vertex-module renderer) nil

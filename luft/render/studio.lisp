@@ -8,14 +8,14 @@
 (defparameter *inspection-reach* 200.0
   "How far, in cells, the atelier's pointer ray may inspect.")
 
-(defparameter *projection* :perspective
+(defparameter *projection* :isometric
   "Either :PERSPECTIVE or :ISOMETRIC.
 
 An isometric picture has no vanishing point, so two chamfers the same width
 are the same width on screen wherever they sit.  That is what makes it the
 projection to judge a shape rule in.")
 
-(defparameter *isometric-height* 64.0
+(defparameter *isometric-height* 18.0
   "How many world units of height an isometric frame spans.")
 
 (defclass fly-camera ()
@@ -62,8 +62,8 @@ at the atelier boundary where a person has selected one site."))
             (camera-yaw camera) 2.3562
             (camera-pitch camera) -0.393
             (camera-field-of-view camera) 0.9599311
-            *projection* :perspective
-            *isometric-height* 64.0)
+            *projection* :isometric
+            *isometric-height* 18.0)
       (when (viewer-renderer viewer)
         (setf (renderer-history-valid-p (viewer-renderer viewer)) nil))))
   viewer)
@@ -376,8 +376,9 @@ the selector is the whole of the difference."
      renderer encoder surface-view extent
      (camera-uniform-data
       view previous (viewer-inspection-parameters viewer extent)
-      (if (and inspection *inspection-ink-p*) 1.0 0.0))
+     (if (and inspection *inspection-ink-p*) 1.0 0.0))
      :jitter jitter :view view
+     :construction-p (plusp *wireframe*)
      :inspector-texture (and inspector-p (viewer-inspector-texture viewer))
      :inspector-rect (and inspector-p
                           (viewer-inspector-rect viewer extent)))))
@@ -613,11 +614,22 @@ the selector is the whole of the difference."
                            (* amount (vec3:vec3-y direction)))
                         (+ (vec3:vec3-z position)
                            (* amount (vec3:vec3-z direction))))))))
-        ;; W/S dolly along the exact 3D viewing ray.  The wheel alone changes
-        ;; isometric scale; Space/Shift remain independent world-Z movement.
-        (when (viewer-control-active-p viewer :forward) (move forward step))
-        (when (viewer-control-active-p viewer :backward)
-          (move forward (- step)))
+        ;; A dolly along the viewing ray is invisible in an orthographic
+        ;; projection, so W/S change its scale instead.  Perspective retains
+        ;; the ordinary fly-camera dolly.
+        (if (eq *projection* :isometric)
+            (let ((zoom-rate (* dt (viewer-speed viewer) 0.12)))
+              (when (viewer-control-active-p viewer :forward)
+                (setf *isometric-height*
+                      (max 6.0 (* *isometric-height* (exp (- zoom-rate))))))
+              (when (viewer-control-active-p viewer :backward)
+                (setf *isometric-height*
+                      (min 96.0 (* *isometric-height* (exp zoom-rate))))))
+            (progn
+              (when (viewer-control-active-p viewer :forward)
+                (move forward step))
+              (when (viewer-control-active-p viewer :backward)
+                (move forward (- step)))))
         (when (viewer-control-active-p viewer :right) (move right step))
         (when (viewer-control-active-p viewer :left) (move right (- step)))
         (when (viewer-control-active-p viewer :up)

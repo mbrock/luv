@@ -1,7 +1,9 @@
 (defpackage #:luft.render.shaders
   (:use #:cl #:luv.shader)
   (:shadowing-import-from #:luv.shader #:step)
-  (:export #:mesh-fragment-specification
+  (:export #:lattice-point-fragment-specification
+           #:lattice-point-vertex-specification
+           #:mesh-fragment-specification
            #:mesh-vertex-specification
            #:inspector-fragment-specification
            #:inspector-vertex-specification

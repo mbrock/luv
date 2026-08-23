@@ -227,30 +227,6 @@
            (* (swizzle render-parameters :y)
               (- 1.0 (smoothstep 0.45 1.15 edge-pixels))))
          (fragment-uv (mesh-clip-uv current-clip))
-         (lattice-point (floor (+ world-position (vec3 0.5 0.5 0.5))))
-         (lattice-offset (- world-position lattice-point))
-         (lattice-distance
-           (sqrt (dot lattice-offset lattice-offset)))
-         (lattice-clip
-           (mesh-view-clip lattice-point camera-position camera-right
-                           camera-up camera-forward camera-projection
-                           (swizzle render-parameters :z)))
-         (lattice-pixel-offset
-           (/ (- fragment-uv (mesh-clip-uv lattice-clip))
-              (max (swizzle inspection-parameters :zw)
-                   (vec2 0.000001 0.000001))))
-         (lattice-pixels
-           (sqrt (dot lattice-pixel-offset lattice-pixel-offset)))
-         (lattice-near
-           (- 1.0 (smoothstep 0.22 0.27 lattice-distance)))
-         (lattice-halo
-           (* (swizzle render-parameters :y)
-              (* lattice-near
-                 (- 1.0 (smoothstep 5.5 8.0 lattice-pixels)))))
-         (lattice-marker
-           (* (swizzle render-parameters :y)
-              (* lattice-near
-                 (- 1.0 (smoothstep 2.5 5.0 lattice-pixels)))))
          (pointer-delta
            (/ (- fragment-uv (swizzle inspection-parameters :xy))
               (max (swizzle inspection-parameters :zw)
@@ -265,13 +241,98 @@
                     (- 1.0 (smoothstep 0.7 1.8 pointer-pixels))))
          (reticle (max center ring))
          (construction-ink (vec3 0.055 0.16 0.22))
-         (lattice-ink (vec3 0.95 0.31 0.13))
          (blueprint (vec3 0.30 0.90 0.94))
          (drafted (mix paper construction-ink construction-wire))
-         (haloed (mix drafted construction-ink lattice-halo))
-         (marked (mix haloed lattice-ink lattice-marker))
-         (radiance (mix marked blueprint reticle)))
+         (radiance (mix drafted blueprint reticle)))
     (set-output color-output (vec4 radiance 1.0))
+    (set-output motion-output
+                (- (mesh-clip-uv previous-clip)
+                   (mesh-clip-uv current-clip)))))
+
+(define-shader lattice-point-vertex-specification
+    (:stage :vertex
+     :inputs ((vertex-index :uint :built-in :vertex-index)
+              (instance-index :uint :built-in :instance-index))
+     :outputs ((clip-position :vec4 :built-in :position)
+               (marker-coordinate-output :vec2 :location 0)
+               (current-clip-output :vec4 :location 1)
+               (previous-clip-output :vec4 :location 2))
+     :resources ((lattice-points :storage-buffer :binding 0 :element :uvec4)
+                 (camera-state :uniform-block :binding 1
+                  :members ((camera-position :vec4)
+                            (camera-right :vec4)
+                            (camera-up :vec4)
+                            (camera-forward :vec4)
+                            (camera-projection :vec4)
+                            (render-parameters :vec4)
+                            (previous-camera-position :vec4)
+                            (previous-camera-right :vec4)
+                            (previous-camera-up :vec4)
+                            (previous-camera-forward :vec4)
+                            (previous-camera-projection :vec4)
+                            (temporal-parameters :vec4)
+                            (inspection-parameters :vec4)))))
+  (let* ((record (buffer-element lattice-points instance-index))
+         (world-position
+           (/ (vec3 (float (swizzle record :x))
+                    (float (swizzle record :y))
+                    (float (swizzle record :z)))
+              8.0))
+         (index (float vertex-index))
+         (right (if (= index 2.0) 1.0
+                    (if (= index 3.0) 1.0
+                        (if (= index 5.0) 1.0 0.0))))
+         (bottom (if (= index 1.0) 1.0
+                     (if (= index 4.0) 1.0
+                         (if (= index 5.0) 1.0 0.0))))
+         (coordinate (vec2 (- (* right 2.0) 1.0)
+                           (- (* bottom 2.0) 1.0)))
+         (current-clip
+           (mesh-view-clip world-position camera-position camera-right
+                           camera-up camera-forward camera-projection
+                           (swizzle render-parameters :z)))
+         (previous-clip
+           (mesh-view-clip world-position previous-camera-position
+                           previous-camera-right previous-camera-up
+                           previous-camera-forward previous-camera-projection
+                           (swizzle temporal-parameters :z)))
+         (pixel-size (swizzle inspection-parameters :zw))
+         (radius 6.5)
+         (jitter (swizzle temporal-parameters :xy)))
+    (set-output
+     clip-position
+     (vec4 (+ (+ (swizzle current-clip :x)
+                 (* (swizzle jitter :x) (swizzle current-clip :w)))
+              (* (swizzle coordinate :x)
+                 (* (* radius 2.0) (swizzle pixel-size :x))
+                 (swizzle current-clip :w)))
+           (+ (+ (swizzle current-clip :y)
+                 (* (swizzle jitter :y) (swizzle current-clip :w)))
+              (* (swizzle coordinate :y)
+                 (* (* radius 2.0) (swizzle pixel-size :y))
+                 (swizzle current-clip :w)))
+           (- (swizzle current-clip :z)
+              (* 0.00015 (swizzle current-clip :w)))
+           (swizzle current-clip :w)))
+    (set-output marker-coordinate-output coordinate)
+    (set-output current-clip-output current-clip)
+    (set-output previous-clip-output previous-clip)))
+
+(define-shader lattice-point-fragment-specification
+    (:stage :fragment
+     :inputs ((marker-coordinate :vec2 :location 0)
+              (current-clip :vec4 :location 1)
+              (previous-clip :vec4 :location 2))
+     :outputs ((color-output :vec4 :location 0)
+               (motion-output :vec2 :location 1)))
+  (let* ((radius (sqrt (dot marker-coordinate marker-coordinate)))
+         (coverage (- 1.0 (smoothstep 0.82 1.0 radius)))
+         (center (- 1.0 (smoothstep 0.40 0.62 radius)))
+         (rim (vec3 0.035 0.075 0.095))
+         (ink (vec3 1.0 0.30 0.10))
+         (color (mix rim ink center))
+         (alpha (* coverage 0.96)))
+    (set-output color-output (vec4 (* color alpha) alpha))
     (set-output motion-output
                 (- (mesh-clip-uv previous-clip)
                    (mesh-clip-uv current-clip)))))
