@@ -103,11 +103,34 @@
                       (third coordinates) +cell-extent+ 1)))))
     (finish-chain-builder builder)))
 
-(defun %mesh-point (mesh index)
-  (let* ((words (surface-mesh-vertex-words mesh))
-         (base (* +mesh-vertex-word-count+ index)))
-    (list (aref words base) (aref words (+ base 1))
-          (aref words (+ base 2)))))
+(defun %map-mesh-triangles (function mesh)
+  (let ((templates (surface-mesh-template-vertex-words mesh))
+        (ranges (surface-mesh-template-ranges mesh)))
+    (labels ((point (base vertex)
+               (loop for axis below 3
+                     collect (+ (* +mesh-cell-size+ (nth axis base))
+                                (- (aref templates
+                                         (+ (* vertex
+                                               +mesh-template-vertex-word-count+)
+                                            axis))
+                                   +mesh-template-coordinate-bias+))))
+             (visit (words kind)
+               (loop for offset from 0 below (length words) by 4
+                     for base = (list (aref words offset)
+                                      (aref words (+ offset 1))
+                                      (aref words (+ offset 2)))
+                     for template-id = (ldb (byte 16 0)
+                                            (aref words (+ offset 3)))
+                     for start = (aref ranges (* 2 template-id))
+                     for count = (aref ranges (1+ (* 2 template-id)))
+                     do (loop for vertex from start below (+ start count) by 3
+                              do (funcall function kind
+                                          (point base vertex)
+                                          (point base (1+ vertex))
+                                          (point base (+ vertex 2)))))))
+      (visit (surface-mesh-face-instance-words mesh) :face)
+      (visit (surface-mesh-band-instance-words mesh) :band)
+      (visit (surface-mesh-fan-instance-words mesh) :fan))))
 
 (defun %ordered-edge (left right)
   (if (or (< (first left) (first right))
@@ -119,53 +142,69 @@
       (list right left)))
 
 (defun %mesh-geometric-edge-counts (mesh)
-  (let ((counts (make-hash-table :test #'equal))
-        (indices (surface-mesh-indices mesh)))
-    (loop for base from 0 below (length indices) by 3 do
-      (let ((points
-              (vector (%mesh-point mesh (aref indices base))
-                      (%mesh-point mesh (aref indices (+ base 1)))
-                      (%mesh-point mesh (aref indices (+ base 2))))))
-        (dotimes (index 3)
-          (incf (gethash (%ordered-edge
-                          (aref points index)
-                          (aref points (mod (1+ index) 3)))
-                         counts 0)))))
+  (let ((counts (make-hash-table :test #'equal)))
+    (%map-mesh-triangles
+     (lambda (kind a b c)
+       (declare (ignore kind))
+       (let ((points (vector a b c)))
+         (dotimes (index 3)
+           (incf (gethash (%ordered-edge
+                           (aref points index)
+                           (aref points (mod (1+ index) 3)))
+                          counts 0)))))
+     mesh)
     counts))
 
 (defun %mesh-closed-p (mesh)
   (loop for count being the hash-values of (%mesh-geometric-edge-counts mesh)
         always (= count 2)))
 
+(defun %stream-template-coordinates-within-p (mesh instance-words low high)
+  (let ((templates (surface-mesh-template-vertex-words mesh))
+        (ranges (surface-mesh-template-ranges mesh)))
+    (loop for offset from 0 below (length instance-words) by 4
+          for template-id = (ldb (byte 16 0)
+                                 (aref instance-words (+ offset 3)))
+          for start = (aref ranges (* 2 template-id))
+          for count = (aref ranges (1+ (* 2 template-id)))
+          always
+          (loop for vertex from start below (+ start count)
+                always
+                (loop for axis below 3
+                      for coordinate =
+                        (- (aref templates
+                                 (+ (* vertex
+                                       +mesh-template-vertex-word-count+)
+                                    axis))
+                           +mesh-template-coordinate-bias+)
+                      always (<= low coordinate high))))))
+
 (defun %test-surface-mesh ()
-  (%with-test-section ("integer surface mesh")
+  (%with-test-section ("integer site streams")
     (%check (equal '(0 -1 0) (%normal-direction-code '(0 -2 0))))
     (let ((one (make-surface-mesh (%solid-for-star #x01))))
-      ;; Six exposed faces, each with one square, four flaps, and four
-      ;; triangles: fourteen triangles and forty-two indices per face.
-      (%check (= (* 6 +mesh-face-template-triangle-count+)
-                 (surface-mesh-face-triangle-count one)))
-      (%check (zerop (surface-mesh-band-triangle-count one)))
-      (%check (zerop (surface-mesh-junction-triangle-count one)))
-      (%check (= 84 (surface-mesh-triangle-count one)))
-      (%check (= (* 3 (surface-mesh-triangle-count one))
-                 (surface-mesh-index-count one)))
-      (%check (= (* 6 +mesh-face-template-index-count+)
-                 (surface-mesh-index-count one)))
-      (%check (= (* +mesh-vertex-word-count+
-                    (surface-mesh-index-count one))
-                 (length (surface-mesh-vertex-words one))))
-      (%check (not (%mesh-closed-p one))))
-    ;; The fixed face template remains deliberately open at every corner even
-    ;; where two exposed faces are coplanar.
+      (%check (= 6 (surface-mesh-face-instance-count one)))
+      (%check (= 12 (surface-mesh-band-instance-count one)))
+      (%check (= 8 (surface-mesh-fan-instance-count one)))
+      (%check (= 12 (surface-mesh-face-triangle-count one)))
+      (%check (= 24 (surface-mesh-band-triangle-count one)))
+      (%check (= 8 (surface-mesh-fan-triangle-count one)))
+      (%check (= 44 (surface-mesh-triangle-count one)))
+      (%check (%stream-template-coordinates-within-p
+               one (surface-mesh-fan-instance-words one) -1 1))
+      (%check (%mesh-closed-p one)))
     (let ((pair (make-surface-mesh (%solid-for-star #x03))))
       (%check (zerop (surface-mesh-singular-star-count pair)))
-      (%check (not (%mesh-closed-p pair))))
+      (%check (%mesh-closed-p pair))
+      (%check (plusp (surface-mesh-band-instance-count pair)))
+      (%check (plusp (surface-mesh-fan-instance-count pair)))
+      (%check (%stream-template-coordinates-within-p
+               pair (surface-mesh-fan-instance-words pair) -1 1)))
     (dolist (mask '(#x06 #x18 #x69))
       (let ((mesh (make-surface-mesh (%solid-for-star mask))))
         (%check (plusp (surface-mesh-singular-star-count mesh))
                 (format nil "mask ~2,'0X" mask))
-        (%check (not (%mesh-closed-p mesh))
+        (%check (%mesh-closed-p mesh)
                 (format nil "mask ~2,'0X" mask))))))
 
 (defun run-luft-tests (&key (stream *standard-output*))

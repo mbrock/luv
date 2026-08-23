@@ -72,41 +72,29 @@
              (luv.arithmetic.lisp.vec3:vec3-z after)))
       (ok (= 18.0 render:*isometric-height*)))))
 
-(deftest the-spike-scene-is-one-indexed-integer-mesh
+(deftest the-spike-scene-is-three-site-instance-streams
   (let* ((mesh (render:make-render-mesh
                 (render:make-manifold-spike-scene)))
-         (words (luft:surface-mesh-vertex-words mesh))
-         (indices (luft:surface-mesh-indices mesh)))
+         (templates (luft:surface-mesh-template-vertex-words mesh)))
     (ok (plusp (luft:surface-mesh-face-triangle-count mesh)))
-    (ok (zerop (luft:surface-mesh-band-triangle-count mesh)))
-    (ok (zerop (luft:surface-mesh-junction-triangle-count mesh)))
+    (ok (plusp (luft:surface-mesh-band-triangle-count mesh)))
+    (ok (plusp (luft:surface-mesh-fan-triangle-count mesh)))
     (ok (plusp (luft:surface-mesh-singular-star-count mesh)))
-    (ok (zerop (mod (luft:surface-mesh-face-triangle-count mesh) 14)))
-    (ok (= (* 3 (luft:surface-mesh-triangle-count mesh))
-           (length indices)))
-    (ok (= (* luft:+mesh-vertex-word-count+ (length indices))
-           (length words)))
-    (ok (loop for index across indices
-              for expected from 0
-              always (= expected index)))))
+    (ok (plusp (luft:surface-mesh-face-instance-count mesh)))
+    (ok (plusp (luft:surface-mesh-band-instance-count mesh)))
+    (ok (plusp (luft:surface-mesh-fan-instance-count mesh)))
+    (ok (plusp (luft:surface-mesh-template-count mesh)))
+    (ok (zerop (mod (length templates)
+                    luft:+mesh-template-vertex-word-count+)))))
 
-(deftest the-connected-miter-study-uses-only-fixed-face-templates
+(deftest the-connected-miter-study-uses-the-site-stream-abi
   (let ((mesh (render:make-render-mesh
                (render:make-miter-study-scene))))
     (ok (plusp (luft:surface-mesh-face-triangle-count mesh)))
-    (ok (zerop (luft:surface-mesh-band-triangle-count mesh)))
-    (ok (zerop (luft:surface-mesh-junction-triangle-count mesh)))
+    (ok (plusp (luft:surface-mesh-band-triangle-count mesh)))
+    (ok (plusp (luft:surface-mesh-fan-triangle-count mesh)))
     (ok (zerop (luft:surface-mesh-singular-star-count mesh)))
-    (ok (zerop (mod (luft:surface-mesh-face-triangle-count mesh) 14)))
-    (let ((vertices (luft:surface-mesh-vertex-words mesh))
-          (lattice (luft.render::mesh-lattice-point-words mesh)))
-      (ok (loop for offset from 3 below (length vertices)
-                  by luft:+mesh-vertex-word-count+
-                always (plusp (ldb (byte 3 14) (aref vertices offset)))))
-      (ok (loop for offset from 3 below (length vertices)
-                  by luft:+mesh-vertex-word-count+
-                thereis (/= #b111
-                            (ldb (byte 3 14) (aref vertices offset)))))
+    (let ((lattice (luft.render::mesh-lattice-point-words mesh)))
       (ok (loop for offset from 3 below (length lattice) by 4
                 thereis (zerop (aref lattice offset))))
       (ok (loop for offset from 3 below (length lattice) by 4
@@ -140,8 +128,9 @@
          (fragment-msl
            (luv.msl:msl-document-source (luv.msl:compile-msl fragment))))
     (ok (search "[[vertex_id]]" vertex-msl))
-    (ok (null (search "[[instance_id]]" vertex-msl)))
-    (ok (search "const device uint4* vertices" vertex-msl))
+    (ok (search "[[instance_id]]" vertex-msl))
+    (ok (search "const device uint4* instances" vertex-msl))
+    (ok (search "const device uint4* template_vertices" vertex-msl))
     (ok (search "barycentric" fragment-msl))
     (ok (search "motion_output" fragment-msl))
     (ok (search "[[instance_id]]"

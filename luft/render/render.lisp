@@ -287,7 +287,7 @@ same view also retains the truncated wall miter preserved by #DJK8HW."
        4))
 
 (defun make-render-mesh (source &key stock-function)
-  "Lower SOURCE directly to the indexed integer triangle ABI."
+  "Classify SOURCE into the face, edge, and vertex template-instance ABI."
   (let* ((scene (and (typep source 'scene) source))
          (solid (if scene (scene-solid source) source))
          (stock-function (or stock-function
@@ -398,16 +398,28 @@ consequence of its own occupancy star and can be read on its own."
 (defclass renderer ()
   ((device :initarg :device :reader renderer-device)
    (mesh :initarg :mesh :reader renderer-mesh)
-   (vertex-buffer :initarg :vertex-buffer :accessor renderer-vertex-buffer)
+   (template-buffer :initarg :template-buffer :accessor renderer-template-buffer)
+   (face-instance-buffer :initarg :face-instance-buffer
+                         :accessor renderer-face-instance-buffer)
+   (band-instance-buffer :initarg :band-instance-buffer
+                         :accessor renderer-band-instance-buffer)
+   (fan-instance-buffer :initarg :fan-instance-buffer
+                        :accessor renderer-fan-instance-buffer)
    (camera-buffer :initarg :camera-buffer :accessor renderer-camera-buffer)
-   (index-buffer :initarg :index-buffer :accessor renderer-index-buffer)
    (layout :initarg :layout :accessor renderer-layout)
-   (bind-group :initarg :bind-group :accessor renderer-bind-group)
+   (face-bind-group :initarg :face-bind-group
+                    :accessor renderer-face-bind-group)
+   (band-bind-group :initarg :band-bind-group
+                    :accessor renderer-band-bind-group)
+   (fan-bind-group :initarg :fan-bind-group
+                   :accessor renderer-fan-bind-group)
    (vertex-module :initarg :vertex-module :accessor renderer-vertex-module)
    (fragment-module :initarg :fragment-module :accessor renderer-fragment-module)
    (pipeline :initarg :pipeline :accessor renderer-pipeline)
    (lattice-point-buffer :initarg :lattice-point-buffer
                          :accessor renderer-lattice-point-buffer)
+   (lattice-point-layout :initarg :lattice-point-layout
+                         :accessor renderer-lattice-point-layout)
    (lattice-point-count :initarg :lattice-point-count
                         :reader renderer-lattice-point-count)
    (lattice-point-bind-group :initarg :lattice-point-bind-group
@@ -569,15 +581,18 @@ consequence of its own occupancy star and can be read on its own."
   (let ((points (make-hash-table :test #'equal))
         (result (make-array 64 :element-type '(unsigned-byte 32)
                               :adjustable t :fill-pointer 0))
-        (words (luft:surface-mesh-vertex-words mesh)))
-    (labels ((vertex-position (vertex)
-               (let ((offset (* vertex luft:+mesh-vertex-word-count+)))
-                 (list (aref words offset)
-                       (aref words (+ offset 1))
-                       (aref words (+ offset 2)))))
-             (remember (point marker-kind)
+        (templates (luft:surface-mesh-template-vertex-words mesh))
+        (ranges (luft:surface-mesh-template-ranges mesh)))
+    (labels ((remember (point marker-kind)
                (setf (gethash point points)
                      (max marker-kind (gethash point points 0))))
+             (template-position (base vertex)
+               (let ((offset (* vertex
+                                luft:+mesh-template-vertex-word-count+)))
+                 (loop for axis below 3
+                       collect (+ (* 8 (nth axis base))
+                                  (- (aref templates (+ offset axis))
+                                     luft:+mesh-template-coordinate-bias+)))))
              (sample-axis-edge (left right)
                (let ((different
                        (loop for axis below 3
@@ -591,68 +606,38 @@ consequence of its own occupancy star and can be read on its own."
                        (let ((point (copy-list left)))
                          (setf (nth axis point) coordinate)
                          (remember point 0)))))))
-             (remember-face-vertex-sites (face-base)
-               ;; The first six vertices are the two triangles of the 6x6
-               ;; center.  Its four corners are one tick inside the LUFT
-               ;; vertex sites deliberately omitted from the face geometry.
-               (let* ((center
-                        (loop for vertex from face-base below (+ face-base 6)
-                              collect (vertex-position vertex)))
-                      (normal-axis
-                        (or (loop for axis below 3
-                                  when (apply #'= (mapcar
-                                                   (lambda (point)
-                                                     (nth axis point))
-                                                   center))
-                                    return axis)
-                            (error "Face center ~S has no constant axis."
-                                   center)))
-                      (tangents
-                        (loop for axis below 3
-                              unless (= axis normal-axis) collect axis))
-                      (plane (nth normal-axis (first center))))
-                 (destructuring-bind (u v) tangents
-                   (let ((u-low (1- (apply #'min (mapcar
-                                                  (lambda (point)
-                                                    (nth u point))
-                                                  center))))
-                         (u-high (1+ (apply #'max (mapcar
-                                                   (lambda (point)
-                                                     (nth u point))
-                                                   center))))
-                         (v-low (1- (apply #'min (mapcar
-                                                  (lambda (point)
-                                                    (nth v point))
-                                                  center))))
-                         (v-high (1+ (apply #'max (mapcar
-                                                   (lambda (point)
-                                                     (nth v point))
-                                                   center)))))
-                     (dolist (u-coordinate (list u-low u-high))
-                       (dolist (v-coordinate (list v-low v-high))
-                         (let ((point (list 0 0 0)))
-                           (setf (nth normal-axis point) plane
-                                 (nth u point) u-coordinate
-                                 (nth v point) v-coordinate)
-                           (remember point 2)))))))))
-      (loop for vertex below (/ (length words) luft:+mesh-vertex-word-count+)
-            do (remember (vertex-position vertex) 1))
-      (loop with face-base = 0
-            repeat (/ (luft:surface-mesh-face-triangle-count mesh)
-                      luft:+mesh-face-template-triangle-count+)
-            do (remember-face-vertex-sites face-base)
-               (incf face-base luft:+mesh-face-template-index-count+))
-      (loop for triangle-base from 0
-              below (/ (length words) luft:+mesh-vertex-word-count+) by 3
-            for attributes =
-              (aref words (+ (* triangle-base luft:+mesh-vertex-word-count+) 3))
-            for edge-mask = (ldb (byte 3 14) attributes)
-            for a = (vertex-position triangle-base)
-            for b = (vertex-position (+ triangle-base 1))
-            for c = (vertex-position (+ triangle-base 2))
-            when (logbitp 0 edge-mask) do (sample-axis-edge b c)
-            when (logbitp 1 edge-mask) do (sample-axis-edge a c)
-            when (logbitp 2 edge-mask) do (sample-axis-edge a b)))
+             (visit-stream (words fan-p)
+               (loop for instance-offset from 0 below (length words) by 4
+                     for base = (list (aref words instance-offset)
+                                      (aref words (+ instance-offset 1))
+                                      (aref words (+ instance-offset 2)))
+                     for packed = (aref words (+ instance-offset 3))
+                     for template-id = (ldb (byte 16 0) packed)
+                     for vertex-start = (aref ranges (* 2 template-id))
+                     for vertex-count = (aref ranges (1+ (* 2 template-id)))
+                     do (when fan-p
+                          (remember (mapcar (lambda (x) (* 8 x)) base) 2))
+                        (loop for vertex from vertex-start
+                                below (+ vertex-start vertex-count)
+                              do (remember (template-position base vertex) 1))
+                        (loop for vertex from vertex-start
+                                below (+ vertex-start vertex-count) by 3
+                              for attributes =
+                                (aref templates
+                                      (+ (* vertex 4) 3))
+                              for edge-mask = (ldb (byte 3 10) attributes)
+                              for a = (template-position base vertex)
+                              for b = (template-position base (1+ vertex))
+                              for c = (template-position base (+ vertex 2))
+                              when (logbitp 0 edge-mask)
+                                do (sample-axis-edge b c)
+                              when (logbitp 1 edge-mask)
+                                do (sample-axis-edge a c)
+                              when (logbitp 2 edge-mask)
+                                do (sample-axis-edge a b)))))
+      (visit-stream (luft:surface-mesh-face-instance-words mesh) nil)
+      (visit-stream (luft:surface-mesh-band-instance-words mesh) nil)
+      (visit-stream (luft:surface-mesh-fan-instance-words mesh) t))
     (maphash
      (lambda (point marker-kind)
        (dolist (coordinate point) (vector-push-extend coordinate result))
@@ -667,9 +652,11 @@ consequence of its own occupancy star and can be read on its own."
                              (list color-format)))
          (lattice-point-words (mesh-lattice-point-words mesh))
          (lattice-point-count (/ (length lattice-point-words) 4))
-         vertex-buffer camera-buffer index-buffer lattice-point-buffer
-         layout bind-group vertex-module fragment-module pipeline
-         lattice-point-bind-group lattice-point-vertex-module
+         template-buffer face-instance-buffer band-instance-buffer
+         fan-instance-buffer camera-buffer lattice-point-buffer
+         layout face-bind-group band-bind-group fan-bind-group
+         vertex-module fragment-module pipeline
+         lattice-point-layout lattice-point-bind-group lattice-point-vertex-module
          lattice-point-fragment-module lattice-point-pipeline
          present-layout present-bind-group present-vertex-module
          present-fragment-module present-pipeline sampler
@@ -678,22 +665,39 @@ consequence of its own occupancy star and can be read on its own."
          (completed-p nil))
     (unwind-protect
          (progn
-           (setf vertex-buffer
+           (setf template-buffer
                  (create device
                          (make-buffer-descriptor
-                          :label "luft integer mesh vertices"
+                          :label "luft site template vertices"
                           :size (max 16
                                      (* 4 (length
-                                           (luft:surface-mesh-vertex-words
+                                           (luft:surface-mesh-template-vertex-words
                                             mesh))))
                           :usage '(:storage :copy-dst)))
-                 index-buffer
+                 face-instance-buffer
                  (create device
                          (make-buffer-descriptor
-                          :label "luft integer mesh indices"
-                          :size (max 4
-                                     (* 4 (luft:surface-mesh-index-count mesh)))
-                          :usage '(:index :copy-dst)))
+                          :label "luft face site instances"
+                          :size (max 16 (* 4 (length
+                                              (luft:surface-mesh-face-instance-words
+                                               mesh))))
+                          :usage '(:storage :copy-dst)))
+                 band-instance-buffer
+                 (create device
+                         (make-buffer-descriptor
+                          :label "luft edge site instances"
+                          :size (max 16 (* 4 (length
+                                              (luft:surface-mesh-band-instance-words
+                                               mesh))))
+                          :usage '(:storage :copy-dst)))
+                 fan-instance-buffer
+                 (create device
+                         (make-buffer-descriptor
+                          :label "luft vertex site instances"
+                          :size (max 16 (* 4 (length
+                                              (luft:surface-mesh-fan-instance-words
+                                               mesh))))
+                          :usage '(:storage :copy-dst)))
                  camera-buffer
                  (create device
                          (make-buffer-descriptor
@@ -705,8 +709,14 @@ consequence of its own occupancy star and can be read on its own."
                           :label "luft unique eighth-cell lattice points"
                           :size (max 16 (* 4 (length lattice-point-words)))
                           :usage '(:storage :copy-dst))))
-           (write-buffer vertex-buffer (luft:surface-mesh-vertex-words mesh))
-           (write-buffer index-buffer (luft:surface-mesh-indices mesh))
+           (write-buffer template-buffer
+                         (luft:surface-mesh-template-vertex-words mesh))
+           (write-buffer face-instance-buffer
+                         (luft:surface-mesh-face-instance-words mesh))
+           (write-buffer band-instance-buffer
+                         (luft:surface-mesh-band-instance-words mesh))
+           (write-buffer fan-instance-buffer
+                         (luft:surface-mesh-fan-instance-words mesh))
            (when (plusp lattice-point-count)
              (write-buffer lattice-point-buffer lattice-point-words))
            (setf layout
@@ -714,13 +724,29 @@ consequence of its own occupancy star and can be read on its own."
                          (make-bind-group-layout-descriptor
                           :label "luft mesh layout"
                           :entries '((:binding 0 :type :storage-buffer)
-                                     (:binding 1 :type :uniform-buffer))))
-                 bind-group
+                                     (:binding 1 :type :storage-buffer)
+                                     (:binding 2 :type :uniform-buffer))))
+                 face-bind-group
                  (create device
                          (make-bind-group-descriptor
-                          :label "luft mesh vertices" :layout layout
-                          :entries `((:binding 0 :resource ,vertex-buffer)
-                                     (:binding 1 :resource ,camera-buffer))))
+                          :label "luft face sites" :layout layout
+                          :entries `((:binding 0 :resource ,face-instance-buffer)
+                                     (:binding 1 :resource ,template-buffer)
+                                     (:binding 2 :resource ,camera-buffer))))
+                 band-bind-group
+                 (create device
+                         (make-bind-group-descriptor
+                          :label "luft edge sites" :layout layout
+                          :entries `((:binding 0 :resource ,band-instance-buffer)
+                                     (:binding 1 :resource ,template-buffer)
+                                     (:binding 2 :resource ,camera-buffer))))
+                 fan-bind-group
+                 (create device
+                         (make-bind-group-descriptor
+                          :label "luft vertex sites" :layout layout
+                          :entries `((:binding 0 :resource ,fan-instance-buffer)
+                                     (:binding 1 :resource ,template-buffer)
+                                     (:binding 2 :resource ,camera-buffer))))
                  vertex-module
                  (create device
                          (make-shader-module-descriptor
@@ -735,7 +761,7 @@ consequence of its own occupancy star and can be read on its own."
                  pipeline
                  (create device
                          (make-render-pipeline-descriptor
-                          :label "luft indexed mesh pipeline" :layout layout
+                          :label "luft site stream pipeline" :layout layout
                           :vertex `(:module ,vertex-module)
                           :fragment `(:module ,fragment-module
                                       :targets
@@ -746,10 +772,17 @@ consequence of its own occupancy star and can be read on its own."
                           :depth-stencil
                           '(:format :depth32-float :depth-write-enabled t
                             :depth-compare :less))))
-           (setf lattice-point-bind-group
+           (setf lattice-point-layout
+                 (create device
+                         (make-bind-group-layout-descriptor
+                          :label "luft lattice point layout"
+                          :entries '((:binding 0 :type :storage-buffer)
+                                     (:binding 1 :type :uniform-buffer))))
+                 lattice-point-bind-group
                  (create device
                          (make-bind-group-descriptor
-                          :label "luft eighth-cell lattice points" :layout layout
+                          :label "luft eighth-cell lattice points"
+                          :layout lattice-point-layout
                           :entries `((:binding 0 :resource ,lattice-point-buffer)
                                      (:binding 1 :resource ,camera-buffer))))
                  lattice-point-vertex-module
@@ -768,7 +801,7 @@ consequence of its own occupancy star and can be read on its own."
                  (create device
                          (make-render-pipeline-descriptor
                           :label "luft eighth-cell lattice point pipeline"
-                          :layout layout
+                          :layout lattice-point-layout
                           :vertex `(:module ,lattice-point-vertex-module)
                           :fragment
                           `(:module ,lattice-point-fragment-module
@@ -860,14 +893,20 @@ consequence of its own occupancy star and can be read on its own."
                                 :device device :mesh mesh
                                 :color-format color-format
                                 :temporal-p temporal-p
-                                :vertex-buffer vertex-buffer
+                                :template-buffer template-buffer
+                                :face-instance-buffer face-instance-buffer
+                                :band-instance-buffer band-instance-buffer
+                                :fan-instance-buffer fan-instance-buffer
                                 :camera-buffer camera-buffer
-                                :index-buffer index-buffer
-                                :layout layout :bind-group bind-group
+                                :layout layout
+                                :face-bind-group face-bind-group
+                                :band-bind-group band-bind-group
+                                :fan-bind-group fan-bind-group
                                 :vertex-module vertex-module
                                 :fragment-module fragment-module
                                 :pipeline pipeline
                                 :lattice-point-buffer lattice-point-buffer
+                                :lattice-point-layout lattice-point-layout
                                 :lattice-point-count lattice-point-count
                                 :lattice-point-bind-group lattice-point-bind-group
                                 :lattice-point-vertex-module
@@ -902,10 +941,13 @@ consequence of its own occupancy star and can be read on its own."
                                 present-layout lattice-point-pipeline
                                 lattice-point-fragment-module
                                 lattice-point-vertex-module
-                                lattice-point-bind-group lattice-point-buffer
+                                lattice-point-bind-group lattice-point-layout
+                                lattice-point-buffer
                                 pipeline fragment-module
-                                vertex-module bind-group layout index-buffer
-                                camera-buffer vertex-buffer))
+                                vertex-module fan-bind-group band-bind-group
+                                face-bind-group layout camera-buffer
+                                fan-instance-buffer band-instance-buffer
+                                face-instance-buffer template-buffer))
           (when resource (ignore-errors (destroy resource))))))))
 
 (defun set-renderer-inspector-texture (renderer texture)
@@ -946,6 +988,16 @@ consequence of its own occupancy star and can be read on its own."
     (draw pass 6))
   renderer)
 
+(defun draw-site-stream (pass bind-group draws)
+  (when draws
+    (set-bind-group pass 0 bind-group)
+    (dolist (draw-record draws)
+      (destructuring-bind
+          (template-id vertex-start vertex-count instance-start instance-count)
+          draw-record
+        (declare (ignore template-id))
+        (draw pass vertex-count instance-count vertex-start instance-start)))))
+
 (defun encode-renderer-frame
     (renderer encoder surface-texture extent camera-uniform-data
      &key jitter view construction-p inspector-texture inspector-rect)
@@ -953,7 +1005,6 @@ consequence of its own occupancy star and can be read on its own."
   (set-renderer-inspector-texture renderer inspector-texture)
   (write-buffer (renderer-camera-buffer renderer) camera-uniform-data)
   (let* ((mesh (renderer-mesh renderer))
-         (index-count (luft:surface-mesh-index-count mesh))
          (temporal-p (renderer-temporal-p renderer))
          (color-view (if temporal-p
                          (renderer-scene-view renderer)
@@ -971,7 +1022,7 @@ consequence of its own occupancy star and can be read on its own."
            (begin-render-pass
             encoder
             (make-render-pass-descriptor
-             :label "luft indexed mesh"
+             :label "luft site streams"
              :color-attachments color-attachments
              :depth-stencil-attachment
              `(:view ,(renderer-depth-view renderer)
@@ -979,10 +1030,12 @@ consequence of its own occupancy star and can be read on its own."
                :depth-store-op ,(if temporal-p :store :discard)
                :depth-clear-value 1.0)))))
     (set-pipeline pass (renderer-pipeline renderer))
-    (set-bind-group pass 0 (renderer-bind-group renderer))
-    (when (plusp index-count)
-      (draw-indexed pass (renderer-index-buffer renderer)
-                    :uint32 index-count))
+    (draw-site-stream pass (renderer-face-bind-group renderer)
+                      (luft:surface-mesh-face-draws mesh))
+    (draw-site-stream pass (renderer-band-bind-group renderer)
+                      (luft:surface-mesh-band-draws mesh))
+    (draw-site-stream pass (renderer-fan-bind-group renderer)
+                      (luft:surface-mesh-fan-draws mesh))
     (when (and construction-p
                (plusp (renderer-lattice-point-count renderer)))
       (set-pipeline pass (renderer-lattice-point-pipeline renderer))
@@ -1049,14 +1102,20 @@ consequence of its own occupancy star and can be read on its own."
                   (renderer-lattice-point-fragment-module renderer)
                   (renderer-lattice-point-vertex-module renderer)
                   (renderer-lattice-point-bind-group renderer)
+                  (renderer-lattice-point-layout renderer)
                   (renderer-lattice-point-buffer renderer)
                   (renderer-pipeline renderer) (renderer-fragment-module renderer)
-                  (renderer-vertex-module renderer) (renderer-bind-group renderer)
+                  (renderer-vertex-module renderer)
+                  (renderer-fan-bind-group renderer)
+                  (renderer-band-bind-group renderer)
+                  (renderer-face-bind-group renderer)
                   (renderer-layout renderer)
-                  (renderer-index-buffer renderer)
                   (and (slot-boundp renderer 'camera-buffer)
                        (renderer-camera-buffer renderer))
-                  (renderer-vertex-buffer renderer)))
+                  (renderer-fan-instance-buffer renderer)
+                  (renderer-band-instance-buffer renderer)
+                  (renderer-face-instance-buffer renderer)
+                  (renderer-template-buffer renderer)))
     (when resource (ignore-errors (destroy resource))))
   (setf (renderer-present-pipeline renderer) nil
         (renderer-present-fragment-module renderer) nil
@@ -1067,13 +1126,18 @@ consequence of its own occupancy star and can be read on its own."
         (renderer-lattice-point-fragment-module renderer) nil
         (renderer-lattice-point-vertex-module renderer) nil
         (renderer-lattice-point-bind-group renderer) nil
+        (renderer-lattice-point-layout renderer) nil
         (renderer-lattice-point-buffer renderer) nil
         (renderer-pipeline renderer) nil
         (renderer-fragment-module renderer) nil
         (renderer-vertex-module renderer) nil
-        (renderer-bind-group renderer) nil
+        (renderer-fan-bind-group renderer) nil
+        (renderer-band-bind-group renderer) nil
+        (renderer-face-bind-group renderer) nil
         (renderer-layout renderer) nil
-        (renderer-index-buffer renderer) nil
         (renderer-camera-buffer renderer) nil
-        (renderer-vertex-buffer renderer) nil)
+        (renderer-fan-instance-buffer renderer) nil
+        (renderer-band-instance-buffer renderer) nil
+        (renderer-face-instance-buffer renderer) nil
+        (renderer-template-buffer renderer) nil)
   (values))

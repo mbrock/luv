@@ -39,12 +39,19 @@
    #:face-tangent-axes #:face-oriented-normal #:orient-face-outward
    #:face-edge-site #:face-corner-site
    ;; Manifold-sheet mesh.
-   #:+mesh-cell-size+ #:+mesh-bevel-width+ #:+mesh-vertex-word-count+
-   #:+mesh-face-template-triangle-count+ #:+mesh-face-template-index-count+
-   #:surface-mesh #:surface-mesh-domain #:surface-mesh-vertex-words
-   #:surface-mesh-indices #:surface-mesh-index-count
+   #:+mesh-cell-size+ #:+mesh-bevel-width+ #:+mesh-instance-word-count+
+   #:+mesh-template-vertex-word-count+ #:+mesh-template-coordinate-bias+
+   #:surface-mesh #:surface-mesh-domain
+   #:surface-mesh-template-vertex-words #:surface-mesh-template-ranges
+   #:surface-mesh-template-count
+   #:surface-mesh-face-instance-words #:surface-mesh-face-instance-count
+   #:surface-mesh-face-draws
+   #:surface-mesh-band-instance-words #:surface-mesh-band-instance-count
+   #:surface-mesh-band-draws
+   #:surface-mesh-fan-instance-words #:surface-mesh-fan-instance-count
+   #:surface-mesh-fan-draws
    #:surface-mesh-triangle-count #:surface-mesh-face-triangle-count
-   #:surface-mesh-band-triangle-count #:surface-mesh-junction-triangle-count
+   #:surface-mesh-band-triangle-count #:surface-mesh-fan-triangle-count
    #:surface-mesh-singular-star-count
    #:star-singular-p #:decompose-star-mask #:make-surface-mesh
    ;; Tests.

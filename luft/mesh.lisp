@@ -1,40 +1,72 @@
 (in-package #:luft)
 
-;;; Integer face-template spike
+;;; Integer site-stream surface materialization
 ;;;
-;;; The renderer consumes an ordinary indexed triangle mesh.  Geometry remains
-;;; exact: cells are eight integer units wide and the bevel is one unit.  Every
-;;; exposed face owns the same fourteen-triangle patch; edge bands and vertex
-;;; junctions are deliberately absent so its unresolved corner gaps stay
-;;; visible.
+;;; Geometry is a sum over lattice sites.  Face records select a fixed inset
+;;; square, edge records select flat collars or crease bands, and vertex records
+;;; select flat corner patches or Arc junction fans.  Records contain only a
+;;; lattice base coordinate, a stock, and a template index.  Template vertices
+;;; are exact small integer offsets from that base; vertex-owned offsets are all
+;;; in {-1,0,1}^3.
 
 (defconstant +mesh-cell-size+ 8)
 (defconstant +mesh-bevel-width+ 1)
-(defconstant +mesh-vertex-word-count+ 4)
-(defconstant +mesh-face-template-triangle-count+ 14)
-(defconstant +mesh-face-template-index-count+ 42)
+(defconstant +mesh-instance-word-count+ 4)
+(defconstant +mesh-template-vertex-word-count+ 4)
+(defconstant +mesh-template-coordinate-bias+ 16)
 
 (defstruct (surface-mesh
              (:constructor %make-surface-mesh
-                 (domain vertex-words indices face-triangle-count
-                  band-triangle-count junction-triangle-count
+                 (domain template-vertex-words template-ranges
+                  face-instance-words face-draws
+                  band-instance-words band-draws
+                  fan-instance-words fan-draws
+                  face-triangle-count band-triangle-count fan-triangle-count
                   singular-star-count))
              (:copier nil))
   (domain nil :type world-domain :read-only t)
-  (vertex-words #() :type (simple-array (unsigned-byte 32) (*)) :read-only t)
-  (indices #() :type (simple-array (unsigned-byte 32) (*)) :read-only t)
+  (template-vertex-words #()
+                         :type (simple-array (unsigned-byte 32) (*))
+                         :read-only t)
+  (template-ranges #()
+                   :type (simple-array (unsigned-byte 32) (*))
+                   :read-only t)
+  (face-instance-words #()
+                       :type (simple-array (unsigned-byte 32) (*))
+                       :read-only t)
+  (face-draws nil :type list :read-only t)
+  (band-instance-words #()
+                       :type (simple-array (unsigned-byte 32) (*))
+                       :read-only t)
+  (band-draws nil :type list :read-only t)
+  (fan-instance-words #()
+                      :type (simple-array (unsigned-byte 32) (*))
+                      :read-only t)
+  (fan-draws nil :type list :read-only t)
   (face-triangle-count 0 :type (integer 0 *) :read-only t)
   (band-triangle-count 0 :type (integer 0 *) :read-only t)
-  (junction-triangle-count 0 :type (integer 0 *) :read-only t)
+  (fan-triangle-count 0 :type (integer 0 *) :read-only t)
   (singular-star-count 0 :type (integer 0 *) :read-only t))
 
-(defun surface-mesh-index-count (mesh)
-  (length (surface-mesh-indices mesh)))
+(defun surface-mesh-template-count (mesh)
+  (/ (length (surface-mesh-template-ranges mesh)) 2))
+
+(defun surface-mesh-face-instance-count (mesh)
+  (/ (length (surface-mesh-face-instance-words mesh))
+     +mesh-instance-word-count+))
+
+(defun surface-mesh-band-instance-count (mesh)
+  (/ (length (surface-mesh-band-instance-words mesh))
+     +mesh-instance-word-count+))
+
+(defun surface-mesh-fan-instance-count (mesh)
+  (/ (length (surface-mesh-fan-instance-words mesh))
+     +mesh-instance-word-count+))
 
 (defun surface-mesh-triangle-count (mesh)
   (+ (surface-mesh-face-triangle-count mesh)
      (surface-mesh-band-triangle-count mesh)
-     (surface-mesh-junction-triangle-count mesh)))
+     (surface-mesh-fan-triangle-count mesh)))
 
 (defun %read-arc-junction-table ()
   (let ((table (make-array 256 :initial-element nil))
@@ -224,18 +256,25 @@ star corpus; signal that boundary explicitly instead of silently welding it."
                                    mask axis-number sign)))
       (> (length (%star-sheet-cycles mask)) 1)))
 
+(defstruct (mesh-template
+             (:constructor %make-mesh-template (id vertices)))
+  (id 0 :type (integer 0 *) :read-only t)
+  (vertices nil :type list :read-only t))
+
+(defstruct (mesh-instance
+             (:constructor %make-mesh-instance (base stock template)))
+  (base nil :type list :read-only t)
+  (stock 0 :type (unsigned-byte 4) :read-only t)
+  (template nil :type mesh-template :read-only t))
+
 (defstruct (surface-mesh-builder
              (:constructor %make-surface-mesh-builder (domain)))
   (domain nil :type world-domain :read-only t)
-  (vertex-words
-    (make-array 256 :element-type '(unsigned-byte 32)
-                    :adjustable t :fill-pointer 0))
-  (indices
-    (make-array 192 :element-type '(unsigned-byte 32)
-                    :adjustable t :fill-pointer 0))
-  (face-triangle-count 0 :type (integer 0 *))
-  (band-triangle-count 0 :type (integer 0 *))
-  (junction-triangle-count 0 :type (integer 0 *))
+  (templates nil :type list)
+  (template-table (make-hash-table :test #'equal) :type hash-table)
+  (face-instances nil :type list)
+  (band-instances nil :type list)
+  (fan-instances nil :type list)
   (singular-star-count 0 :type (integer 0 *)))
 
 (defun %point-with-component (point axis-number value)
@@ -265,77 +304,161 @@ star corpus; signal that boundary explicitly instead of silently welding it."
     (error "Mesh normal is not a nonzero integer direction: ~S." normal))
   (mapcar #'signum normal))
 
-(defun %pack-mesh-attributes
-    (normal stock barycentric-index kind boundary-edge-mask)
+(defun %pack-template-attributes
+    (normal barycentric-index kind boundary-edge-mask)
   (let ((normal (%normal-direction-code normal)))
-    (unless (and (typep stock '(unsigned-byte 4))
-                 (<= 0 barycentric-index 2))
-      (error "Unpackable mesh attributes: ~S ~S ~S."
-             normal stock barycentric-index))
+    (unless (<= 0 barycentric-index 2)
+      (error "Unpackable barycentric index: ~S." barycentric-index))
     (let ((kind-code (ecase kind (:face 0) (:band 1) (:junction 2))))
       (logior (+ 1 (first normal))
               (ash (+ 1 (second normal)) 2)
               (ash (+ 1 (third normal)) 4)
-              (ash stock 6)
-              (ash barycentric-index 10)
-              (ash kind-code 12)
-              (ash boundary-edge-mask 14)))))
+              (ash barycentric-index 6)
+              (ash kind-code 8)
+              (ash boundary-edge-mask 10)))))
 
-(defun %emit-triangle
-    (builder a b c normal stock kind boundary-edge-mask)
+(defun %local-point (base point)
+  (loop for base-coordinate in base
+        for coordinate in point
+        collect (- coordinate (* +mesh-cell-size+ base-coordinate))))
+
+(defun %triangle-template-vertices
+    (base a b c normal kind boundary-edge-mask)
   (let ((orientation (%dot (%cross (%point- b a) (%point- c a)) normal)))
     (when (zerop orientation)
       (error "Degenerate ~A triangle ~S ~S ~S." kind a b c))
     (when (minusp orientation) (rotatef b c)))
-  (ecase kind
-    (:face (incf (surface-mesh-builder-face-triangle-count builder)))
-    (:band (incf (surface-mesh-builder-band-triangle-count builder)))
-    (:junction (incf (surface-mesh-builder-junction-triangle-count builder))))
   (loop for point in (list a b c)
         for barycentric-index below 3
-        for vertex-index =
-          (floor (length (surface-mesh-builder-vertex-words builder))
-                 +mesh-vertex-word-count+)
-        do (dolist (coordinate point)
-             (unless (typep coordinate '(unsigned-byte 32))
-               (error "Mesh coordinate ~S is outside the unsigned spike ABI."
-                      coordinate))
-             (vector-push-extend
-              coordinate (surface-mesh-builder-vertex-words builder)))
-           (vector-push-extend
-            (%pack-mesh-attributes normal stock barycentric-index kind
-                                   boundary-edge-mask)
-            (surface-mesh-builder-vertex-words builder))
-           (vector-push-extend vertex-index
-                               (surface-mesh-builder-indices builder))))
+        collect (list (%local-point base point)
+                      (%normal-direction-code normal)
+                      barycentric-index kind boundary-edge-mask)))
 
-(defun %emit-polygon (builder points normal stock kind)
+(defun %polygon-template-vertices (base points normal kind)
   (when (>= (length points) 3)
     (loop with first-tail = (rest points)
           with last = (car (last points))
           for tail on first-tail
           while (rest tail)
-          do (%emit-triangle builder (first points)
-                             (first tail) (second tail)
-                             normal stock kind
-                             (logior #b001
-                                     (if (equal (second tail) last) #b010 0)
-                                     (if (eq tail first-tail) #b100 0))))))
+          append (%triangle-template-vertices
+                  base (first points) (first tail) (second tail) normal kind
+                  (logior #b001
+                          (if (equal (second tail) last) #b010 0)
+                          (if (eq tail first-tail) #b100 0))))))
+
+(defun %intern-mesh-template (builder vertices)
+  (or (gethash vertices (surface-mesh-builder-template-table builder))
+      (let ((template
+              (%make-mesh-template
+               (length (surface-mesh-builder-templates builder)) vertices)))
+        (setf (gethash vertices (surface-mesh-builder-template-table builder))
+              template)
+        (setf (surface-mesh-builder-templates builder)
+              (append (surface-mesh-builder-templates builder)
+                      (list template)))
+        template)))
+
+(defun %emit-polygon (builder base points normal stock kind)
+  (check-type stock (unsigned-byte 4))
+  (let* ((vertices (%polygon-template-vertices base points normal kind))
+         (template (%intern-mesh-template builder vertices))
+         (instance (%make-mesh-instance base stock template)))
+    (ecase kind
+      (:face (push instance (surface-mesh-builder-face-instances builder)))
+      (:band (push instance (surface-mesh-builder-band-instances builder)))
+      (:junction (push instance (surface-mesh-builder-fan-instances builder))))
+    instance))
 
 (defun %simple-u32-vector (source)
   (let ((copy (make-array (length source) :element-type '(unsigned-byte 32))))
     (replace copy source)
     copy))
 
+(defun %encode-template-coordinate (coordinate)
+  (let ((encoded (+ coordinate +mesh-template-coordinate-bias+)))
+    (unless (typep encoded '(unsigned-byte 5))
+      (error "Template coordinate ~S does not fit the signed five-bit ABI."
+             coordinate))
+    encoded))
+
+(defun %template-words (templates)
+  (let ((words (make-array 256 :element-type '(unsigned-byte 32)
+                               :adjustable t :fill-pointer 0))
+        (ranges (make-array (* 2 (length templates))
+                            :element-type '(unsigned-byte 32)))
+        (vertex-start 0))
+    (dolist (template templates)
+      (let ((vertices (mesh-template-vertices template)))
+        (setf (aref ranges (* 2 (mesh-template-id template))) vertex-start
+              (aref ranges (1+ (* 2 (mesh-template-id template))))
+              (length vertices))
+        (dolist (vertex vertices)
+          (destructuring-bind
+              (point normal barycentric-index kind boundary-edge-mask) vertex
+            (dolist (coordinate point)
+              (vector-push-extend (%encode-template-coordinate coordinate)
+                                  words))
+            (vector-push-extend
+             (%pack-template-attributes normal barycentric-index kind
+                                        boundary-edge-mask)
+             words)))
+        (incf vertex-start (length vertices))))
+    (values (%simple-u32-vector words) ranges)))
+
+(defun %finish-instance-stream (instances ranges)
+  (let* ((ordered
+           (stable-sort (copy-list instances) #'<
+                        :key (lambda (instance)
+                               (mesh-template-id
+                                (mesh-instance-template instance)))))
+         (words (make-array (* +mesh-instance-word-count+ (length ordered))
+                            :element-type '(unsigned-byte 32)))
+         (draws nil)
+         (triangle-count 0))
+    (loop for instance in ordered
+          for instance-index below (length ordered)
+          for base = (mesh-instance-base instance)
+          for template = (mesh-instance-template instance)
+          for template-id = (mesh-template-id template)
+          for vertex-start = (aref ranges (* 2 template-id))
+          for vertex-count = (aref ranges (1+ (* 2 template-id)))
+          do (loop for coordinate in base
+                   for word from (* instance-index +mesh-instance-word-count+)
+                   do (unless (typep coordinate '(unsigned-byte 32))
+                        (error "Instance base coordinate is unsigned: ~S."
+                               base))
+                      (setf (aref words word) coordinate))
+             (setf (aref words
+                         (+ (* instance-index +mesh-instance-word-count+) 3))
+                   (logior template-id
+                           (ash (mesh-instance-stock instance) 16)))
+             (incf triangle-count (/ vertex-count 3))
+             (let ((draw (first draws)))
+               (if (and draw (= template-id (first draw)))
+                   (incf (fifth draw))
+                   (push (list template-id vertex-start vertex-count
+                               instance-index 1)
+                         draws))))
+    (values words (nreverse draws) triangle-count)))
+
 (defun %finish-surface-mesh (builder)
-  (%make-surface-mesh
-   (surface-mesh-builder-domain builder)
-   (%simple-u32-vector (surface-mesh-builder-vertex-words builder))
-   (%simple-u32-vector (surface-mesh-builder-indices builder))
-   (surface-mesh-builder-face-triangle-count builder)
-   (surface-mesh-builder-band-triangle-count builder)
-   (surface-mesh-builder-junction-triangle-count builder)
-   (surface-mesh-builder-singular-star-count builder)))
+  (multiple-value-bind (template-words template-ranges)
+      (%template-words (surface-mesh-builder-templates builder))
+    (multiple-value-bind (face-words face-draws face-triangles)
+        (%finish-instance-stream
+         (surface-mesh-builder-face-instances builder) template-ranges)
+      (multiple-value-bind (band-words band-draws band-triangles)
+          (%finish-instance-stream
+           (surface-mesh-builder-band-instances builder) template-ranges)
+        (multiple-value-bind (fan-words fan-draws fan-triangles)
+            (%finish-instance-stream
+             (surface-mesh-builder-fan-instances builder) template-ranges)
+          (%make-surface-mesh
+           (surface-mesh-builder-domain builder)
+           template-words template-ranges
+           face-words face-draws band-words band-draws fan-words fan-draws
+           face-triangles band-triangles fan-triangles
+           (surface-mesh-builder-singular-star-count builder)))))))
 
 (defun %cell-coordinates (cell)
   (list (site-x cell) (site-y cell) (site-z cell)))
@@ -366,80 +489,78 @@ star corpus; signal that boundary explicitly instead of silently welding it."
     (not (and (= 1 (%occupancy-at domain occupancy tangent-neighbor))
               (= 0 (%occupancy-at domain occupancy diagonal))))))
 
-(defun %patch-normal (points outward)
-  "An exact nonzero normal for planar POINTS, facing OUTWARD."
-  (let ((normal (%cross (%point- (second points) (first points))
-                        (%point- (third points) (first points)))))
-    (when (zerop (%dot normal outward))
-      (error "Face patch ~S is edge-on to outward direction ~S."
-             points outward))
-    (if (minusp (%dot normal outward))
-        (mapcar #'- normal)
-        normal)))
-
-(defun %emit-face-patch (builder points outward stock)
-  (%emit-polygon builder points (%patch-normal points outward) stock :face))
-
 (defun %emit-cell-face
-    (builder domain cell axis-number side stock-function)
+    (builder domain occupancy cell axis-number side stock-function)
   (let* ((cell-coordinates (%cell-coordinates cell))
          (tangents (%other-axis-numbers axis-number))
          (plane (* +mesh-cell-size+
                    (+ (nth axis-number cell-coordinates)
                       (if (plusp side) 1 0))))
-         (outward (loop for index below 3
-                        collect (if (= index axis-number) side 0)))
+         (normal (loop for index below 3
+                       collect (if (= index axis-number) side 0)))
          (face (%cell-face domain cell axis-number side))
          (stock (funcall stock-function face)))
     (destructuring-bind (u v) tangents
-      (let ((u-anchor (* +mesh-cell-size+ (nth u cell-coordinates)))
-            (v-anchor (* +mesh-cell-size+ (nth v cell-coordinates))))
-        (labels ((point (u-value v-value normal-value)
+      (let* ((u-anchor (* +mesh-cell-size+ (nth u cell-coordinates)))
+             (v-anchor (* +mesh-cell-size+ (nth v cell-coordinates)))
+             (u-low (+ u-anchor
+                       (if (%face-crease-p
+                            domain occupancy cell-coordinates axis-number side
+                            u -1)
+                           +mesh-bevel-width+ 0)))
+             (u-high (- (+ u-anchor +mesh-cell-size+)
+                        (if (%face-crease-p
+                             domain occupancy cell-coordinates axis-number side
+                             u 1)
+                            +mesh-bevel-width+ 0)))
+             (v-low (+ v-anchor
+                       (if (%face-crease-p
+                            domain occupancy cell-coordinates axis-number side
+                            v -1)
+                           +mesh-bevel-width+ 0)))
+             (v-high (- (+ v-anchor +mesh-cell-size+)
+                        (if (%face-crease-p
+                             domain occupancy cell-coordinates axis-number side
+                             v 1)
+                            +mesh-bevel-width+ 0)))
+             (u-cuts (vector u-low (1+ u-anchor)
+                             (1- (+ u-anchor +mesh-cell-size+)) u-high))
+             (v-cuts (vector v-low (1+ v-anchor)
+                             (1- (+ v-anchor +mesh-cell-size+)) v-high)))
+        (labels ((point (u-value v-value)
                    (let ((result (list 0 0 0)))
-                     (setf (nth axis-number result) normal-value
+                     (setf (nth axis-number result) plane
                            (nth u result) u-value
                            (nth v result) v-value)
                      result))
-                 (inner (anchor tangent-side)
-                   (+ anchor
-                      (if (minusp tangent-side)
-                          +mesh-bevel-width+
-                          (- +mesh-cell-size+ +mesh-bevel-width+))))
-                 (outer (anchor tangent-side)
-                   (+ anchor (if (minusp tangent-side) 0 +mesh-cell-size+)))
-                 (patch (points)
-                   (%emit-face-patch builder points outward stock)))
-          ;; The same six-by-six heart exists even when every patch is flat.
-          (patch
-           (list (point (inner u-anchor -1) (inner v-anchor -1) plane)
-                 (point (inner u-anchor 1) (inner v-anchor -1) plane)
-                 (point (inner u-anchor 1) (inner v-anchor 1) plane)
-                 (point (inner u-anchor -1) (inner v-anchor 1) plane)))
-          ;; Four one-by-six flaps, deliberately left coplanar until the local
-          ;; edge situation supplies a signed flat/convex/concave displacement.
-          (dolist (u-side '(-1 1))
-            (patch
-             (list (point (inner u-anchor u-side) (inner v-anchor -1) plane)
-                   (point (outer u-anchor u-side) (inner v-anchor -1) plane)
-                   (point (outer u-anchor u-side) (inner v-anchor 1) plane)
-                   (point (inner u-anchor u-side) (inner v-anchor 1) plane))))
-          (dolist (v-side '(-1 1))
-            (patch
-             (list (point (inner u-anchor -1) (inner v-anchor v-side) plane)
-                   (point (inner u-anchor 1) (inner v-anchor v-side) plane)
-                   (point (inner u-anchor 1) (outer v-anchor v-side) plane)
-                   (point (inner u-anchor -1) (outer v-anchor v-side) plane))))
-          ;; One half of each one-by-one corner square.  The complementary
-          ;; triangle is deliberately absent in this first face-owned spike.
-          (dolist (u-side '(-1 1))
-            (dolist (v-side '(-1 1))
-              (patch
-               (list
-                (point (inner u-anchor u-side) (inner v-anchor v-side) plane)
-                (point (outer u-anchor u-side) (inner v-anchor v-side)
-                       plane)
-                (point (inner u-anchor u-side) (outer v-anchor v-side)
-                       plane))))))))))
+                 (site-base (u-cell v-cell)
+                   (let ((base (copy-list cell-coordinates)))
+                     (setf (nth axis-number base)
+                           (+ (nth axis-number base) (if (plusp side) 1 0))
+                           (nth u base) (+ (nth u base) u-cell)
+                           (nth v base) (+ (nth v base) v-cell))
+                     base)))
+          ;; Uniformly partition the exact old face rectangle.  Its 6x6 heart
+          ;; is face-owned; nonempty side cells are edge-owned; nonempty corner
+          ;; cells are vertex-owned.
+          (dotimes (u-cell 3)
+            (dotimes (v-cell 3)
+              (let ((u0 (aref u-cuts u-cell))
+                    (u1 (aref u-cuts (1+ u-cell)))
+                    (v0 (aref v-cuts v-cell))
+                    (v1 (aref v-cuts (1+ v-cell))))
+                (when (and (< u0 u1) (< v0 v1))
+                  (let ((kind (cond ((and (= u-cell 1) (= v-cell 1))
+                                     :face)
+                                    ((or (= u-cell 1) (= v-cell 1)) :band)
+                                    (t :junction))))
+                    (%emit-polygon
+                     builder
+                     (site-base (if (= u-cell 2) 1 0)
+                                (if (= v-cell 2) 1 0))
+                     (list (point u0 v0) (point u1 v0)
+                           (point u1 v1) (point u0 v1))
+                     normal stock kind)))))))))))
 
 (defun %collect-edge-keys (solid)
   (let ((keys (make-hash-table :test #'equal)))
@@ -601,36 +722,42 @@ star corpus; signal that boundary explicitly instead of silently welding it."
         (unless (%parallel-normal-p left-normal right-normal)
           (let* ((pair-key (%band-pair-key left-normal right-normal))
                  (high-vertex (%offset-coordinates anchor axis-number 1))
-                 (low-coordinate
-                   (+ (* +mesh-cell-size+ (nth axis-number anchor))
-                      (if (%band-continues-p
-                           domain occupancy anchor axis-number -1 pair-key)
-                          0 +mesh-bevel-width+)))
-                 (high-coordinate
-                   (- (* +mesh-cell-size+ (nth axis-number high-vertex))
-                      (if (%band-continues-p
-                           domain occupancy high-vertex axis-number 1 pair-key)
-                          0 +mesh-bevel-width+)))
+                 (axis-low (* +mesh-cell-size+
+                              (nth axis-number anchor)))
+                 (axis-high (* +mesh-cell-size+
+                               (nth axis-number high-vertex)))
+                 (low-continues-p
+                   (%band-continues-p
+                    domain occupancy anchor axis-number -1 pair-key))
+                 (high-continues-p
+                   (%band-continues-p
+                    domain occupancy high-vertex axis-number 1 pair-key))
                  (base (mapcar (lambda (coordinate)
                                  (* +mesh-cell-size+ coordinate))
                                anchor))
-                 (left-low
-                   (%point-with-component
-                    (mapcar #'+ base (getf left :offset))
-                    axis-number low-coordinate))
-                 (right-low
-                   (%point-with-component
-                    (mapcar #'+ base (getf right :offset))
-                    axis-number low-coordinate))
-                 (left-high (%point-with-component
-                             left-low axis-number high-coordinate))
-                 (right-high (%point-with-component
-                              right-low axis-number high-coordinate))
                  (normal (mapcar #'+ left-normal right-normal))
                  (stock (funcall stock-function (getf left :face))))
-            (%emit-polygon builder
-                           (list left-low right-low right-high left-high)
-                           normal stock :band)))))))
+            (labels ((rail (data coordinate)
+                       (%point-with-component
+                        (mapcar #'+ base (getf data :offset))
+                        axis-number coordinate))
+                     (patch (site-base low high kind)
+                       (%emit-polygon
+                        builder site-base
+                        (list (rail left low) (rail right low)
+                              (rail right high) (rail left high))
+                        normal stock kind)))
+              ;; Every edge owns the same six-tick middle.  Any extension to
+              ;; a lattice vertex is moved into that vertex's fan stream.
+              (patch anchor
+                     (+ axis-low +mesh-bevel-width+)
+                     (- axis-high +mesh-bevel-width+) :band)
+              (when low-continues-p
+                (patch anchor axis-low (+ axis-low +mesh-bevel-width+)
+                       :junction))
+              (when high-continues-p
+                (patch high-vertex (- axis-high +mesh-bevel-width+) axis-high
+                       :junction)))))))))
 
 (defun %collect-vertex-keys (solid)
   (let ((vertices (make-hash-table :test #'equal)))
@@ -690,6 +817,7 @@ star corpus; signal that boundary explicitly instead of silently welding it."
         (dolist (face (getf entry :faces))
           (%emit-polygon
            builder
+           vertex
            (mapcar (lambda (point) (mapcar #'+ origin point))
                    (getf face :points))
            (getf face :normal)
@@ -697,12 +825,12 @@ star corpus; signal that boundary explicitly instead of silently welding it."
 
 (defun make-surface-mesh
     (solid &key (stock-function (constantly 0)))
-  "Realize SOLID as an exact integer face-template mesh.
+  "Classify SOLID into exact integer face, edge, and vertex instance streams.
 
-Every exposed cell face emits fourteen triangles: a six-by-six central square,
-four one-by-six flaps, and four corner triangles.  The complementary corner
-triangles are deliberately absent in this topology spike, exposing the gaps a
-later vertex-owned strip must close.  STOCK-FUNCTION is called with an oriented
+Every exposed cell face emits the same six-by-six central square.  Coplanar
+collars and bevel bands are edge-owned.  Flat corner patches and Arc junction
+polygons are vertex-owned.  Each stream is sorted by template so the renderer
+can issue direct instanced draws.  STOCK-FUNCTION is called with an oriented
 boundary face."
   (check-type solid chain)
   (check-type stock-function function)
@@ -720,11 +848,10 @@ boundary face."
             (when (= 0 (%occupancy-at
                         domain occupancy
                         (%offset-coordinates coordinates axis-number side)))
-              (%emit-cell-face builder domain cell axis-number side
+              (%emit-cell-face builder domain occupancy cell axis-number side
                                stock-function))))))
-    ;; Retain the topology diagnostic even though this spike deliberately does
-    ;; not publish a separate vertex-junction product.
+    (dolist (edge (%collect-edge-keys solid))
+      (%emit-edge-bands builder domain occupancy edge stock-function))
     (dolist (vertex (%collect-vertex-keys solid))
-      (when (star-singular-p (%vertex-star-mask domain occupancy vertex))
-        (incf (surface-mesh-builder-singular-star-count builder))))
+      (%emit-vertex-junctions builder domain occupancy vertex stock-function))
     (%finish-surface-mesh builder)))

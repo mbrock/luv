@@ -1,8 +1,8 @@
 (in-package #:luft.render.shaders)
 
-;;; The spike shader pulls an ordinary indexed triangle vertex.  Its UVec4 is
-;;; integer XYZ at one eighth of a cell plus a packed normal/stock/barycentric
-;;; word.  All topology has already been authored by the CPU mesher.
+;;; Site-stream rendering.  One UVec4 instance selects a lattice base and
+;;; template; the template vertex is a small exact offset plus geometric
+;;; attributes.  The CPU classifies sites and the vertex shader realizes them.
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defvar *stock-tooth* 0.055)
@@ -68,7 +68,8 @@
 
 (define-shader mesh-vertex-specification
     (:stage :vertex
-     :inputs ((vertex-index :uint :built-in :vertex-index))
+     :inputs ((vertex-index :uint :built-in :vertex-index)
+              (instance-index :uint :built-in :instance-index))
      :outputs ((clip-position :vec4 :built-in :position)
                (world-position-output :vec3 :location 0)
                (mesh-normal-output :vec3 :location 1 :interpolation :flat)
@@ -79,8 +80,9 @@
                (kind-output :float :location 6 :interpolation :flat)
                (boundary-edge-mask-output :uint :location 7
                                           :interpolation :flat))
-     :resources ((vertices :storage-buffer :binding 0 :element :uvec4)
-                 (camera-state :uniform-block :binding 1
+     :resources ((instances :storage-buffer :binding 0 :element :uvec4)
+                 (template-vertices :storage-buffer :binding 1 :element :uvec4)
+                 (camera-state :uniform-block :binding 2
                   :members ((camera-position :vec4)
                             (camera-right :vec4)
                             (camera-up :vec4)
@@ -94,21 +96,27 @@
                             (previous-camera-projection :vec4)
                             (temporal-parameters :vec4)
                             (inspection-parameters :vec4)))))
-  (let* ((record (buffer-element vertices vertex-index))
-         (attributes (swizzle record :w))
+  (let* ((instance (buffer-element instances instance-index))
+         (template-vertex (buffer-element template-vertices vertex-index))
+         (attributes (swizzle template-vertex :w))
          (world-position
-           (/ (vec3 (float (swizzle record :x))
-                    (float (swizzle record :y))
-                    (float (swizzle record :z)))
+           (/ (+ (* (vec3 (float (swizzle instance :x))
+                          (float (swizzle instance :y))
+                          (float (swizzle instance :z)))
+                    8.0)
+                 (- (vec3 (float (swizzle template-vertex :x))
+                          (float (swizzle template-vertex :y))
+                          (float (swizzle template-vertex :z)))
+                    (vec3 16.0 16.0 16.0)))
               8.0))
          (mesh-normal
            (vec3 (- (float (ldb (byte 2 0) attributes)) 1.0)
                  (- (float (ldb (byte 2 2) attributes)) 1.0)
                  (- (float (ldb (byte 2 4) attributes)) 1.0)))
-         (stock (float (ldb (byte 4 6) attributes)))
-         (barycentric-index (uint (ldb (byte 2 10) attributes)))
-         (kind (float (ldb (byte 2 12) attributes)))
-         (boundary-edge-mask (uint (ldb (byte 3 14) attributes)))
+         (stock (float (ldb (byte 4 16) (swizzle instance :w))))
+         (barycentric-index (uint (ldb (byte 2 6) attributes)))
+         (kind (float (ldb (byte 2 8) attributes)))
+         (boundary-edge-mask (uint (ldb (byte 3 10) attributes)))
          (barycentric
            (if (= barycentric-index (uint 0.0))
                (vec3 1.0 0.0 0.0)
@@ -153,7 +161,7 @@
               (boundary-edge-mask :uint :location 7 :interpolation :flat))
      :outputs ((color-output :vec4 :location 0)
                (motion-output :vec2 :location 1))
-     :resources ((camera-state :uniform-block :binding 1
+     :resources ((camera-state :uniform-block :binding 2
                   :members ((camera-position :vec4)
                             (camera-right :vec4)
                             (camera-up :vec4)
