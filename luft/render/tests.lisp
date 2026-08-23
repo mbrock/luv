@@ -174,6 +174,30 @@
   (ok (not (luft.render::scene-player-p
             (render:make-miter-study-scene)))))
 
+(deftest the-sanctuary-curtain-is-bedded-into-the-mountain
+  (let* ((scene (render:make-mountain-sanctuary-scene))
+         (solid (luft.render::scene-solid scene))
+         (architecture (luft.render::scene-architecture-cells scene))
+         (domain (luft:chain-domain solid)))
+    (flet ((occupied-p (x y z)
+             (= 1 (luft:chain-cell-occupancy-bit solid x y z)))
+           (architecture-p (x y z)
+             (gethash (luft:make-site domain x y z luft:+cell-extent+ 1)
+                      architecture)))
+      ;; The front curtain and both round keeps have continuous stone shoes
+      ;; where the procedural ridge can otherwise fall below their fixed base.
+      (dolist (point '((20 45) (40 45) (15 41) (45 41)))
+        (destructuring-bind (x y) point
+          (ok (occupied-p x y 17))
+          (ok (occupied-p x y 18))
+          (ok (architecture-p x y 17))
+          (ok (architecture-p x y 18))))
+      ;; The stair arrives at a supported masonry threshold, while the gate
+      ;; opening itself remains clear at the sanctuary floor.
+      (ok (occupied-p 30 45 18))
+      (ok (architecture-p 30 45 18))
+      (ok (not (occupied-p 30 45 19))))))
+
 (deftest player-gait-anchors-stance-feet-and-rises-over-support
   (let ((step-length 0.75)
         (leg-length 1.07737)

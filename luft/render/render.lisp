@@ -219,6 +219,24 @@ curtain wall, paired turrets and an arcaded hall."
     (loop for step from 0 to 6 for y from 39 do
       (scene-builder-box builder 26 33 y y 0 (+ deck step)
                          :architecture-p t))
+    ;; Bed the sanctuary into the uneven ridge before raising its walls.  The
+    ;; two-course podium is shallow enough to disappear into the higher turf,
+    ;; but where the mountain falls away it remains a continuous load path
+    ;; instead of leaving the fixed-height curtain visibly suspended in air.
+    ;; Its wider tower shoes also give the round keeps a deliberate transition
+    ;; into the rectilinear retaining work.
+    (scene-builder-box builder 13 47 44 48 (- plateau 2) (1- plateau)
+                       :architecture-p t)
+    (scene-builder-box builder 13 17 49 62 (- plateau 2) (1- plateau)
+                       :architecture-p t)
+    (scene-builder-box builder 43 47 49 62 (- plateau 2) (1- plateau)
+                       :architecture-p t)
+    (scene-builder-box builder 18 42 59 62 (- plateau 2) (1- plateau)
+                       :architecture-p t)
+    (dolist (corner '((15 46) (45 46)))
+      (destructuring-bind (cx cy) corner
+        (scene-builder-disc builder cx cy 6 (- plateau 2) (1- plateau)
+                            :architecture-p t)))
     (scene-builder-box builder 14 46 45 47 plateau (+ plateau 6)
                        :architecture-p t)
     (scene-builder-box builder 14 16 45 61 plateau (+ plateau 6)
