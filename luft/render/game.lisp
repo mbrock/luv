@@ -23,6 +23,19 @@
 
 (defmethod inspection-source-solid ((source scene)) (scene-solid source))
 
+(defun collision-cell-occupancy-bit (solid x y z)
+  "Read SOLID for gameplay, treating its finite horizontal boundary as wall.
+
+Meshing and other world clients retain explicit OUTSIDE-DOMAIN semantics.
+Only physical occupants choose this restart, so walkers slide along the box
+and projectile terrain publication materializes nearby boundary colliders."
+  (handler-bind
+      ((luft:outside-domain
+         (lambda (condition)
+           (declare (ignore condition))
+           (invoke-restart 'luft:treat-as-solid))))
+    (luft:chain-cell-occupancy-bit solid x y z)))
+
 (defclass walking-player ()
   ((position :initarg :position :accessor walking-player-position)
    (previous-position :initarg :position
@@ -97,7 +110,7 @@ semantic animation inputs; keys and shader clocks are deliberately absent."))
         (cell-y (floor y)))
     (loop for z from (floor base-z)
           below (ceiling (+ base-z +walking-player-height+))
-          always (zerop (luft:chain-cell-occupancy-bit
+          always (zerop (collision-cell-occupancy-bit
                          solid cell-x cell-y z)))))
 
 (defun walking-player-support-height (source x y current-base-z)
@@ -112,7 +125,7 @@ for a remote roof, so a wall cannot teleport the player onto its top."
     (loop for support-z from (+ base (1- +walking-player-step-height+))
             downto (- base (1+ +walking-player-maximum-drop+))
           for candidate-base = (1+ support-z)
-          when (and (= 1 (luft:chain-cell-occupancy-bit
+          when (and (= 1 (collision-cell-occupancy-bit
                           solid cell-x cell-y support-z))
                     (walking-player-clear-at-p
                      solid x y candidate-base))
@@ -130,6 +143,17 @@ for a remote roof, so a wall cannot teleport the player onto its top."
       (setf (vec3:vec3-x position) x
             (vec3:vec3-y position) y
             (vec3:vec3-z position) support)
+      t)))
+
+(defun try-walking-player-air-axis (player source axis amount)
+  "Move one airborne horizontal axis while retaining solid wall collision."
+  (let* ((position (walking-player-position player))
+         (x (+ (vec3:vec3-x position) (if (eq axis :x) amount 0.0)))
+         (y (+ (vec3:vec3-y position) (if (eq axis :y) amount 0.0))))
+    (when (walking-player-clear-at-p
+           (inspection-source-solid source) x y (vec3:vec3-z position))
+      (setf (vec3:vec3-x position) x
+            (vec3:vec3-y position) y)
       t)))
 
 (defun request-walking-player-jump (player)
@@ -180,7 +204,7 @@ for a remote roof, so a wall cannot teleport the player onto its top."
         (loop for x from (- cx 2) to (+ cx 2) do
           (loop for y from (- cy 2) to (+ cy 2) do
             (loop for z from (- cz 2) to (+ cz 2)
-                  when (plusp (luft:chain-cell-occupancy-bit solid x y z))
+                  when (plusp (collision-cell-occupancy-bit solid x y z))
                     do (luvcraft:post-physics-box
                         physics x z y (1+ x) (1+ z) (1+ y))))))))
   player)
@@ -262,9 +286,11 @@ for a remote roof, so a wall cannot teleport the player onto its top."
               (progn
                 (try-walking-player-axis player source :x (* direction-x distance))
                 (try-walking-player-axis player source :y (* direction-y distance)))
-              (let ((position (walking-player-position player)))
-                (incf (vec3:vec3-x position) (* direction-x distance))
-                (incf (vec3:vec3-y position) (* direction-y distance))))
+              (progn
+                (try-walking-player-air-axis
+                 player source :x (* direction-x distance))
+                (try-walking-player-air-axis
+                 player source :y (* direction-y distance))))
           (let* ((dx (- (vec3:vec3-x position) before-x))
                  (dy (- (vec3:vec3-y position) before-y))
                  (travelled (sqrt (+ (* dx dx) (* dy dy)))))

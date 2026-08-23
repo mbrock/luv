@@ -450,6 +450,34 @@
                (luv.arithmetic.lisp.vec3:vec3-x
                 (render:walking-player-position player))))))))
 
+(deftest gameplay-treats-the-finite-world-domain-as-a-wall
+  (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
+         (camera
+           (render:make-fly-camera
+            :position (luv.arithmetic.lisp.vec3:make-vec3 0.0 0.0 0.0)
+            :yaw 0.0 :pitch -0.5))
+         (player
+           (render:make-walking-player
+            :position
+            (luv.arithmetic.lisp.vec3:make-vec3 15.5 8.5 1.0))))
+    (luft.render::scene-builder-box builder 0 15 0 15 0 0)
+    (let ((scene (luft.render::finish-scene-builder builder :player-p t)))
+      (ok (= 1 (luft.render::collision-cell-occupancy-bit
+                (luft.render::scene-solid scene) 16 8 1)))
+      (let ((before
+              (luv.arithmetic.lisp.vec3:vec3-x
+               (render:walking-player-position player))))
+        (luft.render::advance-walking-player player scene camera 1 0 0.2)
+        (ok (= before
+               (luv.arithmetic.lisp.vec3:vec3-x
+                (render:walking-player-position player))))
+        (setf (luft.render::walking-player-grounded-p player) nil)
+        (ok (null (luft.render::try-walking-player-air-axis
+                   player scene :x 1.0)))
+        (ok (= before
+               (luv.arithmetic.lisp.vec3:vec3-x
+                (render:walking-player-position player))))))))
+
 (deftest click-thrown-ball-has-motion-and-render-state
   (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
          (scene (luft.render::finish-scene-builder builder :player-p t))
@@ -471,6 +499,25 @@
         (luft.render::walking-player-render-lanes player)
       (declare (ignore character previous direction-lane previous-ball))
       (ok (= luft.render::+thrown-ball-radius+ (fourth ball))))))
+
+(deftest a-thrown-ball-bounces-off-the-finite-world-domain
+  (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
+         (scene (luft.render::finish-scene-builder builder :player-p t))
+         (player (render:make-walking-player))
+         (origin (luv.arithmetic.lisp.vec3:make-vec3 14.0 8.0 4.0))
+         (direction (luv.arithmetic.lisp.vec3:make-vec3 1.0 0.0 0.0)))
+    (luft.render::throw-walking-player-ball player origin direction)
+    (loop repeat 12 do
+      (luft.render::advance-walking-player-ball player scene (/ 1.0 60.0)))
+    (let* ((physics (luft.render::walking-player-physics player))
+           (handle (luft.render::walking-player-ball-handle player))
+           (x (luv.arithmetic.lisp.vec3:vec3-x
+               (luft.render::walking-player-ball-position player))))
+      (multiple-value-bind (vx vy vz)
+          (luvcraft:physics-body-velocity physics handle)
+        (declare (ignore vy vz))
+        (ok (< x 16.0))
+        (ok (minusp vx))))))
 
 (deftest the-spike-scene-is-three-site-instance-streams
   (let* ((mesh (render:make-render-mesh
@@ -494,6 +541,44 @@
             (render:make-manifold-spike-scene))))
   (ok (not (luft.render::scene-player-p
             (render:make-miter-study-scene)))))
+
+(deftest the-elevated-sanctuary-rim-is-an-authored-stone-battlement
+  (let ((scene (render:make-mountain-sanctuary-scene)))
+    (multiple-value-bind (west east present-p)
+        (luft.render::mountain-sanctuary-terrain-x-bounds 47)
+      (declare (ignore west))
+      (ok present-p)
+      (let* ((height
+               (luft.render::mountain-sanctuary-terrain-height east 47))
+             (x (+ luft.render::+sanctuary-origin-x+ east))
+             (y (+ luft.render::+sanctuary-origin-y+ 47))
+             (solid (luft.render::scene-solid scene))
+             (wall-cell
+               (luft:make-site (luft:chain-domain solid) x y height
+                               luft:+cell-extent+ 1)))
+        (ok (>= height luft.render::+sanctuary-plateau-height+))
+        ;; Two continuous courses stop the one-step walker; this even
+        ;; contour column also carries the alternating crenellation.
+        (ok (= 1 (luft:chain-cell-occupancy-bit solid x y height)))
+        (ok (= 1 (luft:chain-cell-occupancy-bit solid x y (1+ height))))
+        (ok (= 1 (luft:chain-cell-occupancy-bit solid x y (+ height 2))))
+        (ok (zerop (luft:chain-cell-occupancy-bit solid (1+ x) y height)))
+        (ok (eq luft.render::*sanctuary-material-placement*
+                (luft.render::scene-material-placement-at scene wall-cell)))))
+    ;; The low southern shore remains open rather than walling in the route.
+    (multiple-value-bind (west east present-p)
+        (luft.render::mountain-sanctuary-terrain-x-bounds -15)
+      (declare (ignore west))
+      (ok present-p)
+      (let ((height
+              (luft.render::mountain-sanctuary-terrain-height east -15)))
+        (ok (< height luft.render::+sanctuary-plateau-height+))
+        (ok (zerop
+             (luft:chain-cell-occupancy-bit
+              (luft.render::scene-solid scene)
+              (+ luft.render::+sanctuary-origin-x+ east)
+              (+ luft.render::+sanctuary-origin-y+ -15)
+              height)))))))
 
 (deftest scene-builders-translate-authored-sites-at-the-boundary
   (let* ((builder (luft.render::make-scene-builder

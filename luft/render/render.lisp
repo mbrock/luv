@@ -195,9 +195,11 @@ four-sheet parity star.  Nothing else in the scene can hide their junctions."
       (place-star #x69 22))
     (finish-scene-builder builder)))
 
+(defconstant +sanctuary-plateau-height+ 19)
+
 (defun mountain-sanctuary-terrain-height (x y)
   "The authored local-coordinate height of the sanctuary's mountain world."
-  (let ((shore 11) (water 2) (plateau 19))
+  (let ((shore 11) (water 2) (plateau +sanctuary-plateau-height+))
     (floor
      (cond
        ((< y 14)
@@ -228,6 +230,42 @@ four-sheet parity star.  Nothing else in the scene can hide their junctions."
               (max water (+ plateau (* 9.0 inland))))))
        (t water)))))
 
+(defun mountain-sanctuary-terrain-x-bounds (y)
+  "Return the authored inclusive terrain span at local Y."
+  (when (<= -15 y 81)
+    (values
+     (max -18 (+ -17 (round (* 1.8 (sin (/ y 6.0))))))
+     (min 82 (- 81 (round (* 2.2 (cos (/ y 8.0))))))
+     t)))
+
+(defun scene-builder-mountain-border-wall (builder)
+  "Guard the elevated authored rim with a limestone parapet.
+
+The continuous two-course body exceeds the player's one-cell step.  Every
+other column rises into a third course, making the finite scenery legible as
+an intentional battlement rather than the accidental edge of a voxel field."
+  (labels ((wall-column (x y)
+             (let ((height (mountain-sanctuary-terrain-height x y)))
+               (when (>= height +sanctuary-plateau-height+)
+                 (scene-builder-box builder x x y y height (1+ height)
+                                    :architecture-p t)
+                 (when (evenp (+ x y))
+                   (scene-builder-cell builder x y (+ height 2)
+                                       :architecture-p t))))))
+    ;; The side contours follow the terrain's authored west/east banks.
+    (loop for y from -15 to 81 do
+      (multiple-value-bind (west east present-p)
+          (mountain-sanctuary-terrain-x-bounds y)
+        (when present-p
+          (wall-column west y)
+          (wall-column east y))))
+    ;; Close the elevated northern rim between those side contours.
+    (multiple-value-bind (west east present-p)
+        (mountain-sanctuary-terrain-x-bounds 81)
+      (when present-p
+        (loop for x from west to east do (wall-column x 81)))))
+  builder)
+
 (defun make-mountain-sanctuary-scene
     (&key (beacon-placement *beacon-material-placement*))
   "A broad Lonely-Mountains world carrying a bridge and walled sanctuary.
@@ -240,18 +278,19 @@ turrets, an arcaded hall and a remote ridge beacon."
                    :horizontal-bits 7
                    :origin-x +sanctuary-origin-x+
                    :origin-y +sanctuary-origin-y+))
-         (water 2) (plateau 19) (deck 13)
+         (water 2) (plateau +sanctuary-plateau-height+) (deck 13)
          (springing 7) (radius 4) (across (cons 27 32)))
     ;; Keep the packed world bounded away from its toroidal seam, while the
     ;; visible camera sees terrain continuing beyond every frame edge.
-    (loop for x from -18 to 82 do
-      (loop for y from -16 to 82
-            for west = (+ -17 (round (* 1.8 (sin (/ y 6.0)))))
-            for east = (- 81 (round (* 2.2 (cos (/ y 8.0)))))
-            when (and (<= -15 y 81) (<= west x east)) do
-              (loop for z below
-                    (max 1 (mountain-sanctuary-terrain-height x y)) do
-                (scene-builder-cell builder x y z))))
+    (loop for y from -15 to 81 do
+      (multiple-value-bind (west east present-p)
+          (mountain-sanctuary-terrain-x-bounds y)
+        (when present-p
+          (loop for x from west to east do
+            (loop for z below
+                  (max 1 (mountain-sanctuary-terrain-height x y)) do
+              (scene-builder-cell builder x y z))))))
+    (scene-builder-mountain-border-wall builder)
     ;; A diagonal, gently climbing processional way makes the bridge belong
     ;; to the low country instead of beginning at the edge of the model.
     (loop for step from 0 below 20
