@@ -10,6 +10,7 @@
 (defconstant +walking-player-step-height+ 1)
 (defconstant +walking-player-maximum-drop+ 2)
 (defconstant +walking-player-half-step+ 0.75)
+(defconstant +walking-player-speed+ 7.0)
 
 (defgeneric inspection-source-solid (source)
   (:documentation "Return SOURCE's packed solid chain for sparse queries."))
@@ -53,7 +54,7 @@ semantic animation inputs; keys and shader clocks are deliberately absent."))
        (position
          (vec3:make-vec3 (+ +sanctuary-origin-x+ 29.5)
                          (+ +sanctuary-origin-y+ 24.5) 14.0))
-       (heading-x 0.0) (heading-y 1.0) (speed 4.0))
+       (heading-x 0.0) (heading-y 1.0) (speed +walking-player-speed+))
   "Make the sanctuary player at the bridge's authored starting point."
   (make-instance 'walking-player :position position
                                  :heading-x heading-x :heading-y heading-y

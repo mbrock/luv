@@ -1468,7 +1468,8 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
                             (previous-camera-forward :vec4)
                             (previous-camera-projection :vec4)
                             (temporal-parameters :vec4)
-                            (inspection-parameters :vec4)))))
+                            (inspection-parameters :vec4)
+                            (character-parameters :vec4)))))
   (let* ((uv (+ (* ndc 0.5) (vec2 0.5 0.5)))
          (value (sample scene scene-sampler uv))
          (texel (swizzle inspection-parameters :zw))
@@ -1648,11 +1649,35 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
          (pigmented (* shadowed
                        (mix (vec3 1.0 1.0 1.0)
                             shadow-pigment pooling)))
-         ;; Keep the full-resolution pass to a single scene sample.  MetalFX
-         ;; already reconstructs the luminance neighborhood; a second 22-tap
-         ;; glow/AO filter here consumed the frame budget without resolving
-         ;; additional scene detail.
-         (glowing (swizzle value :xyz))
+         ;; A gentle screen-space tilt shift holds the player's projected
+         ;; height crisp and gives the near/far route a miniature depth cue.
+         ;; It is deliberately only a five-tap gather after MetalFX resolves.
+         (player-clip
+           (mesh-view-clip (swizzle character-parameters :xyz)
+                           camera-position camera-right camera-up
+                           camera-forward camera-projection divisor))
+         (focus-y
+           (+ (swizzle (mesh-clip-uv player-clip) :y)
+              (* (swizzle temporal-parameters :y) 0.5)))
+         (tilt
+           (smoothstep 0.16 0.52 (abs (- (swizzle uv :y) focus-y))))
+         (blur-radius (* texel 2.6))
+         (blurred
+           (* 0.2
+              (+ (swizzle value :xyz)
+                 (swizzle (sample scene scene-sampler
+                                  (+ uv (vec2 (swizzle blur-radius :x) 0.0)))
+                          :xyz)
+                 (swizzle (sample scene scene-sampler
+                                  (- uv (vec2 (swizzle blur-radius :x) 0.0)))
+                          :xyz)
+                 (swizzle (sample scene scene-sampler
+                                  (+ uv (vec2 0.0 (swizzle blur-radius :y))))
+                          :xyz)
+                 (swizzle (sample scene scene-sampler
+                                  (- uv (vec2 0.0 (swizzle blur-radius :y))))
+                          :xyz))))
+         (glowing (mix (swizzle pigmented :xyz) blurred (* tilt 0.52)))
          (mapped (paper-grade (paper-tonemap (* glowing 1.02)))))
     (set-output color-output
                 (vec4 mapped 1.0))))

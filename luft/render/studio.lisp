@@ -68,7 +68,10 @@ at the atelier boundary where a person has selected one site."))
             (camera-pitch camera) -0.5165006
             (camera-field-of-view camera) 0.9599311
             *projection* :isometric
-            *isometric-height* (if player 22.0 64.0))
+            ;; The player owns the frame now: keep the playable view close
+            ;; enough to read footsteps and terrain relief without losing the
+            ;; next turn of the route.
+            *isometric-height* (if player 18.0 64.0))
       (if player
           (let ((spawn (make-walking-player)))
             (setf (viewer-player viewer) spawn)
