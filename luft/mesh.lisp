@@ -1011,6 +1011,13 @@ Ownership is the half-open box [OX0, OX1) x [OY0, OY1) of site coordinates."
 ;;; boundary; each is then attributed to the lattice vertex whose bevel domain
 ;;; contains it and packed as one fixnum of biased site-local endpoints:
 ;;; left12<<16 | right12<<4 | stock, where a point12 is (x+4)<<8|(y+4)<<4|(z+4).
+;;;
+;;; The key itself is one fixnum, because a boundary packing states the
+;;; horizontal anchor box the scan covers -- one chunk plus its halo, or a
+;;; whole solid's own extent -- and stores anchors relative to that box's
+;;; origin: ((x * y-span + y) * 257 + (z + 1)) << 24 | undirected edge.  A
+;;; solid too wide for that product to stay a fixnum has to be meshed by
+;;; chunks; MESH-CHUNK's boxes are always small enough.
 
 (declaim (inline %fan-point %fan-point-x %fan-point-y %fan-point-z
                  %fan-record-left %fan-record-right %fan-record-stock
@@ -1037,22 +1044,97 @@ Ownership is the half-open box [OX0, OX1) x [OY0, OY1) of site coordinates."
         (logior (ash left 12) right)
         (logior (ash right 12) left))))
 
-(defun %builder-open-boundary-table (builders)
+(defconstant +boundary-z-span+ 257
+  "Anchor Z values run from -1 through 255 inclusive.")
+
+(defstruct (boundary-packing
+             (:constructor %make-boundary-packing (origin-x origin-y y-span)))
+  "The anchor box one parity scan covers, and thus its fixnum key layout."
+  (origin-x 0 :type fixnum :read-only t)
+  (origin-y 0 :type fixnum :read-only t)
+  (y-span 1 :type (integer 1 *) :read-only t))
+
+(defun %make-boundary-packing-for-box (x0 x1 y0 y1)
+  "Pack anchors of the cell box [X0, X1) x [Y0, Y1).
+
+Instance bases lie inside the box and template offsets reach at most one
+eighth-cell anchor beyond it, so the packed anchor box is widened by two."
+  (let* ((origin-x (- x0 2))
+         (origin-y (- y0 2))
+         (x-span (+ (- x1 x0) 4))
+         (y-span (+ (- y1 y0) 4)))
+    (unless (typep (ash (* x-span y-span +boundary-z-span+) 24) 'fixnum)
+      (error "A solid spanning ~Dx~D cells is too wide for one boundary ~
+              scan; mesh it by chunks."
+             x-span y-span))
+    (%make-boundary-packing origin-x origin-y y-span)))
+
+(declaim (inline %boundary-edge-key %boundary-key-anchor-x
+                 %boundary-key-anchor-y %boundary-key-anchor-z))
+(defun %boundary-edge-key (packing anchor-x anchor-y anchor-z edge)
+  (logior (ash (+ (* (+ (* (- anchor-x (boundary-packing-origin-x packing))
+                           (boundary-packing-y-span packing))
+                        (- anchor-y (boundary-packing-origin-y packing)))
+                     +boundary-z-span+)
+                  (1+ anchor-z))
+               24)
+          edge))
+
+(defun %boundary-key-anchor-x (packing key)
+  (+ (boundary-packing-origin-x packing)
+     (truncate (ash key -24)
+               (* (boundary-packing-y-span packing) +boundary-z-span+))))
+(defun %boundary-key-anchor-y (packing key)
+  (+ (boundary-packing-origin-y packing)
+     (mod (truncate (ash key -24) +boundary-z-span+)
+          (boundary-packing-y-span packing))))
+(defun %boundary-key-anchor-z (key)
+  (1- (mod (ash key -24) +boundary-z-span+)))
+
+(defun %stream-triangle-count (stream templates)
+  (declare (optimize (speed 3) (safety 1)))
+  (let ((words (instance-stream-words stream))
+        (count 0))
+    (loop for offset from 3 below (fill-pointer words)
+          by +mesh-instance-word-count+
+          do (incf count
+                   (truncate
+                    (length (mesh-template-vertices
+                             (aref templates
+                                   (ldb (byte 16 0) (aref words offset)))))
+                    3)))
+    count))
+
+(defun %builder-open-boundary-table (builders packing)
   "Parity-count the BUILDERS' face and band streams' directed triangle edges.
 
-Returns a table from canonical edge keys to count<<28 | left12<<16 |
+Returns a table from PACKING's fixnum edge keys to count<<28 | left12<<16 |
 right12<<4 | stock, where the 12-bit points are anchor-local."
   (declare (optimize (speed 3) (safety 1)))
-  (let ((observations (make-hash-table :test #'equal :size 4096)))
+  (let* ((triangles
+           (loop for builder in builders
+                 for templates = (surface-mesh-builder-templates builder)
+                 sum (%stream-triangle-count
+                      (surface-mesh-builder-face-stream builder) templates)
+                 sum (%stream-triangle-count
+                      (surface-mesh-builder-band-stream builder) templates)))
+         ;; Each triangle contributes three directed edges, and an interior
+         ;; edge is observed twice, so the table holds about 3/2 keys per
+         ;; triangle.  Sizing it now spares a long chain of rehashes.
+         (observations (make-hash-table :test #'eql
+                                        :size (max 4096
+                                                   (ceiling (* 3 triangles)
+                                                            2)))))
     (dolist (builder builders observations)
       (let ((templates (surface-mesh-builder-templates builder)))
         (%scan-stream-boundary-edges
-         (surface-mesh-builder-face-stream builder) templates observations)
+         (surface-mesh-builder-face-stream builder) templates packing
+         observations)
         (%scan-stream-boundary-edges
-         (surface-mesh-builder-band-stream builder) templates
+         (surface-mesh-builder-band-stream builder) templates packing
          observations)))))
 
-(defun %scan-stream-boundary-edges (stream templates observations)
+(defun %scan-stream-boundary-edges (stream templates packing observations)
   (declare (optimize (speed 3) (safety 1)))
   (let ((words (instance-stream-words stream)))
         (loop for offset from 0 below (fill-pointer words)
@@ -1102,9 +1184,8 @@ right12<<4 | stock, where the 12-bit points are anchor-local."
                                           (ash (- ry (* 8 anchor-y)) 4)
                                           (- rz (* 8 anchor-z))))
                                        (key
-                                         (cons
-                                          (%lattice-key anchor-x anchor-y
-                                                        anchor-z)
+                                         (%boundary-edge-key
+                                          packing anchor-x anchor-y anchor-z
                                           (if (< left12 right12)
                                               (logior (ash left12 12)
                                                       right12)
@@ -1129,7 +1210,8 @@ right12<<4 | stock, where the 12-bit points are anchor-local."
                                              (dpb count (byte 4 28)
                                                   existing)))))))))))))
 
-(defun %attribute-open-edges-to-sites (builders bevel-width drop-nonlocal-p)
+(defun %attribute-open-edges-to-sites
+    (builders packing bevel-width drop-nonlocal-p)
   "Group the open boundary's directed edges by owning lattice vertex.
 
 Returns a table from packed site keys to lists of fan records whose 12-bit
@@ -1138,16 +1220,15 @@ vertex's bevel domain is an invariant violation for a whole solid; for a
 chunk's witness scan it is the witness truncation boundary, provably outside
 every owned site's bevel domain, and DROP-NONLOCAL-P discards it."
   (declare (optimize (speed 3) (safety 1)))
-  (let ((observations (%builder-open-boundary-table builders))
+  (let ((observations (%builder-open-boundary-table builders packing))
         (by-site (make-hash-table :test #'eql :size 1024)))
     (maphash
      (lambda (key value)
        (when (= 1 (ash value -28))
          (block attribute
-           (let* ((anchor (car key))
-                  (anchor-x (%lattice-key-x anchor))
-                  (anchor-y (%lattice-key-y anchor))
-                  (anchor-z (%lattice-key-z anchor))
+           (let* ((anchor-x (%boundary-key-anchor-x packing key))
+                  (anchor-y (%boundary-key-anchor-y packing key))
+                  (anchor-z (%boundary-key-anchor-z key))
                   (left12 (ldb (byte 12 16) value))
                   (right12 (ldb (byte 12 4) value))
                   (stock (ldb (byte 4 0) value))
@@ -1386,7 +1467,7 @@ every owned site's bevel domain, and DROP-NONLOCAL-P discards it."
                               stock star-mask))))))
 
 (defun %emit-boundary-derived-fans
-    (builder field domain chamfer-stock-function sheet-builders
+    (builder field domain chamfer-stock-function sheet-builders packing
      ox0 ox1 oy0 oy1 drop-nonlocal-p)
   "Close the SHEET-BUILDERS' open loops with site-local templates in BUILDER.
 
@@ -1396,7 +1477,7 @@ witness scan."
   (let* ((source-width (surface-mesh-builder-bevel-width
                         (first sheet-builders)))
          (target-width (surface-mesh-builder-bevel-width builder))
-         (by-site (%attribute-open-edges-to-sites sheet-builders
+         (by-site (%attribute-open-edges-to-sites sheet-builders packing
                                                   source-width
                                                   drop-nonlocal-p))
          (site-keys (make-array (hash-table-count by-site)
@@ -1593,11 +1674,28 @@ lattice-site closure.  It must return one stock for that entire chamfer."
                                     stock-function chamfer-stock-function))
          (%count-singular-vertex-stars builder field domain cells
                                        0 (1+ x-limit) 0 (1+ y-limit))
-         (%emit-boundary-derived-fans builder field domain
-                                      chamfer-stock-function
-                                      (list boundary-builder)
-                                      0 (1+ x-limit) 0 (1+ y-limit) nil)
+         (multiple-value-bind (x0 x1 y0 y1) (%cell-key-box cells)
+           (%emit-boundary-derived-fans builder field domain
+                                        chamfer-stock-function
+                                        (list boundary-builder)
+                                        (%make-boundary-packing-for-box
+                                         x0 x1 y0 y1)
+                                        0 (1+ x-limit) 0 (1+ y-limit) nil))
          (%finish-surface-mesh builder))))))
+
+(defun %cell-key-box (cells)
+  "The half-open horizontal cell box spanned by the packed keys in CELLS."
+  (declare (type (simple-array (unsigned-byte 64) (*)) cells))
+  (if (zerop (length cells))
+      (values 0 1 0 1)
+      (let ((x0 most-positive-fixnum) (x1 most-negative-fixnum)
+            (y0 most-positive-fixnum) (y1 most-negative-fixnum))
+        (loop for key across cells
+              do (let ((x (%lattice-key-x key))
+                       (y (%lattice-key-y key)))
+                   (setf x0 (min x0 x) x1 (max x1 x)
+                         y0 (min y0 y) y1 (max y1 y))))
+        (values x0 (1+ x1) y0 (1+ y1)))))
 
 (defun %emit-exposed-cell-faces
     (target field domain cells stock-function chamfer-stock-function)
@@ -1729,5 +1827,9 @@ a whole-world mesh would close them."
         (%emit-boundary-derived-fans builder field domain
                                      chamfer-stock-function
                                      (list ship-sheets witness-sheets)
+                                     ;; The scan covers this chunk's cells
+                                     ;; plus its low-side halo ring.
+                                     (%make-boundary-packing-for-box
+                                      (1- x0) x1 (1- y0) y1)
                                      x0 ox1 y0 oy1 t)
         (%finish-surface-mesh builder)))))
