@@ -78,9 +78,10 @@
          (words (luft:surface-mesh-vertex-words mesh))
          (indices (luft:surface-mesh-indices mesh)))
     (ok (plusp (luft:surface-mesh-face-triangle-count mesh)))
-    (ok (plusp (luft:surface-mesh-band-triangle-count mesh)))
-    (ok (plusp (luft:surface-mesh-junction-triangle-count mesh)))
+    (ok (zerop (luft:surface-mesh-band-triangle-count mesh)))
+    (ok (zerop (luft:surface-mesh-junction-triangle-count mesh)))
     (ok (plusp (luft:surface-mesh-singular-star-count mesh)))
+    (ok (zerop (mod (luft:surface-mesh-face-triangle-count mesh) 14)))
     (ok (= (* 3 (luft:surface-mesh-triangle-count mesh))
            (length indices)))
     (ok (= (* luft:+mesh-vertex-word-count+ (length indices))
@@ -89,13 +90,14 @@
               for expected from 0
               always (= expected index)))))
 
-(deftest the-connected-miter-study-lowers-to-one-mesh
+(deftest the-connected-miter-study-uses-only-fixed-face-templates
   (let ((mesh (render:make-render-mesh
                (render:make-miter-study-scene))))
     (ok (plusp (luft:surface-mesh-face-triangle-count mesh)))
-    (ok (plusp (luft:surface-mesh-band-triangle-count mesh)))
-    (ok (plusp (luft:surface-mesh-junction-triangle-count mesh)))
+    (ok (zerop (luft:surface-mesh-band-triangle-count mesh)))
+    (ok (zerop (luft:surface-mesh-junction-triangle-count mesh)))
     (ok (zerop (luft:surface-mesh-singular-star-count mesh)))
+    (ok (zerop (mod (luft:surface-mesh-face-triangle-count mesh) 14)))
     (let ((vertices (luft:surface-mesh-vertex-words mesh))
           (lattice (luft.render::mesh-lattice-point-words mesh)))
       (ok (loop for offset from 3 below (length vertices)

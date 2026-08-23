@@ -141,26 +141,31 @@
   (%with-test-section ("integer surface mesh")
     (%check (equal '(0 -1 0) (%normal-direction-code '(0 -2 0))))
     (let ((one (make-surface-mesh (%solid-for-star #x01))))
-      (%check (= 12 (surface-mesh-face-triangle-count one)))
-      (%check (= 24 (surface-mesh-band-triangle-count one)))
-      (%check (= 8 (surface-mesh-junction-triangle-count one)))
-      (%check (= 44 (surface-mesh-triangle-count one)))
+      ;; Six exposed faces, each with one square, four flaps, and four
+      ;; triangles: fourteen triangles and forty-two indices per face.
+      (%check (= (* 6 +mesh-face-template-triangle-count+)
+                 (surface-mesh-face-triangle-count one)))
+      (%check (zerop (surface-mesh-band-triangle-count one)))
+      (%check (zerop (surface-mesh-junction-triangle-count one)))
+      (%check (= 84 (surface-mesh-triangle-count one)))
       (%check (= (* 3 (surface-mesh-triangle-count one))
+                 (surface-mesh-index-count one)))
+      (%check (= (* 6 +mesh-face-template-index-count+)
                  (surface-mesh-index-count one)))
       (%check (= (* +mesh-vertex-word-count+
                     (surface-mesh-index-count one))
                  (length (surface-mesh-vertex-words one))))
-      (%check (%mesh-closed-p one)))
-    ;; A face-connected pair suppresses flat continuation bands and remains
-    ;; one closed surface across its internal cell boundary.
+      (%check (not (%mesh-closed-p one))))
+    ;; The fixed face template remains deliberately open at every corner even
+    ;; where two exposed faces are coplanar.
     (let ((pair (make-surface-mesh (%solid-for-star #x03))))
       (%check (zerop (surface-mesh-singular-star-count pair)))
-      (%check (%mesh-closed-p pair)))
+      (%check (not (%mesh-closed-p pair))))
     (dolist (mask '(#x06 #x18 #x69))
       (let ((mesh (make-surface-mesh (%solid-for-star mask))))
         (%check (plusp (surface-mesh-singular-star-count mesh))
                 (format nil "mask ~2,'0X" mask))
-        (%check (%mesh-closed-p mesh)
+        (%check (not (%mesh-closed-p mesh))
                 (format nil "mask ~2,'0X" mask))))))
 
 (defun run-luft-tests (&key (stream *standard-output*))

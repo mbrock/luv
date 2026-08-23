@@ -1,17 +1,18 @@
 (in-package #:luft)
 
-;;; Integer manifold-sheet spike
+;;; Integer face-template spike
 ;;;
-;;; The renderer consumes an ordinary indexed triangle mesh for this spike.
-;;; Geometry remains exact: cells are eight integer units wide, the bevel is
-;;; one unit, and every junction polygon comes from the checked Blender Arc
-;;; corpus.  Singular stars are first resolved into oriented manifold link
-;;; cycles; each cycle is then realized through an ordinary regular star.
-;;; This is the executable policy chosen at #WJRRK7.
+;;; The renderer consumes an ordinary indexed triangle mesh.  Geometry remains
+;;; exact: cells are eight integer units wide and the bevel is one unit.  Every
+;;; exposed face owns the same fourteen-triangle patch; edge bands and vertex
+;;; junctions are deliberately absent so its unresolved corner gaps stay
+;;; visible.
 
 (defconstant +mesh-cell-size+ 8)
 (defconstant +mesh-bevel-width+ 1)
 (defconstant +mesh-vertex-word-count+ 4)
+(defconstant +mesh-face-template-triangle-count+ 14)
+(defconstant +mesh-face-template-index-count+ 42)
 
 (defstruct (surface-mesh
              (:constructor %make-surface-mesh
@@ -365,46 +366,90 @@ star corpus; signal that boundary explicitly instead of silently welding it."
     (not (and (= 1 (%occupancy-at domain occupancy tangent-neighbor))
               (= 0 (%occupancy-at domain occupancy diagonal))))))
 
+(defun %patch-normal (points outward)
+  "An exact nonzero normal for planar POINTS, facing OUTWARD."
+  (let ((normal (%cross (%point- (second points) (first points))
+                        (%point- (third points) (first points)))))
+    (when (zerop (%dot normal outward))
+      (error "Face patch ~S is edge-on to outward direction ~S."
+             points outward))
+    (if (minusp (%dot normal outward))
+        (mapcar #'- normal)
+        normal)))
+
+(defun %emit-face-patch (builder points outward stock)
+  (%emit-polygon builder points (%patch-normal points outward) stock :face))
+
 (defun %emit-cell-face
     (builder domain occupancy cell axis-number side stock-function)
   (let* ((cell-coordinates (%cell-coordinates cell))
          (tangents (%other-axis-numbers axis-number))
-         (bounds (make-array 3 :initial-element nil))
          (plane (* +mesh-cell-size+
                    (+ (nth axis-number cell-coordinates)
                       (if (plusp side) 1 0))))
-         (normal (loop for index below 3
-                       collect (if (= index axis-number) side 0)))
+         (outward (loop for index below 3
+                        collect (if (= index axis-number) side 0)))
          (face (%cell-face domain cell axis-number side))
          (stock (funcall stock-function face)))
-    (dolist (tangent tangents)
-      (let* ((anchor (* +mesh-cell-size+
-                        (nth tangent cell-coordinates)))
-             (low-inset
-               (if (%face-crease-p domain occupancy cell-coordinates
-                                   axis-number side tangent -1)
-                   +mesh-bevel-width+ 0))
-             (high-inset
-               (if (%face-crease-p domain occupancy cell-coordinates
-                                   axis-number side tangent 1)
-                   +mesh-bevel-width+ 0)))
-        (setf (aref bounds tangent)
-              (cons (+ anchor low-inset)
-                    (- (+ anchor +mesh-cell-size+) high-inset)))))
     (destructuring-bind (u v) tangents
-      (labels ((point (u-value v-value)
-                 (let ((result (list 0 0 0)))
-                   (setf (nth axis-number result) plane
-                         (nth u result) u-value
-                         (nth v result) v-value)
-                   result)))
-        (%emit-polygon
-         builder
-         (list (point (car (aref bounds u)) (car (aref bounds v)))
-               (point (cdr (aref bounds u)) (car (aref bounds v)))
-               (point (cdr (aref bounds u)) (cdr (aref bounds v)))
-               (point (car (aref bounds u)) (cdr (aref bounds v))))
-         normal stock :face)))))
+      (let ((u-anchor (* +mesh-cell-size+ (nth u cell-coordinates)))
+            (v-anchor (* +mesh-cell-size+ (nth v cell-coordinates))))
+        (labels ((point (u-value v-value normal-value)
+                   (let ((result (list 0 0 0)))
+                     (setf (nth axis-number result) normal-value
+                           (nth u result) u-value
+                           (nth v result) v-value)
+                     result))
+                 (inner (anchor tangent-side)
+                   (+ anchor
+                      (if (minusp tangent-side)
+                          +mesh-bevel-width+
+                          (- +mesh-cell-size+ +mesh-bevel-width+))))
+                 (outer (anchor tangent-side)
+                   (+ anchor (if (minusp tangent-side) 0 +mesh-cell-size+)))
+                 (outer-plane (tangent tangent-side)
+                   (if (%face-crease-p
+                        domain occupancy cell-coordinates axis-number side
+                        tangent tangent-side)
+                       (- plane (* side +mesh-bevel-width+))
+                       plane))
+                 (patch (points)
+                   (%emit-face-patch builder points outward stock)))
+          ;; The same six-by-six heart exists even when every patch is flat.
+          (patch
+           (list (point (inner u-anchor -1) (inner v-anchor -1) plane)
+                 (point (inner u-anchor 1) (inner v-anchor -1) plane)
+                 (point (inner u-anchor 1) (inner v-anchor 1) plane)
+                 (point (inner u-anchor -1) (inner v-anchor 1) plane)))
+          ;; Four one-by-six flaps.  A crease moves only the flap's outer edge
+          ;; one integer tick inward along the face normal.
+          (dolist (u-side '(-1 1))
+            (patch
+             (list (point (inner u-anchor u-side) (inner v-anchor -1) plane)
+                   (point (outer u-anchor u-side) (inner v-anchor -1)
+                          (outer-plane u u-side))
+                   (point (outer u-anchor u-side) (inner v-anchor 1)
+                          (outer-plane u u-side))
+                   (point (inner u-anchor u-side) (inner v-anchor 1) plane))))
+          (dolist (v-side '(-1 1))
+            (patch
+             (list (point (inner u-anchor -1) (inner v-anchor v-side) plane)
+                   (point (inner u-anchor 1) (inner v-anchor v-side) plane)
+                   (point (inner u-anchor 1) (outer v-anchor v-side)
+                          (outer-plane v v-side))
+                   (point (inner u-anchor -1) (outer v-anchor v-side)
+                          (outer-plane v v-side)))))
+          ;; One half of each one-by-one corner square.  The complementary
+          ;; triangle is deliberately absent in this first face-owned spike.
+          (dolist (u-side '(-1 1))
+            (dolist (v-side '(-1 1))
+              (patch
+               (list
+                (point (inner u-anchor u-side) (inner v-anchor v-side) plane)
+                (point (outer u-anchor u-side) (inner v-anchor v-side)
+                       (outer-plane u u-side))
+                (point (inner u-anchor u-side) (outer v-anchor v-side)
+                       (outer-plane v v-side)))))))))))
 
 (defun %collect-edge-keys (solid)
   (let ((keys (make-hash-table :test #'equal)))
@@ -662,13 +707,13 @@ star corpus; signal that boundary explicitly instead of silently welding it."
 
 (defun make-surface-mesh
     (solid &key (stock-function (constantly 0)))
-  "Realize SOLID as an exact integer triangle mesh with manifold sheets.
+  "Realize SOLID as an exact integer face-template mesh.
 
-The CPU binds topology once: exposed cell faces become inset face polygons,
-creased edge runs become bands, and each resolved vertex-link cycle selects a
-regular Arc junction from the committed Blender corpus.  Singular occupancy is
-therefore represented by multiple ordinary sheets, never a special pinched
-template.  STOCK-FUNCTION is called with an oriented boundary face."
+Every exposed cell face emits fourteen triangles: a six-by-six central square,
+four one-by-six flaps, and four corner triangles.  The complementary corner
+triangles are deliberately absent in this topology spike, exposing the gaps a
+later vertex-owned strip must close.  STOCK-FUNCTION is called with an oriented
+boundary face."
   (check-type solid chain)
   (check-type stock-function function)
   (let* ((domain (chain-domain solid))
@@ -687,8 +732,9 @@ template.  STOCK-FUNCTION is called with an oriented boundary face."
                         (%offset-coordinates coordinates axis-number side)))
               (%emit-cell-face builder domain occupancy cell axis-number side
                                stock-function))))))
-    (dolist (edge (%collect-edge-keys solid))
-      (%emit-edge-bands builder domain occupancy edge stock-function))
+    ;; Retain the topology diagnostic even though this spike deliberately does
+    ;; not publish a separate vertex-junction product.
     (dolist (vertex (%collect-vertex-keys solid))
-      (%emit-vertex-junctions builder domain occupancy vertex stock-function))
+      (when (star-singular-p (%vertex-star-mask domain occupancy vertex))
+        (incf (surface-mesh-builder-singular-star-count builder))))
     (%finish-surface-mesh builder)))
