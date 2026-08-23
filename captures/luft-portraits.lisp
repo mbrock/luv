@@ -86,7 +86,7 @@
   (pathname)
   (capture-luft-material-contact
    pathname
-   (luv.arithmetic.lisp.vec3:make-vec3 57.0 9.0 41.0)
+   (luv.arithmetic.lisp.vec3:make-vec3 89.0 33.0 41.0)
    20.0 "LUFT material contact study"))
 
 (luv:define-capture luft-material-contact-closeup
@@ -96,7 +96,7 @@
   (pathname)
   (capture-luft-material-contact
    pathname
-   (luv.arithmetic.lisp.vec3:make-vec3 -9.3 14.3 38.8)
+   (luv.arithmetic.lisp.vec3:make-vec3 22.7 38.3 38.8)
    4.0 "LUFT material contact closeup"
    :yaw 0.90 :pitch -0.5165006))
 
@@ -107,7 +107,7 @@
   (pathname)
   (capture-luft-material-contact
    pathname
-   (luv.arithmetic.lisp.vec3:make-vec3 48.0 19.0 32.0)
+   (luv.arithmetic.lisp.vec3:make-vec3 80.0 43.0 32.0)
    7.0 "LUFT stair material contacts"))
 
 (luv:define-capture luft-material-contact-west-foot
@@ -117,7 +117,7 @@
   (pathname)
   (capture-luft-material-contact
    pathname
-   (luv.arithmetic.lisp.vec3:make-vec3 -7.0 14.0 41.0)
+   (luv.arithmetic.lisp.vec3:make-vec3 25.0 38.0 41.0)
    8.0 "LUFT west foundation contacts"
    :yaw 0.90 :pitch -0.5165006))
 
@@ -128,7 +128,7 @@
   (pathname)
   (capture-luft-material-contact
    pathname
-   (luv.arithmetic.lisp.vec3:make-vec3 43.0 -5.0 20.0)
+   (luv.arithmetic.lisp.vec3:make-vec3 75.0 19.0 20.0)
    7.0 "LUFT bridge foundation contacts"))
 
 (defun capture-luft-miter-closeup (pathname wireframe title)

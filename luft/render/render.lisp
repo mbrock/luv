@@ -18,6 +18,11 @@
 (defconstant +foundation-stone-stock+ 8
   "The lowest exposed course of stone borne by a terrain cell.")
 
+(defconstant +sanctuary-origin-x+ 32)
+(defconstant +sanctuary-origin-y+ 24)
+(defparameter *sanctuary-beacon-x* 58)
+(defparameter *sanctuary-beacon-y* 54)
+
 (defclass scene ()
   ((solid :initarg :solid :reader scene-solid)
    (architecture-cells :initarg :architecture-cells
@@ -32,19 +37,25 @@ not put objects or material records on every cell."))
 
 (defclass scene-builder ()
   ((domain :initarg :domain :reader scene-builder-domain)
+   (origin-x :initarg :origin-x :initform 0 :reader scene-builder-origin-x)
+   (origin-y :initarg :origin-y :initform 0 :reader scene-builder-origin-y)
    (cells :initform (make-hash-table :test #'eql) :reader scene-builder-cells)
    (architecture-cells :initform (make-hash-table :test #'eql)
                        :reader scene-builder-architecture-cells)))
 
-(defun make-scene-builder (&key (horizontal-bits 6))
+(defun make-scene-builder (&key (horizontal-bits 6) (origin-x 0) (origin-y 0))
   (make-instance 'scene-builder
                  :domain (luft:make-world-domain
-                          :x-bits horizontal-bits :y-bits horizontal-bits)))
+                          :x-bits horizontal-bits :y-bits horizontal-bits)
+                 :origin-x origin-x :origin-y origin-y))
 
 (defun scene-builder-cell (builder x y z &key (solid-p t) architecture-p)
   (when (<= 0 z 254)
-    (let ((site (luft:make-site (scene-builder-domain builder) x y z
-                                luft:+cell-extent+ 1)))
+    (let ((site (luft:make-site
+                 (scene-builder-domain builder)
+                 (+ x (scene-builder-origin-x builder))
+                 (+ y (scene-builder-origin-y builder))
+                 z luft:+cell-extent+ 1)))
       (if solid-p
           (progn
             (setf (gethash site (scene-builder-cells builder)) t)
@@ -166,39 +177,76 @@ four-sheet parity star.  Nothing else in the scene can hide their junctions."
       (place-star #x69 22))
     (finish-scene-builder builder)))
 
+(defun mountain-sanctuary-terrain-height (x y)
+  "The authored local-coordinate height of the sanctuary's mountain world."
+  (let ((shore 11) (water 2) (plateau 19))
+    (floor
+     (cond
+       ((< y 14)
+        (max water
+             (+ shore
+                (* 1.4 (sin (/ x 11.0)))
+                (* 1.1 (sin (/ (+ x (* 0.75 y)) 9.0)))
+                (- (* 1.6 (max 0 (- y 9))))
+                ;; A long diagonal shoulder lifts the far eastern approach
+                ;; without changing the bridge landing.
+                (* 0.10 (max 0 (- (- x (* 0.9 y)) 58))))))
+       ((>= y 36)
+        (let* ((edge (+ 2.0 (* 3.0 (sin (/ x 9.0)))
+                           (* 1.5 (sin (/ x 3.7)))))
+               (inland (- y 36 edge)))
+          (if (>= inland 0)
+              (let* ((ridge
+                       (min 11.0
+                            (* 0.22 (max 0 (- (+ y (* 0.55 x)) 88)))))
+                     (ravine
+                       (max 0.0
+                            (- 4.5
+                               (* 1.35
+                                  (abs (- y (+ 67 (* 0.34 x))))))))
+                     (rolling
+                       (* 1.3 (sin (/ x 12.0)) (cos (/ y 13.0)))))
+                (+ plateau rolling ridge (- ravine)))
+              (max water (+ plateau (* 9.0 inland))))))
+       (t water)))))
+
 (defun make-mountain-sanctuary-scene ()
-  "A Lonely-Mountains landscape carrying a bridge and walled sanctuary.
+  "A broad Lonely-Mountains world carrying a bridge and walled sanctuary.
 
 This is the old Holm's architectural sentence with its material menagerie
-removed: a shore, channel and high rock; a two-arched stone bridge; a gate,
-curtain wall, paired turrets and an arcaded hall."
-  (let* ((builder (make-scene-builder :horizontal-bits 6))
-         (shore 11) (water 2) (plateau 19) (deck 13)
+removed: rolling approaches, a channel and rising high rock; a diagonal
+processional way; a two-arched stone bridge; a gate, curtain wall, paired
+turrets, an arcaded hall and a remote ridge beacon."
+  (let* ((builder (make-scene-builder
+                   :horizontal-bits 7
+                   :origin-x +sanctuary-origin-x+
+                   :origin-y +sanctuary-origin-y+))
+         (water 2) (plateau 19) (deck 13)
          (springing 7) (radius 4) (across (cons 27 32)))
-    (dotimes (x 64)
-      (dotimes (y 64)
-        (let* ((west (+ 3 (round (* 1.8 (sin (/ y 6.0))))))
-               (east (- 60 (round (* 2.2 (cos (/ y 8.0))))))
-               (land-p (and (<= 3 y 61) (<= west x east)))
-               (height
-                (floor
-                 (cond
-                   ((< y 14)
-                    (max water
-                         (+ shore (* 1.4 (sin (/ x 11.0)))
-                            (- (* 1.6 (max 0 (- y 9)))))))
-                   ((>= y 36)
-                    (let* ((edge (+ 2.0 (* 3.0 (sin (/ x 9.0)))
-                                       (* 1.5 (sin (/ x 3.7)))))
-                           (inland (- y 36 edge)))
-                      (if (>= inland 0)
-                          (+ plateau (* 1.3 (sin (/ x 12.0))
-                                           (cos (/ y 13.0))))
-                          (max water (+ plateau (* 9.0 inland))))))
-                   (t water)))))
-          (when land-p
-            (loop for z below (max 1 height) do
-              (scene-builder-cell builder x y z))))))
+    ;; Keep the packed world bounded away from its toroidal seam, while the
+    ;; visible camera sees terrain continuing beyond every frame edge.
+    (loop for x from -18 to 82 do
+      (loop for y from -16 to 82
+            for west = (+ -17 (round (* 1.8 (sin (/ y 6.0)))))
+            for east = (- 81 (round (* 2.2 (cos (/ y 8.0)))))
+            when (and (<= -15 y 81) (<= west x east)) do
+              (loop for z below
+                    (max 1 (mountain-sanctuary-terrain-height x y)) do
+                (scene-builder-cell builder x y z))))
+    ;; A diagonal, gently climbing processional way makes the bridge belong
+    ;; to the low country instead of beginning at the edge of the model.
+    (loop for step from 0 below 20
+          for x = (+ 6 step)
+          for y = (+ -14 step)
+          for top = (max (mountain-sanctuary-terrain-height x y)
+                         (min deck (+ 10 (floor step 5))))
+          do (scene-builder-box builder x (+ x 4) y (1+ y) 0 top
+                                :architecture-p t)
+             (when (zerop (mod step 4))
+               (scene-builder-cell builder x y (1+ top)
+                                   :architecture-p t)
+               (scene-builder-cell builder (+ x 4) (1+ y) (1+ top)
+                                   :architecture-p t)))
     (dolist (y '(15 25 35))
       (scene-builder-box builder 26 33 (1- y) (1+ y) water springing
                          :architecture-p t))
@@ -264,7 +312,36 @@ curtain wall, paired turrets and an arcaded hall."
     (dolist (bay '(25 30 35))
       (scene-builder-carve-arch builder bay (1+ plateau) (+ plateau 3) 2
                                 (cons 55 55)))
-    (finish-scene-builder builder :player-p t)))
+      ;; A hollow beacon on the eastern ridge gives the enlarged world a
+      ;; distant inhabited landmark and a second architectural scale.
+      (let* ((beacon-x *sanctuary-beacon-x*)
+             (beacon-y *sanctuary-beacon-y*)
+             (base (mountain-sanctuary-terrain-height beacon-x beacon-y)))
+        (scene-builder-disc builder beacon-x beacon-y 3 base (1+ base)
+                            :architecture-p t)
+        (scene-builder-ring builder beacon-x beacon-y 1 2 (+ base 2)
+                            (+ base 6) :architecture-p t)
+        (scene-builder-ring builder beacon-x beacon-y 1 3 (+ base 7)
+                            (+ base 8) :architecture-p t)
+        (scene-builder-disc builder beacon-x beacon-y 1 (+ base 8)
+                            (+ base 8) :architecture-p t))
+      ;; An old eight-pillar sun court occupies the open lowland beside the
+      ;; processional way.  Its diagonal stones echo the landscape's oblique
+      ;; ridges without competing with the sanctuary's larger silhouette.
+      (let* ((court-x 55)
+             (court-y 4)
+             (base (mountain-sanctuary-terrain-height court-x court-y)))
+        (scene-builder-disc builder court-x court-y 5 base base
+                            :architecture-p t)
+        (dolist (offset '((-4 0) (-3 -3) (0 -4) (3 -3)
+                          (4 0) (3 3) (0 4) (-3 3)))
+          (destructuring-bind (dx dy) offset
+            (scene-builder-box builder (+ court-x dx) (+ court-x dx)
+                               (+ court-y dy) (+ court-y dy)
+                               (1+ base) (+ base 4) :architecture-p t)
+            (scene-builder-cell builder (+ court-x dx) (+ court-y dy)
+                                (+ base 5) :architecture-p t))))
+      (finish-scene-builder builder :player-p t)))
 
 (defun make-miter-study-scene ()
   "Build the wall-side stepped mountain used to judge mixed miters. #Z5NDTA

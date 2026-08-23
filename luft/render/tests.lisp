@@ -174,6 +174,16 @@
   (ok (not (luft.render::scene-player-p
             (render:make-miter-study-scene)))))
 
+(deftest scene-builders-translate-authored-sites-at-the-boundary
+  (let* ((builder (luft.render::make-scene-builder
+                   :horizontal-bits 5 :origin-x 7 :origin-y 11))
+         (scene (progn
+                  (luft.render::scene-builder-cell builder 2 3 4)
+                  (luft.render::finish-scene-builder builder)))
+         (solid (luft.render::scene-solid scene)))
+    (ok (= 1 (luft:chain-cell-occupancy-bit solid 9 14 4)))
+    (ok (zerop (luft:chain-cell-occupancy-bit solid 2 3 4)))))
+
 (deftest the-sanctuary-curtain-is-bedded-into-the-mountain
   (let* ((scene (render:make-mountain-sanctuary-scene))
          (solid (luft.render::scene-solid scene))
@@ -188,15 +198,35 @@
       ;; where the procedural ridge can otherwise fall below their fixed base.
       (dolist (point '((20 45) (40 45) (15 41) (45 41)))
         (destructuring-bind (x y) point
+          (incf x luft.render::+sanctuary-origin-x+)
+          (incf y luft.render::+sanctuary-origin-y+)
           (ok (occupied-p x y 17))
           (ok (occupied-p x y 18))
           (ok (architecture-p x y 17))
           (ok (architecture-p x y 18))))
       ;; The stair arrives at a supported masonry threshold, while the gate
       ;; opening itself remains clear at the sanctuary floor.
-      (ok (occupied-p 30 45 18))
-      (ok (architecture-p 30 45 18))
-      (ok (not (occupied-p 30 45 19))))))
+      (let ((x (+ 30 luft.render::+sanctuary-origin-x+))
+            (y (+ 45 luft.render::+sanctuary-origin-y+)))
+        (ok (occupied-p x y 18))
+        (ok (architecture-p x y 18))
+        (ok (not (occupied-p x y 19))))
+      ;; Terrain and inhabited architecture now continue well beyond the old
+      ;; 64-cell diorama, including the remote back-ridge beacon.
+      (ok (occupied-p (+ luft.render::*sanctuary-beacon-x*
+                         luft.render::+sanctuary-origin-x+)
+                      (+ luft.render::*sanctuary-beacon-y*
+                         luft.render::+sanctuary-origin-y+)
+                      20))
+      (ok (architecture-p
+           (+ luft.render::*sanctuary-beacon-x*
+              luft.render::+sanctuary-origin-x+)
+           (+ luft.render::*sanctuary-beacon-y*
+              luft.render::+sanctuary-origin-y+)
+           (+ 8
+              (luft.render::mountain-sanctuary-terrain-height
+               luft.render::*sanctuary-beacon-x*
+               luft.render::*sanctuary-beacon-y*)))))))
 
 (deftest player-gait-anchors-stance-feet-and-rises-over-support
   (let ((step-length 0.75)
@@ -588,7 +618,7 @@
         (ok (= (aref perspective 21) render:*wireframe*))
         (ok (equalp #(0.5 0.5 0.001 0.001)
                     (subseq perspective 48 52)))
-        (ok (equalp #(29.5 24.5 15.48 7.25)
+        (ok (equalp #(61.5 48.5 15.48 7.25)
                     (subseq perspective 52 56)))))))
 
 (deftest a-pointer-ray-retains-the-semantic-boundary-site

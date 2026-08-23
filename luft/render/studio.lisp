@@ -51,7 +51,9 @@ at the atelier boundary where a person has selected one site."))
               (site-inspection-distance inspection)))))
 
 (defun make-fly-camera
-    (&key (position (vec3:make-vec3 70.0 -18.0 50.0))
+    (&key (position
+            (vec3:make-vec3 (+ 70.0 +sanctuary-origin-x+)
+                            (+ -18.0 +sanctuary-origin-y+) 50.0))
           (yaw 2.2455373) (pitch -0.5165006)
           (field-of-view 0.9599311))
   (make-instance 'fly-camera :position position :yaw yaw :pitch pitch
@@ -61,7 +63,9 @@ at the atelier boundary where a person has selected one site."))
   "Return VIEWER to the composed isometric sanctuary view."
   (when viewer
     (let ((camera (viewer-camera viewer)))
-      (setf (camera-position camera) (vec3:make-vec3 70.0 -18.0 50.0)
+      (setf (camera-position camera)
+            (vec3:make-vec3 (+ 70.0 +sanctuary-origin-x+)
+                            (+ -18.0 +sanctuary-origin-y+) 50.0)
             (camera-yaw camera) 2.2455373
             (camera-pitch camera) -0.5165006
             (camera-field-of-view camera) 0.9599311
@@ -297,7 +301,9 @@ the selector is the whole of the difference."
                     (frame-view-divisor previous) 0.0)
               (coerce inspection-parameters 'list)
               ;; Bridge centre, body-sphere centre height, animation clock.
-              (list 29.5 24.5 15.48 character-time))))))
+              (list (+ 29.5 +sanctuary-origin-x+)
+                    (+ 24.5 +sanctuary-origin-y+)
+                    15.48 character-time))))))
 
 (defun viewer-logical-extent (viewer)
   (let ((canvas (viewer-canvas viewer)))
