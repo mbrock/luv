@@ -11,6 +11,10 @@
     url = "git+https://github.com/aiffc/cl-sdl3.git?rev=47c90b54715aba23752b70d382a3eb310172cd34";
     flake = false;
   };
+  inputs.swash = {
+    url = "github:lessrest/swash/8ee11223130647ea12bbb7832e4b083af03b7421";
+    flake = false;
+  };
   # Keep this tag equal to the Tracy profiler you actually run: the client and
   # the viewer negotiate an exact protocol version and refuse to talk across a
   # mismatch.
@@ -27,7 +31,7 @@
   # a shared cache ahead of the work that will use it.
   inputs.nix-wpe-webkit.url = "github:eval-exec/nix-wpe-webkit";
 
-  outputs = { nixpkgs, ghostty, mcclim, cl-sdl3, tracy, nix-wpe-webkit, ... }:
+  outputs = { nixpkgs, ghostty, mcclim, cl-sdl3, swash, tracy, nix-wpe-webkit, ... }:
     let
       systems = [
         "x86_64-linux"
@@ -271,6 +275,15 @@
           };
           slyRoot =
             "${pkgs.emacsPackages.sly}/share/emacs/site-lisp/elpa/${pkgs.emacsPackages.sly.pname}-${pkgs.emacsPackages.sly.version}";
+          swashPackage = pkgs.buildGoModule {
+            pname = "swash";
+            version = "0-unstable-2026-08-24";
+            src = swash;
+            vendorHash = "sha256-QliqQWIf2sU6hexErhx3mGq/6FP+sM3Krlf7cKnu0gQ=";
+            subPackages = [ "cmd/swash" ];
+            CGO_CFLAGS = "-I${swash}/cvendor";
+            env.GOWORK = "off";
+          };
           # A second nixpkgs instance carrying the WPE overlay, so the main
           # `pkgs` above keeps its plain `legacyPackages` identity and nothing
           # else in the closure is rebuilt by the overlay.
@@ -294,6 +307,7 @@
             pkgs.qrencode
             pkgs.sdl3
             pkgs.spirv-tools
+            swashPackage
             pkgs.urbit
             pkgs.vulkan-headers
             pkgs.vulkan-tools
@@ -312,6 +326,7 @@
             LUV_GHOSTTY_LIBRARY = libghosttyVtLibrary;
             LUV_BASH = "${pkgs.bashInteractive}/bin/bash";
             LUV_SLYNK_DIR = "${slyRoot}/slynk";
+            LUV_SWASH = "${swashPackage}/bin/swash";
             LUV_FFMPEG_LIBDIR = ffmpegLibraryDirectory;
             LUV_MUPDF_LIBDIR = mupdfLibraryDirectory;
             LUV_YT_DLP = "${pkgs.yt-dlp}/bin/yt-dlp";
@@ -396,7 +411,7 @@
           inherit pkgs wpePkgs sbcl lisp clSdl3WithoutMixer;
           inherit dev developmentPackages developmentEnvironment;
           inherit developmentEnvironmentHook;
-          inherit nativeLibraryPath mesaLibraryPath slyRoot;
+          inherit nativeLibraryPath mesaLibraryPath slyRoot swashPackage;
           inherit ffmpeg ffmpegLibraryDirectory mupdf mupdfLibraryDirectory;
           inherit libghosttyVt libghosttyVtLibrary;
           inherit tracyClient tracyClientLibrary tracyTools;
@@ -425,6 +440,7 @@
           libghostty-vt = env.libghosttyVt;
           tracy-client = env.tracyClient;
           tracy = env.tracyTools;
+          swash = env.swashPackage;
           default = env.lisp;
         } // nixpkgs.lib.optionalAttrs env.pkgs.stdenv.isLinux {
           # Reachable only by name, `nix build .#wpewebkit` on Linux: not in

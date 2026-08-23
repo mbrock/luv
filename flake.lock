@@ -164,7 +164,25 @@
         "mcclim": "mcclim",
         "nix-wpe-webkit": "nix-wpe-webkit",
         "nixpkgs": "nixpkgs_3",
+        "swash": "swash",
         "tracy": "tracy"
+      }
+    },
+    "swash": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1787519426,
+        "narHash": "sha256-JOP5lum2rWyN9bqK36f7/7fzv8eAGIUVHwnoEnJP9Jc=",
+        "owner": "lessrest",
+        "repo": "swash",
+        "rev": "8ee11223130647ea12bbb7832e4b083af03b7421",
+        "type": "github"
+      },
+      "original": {
+        "owner": "lessrest",
+        "repo": "swash",
+        "rev": "8ee11223130647ea12bbb7832e4b083af03b7421",
+        "type": "github"
       }
     },
     "systems": {

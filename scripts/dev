@@ -9,11 +9,12 @@ project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 . "$project_root/scripts/require-dev-environment"
 
 if [ "${1:-}" = "--status" ]; then
-  "$project_root/scripts/worktree-port" --explain
+  printf 'checkout: %s\n' "$project_root"
   printf 'environment: active luv development profile\n'
   printf 'SBCL: %s\nSBCL version: ' "$(command -v sbcl)"
   sbcl --version
   printf 'LUV_SLYNK_DIR: %s\n' "${LUV_SLYNK_DIR:-unset}"
+  printf 'LUV_SWASH: %s\n' "${LUV_SWASH:-unset}"
   printf 'LUV_GHOSTTY_LIBRARY: %s\n' "${LUV_GHOSTTY_LIBRARY:-unset}"
   printf 'VK_LAYER_PATH: %s\n' "${VK_LAYER_PATH:-unset}"
   printf 'CL_SOURCE_REGISTRY: %s\n' "${CL_SOURCE_REGISTRY:-unset}"

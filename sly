@@ -3,8 +3,10 @@
 set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+attach_only=
 
 if [ "${1:-}" = "--luvcraft" ]; then
+  attach_only=1
   shift
   endpoint="$project_root/build/luvcraft.slynk"
   if [ ! -r "$endpoint" ]; then
@@ -32,11 +34,19 @@ if [ "${1:-}" = "--luvcraft" ]; then
   export LUV_SLYNK_ATTACH_ONLY=1
 fi
 
-if [ -z "${LUV_SLYNK_PORT:-}" ]; then
-  LUV_SLYNK_PORT=$("$project_root/scripts/worktree-port")
-  export LUV_SLYNK_PORT
+if [ -z "$attach_only" ]; then
+  unset LUV_SLYNK_HOST LUV_SLYNK_PORT LUV_SLYNK_PID LUV_SLYNK_ATTACH_ONLY
+  if [ "${1:-}" = "--lisp" ]; then
+    if [ "$#" -lt 2 ]; then
+      echo "sly: --lisp requires a session ID or Lisp name" >&2
+      exit 2
+    fi
+    export LUV_LISP_SELECTOR=$2
+    shift 2
+  fi
 fi
 
 . "$project_root/scripts/require-dev-environment"
 
+cd "$project_root"
 exec sbcl --script "$project_root/scripts/sly-client.lisp" "$@"

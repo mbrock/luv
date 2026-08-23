@@ -46,10 +46,10 @@ Reporting "it seems to be taking a while" is not a status. Neither is trying
 it again the same way. If a command has gone quiet, you have a defect in
 front of you: name it before doing anything else.
 
-# Start here: one Lisp, one game
+# Start here: managed Lisps, one selected game
 
-Everything happens in one durable SBCL image per checkout, and the game
-normally runs inside it:
+Swash supervises the durable SBCL images above the worktree level, and the
+game normally runs inside one selected image:
 
 ```sh
 ./sly play                              # boot the image and open the real game
@@ -57,12 +57,16 @@ normally runs inside it:
 ./sly screenshot build/frame.png        # capture what the game is showing
 ./sly stop-playing                      # checkpoint and close the game
 ./sly restart                           # explicit recovery if the image is wrecked
+./sly list                              # all running Lisps across checkouts
 ```
 
-`play` starts the checkout's durable image when necessary. `./sly eval`,
-`inspect`, `describe`, `apropos`, `edit`, and `xref` all talk to that same
-process; `luvcraft:*session*` is the live game. `./sly --help` is the command
-map. Do not start a second Lisp or run `build/luvcraft` alongside it.
+`play` starts a Lisp for this checkout when necessary. `./sly eval`, `inspect`,
+`describe`, `apropos`, `edit`, and `xref` select the sole Lisp for this
+checkout; `luvcraft:*session*` is the live game. Multiple Lisps are first-class
+and always visible in `./sly list`: create one with `start --name NAME` and use
+`./sly --lisp ID-or-NAME COMMAND` to select it. An unqualified command refuses
+to guess when several match. `./sly --help` is the command map. Do not run
+`build/luvcraft` alongside a managed game image.
 
 The surfaces have distinct jobs:
 
@@ -127,9 +131,9 @@ print the corpus from a shell; see the `wiki-work` skill before editing.
 
 # Live Lisp interaction
 
-Prefer `./sly` over `emacsclient` or a second SBCL when exploring, testing, or
-changing the running project. It talks directly to the durable SLY image, where
-the window and other live Lisp state already exist, but opens a fresh Slynk
+Prefer `./sly` over `emacsclient` or an unmanaged SBCL when exploring, testing,
+or changing the running project. It talks directly to the selected SLY image,
+where the window and other live Lisp state already exist, but opens a fresh Slynk
 connection for each invocation so there is no persistent client to go stale.
 Start the `luv` SLY implementation in Emacs first if its listener is not up.
 
@@ -148,21 +152,22 @@ Use lower-level `open-canvas`, device, and context forms only when the task is
 specifically below luvcraft; they create another window and another ownership
 lifecycle by design.
 
-`./sly play`, `status`, `restart`, `start`, and `stop` manage the image when it is
-the `./sly`-managed one (`sly-server.lisp`, which loads `luv` and `luv-wiki`).
+`./sly play`, `status`, `restart`, `start`, and `stop` manage Swash sessions
+running `sly-server.lisp`, which loads `luv` and `luv-wiki`. `restart` stops the
+selected incarnation and creates a new one in the current profile environment.
 The standalone `./build/luvcraft` (for shipping and `make smoke`) embeds its
 own Slynk listener; `./sly --luvcraft ...` attaches to it.  Do not run it
-alongside the durable image while developing: one Lisp, one game window.
+alongside a managed game image while developing: one selected game window.
 
 The image is only as current as the environment it was started in: when it
 cannot find a system or component that the flake now provides (`Component
 SPINNERET not found`), or otherwise reflects an old world (a package or
 readtable that should exist does not, `flake.nix` or an `.asd` has changed
 since it started), **fix the image rather than routing around it** -- check
-`./sly status` for who owns it and that no client is connected, then
-`./sly stop && ./sly start`, and confirm with an eval that the missing thing
-is there.  Do not fall back to a fresh `sbcl` for the rest of a session
-because the durable image is broken; that leaves it broken for everyone.
+`./sly list` and `./sly status` for its Swash identity, then `./sly restart`,
+and confirm with an eval that the missing thing is there. Do not fall back to
+an unmanaged `sbcl` for the rest of a session because the managed image is
+broken; that leaves it broken for everyone.
 
 `describe`, `apropos`, and `edit` accept multiple names. `apropos` shows only
 external symbols by default; pass `--all` for internals. Failed evaluations

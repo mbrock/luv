@@ -16,10 +16,25 @@
              name))
     (uiop:ensure-directory-pathname value)))
 
+(defun emit-swash-event (session event message &rest fields)
+  (let ((swash (or (uiop:getenv "LUV_SWASH")
+                   (error "LUV_SWASH is not set"))))
+    (let ((process
+            (uiop:launch-program
+             (append (list swash "emit" session
+                           "--event" event "--message" message)
+                     (loop for field in fields append (list "--field" field)))
+             :input nil :output nil :error-output *error-output*)))
+      (unless (zerop (uiop:wait-process process))
+        (error "Could not publish Swash event ~A for ~A" event session)))))
+
 (let* ((project-root
          (uiop:pathname-directory-pathname *load-truename*))
        (slynk-root (required-directory "LUV_SLYNK_DIR"))
-       (port (parse-integer (getenv-or "LUV_SLYNK_PORT" "4005"))))
+       (requested-port (parse-integer (getenv-or "LUV_SLYNK_PORT" "0")))
+       (session (or (uiop:getenv "SWASH_SESSION")
+                    (error "sly-server.lisp must run inside a Swash session")))
+       (name (getenv-or "LUV_NAME" session)))
   (setf cl-user::*luv-project-root* project-root)
   (asdf:initialize-source-registry
    `(:source-registry
@@ -65,10 +80,21 @@
                 (build-call "FAILED" (princ-to-string condition))
                 (build-call "FINISH" :error)
                 (error condition)))))))
-  (format t "~&Starting luv Slynk on 127.0.0.1:~D.~%" port)
-  (funcall (find-symbol "CREATE-SERVER" "SLYNK")
-           :interface "127.0.0.1"
-           :port port
-           :dont-close t)
-  (format t "~&Luv Slynk is ready on 127.0.0.1:~D.~%" port)
-  (loop (sleep 3600)))
+  (format t "~&Starting luv Slynk on a kernel-assigned loopback port.~%")
+  (force-output)
+  (let ((port
+          (funcall (find-symbol "CREATE-SERVER" "SLYNK")
+                   :interface "127.0.0.1"
+                   :port requested-port
+                   :dont-close t)))
+    (emit-swash-event
+     session "slynk-ready" (format nil "Lisp ~A is ready" name)
+     "LUV_KIND=LISP"
+     (format nil "LUV_ROOT=~A" (namestring project-root))
+     (format nil "LUV_NAME=~A" name)
+     (format nil "LUV_SLYNK_PORT=~D" port)
+     (format nil "LUV_SLYNK_PID=~D" (sb-posix:getpid)))
+    (format t "~&Luv Slynk is ready on 127.0.0.1:~D (Swash ~A).~%"
+            port session)
+    (force-output)
+    (loop (sleep 3600))))
