@@ -848,62 +848,72 @@ so the complete surface needs at most two direct instanced draws."
                                          (gpu-temporal-scaler-depth-usage
                                           scaler))))))
          (depth-view
-           (create device (make-texture-view-descriptor :texture depth))))
+           (create device (make-texture-view-descriptor :texture depth)))
+         (scene
+           (create device
+                   (make-texture-descriptor
+                    :label "luft HDR color" :size extent :dimensions :2d
+                    :format :rgba16-float
+                    :usage
+                    (funcall usage '(:render-attachment :texture-binding)
+                             (and scaler
+                                  (gpu-temporal-scaler-color-usage scaler))))))
+         (scene-view
+           (create device (make-texture-view-descriptor :texture scene)))
+         (motion
+           (and temporal-p
+                (create device
+                        (make-texture-descriptor
+                         :label "luft temporal motion" :size extent
+                         :dimensions :2d :format :rg16-float
+                         :usage
+                         (funcall usage '(:render-attachment)
+                                  (gpu-temporal-scaler-motion-usage scaler))))))
+         (motion-view
+           (and motion
+                (create device
+                        (make-texture-view-descriptor :texture motion))))
+         (resolved
+           (and temporal-p
+                (create device
+                        (make-texture-descriptor
+                         :label "luft temporal resolve" :size extent
+                         :dimensions :2d :format :rgba16-float
+                         :usage
+                         (funcall usage '(:texture-binding)
+                                  (gpu-temporal-scaler-output-usage scaler))))))
+         (resolved-view
+           (and resolved
+                (create device
+                        (make-texture-view-descriptor :texture resolved))))
+         (present-source-view (or resolved-view scene-view))
+         (present-group
+           (create device
+                   (make-bind-group-descriptor
+                    :label "luft HDR presentation"
+                    :layout (renderer-present-layout renderer)
+                    :entries `((:binding 0 :resource ,present-source-view)
+                               (:binding 1
+                                :resource ,(renderer-sampler renderer))
+                               (:binding 2 :resource ,depth-view)
+                               (:binding 3
+                                :resource
+                                ,(renderer-camera-buffer renderer)))))))
     (setf (renderer-temporal-scaler renderer) scaler
           (renderer-depth-texture renderer) depth
           (renderer-depth-view renderer) depth-view
+          (renderer-scene-texture renderer) scene
+          (renderer-scene-view renderer) scene-view
+          (renderer-motion-texture renderer) motion
+          (renderer-motion-view renderer) motion-view
+          (renderer-resolved-texture renderer) resolved
+          (renderer-resolved-view renderer) resolved-view
+          (renderer-present-bind-group renderer) present-group
           (renderer-extent renderer) (copy-list extent)
           (renderer-frame-index renderer) 0
           (renderer-previous-view renderer) nil
           (renderer-history-valid-p renderer) nil
-          (renderer-history-used-p renderer) nil)
-    (when temporal-p
-      (let* ((scene
-               (create device
-                       (make-texture-descriptor
-                        :label "luft temporal color" :size extent :dimensions :2d
-                        :format :rgba16-float
-                        :usage (funcall usage '(:render-attachment)
-                                        (gpu-temporal-scaler-color-usage scaler)))))
-             (motion
-               (create device
-                       (make-texture-descriptor
-                        :label "luft temporal motion" :size extent :dimensions :2d
-                        :format :rg16-float
-                        :usage (funcall usage '(:render-attachment)
-                                        (gpu-temporal-scaler-motion-usage scaler)))))
-             (resolved
-               (create device
-                       (make-texture-descriptor
-                        :label "luft temporal resolve" :size extent :dimensions :2d
-                        :format :rgba16-float
-                        :usage (funcall usage '(:texture-binding)
-                                        (gpu-temporal-scaler-output-usage scaler)))))
-             (scene-view
-               (create device (make-texture-view-descriptor :texture scene)))
-             (motion-view
-               (create device (make-texture-view-descriptor :texture motion)))
-             (resolved-view
-               (create device (make-texture-view-descriptor :texture resolved)))
-             (present-group
-               (create device
-                       (make-bind-group-descriptor
-                        :label "luft temporal presentation"
-                        :layout (renderer-present-layout renderer)
-                        :entries `((:binding 0 :resource ,resolved-view)
-                                   (:binding 1
-                                    :resource ,(renderer-sampler renderer))
-                                   (:binding 2 :resource ,depth-view)
-                                   (:binding 3
-                                    :resource
-                                    ,(renderer-camera-buffer renderer)))))))
-        (setf (renderer-scene-texture renderer) scene
-              (renderer-scene-view renderer) scene-view
-              (renderer-motion-texture renderer) motion
-              (renderer-motion-view renderer) motion-view
-              (renderer-resolved-texture renderer) resolved
-              (renderer-resolved-view renderer) resolved-view
-              (renderer-present-bind-group renderer) present-group))))
+          (renderer-history-used-p renderer) nil))
   renderer)
 
 (defun ensure-renderer-extent (renderer extent)
@@ -1203,7 +1213,7 @@ cohort untouched. No frame can interleave with the owner-thread publication."
   (let* ((temporal-p (metal-temporal-device-p device))
          (target-formats (if temporal-p
                              '(:rgba16-float :rg16-float)
-                             (list color-format)))
+                             '(:rgba16-float)))
          camera-buffer
          layout
          vertex-module fragment-module pipeline
@@ -1385,36 +1395,35 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                          (make-sampler-descriptor
                           :label "luft presentation sampler"
                           :mag-filter :linear :min-filter :linear)))
-           (when temporal-p
-             (setf present-layout
-                   (create device
-                           (make-bind-group-layout-descriptor
-                            :label "luft presentation layout"
-                            :entries '((:binding 0 :type :texture)
-                                       (:binding 1 :type :sampler)
-                                       (:binding 2 :type :texture)
-                                       (:binding 3 :type :uniform-buffer))))
-                   present-vertex-module
-                   (create device
-                           (make-shader-module-descriptor
-                            :label "luft presentation vertex"
-                            :language :mathematical
-                            :code (shaders:present-vertex-specification)))
-                   present-fragment-module
-                   (create device
-                           (make-shader-module-descriptor
-                            :label "luft presentation fragment"
-                            :language :mathematical
-                            :code (shaders:present-fragment-specification)))
-                   present-pipeline
-                   (create device
-                           (make-render-pipeline-descriptor
-                            :label "luft temporal presentation pipeline"
-                            :layout present-layout
-                            :vertex `(:module ,present-vertex-module)
-                            :fragment `(:module ,present-fragment-module
-                                        :targets ((:format ,color-format)))
-                            :primitive '(:topology :triangle-list)))))
+           (setf present-layout
+                 (create device
+                         (make-bind-group-layout-descriptor
+                          :label "luft presentation layout"
+                          :entries '((:binding 0 :type :texture)
+                                     (:binding 1 :type :sampler)
+                                     (:binding 2 :type :texture)
+                                     (:binding 3 :type :uniform-buffer))))
+                 present-vertex-module
+                 (create device
+                         (make-shader-module-descriptor
+                          :label "luft presentation vertex"
+                          :language :mathematical
+                          :code (shaders:present-vertex-specification)))
+                 present-fragment-module
+                 (create device
+                         (make-shader-module-descriptor
+                          :label "luft presentation fragment"
+                          :language :mathematical
+                          :code (shaders:present-fragment-specification)))
+                 present-pipeline
+                 (create device
+                         (make-render-pipeline-descriptor
+                          :label "luft HDR presentation pipeline"
+                          :layout present-layout
+                          :vertex `(:module ,present-vertex-module)
+                          :fragment `(:module ,present-fragment-module
+                                      :targets ((:format ,color-format)))
+                          :primitive '(:topology :triangle-list))))
            (setf renderer
                  (make-instance 'renderer
                                 :device device
@@ -1508,9 +1517,7 @@ cohort untouched. No frame can interleave with the owner-thread publication."
     (prepare-texture encoder (renderer-shadow-texture renderer)
                      :texture-binding))
   (let* ((temporal-p (renderer-temporal-p renderer))
-         (color-view (if temporal-p
-                         (renderer-scene-view renderer)
-                         surface-texture))
+         (color-view (renderer-scene-view renderer))
          (color-attachments
            (if temporal-p
                `((:view ,color-view :load-op :clear :store-op :store
@@ -1529,7 +1536,7 @@ cohort untouched. No frame can interleave with the owner-thread publication."
              :depth-stencil-attachment
              `(:view ,(renderer-depth-view renderer)
                :depth-load-op :clear
-               :depth-store-op ,(if temporal-p :store :discard)
+               :depth-store-op :store
                :depth-clear-value 1.0)))))
     (set-pipeline pass (renderer-pipeline renderer))
     (let ((resident (renderer-population renderer)))
@@ -1549,8 +1556,6 @@ cohort untouched. No frame can interleave with the owner-thread publication."
     (when temporal-p
       (signal-temporal-scaler-inputs pass
                                      (renderer-temporal-scaler renderer)))
-    (when (and (not temporal-p) overlay-encoder)
-      (funcall overlay-encoder pass))
     (end-pass pass)
     (when temporal-p
       (let ((scaler (renderer-temporal-scaler renderer))
@@ -1564,28 +1569,35 @@ cohort untouched. No frame can interleave with the owner-thread publication."
          (vector (* 0.5 (first extent) (aref jitter 0))
                  (* 0.5 (second extent) (aref jitter 1)))
          (not history-valid-p))
-        (let ((present-pass
-                (begin-render-pass
-                 encoder
-                 (make-render-pass-descriptor
-                  :label "luft temporal presentation"
-                  :color-attachments
-                  `((:view ,surface-texture :load-op :clear :store-op :store
-                     :clear-value #(0.0 0.0 0.0 1.0)))))))
-          (wait-temporal-scaler-output present-pass scaler)
-          (set-pipeline present-pass (renderer-present-pipeline renderer))
-          (set-bind-group present-pass 0
-                          (renderer-present-bind-group renderer))
-          (draw present-pass 3)
-          ;; MetalFX publishes into this pass.  Keeping the atelier overlay in
-          ;; the same final pass makes it unambiguously later than the resolve.
-          (when overlay-encoder
-            (funcall overlay-encoder present-pass))
-          (end-pass present-pass))
         (setf (renderer-previous-view renderer) view
               (renderer-history-valid-p renderer) t
-              (renderer-history-used-p renderer) history-valid-p)
-        (incf (renderer-frame-index renderer)))))
+              (renderer-history-used-p renderer) history-valid-p)))
+    (unless temporal-p
+      (prepare-texture encoder (renderer-scene-texture renderer)
+                       :texture-binding)
+      (prepare-texture encoder (renderer-depth-texture renderer)
+                       :texture-binding))
+    (let ((present-pass
+            (begin-render-pass
+             encoder
+             (make-render-pass-descriptor
+              :label "luft HDR presentation"
+              :color-attachments
+              `((:view ,surface-texture :load-op :clear :store-op :store
+                 :clear-value #(0.0 0.0 0.0 1.0)))))))
+      (when temporal-p
+        (wait-temporal-scaler-output
+         present-pass (renderer-temporal-scaler renderer)))
+      (set-pipeline present-pass (renderer-present-pipeline renderer))
+      (set-bind-group present-pass 0 (renderer-present-bind-group renderer))
+      (draw present-pass 3)
+      ;; Both MetalFX and the direct HDR path publish here.  The atelier
+      ;; overlay remains later than tone mapping and glow in either case.
+      (when overlay-encoder
+        (funcall overlay-encoder present-pass))
+      (end-pass present-pass))
+    ;; Character motion is presentation time, not a MetalFX capability.
+    (incf (renderer-frame-index renderer)))
   renderer)
 
 (defun destroy-renderer (renderer)

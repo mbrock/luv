@@ -13,7 +13,9 @@
   (defvar *screen-ambient-occlusion-strength* 0.38)
   (defvar *screen-ambient-occlusion-radius* 0.95)
   (defvar *ambient-pigment-strength* 0.82)
-  (defvar *earth-set-stone-strength* 0.72))
+  (defvar *earth-set-stone-strength* 0.72)
+  (defvar *highlight-glow-threshold* 0.82)
+  (defvar *highlight-glow-strength* 0.24))
 
 (define-shader-function paper-hash (site)
   (let* ((scattered (fract (* site 0.1031)))
@@ -262,6 +264,33 @@
               (vec3 0.14 0.14 0.14))))
     (clamp (/ numerator denominator)
            (vec3 0.0 0.0 0.0) (vec3 1.0 1.0 1.0))))
+
+(define-shader-function paper-grade (color)
+  "Keep cool shade and warm paper luminous after highlight compression."
+  (let* ((luminance (dot color (vec3 0.2126 0.7152 0.0722)))
+         (temperature (smoothstep 0.30 0.78 luminance))
+         (split-tone
+           (mix (vec3 0.93 0.99 1.08) (vec3 1.08 1.01 0.88)
+                temperature))
+         (toned (* color split-tone))
+         (toned-luminance (dot toned (vec3 0.2126 0.7152 0.0722)))
+         (grey (vec3 toned-luminance toned-luminance toned-luminance))
+         (saturated (+ grey (* (- toned grey) 1.12)))
+         (curved
+           (* saturated
+              (* saturated
+                 (- (vec3 3.0 3.0 3.0) (* saturated 2.0)))))
+         (contrasted (mix saturated curved 0.14))
+         (black (vec3 0.0 0.0 0.0))
+         (white (vec3 1.0 1.0 1.0)))
+    (clamp contrasted black white)))
+
+(define-shader-function highlight-energy (value)
+  "Keep only genuinely luminous scene-linear colour for the paper glow."
+  (let* ((color (swizzle value :xyz))
+         (luminance (dot color (vec3 0.2126 0.7152 0.0722)))
+         (gate (smoothstep #.*highlight-glow-threshold* 1.55 luminance)))
+    (* color gate)))
 
 (define-shader-function mesh-view-clip
     (point position right up forward projection divisor)
@@ -896,12 +925,17 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
            (mix 1.0 sampled-shadow
                 (smoothstep 0.03 0.18 (max 0.0 facing))))
          (upness (swizzle normal :z))
-         (indirect (+ (* sky (* 0.54 (+ 0.5 (* 0.5 upness))))
-                      (* ground (* 0.54 (- 0.5 (* 0.5 upness))))))
+         (sky-weight (+ 0.5 (* 0.5 upness)))
+         (ground-weight (- 0.5 (* 0.5 upness)))
+         (indirect (+ (* sky (+ 0.15 (* 0.54 sky-weight)))
+                      (* ground (+ 0.05 (* 0.34 ground-weight)))))
+         (warm-return
+           (* sun-color
+              (* 0.085 direct-shape (- 1.0 direct-visibility))))
          (lit (* albedo
                  (+ (* sun-color (* direct-shape direct-visibility))
-                    indirect)))
-         (paper (paper-tonemap (* lit 1.16)))
+                    indirect warm-return)))
+         (paper (* lit 1.08))
          (rim (expt (- 1.0 (max 0.0 (dot normal (* ray -1.0)))) 3.0))
          (radiance (+ paper (* (vec3 0.20 0.42 0.48) (* rim 0.07)))))
     (set-output color-output (vec4 (* radiance coverage) coverage))
@@ -1176,13 +1210,24 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
          (sky-weight (+ 0.5 (* 0.5 upness)))
          (ground-weight (- 0.5 (* 0.5 upness)))
          (indirect-light
-           (+ (* sky (* 0.54 sky-weight))
-              (* ground (* 0.54 ground-weight))))
+           ;; Sky and earth are illumination, not gray absence-of-sun.  The
+           ;; constant terms keep vertical and turned-away planes chromatic;
+           ;; the hemispheric terms still tell us which environment they see.
+           (+ (* sky (+ 0.15 (* 0.54 sky-weight)))
+              (* ground (+ 0.05 (* 0.34 ground-weight)))))
          (ambient-accessibility
            (- 1.0 (* #.*local-ambient-occlusion-strength*
                      ambient-occlusion)))
+         ;; A sun-facing receiver inside a cast shadow still sees warm light
+         ;; returned by the illuminated world around it.  This little wash is
+         ;; deliberately conditional on occlusion: it animates sun patches
+         ;; without turning north-facing planes orange.
+         (warm-return
+           (* sun-color
+              (* 0.085 direct-shape (- 1.0 direct-visibility))))
          (light (+ (* sun-color (* direct-shape direct-visibility))
-                   (* indirect-light ambient-accessibility)))
+                   (* indirect-light ambient-accessibility)
+                   warm-return))
          (view-direction
            (normalize (- (swizzle camera-position :xyz) world-position)))
          (half-vector (normalize (+ view-direction sun)))
@@ -1216,7 +1261,9 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
                  (* distribution
                     (* visibility (* fresnel n-dot-l))))))
          (lit (+ (* base (* light (stock-tooth material-point))) specular))
-         (mapped-paper (paper-tonemap (* lit 1.16)))
+         ;; Keep scene radiance linear and HDR here.  The universal
+         ;; presentation pass blooms, tone maps, and grades it exactly once.
+         (mapped-paper (* lit 1.08))
          (camera-delta (- world-position (swizzle camera-position :xyz)))
          (distance (sqrt (dot camera-delta camera-delta)))
          (fog (smoothstep 165.0 300.0 distance))
@@ -1280,7 +1327,7 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
          (reticle (max center ring))
          (construction-ink (vec3 0.055 0.16 0.22))
          (blueprint (vec3 0.30 0.90 0.94))
-         (cut-paper (vec3 1.02 0.975 0.86))
+         (cut-paper (vec3 2.10 1.25 0.50))
          (edged (mix paper cut-paper cut-edge))
          (drafted (mix edged construction-ink construction-wire))
          (radiance (mix drafted blueprint reticle)))
@@ -1476,6 +1523,37 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
                             (inspection-parameters :vec4)))))
   (let* ((uv (+ (* ndc 0.5) (vec2 0.5 0.5)))
          (value (sample scene scene-sampler uv))
+         (texel (swizzle inspection-parameters :zw))
+         (near (* texel 3.0))
+         (far (* texel 11.0))
+         ;; One low-cost, deliberately broad gather.  Linear sampling and the
+         ;; two rings make luminous paper bleed across an edge without erasing
+         ;; the edge itself or turning the whole frame into fog.
+         (glow
+           (* 0.125
+              (+
+               (highlight-energy
+                (sample scene scene-sampler
+                        (+ uv (vec2 (swizzle near :x) 0.0))))
+               (highlight-energy
+                (sample scene scene-sampler
+                        (+ uv (vec2 (- (swizzle near :x)) 0.0))))
+               (highlight-energy
+                (sample scene scene-sampler
+                        (+ uv (vec2 0.0 (swizzle near :y)))))
+               (highlight-energy
+                (sample scene scene-sampler
+                        (+ uv (vec2 0.0 (- (swizzle near :y))))))
+               (highlight-energy (sample scene scene-sampler (+ uv far)))
+               (highlight-energy (sample scene scene-sampler (- uv far)))
+               (highlight-energy
+                (sample
+                 scene scene-sampler
+                 (+ uv (vec2 (swizzle far :x) (- (swizzle far :y))))))
+               (highlight-energy
+                (sample
+                 scene scene-sampler
+                 (+ uv (vec2 (- (swizzle far :x)) (swizzle far :y))))))))
          ;; Geometry depth carries the subpixel projection jitter consumed by
          ;; MetalFX; presentation UVs do not.  Sample depth at the same current
          ;; geometry location so the AO does not crawl across a resolved edge.
@@ -1621,6 +1699,12 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
          (shadowed (* (swizzle value :xyz) accessibility))
          (pigmented (* shadowed
                        (mix (vec3 1.0 1.0 1.0)
-                            shadow-pigment pooling))))
+                            shadow-pigment pooling)))
+         (glowing
+           (+ pigmented
+              (* glow
+                 (* (vec3 1.08 0.82 0.58)
+                    #.*highlight-glow-strength*))))
+         (mapped (paper-grade (paper-tonemap (* glowing 1.02)))))
     (set-output color-output
-                (vec4 pigmented 1.0))))
+                (vec4 mapped 1.0))))

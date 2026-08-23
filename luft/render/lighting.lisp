@@ -30,9 +30,9 @@
        *light* 'light
        :name :late-afternoon
        :sun-direction (vec3:vec3-normalize (vec3:make-vec3 -0.58 0.36 0.73))
-       :sun-color #(1.34 0.98 0.66 0.92)
-       :sky-color #(0.48 0.58 0.86 1.0)
-       :ground-color #(0.32 0.23 0.28 1.0)
+       :sun-color #(2.45 1.30 0.48 0.92)
+       :sky-color #(0.33 0.52 1.02 1.0)
+       :ground-color #(0.50 0.24 0.32 1.0)
        :shadow-half-extent 96.0
        :shadow-depth-radius 160.0
        :shadow-base-bias 0.00075

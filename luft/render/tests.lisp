@@ -791,6 +791,8 @@
     (ok (search "barycentric" fragment-msl))
     (ok (search "motion_output" fragment-msl))
     (ok (search "depth2d<float> scene_depth" present-fragment-msl))
+    (ok (search "highlight_energy" present-fragment-msl))
+    (ok (search "paper_grade" present-fragment-msl))
     (ok (search "[[instance_id]]"
                 (luv.msl:msl-document-source
                  (luv.msl:compile-msl lattice-vertex))))
