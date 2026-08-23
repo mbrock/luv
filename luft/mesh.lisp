@@ -381,7 +381,7 @@ star corpus; signal that boundary explicitly instead of silently welding it."
   (%emit-polygon builder points (%patch-normal points outward) stock :face))
 
 (defun %emit-cell-face
-    (builder domain occupancy cell axis-number side stock-function)
+    (builder domain cell axis-number side stock-function)
   (let* ((cell-coordinates (%cell-coordinates cell))
          (tangents (%other-axis-numbers axis-number))
          (plane (* +mesh-cell-size+
@@ -407,12 +407,6 @@ star corpus; signal that boundary explicitly instead of silently welding it."
                           (- +mesh-cell-size+ +mesh-bevel-width+))))
                  (outer (anchor tangent-side)
                    (+ anchor (if (minusp tangent-side) 0 +mesh-cell-size+)))
-                 (outer-plane (tangent tangent-side)
-                   (if (%face-crease-p
-                        domain occupancy cell-coordinates axis-number side
-                        tangent tangent-side)
-                       (- plane (* side +mesh-bevel-width+))
-                       plane))
                  (patch (points)
                    (%emit-face-patch builder points outward stock)))
           ;; The same six-by-six heart exists even when every patch is flat.
@@ -421,24 +415,20 @@ star corpus; signal that boundary explicitly instead of silently welding it."
                  (point (inner u-anchor 1) (inner v-anchor -1) plane)
                  (point (inner u-anchor 1) (inner v-anchor 1) plane)
                  (point (inner u-anchor -1) (inner v-anchor 1) plane)))
-          ;; Four one-by-six flaps.  A crease moves only the flap's outer edge
-          ;; one integer tick inward along the face normal.
+          ;; Four one-by-six flaps, deliberately left coplanar until the local
+          ;; edge situation supplies a signed flat/convex/concave displacement.
           (dolist (u-side '(-1 1))
             (patch
              (list (point (inner u-anchor u-side) (inner v-anchor -1) plane)
-                   (point (outer u-anchor u-side) (inner v-anchor -1)
-                          (outer-plane u u-side))
-                   (point (outer u-anchor u-side) (inner v-anchor 1)
-                          (outer-plane u u-side))
+                   (point (outer u-anchor u-side) (inner v-anchor -1) plane)
+                   (point (outer u-anchor u-side) (inner v-anchor 1) plane)
                    (point (inner u-anchor u-side) (inner v-anchor 1) plane))))
           (dolist (v-side '(-1 1))
             (patch
              (list (point (inner u-anchor -1) (inner v-anchor v-side) plane)
                    (point (inner u-anchor 1) (inner v-anchor v-side) plane)
-                   (point (inner u-anchor 1) (outer v-anchor v-side)
-                          (outer-plane v v-side))
-                   (point (inner u-anchor -1) (outer v-anchor v-side)
-                          (outer-plane v v-side)))))
+                   (point (inner u-anchor 1) (outer v-anchor v-side) plane)
+                   (point (inner u-anchor -1) (outer v-anchor v-side) plane))))
           ;; One half of each one-by-one corner square.  The complementary
           ;; triangle is deliberately absent in this first face-owned spike.
           (dolist (u-side '(-1 1))
@@ -447,9 +437,9 @@ star corpus; signal that boundary explicitly instead of silently welding it."
                (list
                 (point (inner u-anchor u-side) (inner v-anchor v-side) plane)
                 (point (outer u-anchor u-side) (inner v-anchor v-side)
-                       (outer-plane u u-side))
+                       plane)
                 (point (inner u-anchor u-side) (outer v-anchor v-side)
-                       (outer-plane v v-side)))))))))))
+                       plane))))))))))
 
 (defun %collect-edge-keys (solid)
   (let ((keys (make-hash-table :test #'equal)))
@@ -730,7 +720,7 @@ boundary face."
             (when (= 0 (%occupancy-at
                         domain occupancy
                         (%offset-coordinates coordinates axis-number side)))
-              (%emit-cell-face builder domain occupancy cell axis-number side
+              (%emit-cell-face builder domain cell axis-number side
                                stock-function))))))
     ;; Retain the topology diagnostic even though this spike deliberately does
     ;; not publish a separate vertex-junction product.
