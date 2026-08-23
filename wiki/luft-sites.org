@@ -301,9 +301,9 @@ The production measurements show how local the intervention is:
 
 | stair | width 1 sites | width 2 sites | width 4 sites | unmatched before contraction | repairs | triangles |
 |-
-| open | 7070 | 682 | 28068 | 354 | 118 | 311356 |
-| flat border | 7089 | 688 | 28041 | 357 | 119 | 311596 |
-| low wall | 7109 | 686 | 28033 | 354 | 118 | 311678 |
+| open | 7858 | 1002 | 27739 | 459 | 153 | 325512 |
+| flat border | 7877 | 1008 | 27712 | 462 | 154 | 325752 |
+| low wall | 7897 | 1006 | 27704 | 459 | 153 | 325834 |
 
 The flat border merely relocates the mixed fans and reads as a fussy stepped
 edge in the clean plate.  The low wall does something stronger: it keeps the
