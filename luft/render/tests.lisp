@@ -343,6 +343,40 @@
                   (loop for offset from 3 below (length words) by 4
                         collect (ldb (byte 4 16) (aref words offset))))))))
 
+(deftest stone-terrain-chamfers-have-an-earth-set-reading
+  (ok (= luft.render::+stone-stock+
+         (luft.render::scene-chamfer-stock
+          (list luft.render::+stone-stock+))))
+  (ok (= luft.render::+earth-set-stone-stock+
+         (luft.render::scene-chamfer-stock
+          (list luft.render::+stone-stock+ luft.render::+grass-stock+))))
+  (ok (= luft.render::+earth-set-stone-stock+
+         (luft.render::scene-chamfer-stock
+          (list luft.render::+soil-stock+ luft.render::+stone-stock+))))
+  (ok (= luft.render::+soil-stock+
+         (luft.render::scene-chamfer-stock
+          (list luft.render::+grass-stock+ luft.render::+soil-stock+)))))
+
+(deftest earth-set-readings-are-confined-to-stone-terrain-chamfers
+  (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
+         (scene (progn
+                  (luft.render::scene-builder-box builder 4 6 4 6 2 2)
+                  (luft.render::scene-builder-cell
+                   builder 5 5 3 :architecture-p t)
+                  (luft.render::finish-scene-builder builder)))
+         (mesh (render:make-render-mesh scene)))
+    (flet ((stocks (words)
+             (loop for offset from 3 below (length words) by 4
+                   collect (ldb (byte 4 16) (aref words offset)))))
+      (ok (notany (lambda (stock)
+                    (= stock luft.render::+earth-set-stone-stock+))
+                  (stocks (luft:surface-mesh-face-instance-words mesh))))
+      (ok (some (lambda (stock)
+                  (= stock luft.render::+earth-set-stone-stock+))
+                (append
+                 (stocks (luft:surface-mesh-band-instance-words mesh))
+                 (stocks (luft:surface-mesh-fan-instance-words mesh))))))))
+
 (deftest directional-star-ambient-occlusion-measures-the-outward-hemisphere
   (ok (= 0 (luft::%directional-star-ambient-occlusion #b00000000 '(0 0 1))))
   (ok (= 1 (luft::%directional-star-ambient-occlusion #b00010000 '(0 0 1))))

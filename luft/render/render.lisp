@@ -3,6 +3,13 @@
 (defparameter *wireframe* 0.0
   "Global construction-edge strength.  The atelier toggles it between 0 and 1.")
 
+(defconstant +grass-stock+ 0)
+(defconstant +soil-stock+ 1)
+(defconstant +subsoil-stock+ 2)
+(defconstant +stone-stock+ 3)
+(defconstant +earth-set-stone-stock+ 4
+  "Stone where an architectural chamfer bears directly on terrain.")
+
 (defclass scene ()
   ((solid :initarg :solid :reader scene-solid)
    (architecture-cells :initarg :architecture-cells
@@ -275,25 +282,30 @@ same view also retains the truncated wall miter preserved by #DJK8HW."
                 axis :backward))))
 
 (defun scene-face-stock (scene face)
-  "The four-colour paper palette slot for FACE in SCENE."
+  "The paper surface-palette slot for FACE in SCENE."
   (multiple-value-bind (cell axis side)
       (face-solid-cell (scene-solid scene) face)
-    (cond ((gethash cell (scene-architecture-cells scene)) 3)
-          ((not (eq axis :z)) 1)
-          ((eq side :backward) 0)
-          (t 2))))
+    (cond ((gethash cell (scene-architecture-cells scene)) +stone-stock+)
+          ((not (eq axis :z)) +soil-stock+)
+          ((eq side :backward) +grass-stock+)
+          (t +subsoil-stock+))))
 
 (defun scene-chamfer-stock (stocks)
   "Resolve one whole chamfer from its incident face STOCKS.
 
-The paper palette's terrain top is grass (0), terrain side is soil (1), and
-terrain underside is dark soil (2).  A unanimous closure continues that face
-material; a mixed terrain chamfer exposes soil.  Architecture (3) is an
-explicit authored material and wins at a terrain--architecture join."
-  (cond ((member 3 stocks) 3)
+The paper palette's terrain top is grass, terrain side is soil, and terrain
+underside is dark soil.  A unanimous closure continues that face material;
+a mixed terrain chamfer exposes soil.  A mixed stone--terrain chamfer is its
+own earth-set reading rather than letting pristine stone win the whole join."
+  (cond ((and (member +stone-stock+ stocks)
+              (some (lambda (stock)
+                      (<= +grass-stock+ stock +subsoil-stock+))
+                    stocks))
+         +earth-set-stone-stock+)
+        ((member +stone-stock+ stocks) +stone-stock+)
         ((every (lambda (stock) (= stock (first stocks))) (rest stocks))
          (first stocks))
-        (t 1)))
+        (t +soil-stock+)))
 
 (defun default-face-stock (face)
   (mod (+ (luft:site-x face) (* 2 (luft:site-y face))
@@ -1209,7 +1221,7 @@ cohort untouched. No frame can interleave with the owner-thread publication."
 
 (defun encode-renderer-frame
     (renderer encoder surface-texture extent camera-uniform-data
-     &key jitter view construction-p overlay-encoder)
+     &key jitter view player-p construction-p overlay-encoder)
   (ensure-renderer-extent renderer extent)
   (write-buffer (renderer-camera-buffer renderer) camera-uniform-data)
   (let* ((temporal-p (renderer-temporal-p renderer))
@@ -1248,9 +1260,10 @@ cohort untouched. No frame can interleave with the owner-thread publication."
           (draw pass 3 triangle-count))
         (when (plusp quad-count)
           (draw pass 6 quad-count 0 triangle-count))))
-    (set-pipeline pass (renderer-player-sdf-pipeline renderer))
-    (set-bind-group pass 0 (renderer-player-sdf-bind-group renderer))
-    (draw pass 6)
+    (when player-p
+      (set-pipeline pass (renderer-player-sdf-pipeline renderer))
+      (set-bind-group pass 0 (renderer-player-sdf-bind-group renderer))
+      (draw pass 6))
     (when construction-p
       (set-pipeline pass (renderer-lattice-point-pipeline renderer))
       (dolist (key (renderer-slot-order renderer))

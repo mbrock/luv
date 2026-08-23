@@ -381,18 +381,20 @@ the selector is the whole of the difference."
          (view (capture-frame-view (viewer-camera viewer)
                                    width height jitter))
          (previous (or (renderer-previous-view renderer) view))
-         (inspection (and inspector-p (update-viewer-inspection viewer))))
+         (inspection (and inspector-p (update-viewer-inspection viewer)))
+         (player-p (and (typep (viewer-source viewer) 'scene)
+                        (scene-player-p (viewer-source viewer)))))
     (encode-renderer-frame
      renderer encoder surface-view extent
      (camera-uniform-data
       view previous (viewer-inspection-parameters viewer extent)
       (if (and inspection *inspection-ink-p*) 1.0 0.0)
-      (if (and (typep (viewer-source viewer) 'scene)
-               (scene-player-p (viewer-source viewer)))
+      (if player-p
           (/ (renderer-frame-index renderer) 60.0)
           -1.0)
       (viewer-bevel-width viewer))
      :jitter jitter :view view
+     :player-p player-p
      :construction-p (plusp *wireframe*)
      :overlay-encoder
      (and inspector-p

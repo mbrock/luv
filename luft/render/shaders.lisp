@@ -12,7 +12,8 @@
   (defvar *cut-edge-lift-strength* 0.24)
   (defvar *screen-ambient-occlusion-strength* 0.38)
   (defvar *screen-ambient-occlusion-radius* 0.95)
-  (defvar *ambient-pigment-strength* 0.82))
+  (defvar *ambient-pigment-strength* 0.82)
+  (defvar *earth-set-stone-strength* 0.78))
 
 (define-shader-function paper-hash (site)
   (let* ((scattered (fract (* site 0.1031)))
@@ -520,13 +521,42 @@
          (normal (if (< (dot geometric-normal mesh-normal) 0.0)
                      (* geometric-normal -1.0)
                      geometric-normal))
+         (grass-tone (vec3 0.17 0.36 0.11))
+         (soil-tone (vec3 0.42 0.32 0.21))
+         (subsoil-tone (vec3 0.24 0.18 0.13))
+         (stone-tone (vec3 0.53 0.49 0.39))
+         (earth-set-p (if (< (abs (- stock 4.0)) 0.5) 1.0 0.0))
+         ;; Two continuous world-space scales keep the contact stain stable
+         ;; across triangles without repeating one decision per voxel face.
+         ;; AO admits more earth in sheltered joins while upward-facing rolls
+         ;; retain a little more exposed stone.
+         (contact-clump
+           (paper-noise (+ (* world-position 1.7)
+                           (vec3 7.1 19.3 3.7))))
+         (contact-grit
+           (paper-noise (+ (* world-position 8.5)
+                           (vec3 31.7 5.9 13.1))))
+         (earth-weight
+           (* earth-set-p
+              (smoothstep
+               0.38 0.58
+               (+ (* 0.62 contact-clump)
+                  (* 0.22 contact-grit)
+                  (* 0.28 ambient-occlusion)
+                  (* -0.10 (max 0.0 (swizzle normal :z)))
+                  #.*earth-set-stone-strength* -0.68))))
+         (earth-pigment
+           (mix soil-tone subsoil-tone (* 0.30 contact-grit)))
+         (earth-set-tone (mix stone-tone earth-pigment earth-weight))
          (tone (if (< stock 0.5)
-                   (vec3 0.17 0.36 0.11)
+                   grass-tone
                    (if (< stock 1.5)
-                       (vec3 0.42 0.32 0.21)
+                       soil-tone
                        (if (< stock 2.5)
-                           (vec3 0.24 0.18 0.13)
-                           (vec3 0.53 0.49 0.39)))))
+                           subsoil-tone
+                           (if (< stock 3.5)
+                               stone-tone
+                               earth-set-tone)))))
          (cell (floor (- world-position (* normal 0.25))))
          (patch (- (paper-noise (* cell 0.21)) 0.5))
          (jitter (- (paper-hash cell) 0.5))
@@ -595,7 +625,10 @@
            (* #.*cut-edge-lift-strength*
               chamferness
               (- 1.0 (smoothstep 0.20 1.45 boundary-edge-pixels))
-              (+ 0.28 (* 0.72 wrapped))))
+              (+ 0.28 (* 0.72 wrapped))
+              ;; Earth-filled contacts should not receive the pristine white
+              ;; paper rim which makes ordinary cut-stone edges legible.
+              (- 1.0 (* earth-set-p 0.78))))
          (construction-wire
            (* (swizzle render-parameters :y)
               (min 1.0 (+ (* all-wire 0.18) (* boundary-wire 0.82)))))
