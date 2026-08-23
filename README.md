@@ -23,6 +23,9 @@ normally runs inside one of them:
 ./sly stop-playing                      # checkpoint and close the game
 ./sly restart                           # explicit recovery if the image is wrecked
 ./sly list                              # every running Lisp, across worktrees
+./sly systems                           # live ASDF state for this checkout
+./sly system luv/test                   # dependencies, ASDF stamps, pending actions
+./sly stale                             # loaded systems ASDF would update
 ```
 
 `play` starts a Lisp for this checkout when necessary. `eval`, `inspect`,
@@ -34,6 +37,12 @@ command refuses to guess when several Lisps belong to the checkout.
 `./sly --help` is the command map.
 `build/luvcraft` is the shipped/CI executable, not the ordinary development
 entry point.
+
+The ASDF reports distinguish a system that has successfully loaded at some
+point from one that is current now. Freshness is computed by constructing a
+read-only `load-op` plan: an empty plan is current, while a nonempty plan lists
+the compile and load actions ASDF would perform. These commands inspect the
+selected live image; they do not load or rebuild anything.
 
 Install the native and Lisp dependencies once as a durable Nix profile:
 

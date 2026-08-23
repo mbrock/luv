@@ -58,6 +58,9 @@ game normally runs inside one selected image:
 ./sly stop-playing                      # checkpoint and close the game
 ./sly restart                           # explicit recovery if the image is wrecked
 ./sly list                              # all running Lisps across checkouts
+./sly systems                           # registered, loaded, and current project systems
+./sly system luv/test                   # dependencies, ASDF stamps, pending actions
+./sly stale                             # loaded project systems with pending ASDF work
 ```
 
 `play` starts a Lisp for this checkout when necessary. `./sly eval`, `inspect`,
@@ -146,7 +149,17 @@ Useful starting points while the game is running:
 ./sly edit render-luvcraft-frame --package LUVCRAFT
 ./sly xref uses render-luvcraft-frame --package LUVCRAFT
 ./sly describe-system luv
+./sly systems
+./sly system luv/test
+./sly stale
 ```
+
+The ASDF commands inspect the selected image without performing a load.
+`systems` calls a system CURRENT only when it was successfully loaded and a
+fresh read-only ASDF `load-op` plan is empty. DIRTY means that plan contains
+actions; UNLOADED means ASDF has registered the definition but has not recorded
+a successful load in this image. `system NAME` also shows direct dependencies,
+ASDF's recorded operation timestamps, and the concrete actions ASDF would take.
 
 Use lower-level `open-canvas`, device, and context forms only when the task is
 specifically below luvcraft; they create another window and another ownership

@@ -1463,6 +1463,7 @@ shows them.~%" failure-count))))))
   (format stream "standalone build/luvcraft process.~%~%")
   (format stream "Usage: ./sly play [luvcraft|luft] [--fullscreen]|stop-playing|status|restart~%")
   (format stream "       ./sly list [--all]|start [--name NAME]|stop|log~%")
+  (format stream "       ./sly systems [--all]|system NAME|stale~%")
   (format stream "       ./sly screenshot PNG~%")
   (format stream "       ./sly eval CODE [--package PACKAGE]~%")
   (format stream "       ./sly do CODE [--package PACKAGE]   (synonym for eval)~%")
@@ -1923,6 +1924,44 @@ shows them.~%" failure-count))))))
      (second arguments))
     (t (error "start accepts only --name NAME"))))
 
+(defun run-captured-report (form)
+  (format *error-output* "Inspecting live ASDF state...~%")
+  (force-output *error-output*)
+  (ensure-server)
+  (with-verified-slynk-connection (stream)
+    (let ((output (evaluate-captured-output-on stream form "CL-USER")))
+      (write-string output)
+      (unless (or (zerop (length output))
+                  (char= (char output (1- (length output))) #\Newline))
+        (terpri))
+      (force-output))))
+
+(defun run-systems (arguments)
+  (cond
+    ((null arguments)
+     (run-captured-report
+      (format nil "(luv.sly.asdf:print-systems :root (pathname ~S))"
+              (namestring *project-root*))))
+    ((equal arguments '("--all"))
+     (run-captured-report
+      (format nil "(luv.sly.asdf:print-systems :root (pathname ~S) :all t)"
+              (namestring *project-root*))))
+    (t (error "systems accepts only --all"))))
+
+(defun run-system-status (arguments)
+  (unless (= (length arguments) 1)
+    (error "system requires exactly one ASDF system name"))
+  (run-captured-report
+   (format nil "(luv.sly.asdf:print-system ~S :root (pathname ~S))"
+           (first arguments) (namestring *project-root*))))
+
+(defun run-stale-systems (arguments)
+  (when arguments
+    (error "stale does not accept arguments"))
+  (run-captured-report
+   (format nil "(luv.sly.asdf:print-stale-systems :root (pathname ~S))"
+           (namestring *project-root*))))
+
 (defun main (arguments)
   (unless arguments
     (usage *error-output*)
@@ -1951,6 +1990,15 @@ shows them.~%" failure-count))))))
        (when arguments
          (error "status does not accept arguments"))
        (server-status)
+       0)
+      ((string= command "systems")
+       (run-systems arguments)
+       0)
+      ((string= command "system")
+       (run-system-status arguments)
+       0)
+      ((string= command "stale")
+       (run-stale-systems arguments)
        0)
       ((string= command "restart")
        (when arguments

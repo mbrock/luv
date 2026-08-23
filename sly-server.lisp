@@ -52,6 +52,7 @@
   (asdf:load-asd (merge-pathnames #P"mqtt.asd" project-root))
   (asdf:load-asd (merge-pathnames #P"openai.asd" project-root))
   (asdf:load-asd (merge-pathnames #P"chrome-cdp.asd" project-root))
+  (load (merge-pathnames #P"scripts/sly-asdf-status.lisp" project-root))
   (load (merge-pathnames #P"luvcraft/build-progress.lisp" project-root))
   (let ((systems '(:luv :luvcraft :luvcraft/agent :luvcraft/birthday
                    :luv-wiki :luft/render)))
