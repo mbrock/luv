@@ -1261,11 +1261,23 @@ that he is standing on something."
                   (normalize (- proxy-world-position
                                 (swizzle camera-position :xyz)))))
          (origin proxy-world-position)
-         (marched
-           (counted-fold (march 58.0 ray-distance 0.002)
-             (player-march-step ray-distance origin ray center
-                                gait direction (* radius 2.0))))
-         (travel (abs marched))
+         ;; The hermit's field is rotated into his live walking heading.  The
+         ;; branch study's shortcut marched in world axes, which diverged as
+         ;; soon as a player turned and left a transparent robe behind.
+         (travel
+           (counted-fold (march 58.0 ray-distance 0.0)
+             (let* ((world-point (+ origin (* ray ray-distance)))
+                    (relative (- world-point center))
+                    (relative-xy (swizzle relative :xy))
+                    (local (vec3 (dot relative-xy player-right)
+                                 (dot relative-xy heading)
+                                 (+ (swizzle relative :z) 1.48)))
+                    (distance (player-distance local gait direction)))
+               (if (< distance 0.0025)
+                   ray-distance
+                   (if (> ray-distance (* radius 2.0))
+                       ray-distance
+                       (+ ray-distance (max (* distance 0.82) 0.0025)))))))
          (world-point (+ origin (* ray travel)))
          (relative (- world-point center))
          (relative-xy (swizzle relative :xy))
