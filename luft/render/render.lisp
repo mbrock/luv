@@ -1,6 +1,6 @@
 (in-package #:luft.render)
 
-(defparameter *wireframe* 1.0
+(defparameter *wireframe* 0.0
   "Global construction-edge strength.  The atelier toggles it between 0 and 1.")
 
 (defclass scene ()

@@ -30,6 +30,9 @@
   (let ((viewer (clim:make-application-frame 'render:viewer)))
     (ok (typep viewer 'clim:application-frame))
     (ok (null (climi::frame-process viewer)))
+    (ok (not (luft.render::viewer-inspector-p viewer)))
+    (ok (luft.render::viewer-inspector-p
+         (clim:make-application-frame 'render:viewer :inspector-p t)))
     (ok (null (luft.render::viewer-key-command viewer (key-press :w))))
     (ok (equal '(luft.render::com-release-pointer)
                (luft.render::viewer-key-command

@@ -366,7 +366,8 @@ the selector is the whole of the difference."
 (declaim (ftype function viewer-surface-view))
 
 (defun encode-viewer-frame
-    (viewer encoder surface-texture extent &key (inspector-p t))
+    (viewer encoder surface-texture extent
+     &key (inspector-p (viewer-inspector-p viewer)))
   (let* ((renderer (viewer-renderer viewer))
          (surface-view (viewer-surface-view viewer surface-texture))
          (width (first extent))
@@ -493,7 +494,8 @@ the selector is the whole of the difference."
              (error () "covered junction · next spike")))))))
 
 (defun refresh-viewer-inspector (viewer)
-  (let ((pane (ignore-errors (clim:find-pane-named viewer 'inspector))))
+  (let ((pane (and (viewer-inspector-p viewer)
+                   (ignore-errors (clim:find-pane-named viewer 'inspector)))))
     (when pane
       (let ((mirror (clim:sheet-direct-mirror
                      (clim:frame-top-level-sheet viewer))))
@@ -545,6 +547,8 @@ the selector is the whole of the difference."
    (pointer-x :initform nil :accessor viewer-pointer-x)
    (pointer-y :initform nil :accessor viewer-pointer-y)
    (inspection :initform nil :accessor viewer-inspection)
+   (inspector-p :initarg :inspector-p :initform nil
+                :accessor viewer-inspector-p)
    (inspector-mirror :initform nil :accessor viewer-inspector-mirror)
    (inspector-compositor :initform nil
                          :accessor viewer-inspector-compositor)
@@ -886,6 +890,7 @@ the selector is the whole of the difference."
                        (title "LUFT miter-study spike")
                        (width 1100) (height 800)
                        fullscreen-p
+                       (inspector-p nil)
                        (frames-per-second 60)
                        (provider *gpu-provider*))
   "Open the indexed-instanced LUFT renderer as a McCLIM atelier."
@@ -931,18 +936,20 @@ the selector is the whole of the difference."
                              :canvas canvas :context context
                              :device device* :renderer renderer*
                              :camera camera :source solid
-                             :bevel-width bevel-width))))
+                             :bevel-width bevel-width
+                             :inspector-p inspector-p))))
            (setf (canvas-event-handler canvas) viewer)
-           (refresh-viewer-inspector viewer)
-           (let* ((mirror (viewer-inspector-mirror viewer))
-                  (compositor
-                    (make-instance 'mcluv:direct-gpu-mirror-compositor
-                                   :mirror mirror)))
-             (setf (mcluv:mirror-compositor mirror) compositor
-                   (viewer-inspector-compositor viewer) compositor)
-             ;; Realization painted before the compositor existed; publish
-             ;; only the inspector pane for direct final-pass replay.
-             (refresh-viewer-inspector viewer))
+           (when inspector-p
+             (refresh-viewer-inspector viewer)
+             (let* ((mirror (viewer-inspector-mirror viewer))
+                    (compositor
+                      (make-instance 'mcluv:direct-gpu-mirror-compositor
+                                     :mirror mirror)))
+               (setf (mcluv:mirror-compositor mirror) compositor
+                     (viewer-inspector-compositor viewer) compositor)
+               ;; Realization painted before the compositor existed; publish
+               ;; only the inspector pane for direct final-pass replay.
+               (refresh-viewer-inspector viewer)))
            (request-canvas-frame
             canvas (lambda (timestamp) (render-viewer-frame viewer timestamp)))
            (show-canvas canvas)
@@ -961,11 +968,13 @@ the selector is the whole of the difference."
         (when device (ignore-errors (destroy device)))))))
 
 (defun capture-viewer-frame
-    (pathname &optional (viewer *viewer*) &key (inspector-p t))
+    (pathname &optional (viewer *viewer*)
+     &key (inspector-p (viewer-inspector-p viewer)))
   "Render one VIEWER frame on its canvas thread and write it to PATHNAME.
 
-INSPECTOR-P is true by default.  A source-defined evidence capture may make it
-false when the subject is the geometry rather than the atelier UI."
+INSPECTOR-P defaults to VIEWER's inspector setting.  A source-defined
+evidence capture may override it when the subject is the geometry rather than
+the atelier UI."
   (let* ((context (viewer-context viewer))
          (extent (canvas-extent context))
          (pathname (merge-pathnames pathname))
