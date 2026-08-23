@@ -1109,17 +1109,18 @@ included, is a single coverage computation, so nothing in it can seam."
   (declare (ignore offsets))
   command)
 
-(luv:zdefun (compose-gpu-mirror-media :zone :mcluv/compose) (mirror)
-  "Join MIRROR's current pane-local drawing streams in painter order."
-  (let* ((sheet (mirror-sheet mirror))
-         (media
+(luv:zdefun (compose-gpu-mirror-media :zone :mcluv/compose)
+    (mirror &optional (source-sheet (mirror-sheet mirror)))
+  "Join SOURCE-SHEET's drawing streams into MIRROR's presentation buffer."
+  (let* ((media
            (remove-duplicates
             (remove-if-not
              (lambda (medium) (typep medium 'luv-gpu-medium))
              (mapcar #'gpu-sheet-presentation-medium
-                     (gpu-sheet-paint-order sheet)))
+                     (gpu-sheet-paint-order source-sheet)))
             :test #'eq))
-         (target-medium (gpu-sheet-presentation-medium sheet))
+         (target-medium
+           (gpu-sheet-presentation-medium (mirror-sheet mirror)))
          (snapshots
            (mapcar
             (lambda (medium)
@@ -1168,6 +1169,37 @@ included, is a single coverage computation, so nothing in it can seam."
               do (vector-push-extend
                   value (gpu-medium-image-vertices target-medium))))
       target-medium))
+
+(defun present-gpu-mirror-sheet (mirror sheet)
+  "Publish SHEET's retained semantic stream through embedded GPU MIRROR."
+  (check-type mirror luv-gpu-mirror)
+  (compose-gpu-mirror-media mirror sheet)
+  (present-mirror mirror)
+  mirror)
+
+(defun call-with-gpu-mirror-sheet-repaint (mirror sheet function)
+  "Replace SHEET's retained streams with one redraw, then publish MIRROR."
+  (check-type mirror luv-gpu-mirror)
+  (let ((media
+          (remove-duplicates
+           (remove-if-not
+            (lambda (medium) (typep medium 'luv-gpu-medium))
+            (mapcar #'gpu-sheet-presentation-medium
+                    (gpu-sheet-paint-order sheet)))
+           :test #'eq)))
+    (dolist (medium media)
+      (setf (fill-pointer (gpu-medium-vertices medium)) 0
+            (fill-pointer (gpu-medium-analytic-vertices medium)) 0
+            (fill-pointer (gpu-medium-relief-vertices medium)) 0
+            (fill-pointer (gpu-medium-gradient-vertices medium)) 0
+            (fill-pointer (gpu-medium-image-vertices medium)) 0
+            (fill-pointer (gpu-medium-commands medium)) 0)
+      (incf (gpu-medium-buffering-depth medium)))
+    (unwind-protect
+         (funcall function)
+      (dolist (medium media)
+        (decf (gpu-medium-buffering-depth medium))))
+    (present-gpu-mirror-sheet mirror sheet)))
 
 (luv:zdefun (repaint-gpu-mirror :zone :mcluv/repaint)
     (mirror &key (present-p t))
@@ -2725,7 +2757,8 @@ solid ink."
 (defmethod present-mirror ((mirror luv-gpu-mirror))
   (let ((target (mirror-target mirror))
         (medium (sheet-medium (mirror-sheet mirror))))
-    (when (and (eq :open (luv:canvas-state target))
+    (when (and (or (mirror-embedded-p mirror)
+                   (eq :open (luv:canvas-state target)))
                (or (mirror-embedded-p mirror)
                    (plusp (length (gpu-medium-commands medium)))))
       (if (mirror-embedded-p mirror)

@@ -40,6 +40,8 @@
            #:port-mirrors
            #:present-mirror
            #:repaint-gpu-mirror
+           #:present-gpu-mirror-sheet
+           #:call-with-gpu-mirror-sheet-repaint
            ;; Portable luv key events as ordinary McCLIM gestures and
            ;; commands. Applications keep their command tables and dispatch
            ;; policy; this package owns only the event-vocabulary bridge.

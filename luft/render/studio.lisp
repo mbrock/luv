@@ -495,14 +495,16 @@ the selector is the whole of the difference."
 (defun refresh-viewer-inspector (viewer)
   (let ((pane (ignore-errors (clim:find-pane-named viewer 'inspector))))
     (when pane
-      (clim:redisplay-frame-pane viewer pane :force-p t)
-      ;; Application panes may follow their output cursor even without visible
-      ;; scroll bars; this inspector is a fixed HUD, so pin its origin.
-      (clim:scroll-extent pane 0 0)
       (let ((mirror (clim:sheet-direct-mirror
                      (clim:frame-top-level-sheet viewer))))
         (setf (viewer-inspector-mirror viewer) mirror)
-        (mcluv:present-mirror mirror))))
+        (mcluv:call-with-gpu-mirror-sheet-repaint
+         mirror pane
+         (lambda ()
+           (clim:redisplay-frame-pane viewer pane :force-p t)
+           ;; Application panes may follow their output cursor even without
+           ;; visible scroll bars; this fixed HUD stays pinned at its origin.
+           (clim:scroll-extent pane 0 0))))))
   viewer)
 
 (defun viewer-inspector-state (viewer extent)
@@ -938,9 +940,9 @@ the selector is the whole of the difference."
                                    :mirror mirror)))
              (setf (mcluv:mirror-compositor mirror) compositor
                    (viewer-inspector-compositor viewer) compositor)
-             ;; Realization painted before the compositor existed; repaint so
-             ;; its semantic stream is prepared for direct final-pass replay.
-             (mcluv:repaint-gpu-mirror mirror))
+             ;; Realization painted before the compositor existed; publish
+             ;; only the inspector pane for direct final-pass replay.
+             (refresh-viewer-inspector viewer))
            (request-canvas-frame
             canvas (lambda (timestamp) (render-viewer-frame viewer timestamp)))
            (show-canvas canvas)
