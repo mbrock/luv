@@ -1,6 +1,8 @@
 ;;;; Standalone Slynk server bootstrap for ./sly.
 
 (require :asdf)
+(require :sb-concurrency)
+(require :sb-posix)
 
 (defparameter cl-user::*luv-project-root* nil)
 
@@ -41,20 +43,28 @@
     ;; The server's outer log is relayed by ./sly while this boot runs, so keep
     ;; narration there. Per-file compiler/toolchain chatter still gets the
     ;; build progress module's focused logs.
-    (luv-build:start project-root :system systems :invocation "sly boot"
-                     :redirect-output-p nil)
-    (handler-case
-        (progn
-          (dolist (system systems)
-            (asdf:load-system system))
-          (luv-build:finish :done))
-      (luv-build:deadline-exceeded ()
-        (luv-build:finish :deadline)
-        (sb-ext:exit :code 1 :abort t))
-      (error (condition)
-        (luv-build:failed (princ-to-string condition))
-        (luv-build:finish :error)
-        (error condition))))
+    (labels ((build-call (name &rest arguments)
+               (apply (symbol-function (find-symbol name "LUV-BUILD"))
+                      arguments))
+             (deadline-exceeded-p (condition)
+               (typep condition
+                      (find-symbol "DEADLINE-EXCEEDED" "LUV-BUILD"))))
+      (build-call "START" project-root :system systems :invocation "sly boot"
+                  :redirect-output-p nil)
+      (handler-case
+          (progn
+            (dolist (system systems)
+              (asdf:load-system system))
+            (build-call "FINISH" :done))
+        (error (condition)
+          (if (deadline-exceeded-p condition)
+              (progn
+                (build-call "FINISH" :deadline)
+                (sb-ext:exit :code 1 :abort t))
+              (progn
+                (build-call "FAILED" (princ-to-string condition))
+                (build-call "FINISH" :error)
+                (error condition)))))))
   (format t "~&Starting luv Slynk on 127.0.0.1:~D.~%" port)
   (funcall (find-symbol "CREATE-SERVER" "SLYNK")
            :interface "127.0.0.1"
