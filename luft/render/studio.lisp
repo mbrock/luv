@@ -60,17 +60,22 @@ at the atelier boundary where a person has selected one site."))
                              :field-of-view field-of-view))
 
 (defun reset-viewer-camera (&optional (viewer *viewer*))
-  "Return VIEWER to the composed isometric sanctuary view."
+  "Return VIEWER to the sanctuary spawn and its following isometric view."
   (when viewer
-    (let ((camera (viewer-camera viewer)))
-      (setf (camera-position camera)
-            (vec3:make-vec3 (+ 70.0 +sanctuary-origin-x+)
-                            (+ -18.0 +sanctuary-origin-y+) 50.0)
-            (camera-yaw camera) 2.2455373
+    (let ((camera (viewer-camera viewer))
+          (player (viewer-player viewer)))
+      (setf (camera-yaw camera) 2.2455373
             (camera-pitch camera) -0.5165006
             (camera-field-of-view camera) 0.9599311
             *projection* :isometric
-            *isometric-height* 64.0)
+            *isometric-height* (if player 22.0 64.0))
+      (if player
+          (let ((spawn (make-walking-player)))
+            (setf (viewer-player viewer) spawn)
+            (follow-walking-player camera spawn))
+          (setf (camera-position camera)
+                (vec3:make-vec3 (+ 70.0 +sanctuary-origin-x+)
+                                (+ -18.0 +sanctuary-origin-y+) 50.0)))
       (when (viewer-renderer viewer)
         (setf (renderer-history-valid-p (viewer-renderer viewer)) nil))))
   viewer)
@@ -94,13 +99,6 @@ at the atelier boundary where a person has selected one site."))
              (incf y (* (vec3:vec3-y direction) scale))
              (incf z (* (vec3:vec3-z direction) scale)))
     (vec3:make-vec3 x y z)))
-
-(defgeneric inspection-source-solid (source)
-  (:documentation "Return SOURCE's packed solid chain for pointer queries."))
-
-(defmethod inspection-source-solid ((source t)) source)
-
-(defmethod inspection-source-solid ((source scene)) (scene-solid source))
 
 (defgeneric inspection-face-stock (source face)
   (:documentation "Return the atelier stock at FACE in SOURCE."))
@@ -273,38 +271,41 @@ the selector is the whole of the difference."
          :divisor divisor :jitter jitter)))))
 
 (defun camera-uniform-data
-    (view previous inspection-parameters ink-strength character-time
+    (view previous inspection-parameters ink-strength player
      &optional (bevel-width luft:+mesh-bevel-width+))
   (flet ((lane (vector fourth)
            (list (vec3:vec3-x vector) (vec3:vec3-y vector)
                  (vec3:vec3-z vector) fourth)))
-    (make-array
-     92 :element-type 'single-float
-     :initial-contents
-     (mapcar
-      (lambda (value) (coerce value 'single-float))
-      (append (lane (frame-view-position view) 0.0)
-              (lane (frame-view-right view) 0.0)
-              (lane (frame-view-up view) 0.0)
-              (lane (frame-view-forward view) 0.0)
-              (coerce (frame-view-projection view) 'list)
-              (list (/ bevel-width luft:+mesh-cell-size+)
-                    *wireframe*
-                    (frame-view-divisor view) ink-strength)
-              (lane (frame-view-position previous) 0.0)
-              (lane (frame-view-right previous) 0.0)
-              (lane (frame-view-up previous) 0.0)
-              (lane (frame-view-forward previous) 0.0)
-              (coerce (frame-view-projection previous) 'list)
-              (list (aref (frame-view-jitter view) 0)
-                    (aref (frame-view-jitter view) 1)
-                    (frame-view-divisor previous) 0.0)
-              (coerce inspection-parameters 'list)
-              ;; Bridge centre, body-sphere centre height, animation clock.
-              (list (+ 29.5 +sanctuary-origin-x+)
-                    (+ 24.5 +sanctuary-origin-y+)
-                    15.48 character-time)
-              (light-uniform-data *light* (frame-view-position view)))))))
+    (multiple-value-bind (character previous-character character-direction)
+        (if player
+            (walking-player-render-lanes player)
+            (values '(0.0 0.0 0.0 0.0) '(0.0 0.0 0.0 0.0)
+                    '(0.0 1.0 0.0 1.0)))
+      (make-array
+       100 :element-type 'single-float
+       :initial-contents
+       (mapcar
+        (lambda (value) (coerce value 'single-float))
+        (append (lane (frame-view-position view) 0.0)
+                (lane (frame-view-right view) 0.0)
+                (lane (frame-view-up view) 0.0)
+                (lane (frame-view-forward view) 0.0)
+                (coerce (frame-view-projection view) 'list)
+                (list (/ bevel-width luft:+mesh-cell-size+)
+                      *wireframe*
+                      (frame-view-divisor view) ink-strength)
+                (lane (frame-view-position previous) 0.0)
+                (lane (frame-view-right previous) 0.0)
+                (lane (frame-view-up previous) 0.0)
+                (lane (frame-view-forward previous) 0.0)
+                (coerce (frame-view-projection previous) 'list)
+                (list (aref (frame-view-jitter view) 0)
+                      (aref (frame-view-jitter view) 1)
+                      (frame-view-divisor previous) 0.0)
+                (coerce inspection-parameters 'list)
+                character
+                (light-uniform-data *light* (frame-view-position view))
+                previous-character character-direction))))))
 
 (defun viewer-logical-extent (viewer)
   (let ((canvas (viewer-canvas viewer)))
@@ -389,16 +390,15 @@ the selector is the whole of the difference."
                                    width height jitter))
          (previous (or (renderer-previous-view renderer) view))
          (inspection (and inspector-p (update-viewer-inspection viewer)))
-         (player-p (and (typep (viewer-source viewer) 'scene)
+         (player (viewer-player viewer))
+         (player-p (and player (typep (viewer-source viewer) 'scene)
                         (scene-player-p (viewer-source viewer)))))
     (encode-renderer-frame
      renderer encoder surface-view extent
      (camera-uniform-data
       view previous (viewer-inspection-parameters viewer extent)
       (if (and inspection *inspection-ink-p*) 1.0 0.0)
-      (if player-p
-          (/ (renderer-frame-index renderer) 60.0)
-          -1.0)
+      (and player-p player)
       (viewer-bevel-width viewer))
      :jitter jitter :view view
      :player-p player-p
@@ -562,6 +562,8 @@ the selector is the whole of the difference."
    (bevel-width :initarg :bevel-width :initform 2
                 :accessor viewer-bevel-width)
    (camera :initarg :camera :initform (make-fly-camera) :reader viewer-camera)
+   (player :initarg :player :initform (make-walking-player)
+           :accessor viewer-player)
    (surface-views :initform (make-hash-table :test #'eql)
                   :reader viewer-surface-views)
    (controls :initform (make-hash-table :test #'eq)
@@ -650,40 +652,28 @@ the selector is the whole of the difference."
          (camera (viewer-camera viewer))
          (step (* dt (viewer-speed viewer))))
     (setf (viewer-last-timestamp viewer) timestamp)
-    (multiple-value-bind (right up forward) (camera-basis camera)
-      (declare (ignore up))
-      (flet ((move (direction amount)
-               (let ((position (camera-position camera)))
-                 (setf (camera-position camera)
-                       (vec3:make-vec3
-                        (+ (vec3:vec3-x position)
-                           (* amount (vec3:vec3-x direction)))
-                        (+ (vec3:vec3-y position)
-                           (* amount (vec3:vec3-y direction)))
-                        (+ (vec3:vec3-z position)
-                           (* amount (vec3:vec3-z direction))))))))
-        ;; A dolly along the viewing ray is invisible in an orthographic
-        ;; projection.  There W/S walk across the XY ground in the camera's
-        ;; yaw direction; the wheel remains the independent scale control.
-        (if (eq *projection* :isometric)
-            (let ((ground-forward
-                    (vec3:make-vec3 (cos (camera-yaw camera))
-                                    (sin (camera-yaw camera)) 0.0)))
-              (when (viewer-control-active-p viewer :forward)
-                (move ground-forward step))
-              (when (viewer-control-active-p viewer :backward)
-                (move ground-forward (- step))))
-            (progn
-              (when (viewer-control-active-p viewer :forward)
-                (move forward step))
-              (when (viewer-control-active-p viewer :backward)
-                (move forward (- step)))))
-        (when (viewer-control-active-p viewer :right) (move right step))
-        (when (viewer-control-active-p viewer :left) (move right (- step)))
-        (when (viewer-control-active-p viewer :up)
-          (move (vec3:make-vec3 0 0 1) step))
-        (when (viewer-control-active-p viewer :down)
-          (move (vec3:make-vec3 0 0 1) (- step)))))))
+    (if (viewer-player viewer)
+        (let ((forward (- (if (viewer-control-active-p viewer :forward) 1 0)
+                          (if (viewer-control-active-p viewer :backward) 1 0)))
+              (right (- (if (viewer-control-active-p viewer :right) 1 0)
+                        (if (viewer-control-active-p viewer :left) 1 0))))
+          (advance-walking-player (viewer-player viewer)
+                                  (viewer-source viewer) camera
+                                  forward right dt)
+          (follow-walking-player camera (viewer-player viewer)))
+        (multiple-value-bind (right up forward) (camera-basis camera)
+          (flet ((move (direction amount)
+                   (let ((position (camera-position camera)))
+                     (setf (camera-position camera)
+                           (add-scaled-directions position direction amount)))))
+            (when (viewer-control-active-p viewer :forward)
+              (move forward step))
+            (when (viewer-control-active-p viewer :backward)
+              (move forward (- step)))
+            (when (viewer-control-active-p viewer :right) (move right step))
+            (when (viewer-control-active-p viewer :left) (move right (- step)))
+            (when (viewer-control-active-p viewer :up) (move up step))
+            (when (viewer-control-active-p viewer :down) (move up (- step))))))))
 
 (defun advance-viewer-streaming (viewer)
   "Drain completed meshes and admit the next mock residency change."
@@ -801,10 +791,8 @@ the selector is the whole of the difference."
   '((:w :forward) (:up :forward)
     (:s :backward) (:down :backward)
     (:a :left) (:left :left)
-    (:d :right) (:right :right)
-    (:space :up)
-    (:shift-left :down) (:shift-right :down))
-  "Physical keys whose press and release urge the inspection camera.")
+    (:d :right) (:right :right))
+  "Physical keys whose press and release urge the active controller.")
 
 (defun install-viewer-movement-commands ()
   "Install the atelier's held controls into their press and release tables."
@@ -929,7 +917,7 @@ the selector is the whole of the difference."
                        (solid (make-mountain-sanctuary-scene))
                        (bevel-width 2)
                        (camera (make-fly-camera))
-                       (title "LUFT mountain sanctuary")
+                       (title "LUFT — walk the mountain · WASD · mouse orbit")
                        (width 1100) (height 800)
                        fullscreen-p
                        (inspector-p nil)
@@ -983,6 +971,9 @@ the selector is the whole of the difference."
                              :device device* :renderer renderer*
                              :production-system production-system
                              :camera camera :source solid
+                             :player (and (typep solid 'scene)
+                                          (scene-player-p solid)
+                                          (make-walking-player))
                              :bevel-width bevel-width
                              :inspector-p inspector-p))))
            (unless (typep solid 'streaming-scene)
@@ -1091,6 +1082,10 @@ the atelier UI."
                     (setf (viewer-renderer viewer) renderer
                           (viewer-production-system viewer) production-system
                           (viewer-source viewer) solid
+                          (viewer-player viewer)
+                          (and (typep solid 'scene) (scene-player-p solid)
+                               (or (viewer-player viewer)
+                                   (make-walking-player)))
                           (viewer-bevel-width viewer) bevel-width
                           (viewer-inspection viewer) nil
                           candidate-renderer nil))

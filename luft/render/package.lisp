@@ -39,6 +39,10 @@
            #:fly-camera
            #:make-fly-camera
            #:camera-position
+           #:walking-player
+           #:make-walking-player
+           #:walking-player-position
+           #:viewer-player
            ;; Retained across the live refoundation package reload.
            #:inspection-camera
            #:camera-x

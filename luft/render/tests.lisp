@@ -136,20 +136,70 @@
 (deftest orthographic-walk-moves-on-the-ground-without-zooming
   (let* ((viewer (clim:make-application-frame 'render:viewer))
          (camera (render:viewer-camera viewer))
-         (before (render:camera-position camera))
+         (player (render:viewer-player viewer))
+         (before-player-x
+           (luv.arithmetic.lisp.vec3:vec3-x
+            (render:walking-player-position player)))
+         (before-player-y
+           (luv.arithmetic.lisp.vec3:vec3-y
+            (render:walking-player-position player)))
          (render:*projection* :isometric)
          (render:*isometric-height* 18.0))
-    (setf (luft.render::viewer-last-timestamp viewer) 1.0)
-    (luft.render::set-viewer-control viewer :forward t)
-    (luft.render::advance-viewer-camera viewer 1.1)
-    (let ((after (render:camera-position camera)))
-      (ok (or (/= (luv.arithmetic.lisp.vec3:vec3-x before)
-                  (luv.arithmetic.lisp.vec3:vec3-x after))
-              (/= (luv.arithmetic.lisp.vec3:vec3-y before)
-                  (luv.arithmetic.lisp.vec3:vec3-y after))))
-      (ok (= (luv.arithmetic.lisp.vec3:vec3-z before)
-             (luv.arithmetic.lisp.vec3:vec3-z after)))
-      (ok (= 18.0 render:*isometric-height*)))))
+    (luft.render::advance-viewer-camera viewer 1.0)
+    (let ((before-camera-z
+            (luv.arithmetic.lisp.vec3:vec3-z
+             (render:camera-position camera))))
+      (luft.render::set-viewer-control viewer :forward t)
+      (luft.render::advance-viewer-camera viewer 1.1)
+      (let ((after (render:walking-player-position player)))
+        (ok (or (/= before-player-x
+                    (luv.arithmetic.lisp.vec3:vec3-x after))
+                (/= before-player-y
+                    (luv.arithmetic.lisp.vec3:vec3-y after))))
+        ;; A same-height walking step translates the following camera without
+        ;; changing its orbit height.
+        (ok (= before-camera-z
+               (luv.arithmetic.lisp.vec3:vec3-z
+                (render:camera-position camera))))
+        (ok (= 18.0 render:*isometric-height*))))))
+
+(deftest walking-player-climbs-one-step-but-not-a-character-high-wall
+  (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
+         (camera (render:make-fly-camera
+                  :position
+                  (luv.arithmetic.lisp.vec3:make-vec3 0.0 0.0 0.0)
+                  :yaw 0.0 :pitch -0.5))
+         (player
+           (render:make-walking-player
+            :position (luv.arithmetic.lisp.vec3:make-vec3 2.5 2.5 1.0))))
+    (luft.render::scene-builder-box builder 0 7 0 5 0 0)
+    (luft.render::scene-builder-cell builder 3 2 1)
+    (let ((scene (luft.render::finish-scene-builder builder :player-p t)))
+      (luft.render::advance-walking-player player scene camera 1 0 0.2)
+      (ok (= 2.0 (luv.arithmetic.lisp.vec3:vec3-z
+                  (render:walking-player-position player))))
+      (ok (> (luft.render::walking-player-gait player) 0.0))
+      (loop repeat 60 do
+        (luft.render::advance-walking-player
+         player scene camera 0 0 (/ 1.0 60.0)))
+      (let ((step-coordinate
+              (/ (luft.render::walking-player-gait player) pi)))
+        (ok (< (abs (- step-coordinate (round step-coordinate))) 1e-5)))
+      ;; The next column is filled through the character's head.  Axis
+      ;; separation leaves the player at the near edge instead of climbing or
+      ;; teleporting to its remote roof.
+      (loop for z from 1 to 4 do
+        (luft.render::scene-builder-cell builder 4 2 z))
+      (let* ((blocked-scene
+               (luft.render::finish-scene-builder builder :player-p t))
+             (before-x
+               (luv.arithmetic.lisp.vec3:vec3-x
+                (render:walking-player-position player))))
+        (luft.render::advance-walking-player
+         player blocked-scene camera 1 0 0.2)
+        (ok (= before-x
+               (luv.arithmetic.lisp.vec3:vec3-x
+                (render:walking-player-position player))))))))
 
 (deftest the-spike-scene-is-three-site-instance-streams
   (let* ((mesh (render:make-render-mesh
@@ -923,14 +973,15 @@
     (ok (luv.spir-v:compile-shader-specification present-fragment))))
 
 (deftest the-camera-block-packs-both-projections
-  (let ((camera (render:make-fly-camera)))
+  (let ((camera (render:make-fly-camera))
+        (player (render:make-walking-player)))
     (flet ((lane (projection)
              (let ((render:*projection* projection))
                (let ((view
                        (luft.render::capture-frame-view
                         camera 1100 800 #(0.0 0.0))))
                  (luft.render::camera-uniform-data
-                  view view #(0.5 0.5 0.001 0.001) 1.0 7.25)))))
+                  view view #(0.5 0.5 0.001 0.001) 1.0 player)))))
       (let ((perspective (lane :perspective))
             (isometric (lane :isometric))
             (eighth
@@ -939,9 +990,9 @@
                         (luft.render::capture-frame-view
                          camera 1100 800 #(0.0 0.0))))
                   (luft.render::camera-uniform-data
-                   view view #(0.5 0.5 0.001 0.001) 1.0 7.25 1)))))
-        (ok (= 92 (length perspective)))
-        (ok (typep perspective '(simple-array single-float (92))))
+                   view view #(0.5 0.5 0.001 0.001) 1.0 player 1)))))
+        (ok (= 100 (length perspective)))
+        (ok (typep perspective '(simple-array single-float (100))))
         (ok (= 1.0 (aref perspective 22)))
         (ok (= 0.0 (aref isometric 22)))
         (flet ((depth (data view-z)
@@ -959,7 +1010,7 @@
         (ok (= (aref perspective 21) render:*wireframe*))
         (ok (equalp #(0.5 0.5 0.001 0.001)
                     (subseq perspective 48 52)))
-        (ok (equalp #(61.5 48.5 15.48 7.25)
+        (ok (equalp #(61.5 48.5 15.48 0.0)
                     (subseq perspective 52 56)))
         (ok (equalp (luft.render::light-sun-color luft.render:*light*)
                     (subseq perspective 60 64)))
@@ -970,7 +1021,11 @@
         (ok (= (/ luft.render::+shadow-map-size+)
                (aref perspective 88)))
         (ok (= (luft.render::light-shadow-filter-radius luft.render:*light*)
-               (aref perspective 91)))))))
+               (aref perspective 91)))
+        (ok (equalp #(61.5 48.5 15.48 0.0)
+                    (subseq perspective 92 96)))
+        (ok (equalp #(0.0 1.0 0.0 1.0)
+                    (subseq perspective 96 100)))))))
 
 (deftest the-light-frame-is-texel-stable-under-subtexel-camera-motion
   (let* ((light luft.render:*light*)

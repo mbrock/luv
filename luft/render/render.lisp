@@ -1281,7 +1281,7 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                  (create device
                          (make-buffer-descriptor
                           :label "luft frame state"
-                          :size 368 :usage '(:uniform :copy-dst)))
+                          :size 400 :usage '(:uniform :copy-dst)))
                  shadow-texture
                  (create device
                          (make-texture-descriptor

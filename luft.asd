@@ -33,7 +33,9 @@
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on ("luft/renderer" "luvcraft/mcclim")
-  :components ((:file "luft/render/studio"))
+  :serial t
+  :components ((:file "luft/render/game")
+               (:file "luft/render/studio"))
   :in-order-to ((test-op (test-op "luft/render/test"))))
 
 (defsystem "luft/program"
