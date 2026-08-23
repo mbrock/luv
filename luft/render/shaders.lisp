@@ -1424,8 +1424,8 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
          (alpha (* coverage 0.96)))
     (set-output color-output (vec4 (* color alpha) alpha))
     (set-output motion-output
-                (mesh-temporal-motion previous-clip current-clip
-                                      temporal-parameters))))
+                (- (mesh-clip-uv previous-clip)
+                   (mesh-clip-uv current-clip)))))
 
 (define-shader present-vertex-specification
     (:stage :vertex

@@ -1619,15 +1619,19 @@ cohort untouched. No frame can interleave with the owner-thread publication."
     (end-pass pass)
     (when temporal-p
       (let ((scaler (renderer-temporal-scaler renderer))
-            (history-valid-p (renderer-history-valid-p renderer)))
+            (history-valid-p (renderer-history-valid-p renderer))
+            (render-extent (renderer-render-extent renderer)))
         (encode-temporal-scale
          encoder scaler
          (renderer-scene-texture renderer)
          (renderer-depth-texture renderer)
          (renderer-motion-texture renderer)
          (renderer-resolved-texture renderer)
-         (vector (* 0.5 (first extent) (aref jitter 0))
-                 (* 0.5 (second extent) (aref jitter 1)))
+         ;; JITTER is clip-space at the internal scene resolution.  MetalFX
+         ;; takes the same offset in input pixels—not output pixels—so using
+         ;; EXTENT here overstates it whenever temporal upscaling is active.
+         (vector (* 0.5 (first render-extent) (aref jitter 0))
+                 (* 0.5 (second render-extent) (aref jitter 1)))
          (not history-valid-p))
         (setf (renderer-previous-view renderer) view
               (renderer-history-valid-p renderer) t
