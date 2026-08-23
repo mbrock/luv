@@ -40,7 +40,8 @@
    (vertical-velocity :initform 0.0 :accessor walking-player-vertical-velocity)
    (grounded-p :initform t :accessor walking-player-grounded-p)
    (jump-requested-p :initform nil
-                     :accessor walking-player-jump-requested-p))
+                     :accessor walking-player-jump-requested-p)
+   (spell-flash :initform 0.0 :accessor walking-player-spell-flash))
   (:documentation
    "The continuous, player-owned state of LUFT's walking character.
 
@@ -127,6 +128,11 @@ for a remote roof, so a wall cannot teleport the player onto its top."
   (setf (walking-player-jump-requested-p player) t)
   player)
 
+(defun cast-walking-player-spell (player)
+  "Ignite the staff orb; the renderer consumes this short cast envelope."
+  (setf (walking-player-spell-flash player) 1.0)
+  player)
+
 (defun advance-walking-player-vertical (player source seconds)
   "Apply Luvcraft-strength gravity to LUFT's Z-up walking controller."
   (let* ((position (walking-player-position player))
@@ -194,6 +200,8 @@ for a remote roof, so a wall cannot teleport the player onto its top."
                 (max (- maximum-change)
                      (min maximum-change difference))))))
   (advance-walking-player-vertical player source seconds)
+  (setf (walking-player-spell-flash player)
+        (max 0.0 (- (walking-player-spell-flash player) (* 2.4 seconds))))
   player)
 
 (defun follow-walking-player (camera player &key (distance 18.0) seconds)
@@ -236,4 +244,4 @@ for a remote roof, so a wall cannot teleport the player onto its top."
      (list (walking-player-heading-x player)
            (walking-player-heading-y player)
            (walking-player-previous-heading-x player)
-           (walking-player-previous-heading-y player)))))
+           (walking-player-spell-flash player)))))

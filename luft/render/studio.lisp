@@ -941,6 +941,8 @@ the selector is the whole of the difference."
   (when (not (viewer-pointer-captured-p viewer))
     (set-canvas-relative-pointer-mode canvas t)
     (setf (viewer-pointer-captured-p viewer) t))
+  (when (viewer-player viewer)
+    (cast-walking-player-spell (viewer-player viewer)))
   nil)
 
 (defmethod handle-canvas-event

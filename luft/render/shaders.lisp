@@ -1262,6 +1262,7 @@ that he is standing on something."
   (let* ((center (swizzle center-radius :xyz))
          (radius (swizzle center-radius :w))
          (gait (swizzle character-parameters :w))
+         (spell-flash (swizzle character-direction :w))
          ;; The game controller rotates world space into the traveler's local
          ;; forward frame below, so the hermit's authored stride always runs
          ;; along local +Y.
@@ -1353,9 +1354,10 @@ that he is standing on something."
               ;; A real source of color: the orb is blue-white at the core,
               ;; warmed by a small peach firework halo.
               (if orb-p
-                  (+ (vec3 0.32 0.85 1.10)
+                  (+ (* (vec3 0.32 0.85 1.10) (+ 1.0 (* spell-flash 6.0)))
                      (* (vec3 1.0 0.34 0.10)
-                        (smoothstep 0.02 0.11 (abs orb-surface-distance))))
+                        (* (+ 1.0 (* spell-flash 5.0))
+                           (smoothstep 0.02 0.11 (abs orb-surface-distance)))))
                   (vec3 0.0 0.0 0.0))))
          ;; Where the body was missed, the same billboard still owes the deck
          ;; his shadow.  Its own sample of the sun's shadow map keeps him from
