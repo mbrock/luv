@@ -305,7 +305,7 @@ device."
                  (cffi:callback choose-videotoolbox-format)))
       (%av-buffer-unreference reference-cell)))
   #-darwin
-  (declare (ignore codec-context))
+  (declare (ignorable codec-context))
   codec-context)
 
 (defun open-video (pathname &key (hardware :auto) hardware-configuration)

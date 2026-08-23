@@ -1137,7 +1137,7 @@ right12<<4 | stock, where the 12-bit points are anchor-local."
 (defun %scan-stream-boundary-edges (stream templates packing observations)
   (declare (optimize (speed 3) (safety 1)))
   (let ((words (instance-stream-words stream)))
-        (loop for offset from 0 below (fill-pointer words)
+    (loop for offset from 0 below (fill-pointer words)
               by +mesh-instance-word-count+
               do (let* ((base-x (aref words offset))
                         (base-y (aref words (+ offset 1)))

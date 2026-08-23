@@ -12,7 +12,6 @@
   (let ((viewer nil)
         (old-projection luft.render:*projection*)
         (old-isometric-height luft.render:*isometric-height*)
-        (old-chamfer-width luft.render:*chamfer-width*)
         (old-wireframe luft.render:*wireframe*)
         (old-inspection-ink-p luft.render:*inspection-ink-p*))
     (unwind-protect
@@ -22,12 +21,12 @@
            ;; these specials around START-VIEWER.
            (setf luft.render:*projection* :isometric
                  luft.render:*isometric-height* 7.0
-                 luft.render:*chamfer-width* 0.11
                  luft.render:*wireframe* 0.85
                  luft.render:*inspection-ink-p* nil)
            (setf viewer
                  (luft.render:start-viewer
                   :solid (luft.render:make-miter-study-scene)
+                  :bevel-width luft:+mesh-bevel-width+
                   :camera
                   (luft.render:make-fly-camera
                    :position
@@ -40,7 +39,6 @@
       (when viewer (luft.render:stop-viewer viewer))
       (setf luft.render:*projection* old-projection
             luft.render:*isometric-height* old-isometric-height
-            luft.render:*chamfer-width* old-chamfer-width
             luft.render:*wireframe* old-wireframe
             luft.render:*inspection-ink-p* old-inspection-ink-p))))
 
@@ -49,14 +47,12 @@
   (let ((viewer nil)
         (old-projection luft.render:*projection*)
         (old-isometric-height luft.render:*isometric-height*)
-        (old-chamfer-width luft.render:*chamfer-width*)
         (old-wireframe luft.render:*wireframe*)
         (old-inspection-ink-p luft.render:*inspection-ink-p*))
     (unwind-protect
          (progn
            (setf luft.render:*projection* :isometric
                  luft.render:*isometric-height* 1.0
-                 luft.render:*chamfer-width* 0.11
                  luft.render:*wireframe* wireframe
                  luft.render:*inspection-ink-p* nil)
            ;; At this yaw/pitch the camera lies backward from the motivating
@@ -64,6 +60,7 @@
            (setf viewer
                  (luft.render:start-viewer
                   :solid (luft.render:make-miter-study-scene)
+                  :bevel-width luft:+mesh-bevel-width+
                   :camera
                   (luft.render:make-fly-camera
                    :position
@@ -75,7 +72,6 @@
       (when viewer (luft.render:stop-viewer viewer))
       (setf luft.render:*projection* old-projection
             luft.render:*isometric-height* old-isometric-height
-            luft.render:*chamfer-width* old-chamfer-width
             luft.render:*wireframe* old-wireframe
             luft.render:*inspection-ink-p* old-inspection-ink-p))))
 

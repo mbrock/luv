@@ -30,6 +30,8 @@
 ;; differs only in its fragment shader and its summed-area texture.
 (defstruct gpu-lattice-command modules first-vertex vertex-count clip)
 
+(defstruct gpu-lattice-paint texture view bind-group)
+
 (defstruct gpu-prepared-lattice-command paint first-vertex vertex-count clip)
 
 (defstruct gpu-text-command
@@ -2164,8 +2166,6 @@ family name adopted."
                 (dolist (resource
                           (remove nil (list bind-group view texture)))
                   (luv:destroy resource)))))))))
-
-(defstruct gpu-lattice-paint texture view bind-group)
 
 (defun lattice-summed-area-table (modules)
   "MODULES (a ROWS x COLUMNS bit array, 1 where a cell is inked) as its

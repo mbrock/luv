@@ -11,6 +11,7 @@
                     (uiop:pathname-directory-pathname *load-truename*))))
 
 (asdf:load-asd (merge-pathnames #P"luv.asd" *project-root*))
+(asdf:load-asd (merge-pathnames #P"luvcraft.asd" *project-root*))
 (asdf:load-asd (merge-pathnames #P"luft.asd" *project-root*))
 (load (merge-pathnames #P"luvcraft/build-progress.lisp" *project-root*))
 
