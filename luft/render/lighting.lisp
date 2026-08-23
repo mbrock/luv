@@ -4,7 +4,8 @@
 ;;; dense lanes packed from this object once per frame; fragments do not carry
 ;;; objects or dispatch through the lighting vocabulary.
 
-(defconstant +shadow-map-size+ 2048)
+(defparameter +shadow-map-size+ 1024
+  "Resolution of LUFT's single sun-shadow map.")
 
 (defclass light ()
   ((name :initarg :name :reader light-name)

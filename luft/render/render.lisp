@@ -3,6 +3,9 @@
 (defparameter *wireframe* 0.0
   "Global construction-edge strength.  The atelier toggles it between 0 and 1.")
 
+(defparameter *render-scale* 0.5
+  "Linear internal resolution of the LUFT scene before temporal upscaling.")
+
 (defconstant +sanctuary-origin-x+ 32)
 (defconstant +sanctuary-origin-y+ 24)
 (defparameter *sanctuary-beacon-x* 58)
@@ -841,6 +844,7 @@ so the complete surface needs at most two direct instanced draws."
    (present-pipeline :initform nil :accessor renderer-present-pipeline)
    (sampler :initform nil :accessor renderer-sampler)
    (extent :initform nil :accessor renderer-extent)
+   (render-extent :initform nil :accessor renderer-render-extent)
    (frame-index :initform 0 :accessor renderer-frame-index)
    (previous-view :initform nil :accessor renderer-previous-view)
    (history-valid-p :initform nil :accessor renderer-history-valid-p)
@@ -875,21 +879,28 @@ so the complete surface needs at most two direct instanced draws."
         (renderer-depth-view renderer) nil
         (renderer-depth-texture renderer) nil))
 
+(defun render-scale-extent (extent)
+  "Return the even-sized internal render extent for output EXTENT."
+  (mapcar (lambda (dimension)
+            (max 2 (* 2 (round (* 0.5 *render-scale* dimension)))))
+          extent))
+
 (defun create-frame-targets (renderer extent)
   (let* ((device (renderer-device renderer))
          (temporal-p (renderer-temporal-p renderer))
+         (render-extent (render-scale-extent extent))
          (scaler
            (and temporal-p
                 (create device
                         (make-temporal-scaler-descriptor
                          :label "luft MetalFX temporal scaler"
-                         :input-size extent :output-size extent))))
+                         :input-size render-extent :output-size extent))))
          (usage (lambda (base extra)
                   (remove-duplicates (append base extra))))
          (depth
            (create device
                    (make-texture-descriptor
-                    :label "luft temporal depth" :size extent :dimensions :2d
+                    :label "luft temporal depth" :size render-extent :dimensions :2d
                     :format :depth32-float
                     :usage (funcall usage '(:render-attachment :texture-binding)
                                     (and scaler
@@ -900,7 +911,7 @@ so the complete surface needs at most two direct instanced draws."
          (scene
            (create device
                    (make-texture-descriptor
-                    :label "luft HDR color" :size extent :dimensions :2d
+                    :label "luft HDR color" :size render-extent :dimensions :2d
                     :format :rgba16-float
                     :usage
                     (funcall usage '(:render-attachment :texture-binding)
@@ -912,7 +923,7 @@ so the complete surface needs at most two direct instanced draws."
            (and temporal-p
                 (create device
                         (make-texture-descriptor
-                         :label "luft temporal motion" :size extent
+                         :label "luft temporal motion" :size render-extent
                          :dimensions :2d :format :rg16-float
                          :usage
                          (funcall usage '(:render-attachment)
@@ -958,6 +969,7 @@ so the complete surface needs at most two direct instanced draws."
           (renderer-resolved-view renderer) resolved-view
           (renderer-present-bind-group renderer) present-group
           (renderer-extent renderer) (copy-list extent)
+          (renderer-render-extent renderer) (copy-list render-extent)
           (renderer-frame-index renderer) 0
           (renderer-previous-view renderer) nil
           (renderer-history-valid-p renderer) nil

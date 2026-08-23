@@ -380,8 +380,9 @@ the selector is the whole of the difference."
      &key (inspector-p (viewer-inspector-p viewer)))
   (let* ((renderer (viewer-renderer viewer))
          (surface-view (viewer-surface-view viewer surface-texture))
-         (width (first extent))
-         (height (second extent))
+         (render-extent (render-scale-extent extent))
+         (width (first render-extent))
+         (height (second render-extent))
          (jitter (if (renderer-temporal-p renderer)
                      (temporal-jitter (renderer-frame-index renderer)
                                       width height)
@@ -396,7 +397,7 @@ the selector is the whole of the difference."
     (encode-renderer-frame
      renderer encoder surface-view extent
      (camera-uniform-data
-      view previous (viewer-inspection-parameters viewer extent)
+      view previous (viewer-inspection-parameters viewer render-extent)
       (if (and inspection *inspection-ink-p*) 1.0 0.0)
       (and player-p player)
       (viewer-bevel-width viewer))

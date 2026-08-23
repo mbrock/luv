@@ -167,26 +167,6 @@
            (+ (* 0.72 stone-grain) (* 0.28 stone-pit))))
     (- (if (< profile 1.5) granular weathered-stone) 0.5)))
 
-(define-shader-function material-relief-gradient
-    (point profile x-axis y-axis z-axis)
-  "Central-difference the exact relief field and return its world gradient."
-  (let* ((epsilon 0.075)
-         (offset-x (vec3 epsilon 0.0 0.0))
-         (offset-y (vec3 0.0 epsilon 0.0))
-         (offset-z (vec3 0.0 0.0 epsilon))
-         (scale (/ 1.0 (* 2.0 epsilon)))
-         (gradient-x
-           (* (- (material-relief (+ point offset-x) profile)
-                 (material-relief (- point offset-x) profile)) scale))
-         (gradient-y
-           (* (- (material-relief (+ point offset-y) profile)
-                 (material-relief (- point offset-y) profile)) scale))
-         (gradient-z
-           (* (- (material-relief (+ point offset-z) profile)
-                 (material-relief (- point offset-z) profile)) scale)))
-    (+ (+ (* x-axis gradient-x) (* y-axis gradient-y))
-       (* z-axis gradient-z))))
-
 (define-shader-function dressed-stone-tone (point normal stone-tone)
   "Suggest laid courses and hand-dressed blocks without texture coordinates."
   (let* ((x (swizzle point :x))
@@ -327,7 +307,7 @@
 
 (define-shader-function soft-shadow-visibility
     (shadow-map shadow-sampler shadow-sample normal sun shadow-control)
-  "Nine comparison-filtered taps forming one restrained paper-soft shadow."
+  "Five comparison-filtered taps forming one restrained paper-soft shadow."
   (let* ((uv (swizzle shadow-sample :xy))
          (depth (swizzle shadow-sample :z))
          (u (swizzle uv :x))
@@ -341,10 +321,8 @@
                   (* 0.00125 (- 1.0 facing))))
          (radius (* (swizzle shadow-control :xy)
                     (swizzle shadow-control :w)))
-         (diagonal (* radius 0.70710678))
          (visibility
-           (/ (+ (* 2.0 (sample-compare shadow-map shadow-sampler uv
-                                       (- depth bias)))
+           (/ (+ (sample-compare shadow-map shadow-sampler uv (- depth bias))
                  (sample-compare shadow-map shadow-sampler
                                  (+ uv (vec2 (swizzle radius :x) 0.0))
                                  (- depth bias))
@@ -356,20 +334,8 @@
                                  (- depth bias))
                  (sample-compare shadow-map shadow-sampler
                                  (- uv (vec2 0.0 (swizzle radius :y)))
-                                 (- depth bias))
-                 (sample-compare shadow-map shadow-sampler
-                                 (+ uv diagonal) (- depth bias))
-                 (sample-compare shadow-map shadow-sampler
-                                 (- uv diagonal) (- depth bias))
-                 (sample-compare shadow-map shadow-sampler
-                                 (+ uv (vec2 (swizzle diagonal :x)
-                                            (- (swizzle diagonal :y))))
-                                 (- depth bias))
-                 (sample-compare shadow-map shadow-sampler
-                                 (+ uv (vec2 (- (swizzle diagonal :x))
-                                            (swizzle diagonal :y)))
                                  (- depth bias)))
-              10.0)))
+              5.0)))
     (mix 1.0 visibility in-bounds)))
 
 ;;; A small, rounded traveler for the sanctuary bridge.  The proxy is only a
@@ -1000,6 +966,10 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
            (vec3 (- (float (ldb (byte 2 0) attributes)) 1.0)
                  (- (float (ldb (byte 2 2) attributes)) 1.0)
                  (- (float (ldb (byte 2 4) attributes)) 1.0)))
+         (front-facing-p
+           (>= (dot mesh-normal
+                    (- (swizzle camera-position :xyz) world-position))
+               0.0))
          (assembly-id (float (ldb (byte 12 16) (swizzle instance :w))))
          (ambient-occlusion
            (/ (float (ldb (byte 2 28) (swizzle instance :w))) 3.0))
@@ -1025,12 +995,14 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
                                 shadow-row-z shadow-row-w))
          (jitter (swizzle temporal-parameters :xy)))
     (set-output clip-position
-                (vec4 (+ (swizzle current-clip :x)
-                         (* (swizzle jitter :x) (swizzle current-clip :w)))
-                      (+ (swizzle current-clip :y)
-                         (* (swizzle jitter :y) (swizzle current-clip :w)))
-                      (swizzle current-clip :z)
-                      (swizzle current-clip :w)))
+                (if front-facing-p
+                    (vec4 (+ (swizzle current-clip :x)
+                             (* (swizzle jitter :x) (swizzle current-clip :w)))
+                          (+ (swizzle current-clip :y)
+                             (* (swizzle jitter :y) (swizzle current-clip :w)))
+                          (swizzle current-clip :z)
+                          (swizzle current-clip :w))
+                    (vec4 2.0 2.0 2.0 1.0)))
     (set-output world-position-output world-position)
     (set-output mesh-normal-output mesh-normal)
     (set-output assembly-output assembly-id)
@@ -1125,22 +1097,11 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
             (swizzle frame-x :xyz) (swizzle frame-y :xyz)
             (swizzle frame-z :xyz)))
          (relief-profile (swizzle frame-origin :w))
-         (relief-amplitude (swizzle frame-x :w))
          (relief-height (material-relief material-point relief-profile))
-         (relief-gradient
-           (material-relief-gradient
-            material-point relief-profile
-            (swizzle frame-x :xyz) (swizzle frame-y :xyz)
-            (swizzle frame-z :xyz)))
-         (tangent-relief-gradient
-           (- relief-gradient (* normal (dot relief-gradient normal))))
-         (shading-normal
-           (normalize (- normal (* tangent-relief-gradient relief-amplitude))))
-         (relief-slope
-           (sqrt (dot tangent-relief-gradient tangent-relief-gradient)))
+         (shading-normal normal)
          (roughness
            (clamp (+ (swizzle tertiary :w)
-                     (* 0.11 (clamp relief-slope 0.0 1.5)))
+                     (* 0.06 (abs relief-height)))
                   0.16 0.99))
          (paper-point (paper-space material-point))
          (primary-tone (swizzle primary :xyz))
@@ -1681,11 +1642,11 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
          (pigmented (* shadowed
                        (mix (vec3 1.0 1.0 1.0)
                             shadow-pigment pooling)))
-         (glowing
-           (+ pigmented
-              (* glow
-                 (* (vec3 1.08 0.82 0.58)
-                    #.*highlight-glow-strength*))))
+         ;; Keep the full-resolution pass to a single scene sample.  MetalFX
+         ;; already reconstructs the luminance neighborhood; a second 22-tap
+         ;; glow/AO filter here consumed the frame budget without resolving
+         ;; additional scene detail.
+         (glowing (swizzle value :xyz))
          (mapped (paper-grade (paper-tonemap (* glowing 1.02)))))
     (set-output color-output
                 (vec4 mapped 1.0))))
