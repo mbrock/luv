@@ -173,6 +173,50 @@
   (ok (not (luft.render::scene-player-p
             (render:make-miter-study-scene)))))
 
+(deftest player-gait-anchors-stance-feet-and-rises-over-support
+  (let ((step-length 0.65625)
+        (leg-length 1.15))
+    (labels ((foot-sample (step-coordinate parity)
+               (let* ((cycle (* 0.5 (- step-coordinate parity)))
+                      (cycle-index (floor cycle))
+                      (phase (- cycle cycle-index))
+                      (swing-time
+                        (min 1.0 (max 0.0 (* 2.0 (- phase 0.5)))))
+                      (swing-weight
+                        (* swing-time swing-time
+                           (- 3.0 (* 2.0 swing-time)))))
+                 (values
+                  (* step-length
+                     (+ parity (* 2.0 cycle-index) 0.5
+                        (* 2.0 swing-weight)))
+                  (* 0.20 4.0 swing-time (- 1.0 swing-time)))))
+             (pelvis-height (step-coordinate)
+               (let* ((phase (- step-coordinate (floor step-coordinate)))
+                      (offset (* step-length (- 0.5 phase))))
+                 (sqrt (- (* leg-length leg-length) (* offset offset))))))
+      ;; Each alternating stance interval holds one foot at one exact world
+      ;; coordinate while the root advances by a complete half-step.
+      (multiple-value-bind (left-a left-a-lift) (foot-sample 0.1 0.0)
+        (multiple-value-bind (left-b left-b-lift) (foot-sample 0.9 0.0)
+          (ok (= left-a left-b (* step-length 0.5)))
+          (ok (zerop left-a-lift))
+          (ok (zerop left-b-lift))))
+      (multiple-value-bind (right-a right-a-lift) (foot-sample 1.1 1.0)
+        (multiple-value-bind (right-b right-b-lift) (foot-sample 1.9 1.0)
+          (ok (= right-a right-b (* step-length 1.5)))
+          (ok (zerop right-a-lift))
+          (ok (zerop right-b-lift))))
+      ;; The other foot clears the deck during transfer and lands at zero
+      ;; height; sixteen half-steps span the bridge's 10.5-cell half-route.
+      (multiple-value-bind (mid-swing mid-lift) (foot-sample 0.5 1.0)
+        (declare (ignore mid-swing))
+        (ok (> mid-lift 0.19)))
+      (ok (= 10.5 (* 16 step-length)))
+      ;; A fixed leg is shortest at double support and tallest over the
+      ;; planted foot at mid-stance, giving the body its non-arbitrary bob.
+      (ok (= (pelvis-height 0.0) (pelvis-height 1.0)))
+      (ok (> (pelvis-height 0.5) (pelvis-height 0.0))))))
+
 (defun instance-signature (base-x base-y base-z packed vertices start count)
   (let ((signature
           (make-array (+ 5 (* count luft:+mesh-template-vertex-word-count+))
