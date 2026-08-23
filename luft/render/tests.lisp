@@ -421,6 +421,52 @@
         (ok (< (abs (- stance-reach leg-length)) 1e-6))
         (ok (< (abs (- mid-height leg-length)) 1e-6))))))
 
+(deftest player-motion-channels-preserve-key-poses-and-foot-rockers
+  (labels ((ease (amount)
+             (let ((time (min 1.0 (max 0.0 amount))))
+               (* time time time
+                  (+ 10.0 (* time (+ -15.0 (* 6.0 time)))))))
+           (segment (phase beginning end beginning-value end-value)
+             (+ beginning-value
+                (* (- end-value beginning-value)
+                   (ease (/ (- phase beginning) (- end beginning))))))
+           (channel (phase contact down passing up next-contact)
+             (cond ((< phase 0.16)
+                    (segment phase 0.0 0.16 contact down))
+                   ((< phase 0.50)
+                    (segment phase 0.16 0.50 down passing))
+                   ((< phase 0.72)
+                    (segment phase 0.50 0.72 passing up))
+                   (t
+                    (segment phase 0.72 1.0 up next-contact))))
+           (rocker (cycle-phase)
+             (if (< cycle-phase 0.5)
+                 (let ((stance-time (* cycle-phase 2.0)))
+                   (cond ((< stance-time 0.18)
+                          (segment stance-time 0.0 0.18 0.17 0.0))
+                         ((< stance-time 0.72) 0.0)
+                         (t (segment stance-time 0.72 1.0 0.0 -0.30))))
+                 (let ((swing-time (* (- cycle-phase 0.5) 2.0)))
+                   (cond ((< swing-time 0.32)
+                          (segment swing-time 0.0 0.32 -0.30 0.10))
+                         ((< swing-time 0.78) 0.10)
+                         (t (segment swing-time 0.78 1.0 0.10 0.17)))))))
+    ;; Authored values survive exactly at semantic pose boundaries.
+    (ok (= 0.20 (channel 0.0 0.20 -0.10 0.30 0.40 0.50)))
+    (ok (= -0.10 (channel 0.16 0.20 -0.10 0.30 0.40 0.50)))
+    (ok (= 0.30 (channel 0.50 0.20 -0.10 0.30 0.40 0.50)))
+    (ok (= 0.40 (channel 0.72 0.20 -0.10 0.30 0.40 0.50)))
+    (ok (= 0.50 (channel 1.0 0.20 -0.10 0.30 0.40 0.50)))
+    ;; The planted boot accepts weight from heel to flat, stays flat through
+    ;; the ankle rocker, then rolls over its toe.  Swing dorsiflexion clears
+    ;; the ground and returns continuously to the next heel contact.
+    (ok (> (rocker 0.0) 0.16))
+    (ok (zerop (rocker 0.15)))
+    (ok (< (rocker 0.48) -0.25))
+    (ok (< (abs (- (rocker 0.49999) (rocker 0.5))) 1e-4))
+    (ok (> (rocker 0.70) 0.09))
+    (ok (< (abs (- (rocker 0.99999) (rocker 0.0))) 1e-4))))
+
 (defun instance-signature (base-x base-y base-z packed vertices start count)
   (let ((signature
           (make-array (+ 5 (* count luft:+mesh-template-vertex-word-count+))

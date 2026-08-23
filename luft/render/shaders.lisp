@@ -342,6 +342,52 @@
 (define-shader-function player-step-coordinate (gait)
   (/ gait 3.14159265))
 
+;;; Motion vocabulary.  Authored channels name the five readable walk poses,
+;;; while contact placement and two-bone IK remain hard constraints beneath
+;;; them.  The same segment primitive can drive idle, gesture, attack or
+;;; interaction channels without coupling their timing to the locomotion math.
+
+(define-shader-function player-motion-ease (amount)
+  "Quintic ease with zero velocity and acceleration at both ends."
+  (let* ((time (clamp amount 0.0 1.0)))
+    (* (* time (* time time))
+       (+ 10.0 (* time (+ -15.0 (* 6.0 time)))))))
+
+(define-shader-function player-motion-segment
+    (phase beginning end beginning-value end-value)
+  (let* ((amount (/ (- phase beginning) (max (- end beginning) 1e-5))))
+    (mix beginning-value end-value (player-motion-ease amount))))
+
+(define-shader-function player-walk-pose-channel
+    (phase contact down passing up next-contact)
+  "Sample a semantic contact/down/passing/up/contact animation channel."
+  (if (< phase 0.16)
+      (player-motion-segment phase 0.0 0.16 contact down)
+      (if (< phase 0.50)
+          (player-motion-segment phase 0.16 0.50 down passing)
+          (if (< phase 0.72)
+              (player-motion-segment phase 0.50 0.72 passing up)
+              (player-motion-segment phase 0.72 1.0 up next-contact)))))
+
+(define-shader-function player-foot-cycle-phase (gait parity)
+  (fract (* 0.5 (- (player-step-coordinate gait) parity))))
+
+(define-shader-function player-foot-rocker-pitch (cycle-phase)
+  "Heel rocker, flat ankle rocker, forefoot rocker, then swing dorsiflexion."
+  (let* ((stance-time (* cycle-phase 2.0))
+         (swing-time (* (- cycle-phase 0.5) 2.0)))
+    (if (< cycle-phase 0.5)
+        (if (< stance-time 0.18)
+            (player-motion-segment stance-time 0.0 0.18 0.17 0.0)
+            (if (< stance-time 0.72)
+                0.0
+                (player-motion-segment stance-time 0.72 1.0 0.0 -0.30)))
+        (if (< swing-time 0.32)
+            (player-motion-segment swing-time 0.0 0.32 -0.30 0.10)
+            (if (< swing-time 0.78)
+                0.10
+                (player-motion-segment swing-time 0.78 1.0 0.10 0.17))))))
+
 (define-shader-function player-pelvis-lift (gait)
   "Height of a fixed-length leg over the active stance contact.
 
@@ -362,13 +408,22 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
                             0.0)))
          (contact-height
            (sqrt (- (* leg-length leg-length) (* half-step half-step)))))
-    (- height contact-height)))
+    (+ (- height contact-height)
+       ;; Loading sinks after contact; maximum authored rise follows the
+       ;; passing pose.  This rides on the inverted-pendulum constraint rather
+       ;; than replacing it.
+       (player-walk-pose-channel phase 0.0 -0.035 0.0 0.018 0.0))))
 
 (define-shader-function player-walk-pose (point gait)
   "Move a sample with the pelvis lift and a quiet support-side weight shift."
-  (vec3 (- (swizzle point :x) (* 0.028 (sin gait)))
-        (swizzle point :y)
-        (- (swizzle point :z) (player-pelvis-lift gait))))
+  (let* ((phase (fract (player-step-coordinate gait)))
+         (side-shift
+           (player-walk-pose-channel phase 0.0 -0.020 0.030 0.018 0.0))
+         (forward-set
+           (player-walk-pose-channel phase 0.0 -0.018 0.012 0.006 0.0)))
+    (vec3 (- (swizzle point :x) side-shift)
+          (- (swizzle point :y) forward-set)
+          (- (swizzle point :z) (player-pelvis-lift gait)))))
 
 (define-shader-function player-head-pose (point gait)
   "Independent slow sway, glance and tilt keep the head out of marching time."
@@ -432,14 +487,9 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
          ;; its second half is the swing to the next fixed contact.
          (cycle (* 0.5 (- step-coordinate parity)))
          (cycle-index (floor cycle))
-         (phase (fract cycle))
+         (phase (player-foot-cycle-phase gait parity))
          (swing-time (clamp (* 2.0 (- phase 0.5)) 0.0 1.0))
-         ;; Quintic ease has zero acceleration at pickup and touchdown; the
-         ;; old cubic read as a guard snapping each leg between marks.
-         (swing-weight
-           (* (* swing-time (* swing-time swing-time))
-              (+ 10.0 (* swing-time
-                         (+ -15.0 (* 6.0 swing-time))))))
+         (swing-weight (player-motion-ease swing-time))
          (contact-step (+ parity (* 2.0 cycle-index)))
          (foot-world
            (* step-length (+ (+ contact-step 0.5)
@@ -450,7 +500,37 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
          (pelvis-lift (player-pelvis-lift gait))
          (hip (vec3 (* side 0.22) 0.0
                     (+ 1.27 pelvis-lift)))
-         (ankle (vec3 (* side 0.22) swing (+ 0.26 lift)))
+         (foot-pitch (player-foot-rocker-pitch phase))
+         (pitch-cosine (cos foot-pitch))
+         (pitch-sine (sin foot-pitch))
+         (baseline-center
+           (vec3 (* side 0.22) (+ swing 0.09) (+ 0.16 lift)))
+         ;; During stance the boot pivots around a stationary heel, lies flat
+         ;; through weight acceptance, then pivots around a stationary toe.
+         ;; During swing its centre follows the authored clearance arc.
+         (stance-time (clamp (* phase 2.0) 0.0 1.0))
+         (pivot
+           (if (< phase 0.5)
+               (if (< stance-time 0.55)
+                   (vec3 (* side 0.22) (- (+ swing 0.09) 0.22) 0.0)
+                   (vec3 (* side 0.22) (+ (+ swing 0.09) 0.23) 0.0))
+               baseline-center))
+         (center-offset (- baseline-center pivot))
+         (boot-center
+           (+ pivot
+              (vec3 (swizzle center-offset :x)
+                    (- (* pitch-cosine (swizzle center-offset :y))
+                       (* pitch-sine (swizzle center-offset :z)))
+                    (+ (* pitch-sine (swizzle center-offset :y))
+                       (* pitch-cosine (swizzle center-offset :z))))))
+         (ankle-offset (vec3 0.0 -0.09 0.10))
+         (ankle
+           (+ boot-center
+              (vec3 0.0
+                    (- (* pitch-cosine (swizzle ankle-offset :y))
+                       (* pitch-sine (swizzle ankle-offset :z)))
+                    (+ (* pitch-sine (swizzle ankle-offset :y))
+                       (* pitch-cosine (swizzle ankle-offset :z))))))
          ;; Equal 0.59-cell bones solve the knee on the forward-bending side
          ;; of the hip/ankle chord.  Keeping a little flex even at maximum
          ;; stance reach gives the silhouette a readable knee instead of a
@@ -470,19 +550,14 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
          (thigh (player-sdf-capsule point hip knee 0.175))
          (shin (player-sdf-capsule point knee ankle 0.15))
          (leg (player-sdf-smooth-union thigh shin 0.065))
-         (boot-center
-           (vec3 (* side 0.22) (+ swing 0.09) (+ 0.16 lift)))
          (boot-offset (- point boot-center))
-         (toe-lift (* 0.20 (sin (* 3.14159265 swing-time))))
-         (toe-cosine (cos toe-lift))
-         (toe-sine (sin toe-lift))
          (boot-point
            (+ boot-center
               (vec3 (swizzle boot-offset :x)
-                    (+ (* toe-cosine (swizzle boot-offset :y))
-                       (* toe-sine (swizzle boot-offset :z)))
-                    (- (* toe-cosine (swizzle boot-offset :z))
-                       (* toe-sine (swizzle boot-offset :y))))))
+                    (+ (* pitch-cosine (swizzle boot-offset :y))
+                       (* pitch-sine (swizzle boot-offset :z)))
+                    (- (* pitch-cosine (swizzle boot-offset :z))
+                       (* pitch-sine (swizzle boot-offset :y))))))
          (boot (player-sdf-ellipsoid
                 boot-point boot-center (vec3 0.22 0.31 0.16))))
     (player-sdf-smooth-union leg boot 0.065)))
