@@ -330,6 +330,35 @@
             scene :stock-function (lambda (face) (legacy-face-stock scene face))
                   :chamfer-stock-function #'legacy-chamfer-stock))))))
 
+(deftest surface-assembly-descriptors-compile-semantic-material-data
+  (let ((words (luft.render::surface-assembly-descriptor-words)))
+    (ok (= (* 9 luft.render::+surface-assembly-descriptor-row-count+ 4)
+           (length words)))
+    (ok (equalp #(0.17 0.36 0.11 0.0) (subseq words 0 4)))
+    (let ((contact (* luft.render::+turf-set-stone-stock+
+                      luft.render::+surface-assembly-descriptor-row-count+ 4)))
+      (ok (equalp #(0.53 0.49 0.39 1.0)
+                  (subseq words contact (+ contact 4))))
+      (ok (equalp #(0.17 0.36 0.11 0.0)
+                  (subseq words (+ contact 4) (+ contact 8)))))))
+
+(deftest surface-assembly-ids-use-the-widened-instance-field
+  (let* ((assembly-id #xabc)
+         (mesh
+           (render:make-render-mesh
+            (render:make-miter-study-scene)
+            :stock-function (lambda (face) (declare (ignore face)) assembly-id)
+            :chamfer-stock-function
+            (lambda (stocks) (declare (ignore stocks)) assembly-id))))
+    (dolist (words (list (luft:surface-mesh-face-instance-words mesh)
+                         (luft:surface-mesh-band-instance-words mesh)
+                         (luft:surface-mesh-fan-instance-words mesh)))
+      (ok (plusp (length words)))
+      (ok (loop for offset from 3 below (length words) by 4
+                always (= assembly-id
+                          (ldb (byte luft:+mesh-instance-stock-bit-count+ 16)
+                               (aref words offset))))))))
+
 (deftest player-gait-anchors-stance-feet-and-rises-over-support
   (let ((step-length 0.75)
         (leg-length 1.07737)
@@ -528,7 +557,8 @@
          (mesh (render:make-render-mesh scene)))
     (flet ((instance-stocks (words)
              (loop for offset from 3 below (length words) by 4
-                   collect (ldb (byte 4 16) (aref words offset)))))
+                   collect (ldb (byte luft:+mesh-instance-stock-bit-count+ 16)
+                                (aref words offset)))))
       (let ((stocks
               (mapcan #'instance-stocks
                       (list (luft:surface-mesh-band-instance-words mesh)
@@ -546,7 +576,8 @@
     (flet ((contains-turf-edge-p (words)
              (loop for offset from 3 below (length words) by 4
                    thereis (= luft.render::+turf-edge-stock+
-                              (ldb (byte 4 16) (aref words offset))))))
+                              (ldb (byte luft:+mesh-instance-stock-bit-count+ 16)
+                                   (aref words offset))))))
       (ok (contains-turf-edge-p
            (luft:surface-mesh-band-instance-words mesh)))
       (ok (contains-turf-edge-p
@@ -558,7 +589,8 @@
                          (luft:surface-mesh-fan-instance-words mesh)))
       (ok (notany (lambda (stock) (zerop stock))
                   (loop for offset from 3 below (length words) by 4
-                        collect (ldb (byte 4 16) (aref words offset))))))))
+                        collect (ldb (byte luft:+mesh-instance-stock-bit-count+ 16)
+                                     (aref words offset))))))))
 
 (deftest stone-terrain-chamfers-have-an-earth-set-reading
   (ok (= luft.render::+stone-stock+
@@ -588,7 +620,8 @@
          (mesh (render:make-render-mesh scene)))
     (flet ((stocks (words)
              (loop for offset from 3 below (length words) by 4
-                   collect (ldb (byte 4 16) (aref words offset)))))
+                   collect (ldb (byte luft:+mesh-instance-stock-bit-count+ 16)
+                                (aref words offset)))))
       (ok (notany (lambda (stock)
                     (member stock
                             (list luft.render::+turf-set-stone-stock+
@@ -615,7 +648,8 @@
          (face-stocks
            (loop with words = (luft:surface-mesh-face-instance-words mesh)
                  for offset from 3 below (length words) by 4
-                 collect (ldb (byte 4 16) (aref words offset)))))
+                 collect (ldb (byte luft:+mesh-instance-stock-bit-count+ 16)
+                              (aref words offset)))))
     (ok (member luft.render::+foundation-stone-stock+ face-stocks))
     (ok (member luft.render::+stone-stock+ face-stocks))
     (ok (notany (lambda (stock)
@@ -633,7 +667,7 @@
   (let ((mesh (render:make-render-mesh (render:make-miter-study-scene))))
     (flet ((levels (words)
              (loop for offset from 3 below (length words) by 4
-                   collect (ldb (byte 2 20) (aref words offset)))))
+                   collect (ldb (byte 2 28) (aref words offset)))))
       (ok (every #'zerop (levels (luft:surface-mesh-face-instance-words mesh))))
       (ok (some #'plusp
                 (append (levels (luft:surface-mesh-band-instance-words mesh))
@@ -665,6 +699,7 @@
     (ok (search "[[instance_id]]" vertex-msl))
     (ok (search "const device uint4* instances" vertex-msl))
     (ok (search "const device uint4* template_vertices" vertex-msl))
+    (ok (search "const device float4* material_descriptors" fragment-msl))
     (ok (search "barycentric" fragment-msl))
     (ok (search "motion_output" fragment-msl))
     (ok (search "depth2d<float> scene_depth" present-fragment-msl))

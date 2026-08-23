@@ -37,7 +37,8 @@
 (defconstant +mesh-template-vertex-word-count+ 4)
 (defconstant +mesh-template-coordinate-bias+ 16)
 (defconstant +mesh-instance-stock-shift+ 16)
-(defconstant +mesh-instance-ambient-occlusion-shift+ 20)
+(defconstant +mesh-instance-stock-bit-count+ 12)
+(defconstant +mesh-instance-ambient-occlusion-shift+ 28)
 
 (defstruct (surface-mesh
              (:constructor %make-surface-mesh
@@ -565,7 +566,7 @@ Bit conventions match SITE-STAR-OCCUPANCY-MASK on a vertex site."
 (defun %emit-instance (builder kind base-x base-y base-z stock
                        ambient-occlusion count)
   "Intern the vertex scratch prefix and append one columnar instance."
-  (check-type stock (unsigned-byte 4))
+  (check-type stock (unsigned-byte #.+mesh-instance-stock-bit-count+))
   (check-type ambient-occlusion (unsigned-byte 2))
   (unless (and (typep base-x '(unsigned-byte 32))
                (typep base-y '(unsigned-byte 32))
@@ -1010,7 +1011,8 @@ Ownership is the half-open box [OX0, OX1) x [OY0, OY1) of site coordinates."
 ;;; as 12-bit anchor-local coordinates.  Edges observed once are the open
 ;;; boundary; each is then attributed to the lattice vertex whose bevel domain
 ;;; contains it and packed as one fixnum of biased site-local endpoints:
-;;; left12<<16 | right12<<4 | stock, where a point12 is (x+4)<<8|(y+4)<<4|(z+4).
+;;; left12<<24 | right12<<12 | stock12, where a point12 is
+;;; (x+4)<<8|(y+4)<<4|(z+4).
 ;;;
 ;;; The key itself is one fixnum, because a boundary packing states the
 ;;; horizontal anchor box the scan covers -- one chunk plus its halo, or a
@@ -1025,6 +1027,10 @@ Ownership is the half-open box [OX0, OX1) x [OY0, OY1) of site coordinates."
 (defconstant +fan-local-bias+ 4)
 (defconstant +fan-origin-point+
   (logior (ash +fan-local-bias+ 8) (ash +fan-local-bias+ 4) +fan-local-bias+))
+(defconstant +fan-record-stock-bit-count+ 12)
+(defconstant +fan-record-right-shift+ 12)
+(defconstant +fan-record-left-shift+ 24)
+(defconstant +boundary-observation-count-shift+ 36)
 
 (defun %fan-point (x y z)
   (logior (ash (+ x +fan-local-bias+) 8)
@@ -1034,9 +1040,12 @@ Ownership is the half-open box [OX0, OX1) x [OY0, OY1) of site coordinates."
 (defun %fan-point-y (point) (- (ldb (byte 4 4) point) +fan-local-bias+))
 (defun %fan-point-z (point) (- (ldb (byte 4 0) point) +fan-local-bias+))
 
-(defun %fan-record-left (record) (ldb (byte 12 16) record))
-(defun %fan-record-right (record) (ldb (byte 12 4) record))
-(defun %fan-record-stock (record) (ldb (byte 4 0) record))
+(defun %fan-record-left (record)
+  (ldb (byte 12 +fan-record-left-shift+) record))
+(defun %fan-record-right (record)
+  (ldb (byte 12 +fan-record-right-shift+) record))
+(defun %fan-record-stock (record)
+  (ldb (byte +fan-record-stock-bit-count+ 0) record))
 (defun %fan-record-undirected (record)
   (let ((left (%fan-record-left record))
         (right (%fan-record-right record)))
@@ -1108,8 +1117,8 @@ eighth-cell anchor beyond it, so the packed anchor box is widened by two."
 (defun %builder-open-boundary-table (builders packing)
   "Parity-count the BUILDERS' face and band streams' directed triangle edges.
 
-Returns a table from PACKING's fixnum edge keys to count<<28 | left12<<16 |
-right12<<4 | stock, where the 12-bit points are anchor-local."
+Returns a table from PACKING's fixnum edge keys to count<<36 | left12<<24 |
+right12<<12 | stock12, where the 12-bit points are anchor-local."
   (declare (optimize (speed 3) (safety 1)))
   (let* ((triangles
            (loop for builder in builders
@@ -1144,7 +1153,8 @@ right12<<4 | stock, where the 12-bit points are anchor-local."
                         (base-z (aref words (+ offset 2)))
                         (meta (aref words (+ offset 3)))
                         (template (aref templates (ldb (byte 16 0) meta)))
-                        (stock (ldb (byte 4 +mesh-instance-stock-shift+)
+                        (stock (ldb (byte +mesh-instance-stock-bit-count+
+                                          +mesh-instance-stock-shift+)
                                     meta))
                         (vertices (mesh-template-vertices template))
                         (ox (* +mesh-cell-size+ base-x))
@@ -1196,18 +1206,22 @@ right12<<4 | stock, where the 12-bit points are anchor-local."
                                   (cond
                                     ((null existing)
                                      (setf (gethash key observations)
-                                           (logior (ash 1 28)
-                                                   (ash left12 16)
-                                                   (ash right12 4)
-                                                   stock)))
+                                           (logior
+                                            (ash 1 +boundary-observation-count-shift+)
+                                            (ash left12 +fan-record-left-shift+)
+                                            (ash right12 +fan-record-right-shift+)
+                                            stock)))
                                     (t
                                      (let ((count
-                                             (1+ (ash existing -28))))
+                                             (1+ (ash existing
+                                                      (- +boundary-observation-count-shift+)))))
                                        (when (> count 2)
                                          (error "Face and edge streams meet ~D times at ~S."
                                                 count key))
                                        (setf (gethash key observations)
-                                             (dpb count (byte 4 28)
+                                             (dpb count
+                                                  (byte 4
+                                                        +boundary-observation-count-shift+)
                                                   existing)))))))))))))
 
 (defun %attribute-open-edges-to-sites
@@ -1224,14 +1238,14 @@ every owned site's bevel domain, and DROP-NONLOCAL-P discards it."
         (by-site (make-hash-table :test #'eql :size 1024)))
     (maphash
      (lambda (key value)
-       (when (= 1 (ash value -28))
+       (when (= 1 (ash value (- +boundary-observation-count-shift+)))
          (block attribute
            (let* ((anchor-x (%boundary-key-anchor-x packing key))
                   (anchor-y (%boundary-key-anchor-y packing key))
                   (anchor-z (%boundary-key-anchor-z key))
-                  (left12 (ldb (byte 12 16) value))
-                  (right12 (ldb (byte 12 4) value))
-                  (stock (ldb (byte 4 0) value))
+                  (left12 (ldb (byte 12 +fan-record-left-shift+) value))
+                  (right12 (ldb (byte 12 +fan-record-right-shift+) value))
+                  (stock (ldb (byte +fan-record-stock-bit-count+ 0) value))
                   (lx (+ (* 8 anchor-x) (ldb (byte 4 8) left12)))
                   (ly (+ (* 8 anchor-y) (ldb (byte 4 4) left12)))
                   (lz (+ (* 8 anchor-z) (ldb (byte 4 0) left12)))
@@ -1262,11 +1276,11 @@ every owned site's bevel domain, and DROP-NONLOCAL-P discards it."
                          (ash (%fan-point (- lx (* 8 site-x))
                                           (- ly (* 8 site-y))
                                           (- lz (* 8 site-z)))
-                              16)
+                              +fan-record-left-shift+)
                          (ash (%fan-point (- rx (* 8 site-x))
                                           (- ry (* 8 site-y))
                                           (- rz (* 8 site-z)))
-                              4)
+                              +fan-record-right-shift+)
                          stock)))
                  (push record
                        (gethash (%lattice-key site-x site-y site-z)
@@ -1320,8 +1334,8 @@ every owned site's bevel domain, and DROP-NONLOCAL-P discards it."
                    (%fan-point (rescale x global)
                                (rescale y global)
                                (rescale z global))))))
-        (logior (ash (rescale-point left) 16)
-                (ash (rescale-point right) 4)
+        (logior (ash (rescale-point left) +fan-record-left-shift+)
+                (ash (rescale-point right) +fan-record-right-shift+)
                 (%fan-record-stock record))))))
 
 (defun %cycle-planar-through-site-p (cycle)

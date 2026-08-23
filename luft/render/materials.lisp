@@ -33,7 +33,9 @@
 (defclass surface-reading ()
   ((name :initarg :name :reader surface-reading-name)
    (kind :initarg :kind :reader surface-reading-kind)
+   (tone :initarg :tone :reader surface-reading-tone)
    (finish :initarg :finish :reader surface-reading-finish)
+   (frame :initarg :frame :reader surface-reading-frame)
    (role :initarg :role :reader surface-reading-role))
   (:documentation
    "One exposed face's derived interpretation of an authored placement."))
@@ -44,6 +46,8 @@
    (primary :initarg :primary :reader surface-assembly-primary)
    (secondary :initarg :secondary :initform nil
               :reader surface-assembly-secondary)
+   (tertiary :initarg :tertiary :initform nil
+             :reader surface-assembly-tertiary)
    (kernel :initarg :kernel :reader surface-assembly-kernel))
   (:documentation
    "An interned face, band, or fan material relation compiled for rendering."))
@@ -101,29 +105,35 @@
 (setf *grass-reading*
       (ensure-semantic-instance
        *grass-reading* 'surface-reading :name :grass
-       :kind *earth-material* :finish :living :role :exposed-top)
+       :kind *earth-material* :tone '(0.17 0.36 0.11) :finish :living
+       :frame *world-material-frame* :role :exposed-top)
       *soil-reading*
       (ensure-semantic-instance
        *soil-reading* 'surface-reading :name :soil
-       :kind *earth-material* :finish :cut :role :exposed-side)
+       :kind *earth-material* :tone '(0.42 0.32 0.21) :finish :cut
+       :frame *world-material-frame* :role :exposed-side)
       *subsoil-reading*
       (ensure-semantic-instance
        *subsoil-reading* 'surface-reading :name :subsoil
-       :kind *earth-material* :finish :broken :role :underside)
+       :kind *earth-material* :tone '(0.24 0.18 0.13) :finish :broken
+       :frame *world-material-frame* :role :underside)
       *stone-reading*
       (ensure-semantic-instance
        *stone-reading* 'surface-reading :name :dressed-limestone
-       :kind *limestone-material* :finish :dressed :role :architecture)
+       :kind *limestone-material* :tone '(0.53 0.49 0.39) :finish :dressed
+       :frame *sanctuary-material-frame* :role :architecture)
       *foundation-stone-reading*
       (ensure-semantic-instance
        *foundation-stone-reading* 'surface-reading :name :foundation-limestone
-       :kind *limestone-material* :finish :earth-weathered :role :foundation))
+       :kind *limestone-material* :tone '(0.53 0.49 0.39)
+       :finish :earth-weathered :frame *sanctuary-material-frame*
+       :role :foundation))
 
 (defun ensure-surface-assembly
-    (current name relation primary &key secondary kernel)
+    (current name relation primary &key secondary tertiary kernel)
   (ensure-semantic-instance
    current 'surface-assembly :name name :relation relation :primary primary
-   :secondary secondary :kernel kernel))
+   :secondary secondary :tertiary tertiary :kernel kernel))
 
 (defvar *grass-surface* nil)
 (defvar *soil-surface* nil)
@@ -150,15 +160,18 @@
       *turf-set-stone-surface*
       (ensure-surface-assembly
        *turf-set-stone-surface* :turf-set-limestone :contact *stone-reading*
-       :secondary *grass-reading* :kernel :earth-set-stone)
+       :secondary *grass-reading* :tertiary *subsoil-reading*
+       :kernel :earth-set-stone)
       *soil-set-stone-surface*
       (ensure-surface-assembly
        *soil-set-stone-surface* :soil-set-limestone :contact *stone-reading*
-       :secondary *soil-reading* :kernel :earth-set-stone)
+       :secondary *soil-reading* :tertiary *subsoil-reading*
+       :kernel :earth-set-stone)
       *deep-set-stone-surface*
       (ensure-surface-assembly
        *deep-set-stone-surface* :deep-set-limestone :contact *stone-reading*
-       :secondary *subsoil-reading* :kernel :earth-set-stone)
+       :secondary *subsoil-reading* :tertiary *subsoil-reading*
+       :kernel :earth-set-stone)
       *turf-edge-surface*
       (ensure-surface-assembly
        *turf-edge-surface* :turf-edge :contact *grass-reading*
@@ -166,7 +179,8 @@
       *foundation-stone-surface*
       (ensure-surface-assembly
        *foundation-stone-surface* :foundation-limestone :face
-       *foundation-stone-reading* :kernel :foundation-stone))
+       *foundation-stone-reading* :secondary *soil-reading*
+       :tertiary *subsoil-reading* :kernel :foundation-stone))
 
 (defparameter *surface-assembly-vocabulary*
   (domains:make-identity-vocabulary-domain
@@ -174,14 +188,77 @@
                   *stone-surface* *turf-set-stone-surface*
                   *soil-set-stone-surface* *deep-set-stone-surface*
                   *turf-edge-surface* *foundation-stone-surface*)
-   :limit 16)
-  "The legacy-width assembly domain; its order is the current GPU oracle.")
+   :limit #x1000)
+  "The assembly domain; its first nine offsets retain the legacy GPU oracle.")
 
 (defun surface-assembly-offset (assembly)
   (domains:identity-vocabulary-offset *surface-assembly-vocabulary* assembly nil))
 
 (defun surface-assembly-at (offset)
   (domains:identity-vocabulary-member *surface-assembly-vocabulary* offset))
+
+(defconstant +surface-assembly-descriptor-row-count+ 7)
+
+(defun surface-kernel-code (kernel)
+  "Compile the intentionally closed shader-kernel ABI."
+  (ecase kernel
+    ((:grass :soil :subsoil :stone) 0)
+    (:earth-set-stone 1)
+    (:turf-edge 2)
+    (:foundation-stone 3)))
+
+(defun surface-contact-variant (assembly)
+  (if (eq (surface-assembly-kernel assembly) :earth-set-stone)
+      (let ((secondary (surface-assembly-secondary assembly)))
+        (cond ((eq secondary *grass-reading*) 0)
+              ((eq secondary *soil-reading*) 1)
+              ((eq secondary *subsoil-reading*) 2)
+              (t (error "Unknown earth contact reading ~S." secondary))))
+      0))
+
+(defun surface-assembly-descriptor-words
+    (&optional (vocabulary *surface-assembly-vocabulary*))
+  "Compile VOCABULARY into fixed-stride float32 rows for direct GPU indexing.
+
+Each assembly owns seven vec4 rows: primary/kernel, secondary/contact variant,
+tertiary/roughness, then frame origin and its three axes.  The fixed stride is
+small enough for direct indexing while leaving material meaning on the CPU."
+  (let* ((members (domains:identity-vocabulary-members vocabulary))
+         (words
+           (make-array (* (length members)
+                          +surface-assembly-descriptor-row-count+ 4)
+                       :element-type 'single-float)))
+    (labels ((put-row (row values)
+               (loop for value in values
+                     for lane from (* row 4)
+                     do (setf (aref words lane)
+                              (coerce value 'single-float))))
+             (tone-of (reading fallback)
+               (surface-reading-tone (or reading fallback))))
+      (loop for assembly across members
+            for index from 0
+            for primary = (surface-assembly-primary assembly)
+            for secondary = (or (surface-assembly-secondary assembly) primary)
+            for tertiary = (or (surface-assembly-tertiary assembly) secondary)
+            for frame = (surface-reading-frame primary)
+            for row = (* index +surface-assembly-descriptor-row-count+)
+            do (put-row row
+                        (append (tone-of primary primary)
+                                (list (surface-kernel-code
+                                       (surface-assembly-kernel assembly)))))
+               (put-row (+ row 1)
+                        (append (tone-of secondary primary)
+                                (list (surface-contact-variant assembly))))
+               (put-row (+ row 2)
+                        (append (tone-of tertiary secondary)
+                                (list (material-kind-roughness
+                                       (surface-reading-kind primary)))))
+               (put-row (+ row 3)
+                        (append (material-frame-origin frame) '(1.0)))
+               (loop for axis in (material-frame-axes frame)
+                     for axis-row from (+ row 4)
+                     do (put-row axis-row (append axis '(0.0))))))
+    words))
 
 (defun make-scene-material-vocabulary ()
   "Return the authored placement vocabulary shared by one scene's cells."

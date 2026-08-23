@@ -50,6 +50,7 @@
    #:face-edge-site #:face-corner-site
    ;; Manifold-sheet mesh.
    #:+mesh-cell-size+ #:+mesh-bevel-width+ #:+mesh-instance-word-count+
+   #:+mesh-instance-stock-bit-count+
    #:+mesh-template-vertex-word-count+ #:+mesh-template-coordinate-bias+
    #:surface-mesh #:surface-mesh-domain #:surface-mesh-bevel-width
    #:surface-mesh-template-vertex-words #:surface-mesh-template-ranges

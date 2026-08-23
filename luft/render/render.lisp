@@ -574,23 +574,27 @@ consequence of its own occupancy star and can be read on its own."
 
 (defstruct (render-population
              (:constructor %make-render-population
-                 (template-words instance-words triangle-instance-count
-                  quad-instance-count))
+                 (template-words instance-words material-descriptor-words
+                  triangle-instance-count quad-instance-count))
              (:copier nil))
   "One compact draw population shared by every resident surface mesh."
   (template-words #() :type (simple-array (unsigned-byte 32) (*)) :read-only t)
   (instance-words #() :type (simple-array (unsigned-byte 32) (*)) :read-only t)
+  (material-descriptor-words #() :type (simple-array single-float (*))
+                             :read-only t)
   (triangle-instance-count 0 :type (integer 0 *) :read-only t)
   (quad-instance-count 0 :type (integer 0 *) :read-only t))
 
 (defstruct (resident-population
              (:constructor %make-resident-population
-                 (population instance-buffer template-buffer bind-group))
+                 (population instance-buffer template-buffer material-buffer
+                  bind-group))
              (:copier nil))
   "The CPU population and its renderer-global GPU realization."
   (population nil :type render-population :read-only t)
   (instance-buffer nil :read-only t)
   (template-buffer nil :read-only t)
+  (material-buffer nil :read-only t)
   (bind-group nil :read-only t))
 
 (defun make-render-population (meshes)
@@ -702,6 +706,7 @@ so the complete surface needs at most two direct instanced draws."
      (coerce template-words '(simple-array (unsigned-byte 32) (*)))
      (concatenate '(simple-array (unsigned-byte 32) (*))
                   triangle-words quad-words)
+     (surface-assembly-descriptor-words)
      triangle-count quad-count)))
 
 (defstruct (mesh-slot (:constructor %make-mesh-slot) (:copier nil))
@@ -1001,6 +1006,7 @@ so the complete surface needs at most two direct instanced draws."
 (defun %destroy-resident-population (resident)
   (when resident
     (dolist (resource (list (resident-population-bind-group resident)
+                            (resident-population-material-buffer resident)
                             (resident-population-template-buffer resident)
                             (resident-population-instance-buffer resident)))
       (when resource (ignore-errors (destroy resource)))))
@@ -1012,7 +1018,9 @@ so the complete surface needs at most two direct instanced draws."
          (population (make-render-population meshes))
          (instance-words (render-population-instance-words population))
          (template-words (render-population-template-words population))
-         instance-buffer template-buffer bind-group
+         (material-words
+           (render-population-material-descriptor-words population))
+         instance-buffer template-buffer material-buffer bind-group
          (completed-p nil))
     (flet ((stream-buffer (label words)
              (let ((buffer
@@ -1030,6 +1038,9 @@ so the complete surface needs at most two direct instanced draws."
                    (stream-buffer "luft resident site instances" instance-words)
                    template-buffer
                    (stream-buffer "luft canonical site templates" template-words)
+                   material-buffer
+                   (stream-buffer "luft surface assembly descriptors"
+                                  material-words)
                    bind-group
                    (create device
                            (make-bind-group-descriptor
@@ -1039,14 +1050,18 @@ so the complete surface needs at most two direct instanced draws."
                             `((:binding 0 :resource ,instance-buffer)
                               (:binding 1 :resource ,template-buffer)
                               (:binding 2
-                               :resource ,(renderer-camera-buffer renderer))))))
+                               :resource ,(renderer-camera-buffer renderer))
+                              (:binding 3 :resource ,material-buffer)))))
              (let ((resident
                      (%make-resident-population
-                      population instance-buffer template-buffer bind-group)))
+                      population instance-buffer template-buffer
+                      material-buffer bind-group)))
                (setf completed-p t)
                resident))
         (unless completed-p
-          (dolist (resource (list bind-group template-buffer instance-buffer))
+          (dolist (resource
+                    (list bind-group material-buffer template-buffer
+                          instance-buffer))
             (when resource (ignore-errors (destroy resource)))))))))
 
 (defun %prospective-meshes (renderer candidates &optional removed-key)
@@ -1171,7 +1186,8 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                           :label "luft mesh layout"
                           :entries '((:binding 0 :type :storage-buffer)
                                      (:binding 1 :type :storage-buffer)
-                                     (:binding 2 :type :uniform-buffer))))
+                                     (:binding 2 :type :uniform-buffer)
+                                     (:binding 3 :type :storage-buffer))))
                  vertex-module
                  (create device
                          (make-shader-module-descriptor

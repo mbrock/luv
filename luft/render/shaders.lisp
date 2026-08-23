@@ -70,11 +70,15 @@
        (* #.*stock-tooth* (- (+ (* 0.55 coarse) (* 0.45 fine)) 0.5)))))
 
 (define-shader-function earth-set-stone-tone
-    (point normal ambient-occlusion stock stone-tone soil-tone subsoil-tone)
+    (point normal ambient-occlusion contact-variant
+     stone-tone soil-tone subsoil-tone)
   "Weather one stone chamfer from its packed incident-substrate reading."
-  (let* ((turf-set-p (if (< (abs (- stock 4.0)) 0.5) 1.0 0.0))
-         (soil-set-p (if (< (abs (- stock 5.0)) 0.5) 1.0 0.0))
-         (deep-set-p (if (< (abs (- stock 6.0)) 0.5) 1.0 0.0))
+  (let* ((turf-set-p
+           (if (< (abs contact-variant) 0.5) 1.0 0.0))
+         (soil-set-p
+           (if (< (abs (- contact-variant 1.0)) 0.5) 1.0 0.0))
+         (deep-set-p
+           (if (< (abs (- contact-variant 2.0)) 0.5) 1.0 0.0))
          (clump
            (paper-noise (+ (* point (vec3 1.25 1.25 4.5))
                            (vec3 7.1 19.3 3.7))))
@@ -618,7 +622,7 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
      :outputs ((clip-position :vec4 :built-in :position)
                (world-position-output :vec3 :location 0)
                (mesh-normal-output :vec3 :location 1 :interpolation :flat)
-               (stock-output :float :location 2 :interpolation :flat)
+               (assembly-output :float :location 2 :interpolation :flat)
                (barycentric-output :vec3 :location 3)
                (current-clip-output :vec4 :location 4)
                (previous-clip-output :vec4 :location 5)
@@ -664,9 +668,9 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
            (vec3 (- (float (ldb (byte 2 0) attributes)) 1.0)
                  (- (float (ldb (byte 2 2) attributes)) 1.0)
                  (- (float (ldb (byte 2 4) attributes)) 1.0)))
-         (stock (float (ldb (byte 4 16) (swizzle instance :w))))
+         (assembly-id (float (ldb (byte 12 16) (swizzle instance :w))))
          (ambient-occlusion
-           (/ (float (ldb (byte 2 20) (swizzle instance :w))) 3.0))
+           (/ (float (ldb (byte 2 28) (swizzle instance :w))) 3.0))
          (barycentric-index (uint (ldb (byte 2 6) attributes)))
          (boundary-edge-mask (uint (ldb (byte 3 10) attributes)))
          (barycentric
@@ -694,7 +698,7 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
                       (swizzle current-clip :w)))
     (set-output world-position-output world-position)
     (set-output mesh-normal-output mesh-normal)
-    (set-output stock-output stock)
+    (set-output assembly-output assembly-id)
     (set-output barycentric-output barycentric)
     (set-output current-clip-output current-clip)
     (set-output previous-clip-output previous-clip)
@@ -705,7 +709,7 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
     (:stage :fragment
      :inputs ((world-position :vec3 :location 0)
               (mesh-normal :vec3 :location 1 :interpolation :flat)
-              (stock :float :location 2 :interpolation :flat)
+              (assembly-id :float :location 2 :interpolation :flat)
               (barycentric :vec3 :location 3)
               (current-clip :vec4 :location 4)
               (previous-clip :vec4 :location 5)
@@ -727,7 +731,9 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
                             (previous-camera-projection :vec4)
                             (temporal-parameters :vec4)
                             (inspection-parameters :vec4)
-                            (character-parameters :vec4)))))
+                            (character-parameters :vec4)))
+                 (material-descriptors :storage-buffer :binding 3
+                  :element :vec4)))
   (let* ((dx (derivative-x world-position))
          (dy (derivative-y world-position))
          (geometric-normal
@@ -742,32 +748,35 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
                      (* geometric-normal -1.0)
                      geometric-normal))
          (paper-point (paper-space world-position))
-         (grass-tone (vec3 0.17 0.36 0.11))
-         (soil-tone (vec3 0.42 0.32 0.21))
-         (subsoil-tone (vec3 0.24 0.18 0.13))
-         (stone-tone (vec3 0.53 0.49 0.39))
-         (earth-set-p (if (> stock 3.5)
-                          (if (< stock 6.5) 1.0 0.0)
-                          0.0))
-         (tone (if (< stock 0.5)
-                   grass-tone
-                   (if (< stock 1.5)
-                       soil-tone
-                       (if (< stock 2.5)
-                           subsoil-tone
-                           (if (< stock 3.5)
-                               stone-tone
-                               (if (< stock 6.5)
-                                   (earth-set-stone-tone
-                                    world-position normal ambient-occlusion
-                                    stock stone-tone soil-tone subsoil-tone)
-                                   (if (< stock 7.5)
-                                       (turf-edge-tone
-                                        world-position normal
-                                        grass-tone soil-tone)
-                                       (foundation-stone-tone
-                                        world-position stone-tone
-                                        soil-tone subsoil-tone))))))))
+         (descriptor-row (uint (* assembly-id 7.0)))
+         (primary
+           (buffer-element material-descriptors descriptor-row))
+         (secondary
+           (buffer-element material-descriptors
+                           (+ descriptor-row (uint 1.0))))
+         (tertiary
+           (buffer-element material-descriptors
+                           (+ descriptor-row (uint 2.0))))
+         (primary-tone (swizzle primary :xyz))
+         (secondary-tone (swizzle secondary :xyz))
+         (tertiary-tone (swizzle tertiary :xyz))
+         (kernel (swizzle primary :w))
+         (contact-variant (swizzle secondary :w))
+         (earth-set-p
+           (if (< (abs (- kernel 1.0)) 0.5) 1.0 0.0))
+         (tone
+           (if (< kernel 0.5)
+               primary-tone
+               (if (< kernel 1.5)
+                   (earth-set-stone-tone
+                    world-position normal ambient-occlusion contact-variant
+                    primary-tone secondary-tone tertiary-tone)
+                   (if (< kernel 2.5)
+                       (turf-edge-tone world-position normal
+                                       primary-tone secondary-tone)
+                       (foundation-stone-tone
+                        world-position primary-tone secondary-tone
+                        tertiary-tone)))))
          (bloom
            (paper-noise (+ (* paper-point 0.17) (vec3 2.7 17.1 8.3))))
          (mottle
