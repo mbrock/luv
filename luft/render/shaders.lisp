@@ -131,16 +131,16 @@
 (define-shader-function player-pelvis-lift (gait)
   "Height of a fixed-length leg over the active stance contact.
 
-Each half-step advances the root by 0.65625 cells.  The support foot sits at
+Each half-step advances the root by 0.875 cells.  The support foot sits at
 the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
 -D/2 and the pelvis rises naturally over mid-stance."
-  (let* ((step-length 0.65625)
+  (let* ((step-length 0.875)
          (half-step (* step-length 0.5))
          ;; The ankle centre is Z=.26 and the hip is Z=1.27 at double
          ;; support.  This reach therefore makes the stance constraint agree
          ;; with the actual SDF joint centres, rather than merely producing a
          ;; plausible amount of bob.
-         (leg-length 1.06196)
+         (leg-length 1.10066)
          (phase (fract (player-step-coordinate gait)))
          (support-offset (* step-length (- 0.5 phase)))
          (height (sqrt (max (- (* leg-length leg-length)
@@ -157,32 +157,43 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
         (- (swizzle point :z) (player-pelvis-lift gait))))
 
 (define-shader-function player-tunic-distance (point)
-  (player-sdf-ellipsoid point (vec3 0.0 0.0 1.67)
-                        (vec3 0.50 0.32 0.64)))
+  ;; A fitted upper coat flowing into a longer surcoat gives the little figure
+  ;; a deliberate, upright silhouette without hiding the planted legs.
+  (player-sdf-smooth-union
+   (player-sdf-ellipsoid point (vec3 0.0 0.0 1.88)
+                         (vec3 0.47 0.30 0.46))
+   (player-sdf-ellipsoid point (vec3 0.0 -0.015 1.52)
+                         (vec3 0.43 0.28 0.55))
+   0.095))
 
 (define-shader-function player-head-distance (point)
-  (player-sdf-ellipsoid point (vec3 0.0 -0.035 2.56)
-                        (vec3 0.39 0.35 0.38)))
+  (player-sdf-ellipsoid point (vec3 0.0 -0.035 2.57)
+                        (vec3 0.35 0.32 0.36)))
 
 (define-shader-function player-face-distance (point)
-  (player-sdf-sphere point (vec3 0.0 0.335 2.54) 0.13))
+  (player-sdf-sphere point (vec3 0.0 0.305 2.55) 0.12))
 
 (define-shader-function player-hair-distance (point)
-  (player-sdf-ellipsoid point (vec3 0.0 -0.11 2.70)
-                        (vec3 0.405 0.31 0.285)))
+  (player-sdf-ellipsoid point (vec3 0.0 -0.10 2.70)
+                        (vec3 0.365 0.285 0.245)))
 
 (define-shader-function player-collar-distance (point)
-  (player-sdf-ellipsoid point (vec3 0.0 -0.015 2.20)
-                        (vec3 0.39 0.31 0.14)))
+  (player-sdf-ellipsoid point (vec3 0.0 -0.015 2.18)
+                        (vec3 0.48 0.325 0.16)))
 
-(define-shader-function player-pack-distance (point)
-  (player-sdf-ellipsoid point (vec3 0.0 -0.285 1.66)
-                        (vec3 0.37 0.21 0.47)))
+(define-shader-function player-cape-distance (point)
+  "A close, draped traveling cape rather than a bulbous adventurer pack."
+  (player-sdf-ellipsoid point (vec3 0.0 -0.265 1.65)
+                        (vec3 0.38 0.135 0.61)))
+
+(define-shader-function player-belt-distance (point)
+  (player-sdf-ellipsoid point (vec3 0.0 0.0 1.62)
+                        (vec3 0.445 0.295 0.095)))
 
 (define-shader-function player-one-leg-distance
     (point gait direction side parity)
   "A continuous two-bone leg field with an analytic knee solution."
-  (let* ((step-length 0.65625)
+  (let* ((step-length 0.875)
          (step-coordinate (player-step-coordinate gait))
          ;; One foot cycle spans two half-steps.  Its first half is stance;
          ;; its second half is the swing to the next fixed contact.
@@ -198,19 +209,19 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
                              (* 2.0 swing-weight))))
          (root-world (* step-length step-coordinate))
          (swing (* direction (- foot-world root-world)))
-         (lift (* 0.20 (* 4.0 (* swing-time (- 1.0 swing-time)))))
+         (lift (* 0.24 (* 4.0 (* swing-time (- 1.0 swing-time)))))
          (pelvis-lift (player-pelvis-lift gait))
          (hip (vec3 (* side 0.22) 0.0
                     (+ 1.27 pelvis-lift)))
          (ankle (vec3 (* side 0.22) swing (+ 0.26 lift)))
-         ;; Equal 0.56-cell bones solve the knee on the forward-bending side
+         ;; Equal 0.60-cell bones solve the knee on the forward-bending side
          ;; of the hip/ankle chord.  Keeping a little flex even at maximum
          ;; stance reach gives the silhouette a readable knee instead of a
          ;; rubbery telescoping capsule.
          (axis (- ankle hip))
          (axis-length (player-sdf-length axis))
          (half-axis (* axis 0.5))
-         (bone-length 0.56)
+         (bone-length 0.60)
          (knee-reach
            (sqrt (max (- (* bone-length bone-length)
                          (* 0.25 (* axis-length axis-length)))
@@ -219,8 +230,8 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
            (/ (vec3 0.0 (- (swizzle axis :z)) (swizzle axis :y))
               axis-length))
          (knee (+ hip (+ half-axis (* knee-forward knee-reach))))
-         (thigh (player-sdf-capsule point hip knee 0.18))
-         (shin (player-sdf-capsule point knee ankle 0.155))
+         (thigh (player-sdf-capsule point hip knee 0.175))
+         (shin (player-sdf-capsule point knee ankle 0.15))
          (leg (player-sdf-smooth-union thigh shin 0.065))
          (boot (player-sdf-ellipsoid
                 point (vec3 (* side 0.22) (+ swing 0.09) (+ 0.16 lift))
@@ -234,17 +245,26 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
   (min (player-one-leg-distance point gait direction -1.0 0.0)
        (player-one-leg-distance point gait direction 1.0 1.0)))
 
+(define-shader-function player-one-arm-distance (point gait side)
+  (let* ((swing (* side (* -0.30 (sin gait))))
+         (shoulder (vec3 (* side 0.44) 0.0 2.00))
+         (elbow (vec3 (* side 0.51) (* swing 0.48) 1.62))
+         (hand (vec3 (* side 0.52) swing 1.31))
+         (upper (player-sdf-capsule point shoulder elbow 0.145))
+         (lower (player-sdf-capsule point elbow hand 0.135)))
+    (player-sdf-smooth-union upper lower 0.055)))
+
 (define-shader-function player-arm-distance (point gait)
-  (let* ((side (if (< (swizzle point :x) 0.0) -1.0 1.0))
-         (swing (* side (* -0.19 (sin gait))))
-         (shoulder (vec3 (* side 0.46) 0.0 1.91))
-         (hand (vec3 (* side 0.55) swing 1.18)))
-    (player-sdf-capsule point shoulder hand 0.16)))
+  (min (player-one-arm-distance point gait -1.0)
+       (player-one-arm-distance point gait 1.0)))
+
+(define-shader-function player-one-hand-distance (point gait side)
+  (let* ((swing (* side (* -0.30 (sin gait)))))
+    (player-sdf-sphere point (vec3 (* side 0.52) swing 1.28) 0.155)))
 
 (define-shader-function player-hand-distance (point gait)
-  (let* ((side (if (< (swizzle point :x) 0.0) -1.0 1.0))
-         (swing (* side (* -0.19 (sin gait)))))
-    (player-sdf-sphere point (vec3 (* side 0.55) swing 1.13) 0.19)))
+  (min (player-one-hand-distance point gait -1.0)
+       (player-one-hand-distance point gait 1.0)))
 
 (define-shader-function player-distance (point gait direction)
   (let* ((posed (player-walk-pose point gait))
@@ -254,7 +274,8 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
          (face (player-face-distance posed))
          (hair (player-hair-distance posed))
          (collar (player-collar-distance posed))
-         (pack (player-pack-distance posed))
+         (cape (player-cape-distance posed))
+         (belt (player-belt-distance posed))
          ;; Legs use the un-bobbed frame: the planted boot stays on the deck
          ;; while the hips and upper body carry the weight shift.
          (legs (player-leg-distance point gait direction))
@@ -265,7 +286,8 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
       (player-sdf-smooth-union
        (player-sdf-smooth-union body face 0.055)
        (player-sdf-smooth-union hair collar 0.06) 0.055)
-      (player-sdf-smooth-union pack legs 0.075) 0.065)
+      (player-sdf-smooth-union
+       (player-sdf-smooth-union cape belt 0.045) legs 0.06) 0.06)
      (player-sdf-smooth-union arms hands 0.07) 0.075)))
 
 (define-shader-function player-normal (point gait direction)
@@ -299,25 +321,29 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
                     (player-hand-distance posed gait)))
          (hair (player-hair-distance posed))
          (collar (player-collar-distance posed))
-         (pack (player-pack-distance posed))
+         (cape (player-cape-distance posed))
+         (belt (player-belt-distance posed))
          (legs (player-leg-distance point gait direction))
          (linen (player-linen-tooth posed))
          (leather (player-leather-tooth posed))
          (skin-near (step skin tunic))
-         (first (mix (* (vec3 0.29 0.37 0.33) linen)
+         (first (mix (* (vec3 0.31 0.385 0.35) linen)
                      (vec3 0.62 0.44 0.32) skin-near))
          (distance (min tunic skin))
          (hair-near (step hair distance))
          (second (mix first (vec3 0.15 0.105 0.075) hair-near))
          (distance-2 (min distance hair))
          (collar-near (step collar distance-2))
-         (third (mix second (* (vec3 0.53 0.39 0.20) linen) collar-near))
+         (third (mix second (* (vec3 0.58 0.455 0.255) linen) collar-near))
          (distance-3 (min distance-2 collar))
-         (pack-near (step pack distance-3))
-         (fourth (mix third (* (vec3 0.30 0.22 0.145) leather) pack-near))
-         (distance-4 (min distance-3 pack))
-         (leg-near (step legs distance-4)))
-    (mix fourth (* (vec3 0.19 0.16 0.13) leather) leg-near)))
+         (cape-near (step cape distance-3))
+         (fourth (mix third (* (vec3 0.37 0.30 0.205) linen) cape-near))
+         (distance-4 (min distance-3 cape))
+         (belt-near (step belt distance-4))
+         (fifth (mix fourth (* (vec3 0.22 0.155 0.095) leather) belt-near))
+         (distance-5 (min distance-4 belt))
+         (leg-near (step legs distance-5)))
+    (mix fifth (* (vec3 0.18 0.15 0.125) leather) leg-near)))
 
 (define-shader player-sdf-vertex-specification
     (:stage :vertex
@@ -428,10 +454,10 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
          (time (swizzle character-parameters :w))
          (path (* time 0.22))
          (direction (if (< (cos path) 0.0) -1.0 1.0))
-         ;; Sixteen physical half-steps from bridge centre to either end.
-         ;; One root half-step is exactly 0.65625 cells, matching the contact
+         ;; Twelve physical half-steps from bridge centre to either end.
+         ;; One root half-step is exactly 0.875 cells, matching the contact
          ;; solver's stride, so stance feet are stationary in world space.
-         (gait (* 50.2654825 (sin path)))
+         (gait (* 37.6991118 (sin path)))
          (ray (if (< (swizzle render-parameters :z) 0.5)
                   (normalize (swizzle camera-forward :xyz))
                   (normalize (- proxy-world-position

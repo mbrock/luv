@@ -174,8 +174,8 @@
             (render:make-miter-study-scene)))))
 
 (deftest player-gait-anchors-stance-feet-and-rises-over-support
-  (let ((step-length 0.65625)
-        (leg-length 1.06196)
+  (let ((step-length 0.875)
+        (leg-length 1.10066)
         (hip-height 1.01))
     (labels ((foot-sample (step-coordinate parity)
                (let* ((cycle (* 0.5 (- step-coordinate parity)))
@@ -190,7 +190,7 @@
                   (* step-length
                      (+ parity (* 2.0 cycle-index) 0.5
                         (* 2.0 swing-weight)))
-                  (* 0.20 4.0 swing-time (- 1.0 swing-time)))))
+                  (* 0.24 4.0 swing-time (- 1.0 swing-time)))))
              (pelvis-height (step-coordinate)
                (let* ((phase (- step-coordinate (floor step-coordinate)))
                       (offset (* step-length (- 0.5 phase))))
@@ -208,11 +208,11 @@
           (ok (zerop right-a-lift))
           (ok (zerop right-b-lift))))
       ;; The other foot clears the deck during transfer and lands at zero
-      ;; height; sixteen half-steps span the bridge's 10.5-cell half-route.
+      ;; height; twelve half-steps span the bridge's 10.5-cell half-route.
       (multiple-value-bind (mid-swing mid-lift) (foot-sample 0.5 1.0)
         (declare (ignore mid-swing))
-        (ok (> mid-lift 0.19)))
-      (ok (= 10.5 (* 16 step-length)))
+        (ok (> mid-lift 0.23)))
+      (ok (= 10.5 (* 12 step-length)))
       ;; A fixed leg is shortest at double support and tallest over the
       ;; planted foot at mid-stance, giving the body its non-arbitrary bob.
       (ok (= (pelvis-height 0.0) (pelvis-height 1.0)))
