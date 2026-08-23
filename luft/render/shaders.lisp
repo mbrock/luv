@@ -9,8 +9,10 @@
   (defvar *stock-tooth* 0.055)
   (defvar *paper-variation* 0.11)
   (defvar *local-ambient-occlusion-strength* 0.28)
+  (defvar *cut-edge-lift-strength* 0.24)
   (defvar *screen-ambient-occlusion-strength* 0.38)
-  (defvar *screen-ambient-occlusion-radius* 0.95))
+  (defvar *screen-ambient-occlusion-radius* 0.95)
+  (defvar *ambient-pigment-strength* 0.82))
 
 (define-shader-function paper-hash (site)
   (let* ((scattered (fract (* site 0.1031)))
@@ -265,6 +267,19 @@
          (all-wire (- 1.0 (smoothstep 0.45 1.15 edge-pixels)))
          (boundary-wire
            (- 1.0 (smoothstep 0.45 1.15 boundary-edge-pixels)))
+         (chamferness
+           (clamp
+            (* 2.4
+               (- (+ (abs (swizzle normal :x))
+                     (abs (swizzle normal :y))
+                     (abs (swizzle normal :z)))
+                  1.0))
+            0.0 1.0))
+         (cut-edge
+           (* #.*cut-edge-lift-strength*
+              chamferness
+              (- 1.0 (smoothstep 0.20 1.45 boundary-edge-pixels))
+              (+ 0.28 (* 0.72 wrapped))))
          (construction-wire
            (* (swizzle render-parameters :y)
               (min 1.0 (+ (* all-wire 0.18) (* boundary-wire 0.82)))))
@@ -284,7 +299,9 @@
          (reticle (max center ring))
          (construction-ink (vec3 0.055 0.16 0.22))
          (blueprint (vec3 0.30 0.90 0.94))
-         (drafted (mix paper construction-ink construction-wire))
+         (cut-paper (vec3 1.02 0.975 0.86))
+         (edged (mix paper cut-paper cut-edge))
+         (drafted (mix edged construction-ink construction-wire))
          (radiance (mix drafted blueprint reticle)))
     (set-output color-output (vec4 radiance 1.0))
     (set-output motion-output
@@ -571,6 +588,16 @@
            (if (< depth 0.9999)
                (- 1.0 (* #.*screen-ambient-occlusion-strength*
                          (min 1.0 (* occlusion 1.6))))
-               1.0)))
+               1.0))
+         (pooling
+           (* #.*ambient-pigment-strength*
+              (min 1.0 (* occlusion 1.6))))
+         ;; A common cool shadow pigment makes the depth signal read as an
+         ;; illustrated wash rather than neutral post-process darkening.
+         (shadow-pigment (vec3 0.76 0.88 1.03))
+         (shadowed (* (swizzle value :xyz) accessibility))
+         (pigmented (* shadowed
+                       (mix (vec3 1.0 1.0 1.0)
+                            shadow-pigment pooling))))
     (set-output color-output
-                (vec4 (* (swizzle value :xyz) accessibility) 1.0))))
+                (vec4 pigmented 1.0))))
