@@ -123,6 +123,31 @@
                        (zerop (mod (aref lattice (+ offset 2))
                                    luft:+mesh-cell-size+))))))))))
 
+(deftest terrain-chamfers-use-one-side-material
+  (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
+         (scene (progn
+                  (luft.render::scene-builder-cell builder 4 4 4)
+                  (luft.render::finish-scene-builder builder)))
+         (mesh (render:make-render-mesh scene)))
+    (flet ((instance-stocks (words)
+             (loop for offset from 3 below (length words) by 4
+                   collect (ldb (byte 4 16) (aref words offset)))))
+      ;; A terrain chamfer resolves uniformly to soil (1), never grass (0),
+      ;; even where its geometric closure sees only a horizontal face.
+      (dolist (words (list (luft:surface-mesh-band-instance-words mesh)
+                           (luft:surface-mesh-fan-instance-words mesh)))
+        (ok (plusp (length words)))
+        (ok (every (lambda (stock) (= stock 1))
+                   (instance-stocks words)))))))
+
+(deftest a-scene-never-gives-a-chamfer-the-terrain-top-stock
+  (let ((mesh (render:make-render-mesh (render:make-miter-study-scene))))
+    (dolist (words (list (luft:surface-mesh-band-instance-words mesh)
+                         (luft:surface-mesh-fan-instance-words mesh)))
+      (ok (notany (lambda (stock) (zerop stock))
+                  (loop for offset from 3 below (length words) by 4
+                        collect (ldb (byte 4 16) (aref words offset))))))))
+
 (deftest mesh-and-presentation-shaders-lower-through-both-conventional-backends
   (let* ((vertex (luft.render.shaders:mesh-vertex-specification))
          (fragment (luft.render.shaders:mesh-fragment-specification))

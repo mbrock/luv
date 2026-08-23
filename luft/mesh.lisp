@@ -498,7 +498,8 @@ star corpus; signal that boundary explicitly instead of silently welding it."
               (= 0 (%occupancy-at domain occupancy diagonal))))))
 
 (defun %emit-cell-face
-    (builder domain occupancy cell axis-number side stock-function)
+    (builder domain occupancy cell axis-number side stock-function
+     chamfer-stock-function)
   (let* ((bevel-width (surface-mesh-builder-bevel-width builder))
          (cell-coordinates (%cell-coordinates cell))
          (tangents (%other-axis-numbers axis-number))
@@ -508,7 +509,11 @@ star corpus; signal that boundary explicitly instead of silently welding it."
          (normal (loop for index below 3
                        collect (if (= index axis-number) side 0)))
          (face (%cell-face domain cell axis-number side))
-         (stock (funcall stock-function face)))
+         (stock (funcall stock-function face))
+         ;; The central square remains face-owned.  Its four collars are the
+         ;; planar part of the chamfer, so they must take the same one-stock
+         ;; policy as bevel bands and vertex closures.
+         (chamfer-stock (funcall chamfer-stock-function (list stock))))
     (destructuring-bind (u v) tangents
       (let* ((u-anchor (* +mesh-cell-size+ (nth u cell-coordinates)))
              (v-anchor (* +mesh-cell-size+ (nth v cell-coordinates)))
@@ -572,7 +577,8 @@ star corpus; signal that boundary explicitly instead of silently welding it."
                                 (if (= v-cell 2) 1 0))
                      (list (point u0 v0) (point u1 v0)
                            (point u1 v1) (point u0 v1))
-                     normal stock kind)))))))))))
+                     normal (if (eq kind :face) stock chamfer-stock)
+                     kind)))))))))))
 
 (defun %collect-edge-keys (solid)
   (let ((keys (make-hash-table :test #'equal)))
@@ -677,7 +683,7 @@ star corpus; signal that boundary explicitly instead of silently welding it."
    occupancy))
 
 (defun %emit-edge-bands
-    (builder domain occupancy key stock-function)
+    (builder domain occupancy key stock-function chamfer-stock-function)
   (let* ((bevel-width (surface-mesh-builder-bevel-width builder))
          (axis-number (first key))
          (anchor (rest key))
@@ -711,7 +717,11 @@ star corpus; signal that boundary explicitly instead of silently welding it."
                                  (* +mesh-cell-size+ coordinate))
                                anchor))
                  (normal (mapcar #'+ left-normal right-normal))
-                 (stock (funcall stock-function (getf left :face))))
+                 (stock
+                   (funcall chamfer-stock-function
+                            (list (funcall stock-function (getf left :face))
+                                  (funcall stock-function
+                                           (getf right :face))))))
             (labels ((rail (data coordinate)
                        (%point-with-component
                         (mapcar #'+ base (getf data :offset))
@@ -846,12 +856,11 @@ star corpus; signal that boundary explicitly instead of silently welding it."
            collect (cons site (%boundary-edge-cycles edges site)))
      #'%point-lexicographically-less-p :key #'first)))
 
-(defun %emit-triangular-boundary-cap (builder site cycle)
+(defun %emit-triangular-boundary-cap (builder site cycle stock)
   (let* ((a (first (first cycle)))
          (b (first (second cycle)))
          (c (first (third cycle)))
-         (normal (%cross (%point- c a) (%point- b a)))
-         (stock (third (first cycle))))
+         (normal (%cross (%point- c a) (%point- b a))))
     ;; The observed loop follows the existing surface winding.  Reverse its
     ;; order so the cap pairs every boundary edge with opposite winding.
     (%emit-polygon builder site (list a c b) normal stock :junction)))
@@ -890,28 +899,20 @@ star corpus; signal that boundary explicitly instead of silently welding it."
           (if (gethash (%geometric-edge-key c a) boundary-stocks) #b010 0)
           (if (gethash (%geometric-edge-key a b) boundary-stocks) #b100 0)))
 
-(defun %triangle-boundary-stock (a b c boundary-stocks fallback)
-  (or (gethash (%geometric-edge-key b c) boundary-stocks)
-      (gethash (%geometric-edge-key c a) boundary-stocks)
-      (gethash (%geometric-edge-key a b) boundary-stocks)
-      fallback))
-
 (defun %emit-boundary-strip-triangle
-    (builder site a b c boundary-stocks fallback-stock)
+    (builder site a b c boundary-stocks stock)
   (let ((normal (%cross (%point- b a) (%point- c a))))
     (%emit-template-instance
      builder site
      (%triangle-template-vertices
       site a b c normal :junction
       (%triangle-boundary-mask a b c boundary-stocks))
-     (%triangle-boundary-stock a b c boundary-stocks fallback-stock)
-     :junction)))
+     stock :junction)))
 
-(defun %emit-boundary-strip (builder site cycle)
+(defun %emit-boundary-strip (builder site cycle stock)
   "Triangulate CYCLE without introducing its lattice-site origin as geometry."
   (let ((points (mapcar #'first cycle))
-        (boundary-stocks (%cycle-boundary-stock-table cycle))
-        (fallback-stock (third (first cycle))))
+        (boundary-stocks (%cycle-boundary-stock-table cycle)))
     ;; Repeatedly remove the end whose replacement diagonal is shorter.  The
     ;; remaining vertices stay a contiguous interval of the boundary, giving
     ;; a deterministic local triangle strip rather than a long fan of spokes.
@@ -925,23 +926,24 @@ star corpus; signal that boundary explicitly instead of silently welding it."
             (progn
               (%emit-boundary-strip-triangle
                builder site first last second
-               boundary-stocks fallback-stock)
+               boundary-stocks stock)
               (setf points (rest points)))
             (progn
               (%emit-boundary-strip-triangle
                builder site first last penultimate
-               boundary-stocks fallback-stock)
+               boundary-stocks stock)
               (setf points (butlast points))))))
     (destructuring-bind (a b c) points
       (%emit-boundary-strip-triangle
-       builder site a c b boundary-stocks fallback-stock))))
+       builder site a c b boundary-stocks stock))))
 
-(defun %emit-centered-boundary-fan (builder site cycle)
+(defun %emit-centered-boundary-fan (builder site cycle stock)
   (let ((origin (mapcar (lambda (coordinate)
                           (* +mesh-cell-size+ coordinate))
                         site)))
     (dolist (edge cycle)
-      (destructuring-bind (left right stock) edge
+      (destructuring-bind (left right edge-stock) edge
+        (declare (ignore edge-stock))
         ;; A boundary edge incident on the center is already a radial edge of
         ;; this fan.  Its neighboring non-radial segment emits the triangle.
         (unless (or (equal left origin) (equal right origin))
@@ -952,8 +954,9 @@ star corpus; signal that boundary explicitly instead of silently welding it."
                      left right site))
             ;; Bit zero denotes the outer RIGHT--LEFT edge.  The other two
             ;; edges are triangulation diagonals inside the complete fan.
-            ;; Keep each sector as its own instance for now because STOCK is
-            ;; an instance attribute and may vary around a mixed junction.
+            ;; Keep each sector as its own instance because the construction
+            ;; mask varies around the junction, even though STOCK is uniform
+            ;; for this whole chamfer.
             (%emit-template-instance
              builder site
              (%triangle-template-vertices
@@ -968,17 +971,20 @@ star corpus; signal that boundary explicitly instead of silently welding it."
         ;; chamfer/fillet runs do not; coning those creates the ornaments.
         (member (logcount mask) '(3 5)))))
 
-(defun %emit-boundary-derived-fans (builder domain occupancy)
+(defun %emit-boundary-derived-fans
+    (builder domain occupancy chamfer-stock-function)
   "Close each face/band boundary loop with a local lattice-site fan template."
   (dolist (entry (%boundary-cycles-by-site builder))
     (let ((site (first entry)))
       (dolist (cycle (rest entry))
-        (cond ((= 3 (length cycle))
-               (%emit-triangular-boundary-cap builder site cycle))
-              ((%vertex-fan-uses-center-p domain occupancy site cycle)
-               (%emit-centered-boundary-fan builder site cycle))
-              (t
-               (%emit-boundary-strip builder site cycle)))))))
+        (let ((stock (funcall chamfer-stock-function
+                              (mapcar #'third cycle))))
+          (cond ((= 3 (length cycle))
+                 (%emit-triangular-boundary-cap builder site cycle stock))
+                ((%vertex-fan-uses-center-p domain occupancy site cycle)
+                 (%emit-centered-boundary-fan builder site cycle stock))
+                (t
+                 (%emit-boundary-strip builder site cycle stock))))))))
 
 (defun %count-singular-vertex-stars (builder domain occupancy vertices)
   (dolist (vertex vertices)
@@ -987,6 +993,7 @@ star corpus; signal that boundary explicitly instead of silently welding it."
 
 (defun make-surface-mesh
     (solid &key (stock-function (constantly 0))
+                (chamfer-stock-function (lambda (stocks) (first stocks)))
                 (bevel-width +mesh-bevel-width+))
   "Classify SOLID into exact integer face, edge, and vertex instance streams.
 
@@ -994,9 +1001,12 @@ Every exposed cell face emits the same width-dependent central square.
 Coplanar collars and bevel bands are edge-owned.  Site-local fans, caps, and
 strips close the remaining lattice-vertex boundaries.  Each stream is sorted
 by template so the renderer can issue direct instanced draws.
-STOCK-FUNCTION is called with an oriented boundary face."
+STOCK-FUNCTION is called with an oriented boundary face.  CHAMFER-STOCK-FUNCTION
+receives the face stocks incident to one edge-owned collar, bevel, or
+lattice-site closure.  It must return one stock for that entire chamfer."
   (check-type solid chain)
   (check-type stock-function function)
+  (check-type chamfer-stock-function function)
   (unless (and (integerp bevel-width)
                (< 0 bevel-width (/ +mesh-cell-size+ 2)))
     (error "Bevel width ~S must be an integer between one and three ticks."
@@ -1016,10 +1026,12 @@ STOCK-FUNCTION is called with an oriented boundary face."
                         domain occupancy
                         (%offset-coordinates coordinates axis-number side)))
               (%emit-cell-face builder domain occupancy cell axis-number side
-                               stock-function))))))
+                               stock-function chamfer-stock-function))))))
     (dolist (edge (%collect-edge-keys solid))
-      (%emit-edge-bands builder domain occupancy edge stock-function))
+      (%emit-edge-bands builder domain occupancy edge stock-function
+                        chamfer-stock-function))
     (let ((vertices (%collect-vertex-keys solid)))
       (%count-singular-vertex-stars builder domain occupancy vertices))
-    (%emit-boundary-derived-fans builder domain occupancy)
+    (%emit-boundary-derived-fans builder domain occupancy
+                                 chamfer-stock-function)
     (%finish-surface-mesh builder)))

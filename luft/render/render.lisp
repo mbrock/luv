@@ -281,13 +281,23 @@ same view also retains the truncated wall miter preserved by #DJK8HW."
           ((eq side :backward) 0)
           (t 2))))
 
+(defun scene-chamfer-stock (stocks)
+  "Resolve one whole chamfer from its incident face STOCKS.
+
+The paper palette's terrain top is grass (0), terrain side is soil (1), and
+terrain underside is dark soil (2).  A chamfer faces out through the terrain
+side, so every non-architectural chamfer is soil regardless of which subset
+of terrain faces generated its triangles.  Architecture (3) is an explicit
+authored material and wins at a terrain--architecture join."
+  (if (member 3 stocks) 3 1))
+
 (defun default-face-stock (face)
   (mod (+ (luft:site-x face) (* 2 (luft:site-y face))
           (* 3 (luft:site-z face)) (luft:site-extent face))
        4))
 
 (defun make-render-mesh
-    (source &key stock-function
+    (source &key stock-function chamfer-stock-function
                  (bevel-width luft:+mesh-bevel-width+))
   "Classify SOURCE into the face, edge, and vertex template-instance ABI."
   (let* ((scene (and (typep source 'scene) source))
@@ -295,10 +305,17 @@ same view also retains the truncated wall miter preserved by #DJK8HW."
          (stock-function (or stock-function
                              (and scene
                                   (lambda (face) (scene-face-stock scene face)))
-                             #'default-face-stock)))
+                             #'default-face-stock))
+         (chamfer-stock-function
+           (or chamfer-stock-function
+               (if scene
+                   #'scene-chamfer-stock
+                   (lambda (stocks) (first stocks))))))
     (check-type solid luft:chain)
     (zone (:luft/rematerialize :value (luft:chain-count solid))
       (luft:make-surface-mesh solid :stock-function stock-function
+                                   :chamfer-stock-function
+                                   chamfer-stock-function
                                    :bevel-width bevel-width))))
 
 (defparameter *gallery*
