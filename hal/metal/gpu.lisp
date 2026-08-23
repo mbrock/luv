@@ -888,6 +888,27 @@ aligned to the element size."
          source 0 (sb-sys:vector-sap bytes) 0 size))
       bytes)))
 
+(defmethod read-buffer-if-ready
+    ((buffer metal-gpu-buffer) &key (offset 0) size)
+  (ensure-live-metal-object buffer :read-buffer-if-ready)
+  (let* ((size (or size (- (gpu-buffer-size buffer) offset)))
+         (queue (device-queue (metal-buffer-device buffer))))
+    (unless (and (typep offset '(unsigned-byte 64))
+                 (typep size '(unsigned-byte 64))
+                 (<= (+ offset size) (gpu-buffer-size buffer)))
+      (reject-metal-gpu-request
+       buffer :buffer-read-out-of-bounds (list :offset offset :size size)))
+    (sb-thread:with-recursive-lock ((metal-queue-lock queue))
+      (ensure-live-metal-object buffer :read-buffer-if-ready)
+      (let ((frontier (maintain-metal-queue queue)))
+        (when (<= (metal-object-last-submission buffer) frontier)
+          (let ((bytes (make-array size :element-type '(unsigned-byte 8)))
+                (source (cffi:inc-pointer (metal-buffer-mapped buffer) offset)))
+            (sb-sys:with-pinned-objects (bytes)
+              (sb-kernel:system-area-ub8-copy
+               source 0 (sb-sys:vector-sap bytes) 0 size))
+            (values bytes t)))))))
+
 (defmethod metal-native-teardown-closure ((buffer metal-gpu-buffer))
   (let* ((device (metal-buffer-device buffer))
          (residency-set (metal-device-residency-set device))

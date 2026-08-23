@@ -1940,10 +1940,8 @@ that he is standing on something."
          (far (- 1.0 (smoothstep (* radius 0.62) radius delta))))
     (* near far)))
 
-(define-shader-function painted-sky
-    (ndc camera-right camera-up camera-forward camera-projection divisor
-     sun-vector sun-color-vector sky-color-vector)
-  "A view-stable late-afternoon atmosphere for background-depth fragments."
+(define-shader-function sky-view-ray
+    (ndc camera-right camera-up camera-forward camera-projection divisor)
   (let* ((perspective-ray
            (normalize
             (+ (swizzle camera-forward :xyz)
@@ -1953,14 +1951,19 @@ that he is standing on something."
                (* (swizzle camera-up :xyz)
                   (/ (- (swizzle ndc :y))
                      (swizzle camera-projection :y))))))
-         ;; Isometric studies still deserve a vertical wash instead of one
-         ;; flat clear colour, while perspective gets a true world-space ray.
          (isometric-ray
            (normalize
             (+ (swizzle camera-forward :xyz)
                (* (swizzle camera-up :xyz)
-                  (* (- (swizzle ndc :y)) 0.38)))))
-         (ray (mix isometric-ray perspective-ray divisor))
+                  (* (- (swizzle ndc :y)) 0.38))))))
+    (mix isometric-ray perspective-ray divisor)))
+
+(define-shader-function painted-sky-radiance
+    (ndc camera-right camera-up camera-forward camera-projection divisor
+     sun-vector sun-color-vector sky-color-vector)
+  "Return view-stable late-afternoon HDR radiance before exposure or grading."
+  (let* ((ray (sky-view-ray ndc camera-right camera-up camera-forward
+                            camera-projection divisor))
          (height (swizzle ray :z))
          (upness (clamp height 0.0 1.0))
          (horizon-weight (smoothstep -0.10 0.42 height))
@@ -2004,7 +2007,107 @@ that he is standing on something."
            (+ clouded
               (* (swizzle sun-color-vector :xyz)
                  (+ (* sun-halo 0.10) (* sun-disc 2.8))))))
-    (paper-grade (paper-tonemap radiance))))
+    radiance))
+
+(define-shader sky-fragment-specification
+    (:stage :fragment
+     :inputs ((ndc :vec2 :location 0))
+     :outputs ((color-output :vec4 :location 0))
+     :resources ((camera-state :uniform-block :binding 0
+                  :members ((camera-position :vec4)
+                            (camera-right :vec4)
+                            (camera-up :vec4)
+                            (camera-forward :vec4)
+                            (camera-projection :vec4)
+                            (render-parameters :vec4)
+                            (previous-camera-position :vec4)
+                            (previous-camera-right :vec4)
+                            (previous-camera-up :vec4)
+                            (previous-camera-forward :vec4)
+                            (previous-camera-projection :vec4)
+                            (temporal-parameters :vec4)
+                            (inspection-parameters :vec4)
+                            (character-parameters :vec4)
+                            (sun-vector :vec4)
+                            (sun-color-vector :vec4)
+                            (sky-color-vector :vec4)))))
+  (let* ((radiance
+           (painted-sky-radiance
+            ndc camera-right camera-up camera-forward camera-projection
+            (swizzle render-parameters :z) sun-vector sun-color-vector
+            sky-color-vector)))
+    (set-output color-output (vec4 radiance 1.0))))
+
+(define-shader sky-temporal-fragment-specification
+    (:stage :fragment
+     :inputs ((ndc :vec2 :location 0))
+     :outputs ((color-output :vec4 :location 0)
+               (motion-output :vec2 :location 1))
+     :resources ((camera-state :uniform-block :binding 0
+                  :members ((camera-position :vec4)
+                            (camera-right :vec4)
+                            (camera-up :vec4)
+                            (camera-forward :vec4)
+                            (camera-projection :vec4)
+                            (render-parameters :vec4)
+                            (previous-camera-position :vec4)
+                            (previous-camera-right :vec4)
+                            (previous-camera-up :vec4)
+                            (previous-camera-forward :vec4)
+                            (previous-camera-projection :vec4)
+                            (temporal-parameters :vec4)
+                            (inspection-parameters :vec4)
+                            (character-parameters :vec4)
+                            (sun-vector :vec4)
+                            (sun-color-vector :vec4)
+                            (sky-color-vector :vec4)))))
+  (let* ((divisor (swizzle render-parameters :z))
+         (ray (sky-view-ray ndc camera-right camera-up camera-forward
+                            camera-projection divisor))
+         (radiance
+           (painted-sky-radiance
+            ndc camera-right camera-up camera-forward camera-projection divisor
+            sun-vector sun-color-vector sky-color-vector))
+         (previous-z (dot ray (swizzle previous-camera-forward :xyz)))
+         (previous-clip
+           (vec4 (* (dot ray (swizzle previous-camera-right :xyz))
+                    (swizzle previous-camera-projection :x))
+                 (- (* (dot ray (swizzle previous-camera-up :xyz))
+                       (swizzle previous-camera-projection :y)))
+                 0.0
+                 (mix 1.0 previous-z divisor)))
+         (current-clip (vec4 (swizzle ndc :x) (swizzle ndc :y) 0.0 1.0)))
+    (set-output color-output (vec4 radiance 1.0))
+    (set-output motion-output
+                (mesh-temporal-motion previous-clip current-clip))))
+
+(define-shader exposure-probe-fragment-specification
+    (:stage :fragment
+     :inputs ((ndc :vec2 :location 0))
+     :outputs ((color-output :vec4 :location 0))
+     :resources ((scene :texture-2d :binding 0 :sample-transfer :identity)
+                 (scene-sampler :sampler :binding 1)))
+  (let* ((uv (+ (* ndc 0.5) (vec2 0.5 0.5)))
+         ;; Match Moppe's broad five-tap probe footprint before the 32x16
+         ;; reduction. Encoding log luminance into UNORM makes the geometric
+         ;; mean portable through the HAL's compact RGBA8 readback contract.
+         (offset (vec2 0.008 0.014))
+         (average
+           (* (+ (swizzle (sample scene scene-sampler uv) :xyz)
+                 (swizzle (sample scene scene-sampler (+ uv offset)) :xyz)
+                 (swizzle (sample scene scene-sampler (- uv offset)) :xyz)
+                 (swizzle
+                  (sample scene scene-sampler
+                          (+ uv (vec2 (swizzle offset :x)
+                                      (- (swizzle offset :y))))) :xyz)
+                 (swizzle
+                  (sample scene scene-sampler
+                          (+ uv (vec2 (- (swizzle offset :x))
+                                      (swizzle offset :y)))) :xyz))
+              0.2))
+         (luminance (max (dot average (vec3 0.2126 0.7152 0.0722)) 0.0001))
+         (encoded (clamp (/ (+ (log luminance) 9.21034) 11.98293) 0.0 1.0)))
+    (set-output color-output (vec4 encoded encoded encoded 1.0))))
 
 (define-shader present-fragment-specification
     (:stage :fragment
@@ -2033,30 +2136,7 @@ that he is standing on something."
                             (sky-color-vector :vec4)))))
   (let* ((uv (+ (* ndc 0.5) (vec2 0.5 0.5)))
          (value (sample scene scene-sampler uv))
-         ;; A sparse whole-frame luminance probe gives the paper camera an
-         ;; exposure of its own.  This intentionally ignores the outermost
-         ;; border (where sky would dominate) and clamps to a three-stop
-         ;; operating range, so entering a gate adapts without a flash.
-         (probe-a (sample scene scene-sampler (vec2 0.25 0.25)))
-         (probe-b (sample scene scene-sampler (vec2 0.50 0.25)))
-         (probe-c (sample scene scene-sampler (vec2 0.75 0.25)))
-         (probe-d (sample scene scene-sampler (vec2 0.25 0.50)))
-         (probe-e (sample scene scene-sampler (vec2 0.50 0.50)))
-         (probe-f (sample scene scene-sampler (vec2 0.75 0.50)))
-         (probe-g (sample scene scene-sampler (vec2 0.25 0.75)))
-         (probe-h (sample scene scene-sampler (vec2 0.50 0.75)))
-         (probe-i (sample scene scene-sampler (vec2 0.75 0.75)))
-         (probe-total
-           (+ (+ (+ (swizzle probe-a :xyz) (swizzle probe-b :xyz))
-                 (+ (swizzle probe-c :xyz) (swizzle probe-d :xyz)))
-              (+ (+ (swizzle probe-e :xyz) (swizzle probe-f :xyz))
-                 (+ (+ (swizzle probe-g :xyz) (swizzle probe-h :xyz))
-                    (swizzle probe-i :xyz)))))
-         (average-luminance
-           (* (/ 1.0 9.0)
-              (dot probe-total (vec3 0.2126 0.7152 0.0722))))
-         (auto-exposure (clamp (/ 0.42 (+ average-luminance 0.08))
-                               0.38 1.55))
+         (auto-exposure (swizzle sky-color-vector :w))
          (texel (swizzle inspection-parameters :zw))
          (near (* texel 3.0))
          (far (* texel 11.0))
@@ -2268,11 +2348,11 @@ that he is standing on something."
          ;; MetalFX has already reconstructed GLowing at this point.  Grade
          ;; it once, with a little exposure headroom for the sunlit grass and
          ;; the wizard's HDR spell rather than clipping both into parchment.
-         (mapped (paper-grade (paper-tonemap (* glowing auto-exposure))))
-         (sky
-           (painted-sky ndc camera-right camera-up camera-forward
-                        camera-projection divisor sun-vector
-                        sun-color-vector sky-color-vector))
-         (presented (if (< depth 0.9999) mapped sky)))
+         ;; Sky is now HDR scene radiance, so it participates in metering and
+         ;; receives exactly the same exposure and paper grade as geometry.
+         ;; Keep geometry-only AO and tilt-shift out of background pixels.
+         (radiance (if (< depth 0.9999) glowing (swizzle value :xyz)))
+         (presented
+           (paper-grade (paper-tonemap (* radiance auto-exposure)))))
     (set-output color-output
                 (vec4 presented 1.0))))

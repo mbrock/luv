@@ -331,7 +331,7 @@ the selector is the whole of the difference."
 
 (defun camera-uniform-data
     (view previous inspection-parameters ink-strength player
-     &optional (bevel-width luft:+mesh-bevel-width+))
+     &optional (bevel-width luft:+mesh-bevel-width+) (exposure 1.0f0))
   (flet ((lane (vector fourth)
            (list (vec3:vec3-x vector) (vec3:vec3-y vector)
                  (vec3:vec3-z vector) fourth)))
@@ -370,7 +370,7 @@ the selector is the whole of the difference."
                       (aref (frame-view-jitter previous) 1))
                 (coerce inspection-parameters 'list)
                 character
-                (light-uniform-data *light* (frame-view-position view))
+                (light-uniform-data *light* (frame-view-position view) exposure)
                 previous-character character-direction ball previous-ball))))))
 
 (defun viewer-logical-extent (viewer)
@@ -460,13 +460,15 @@ the selector is the whole of the difference."
          (player (viewer-player viewer))
          (player-p (and player (typep (viewer-source viewer) 'scene)
                         (scene-player-p (viewer-source viewer)))))
+    (maintain-renderer-exposure renderer)
     (encode-renderer-frame
      renderer encoder surface-view extent
      (camera-uniform-data
       view previous (viewer-inspection-parameters viewer render-extent)
       (if (and inspection *inspection-ink-p*) 1.0 0.0)
       (and player-p player)
-      (viewer-bevel-width viewer))
+      (viewer-bevel-width viewer)
+      (renderer-exposure renderer))
      :jitter jitter :view view
      :player-p player-p
      ;; Dense lattice dots are a close-study diagnostic, not a terrain view:

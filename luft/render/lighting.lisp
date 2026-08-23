@@ -73,7 +73,7 @@ texel."
             (- 0.5 (/ center-forward (* 2.0 depth-radius))))
        '(0.0 0.0 0.0 1.0)))))
 
-(defun light-uniform-data (light center)
+(defun light-uniform-data (light center &optional (exposure 1.0f0))
   "Return LIGHT's nine vec4 lanes for the frame uniform ABI."
   (flet ((vec3-lane (value fourth)
            (list (vec3:vec3-x value) (vec3:vec3-y value)
@@ -81,7 +81,10 @@ texel."
     (append
      (vec3-lane (light-sun-direction light) 0.0)
      (coerce (light-sun-color light) 'list)
-     (coerce (light-sky-color light) 'list)
+     (list (aref (light-sky-color light) 0)
+           (aref (light-sky-color light) 1)
+           (aref (light-sky-color light) 2)
+           exposure)
      (coerce (light-ground-color light) 'list)
      (light-shadow-rows light center)
      (list (/ +shadow-map-size+) (/ +shadow-map-size+)

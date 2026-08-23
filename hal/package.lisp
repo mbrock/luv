@@ -332,6 +332,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:submitted-work-done
            #:write-buffer
            #:read-buffer
+           #:read-buffer-if-ready
            #:write-texture
            #:destroy
            #:begin-compute-pass

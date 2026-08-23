@@ -9,6 +9,12 @@
 (defparameter *temporal-upscaling-p* t
   "Whether LUFT uses MetalFX temporal reconstruction on Metal devices.")
 
+(defconstant +exposure-probe-width+ 32)
+(defconstant +exposure-probe-height+ 16)
+(defconstant +exposure-probe-buffer-count+ 3)
+(defconstant +exposure-probe-byte-count+
+  (* 4 +exposure-probe-width+ +exposure-probe-height+))
+
 (defconstant +sanctuary-origin-x+ 32)
 (defconstant +sanctuary-origin-y+ 24)
 (defparameter *sanctuary-beacon-x* 58)
@@ -877,6 +883,10 @@ so the complete surface needs at most two direct instanced draws."
                                   :accessor renderer-lattice-point-fragment-module)
    (lattice-point-pipeline :initarg :lattice-point-pipeline
                            :accessor renderer-lattice-point-pipeline)
+   (sky-layout :initform nil :accessor renderer-sky-layout)
+   (sky-bind-group :initform nil :accessor renderer-sky-bind-group)
+   (sky-fragment-module :initform nil :accessor renderer-sky-fragment-module)
+   (sky-pipeline :initform nil :accessor renderer-sky-pipeline)
    (color-format :initarg :color-format :reader renderer-color-format)
    (temporal-p :initarg :temporal-p :reader renderer-temporal-p)
    (depth-texture :initform nil :accessor renderer-depth-texture)
@@ -895,6 +905,25 @@ so the complete surface needs at most two direct instanced draws."
    (present-fragment-module :initform nil
                             :accessor renderer-present-fragment-module)
    (present-pipeline :initform nil :accessor renderer-present-pipeline)
+   (exposure-probe-layout :initform nil
+                          :accessor renderer-exposure-probe-layout)
+   (exposure-probe-bind-group :initform nil
+                              :accessor renderer-exposure-probe-bind-group)
+   (exposure-probe-texture :initform nil
+                           :accessor renderer-exposure-probe-texture)
+   (exposure-probe-view :initform nil
+                        :accessor renderer-exposure-probe-view)
+   (exposure-probe-fragment-module
+    :initform nil :accessor renderer-exposure-probe-fragment-module)
+   (exposure-probe-pipeline :initform nil
+                            :accessor renderer-exposure-probe-pipeline)
+   (exposure-probe-buffers :initform #()
+                           :accessor renderer-exposure-probe-buffers)
+   (exposure-probe-submitted :initform (make-array 0 :element-type 'bit)
+                             :accessor renderer-exposure-probe-submitted)
+   (exposure-probe-frames :initform #()
+                          :accessor renderer-exposure-probe-frames)
+   (exposure :initform 1.0f0 :accessor renderer-exposure)
    (sampler :initform nil :accessor renderer-sampler)
    (extent :initform nil :accessor renderer-extent)
    (render-extent :initform nil :accessor renderer-render-extent)
@@ -911,6 +940,7 @@ so the complete surface needs at most two direct instanced draws."
 (defun destroy-renderer-targets (renderer)
   (dolist (resource
             (list (renderer-present-bind-group renderer)
+                  (renderer-exposure-probe-bind-group renderer)
                   (renderer-temporal-scaler renderer)
                   (renderer-resolved-view renderer)
                   (renderer-resolved-texture renderer)
@@ -922,6 +952,7 @@ so the complete surface needs at most two direct instanced draws."
                   (renderer-depth-texture renderer)))
     (when resource (ignore-errors (destroy resource))))
   (setf (renderer-present-bind-group renderer) nil
+        (renderer-exposure-probe-bind-group renderer) nil
         (renderer-temporal-scaler renderer) nil
         (renderer-resolved-view renderer) nil
         (renderer-resolved-texture renderer) nil
@@ -1000,17 +1031,26 @@ so the complete surface needs at most two direct instanced draws."
                         (make-texture-view-descriptor :texture resolved))))
          (present-source-view (or resolved-view scene-view))
          (present-group
-           (create device
-                   (make-bind-group-descriptor
-                    :label "luft HDR presentation"
-                    :layout (renderer-present-layout renderer)
-                    :entries `((:binding 0 :resource ,present-source-view)
-                               (:binding 1
-                                :resource ,(renderer-sampler renderer))
-                               (:binding 2 :resource ,depth-view)
-                               (:binding 3
-                                :resource
-                                ,(renderer-camera-buffer renderer)))))))
+           (create
+            device
+            (make-bind-group-descriptor
+             :label "luft HDR presentation"
+             :layout (renderer-present-layout renderer)
+             :entries
+             `((:binding 0 :resource ,present-source-view)
+               (:binding 1 :resource ,(renderer-sampler renderer))
+               (:binding 2 :resource ,depth-view)
+               (:binding 3
+                :resource ,(renderer-camera-buffer renderer))))))
+         (exposure-probe-group
+           (create
+            device
+            (make-bind-group-descriptor
+             :label "luft exposure probe source"
+             :layout (renderer-exposure-probe-layout renderer)
+             :entries
+             `((:binding 0 :resource ,present-source-view)
+               (:binding 1 :resource ,(renderer-sampler renderer)))))))
     (setf (renderer-temporal-scaler renderer) scaler
           (renderer-depth-texture renderer) depth
           (renderer-depth-view renderer) depth-view
@@ -1021,9 +1061,9 @@ so the complete surface needs at most two direct instanced draws."
           (renderer-resolved-texture renderer) resolved
           (renderer-resolved-view renderer) resolved-view
           (renderer-present-bind-group renderer) present-group
+          (renderer-exposure-probe-bind-group renderer) exposure-probe-group
           (renderer-extent renderer) (copy-list extent)
           (renderer-render-extent renderer) (copy-list render-extent)
-          (renderer-frame-index renderer) 0
           (renderer-previous-view renderer) nil
           (renderer-history-valid-p renderer) nil
           (renderer-history-used-p renderer) nil))
@@ -1350,6 +1390,11 @@ cohort untouched. No frame can interleave with the owner-thread publication."
          lattice-point-fragment-module lattice-point-pipeline
          present-layout present-bind-group present-vertex-module
          present-fragment-module present-pipeline sampler
+         sky-layout sky-bind-group sky-fragment-module sky-pipeline
+         exposure-probe-layout exposure-probe-bind-group
+         exposure-probe-texture exposure-probe-view
+         exposure-probe-fragment-module exposure-probe-pipeline
+         exposure-probe-buffers
          renderer
          (completed-p nil))
     (unwind-protect
@@ -1530,7 +1575,46 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                  (create device
                          (make-sampler-descriptor
                           :label "luft presentation sampler"
-                          :mag-filter :linear :min-filter :linear)))
+                          :mag-filter :linear :min-filter :linear))
+                 sky-layout
+                 (create device
+                         (make-bind-group-layout-descriptor
+                          :label "luft HDR sky layout"
+                          :entries '((:binding 0 :type :uniform-buffer))))
+                 sky-bind-group
+                 (create device
+                         (make-bind-group-descriptor
+                          :label "luft HDR sky"
+                          :layout sky-layout
+                          :entries `((:binding 0 :resource ,camera-buffer))))
+                 exposure-probe-layout
+                 (create device
+                         (make-bind-group-layout-descriptor
+                          :label "luft exposure probe layout"
+                          :entries '((:binding 0 :type :texture)
+                                     (:binding 1 :type :sampler))))
+                 exposure-probe-texture
+                 (create device
+                         (make-texture-descriptor
+                          :label "luft exposure log luminance"
+                          :size (list +exposure-probe-width+
+                                      +exposure-probe-height+)
+                          :dimensions :2d :format :rgba8-unorm
+                          :usage '(:render-attachment :copy-src)))
+                 exposure-probe-view
+                 (create device
+                         (make-texture-view-descriptor
+                          :texture exposure-probe-texture))
+                 exposure-probe-buffers
+                 (coerce
+                  (loop repeat +exposure-probe-buffer-count+
+                        collect
+                        (create device
+                                (make-buffer-descriptor
+                                 :label "luft exposure readback"
+                                 :size +exposure-probe-byte-count+
+                                 :usage '(:copy-dst))))
+                  'vector))
            (setf present-layout
                  (create device
                          (make-bind-group-layout-descriptor
@@ -1559,6 +1643,42 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                           :vertex `(:module ,present-vertex-module)
                           :fragment `(:module ,present-fragment-module
                                       :targets ((:format ,color-format)))
+                          :primitive '(:topology :triangle-list)))
+                 sky-fragment-module
+                 (create device
+                         (make-shader-module-descriptor
+                          :label "luft HDR sky fragment"
+                          :language :mathematical
+                          :code (if temporal-p
+                                    (shaders:sky-temporal-fragment-specification)
+                                    (shaders:sky-fragment-specification))))
+                 sky-pipeline
+                 (create device
+                         (make-render-pipeline-descriptor
+                          :label "luft HDR sky pipeline"
+                          :layout sky-layout
+                          :vertex `(:module ,present-vertex-module)
+                          :fragment `(:module ,sky-fragment-module
+                                      :targets
+                                      ,(mapcar (lambda (format)
+                                                 `(:format ,format))
+                                               target-formats))
+                          :primitive '(:topology :triangle-list)))
+                 exposure-probe-fragment-module
+                 (create device
+                         (make-shader-module-descriptor
+                          :label "luft exposure probe fragment"
+                          :language :mathematical
+                          :code
+                          (shaders:exposure-probe-fragment-specification)))
+                 exposure-probe-pipeline
+                 (create device
+                         (make-render-pipeline-descriptor
+                          :label "luft exposure probe pipeline"
+                          :layout exposure-probe-layout
+                          :vertex `(:module ,present-vertex-module)
+                          :fragment `(:module ,exposure-probe-fragment-module
+                                      :targets ((:format :rgba8-unorm)))
                           :primitive '(:topology :triangle-list))))
            (setf renderer
                  (make-instance 'renderer
@@ -1596,25 +1716,56 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                  (renderer-present-fragment-module renderer)
                  present-fragment-module
                  (renderer-present-pipeline renderer) present-pipeline)
+           (setf (renderer-sky-layout renderer) sky-layout
+                 (renderer-sky-bind-group renderer) sky-bind-group
+                 (renderer-sky-fragment-module renderer) sky-fragment-module
+                 (renderer-sky-pipeline renderer) sky-pipeline
+                 (renderer-exposure-probe-layout renderer)
+                 exposure-probe-layout
+                 (renderer-exposure-probe-texture renderer)
+                 exposure-probe-texture
+                 (renderer-exposure-probe-view renderer) exposure-probe-view
+                 (renderer-exposure-probe-fragment-module renderer)
+                 exposure-probe-fragment-module
+                 (renderer-exposure-probe-pipeline renderer)
+                 exposure-probe-pipeline
+                 (renderer-exposure-probe-buffers renderer)
+                 exposure-probe-buffers
+                 (renderer-exposure-probe-submitted renderer)
+                 (make-array +exposure-probe-buffer-count+
+                             :element-type 'bit :initial-element 0)
+                 (renderer-exposure-probe-frames renderer)
+                 (make-array +exposure-probe-buffer-count+
+                             :element-type '(unsigned-byte 64)
+                             :initial-element 0))
            (create-frame-targets renderer extent)
            (setf completed-p t)
            renderer)
       (unless completed-p
         (when renderer (destroy-renderer renderer))
-        (dolist (resource (list present-pipeline present-fragment-module
-                                present-vertex-module sampler present-bind-group
-                                present-layout lattice-point-pipeline
-                                lattice-point-fragment-module
-                                lattice-point-vertex-module
-                                lattice-point-layout
-                                player-sdf-bind-group player-sdf-pipeline
-                                player-sdf-fragment-module
-                                player-sdf-vertex-module player-sdf-layout
-                                shadow-pipeline shadow-vertex-module shadow-layout
-                                shadow-sampler shadow-view shadow-texture
-                                pipeline fragment-module
-                                vertex-module layout material-buffer
-                                camera-buffer))
+        (dolist (resource (append (and exposure-probe-buffers
+                                       (coerce exposure-probe-buffers 'list))
+                                  (list present-pipeline present-fragment-module
+                                        present-vertex-module sampler
+                                        present-bind-group sky-pipeline
+                                        sky-fragment-module sky-bind-group
+                                        sky-layout exposure-probe-bind-group
+                                        exposure-probe-pipeline
+                                        exposure-probe-fragment-module
+                                        exposure-probe-view exposure-probe-texture
+                                        exposure-probe-layout
+                                        present-layout lattice-point-pipeline
+                                        lattice-point-fragment-module
+                                        lattice-point-vertex-module
+                                        lattice-point-layout
+                                        player-sdf-bind-group player-sdf-pipeline
+                                        player-sdf-fragment-module
+                                        player-sdf-vertex-module player-sdf-layout
+                                        shadow-pipeline shadow-vertex-module
+                                        shadow-layout shadow-sampler shadow-view
+                                        shadow-texture pipeline fragment-module
+                                        vertex-module layout material-buffer
+                                        camera-buffer)))
           (when resource (ignore-errors (destroy resource))))))))
 
 (defun draw-resident-population (pass resident bind-group)
@@ -1629,6 +1780,95 @@ cohort untouched. No frame can interleave with the owner-thread publication."
         (draw pass 3 triangle-count))
       (when (plusp quad-count)
         (draw pass 6 quad-count 0 triangle-count)))))
+
+(defun exposure-probe-average-luminance (bytes)
+  "Decode the geometric-mean luminance encoded by the 32x16 GPU probe."
+  (unless (= (length bytes) +exposure-probe-byte-count+)
+    (error "LUFT exposure probe returned ~D bytes, expected ~D."
+           (length bytes) +exposure-probe-byte-count+))
+  (let ((sum 0d0))
+    (loop for index from 0 below (length bytes) by 4
+          do (incf sum (aref bytes index)))
+    (let* ((count (* +exposure-probe-width+ +exposure-probe-height+))
+           (encoded (/ sum (* count 255d0)))
+           (average-log (- (* encoded 11.98293d0) 9.21034d0)))
+      (exp average-log))))
+
+(defun adapted-exposure (current average-luminance)
+  "Take one Moppe-style asymmetric eye-adaptation step."
+  (let* ((target (max 0.55f0
+                      (min 1.9f0
+                           (/ 0.16f0 (coerce average-luminance
+                                            'single-float)))))
+         (rate (if (< target current) 0.10f0 0.04f0)))
+    (+ current (* (- target current) rate))))
+
+(defun maintain-renderer-exposure (renderer)
+  "Consume the oldest completed probe without waiting for newer GPU work."
+  (let ((buffers (renderer-exposure-probe-buffers renderer))
+        (submitted (renderer-exposure-probe-submitted renderer))
+        (frames (renderer-exposure-probe-frames renderer))
+        (oldest nil))
+    ;; A live DEFCLASS update can add this chronology lane to an existing
+    ;; renderer between frames. Preserve its in-flight bits and give those
+    ;; older probes one common age until the next transactional refresh.
+    (unless (= (length frames) (length buffers))
+      (setf frames
+            (make-array (length buffers) :element-type '(unsigned-byte 64)
+                                         :initial-element
+                                         (renderer-frame-index renderer))
+            (renderer-exposure-probe-frames renderer) frames))
+    (dotimes (index (length buffers))
+      (when (and (= 1 (aref submitted index))
+                 (or (null oldest)
+                     (< (aref frames index) (aref frames oldest))))
+        (setf oldest index)))
+    (when oldest
+      (multiple-value-bind (bytes ready-p)
+          (read-buffer-if-ready (aref buffers oldest))
+        (when ready-p
+          ;; One adaptation step per rendered frame keeps a CPU pause from
+          ;; collapsing several delayed measurements into one visible jump.
+          (setf (aref submitted oldest) 0
+                (renderer-exposure renderer)
+                (adapted-exposure
+                 (renderer-exposure renderer)
+                 (exposure-probe-average-luminance bytes)))))))
+  (renderer-exposure renderer))
+
+(defun encode-exposure-probe (renderer encoder temporal-p)
+  "Reduce unified HDR scene radiance and queue one nonblocking readback."
+  (let* ((index (mod (renderer-frame-index renderer)
+                     +exposure-probe-buffer-count+))
+         (submitted (renderer-exposure-probe-submitted renderer)))
+    ;; If the GPU is more than three frames behind, keep rendering and retain
+    ;; the last exposure instead of overwriting an in-flight measurement.
+    (when (zerop (aref submitted index))
+      (let ((pass
+              (begin-render-pass
+               encoder
+               (make-render-pass-descriptor
+                :label "luft exposure probe"
+                :color-attachments
+                `((:view ,(renderer-exposure-probe-view renderer)
+                   :load-op :clear :store-op :store
+                   :clear-value #(0.0 0.0 0.0 1.0)))))))
+        (when temporal-p
+          (wait-temporal-scaler-output
+           pass (renderer-temporal-scaler renderer)))
+        (set-pipeline pass (renderer-exposure-probe-pipeline renderer))
+        (set-bind-group pass 0
+                        (renderer-exposure-probe-bind-group renderer))
+        (draw pass 3)
+        (end-pass pass))
+      (encode encoder
+              (make-gpu-copy-texture-to-buffer-command
+               :source (renderer-exposure-probe-texture renderer)
+               :destination
+               (aref (renderer-exposure-probe-buffers renderer) index)))
+      (setf (aref submitted index) 1
+            (aref (renderer-exposure-probe-frames renderer) index)
+            (renderer-frame-index renderer)))))
 
 (defun encode-renderer-frame
     (renderer encoder surface-texture extent camera-uniform-data
@@ -1661,12 +1901,12 @@ cohort untouched. No frame can interleave with the owner-thread publication."
          (color-attachments
            (if temporal-p
                `((:view ,color-view :load-op :clear :store-op :store
-                  :clear-value #(0.60 0.75 0.96 1.0))
+                  :clear-value #(0.0 0.0 0.0 1.0))
                  (:view ,(renderer-motion-view renderer)
                   :load-op :clear :store-op :store
                   :clear-value #(0.0 0.0 0.0 0.0)))
                `((:view ,color-view :load-op :clear :store-op :store
-                  :clear-value #(0.60 0.75 0.96 1.0)))))
+                  :clear-value #(0.0 0.0 0.0 1.0)))))
          (pass
            (begin-render-pass
             encoder
@@ -1678,6 +1918,12 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                :depth-load-op :clear
                :depth-store-op :store
                :depth-clear-value 1.0)))))
+    ;; The atmosphere is scene-linear world radiance: geometry overwrites it,
+    ;; MetalFX reconstructs it, and the exposure probe meters the same pixels
+    ;; presentation will grade.
+    (set-pipeline pass (renderer-sky-pipeline renderer))
+    (set-bind-group pass 0 (renderer-sky-bind-group renderer))
+    (draw pass 3)
     (set-pipeline pass (renderer-pipeline renderer))
     (dolist (key (renderer-slot-order renderer))
       (let ((resident
@@ -1732,6 +1978,7 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                        :texture-binding)
       (prepare-texture encoder (renderer-depth-texture renderer)
                        :texture-binding))
+    (encode-exposure-probe renderer encoder temporal-p)
     (let ((present-pass
             (begin-render-pass
              encoder
@@ -1762,7 +2009,18 @@ cohort untouched. No frame can interleave with the owner-thread publication."
   (clrhash (renderer-mesh-slots renderer))
   (setf (renderer-slot-order renderer) nil)
   (dolist (resource
-            (list (renderer-present-pipeline renderer)
+            (append
+             (coerce (renderer-exposure-probe-buffers renderer) 'list)
+             (list (renderer-exposure-probe-pipeline renderer)
+                  (renderer-exposure-probe-fragment-module renderer)
+                  (renderer-exposure-probe-view renderer)
+                  (renderer-exposure-probe-texture renderer)
+                  (renderer-exposure-probe-layout renderer)
+                  (renderer-sky-pipeline renderer)
+                  (renderer-sky-fragment-module renderer)
+                  (renderer-sky-bind-group renderer)
+                  (renderer-sky-layout renderer)
+                  (renderer-present-pipeline renderer)
                   (renderer-present-fragment-module renderer)
                   (renderer-present-vertex-module renderer)
                   (renderer-sampler renderer)
@@ -1787,9 +2045,22 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                   (renderer-layout renderer)
                   (renderer-material-buffer renderer)
                   (and (slot-boundp renderer 'camera-buffer)
-                       (renderer-camera-buffer renderer))))
+                       (renderer-camera-buffer renderer)))))
     (when resource (ignore-errors (destroy resource))))
   (setf (renderer-present-pipeline renderer) nil
+        (renderer-exposure-probe-pipeline renderer) nil
+        (renderer-exposure-probe-fragment-module renderer) nil
+        (renderer-exposure-probe-view renderer) nil
+        (renderer-exposure-probe-texture renderer) nil
+        (renderer-exposure-probe-layout renderer) nil
+        (renderer-exposure-probe-buffers renderer) #()
+        (renderer-exposure-probe-submitted renderer)
+        (make-array 0 :element-type 'bit)
+        (renderer-exposure-probe-frames renderer) #()
+        (renderer-sky-pipeline renderer) nil
+        (renderer-sky-fragment-module renderer) nil
+        (renderer-sky-bind-group renderer) nil
+        (renderer-sky-layout renderer) nil
         (renderer-present-fragment-module renderer) nil
         (renderer-present-vertex-module renderer) nil
         (renderer-sampler renderer) nil

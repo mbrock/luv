@@ -758,6 +758,13 @@ completed on the GPU."))
   (:documentation
    "Wait for BUFFER's device queue and copy mapped bytes back to the host."))
 
+(defgeneric read-buffer-if-ready (buffer &key offset size)
+  (:documentation
+   "Copy mapped BUFFER bytes only when its own newest submission is complete.
+
+Return the byte vector and true when ready, or NIL and NIL without waiting.
+Unlike READ-BUFFER this does not wait for unrelated newer queue work."))
+
 (defgeneric destroy (handle)
   (:documentation
    "Logically invalidate HANDLE immediately.

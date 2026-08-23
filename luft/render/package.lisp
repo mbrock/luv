@@ -8,6 +8,9 @@
            #:mesh-fragment-specification
            #:mesh-vertex-specification
            #:shadow-vertex-specification
+           #:sky-fragment-specification
+           #:sky-temporal-fragment-specification
+           #:exposure-probe-fragment-specification
            #:present-fragment-specification
            #:present-vertex-specification))
 

@@ -1238,6 +1238,12 @@
            (luft.render.shaders:present-vertex-specification))
          (present-fragment
            (luft.render.shaders:present-fragment-specification))
+         (sky-fragment
+           (luft.render.shaders:sky-fragment-specification))
+         (sky-temporal-fragment
+           (luft.render.shaders:sky-temporal-fragment-specification))
+         (exposure-probe-fragment
+           (luft.render.shaders:exposure-probe-fragment-specification))
          (vertex-msl
            (luv.msl:msl-document-source (luv.msl:compile-msl vertex)))
          (fragment-msl
@@ -1271,8 +1277,40 @@
     (ok (luv.msl:compile-msl player-fragment))
     (ok (luv.spir-v:compile-shader-specification player-vertex))
     (ok (luv.spir-v:compile-shader-specification player-fragment))
+    (ok (luv.msl:compile-msl sky-fragment))
+    (ok (luv.msl:compile-msl sky-temporal-fragment))
+    (ok (luv.msl:compile-msl exposure-probe-fragment))
+    (ok (luv.spir-v:compile-shader-specification sky-fragment))
+    (ok (luv.spir-v:compile-shader-specification sky-temporal-fragment))
+    (ok (luv.spir-v:compile-shader-specification exposure-probe-fragment))
     (ok (luv.spir-v:compile-shader-specification present-vertex))
     (ok (luv.spir-v:compile-shader-specification present-fragment))))
+
+(deftest exposure-probes-decode-and-adapt-with-moppes-asymmetric-rates
+  (let* ((luminance 0.16d0)
+         (encoded
+           (round
+            (* 255d0
+               (/ (+ (log luminance) 9.21034d0) 11.98293d0))))
+         (bytes
+           (make-array render::+exposure-probe-byte-count+
+                       :element-type '(unsigned-byte 8)
+                       :initial-element 0)))
+    (loop for index from 0 below (length bytes) by 4
+          do (setf (aref bytes index) encoded))
+    (ok (< (abs (- luminance
+                   (render::exposure-probe-average-luminance bytes)))
+           0.01d0))
+    ;; Looking into more light closes down quickly; opening into darkness is
+    ;; deliberately slower, matching Moppe's eye-adaptation architecture.
+    (ok (< (abs (- 0.955f0
+                   (render::adapted-exposure 1.0f0 0.32f0)))
+           1.0e-6))
+    (ok (< (abs (- 1.036f0
+                   (render::adapted-exposure 1.0f0 0.08f0)))
+           1.0e-6))
+    (ok (< (render::adapted-exposure 1.9f0 1000.0f0) 1.9f0))
+    (ok (> (render::adapted-exposure 0.55f0 0.00001f0) 0.55f0))))
 
 (deftest the-camera-block-packs-both-projections
   (let ((camera (render:make-fly-camera))
