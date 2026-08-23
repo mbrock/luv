@@ -2148,6 +2148,9 @@ that he is standing on something."
                                   (- uv (vec2 0.0 (swizzle blur-radius :y))))
                           :xyz))))
          (glowing (mix (swizzle pigmented :xyz) blurred (* tilt 0.52)))
-         (mapped (paper-grade (paper-tonemap (* glowing 1.02)))))
+         ;; MetalFX has already reconstructed GLowing at this point.  Grade
+         ;; it once, with a little exposure headroom for the sunlit grass and
+         ;; the wizard's HDR spell rather than clipping both into parchment.
+         (mapped (paper-grade (paper-tonemap (* glowing 0.82)))))
     (set-output color-output
                 (vec4 mapped 1.0))))
