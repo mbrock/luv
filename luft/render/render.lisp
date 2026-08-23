@@ -565,7 +565,7 @@ consequence of its own occupancy star and can be read on its own."
   renderer)
 
 (defun mesh-lattice-point-words (mesh)
-  "Mesh vertices and eighth-step samples along axis-aligned boundary edges."
+  "LUFT vertex sites, mesh vertices, and eighth-step boundary-edge samples."
   (let ((points (make-hash-table :test #'equal))
         (result (make-array 64 :element-type '(unsigned-byte 32)
                               :adjustable t :fill-pointer 0))
@@ -575,10 +575,9 @@ consequence of its own occupancy star and can be read on its own."
                  (list (aref words offset)
                        (aref words (+ offset 1))
                        (aref words (+ offset 2)))))
-             (remember (point mesh-vertex-p)
+             (remember (point marker-kind)
                (setf (gethash point points)
-                     (max (if mesh-vertex-p 1 0)
-                          (gethash point points 0))))
+                     (max marker-kind (gethash point points 0))))
              (sample-axis-edge (left right)
                (let ((different
                        (loop for axis below 3
@@ -591,9 +590,58 @@ consequence of its own occupancy star and can be read on its own."
                      (loop for coordinate from low to high do
                        (let ((point (copy-list left)))
                          (setf (nth axis point) coordinate)
-                         (remember point nil))))))))
+                         (remember point 0)))))))
+             (remember-face-vertex-sites (face-base)
+               ;; The first six vertices are the two triangles of the 6x6
+               ;; center.  Its four corners are one tick inside the LUFT
+               ;; vertex sites deliberately omitted from the face geometry.
+               (let* ((center
+                        (loop for vertex from face-base below (+ face-base 6)
+                              collect (vertex-position vertex)))
+                      (normal-axis
+                        (or (loop for axis below 3
+                                  when (apply #'= (mapcar
+                                                   (lambda (point)
+                                                     (nth axis point))
+                                                   center))
+                                    return axis)
+                            (error "Face center ~S has no constant axis."
+                                   center)))
+                      (tangents
+                        (loop for axis below 3
+                              unless (= axis normal-axis) collect axis))
+                      (plane (nth normal-axis (first center))))
+                 (destructuring-bind (u v) tangents
+                   (let ((u-low (1- (apply #'min (mapcar
+                                                  (lambda (point)
+                                                    (nth u point))
+                                                  center))))
+                         (u-high (1+ (apply #'max (mapcar
+                                                   (lambda (point)
+                                                     (nth u point))
+                                                   center))))
+                         (v-low (1- (apply #'min (mapcar
+                                                  (lambda (point)
+                                                    (nth v point))
+                                                  center))))
+                         (v-high (1+ (apply #'max (mapcar
+                                                   (lambda (point)
+                                                     (nth v point))
+                                                   center)))))
+                     (dolist (u-coordinate (list u-low u-high))
+                       (dolist (v-coordinate (list v-low v-high))
+                         (let ((point (list 0 0 0)))
+                           (setf (nth normal-axis point) plane
+                                 (nth u point) u-coordinate
+                                 (nth v point) v-coordinate)
+                           (remember point 2)))))))))
       (loop for vertex below (/ (length words) luft:+mesh-vertex-word-count+)
-            do (remember (vertex-position vertex) t))
+            do (remember (vertex-position vertex) 1))
+      (loop with face-base = 0
+            repeat (/ (luft:surface-mesh-face-triangle-count mesh)
+                      luft:+mesh-face-template-triangle-count+)
+            do (remember-face-vertex-sites face-base)
+               (incf face-base luft:+mesh-face-template-index-count+))
       (loop for triangle-base from 0
               below (/ (length words) luft:+mesh-vertex-word-count+) by 3
             for attributes =
@@ -606,9 +654,9 @@ consequence of its own occupancy star and can be read on its own."
             when (logbitp 1 edge-mask) do (sample-axis-edge a c)
             when (logbitp 2 edge-mask) do (sample-axis-edge a b)))
     (maphash
-     (lambda (point mesh-vertex-p)
+     (lambda (point marker-kind)
        (dolist (coordinate point) (vector-push-extend coordinate result))
-       (vector-push-extend mesh-vertex-p result))
+       (vector-push-extend marker-kind result))
      points)
     (coerce result '(simple-array (unsigned-byte 32) (*)))))
 

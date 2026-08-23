@@ -272,7 +272,7 @@
                (marker-coordinate-output :vec2 :location 0)
                (current-clip-output :vec4 :location 1)
                (previous-clip-output :vec4 :location 2)
-               (mesh-vertex-output :float :location 3
+               (marker-kind-output :float :location 3
                                    :interpolation :flat))
      :resources ((lattice-points :storage-buffer :binding 0 :element :uvec4)
                  (camera-state :uniform-block :binding 1
@@ -304,7 +304,7 @@
                          (if (= index 5.0) 1.0 0.0))))
          (coordinate (vec2 (- (* right 2.0) 1.0)
                            (- (* bottom 2.0) 1.0)))
-         (mesh-vertex (if (> (swizzle record :w) (uint 0.0)) 1.0 0.0))
+         (marker-kind (float (swizzle record :w)))
          (current-clip
            (mesh-view-clip world-position camera-position camera-right
                            camera-up camera-forward camera-projection
@@ -315,7 +315,8 @@
                            previous-camera-forward previous-camera-projection
                            (swizzle temporal-parameters :z)))
          (pixel-size (swizzle inspection-parameters :zw))
-         (radius (if (> mesh-vertex 0.5) 6.5 2.6))
+         (radius (if (> marker-kind 1.5) 8.5
+                     (if (> marker-kind 0.5) 6.5 2.6)))
          (jitter (swizzle temporal-parameters :xy)))
     (set-output
      clip-position
@@ -335,24 +336,27 @@
     (set-output marker-coordinate-output coordinate)
     (set-output current-clip-output current-clip)
     (set-output previous-clip-output previous-clip)
-    (set-output mesh-vertex-output mesh-vertex)))
+    (set-output marker-kind-output marker-kind)))
 
 (define-shader lattice-point-fragment-specification
     (:stage :fragment
      :inputs ((marker-coordinate :vec2 :location 0)
               (current-clip :vec4 :location 1)
               (previous-clip :vec4 :location 2)
-              (mesh-vertex :float :location 3 :interpolation :flat))
+              (marker-kind :float :location 3 :interpolation :flat))
      :outputs ((color-output :vec4 :location 0)
                (motion-output :vec2 :location 1)))
   (let* ((radius (sqrt (dot marker-coordinate marker-coordinate)))
          (coverage (- 1.0 (smoothstep 0.82 1.0 radius)))
-         (center (- 1.0 (smoothstep (if (> mesh-vertex 0.5) 0.40 0.18)
-                                    (if (> mesh-vertex 0.5) 0.62 0.52)
+         (vertex-site (if (> marker-kind 1.5) 1.0 0.0))
+         (mesh-point (if (> marker-kind 0.5) 1.0 0.0))
+         (center (- 1.0 (smoothstep (if (> mesh-point 0.5) 0.40 0.18)
+                                    (if (> mesh-point 0.5) 0.62 0.52)
                                     radius)))
          (rim (vec3 0.035 0.075 0.095))
          (ink (vec3 1.0 0.30 0.10))
-         (color (mix rim ink center))
+         (site (vec3 0.20 0.95 1.0))
+         (color (mix (mix rim ink center) site vertex-site))
          (alpha (* coverage 0.96)))
     (set-output color-output (vec4 (* color alpha) alpha))
     (set-output motion-output

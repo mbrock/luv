@@ -40,6 +40,7 @@
    #:face-edge-site #:face-corner-site
    ;; Manifold-sheet mesh.
    #:+mesh-cell-size+ #:+mesh-bevel-width+ #:+mesh-vertex-word-count+
+   #:+mesh-face-template-triangle-count+ #:+mesh-face-template-index-count+
    #:surface-mesh #:surface-mesh-domain #:surface-mesh-vertex-words
    #:surface-mesh-indices #:surface-mesh-index-count
    #:surface-mesh-triangle-count #:surface-mesh-face-triangle-count

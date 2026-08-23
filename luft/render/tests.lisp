@@ -110,7 +110,15 @@
       (ok (loop for offset from 3 below (length lattice) by 4
                 thereis (zerop (aref lattice offset))))
       (ok (loop for offset from 3 below (length lattice) by 4
-                thereis (= 1 (aref lattice offset)))))))
+                thereis (= 1 (aref lattice offset))))
+      (ok (loop for offset from 3 below (length lattice) by 4
+                thereis (= 2 (aref lattice offset))))
+      (ok (loop for offset from 0 below (length lattice) by 4
+                always (or (/= 2 (aref lattice (+ offset 3)))
+                           (and (zerop (mod (aref lattice offset) 8))
+                                (zerop (mod (aref lattice (+ offset 1)) 8))
+                                (zerop (mod (aref lattice (+ offset 2))
+                                            8)))))))))
 
 (deftest mesh-and-atelier-shaders-lower-through-both-conventional-backends
   (let* ((vertex (luft.render.shaders:mesh-vertex-specification))
