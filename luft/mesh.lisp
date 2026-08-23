@@ -305,22 +305,6 @@ star corpus; signal that boundary explicitly instead of silently welding it."
 (defun %dot (left right)
   (reduce #'+ (mapcar #'* left right)))
 
-(declaim (inline %quad-arris-masks))
-(defun %quad-arris-masks (kind-code first-edge-squared second-edge-squared)
-  "Return triangle masks for the two longer opposing rails of a band quad."
-  (if (= kind-code 1)
-      (if (> first-edge-squared second-edge-squared)
-          (values #b100 #b001)
-          (values #b001 #b010))
-      (values 0 0)))
-
-(declaim (inline %swap-triangle-bc-mask))
-(defun %swap-triangle-bc-mask (mask)
-  "Follow a B/C vertex swap by exchanging their opposite-edge mask bits."
-  (logior (logand mask #b001)
-          (ash (logand mask #b010) 1)
-          (ash (logand mask #b100) -1)))
-
 (defun %normal-direction-code (normal)
   "Reduce an exact polygon normal to the trit direction stored by the ABI."
   (unless (and (= 3 (length normal))
@@ -340,10 +324,7 @@ star corpus; signal that boundary explicitly instead of silently welding it."
               (ash (+ 1 (third normal)) 4)
               (ash barycentric-index 6)
               (ash kind-code 8)
-              (ash boundary-edge-mask 10)
-              ;; Generic template callers do not carry a beauty arris.  Band
-              ;; assembly below chooses those from the quad's actual shape.
-              (ash 0 13)))))
+              (ash boundary-edge-mask 10)))))
 
 (defun %directional-star-ambient-occlusion (mask normal)
   "Quantize occupancy in NORMAL's outward local hemisphere to two AO bits."
@@ -610,7 +591,6 @@ Bit conventions match SITE-STAR-OCCUPANCY-MASK on a vertex site."
 ;;; Scalar triangle assembly
 
 (defun %scratch-triangle (scratch offset kind-code boundary-edge-mask
-                          arris-edge-mask
                           ax ay az bx by bz cx cy cz nx ny nz)
   "Write one oriented triangle of template-local vertices; return next offset."
   (declare (optimize (speed 3) (safety 1))
@@ -626,20 +606,12 @@ Bit conventions match SITE-STAR-OCCUPANCY-MASK on a vertex site."
       (error "Degenerate ~[face~;band~;junction~] triangle ~S ~S ~S."
              kind-code (list ax ay az) (list bx by bz) (list cx cy cz)))
     (when (minusp orientation)
-      (rotatef bx cx) (rotatef by cy) (rotatef bz cz)
-      ;; Barycentric bit N names the edge opposite vertex N, so both masks
-      ;; must follow the winding repair.  Otherwise a quad diagonal can turn
-      ;; into a visible beauty edge.
-      (setf boundary-edge-mask
-            (%swap-triangle-bc-mask boundary-edge-mask)
-            arris-edge-mask
-            (%swap-triangle-bc-mask arris-edge-mask)))
+      (rotatef bx cx) (rotatef by cy) (rotatef bz cz))
     (let ((attributes (logior (1+ (signum nx))
                               (ash (1+ (signum ny)) 2)
                               (ash (1+ (signum nz)) 4)
                               (ash kind-code 8)
-                              (ash boundary-edge-mask 10)
-                              (ash arris-edge-mask 13))))
+                              (ash boundary-edge-mask 10))))
       (setf (aref scratch offset)
             (%pack-template-vertex ax ay az attributes)
             (aref scratch (+ offset 1))
@@ -656,28 +628,18 @@ Bit conventions match SITE-STAR-OCCUPANCY-MASK on a vertex site."
         (oz (* +mesh-cell-size+ base-z))
         (scratch (surface-mesh-builder-vertex-scratch builder))
         (kind-code (ecase kind (:face 0) (:band 1))))
-    (let ((first-edge-squared
-            (+ (expt (- (svref p1 0) (svref p0 0)) 2)
-               (expt (- (svref p1 1) (svref p0 1)) 2)
-               (expt (- (svref p1 2) (svref p0 2)) 2)))
-          (second-edge-squared
-            (+ (expt (- (svref p2 0) (svref p1 0)) 2)
-               (expt (- (svref p2 1) (svref p1 1)) 2)
-               (expt (- (svref p2 2) (svref p1 2)) 2))))
-      (multiple-value-bind (first-arris-mask second-arris-mask)
-          (%quad-arris-masks kind-code first-edge-squared second-edge-squared)
-        (let ((offset (%scratch-triangle
-                       scratch 0 kind-code #b101 first-arris-mask
-                       (- (svref p0 0) ox) (- (svref p0 1) oy) (- (svref p0 2) oz)
-                       (- (svref p1 0) ox) (- (svref p1 1) oy) (- (svref p1 2) oz)
-                       (- (svref p2 0) ox) (- (svref p2 1) oy) (- (svref p2 2) oz)
-                       nx ny nz)))
-          (%scratch-triangle
-           scratch offset kind-code #b011 second-arris-mask
-           (- (svref p0 0) ox) (- (svref p0 1) oy) (- (svref p0 2) oz)
-           (- (svref p2 0) ox) (- (svref p2 1) oy) (- (svref p2 2) oz)
-           (- (svref p3 0) ox) (- (svref p3 1) oy) (- (svref p3 2) oz)
-           nx ny nz))))
+    (let ((offset (%scratch-triangle
+                   scratch 0 kind-code #b101
+                   (- (svref p0 0) ox) (- (svref p0 1) oy) (- (svref p0 2) oz)
+                   (- (svref p1 0) ox) (- (svref p1 1) oy) (- (svref p1 2) oz)
+                   (- (svref p2 0) ox) (- (svref p2 1) oy) (- (svref p2 2) oz)
+                   nx ny nz)))
+      (%scratch-triangle
+       scratch offset kind-code #b011
+       (- (svref p0 0) ox) (- (svref p0 1) oy) (- (svref p0 2) oz)
+       (- (svref p2 0) ox) (- (svref p2 1) oy) (- (svref p2 2) oz)
+       (- (svref p3 0) ox) (- (svref p3 1) oy) (- (svref p3 2) oz)
+       nx ny nz))
     (%emit-instance builder kind base-x base-y base-z stock
                     ambient-occlusion 6)))
 
@@ -686,7 +648,7 @@ Bit conventions match SITE-STAR-OCCUPANCY-MASK on a vertex site."
                            stock star-mask)
   "Emit one junction triangle whose coordinates are already site-local."
   (let ((scratch (surface-mesh-builder-vertex-scratch builder)))
-    (%scratch-triangle scratch 0 2 boundary-edge-mask 0
+    (%scratch-triangle scratch 0 2 boundary-edge-mask
                        ax ay az bx by bz cx cy cz nx ny nz)
     (%emit-instance builder :junction base-x base-y base-z stock
                     (%star-normal-ambient-occlusion star-mask nx ny nz) 3)))
