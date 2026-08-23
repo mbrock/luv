@@ -62,10 +62,12 @@
 
 (defvar *earth-material* nil)
 (defvar *limestone-material* nil)
+(defvar *highland-rock-material* nil)
 (defvar *world-material-frame* nil)
 (defvar *sanctuary-material-frame* nil)
 (defvar *beacon-material-frame* nil)
 (defvar *terrain-material-placement* nil)
+(defvar *highland-rock-material-placement* nil)
 (defvar *sanctuary-material-placement* nil)
 (defvar *beacon-material-placement* nil)
 
@@ -79,6 +81,11 @@
        *limestone-material* 'stone-material-kind
        :name :limestone :base-tone '(0.53 0.49 0.39)
        :roughness 0.78 :relief :weathered-stone)
+      *highland-rock-material*
+      (ensure-semantic-instance
+       *highland-rock-material* 'stone-material-kind
+       :name :highland-rock :base-tone '(0.29 0.30 0.27)
+       :roughness 0.94 :relief :weathered-stone)
       *world-material-frame*
       (ensure-semantic-instance
        *world-material-frame* 'material-frame
@@ -101,6 +108,11 @@
        *terrain-material-placement* 'material-placement
        :name :terrain :kind *earth-material* :finish :living
        :frame *world-material-frame* :role :terrain)
+      *highland-rock-material-placement*
+      (ensure-semantic-instance
+       *highland-rock-material-placement* 'material-placement
+       :name :highland-rock :kind *highland-rock-material* :finish :weathered
+       :frame *world-material-frame* :role :terrain-rock)
       *sanctuary-material-placement*
       (ensure-semantic-instance
        *sanctuary-material-placement* 'material-placement
@@ -155,6 +167,7 @@
   ;; any later placement receives the same semantic readings in its own frame.
   (seed *terrain-material-placement*
         *grass-reading* *soil-reading* *subsoil-reading*)
+  (seed *highland-rock-material-placement*)
   (seed *sanctuary-material-placement*
         *stone-reading* *foundation-stone-reading*)
   (seed *beacon-material-placement*))
@@ -343,7 +356,8 @@ indexing while leaving material meaning on the CPU."
 (defun make-scene-material-vocabulary ()
   "Return the authored placement vocabulary shared by one scene's cells."
   (domains:make-identity-vocabulary-domain
-   :members (list *terrain-material-placement* *sanctuary-material-placement*)
+   :members (list *terrain-material-placement* *highland-rock-material-placement*
+                  *sanctuary-material-placement*)
    :limit #x10000))
 
 (defgeneric material-face-reading (kind placement scene cell axis side)
@@ -366,13 +380,16 @@ indexing while leaving material meaning on the CPU."
 (defmethod material-face-reading
     ((kind stone-material-kind) placement scene cell axis side)
   (declare (ignore kind axis side))
-  (if (scene-foundation-cell-p scene cell)
+  (if (eq :terrain-rock (material-placement-role placement))
       (placement-surface-reading
-       placement :foundation :foundation-limestone '(0.53 0.49 0.39)
-       :earth-weathered)
-      (placement-surface-reading
-       placement :architecture :dressed-limestone '(0.53 0.49 0.39)
-       :dressed)))
+       placement :natural-rock :highland-rock '(0.29 0.30 0.27) :weathered)
+      (if (scene-foundation-cell-p scene cell)
+          (placement-surface-reading
+           placement :foundation :foundation-limestone '(0.53 0.49 0.39)
+           :earth-weathered)
+          (placement-surface-reading
+           placement :architecture :dressed-limestone '(0.53 0.49 0.39)
+           :dressed))))
 
 (defun find-surface-assembly
     (relation primary secondary tertiary kernel)
@@ -548,16 +565,22 @@ in semantic identities rather than numeric ranges."
     ((kind stone-material-kind) placement)
   (declare (ignore kind))
   (incf *material-placement-compilation-count*)
-  (let ((architecture
-          (placement-surface-reading
-           placement :architecture :dressed-limestone '(0.53 0.49 0.39)
-           :dressed))
-        (foundation
-          (placement-surface-reading
-           placement :foundation :foundation-limestone '(0.53 0.49 0.39)
-           :earth-weathered)))
-    (vector architecture architecture architecture architecture
-            architecture architecture foundation)))
+  (if (eq :terrain-rock (material-placement-role placement))
+      (let ((rock
+              (placement-surface-reading
+               placement :natural-rock :highland-rock '(0.29 0.30 0.27)
+               :weathered)))
+        (vector rock rock rock rock rock rock nil))
+      (let ((architecture
+              (placement-surface-reading
+               placement :architecture :dressed-limestone '(0.53 0.49 0.39)
+               :dressed))
+            (foundation
+              (placement-surface-reading
+               placement :foundation :foundation-limestone '(0.53 0.49 0.39)
+               :earth-weathered)))
+        (vector architecture architecture architecture architecture
+                architecture architecture foundation))))
 
 (defun legacy-surface-assembly-p (assembly)
   (member assembly

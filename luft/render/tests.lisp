@@ -92,6 +92,37 @@
       (ok (zerop (hash-table-count
                   (luft.render::streaming-scene-loaded scene)))))))
 
+(deftest highland-landscape-is-deterministic-and-regionally-varied
+  (let* ((size 256)
+         (heights
+           (loop for x below size by 8 append
+             (loop for y below size by 8
+                   collect
+                   (luft.render::highland-landscape-height
+                    x y size :seed 121))))
+         (again
+           (loop for x below size by 8 append
+             (loop for y below size by 8
+                   collect
+                   (luft.render::highland-landscape-height
+                    x y size :seed 121)))))
+    (ok (equal heights again))
+    (ok (>= (- (reduce #'max heights) (reduce #'min heights)) 24))
+    (ok (>= (length (remove-duplicates heights)) 20))
+    (ok (not (equal heights
+                    (loop for x below size by 8 append
+                      (loop for y below size by 8
+                            collect
+                            (luft.render::highland-landscape-height
+                             x y size :seed 913))))))))
+
+(deftest highland-landscape-streams-by-default
+  (let ((scene
+          (render:make-highland-sanctuary-scene :horizontal-bits 6)))
+    (ok (typep scene 'render:streaming-scene))
+    (ok (= 1 (hash-table-count
+              (luft.render::streaming-scene-store scene))))))
+
 (deftest retargeting-replaces-one-complete-residency-window
   (let* ((scene (make-two-chunk-streaming-scene))
          (left (luft:chunk-key-at 63 4))

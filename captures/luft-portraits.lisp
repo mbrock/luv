@@ -319,3 +319,72 @@
    pathname :character-time 0.5 :isometric-height 7.0
    :scene-maker #'luft.render:make-mountain-sanctuary-scene
    :title "LUFT traveler on the bridge"))
+
+;;; The streamed highlands. These two cameras retain the regional read and the
+;;; citadel-scale read that caught the old sine terrain's repetition. #H1GHLD
+
+(defun wait-for-luft-landscape-residency (viewer)
+  (loop for attempt below 120
+        for scene = (luft.render::viewer-source viewer)
+        for loaded = (hash-table-count
+                      (luft.render::streaming-scene-loaded scene))
+        for outstanding = (hash-table-count
+                           (luft.render::streaming-scene-outstanding scene))
+        when (and (plusp loaded) (zerop outstanding)
+                  (null (luft.render::streaming-scene-cohort scene)))
+          return t
+        when (zerop (mod attempt 20))
+          do (format t "capture LUFT highlands: ~D chunks loaded, ~D pending~%"
+                     loaded outstanding)
+             (force-output)
+        do (sleep 0.05)
+        finally (error "LUFT highland residency did not become ready.")))
+
+(defun capture-luft-highland-landscape
+    (pathname position yaw pitch title)
+  (let ((viewer nil)
+        (old-projection luft.render:*projection*)
+        (old-wireframe luft.render:*wireframe*)
+        (old-inspection-ink-p luft.render:*inspection-ink-p*))
+    (unwind-protect
+         (progn
+           (setf luft.render:*projection* :perspective
+                 luft.render:*wireframe* 0.0
+                 luft.render:*inspection-ink-p* nil)
+           (format t "capture LUFT highlands: building deterministic source~%")
+           (force-output)
+           (setf viewer
+                 (luft.render:start-viewer
+                  :solid (luft.render:make-highland-sanctuary-scene)
+                  :bevel-width luft:+mesh-bevel-width+
+                  :camera
+                  (luft.render:make-fly-camera
+                   :position position :yaw yaw :pitch pitch)
+                  :title title :width 1280 :height 800))
+           (wait-for-luft-landscape-residency viewer)
+           (luft.render:capture-viewer-frame
+            pathname viewer :inspector-p nil))
+      (when viewer (luft.render:stop-viewer viewer))
+      (setf luft.render:*projection* old-projection
+            luft.render:*wireframe* old-wireframe
+            luft.render:*inspection-ink-p* old-inspection-ink-p))))
+
+(luv:define-capture luft-grand-highlands
+    (:figure H1GHLD :kind :image :extension "png" :layout :landscape
+     :description
+     "The streamed highland region: rocky massifs, green valleys, shelves, and distant ruins.")
+  (pathname)
+  (capture-luft-highland-landscape
+   pathname
+   (luv.arithmetic.lisp.vec3:make-vec3 121.0 92.0 54.0)
+   2.20 -0.27 "LUFT grand highlands"))
+
+(luv:define-capture luft-highland-citadel
+    (:figure R8NCIT :kind :image :extension "png" :layout :landscape
+     :description
+     "The open-court highland citadel where dressed stone meets terraced green country.")
+  (pathname)
+  (capture-luft-highland-landscape
+   pathname
+   (luv.arithmetic.lisp.vec3:make-vec3 217.0 136.0 48.0)
+   2.18 -0.22 "LUFT highland citadel"))

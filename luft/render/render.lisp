@@ -2051,31 +2051,169 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                       scene request (production:production-result-value result)))))))
   (publish-ready-streaming-scene scene renderer))
 
-(defun make-highland-sanctuary-scene (&key (horizontal-bits 8))
-  "Rolling highlands spanning many chunks, studded with watchtowers."
+(defun landscape-hash-reading (x y seed salt)
+  "Return a stable coordinate reading in [-1, 1]."
+  (let ((value
+          (logand #xffffffff
+                  (+ seed (* x 374761393) (* y 668265263)
+                     (* salt 2246822519)))))
+    (setf value
+          (logand #xffffffff
+                  (* (logxor value (ash value -13)) 1274126177)))
+    (- (* 2.0d0
+          (/ (logand #xffffffff (logxor value (ash value -16)))
+             #xffffffff))
+       1.0d0)))
+
+(defun smooth-landscape-reading (reading)
+  (* reading reading (- 3.0d0 (* 2.0d0 reading))))
+
+(defun interpolate-landscape-reading (left right amount)
+  (+ left (* (- right left) amount)))
+
+(defun landscape-value-noise (x y period seed salt)
+  "Sample stable smooth value noise without allocating terrain objects."
+  (let* ((sample-x (/ x (coerce period 'double-float)))
+         (sample-y (/ y (coerce period 'double-float)))
+         (cell-x (floor sample-x))
+         (cell-y (floor sample-y))
+         (tx (smooth-landscape-reading (- sample-x cell-x)))
+         (ty (smooth-landscape-reading (- sample-y cell-y)))
+         (near
+           (interpolate-landscape-reading
+            (landscape-hash-reading cell-x cell-y seed salt)
+            (landscape-hash-reading (1+ cell-x) cell-y seed salt)
+            tx))
+         (far
+           (interpolate-landscape-reading
+            (landscape-hash-reading cell-x (1+ cell-y) seed salt)
+            (landscape-hash-reading (1+ cell-x) (1+ cell-y) seed salt)
+            tx)))
+    (interpolate-landscape-reading near far ty)))
+
+(defun landscape-ramp (low high reading)
+  (smooth-landscape-reading
+   (max 0.0d0 (min 1.0d0 (/ (- reading low) (- high low))))))
+
+(defun highland-landscape-height (x y size &key (seed 121))
+  "Height of the authored highland at X,Y.
+
+The invariant is that every reading is a pure function of X, Y, SIZE, and
+SEED. Low-frequency domain warping bends a zero-contour into mountain chains;
+independent fields add foothills, a basin, a river valley, and a terraced
+upland instead of repeating one periodic profile."
+  (let* ((warp-x
+           (+ x (* 23.0d0 (landscape-value-noise x y 113 seed 40))))
+         (warp-y
+           (+ y (* 23.0d0 (landscape-value-noise x y 127 seed 41))))
+         (continent (landscape-value-noise warp-x warp-y 211 seed 0))
+         (fold (abs (landscape-value-noise warp-x warp-y 103 seed 7)))
+         (ridge (expt (max 0.0d0 (- 1.0d0 (* 1.45d0 fold))) 1.55d0))
+         (mountain-country
+           (+ 0.3d0
+              (* 0.7d0
+                 (landscape-ramp
+                  -0.35d0 0.55d0
+                  (landscape-value-noise x y 237 seed 8)))))
+         (foothills (landscape-value-noise warp-x warp-y 47 seed 2))
+         (detail (landscape-value-noise x y 17 seed 3))
+         (western-distance
+           (sqrt (+ (expt (/ (- x (* size 0.27d0)) (* size 0.31d0)) 2)
+                    (expt (/ (- y (* size 0.58d0)) (* size 0.40d0)) 2))))
+         (eastern-distance
+           (sqrt (+ (expt (/ (- x (* size 0.72d0)) (* size 0.24d0)) 2)
+                    (expt (/ (- y (* size 0.30d0)) (* size 0.30d0)) 2))))
+         (massif
+           (max (expt (max 0.0d0 (- 1.0d0 western-distance)) 1.4d0)
+                (* 0.78d0
+                   (expt (max 0.0d0 (- 1.0d0 eastern-distance)) 1.3d0))))
+         (river-centre
+           (+ (* size 0.46d0)
+              (* size 0.13d0
+                 (landscape-value-noise x 0 139 seed 19))))
+         (river-width (+ 7.0d0 (* size 0.018d0)))
+         (river
+           (expt (max 0.0d0
+                      (- 1.0d0 (/ (abs (- y river-centre)) river-width)))
+                 2))
+         (basin-x (* size 0.24d0))
+         (basin-y (* size 0.73d0))
+         (basin-distance
+           (sqrt (+ (expt (- x basin-x) 2) (expt (- y basin-y) 2))))
+         (basin
+           (expt (max 0.0d0
+                      (- 1.0d0 (/ basin-distance (* size 0.22d0))))
+                 2))
+         (raw
+           (- (+ 10.0d0 (* 5.0d0 continent)
+                 (* 30.0d0 ridge mountain-country)
+                 (* massif (+ 22.0d0 (* 10.0d0 ridge)))
+                 (* 4.5d0 foothills) (* 2.6d0 detail))
+              (* 9.0d0 river) (* 7.0d0 basin)))
+         (plateau
+           (landscape-ramp
+            0.18d0 0.62d0
+            (+ (landscape-value-noise x y 151 seed 29)
+               (* 0.55d0 (/ (- (+ x y) size) size)))))
+         (terraced (* 3.0d0 (round (/ raw 3.0d0))))
+         (height
+           (interpolate-landscape-reading raw terraced (* 0.35d0 plateau))))
+    (max 2 (min 72 (round height)))))
+
+(defun build-highland-lookout (builder x y base &key (citadel-p nil))
+  "Build one sparse limestone lookout; CITADEL-P makes the regional anchor."
+  (let ((platform-radius (if citadel-p 13 5))
+        (tower-inner (if citadel-p 5 2))
+        (tower-outer (if citadel-p 8 4))
+        (tower-height (if citadel-p 15 10)))
+    (scene-builder-disc builder x y platform-radius
+                        (1- base) base :architecture-p t)
+    (scene-builder-ring builder x y tower-inner tower-outer
+                        (1+ base) (+ base tower-height) :architecture-p t)
+    (scene-builder-ring builder x y tower-inner (1+ tower-outer)
+                        (+ base tower-height 1) (+ base tower-height 2)
+                        :architecture-p t)
+    (unless citadel-p
+      (scene-builder-disc builder x y tower-outer
+                          (+ base tower-height 2) (+ base tower-height 2)
+                          :architecture-p t))
+    (when citadel-p
+      (scene-builder-carve-arch
+       builder x (+ base 1) (+ base 5) 2
+       (cons (- y tower-outer) (+ y tower-outer)) :axis :x)
+      (scene-builder-carve-arch
+       builder y (+ base 1) (+ base 5) 2
+       (cons (- x tower-outer) (+ x tower-outer)) :axis :y))))
+
+(defun make-highland-sanctuary-scene
+    (&key (horizontal-bits 8) (seed 121) (streaming-p t))
+  "Make a large varied landscape with mountain chains and sparse ruins.
+
+The default 256 by 256 world spans sixteen LUFT chunks. STREAMING-P wraps it
+in bounded camera-driven residency, so only the nearby mesh cohort reaches the
+GPU even though the authored landscape remains available as one solid."
   (let* ((builder (make-scene-builder :horizontal-bits horizontal-bits))
          (size (ash 1 horizontal-bits)))
-    (flet ((terrain-height (x y)
-             (max 1 (floor (+ 9.0
-                              (* 5.0 (sin (* x 0.043)) (cos (* y 0.037)))
-                              (* 3.0 (sin (+ (* x 0.11) (* y 0.073))))
-                              (* 1.5 (cos (+ (* x 0.021) (* y 0.19)))))))))
-      (dotimes (x size)
-        (dotimes (y size)
-          (let ((height (terrain-height x y)))
-            (dotimes (z height)
-              (scene-builder-cell builder x y z)))))
-      ;; A watchtower near the middle of every chunk.
-      (loop for tower-x from 32 below size by luft:+chunk-size+ do
-        (loop for tower-y from 32 below size by luft:+chunk-size+ do
-          (let ((base (terrain-height tower-x tower-y)))
-            (scene-builder-disc builder tower-x tower-y 4
-                                (1- base) base :architecture-p t)
-            (scene-builder-ring builder tower-x tower-y 2 3
-                                (1+ base) (+ base 7) :architecture-p t)
-            (scene-builder-ring builder tower-x tower-y 2 4
-                                (+ base 8) (+ base 9) :architecture-p t)
-            (scene-builder-disc builder tower-x tower-y 3
-                                (+ base 9) (+ base 9)
-                                :architecture-p t)))))
-    (finish-scene-builder builder)))
+    (dotimes (x size)
+      (dotimes (y size)
+        (let* ((height (highland-landscape-height x y size :seed seed))
+               (rock-depth (max 0 (min 6 (floor (- height 20) 3)))))
+          (dotimes (z height)
+            (scene-builder-cell
+             builder x y z
+             :material
+             (if (>= z (- height rock-depth))
+                 *highland-rock-material-placement*
+                 *terrain-material-placement*))))))
+    ;; Deliberately sparse, asymmetrical anchors replace the old tower in every
+    ;; chunk. Their different scales make travel across the terrain legible.
+    (dolist (landmark '((0.27d0 0.29d0 nil)
+                        (0.71d0 0.68d0 t)
+                        (0.79d0 0.24d0 nil)))
+      (destructuring-bind (fraction-x fraction-y citadel-p) landmark
+        (let* ((x (round (* size fraction-x)))
+               (y (round (* size fraction-y)))
+               (base (highland-landscape-height x y size :seed seed)))
+          (build-highland-lookout builder x y base :citadel-p citadel-p))))
+    (let ((scene (finish-scene-builder builder)))
+      (if streaming-p (make-streaming-scene scene) scene))))
