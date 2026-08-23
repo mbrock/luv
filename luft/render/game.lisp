@@ -47,8 +47,10 @@
    (ball-position :initform nil :accessor walking-player-ball-position)
    (previous-ball-position :initform nil
                            :accessor walking-player-previous-ball-position)
-   (ball-velocity :initform nil :accessor walking-player-ball-velocity)
-   (ball-age :initform 0.0 :accessor walking-player-ball-age))
+   (physics :initform (luvcraft:make-physics-world :terrain nil)
+            :reader walking-player-physics)
+   (ball-handle :initform nil :accessor walking-player-ball-handle)
+   (physics-clock :initform 0.0d0 :accessor walking-player-physics-clock))
   (:documentation
    "The continuous, player-owned state of LUFT's walking character.
 
@@ -142,53 +144,79 @@ for a remote roof, so a wall cannot teleport the player onto its top."
 
 (defun throw-walking-player-ball (player origin direction)
   "Throw (or replace) PLAYER's ball from ORIGIN along DIRECTION."
-  (let ((position (add-scaled-directions origin direction 1.15)))
+  (let* ((position (add-scaled-directions origin direction 1.15))
+         (physics (walking-player-physics player))
+         (old (walking-player-ball-handle player)))
+    (when (and old (luvcraft:physics-body-alive-p physics old))
+      (luvcraft:destroy-physics-body physics old))
     (setf (walking-player-ball-position player) position
           (walking-player-previous-ball-position player)
           (vec3:make-vec3 (vec3:vec3-x position) (vec3:vec3-y position)
                           (vec3:vec3-z position))
-          (walking-player-ball-velocity player)
-          (vec3:make-vec3 (* +thrown-ball-speed+ (vec3:vec3-x direction))
-                          (* +thrown-ball-speed+ (vec3:vec3-y direction))
-                          (* +thrown-ball-speed+ (vec3:vec3-z direction)))
-          (walking-player-ball-age player) 0.0
+          (walking-player-ball-handle player)
+          (luvcraft:spawn-physics-body
+           physics
+           (vec3:vec3-x position) (vec3:vec3-z position)
+           (vec3:vec3-y position)
+           :radius +thrown-ball-radius+ :mass 0.85
+           :vx (* +thrown-ball-speed+ (vec3:vec3-x direction))
+           :vy (* +thrown-ball-speed+ (vec3:vec3-z direction))
+           :vz (* +thrown-ball-speed+ (vec3:vec3-y direction))
+           :restitution 0.72 :friction 0.58 :rolling-resistance 0.018
+           :damping 0.035 :lifetime 8.0)
           (walking-player-spell-flash player) 1.0))
   player)
 
+(defun post-walking-player-ball-terrain (player source)
+  "Publish nearby LUFT cells to the Luvcraft solver as static boxes."
+  (let* ((physics (walking-player-physics player))
+         (position (walking-player-ball-position player))
+         (solid (inspection-source-solid source)))
+    (luvcraft:clear-physics-boxes physics)
+    (when position
+      (let ((cx (floor (vec3:vec3-x position)))
+            (cy (floor (vec3:vec3-y position)))
+            (cz (floor (vec3:vec3-z position))))
+        (loop for x from (- cx 2) to (+ cx 2) do
+          (loop for y from (- cy 2) to (+ cy 2) do
+            (loop for z from (- cz 2) to (+ cz 2)
+                  when (plusp (luft:chain-cell-occupancy-bit solid x y z))
+                    do (luvcraft:post-physics-box
+                        physics x z y (1+ x) (1+ z) (1+ y))))))))
+  player)
+
+(defun sync-walking-player-ball (player)
+  (let ((physics (walking-player-physics player))
+        (handle (walking-player-ball-handle player)))
+    (if (and handle (luvcraft:physics-body-alive-p physics handle))
+        (multiple-value-bind (x z y)
+            (luvcraft:physics-body-position physics handle)
+          (let ((position (walking-player-ball-position player)))
+            (setf (vec3:vec3-x position) x
+                  (vec3:vec3-y position) y
+                  (vec3:vec3-z position) z)))
+        (setf (walking-player-ball-handle player) nil
+              (walking-player-ball-position player) nil
+              (walking-player-previous-ball-position player) nil)))
+  player)
+
 (defun advance-walking-player-ball (player source seconds)
-  (let ((position (walking-player-ball-position player))
-        (velocity (walking-player-ball-velocity player)))
-    (when (and position velocity)
+  (let ((position (walking-player-ball-position player)))
+    (when position
       (let ((previous (walking-player-previous-ball-position player)))
         (setf (vec3:vec3-x previous) (vec3:vec3-x position)
               (vec3:vec3-y previous) (vec3:vec3-y position)
               (vec3:vec3-z previous) (vec3:vec3-z position)))
-      (incf (walking-player-ball-age player) seconds)
-      (incf (vec3:vec3-z velocity) (* +walking-player-gravity+ seconds))
-      (let ((solid (inspection-source-solid source)))
-        (dolist (axis '(:x :y :z))
-          (flet ((component (vector)
-                   (ecase axis
-                     (:x (vec3:vec3-x vector)) (:y (vec3:vec3-y vector))
-                     (:z (vec3:vec3-z vector))))
-                 ((setf component) (value vector)
-                   (ecase axis
-                     (:x (setf (vec3:vec3-x vector) value))
-                     (:y (setf (vec3:vec3-y vector) value))
-                     (:z (setf (vec3:vec3-z vector) value)))))
-            (let* ((candidate (+ (component position)
-                                 (* (component velocity) seconds)))
-                 (x (if (eq axis :x) candidate (vec3:vec3-x position)))
-                 (y (if (eq axis :y) candidate (vec3:vec3-y position)))
-                 (z (if (eq axis :z) candidate (vec3:vec3-z position))))
-              (if (plusp (luft:chain-cell-occupancy-bit
-                          solid (floor x) (floor y) (floor z)))
-                  (setf (component velocity) (* -0.58 (component velocity)))
-                  (setf (component position) candidate))))))
-      (when (> (walking-player-ball-age player) 8.0)
-        (setf (walking-player-ball-position player) nil
-              (walking-player-previous-ball-position player) nil
-              (walking-player-ball-velocity player) nil))))
+      (incf (walking-player-physics-clock player) seconds)
+      (loop repeat 3
+            while (>= (walking-player-physics-clock player) (/ 1d0 60d0))
+            do (decf (walking-player-physics-clock player) (/ 1d0 60d0))
+               (post-walking-player-ball-terrain player source)
+               (luvcraft:step-physics-world (walking-player-physics player)
+                                            (/ 1.0 60.0)))
+      (when (>= (walking-player-physics-clock player) (/ 1d0 60d0))
+        (setf (walking-player-physics-clock player) 0d0))
+      (sync-walking-player-ball player)))
   player)
 
 (defun advance-walking-player-vertical (player source seconds)

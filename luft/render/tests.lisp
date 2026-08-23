@@ -208,9 +208,14 @@
          (origin (luv.arithmetic.lisp.vec3:make-vec3 2.0 2.0 4.0))
          (direction (luv.arithmetic.lisp.vec3:make-vec3 1.0 0.0 0.0)))
     (luft.render::throw-walking-player-ball player origin direction)
+    (ok (luvcraft:physics-body-alive-p
+         (luft.render::walking-player-physics player)
+         (luft.render::walking-player-ball-handle player)))
     (let ((before (luv.arithmetic.lisp.vec3:vec3-x
                    (luft.render::walking-player-ball-position player))))
       (luft.render::advance-walking-player-ball player scene 0.1)
+      (ok (plusp (luvcraft:physics-world-step-count
+                  (luft.render::walking-player-physics player))))
       (ok (> (luv.arithmetic.lisp.vec3:vec3-x
               (luft.render::walking-player-ball-position player)) before)))
     (multiple-value-bind (character previous direction-lane ball previous-ball)
