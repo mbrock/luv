@@ -82,7 +82,10 @@ at the atelier boundary where a person has selected one site."))
       (if player
           (let ((spawn (make-walking-player)))
             (setf (viewer-player viewer) spawn)
-            (follow-walking-player camera spawn))
+            (follow-walking-player camera spawn)
+            ;; Reset is also a camera move: do not briefly reveal the old
+            ;; outside perch when the spawn happens to be indoors.
+            (constrain-viewer-follow-camera viewer))
           (setf (camera-position camera)
                 (vec3:make-vec3 (+ 70.0 +sanctuary-origin-x+)
                                 (+ -18.0 +sanctuary-origin-y+) 50.0)))
@@ -216,6 +219,52 @@ boundary over the packed chain and dense face records."
             (incf z step-z)
             (incf next-z delta-z)
             (remember :z step-z (vec3:vec3-z direction))))))))
+
+(defun constrain-viewer-follow-camera (viewer)
+  "Keep a following camera on the traveler's side of sanctuary geometry.
+
+The player can pass through a gate while the preferred isometric perch is
+still outside the rampart.  Cast from the look-at point to the *actual*
+smoothed camera position, rather than the ideal perch: this preserves the
+soft follow but never lets a wall sit between the eye and the hermit."
+  (let ((player (viewer-player viewer)))
+    (when player
+      (let* ((player-position (walking-player-position player))
+             (heading-x (walking-player-heading-x player))
+             (heading-y (walking-player-heading-y player))
+             ;; Match FOLLOW-WALKING-PLAYER's look-ahead exactly.  This is
+             ;; the point the player-owned frame promises to keep visible.
+             (aim-x (+ (vec3:vec3-x player-position) (* 2.4 heading-x)))
+             (aim-y (+ (vec3:vec3-y player-position) (* 2.4 heading-y)))
+             (aim-z (+ (vec3:vec3-z player-position) 1.45))
+             (aim (vec3:make-vec3 aim-x aim-y aim-z))
+             (camera-position (camera-position (viewer-camera viewer)))
+             (dx (- (vec3:vec3-x camera-position) aim-x))
+             (dy (- (vec3:vec3-y camera-position) aim-y))
+             (dz (- (vec3:vec3-z camera-position) aim-z))
+             (distance (sqrt (+ (* dx dx) (* dy dy) (* dz dz)))))
+        (when (> distance 0.01)
+          (let ((inspection
+                  ;; The sanctuary is finite while the pleasant isometric
+                  ;; perch can look out across its edge.  An off-map ray is
+                  ;; simply no occluder, never a reason to park the frame.
+                  (handler-case
+                      (raycast-site (viewer-source viewer) aim
+                                    (vec3:make-vec3 dx dy dz)
+                                    :max-distance distance)
+                    (error () nil))))
+            (when inspection
+              ;; Leave enough room for the near plane and an over-the-
+              ;; shoulder silhouette.  The camera therefore tucks into the
+              ;; room smoothly instead of landing on the wall itself.
+              (let* ((safe-distance
+                       (max 0.75 (- (site-inspection-distance inspection)
+                                    0.40)))
+                     (scale (/ safe-distance distance)))
+                (setf (vec3:vec3-x camera-position) (+ aim-x (* dx scale))
+                      (vec3:vec3-y camera-position) (+ aim-y (* dy scale))
+                      (vec3:vec3-z camera-position) (+ aim-z (* dz scale))))))))))
+  viewer)
 
 (defun projection-lane (width height field-of-view near far)
   "The four projection coefficients and the homogeneous-divisor selector.
@@ -676,7 +725,8 @@ the selector is the whole of the difference."
           (advance-walking-player (viewer-player viewer)
                                   (viewer-source viewer) camera
                                   forward right dt)
-          (follow-walking-player camera (viewer-player viewer) :seconds dt))
+          (follow-walking-player camera (viewer-player viewer) :seconds dt)
+          (constrain-viewer-follow-camera viewer))
         (multiple-value-bind (right up forward) (camera-basis camera)
           (flet ((move (direction amount)
                    (let ((position (camera-position camera)))

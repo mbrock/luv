@@ -365,6 +365,19 @@ for completely static geometry."
 (define-shader-function player-sdf-sphere (point center radius)
   (- (player-sdf-length (- point center)) radius))
 
+(define-shader-function player-wizard-orb-distance (point)
+  "The hermit's little captured firework: a true SDF sphere and four sparks.
+
+The staff gets a visible payoff even before a cast is in flight.  Keeping the
+sparks in the same field means they clip and shade with the body rather than
+becoming transparent billboard confetti."
+  (min (player-sdf-sphere point (vec3 0.640 0.195 3.34) 0.235)
+       (min (player-sdf-sphere point (vec3 0.640 0.195 3.69) 0.052)
+            (min (player-sdf-sphere point (vec3 0.965 0.195 3.34) 0.044)
+                 (min (player-sdf-sphere point (vec3 0.360 0.195 3.34) 0.044)
+                      (player-sdf-sphere point
+                                         (vec3 0.640 0.195 3.00) 0.040))))))
+
 (define-shader-function player-sdf-ellipsoid (point center radii)
   (let* ((offset (/ (- point center) radii))
          (outer (player-sdf-length offset))
@@ -1272,7 +1285,9 @@ that he is standing on something."
                     (local (vec3 (dot relative-xy player-right)
                                  (dot relative-xy heading)
                                  (+ (swizzle relative :z) 1.48)))
-                    (distance (player-distance local gait direction)))
+                    (distance
+                      (min (player-distance local gait direction)
+                           (player-wizard-orb-distance local))))
                (if (< distance 0.0025)
                    ray-distance
                    (if (> ray-distance (* radius 2.0))
@@ -1284,11 +1299,21 @@ that he is standing on something."
          (local (vec3 (dot relative-xy player-right)
                       (dot relative-xy heading)
                       (+ (swizzle relative :z) 1.48)))
-         (surface-distance (player-distance local gait direction))
+         (player-surface-distance (player-distance local gait direction))
+         (orb-surface-distance (player-wizard-orb-distance local))
+         (orb-p (< orb-surface-distance player-surface-distance))
+         (surface-distance (min player-surface-distance orb-surface-distance))
          (coverage (- 1.0 (step 0.006 surface-distance)))
-         (local-normal (player-normal local gait direction))
+         (local-normal
+           (if orb-p
+               ;; The central sphere owns the visible normal.  Its tiny
+               ;; firework motes use the same radial answer, which makes the
+               ;; glow read as one spell instead of pixel speckle.
+               (normalize (- local (vec3 0.640 0.195 3.34)))
+               (player-normal local gait direction)))
          (normal (normalize (player-world-direction local-normal heading)))
-         (albedo (player-albedo local gait direction))
+         (albedo (if orb-p (vec3 0.42 0.88 1.0)
+                     (player-albedo local gait direction)))
          (sun (swizzle sun-vector :xyz))
          (sun-color (swizzle sun-color-vector :xyz))
          (sky (swizzle sky-color-vector :xyz))
@@ -1322,7 +1347,16 @@ that he is standing on something."
                     indirect warm-return)))
          (paper (* lit 1.08))
          (rim (expt (- 1.0 (max 0.0 (dot normal (* ray -1.0)))) 3.0))
-         (radiance (+ paper (* (vec3 0.20 0.42 0.48) (* rim 0.07))))
+         (radiance
+           (+ paper
+              (* (vec3 0.20 0.42 0.48) (* rim 0.07))
+              ;; A real source of color: the orb is blue-white at the core,
+              ;; warmed by a small peach firework halo.
+              (if orb-p
+                  (+ (vec3 0.32 0.85 1.10)
+                     (* (vec3 1.0 0.34 0.10)
+                        (smoothstep 0.02 0.11 (abs orb-surface-distance))))
+                  (vec3 0.0 0.0 0.0))))
          ;; Where the body was missed, the same billboard still owes the deck
          ;; his shadow.  Its own sample of the sun's shadow map keeps him from
          ;; darkening ground the sanctuary is already shading.
