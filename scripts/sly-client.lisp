@@ -393,9 +393,21 @@ killed."
       (error "Missing server bootstrap: ~A" server-path))
     (unless (zerop (run-shell command))
       (error "Could not spawn luv Slynk server"))
-    (loop repeat (* 10 *server-start-timeout*)
+    (labels ((relay-server-output (position)
+               (if (probe-file *server-log-path*)
+                   (with-open-file (input *server-log-path*)
+                     (file-position input (min position (file-length input)))
+                     (loop for line = (read-line input nil nil)
+                           while line do (format t "~A~%" line))
+                     (finish-output)
+                     (file-position input))
+                   position)))
+      (loop with log-position = 0
+            repeat (* 10 *server-start-timeout*)
+            do (setf log-position (relay-server-output log-position))
           when (connection-available-p)
             do (progn
+                 (setf log-position (relay-server-output log-position))
                  (assert-listener-project)
                  (unless (eql (pid-file-pid) (listener-process-id))
                    (error "Slynk startup pid ~A does not own port ~D (listener pid ~A)"
@@ -408,7 +420,7 @@ killed."
             do (progn
                  (print-server-log-tail)
                  (error "luv Slynk server exited during startup"))
-          do (sleep 0.1))
+          do (sleep 0.1)))
     (print-server-log-tail)
     (error "Timed out waiting for luv Slynk on ~A:~D" *host* *port*)))
 

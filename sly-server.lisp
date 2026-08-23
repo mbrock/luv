@@ -35,12 +35,26 @@
   (asdf:load-asd (merge-pathnames #P"mqtt.asd" project-root))
   (asdf:load-asd (merge-pathnames #P"openai.asd" project-root))
   (asdf:load-asd (merge-pathnames #P"chrome-cdp.asd" project-root))
-  (asdf:load-system :luv)
-  (asdf:load-system :luvcraft)
-  (asdf:load-system :luvcraft/agent)
-  (asdf:load-system :luvcraft/birthday)
-  (asdf:load-system :luv-wiki)
-  (asdf:load-system :luft/render)
+  (load (merge-pathnames #P"luvcraft/build-progress.lisp" project-root))
+  (let ((systems '(:luv :luvcraft :luvcraft/agent :luvcraft/birthday
+                   :luv-wiki :luft/render)))
+    ;; The server's outer log is relayed by ./sly while this boot runs, so keep
+    ;; narration there. Per-file compiler/toolchain chatter still gets the
+    ;; build progress module's focused logs.
+    (luv-build:start project-root :system systems :invocation "sly boot"
+                     :redirect-output-p nil)
+    (handler-case
+        (progn
+          (dolist (system systems)
+            (asdf:load-system system))
+          (luv-build:finish :done))
+      (luv-build:deadline-exceeded ()
+        (luv-build:finish :deadline)
+        (sb-ext:exit :code 1 :abort t))
+      (error (condition)
+        (luv-build:failed (princ-to-string condition))
+        (luv-build:finish :error)
+        (error condition))))
   (format t "~&Starting luv Slynk on 127.0.0.1:~D.~%" port)
   (funcall (find-symbol "CREATE-SERVER" "SLYNK")
            :interface "127.0.0.1"

@@ -50,6 +50,8 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
 (defvar *build-id* nil)
 (defvar *system* nil
   "What this build is making, as ASDF names it.")
+(defvar *invocation* "make"
+  "How the narrated operation names itself in its opening comment.")
 
 (defparameter *id-characters* "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
   "The wiki's alphabet for short references; a build gets one of the same shape.")
@@ -81,6 +83,8 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
 ;;; The console: a dup of stderr, immune to the redirection below.
 
 (defvar *console* nil)
+(defvar *saved-standard-output-fd* nil)
+(defvar *saved-error-output-fd* nil)
 
 ;;; Threads
 
@@ -326,7 +330,7 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
   (destructuring-bind (kind &rest args) message
     (ecase kind
       (:header
-       (remark "make ~(~S~)" *system*)
+       (remark "~A ~(~S~)" *invocation* *system*)
        (remark "logs ~A" (here (string-right-trim
                                 "/" (namestring
                                      (uiop:enough-pathname *log-directory*
@@ -499,23 +503,31 @@ logs the way the systems themselves nest: luv.log beside luv/domains.log."
 
 ;;; Plan
 
-(defun report-plan (system)
-  "Count what the build is about to do, so progress can be a fraction."
+(defun report-plan (systems)
+  "Count the distinct actions needed by SYSTEMS, so progress is a fraction."
   (handler-case
-      (let ((systems 0) (compiles 0) (loads 0))
-        (dolist (action (asdf/plan:plan-actions
-                         (asdf/plan:make-plan
-                          nil (asdf:make-operation 'asdf:build-op)
-                          (asdf:find-system system))))
-          (let ((op (asdf/action:action-operation action))
-                (component (asdf/action:action-component action)))
-            (cond ((and (typep op 'asdf:prepare-op)
-                        (typep component 'asdf:system))
-                   (incf systems))
-                  ((not (typep component 'asdf:cl-source-file)))
-                  ((typep op 'asdf:compile-op) (incf compiles))
-                  ((typep op 'asdf:load-op) (incf loads)))))
-        (send :plan :systems systems :compiles compiles :loads loads))
+      (let ((system-actions (make-hash-table :test #'equal))
+            (compile-actions (make-hash-table :test #'equal))
+            (load-actions (make-hash-table :test #'equal)))
+        (dolist (system (if (listp systems) systems (list systems)))
+          (dolist (action (asdf/plan:plan-actions
+                           (asdf/plan:make-plan
+                            nil (asdf:make-operation 'asdf:build-op)
+                            (asdf:find-system system))))
+            (let* ((op (asdf/action:action-operation action))
+                   (component (asdf/action:action-component action))
+                   (key (list (class-name (class-of op)) component)))
+              (cond ((and (typep op 'asdf:prepare-op)
+                          (typep component 'asdf:system))
+                     (setf (gethash key system-actions) t))
+                    ((not (typep component 'asdf:cl-source-file)))
+                    ((typep op 'asdf:compile-op)
+                     (setf (gethash key compile-actions) t))
+                    ((typep op 'asdf:load-op)
+                     (setf (gethash key load-actions) t))))))
+        (send :plan :systems (hash-table-count system-actions)
+                    :compiles (hash-table-count compile-actions)
+                    :loads (hash-table-count load-actions)))
     (error (e)
       (send :note (format nil "plan unavailable: ~A" e)))))
 
@@ -583,12 +595,16 @@ Returns the current build's archive, and how many were made."
 
 ;;; Entry points
 
-(defun start (project-root &key system)
+(defun start (project-root &key system (invocation "make")
+                                  (redirect-output-p t))
   (setf *project-root* project-root
         *system* system
+        *invocation* invocation
         *build-id* (make-build-id)
         *log-directory* (merge-pathnames (format nil "build/logs/~A/" *build-id*)
                                          project-root)
+        *saved-standard-output-fd* (and redirect-output-p (sb-posix:dup 1))
+        *saved-error-output-fd* (and redirect-output-p (sb-posix:dup 2))
         *console* (sb-sys:make-fd-stream (sb-posix:dup 2)
                                          :output t :buffering :line
                                          :external-format :utf-8)
@@ -605,7 +621,8 @@ Returns the current build's archive, and how many were made."
   ;; again to its own file's log.  Output that belongs to no single file --
   ;; ASDF's chatter, a compilation unit's abort summary -- lands there rather
   ;; than interrupting the display.
-  (redirect-output-to (build-log))
+  (when redirect-output-p
+    (redirect-output-to (build-log)))
   (link-latest-logs)
   (when system (report-plan system))
   (send :header)
@@ -618,5 +635,20 @@ another thread is alive."
   (when (and *display-thread* (sb-thread:thread-alive-p *display-thread*))
     (send :finish reason)
     (sb-thread:join-thread *display-thread* :timeout 60 :default nil))
-  (setf *display-thread* nil)
+  ;; Standalone program builds die immediately after this, but the SLY image
+  ;; stays alive.  Give that durable process its ordinary log streams back.
+  (ignore-errors (finish-output *standard-output*))
+  (ignore-errors (finish-output *error-output*))
+  (when *saved-standard-output-fd*
+    (sb-posix:dup2 *saved-standard-output-fd* 1)
+    (sb-posix:close *saved-standard-output-fd*))
+  (when *saved-error-output-fd*
+    (sb-posix:dup2 *saved-error-output-fd* 2)
+    (sb-posix:close *saved-error-output-fd*))
+  (when *console* (ignore-errors (close *console*)))
+  (setf *mailbox* nil
+        *display-thread* nil
+        *console* nil
+        *saved-standard-output-fd* nil
+        *saved-error-output-fd* nil)
   (values))
