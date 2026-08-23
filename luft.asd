@@ -24,6 +24,7 @@
                 :serial t
                 :components ((:file "package")
                              (:file "materials")
+                             (:file "lighting")
                              (:file "shaders")
                              (:file "render")))))
 

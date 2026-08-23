@@ -7,6 +7,7 @@
            #:player-sdf-vertex-specification
            #:mesh-fragment-specification
            #:mesh-vertex-specification
+           #:shadow-vertex-specification
            #:present-fragment-specification
            #:present-vertex-specification))
 
@@ -18,6 +19,8 @@
                     (#:vec3 #:luv.arithmetic.lisp.vec3))
   (:export #:scene
            #:scene-solid
+           #:light
+           #:*light*
            #:make-manifold-spike-scene
            #:make-mountain-sanctuary-scene
            #:make-miter-study-scene

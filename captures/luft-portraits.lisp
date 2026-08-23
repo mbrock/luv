@@ -44,7 +44,7 @@
 
 (defun capture-luft-material-contact
     (pathname position isometric-height title
-     &key (yaw 2.2455373) (pitch -0.5165006))
+     &key (yaw 2.2455373) (pitch -0.5165006) player-p)
   (let ((viewer nil)
         (old-projection luft.render:*projection*)
         (old-isometric-height luft.render:*isometric-height*)
@@ -60,9 +60,10 @@
                  (luft.render:start-viewer
                   :solid
                   (let ((scene (luft.render:make-mountain-sanctuary-scene)))
-                    ;; The material plate isolates the solid renderer; the
-                    ;; walking player's separate SDF pass has its own plates.
-                    (setf (slot-value scene 'luft.render::player-p) nil)
+                    ;; Material plates isolate the solid renderer.  A lighting
+                    ;; plate deliberately keeps the separate SDF player pass.
+                    (unless player-p
+                      (setf (slot-value scene 'luft.render::player-p) nil))
                     scene)
                   :bevel-width luft:+mesh-bevel-width+
                   :camera
@@ -88,6 +89,16 @@
    pathname
    (luv.arithmetic.lisp.vec3:make-vec3 89.0 33.0 41.0)
    20.0 "LUFT material contact study"))
+
+(luv:define-capture luft-stylized-lighting-study
+    (:figure L1GHTS :kind :image :extension "png" :layout :landscape
+     :description
+     "The sanctuary, traveler, and terrain under LUFT's shared stylized sun.")
+  (pathname)
+  (capture-luft-material-contact
+   pathname
+   (luv.arithmetic.lisp.vec3:make-vec3 89.0 33.0 41.0)
+   20.0 "LUFT stylized lighting study" :player-p t))
 
 (luv:define-capture luft-material-contact-closeup
     (:figure ER7HST :kind :image :extension "png" :layout :landscape

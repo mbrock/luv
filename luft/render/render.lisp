@@ -588,14 +588,15 @@ consequence of its own occupancy star and can be read on its own."
 (defstruct (resident-population
              (:constructor %make-resident-population
                  (population instance-buffer template-buffer material-buffer
-                  bind-group))
+                  bind-group shadow-bind-group))
              (:copier nil))
   "The CPU population and its renderer-global GPU realization."
   (population nil :type render-population :read-only t)
   (instance-buffer nil :read-only t)
   (template-buffer nil :read-only t)
   (material-buffer nil :read-only t)
-  (bind-group nil :read-only t))
+  (bind-group nil :read-only t)
+  (shadow-bind-group nil :read-only t))
 
 (defun make-render-population (meshes)
   "Canonicalize and concatenate MESHES into two fixed-arity instance runs.
@@ -738,6 +739,14 @@ so the complete surface needs at most two direct instanced draws."
    (vertex-module :initarg :vertex-module :accessor renderer-vertex-module)
    (fragment-module :initarg :fragment-module :accessor renderer-fragment-module)
    (pipeline :initarg :pipeline :accessor renderer-pipeline)
+   (shadow-texture :initarg :shadow-texture :accessor renderer-shadow-texture)
+   (shadow-view :initarg :shadow-view :accessor renderer-shadow-view)
+   (shadow-sampler :initarg :shadow-sampler :accessor renderer-shadow-sampler)
+   (shadow-layout :initarg :shadow-layout :accessor renderer-shadow-layout)
+   (shadow-vertex-module :initarg :shadow-vertex-module
+                         :accessor renderer-shadow-vertex-module)
+   (shadow-pipeline :initarg :shadow-pipeline
+                    :accessor renderer-shadow-pipeline)
    (player-sdf-layout :initarg :player-sdf-layout
                       :accessor renderer-player-sdf-layout)
    (player-sdf-bind-group :initarg :player-sdf-bind-group
@@ -1016,6 +1025,7 @@ so the complete surface needs at most two direct instanced draws."
   (when resident
     (dolist (resource (list (resident-population-bind-group resident)
                             (resident-population-material-buffer resident)
+                            (resident-population-shadow-bind-group resident)
                             (resident-population-template-buffer resident)
                             (resident-population-instance-buffer resident)))
       (when resource (ignore-errors (destroy resource)))))
@@ -1030,6 +1040,7 @@ so the complete surface needs at most two direct instanced draws."
          (material-words
            (render-population-material-descriptor-words population))
          instance-buffer template-buffer material-buffer bind-group
+         shadow-bind-group
          (completed-p nil))
     (flet ((stream-buffer (label words)
              (let ((buffer
@@ -1060,17 +1071,31 @@ so the complete surface needs at most two direct instanced draws."
                               (:binding 1 :resource ,template-buffer)
                               (:binding 2
                                :resource ,(renderer-camera-buffer renderer))
-                              (:binding 3 :resource ,material-buffer)))))
+                              (:binding 3 :resource ,material-buffer)
+                              (:binding 4
+                               :resource ,(renderer-shadow-view renderer))
+                              (:binding 5
+                               :resource ,(renderer-shadow-sampler renderer)))))
+                   shadow-bind-group
+                   (create device
+                           (make-bind-group-descriptor
+                            :label "luft resident shadow population"
+                            :layout (renderer-shadow-layout renderer)
+                            :entries
+                            `((:binding 0 :resource ,instance-buffer)
+                              (:binding 1 :resource ,template-buffer)
+                              (:binding 2
+                               :resource ,(renderer-camera-buffer renderer))))))
              (let ((resident
                      (%make-resident-population
                       population instance-buffer template-buffer
-                      material-buffer bind-group)))
+                      material-buffer bind-group shadow-bind-group)))
                (setf completed-p t)
                resident))
         (unless completed-p
           (dolist (resource
-                    (list bind-group material-buffer template-buffer
-                          instance-buffer))
+                    (list shadow-bind-group bind-group material-buffer
+                          template-buffer instance-buffer))
             (when resource (ignore-errors (destroy resource)))))))))
 
 (defun %prospective-meshes (renderer candidates &optional removed-key)
@@ -1174,6 +1199,8 @@ cohort untouched. No frame can interleave with the owner-thread publication."
          camera-buffer
          layout
          vertex-module fragment-module pipeline
+         shadow-texture shadow-view shadow-sampler shadow-layout
+         shadow-vertex-module shadow-pipeline
          player-sdf-layout player-sdf-bind-group player-sdf-vertex-module
          player-sdf-fragment-module player-sdf-pipeline
          lattice-point-layout lattice-point-vertex-module
@@ -1187,8 +1214,24 @@ cohort untouched. No frame can interleave with the owner-thread publication."
            (setf camera-buffer
                  (create device
                          (make-buffer-descriptor
-                          :label "luft inspection camera"
-                          :size 224 :usage '(:uniform :copy-dst))))
+                          :label "luft frame state"
+                          :size 368 :usage '(:uniform :copy-dst)))
+                 shadow-texture
+                 (create device
+                         (make-texture-descriptor
+                          :label "luft sun shadow depth"
+                          :size (list +shadow-map-size+ +shadow-map-size+)
+                          :dimensions :2d :format :depth32-float
+                          :usage '(:render-attachment :texture-binding)))
+                 shadow-view
+                 (create device
+                         (make-texture-view-descriptor :texture shadow-texture))
+                 shadow-sampler
+                 (create device
+                         (make-sampler-descriptor
+                          :label "luft soft shadow comparison sampler"
+                          :mag-filter :linear :min-filter :linear
+                          :mipmap-filter :nearest :compare :less-or-equal)))
            (setf layout
                  (create device
                          (make-bind-group-layout-descriptor
@@ -1196,7 +1239,16 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                           :entries '((:binding 0 :type :storage-buffer)
                                      (:binding 1 :type :storage-buffer)
                                      (:binding 2 :type :uniform-buffer)
-                                     (:binding 3 :type :storage-buffer))))
+                                     (:binding 3 :type :storage-buffer)
+                                     (:binding 4 :type :texture)
+                                     (:binding 5 :type :sampler))))
+                 shadow-layout
+                 (create device
+                         (make-bind-group-layout-descriptor
+                          :label "luft shadow layout"
+                          :entries '((:binding 0 :type :storage-buffer)
+                                     (:binding 1 :type :storage-buffer)
+                                     (:binding 2 :type :uniform-buffer))))
                  vertex-module
                  (create device
                          (make-shader-module-descriptor
@@ -1221,12 +1273,30 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                           :primitive '(:topology :triangle-list)
                           :depth-stencil
                           '(:format :depth32-float :depth-write-enabled t
+                            :depth-compare :less)))
+                 shadow-vertex-module
+                 (create device
+                         (make-shader-module-descriptor
+                          :label "luft shadow vertex"
+                          :language :mathematical
+                          :code (shaders:shadow-vertex-specification)))
+                 shadow-pipeline
+                 (create device
+                         (make-render-pipeline-descriptor
+                          :label "luft sun shadow pipeline"
+                          :layout shadow-layout
+                          :vertex `(:module ,shadow-vertex-module)
+                          :primitive '(:topology :triangle-list)
+                          :depth-stencil
+                          '(:format :depth32-float :depth-write-enabled t
                             :depth-compare :less))))
            (setf player-sdf-layout
                  (create device
                          (make-bind-group-layout-descriptor
                           :label "luft player sdf layout"
-                          :entries '((:binding 0 :type :uniform-buffer))))
+                          :entries '((:binding 0 :type :uniform-buffer)
+                                     (:binding 1 :type :texture)
+                                     (:binding 2 :type :sampler))))
                  player-sdf-vertex-module
                  (create device
                          (make-shader-module-descriptor
@@ -1262,7 +1332,10 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                          (make-bind-group-descriptor
                           :label "luft walking player sdf"
                           :layout player-sdf-layout
-                          :entries `((:binding 0 :resource ,camera-buffer)))))
+                          :entries
+                          `((:binding 0 :resource ,camera-buffer)
+                            (:binding 1 :resource ,shadow-view)
+                            (:binding 2 :resource ,shadow-sampler)))))
            (setf lattice-point-layout
                  (create device
                          (make-bind-group-layout-descriptor
@@ -1344,6 +1417,12 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                                 :vertex-module vertex-module
                                 :fragment-module fragment-module
                                 :pipeline pipeline
+                                :shadow-texture shadow-texture
+                                :shadow-view shadow-view
+                                :shadow-sampler shadow-sampler
+                                :shadow-layout shadow-layout
+                                :shadow-vertex-module shadow-vertex-module
+                                :shadow-pipeline shadow-pipeline
                                 :player-sdf-layout player-sdf-layout
                                 :player-sdf-bind-group player-sdf-bind-group
                                 :player-sdf-vertex-module player-sdf-vertex-module
@@ -1379,15 +1458,47 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                                 player-sdf-bind-group player-sdf-pipeline
                                 player-sdf-fragment-module
                                 player-sdf-vertex-module player-sdf-layout
+                                shadow-pipeline shadow-vertex-module shadow-layout
+                                shadow-sampler shadow-view shadow-texture
                                 pipeline fragment-module
                                 vertex-module layout camera-buffer))
           (when resource (ignore-errors (destroy resource))))))))
+
+(defun draw-resident-population (pass resident bind-group)
+  "Issue the two fixed-arity draws shared by the sun and scene passes."
+  (let* ((population (resident-population-population resident))
+         (triangle-count
+           (render-population-triangle-instance-count population))
+         (quad-count (render-population-quad-instance-count population)))
+    (when (plusp (+ triangle-count quad-count))
+      (set-bind-group pass 0 bind-group)
+      (when (plusp triangle-count)
+        (draw pass 3 triangle-count))
+      (when (plusp quad-count)
+        (draw pass 6 quad-count 0 triangle-count)))))
 
 (defun encode-renderer-frame
     (renderer encoder surface-texture extent camera-uniform-data
      &key jitter view player-p construction-p overlay-encoder)
   (ensure-renderer-extent renderer extent)
   (write-buffer (renderer-camera-buffer renderer) camera-uniform-data)
+  (let ((resident (renderer-population renderer)))
+    (let ((shadow-pass
+            (begin-render-pass
+             encoder
+             (make-render-pass-descriptor
+              :label "luft sun shadow"
+              :color-attachments nil
+              :depth-stencil-attachment
+              `(:view ,(renderer-shadow-view renderer)
+                :depth-load-op :clear :depth-store-op :store
+                :depth-clear-value 1.0)))))
+      (set-pipeline shadow-pass (renderer-shadow-pipeline renderer))
+      (draw-resident-population
+       shadow-pass resident (resident-population-shadow-bind-group resident))
+      (end-pass shadow-pass))
+    (prepare-texture encoder (renderer-shadow-texture renderer)
+                     :texture-binding))
   (let* ((temporal-p (renderer-temporal-p renderer))
          (color-view (if temporal-p
                          (renderer-scene-view renderer)
@@ -1413,17 +1524,9 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                :depth-store-op ,(if temporal-p :store :discard)
                :depth-clear-value 1.0)))))
     (set-pipeline pass (renderer-pipeline renderer))
-    (let* ((resident (renderer-population renderer))
-           (population (resident-population-population resident))
-           (triangle-count
-             (render-population-triangle-instance-count population))
-           (quad-count (render-population-quad-instance-count population)))
-      (when (plusp (+ triangle-count quad-count))
-        (set-bind-group pass 0 (resident-population-bind-group resident))
-        (when (plusp triangle-count)
-          (draw pass 3 triangle-count))
-        (when (plusp quad-count)
-          (draw pass 6 quad-count 0 triangle-count))))
+    (let ((resident (renderer-population renderer)))
+      (draw-resident-population
+       pass resident (resident-population-bind-group resident)))
     (when player-p
       (set-pipeline pass (renderer-player-sdf-pipeline renderer))
       (set-bind-group pass 0 (renderer-player-sdf-bind-group renderer))
@@ -1500,6 +1603,12 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                   (renderer-player-sdf-fragment-module renderer)
                   (renderer-player-sdf-vertex-module renderer)
                   (renderer-player-sdf-layout renderer)
+                  (renderer-shadow-pipeline renderer)
+                  (renderer-shadow-vertex-module renderer)
+                  (renderer-shadow-layout renderer)
+                  (renderer-shadow-sampler renderer)
+                  (renderer-shadow-view renderer)
+                  (renderer-shadow-texture renderer)
                   (renderer-pipeline renderer) (renderer-fragment-module renderer)
                   (renderer-vertex-module renderer)
                   (renderer-layout renderer)
@@ -1520,6 +1629,12 @@ cohort untouched. No frame can interleave with the owner-thread publication."
         (renderer-player-sdf-fragment-module renderer) nil
         (renderer-player-sdf-vertex-module renderer) nil
         (renderer-player-sdf-layout renderer) nil
+        (renderer-shadow-pipeline renderer) nil
+        (renderer-shadow-vertex-module renderer) nil
+        (renderer-shadow-layout renderer) nil
+        (renderer-shadow-sampler renderer) nil
+        (renderer-shadow-view renderer) nil
+        (renderer-shadow-texture renderer) nil
         (renderer-pipeline renderer) nil
         (renderer-fragment-module renderer) nil
         (renderer-vertex-module renderer) nil

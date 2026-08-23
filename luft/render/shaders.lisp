@@ -243,6 +243,71 @@
   (+ (* (/ (swizzle clip :xy) (swizzle clip :w)) 0.5)
      (vec2 0.5 0.5)))
 
+(define-shader-function mesh-world-position (instance template-vertex)
+  "Decode the one world position shared by the scene and shadow passes."
+  (/ (+ (* (vec3 (float (swizzle instance :x))
+                 (float (swizzle instance :y))
+                 (float (swizzle instance :z)))
+           8.0)
+        (- (vec3 (float (swizzle template-vertex :x))
+                 (float (swizzle template-vertex :y))
+                 (float (swizzle template-vertex :z)))
+           (vec3 16.0 16.0 16.0)))
+     8.0))
+
+(define-shader-function light-clip-position
+    (world-position row-x row-y row-z row-w)
+  (let* ((point (vec4 world-position 1.0)))
+    (vec4 (dot point row-x) (dot point row-y)
+          (dot point row-z) (dot point row-w))))
+
+(define-shader-function soft-shadow-visibility
+    (shadow-map shadow-sampler shadow-sample normal sun shadow-control)
+  "Nine comparison-filtered taps forming one restrained paper-soft shadow."
+  (let* ((uv (swizzle shadow-sample :xy))
+         (depth (swizzle shadow-sample :z))
+         (u (swizzle uv :x))
+         (v (swizzle uv :y))
+         (in-bounds
+           (* (step 0.0 u) (step u 1.0)
+              (step 0.0 v) (step v 1.0)
+              (step 0.0 depth) (step depth 1.0)))
+         (facing (max 0.0 (dot normal sun)))
+         (bias (+ (swizzle shadow-control :z)
+                  (* 0.00125 (- 1.0 facing))))
+         (radius (* (swizzle shadow-control :xy)
+                    (swizzle shadow-control :w)))
+         (diagonal (* radius 0.70710678))
+         (visibility
+           (/ (+ (* 2.0 (sample-compare shadow-map shadow-sampler uv
+                                       (- depth bias)))
+                 (sample-compare shadow-map shadow-sampler
+                                 (+ uv (vec2 (swizzle radius :x) 0.0))
+                                 (- depth bias))
+                 (sample-compare shadow-map shadow-sampler
+                                 (- uv (vec2 (swizzle radius :x) 0.0))
+                                 (- depth bias))
+                 (sample-compare shadow-map shadow-sampler
+                                 (+ uv (vec2 0.0 (swizzle radius :y)))
+                                 (- depth bias))
+                 (sample-compare shadow-map shadow-sampler
+                                 (- uv (vec2 0.0 (swizzle radius :y)))
+                                 (- depth bias))
+                 (sample-compare shadow-map shadow-sampler
+                                 (+ uv diagonal) (- depth bias))
+                 (sample-compare shadow-map shadow-sampler
+                                 (- uv diagonal) (- depth bias))
+                 (sample-compare shadow-map shadow-sampler
+                                 (+ uv (vec2 (swizzle diagonal :x)
+                                            (- (swizzle diagonal :y))))
+                                 (- depth bias))
+                 (sample-compare shadow-map shadow-sampler
+                                 (+ uv (vec2 (- (swizzle diagonal :x))
+                                            (swizzle diagonal :y)))
+                                 (- depth bias)))
+              10.0)))
+    (mix 1.0 visibility in-bounds)))
+
 ;;; A small, rounded traveler for the sanctuary bridge.  The proxy is only a
 ;;; conservative raster bound; every visible contour below comes from this
 ;;; analytic field.  LUFT is Z-up, unlike luvcraft's first-person figures.
@@ -555,7 +620,18 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
                             (previous-camera-projection :vec4)
                             (temporal-parameters :vec4)
                             (inspection-parameters :vec4)
-                            (character-parameters :vec4)))))
+                            (character-parameters :vec4)
+                            (sun-vector :vec4)
+                            (sun-color-vector :vec4)
+                            (sky-color-vector :vec4)
+                            (ground-color-vector :vec4)
+                            (shadow-row-x :vec4)
+                            (shadow-row-y :vec4)
+                            (shadow-row-z :vec4)
+                            (shadow-row-w :vec4)
+                            (shadow-control :vec4)))
+                 (shadow-map :depth-texture-2d :binding 1)
+                 (shadow-sampler :sampler :binding 2)))
   (let* ((index (float vertex-index))
          (right-corner (if (= index 2.0) 1.0
                            (if (= index 3.0) 1.0
@@ -636,7 +712,18 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
                             (previous-camera-projection :vec4)
                             (temporal-parameters :vec4)
                             (inspection-parameters :vec4)
-                            (character-parameters :vec4)))))
+                            (character-parameters :vec4)
+                            (sun-vector :vec4)
+                            (sun-color-vector :vec4)
+                            (sky-color-vector :vec4)
+                            (ground-color-vector :vec4)
+                            (shadow-row-x :vec4)
+                            (shadow-row-y :vec4)
+                            (shadow-row-z :vec4)
+                            (shadow-row-w :vec4)
+                            (shadow-control :vec4)))
+                 (shadow-map :depth-texture-2d :binding 1)
+                 (shadow-sampler :sampler :binding 2)))
   (let* ((center (swizzle center-radius :xyz))
          (radius (swizzle center-radius :w))
          (time (swizzle character-parameters :w))
@@ -677,16 +764,32 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
                                   (* direction (swizzle local-normal :y))
                                   (swizzle local-normal :z))))
          (albedo (player-albedo local gait direction))
-         (sun (normalize (vec3 -0.62 0.38 0.34)))
-         (sun-color (vec3 1.22 1.00 0.72))
-         (sky (vec3 0.60 0.75 0.96))
-         (ground (vec3 0.40 0.34 0.26))
-         (wrapped (expt (clamp (+ 0.5 (* 0.5 (dot normal sun)))
-                               0.0 1.0) 1.55))
+         (sun (swizzle sun-vector :xyz))
+         (sun-color (swizzle sun-color-vector :xyz))
+         (sky (swizzle sky-color-vector :xyz))
+         (ground (swizzle ground-color-vector :xyz))
+         (facing (dot normal sun))
+         (direct-shape (smoothstep 0.0 0.72 (max 0.0 facing)))
+         (light-clip
+           (light-clip-position world-point shadow-row-x shadow-row-y
+                                shadow-row-z shadow-row-w))
+         (player-shadow-sample
+           (vec3 (+ (* (swizzle light-clip :x) 0.5) 0.5)
+                 (+ (* (swizzle light-clip :y) 0.5) 0.5)
+                 (swizzle light-clip :z)))
+         (sampled-shadow
+           (soft-shadow-visibility shadow-map shadow-sampler
+                                   player-shadow-sample normal sun
+                                   shadow-control))
+         (direct-visibility
+           (mix 1.0 sampled-shadow
+                (smoothstep 0.03 0.18 (max 0.0 facing))))
          (upness (swizzle normal :z))
-         (indirect (+ (* sky (* 0.44 (+ 0.5 (* 0.5 upness))))
-                      (* ground (* 0.44 (- 0.5 (* 0.5 upness))))))
-         (lit (* albedo (+ (* sun-color wrapped) indirect)))
+         (indirect (+ (* sky (* 0.54 (+ 0.5 (* 0.5 upness))))
+                      (* ground (* 0.54 (- 0.5 (* 0.5 upness))))))
+         (lit (* albedo
+                 (+ (* sun-color (* direct-shape direct-visibility))
+                    indirect)))
          (paper (paper-tonemap (* lit 1.16)))
          (rim (expt (- 1.0 (max 0.0 (dot normal (* ray -1.0)))) 3.0))
          (radiance (+ paper (* (vec3 0.20 0.42 0.48) (* rim 0.07)))))
@@ -706,6 +809,7 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
                (barycentric-output :vec3 :location 3)
                (current-clip-output :vec4 :location 4)
                (previous-clip-output :vec4 :location 5)
+               (shadow-sample-output :vec3 :location 6)
                (boundary-edge-mask-output :uint :location 7
                                           :interpolation :flat)
                (ambient-occlusion-output :float :location 8
@@ -726,7 +830,16 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
                             (previous-camera-projection :vec4)
                             (temporal-parameters :vec4)
                             (inspection-parameters :vec4)
-                            (character-parameters :vec4)))))
+                            (character-parameters :vec4)
+                            (sun-vector :vec4)
+                            (sun-color-vector :vec4)
+                            (sky-color-vector :vec4)
+                            (ground-color-vector :vec4)
+                            (shadow-row-x :vec4)
+                            (shadow-row-y :vec4)
+                            (shadow-row-z :vec4)
+                            (shadow-row-w :vec4)
+                            (shadow-control :vec4)))))
   (let* ((instance (buffer-element instances instance-index))
          (template-id
            (uint (ldb (byte 16 0) (swizzle instance :w))))
@@ -734,16 +847,7 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
            (+ (* template-id (uint 6.0)) vertex-index))
          (template-vertex (buffer-element template-vertices template-index))
          (attributes (swizzle template-vertex :w))
-         (world-position
-           (/ (+ (* (vec3 (float (swizzle instance :x))
-                          (float (swizzle instance :y))
-                          (float (swizzle instance :z)))
-                    8.0)
-                 (- (vec3 (float (swizzle template-vertex :x))
-                          (float (swizzle template-vertex :y))
-                          (float (swizzle template-vertex :z)))
-                    (vec3 16.0 16.0 16.0)))
-              8.0))
+         (world-position (mesh-world-position instance template-vertex))
          (mesh-normal
            (vec3 (- (float (ldb (byte 2 0) attributes)) 1.0)
                  (- (float (ldb (byte 2 2) attributes)) 1.0)
@@ -768,6 +872,9 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
                            previous-camera-right previous-camera-up
                            previous-camera-forward previous-camera-projection
                            (swizzle temporal-parameters :z)))
+         (light-clip
+           (light-clip-position world-position shadow-row-x shadow-row-y
+                                shadow-row-z shadow-row-w))
          (jitter (swizzle temporal-parameters :xy)))
     (set-output clip-position
                 (vec4 (+ (swizzle current-clip :x)
@@ -782,6 +889,10 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
     (set-output barycentric-output barycentric)
     (set-output current-clip-output current-clip)
     (set-output previous-clip-output previous-clip)
+    (set-output shadow-sample-output
+                (vec3 (+ (* (swizzle light-clip :x) 0.5) 0.5)
+                      (+ (* (swizzle light-clip :y) 0.5) 0.5)
+                      (swizzle light-clip :z)))
     (set-output boundary-edge-mask-output boundary-edge-mask)
     (set-output ambient-occlusion-output ambient-occlusion)))
 
@@ -793,6 +904,7 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
               (barycentric :vec3 :location 3)
               (current-clip :vec4 :location 4)
               (previous-clip :vec4 :location 5)
+              (shadow-sample :vec3 :location 6)
               (boundary-edge-mask :uint :location 7 :interpolation :flat)
               (ambient-occlusion :float :location 8 :interpolation :flat))
      :outputs ((color-output :vec4 :location 0)
@@ -811,9 +923,20 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
                             (previous-camera-projection :vec4)
                             (temporal-parameters :vec4)
                             (inspection-parameters :vec4)
-                            (character-parameters :vec4)))
+                            (character-parameters :vec4)
+                            (sun-vector :vec4)
+                            (sun-color-vector :vec4)
+                            (sky-color-vector :vec4)
+                            (ground-color-vector :vec4)
+                            (shadow-row-x :vec4)
+                            (shadow-row-y :vec4)
+                            (shadow-row-z :vec4)
+                            (shadow-row-w :vec4)
+                            (shadow-control :vec4)))
                  (material-descriptors :storage-buffer :binding 3
-                  :element :vec4)))
+                  :element :vec4)
+                 (shadow-map :depth-texture-2d :binding 4)
+                 (shadow-sampler :sampler :binding 5)))
   (let* ((dx (derivative-x world-position))
          (dy (derivative-y world-position))
          (geometric-normal
@@ -906,24 +1029,28 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
          (warmth (mix (vec3 0.965 0.99 1.04) (vec3 1.04 1.01 0.96)
                       (smoothstep 0.18 0.82 mottle)))
          (base (* tone (* warmth value)))
-         (sun (normalize (vec3 -0.62 0.38 0.34)))
-         (sun-color (vec3 1.22 1.00 0.72))
-         (sky (vec3 0.60 0.75 0.96))
-         (ground (vec3 0.40 0.34 0.26))
-         (fill-direction (normalize (vec3 0.55 -0.40 0.32)))
+         (sun (swizzle sun-vector :xyz))
+         (sun-color (swizzle sun-color-vector :xyz))
+         (sky (swizzle sky-color-vector :xyz))
+         (ground (swizzle ground-color-vector :xyz))
          (facing (dot normal sun))
-         (wrapped (expt (clamp (+ 0.5 (* 0.5 facing)) 0.0 1.0) 1.55))
-         (fill (* 0.30 (max 0.0 (dot normal fill-direction))))
+         (direct-shape (smoothstep 0.0 0.72 (max 0.0 facing)))
+         (sampled-shadow
+           (soft-shadow-visibility shadow-map shadow-sampler shadow-sample
+                                   normal sun shadow-control))
+         (direct-visibility
+           (mix 1.0 sampled-shadow
+                (smoothstep 0.03 0.18 (max 0.0 facing))))
          (upness (swizzle normal :z))
          (sky-weight (+ 0.5 (* 0.5 upness)))
          (ground-weight (- 0.5 (* 0.5 upness)))
          (indirect-light
-           (+ (* sky (+ (* 0.44 sky-weight) fill))
-              (* ground (* 0.44 ground-weight))))
+           (+ (* sky (* 0.54 sky-weight))
+              (* ground (* 0.54 ground-weight))))
          (ambient-accessibility
            (- 1.0 (* #.*local-ambient-occlusion-strength*
                      ambient-occlusion)))
-         (light (+ (* sun-color wrapped)
+         (light (+ (* sun-color (* direct-shape direct-visibility))
                    (* indirect-light ambient-accessibility)))
          (lit (* base (* light (stock-tooth material-point))))
          (mapped-paper (paper-tonemap (* lit 1.16)))
@@ -963,7 +1090,8 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
            (* #.*cut-edge-lift-strength*
               chamferness
               (- 1.0 (smoothstep 0.20 1.45 boundary-edge-pixels))
-              (+ 0.28 (* 0.72 wrapped))
+              (+ 0.18 (* 0.82 direct-shape))
+              (mix 0.22 1.0 direct-visibility)
               ;; Earth-filled contacts should not receive the pristine white
               ;; paper rim which makes ordinary cut-stone edges legible.
               ;; Locally exposed stone still catches light; pigment clumps
@@ -997,6 +1125,47 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
     (set-output motion-output
                 (- (mesh-clip-uv previous-clip)
                    (mesh-clip-uv current-clip)))))
+
+(define-shader shadow-vertex-specification
+    (:stage :vertex
+     :inputs ((vertex-index :uint :built-in :vertex-index)
+              (instance-index :uint :built-in :instance-index))
+     :outputs ((clip-position :vec4 :built-in :position))
+     :resources ((instances :storage-buffer :binding 0 :element :uvec4)
+                 (template-vertices :storage-buffer :binding 1 :element :uvec4)
+                 (camera-state :uniform-block :binding 2
+                  :members ((camera-position :vec4)
+                            (camera-right :vec4)
+                            (camera-up :vec4)
+                            (camera-forward :vec4)
+                            (camera-projection :vec4)
+                            (render-parameters :vec4)
+                            (previous-camera-position :vec4)
+                            (previous-camera-right :vec4)
+                            (previous-camera-up :vec4)
+                            (previous-camera-forward :vec4)
+                            (previous-camera-projection :vec4)
+                            (temporal-parameters :vec4)
+                            (inspection-parameters :vec4)
+                            (character-parameters :vec4)
+                            (sun-vector :vec4)
+                            (sun-color-vector :vec4)
+                            (sky-color-vector :vec4)
+                            (ground-color-vector :vec4)
+                            (shadow-row-x :vec4)
+                            (shadow-row-y :vec4)
+                            (shadow-row-z :vec4)
+                            (shadow-row-w :vec4)
+                            (shadow-control :vec4)))))
+  (let* ((instance (buffer-element instances instance-index))
+         (template-id (uint (ldb (byte 16 0) (swizzle instance :w))))
+         (template-index (+ (* template-id (uint 6.0)) vertex-index))
+         (template-vertex (buffer-element template-vertices template-index))
+         (world-position (mesh-world-position instance template-vertex)))
+    (set-output clip-position
+                (light-clip-position world-position
+                                     shadow-row-x shadow-row-y
+                                     shadow-row-z shadow-row-w))))
 
 (define-shader lattice-point-vertex-specification
     (:stage :vertex

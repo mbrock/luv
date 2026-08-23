@@ -279,7 +279,7 @@ the selector is the whole of the difference."
            (list (vec3:vec3-x vector) (vec3:vec3-y vector)
                  (vec3:vec3-z vector) fourth)))
     (make-array
-     56 :element-type 'single-float
+     92 :element-type 'single-float
      :initial-contents
      (mapcar
       (lambda (value) (coerce value 'single-float))
@@ -303,7 +303,8 @@ the selector is the whole of the difference."
               ;; Bridge centre, body-sphere centre height, animation clock.
               (list (+ 29.5 +sanctuary-origin-x+)
                     (+ 24.5 +sanctuary-origin-y+)
-                    15.48 character-time))))))
+                    15.48 character-time)
+              (light-uniform-data *light* (frame-view-position view)))))))
 
 (defun viewer-logical-extent (viewer)
   (let ((canvas (viewer-canvas viewer)))

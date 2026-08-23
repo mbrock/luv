@@ -679,6 +679,8 @@
 (deftest mesh-and-presentation-shaders-lower-through-both-conventional-backends
   (let* ((vertex (luft.render.shaders:mesh-vertex-specification))
          (fragment (luft.render.shaders:mesh-fragment-specification))
+         (shadow-vertex
+           (luft.render.shaders:shadow-vertex-specification))
          (lattice-vertex
            (luft.render.shaders:lattice-point-vertex-specification))
          (lattice-fragment
@@ -703,6 +705,8 @@
     (ok (search "const device uint4* instances" vertex-msl))
     (ok (search "const device uint4* template_vertices" vertex-msl))
     (ok (search "const device float4* material_descriptors" fragment-msl))
+    (ok (search "depth2d<float> shadow_map" fragment-msl))
+    (ok (search "sampler shadow_sampler" fragment-msl))
     (ok (search "barycentric" fragment-msl))
     (ok (search "motion_output" fragment-msl))
     (ok (search "depth2d<float> scene_depth" present-fragment-msl))
@@ -712,6 +716,8 @@
     (ok (luv.msl:compile-msl lattice-fragment))
     (ok (luv.spir-v:compile-shader-specification vertex))
     (ok (luv.spir-v:compile-shader-specification fragment))
+    (ok (luv.msl:compile-msl shadow-vertex))
+    (ok (luv.spir-v:compile-shader-specification shadow-vertex))
     (ok (luv.spir-v:compile-shader-specification lattice-vertex))
     (ok (luv.spir-v:compile-shader-specification lattice-fragment))
     (ok (luv.msl:compile-msl player-vertex))
@@ -739,8 +745,8 @@
                          camera 1100 800 #(0.0 0.0))))
                   (luft.render::camera-uniform-data
                    view view #(0.5 0.5 0.001 0.001) 1.0 7.25 1)))))
-        (ok (= 56 (length perspective)))
-        (ok (typep perspective '(simple-array single-float (56))))
+        (ok (= 92 (length perspective)))
+        (ok (typep perspective '(simple-array single-float (92))))
         (ok (= 1.0 (aref perspective 22)))
         (ok (= 0.0 (aref isometric 22)))
         (flet ((depth (data view-z)
@@ -759,7 +765,35 @@
         (ok (equalp #(0.5 0.5 0.001 0.001)
                     (subseq perspective 48 52)))
         (ok (equalp #(61.5 48.5 15.48 7.25)
-                    (subseq perspective 52 56)))))))
+                    (subseq perspective 52 56)))
+        (ok (equalp (luft.render::light-sun-color luft.render:*light*)
+                    (subseq perspective 60 64)))
+        (ok (equalp (luft.render::light-sky-color luft.render:*light*)
+                    (subseq perspective 64 68)))
+        (ok (equalp (luft.render::light-ground-color luft.render:*light*)
+                    (subseq perspective 68 72)))
+        (ok (= (/ luft.render::+shadow-map-size+)
+               (aref perspective 88)))
+        (ok (= (luft.render::light-shadow-filter-radius luft.render:*light*)
+               (aref perspective 91)))))))
+
+(deftest the-light-frame-is-texel-stable-under-subtexel-camera-motion
+  (let* ((light luft.render:*light*)
+         (center (luv.arithmetic.lisp.vec3:make-vec3 31.0 47.0 13.0))
+         (rows (luft.render::light-shadow-rows light center))
+         (texel (/ (* 2.0 (luft.render::light-shadow-half-extent light))
+                   luft.render::+shadow-map-size+))
+         (nearby
+           (luv.arithmetic.lisp.vec3:make-vec3
+            (+ (luv.arithmetic.lisp.vec3:vec3-x center) (* texel 0.1))
+            (luv.arithmetic.lisp.vec3:vec3-y center)
+            (luv.arithmetic.lisp.vec3:vec3-z center)))
+         (nearby-rows (luft.render::light-shadow-rows light nearby)))
+    (ok (= 16 (length rows)))
+    ;; Snapping is in the light plane: a tiny arbitrary world translation may
+    ;; cross no light-space texel boundary, and therefore leaves X/Y rows exact.
+    (ok (equalp (subseq rows 0 8) (subseq nearby-rows 0 8)))
+    (ok (= 36 (length (luft.render::light-uniform-data light center))))))
 
 (deftest a-pointer-ray-retains-the-semantic-boundary-site
   (let* ((domain (luft:make-world-domain :horizontal-bits 4))
