@@ -469,7 +469,12 @@ the selector is the whole of the difference."
       (viewer-bevel-width viewer))
      :jitter jitter :view view
      :player-p player-p
-     :construction-p (plusp *wireframe*)
+     ;; Dense lattice dots are a close-study diagnostic, not a terrain view:
+     ;; streamed chunks can each contain more than a million markers. The
+     ;; shader-backed construction lines remain controlled by *WIREFRAME*.
+     :construction-p (and (plusp *wireframe*)
+                          (not (typep (viewer-source viewer)
+                                      'streaming-scene)))
      :overlay-encoder
      (and inspector-p
           (lambda (pass)
@@ -755,13 +760,15 @@ the selector is the whole of the difference."
       ;; One complete neighborhood cohort crosses the owner boundary before
       ;; another residency change can invalidate it.
       (when (and (null (streaming-scene-cohort source))
-                 (streaming-scene-pending source))
+                 (null (streaming-scene-removals source)))
         (incf (streaming-scene-frame-counter source))
         (when (>= (streaming-scene-frame-counter source)
                   (streaming-scene-frames-per-load source))
           (setf (streaming-scene-frame-counter source) 0)
-          (advance-streaming-scene source production-system
-                                   (viewer-bevel-width viewer)))))))
+          (let ((position (camera-position (viewer-camera viewer))))
+            (retarget-streaming-scene
+             source production-system (viewer-bevel-width viewer)
+             (vec3:vec3-x position) (vec3:vec3-y position))))))))
 
 (defun render-viewer-frame (viewer timestamp)
   (declare (ignore timestamp))
@@ -1210,7 +1217,8 @@ GPU cohort only after the complete candidate exists."
              (dolist (key (renderer-slot-order old))
                (renderer-set-mesh
                 candidate key
-                (mesh-slot-mesh (gethash key (renderer-mesh-slots old)))))
+                (mesh-slot-prepared-mesh
+                 (gethash key (renderer-mesh-slots old)))))
              (setf (viewer-renderer viewer) candidate
                    (viewer-shader-diagnostic viewer) nil
                    candidate nil

@@ -647,29 +647,38 @@ consequence of its own occupancy star and can be read on its own."
 
 (defstruct (render-population
              (:constructor %make-render-population
-                 (template-words instance-words material-descriptor-words
-                  triangle-instance-count quad-instance-count))
+                 (template-words instance-words triangle-instance-count
+                  quad-instance-count))
              (:copier nil))
-  "One compact draw population shared by every resident surface mesh."
+  "One compact fixed-arity draw population for a surface-mesh cohort."
   (template-words #() :type (simple-array (unsigned-byte 32) (*)) :read-only t)
   (instance-words #() :type (simple-array (unsigned-byte 32) (*)) :read-only t)
-  (material-descriptor-words #() :type (simple-array single-float (*))
-                             :read-only t)
   (triangle-instance-count 0 :type (integer 0 *) :read-only t)
   (quad-instance-count 0 :type (integer 0 *) :read-only t))
 
 (defstruct (resident-population
              (:constructor %make-resident-population
-                 (population instance-buffer template-buffer material-buffer
-                  bind-group shadow-bind-group))
+                 (population instance-buffer template-buffer bind-group
+                  shadow-bind-group))
              (:copier nil))
-  "The CPU population and its renderer-global GPU realization."
+  "One chunk's CPU population and independently retained GPU realization."
   (population nil :type render-population :read-only t)
   (instance-buffer nil :read-only t)
   (template-buffer nil :read-only t)
-  (material-buffer nil :read-only t)
   (bind-group nil :read-only t)
   (shadow-bind-group nil :read-only t))
+
+(defstruct (prepared-render-mesh
+             (:constructor %make-prepared-render-mesh (mesh population))
+             (:copier nil))
+  "Worker-transferable CPU realization of one semantic surface mesh."
+  (mesh nil :type luft:surface-mesh :read-only t)
+  (population nil :type render-population :read-only t))
+
+(zdefun (prepare-render-mesh :zone :luft/prepare-population) (mesh)
+  "Canonicalize one MESH before it crosses to the renderer owner."
+  (check-type mesh luft:surface-mesh)
+  (%make-prepared-render-mesh mesh (make-render-population (list mesh))))
 
 (defun make-render-population (meshes)
   "Canonicalize and concatenate MESHES into two fixed-arity instance runs.
@@ -789,12 +798,12 @@ so the complete surface needs at most two direct instanced draws."
      (coerce template-words '(simple-array (unsigned-byte 32) (*)))
      (concatenate '(simple-array (unsigned-byte 32) (*))
                   triangle-words quad-words)
-     (surface-assembly-descriptor-words)
      triangle-count quad-count)))
 
 (defstruct (mesh-slot (:constructor %make-mesh-slot) (:copier nil))
   "One mesh's semantic residency and optional construction-overlay resources."
   (mesh nil)
+  (resident nil)
   (lattice-point-buffer nil)
   (lattice-point-count 0)
   (lattice-point-group nil))
@@ -806,8 +815,8 @@ so the complete surface needs at most two direct instanced draws."
    (mesh-slots :initform (make-hash-table :test #'eql)
                :reader renderer-mesh-slots)
    (slot-order :initform nil :accessor renderer-slot-order)
-   (population :initform nil :accessor renderer-population)
    (camera-buffer :initarg :camera-buffer :accessor renderer-camera-buffer)
+   (material-buffer :initarg :material-buffer :accessor renderer-material-buffer)
    (layout :initarg :layout :accessor renderer-layout)
    (vertex-module :initarg :vertex-module :accessor renderer-vertex-module)
    (fragment-module :initarg :fragment-module :accessor renderer-fragment-module)
@@ -996,142 +1005,191 @@ so the complete surface needs at most two direct instanced draws."
     (create-frame-targets renderer extent))
   renderer)
 
-(defun mesh-lattice-point-words (mesh)
+(zdefun (mesh-lattice-point-words :zone :luft/prepare-overlay) (mesh)
   "LUFT vertex sites, mesh vertices, and eighth-step boundary-edge samples."
-  (let ((points (make-hash-table :test #'equal))
+  (let ((points (make-hash-table :test #'eql))
         (result (make-array 64 :element-type '(unsigned-byte 32)
                               :adjustable t :fill-pointer 0))
         (templates (luft:surface-mesh-template-vertex-words mesh))
         (ranges (luft:surface-mesh-template-ranges mesh)))
-    (labels ((remember (point marker-kind)
-               (setf (gethash point points)
-                     (max marker-kind (gethash point points 0))))
-             (template-position (base vertex)
-               (let ((offset (* vertex
-                                luft:+mesh-template-vertex-word-count+)))
-                 (loop for axis below 3
-                       collect (+ (* luft:+mesh-cell-size+ (nth axis base))
-                                  (- (aref templates (+ offset axis))
-                                     luft:+mesh-template-coordinate-bias+)))))
-             (sample-axis-edge (left right)
-               (let ((different
-                       (loop for axis below 3
-                             unless (= (nth axis left) (nth axis right))
-                               collect axis)))
-                 (when (= 1 (length different))
-                   (let* ((axis (first different))
-                          (low (min (nth axis left) (nth axis right)))
-                          (high (max (nth axis left) (nth axis right))))
-                     (loop for coordinate from low to high do
-                       (let ((point (copy-list left)))
-                         (setf (nth axis point) coordinate)
-                         (remember point 0)))))))
+    (labels ((pack-point (x y z)
+               ;; World coordinates are non-negative and comfortably below
+               ;; twenty bits at the eighth-cell scale. One fixnum is a
+               ;; cons-free hash key for the diagnostic point vocabulary.
+               (unless (and (typep x '(unsigned-byte 20))
+                            (typep y '(unsigned-byte 20))
+                            (typep z '(unsigned-byte 20)))
+                 (error "LUFT lattice point (~D ~D ~D) exceeds packed range."
+                        x y z))
+               (logior x (ash y 20) (ash z 40)))
+             (remember (x y z marker-kind)
+               (let ((key (pack-point x y z)))
+                 (setf (gethash key points)
+                       (max marker-kind (gethash key points 0)))))
+             (template-coordinate (base vertex axis)
+               (+ (* luft:+mesh-cell-size+ base)
+                  (- (aref templates
+                           (+ (* vertex luft:+mesh-template-vertex-word-count+)
+                              axis))
+                     luft:+mesh-template-coordinate-bias+)))
+             (sample-axis-edge (ax ay az bx by bz)
+               (cond
+                 ((and (= ay by) (= az bz) (/= ax bx))
+                  (loop for x from (min ax bx) to (max ax bx)
+                        do (remember x ay az 0)))
+                 ((and (= ax bx) (= az bz) (/= ay by))
+                  (loop for y from (min ay by) to (max ay by)
+                        do (remember ax y az 0)))
+                 ((and (= ax bx) (= ay by) (/= az bz))
+                  (loop for z from (min az bz) to (max az bz)
+                        do (remember ax ay z 0)))))
              (visit-stream (words fan-p)
                (loop for instance-offset from 0 below (length words) by 4
-                     for base = (list (aref words instance-offset)
-                                      (aref words (+ instance-offset 1))
-                                      (aref words (+ instance-offset 2)))
+                     for base-x = (aref words instance-offset)
+                     for base-y = (aref words (+ instance-offset 1))
+                     for base-z = (aref words (+ instance-offset 2))
                      for packed = (aref words (+ instance-offset 3))
                      for template-id = (ldb (byte 16 0) packed)
                      for vertex-start = (aref ranges (* 2 template-id))
                      for vertex-count = (aref ranges (1+ (* 2 template-id)))
                      do (when fan-p
-                          (remember
-                           (mapcar (lambda (x)
-                                     (* luft:+mesh-cell-size+ x))
-                                   base)
-                           2))
+                          (remember (* luft:+mesh-cell-size+ base-x)
+                                    (* luft:+mesh-cell-size+ base-y)
+                                    (* luft:+mesh-cell-size+ base-z) 2))
                         (loop for vertex from vertex-start
                                 below (+ vertex-start vertex-count)
-                              do (remember (template-position base vertex) 1))
+                              do (remember
+                                  (template-coordinate base-x vertex 0)
+                                  (template-coordinate base-y vertex 1)
+                                  (template-coordinate base-z vertex 2) 1))
                         (loop for vertex from vertex-start
                                 below (+ vertex-start vertex-count) by 3
                               for attributes =
                                 (aref templates
                                       (+ (* vertex 4) 3))
                               for edge-mask = (ldb (byte 3 10) attributes)
-                              for a = (template-position base vertex)
-                              for b = (template-position base (1+ vertex))
-                              for c = (template-position base (+ vertex 2))
+                              for ax = (template-coordinate base-x vertex 0)
+                              for ay = (template-coordinate base-y vertex 1)
+                              for az = (template-coordinate base-z vertex 2)
+                              for bx = (template-coordinate base-x (1+ vertex) 0)
+                              for by = (template-coordinate base-y (1+ vertex) 1)
+                              for bz = (template-coordinate base-z (1+ vertex) 2)
+                              for cx = (template-coordinate base-x (+ vertex 2) 0)
+                              for cy = (template-coordinate base-y (+ vertex 2) 1)
+                              for cz = (template-coordinate base-z (+ vertex 2) 2)
                               when (logbitp 0 edge-mask)
-                                do (sample-axis-edge b c)
+                                do (sample-axis-edge bx by bz cx cy cz)
                               when (logbitp 1 edge-mask)
-                                do (sample-axis-edge a c)
+                                do (sample-axis-edge ax ay az cx cy cz)
                               when (logbitp 2 edge-mask)
-                                do (sample-axis-edge a b)))))
+                                do (sample-axis-edge ax ay az bx by bz)))))
       (visit-stream (luft:surface-mesh-face-instance-words mesh) nil)
       (visit-stream (luft:surface-mesh-band-instance-words mesh) nil)
       (visit-stream (luft:surface-mesh-fan-instance-words mesh) t))
     (maphash
      (lambda (point marker-kind)
-       (dolist (coordinate point) (vector-push-extend coordinate result))
+       (vector-push-extend (ldb (byte 20 0) point) result)
+       (vector-push-extend (ldb (byte 20 20) point) result)
+       (vector-push-extend (ldb (byte 20 40) point) result)
        (vector-push-extend marker-kind result))
      points)
     (coerce result '(simple-array (unsigned-byte 32) (*)))))
 
 (defun %destroy-mesh-slot (slot)
+  (%destroy-resident-population (mesh-slot-resident slot))
   (dolist (resource (list (mesh-slot-lattice-point-group slot)
                           (mesh-slot-lattice-point-buffer slot)))
     (when resource (ignore-errors (destroy resource))))
   (values))
 
-(defun %make-renderer-mesh-slot (renderer mesh)
-  "Create MESH's optional construction-overlay residency."
-  (let* ((device (renderer-device renderer))
-         (camera-buffer (renderer-camera-buffer renderer))
-         (lattice-point-words (mesh-lattice-point-words mesh))
-         (lattice-point-count (/ (length lattice-point-words) 4))
-         (slot (%make-mesh-slot :mesh mesh
-                                :lattice-point-count lattice-point-count))
+(defun mesh-slot-prepared-mesh (slot)
+  "Borrow SLOT's immutable CPU realization for renderer reconstruction."
+  (%make-prepared-render-mesh
+   (mesh-slot-mesh slot)
+   (resident-population-population (mesh-slot-resident slot))))
+
+(defun %make-renderer-mesh-slot (renderer mesh-or-prepared)
+  "Upload one independently retained chunk slot.
+
+MESH-OR-PREPARED may carry worker-built dense population arrays. Construction
+overlay data is deliberately absent until construction mode asks for it."
+  (let* ((prepared
+           (if (typep mesh-or-prepared 'prepared-render-mesh)
+               mesh-or-prepared
+               (prepare-render-mesh mesh-or-prepared)))
+         (mesh (prepared-render-mesh-mesh prepared))
+         (slot (%make-mesh-slot :mesh mesh))
          (completed-p nil))
-    (flet ((stream-buffer (label words)
-             (let ((buffer (create device
-                                   (make-buffer-descriptor
-                                    :label label
-                                    :size (max 16 (* 4 (length words)))
-                                    :usage '(:storage :copy-dst)))))
-               (when (plusp (length words))
-                 (write-buffer buffer words))
-               buffer)))
-      (unwind-protect
-           (progn
-             (setf (mesh-slot-lattice-point-buffer slot)
-                   (stream-buffer "luft unique eighth-cell lattice points"
-                                  lattice-point-words))
-             (setf (mesh-slot-lattice-point-group slot)
-                   (create device
-                           (make-bind-group-descriptor
-                            :label "luft eighth-cell lattice points"
-                            :layout (renderer-lattice-point-layout renderer)
-                            :entries
-                            `((:binding 0
-                               :resource ,(mesh-slot-lattice-point-buffer
-                                           slot))
-                              (:binding 1 :resource ,camera-buffer)))))
-             (setf completed-p t)
-             slot)
-        (unless completed-p
-          (%destroy-mesh-slot slot))))))
+    (unwind-protect
+         (progn
+           (setf (mesh-slot-resident slot)
+                 (%upload-render-population
+                  renderer (prepared-render-mesh-population prepared)))
+           (setf completed-p t)
+           slot)
+      (unless completed-p
+        (%destroy-mesh-slot slot)))))
+
+(defun ensure-mesh-slot-lattice-points (renderer slot)
+  "Create SLOT's diagnostic overlay on first use, never during normal streaming."
+  (unless (mesh-slot-lattice-point-buffer slot)
+    (let* ((device (renderer-device renderer))
+           (camera-buffer (renderer-camera-buffer renderer))
+           (lattice-point-words
+             (mesh-lattice-point-words (mesh-slot-mesh slot)))
+           (lattice-point-count (/ (length lattice-point-words) 4))
+           (completed-p nil))
+      (flet ((stream-buffer (label words)
+               (let ((buffer (create device
+                                     (make-buffer-descriptor
+                                      :label label
+                                      :size (max 16 (* 4 (length words)))
+                                      :usage '(:storage :copy-dst)))))
+                 (when (plusp (length words))
+                   (write-buffer buffer words))
+                 buffer)))
+        (unwind-protect
+             (progn
+               (setf (mesh-slot-lattice-point-count slot) lattice-point-count
+                     (mesh-slot-lattice-point-buffer slot)
+                     (stream-buffer "luft unique eighth-cell lattice points"
+                                    lattice-point-words))
+               (setf (mesh-slot-lattice-point-group slot)
+                     (create device
+                             (make-bind-group-descriptor
+                              :label "luft eighth-cell lattice points"
+                              :layout (renderer-lattice-point-layout renderer)
+                              :entries
+                              `((:binding 0
+                                 :resource ,(mesh-slot-lattice-point-buffer
+                                             slot))
+                                (:binding 1 :resource ,camera-buffer)))))
+               (setf completed-p t))
+          (unless completed-p
+            (dolist (resource (list (mesh-slot-lattice-point-group slot)
+                                    (mesh-slot-lattice-point-buffer slot)))
+              (when resource (ignore-errors (destroy resource))))
+            (setf (mesh-slot-lattice-point-group slot) nil
+                  (mesh-slot-lattice-point-buffer slot) nil
+                  (mesh-slot-lattice-point-count slot) 0))))))
+  slot)
 
 (defun %destroy-resident-population (resident)
   (when resident
     (dolist (resource (list (resident-population-bind-group resident)
-                            (resident-population-material-buffer resident)
                             (resident-population-shadow-bind-group resident)
                             (resident-population-template-buffer resident)
                             (resident-population-instance-buffer resident)))
       (when resource (ignore-errors (destroy resource)))))
   (values))
 
-(defun %upload-render-population (renderer meshes)
+(zdefun (%upload-render-population :zone :luft/upload-slot)
+    (renderer population)
   "Build and upload one candidate population without changing RENDERER."
   (let* ((device (renderer-device renderer))
-         (population (make-render-population meshes))
          (instance-words (render-population-instance-words population))
          (template-words (render-population-template-words population))
-         (material-words
-           (render-population-material-descriptor-words population))
-         instance-buffer template-buffer material-buffer bind-group
+         instance-buffer template-buffer bind-group
          shadow-bind-group
          (completed-p nil))
     (flet ((stream-buffer (label words)
@@ -1150,9 +1208,6 @@ so the complete surface needs at most two direct instanced draws."
                    (stream-buffer "luft resident site instances" instance-words)
                    template-buffer
                    (stream-buffer "luft canonical site templates" template-words)
-                   material-buffer
-                   (stream-buffer "luft surface assembly descriptors"
-                                  material-words)
                    bind-group
                    (create device
                            (make-bind-group-descriptor
@@ -1163,7 +1218,8 @@ so the complete surface needs at most two direct instanced draws."
                               (:binding 1 :resource ,template-buffer)
                               (:binding 2
                                :resource ,(renderer-camera-buffer renderer))
-                              (:binding 3 :resource ,material-buffer)
+                              (:binding 3
+                               :resource ,(renderer-material-buffer renderer))
                               (:binding 4
                                :resource ,(renderer-shadow-view renderer))
                               (:binding 5
@@ -1180,33 +1236,15 @@ so the complete surface needs at most two direct instanced draws."
                                :resource ,(renderer-camera-buffer renderer))))))
              (let ((resident
                      (%make-resident-population
-                      population instance-buffer template-buffer
-                      material-buffer bind-group shadow-bind-group)))
+                      population instance-buffer template-buffer bind-group
+                      shadow-bind-group)))
                (setf completed-p t)
                resident))
         (unless completed-p
           (dolist (resource
-                    (list shadow-bind-group bind-group material-buffer
-                          template-buffer instance-buffer))
+                    (list shadow-bind-group bind-group template-buffer
+                          instance-buffer))
             (when resource (ignore-errors (destroy resource)))))))))
-
-(defun %prospective-meshes (renderer candidates &optional removed-key)
-  "Return the deterministically keyed mesh population after one transaction."
-  (let ((by-key (make-hash-table :test #'eql))
-        (keys nil))
-    (dolist (key (renderer-slot-order renderer))
-      (unless (eql key removed-key)
-        (setf (gethash key by-key)
-              (mesh-slot-mesh
-               (gethash key (renderer-mesh-slots renderer))))
-        (push key keys)))
-    (dolist (entry candidates)
-      (let ((key (car entry)))
-        (unless (gethash key by-key)
-          (push key keys))
-        (setf (gethash key by-key) (mesh-slot-mesh (cdr entry)))))
-    (loop for key in (sort (remove-duplicates keys :test #'eql) #'<)
-          collect (gethash key by-key))))
 
 (defun %refresh-renderer-slot-order (renderer)
   (let ((keys '()))
@@ -1224,9 +1262,13 @@ so the complete surface needs at most two direct instanced draws."
 MESHES is an alist of key to surface mesh. Every GPU slot is created before
 the renderer's table changes; a failed upload therefore leaves the installed
 cohort untouched. No frame can interleave with the owner-thread publication."
+  (renderer-update-meshes renderer meshes nil))
+
+(zdefun (renderer-update-meshes :zone :luft/publish-residency)
+    (renderer meshes removed-keys)
+  "Transactionally replace MESHES and remove REMOVED-KEYS as one cohort."
   (let ((candidates nil)
         (retired nil)
-        (candidate-population nil)
         (installed-p nil))
     (unwind-protect
          (progn
@@ -1235,51 +1277,30 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                          (%make-renderer-mesh-slot renderer (cdr entry)))
                    candidates))
            (setf candidates (nreverse candidates))
-           (setf candidate-population
-                 (%upload-render-population
-                  renderer (%prospective-meshes renderer candidates)))
            (dolist (entry candidates)
              (let ((old (gethash (car entry) (renderer-mesh-slots renderer))))
                (setf (gethash (car entry) (renderer-mesh-slots renderer))
                      (cdr entry))
                (when old (push old retired))))
+           (dolist (key removed-keys)
+             (unless (assoc key candidates :test #'eql)
+               (let ((old (gethash key (renderer-mesh-slots renderer))))
+                 (when old
+                   (push old retired)
+                   (remhash key (renderer-mesh-slots renderer))))))
            (%refresh-renderer-slot-order renderer)
-           (let ((old-population (renderer-population renderer)))
-             (setf (renderer-population renderer) candidate-population)
-             (setf candidate-population nil)
-             (%destroy-resident-population old-population))
            (setf installed-p t)
            (dolist (slot retired) (%destroy-mesh-slot slot))
            candidates)
       (unless installed-p
-        (%destroy-resident-population candidate-population)
         (dolist (entry candidates) (%destroy-mesh-slot (cdr entry)))))))
 
 (defun renderer-remove-mesh (renderer key)
-  (let ((slot (gethash key (renderer-mesh-slots renderer))))
-    (when slot
-      (let ((candidate-population
-              (%upload-render-population
-               renderer (%prospective-meshes renderer nil key))))
-        (remhash key (renderer-mesh-slots renderer))
-        (%refresh-renderer-slot-order renderer)
-        (let ((old-population (renderer-population renderer)))
-          (setf (renderer-population renderer) candidate-population)
-          (%destroy-resident-population old-population))
-        (%destroy-mesh-slot slot)))
-    (values)))
+  (renderer-update-meshes renderer nil (list key))
+  (values))
 
 (defun renderer-clear-meshes (renderer)
-  (let ((candidate-population (%upload-render-population renderer nil))
-        (slots nil))
-    (loop for slot being the hash-values of (renderer-mesh-slots renderer)
-          do (push slot slots))
-    (clrhash (renderer-mesh-slots renderer))
-    (setf (renderer-slot-order renderer) nil)
-    (let ((old-population (renderer-population renderer)))
-      (setf (renderer-population renderer) candidate-population)
-      (%destroy-resident-population old-population))
-    (dolist (slot slots) (%destroy-mesh-slot slot)))
+  (renderer-update-meshes renderer nil (copy-list (renderer-slot-order renderer)))
   (values))
 
 (defun make-renderer (device color-format extent)
@@ -1288,7 +1309,7 @@ cohort untouched. No frame can interleave with the owner-thread publication."
          (target-formats (if temporal-p
                              '(:rgba16-float :rg16-float)
                              '(:rgba16-float)))
-         camera-buffer
+         camera-buffer material-buffer
          layout
          vertex-module fragment-module pipeline
          shadow-texture shadow-view shadow-sampler shadow-layout
@@ -1308,6 +1329,17 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                          (make-buffer-descriptor
                           :label "luft frame state"
                           :size 432 :usage '(:uniform :copy-dst)))
+                 material-buffer
+                 (let ((words (surface-assembly-descriptor-words)))
+                   (let ((buffer
+                           (create device
+                                   (make-buffer-descriptor
+                                    :label "luft surface assembly descriptors"
+                                    :size (max 16 (* 4 (length words)))
+                                    :usage '(:storage :copy-dst)))))
+                     (when (plusp (length words))
+                       (write-buffer buffer words))
+                     buffer))
                  shadow-texture
                  (create device
                          (make-texture-descriptor
@@ -1504,6 +1536,7 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                                 :color-format color-format
                                 :temporal-p temporal-p
                                 :camera-buffer camera-buffer
+                                :material-buffer material-buffer
                                 :layout layout
                                 :vertex-module vertex-module
                                 :fragment-module fragment-module
@@ -1534,8 +1567,6 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                  present-fragment-module
                  (renderer-present-pipeline renderer) present-pipeline)
            (create-frame-targets renderer extent)
-           (setf (renderer-population renderer)
-                 (%upload-render-population renderer nil))
            (setf completed-p t)
            renderer)
       (unless completed-p
@@ -1552,7 +1583,8 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                                 shadow-pipeline shadow-vertex-module shadow-layout
                                 shadow-sampler shadow-view shadow-texture
                                 pipeline fragment-module
-                                vertex-module layout camera-buffer))
+                                vertex-module layout material-buffer
+                                camera-buffer))
           (when resource (ignore-errors (destroy resource))))))))
 
 (defun draw-resident-population (pass resident bind-group)
@@ -1573,8 +1605,7 @@ cohort untouched. No frame can interleave with the owner-thread publication."
      &key jitter view player-p construction-p overlay-encoder)
   (ensure-renderer-extent renderer extent)
   (write-buffer (renderer-camera-buffer renderer) camera-uniform-data)
-  (let ((resident (renderer-population renderer)))
-    (let ((shadow-pass
+  (let ((shadow-pass
             (begin-render-pass
              encoder
              (make-render-pass-descriptor
@@ -1585,11 +1616,16 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                 :depth-load-op :clear :depth-store-op :store
                 :depth-clear-value 1.0)))))
       (set-pipeline shadow-pass (renderer-shadow-pipeline renderer))
-      (draw-resident-population
-       shadow-pass resident (resident-population-shadow-bind-group resident))
+      (dolist (key (renderer-slot-order renderer))
+        (let ((resident
+                (mesh-slot-resident
+                 (gethash key (renderer-mesh-slots renderer)))))
+          (draw-resident-population
+           shadow-pass resident
+           (resident-population-shadow-bind-group resident))))
       (end-pass shadow-pass))
-    (prepare-texture encoder (renderer-shadow-texture renderer)
-                     :texture-binding))
+  (prepare-texture encoder (renderer-shadow-texture renderer)
+                   :texture-binding)
   (let* ((temporal-p (renderer-temporal-p renderer))
          (color-view (renderer-scene-view renderer))
          (color-attachments
@@ -1613,14 +1649,25 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                :depth-store-op :store
                :depth-clear-value 1.0)))))
     (set-pipeline pass (renderer-pipeline renderer))
-    (let ((resident (renderer-population renderer)))
-      (draw-resident-population
-       pass resident (resident-population-bind-group resident)))
+    (dolist (key (renderer-slot-order renderer))
+      (let ((resident
+              (mesh-slot-resident
+               (gethash key (renderer-mesh-slots renderer)))))
+        (draw-resident-population
+         pass resident (resident-population-bind-group resident))))
     (when player-p
       (set-pipeline pass (renderer-player-sdf-pipeline renderer))
       (set-bind-group pass 0 (renderer-player-sdf-bind-group renderer))
       (draw pass 6 2))
     (when construction-p
+      ;; Populate at most one diagnostic slot per frame. The overlay is a
+      ;; debugging view, so progressive readiness is preferable to freezing
+      ;; one frame while every resident chunk is scanned.
+      (loop for key in (renderer-slot-order renderer)
+            for slot = (gethash key (renderer-mesh-slots renderer))
+            unless (mesh-slot-lattice-point-buffer slot)
+              do (ensure-mesh-slot-lattice-points renderer slot)
+                 (return))
       (set-pipeline pass (renderer-lattice-point-pipeline renderer))
       (dolist (key (renderer-slot-order renderer))
         (let ((slot (gethash key (renderer-mesh-slots renderer))))
@@ -1684,8 +1731,6 @@ cohort untouched. No frame can interleave with the owner-thread publication."
         do (%destroy-mesh-slot slot))
   (clrhash (renderer-mesh-slots renderer))
   (setf (renderer-slot-order renderer) nil)
-  (%destroy-resident-population (renderer-population renderer))
-  (setf (renderer-population renderer) nil)
   (dolist (resource
             (list (renderer-present-pipeline renderer)
                   (renderer-present-fragment-module renderer)
@@ -1710,6 +1755,7 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                   (renderer-pipeline renderer) (renderer-fragment-module renderer)
                   (renderer-vertex-module renderer)
                   (renderer-layout renderer)
+                  (renderer-material-buffer renderer)
                   (and (slot-boundp renderer 'camera-buffer)
                        (renderer-camera-buffer renderer))))
     (when resource (ignore-errors (destroy resource))))
@@ -1737,6 +1783,7 @@ cohort untouched. No frame can interleave with the owner-thread publication."
         (renderer-fragment-module renderer) nil
         (renderer-vertex-module renderer) nil
         (renderer-layout renderer) nil
+        (renderer-material-buffer renderer) nil
         (renderer-camera-buffer renderer) nil)
   (values))
 
@@ -1744,18 +1791,17 @@ cohort untouched. No frame can interleave with the owner-thread publication."
 ;;; Streaming chunk scenes
 ;;;
 ;;; A streaming scene is an ordinary authored scene whose solid is split into
-;;; its chunk chains.  Chunks become resident one at a time -- the mock of a
-;;; real async store -- and each residency change remeshes the arrival and its
-;;; already-resident neighbors. MESH-CHUNK's probes into non-resident neighbors
-;;; signal MISSING-CHUNK; an immutable worker snapshot answers USE-CHUNK for the
-;;; captured neighborhood and TREAT-AS-AIR otherwise. The canvas owner publishes
-;;; the complete affected cohort only after every current mesh has returned, so
-;;; the loading frontier's honest cliff walls heal without a mixed seam frame.
+;;; chunk chains. A bounded square window follows the camera. Each focus change
+;;; installs the final desired residency first, then remeshes exactly the chunks
+;;; whose 3 by 3 dependency neighborhoods changed. MESH-CHUNK's probes into
+;;; non-resident neighbors signal MISSING-CHUNK; immutable worker snapshots
+;;; answer USE-CHUNK for the captured neighborhood and TREAT-AS-AIR otherwise.
+;;; The canvas owner publishes replacements and departures as one complete
+;;; cohort, so no frame observes a mixed seam generation.
 
 (defclass streaming-scene (scene)
   ((store :initform (make-hash-table :test #'eql)
           :reader streaming-scene-store)
-   (pending :initform nil :accessor streaming-scene-pending)
    (loaded :initform (make-hash-table :test #'eql)
            :reader streaming-scene-loaded)
    (outstanding :initform (make-hash-table :test #'eql)
@@ -1763,10 +1809,14 @@ cohort untouched. No frame can interleave with the owner-thread publication."
    (staged :initform (make-hash-table :test #'eql)
            :reader streaming-scene-staged)
    (cohort :initform nil :accessor streaming-scene-cohort)
+   (removals :initform nil :accessor streaming-scene-removals)
    (production-errors :initform nil
                       :accessor streaming-scene-production-errors)
    (frames-per-load :initarg :frames-per-load :initform 15
                     :accessor streaming-scene-frames-per-load)
+   (residency-radius :initarg :residency-radius :initform 1
+                     :accessor streaming-scene-residency-radius)
+   (focus :initform nil :accessor streaming-scene-focus)
    (frame-counter :initform 0 :accessor streaming-scene-frame-counter)))
 
 (defstruct (streaming-mesh-snapshot
@@ -1782,35 +1832,73 @@ cohort untouched. No frame can interleave with the owner-thread publication."
 (defclass streaming-mesh-request (production:production-request)
   ((snapshot :initarg :snapshot :reader streaming-mesh-request-snapshot)))
 
-(defun make-streaming-scene (scene &key (frames-per-load 15))
-  "Wrap SCENE for chunk-at-a-time residency, loading nearest chunks first."
+(defun make-streaming-scene
+    (scene &key (frames-per-load 15) (residency-radius 1))
+  "Wrap SCENE in bounded camera-driven chunk residency."
   (let ((streaming (make-instance
                     'streaming-scene
                     :solid (scene-solid scene)
                     :material-vocabulary (scene-material-vocabulary scene)
                     :material-cells (scene-material-cells scene)
                     :material-program (scene-material-program scene)
-                    :frames-per-load frames-per-load))
-        (keys '()))
+                    :frames-per-load frames-per-load
+                    :residency-radius residency-radius)))
     (luft:map-chain-chunks
      (lambda (key chain)
-       (setf (gethash key (streaming-scene-store streaming)) chain)
-       (push key keys))
+       (setf (gethash key (streaming-scene-store streaming)) chain))
      (scene-solid scene))
-    (let* ((domain (luft:chain-domain (scene-solid scene)))
-           (centre-x (/ (luft:world-domain-x-limit domain) 2))
-           (centre-y (/ (luft:world-domain-y-limit domain) 2)))
-      (setf (streaming-scene-pending streaming)
-            (sort keys #'<
-                  :key (lambda (key)
-                         (let ((dx (- (+ (luft:chunk-origin-x key)
-                                         (/ luft:+chunk-size+ 2))
-                                      centre-x))
-                               (dy (- (+ (luft:chunk-origin-y key)
-                                         (/ luft:+chunk-size+ 2))
-                                      centre-y)))
-                           (+ (* dx dx) (* dy dy)))))))
     streaming))
+
+(defun streaming-scene-keys-near (scene focus-x focus-y)
+  "Stored chunk keys inside SCENE's square residency window."
+  (let ((radius (streaming-scene-residency-radius scene))
+        (keys nil))
+    (loop for key being the hash-keys of (streaming-scene-store scene)
+          when (and (<= (abs (- (luft:chunk-key-x key) focus-x)) radius)
+                    (<= (abs (- (luft:chunk-key-y key) focus-y)) radius))
+            do (push key keys))
+    (sort keys #'<)))
+
+(defun chunk-keys-neighbor-p (left right)
+  (and (<= (abs (- (luft:chunk-key-x left) (luft:chunk-key-x right))) 1)
+       (<= (abs (- (luft:chunk-key-y left) (luft:chunk-key-y right))) 1)))
+
+(defun retarget-streaming-scene
+    (scene production-system bevel-width world-x world-y)
+  "Batch SCENE's desired window around a camera position and mesh it once."
+  (when (or (streaming-scene-cohort scene)
+            (streaming-scene-removals scene))
+    (return-from retarget-streaming-scene nil))
+  (let* ((focus-key (luft:chunk-key-at (floor world-x) (floor world-y)))
+         (focus (cons (luft:chunk-key-x focus-key)
+                      (luft:chunk-key-y focus-key)))
+         (desired (streaming-scene-keys-near scene (car focus) (cdr focus)))
+         (loaded (streaming-scene-loaded scene))
+         (arrivals
+           (remove-if (lambda (key) (gethash key loaded)) desired))
+         (departures
+           (loop for key being the hash-keys of loaded
+                 unless (member key desired :test #'eql)
+                   collect key))
+         (changes (append arrivals departures)))
+    (setf (streaming-scene-focus scene) focus)
+    (when changes
+      (clrhash loaded)
+      (dolist (key desired) (setf (gethash key loaded) t))
+      (let ((affected
+              (remove-if-not
+               (lambda (key)
+                 (some (lambda (changed)
+                         (chunk-keys-neighbor-p key changed))
+                       changes))
+               desired)))
+        (setf (streaming-scene-cohort scene) affected
+              (streaming-scene-removals scene) departures)
+        (dolist (key affected)
+          (schedule-streaming-scene-mesh
+           scene production-system key bevel-width
+           (if (member key arrivals :test #'eql) 0 1))))
+      t)))
 
 (defun streaming-scene-neighborhood-keys (scene key)
   "Return the loaded 3 by 3 chunk neighborhood observed while meshing KEY."
@@ -1873,7 +1961,8 @@ cohort untouched. No frame can interleave with the owner-thread publication."
 
 (defmethod production:perform-production-request
     ((request streaming-mesh-request))
-  (mesh-streaming-snapshot (streaming-mesh-request-snapshot request)))
+  (prepare-render-mesh
+   (mesh-streaming-snapshot (streaming-mesh-request-snapshot request))))
 
 (defun schedule-streaming-scene-mesh
     (scene production-system key bevel-width priority)
@@ -1907,26 +1996,34 @@ cohort untouched. No frame can interleave with the owner-thread publication."
         t))))
 
 (defun ready-streaming-scene-meshes (scene)
-  "Return the complete current cohort as key-to-mesh pairs, or NIL."
+  "Return the complete current cohort and a readiness flag."
   (let ((cohort (streaming-scene-cohort scene))
-        (staged (streaming-scene-staged scene)))
-    (when (and cohort
-               (every (lambda (key)
-                        (let ((entry (gethash key staged)))
-                          (and entry
-                               (current-streaming-mesh-request-p
-                                scene (car entry)))))
-                      cohort))
-      (mapcar (lambda (key) (cons key (cdr (gethash key staged)))) cohort))))
+        (staged (streaming-scene-staged scene))
+        (active-p (or (streaming-scene-cohort scene)
+                      (streaming-scene-removals scene))))
+    (if (and active-p
+             (every (lambda (key)
+                      (let ((entry (gethash key staged)))
+                        (and entry
+                             (current-streaming-mesh-request-p
+                              scene (car entry)))))
+                    cohort))
+        (values
+         (mapcar (lambda (key) (cons key (cdr (gethash key staged)))) cohort)
+         t)
+        (values nil nil))))
 
 (defun publish-ready-streaming-scene (scene renderer)
   "Install a complete current mesh cohort at the canvas-owner boundary."
-  (let ((meshes (ready-streaming-scene-meshes scene)))
-    (when meshes
-      (renderer-set-meshes renderer meshes)
+  (multiple-value-bind (meshes ready-p)
+      (ready-streaming-scene-meshes scene)
+    (when ready-p
+      (renderer-update-meshes
+       renderer meshes (streaming-scene-removals scene))
       (dolist (entry meshes)
         (remhash (car entry) (streaming-scene-staged scene)))
-      (setf (streaming-scene-cohort scene) nil)
+      (setf (streaming-scene-cohort scene) nil
+            (streaming-scene-removals scene) nil)
       (length meshes))))
 
 (defun drain-streaming-scene-production
@@ -1953,23 +2050,6 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                      (accept-streaming-mesh-result
                       scene request (production:production-result-value result)))))))
   (publish-ready-streaming-scene scene renderer))
-
-(defun advance-streaming-scene (scene production-system bevel-width)
-  "Make the next pending chunk resident and schedule its mesh cohort.
-
-Returns the newly resident chunk key, or NIL when everything is resident."
-  (when (streaming-scene-cohort scene)
-    (error "The current LUFT streaming cohort has not finished."))
-  (let ((key (pop (streaming-scene-pending scene))))
-    (when key
-      (setf (gethash key (streaming-scene-loaded scene)) t)
-      (let ((cohort (streaming-scene-neighborhood-keys scene key)))
-        (setf (streaming-scene-cohort scene) cohort)
-        (dolist (neighbor cohort)
-          (schedule-streaming-scene-mesh
-           scene production-system neighbor bevel-width
-           (if (= neighbor key) 0 1))))
-      key)))
 
 (defun make-highland-sanctuary-scene (&key (horizontal-bits 8))
   "Rolling highlands spanning many chunks, studded with watchtowers."

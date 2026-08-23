@@ -859,10 +859,16 @@ aligned to the element size."
       (reject-metal-gpu-request
        buffer :buffer-write-out-of-bounds
        (list :offset offset :length (* element-size (length data)))))
+    ;; Numeric storage vectors are unboxed. Pin and copy their bytes once;
+    ;; crossing CFFI once per element turns large streamed populations into a
+    ;; multi-million-call owner-thread stall.
     (let ((destination (cffi:inc-pointer (metal-buffer-mapped buffer) offset)))
-      (dotimes (index (length data))
-        (setf (cffi:mem-aref destination foreign-type index)
-              (aref data index)))))
+      (sb-kernel:with-array-data ((vector data) (start 0) (end (length data)))
+        (sb-sys:with-pinned-objects (vector)
+          (sb-kernel:system-area-ub8-copy
+           (sb-sys:vector-sap vector) (* start element-size)
+           destination 0
+           (* element-size (- end start)))))))
   buffer)
 
 (defmethod read-buffer
@@ -877,8 +883,10 @@ aligned to the element size."
     (submitted-work-done (device-queue (metal-buffer-device buffer)))
     (let ((bytes (make-array size :element-type '(unsigned-byte 8)))
           (source (cffi:inc-pointer (metal-buffer-mapped buffer) offset)))
-      (dotimes (index size bytes)
-        (setf (aref bytes index) (cffi:mem-aref source :uint8 index))))))
+      (sb-sys:with-pinned-objects (bytes)
+        (sb-kernel:system-area-ub8-copy
+         source 0 (sb-sys:vector-sap bytes) 0 size))
+      bytes)))
 
 (defmethod metal-native-teardown-closure ((buffer metal-gpu-buffer))
   (let* ((device (metal-buffer-device buffer))

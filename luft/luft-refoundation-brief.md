@@ -52,12 +52,15 @@ One vertex is one `uvec4`:
 | w bits 10-11 | barycentric corner |
 | w bits 12-13 | face, band, or junction kind |
 
-The renderer uploads one storage buffer and one `uint32` index buffer, then
-issues one indexed draw. The vertex shader only decodes this record, projects
-it, and emits temporal motion. The fragment shader retains the paper palette,
+Each resident chunk owns compact instance and local template storage. The
+renderer retains unchanged chunk slots, shares camera and material tables, and
+issues at most one triangle-instance and one quad-instance draw per chunk. A
+residency cohort uploads only its replacements and atomically swaps those slots
+with any departures. The vertex shader decodes integer site records, projects
+them, and emits temporal motion. The fragment shader retains the paper palette,
 lighting, fog, MetalFX motion output, and barycentric construction lines.
-Construction mode also projects the nearest integer lattice vertex through the
-same camera and marks it with a fixed-size warm dot and dark drafting halo.
+Close-study construction mode can additionally project integer lattice points;
+streamed terrain omits that million-point-per-chunk diagnostic.
 
 ## Executable scope
 

@@ -28,7 +28,8 @@
              (make-instance 'luft.render::streaming-mesh-request
                             :key left :snapshot snapshot))
            (before
-             (production:perform-production-request request)))
+             (luft.render::prepared-render-mesh-mesh
+              (production:perform-production-request request))))
       (ok (luft.render::current-streaming-mesh-request-p scene request))
       (setf (gethash right (luft.render::streaming-scene-loaded scene)) t)
       (ok (not (luft.render::current-streaming-mesh-request-p scene request)))
@@ -36,7 +37,8 @@
       ;; oracle observes and closes the newly resident cross-chunk seam.
       (ok (equalp (luft:surface-mesh-face-instance-words before)
                   (luft:surface-mesh-face-instance-words
-                   (production:perform-production-request request))))
+                   (luft.render::prepared-render-mesh-mesh
+                    (production:perform-production-request request)))))
       (ok (not (equalp
                 (luft:surface-mesh-face-instance-words before)
                 (luft:surface-mesh-face-instance-words
@@ -73,6 +75,46 @@
         (ok (equal (list (cons left :left-mesh)
                          (cons right :right-mesh))
                    (luft.render::ready-streaming-scene-meshes scene)))))))
+
+(deftest a-streaming-window-is-bounded-around-its-focus
+  (let ((builder (luft.render::make-scene-builder :horizontal-bits 8)))
+    (dotimes (chunk-x 3)
+      (dotimes (chunk-y 3)
+        (luft.render::scene-builder-cell
+         builder (* chunk-x luft:+chunk-size+)
+         (* chunk-y luft:+chunk-size+) 0)))
+    (let ((scene
+            (render:make-streaming-scene
+             (luft.render::finish-scene-builder builder)
+             :residency-radius 1)))
+      (ok (= 4 (length (luft.render::streaming-scene-keys-near scene 0 0))))
+      (ok (= 9 (length (luft.render::streaming-scene-keys-near scene 1 1))))
+      (ok (zerop (hash-table-count
+                  (luft.render::streaming-scene-loaded scene)))))))
+
+(deftest retargeting-replaces-one-complete-residency-window
+  (let* ((scene (make-two-chunk-streaming-scene))
+         (left (luft:chunk-key-at 63 4))
+         (right (luft:chunk-key-at 64 4))
+         (system
+           (production:make-single-worker-production-system
+            :name "LUFT retarget test")))
+    (setf (luft.render::streaming-scene-residency-radius scene) 0
+          (gethash left (luft.render::streaming-scene-loaded scene)) t)
+    (unwind-protect
+         (progn
+           (ok (luft.render::retarget-streaming-scene
+                scene system luft:+mesh-bevel-width+ 64 4))
+           (ok (null (gethash left
+                              (luft.render::streaming-scene-loaded scene))))
+           (ok (gethash right (luft.render::streaming-scene-loaded scene)))
+           (ok (equal (list right)
+                      (luft.render::streaming-scene-cohort scene)))
+           (ok (equal (list left)
+                      (luft.render::streaming-scene-removals scene)))
+           (ok (= 1 (hash-table-count
+                     (luft.render::streaming-scene-outstanding scene)))))
+      (production:stop-production-system system))))
 
 (defun key-event (class key-name &key character modifiers repeat-p)
   (make-instance class
