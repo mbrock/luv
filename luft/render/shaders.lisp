@@ -42,9 +42,30 @@
                         (paper-hash (+ lattice (vec3 1.0 1.0 1.0))) u)))
     (mix (mix near-low near-high v) (mix far-low far-high v) w)))
 
+(define-shader-function paper-space (point)
+  ;; Rotate the material field away from the voxel axes.  Because this is a
+  ;; single world-space transform, adjacent facets still meet without seams.
+  (let* ((x (swizzle point :x))
+         (y (swizzle point :y))
+         (z (swizzle point :z)))
+    (vec3 (+ (* x 0.36) (* y 0.48) (* z -0.80))
+          (+ (* x -0.80) (* y 0.60))
+          (+ (* x 0.48) (* y 0.64) (* z 0.60)))))
+
 (define-shader-function stock-tooth (point)
-  (let* ((coarse (paper-noise (* point 11.0)))
-         (fine (paper-noise (* point 31.0))))
+  (let* ((paper-point (paper-space point))
+         (coarse
+           (paper-noise
+            (+ (vec3 (* (swizzle paper-point :x) 7.7)
+                     (* (swizzle paper-point :y) 11.3)
+                     (* (swizzle paper-point :z) 9.1))
+               (vec3 13.7 3.1 21.9))))
+         (fine
+           (paper-noise
+            (+ (vec3 (* (swizzle paper-point :z) 27.1)
+                     (* (swizzle paper-point :x) 33.7)
+                     (* (swizzle paper-point :y) 23.9))
+               (vec3 4.3 29.1 11.7)))))
     (+ 1.0
        (* #.*stock-tooth* (- (+ (* 0.55 coarse) (* 0.45 fine)) 0.5)))))
 
@@ -471,7 +492,6 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
                (barycentric-output :vec3 :location 3)
                (current-clip-output :vec4 :location 4)
                (previous-clip-output :vec4 :location 5)
-               (kind-output :float :location 6 :interpolation :flat)
                (boundary-edge-mask-output :uint :location 7
                                           :interpolation :flat)
                (ambient-occlusion-output :float :location 8
@@ -518,7 +538,6 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
          (ambient-occlusion
            (/ (float (ldb (byte 2 20) (swizzle instance :w))) 3.0))
          (barycentric-index (uint (ldb (byte 2 6) attributes)))
-         (kind (float (ldb (byte 2 8) attributes)))
          (boundary-edge-mask (uint (ldb (byte 3 10) attributes)))
          (barycentric
            (if (= barycentric-index (uint 0.0))
@@ -549,7 +568,6 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
     (set-output barycentric-output barycentric)
     (set-output current-clip-output current-clip)
     (set-output previous-clip-output previous-clip)
-    (set-output kind-output kind)
     (set-output boundary-edge-mask-output boundary-edge-mask)
     (set-output ambient-occlusion-output ambient-occlusion)))
 
@@ -561,7 +579,6 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
               (barycentric :vec3 :location 3)
               (current-clip :vec4 :location 4)
               (previous-clip :vec4 :location 5)
-              (kind :float :location 6 :interpolation :flat)
               (boundary-edge-mask :uint :location 7 :interpolation :flat)
               (ambient-occlusion :float :location 8 :interpolation :flat))
      :outputs ((color-output :vec4 :location 0)
@@ -594,6 +611,7 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
          (normal (if (< (dot geometric-normal mesh-normal) 0.0)
                      (* geometric-normal -1.0)
                      geometric-normal))
+         (paper-point (paper-space world-position))
          (grass-tone (vec3 0.17 0.36 0.11))
          (soil-tone (vec3 0.42 0.32 0.21))
          (subsoil-tone (vec3 0.24 0.18 0.13))
@@ -604,10 +622,10 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
          ;; AO admits more earth in sheltered joins while upward-facing rolls
          ;; retain a little more exposed stone.
          (contact-clump
-           (paper-noise (+ (* world-position 1.7)
+           (paper-noise (+ (* paper-point 1.7)
                            (vec3 7.1 19.3 3.7))))
          (contact-grit
-           (paper-noise (+ (* world-position 8.5)
+           (paper-noise (+ (* (swizzle paper-point :yzx) 8.5)
                            (vec3 31.7 5.9 13.1))))
          (earth-weight
            (* earth-set-p
@@ -630,17 +648,25 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
                            (if (< stock 3.5)
                                stone-tone
                                earth-set-tone)))))
-         (cell (floor (- world-position (* normal 0.25))))
-         (patch (- (paper-noise (* cell 0.21)) 0.5))
-         (jitter (- (paper-hash cell) 0.5))
-         (warm-patch
-           (paper-noise (+ (* cell 0.13) (vec3 19.7 7.3 3.1))))
+         (bloom
+           (paper-noise (+ (* paper-point 0.17) (vec3 2.7 17.1 8.3))))
+         (mottle
+           (paper-noise
+            (+ (* (swizzle paper-point :yzx) 0.61)
+               (vec3 19.7 7.3 3.1))))
+         (fiber
+           (paper-noise
+            (+ (vec3 (* (swizzle paper-point :x) 2.3)
+                     (* (swizzle paper-point :y) 5.1)
+                     (* (swizzle paper-point :z) 3.7))
+               (vec3 5.9 23.3 14.1))))
          (value (+ 1.0 (* #.*paper-variation*
-                           (+ (* 1.35 patch) (* 0.45 jitter)))))
+                           (+ (* 0.90 (- bloom 0.5))
+                              (* 0.55 (- mottle 0.5))
+                              (* 0.25 (- fiber 0.5))))))
          (warmth (mix (vec3 0.965 0.99 1.04) (vec3 1.04 1.01 0.96)
-                      warm-patch))
-         (piece-value (if (< kind 0.5) 1.0 (if (< kind 1.5) 0.96 1.04)))
-         (base (* tone (* warmth (* value piece-value))))
+                      (smoothstep 0.18 0.82 mottle)))
+         (base (* tone (* warmth value)))
          (sun (normalize (vec3 -0.62 0.38 0.34)))
          (sun-color (vec3 1.22 1.00 0.72))
          (sky (vec3 0.60 0.75 0.96))
