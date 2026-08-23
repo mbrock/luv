@@ -1,6 +1,11 @@
 ;;;; Standalone Slynk server bootstrap for ./sly.
 
 (require :asdf)
+(handler-bind ((warning #'muffle-warning))
+  ;; build-progress.lisp uses these SBCL contrib packages at read time, just
+  ;; like the standalone luvcraft and LUFT build bootstraps do.
+  (require :sb-concurrency)
+  (require :sb-posix))
 
 (defparameter cl-user::*luv-project-root* nil)
 
@@ -16,8 +21,7 @@
 
 (let* ((project-root
          (uiop:pathname-directory-pathname *load-truename*))
-       (slynk-root (required-directory "LUV_SLYNK_DIR"))
-       (port (parse-integer (getenv-or "LUV_SLYNK_PORT" "4005"))))
+       (slynk-root (required-directory "LUV_SLYNK_DIR")))
   (setf cl-user::*luv-project-root* project-root)
   (asdf:initialize-source-registry
    `(:source-registry
@@ -35,7 +39,13 @@
   (asdf:load-asd (merge-pathnames #P"mqtt.asd" project-root))
   (asdf:load-asd (merge-pathnames #P"openai.asd" project-root))
   (asdf:load-asd (merge-pathnames #P"chrome-cdp.asd" project-root))
-  (load (merge-pathnames #P"luvcraft/build-progress.lisp" project-root))
+  ;; LOAD reads and evaluates top-level forms in order.  End this form after
+  ;; defining LUV-BUILD so the qualified symbols in the next one can be read
+  ;; during a fresh image boot.
+  (load (merge-pathnames #P"luvcraft/build-progress.lisp" project-root)))
+
+(let ((project-root cl-user::*luv-project-root*)
+      (port (parse-integer (getenv-or "LUV_SLYNK_PORT" "4005"))))
   (let ((systems '(:luv :luvcraft :luvcraft/agent :luvcraft/birthday
                    :luv-wiki :luft/render)))
     ;; The server's outer log is relayed by ./sly while this boot runs, so keep
