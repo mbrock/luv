@@ -33,6 +33,7 @@
            #:make-render-mesh
            #:material-bevel-profile #:make-material-bevel-profile
            #:material-bevel-width #:compile-material-bevel-profile
+           #:make-material-bevel-mesh
            #:make-material-bevel-meshes
            #:renderer
            #:renderer-set-mesh #:renderer-set-meshes

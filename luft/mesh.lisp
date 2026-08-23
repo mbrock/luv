@@ -1769,6 +1769,116 @@ not as a substitute for a variable-width junction construction."
       (visit (surface-mesh-band-instance-words mesh) :band)
       (visit (surface-mesh-fan-instance-words mesh) :junction))))
 
+(defun %unit-bevel-point-site (point)
+  "Return the canonical lattice site and local direction owning POINT.
+
+POINT must come from a width-one LUFT surface, so every coordinate is exactly
+on, one tick above, or one tick below its owning lattice plane."
+  (let ((site nil)
+        (direction nil))
+    (dolist (coordinate point)
+      (multiple-value-bind (cell remainder)
+          (floor coordinate +mesh-cell-size+)
+        (case remainder
+          (0 (push cell site) (push 0 direction))
+          (1 (push cell site) (push 1 direction))
+          (7 (push (1+ cell) site) (push -1 direction))
+          (t (error "Width-one point coordinate ~D has no canonical lattice-site owner."
+                    coordinate)))))
+    (values (nreverse site) (nreverse direction))))
+
+(defun vary-surface-mesh-bevel-widths (witness width-function)
+  "Evaluate one width-one WITNESS at a locally selected width per vertex site.
+
+WIDTH-FUNCTION is called once for each canonical lattice vertex as
+  (WIDTH-FUNCTION X Y Z INCIDENT-STOCKS)
+where INCIDENT-STOCKS is a sorted list of the packed stocks on witness
+triangles using that site.  It must return an integer width from one through
+four.
+
+Every witness vertex has the exact affine form 8*S + Q with Q in {-1,0,1}^3.
+The result replaces it by 8*S + WIDTH(S)*Q.  Since every incident primitive
+uses the same canonical S, shared vertices remain equal without stitching.
+Zero-area triangles at the medial limit are omitted.  WITNESS remains the
+rebuild oracle for topology and uniform-width geometry.  Transition triangles
+may leave the uniform mesher's 26 exact normal directions; the current packed
+render ABI consequently shades them with its usual sign-quantized normal."
+  (check-type witness surface-mesh)
+  (check-type width-function function)
+  (unless (= 1 (surface-mesh-bevel-width witness))
+    (error "A site-local bevel witness must have width one, not ~D."
+           (surface-mesh-bevel-width witness)))
+  ;; This deliberately simple exact prototype expands the witness triangles
+  ;; and interns sites in hash tables.  A production emitter can compile the
+  ;; same site field densely without changing the affine invariant above.
+  (let ((stocks-by-site (make-hash-table :test #'eql))
+        (width-by-site (make-hash-table :test #'eql))
+        (maximum-width 1))
+    (%map-surface-mesh-triangle-records
+     (lambda (kind stock ambient mask normal a b c)
+       (declare (ignore kind ambient mask normal))
+       (dolist (point (list a b c))
+         (multiple-value-bind (site direction)
+             (%unit-bevel-point-site point)
+           (declare (ignore direction))
+           (pushnew stock
+                    (gethash (%lattice-key (first site)
+                                           (second site)
+                                           (third site))
+                             stocks-by-site)
+                    :test #'=))))
+     witness)
+    (maphash
+     (lambda (key stocks)
+       (let ((width
+               (funcall width-function
+                        (%lattice-key-x key)
+                        (%lattice-key-y key)
+                        (%lattice-key-z key)
+                        (sort (copy-list stocks) #'<))))
+         (unless (and (integerp width)
+                      (<= 1 width (/ +mesh-cell-size+ 2)))
+           (error "Site-local bevel policy assigned invalid width ~S at ~S."
+                  width (list (%lattice-key-x key)
+                              (%lattice-key-y key)
+                              (%lattice-key-z key))))
+         (setf (gethash key width-by-site) width
+               maximum-width (max maximum-width width))))
+     stocks-by-site)
+    (let ((builder (%make-surface-mesh-builder
+                    (surface-mesh-domain witness) maximum-width)))
+      (setf (surface-mesh-builder-singular-star-count builder)
+            (surface-mesh-singular-star-count witness))
+      (labels ((transformed-point (point)
+                 (multiple-value-bind (site direction)
+                     (%unit-bevel-point-site point)
+                   (let* ((key (%lattice-key (first site)
+                                             (second site)
+                                             (third site)))
+                          (width (gethash key width-by-site)))
+                     (unless width
+                       (error "No site-local bevel width was compiled for ~S."
+                              site))
+                     (loop for coordinate in site
+                           for component in direction
+                           collect (+ (* +mesh-cell-size+ coordinate)
+                                      (* width component))))))
+               (emit (kind stock ambient mask normal a b c)
+                 (let* ((ta (transformed-point a))
+                        (tb (transformed-point b))
+                        (tc (transformed-point c))
+                        (cross (%point-cross ta tb tc)))
+                   (unless (every #'zerop cross)
+                     (unless (plusp (%point-dot cross normal))
+                       (error "Site-local bevel folded ~S triangle ~S ~S ~S into ~S ~S ~S."
+                              kind a b c ta tb tc))
+                     (%emit-global-triangle
+                      builder kind stock ambient mask
+                      (%primitive-plane-normal ta tb tc)
+                      (list ta tb tc))))))
+        (%map-surface-mesh-triangle-records #'emit witness))
+      (%finish-surface-mesh builder))))
+
 (defun %coplanar-group-loops (triangles)
   "Return oriented boundary loops, or NIL when the union is not simple."
   (let ((edges (make-hash-table :test #'equal)))

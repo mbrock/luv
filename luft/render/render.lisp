@@ -546,44 +546,35 @@ from an exposed or buried foundation without adding per-site material objects."
                                    chamfer-stock-function
                                    :bevel-width bevel-width))))
 
-(defun make-material-bevel-meshes (scene profile)
-  "Build material-selected uniform-width cohorts for experimental rendering.
+(defun make-material-bevel-mesh (scene profile)
+  "Build one watertight mesh with a conservative material width at each site.
 
-PROFILE is compiled to a dense stock-to-width lane.  For every selected width
-the ordinary uniform mesher remains the geometry oracle; its instance streams
-are then partitioned by stock and returned as an alist of width to mesh.  Every
-rendered primitive therefore comes from one existing exact LUFT construction.
-
-This proof does not solve unequal-width junction geometry.  Neighboring
-cohorts can expose the seam between their independently constructed surfaces;
-that visible failure is evidence for the eventual transition rule."
+The ordinary width-one mesher supplies one exact topology witness.  PROFILE is
+compiled after that build to a dense stock-to-width lane, and each canonical
+lattice vertex selects the minimum requested width among all incident stocks.
+Terrain therefore reaches width four only where its whole local surface star
+permits it; architecture pulls its incident sites back to width one, with the
+unchanged witness triangles forming the transition between them."
   (check-type scene scene)
   (check-type profile material-bevel-profile)
-  ;; The chamfer stock function can intern authored material assemblies while
-  ;; the first mesh is built.  Discover that complete vocabulary before
-  ;; freezing the dense profile lane.
-  (let* ((discovery-width luft:+mesh-bevel-width+)
-         (discovery-mesh
-           (make-render-mesh scene :bevel-width discovery-width))
-         (width-table (compile-material-bevel-profile profile))
-         (widths (sort (remove-duplicates (coerce width-table 'list)) #'<))
-         (result nil))
-    (dolist (width widths (nreverse result))
-      (let* ((mesh (if (= width discovery-width)
-                       discovery-mesh
-                       (make-render-mesh scene :bevel-width width)))
-             (selected
-               (luft:select-surface-mesh-stocks
-                mesh
-                (lambda (stock)
-                  (unless (< stock (length width-table))
-                    (error "Mesh stock ~D is outside the compiled material bevel profile of ~D entries."
-                           stock (length width-table)))
-                  (= width (aref width-table stock))))))
-        (unless (and (zerop (luft:surface-mesh-face-instance-count selected))
-                     (zerop (luft:surface-mesh-band-instance-count selected))
-                     (zerop (luft:surface-mesh-fan-instance-count selected)))
-          (push (cons width selected) result))))))
+  ;; The witness build also interns every authored material assembly reached by
+  ;; the chamfer stock function.  Freeze the dense policy only afterward.
+  (let* ((witness (make-render-mesh scene :bevel-width 1))
+         (width-table (compile-material-bevel-profile profile)))
+    (luft:vary-surface-mesh-bevel-widths
+     witness
+     (lambda (x y z stocks)
+       (declare (ignore x y z))
+       (reduce #'min stocks
+               :key (lambda (stock)
+                      (unless (< stock (length width-table))
+                        (error "Mesh stock ~D is outside the compiled material bevel profile of ~D entries."
+                               stock (length width-table)))
+                      (aref width-table stock)))))))
+
+(defun make-material-bevel-meshes (scene profile)
+  "Return the single site-local material bevel mesh in renderer slot zero."
+  (list (cons 0 (make-material-bevel-mesh scene profile))))
 
 (defparameter *gallery*
   ;; Each entry is one isolated complex, named by the star configuration it

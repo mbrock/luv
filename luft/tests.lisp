@@ -358,6 +358,37 @@
                  (%mesh-oriented-plane-areas mesh)
                  (%mesh-oriented-plane-areas merged))
                 (format nil "merged plane areas mask ~2,'0X" mask))))
+    (dolist (width '(1 2 3 4))
+      (dolist (mask '(#x01 #x70 #x8f #x69))
+        (let* ((solid (%solid-for-star mask))
+               (witness (make-surface-mesh solid :bevel-width 1))
+               (oracle (make-surface-mesh solid :bevel-width width))
+               (varied
+                 (vary-surface-mesh-bevel-widths
+                  witness
+                  (lambda (x y z stocks)
+                    (declare (ignore x y z stocks))
+                    width))))
+          (%check (%mesh-closed-p varied))
+          (%check (%mesh-nondegenerate-p varied))
+          (%check (%same-plane-areas-p
+                   (%mesh-oriented-plane-areas oracle)
+                   (%mesh-oriented-plane-areas varied))
+                  (format nil "uniform affine width ~D mask ~2,'0X"
+                          width mask)))))
+    (dotimes (mask 256)
+      (let* ((witness
+               (make-surface-mesh (%solid-for-star mask) :bevel-width 1))
+             (varied
+               (vary-surface-mesh-bevel-widths
+                witness
+                (lambda (x y z stocks)
+                  (declare (ignore stocks))
+                  (if (oddp (+ x y z)) 4 1)))))
+        (%check (%mesh-closed-p varied)
+                (format nil "mixed affine closure mask ~2,'0X" mask))
+        (%check (%mesh-nondegenerate-p varied)
+                (format nil "mixed affine triangles mask ~2,'0X" mask))))
     (dolist (width '(0 5 1/2))
       (%check (%signals-error-p
                (lambda ()

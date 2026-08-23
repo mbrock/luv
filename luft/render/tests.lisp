@@ -1079,40 +1079,23 @@
     (ok (= 2 (aref widths luft.render::+soil-set-stone-stock+)))
     (ok (= 2 (aref widths luft.render::+deep-set-stone-stock+)))))
 
-(deftest material-bevel-cohorts-partition-uniform-mesh-oracles-by-stock
+(deftest material-bevel-policy-builds-one-closed-site-local-surface
   (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
          (scene
            (progn
-             (luft.render::scene-builder-box builder 4 7 4 7 2 2)
+             (luft.render::scene-builder-box builder 4 9 4 9 2 2)
              (luft.render::scene-builder-box
               builder 5 6 5 6 3 5 :architecture-p t)
              (luft.render::finish-scene-builder builder)))
          (profile (render:make-material-bevel-profile))
-         (widths (render:compile-material-bevel-profile profile))
-         (cohorts (render:make-material-bevel-meshes scene profile)))
-    (labels ((streams (mesh)
-               (list (luft:surface-mesh-face-instance-words mesh)
-                     (luft:surface-mesh-band-instance-words mesh)
-                     (luft:surface-mesh-fan-instance-words mesh)))
-             (stocks (mesh)
-               (loop for words in (streams mesh)
-                     append
-                     (loop for offset from 3 below (length words) by 4
-                           collect
-                           (ldb (byte luft:+mesh-instance-stock-bit-count+ 16)
-                                (aref words offset))))))
-      (ok (equal '(1 2 4) (mapcar #'car cohorts)))
-      (dolist (entry cohorts)
-        (let* ((width (car entry))
-               (selected (cdr entry))
-               (oracle (render:make-render-mesh scene :bevel-width width))
-               (expected
-                 (count width (stocks oracle)
-                        :key (lambda (stock) (aref widths stock)))))
-          (ok (plusp expected))
-          (ok (= expected (length (stocks selected))))
-          (ok (every (lambda (stock) (= width (aref widths stock)))
-                     (stocks selected))))))))
+         (mesh (render:make-material-bevel-mesh scene profile))
+         (meshes (render:make-material-bevel-meshes scene profile)))
+    (ok (= 4 (luft:surface-mesh-bevel-width mesh)))
+    (ok (luft::%mesh-closed-p mesh))
+    (ok (luft::%mesh-nondegenerate-p mesh))
+    (ok (= 1 (length meshes)))
+    (ok (= 0 (caar meshes)))
+    (ok (luft::%mesh-closed-p (cdar meshes)))))
 
 (deftest terrain-chamfers-distinguish-the-living-top-edge
   (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
