@@ -8,7 +8,9 @@
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defvar *stock-tooth* 0.055)
   (defvar *paper-variation* 0.11)
-  (defvar *local-ambient-occlusion-strength* 0.28))
+  (defvar *local-ambient-occlusion-strength* 0.28)
+  (defvar *screen-ambient-occlusion-strength* 0.38)
+  (defvar *screen-ambient-occlusion-radius* 0.95))
 
 (define-shader-function paper-hash (site)
   (let* ((scattered (fract (* site 0.1031)))
@@ -399,12 +401,176 @@
     (set-output clip-position (vec4 x y 0.0 1.0))
     (set-output ndc-output (vec2 x y))))
 
+(define-shader-function view-depth (depth projection divisor)
+  (if (< divisor 0.5)
+      (/ (- depth (swizzle projection :w)) (swizzle projection :z))
+      (/ (swizzle projection :w)
+         (- depth (swizzle projection :z)))))
+
+(define-shader-function depth-occlusion (centre sample radius)
+  (let* ((delta (- centre sample))
+         (near (smoothstep 0.025 (* radius 0.42) delta))
+         (far (- 1.0 (smoothstep (* radius 0.62) radius delta))))
+    (* near far)))
+
 (define-shader present-fragment-specification
     (:stage :fragment
      :inputs ((ndc :vec2 :location 0))
      :outputs ((color-output :vec4 :location 0))
      :resources ((scene :texture-2d :binding 0 :sample-transfer :identity)
-                 (scene-sampler :sampler :binding 1)))
+                 (scene-sampler :sampler :binding 1)
+                 (scene-depth :depth-texture-2d :binding 2)
+                 (camera-state :uniform-block :binding 3
+                  :members ((camera-position :vec4)
+                            (camera-right :vec4)
+                            (camera-up :vec4)
+                            (camera-forward :vec4)
+                            (camera-projection :vec4)
+                            (render-parameters :vec4)
+                            (previous-camera-position :vec4)
+                            (previous-camera-right :vec4)
+                            (previous-camera-up :vec4)
+                            (previous-camera-forward :vec4)
+                            (previous-camera-projection :vec4)
+                            (temporal-parameters :vec4)
+                            (inspection-parameters :vec4)))))
   (let* ((uv (+ (* ndc 0.5) (vec2 0.5 0.5)))
-         (value (sample scene scene-sampler uv)))
-    (set-output color-output (vec4 (swizzle value :xyz) 1.0))))
+         (value (sample scene scene-sampler uv))
+         ;; Geometry depth carries the subpixel projection jitter consumed by
+         ;; MetalFX; presentation UVs do not.  Sample depth at the same current
+         ;; geometry location so the AO does not crawl across a resolved edge.
+         (depth-uv (+ uv (* (swizzle temporal-parameters :xy) 0.5)))
+         (depth (swizzle (sample scene-depth scene-sampler depth-uv) :x))
+         (divisor (swizzle render-parameters :z))
+         (centre (view-depth depth camera-projection divisor))
+         (perspective-scale (if (< divisor 0.5) 1.0 (/ 1.0 centre)))
+         (outer
+           (* (swizzle camera-projection :xy)
+              (* 0.5 #.*screen-ambient-occlusion-radius*
+                 perspective-scale)))
+         (inner (* outer 0.42))
+         (diagonal (* outer 0.70710678))
+         (occlusion
+           (* (/ 1.0 12.0)
+              (+
+               (depth-occlusion centre
+                                (view-depth
+                                 (swizzle
+                                  (sample scene-depth scene-sampler
+                                          (+ depth-uv
+                                             (vec2 (swizzle inner :x) 0.0)))
+                                  :x)
+                                 camera-projection divisor)
+                                #.*screen-ambient-occlusion-radius*)
+               (depth-occlusion centre
+                                (view-depth
+                                 (swizzle
+                                  (sample
+                                   scene-depth scene-sampler
+                                   (+ depth-uv
+                                      (vec2 (- (swizzle inner :x)) 0.0)))
+                                  :x)
+                                 camera-projection divisor)
+                                #.*screen-ambient-occlusion-radius*)
+               (depth-occlusion centre
+                                (view-depth
+                                 (swizzle
+                                  (sample scene-depth scene-sampler
+                                          (+ depth-uv
+                                             (vec2 0.0
+                                                   (swizzle inner :y))))
+                                  :x)
+                                 camera-projection divisor)
+                                #.*screen-ambient-occlusion-radius*)
+               (depth-occlusion centre
+                                (view-depth
+                                 (swizzle
+                                  (sample scene-depth scene-sampler
+                                          (+ depth-uv
+                                             (vec2 0.0
+                                                   (- (swizzle inner :y)))))
+                                  :x)
+                                 camera-projection divisor)
+                                #.*screen-ambient-occlusion-radius*)
+               (depth-occlusion centre
+                                (view-depth
+                                 (swizzle
+                                  (sample scene-depth scene-sampler
+                                          (+ depth-uv
+                                             (vec2 (swizzle outer :x) 0.0)))
+                                  :x)
+                                 camera-projection divisor)
+                                #.*screen-ambient-occlusion-radius*)
+               (depth-occlusion centre
+                                (view-depth
+                                 (swizzle
+                                  (sample
+                                   scene-depth scene-sampler
+                                   (+ depth-uv
+                                      (vec2 (- (swizzle outer :x)) 0.0)))
+                                  :x)
+                                 camera-projection divisor)
+                                #.*screen-ambient-occlusion-radius*)
+               (depth-occlusion centre
+                                (view-depth
+                                 (swizzle
+                                  (sample scene-depth scene-sampler
+                                          (+ depth-uv
+                                             (vec2 0.0
+                                                   (swizzle outer :y))))
+                                  :x)
+                                 camera-projection divisor)
+                                #.*screen-ambient-occlusion-radius*)
+               (depth-occlusion centre
+                                (view-depth
+                                 (swizzle
+                                  (sample scene-depth scene-sampler
+                                          (+ depth-uv
+                                             (vec2 0.0
+                                                   (- (swizzle outer :y)))))
+                                  :x)
+                                 camera-projection divisor)
+                                #.*screen-ambient-occlusion-radius*)
+               (depth-occlusion centre
+                                (view-depth
+                                 (swizzle (sample scene-depth scene-sampler
+                                                  (+ depth-uv diagonal))
+                                          :x)
+                                 camera-projection divisor)
+                                #.*screen-ambient-occlusion-radius*)
+               (depth-occlusion centre
+                                (view-depth
+                                 (swizzle (sample scene-depth scene-sampler
+                                                  (- depth-uv diagonal))
+                                          :x)
+                                 camera-projection divisor)
+                                #.*screen-ambient-occlusion-radius*)
+               (depth-occlusion centre
+                                (view-depth
+                                 (swizzle
+                                  (sample
+                                   scene-depth scene-sampler
+                                   (+ depth-uv
+                                      (vec2 (swizzle diagonal :x)
+                                            (- (swizzle diagonal :y)))))
+                                  :x)
+                                 camera-projection divisor)
+                                #.*screen-ambient-occlusion-radius*)
+               (depth-occlusion centre
+                                (view-depth
+                                 (swizzle
+                                  (sample
+                                   scene-depth scene-sampler
+                                   (+ depth-uv
+                                      (vec2 (- (swizzle diagonal :x))
+                                            (swizzle diagonal :y))))
+                                  :x)
+                                 camera-projection divisor)
+                                #.*screen-ambient-occlusion-radius*))))
+         (accessibility
+           (if (< depth 0.9999)
+               (- 1.0 (* #.*screen-ambient-occlusion-strength*
+                         (min 1.0 (* occlusion 1.6))))
+               1.0)))
+    (set-output color-output
+                (vec4 (* (swizzle value :xyz) accessibility) 1.0))))

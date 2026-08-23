@@ -365,13 +365,17 @@
          (vertex-msl
            (luv.msl:msl-document-source (luv.msl:compile-msl vertex)))
          (fragment-msl
-           (luv.msl:msl-document-source (luv.msl:compile-msl fragment))))
+           (luv.msl:msl-document-source (luv.msl:compile-msl fragment)))
+         (present-fragment-msl
+           (luv.msl:msl-document-source
+            (luv.msl:compile-msl present-fragment))))
     (ok (search "[[vertex_id]]" vertex-msl))
     (ok (search "[[instance_id]]" vertex-msl))
     (ok (search "const device uint4* instances" vertex-msl))
     (ok (search "const device uint4* template_vertices" vertex-msl))
     (ok (search "barycentric" fragment-msl))
     (ok (search "motion_output" fragment-msl))
+    (ok (search "depth2d<float> scene_depth" present-fragment-msl))
     (ok (search "[[instance_id]]"
                 (luv.msl:msl-document-source
                  (luv.msl:compile-msl lattice-vertex))))

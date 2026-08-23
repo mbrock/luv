@@ -649,7 +649,7 @@ so the complete surface needs at most two direct instanced draws."
                    (make-texture-descriptor
                     :label "luft temporal depth" :size extent :dimensions :2d
                     :format :depth32-float
-                    :usage (funcall usage '(:render-attachment)
+                    :usage (funcall usage '(:render-attachment :texture-binding)
                                     (and scaler
                                          (gpu-temporal-scaler-depth-usage
                                           scaler))))))
@@ -698,7 +698,11 @@ so the complete surface needs at most two direct instanced draws."
                         :layout (renderer-present-layout renderer)
                         :entries `((:binding 0 :resource ,resolved-view)
                                    (:binding 1
-                                    :resource ,(renderer-sampler renderer)))))))
+                                    :resource ,(renderer-sampler renderer))
+                                   (:binding 2 :resource ,depth-view)
+                                   (:binding 3
+                                    :resource
+                                    ,(renderer-camera-buffer renderer)))))))
         (setf (renderer-scene-texture renderer) scene
               (renderer-scene-view renderer) scene-view
               (renderer-motion-texture renderer) motion
@@ -1075,7 +1079,9 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                            (make-bind-group-layout-descriptor
                             :label "luft presentation layout"
                             :entries '((:binding 0 :type :texture)
-                                       (:binding 1 :type :sampler))))
+                                       (:binding 1 :type :sampler)
+                                       (:binding 2 :type :texture)
+                                       (:binding 3 :type :uniform-buffer))))
                    present-vertex-module
                    (create device
                            (make-shader-module-descriptor
