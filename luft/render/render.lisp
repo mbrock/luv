@@ -1756,7 +1756,14 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                                       ,(mapcar (lambda (format)
                                                  `(:format ,format))
                                                target-formats))
-                          :primitive '(:topology :triangle-list)))
+                          :primitive '(:topology :triangle-list)
+                          ;; The sky is drawn inside the scene pass, whose
+                          ;; depth attachment geometry subsequently owns.
+                          ;; Match that pass without touching its depth.
+                          :depth-stencil
+                          '(:format :depth32-float
+                            :depth-write-enabled nil
+                            :depth-compare :always)))
                  exposure-probe-fragment-module
                  (create device
                          (make-shader-module-descriptor
