@@ -2289,7 +2289,8 @@ distribution overhead."
     '((post-control :vec4)    ; texel u, texel v, focus blur, exposure
       (lens-control :vec4)    ; bloom gain, shaft gain, vignette, threshold
       (sun-screen :vec4)      ; sun screen u, v, on-screen weight, diagnostic
-      (bloom-control :vec4))  ; chain texel u, v, shaft decay, elapsed time
+      (bloom-control :vec4)   ; chain texel u, v, shaft decay, elapsed time
+      (presentation-control :vec4)) ; output texel u, v, reserved, reserved
     "The presentation uniform layout shared by the post and bloom stages."))
 
 ;;; Narkowicz's fitted ACES curve.  Its toe keeps shadows from turning to mud,
@@ -2502,6 +2503,7 @@ distribution overhead."
                    :sample-transfer :identity)
       (depth-sampler :sampler :set 0 :binding 6)))
   (let* ((texel (swizzle post-control :xy))
+         (presentation-texel (swizzle presentation-control :xy))
          (active (swizzle post-control :z))
          (exposure (swizzle post-control :w))
          (centered (- uv-input (vec2 0.5 0.5)))
@@ -2570,7 +2572,7 @@ distribution overhead."
          ;; gradient noise, scaled so it is about half a step wherever the
          ;; image sits on the transfer curve, turns the contour into a grain
          ;; too fine to see.
-         (pixel (/ uv-input texel))
+         (pixel (/ uv-input presentation-texel))
          (dither-phase
            (+ (* (swizzle pixel :x) 0.06711056) (* (swizzle pixel :y)
                                                    0.00583715)))

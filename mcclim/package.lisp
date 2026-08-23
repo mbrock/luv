@@ -40,8 +40,114 @@
            #:port-mirrors
            #:present-mirror
            #:repaint-gpu-mirror
+           #:prepare-gpu-mirror-compositor
            #:present-gpu-mirror-sheet
            #:call-with-gpu-mirror-sheet-repaint
+           #:transparent-gpu-application-pane
+           #:transparent-gpu-top-level-sheet-pane
+           #:make-gpu-frame-background-transparent
+           ;; Shared retained-GPU M-x instrument.
+           #:command-menu
+           #:command-menu-owner-frame
+           #:command-menu-command-tables
+           #:command-menu-entries
+           #:command-menu-results
+           #:command-menu-query
+           #:command-menu-selected
+           #:command-menu-entry
+           #:command-menu-entry-label
+           #:command-menu-entry-command-name
+           #:command-menu-entry-table
+           #:command-menu-tables-for
+           #:command-menu-entries-for-tables
+           #:matching-command-menu-entries
+           #:refresh-command-menu-entries
+           #:command-menu-visible-results
+           #:command-menu-selected-command
+           #:command-menu-mirror
+           #:repaint-command-menu
+           #:prepare-command-menu
+           #:command-menu-screen-state
+           #:command-menu-local-coordinate
+           #:handle-command-menu-key-event
+           #:handle-command-menu-pointer-press
+           #:execute-command-menu-command
+           #:make-embedded-command-menu
+           #:destroy-command-menu
+           ;; Shared retained-GPU metabar instrument and its open semantic
+           ;; application protocol.
+           #:metabar
+           #:metabar-owner
+           #:metabar-logical-height
+           #:metabar-diagnostic
+           #:metabar-groups-for
+           #:metabar-group-label
+           #:metabar-controls-for
+           #:metabar-actions-for
+           #:metabar-control-kind
+           #:metabar-control-label
+           #:metabar-control-value
+           #:metabar-control-value-label
+           #:metabar-control-fraction
+           #:metabar-control-change-kind
+           #:metabar-control-update-policy
+           #:perform-metabar-control-step
+           #:perform-metabar-control-set-fraction
+           #:perform-metabar-control-toggle
+           #:metabar-action-label
+           #:perform-metabar-action
+           #:refresh-metabar-vocabulary
+           #:refresh-metabar-state
+           #:drain-metabar-operations
+           #:prepare-metabar
+           #:repaint-metabar
+           #:metabar-mirror
+           #:metabar-screen-state
+           #:metabar-local-coordinate
+           #:handle-metabar-key-event
+           #:handle-metabar-pointer-event
+           #:make-embedded-metabar
+           #:destroy-metabar
+           #:validate-metabar-direct-presentation
+           #:metabar-requires-direct-gpu
+           #:metabar-direct-presentation-violation
+           ;; The always-available application status line.  Base channels
+           ;; are shared while applications extend the ordered vocabulary by
+           ;; specializing the ordinary CLOS protocol below.
+           #:status-bar
+           #:status-bar-owner
+           #:status-bar-logical-width
+           #:status-bar-visible-fields
+           #:status-bar-field
+           #:status-bar-field-channel
+           #:status-bar-field-label
+           #:status-bar-field-value
+           #:status-bar-channels-for
+           #:status-bar-channel-label
+           #:status-bar-channel-value
+           #:status-bar-application-name
+           #:status-bar-lobby-client
+           #:status-bar-source-root
+           #:status-bar-worktree-description
+           #:refresh-status-bar
+           #:prepare-status-bar
+           #:repaint-status-bar
+           #:status-bar-mirror
+           #:status-bar-screen-state
+           #:resize-status-bar
+           #:make-embedded-status-bar
+           #:destroy-status-bar
+           #:validate-status-bar-direct-presentation
+           #:status-bar-requires-direct-gpu
+           #:status-bar-direct-presentation-violation
+           ;; Thin Luvcraft application adapters for shared global HUDs.
+           #:luvcraft-status-bar-overlay
+           #:find-luvcraft-status-bar
+           #:open-luvcraft-status-bar
+           #:luvcraft-lobby-hud-overlay
+           #:open-luvcraft-lobby-hud
+           #:close-luvcraft-lobby-hud
+           #:toggle-luvcraft-lobby-hud
            ;; Portable luv key events as ordinary McCLIM gestures and
            ;; commands. Applications keep their command tables and dispatch
            ;; policy; this package owns only the event-vocabulary bridge.

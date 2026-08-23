@@ -2,10 +2,87 @@
 
 (in-package #:luvcraft)
 
+(defmethod luv:capture-canvas ((session luvcraft-session))
+  (luvcraft-session-canvas session))
+
+(defmethod luv:prepare-capture
+    ((session luvcraft-session) (capture luv:application-capture))
+  ;; A still wants a useful initial neighborhood.  A film must not publish a
+  ;; late chunk halfway through a supposedly continuous authored shot.
+  (ecase (luv:capture-kind capture)
+    (:screenshot
+     (wait-for-luvcraft-products session))
+    (:film
+     (wait-for-luvcraft-products
+      session
+      :minimum
+      (hash-table-count (luvcraft-session-desired-chunks session)))))
+  session)
+
+(defmethod luv:encode-capture-frame
+    ((session luvcraft-session) (capture luv:application-capture)
+     encoder target extent)
+  (declare (ignore extent))
+  (let* ((camera (luvcraft-session-camera session))
+         (saved-pose (camera-pose-from-camera camera))
+         (camera-pose (luv:capture-option capture :camera-pose))
+         (pose (if (functionp camera-pose)
+                   (funcall camera-pose session)
+                   camera-pose))
+         (metadata-function
+           (luv:capture-option capture :metadata-function))
+         (metadata nil))
+    (unwind-protect
+         (progn
+           (when pose (set-camera-pose camera pose))
+           (when metadata-function
+             (setf metadata (funcall metadata-function session)))
+           ;; ENCODE-LUVCRAFT-FRAME resolves its scene into TARGET.  The shared
+           ;; capture transaction owns the following target-to-buffer copy.
+           (encode-luvcraft-frame
+            session target encoder
+            :include-hud-p
+            (luv:capture-option capture :include-hud-p t)
+            :include-viewmodel-p
+            (luv:capture-option capture :include-viewmodel-p t)))
+      (set-camera-pose camera saved-pose))
+    metadata))
+
+(defun release-luvcraft-capture-frame-state (session target)
+  "Release the per-target frame state cached while encoding TARGET."
+  (let* ((renderer (luvcraft-session-renderer session))
+         (states (luvcraft-session-frame-states session))
+         (key (canvas-frame-resource-key
+               (luvcraft-session-context session) target))
+         (state (gethash key states)))
+    (when state
+      (with-release-report
+        (dolist (resource
+                  (remove-duplicates
+                   (luvcraft-frame-state-resources state) :test #'eq))
+          (releasing :capture-frame-state-resource
+            (release-luvcraft-renderer-resource renderer resource)))
+        (remhash key states))))
+  (values))
+
+(defmethod luv:cleanup-capture
+    ((session luvcraft-session) (capture luv:application-capture))
+  (let ((target (luv:capture-target capture))
+        (canvas (luvcraft-session-canvas session)))
+    (when (and target (eq :open (canvas-state canvas)))
+      (request-canvas-frame
+       canvas
+       (lambda (timestamp)
+         (declare (ignore timestamp))
+         ;; The target is still alive here.  Never leave its identity and the
+         ;; bind groups that name it retained in the long-lived renderer.
+         (release-luvcraft-capture-frame-state session target)))))
+  (values))
+
 (defun capture-luvcraft-screenshot
     (session pathname &key camera-pose metadata-function
                            (include-hud-p t) (include-viewmodel-p t))
-  "Render SESSION once on its canvas thread and write its color attachment to PNG.
+  "Render SESSION once offscreen and write its native GPU frame to PNG.
 
 This works for both live and hidden sessions.  The call returns only after GPU
 readback and compressed PNG writing have completed; it does not inspect the
@@ -13,49 +90,14 @@ host window or depend on the window being visible.  CAMERA-POSE may be a pose
 or a function of SESSION evaluated on the canvas thread; the session camera is
 restored before the call returns.  METADATA-FUNCTION, when supplied, is called
 there under the capture pose and its value is returned last."
-  (unless (eq :open (canvas-state (luvcraft-session-canvas session)))
-    (error "Cannot capture a closed luvcraft session."))
-  (wait-for-luvcraft-products session)
-  (let* ((context (luvcraft-session-context session))
-         (extent (canvas-extent context))
-         (metadata nil)
-         (buffer
-           (create
-            (luvcraft-session-device session)
-            (make-buffer-descriptor
-             :label "block world screenshot readback"
-             :size (* 4 (first extent) (second extent))
-             :usage '(:copy-dst)))))
-    (unwind-protect
-         (progn
-           (present-canvas-frame
-            context
-            (lambda (surface-texture encoder presentation-time)
-              (declare (ignore presentation-time))
-              (let* ((camera (luvcraft-session-camera session))
-                     (saved-pose (camera-pose-from-camera camera))
-                     (pose (if (functionp camera-pose)
-                               (funcall camera-pose session)
-                               camera-pose)))
-                (unwind-protect
-                     (progn
-                       (when pose (set-camera-pose camera pose))
-                       (when metadata-function
-                         (setf metadata (funcall metadata-function session)))
-                       (encode-luvcraft-frame
-                        session surface-texture encoder
-                        :readback-buffer buffer
-                        :include-hud-p include-hud-p
-                        :include-viewmodel-p include-viewmodel-p))
-                  (set-camera-pose camera saved-pose)))))
-           (ensure-directories-exist pathname)
-           (let ((pixels (read-buffer buffer))
-                 (format (canvas-format context)))
-             (write-rgba-png
-              pathname pixels (first extent) (second extent) format)
-             (values pathname pixels (first extent) (second extent) format
-                     metadata)))
-      (destroy buffer))))
+  (luv:capture-application-screenshot
+   session pathname
+   :label "luvcraft screenshot"
+   :options
+   (list :camera-pose camera-pose
+         :metadata-function metadata-function
+         :include-hud-p include-hud-p
+         :include-viewmodel-p include-viewmodel-p)))
 
 (defun temporal-derivative-rgba
     (current previous scale &optional previous-previous)
@@ -161,6 +203,10 @@ placed in CRITTERS rather than growing around a player."
                  (start-luvcraft
                   :title title :width width :height height
                   :frames-per-second nil :visible-p nil
+                  ;; Authored hidden captures name output pixels explicitly.
+                  ;; Live-window screenshots retain the session's native Retina
+                  ;; presentation extent through CAPTURE-LUVCRAFT-SCREENSHOT.
+                  :high-pixel-density-p nil
                   :provider provider
                   :world world :mesher mesher :camera camera
                   :critters critters
@@ -253,6 +299,7 @@ scenes."
                  (start-luvcraft
                   :title title :width width :height height
                   :frames-per-second nil :visible-p nil
+                  :high-pixel-density-p nil
                   :provider provider
                   :world world :mesher mesher :camera camera
                   :critters critters

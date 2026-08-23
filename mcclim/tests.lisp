@@ -32,6 +32,277 @@
 (defun fresh-gpu-medium ()
   (make-instance 'mcluv:luv-gpu-medium))
 
+(defclass stable-frame-key-context (luv:canvas-context) ())
+
+(defmethod luv:canvas-frame-resource-key
+    ((context stable-frame-key-context) surface-texture)
+  (declare (ignore context surface-texture))
+  :same-native-drawable)
+
+(deftest direct-compositor-uses-bounded-backend-frame-keys
+  (let* ((context (make-instance 'stable-frame-key-context))
+         (mirror
+           (make-instance 'mcluv::luv-gpu-mirror
+                          :sheet nil :target nil :context context))
+         (compositor
+           (make-instance 'mcluv:direct-gpu-mirror-compositor
+                          :mirror mirror)))
+    ;; Fresh borrowed texture wrappers for one native drawable must address
+    ;; the same per-frame uniform state.
+    (ok (eq :same-native-drawable
+            (mcluv::direct-gpu-mirror-frame-resource-key
+             compositor (list :wrapper 1))))
+    (ok (eq :same-native-drawable
+            (mcluv::direct-gpu-mirror-frame-resource-key
+             compositor (list :wrapper 2))))
+    (ok (not (mcluv::gpu-command-rasterized-p compositor :anything)))))
+
+(deftest solid-vertices-carry-premultiplied-color
+  (let* ((medium (fresh-gpu-medium))
+         (vertices (mcluv::gpu-medium-vertices medium)))
+    (mcluv::gpu-medium-push-vertex medium 0.5 0.5 '(0.8 0.4 0.2 0.25))
+    (ok (= 0.25 (aref vertices 2)))
+    (ok (= 0.20 (aref vertices 3)))
+    (ok (= 0.10 (aref vertices 4)))
+    (ok (= 0.05 (aref vertices 5)))))
+
+(deftest slug-vertices-carry-premultiplied-color
+  (let ((vertices
+          (make-array 0 :element-type 'single-float
+                        :adjustable t :fill-pointer 0)))
+    (mcluv::append-gpu-text-vertex
+     vertices 100 100 10 20 0.25 0 0 1 2 3 4 -1 -1 1 1
+     '(0.8 0.4 0.2 0.25))
+    (ok (= 0.25 (aref vertices 2)))
+    (ok (= 0.20 (aref vertices 15)))
+    (ok (= 0.10 (aref vertices 16)))
+    (ok (= 0.05 (aref vertices 17)))))
+
+(defun shader-output-source-value (specification output)
+  (third
+   (find output
+         (mapcar #'shader:shader-statement-source-form
+                 (shader:shader-specification-statements specification))
+         :key #'second)))
+
+(deftest solid-and-slug-shaders-do-not-premultiply-twice
+  (ok (equal '(shader:vec4 mcluv::color-input mcluv::alpha)
+             (shader-output-source-value
+              (mcluv::direct-widget-solid-vertex-specification)
+              'mcluv::color-output)))
+  (dolist (specification
+            (list (shader:shader-specification-for :mcluv-slug :vertex)
+                  (mcluv::direct-mirror-slug-vertex-specification)))
+    (ok (equal
+         '(shader:vec4 mcluv::color-input
+           (shader:swizzle mcluv::position-alpha :z))
+         (shader-output-source-value specification 'mcluv::render-color))))
+  ;; The standalone solid stage names its VEC4 binding COLOR.  Its RGB operand
+  ;; is a direct input reference, not another multiplication by opacity.
+  (let* ((specification
+           (shader:shader-specification-for :mcluv-solid :vertex))
+         (binding
+           (find 'clim:color
+                 (shader:shader-specification-bindings specification)
+                 :key #'shader:shader-object-name))
+         (expression (shader:shader-binding-expression binding)))
+    (ok (eq 'shader:vec4 (shader:shader-call-operator expression)))
+    (ok (not (typep (first (shader:shader-call-operands expression))
+                    'shader:shader-call)))))
+
+(deftest prepared-gpu-revisions-copy-and-publish-one-cohort
+  (let* ((mirror
+           (make-instance 'mcluv::luv-gpu-mirror
+                          :sheet nil :target nil :context nil))
+         (source (vector 1.0f0 2.0f0 3.0f0))
+         (command (mcluv::make-gpu-solid-command :first-vertex 1))
+         (first
+           (mcluv::make-gpu-mirror-prepared-revision
+            mirror (list command) source #() #() #() #() #())))
+    (setf (aref source 0) 99.0f0)
+    (ok (= 1.0f0 (aref (mcluv::gpu-prepared-frame-vertices first) 0)))
+    (ok (equal '(:solid)
+               (mcluv::gpu-prepared-frame-pipeline-families first)))
+    (mcluv::publish-gpu-mirror-prepared-revision mirror first)
+    (let ((second
+            (mcluv::make-gpu-mirror-prepared-revision
+             mirror
+             (list (mcluv::make-gpu-prepared-text-command))
+             #() #() #() #() #() #())))
+      (mcluv::publish-gpu-mirror-prepared-revision mirror second)
+      ;; A delayed older repaint cannot replace the newer publication.
+      (mcluv::publish-gpu-mirror-prepared-revision mirror first)
+      (ok (eq second (mcluv::gpu-mirror-prepared-revision mirror)))
+      (ok (equal '(:text)
+                 (mcluv::gpu-prepared-frame-pipeline-families second))))))
+
+(defclass current-revision-preparation-probe ()
+  ((revisions :initform nil
+              :accessor current-revision-preparation-probe-revisions)))
+
+(defmethod mcluv::prepare-mirror-compositor-revision
+    ((probe current-revision-preparation-probe)
+     (mirror mcluv:luv-gpu-mirror) revision)
+  (declare (ignore mirror))
+  (push revision (current-revision-preparation-probe-revisions probe)))
+
+(deftest static-gpu-mirror-prepares-its-current-revision
+  (let* ((mirror
+           (make-instance 'mcluv:luv-gpu-mirror
+                          :sheet nil :target nil :context nil))
+         (probe (make-instance 'current-revision-preparation-probe))
+         (revision
+           (mcluv::make-gpu-mirror-prepared-revision
+            mirror nil #() #() #() #() #() #())))
+    (setf (mcluv:mirror-compositor mirror) probe)
+    (mcluv::publish-gpu-mirror-prepared-revision mirror revision)
+    ;; Publication already prepared the semantic revision.  Clear that
+    ;; observation to model a later frame whose McCLIM stream stayed static.
+    (setf (current-revision-preparation-probe-revisions probe) nil)
+    (ok (eq mirror (mcluv:prepare-gpu-mirror-compositor mirror)))
+    (ok (equal (list revision)
+               (current-revision-preparation-probe-revisions probe)))))
+
+(defun mount-static-direct-preparation-probe (frame)
+  "Give unrealized test FRAME one immutable direct-GPU revision and a probe."
+  (let* ((sheet
+           (make-instance
+            'mcluv:transparent-gpu-top-level-sheet-pane
+            :region (clim:make-bounding-rectangle 0 0 640 480)))
+         (mirror
+           (make-instance 'mcluv:luv-gpu-mirror
+                          :sheet sheet :target nil :context nil
+                          :embedded-p t))
+         (probe (make-instance 'current-revision-preparation-probe))
+         (revision
+           (mcluv::make-gpu-mirror-prepared-revision
+            mirror (list (mcluv::make-gpu-solid-command))
+            #() #() #() #() #() #())))
+    (setf (slot-value frame 'clim-internals::top-level-sheet) sheet
+          (clim:sheet-direct-mirror sheet) mirror)
+    ;; Initial semantic publication has no compositor.  Every later probe
+    ;; observation therefore belongs to the tested static refresh boundary.
+    (mcluv::publish-gpu-mirror-prepared-revision mirror revision)
+    (setf (mcluv:mirror-compositor mirror) probe)
+    (values probe revision)))
+
+(deftest concurrent-prepared-revisions-never-cross-commands-and-bytes
+  (let* ((mirror
+           (make-instance 'mcluv::luv-gpu-mirror
+                          :sheet nil :target nil :context nil))
+         (threads
+           (loop for worker below 4
+                 collect
+                 (sb-thread:make-thread
+                  (lambda ()
+                    (dotimes (step 50)
+                      (let* ((value (+ (* worker 1000) step))
+                             (revision
+                               (mcluv::make-gpu-mirror-prepared-revision
+                                mirror
+                                (list
+                                 (mcluv::make-gpu-solid-command
+                                  :first-vertex value))
+                                (vector (coerce value 'single-float))
+                                #() #() #() #() #())))
+                        (mcluv::publish-gpu-mirror-prepared-revision
+                         mirror revision))))))))
+    (mapc #'sb-thread:join-thread threads)
+    (let* ((revision (mcluv::gpu-mirror-prepared-revision mirror))
+           (command (first (mcluv::gpu-prepared-frame-commands revision))))
+      (ok (= (mcluv::gpu-mirror-prepared-revision-counter mirror)
+             (mcluv::gpu-prepared-frame-number revision)))
+      (ok (= (mcluv::gpu-solid-command-first-vertex command)
+             (aref (mcluv::gpu-prepared-frame-vertices revision) 0))))))
+
+(deftest destination-frame-slots-materialize-revisions-independently
+  (let* ((mirror
+           (make-instance 'mcluv::luv-gpu-mirror
+                          :sheet nil :target nil :context nil))
+         (compositor
+           (make-instance 'mcluv:direct-gpu-mirror-compositor :mirror mirror))
+         (first
+           (mcluv::make-gpu-mirror-prepared-revision
+            mirror nil #() #() #() #() #() #()))
+         (second
+           (mcluv::make-gpu-mirror-prepared-revision
+            mirror nil #() #() #() #() #() #()))
+         (slot-a
+           (make-instance
+            'mcluv::direct-widget-frame-state
+            :buffer nil :shape-bind-group nil
+            :source-state (make-instance 'mcluv::gpu-mirror-frame-state)))
+         (slot-b
+           (make-instance
+            'mcluv::direct-widget-frame-state
+            :buffer nil :shape-bind-group nil
+            :source-state (make-instance 'mcluv::gpu-mirror-frame-state))))
+    (mcluv::materialize-direct-widget-frame-revision compositor slot-a first)
+    (mcluv::materialize-direct-widget-frame-revision compositor slot-b first)
+    (mcluv::materialize-direct-widget-frame-revision compositor slot-a second)
+    (ok (eq second (mcluv::direct-widget-frame-prepared-revision slot-a)))
+    (ok (eq first (mcluv::direct-widget-frame-prepared-revision slot-b)))
+    (ok (not (eq (mcluv::direct-widget-frame-source-state slot-a)
+                 (mcluv::direct-widget-frame-source-state slot-b))))))
+
+(deftest late-direct-pipeline-families-are-guarded-not-compiled
+  (let* ((mirror
+           (make-instance 'mcluv::luv-gpu-mirror
+                          :sheet nil :target nil :context nil))
+         (compositor
+           (make-instance 'mcluv:direct-gpu-mirror-compositor :mirror mirror)))
+    (ok (signals
+         (mcluv::require-direct-gpu-mirror-pipelines
+          compositor :bgra8unorm nil '(:solid))
+         'mcluv::direct-mirror-pipelines-not-prepared))
+    (ok (zerop (hash-table-count
+                (mcluv::direct-widget-pipelines compositor))))))
+
+(defclass direct-release-probe ()
+  ((name :initarg :name :reader direct-release-probe-name)
+   (events :initarg :events :reader direct-release-probe-events)
+   (failp :initarg :failp :initform nil :reader direct-release-probe-failp)))
+
+(defmethod luv:destroy ((probe direct-release-probe))
+  (vector-push-extend (direct-release-probe-name probe)
+                      (direct-release-probe-events probe))
+  (when (direct-release-probe-failp probe)
+    (error "scripted release failure"))
+  probe)
+
+(deftest direct-compositor-release-is-exhaustive-and-idempotent
+  (let* ((events (make-array 0 :adjustable t :fill-pointer 0))
+         (mirror
+           (make-instance 'mcluv::luv-gpu-mirror
+                          :sheet nil :target nil :context nil))
+         (compositor
+           (make-instance 'mcluv:direct-gpu-mirror-compositor :mirror mirror)))
+    (setf (mcluv::direct-widget-resources compositor)
+          (list (make-instance 'direct-release-probe
+                               :name :first :events events)
+                (make-instance 'direct-release-probe
+                               :name :failing :events events :failp t)
+                (make-instance 'direct-release-probe
+                               :name :last :events events)))
+    (ok (signals (mcluv::release-direct-gpu-mirror-resources compositor)
+                 'mcluv::direct-mirror-release-error))
+    (ok (= 3 (length events)))
+    (ok (find :first events))
+    (ok (find :failing events))
+    (ok (find :last events))
+    (ok (null (mcluv::direct-widget-resources compositor)))
+    ;; Logical ownership was detached before the error; retry is a no-op.
+    (mcluv::release-direct-gpu-mirror-resources compositor)
+    (ok (= 3 (length events)))))
+
+(deftest the-unqualified-luv-port-is-direct-gpu
+  (multiple-value-bind (class transform) (climi::find-port-type :luv)
+    (ok (eq 'mcluv:luv-gpu-port class))
+    (ok (eq 'identity transform)))
+  (multiple-value-bind (class transform) (climi::find-port-type :luv-raster)
+    (ok (eq 'mcluv:luv-raster-port class))
+    (ok (eq 'identity transform))))
+
 (defstruct protocol-test-gpu-command clip)
 
 (defmethod mcluv::rebase-gpu-command

@@ -505,6 +505,9 @@ is finally created."
   #-darwin
   (eq sb-thread:*current-thread* (sdl-canvas-thread canvas)))
 
+(defmethod canvas-thread-p ((canvas sdl-canvas))
+  (sdl-canvas-native-thread-p canvas))
+
 (defun take-sdl-canvas-requests (canvas)
   (sb-thread:with-mutex ((sdl-canvas-request-lock canvas))
     (prog1 (sdl-canvas-requests canvas)

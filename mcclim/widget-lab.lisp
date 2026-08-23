@@ -83,7 +83,7 @@
     ;; callback, so ask for another after changing its label.
     (dispatch-repaint gadget +everywhere+)))
 
-(defun open-widget-lab (&key (server-path '(:luv))
+(defun open-widget-lab (&key (server-path '(:luv-gpu))
                              (title "McCLIM widgets on luv")
                              target context device)
   "Create, adopt, and enable a tiny interactive McCLIM gadget frame."

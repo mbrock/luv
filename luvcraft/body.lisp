@@ -225,6 +225,7 @@ the default hand holds things but does nothing with them."))
            (vertex-buffer nil)
            (instance-buffer nil)
            (pipeline nil)
+           (transferred-p nil)
            (completed-p nil))
       (unwind-protect
            (progn
@@ -272,10 +273,13 @@ the default hand holds things but does nothing with them."))
                    (player-body-sdf-instance-buffer body) instance-buffer
                    (player-body-sdf-instance-data body) instance-data)
              (place-player-body-sdf body)
+             ;; ADD owns BODY and its installed resources from this point,
+             ;; including the terminal-rejection cleanup path.
+             (setf transferred-p t)
              (add-luvcraft-overlay session body)
              (setf completed-p t)
              body)
-        (unless completed-p
+        (unless (or completed-p transferred-p)
           (when pipeline
             (ignore-errors (release-live-shader-pipeline pipeline)))
           (when instance-buffer (ignore-errors (destroy instance-buffer)))

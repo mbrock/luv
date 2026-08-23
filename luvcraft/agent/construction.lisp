@@ -311,9 +311,11 @@
       (error "~A already has a proposal waiting for the player."
              (embodied-agent-name presence)))
     (let ((preview (make-construction-preview-overlay approval)))
+      (luvcraft:add-luvcraft-overlay session preview)
+      ;; A rejected ADD consumes PREVIEW.  Publish approval state only after
+      ;; the application owns the corresponding visible attachment.
       (setf (construction-approval-preview approval) preview
             (embodied-agent-pending-approval presence) approval)
-      (luvcraft:add-luvcraft-overlay session preview)
       (ensure-gnome-dialogue presence)
       (repaint-gnome-dialogue presence)))
   approval)

@@ -30,6 +30,7 @@
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on ("luv"
+               "luv/tracy-capture"
                "luv/ghostty"
                "luv/libav"
                "luv/terminal/canvas"
@@ -71,8 +72,6 @@
                  (:file "persistence")
                  (:file "sky")
                  (:file "frame-performance")
-                 (:file "live-pipeline")
-                 (:file "release")
                  (:file "text")
                  (:file "sound")
                  (:file "video-interop")
@@ -150,6 +149,13 @@
                  (:file "web")
                  (:file "lobby")))))
 
+(defsystem "luvcraft/lobby"
+  :description "Luvcraft ownership of the shared application lobby radio."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luvcraft/core" "luv/lobby")
+  :components ((:file "luvcraft/lobby")))
+
 (defsystem "luvcraft/mcclim"
   :description "McCLIM command surfaces embedded in a live luvcraft session."
   :version "0.0.1"
@@ -162,14 +168,16 @@
                (:file "mcclim/block-icon")
                (:file "mcclim/hotbar")
                (:file "mcclim/inventory")
-               (:file "mcclim/metabar"))
+               (:file "mcclim/luvcraft-metabar"))
   :in-order-to ((test-op (test-op "luvcraft/mcclim/test"))))
 
 (defsystem "luvcraft/mcclim/test"
   :description "Executable claims for McCLIM instruments embedded in luvcraft."
   :version "0.0.1"
   :depends-on ("luvcraft/mcclim" "rove")
-  :components ((:file "mcclim/surveyor-tests"))
+  :serial t
+  :components ((:file "mcclim/surveyor-tests")
+               (:file "mcclim/luvcraft-metabar-tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
              (unless (uiop:symbol-call '#:rove '#:run-suite
@@ -177,6 +185,15 @@
                                                          '#:mcluv.surveyor-tests)
                                        :style :luv)
                (error "luvcraft/mcclim tests failed"))))
+
+(defsystem "luvcraft/lobby/mcclim"
+  :description "The shared lobby HUD placed in Luvcraft's final HUD pass."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luvcraft/lobby" "luvcraft/mcclim" "luv/lobby/mcclim")
+  :serial t
+  :components ((:file "mcclim/lobby")
+               (:file "mcclim/status-bar")))
 
 (defsystem "luvcraft/telegram"
   :description "A Telegram terminal mounted on a luvcraft wall and phone."
@@ -209,11 +226,10 @@
   :depends-on ("luvcraft/core"
                "luvcraft/mcclim"
                "luvcraft/telegram"
-               "mqtt/net"
+               "luvcraft/lobby/mcclim"
                "alexandria")
   :serial t
-  :components ((:file "luvcraft/lobby")
-               (:file "mcclim/lobby")
+  :components ((:file "luvcraft/lobby-credentials")
                (:module "luvcraft/clim"
                 :serial t
                 :components ((:file "package")
@@ -225,6 +241,8 @@
                              (:file "input"))))
   :in-order-to ((test-op (test-op "luvcraft/core/test")
                          (test-op "luv/mcclim/test")
+                         (test-op "luv/lobby/test")
+                         (test-op "luv/lobby/mcclim/test")
                          (test-op "luvcraft/mcclim/test")
                          (test-op "luvcraft/test"))))
 
@@ -233,15 +251,13 @@
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on ("luvcraft" "luvcraft/agent-bodies"
-               "openai" "mqtt/net" "alexandria" "sb-concurrency")
+               "luv/application-agent"
+               "openai" "alexandria" "sb-concurrency")
   :serial t
   :components ((:module "luvcraft/agent"
                 :serial t
                 :components ((:file "package")
-                             (:file "presentations")
-                             (:file "transcript")
-                             (:file "agent")
-                             (:file "tools")
+                             (:file "application-adapter")
                              (:file "commands")
                              (:file "approval")
                              (:file "hud")
@@ -260,7 +276,8 @@
                 :serial t
                 :components ((:file "package")
                              (:file "surroundings")
-                             (:file "construction"))))
+                             (:file "construction")
+                             (:file "opening"))))
   :perform (test-op (operation component)
              (declare (ignore operation component))
              (unless (uiop:symbol-call '#:rove '#:run-suite

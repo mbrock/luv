@@ -9,9 +9,19 @@
 Component release is an owner boundary: callers name the component once,
 rather than reproducing its private resource inventory."))
 
-(defgeneric resize-luvcraft-component (component extent)
+(defstruct (luvcraft-frame-extents
+            (:constructor make-luvcraft-frame-extents
+                (render presentation)))
+  "The two resolution domains installed together at a frame boundary."
+  render
+  presentation)
+
+(defgeneric resize-luvcraft-component (component extents)
   (:documentation
-   "Replace COMPONENT's frame-sized state for EXTENT at a frame boundary."))
+   "Replace COMPONENT's frame-sized state at a frame boundary.
+
+EXTENTS names both the expensive game-scene resolution and the final
+drawable-matched resolution where native-density application UI is composed."))
 
 (defclass luvcraft-renderer ()
   ((device :initarg :device :reader luvcraft-renderer-device)
@@ -93,6 +103,8 @@ streaming, overlays, and presentation; it does not duplicate its inventory."))
 
 (define-luvcraft-frame-attachment-reader
     luvcraft-renderer-render-extent :render-extent)
+(define-luvcraft-frame-attachment-reader
+    luvcraft-renderer-presentation-extent :presentation-extent)
 (define-luvcraft-frame-attachment-reader
     luvcraft-renderer-color-texture :color-texture)
 (define-luvcraft-frame-attachment-reader

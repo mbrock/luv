@@ -38,6 +38,7 @@
            #:com-toggle-inventory
            #:com-toggle-phone
            #:com-toggle-metabar
+           #:com-toggle-lobby-panel
            #:com-toggle-fullscreen
            #:com-toggle-tracy-capture
            #:com-toggle-focus
@@ -58,7 +59,6 @@
            #:close-luvcraft-legend
            #:toggle-luvcraft-legend
            ;; M-x: the searchable, executable command vocabulary.
-           #:luvcraft-command-menu
            #:luvcraft-command-menu-overlay
            #:luvcraft-command-menu-entries
            #:open-luvcraft-command-menu

@@ -34,6 +34,13 @@
 (defvar *tracy-client* nil
   "The loaded Tracy client library, or NIL before anything asked for one.")
 
+(defparameter *tracy-client-required-shim-symbols*
+  '("luv_tracy_emit_zone_begin"
+    "luv_tracy_emit_zone_end"
+    "luv_tracy_emit_zone_value"
+    "luv_tracy_zone_depth")
+  "Native context-stack entry points required by luv's Tracy zone ABI.")
+
 (defun tracy-client-override ()
   "Return the client LUV_TRACY_CLIENT names, when it names one that exists."
   (let ((name (uiop:getenv "LUV_TRACY_CLIENT")))
@@ -43,11 +50,22 @@
 (defun load-tracy-client ()
   "Load the Tracy client library, preferring the one LUV_TRACY_CLIENT names."
   (or *tracy-client*
-      (setf *tracy-client*
-            (let ((override (tracy-client-override)))
-              (if override
-                  (cffi:load-foreign-library (namestring override))
-                  (cffi:use-foreign-library tracy-client))))))
+      (let* ((override (tracy-client-override))
+             (client
+               (if override
+                   (cffi:load-foreign-library (namestring override))
+                   (cffi:use-foreign-library tracy-client)))
+             (missing
+               (remove-if
+                (lambda (name)
+                  (cffi:foreign-symbol-pointer name :library client))
+                *tracy-client-required-shim-symbols*)))
+        (when missing
+          (ignore-errors (cffi:close-foreign-library client))
+          (error
+           "The Tracy client~@[ at ~A~] lacks luv's native zone-context shim: ~{~A~^, ~}.~%Use the Tracy client built by this checkout."
+           override missing))
+        (setf *tracy-client* client))))
 
 (defun tracy-client-available-p ()
   "Answer whether a Tracy client can be loaded, without complaining if not."

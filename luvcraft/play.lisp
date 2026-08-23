@@ -61,15 +61,24 @@ game for later SLY evaluations.  STOP-PLAYING checkpoints and closes it."
                     :video-pathname video-pathname
                     :quit-function
                     (lambda (playing-session)
-                      ;; Native close and Command-Q arrive on Cocoa's event
-                      ;; thread.  Teardown owns frame-boundary waits, so run it
-                      ;; beside the canvas and let CLOSE-CANVAS end the loop
-                      ;; only after application GPU resources are released.
-                      (sb-thread:make-thread
-                       (lambda ()
-                         (when (eq playing-session *session*)
-                           (stop-playing)))
-                       :name "luvcraft native quit"))
+                      ;; REQUEST-LUVCRAFT-QUIT already granted this worker sole
+                      ;; ownership; do not recursively enter STOP-LUVCRAFT.
+                      (let ((playing-writer writer))
+                        (unwind-protect-releasing
+                            (with-release-report
+                              (releasing :checkpoint
+                                (request-luvcraft-session-checkpoint
+                                 playing-session))
+                              (releasing :session
+                                (perform-luvcraft-stop playing-session)))
+                          (releasing :playing-session-publication
+                            (when (eq playing-session *session*)
+                              (setf *session* nil
+                                    *checkpoint-writer* nil)))
+                          (releasing :checkpoint-writer
+                            (when playing-writer
+                              (stop-world-checkpoint-writer
+                               playing-writer))))))
                     :checkpoint-writer writer))
           (unless session
             (stop-world-checkpoint-writer writer)))
@@ -90,14 +99,18 @@ is not swallowed: STOP-LUVCRAFT closes the window first and then signals what
 went wrong, and that condition comes out of here."
   (let ((session *session*)
         (writer *checkpoint-writer*))
-    (unwind-protect
+    (unwind-protect-releasing
          (when session
-           (request-luvcraft-session-checkpoint session)
-           (stop-luvcraft session))
-      (setf *session* nil
-            *checkpoint-writer* nil)
-      (when writer
-        (stop-world-checkpoint-writer writer)))
+           (with-release-report
+             (releasing :checkpoint
+               (request-luvcraft-session-checkpoint session))
+             (releasing :session (stop-luvcraft session))))
+      (releasing :playing-session-publication
+        (setf *session* nil
+              *checkpoint-writer* nil))
+      (releasing :checkpoint-writer
+        (when writer
+          (stop-world-checkpoint-writer writer))))
     (values)))
 
 (defun shader-knob-p (knob)

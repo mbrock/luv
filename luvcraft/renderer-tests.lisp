@@ -38,10 +38,12 @@
          (new-depth (gensym "NEW-DEPTH"))
          (old-attachments
            (list :render-extent '(640 480)
+                 :presentation-extent '(1280 960)
                  :color-texture old-color
                  :depth-texture old-depth))
          (new-attachments
            (list :render-extent '(1280 720)
+                 :presentation-extent '(2560 1440)
                  :color-texture new-color
                  :depth-texture new-depth))
          (renderer
@@ -58,6 +60,8 @@
             (luvcraft::luvcraft-renderer-frame-attachments renderer)))
     (ok (equal '(1280 720)
                (luvcraft::luvcraft-session-render-extent session)))
+    (ok (equal '(2560 1440)
+               (luvcraft::luvcraft-session-presentation-extent session)))
     (ok (eq new-color (luvcraft::luvcraft-session-color-texture session)))
     (ok (eq new-depth (luvcraft::luvcraft-session-depth-texture session)))
     (ok (equal (list new-color new-depth old-color old-depth)
@@ -98,7 +102,7 @@
          (renderer
            (make-instance 'luvcraft-renderer :resources (list resource))))
     (ok (signals (release-luvcraft-component renderer)
-                 'luvcraft::luvcraft-release-error))
+                 'luv:release-error))
     (ok (= 1 (renderer-release-probe-attempts resource)))
     (ok (equal (list resource)
                (luvcraft::luvcraft-renderer-resources renderer)))

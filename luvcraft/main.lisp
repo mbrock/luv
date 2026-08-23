@@ -108,7 +108,14 @@
          (let ((failure
                  (luv::sdl-canvas-startup-error
                   (luvcraft-session-canvas session))))
-           (when failure (error failure))))
+           (when failure (error failure)))
+         ;; Native teardown reports through the controller rather than from
+         ;; its worker thread.  Surface that exact result in the executable.
+         (unless (eq :running
+                     (stop-controller-state
+                      (luvcraft-session-stop-controller session)))
+           (wait-for-controlled-stop
+            (luvcraft-session-stop-controller session))))
     (stop-playing)))
 
 (defun parse-interactive-options (arguments)

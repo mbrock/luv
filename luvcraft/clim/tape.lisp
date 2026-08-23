@@ -46,9 +46,7 @@
          (field-top 74)
          (field-bottom 116))
     (with-bounding-rectangle* (left top right-edge bottom) pane
-      (with-sheet-medium (medium pane)
-        (when (typep medium 'mcluv:luv-raster-medium)
-          (mcluv::clear-raster-medium-reliefs medium))
+      (progn
         (draw-rectangle* pane left top right-edge bottom
                          :ink *tape-prompt-panel-ink*)
         (draw-rectangle* pane left top right-edge bottom :filled nil
@@ -89,11 +87,8 @@
 
 (defun repaint-tape-prompt (frame)
   (let ((mirror (sheet-direct-mirror (frame-top-level-sheet frame))))
-    (if (typep mirror 'mcluv:luv-gpu-mirror)
-        (mcluv:repaint-gpu-mirror mirror)
-        (progn
-          (repaint-sheet (mcluv:mirror-sheet mirror) +everywhere+)
-          (mcluv:present-mirror mirror))))
+    (check-type mirror mcluv:luv-gpu-mirror)
+    (mcluv:repaint-gpu-mirror mirror))
   frame)
 
 ;;; ---------------------------------------------------------------------

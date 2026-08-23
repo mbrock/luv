@@ -254,9 +254,7 @@
          (agent (agent-hud-agent frame))
          (turn (agent-hud-turn frame)))
     (with-bounding-rectangle* (left top right bottom) pane
-      (with-sheet-medium (medium pane)
-        (when (typep medium 'mcluv:luv-raster-medium)
-          (mcluv::clear-raster-medium-reliefs medium))
+      (progn
         (draw-rectangle* pane left top right bottom :ink *hud-panel-ink*)
         (draw-rectangle* pane left top right bottom :filled nil
                          :line-thickness 2 :ink *hud-edge-ink*)
@@ -277,11 +275,8 @@
 
 (defun repaint-agent-hud (frame)
   (let ((mirror (sheet-direct-mirror (frame-top-level-sheet frame))))
-    (if (typep mirror 'mcluv:luv-gpu-mirror)
-        (mcluv:repaint-gpu-mirror mirror)
-        (progn
-          (repaint-sheet (mcluv:mirror-sheet mirror) +everywhere+)
-          (mcluv:present-mirror mirror))))
+    (check-type mirror mcluv:luv-gpu-mirror)
+    (mcluv:repaint-gpu-mirror mirror))
   (setf (agent-hud-visible-state frame) (agent-hud-state frame))
   frame)
 
@@ -291,27 +286,37 @@
   (declare (ignore overlay))
   :hud)
 
+(defun agent-hud-top-margin (session)
+  "Return the HUD's ordinary margin below application-level top surfaces."
+  (multiple-value-bind (left top right bottom)
+      (luvcraft:luvcraft-session-focus-insets session)
+    (declare (ignore left right bottom))
+    (+ 20.0 top)))
+
 (defun agent-hud-screen-state (overlay)
   "Top right corner, at its own size.
 
 One pane pixel is one screen pixel unless the viewport cannot hold it:
 shrinking the pane shrinks its type, and small type is what reads as soft."
-  (let* ((source-size (mcluv:widget-overlay-logical-size overlay))
+  (let* ((session (mcluv:widget-overlay-session overlay))
+         (source-size (mcluv:widget-overlay-logical-size overlay))
          (viewport-size
-           (luv:canvas-extent
-            (luvcraft:luvcraft-session-context
-             (mcluv:widget-overlay-session overlay))))
+           (multiple-value-list
+            (luv:canvas-logical-size
+             (luvcraft:luvcraft-session-canvas
+              session))))
          (source-width (first source-size))
          (source-height (second source-size))
          (viewport-width (first viewport-size))
          (viewport-height (second viewport-size))
+         (top-margin (agent-hud-top-margin session))
          (scale (min 1.0
                      (/ (- viewport-width 40.0) source-width)
-                     (/ (- viewport-height 96.0) source-height)))
+                     (/ (- viewport-height 76.0 top-margin) source-height)))
          (half-width (/ (* source-width scale) viewport-width))
          (half-height (/ (* source-height scale) viewport-height))
          (margin-x (/ 20.0 viewport-width))
-         (margin-y (/ 20.0 viewport-height))
+         (margin-y (/ top-margin viewport-height))
          (center-x (- 1.0 margin-x half-width))
          (center-y (+ -1.0 margin-y half-height)))
     (make-array

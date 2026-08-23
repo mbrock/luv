@@ -355,6 +355,9 @@
     (ok (luft.render::viewer-inspector-p
          (clim:make-application-frame 'render:viewer :inspector-p t)))
     (ok (null (luft.render::viewer-key-command viewer (key-press :w))))
+    (ok (equal '(luft.render::com-toggle-fullscreen)
+               (luft.render::viewer-key-command
+                viewer (key-press :f11))))
     (ok (equal '(luft.render::com-release-pointer)
                (luft.render::viewer-key-command
                 viewer (key-press :escape))))
@@ -1494,3 +1497,25 @@
       (ok (= #x80 (render:site-inspection-star-mask inspection)))
       (ok (not (luft:star-singular-p
                 (render:site-inspection-star-mask inspection)))))))
+
+(deftest film-cleanup-cannot-resurrect-a-shutting-down-viewer
+  (flet ((make-probe ()
+           (clim:make-application-frame
+            'render:viewer :canvas (make-instance 'luv:canvas))))
+    (let* ((viewer (make-probe))
+           (capture
+             (make-instance 'luv:application-capture
+                            :application viewer :kind :film)))
+      (setf (luv:capture-client-state capture) '(:running-p t)
+            (render::viewer-running-p viewer) nil)
+      (luv:cleanup-capture viewer capture)
+      (ok (render::viewer-running-p viewer)))
+    (let* ((viewer (make-probe))
+           (capture
+             (make-instance 'luv:application-capture
+                            :application viewer :kind :film)))
+      (setf (luv:capture-client-state capture) '(:running-p t)
+            (render::viewer-running-p viewer) nil)
+      (luv:request-application-capture-shutdown viewer)
+      (luv:cleanup-capture viewer capture)
+      (ok (not (render::viewer-running-p viewer))))))

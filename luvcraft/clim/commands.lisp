@@ -28,6 +28,11 @@
     ()
   (luvcraft:toggle-luvcraft-metabar (luvcraft-command-session)))
 
+(define-command (com-toggle-lobby-panel :command-table luvcraft-window
+                                        :name "Toggle Lobby Panel")
+    ()
+  (mcluv:toggle-luvcraft-lobby-hud (luvcraft-command-session)))
+
 (define-command (com-toggle-focus :command-table luvcraft-world
                                   :name "Toggle Focus"
                                   :keystroke (:tab))
@@ -48,6 +53,28 @@
   ;; give this live-started lane the wrong ownership name.
   (luvcraft:toggle-luvcraft-tracy-capture)
   (luv:name-tracy-thread "canvas"))
+
+(define-command (com-start-tracy-capture :command-table luvcraft-window
+                                         :name "Start Tracy Capture")
+    ()
+  (luvcraft:start-luvcraft-tracy-capture))
+
+(define-command (com-stop-tracy-capture :command-table luvcraft-window
+                                        :name "Stop Tracy Capture")
+    ()
+  (luvcraft:stop-luvcraft-tracy-capture))
+
+(define-command (com-open-last-tracy-capture
+                 :command-table luvcraft-window
+                 :name "Open Last Tracy Capture")
+    ()
+  (luvcraft::open-luvcraft-tracy-capture))
+
+(define-command (com-reveal-last-tracy-capture
+                 :command-table luvcraft-window
+                 :name "Reveal Last Tracy Capture")
+    ()
+  (luvcraft::reveal-luvcraft-tracy-capture))
 
 (define-command (com-toggle-fullscreen :command-table luvcraft-window
                                        :name "Toggle Fullscreen"

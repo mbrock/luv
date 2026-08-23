@@ -53,7 +53,8 @@
                  context
                  (luv:make-canvas-context
                   canvas provider
-                  (luv:make-canvas-configuration :device device))
+                  (luv:make-canvas-configuration
+                   :device device :usage '(:render-attachment)))
                  buffer
                  (luv:create
                   device

@@ -73,6 +73,7 @@
            #:stop-viewer
            #:refresh-viewer-renderer
            #:refresh-viewer-shaders
+           #:viewer-live-artifact
            #:capture-viewer-frame
            #:film-viewer
            #:*wireframe*
@@ -85,6 +86,40 @@
            #:viewer-renderer
            #:viewer-shader-diagnostic
            #:viewer-running-p
+           ;; Ordered application instruments.  Each shared tool owns its UI
+           ;; implementation; LUFT supplies only attachment, frame-boundary,
+           ;; final-pass, input, and release policy through this protocol.
+           #:viewer-instruments
+           #:add-viewer-instrument
+           #:remove-viewer-instrument
+           #:viewer-instrument-priority
+           #:viewer-instrument-present-p
+           #:refresh-viewer-instrument
+           #:encode-viewer-instrument
+           #:handle-viewer-instrument-event
+           #:release-viewer-instrument
+           #:open-viewer-command-menu
+           #:close-viewer-command-menu
+           #:toggle-viewer-command-menu
+           #:open-viewer-metabar
+           #:close-viewer-metabar
+           #:toggle-viewer-metabar
+           #:open-viewer-lobby
+           #:close-viewer-lobby
+           #:toggle-viewer-lobby
+           #:viewer-lobby-client
+           #:viewer-status-bar
+           #:open-viewer-status-bar
+           #:start-viewer-tracy-capture
+           #:stop-viewer-tracy-capture
+           #:toggle-viewer-tracy-capture
+           #:open-viewer-tracy-capture
+           #:reveal-viewer-tracy-capture
+           #:viewer-agent
+           #:make-viewer-agent
+           #:ask-viewer-agent
+           #:release-viewer-agent
+           #:viewer-agent-report
            #:*viewer*
            #:main
            #:run-standalone-viewer))

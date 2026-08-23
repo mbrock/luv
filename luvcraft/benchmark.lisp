@@ -90,6 +90,8 @@ drainage and is intentionally not labelled as GPU time."
                   :title "luvcraft Metal frame benchmark"
                   :width width :height height
                   :visible-p nil :frames-per-second nil
+                  ;; WIDTH and HEIGHT are benchmark controls, not window points.
+                  :high-pixel-density-p nil
                   :provider provider :world world :camera camera
                   :sky-clock
                   (make-instance 'sky-clock :pinned-day-fraction 0.5)))

@@ -101,16 +101,21 @@ mirror's identity: a later target may be a texture presented on a 3D quad."))
    (text-bind-groups
     :initform (make-hash-table :test #'eq)
     :reader gpu-mirror-text-bind-groups)
-   ;; The last immutable semantic stream prepared for presentation. Embedded
-   ;; compositors replay it into the game's actual scene or HUD pass.
-   (prepared-commands
-    :initform nil :accessor gpu-mirror-prepared-commands)
-   (prepared-frame-state
-    :initform nil :accessor gpu-mirror-prepared-frame-state))
+   ;; Repaint constructs a complete immutable CPU revision, then publishes its
+   ;; pointer under this small lock.  A direct compositor materializes that
+   ;; revision into the destination drawable's bounded frame slot; the mirror
+   ;; itself never owns one mutable source buffer shared by in-flight frames.
+   (prepared-revision-lock
+    :initform (sb-thread:make-mutex :name "McCLIM prepared GPU revision")
+    :reader gpu-mirror-prepared-revision-lock)
+   (prepared-revision-counter
+    :initform 0 :accessor gpu-mirror-prepared-revision-counter)
+   (prepared-revision
+    :initform nil :accessor %gpu-mirror-prepared-revision))
   (:documentation
    "A direct GPU target for an ordered LUV-GPU-MEDIUM drawing stream.
 
-An embedded mirror retains prepared GPU commands and buffers for the game's
+An embedded mirror retains an immutable prepared CPU revision for the game's
 final pass; a standalone mirror renders into its native canvas drawable."))
 
 (defmethod print-object ((mirror luv-mirror) stream)
@@ -445,10 +450,43 @@ on is still playing the game, so they contribute nothing rather than fail."
         (luv:make-gpu-copy-texture-command
          :source texture :destination surface))))))
 
-(defgeneric release-raster-mirror-compositor (compositor))
+(defgeneric release-mirror-compositor (compositor)
+  (:documentation
+   "Exhaustively release resources retained by a mirror COMPOSITOR."))
 
-(defmethod release-raster-mirror-compositor ((compositor null))
+(defmethod release-mirror-compositor ((compositor null))
   (values))
+
+(defgeneric release-raster-mirror-compositor (compositor)
+  (:documentation
+   "Legacy adapter for the application-neutral RELEASE-MIRROR-COMPOSITOR."))
+
+(defmethod release-raster-mirror-compositor (compositor)
+  (release-mirror-compositor compositor))
+
+(defgeneric prepare-mirror-compositor-revision
+    (compositor mirror revision)
+  (:documentation
+   "Prepare COMPOSITOR for immutable MIRROR REVISION outside a render pass."))
+
+(defmethod prepare-mirror-compositor-revision
+    (compositor mirror revision)
+  (declare (ignore compositor mirror revision))
+  (values))
+
+(defgeneric prepare-mirror-compositor-target-revision
+    (compositor mirror revision &key target-format depth-stencil)
+  (:documentation
+   "Prepare COMPOSITOR for REVISION and an application-owned attachment.
+
+This target-aware protocol is used when the application renders a retained
+mirror somewhere other than its canvas format.  The default preserves the
+ordinary revision protocol for compositors without target-specific state."))
+
+(defmethod prepare-mirror-compositor-target-revision
+    (compositor mirror revision &key target-format depth-stencil)
+  (declare (ignore target-format depth-stencil))
+  (prepare-mirror-compositor-revision compositor mirror revision))
 
 (defmethod present-mirror ((mirror luv-raster-mirror))
   "Upload and present MIRROR when McCLIM has marked its image dirty."

@@ -1130,7 +1130,7 @@ that he is standing on something."
              (* (swizzle heading :y) (swizzle local :y)))
           (swizzle local :z))))
 
-(define-shader player-sdf-vertex-specification
+(define-live-shader player-sdf-vertex-specification
     (:stage :vertex
      :inputs ((vertex-index :uint :built-in :vertex-index)
               (instance-index :uint :built-in :instance-index))
@@ -1228,7 +1228,7 @@ that he is standing on something."
     (set-output current-clip-output current-clip)
     (set-output previous-clip-output previous-clip)))
 
-(define-shader player-sdf-fragment-specification
+(define-live-shader player-sdf-fragment-specification
     (:stage :fragment
      :inputs ((proxy-world-position :vec3 :location 0)
               (center-radius :vec4 :location 1)
@@ -1413,7 +1413,7 @@ that he is standing on something."
     (set-output motion-output
                 (mesh-temporal-motion previous-clip current-clip))))
 
-(define-shader mesh-vertex-specification
+(define-live-shader mesh-vertex-specification
     (:stage :vertex
      :inputs ((vertex-index :uint :built-in :vertex-index)
               (instance-index :uint :built-in :instance-index))
@@ -1515,7 +1515,7 @@ that he is standing on something."
     (set-output boundary-edge-mask-output boundary-edge-mask)
     (set-output ambient-occlusion-output ambient-occlusion)))
 
-(define-shader mesh-fragment-specification
+(define-live-shader mesh-fragment-specification
     (:stage :fragment
      :inputs ((world-position :vec3 :location 0)
               (mesh-normal :vec3 :location 1 :interpolation :flat)
@@ -1776,7 +1776,7 @@ that he is standing on something."
     (set-output motion-output
                 (mesh-temporal-motion previous-clip current-clip))))
 
-(define-shader shadow-vertex-specification
+(define-live-shader shadow-vertex-specification
     (:stage :vertex
      :inputs ((vertex-index :uint :built-in :vertex-index)
               (instance-index :uint :built-in :instance-index))
@@ -1817,7 +1817,7 @@ that he is standing on something."
                                      shadow-row-x shadow-row-y
                                      shadow-row-z shadow-row-w))))
 
-(define-shader lattice-point-vertex-specification
+(define-live-shader lattice-point-vertex-specification
     (:stage :vertex
      :inputs ((vertex-index :uint :built-in :vertex-index)
               (instance-index :uint :built-in :instance-index))
@@ -1892,7 +1892,7 @@ that he is standing on something."
     (set-output previous-clip-output previous-clip)
     (set-output marker-kind-output marker-kind)))
 
-(define-shader lattice-point-fragment-specification
+(define-live-shader lattice-point-fragment-specification
     (:stage :fragment
      :inputs ((marker-coordinate :vec2 :location 0)
               (current-clip :vec4 :location 1)
@@ -1917,7 +1917,7 @@ that he is standing on something."
                 (- (mesh-clip-uv previous-clip)
                    (mesh-clip-uv current-clip)))))
 
-(define-shader present-vertex-specification
+(define-live-shader present-vertex-specification
     (:stage :vertex
      :inputs ((vertex-index :uint :built-in :vertex-index))
      :outputs ((clip-position :vec4 :built-in :position)
@@ -2009,7 +2009,7 @@ that he is standing on something."
                  (+ (* sun-halo 0.10) (* sun-disc 2.8))))))
     radiance))
 
-(define-shader sky-fragment-specification
+(define-live-shader sky-fragment-specification
     (:stage :fragment
      :inputs ((ndc :vec2 :location 0))
      :outputs ((color-output :vec4 :location 0))
@@ -2038,7 +2038,7 @@ that he is standing on something."
             sky-color-vector)))
     (set-output color-output (vec4 radiance 1.0))))
 
-(define-shader sky-temporal-fragment-specification
+(define-live-shader sky-temporal-fragment-specification
     (:stage :fragment
      :inputs ((ndc :vec2 :location 0))
      :outputs ((color-output :vec4 :location 0)
@@ -2081,7 +2081,7 @@ that he is standing on something."
     (set-output motion-output
                 (mesh-temporal-motion previous-clip current-clip))))
 
-(define-shader exposure-probe-fragment-specification
+(define-live-shader exposure-probe-fragment-specification
     (:stage :fragment
      :inputs ((ndc :vec2 :location 0))
      :outputs ((color-output :vec4 :location 0))
@@ -2109,7 +2109,7 @@ that he is standing on something."
          (encoded (clamp (/ (+ (log luminance) 9.21034) 11.98293) 0.0 1.0)))
     (set-output color-output (vec4 encoded encoded encoded 1.0))))
 
-(define-shader present-fragment-specification
+(define-live-shader present-fragment-specification
     (:stage :fragment
      :inputs ((ndc :vec2 :location 0))
      :outputs ((color-output :vec4 :location 0))

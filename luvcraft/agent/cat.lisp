@@ -125,20 +125,14 @@ your final message is not shown.  Keep what you say short, feline, and useful.
 Results may mention #ABCD handles; pass one back to describe-handle to inspect
 the thing it names.")
 
-(defmethod ensure-embodied-agent-agent ((cat cat))
-  (or (gnome-agent cat)
-      (let ((agent (make-world-agent
-                    :session (gnome-session cat)
-                    :commands *gnome-tools*
-                    :instructions
-                    (format nil "~A~%~%You sit at x=~D y=~D z=~D."
-                            *cat-instructions*
-                            (gnome-x cat) (gnome-y cat) (gnome-z cat)))))
-        (setf (world-agent-presence agent) cat
-              (gnome-observer cat) (make-gnome-observer cat)
-              (gnome-agent cat) agent)
-        (add-agent-observer agent (gnome-observer cat))
-        agent)))
+(defmethod open-embodied-agent-agent ((cat cat))
+  (make-world-agent
+   :session (gnome-session cat)
+   :commands *gnome-tools*
+   :instructions
+   (format nil "~A~%~%You sit at x=~D y=~D z=~D."
+           *cat-instructions*
+           (gnome-x cat) (gnome-y cat) (gnome-z cat))))
 
 (defun find-cat (session x y z &optional (make-p t))
   "Find the CAT at X,Y,Z, creating one when MAKE-P and the cell is free."

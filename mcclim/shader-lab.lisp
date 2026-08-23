@@ -605,12 +605,12 @@
     (terpri stream)
     (when pipeline
       (format stream "GPU ~(~A~)  ·  installed revision ~D~%"
-              (luvcraft:live-shader-pipeline-status pipeline)
-              (luvcraft:live-shader-pipeline-installed-revision pipeline)))
+              (luv:live-shader-pipeline-status pipeline)
+              (luv:live-shader-pipeline-installed-revision pipeline)))
     (let ((diagnostic
             (or (shader-definition-entry-diagnostic definition)
                 (and pipeline
-                     (luvcraft:live-shader-pipeline-diagnostic pipeline)))))
+                     (luv:live-shader-pipeline-diagnostic pipeline)))))
       (when diagnostic
         (with-drawing-options (stream :ink *shader-literal-ink*)
           (format stream "diagnostic: ~A~%" diagnostic))))
@@ -815,10 +815,10 @@
   (find-if (lambda (pipeline)
              (ecase stage
                (:vertex
-                (eq role (luvcraft:live-shader-pipeline-vertex-role pipeline)))
+                (eq role (luv:live-shader-pipeline-vertex-role pipeline)))
                (:fragment
-                (and (eq role (luvcraft:live-shader-pipeline-role pipeline))
-                     (eq stage (luvcraft:live-shader-pipeline-stage pipeline))))))
+                (and (eq role (luv:live-shader-pipeline-role pipeline))
+                     (eq stage (luv:live-shader-pipeline-stage pipeline))))))
            pipelines))
 
 (defun make-default-shader-definitions (pipelines)
@@ -966,62 +966,9 @@
               (completed-p (values frame :refreshed nil))
               (t (values frame :unresponsive nil))))))
 
-(defun capture-raster-mirror-screenshot (mirror pathname)
-  "Read MIRROR's uploaded GPU texture and write it to PATHNAME as a PNG."
-  (check-type mirror luv-raster-mirror)
-  (let* ((target (mirror-target mirror))
-         (context (mirror-context mirror))
-         (texture (mirror-texture mirror)))
-    (unless (eq :open (luv:canvas-state target))
-      (error "Cannot capture a McCLIM mirror whose canvas is ~S."
-             (luv:canvas-state target)))
-    (unless (and context texture)
-      (error "Cannot capture a McCLIM mirror before its first presentation."))
-    (ensure-directories-exist pathname)
-    (luv:request-canvas-frame
-     target
-     (lambda (timestamp)
-       (declare (ignore timestamp))
-       (let* ((device (luv:context-device context))
-              (queue (luv:device-queue device))
-              (size (luv:gpu-texture-size texture))
-              (width (first size))
-              (height (second size))
-              (format (luv:gpu-texture-format texture))
-              (buffer nil)
-              (encoder nil)
-              (commands nil))
-         (unwind-protect
-              (progn
-                (setf buffer
-                      (luv:create
-                       device
-                       (luv:make-buffer-descriptor
-                        :label "McCLIM screenshot readback"
-                        :size (* 4 width height)
-                        :usage '(:copy-dst)))
-                      encoder
-                      (luv:create
-                       device
-                       (luv:make-command-encoder-descriptor
-                        :label "McCLIM screenshot commands")))
-                (luv:encode
-                 encoder
-                 (luv:make-gpu-copy-texture-to-buffer-command
-                  :source texture :destination buffer))
-                (setf commands (luv:finish encoder))
-                (luv:submit queue commands)
-                (let ((pixels (luv:read-buffer buffer)))
-                  (luv:write-rgba-png
-                   pathname pixels width height format)
-                  (values pathname pixels width height format)))
-           (when commands (luv:destroy commands))
-           (when encoder (luv:destroy encoder))
-           (when buffer (luv:destroy buffer))))))))
-
 (defun capture-shader-lab-screenshot
     (frame pathname &key (timeout 10.0))
-  "Redisplay FRAME and capture its actual luv-backed McCLIM texture."
+  "Redisplay FRAME and capture its direct-GPU McCLIM presentation."
   (check-type frame shader-lab)
   (multiple-value-bind (completed-p result condition)
       (call-in-shader-lab-process
@@ -1030,10 +977,10 @@
          (redisplay-frame-panes frame :force-p t)
          (let* ((sheet (frame-top-level-sheet frame))
                 (mirror (and sheet (sheet-direct-mirror sheet))))
-           (unless (typep mirror 'luv-raster-mirror)
-             (error "Shader lab has no luv raster mirror to capture."))
-           (present-mirror mirror)
-           (capture-raster-mirror-screenshot mirror pathname)))
+           (unless (typep mirror 'luv-gpu-mirror)
+             (error "Shader lab requires a direct-GPU McCLIM mirror."))
+           (repaint-gpu-mirror mirror :present-p nil)
+           (capture-gpu-mirror-screenshot mirror pathname)))
        timeout)
     (cond (condition (error condition))
           ((not completed-p)
@@ -1043,7 +990,7 @@
 
 (defun capture-default-shader-lab-screenshot
     (pathname &key specification
-                   (server-path '(:luv))
+                   (server-path '(:luv-gpu))
                    (title "Luv mathematical shader browser"))
   "Open a callback-only shader lab, capture it, and tear it down."
   (let* ((definitions
@@ -1091,7 +1038,7 @@
 
 (defun open-shader-lab
     (&key specification specifications pipelines
-          (server-path '(:luv))
+          (server-path '(:luv-gpu))
           (startup-timeout 10.0)
           (title "Luvcraft material and shader workbench"))
   "Open a live-definition, expression, and SSA workbench on luv's backend.

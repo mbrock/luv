@@ -32,10 +32,23 @@
   :description "The McCLIM LUFT atelier over the packed-site renderer."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luft/renderer" "luvcraft/mcclim")
+  ;; The atelier shares Luv's McCLIM backend directly.  Luvcraft remains only
+  ;; for the small physics vocabulary used by RENDER/GAME; LUFT no longer
+  ;; loads another game's widget adapters to obtain the common compositor.
+  :depends-on ("luft/renderer" "luv/mcclim" "luv/lobby/mcclim"
+               "luv/tracy-capture" "luv/application-agent"
+               "luvcraft/core")
   :serial t
   :components ((:file "luft/render/game")
-               (:file "luft/render/studio"))
+               (:file "luft/render/studio")
+               (:file "luft/render/live-artifact")
+               (:file "luft/render/instruments")
+               (:file "luft/render/tracy-capture")
+               (:file "luft/render/command-menu")
+               (:file "luft/render/metabar")
+               (:file "luft/render/lobby")
+               (:file "luft/render/status-bar")
+               (:file "luft/render/application-agent"))
   :in-order-to ((test-op (test-op "luft/render/test"))))
 
 (defsystem "luft/program"
@@ -57,7 +70,15 @@
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on ("luft/render" "rove")
-  :components ((:file "luft/render/tests"))
+  :serial t
+  :components ((:file "luft/render/tests")
+               (:file "luft/render/instrument-tests")
+               (:file "luft/render/tracy-capture-tests")
+               (:file "luft/render/live-artifact-tests")
+               (:file "luft/render/metabar-tests")
+               (:file "luft/render/lobby-tests")
+               (:file "luft/render/status-bar-tests")
+               (:file "luft/render/application-agent-tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
              (unless (uiop:symbol-call '#:rove '#:run-suite

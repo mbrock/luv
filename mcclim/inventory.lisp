@@ -316,8 +316,6 @@ every cell makes the word louder than the block it is about."
          (cell-height (/ (- +inventory-grid-bottom+ +inventory-grid-top+) 2)))
     (with-bounding-rectangle* (left top right bottom) pane
       (with-sheet-medium (medium pane)
-        (when (typep medium 'luv-raster-medium)
-          (clear-raster-medium-reliefs medium))
         (draw-analytic-rounded-rectangle*
          medium left top right bottom :radius 7
          :ink (make-linear-gradient
@@ -377,11 +375,8 @@ every cell makes the word louder than the block it is about."
 
 (defun repaint-inventory (frame)
   (let ((mirror (sheet-direct-mirror (frame-top-level-sheet frame))))
-    (if (typep mirror 'luv-gpu-mirror)
-        (repaint-gpu-mirror mirror)
-        (progn
-          (repaint-sheet (mirror-sheet mirror) +everywhere+)
-          (present-mirror mirror))))
+    (check-type mirror luv-gpu-mirror)
+    (repaint-gpu-mirror mirror))
   (setf (inventory-visible-state frame) (inventory-visible-state-for frame))
   frame)
 
@@ -404,9 +399,10 @@ every cell makes the word louder than the block it is about."
 (defun inventory-screen-state (overlay)
   (let* ((source-size (widget-overlay-logical-size overlay))
          (viewport-size
-           (luv:canvas-extent
-            (luvcraft::luvcraft-session-context
-             (widget-overlay-session overlay))))
+           (multiple-value-list
+            (luv:canvas-logical-size
+             (luvcraft:luvcraft-session-canvas
+              (widget-overlay-session overlay)))))
          (source-width (first source-size))
          (source-height (second source-size))
          (viewport-width (first viewport-size))
@@ -612,10 +608,13 @@ every cell makes the word louder than the block it is about."
         (progn (open-luvcraft-inventory session) t))
     (progn (open-luvcraft-inventory session) t)))
 
-(defmethod luvcraft:attach-luvcraft-hud :after
+(defmethod luvcraft:attach-luvcraft-hud :around
     ((session luvcraft:luvcraft-session))
   ;; Build the durable inventory pane before the game window is published.
   ;; Opening it later is then only focus/visibility state, with no shader or
-  ;; glyph-atlas compilation on the frame thread.
-  (open-luvcraft-inventory session)
-  (luvcraft:unfocus-luvcraft-session session))
+  ;; glyph-atlas compilation on the frame thread.  This is an AROUND method so
+  ;; application adapters can independently own :AFTER attachment hooks; CLOS
+  ;; replaces, rather than accumulates, identical qualified coordinates.
+  (multiple-value-prog1 (call-next-method)
+    (open-luvcraft-inventory session)
+    (luvcraft:unfocus-luvcraft-session session)))

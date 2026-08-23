@@ -439,12 +439,45 @@ the selector is the whole of the difference."
               (coerce (/ (first extent)) 'single-float)
               (coerce (/ (second extent)) 'single-float)))))
 
-(declaim (ftype function viewer-surface-view))
+(declaim (ftype function viewer-surface-view
+                viewer-inspector-p
+                viewer-inspector-mirror
+                viewer-instruments-present-p
+                refresh-viewer-instruments
+                encode-viewer-instruments
+                release-viewer-instruments
+                attach-viewer-lobby
+                open-viewer-status-bar
+                make-tracked-renderer
+                attach-viewer-live-artifact
+                viewer-live-artifact
+                release-viewer-live-artifact
+                force-viewer-live-artifact-refresh
+                note-viewer-renderer-replacement
+                %perform-viewer-stop))
+
+(defun prepare-viewer-frame-renderer (viewer)
+  "Publish frame-boundary instruments, then borrow VIEWER's renderer.
+
+An instrument operation may transactionally replace the complete renderer
+cohort and retire the previous one.  No frame may borrow that previous cohort
+before the operation boundary, or it would encode through resources which the
+  same canvas thread has just retired."
+  (refresh-viewer-instruments viewer)
+  ;; Inspector repaint is semantic and therefore sparse.  Shader definitions
+  ;; are independently live, so the static retained stream still refreshes its
+  ;; direct compositor here, before ENCODE-RENDERER-FRAME opens a pass.
+  (when (and (viewer-inspector-p viewer)
+             (viewer-inspector-mirror viewer))
+    (mcluv:prepare-gpu-mirror-compositor
+     (viewer-inspector-mirror viewer)))
+  (or (viewer-renderer viewer)
+      (error "LUFT viewer has no renderer after frame-boundary publication.")))
 
 (defun encode-viewer-frame
     (viewer encoder surface-texture extent
      &key (inspector-p (viewer-inspector-p viewer)))
-  (let* ((renderer (viewer-renderer viewer))
+  (let* ((renderer (prepare-viewer-frame-renderer viewer))
          (surface-view (viewer-surface-view viewer surface-texture))
          (render-extent (render-scale-extent extent))
          (width (first render-extent))
@@ -461,6 +494,8 @@ the selector is the whole of the difference."
          (player-p (and player (typep (viewer-source viewer) 'scene)
                         (scene-player-p (viewer-source viewer)))))
     (maintain-renderer-exposure renderer)
+    ;; Instrument state is now immutable for this frame.  Encoding below only
+    ;; replays prepared GPU commands against the renderer borrowed afterward.
     (encode-renderer-frame
      renderer encoder surface-view extent
      (camera-uniform-data
@@ -478,11 +513,15 @@ the selector is the whole of the difference."
                           (not (typep (viewer-source viewer)
                                       'streaming-scene)))
      :overlay-encoder
-     (and inspector-p
+     (and (or inspector-p (viewer-instruments-present-p viewer))
           (lambda (pass)
-            (mcluv:encode-direct-gpu-mirror
-             (viewer-inspector-compositor viewer) pass surface-texture
-             (viewer-inspector-state viewer extent)))))))
+            (when inspector-p
+              (mcluv:encode-direct-gpu-mirror
+               (viewer-inspector-compositor viewer) pass surface-texture
+               (viewer-inspector-state viewer extent)))
+            ;; Instruments are ordered low-to-high so modal tools render last.
+            (encode-viewer-instruments
+             viewer pass surface-texture extent))))))
 
 (clim:define-command-table luft-window)
 (clim:define-command-table luft-window-release)
@@ -657,16 +696,12 @@ the selector is the whole of the difference."
    (speed :initarg :speed :initform 4.0 :accessor viewer-speed)
    (sensitivity :initarg :sensitivity :initform 0.0032
                 :accessor viewer-sensitivity)
-   (shader-revision :initform 0 :accessor viewer-shader-revision)
    (shader-diagnostic :initform nil :accessor viewer-shader-diagnostic)
    (running-p :initform t :accessor viewer-running-p)
-   (quit-requested-p :initform nil :accessor viewer-quit-requested-p)
-   (stop-state :initform :running :accessor viewer-stop-state)
-   (stop-lock :initform (sb-thread:make-mutex :name "LUFT viewer stop")
-              :reader viewer-stop-lock)
-   (stop-ready :initform (sb-thread:make-waitqueue
-                          :name "LUFT viewer stopped")
-               :reader viewer-stop-ready))
+   (stop-controller
+    :initarg :stop-controller
+    :initform (make-stop-controller :name "LUFT viewer")
+    :reader viewer-stop-controller))
   ;; The frame is the application and the inspector is its first pane.  Its
   ;; command table inherits every input phase so McCLIM considers each command
   ;; executable; event dispatch still chooses one phase explicitly.
@@ -704,11 +739,23 @@ the selector is the whole of the difference."
                       (make-texture-view-descriptor :texture surface))))))
 
 (defun release-viewer-surface-views (viewer)
-  (maphash (lambda (key view)
-             (declare (ignore key))
-             (destroy view))
-           (viewer-surface-views viewer))
-  (clrhash (viewer-surface-views viewer))
+  (with-release-report
+    (maphash (lambda (key view)
+               (declare (ignore key))
+               (releasing :surface-view (destroy view)))
+             (viewer-surface-views viewer))
+    (clrhash (viewer-surface-views viewer)))
+  (values))
+
+(defun release-viewer-surface-view (viewer surface)
+  "Release only VIEWER's cached view of SURFACE, when one exists."
+  (let* ((context (viewer-context viewer))
+         (key (canvas-frame-resource-key context surface))
+         (views (viewer-surface-views viewer)))
+    (multiple-value-bind (view present-p) (gethash key views)
+      (when present-p
+        (when view (destroy view))
+        (remhash key views))))
   (values))
 
 (defun viewer-control-active-p (viewer direction)
@@ -738,7 +785,11 @@ the selector is the whole of the difference."
           (advance-walking-player (viewer-player viewer)
                                   (viewer-source viewer) camera
                                   forward right dt)
-          (follow-walking-player camera (viewer-player viewer) :seconds dt)
+          ;; The first timestamp establishes the follow pose immediately.
+          ;; Subsequent zero-duration samples preserve it; in Common Lisp a
+          ;; numeric zero is true, so DT alone cannot express that distinction.
+          (follow-walking-player camera (viewer-player viewer)
+                                 :seconds (and last dt))
           (constrain-viewer-follow-camera viewer))
         (multiple-value-bind (right up forward) (camera-basis camera)
           (flet ((move (direction amount)
@@ -777,17 +828,9 @@ the selector is the whole of the difference."
 (defun render-viewer-frame (viewer timestamp)
   (declare (ignore timestamp))
   (when (viewer-running-p viewer)
-    (let ((revision (luv.shader:shader-source-revision)))
-      (cond
-        ((zerop (viewer-shader-revision viewer))
-         (setf (viewer-shader-revision viewer) revision))
-        ((> revision (viewer-shader-revision viewer))
-         (setf (viewer-shader-revision viewer) revision)
-         (handler-case (%refresh-viewer-shaders viewer)
-           (error (condition)
-             ;; Keep drawing the last complete renderer.  The failed source
-             ;; remains inspectable and a later edit advances REVISION again.
-             (setf (viewer-shader-diagnostic viewer) condition))))))
+    ;; Source callbacks only advance revisions.  Compilation and complete
+    ;; cohort publication happen here, before this frame borrows the renderer.
+    (refresh-application-live-artifacts viewer)
     (advance-viewer-streaming viewer)
     (present-canvas-frame
      (viewer-context viewer)
@@ -802,20 +845,19 @@ the selector is the whole of the difference."
 
 (defun request-viewer-quit (viewer)
   "Begin an orderly stop once and return true when this call began it."
-  (let ((begin-p nil))
-    (sb-thread:with-mutex ((viewer-stop-lock viewer))
-      (unless (viewer-quit-requested-p viewer)
-        (setf (viewer-quit-requested-p viewer) t
-              (viewer-running-p viewer) nil
-              begin-p t)))
-    (when begin-p
-      ;; A native close and a command both run on the canvas thread. Teardown
-      ;; establishes a canvas-thread barrier, so it must run beside that thread
-      ;; and let CLOSE-CANVAS end the loop after application resources are gone.
-      (sb-thread:make-thread
-       (lambda () (stop-viewer viewer))
-       :name "LUFT viewer quit"))
-    begin-p))
+  ;; Native input closes capture admission without waiting.  The worker below
+  ;; drains the capture beside this thread before crossing its frame barrier.
+  (request-application-capture-shutdown viewer)
+  (setf (viewer-running-p viewer) nil)
+  ;; A native close and a command both run on the canvas thread.  Reserve the
+  ;; one teardown owner here, but run it beside that thread so its synchronous
+  ;; frame-boundary barrier can complete before CLOSE-CANVAS ends the loop.
+  (nth-value
+   0
+   (request-controlled-stop
+    (viewer-stop-controller viewer)
+    (lambda () (%perform-viewer-stop viewer))
+    :thread-name "LUFT viewer quit")))
 
 (clim:define-command (com-start-moving :command-table luft-atelier
                                        :name "Start Moving")
@@ -932,11 +974,16 @@ the selector is the whole of the difference."
 
 (defun viewer-key-command (viewer event)
   "Return the named McCLIM command VIEWER binds to key EVENT, or NIL."
-  (when (or (viewer-pointer-captured-p viewer)
-            (eq :escape (canvas-key-event-key-name event)))
-    (multiple-value-bind (window atelier) (viewer-key-event-tables event)
-      (or (mcluv:canvas-key-event-command
-           viewer event :command-table window)
+  (multiple-value-bind (window atelier) (viewer-key-event-tables event)
+    ;; Window commands are global application controls: fullscreen, Tracy,
+    ;; quit, and pointer release remain available after Escape.  Unmodified
+    ;; atelier/gameplay commands still require captured input; modified tools
+    ;; such as M-x deliberately remain global as well.
+    (or (mcluv:canvas-key-event-command
+         viewer event :command-table window)
+        (when (or (viewer-pointer-captured-p viewer)
+                  (intersection '(:control :meta :super)
+                                (canvas-key-event-modifiers event)))
           (mcluv:canvas-key-event-command
            viewer event :command-table atelier)))))
 
@@ -1044,10 +1091,13 @@ the uniform fallback."
            :presentation-api (sdl-presentation-api-for provider)))
         (device nil)
         (renderer nil)
+        (viewer-state nil)
+        (renderer-source-values nil)
+        (renderer-source-revision 0)
         (production-system nil)
         (completed-p nil))
     (open-canvas canvas)
-    (unwind-protect
+    (unwind-protect-releasing
          (let* ((device*
                   (setf device
                         (request-gpu-device
@@ -1061,34 +1111,46 @@ the uniform fallback."
                     :device device*
                     :usage '(:render-attachment :copy-src))))
                 (renderer*
-                  (setf renderer
-                        (make-renderer
-                         device* (canvas-format context)
-                         (canvas-extent context))))
+                  (multiple-value-bind
+                      (created source-values before after)
+                      (make-tracked-renderer
+                       device* (canvas-format context) (canvas-extent context))
+                    ;; If source moved during construction, BEFORE deliberately
+                    ;; remains the installed attempt: the first frame sees the
+                    ;; newer AFTER revision and transactionally rebuilds.
+                    (declare (ignore after))
+                    (setf renderer created
+                          renderer-source-values source-values
+                          renderer-source-revision before)
+                    created))
                 (port (clim:find-port :server-path '(:luv-gpu)))
                 (manager
                   (or (first (clim-internals::frame-managers port))
                       (make-instance 'mcluv:luv-frame-manager :port port)))
                 (viewer
-                  (let ((mcluv:*embedded-mirror-target* canvas)
-                        (mcluv:*embedded-mirror-context* context)
-                        (mcluv:*embedded-mirror-device* device*))
-                    (when (typep solid 'streaming-scene)
-                      (setf production-system
-                            (production:make-single-worker-production-system
-                             :name "LUFT mesh producer")))
-                    (clim:make-application-frame
-                     'viewer :frame-manager manager :enable t
-                             :canvas canvas :context context
-                             :device device* :renderer renderer*
-                             :production-system production-system
-                             :camera camera :source solid
-                             :player (and (typep solid 'scene)
-                                          (scene-player-p solid)
-                                          (make-walking-player))
-                             :bevel-width bevel-width
-                             :bevel-profile bevel-profile
-                             :inspector-p inspector-p))))
+                  (setf viewer-state
+                        (let ((mcluv:*embedded-mirror-target* canvas)
+                              (mcluv:*embedded-mirror-context* context)
+                              (mcluv:*embedded-mirror-device* device*))
+                          (when (typep solid 'streaming-scene)
+                            (setf production-system
+                                  (production:make-single-worker-production-system
+                                   :name "LUFT mesh producer")))
+                          (clim:make-application-frame
+                           'viewer :frame-manager manager :enable t
+                                   :canvas canvas :context context
+                                   :device device* :renderer renderer*
+                                   :stop-controller
+                                   (make-canvas-stop-controller
+                                    canvas :name "LUFT viewer")
+                                   :production-system production-system
+                                   :camera camera :source solid
+                                   :player (and (typep solid 'scene)
+                                                (scene-player-p solid)
+                                                (make-walking-player))
+                                   :bevel-width bevel-width
+                                   :bevel-profile bevel-profile
+                                   :inspector-p inspector-p)))))
            (unless (typep solid 'streaming-scene)
              (if bevel-profile
                  (renderer-set-meshes
@@ -1096,6 +1158,8 @@ the uniform fallback."
                  (renderer-set-mesh renderer* 0
                                     (make-render-mesh
                                      solid :bevel-width bevel-width))))
+           (attach-viewer-live-artifact
+            viewer renderer-source-values renderer-source-revision)
            (setf (canvas-event-handler canvas) viewer)
            (when inspector-p
              (refresh-viewer-inspector viewer)
@@ -1108,6 +1172,11 @@ the uniform fallback."
                ;; Realization painted before the compositor existed; publish
                ;; only the inspector pane for direct final-pass replay.
                (refresh-viewer-inspector viewer)))
+           ;; The radio is application infrastructure and remains active while
+           ;; its old detailed panel is hidden.  The compact shared status line
+           ;; is the default visible representation.
+           (attach-viewer-lobby viewer)
+           (open-viewer-status-bar viewer)
            (request-canvas-frame
             canvas (lambda (timestamp) (render-viewer-frame viewer timestamp)))
            (show-canvas canvas)
@@ -1121,74 +1190,85 @@ the uniform fallback."
                  completed-p t)
            viewer)
       (unless completed-p
+        (when viewer-state
+          (releasing :instruments
+            (release-viewer-instruments viewer-state)))
         (when production-system
-          (production:stop-production-system production-system))
-        (when renderer (destroy-renderer renderer))
-        (when (eq :open (canvas-state canvas)) (close-canvas canvas))
-        (when device (ignore-errors (destroy device)))))))
+          (releasing :production-system
+            (production:stop-production-system production-system)))
+        (if (and viewer-state (viewer-live-artifact viewer-state))
+            (releasing :renderer-artifact
+              (release-viewer-live-artifact viewer-state))
+            (when renderer
+              (releasing :renderer (destroy-renderer renderer))))
+        (when (eq :open (canvas-state canvas))
+          (releasing :canvas (close-canvas canvas)))
+        (when device (releasing :device (destroy device)))))))
+
+(defmethod luv:capture-canvas ((viewer viewer))
+  (viewer-canvas viewer))
+
+(defmethod luv:prepare-capture
+    ((viewer viewer) (capture luv:application-capture))
+  (when (eq :film (luv:capture-kind capture))
+    (setf (luv:capture-client-state capture)
+          (list :running-p (viewer-running-p viewer))
+          (viewer-running-p viewer) nil))
+  viewer)
+
+(defmethod luv:advance-capture-frame
+    ((viewer viewer) (capture luv:application-capture) frame-index)
+  (declare (ignore capture frame-index))
+  (advance-viewer-streaming viewer))
+
+(defmethod luv:encode-capture-frame
+    ((viewer viewer) (capture luv:application-capture)
+     encoder target extent)
+  (encode-viewer-frame
+   viewer encoder target extent
+   :inspector-p
+   (luv:capture-option
+    capture :inspector-p
+    (and (eq :screenshot (luv:capture-kind capture))
+         (viewer-inspector-p viewer)))))
+
+(defmethod luv:cleanup-capture
+    ((viewer viewer) (capture luv:application-capture))
+  (let ((target (luv:capture-target capture))
+        (canvas (viewer-canvas viewer))
+        (saved-state (luv:capture-client-state capture)))
+    (unwind-protect
+         (when (and target (eq :open (canvas-state canvas)))
+           (request-canvas-frame
+            canvas
+            (lambda (timestamp)
+              (declare (ignore timestamp))
+              ;; The shared target is still alive.  Evict only its cached
+              ;; view; normal drawable views remain warm.
+              (release-viewer-surface-view viewer target))))
+      (when (and (eq :film (luv:capture-kind capture)) saved-state)
+        ;; Test and publication share the capture gate lock.  If cleanup wins,
+        ;; a following stop request writes NIL afterward; if shutdown wins,
+        ;; cleanup cannot resurrect a terminal viewer.
+        (call-if-application-captures-open
+         viewer
+         (lambda ()
+           (setf (viewer-running-p viewer)
+                 (getf saved-state :running-p)))))))
+  (values))
 
 (defun capture-viewer-frame
     (pathname &optional (viewer *viewer*)
      &key (inspector-p (viewer-inspector-p viewer)))
-  "Render one VIEWER frame on its canvas thread and write it to PATHNAME.
+  "Render one native-resolution VIEWER frame offscreen into PATHNAME.
 
 INSPECTOR-P defaults to VIEWER's inspector setting.  A source-defined
 evidence capture may override it when the subject is the geometry rather than
 the atelier UI."
-  (let* ((context (viewer-context viewer))
-         (extent (canvas-extent context))
-         (pathname (merge-pathnames pathname))
-         (buffer
-           (create (viewer-device viewer)
-                   (make-buffer-descriptor
-                    :label "luft capture readback"
-                    :size (* 4 (first extent) (second extent))
-                    :usage '(:copy-dst)))))
-    (unwind-protect
-         (progn
-           (luv::call-on-sdl-canvas-thread
-            (viewer-canvas viewer)
-            (lambda ()
-              (present-canvas-frame
-               context
-               (lambda (surface-texture encoder presentation-time)
-                 (declare (ignore presentation-time))
-                 (encode-viewer-frame
-                  viewer encoder surface-texture extent
-                  :inspector-p inspector-p)
-                 (encode encoder
-                         (make-gpu-copy-texture-to-buffer-command
-                          :source surface-texture :destination buffer))))))
-           (ensure-directories-exist pathname)
-           (write-rgba-png pathname (read-buffer buffer)
-                           (first extent) (second extent)
-                           (canvas-format context)))
-      (destroy buffer))))
-
-(defun render-viewer-film-frame (viewer texture buffer extent)
-  "Render VIEWER once into TEXTURE on its canvas thread; return the pixels."
-  (let ((device (viewer-device viewer)))
-    (luv::call-on-sdl-canvas-thread
-     (viewer-canvas viewer)
-     (lambda ()
-       (let ((encoder nil)
-             (commands nil))
-         (unwind-protect
-              (progn
-                (setf encoder
-                      (create device
-                              (make-command-encoder-descriptor
-                               :label "LUFT film frame")))
-                (encode-viewer-frame
-                 viewer encoder texture extent :inspector-p nil)
-                (encode encoder
-                        (make-gpu-copy-texture-to-buffer-command
-                         :source texture :destination buffer))
-                (setf commands (finish encoder))
-                (submit (device-queue device) commands))
-           (when commands (destroy commands))
-           (when encoder (destroy encoder))))))
-    (read-buffer buffer)))
+  (luv:capture-application-screenshot
+   viewer (merge-pathnames pathname)
+   :label "LUFT screenshot"
+   :options (list :inspector-p inspector-p)))
 
 (defun film-viewer (viewer pathname
                     &key (seconds 8) (frame-rate 30) before-frame)
@@ -1197,60 +1277,18 @@ the atelier UI."
 BEFORE-FRAME, when supplied, receives the frame index before streaming and
 rendering that frame.  Recording is paced in real time so asynchronous chunk
 production gets the same opportunity to publish as it does in the window."
-  (unless (eq :open (canvas-state (viewer-canvas viewer)))
-    (error "Cannot film a closed LUFT viewer."))
-  (let* ((context (viewer-context viewer))
-         (extent (canvas-extent context))
-         (width (first extent))
-         (height (second extent))
-         (device (viewer-device viewer))
-         (frame-count (max 1 (round (* seconds frame-rate))))
-         (frame-interval (/ 1.0d0 frame-rate))
-         (was-running-p (viewer-running-p viewer))
-         (texture
-           (create device
-                   (make-texture-descriptor
-                    :label "LUFT film target"
-                    :size extent :dimensions :2d
-                    :format (canvas-format context)
-                    :usage '(:render-attachment :copy-src :copy-dst))))
-         (buffer
-           (create device
-                   (make-buffer-descriptor
-                    :label "LUFT film readback"
-                    :size (* 4 width height)
-                    :usage '(:copy-dst)))))
-    (unwind-protect
-         (progn
-           (setf (viewer-running-p viewer) nil)
-           (luv:with-video-encoder
-               (write-frame pathname width height
-                :frame-rate frame-rate :format (canvas-format context))
-             (let ((start (/ (get-internal-real-time)
-                             (float internal-time-units-per-second 1.0d0))))
-               (dotimes (frame frame-count)
-                 (when before-frame (funcall before-frame frame))
-                 (advance-viewer-streaming viewer)
-                 (write-frame
-                  (render-viewer-film-frame viewer texture buffer extent))
-                 (when (zerop (mod frame frame-rate))
-                   (format t "LUFT film: frame ~D / ~D~%" frame frame-count)
-                   (force-output))
-                 (let ((wait
-                         (- (+ start (* (1+ frame) frame-interval))
-                            (/ (get-internal-real-time)
-                               (float internal-time-units-per-second
-                                      1.0d0)))))
-                   (when (plusp wait) (sleep wait)))))))
-      ;; The film texture has a cached view alongside swapchain views.  Release
-      ;; all of them while the texture is still alive; presentation recreates
-      ;; its borrowed views lazily on the next window frame.
-      (luv::call-on-sdl-canvas-thread
-       (viewer-canvas viewer)
-       (lambda () (release-viewer-surface-views viewer)))
-      (destroy buffer)
-      (destroy texture)
-      (setf (viewer-running-p viewer) was-running-p))))
+  (luv:capture-application-film
+   viewer pathname
+   :seconds seconds
+   :frame-rate frame-rate
+   :before-frame before-frame
+   :progress-function
+   (lambda (frame frame-count)
+     (when (zerop (mod frame frame-rate))
+       (format t "LUFT film: frame ~D / ~D~%" frame frame-count)
+       (force-output)))
+   :label "LUFT film"
+   :options '(:inspector-p nil)))
 
 (defun refresh-viewer-renderer (&optional (viewer *viewer*)
                                 &key (solid (make-mountain-sanctuary-scene))
@@ -1272,16 +1310,28 @@ production gets the same opportunity to publish as it does in the window."
               (old (viewer-renderer viewer))
               (old-production-system (viewer-production-system viewer))
               (candidate-renderer nil)
+              (candidate-source-values nil)
+              (candidate-source-revision 0)
               (production-system nil)
               (was-running-p (viewer-running-p viewer)))
          (setf (viewer-running-p viewer) nil)
          (unwind-protect
               (handler-case
                   (let ((renderer
-                          (setf candidate-renderer
-                                (make-renderer (viewer-device viewer)
-                                               (canvas-format context)
-                                               (canvas-extent context)))))
+                          (multiple-value-bind
+                              (created source-values before after)
+                              (make-tracked-renderer
+                               (viewer-device viewer)
+                               (canvas-format context)
+                               (canvas-extent context))
+                            (unless (= before after)
+                              (when created (destroy-renderer created))
+                              (error 'renderer-source-changed-during-build
+                                     :before before :after after))
+                            (setf candidate-renderer created
+                                  candidate-source-values source-values
+                                  candidate-source-revision before)
+                            created)))
                     (cond
                       ((typep solid 'streaming-scene)
                        (setf production-system
@@ -1305,7 +1355,10 @@ production gets the same opportunity to publish as it does in the window."
                           (viewer-bevel-width viewer) bevel-width
                           (viewer-bevel-profile viewer) bevel-profile
                           (viewer-inspection viewer) nil
-                          candidate-renderer nil))
+                          candidate-renderer nil)
+                    (note-viewer-renderer-replacement
+                     viewer candidate-source-values
+                     candidate-source-revision))
                 (error (condition)
                   (when candidate-renderer
                     (destroy-renderer candidate-renderer))
@@ -1318,123 +1371,73 @@ production gets the same opportunity to publish as it does in the window."
          (when old (destroy-renderer old))))))
   (values))
 
-(defun %refresh-viewer-shaders (viewer)
-  "Transactionally recompile VIEWER's shader pipelines, retaining its meshes.
-
-A failed edit leaves the last good renderer installed and records the
-condition in VIEWER-SHADER-DIAGNOSTIC.  Successful publication retires the old
-GPU cohort only after the complete candidate exists."
-  (let* ((old (viewer-renderer viewer))
-         (candidate nil)
-         (completed-p nil))
-    (unwind-protect
-         (progn
-             (setf candidate
-                   (make-renderer (viewer-device viewer)
-                                  (canvas-format (viewer-context viewer))
-                                  (canvas-extent (viewer-context viewer))))
-             (dolist (key (renderer-slot-order old))
-               (renderer-set-mesh
-                candidate key
-                (mesh-slot-prepared-mesh
-                 (gethash key (renderer-mesh-slots old)))))
-             (setf (viewer-renderer viewer) candidate
-                   (viewer-shader-diagnostic viewer) nil
-                   candidate nil
-                   completed-p t)
-             (destroy-renderer old))
-      (unless completed-p
-        (when candidate (destroy-renderer candidate)))))
-  (values))
-
 (defun refresh-viewer-shaders (&optional (viewer *viewer*))
-  "Recompile VIEWER's shaders on its canvas thread."
+  "Force a complete renderer-cohort rebuild on VIEWER's canvas thread."
   (when viewer
     (luv::call-on-sdl-canvas-thread
      (viewer-canvas viewer)
-     (lambda () (%refresh-viewer-shaders viewer))))
+     (lambda () (force-viewer-live-artifact-refresh viewer))))
+  (values))
+
+(defun %perform-viewer-stop (viewer)
+  "Release VIEWER after its stop controller granted this caller ownership."
+  ;; A native request only closed admission.  This sole off-canvas owner waits
+  ;; for the active capture to encode and evict its surface view before any
+  ;; renderer, canvas, or device release can begin.
+  (quiesce-application-captures viewer)
+  (setf (viewer-running-p viewer) nil)
+  (let ((canvas (viewer-canvas viewer)))
+    (unwind-protect-releasing
+        (with-release-report
+          (releasing :controls (clear-viewer-controls viewer))
+          (when (member (canvas-state canvas) '(:opening :open))
+            (releasing :clock
+              (setf (canvas-clock canvas) (make-demand-clock)))
+            (when (viewer-pointer-captured-p viewer)
+              (releasing :pointer-capture
+                (set-canvas-relative-pointer-mode canvas nil)
+                (setf (viewer-pointer-captured-p viewer) nil)))
+            (releasing :canvas-quiescence
+              ;; A synchronous no-op after changing the clock is the frame
+              ;; boundary: no encoder still borrows application resources.
+              (request-canvas-frame
+               canvas (lambda (timestamp) (declare (ignore timestamp))))))
+          (releasing :event-handler
+            (setf (canvas-event-handler canvas) nil))
+          (releasing :instruments (release-viewer-instruments viewer))
+          (when (viewer-production-system viewer)
+            (releasing :production-system
+              (production:stop-production-system
+               (viewer-production-system viewer))
+              (setf (viewer-production-system viewer) nil)))
+          (releasing :surface-views (release-viewer-surface-views viewer))
+          ;; The live artifact is the renderer cohort's sole owner.  It
+          ;; detaches the renderer before native retirement and makes release
+          ;; terminal even when the backend reports a retirement failure.
+          (releasing :renderer-artifact
+            (release-viewer-live-artifact viewer))
+          (unless (eq :disowned (clim:frame-state viewer))
+            (releasing :inspector-frame (clim:destroy-frame viewer)))
+          ;; Native window and GPU device are deliberately the final handles.
+          (when (member (canvas-state canvas) '(:opening :open))
+            (releasing :canvas (close-canvas canvas)))
+          (when (viewer-device viewer)
+            (releasing :device (destroy (viewer-device viewer)))))
+      (releasing :viewer-publication
+        (when (eq viewer *viewer*) (setf *viewer* nil)))))
   (values))
 
 (defun stop-viewer (&optional (viewer *viewer*))
-  "Quiesce VIEWER, release its renderer, then close its canvas and device.
+  "Stop VIEWER exactly once and publish one result to every caller.
 
-The first caller owns teardown. Concurrent callers wait for that teardown to
-finish, which makes native close, Control-Q, the standalone unwind cleanup,
-and an interactive STOP-VIEWER the same idempotent application operation."
+Native canvas-thread handlers use REQUEST-VIEWER-QUIT instead: a synchronous
+  owner or waiter is rejected there because teardown crosses a frame boundary."
   (when viewer
-    (let ((owner-p nil))
-      (sb-thread:with-mutex ((viewer-stop-lock viewer))
-        (case (viewer-stop-state viewer)
-          (:running
-           (setf (viewer-stop-state viewer) :stopping
-                 (viewer-running-p viewer) nil
-                 owner-p t))
-          (:stopping
-           (loop while (eq :stopping (viewer-stop-state viewer))
-                 do (sb-thread:condition-wait
-                     (viewer-stop-ready viewer) (viewer-stop-lock viewer))))))
-      (when owner-p
-        (let ((errors nil)
-              (canvas (viewer-canvas viewer)))
-          (labels ((release (part function)
-                     (handler-case (funcall function)
-                       (error (condition)
-                         (push (cons part condition) errors)))))
-            (unwind-protect
-                 (progn
-                   (clear-viewer-controls viewer)
-                   (when (member (canvas-state canvas) '(:opening :open))
-                     (release :clock
-                              (lambda ()
-                                (setf (canvas-clock canvas)
-                                      (make-demand-clock))))
-                     (when (viewer-pointer-captured-p viewer)
-                       (release :pointer-capture
-                                (lambda ()
-                                  (set-canvas-relative-pointer-mode
-                                   canvas nil)))
-                       (setf (viewer-pointer-captured-p viewer) nil))
-                     ;; The synchronous no-op is the owner-thread barrier: no
-                     ;; already-running frame can still hold renderer state.
-                     (release :canvas-quiescence
-                              (lambda ()
-                                (request-canvas-frame
-                                 canvas
-                                 (lambda (timestamp)
-                                   (declare (ignore timestamp)))))))
-                   (setf (canvas-event-handler canvas) nil)
-                   (when (viewer-production-system viewer)
-                     (release :production-system
-                              (lambda ()
-                                (production:stop-production-system
-                                 (viewer-production-system viewer))))
-                     (setf (viewer-production-system viewer) nil))
-                   (release :surface-views
-                            (lambda ()
-                              (release-viewer-surface-views viewer)))
-                   (when (viewer-renderer viewer)
-                     (release :renderer
-                              (lambda ()
-                                (destroy-renderer
-                                 (viewer-renderer viewer))))
-                     (setf (viewer-renderer viewer) nil))
-                   (unless (eq :disowned (clim:frame-state viewer))
-                     (release :inspector-frame
-                              (lambda () (clim:destroy-frame viewer))))
-                   (when (member (canvas-state canvas) '(:opening :open))
-                     (release :canvas (lambda () (close-canvas canvas))))
-                   (when (viewer-device viewer)
-                     (release :device
-                              (lambda () (destroy (viewer-device viewer))))))
-              (when (eq viewer *viewer*)
-                (setf *viewer* nil))
-              (sb-thread:with-mutex ((viewer-stop-lock viewer))
-                (setf (viewer-stop-state viewer) :stopped)
-                (sb-thread:condition-broadcast (viewer-stop-ready viewer))))
-            (when errors
-              (warn "LUFT viewer release failed in ~{~A~^, ~}: ~A"
-                    (mapcar #'car (reverse errors))
-                    (cdar errors))))))))
+    (request-application-capture-shutdown viewer)
+    (setf (viewer-running-p viewer) nil)
+    (call-with-stop-controller
+     (viewer-stop-controller viewer)
+     (lambda () (%perform-viewer-stop viewer))))
   (values))
 
 (defun run-standalone-viewer ()

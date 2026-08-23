@@ -2124,6 +2124,7 @@ unless ADD-P is false."
           (screen-run nil)
           (faceplate-run nil)
           (display nil)
+          (transferred-p nil)
           (completed-p nil))
       (unwind-protect
            (progn
@@ -2176,10 +2177,13 @@ unless ADD-P is false."
                (setf (slot-value display 'glyphs-by-character)
                      glyphs-by-character))
              (when add-p
+               ;; ADD consumes DISPLAY on either success or terminal
+               ;; rejection; the local resource variables no longer own it.
+               (setf transferred-p t)
                (add-luvcraft-overlay session display))
              (setf completed-p t)
              display)
-        (unless completed-p
+        (unless (or completed-p transferred-p)
           (when faceplate-run
             (ignore-errors (release-terminal-cell-run faceplate-run)))
           (when screen-run

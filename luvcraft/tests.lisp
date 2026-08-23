@@ -7,6 +7,246 @@
   (push command (recording-command-encoder-commands encoder))
   encoder)
 
+(defstruct (overlay-owner-request
+             (:constructor make-overlay-owner-request (function)))
+  function
+  (completion (sb-thread:make-semaphore :count 0) :read-only t)
+  values
+  condition)
+
+(defclass overlay-owner-canvas ()
+  ((state :initform :open :accessor overlay-owner-canvas-state)
+   (mailbox
+    :initform (sb-concurrency:make-mailbox
+               :name "Luvcraft overlay owner requests")
+    :reader overlay-owner-canvas-mailbox)
+   (thread :reader overlay-owner-canvas-thread)
+   (request-enqueued
+    :initform (sb-thread:make-semaphore :count 0)
+    :reader overlay-owner-canvas-request-enqueued)
+   (reject-requests-p
+    :initform nil :accessor overlay-owner-canvas-reject-requests-p)
+   (stopped
+    :initform (sb-thread:make-semaphore :count 0)
+    :reader overlay-owner-canvas-stopped)))
+
+(defun run-overlay-owner-canvas (canvas)
+  (unwind-protect
+       (loop for request = (sb-concurrency:receive-message
+                            (overlay-owner-canvas-mailbox canvas))
+             until (eq request :stop)
+             do (handler-case
+                    (setf (overlay-owner-request-values request)
+                          (multiple-value-list
+                           (funcall (overlay-owner-request-function request)
+                                    0.0d0)))
+                  (error (condition)
+                    (setf (overlay-owner-request-condition request)
+                          condition)))
+                (sb-thread:signal-semaphore
+                 (overlay-owner-request-completion request)))
+    (sb-thread:signal-semaphore (overlay-owner-canvas-stopped canvas))))
+
+(defmethod initialize-instance :after ((canvas overlay-owner-canvas) &key)
+  (setf (slot-value canvas 'thread)
+        (sb-thread:make-thread
+         (lambda () (run-overlay-owner-canvas canvas))
+         :name "Luvcraft overlay native owner")))
+
+(defmethod canvas-state ((canvas overlay-owner-canvas))
+  (overlay-owner-canvas-state canvas))
+
+(defmethod canvas-thread-p ((canvas overlay-owner-canvas))
+  (and (slot-boundp canvas 'thread)
+       (eq sb-thread:*current-thread* (overlay-owner-canvas-thread canvas))))
+
+(defmethod request-canvas-frame ((canvas overlay-owner-canvas) function)
+  (when (canvas-thread-p canvas)
+    (return-from request-canvas-frame (funcall function 0.0d0)))
+  (when (overlay-owner-canvas-reject-requests-p canvas)
+    (error "The overlay owner rejected the request before its callback."))
+  (unless (eq :open (overlay-owner-canvas-state canvas))
+    (error "The overlay owner canvas is not open."))
+  (let ((request (make-overlay-owner-request function)))
+    (sb-concurrency:send-message
+     (overlay-owner-canvas-mailbox canvas) request)
+    (sb-thread:signal-semaphore
+     (overlay-owner-canvas-request-enqueued canvas))
+    (unless (sb-thread:wait-on-semaphore
+             (overlay-owner-request-completion request) :timeout 2.0)
+      (error "The overlay owner did not service a frame request."))
+    (when (overlay-owner-request-condition request)
+      (error (overlay-owner-request-condition request)))
+    (values-list (overlay-owner-request-values request))))
+
+(defun close-overlay-owner-canvas (canvas)
+  (unless (eq :closed (overlay-owner-canvas-state canvas))
+    (setf (overlay-owner-canvas-state canvas) :closed)
+    (sb-concurrency:send-message
+     (overlay-owner-canvas-mailbox canvas) :stop)
+    (unless (sb-thread:wait-on-semaphore
+             (overlay-owner-canvas-stopped canvas) :timeout 2.0)
+      (error "The overlay owner did not stop."))
+    (sb-thread:join-thread (overlay-owner-canvas-thread canvas)))
+  canvas)
+
+(defun wait-for-overlay-owner-request (canvas)
+  (unless (sb-thread:wait-on-semaphore
+           (overlay-owner-canvas-request-enqueued canvas) :timeout 1.0)
+    (error "The expected overlay owner request was not enqueued.")))
+
+(defclass owned-overlay-probe ()
+  ((canvas :initarg :canvas :reader owned-overlay-canvas)
+   (release-count :initform 0 :accessor owned-overlay-release-count)
+   (released-on-owner-p :initform nil
+                        :accessor owned-overlay-released-on-owner-p)
+   (fail-release-p :initarg :fail-release-p :initform nil
+                   :reader owned-overlay-fail-release-p)))
+
+(defmethod release-luvcraft-overlay ((overlay owned-overlay-probe))
+  (setf (owned-overlay-released-on-owner-p overlay)
+        (canvas-thread-p (owned-overlay-canvas overlay)))
+  (incf (owned-overlay-release-count overlay))
+  (when (owned-overlay-fail-release-p overlay)
+    (error "Deliberate overlay release failure.")))
+
+(deftest stopped-luvcraft-sessions-consume-and-reject-late-overlays
+  (let* ((canvas (make-instance 'overlay-owner-canvas))
+         (session (make-instance 'luvcraft-session :canvas canvas))
+         (owned (make-instance 'owned-overlay-probe :canvas canvas))
+         (late (make-instance 'owned-overlay-probe
+                              :canvas canvas :fail-release-p t))
+         (condition nil))
+    (unwind-protect
+         (progn
+           (add-luvcraft-overlay session owned)
+           (add-luvcraft-overlay session owned)
+           (ok (= 1 (length (luvcraft-session-overlays session))))
+           (call-with-stop-controller
+            (luvcraft::luvcraft-session-stop-controller session)
+            (lambda () nil))
+           ;; A duplicate remains idempotent even if the closing native canvas
+           ;; would reject a callback before the attachment gate can inspect it.
+           (setf (overlay-owner-canvas-reject-requests-p canvas) t)
+           (ok (eq owned (add-luvcraft-overlay session owned)))
+           (ok (zerop (owned-overlay-release-count owned)))
+           (ok (= 1 (length (luvcraft-session-overlays session))))
+           (setf (overlay-owner-canvas-reject-requests-p canvas) nil)
+           ;; Removal remains legal after the terminal transition so teardown
+           ;; and constructor rollback never lose their release path.
+           (ok (eq owned (remove-luvcraft-overlay session owned)))
+           (handler-bind ((release-warning #'muffle-warning))
+             (handler-case (add-luvcraft-overlay session late)
+               (application-attachment-closed (failure)
+                 (setf condition failure))))
+           (ok (typep condition 'application-attachment-closed))
+           (ok (eq late
+                   (application-attachment-closed-attachment condition)))
+           (ok (eq :stopped
+                   (application-attachment-closed-state condition)))
+           (ok (= 1 (owned-overlay-release-count owned)))
+           ;; The rejected release failed deliberately, but ADD invoked it once
+           ;; and preserved the semantic rejection as the primary condition.
+           (ok (= 1 (owned-overlay-release-count late)))
+           (ok (owned-overlay-released-on-owner-p late))
+           (ok (null (luvcraft-session-overlays session))))
+      (close-overlay-owner-canvas canvas))))
+
+(deftest overlay-add-versus-stop-never-repopulates-the-terminal-registry
+  (dotimes (iteration 16)
+    (let* ((canvas (make-instance 'overlay-owner-canvas))
+           (session (make-instance 'luvcraft-session :canvas canvas))
+           (overlay (make-instance 'owned-overlay-probe :canvas canvas))
+           (start (sb-thread:make-semaphore :count 0))
+           (finished (sb-thread:make-semaphore :count 0))
+           (add-condition nil)
+           (stop-condition nil)
+           (add-thread nil)
+           (stop-thread nil))
+      (declare (ignore iteration))
+      (unwind-protect
+           (progn
+             (setf add-thread
+                   (sb-thread:make-thread
+                    (lambda ()
+                      (unwind-protect
+                           (progn
+                             (sb-thread:wait-on-semaphore start)
+                             (handler-case
+                                 (add-luvcraft-overlay session overlay)
+                               (error (failure)
+                                 (setf add-condition failure))))
+                        (sb-thread:signal-semaphore finished)))
+                    :name "Luvcraft racing overlay add")
+                   stop-thread
+                   (sb-thread:make-thread
+                    (lambda ()
+                      (unwind-protect
+                           (progn
+                             (sb-thread:wait-on-semaphore start)
+                             (handler-case
+                                 (call-with-stop-controller
+                                  (luvcraft::luvcraft-session-stop-controller
+                                   session)
+                                  (lambda ()
+                                    (dolist
+                                        (attached
+                                         (copy-list
+                                          (luvcraft-session-overlays session)))
+                                      (remove-luvcraft-overlay
+                                       session attached))))
+                               (error (failure)
+                                 (setf stop-condition failure))))
+                        (sb-thread:signal-semaphore finished)))
+                    :name "Luvcraft racing overlay stop"))
+             (sb-thread:signal-semaphore start)
+             (sb-thread:signal-semaphore start)
+             (unless (and (sb-thread:wait-on-semaphore finished :timeout 2.0)
+                          (sb-thread:wait-on-semaphore finished :timeout 2.0))
+               (error "The Luvcraft attachment race did not settle."))
+             (sb-thread:join-thread add-thread)
+             (setf add-thread nil)
+             (sb-thread:join-thread stop-thread)
+             (setf stop-thread nil)
+             (ok (null stop-condition))
+             (ok (or (null add-condition)
+                     (typep add-condition 'application-attachment-closed)))
+             (ok (eq :stopped
+                     (stop-controller-state
+                      (luvcraft::luvcraft-session-stop-controller session))))
+             (ok (null (luvcraft-session-overlays session)))
+             (ok (= 1 (owned-overlay-release-count overlay)))
+             (ok (owned-overlay-released-on-owner-p overlay)))
+        (sb-thread:signal-semaphore start)
+        (sb-thread:signal-semaphore start)
+        (when add-thread (sb-thread:join-thread add-thread))
+        (when stop-thread (sb-thread:join-thread stop-thread))
+        (dolist (attached (copy-list (luvcraft-session-overlays session)))
+          (ignore-errors (remove-luvcraft-overlay session attached)))
+        (close-overlay-owner-canvas canvas)))))
+
+(deftest tracy-controller-release-detaches-before-the-next-session
+  (let ((first
+          (luv.tracy.capture:make-tracy-capture-controller
+           :application-name "Luvcraft test"
+           :directory (uiop:temporary-directory)
+           :open-on-completion-p nil)))
+    (unwind-protect
+         (progn
+           (sb-thread:with-mutex
+               (luvcraft::*luvcraft-tracy-capture-controller-lock*)
+             (setf luvcraft::*luvcraft-tracy-capture-controller* first))
+           (ok (luvcraft:release-luvcraft-tracy-capture-controller))
+           (ok (null luvcraft::*luvcraft-tracy-capture-controller*))
+           (ok (luv.tracy.capture:tracy-capture-controller-released-p first))
+           (let ((second
+                   (luvcraft::ensure-luvcraft-tracy-capture-controller)))
+             (ok (not (eq first second)))
+             (ok (not
+                  (luv.tracy.capture:tracy-capture-controller-released-p
+                   second)))))
+      (luvcraft:release-luvcraft-tracy-capture-controller))))
+
 (defclass recording-chunk-window ()
   ((locations :initform nil :accessor recording-window-locations)))
 
@@ -75,6 +315,164 @@
     (ok (equal '(:left :entered) (recording-focus-transitions second)))
     (ok (not (dispatch-luvcraft-focus-event session nil event)))))
 
+(deftest off-thread-overlay-removal-waits-for-the-borrowing-frame
+  (let* ((canvas (make-instance 'overlay-owner-canvas))
+         (session (make-instance 'luvcraft-session :canvas canvas))
+         (overlay (make-instance 'owned-overlay-probe :canvas canvas))
+         (borrowed (sb-thread:make-semaphore :count 0))
+         (continue (sb-thread:make-semaphore :count 0))
+         (frame-finished (sb-thread:make-semaphore :count 0))
+         (remove-finished (sb-thread:make-semaphore :count 0))
+         (snapshot-kept-p nil)
+         (remove-result nil)
+         (frame-condition nil)
+         (remove-condition nil)
+         (frame-thread nil)
+         (remove-thread nil))
+    (unwind-protect
+         (progn
+           (add-luvcraft-overlay session overlay)
+           (wait-for-overlay-owner-request canvas)
+           (setf frame-thread
+                 (sb-thread:make-thread
+                  (lambda ()
+                    (handler-case
+                        (request-canvas-frame
+                         canvas
+                         (lambda (timestamp)
+                           (declare (ignore timestamp))
+                           (let ((snapshot
+                                   (copy-list
+                                    (luvcraft-session-overlays session))))
+                             (sb-thread:signal-semaphore borrowed)
+                             (unless (sb-thread:wait-on-semaphore
+                                      continue :timeout 1.0)
+                               (error "The borrowing frame was not released."))
+                             (setf snapshot-kept-p
+                                   (eq overlay (first snapshot))))))
+                      (error (condition)
+                        (setf frame-condition condition)))
+                    (sb-thread:signal-semaphore frame-finished))
+                  :name "Luvcraft borrowing frame"))
+           (wait-for-overlay-owner-request canvas)
+           (unless (sb-thread:wait-on-semaphore borrowed :timeout 1.0)
+             (error "The overlay frame did not borrow its snapshot."))
+           (setf remove-thread
+                 (sb-thread:make-thread
+                  (lambda ()
+                    (handler-case
+                        (setf remove-result
+                              (remove-luvcraft-overlay session overlay))
+                      (error (condition)
+                        (setf remove-condition condition)))
+                    (sb-thread:signal-semaphore remove-finished))
+                  :name "Luvcraft off-thread overlay removal"))
+           (wait-for-overlay-owner-request canvas)
+           (ok (not (sb-thread:wait-on-semaphore
+                     remove-finished :timeout 0.02))
+               "remove remains synchronous while the frame owns its snapshot")
+           (ok (zerop (owned-overlay-release-count overlay))
+               "the borrowed overlay has not been released")
+           (sb-thread:signal-semaphore continue)
+           (unless (sb-thread:wait-on-semaphore frame-finished :timeout 1.0)
+             (error "The borrowing frame did not finish."))
+           (unless (sb-thread:wait-on-semaphore remove-finished :timeout 1.0)
+             (error "The queued overlay removal did not finish."))
+           (sb-thread:join-thread frame-thread)
+           (setf frame-thread nil)
+           (sb-thread:join-thread remove-thread)
+           (setf remove-thread nil)
+           (ok (null frame-condition))
+           (ok (null remove-condition))
+           (ok snapshot-kept-p)
+           (ok (eq overlay remove-result))
+           (ok (= 1 (owned-overlay-release-count overlay)))
+           (ok (owned-overlay-released-on-owner-p overlay))
+           (ok (null (luvcraft-session-overlays session))))
+      (sb-thread:signal-semaphore continue)
+      (when frame-thread (sb-thread:join-thread frame-thread))
+      (when remove-thread (sb-thread:join-thread remove-thread))
+      (close-overlay-owner-canvas canvas))))
+
+(deftest mid-frame-overlay-fuse-detaches-without-releasing
+  (let* ((canvas (make-instance 'overlay-owner-canvas))
+         (session (make-instance 'luvcraft-session :canvas canvas))
+         (overlay (make-instance 'owned-overlay-probe :canvas canvas)))
+    (unwind-protect
+         (progn
+           (add-luvcraft-overlay session overlay)
+           (wait-for-overlay-owner-request canvas)
+           (request-canvas-frame
+            canvas
+            (lambda (timestamp)
+              (declare (ignore timestamp))
+              (remove-luvcraft-overlay session overlay :release-p nil)))
+           (wait-for-overlay-owner-request canvas)
+           (ok (zerop (owned-overlay-release-count overlay)))
+           (ok (null (luvcraft-session-overlays session))))
+      (close-overlay-owner-canvas canvas))))
+
+(deftest overlay-release-errors-return-through-the-frame-boundary
+  (let* ((canvas (make-instance 'overlay-owner-canvas))
+         (session (make-instance 'luvcraft-session :canvas canvas))
+         (overlay (make-instance 'owned-overlay-probe
+                                 :canvas canvas :fail-release-p t))
+         (condition nil))
+    (unwind-protect
+         (progn
+           (add-luvcraft-overlay session overlay)
+           (wait-for-overlay-owner-request canvas)
+           (handler-case
+               (remove-luvcraft-overlay session overlay)
+             (error (failure)
+               (setf condition failure)))
+           (wait-for-overlay-owner-request canvas)
+           (ok (typep condition 'error))
+           (ok (= 1 (owned-overlay-release-count overlay)))
+           (ok (owned-overlay-released-on-owner-p overlay))
+           (ok (null (luvcraft-session-overlays session))))
+      (close-overlay-owner-canvas canvas))))
+
+(deftest overlay-teardown-detaches-all-and-aggregates-release-failures
+  (let* ((canvas (make-instance 'overlay-owner-canvas))
+         (session (make-instance 'luvcraft-session :canvas canvas))
+         (first (make-instance 'owned-overlay-probe
+                               :canvas canvas :fail-release-p t))
+         (second (make-instance 'owned-overlay-probe :canvas canvas))
+         (third (make-instance 'owned-overlay-probe
+                               :canvas canvas :fail-release-p t))
+         (condition nil))
+    (unwind-protect
+         (progn
+           (dolist (overlay (list first second third))
+             (add-luvcraft-overlay session overlay)
+             (wait-for-overlay-owner-request canvas))
+           (handler-case
+               (with-release-report
+                 ;; This is the application teardown policy: keep the release
+                 ;; report on its owner thread while each individual release
+                 ;; crosses, synchronously, to the native canvas owner.
+                 (dolist (overlay
+                           (copy-list (luvcraft-session-overlays session)))
+                   (releasing :overlay
+                     (remove-luvcraft-overlay session overlay))))
+             (release-error (failure)
+               (setf condition failure)))
+           (loop repeat 3
+                 do (wait-for-overlay-owner-request canvas))
+           (ok (typep condition 'release-error))
+           (ok (= 2 (length (release-error-failures condition))))
+           (ok (every (lambda (failure)
+                        (eq :overlay (release-failure-name failure)))
+                      (release-error-failures condition)))
+           (ok (every (lambda (overlay)
+                        (= 1 (owned-overlay-release-count overlay)))
+                      (list first second third)))
+           (ok (every #'owned-overlay-released-on-owner-p
+                      (list first second third)))
+           (ok (null (luvcraft-session-overlays session))))
+      (close-overlay-owner-canvas canvas))))
+
 (defclass recording-pointer-canvas ()
   ((relative-p :initform nil :accessor recording-canvas-relative-p)))
 
@@ -136,6 +534,8 @@
             (handle-canvas-event session nil event)))
     (ok (eq :defer-canvas-close
             (handle-canvas-event session nil event)))
+    (luv:wait-for-controlled-stop
+     (luvcraft::luvcraft-session-stop-controller session))
     (ok (= 1 calls))
     (ok (not (luvcraft-session-running-p session)))))
 

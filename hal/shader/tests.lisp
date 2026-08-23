@@ -324,6 +324,24 @@
               '((set-output result (redefinable-shader-function left))))
              'shader:shader-language-error))))))
 
+(deftest top-level-shader-redefinition-advances-the-live-source-revision
+  (flet ((definition (macro name red)
+           `(,macro ,name
+                (:stage :fragment
+                 :outputs ((color :vec4 :location 0)))
+              (set-output color (vec4 ,red 0.0 0.0 1.0)))))
+    (dolist (case '((shader:define-shader
+                     revision-static-stage-probe)
+                    (shader:define-live-shader
+                     revision-live-stage-probe)))
+      (destructuring-bind (macro name) case
+        (let ((before (shader:shader-source-revision)))
+          (eval (definition macro name 0.25))
+          (let ((first (shader:shader-source-revision)))
+            (ok (> first before))
+            (eval (definition macro name 0.75))
+            (ok (> (shader:shader-source-revision) first))))))))
+
 (deftest shader-source-name-can-migrate-from-rewriter-to-typed-function
   (eval
    '(shader:define-shader-abstraction source-kind-migration-probe (value)

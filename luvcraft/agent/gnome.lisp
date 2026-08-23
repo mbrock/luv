@@ -106,6 +106,20 @@ GPU medium spells as a fully transparent fill.")
                      :documentation
                      "The one possible-world tool effect awaiting the player.")
    (agent :initform nil :accessor gnome-agent)
+   (agent-lock :initform
+               (sb-thread:make-mutex :name "embodied agent provider")
+               :reader embodied-agent-agent-lock)
+   (agent-ready :initform
+                (sb-thread:make-waitqueue :name "embodied agent provider ready")
+                :reader embodied-agent-agent-ready)
+   (agent-opening-owner :initform nil
+                        :accessor embodied-agent-agent-opening-owner)
+   (agent-opening-thread :initform nil
+                         :accessor embodied-agent-agent-opening-thread)
+   (pending-agent-prompts :initform '()
+                          :accessor embodied-agent-pending-agent-prompts)
+   (agent-released-p :initform nil
+                     :accessor embodied-agent-agent-released-p)
    (body :initform nil :accessor gnome-body)
    (bubbles :initform '() :accessor gnome-bubbles
             :documentation "Bubble overlays, newest first.")
@@ -146,7 +160,18 @@ GPU medium spells as a fully transparent fill.")
   (:documentation "How far away the focused camera stands from AGENT."))
 
 (defgeneric ensure-embodied-agent-agent (agent)
-  (:documentation "Return AGENT's WORLD-AGENT, creating it when necessary."))
+  (:documentation
+   "Return AGENT's WORLD-AGENT, opening it synchronously when necessary.
+
+This setup operation may perform network I/O and must not run on the canvas
+thread.  Gnome interaction uses Gnome-Ask's asynchronous first-contact path."))
+
+(defgeneric open-embodied-agent-agent (agent)
+  (:documentation
+   "Perform the blocking provider setup for AGENT and return a fresh WORLD-AGENT.
+
+Methods construct candidates only.  The common opening protocol installs one
+winner, attaches its observer, and releases candidates that lose to teardown."))
 
 (defgeneric ensure-embodied-agent-body (agent)
   (:documentation "Return AGENT's render body, creating it when necessary."))
@@ -400,9 +425,30 @@ leave room above its hat for the bubbles."
   gnome)
 
 (defun gnome-ask (gnome text)
-  (let ((agent (or (gnome-agent gnome)
-                   (ensure-embodied-agent-agent gnome))))
-    (ask text :agent agent)))
+  "Start TEXT now, or queue it behind one asynchronous provider opening.
+
+In particular, first contact never performs DNS, TLS, or a WebSocket handshake
+on the canvas thread.  It returns GNOME while opening, and a TURN when the
+provider was already installed."
+  (check-type text string)
+  (multiple-value-bind (agent opening-owner)
+      (sb-thread:with-mutex ((embodied-agent-agent-lock gnome))
+        (when (embodied-agent-agent-released-p gnome)
+          (error "~A has left the world." (embodied-agent-name gnome)))
+        (cond ((gnome-agent gnome)
+               (values (gnome-agent gnome) nil))
+              (t
+               (push text (embodied-agent-pending-agent-prompts gnome))
+               (if (embodied-agent-agent-opening-owner gnome)
+                   (values nil nil)
+                   (let ((owner (list :opening gnome)))
+                     (setf (embodied-agent-agent-opening-owner gnome) owner)
+                     (values nil owner))))))
+    (cond (agent (ask text :agent agent))
+          (opening-owner
+           (start-embodied-agent-opening gnome opening-owner)
+           gnome)
+          (t gnome))))
 
 (defmethod luvcraft:handle-luvcraft-focus-event
     ((gnome embodied-agent) session canvas (event luv:canvas-key-press-event))
@@ -478,19 +524,13 @@ one back to describe-handle to read more.")
     com-move-to com-block-at com-place-block-at com-propose-block-box
     com-describe-handle com-eval))
 
-(defmethod ensure-embodied-agent-agent ((gnome gnome))
-  (or (gnome-agent gnome)
-      (let ((agent (make-world-agent
-                    :session (gnome-session gnome)
-                    :commands *gnome-tools*
-                    :instructions (format nil "~A~%~%You stand at x=~D y=~D z=~D."
-                                          *gnome-instructions*
-                                          (gnome-x gnome) (gnome-y gnome) (gnome-z gnome)))))
-        (setf (world-agent-presence agent) gnome
-              (gnome-observer gnome) (make-gnome-observer gnome)
-              (gnome-agent gnome) agent)
-        (add-agent-observer agent (gnome-observer gnome))
-        agent)))
+(defmethod open-embodied-agent-agent ((gnome gnome))
+  (make-world-agent
+   :session (gnome-session gnome)
+   :commands *gnome-tools*
+   :instructions (format nil "~A~%~%You stand at x=~D y=~D z=~D."
+                         *gnome-instructions*
+                         (gnome-x gnome) (gnome-y gnome) (gnome-z gnome))))
 
 (defun ensure-gnome-agent (gnome)
   "Compatibility name for ENSURE-EMBODIED-AGENT-AGENT."
@@ -516,6 +556,184 @@ one back to describe-handle to read more.")
 
 (defun gnome-note (gnome note)
   (sb-concurrency:send-message (gnome-notes gnome) note))
+
+(defun note-embodied-agent-failure (agent condition &optional (context "Agent"))
+  "Publish CONDITION for the next canvas refresh, unless AGENT was released."
+  (let ((publish-p
+          (sb-thread:with-mutex ((embodied-agent-agent-lock agent))
+            (not (embodied-agent-agent-released-p agent)))))
+    (when publish-p
+      (gnome-note agent
+                  (list :agent-failed
+                        (format nil "~A: ~A" context condition))))))
+
+(defun release-uninstalled-world-agent (presence agent observer)
+  "Release a provider candidate that was never published on PRESENCE."
+  (when observer
+    (ignore-errors (remove-agent-observer agent observer)))
+  (when (eq *agent* agent)
+    (setf *agent* (gnome-agent presence)))
+  (ignore-errors (release-application-agent agent))
+  nil)
+
+(defun finish-embodied-agent-opening-failure (presence owner condition)
+  "Relinquish OWNER and queue one canvas-safe failure for its pending prompts."
+  (let ((publish-p nil))
+    (sb-thread:with-mutex ((embodied-agent-agent-lock presence))
+      (when (eq owner (embodied-agent-agent-opening-owner presence))
+        (setf publish-p
+              (and (embodied-agent-pending-agent-prompts presence)
+                   (not (embodied-agent-agent-released-p presence)))
+              (embodied-agent-pending-agent-prompts presence) '()
+              (embodied-agent-agent-opening-owner presence) nil
+              (embodied-agent-agent-opening-thread presence) nil)
+        (sb-thread:condition-broadcast
+         (embodied-agent-agent-ready presence))))
+    (when publish-p
+      (note-embodied-agent-failure presence condition "Could not open agent"))))
+
+(defun publish-opened-embodied-agent (presence owner candidate)
+  "Install CANDIDATE iff OWNER still owns PRESENCE's opening.
+
+Return the installed provider and the pending prompts in arrival order.  A
+candidate that loses to release or another publication is detached and closed."
+  (let ((observer nil)
+        (installed nil)
+        (prompts '()))
+    (unwind-protect
+         (progn
+           ;; Keep validation inside the cleanup extent: a buggy opener can
+           ;; still have returned a live provider object of the wrong class.
+           (check-type candidate world-agent)
+           (setf (world-agent-presence candidate) presence
+                 observer (make-gnome-observer presence))
+           (add-agent-observer candidate observer)
+           (sb-thread:with-mutex ((embodied-agent-agent-lock presence))
+             (when (and (eq owner
+                            (embodied-agent-agent-opening-owner presence))
+                        (not (embodied-agent-agent-released-p presence)))
+               (cond ((gnome-agent presence)
+                      (setf installed (gnome-agent presence)))
+                     (t
+                      (setf installed candidate
+                            (gnome-agent presence) candidate
+                            (gnome-observer presence) observer)))
+               (setf prompts
+                     (nreverse
+                      (embodied-agent-pending-agent-prompts presence))
+                     (embodied-agent-pending-agent-prompts presence) '()
+                     (embodied-agent-agent-opening-owner presence) nil
+                     (embodied-agent-agent-opening-thread presence) nil)
+               (sb-thread:condition-broadcast
+                (embodied-agent-agent-ready presence))))
+           (values installed prompts))
+      (unless (eq installed candidate)
+        (release-uninstalled-world-agent presence candidate observer)))))
+
+(defun submit-embodied-agent-prompts (presence provider prompts)
+  "Submit PROMPTS without letting one worker-creation failure lose the rest."
+  (dolist (prompt prompts)
+    (handler-case (ask prompt :agent provider)
+      (error (condition)
+        (note-embodied-agent-failure presence condition
+                                     "Could not start agent turn"))))
+  provider)
+
+(defun run-embodied-agent-opening (presence owner)
+  "Blocking body of the provider-opening worker owned by OWNER."
+  (handler-case
+      (let ((candidate (open-embodied-agent-agent presence)))
+        (unless candidate
+          (error "The provider opener returned NIL."))
+        (multiple-value-bind (provider prompts)
+            (publish-opened-embodied-agent presence owner candidate)
+          (when provider
+            (submit-embodied-agent-prompts presence provider prompts))))
+    (error (condition)
+      (finish-embodied-agent-opening-failure presence owner condition))))
+
+(defun embodied-agent-opening-thread-name (presence)
+  (format nil "Luvcraft ~:(~A~) agent opening"
+          (embodied-agent-name presence)))
+
+(defun start-embodied-agent-opening (presence owner)
+  "Start OWNER's named connection worker and return immediately."
+  (handler-case
+      (let ((thread
+              (sb-thread:make-thread
+               (lambda () (run-embodied-agent-opening presence owner))
+               :name (embodied-agent-opening-thread-name presence))))
+        (sb-thread:with-mutex ((embodied-agent-agent-lock presence))
+          (when (eq owner (embodied-agent-agent-opening-owner presence))
+            (setf (embodied-agent-agent-opening-thread presence) thread)))
+        thread)
+    (error (condition)
+      (finish-embodied-agent-opening-failure presence owner condition)
+      nil)))
+
+(defmethod ensure-embodied-agent-agent ((presence embodied-agent))
+  ;; This deliberately remains a synchronous setup primitive for SLY and
+  ;; explicit callers.  Canvas interaction reaches only GNOME-ASK above.
+  (loop
+    (let ((owner (list :synchronous-opening presence)))
+      (multiple-value-bind (provider open-p)
+          (sb-thread:with-mutex ((embodied-agent-agent-lock presence))
+            (cond ((embodied-agent-agent-released-p presence)
+                   (error "~A has left the world."
+                          (embodied-agent-name presence)))
+                  ((gnome-agent presence)
+                   (values (gnome-agent presence) nil))
+                  ((embodied-agent-agent-opening-owner presence)
+                   (sb-thread:condition-wait
+                    (embodied-agent-agent-ready presence)
+                    (embodied-agent-agent-lock presence))
+                   (values nil nil))
+                  (t
+                   (setf (embodied-agent-agent-opening-owner presence) owner
+                         (embodied-agent-agent-opening-thread presence)
+                         sb-thread:*current-thread*)
+                   (values nil t))))
+        (when provider
+          (return provider))
+        (when open-p
+          (handler-case
+              (let ((candidate (open-embodied-agent-agent presence)))
+                (unless candidate
+                  (error "The provider opener returned NIL."))
+                (multiple-value-bind (installed prompts)
+                    (publish-opened-embodied-agent presence owner candidate)
+                  (when installed
+                    (submit-embodied-agent-prompts
+                     presence installed prompts)
+                    (return installed))))
+            (error (condition)
+              (finish-embodied-agent-opening-failure
+               presence owner condition)
+              (error condition))))))))
+
+(defun release-embodied-agent-harness (presence)
+  "Detach PRESENCE from its provider once, without waiting for an opener."
+  (multiple-value-bind (provider observer release-p)
+      (sb-thread:with-mutex ((embodied-agent-agent-lock presence))
+        (if (embodied-agent-agent-released-p presence)
+            (values nil nil nil)
+            (let ((provider (gnome-agent presence))
+                  (observer (gnome-observer presence)))
+              (setf (embodied-agent-agent-released-p presence) t
+                    (gnome-agent presence) nil
+                    (gnome-observer presence) nil
+                    (embodied-agent-pending-agent-prompts presence) '()
+                    (embodied-agent-agent-opening-owner presence) nil
+                    (embodied-agent-agent-opening-thread presence) nil)
+              (sb-thread:condition-broadcast
+               (embodied-agent-agent-ready presence))
+              (values provider observer t))))
+    (when release-p
+      (when (and provider observer)
+        (ignore-errors (remove-agent-observer provider observer)))
+      (when provider
+        (release-application-agent provider)))
+    release-p))
 
 ;;; ---------------------------------------------------------------------
 ;;; Saying
@@ -546,13 +764,7 @@ one back to describe-handle to read more.")
 (defparameter *dialogue-height* 150)
 (defparameter *dialogue-columns* 70)
 
-(defclass clear-top-level-sheet-pane
-    (climi::never-repaint-background-mixin climi::top-level-sheet-pane) ()
-  (:documentation
-   "A frame's top-level sheet that paints no background, so a floating
-title or bubble shows only what its pane draws."))
-
-(defclass gnome-dialogue-pane (climi::never-repaint-background-mixin application-pane) ()
+(defclass gnome-dialogue-pane (mcluv:transparent-gpu-application-pane) ()
   (:documentation "A pane that paints nothing but its text: the view shows through."))
 
 (define-application-frame gnome-dialogue ()
@@ -591,9 +803,6 @@ title or bubble shows only what its pane draws."))
   (let* ((frame (pane-frame pane))
          (gnome (dialogue-gnome frame))
          (line (dialogue-lines gnome)))
-    (with-sheet-medium (medium pane)
-      (when (typep medium 'mcluv:luv-raster-medium)
-        (mcluv::clear-raster-medium-reliefs medium)))
     (when line
       (destructuring-bind (speaker text ink) line
         (let* ((lines (wrap-words text *dialogue-columns*))
@@ -628,8 +837,10 @@ title or bubble shows only what its pane draws."))
   "Centred at the bottom of the viewport."
   (let* ((source-size (mcluv:widget-overlay-logical-size overlay))
          (viewport-size
-           (luv:canvas-extent
-            (luvcraft:luvcraft-session-context (mcluv:widget-overlay-session overlay))))
+           (multiple-value-list
+            (luv:canvas-logical-size
+             (luvcraft:luvcraft-session-canvas
+              (mcluv:widget-overlay-session overlay)))))
          (source-width (first source-size))
          (source-height (second source-size))
          (viewport-width (first viewport-size))
@@ -680,7 +891,7 @@ title or bubble shows only what its pane draws."))
                           :frame-manager manager :enable t initargs)))
         ;; Nothing behind the pane either: the top-level sheet would otherwise
         ;; fill the frame's rectangle with its own white.
-        (change-class (frame-top-level-sheet frame) 'clear-top-level-sheet-pane)
+        (mcluv:make-gpu-frame-background-transparent frame)
         frame))))
 
 ;;; ---------------------------------------------------------------------
@@ -848,9 +1059,11 @@ title or bubble shows only what its pane draws."))
                                      :session session :frame frame :mirror mirror
                                      :gnome gnome)))
         (setf (frame-pretty-name frame) "gnome dialogue"
-              (mcluv:mirror-compositor mirror) overlay
-              (gnome-dialogue gnome) overlay)
+              (mcluv:mirror-compositor mirror) overlay)
         (luvcraft:add-luvcraft-overlay session overlay)
+        ;; ADD consumes a rejected overlay.  Publish the semantic handle only
+        ;; after the session accepted it, never while it names released state.
+        (setf (gnome-dialogue gnome) overlay)
         overlay)))
 
 ;;; ---------------------------------------------------------------------
@@ -869,7 +1082,7 @@ title or bubble shows only what its pane draws."))
 (defparameter *bubble-linger-seconds* 14
   "How long after a turn ends its bubbles stay.")
 
-(defclass gnome-bubble-pane (climi::never-repaint-background-mixin application-pane) ())
+(defclass gnome-bubble-pane (mcluv:transparent-gpu-application-pane) ())
 
 (define-application-frame gnome-bubble ()
   ((gnome :initarg :gnome :reader bubble-gnome)
@@ -914,9 +1127,6 @@ title or bubble shows only what its pane draws."))
          (*agent-hud-columns* *bubble-columns*)
          (height (+ (* 2 *bubble-margin*) (bubble-content-height item)))
          (top (max 2 (- *bubble-height* height))))
-    (with-sheet-medium (medium pane)
-      (when (typep medium 'mcluv:luv-raster-medium)
-        (mcluv::clear-raster-medium-reliefs medium)))
     ;; The cassette: a matte rounded slab standing off the world, as tall as
     ;; its contents and sitting at the bottom of the pane, nearest the head.
     (mcluv:draw-analytic-rounded-rectangle*
@@ -1002,9 +1212,11 @@ title or bubble shows only what its pane draws."))
           (mcluv:mirror-compositor mirror) overlay
           (bubble-lift overlay) (- *bubble-lift* 0.3)
           (bubble-target-lift overlay) *bubble-lift*)
+    (luvcraft:add-luvcraft-overlay session overlay)
+    ;; The gnome's semantic stack contains only application-owned overlays.
+    ;; A terminal rejection releases OVERLAY before this publication point.
     (push overlay (gnome-bubbles gnome))
     (restack-gnome-bubbles gnome)
-    (luvcraft:add-luvcraft-overlay session overlay)
     (repaint-bubble overlay)
     overlay))
 
@@ -1040,6 +1252,8 @@ title or bubble shows only what its pane draws."))
          (add-gnome-bubble gnome object)))
       (:call (add-gnome-bubble gnome object))
       (:call-finished nil)
+      (:agent-failed
+       (gnome-say gnome (format nil "(~A)" object)))
       (:turn-finished
        (unless (string= (turn-text object) "")
          ;; A gnome that forgot to SAY still gets heard.
@@ -1089,10 +1303,7 @@ title or bubble shows only what its pane draws."))
   (alexandria:when-let ((approval (embodied-agent-pending-approval gnome)))
     (deny-tool-approval approval "The embodied agent left the world."))
   (setf *agents* (delete gnome *agents* :test #'eq))
-  (when (and (gnome-agent gnome) (gnome-observer gnome))
-    (remove-agent-observer (gnome-agent gnome) (gnome-observer gnome)))
-  (when (gnome-agent gnome)
-    (openai:close-agent (gnome-agent gnome))))
+  (release-embodied-agent-harness gnome))
 
 ;;; ---------------------------------------------------------------------
 ;;; Spawning one

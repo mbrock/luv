@@ -105,10 +105,15 @@ subclasses for live text, reasoning, tool, or lifecycle presentation."))
 is unset; the first non-empty string wins.  Applications push providers here
 (luvcraft asks the tailnet lobby).")
 
+(defvar *api-key-environment-provider*
+  (lambda () (uiop:getenv "OPENAI_API_KEY"))
+  "Function used to read OPENAI_API_KEY.  Kept indirect so recovery behavior
+can be tested without depending on or mutating the host process environment.")
+
 (defun default-api-key ()
   "OPENAI_API_KEY from the environment, else the first *API-KEY-FALLBACKS*
 answer."
-  (let ((env (uiop:getenv "OPENAI_API_KEY")))
+  (let ((env (funcall *api-key-environment-provider*)))
     (if (and env (plusp (length env)))
         env
         (loop for fallback in *api-key-fallbacks*

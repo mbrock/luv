@@ -1182,8 +1182,6 @@ the code simply fills the well."
     (with-communicator-geometry ((communicator-geometry frame))
      (with-bounding-rectangle* (left top right bottom) pane
       (with-sheet-medium (medium pane)
-        (when (typep medium 'luv-raster-medium)
-          (clear-raster-medium-reliefs medium))
         ;; The bezel is the body of the device; everything else is inside it.
         (draw-rectangle* medium left top right bottom
                          :ink *communicator-bezel-ink*)
@@ -1221,11 +1219,8 @@ the code simply fills the well."
              :value (length (communicator-draft frame)))
     (frame)
   (let ((mirror (sheet-direct-mirror (frame-top-level-sheet frame))))
-    (if (typep mirror 'luv-gpu-mirror)
-        (repaint-gpu-mirror mirror)
-        (progn
-          (repaint-sheet (mirror-sheet mirror) +everywhere+)
-          (present-mirror mirror))))
+    (check-type mirror luv-gpu-mirror)
+    (repaint-gpu-mirror mirror))
   frame)
 
 (defun communicator-paint-state (frame)

@@ -9,6 +9,7 @@
 (defconstant +walking-player-height+ 2.9)
 (defconstant +walking-player-step-height+ 1)
 (defconstant +walking-player-maximum-drop+ 2)
+(defconstant +walking-player-maximum-axis-substep+ 0.5)
 (defconstant +walking-player-half-step+ 0.75)
 (defconstant +walking-player-speed+ 7.0)
 (defconstant +walking-player-gravity+ -24.0)
@@ -132,26 +133,54 @@ for a remote roof, so a wall cannot teleport the player onto its top."
             return (coerce candidate-base 'single-float))))
 
 (defun try-walking-player-axis (player source axis amount)
-  "Move PLAYER along one horizontal AXIS, sliding at blocked boundaries."
+  "Sweep PLAYER along one horizontal AXIS, sliding at blocked boundaries."
   (let* ((position (walking-player-position player))
-         (x (+ (vec3:vec3-x position) (if (eq axis :x) amount 0.0)))
-         (y (+ (vec3:vec3-y position) (if (eq axis :y) amount 0.0)))
-         (support
-           (walking-player-support-height
-            source x y (vec3:vec3-z position))))
-    (when support
+         ;; No substep spans a whole terrain cell, so an endpoint beyond a
+         ;; thin wall can never hide the occupied cell crossed to reach it.
+         (step-count
+           (max 1 (ceiling (/ (abs amount)
+                              +walking-player-maximum-axis-substep+))))
+         (step (/ amount step-count))
+         (x (vec3:vec3-x position))
+         (y (vec3:vec3-y position))
+         (z (vec3:vec3-z position))
+         (clear-p t))
+    ;; Validate the whole axis attempt before publishing it.  Axis separation
+    ;; therefore retains its atomic slide-at-a-wall behavior while every cell
+    ;; crossed by a long attempt still participates in collision.
+    (loop repeat step-count
+          while clear-p
+          do (incf x (if (eq axis :x) step 0.0))
+             (incf y (if (eq axis :y) step 0.0))
+             (let ((support (walking-player-support-height source x y z)))
+               (if support
+                   (setf z support)
+                   (setf clear-p nil))))
+    (when clear-p
       (setf (vec3:vec3-x position) x
             (vec3:vec3-y position) y
-            (vec3:vec3-z position) support)
+            (vec3:vec3-z position) z)
       t)))
 
 (defun try-walking-player-air-axis (player source axis amount)
-  "Move one airborne horizontal axis while retaining solid wall collision."
+  "Sweep one airborne horizontal axis while retaining solid wall collision."
   (let* ((position (walking-player-position player))
-         (x (+ (vec3:vec3-x position) (if (eq axis :x) amount 0.0)))
-         (y (+ (vec3:vec3-y position) (if (eq axis :y) amount 0.0))))
-    (when (walking-player-clear-at-p
-           (inspection-source-solid source) x y (vec3:vec3-z position))
+         (solid (inspection-source-solid source))
+         (step-count
+           (max 1 (ceiling (/ (abs amount)
+                              +walking-player-maximum-axis-substep+))))
+         (step (/ amount step-count))
+         (x (vec3:vec3-x position))
+         (y (vec3:vec3-y position))
+         (clear-p t))
+    (loop repeat step-count
+          while clear-p
+          do (incf x (if (eq axis :x) step 0.0))
+             (incf y (if (eq axis :y) step 0.0))
+             (unless (walking-player-clear-at-p
+                      solid x y (vec3:vec3-z position))
+               (setf clear-p nil)))
+    (when clear-p
       (setf (vec3:vec3-x position) x
             (vec3:vec3-y position) y)
       t)))

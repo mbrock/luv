@@ -393,6 +393,14 @@ the window is still pumped, but no event reaches the application.")
 (defgeneric close-canvas (canvas)
   (:documentation "Close CANVAS and all presentation contexts attached to it."))
 
+(defgeneric canvas-thread-p (canvas)
+  (:documentation
+   "Return true when the caller is CANVAS's native event/frame thread."))
+
+(defmethod canvas-thread-p ((canvas canvas))
+  (declare (ignore canvas))
+  nil)
+
 (defgeneric canvas-title (canvas)
   (:documentation "Return CANVAS's native title."))
 
@@ -487,6 +495,14 @@ When CONFIGURATION is omitted, return the context unconfigured."))
 (defgeneric context-device (context)
   (:documentation
    "Return the GPU device used by CONTEXT, or NIL before first configuration."))
+
+(defgeneric canvas-extent (context)
+  (:documentation
+   "Return CONTEXT's configured drawable extent as (WIDTH HEIGHT), or NIL."))
+
+(defgeneric canvas-format (context)
+  (:documentation
+   "Return CONTEXT's configured presentation format, or NIL."))
 
 (defgeneric configure-canvas-context (context configuration)
   (:documentation "Configure or reconfigure CONTEXT for presentation."))

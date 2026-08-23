@@ -464,8 +464,10 @@ falls behind the camera, so a turn of the head does not pop the shafts."
                     (coerce (* 0.5 (+ clip-y 1.0)) 'single-float)
                     (coerce weight 'single-float)))))))
 
-(defun luvcraft-post-uniform-data (session width height)
-  "Pack the presentation environment: texel size, lens gains, and the sun.
+(defun luvcraft-post-uniform-data
+    (session width height
+     &optional (presentation-width width) (presentation-height height))
+  "Pack the presentation environment: texel sizes, lens gains, and the sun.
 
 Lane order must match *POST-UNIFORM-MEMBERS* exactly; the construction-time
 check in LUVCRAFT-POST-UNIFORM-SIZE keeps the two honest."
@@ -477,7 +479,7 @@ check in LUVCRAFT-POST-UNIFORM-SIZE keeps the two honest."
       (let ((bloom-extent (luvcraft-bloom-extent (list width height)))
             (elapsed (or (luvcraft-session-last-frame-time session) 0d0)))
         (make-array
-         16 :element-type 'single-float
+         20 :element-type 'single-float
          :initial-contents
          (mapcar
           (lambda (value) (coerce value 'single-float))
@@ -495,7 +497,9 @@ check in LUVCRAFT-POST-UNIFORM-SIZE keeps the two honest."
                 (/ 1.0 (first bloom-extent))
                 (/ 1.0 (second bloom-extent))
                 *luvcraft-shaft-decay*
-                (mod elapsed 3600d0))))))))
+                (mod elapsed 3600d0)
+                (/ 1.0 presentation-width) (/ 1.0 presentation-height)
+                0.0 0.0)))))))
 
 (defun luvcraft-post-uniform-size (session)
   "The presentation buffer byte size derived from the shader-visible block."
@@ -618,13 +622,15 @@ the frame uniform cannot silently diverge between shader and host."
 ;;; set behind one constructor is what lets START-LUVCRAFT and a live resize
 ;;; agree on formats and usages without either one drifting.
 
-(defun make-luvcraft-frame-attachments (device context extent)
-  "Create every frame-sized attachment for EXTENT as a plist of GPU objects.
+(defun make-luvcraft-frame-attachments
+    (device context render-extent presentation-extent)
+  "Create the scene and presentation attachments as one GPU-object cohort.
 
-The scene is drawn into a linear HDR colour attachment with its own depth
-buffer, the lens chain runs at a reduced extent, and the tonemapped result
-lands in a presentation image that is finally copied onto the drawable."
-  (let ((bloom-extent (luvcraft-bloom-extent extent))
+The scene is drawn at RENDER-EXTENT into a linear HDR colour attachment with
+its own depth buffer and reduced lens chain.  The tonemapped result is scaled
+into PRESENTATION-EXTENT, where direct retained UI is evaluated at the
+drawable's native density before the complete image is copied to the surface."
+  (let ((bloom-extent (luvcraft-bloom-extent render-extent))
         (made nil)
         (completed-p nil))
     (flet ((texture (label size format usage)
@@ -642,11 +648,11 @@ lands in a presentation image that is finally copied onto the drawable."
                  (values texture view)))))
       (unwind-protect
            (multiple-value-bind (color-texture color-view)
-               (texture "block world color" extent
+               (texture "block world color" render-extent
                         +luvcraft-scene-color-format+
                         '(:render-attachment :texture-binding :copy-src))
              (multiple-value-bind (depth-texture depth-view)
-                 (texture "block world depth" extent :depth32-float
+                 (texture "block world depth" render-extent :depth32-float
                           '(:render-attachment :texture-binding))
                (multiple-value-bind (bloom-primary-texture bloom-primary-view)
                    (texture "block world bloom primary" bloom-extent
@@ -658,11 +664,13 @@ lands in a presentation image that is finally copied onto the drawable."
                               +luvcraft-bloom-color-format+
                               '(:render-attachment :texture-binding))
                    (multiple-value-bind (presentation-texture presentation-view)
-                       (texture "block world presentation color" extent
+                       (texture "block world presentation color"
+                                presentation-extent
                                 (canvas-format context)
                                 '(:render-attachment :copy-src))
                      (setf completed-p t)
-                     (list :render-extent extent
+                     (list :render-extent render-extent
+                           :presentation-extent presentation-extent
                            :color-texture color-texture
                            :color-view color-view
                            :depth-texture depth-texture
@@ -713,9 +721,9 @@ lands in a presentation image that is finally copied onto the drawable."
   (values))
 
 (defun luvcraft-frame-attachment-resources (attachments)
-  "Return the GPU objects in an attachment candidate, excluding its extent."
+  "Return the GPU objects in an attachment candidate, excluding its extents."
   (loop for (key value) on attachments by #'cddr
-        unless (eq key :render-extent)
+        unless (member key '(:render-extent :presentation-extent))
           collect value))
 
 (defun make-luvcraft-lens-pipeline (device layout role label)
@@ -1064,16 +1072,20 @@ attachments the renderer actually holds."
   (values))
 
 (defmethod resize-luvcraft-component
-    ((renderer luvcraft-renderer) extent)
+    ((renderer luvcraft-renderer) extents)
   "Transactionally replace every extent-sized image owned by RENDERER."
-  (let ((attachments
-          (make-luvcraft-frame-attachments
-           (luvcraft-renderer-device renderer)
-           (luvcraft-renderer-context renderer)
-           extent))
-        (old-attachments
-          (luvcraft-renderer-frame-attachment-resources renderer))
-        (installed-p nil))
+  (check-type extents luvcraft-frame-extents)
+  (let* ((render-extent (luvcraft-frame-extents-render extents))
+         (presentation-extent
+           (luvcraft-frame-extents-presentation extents))
+         (attachments
+           (make-luvcraft-frame-attachments
+            (luvcraft-renderer-device renderer)
+            (luvcraft-renderer-context renderer)
+            render-extent presentation-extent))
+         (old-attachments
+           (luvcraft-renderer-frame-attachment-resources renderer))
+         (installed-p nil))
     (unwind-protect
          (progn
            ;; The new cohort exists before any old object is released.  If
@@ -1084,12 +1096,13 @@ attachments the renderer actually holds."
            (write-buffer
             (luvcraft-renderer-crosshair-vertex-buffer renderer)
             (make-block-world-crosshair-vertices
-             (first extent) (second extent)))
+             (first render-extent) (second render-extent)))
            (write-buffer
             (luvcraft-renderer-cursor-vertex-buffer renderer)
             (make-luvcraft-cursor-vertices
-             (first extent) (second extent)
-             (/ (first extent) 2.0) (/ (second extent) 2.0)))
+             (first render-extent) (second render-extent)
+             (/ (first render-extent) 2.0)
+             (/ (second render-extent) 2.0)))
            (discard-luvcraft-frame-states renderer)
            (install-luvcraft-frame-attachments renderer attachments)
            (setf installed-p t)
@@ -1106,26 +1119,33 @@ attachments the renderer actually holds."
   renderer)
 
 (defun ensure-luvcraft-frame-extent (session)
-  "Rebuild SESSION's frame-sized images when the drawable has changed size.
+  "Rebuild SESSION's frame-sized images when either frame extent changes.
 
-A window resize gives the canvas a new drawable extent while every scene,
-depth, lens-chain, and presentation image still has the old one; the final
-copy onto the drawable is then a size mismatch, which is how a resize used
-to end the game.  This runs at the top of a frame, inside the canvas
-callback that owns GPU replacement, and after the backend has already
-synchronized the drawable, so the extent asked for here is the extent this
-frame will present to.  The outgoing images stay alive until the last
-submission that used them completes."
-  (let ((extent (canvas-extent (luvcraft-session-context session))))
-    (unless (equal extent (luvcraft-session-render-extent session))
-      (log-event :luvcraft "reframing ~{~D~^x~} to ~{~D~^x~}"
-                 (or (luvcraft-session-render-extent session) '(0 0)) extent)
+A Retina canvas has two deliberately different extents: the game scene renders
+once per logical point, while presentation and direct application UI render
+once per physical drawable pixel.  This runs at the top of a frame, after the
+backend has synchronized the drawable and inside the callback which owns GPU
+replacement.  The outgoing images stay alive until their last submission
+completes."
+  (let* ((canvas (luvcraft-session-canvas session))
+         (render-extent (multiple-value-list (canvas-logical-size canvas)))
+         (presentation-extent
+           (canvas-extent (luvcraft-session-context session))))
+    (unless (and (equal render-extent
+                        (luvcraft-session-render-extent session))
+                 (equal presentation-extent
+                        (luvcraft-session-presentation-extent session)))
+      (log-event :luvcraft
+                 "reframing scene ~{~D~^x~}, presentation ~{~D~^x~}"
+                 render-extent presentation-extent)
       ;; Pointer intent belongs to the session.  The normal frame-boundary
       ;; update replaces the renderer's centred candidate and retains DIRTY-P
       ;; if its buffer write fails.
       (setf (luvcraft-session-pointer-dirty-p session) t)
-      (resize-luvcraft-component (luvcraft-session-renderer session) extent))
-    extent))
+      (resize-luvcraft-component
+       (luvcraft-session-renderer session)
+       (make-luvcraft-frame-extents render-extent presentation-extent)))
+    (values render-extent presentation-extent)))
 
 (zdefun (encode-luvcraft-frame :zone :luvcraft/encode-frame)
     (session surface-texture encoder &key readback-buffer sample
@@ -1156,7 +1176,9 @@ submission that used them completes."
                (sample luvcraft-frame-sample-mesh-publication-seconds
                        :luvcraft/mesh-publication)
              (refresh-luvcraft-mesh session)))
-         (extent (canvas-extent (luvcraft-session-context session)))
+         (extent (luvcraft-session-render-extent session))
+         (presentation-extent
+           (luvcraft-session-presentation-extent session))
          (frame (luvcraft-frame-state session surface-texture))
          (particle-vertices
            (block-particle-vertices
@@ -1248,7 +1270,9 @@ submission that used them completes."
        (frame-uniform-data session (first extent) (second extent)))
       (write-buffer
        (luvcraft-frame-post-uniform-buffer frame)
-       (luvcraft-post-uniform-data session (first extent) (second extent)))
+       (luvcraft-post-uniform-data
+        session (first extent) (second extent)
+        (first presentation-extent) (second presentation-extent)))
       (when (plusp particle-vertex-count)
         (write-buffer
          (luvcraft-frame-particle-vertex-buffer frame)
@@ -1868,6 +1892,7 @@ the replacement texture's width through the frame uniform."
                                 (frames-per-second 60)
                                 (visible-p t)
                                 (fullscreen-p nil)
+                                (high-pixel-density-p t)
                                 (world (make-empty-little-block-world))
                                 (mesher (make-instance
                                          'exposed-face-mesher))
@@ -1923,12 +1948,15 @@ world, simulation, streaming, or frame orchestration.  Pass :VISIBLE-P NIL to
 keep the SDL window hidden while still exercising the real presentation path.
 Pass :FRAMES-PER-SECOND NIL for a capture-only demand clock.  On KMSDRM any
 non-NIL value selects display-paced animation because FIFO scanout, rather
-than an independent host timer, owns the available frame rate.  Pass
-:FULLSCREEN-P T to open on the whole display, and leave :WIDTH and :HEIGHT
-NIL to let the display choose a comfortable window."
-  (let* ((canvas (make-sdl-canvas
-                  :title title :width width :height height
-                  :fullscreen-p fullscreen-p
+	than an independent host timer, owns the available frame rate.  Pass
+	:FULLSCREEN-P T to open on the whole display, and leave :WIDTH and :HEIGHT
+	NIL to let the display choose a comfortable window.  A high-pixel-density
+	drawable is requested by default; the scene remains at logical resolution and
+	the final application UI uses every physical pixel."
+	  (let* ((canvas (make-sdl-canvas
+	                  :title title :width width :height height
+	                  :fullscreen-p fullscreen-p
+	                  :high-pixel-density-p high-pixel-density-p
                   ;; Keep the native window hidden until its first complete
                   ;; terrain frame has been presented.  Showing it here would
                   ;; expose black initialization and sky-only streaming states.
@@ -1966,16 +1994,19 @@ NIL to let the display choose a comfortable window."
                     (push resource resources)
                     resource))
              (let* ((lighting-state (attach-lighting-state world))
-                  (extent (canvas-extent context))
-                  ;; Every frame-sized image comes from one constructor, which
-                  ;; a live window resize calls again with the new extent.
-                  (attachments
-                    (let ((attachments
-                            (make-luvcraft-frame-attachments
-                             device context extent)))
-                      (mapc #'keep
-                            (luvcraft-frame-attachment-resources attachments))
-                      attachments))
+                    (render-extent
+                      (multiple-value-list (canvas-logical-size canvas)))
+                    (presentation-extent (canvas-extent context))
+                    ;; Both extent classes come from one constructor, which a
+                    ;; live window or drawable resize calls again as one cohort.
+                    (attachments
+                      (let ((attachments
+                              (make-luvcraft-frame-attachments
+                               device context render-extent
+                               presentation-extent)))
+                        (mapc #'keep
+                              (luvcraft-frame-attachment-resources attachments))
+                        attachments))
                   (shadow-depth-texture
                     (keep
                      (create
@@ -2067,11 +2098,12 @@ NIL to let the display choose a comfortable window."
                        :usage '(:vertex)))))
                   (crosshair-vertices
                     (make-block-world-crosshair-vertices
-                     (first extent) (second extent)))
+                     (first render-extent) (second render-extent)))
                   (cursor-vertices
                     (make-luvcraft-cursor-vertices
-                     (first extent) (second extent)
-                     (/ (first extent) 2.0) (/ (second extent) 2.0)))
+                     (first render-extent) (second render-extent)
+                     (/ (first render-extent) 2.0)
+                     (/ (second render-extent) 2.0)))
                   (crosshair-vertex-buffer
                     (keep
                      (create
@@ -2365,6 +2397,9 @@ NIL to let the display choose a comfortable window."
                      :camera camera
                      :player player
                      :quit-function quit-function
+                     :stop-controller
+                     (make-canvas-stop-controller
+                      canvas :name "luvcraft session")
                      :selected-block selected-block
                      :inventory inventory
                      :lighting-state lighting-state
@@ -2457,9 +2492,10 @@ NIL to let the display choose a comfortable window."
             (releasing :chunk-products
               (destroy-luvcraft-chunk-products session))
             (releasing :focus (unfocus-luvcraft-session session))
-            (dolist (overlay (luvcraft-session-overlays session))
-              (releasing :overlay (release-luvcraft-overlay overlay)))
-            (setf (luvcraft-session-overlays session) nil))
+            (dolist (overlay (copy-list
+                              (luvcraft-session-overlays session)))
+              (releasing :overlay
+                (remove-luvcraft-overlay session overlay))))
           (if renderer
               (releasing :renderer (release-luvcraft-component renderer))
               (progn
@@ -2479,39 +2515,44 @@ NIL to let the display choose a comfortable window."
           (releasing :canvas (close-canvas canvas))
           (when device (releasing :device (destroy device))))))))
 
-(defun stop-luvcraft (session)
-  "Stop SESSION and explicitly release all of its GPU and canvas resources.
-
-Every step runs whatever the ones before it did, so the window closes even
-when something fails; the failures are then signalled together as
-LUVCRAFT-RELEASE-ERROR.  See WITH-RELEASE-REPORT."
-  ;; A native close request may already have set this, but the resources still
-  ;; belong to the session until this explicit teardown.
+(defmethod perform-luvcraft-stop ((session luvcraft-session))
+  "Release SESSION after its stop controller granted this caller ownership."
+  ;; The stop controller guarantees that this owner is beside the canvas
+  ;; thread.  Leave that thread alive until the capture transaction has encoded
+  ;; and evicted its target-keyed frame state.
+  (quiesce-application-captures session)
   (setf (luvcraft-session-running-p session) nil)
   (with-release-report
-    (releasing :lobby (stop-luvcraft-lobby session))
-    (releasing :focus (unfocus-luvcraft-session session))
     (let ((canvas (luvcraft-session-canvas session)))
-      (releasing :canvas-quiescence
-        (when (eq :open (canvas-state canvas))
+      ;; First stop future frames, then cross the native frame boundary.  This
+      ;; method only runs beside the canvas thread: the controller rejects a
+      ;; synchronous owner or waiter on that thread.
+      (when (eq :open (canvas-state canvas))
+        (releasing :clock
           (setf (canvas-clock canvas) (make-demand-clock))
-          (when (luvcraft-session-pointer-captured-p session)
-            (releasing :pointer-capture
-              (set-canvas-relative-pointer-mode canvas nil))
-            (setf (luvcraft-session-pointer-captured-p session) nil))
-          ;; A synchronous no-op after changing the clock is a native-thread
-          ;; barrier: an already-running frame has finished before teardown
-          ;; starts.
+          (values))
+        (when (luvcraft-session-pointer-captured-p session)
+          (releasing :pointer-capture
+            (set-canvas-relative-pointer-mode canvas nil)
+            (setf (luvcraft-session-pointer-captured-p session) nil)))
+        (releasing :canvas-quiescence
+          ;; A synchronous no-op after changing the clock is the frame-boundary
+          ;; barrier: no encoder can still be borrowing application resources.
           (request-canvas-frame canvas (lambda (timestamp)
                                          (declare (ignore timestamp))))))
-      (setf (canvas-event-handler canvas) nil)
+      (releasing :event-handler
+        (setf (canvas-event-handler canvas) nil))
+      (releasing :lobby (stop-luvcraft-lobby session))
+      (releasing :tracy-capture
+        (release-luvcraft-tracy-capture-controller))
+      (releasing :focus (unfocus-luvcraft-session session))
       ;; Stop CPU publication before releasing any render-owned destination.
       (releasing :production-system
         (stop-production-system (luvcraft-session-production-system session)))
       (releasing :chunk-products (destroy-luvcraft-chunk-products session))
-      (dolist (overlay (luvcraft-session-overlays session))
-        (releasing :overlay (release-luvcraft-overlay overlay)))
-      (setf (luvcraft-session-overlays session) nil)
+      (dolist (overlay (copy-list (luvcraft-session-overlays session)))
+        (releasing :overlay
+          (remove-luvcraft-overlay session overlay)))
       ;; The session coordinates one renderer owner; it no longer reproduces
       ;; the renderer's pipeline and resource inventories during teardown.
       (releasing :renderer
@@ -2535,3 +2576,15 @@ LUVCRAFT-RELEASE-ERROR.  See WITH-RELEASE-REPORT."
       (releasing :canvas (close-canvas canvas)))
     (releasing :device (destroy (luvcraft-session-device session))))
   (values))
+
+(defun stop-luvcraft (session)
+  "Stop SESSION exactly once and publish its result to every caller.
+
+The sole owner attempts every named release step and closes the canvas and
+device last.  Concurrent and later callers observe the same values or
+RELEASE-ERROR without releasing a native handle twice."
+  (request-application-capture-shutdown session)
+  (setf (luvcraft-session-running-p session) nil)
+  (call-with-stop-controller
+   (luvcraft-session-stop-controller session)
+   (lambda () (perform-luvcraft-stop session))))

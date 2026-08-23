@@ -27,6 +27,12 @@
 ;;;; goes into a record, which becomes the closing remarks and is saved as
 ;;;; build.sexp beside the logs.
 
+;; A fresh image has no SB-CONCURRENCY package for the reader to resolve
+;; below.  Build entry points used to acquire it incidentally by loading the
+;; application first; the progress reporter is a standalone bootstrap tool
+;; and must establish its own dependency.
+(require :sb-concurrency)
+
 (defpackage #:luv-build
   (:use #:cl)
   (:export #:start #:finish #:failed #:deadline-exceeded #:deadline-exceeded-label

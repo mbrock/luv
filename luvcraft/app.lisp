@@ -149,7 +149,13 @@ the arrow keys: a mouse for the mouseless console.")
    (quit-function :initarg :quit-function :initform nil
                   :reader luvcraft-session-quit-function
                   :documentation
-                  "A quick callback which begins orderly session teardown.")
+                  "An optional PLAY-level teardown run by the stop owner.")
+   (stop-controller
+    :initarg :stop-controller
+    :initform (make-stop-controller :name "luvcraft session")
+    :reader luvcraft-session-stop-controller
+    :documentation
+    "The separate one-shot owner and result publication for session teardown.")
    (pointer-capture-suspended-p
     :initform nil
     :accessor luvcraft-session-pointer-capture-suspended-p
@@ -202,6 +208,9 @@ of making them click the world again.")
     :setf t)
 (define-luvcraft-renderer-forwarder
     luvcraft-session-render-extent luvcraft-renderer-render-extent)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-presentation-extent
+    luvcraft-renderer-presentation-extent)
 (define-luvcraft-renderer-forwarder
     luvcraft-session-color-texture luvcraft-renderer-color-texture)
 (define-luvcraft-renderer-forwarder
@@ -610,19 +619,30 @@ attached overlay."))
   (declare (ignore session))
   nil)
 
-(defun request-luvcraft-quit (session)
-  "Publish SESSION as stopping and invoke its orderly quit callback.
+(defgeneric perform-luvcraft-stop (session)
+  (:documentation
+   "Release SESSION after its stop controller has granted sole ownership."))
 
-Return true when the callback took ownership of closing the canvas.  A raw
-START-LUVCRAFT session has no callback, so its caller retains the old direct
-close policy; PLAY supplies the callback which checkpoints and tears down the
-renderer before allowing the native window loop to end."
-  (let ((quit-function (luvcraft-session-quit-function session)))
-    (when (luvcraft-session-running-p session)
-      (setf (luvcraft-session-running-p session) nil)
-      (when quit-function
-        (funcall quit-function session)))
-    (not (null quit-function))))
+(defun request-luvcraft-quit (session)
+  "Request SESSION's one orderly teardown beside its native canvas thread.
+
+Native close and commands may call this without waiting.  Exactly one worker
+runs the PLAY-level quit callback when present, or the session teardown itself
+otherwise; repeated requests still defer native close to that same owner."
+  ;; Close capture admission on the native caller before its teardown worker
+  ;; exists.  A capture which won the race remains safe to finish; no later
+  ;; request can enter behind the owner's eventual frame-boundary barrier.
+  (request-application-capture-shutdown session)
+  (setf (luvcraft-session-running-p session) nil)
+  (request-controlled-stop
+   (luvcraft-session-stop-controller session)
+   (lambda ()
+     (let ((quit-function (luvcraft-session-quit-function session)))
+       (if quit-function
+           (funcall quit-function session)
+           (perform-luvcraft-stop session))))
+   :thread-name "luvcraft session stop")
+  t)
 
 (defgeneric luvcraft-key-hint (thing)
   (:documentation
@@ -797,13 +817,109 @@ the terrain the ray meets first is what the player is looking at."
             (handle-luvcraft-overlay-event overlay session canvas event)))
         (luvcraft-session-overlays session)))
 
-(defun add-luvcraft-overlay (session overlay)
-  "Draw OVERLAY in subsequent SESSION frames and return it."
-  (pushnew overlay (luvcraft-session-overlays session) :test #'eq)
-  overlay)
+(defun luvcraft-overlay-mutation-canvas (session)
+  "Return SESSION's live canvas, or NIL while its native owner does not exist."
+  (when (slot-boundp session 'canvas)
+    (luvcraft-session-canvas session)))
 
-(defun remove-luvcraft-overlay (session overlay &key (release-p t))
-  "Stop drawing OVERLAY in SESSION, optionally releasing it."
+(defun call-with-luvcraft-overlay-mutation (session function)
+  "Run FUNCTION at SESSION's native frame boundary when one exists.
+
+Startup and post-quiescence cleanup still execute directly.  Once the canvas
+is open, REQUEST-CANVAS-FRAME makes attachment mutation and GPU release part
+of the native owner stream, after any frame which borrowed the overlay list,
+and synchronously returns FUNCTION's values or condition to the caller."
+  (check-type function function)
+  (let ((canvas (luvcraft-overlay-mutation-canvas session)))
+    (if (and canvas (eq :open (canvas-state canvas)))
+        (request-canvas-frame
+         canvas
+         (lambda (timestamp)
+           (declare (ignore timestamp))
+           (funcall function)))
+        (funcall function))))
+
+(defun %add-luvcraft-overlay (session overlay)
+  (let ((installed-p nil))
+    (unwind-protect-releasing
+        (progn
+          (call-with-running-stop-controller
+           (luvcraft-session-stop-controller session)
+           (lambda ()
+             ;; Recheck at publication: two callers may both have reached this
+             ;; boundary before either became visible.
+             (pushnew overlay (luvcraft-session-overlays session) :test #'eq)
+             overlay)
+           :attachment overlay
+           :already-attached-p
+           (lambda ()
+             (member overlay (luvcraft-session-overlays session) :test #'eq)))
+          (setf installed-p t)
+          overlay)
+      ;; ADD consumes a newly offered attachment on either outcome.  A
+      ;; rejected constructor therefore unwinds with no frame, pipeline,
+      ;; worker, or other application resource stranded beside the game.
+      (unless installed-p
+        (releasing :rejected-overlay
+          (release-luvcraft-overlay overlay))))))
+
+(defun add-luvcraft-overlay (session overlay)
+  "Attach OVERLAY at SESSION's next native frame boundary and return it.
+
+ADD consumes a newly offered OVERLAY on both success and terminal rejection.
+Once SESSION begins stopping, the rejected overlay is released exactly once
+before APPLICATION-ATTACHMENT-CLOSED is signalled."
+  ;; An EQ object already owned by this session is not a fresh offer.  Resolve
+  ;; that idempotent case before a closing canvas can reject the owner request
+  ;; and make the caller mistake registered state for unpublished state.
+  (when (member overlay (luvcraft-session-overlays session) :test #'eq)
+    (return-from add-luvcraft-overlay overlay))
+  (let ((consumed-p nil))
+    (unwind-protect-releasing
+        (progn
+          (handler-case
+              (call-with-luvcraft-overlay-mutation
+               session
+               (lambda ()
+                 (setf consumed-p t)
+                 (%add-luvcraft-overlay session overlay)))
+            (application-attachment-closed (condition)
+              (error condition))
+            (error (condition)
+              ;; A native request can lose its closing-canvas race before the
+              ;; mutation starts.  Once the application gate is terminal, name
+              ;; that semantic rejection instead of leaking the backend detail
+              ;; through ADD's ownership boundary.
+              (let* ((controller
+                       (luvcraft-session-stop-controller session))
+                     (state (stop-controller-state controller)))
+                (cond
+                  ;; Another serialized add may have published this same EQ
+                  ;; object before our native request lost its close race.
+                  ((and (not consumed-p)
+                        (member overlay
+                                (luvcraft-session-overlays session)
+                                :test #'eq))
+                   (setf consumed-p t)
+                   overlay)
+                  ((and (not consumed-p) (not (eq :running state)))
+                   (error 'application-attachment-closed
+                          :controller controller
+                          :attachment overlay
+                          :state state))
+                  (t (error condition))))))
+          overlay)
+      ;; REQUEST-CANVAS-FRAME can itself reject a closing canvas before the
+      ;; mutation callback begins.  The registry has not consumed OVERLAY in
+      ;; that case, so no frame can have borrowed it.  Finish the transfer on
+      ;; this caller: GPU DESTROY is synchronized by the backend retirement
+      ;; ledger and is therefore safe even while terminal device teardown wins
+      ;; the race beside us.
+      (unless consumed-p
+        (releasing :unpublished-overlay
+          (release-luvcraft-overlay overlay))))))
+
+(defun %remove-luvcraft-overlay (session overlay release-p)
   (setf (luvcraft-session-overlays session)
         (delete overlay (luvcraft-session-overlays session) :test #'eq))
   (when (eq overlay (luvcraft-session-modal-focus session))
@@ -811,6 +927,15 @@ the terrain the ray meets first is what the player is looking at."
   (when release-p
     (release-luvcraft-overlay overlay))
   overlay)
+
+(defun remove-luvcraft-overlay (session overlay &key (release-p t))
+  "Detach OVERLAY at a frame boundary and optionally release it there.
+
+The no-release path is intentionally preserved for FUSE-LUVCRAFT-OVERLAY:
+that path may run inside a frame whose command stream still borrows OVERLAY."
+  (call-with-luvcraft-overlay-mutation
+   session
+   (lambda () (%remove-luvcraft-overlay session overlay release-p))))
 
 (defun request-luvcraft-session-checkpoint (session)
   "Capture SESSION's durable state and submit it to its asynchronous writer."
@@ -865,11 +990,13 @@ the terrain the ray meets first is what the player is looking at."
            (loop for overlay in (luvcraft-session-overlays session)
                  append (luvcraft-overlay-live-shader-pipelines overlay)))))
 
+(defmethod application-live-artifacts ((session luvcraft-session))
+  "Enumerate Luvcraft's per-pipeline artifacts for shared developer tools."
+  (luvcraft-session-live-shader-pipelines session))
+
 (defun refresh-luvcraft-shaders (session)
   "Install any successfully redefined block-world shader methods."
-  (dolist (pipeline (luvcraft-session-live-shader-pipelines session))
-    (refresh-live-shader-pipeline pipeline))
-  session)
+  (refresh-application-live-artifacts session))
 
 (defun luvcraft-session-target
     (session &key (max-distance +luvcraft-target-reach+))

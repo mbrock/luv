@@ -5,6 +5,24 @@
 
 (in-package #:mcluv)
 
+;;; A direct-GPU frame whose authored shape has transparent margins must not
+;;; ask McCLIM to repaint those margins.  McCLIM's ordinary background mixin
+;;; composes every pane background over black, which turns transparency into
+;;; an opaque rectangle before the backend sees it.
+
+(defclass transparent-gpu-application-pane
+    (clime:never-repaint-background-mixin application-pane) ())
+
+(defclass transparent-gpu-top-level-sheet-pane
+    (clime:never-repaint-background-mixin climi::top-level-sheet-pane) ())
+
+(defun make-gpu-frame-background-transparent (frame)
+  "Suppress McCLIM background records at both levels of direct-GPU FRAME."
+  (let ((sheet (frame-top-level-sheet frame)))
+    (unless (typep sheet 'transparent-gpu-top-level-sheet-pane)
+      (change-class sheet 'transparent-gpu-top-level-sheet-pane)))
+  frame)
+
 (define-condition gpu-medium-unsupported-design (error)
   ((design :initarg :design :reader unsupported-gpu-design))
   (:report (lambda (condition stream)
@@ -39,6 +57,141 @@
 
 (defstruct gpu-prepared-text-command
   atlas first-vertex vertex-count clip)
+
+(defgeneric gpu-command-pipeline-family (command)
+  (:documentation
+   "Name the direct-compositor pipeline family required by COMMAND.
+
+There is deliberately no default method: a new prepared semantic command must
+declare both how it encodes and which pipeline cohort must exist before an
+application render pass opens."))
+
+(defmethod gpu-command-pipeline-family ((command gpu-solid-command))
+  (declare (ignore command))
+  :solid)
+
+(defmethod gpu-command-pipeline-family ((command gpu-analytic-command))
+  (declare (ignore command))
+  :analytic)
+
+(defmethod gpu-command-pipeline-family
+    ((command gpu-relief-analytic-command))
+  (declare (ignore command))
+  :relief)
+
+(defmethod gpu-command-pipeline-family
+    ((command gpu-gradient-analytic-command))
+  (declare (ignore command))
+  :gradient)
+
+(defmethod gpu-command-pipeline-family
+    ((command gpu-prepared-image-command))
+  (declare (ignore command))
+  :image)
+
+(defmethod gpu-command-pipeline-family
+    ((command gpu-prepared-lattice-command))
+  (declare (ignore command))
+  :lattice)
+
+(defmethod gpu-command-pipeline-family
+    ((command gpu-prepared-text-command))
+  (declare (ignore command))
+  :text)
+
+(defstruct (gpu-prepared-frame-revision
+            (:constructor %make-gpu-prepared-frame-revision)
+            (:conc-name gpu-prepared-frame-))
+  "One immutable CPU snapshot published by a retained GPU mirror."
+  (number 0 :type (unsigned-byte 64) :read-only t)
+  (commands nil :read-only t)
+  (pipeline-families nil :read-only t)
+  (vertices #() :read-only t)
+  (analytic-vertices #() :read-only t)
+  (relief-vertices #() :read-only t)
+  (gradient-vertices #() :read-only t)
+  (image-vertices #() :read-only t)
+  (text-data #() :read-only t))
+
+(defun gpu-command-pipeline-families (commands)
+  "Return COMMANDS' direct pipeline families in first-use order."
+  (remove-duplicates
+   (mapcar #'gpu-command-pipeline-family commands)
+   :test #'eq :from-end t))
+
+(defun gpu-mirror-prepared-revision (mirror)
+  "Borrow MIRROR's current immutable CPU revision atomically."
+  (sb-thread:with-mutex ((gpu-mirror-prepared-revision-lock mirror))
+    (%gpu-mirror-prepared-revision mirror)))
+
+(defun gpu-mirror-prepared-commands (mirror)
+  "Return the commands belonging to MIRROR's current atomic revision."
+  (alexandria:when-let ((revision (gpu-mirror-prepared-revision mirror)))
+    (gpu-prepared-frame-commands revision)))
+
+(defun make-gpu-mirror-prepared-revision
+    (mirror commands vertices analytic-vertices relief-vertices
+     gradient-vertices image-vertices text-data &key (copy-p t))
+  "Copy and number one immutable CPU revision without publishing it yet."
+  (flet ((snapshot (sequence)
+           (if copy-p (copy-seq sequence) sequence)))
+    (let ((commands (if copy-p (copy-list commands) commands)))
+      (sb-thread:with-mutex ((gpu-mirror-prepared-revision-lock mirror))
+        (%make-gpu-prepared-frame-revision
+         :number (incf (gpu-mirror-prepared-revision-counter mirror))
+         :commands commands
+         :pipeline-families (gpu-command-pipeline-families commands)
+         :vertices (snapshot vertices)
+         :analytic-vertices (snapshot analytic-vertices)
+         :relief-vertices (snapshot relief-vertices)
+         :gradient-vertices (snapshot gradient-vertices)
+         :image-vertices (snapshot image-vertices)
+         :text-data (snapshot text-data))))))
+
+(defun publish-gpu-mirror-prepared-revision (mirror revision)
+  "Prepare dependents, then atomically publish immutable REVISION if newest."
+  ;; Pipeline work is intentionally before publication and outside the small
+  ;; revision lock.  If it fails, the previous command/buffer cohort remains
+  ;; the complete last-known-good presentation.
+  (prepare-mirror-compositor-revision
+   (mirror-compositor mirror) mirror revision)
+  (sb-thread:with-mutex ((gpu-mirror-prepared-revision-lock mirror))
+    (let ((current (%gpu-mirror-prepared-revision mirror)))
+      (when (or (null current)
+                (< (gpu-prepared-frame-number current)
+                   (gpu-prepared-frame-number revision)))
+        (setf (%gpu-mirror-prepared-revision mirror) revision))))
+  revision)
+
+(defun clear-gpu-mirror-prepared-revision (mirror)
+  (sb-thread:with-mutex ((gpu-mirror-prepared-revision-lock mirror))
+    (setf (%gpu-mirror-prepared-revision mirror) nil))
+  mirror)
+
+(defun prepare-gpu-mirror-compositor
+    (mirror &key
+              (target-format nil target-format-p)
+              (depth-stencil nil depth-stencil-p))
+  "Prepare MIRROR's compositor for its current immutable GPU revision.
+
+Applications call this at their pre-pass refresh boundary even when McCLIM's
+semantic command stream is unchanged.  It deliberately accepts only a direct
+GPU mirror: raster mirrors have no retained semantic revision and are not a
+fallback for application panels.  TARGET-FORMAT and DEPTH-STENCIL identify an
+application-owned attachment which differs from the mirror canvas.  The
+compositor protocol retains its own last-known-good pipeline cohort when
+preparation of a newer shader revision fails."
+  (check-type mirror luv-gpu-mirror)
+  (alexandria:when-let ((revision (gpu-mirror-prepared-revision mirror)))
+    (if (or target-format-p depth-stencil-p)
+        (apply #'prepare-mirror-compositor-target-revision
+               (mirror-compositor mirror) mirror revision
+               (append
+                (when target-format-p (list :target-format target-format))
+                (when depth-stencil-p (list :depth-stencil depth-stencil))))
+        (prepare-mirror-compositor-revision
+         (mirror-compositor mirror) mirror revision)))
+  mirror)
 
 (defstruct gpu-command-offsets
   "Base vertex indices for the dense streams joined into one mirror frame."
@@ -152,6 +305,18 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
    (text-capacity :initarg :text-capacity :initform 0
                   :accessor gpu-frame-state-text-capacity)))
 
+(define-condition gpu-frame-state-release-error (error)
+  ((failures :initarg :failures :reader gpu-frame-state-release-failures))
+  (:report
+   (lambda (condition stream)
+     (let ((failures (gpu-frame-state-release-failures condition)))
+       (format stream "~D GPU frame resource~:P failed to release"
+               (length failures))
+       (when failures
+         (format stream "; first failure for ~S: ~A"
+                 (caar failures) (cdar failures)))
+       (write-char #\. stream)))))
+
 (defclass gpu-cached-image-paint ()
   ((texture :initarg :texture :reader gpu-image-paint-texture)
    (view :initarg :view :reader gpu-image-paint-view)
@@ -159,6 +324,10 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
                :reader gpu-image-paint-bind-group)
    (width :initarg :width :reader gpu-image-paint-width)
    (height :initarg :height :reader gpu-image-paint-height)))
+
+;; GPU-MEDIUM-PUSH-VERTEX and APPEND-GPU-TEXT-VERTEX premultiply authored RGB
+;; on the CPU.  Solid and Slug vertex stages therefore forward RGB unchanged;
+;; multiplying by their alpha lane here would premultiply a second time.
 
 (shader:define-shader-method shader:shader-specification-for
     mcluv-solid-vertex-specification
@@ -1977,40 +2146,37 @@ family name adopted."
     (setf (gpu-frame-state-mirror state) mirror)
     state))
 
-(defun ensure-embedded-gpu-mirror-frame-state (mirror)
-  (let ((state
-          (or (gpu-mirror-prepared-frame-state mirror)
-              (setf (gpu-mirror-prepared-frame-state mirror)
-                    (make-instance 'gpu-mirror-frame-state :mirror mirror)))))
-    (setf (gpu-frame-state-mirror state) mirror)
-    state))
-
-(luv:zdefun (upload-gpu-mirror-frame-data
+(luv:zdefun (upload-gpu-prepared-frame-revision
              :zone :mcluv/upload
              :value
-             (* 4 (+ (length vertices)
-                     (length analytic-vertices)
-                     (length relief-vertices)
-                     (length gradient-vertices)
-                     (length image-vertices)
-                     (length text-data))))
-    (mirror device vertices analytic-vertices relief-vertices
-     gradient-vertices image-vertices text-data)
-  "Upload one embedded mirror snapshot without creating a raster target."
-  (let ((state (ensure-embedded-gpu-mirror-frame-state mirror)))
-    (flet ((upload (data ensure-buffer)
-             (when (plusp (length data))
-               (let ((buffer
-                       (funcall ensure-buffer
-                                state device (* 4 (length data)))))
-                 (luv:write-buffer buffer data)))))
-      (upload vertices #'ensure-gpu-frame-vertex-buffer)
-      (upload analytic-vertices #'ensure-gpu-frame-analytic-buffer)
-      (upload relief-vertices #'ensure-gpu-frame-relief-buffer)
-      (upload gradient-vertices #'ensure-gpu-frame-gradient-buffer)
-      (upload image-vertices #'ensure-gpu-frame-image-buffer)
-      (upload text-data #'ensure-gpu-frame-text-buffer))
-    state))
+             (* 4 (+ (length (gpu-prepared-frame-vertices revision))
+                     (length
+                      (gpu-prepared-frame-analytic-vertices revision))
+                     (length (gpu-prepared-frame-relief-vertices revision))
+                     (length (gpu-prepared-frame-gradient-vertices revision))
+                     (length (gpu-prepared-frame-image-vertices revision))
+                     (length (gpu-prepared-frame-text-data revision)))))
+    (state device revision)
+  "Materialize immutable CPU REVISION into one destination frame STATE."
+  (flet ((upload (data ensure-buffer)
+           (when (plusp (length data))
+             (let ((buffer
+                     (funcall ensure-buffer
+                              state device (* 4 (length data)))))
+               (luv:write-buffer buffer data)))))
+    (upload (gpu-prepared-frame-vertices revision)
+            #'ensure-gpu-frame-vertex-buffer)
+    (upload (gpu-prepared-frame-analytic-vertices revision)
+            #'ensure-gpu-frame-analytic-buffer)
+    (upload (gpu-prepared-frame-relief-vertices revision)
+            #'ensure-gpu-frame-relief-buffer)
+    (upload (gpu-prepared-frame-gradient-vertices revision)
+            #'ensure-gpu-frame-gradient-buffer)
+    (upload (gpu-prepared-frame-image-vertices revision)
+            #'ensure-gpu-frame-image-buffer)
+    (upload (gpu-prepared-frame-text-data revision)
+            #'ensure-gpu-frame-text-buffer))
+  state)
 
 (defun ensure-gpu-frame-vertex-buffer (state device byte-count)
   (when (> byte-count (gpu-frame-state-vertex-capacity state))
@@ -2598,32 +2764,62 @@ solid ink."
                 (max 1 (ceiling (bounding-rectangle-height sheet)))))
       (luv:canvas-logical-size (mirror-target mirror))))
 
-(defun release-gpu-mirror-frame-states (mirror)
-  (maphash
-   (lambda (key state)
-     (declare (ignore key))
-     (dolist (buffer
-               (list (gpu-frame-state-vertex-buffer state)
-                     (gpu-frame-state-analytic-buffer state)
-                     (gpu-frame-state-relief-buffer state)
-                     (gpu-frame-state-gradient-buffer state)
-                     (gpu-frame-state-image-buffer state)
-                     (gpu-frame-state-text-buffer state)))
-       (when buffer (luv:destroy buffer)))
-     (alexandria:when-let ((view (gpu-frame-state-view state)))
-       (luv:destroy view)))
-   (gpu-mirror-frame-states mirror))
-  (clrhash (gpu-mirror-frame-states mirror))
-  (alexandria:when-let ((state (gpu-mirror-prepared-frame-state mirror)))
-    (dolist (buffer
-              (list (gpu-frame-state-vertex-buffer state)
+(defun detach-gpu-frame-state-resources (state)
+  "Logically empty STATE and return every resource it formerly owned."
+  (prog1
+      (remove nil
+              (list (gpu-frame-state-view state)
+                    (gpu-frame-state-vertex-buffer state)
                     (gpu-frame-state-analytic-buffer state)
                     (gpu-frame-state-relief-buffer state)
                     (gpu-frame-state-gradient-buffer state)
                     (gpu-frame-state-image-buffer state)
                     (gpu-frame-state-text-buffer state)))
-      (when buffer (luv:destroy buffer)))
-    (setf (gpu-mirror-prepared-frame-state mirror) nil))
+    (setf (gpu-frame-state-view state) nil
+          (gpu-frame-state-vertex-buffer state) nil
+          (gpu-frame-state-vertex-capacity state) 0
+          (gpu-frame-state-analytic-buffer state) nil
+          (gpu-frame-state-analytic-capacity state) 0
+          (gpu-frame-state-relief-buffer state) nil
+          (gpu-frame-state-relief-capacity state) 0
+          (gpu-frame-state-gradient-buffer state) nil
+          (gpu-frame-state-gradient-capacity state) 0
+          (gpu-frame-state-image-buffer state) nil
+          (gpu-frame-state-image-capacity state) 0
+          (gpu-frame-state-text-buffer state) nil
+          (gpu-frame-state-text-capacity state) 0)))
+
+(defun release-gpu-frame-state (state)
+  "Exhaustively release STATE after first detaching all logical ownership."
+  (let ((failures nil))
+    (dolist (resource (detach-gpu-frame-state-resources state))
+      (handler-case
+          (luv:destroy resource)
+        (error (condition)
+          (push (cons resource condition) failures))))
+    (when failures
+      (error 'gpu-frame-state-release-error
+             :failures (nreverse failures))))
+  state)
+
+(defun release-gpu-mirror-frame-states (mirror)
+  (let ((states nil)
+        (failures nil))
+    (maphash (lambda (key state)
+               (declare (ignore key))
+               (push state states))
+             (gpu-mirror-frame-states mirror))
+    ;; Logical detachment precedes native destruction, so a condition cannot
+    ;; leave a half-owned table that will double-release on a later close.
+    (clrhash (gpu-mirror-frame-states mirror))
+    (dolist (state states)
+      (handler-case
+          (release-gpu-frame-state state)
+        (error (condition)
+          (push (cons state condition) failures))))
+    (when failures
+      (error 'gpu-frame-state-release-error
+             :failures (nreverse failures))))
   mirror)
 
 (defun call-with-gpu-mirror-target (mirror context function)
@@ -2639,7 +2835,10 @@ solid ink."
   (let ((medium (sheet-medium (mirror-sheet mirror))))
     (when (and (mirror-embedded-p mirror)
                (zerop (length (gpu-medium-commands medium))))
-      (setf (gpu-mirror-prepared-commands mirror) nil)
+      (publish-gpu-mirror-prepared-revision
+       mirror
+       (make-gpu-mirror-prepared-revision
+        mirror nil #() #() #() #() #() #()))
       (return-from render-gpu-mirror-frame mirror))
       ;; Drawing may continue on the McCLIM side while canvas presentation
       ;; crosses onto its native frame thread. Upload one immutable frame
@@ -2666,16 +2865,17 @@ solid ink."
                 (ensure-gpu-mirror-pipeline mirror context))
             (multiple-value-bind (commands text-data)
                 (prepare-gpu-frame-commands mirror semantic-commands)
+              (publish-gpu-mirror-prepared-revision
+               mirror
+               (make-gpu-mirror-prepared-revision
+                mirror commands vertices analytic-vertices relief-vertices
+                gradient-vertices image-vertices text-data :copy-p nil))
               (when (mirror-embedded-p mirror)
-                (upload-gpu-mirror-frame-data
-                 mirror device vertices analytic-vertices relief-vertices
-                 gradient-vertices image-vertices text-data)
-                ;; Publish the semantic stream only after every family buffer
-                ;; has received the matching snapshot. The game render thread
-                ;; must never observe new command ranges over old bytes.
-                (setf (gpu-mirror-prepared-commands mirror) commands)
+                ;; Destination-frame ownership is unknown until the application
+                ;; borrows its drawable.  Publication therefore remains CPU-only;
+                ;; ENCODE-DIRECT-GPU-MIRROR uploads this exact revision into that
+                ;; drawable's bounded source state before replaying its commands.
                 (return-from render-gpu-mirror-frame mirror))
-              (setf (gpu-mirror-prepared-commands mirror) commands)
               (call-with-gpu-mirror-target
                mirror context
                (lambda (surface encoder)
@@ -2806,9 +3006,9 @@ solid ink."
            (luv:destroy buffer)))))))
 
 (defmethod release-mirror-presentation ((mirror luv-gpu-mirror))
-  (release-raster-mirror-compositor (mirror-compositor mirror))
-  (setf (mirror-compositor mirror) nil
-        (gpu-mirror-prepared-commands mirror) nil)
+  (release-mirror-compositor (mirror-compositor mirror))
+  (setf (mirror-compositor mirror) nil)
+  (clear-gpu-mirror-prepared-revision mirror)
   (release-gpu-mirror-pipeline mirror)
   (release-gpu-mirror-frame-states mirror)
   (alexandria:when-let ((texture (mirror-texture mirror)))

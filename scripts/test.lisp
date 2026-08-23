@@ -20,7 +20,9 @@
     (uiop:symbol-call :luv.test-reporter :register-luv-reporter)
     (setf (symbol-value (uiop:find-symbol* :*default-reporter* :rove)) :luv)
     (uiop:symbol-call :rove :use-reporter :luv)
-    (dolist (system '(:luv :luv/ghostty :luv/libav :luvcraft :luvcraft/agent
+    (dolist (system '(:luv :luv/lobby :luv/tracy-capture
+                      :luv/mcclim :luv/lobby/mcclim :luv/application-agent
+                      :luv/ghostty :luv/libav :luvcraft :luvcraft/agent
                       :mqtt :openai :chrome-cdp
                       :luv-wiki :luft :luft/render
                       :luft/z-fiber-benchmark))

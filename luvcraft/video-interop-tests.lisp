@@ -286,7 +286,8 @@
 (deftest decoded-video-picture-releases-every-view-before-any-texture
   (let* ((events (make-video-interop-test-events))
          (picture (make-video-interop-test-picture events :picture 2)))
-    (luvcraft::release-decoded-video-picture picture)
+    (luv:with-release-report
+      (luvcraft::release-decoded-video-picture picture))
     (ok (equal '((:destroy :picture :view 0)
                  (:destroy :picture :view 1)
                  (:destroy :picture :texture 0)
@@ -336,7 +337,7 @@
           (terminal-display-film-screen display) screen
           (luvcraft::luvcraft-session-video-screen session) screen)
     (ok (signals (luvcraft::stop-terminal-display-film display session)
-                 'luvcraft::luvcraft-release-error))
+                 'luv:release-error))
     (ok (eq screen (terminal-display-film-screen display)))
     (ok (eq screen (luvcraft::luvcraft-session-video-screen session)))
     (ok (eq bind-group (luvcraft::video-screen-bind-group screen)))
@@ -362,7 +363,7 @@
          (screen (make-video-interop-test-screen nil nil)))
     (setf (luvcraft::video-screen-resources screen) (list resource))
     (handler-bind ((warning #'muffle-warning))
-      (luvcraft::with-release-warnings
+      (luv:with-release-warnings
         (luvcraft::release-video-screen-or-retain screen)))
     (ok (equal (list screen) luvcraft::*video-screen-release-backlog*))
     (ok (not (luvcraft::video-screen-released-p screen)))

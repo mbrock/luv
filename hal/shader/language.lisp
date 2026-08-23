@@ -3787,7 +3787,13 @@ evaluate work which the condition excludes."
     `(progn
        (defparameter ,variable
          (parse-shader-specification ',name ',options ',body))
-       (defun ,name () ,variable))))
+       (defun ,name () ,variable)
+       ;; A whole-renderer live artifact cannot subscribe narrowly to a
+       ;; standalone shader function through the method MOP.  Publish the
+       ;; same source revision used by shared shader functions so replacing a
+       ;; top-level stage also invalidates its owning cohort.
+       (note-shader-source-redefinition ',name)
+       ',name)))
 
 (defmacro define-live-shader (name options &body body)
   "Define NAME as a function that reparses its shader source on every call.
@@ -3800,7 +3806,9 @@ happens once, to fail early on a broken source."
   `(progn
      (parse-shader-specification ',name ',options ',body)
      (defun ,name ()
-       (parse-shader-specification ',name ',options ',body))))
+       (parse-shader-specification ',name ',options ',body))
+     (note-shader-source-redefinition ',name)
+     ',name))
 
 ;;; Live definitions ---------------------------------------------------------
 

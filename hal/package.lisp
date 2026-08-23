@@ -1,9 +1,16 @@
-(defpackage #:luv.vk
-  (:nicknames #:vk)
-  (:use)
-  (:documentation
-   "The Vulkan entry points luv speaks, one external function per foreign
-entry point.  DEFVKFUN interns and exports here; nothing else does."))
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  ;; Unlike an ordinary declarative package, LUV.VK's external vocabulary is
+  ;; populated by DEFVKFUN as backend files load.  Reasserting an empty
+  ;; DEFPACKAGE in a durable image makes SBCL report every legitimate entry
+  ;; point as package variance, which turns an otherwise valid ASDF recompile
+  ;; into COMPILE-FILE-ERROR.  Establish this dynamic namespace exactly once.
+  (unless (find-package '#:luv.vk)
+    (defpackage #:luv.vk
+      (:nicknames #:vk)
+      (:use)
+      (:documentation
+       "The Vulkan entry points luv speaks, one external function per foreign
+entry point.  DEFVKFUN interns and exports here; nothing else does."))))
 
 (defpackage #:luv.vulkan
   (:nicknames #:lvk)
@@ -189,6 +196,58 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
 ;;; LUV is the public GPU, canvas, and native-host vocabulary.  The block
 ;;; world and application live in LUVCRAFT.WORLD and LUVCRAFT.
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  ;; LIVE-SHADER-PIPELINE moved from LUVCRAFT into LUV.  A durable image may
+  ;; still have the former package's complete private implementation interned;
+  ;; remove that obsolete vocabulary before LUV exports the canonical names.
+  (let ((package (find-package '#:luvcraft)))
+    (when package
+      (let ((prefix "LIVE-SHADER-PIPELINE-")
+            (obsolete nil))
+        ;; Do not mutate a package while DO-SYMBOLS is walking its hash
+        ;; tables.  Durable-image migration is rare, but it must be as
+        ;; deterministic as an ordinary cold load.
+        (do-symbols (symbol package)
+          (let ((name (symbol-name symbol)))
+            (when (and (eq package (symbol-package symbol))
+                       (or (string= name "LIVE-SHADER-PIPELINE")
+                           (and (<= (length prefix) (length name))
+                                (string= prefix name
+                                         :end2 (length prefix)))
+                           (member name
+                                   '("BUILD-LIVE-SHADER-PIPELINE-CANDIDATE"
+                                     "INSTALL-LIVE-SHADER-PIPELINE-CANDIDATE"
+                                     "MAKE-LIVE-SHADER-PIPELINE"
+                                     "REFRESH-LIVE-SHADER-PIPELINE"
+                                     "RELEASE-LIVE-SHADER-PIPELINE")
+                                   :test #'string=)))
+              (push symbol obsolete))))
+        (dolist (symbol obsolete)
+          (let ((name (symbol-name symbol)))
+            (when (eq :external (nth-value 1 (find-symbol name package)))
+              (unexport symbol package))
+            (unintern symbol package)))))))
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  ;; The named release scope now belongs to LUV.  Remove the former owned
+  ;; LUVCRAFT symbols before exporting the shared spellings into a package
+  ;; which an existing durable LUVCRAFT package already uses.
+  (let ((package (find-package '#:luvcraft)))
+    (when package
+      (dolist (name '("*RELEASE-FAILURES*"
+                      "LUVCRAFT-RELEASE-ERROR"
+                      "LUVCRAFT-RELEASE-ERROR-FAILURES"
+                      "CALL-RELEASING"
+                      "RELEASING"
+                      "WITH-RELEASE-REPORT"
+                      "WITH-RELEASE-WARNINGS"))
+        (multiple-value-bind (symbol status) (find-symbol name package)
+          (when (and symbol status
+                     (eq package (symbol-package symbol)))
+            (when (eq status :external)
+              (unexport symbol package))
+            (unintern symbol package)))))))
+
 (defpackage #:luv
   (:use #:cl)
   (:export #:*gpu-provider*
@@ -215,6 +274,44 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:zone
            #:zdefun
            #:zdefmethod
+           ;; Honest application cleanup and one-owner stop publication.
+           #:release-failure
+           #:release-failure-name
+           #:release-failure-condition
+           #:release-error
+           #:release-error-failures
+           #:release-warning
+           #:release-warning-failures
+           #:release-warning-primary-condition
+           #:call-with-release-report
+           #:with-release-report
+           #:call-with-release-warnings
+           #:with-release-warnings
+           #:call-with-release-unwind
+           #:unwind-protect-releasing
+           #:releasing
+           #:stop-controller
+           #:make-stop-controller
+           #:make-canvas-stop-controller
+           #:stop-controller-name
+           #:stop-controller-state
+           #:stop-controller-condition
+           #:stop-controller-result-values
+           #:stop-controller-error
+           #:stop-error-controller
+           #:stop-controller-blocking-thread-error
+           #:stop-error-operation
+           #:recursive-stop-error
+           #:stop-not-started-error
+           #:stop-operation-aborted
+           #:application-attachment-closed
+           #:application-attachment-closed-controller
+           #:application-attachment-closed-attachment
+           #:application-attachment-closed-state
+           #:call-with-running-stop-controller
+           #:call-with-stop-controller
+           #:request-controlled-stop
+           #:wait-for-controlled-stop
            #:cpu-trace-zones
            #:cpu-trace-zone-name
            #:cpu-trace-zone-parent-index
@@ -393,6 +490,65 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #:make-gpu-draw-command
            #:make-gpu-draw-indexed-command
            #:make-gpu-draw-mesh-command
+           ;; Application-owned derivatives of live source.
+           #:application-live-artifacts
+           #:live-artifact-label
+           #:live-artifact-status
+           #:live-artifact-diagnostic
+           #:live-artifact-installed-revision
+           #:refresh-live-artifact
+           #:release-live-artifact
+           #:refresh-application-live-artifacts
+           #:live-shader-pipeline
+           #:live-shader-pipeline-diagnostic
+           #:live-shader-pipeline-installed-revision
+           #:live-shader-pipeline-installed-source-revision
+           #:live-shader-pipeline-installed-source-values
+           #:live-shader-pipeline-attempted-source-values
+           #:live-shader-pipeline-lowering
+           #:live-shader-pipeline-role
+           #:live-shader-pipeline-specification
+           #:live-shader-pipeline-stage
+           #:live-shader-pipeline-status
+           #:live-shader-pipeline-vertex-lowering
+           #:live-shader-pipeline-vertex-role
+           #:live-shader-pipeline-vertex-specification
+           #:live-shader-pipeline-layout
+           #:live-shader-pipeline-native-pipeline
+           #:make-live-shader-pipeline
+           #:refresh-live-shader-pipeline
+           #:release-live-shader-pipeline
+           ;; GPU-native screenshots and films of live applications.
+           #:application-capture
+           #:application-capture-busy
+           #:application-capture-busy-application
+           #:application-capture-busy-active-capture
+           #:application-capture-busy-requested-capture
+           #:application-capture-shutting-down
+           #:application-capture-shutting-down-application
+           #:application-capture-shutting-down-requested-capture
+           #:application-capture-shutdown-blocking-thread-error
+           #:application-capture-shutdown-blocking-application
+           #:application-capture-shutdown-blocking-active-capture
+           #:application-capture-shutdown-p
+           #:request-application-capture-shutdown
+           #:call-if-application-captures-open
+           #:quiesce-application-captures
+           #:capture-kind
+           #:capture-option
+           #:capture-extent
+           #:capture-format
+           #:capture-target
+           #:capture-readback-buffer
+           #:capture-frame-index
+           #:capture-client-state
+           #:capture-canvas
+           #:prepare-capture
+           #:advance-capture-frame
+           #:encode-capture-frame
+           #:cleanup-capture
+           #:capture-application-screenshot
+           #:capture-application-film
            #:vulkan-gpu-provider
            #+darwin
            #:metal-gpu-provider
@@ -589,6 +745,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))
            #+darwin
            #:metal-canvas-context
            #:canvas-title
+           #:canvas-thread-p
            #:canvas-width
            #:canvas-height
            #:canvas-size

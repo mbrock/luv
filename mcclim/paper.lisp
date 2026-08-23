@@ -1,12 +1,8 @@
 ;;; A sheet of PDF paper, standing in the luvcraft world.
 ;;;
-;;; The page is split the way #S8LIJP says to split it: the sheet is a raster
-;;; and the type is geometry.
-;;;
-;;; The sheet is one analytic rounded rectangle drawn into the mirror texture,
-;;; which is exactly what that path is good at -- a smooth fill with no detail
-;;; finer than a texel.  The texture is cut to the page's own proportions, so
-;;; that rectangle is the whole quad and there is no surround to decide about.
+;;; The page is split the way #S8LIJP says to split it: the sheet is one
+;;; retained analytic primitive and the type is world geometry.  Both enter
+;;; the game's final pass directly; there is no pane raster or texture blit.
 ;;;
 ;;; The text is not in the texture at all.  MuPDF gives back each typeset line
 ;;; with its baseline, its size, and the font it was set in; those are shaped
@@ -51,7 +47,7 @@ the sheet's depth lose the depth test against the sheet and come out hollow.")
 (defparameter *paper-text-ink* (make-rgb-color 0.10 0.09 0.08))
 (defparameter *paper-muted-ink* (make-rgb-color 0.52 0.50 0.46))
 
-(defclass paper-pane (application-pane) ())
+(defclass paper-pane (transparent-gpu-application-pane) ())
 
 (define-application-frame luvcraft-paper ()
   ((document :initarg :document :accessor paper-document)
@@ -67,10 +63,14 @@ the sheet's depth lose the depth test against the sheet and come out hollow.")
   (:panes
    (paper (make-pane 'paper-pane
                      :background +transparent-ink+
-                     :default-text-style (make-text-style :serif nil :normal))))
-  (:layouts
-   (default
-    (horizontally (:width *paper-texture-width* :height *paper-texture-height*) paper))))
+                     :default-text-style (make-text-style :serif nil :normal)
+                     :width *paper-texture-width*
+                     :height *paper-texture-height*
+                     :min-width *paper-texture-width*
+                     :min-height *paper-texture-height*
+                     :max-width *paper-texture-width*
+                     :max-height *paper-texture-height*)))
+  (:layouts (default paper)))
 
 (defun load-paper-page (frame)
   "Measure the current page and pull its lines out of the document."
@@ -106,8 +106,6 @@ centred with paper around it rather than stretched."
   (declare (ignore region))
   (let ((frame (pane-frame pane)))
     (with-sheet-medium (medium pane)
-      (when (typep medium 'luv-raster-medium)
-        (clear-raster-medium-reliefs medium))
       (with-bounding-rectangle* (left top right bottom) pane
         (draw-analytic-rounded-rectangle*
          medium left top right bottom :radius 4
@@ -122,11 +120,8 @@ centred with paper around it rather than stretched."
 
 (defun repaint-paper (frame)
   (let ((mirror (sheet-direct-mirror (frame-top-level-sheet frame))))
-    (if (typep mirror 'luv-gpu-mirror)
-        (repaint-gpu-mirror mirror)
-        (progn
-          (repaint-sheet (mirror-sheet mirror) +everywhere+)
-          (present-mirror mirror))))
+    (check-type mirror luv-gpu-mirror)
+    (repaint-gpu-mirror mirror))
   frame)
 
 (defun turn-paper-page (frame delta)
@@ -257,7 +252,7 @@ they share, or NIL when the page has no drawable text."
 
 ;;;; The overlay
 
-(defclass luvcraft-paper-overlay (luvcraft-widget-overlay)
+(defclass luvcraft-paper-overlay (luvcraft-world-widget-overlay)
   ((glyph-cache :initform nil :accessor paper-glyph-cache)
    (text-run :initform nil :accessor paper-text-run)
    (text-generation :initform nil :accessor paper-text-generation)
@@ -320,43 +315,33 @@ pipelines and buffers, and the pass is no place to do that."
 (luv:zdefmethod (luvcraft:encode-luvcraft-overlay :zone :paper/encode)
     ((overlay luvcraft-paper-overlay) session pass surface-texture)
   "Draw the sheet, then set the page on it."
-  (let* ((mirror (widget-overlay-mirror overlay))
-         (source (mirror-texture mirror)))
-    (when source
-      (ensure-spinning-compositor-resources
-       overlay (mirror-context mirror) source
-       :depth-format :depth32-float
-       :target-format
-       (luv:gpu-texture-format
-        (luvcraft::luvcraft-session-color-texture session)))
-      (let* ((viewport-size
-               (luv:canvas-extent (luvcraft::luvcraft-session-context session)))
-             (state (world-device-clip-state
-                     overlay session (first viewport-size)
-                     (second viewport-size)))
-             (frame-state
-               (ensure-spinning-compositor-frame-state overlay surface-texture)))
-        (setf (widget-overlay-render-state overlay) state)
-        (luv:write-buffer (spinning-frame-state-buffer frame-state) state)
-        (luv:set-pipeline pass (spinning-compositor-pipeline overlay))
-        (luv:set-bind-group pass 0
-                            (spinning-frame-state-bind-group frame-state))
-        (luv:draw pass 4))
-      ;; The type is a second draw in the same pass, in world space, sharing
-      ;; the scene's own frame uniform rather than the compositor's.
-      (alexandria:when-let ((run (paper-text-run overlay)))
-        (let* ((device (luvcraft::luvcraft-session-device session))
-               (frame (luvcraft::luvcraft-frame-state session surface-texture))
-               (glyphs (luvcraft::world-text-run-glyphs run)))
-          (when (plusp (length glyphs))
-            (luv:set-pipeline pass (luvcraft::world-text-run-native-pipeline run))
-            (luv:set-vertex-buffer
-             pass 0 (luvcraft::world-text-run-vertex-buffer run))
-            (luv:set-vertex-buffer
-             pass 1 (luvcraft::world-text-run-instance-buffer run))
-            (luv:set-bind-group
-             pass 0 (paper-frame-bind-group overlay run frame device))
-            (luv:draw pass 6 (length glyphs)))))))
+  (let* ((viewport-size
+           (luv:canvas-extent (luvcraft::luvcraft-session-context session)))
+         (state (world-device-clip-state
+                 overlay session (first viewport-size) (second viewport-size))))
+    ;; Replay the retained analytic sheet before its independently shaped Slug
+    ;; text.  Clear the automatic :AFTER replay marker so the paper cannot be
+    ;; drawn over its own ink.
+    (prepare-direct-widget-overlay overlay session surface-texture state)
+    (encode-direct-gpu-mirror
+     overlay pass (widget-overlay-render-target-texture overlay) state
+     :frame-texture surface-texture)
+    (setf (widget-overlay-render-state overlay) nil)
+    ;; The type is a second draw in the same pass, in world space, sharing the
+    ;; scene's own frame uniform rather than the compositor's.
+    (alexandria:when-let ((run (paper-text-run overlay)))
+      (let* ((device (luvcraft::luvcraft-session-device session))
+             (frame (luvcraft::luvcraft-frame-state session surface-texture))
+             (glyphs (luvcraft::world-text-run-glyphs run)))
+        (when (plusp (length glyphs))
+          (luv:set-pipeline pass (luvcraft::world-text-run-native-pipeline run))
+          (luv:set-vertex-buffer
+           pass 0 (luvcraft::world-text-run-vertex-buffer run))
+          (luv:set-vertex-buffer
+           pass 1 (luvcraft::world-text-run-instance-buffer run))
+          (luv:set-bind-group
+           pass 0 (paper-frame-bind-group overlay run frame device))
+          (luv:draw pass 6 (length glyphs))))))
   overlay)
 
 (luv:zdefmethod (luvcraft:refresh-luvcraft-overlay :zone :paper/refresh)
@@ -459,9 +444,11 @@ looking and focused with TAB like anything else."
               :width *paper-texture-width* :height texture-height
               :document document))))
     (setf (frame-pretty-name frame) "paper")
+    (make-gpu-frame-background-transparent frame)
     (load-paper-page frame)
     (let* ((mirror (sheet-direct-mirror (frame-top-level-sheet frame)))
-           (source-size (luv:gpu-texture-size (mirror-texture mirror)))
+           (source-size (multiple-value-list
+                         (gpu-mirror-logical-size mirror)))
            (aspect (/ (first source-size) (second source-size)))
            (camera (luvcraft:luvcraft-session-camera session))
            (camera-position (luvcraft:camera-position camera)))

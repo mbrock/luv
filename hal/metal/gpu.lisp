@@ -2663,6 +2663,21 @@ compiler boundary of #58IDSR."
     (setf (metal-encoder-encoded-p encoder) t)
     command))
 
+(defconstant +metal-blit-read-producer-stages+
+  (logior luv.metal:+stage-fragment+ luv.metal:+stage-blit+)
+  "Metal stages whose texture writes can feed a subsequent blit read.")
+
+(defun encode-metal-blit-read-barrier (native-encoder)
+  "Make earlier render and blit texture writes visible to a blit read."
+  ;; MTL4CommandQueue ignores ordinary resource hazard tracking.  A copy can
+  ;; consume either a render target or the destination of an earlier copy in
+  ;; this portable encoder, so both producer stages belong in the dependency.
+  (luv.metal:barrier-after-queue-stages
+   native-encoder
+   +metal-blit-read-producer-stages+
+   luv.metal:+stage-blit+
+   luv.metal:+visibility-device+))
+
 (defmethod encode
     ((encoder metal-gpu-command-encoder)
      (command gpu-copy-texture-command))
@@ -2691,11 +2706,7 @@ compiler boundary of #58IDSR."
       (unless native-encoder
         (error 'metal-gpu-error :operation :copy-texture
                :reason :compute-encoder-creation-failed))
-      ;; MTL4CommandQueue ignores ordinary resource hazard tracking.  Make the
-      ;; render-target writes visible before this encoder's blit-stage read.
-      (luv.metal:barrier-after-queue-stages
-       native-encoder luv.metal:+stage-fragment+ luv.metal:+stage-blit+
-       luv.metal:+visibility-device+)
+      (encode-metal-blit-read-barrier native-encoder)
       (luv.metal:copy-metal-texture
        native-encoder (metal-native-object source)
        (metal-native-object destination))
@@ -2738,9 +2749,7 @@ compiler boundary of #58IDSR."
       (unless native-encoder
         (error 'metal-gpu-error :operation :copy-texture-to-buffer
                :reason :compute-encoder-creation-failed))
-      (luv.metal:barrier-after-queue-stages
-       native-encoder luv.metal:+stage-fragment+ luv.metal:+stage-blit+
-       luv.metal:+visibility-device+)
+      (encode-metal-blit-read-barrier native-encoder)
       (luv.metal:copy-metal-texture-to-buffer
        native-encoder (metal-native-object source)
        (first size) (second size)

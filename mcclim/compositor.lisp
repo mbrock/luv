@@ -503,7 +503,8 @@
     (&key (title "McCLIM widget drifting through luv space")
           (frames-per-second 60) (speed 0.12))
   "Open WIDGET-LAB and immediately composite it as a spinning 3D quad."
-  (let* ((frame (open-widget-lab :title title))
+  (let* ((frame (open-widget-lab :title title
+                                 :server-path '(:luv-raster)))
          (sheet (frame-top-level-sheet frame))
          (mirror (sheet-direct-mirror sheet)))
     (enable-spinning-mirror

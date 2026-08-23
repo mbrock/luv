@@ -3,6 +3,48 @@
 
 (in-package #:mcluv.surveyor-tests)
 
+(defclass direct-overlay-preparation-probe
+    (mcluv:luvcraft-world-widget-overlay)
+  ((observations :initform nil
+                 :accessor direct-overlay-preparation-observations)))
+
+(defmethod mcluv::prepare-mirror-compositor-target-revision
+    ((overlay direct-overlay-preparation-probe)
+     (mirror mcluv:luv-gpu-mirror) revision
+     &key target-format depth-stencil)
+  (declare (ignore mirror))
+  (push (list revision target-format depth-stencil)
+        (direct-overlay-preparation-observations overlay)))
+
+(deftest static-luvcraft-world-overlay-prepares-its-scene-target
+  (let* ((mirror
+           (make-instance 'mcluv:luv-gpu-mirror
+                          :sheet nil :target nil :context nil))
+         (revision
+           (mcluv::make-gpu-mirror-prepared-revision
+            mirror nil #() #() #() #() #() #()))
+         (overlay
+           (make-instance 'direct-overlay-preparation-probe
+                          :session nil :frame nil :mirror mirror))
+         (expected
+           (list
+            (list revision :rgba16-float
+                  '(:format :depth32-float
+                    :depth-write-enabled nil :depth-compare :less)))))
+    ;; Seed the static semantic revision while no compositor is attached.
+    (mcluv::publish-gpu-mirror-prepared-revision mirror revision)
+    (setf (mcluv:mirror-compositor mirror) overlay)
+    ;; Repaint publication and static refresh must agree on the actual scene
+    ;; attachment; otherwise each semantic edit would discard the cohort that
+    ;; the pre-pass boundary had just installed.
+    (mcluv::prepare-mirror-compositor-revision overlay mirror revision)
+    (ok (equal expected
+               (direct-overlay-preparation-observations overlay)))
+    (setf (direct-overlay-preparation-observations overlay) nil)
+    (luvcraft:refresh-luvcraft-overlay overlay nil)
+    (ok (equal expected
+               (direct-overlay-preparation-observations overlay)))))
+
 (deftest surveyor-captures-one-dense-terrain-product
   (let* ((world (luvcraft:make-empty-little-block-world :seed 121))
          (camera
@@ -80,12 +122,12 @@
       (ok (compute-applicable-methods generic
                                       (list command nil context)))))
   (ok (null
-       (mcluv::direct-widget-text-depth-stencil
+       (mcluv::direct-gpu-mirror-depth-stencil
         (allocate-instance
          (find-class 'mcluv:luvcraft-hud-widget-overlay)))))
   (ok (equal '(:format :depth32-float
                :depth-write-enabled nil :depth-compare :less)
-             (mcluv::direct-widget-text-depth-stencil
+             (mcluv::direct-gpu-mirror-depth-stencil
               (allocate-instance
                (find-class 'mcluv:luvcraft-world-widget-overlay)))))
   (dolist (specification
@@ -94,12 +136,35 @@
                   (mcluv::direct-widget-relief-vertex-specification)
                   (mcluv::direct-widget-gradient-vertex-specification)
                   (mcluv::direct-widget-image-vertex-specification)
-                  (mcluv::world-widget-slug-vertex-specification)
+                  (mcluv::direct-mirror-slug-vertex-specification)
                   (luv.analytic:lattice-fragment-specification)))
     (ok (> (length (spv:assemble-shader-specification specification)) 5))
     (ok (search "using namespace metal"
                 (luv.msl:msl-document-source
                  (luv.msl:compile-msl specification))))))
+
+(deftest widget-focus-probes-the-logical-retina-center
+  (let* ((canvas (make-instance 'luv:sdl-canvas :width 1000 :height 500))
+         (session (make-instance 'luvcraft:luvcraft-session :canvas canvas))
+         (overlay
+           (make-instance 'mcluv:luvcraft-world-widget-overlay
+                          :session session :frame nil :mirror nil)))
+    (setf (mcluv:widget-overlay-render-state overlay)
+          (make-array
+           16 :element-type 'single-float
+           :initial-contents
+           '(0.0 0.0 0.0 1.0
+             1.0 0.0 0.0 0.0
+             0.0 1.0 0.0 0.0
+             0.0 0.0 0.0 0.0)))
+    (let ((coordinate
+            (mcluv:luvcraft-widget-texture-coordinate overlay 500.0 250.0)))
+      (ok coordinate)
+      (ok (= 0.5 (first coordinate)))
+      (ok (= 0.5 (second coordinate))))
+    ;; This has no canvas context or drawable extent on purpose. Focus uses
+    ;; the same logical point space as SDL pointer events, not GPU pixels.
+    (ok (= 0.0 (luvcraft:luvcraft-focus-score overlay session)))))
 
 (deftest inventory-is-a-modal-hud-with-stable-grid-hit-testing
   (ok (eq :hud

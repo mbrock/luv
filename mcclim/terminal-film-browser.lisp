@@ -211,11 +211,8 @@ twelve saturated bars fight each other and the filename loses."
 
 (defun repaint-terminal-film-browser (frame)
   (let ((mirror (sheet-direct-mirror (frame-top-level-sheet frame))))
-    (if (typep mirror 'luv-gpu-mirror)
-        (repaint-gpu-mirror mirror)
-        (progn
-          (repaint-sheet (mirror-sheet mirror) +everywhere+)
-          (present-mirror mirror))))
+    (check-type mirror luv-gpu-mirror)
+    (repaint-gpu-mirror mirror))
   frame)
 
 (defun refresh-terminal-film-browser (frame &key (reset-offset-p nil))

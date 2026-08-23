@@ -57,19 +57,17 @@
            (ok (typep curve-texture 'luv::metal-gpu-texture))
            (let ((unexpected nil))
              (unwind-protect
-                  (ok (eq :unsupported-texture-usage
-                          (handler-case
-                              (progn
-                                (setf unexpected
-                                      (create
-                                       device
-                                       (make-texture-descriptor
-                                        :size '(1 1) :dimensions :2d
-                                        :format :rgba8-unorm
-                                        :usage :storage-binding)))
-                                :no-error)
-                            (gpu-request-error (condition)
-                              (gpu-request-error-reason condition)))))
+                  (progn
+                    (setf unexpected
+                          (create
+                           device
+                           (make-texture-descriptor
+                            :size '(1 1) :dimensions :2d
+                            :format :rgba8-unorm
+                            :usage :storage-binding)))
+                    (ok (typep unexpected 'luv::metal-gpu-texture))
+                    (ok (member :storage-binding
+                                (gpu-texture-usage unexpected))))
                (when unexpected (destroy unexpected)))))
       (when curve-texture (destroy curve-texture))
       (when band-texture (destroy band-texture))
@@ -137,6 +135,81 @@
       (when encoder (destroy encoder))
       (when depth (destroy depth))
       (when color (destroy color))
+      (destroy device))))
+
+(deftest metal-chained-blits-observe-the-prior-blit-write
+  (let* ((width 641)
+         (height 359)
+         (device
+           (request-gpu-device (make-instance 'metal-gpu-provider)))
+         (queue (device-queue device))
+         (source nil)
+         (intermediate nil)
+         (readback nil)
+         (encoder nil)
+         (command-buffer nil))
+    (unwind-protect
+         (progn
+           (ok (logtest metal:+stage-fragment+
+                        luv::+metal-blit-read-producer-stages+))
+           (ok (logtest metal:+stage-blit+
+                        luv::+metal-blit-read-producer-stages+))
+           (setf source
+                 (create
+                  device
+                  (make-texture-descriptor
+                   :label "chained blit source"
+                   :size (list width height)
+                   :dimensions :2d :format :rgba8-unorm
+                   :usage '(:render-attachment :copy-src)))
+                 intermediate
+                 (create
+                  device
+                  (make-texture-descriptor
+                   :label "chained blit intermediate"
+                   :size (list width height)
+                   :dimensions :2d :format :rgba8-unorm
+                   :usage '(:copy-src :copy-dst)))
+                 readback
+                 (create
+                  device
+                  (make-buffer-descriptor
+                   :label "chained blit readback"
+                   :size (* width height 4) :usage '(:copy-dst)))
+                 encoder
+                 (create
+                  device
+                  (make-command-encoder-descriptor
+                   :label "chained blit commands")))
+           (end-pass
+            (begin-render-pass
+             encoder
+             (make-render-pass-descriptor
+              :color-attachments
+              `((:view ,source :load-op :clear :store-op :store
+                 :clear-value #(1.0 0.0 1.0 1.0))))))
+           (encode
+            encoder
+            (make-gpu-copy-texture-command
+             :source source :destination intermediate))
+           (encode
+            encoder
+            (make-gpu-copy-texture-to-buffer-command
+             :source intermediate :destination readback))
+           (setf command-buffer (finish encoder))
+           (submit queue command-buffer)
+           (let ((pixels (read-buffer readback)))
+             (ok (= (* width height 4) (length pixels)))
+             (ok (loop for index below (length pixels) by 4
+                       always (and (= 255 (aref pixels index))
+                                   (zerop (aref pixels (+ index 1)))
+                                   (= 255 (aref pixels (+ index 2)))
+                                   (= 255 (aref pixels (+ index 3))))))))
+      (when command-buffer (destroy command-buffer))
+      (when encoder (destroy encoder))
+      (when readback (destroy readback))
+      (when intermediate (destroy intermediate))
+      (when source (destroy source))
       (destroy device))))
 
 (deftest world-text-cache-reuses-shaping-and-device-glyphs

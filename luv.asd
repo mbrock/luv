@@ -1,5 +1,30 @@
 (in-package #:asdf-user)
 
+(defsystem "luv/lobby"
+  :description "A restartable application lobby radio with semantic snapshots."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  ;; This optional system owns the MQTT dependency; the core LUV system does
+  ;; not depend on it.
+  :depends-on ("mqtt/net" "uiop")
+  :serial t
+  :components ((:file "lobby/client-package")
+               (:file "lobby/client"))
+  :in-order-to ((test-op (test-op "luv/lobby/test"))))
+
+(defsystem "luv/lobby/test"
+  :description "Executable lifecycle and snapshot claims for the lobby radio."
+  :version "0.0.1"
+  :depends-on ("luv/lobby" "rove")
+  :components ((:file "lobby/client-tests"))
+  :perform (test-op (operation component)
+             (declare (ignore operation component))
+             (unless (uiop:symbol-call '#:rove '#:run-suite
+                                       (uiop:symbol-call '#:rove '#:find-suite
+                                                         '#:luv.lobby.tests)
+                                       :style :spec)
+               (error "Luv lobby tests failed"))))
+
 (defsystem "luv/domains"
   :description "Minimal shared protocols for finite domains."
   :version "0.0.1"
@@ -248,8 +273,11 @@ offsets and of headers."
      (:file "trace")
      (:file "gpu")
      (:file "canvas")
+     (:file "application-lifecycle")
+     (:file "live-artifact")
      (:file "png")
      (:file "video")
+     (:file "application-capture")
      (:file "capture-specification")
      (:module "vulkan-core"
       :pathname "vulkan"
@@ -300,6 +328,29 @@ offsets and of headers."
      (:file "examples"))))
   :in-order-to ((test-op (test-op "luv/test"))))
 
+(defsystem "luv/tracy-capture"
+  :description "Concurrent application-neutral ownership of Tracy captures."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luv")
+  :serial t
+  :components ((:file "hal/tracy-capture-package")
+               (:file "hal/tracy-capture"))
+  :in-order-to ((test-op (test-op "luv/tracy-capture/test"))))
+
+(defsystem "luv/tracy-capture/test"
+  :description "Executable concurrency and subprocess claims for Tracy capture."
+  :version "0.0.1"
+  :depends-on ("luv/tracy-capture" "rove")
+  :components ((:file "hal/tracy-capture-tests"))
+  :perform (test-op (operation component)
+             (declare (ignore operation component))
+             (unless (uiop:symbol-call '#:rove '#:run-suite
+                                       (uiop:symbol-call '#:rove '#:find-suite
+                                                         '#:luv.tracy.capture.tests)
+                                       :style :spec)
+               (error "Luv Tracy capture tests failed"))))
+
 (defsystem "luv/production"
   :description "A bounded latest-value owner/worker production boundary."
   :version "0.0.1"
@@ -326,6 +377,9 @@ offsets and of headers."
    (:file "arithmetic/lisp/tests")
    (:file "objective-c/tests" :if-feature :darwin)
    (:file "hal/gpu-tests")
+   (:file "hal/live-artifact-tests")
+   (:file "hal/application-lifecycle-tests")
+   (:file "hal/application-capture-tests")
    (:file "hal/capture-specification-tests")
    (:file "hal/vulkan/tests")
    (:file "parinfer/tests"))
@@ -334,7 +388,7 @@ offsets and of headers."
              (unless (uiop:symbol-call '#:rove '#:run-suite
                                        (uiop:symbol-call '#:rove '#:find-suite
                                                          '#:luv.tests)
-                                       :style :luv)
+                                       :style :spec)
                (error "luv tests failed"))))
 
 (defsystem "luv/showcase"
@@ -361,7 +415,7 @@ offsets and of headers."
   :description "An experimental McCLIM backend presented through luv canvases."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luv" "mcclim-render" "cl-dejavu")
+  :depends-on ("luv" "luv/lobby" "mcclim-render" "cl-dejavu")
   :serial t
   :components ((:module "mcclim"
                 :serial t
@@ -371,22 +425,81 @@ offsets and of headers."
                              (:file "port")
                              (:file "mirror")
                              (:file "gpu")
+                             (:file "command-menu")
+                             (:file "metabar")
+                             (:file "application-status-bar")
                              (:file "widget-lab")
-                             (:file "compositor"))))
+                             (:file "compositor")
+                             (:file "direct-compositor"))))
   :in-order-to ((test-op (test-op "luv/mcclim/test"))))
 
 (defsystem "luv/mcclim/test"
   :description "Executable claims for luv's direct McCLIM GPU backend."
   :version "0.0.1"
   :depends-on ("luv/mcclim" "rove")
-  :components ((:file "mcclim/tests"))
+  :serial t
+  :components ((:file "mcclim/tests")
+               (:file "mcclim/command-menu-tests")
+               (:file "mcclim/metabar-tests")
+               (:file "mcclim/status-bar-tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
              (unless (uiop:symbol-call '#:rove '#:run-suite
                                        (uiop:symbol-call '#:rove '#:find-suite
                                                          '#:mcluv.tests)
-                                       :style :luv)
+                                       :style :spec)
                (error "luv/mcclim tests failed"))))
+
+(defsystem "luv/application-agent"
+  :description "Application-neutral asynchronous language-agent harness."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("openai" "mcclim" "uiop" "sb-concurrency")
+  :serial t
+  :components ((:file "application-agent/package")
+               (:file "application-agent/presentations")
+               (:file "application-agent/transcript")
+               (:file "application-agent/harness")
+               (:file "application-agent/command-tool"))
+  :in-order-to ((test-op (test-op "luv/application-agent/test"))))
+
+(defsystem "luv/application-agent/test"
+  :description "Executable lifecycle, transcript, and command-tool claims."
+  :version "0.0.1"
+  :depends-on ("luv/application-agent" "rove")
+  :serial t
+  :components ((:file "application-agent/tests-package")
+               (:file "application-agent/tests"))
+  :perform (test-op (operation component)
+             (declare (ignore operation component))
+             (unless (uiop:symbol-call '#:rove '#:run-suite
+                                       (uiop:symbol-call '#:rove '#:find-suite
+                                                         '#:luv.application-agent.tests)
+                                       :style :spec)
+               (error "Luv application-agent tests failed"))))
+
+(defsystem "luv/lobby/mcclim"
+  :description "A textureless retained-GPU HUD for the shared lobby radio."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luv/lobby" "luv/mcclim")
+  :serial t
+  :components ((:file "lobby/mcclim-package")
+               (:file "lobby/mcclim"))
+  :in-order-to ((test-op (test-op "luv/lobby/mcclim/test"))))
+
+(defsystem "luv/lobby/mcclim/test"
+  :description "GPU-media and native-resolution claims for the lobby HUD."
+  :version "0.0.1"
+  :depends-on ("luv/lobby/mcclim" "rove")
+  :components ((:file "lobby/mcclim-tests"))
+  :perform (test-op (operation component)
+             (declare (ignore operation component))
+             (unless (uiop:symbol-call '#:rove '#:run-suite
+                                       (uiop:symbol-call '#:rove '#:find-suite
+                                                         '#:luv.lobby.mcclim.tests)
+                                       :style :spec)
+               (error "Luv lobby McCLIM tests failed"))))
 
 (defsystem "luv/mcclim/gallery"
   :description "A screenshot gallery and primitive-fallback audit for McCLIM."

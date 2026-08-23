@@ -83,6 +83,11 @@
     (ok (assoc "Toggle Phone" entries :test #'string=))
     (ok (assoc "Place Block" entries :test #'string=))
     (ok (assoc "Toggle Tracy Capture" entries :test #'string=))
+    (ok (assoc "Toggle Lobby Panel" entries :test #'string=))
+    (ok (assoc "Start Tracy Capture" entries :test #'string=))
+    (ok (assoc "Stop Tracy Capture" entries :test #'string=))
+    (ok (assoc "Open Last Tracy Capture" entries :test #'string=))
+    (ok (assoc "Reveal Last Tracy Capture" entries :test #'string=))
     (ok (assoc "Export Presentation Timing" entries :test #'string=))
     ;; Commands needing arguments will join M-x when it can ask for them;
     ;; presenting them as executable before then would make a dishonest menu.

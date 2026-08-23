@@ -233,7 +233,7 @@
                   :text-size 12 :ink (make-rgb-color 0.48 0.58 0.57)))))
 
 (defun open-surveyor-map
-    (session &key (server-path '(:luv)) (title "surveyor map")
+    (session &key (server-path '(:luv-gpu)) (title "surveyor map")
                   target context device)
   "Create and enable a surveyor instrument sampled from SESSION."
   (when (and target (not (and context device)))

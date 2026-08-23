@@ -132,7 +132,9 @@
   (:documentation "The root of the McCLIM sheet hierarchy on a LUV-PORT."))
 
 (defmethod find-port-type ((type (eql :luv)))
-  (values 'luv-raster-port 'identity))
+  ;; The unqualified backend name is the production path.  Keep the old
+  ;; raster uploader available only under its deliberately explicit name.
+  (values 'luv-gpu-port 'identity))
 
 (defmethod find-port-type ((type (eql :luv-raster)))
   (values 'luv-raster-port 'identity))

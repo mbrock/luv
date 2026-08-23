@@ -1,3 +1,17 @@
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  ;; The lobby vocabulary moved to LUV.LOBBY.  Remove stale home symbols from
+  ;; durable images so package qualification continues to name ownership.
+  (let ((package (find-package '#:luvcraft)))
+    (when package
+      (dolist (name '("LOBBY-CLIENT" "LOBBY-CLIENT-ID" "LOBBY-CLIENT-NAME"
+                      "LOBBY-CLIENT-SNAPSHOT" "LOBBY-CLIENT-VALUE"
+                      "LOBBY-PEER" "LOBBY-PEER-ID" "LOBBY-PEER-NAME"
+                      "RECEIVE-LOBBY-PUBLICATION"))
+        (multiple-value-bind (symbol status) (find-symbol name package)
+          (when (and symbol (eq package (symbol-package symbol)))
+            (when (eq status :external) (unexport symbol package))
+            (unintern symbol package)))))))
+
 (defpackage #:luvcraft
   (:use #:cl #:luv #:luvcraft.world)
   (:import-from #:luv.production
@@ -343,17 +357,6 @@
            #:little-world-surface-height
            #:little-world-surface-material
            #:little-world-value-noise
-           #:live-shader-pipeline
-           #:live-shader-pipeline-diagnostic
-           #:live-shader-pipeline-installed-revision
-           #:live-shader-pipeline-lowering
-           #:live-shader-pipeline-role
-           #:live-shader-pipeline-specification
-           #:live-shader-pipeline-stage
-           #:live-shader-pipeline-status
-           #:live-shader-pipeline-vertex-lowering
-           #:live-shader-pipeline-vertex-role
-           #:live-shader-pipeline-vertex-specification
            #:luvcraft-chunk-product
            #:luvcraft-chunk-product-coordinate
            #:luvcraft-chunk-product-dependency-stamp
@@ -402,21 +405,13 @@
            #:luvcraft-focus-left
            #:luvcraft-focus-score
            #:luvcraft-overlay-focus-insets
+           #:luvcraft-session-focus-insets
            #:luvcraft-overlay-stage
            #:luvcraft-session-mesh
            #:luvcraft-session-meshed-world-revision
            #:luvcraft-session-outstanding-production
            #:luvcraft-session-overlays
            #:luvcraft-session-lobby-client
-           #:lobby-client
-           #:lobby-client-id
-           #:lobby-client-name
-           #:lobby-client-snapshot
-           #:lobby-client-value
-           #:lobby-peer
-           #:lobby-peer-id
-           #:lobby-peer-name
-           #:receive-lobby-publication
            #:luvcraft-session-critters
            #:luvcraft-session-particle-system
            #:luvcraft-session-player
@@ -548,6 +543,9 @@
            #:start-luvcraft-tracy-capture
            #:stop-luvcraft-tracy-capture
            #:toggle-luvcraft-tracy-capture
+           #:open-luvcraft-tracy-capture
+           #:reveal-luvcraft-tracy-capture
+           #:release-luvcraft-tracy-capture-controller
            #:step-block-world-player
            #:movement-intent
            #:make-movement-intent

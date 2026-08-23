@@ -176,8 +176,6 @@ the slot that has none stop looking like the same kind of thing.")
 (defun paint-terminal-mode-hotbar (pane display)
   "Paint the focused terminal's semantic modes into PANE."
   (with-sheet-medium (medium pane)
-    (when (typep medium 'luv-raster-medium)
-      (clear-raster-medium-reliefs medium))
     (draw-hotbar-shell pane medium)
     (let ((count (length *terminal-display-modes*))
           (current (luvcraft:terminal-display-mode display)))
@@ -235,8 +233,6 @@ the slot that has none stop looking like the same kind of thing.")
       (paint-terminal-mode-hotbar pane display)
       (return-from handle-repaint nil))
     (with-sheet-medium (medium pane)
-      (when (typep medium 'luv-raster-medium)
-        (clear-raster-medium-reliefs medium))
       (draw-hotbar-shell pane medium)
       (let ((count (max 1 (length blocks))))
         (loop for block in blocks
@@ -280,11 +276,8 @@ the slot that has none stop looking like the same kind of thing.")
 (defun repaint-hotbar (frame)
   "Repaint and publish one complete material palette."
   (let ((mirror (sheet-direct-mirror (frame-top-level-sheet frame))))
-    (if (typep mirror 'luv-gpu-mirror)
-        (repaint-gpu-mirror mirror)
-        (progn
-          (repaint-sheet (mirror-sheet mirror) +everywhere+)
-          (present-mirror mirror))))
+    (check-type mirror luv-gpu-mirror)
+    (repaint-gpu-mirror mirror))
   (setf (hotbar-visible-selection frame)
         (hotbar-visible-state-for frame))
   frame)
@@ -299,9 +292,10 @@ the slot that has none stop looking like the same kind of thing.")
 (defun hotbar-screen-state (overlay)
   (let* ((source-size (widget-overlay-logical-size overlay))
          (viewport-size
-           (luv:canvas-extent
-            (luvcraft::luvcraft-session-context
-             (widget-overlay-session overlay))))
+           (multiple-value-list
+            (luv:canvas-logical-size
+             (luvcraft:luvcraft-session-canvas
+              (widget-overlay-session overlay)))))
          (source-width (first source-size))
          (source-height (second source-size))
          (viewport-width (first viewport-size))
@@ -386,9 +380,10 @@ the slot that has none stop looking like the same kind of thing.")
   (let* ((state (hotbar-screen-state overlay))
          (height
            (second
-            (luv:canvas-extent
-             (luvcraft::luvcraft-session-context
-              (widget-overlay-session overlay)))))
+            (multiple-value-list
+             (luv:canvas-logical-size
+              (luvcraft:luvcraft-session-canvas
+               (widget-overlay-session overlay))))))
          (center-y (aref state 1))
          (half-height (abs (aref state 9)))
          (bottom-inset

@@ -1,0 +1,224 @@
+#+title: The shared Lisp application workbench
+#+startup: overview
+
+* The workbench belongs to the Lisp application
+:PROPERTIES:
+:ID: QRP6YG
+:END:
+
+Luvcraft and LUFT are different games, but they are also two iterations of one
+live Common Lisp application environment.  The reusable boundary is therefore
+below either world model: luv owns application-neutral mechanisms, while a thin
+adapter names the application's canvas, command frame, semantic state, and
+resource order.  Neither game has to import the other's session, renderer, or
+gameplay objects in order to acquire the same developer tools.
+
+The current source divides that boundary as follows:
+
+| Concern | Shared owner | What an application supplies |
+|-
+| Status, M-x, metabar | =luv/mcclim= | CLOS fields, commands, controls, attachment |
+| Lobby | =luv/lobby= and =luv/lobby/mcclim= | identity, lifetime, optional panel placement |
+| Screenshots and films | base =luv= | readiness, one complete frame, cleanup |
+| Tracy capture | =luv/tracy-capture= | application name, commands, lifecycle attachment |
+| Live shaders | base =luv= | candidate grain and publication boundary |
+| Stop and release | base =luv= | quiescence and resource-release order |
+| Language agents | =luv/application-agent= | commands, instructions, credentials, frame crossing |
+
+This is an extraction of mechanisms, not a common game engine.  LUFT's packed
+site renderer and Luvcraft's block world remain deliberately different.  The
+larger crossing of gameplay features tracked by #WO50UR is still open.
+
+* One quiet line is the default global surface
+:PROPERTIES:
+:ID: MVIIU6
+:END:
+
+The always-visible surface is the 28-logical-pixel translucent-black status
+line in
+[[file:../mcclim/application-status-bar.lisp][application-status-bar.lisp]].
+Its base CLOS vocabulary is application identity, PID, FPS, Lisp heap usage,
+lobby status and peer count, and checkout/worktree identity.  Luvcraft appends
+its resident chunk count; LUFT appends bevel width and projection.  An
+application extends =STATUS-BAR-CHANNELS-FOR= and =STATUS-BAR-CHANNEL-VALUE=
+rather than replacing the frame or its sampling policy.
+
+The render-thread path increments one frame counter.  Complete semantic
+sampling is throttled to twice a second, capped at twelve fields and forty-eight
+characters per value, and forbidden from doing I/O or waiting.  Worktree
+identity is read and cached without invoking Git; the lobby contributes a
+constant-work summary instead of a peer collection.  Every field uses one font
+and one size.  A narrow window drops a trailing suffix of fields rather than
+shrinking or restyling individual values.
+
+Both applications start the lobby radio and attach this line by default.  The
+larger lobby panel is now an explicitly opened instrument: hiding it does not
+stop presence, credentials, or the compact lobby summary.
+
+* M-x and the metabar reveal one application vocabulary
+:PROPERTIES:
+:ID: PXM6RK
+:END:
+
+[[file:../mcclim/command-menu.lisp][The shared M-x component]] reads an
+application's existing McCLIM command tables, retains one searchable snapshot,
+filters it without running application work during paint, and executes the
+chosen command on the frame which owns that vocabulary.  The current menu
+includes commands with no required arguments.  Presentation-typed prompting
+for parameterized commands remains the separate next step #OL2JZ1.
+
+[[file:../mcclim/metabar.lisp][The metabar]] is the parallel CLOS protocol for
+grouped live controls and actions.  Its input handlers queue small semantic
+operations; the application drains them at its frame boundary, publishes the
+new value, and repaints only when the retained meaning changes.  Luvcraft and
+LUFT supply their own groups and settings without copying the drawer, input,
+or presentation machinery.  Tracy commands and the explicit detailed-lobby
+commands join the same application vocabulary rather than acquiring private
+key-event ladders.
+
+* Application panels are retained GPU commands, not pane textures
+:PROPERTIES:
+:ID: Q1GK2H
+:END:
+
+The shared application-panel contract is the
+[[file:../mcclim/direct-compositor.lisp][direct retained GPU compositor]].
+It replays semantic solids, analytic shapes, gradients, images, lattices, and
+Slug text into the caller-owned game pass.  Authored logical coordinates are
+mapped once to the destination, so a Retina drawable evaluates edges and
+glyphs at its full native sample density.  There is no intermediate pane
+raster to enlarge, no pane upload or sampled copy, and no drawable acquisition
+or queue submission hidden inside the panel.
+
+Transparent McCLIM application and top-level panes prevent an opaque default
+background from entering the retained stream.  Panel colour is premultiplied
+before ordinary OVER blending against the already rendered game.  The status
+line, M-x, metabar, and lobby validators reject a mirror texture, decomposed
+primitive fallback, or prepared raster-image command.  The explicitly named
+=:luv-raster= port remains available for low-level experiments and old demos;
+it is deprecated as an application-panel path and is not a compatibility
+target for these components.
+
+Those are current source and executable-test invariants.  They do not by
+themselves constitute human acceptance of typography, alpha, responsiveness,
+or composition in both running games; final live visual review remains
+separate evidence.
+
+* Captures reserve the evidence they own
+:PROPERTIES:
+:ID: TVHBY9
+:END:
+
+[[file:../hal/application-capture.lisp][Application capture]] reserves one
+screenshot-or-film lane per application and rejects overlap before either
+capture begins preparation.  The shared transaction fixes the canvas, context,
+device, extent, and colour format; owns one offscreen target and readback
+buffer; and exhaustively cleans them after an application adapter encodes its
+complete visible frame.  Screenshots write native-resolution PNG.  Films own
+the same reservation for their complete H.264 sequence and pace against
+absolute deadlines so frame-time variance does not accumulate drift.
+
+Application shutdown closes that reservation lane without blocking the native
+canvas thread.  Its off-canvas teardown owner waits for the active capture to
+clean up before releasing render resources; a film cooperatively leaves after
+its current valid frame, and no later capture can enter behind the teardown
+barrier.
+
+This API is deliberately synchronous for its capture caller: readback and film
+writing are real work.  Only the application-defined encoding closure crosses
+onto the canvas owner, so the game does not duplicate GPU capture mechanics or
+pretend that a window screenshot is an application frame.
+
+[[file:../hal/tracy-capture.lisp][Tracy capture]] owns a different kind of
+evidence.  One controller chooses an exact configured executable, reserves a
+collision-free trace pathname, and owns at most one capture subprocess per
+generation.  Start, stop, open, reveal, and release publish work without
+waiting for that process.  The owner worker reaps it, retries graceful stop,
+escalates rather than orphaning a failed capture, and retains asynchronous
+diagnostics for an inspector or status surface.  Game adapters contribute M-x
+commands and release attachment, not another subprocess state machine.
+
+* Live replacement and stopping publish whole outcomes
+:PROPERTIES:
+:ID: E0HOZE
+:END:
+
+A [[file:../hal/live-artifact.lisp][live artifact]] is an application-owned
+derivative of redefinable source.  It builds a complete candidate away from
+installed state, publishes at the owner's boundary, keeps the last-known-good
+value after failure or a source race, and makes explicit release terminal.
+Luvcraft specializes that protocol for a shader pipeline; LUFT uses the same
+contract for a complete renderer cohort whose layouts, targets, and pipelines
+must change together.  Definition callbacks only advance revisions and never
+perform GPU work under definition locks.
+
+That protocol establishes correctness, not a frame-time budget.  Compilation
+and GPU creation currently occur at the owning application boundary; whether a
+later worker should prepare more of a candidate is a measurement question, not
+a property already claimed here.
+
+[[file:../hal/application-lifecycle.lisp][Application lifecycle]] gives teardown
+the same whole-value shape.  Named release steps all receive an attempt while
+the original failure remains primary.  A stop controller grants teardown to
+one caller and publishes that caller's exact values or condition to every
+concurrent waiter.  Canvas-thread close handlers may request a stop but may not
+block waiting for the frame boundary they own.
+
+Application attachment publication is atomic with that stop transition.  A
+panel or instrument which wins publication belongs to teardown; a fresh late
+attachment is consumed, released at the application boundary, and rejected.
+Removal remains available during teardown, so constructor rollback and the stop
+owner cannot lose their only resource-release path.
+
+Both game adapters stop their clocks, cross one no-op frame barrier, detach
+input, release workers, panels, and live artifacts, and close the native canvas
+and device last.  Standalone entry points still use luv's SDL/Cocoa main-thread
+host; the games no longer each invent a macOS shutdown convention around it.
+
+* The language-agent harness is not the gnome
+:PROPERTIES:
+:ID: 9IH3E6
+:END:
+
+[[file:../application-agent/harness.lisp][The application-agent harness]] owns
+one provider connection, one FIFO mailbox worker, transcript turns, semantic
+handles and views, observers, and terminal release.  =ASK= publishes a turn
+and returns immediately.  Provider receive, observer notification, and result
+settlement stay on the worker; provider close gets a separate lifecycle lane
+and an explicit bounded join point.
+
+[[file:../application-agent/command-tool.lisp][The command adapter]] derives
+strict provider schemas and parsers from the same McCLIM presentation-typed
+arguments.  A command effect crosses the application's frame boundary once,
+while an explicitly off-canvas result may settle on the provider worker.  This
+is the reusable harness behind Luvcraft's gnome and cat, not their personality,
+body, or gameplay tools.  LUFT can attach the same harness as an invisible
+lifecycle instrument and supply its own commands and instructions.  This is
+the application-level realization of the nonblocking boundary described by
+#T6PEVY.
+
+* DONE Extract the application workbench beneath both games
+:PROPERTIES:
+:ID: 7OH71A
+:END:
+
+/Intent./ Give general Lisp-application tools one reusable owner, with thin
+Luvcraft and LUFT adapters, so improving their reliability improves both
+experiments without making their gameplay models the same.
+
+/Evidence./ The current systems separate =luv/mcclim=, =luv/lobby=,
+=luv/tracy-capture=, and =luv/application-agent= from their game adapters;
+capture, live-artifact, and lifecycle protocols live in base luv.  Both games
+attach the same compact status component by default, keep the shared radio live
+without opening its detailed panel, expose the same M-x and metabar machinery,
+and adapt the shared capture, Tracy, live-artifact, stop, and agent ownership
+boundaries.  Focused test sources exercise the CLOS status vocabulary and
+bounds, no-raster panel contract, capture reservation and cleanup, subprocess
+ownership, last-known-good publication, exhaustive stop, and asynchronous
+agent release.  Full live visual acceptance of the new default status line is
+not evidence claimed by this mark.
+
+/Done when./ Done: each mechanism named above has an application-neutral owner
+and game-specific attachment rather than two copied implementations.  This
+closes the extraction, not the presentation-prompt work #OL2JZ1 or the gameplay
+crossing #WO50UR.
