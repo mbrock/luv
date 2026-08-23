@@ -780,9 +780,8 @@ here and install its publication cohort later at the frame boundary."))
          :zone :streaming/drain-results
          :value
          (min (luvcraft-session-publication-limit session)
-              (sb-concurrency:mailbox-count
-               (production-system-result-mailbox
-                (luvcraft-session-production-system session)))))
+              (production-system-completed-count
+               (luvcraft-session-production-system session))))
     (session)
   "Publish a bounded number of completed CPU products this frame."
   (loop repeat (luvcraft-session-publication-limit session)

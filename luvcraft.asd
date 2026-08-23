@@ -33,6 +33,7 @@
                "luv/ghostty"
                "luv/libav"
                "luv/terminal/canvas"
+               "luv/production"
                "luvcraft/world"
                "luvcraft/frontier"
                "cl-dejavu"
@@ -54,7 +55,6 @@
                  (:file "shaders")
                  (:file "player-body-shaders")
                  (:file "fields")
-                 (:file "production")
                  (:file "blocks")
                  (:file "inventory")
                  (:file "terrain")

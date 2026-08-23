@@ -1,6 +1,9 @@
 ;;; A deliberately small owner/worker production boundary.
 
-(in-package #:luvcraft)
+(in-package #:luv.production)
+
+(math:define-quantity :production-duration :kind :duration
+  :non-negative-p t)
 
 (defclass production-request ()
   ((key :initarg :key :reader production-request-key)
@@ -29,7 +32,7 @@
    (request-mailbox :reader production-system-request-mailbox)
    (result-mailbox :reader production-system-result-mailbox)
    (lock :reader production-system-lock)
-   ;; DESIRED is a latest-value map, not a history queue.  Scheduling the same
+   ;; DESIRED is a latest-value map, not a history queue. Scheduling the same
    ;; semantic key replaces work which has not started yet.
    (desired :reader production-system-desired)
    (wake-p :initform nil :accessor production-system-wake-p)
@@ -70,16 +73,11 @@
                  (plusp (hash-table-count
                          (production-system-desired system)))
                  ;; One completed value is the publication backpressure
-                 ;; frontier.  The owner must receive it before the worker
-                 ;; begins another request, so result memory is strictly
-                 ;; bounded even when rendering pauses.
+                 ;; frontier. The owner must receive it before the worker
+                 ;; begins another request, so result memory stays bounded
+                 ;; even when rendering pauses.
                  (sb-concurrency:mailbox-empty-p
                   (production-system-result-mailbox system))
-                 ;; The active worker is already this system's wakeup.  If a
-                 ;; second :WORK token is queued while it runs, that token can
-                 ;; bypass result backpressure as soon as the active request
-                 ;; completes and leave two large values waiting for an owner
-                 ;; which has stopped rendering.
                  (null (production-system-active-request system))
                  (not (production-system-wake-p system)))
         (setf (production-system-wake-p system) t
@@ -89,9 +87,6 @@
        (production-system-request-mailbox system) :work))))
 
 (defun run-production-system (system)
-  ;; Tracy gives every thread that emits a zone its own lane, labelled by the
-  ;; thread id until the thread says otherwise.  Naming the worker here, from
-  ;; inside the thread, is what makes the lane read as the job it is doing.
   (name-tracy-thread (production-system-name system))
   (loop
     (multiple-value-bind (message received-p)
@@ -126,9 +121,9 @@
     (&key (name "luv single CPU producer"))
   "Make one sleeping SB-CONCURRENCY mailbox worker.
 
-There is intentionally no pool yet.  One worker proves the ownership and
+There is intentionally no pool yet. One worker proves the ownership and
 publication protocol, prevents CPU oversubscription, and keeps completion
-order intelligible while taking expensive work out of the frame callback."
+order intelligible while taking expensive work out of an owner callback."
   (let ((system (make-instance 'single-worker-production-system :name name)))
     (setf (slot-value system 'request-mailbox)
           (sb-concurrency:make-mailbox :name (format nil "~A requests" name))
@@ -180,12 +175,15 @@ order intelligible while taking expensive work out of the frame callback."
       (wake-production-system-if-needed system))
     (values result present-p)))
 
+(defun production-system-completed-count (system)
+  "Return the number of completed results waiting for their owner."
+  (sb-concurrency:mailbox-count (production-system-result-mailbox system)))
+
 (defun production-system-pending-count (system)
   (sb-thread:with-mutex ((production-system-lock system))
     (+ (hash-table-count (production-system-desired system))
        (if (production-system-active-request system) 1 0)
-       (sb-concurrency:mailbox-count
-        (production-system-result-mailbox system)))))
+       (production-system-completed-count system))))
 
 (defun stop-production-system (system &key (timeout 10.0))
   "Cooperatively stop SYSTEM after its active request, then join its worker."

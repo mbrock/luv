@@ -133,8 +133,6 @@
   :non-negative-p t)
 (math:define-quantity :benchmark-drain-duration :kind :duration
   :non-negative-p t)
-(math:define-quantity :production-duration :kind :duration
-  :non-negative-p t)
 (math:define-quantity :physics-accumulated-duration :kind :duration
   :non-negative-p t)
 (math:define-quantity :monotonic-frame-time :kind :duration

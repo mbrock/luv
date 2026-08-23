@@ -749,12 +749,35 @@ consequence of its own occupancy star and can be read on its own."
 
 (defun renderer-set-mesh (renderer key mesh)
   "Make MESH resident under KEY, replacing any previous resident mesh."
-  (let ((old (gethash key (renderer-mesh-slots renderer)))
-        (slot (%make-renderer-mesh-slot renderer mesh)))
-    (setf (gethash key (renderer-mesh-slots renderer)) slot)
-    (%refresh-renderer-slot-order renderer)
-    (when old (%destroy-mesh-slot old))
-    slot))
+  (cdar (renderer-set-meshes renderer (list (cons key mesh)))))
+
+(defun renderer-set-meshes (renderer meshes)
+  "Transactionally replace the keyed MESHES as one visible residency cohort.
+
+MESHES is an alist of key to surface mesh. Every GPU slot is created before
+the renderer's table changes; a failed upload therefore leaves the installed
+cohort untouched. No frame can interleave with the owner-thread publication."
+  (let ((candidates nil)
+        (retired nil)
+        (installed-p nil))
+    (unwind-protect
+         (progn
+           (dolist (entry meshes)
+             (push (cons (car entry)
+                         (%make-renderer-mesh-slot renderer (cdr entry)))
+                   candidates))
+           (setf candidates (nreverse candidates))
+           (dolist (entry candidates)
+             (let ((old (gethash (car entry) (renderer-mesh-slots renderer))))
+               (setf (gethash (car entry) (renderer-mesh-slots renderer))
+                     (cdr entry))
+               (when old (push old retired))))
+           (%refresh-renderer-slot-order renderer)
+           (setf installed-p t)
+           (dolist (slot retired) (%destroy-mesh-slot slot))
+           candidates)
+      (unless installed-p
+        (dolist (entry candidates) (%destroy-mesh-slot (cdr entry)))))))
 
 (defun renderer-remove-mesh (renderer key)
   (let ((slot (gethash key (renderer-mesh-slots renderer))))
@@ -1067,11 +1090,12 @@ consequence of its own occupancy star and can be read on its own."
 ;;;
 ;;; A streaming scene is an ordinary authored scene whose solid is split into
 ;;; its chunk chains.  Chunks become resident one at a time -- the mock of a
-;;; real async store -- and each residency change remeshes the arrivals and
-;;; their already-resident neighbors.  MESH-CHUNK's probes into non-resident
-;;; neighbors signal MISSING-CHUNK; the scene's handler answers USE-CHUNK for
-;;; resident chunks and TREAT-AS-AIR otherwise, so the loading frontier shows
-;;; honest cliff walls that heal as neighbors arrive.
+;;; real async store -- and each residency change remeshes the arrival and its
+;;; already-resident neighbors. MESH-CHUNK's probes into non-resident neighbors
+;;; signal MISSING-CHUNK; an immutable worker snapshot answers USE-CHUNK for the
+;;; captured neighborhood and TREAT-AS-AIR otherwise. The canvas owner publishes
+;;; the complete affected cohort only after every current mesh has returned, so
+;;; the loading frontier's honest cliff walls heal without a mixed seam frame.
 
 (defclass streaming-scene (scene)
   ((store :initform (make-hash-table :test #'eql)
@@ -1079,9 +1103,29 @@ consequence of its own occupancy star and can be read on its own."
    (pending :initform nil :accessor streaming-scene-pending)
    (loaded :initform (make-hash-table :test #'eql)
            :reader streaming-scene-loaded)
+   (outstanding :initform (make-hash-table :test #'eql)
+                :reader streaming-scene-outstanding)
+   (staged :initform (make-hash-table :test #'eql)
+           :reader streaming-scene-staged)
+   (cohort :initform nil :accessor streaming-scene-cohort)
+   (production-errors :initform nil
+                      :accessor streaming-scene-production-errors)
    (frames-per-load :initarg :frames-per-load :initform 15
                     :accessor streaming-scene-frames-per-load)
    (frame-counter :initform 0 :accessor streaming-scene-frame-counter)))
+
+(defstruct (streaming-mesh-snapshot
+             (:constructor %make-streaming-mesh-snapshot
+                 (scene key bevel-width neighborhood stamp)))
+  "Immutable CPU input for one chunk mesh request."
+  (scene nil :read-only t)
+  (key 0 :type luft:chunk-key :read-only t)
+  (bevel-width luft:+mesh-bevel-width+ :read-only t)
+  (neighborhood nil :type hash-table :read-only t)
+  (stamp nil :read-only t))
+
+(defclass streaming-mesh-request (production:production-request)
+  ((snapshot :initarg :snapshot :reader streaming-mesh-request-snapshot)))
 
 (defun make-streaming-scene (scene &key (frames-per-load 15))
   "Wrap SCENE for chunk-at-a-time residency, loading nearest chunks first."
@@ -1111,54 +1155,160 @@ consequence of its own occupancy star and can be read on its own."
                            (+ (* dx dx) (* dy dy)))))))
     streaming))
 
-(defun mesh-streaming-chunk (scene key bevel-width)
-  "Mesh one resident chunk against the scene's current residency."
-  (let ((store (streaming-scene-store scene))
-        (loaded (streaming-scene-loaded scene)))
+(defun streaming-scene-neighborhood-keys (scene key)
+  "Return the loaded 3 by 3 chunk neighborhood observed while meshing KEY."
+  (let ((x (luft:chunk-key-x key))
+        (y (luft:chunk-key-y key))
+        (keys nil))
+    (loop for candidate being the hash-keys of (streaming-scene-loaded scene)
+          when (and (<= (abs (- (luft:chunk-key-x candidate) x)) 1)
+                    (<= (abs (- (luft:chunk-key-y candidate) y)) 1))
+            do (push candidate keys))
+    (sort keys #'<)))
+
+(defun streaming-scene-mesh-stamp (scene key bevel-width)
+  "Name the exact residency and geometry parameters observed by KEY's mesh."
+  (list bevel-width (streaming-scene-neighborhood-keys scene key)))
+
+(defun make-streaming-mesh-snapshot (scene key bevel-width)
+  "Capture immutable chains for the neighborhood KEY currently observes."
+  (let ((neighborhood (make-hash-table :test #'eql))
+        (store (streaming-scene-store scene)))
+    (dolist (neighbor (streaming-scene-neighborhood-keys scene key))
+      (setf (gethash neighbor neighborhood) (gethash neighbor store)))
+    (%make-streaming-mesh-snapshot
+     scene key bevel-width neighborhood
+     (streaming-scene-mesh-stamp scene key bevel-width))))
+
+(defun mesh-streaming-snapshot (snapshot)
+  "Mesh one worker-owned residency snapshot without reading owner state."
+  (let ((scene (streaming-mesh-snapshot-scene snapshot))
+        (key (streaming-mesh-snapshot-key snapshot))
+        (neighborhood (streaming-mesh-snapshot-neighborhood snapshot)))
     (handler-bind
         ((luft:missing-chunk
            (lambda (condition)
-             (let ((neighbor-key (luft:missing-chunk-key condition)))
-               (if (gethash neighbor-key loaded)
-                   (invoke-restart 'luft:use-chunk
-                                   (gethash neighbor-key store))
+             (multiple-value-bind (chain present-p)
+                 (gethash (luft:missing-chunk-key condition) neighborhood)
+               (if present-p
+                   (invoke-restart 'luft:use-chunk chain)
                    (invoke-restart 'luft:treat-as-air)))))
          (luft:outside-domain
            (lambda (condition)
              (declare (ignore condition))
              (invoke-restart 'luft:treat-as-air))))
-      (let ((chain (gethash key store)))
+      (let ((chain (gethash key neighborhood)))
         (zone (:luft/rematerialize :value (luft:chain-count chain))
           (luft:mesh-chunk chain key
                            :stock-function
                            (lambda (face) (scene-face-stock scene face))
                            :chamfer-stock-function #'scene-chamfer-stock
-                           :bevel-width bevel-width))))))
+                           :bevel-width
+                           (streaming-mesh-snapshot-bevel-width snapshot)))))))
 
-(defun advance-streaming-scene (scene renderer bevel-width)
-  "Make the next pending chunk resident; heal resident neighbor seams.
+(defun mesh-streaming-chunk (scene key bevel-width)
+  "Synchronously mesh KEY from the same immutable snapshot workers receive."
+  (mesh-streaming-snapshot
+   (make-streaming-mesh-snapshot scene key bevel-width)))
+
+(defmethod production:perform-production-request
+    ((request streaming-mesh-request))
+  (mesh-streaming-snapshot (streaming-mesh-request-snapshot request)))
+
+(defun schedule-streaming-scene-mesh
+    (scene production-system key bevel-width priority)
+  (let* ((snapshot (make-streaming-mesh-snapshot scene key bevel-width))
+         (request
+           (make-instance 'streaming-mesh-request
+                          :key key :priority priority :snapshot snapshot))
+         (ticket
+           (production:schedule-production-request production-system request)))
+    (setf (gethash key (streaming-scene-outstanding scene)) ticket)
+    request))
+
+(defun current-streaming-mesh-request-p (scene request)
+  (let ((snapshot (streaming-mesh-request-snapshot request)))
+    (and (eq scene (streaming-mesh-snapshot-scene snapshot))
+         (equal (streaming-mesh-snapshot-stamp snapshot)
+                (streaming-scene-mesh-stamp
+                 scene
+                 (streaming-mesh-snapshot-key snapshot)
+                 (streaming-mesh-snapshot-bevel-width snapshot))))))
+
+(defun accept-streaming-mesh-result (scene request mesh)
+  "Stage MESH when REQUEST is still the latest description of its chunk."
+  (let* ((key (production:production-request-key request))
+         (ticket (gethash key (streaming-scene-outstanding scene))))
+    (when (eql ticket (production:production-request-ticket request))
+      (remhash key (streaming-scene-outstanding scene))
+      (when (current-streaming-mesh-request-p scene request)
+        (setf (gethash key (streaming-scene-staged scene))
+              (cons request mesh))
+        t))))
+
+(defun ready-streaming-scene-meshes (scene)
+  "Return the complete current cohort as key-to-mesh pairs, or NIL."
+  (let ((cohort (streaming-scene-cohort scene))
+        (staged (streaming-scene-staged scene)))
+    (when (and cohort
+               (every (lambda (key)
+                        (let ((entry (gethash key staged)))
+                          (and entry
+                               (current-streaming-mesh-request-p
+                                scene (car entry)))))
+                      cohort))
+      (mapcar (lambda (key) (cons key (cdr (gethash key staged)))) cohort))))
+
+(defun publish-ready-streaming-scene (scene renderer)
+  "Install a complete current mesh cohort at the canvas-owner boundary."
+  (let ((meshes (ready-streaming-scene-meshes scene)))
+    (when meshes
+      (renderer-set-meshes renderer meshes)
+      (dolist (entry meshes)
+        (remhash (car entry) (streaming-scene-staged scene)))
+      (setf (streaming-scene-cohort scene) nil)
+      (length meshes))))
+
+(defun drain-streaming-scene-production
+    (scene renderer production-system &key (limit 2))
+  "Drain and publish bounded worker results on the canvas owner thread."
+  (loop repeat limit
+        do (multiple-value-bind (result present-p)
+               (production:receive-production-result-no-hang production-system)
+             (unless present-p (return))
+             (let* ((request (production:production-result-request result))
+                    (key (production:production-request-key request))
+                    (ticket (gethash key
+                                     (streaming-scene-outstanding scene))))
+               (when (eql ticket
+                          (production:production-request-ticket request))
+                 (if (production:production-result-condition result)
+                     (progn
+                       (remhash key (streaming-scene-outstanding scene))
+                       (push result
+                             (streaming-scene-production-errors scene))
+                       (error "LUFT mesh production for chunk ~D failed: ~A"
+                              key
+                              (production:production-result-condition result)))
+                     (accept-streaming-mesh-result
+                      scene request (production:production-result-value result)))))))
+  (publish-ready-streaming-scene scene renderer))
+
+(defun advance-streaming-scene (scene production-system bevel-width)
+  "Make the next pending chunk resident and schedule its mesh cohort.
 
 Returns the newly resident chunk key, or NIL when everything is resident."
+  (when (streaming-scene-cohort scene)
+    (error "The current LUFT streaming cohort has not finished."))
   (let ((key (pop (streaming-scene-pending scene))))
     (when key
       (setf (gethash key (streaming-scene-loaded scene)) t)
-      (renderer-set-mesh renderer key
-                         (mesh-streaming-chunk scene key bevel-width))
-      (let ((grid-x (luft:chunk-key-x key))
-            (grid-y (luft:chunk-key-y key)))
-        (loop for dx from -1 to 1 do
-          (loop for dy from -1 to 1 do
-            (unless (and (zerop dx) (zerop dy))
-              (let ((nx (+ grid-x dx)) (ny (+ grid-y dy)))
-                (when (and (<= 0 nx) (<= 0 ny))
-                  (let ((neighbor (luft:chunk-key-at
-                                   (ash nx luft:+chunk-bits+)
-                                   (ash ny luft:+chunk-bits+))))
-                    (when (gethash neighbor (streaming-scene-loaded scene))
-                      (renderer-set-mesh
-                       renderer neighbor
-                       (mesh-streaming-chunk scene neighbor
-                                             bevel-width))))))))))
+      (let ((cohort (streaming-scene-neighborhood-keys scene key)))
+        (setf (streaming-scene-cohort scene) cohort)
+        (dolist (neighbor cohort)
+          (schedule-streaming-scene-mesh
+           scene production-system neighbor bevel-width
+           (if (= neighbor key) 0 1))))
       key)))
 
 (defun make-highland-sanctuary-scene (&key (horizontal-bits 8))

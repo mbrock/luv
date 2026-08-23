@@ -300,6 +300,15 @@ offsets and of headers."
      (:file "examples"))))
   :in-order-to ((test-op (test-op "luv/test"))))
 
+(defsystem "luv/production"
+  :description "A bounded latest-value owner/worker production boundary."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luv" "sb-concurrency")
+  :serial t
+  :components ((:file "production/package")
+               (:file "production/production")))
+
 (defsystem "luv/test"
   :description "Executable claims for luv's arithmetic, native bindings, and HAL."
   :version "0.0.1"

@@ -542,6 +542,8 @@ the selector is the whole of the difference."
    (source :initarg :source :initform (make-mountain-sanctuary-scene)
            :accessor viewer-source)
    (renderer :initarg :renderer :initform nil :accessor viewer-renderer)
+   (production-system :initarg :production-system :initform nil
+                      :accessor viewer-production-system)
    (bevel-width :initarg :bevel-width :initform luft:+mesh-bevel-width+
                 :accessor viewer-bevel-width)
    (camera :initarg :camera :initform (make-fly-camera) :reader viewer-camera)
@@ -669,16 +671,22 @@ the selector is the whole of the difference."
           (move (vec3:make-vec3 0 0 1) (- step)))))))
 
 (defun advance-viewer-streaming (viewer)
-  "Tick the mock chunk stream: one residency change every few frames."
-  (let ((source (viewer-source viewer)))
-    (when (and (typep source 'streaming-scene)
-               (streaming-scene-pending source))
-      (incf (streaming-scene-frame-counter source))
-      (when (>= (streaming-scene-frame-counter source)
-                (streaming-scene-frames-per-load source))
-        (setf (streaming-scene-frame-counter source) 0)
-        (advance-streaming-scene source (viewer-renderer viewer)
-                                 (viewer-bevel-width viewer))))))
+  "Drain completed meshes and admit the next mock residency change."
+  (let ((source (viewer-source viewer))
+        (production-system (viewer-production-system viewer)))
+    (when (and (typep source 'streaming-scene) production-system)
+      (drain-streaming-scene-production
+       source (viewer-renderer viewer) production-system)
+      ;; One complete neighborhood cohort crosses the owner boundary before
+      ;; another residency change can invalidate it.
+      (when (and (null (streaming-scene-cohort source))
+                 (streaming-scene-pending source))
+        (incf (streaming-scene-frame-counter source))
+        (when (>= (streaming-scene-frame-counter source)
+                  (streaming-scene-frames-per-load source))
+          (setf (streaming-scene-frame-counter source) 0)
+          (advance-streaming-scene source production-system
+                                   (viewer-bevel-width viewer)))))))
 
 (defun render-viewer-frame (viewer timestamp)
   (declare (ignore timestamp))
@@ -921,6 +929,7 @@ the selector is the whole of the difference."
            :presentation-api (sdl-presentation-api-for provider)))
         (device nil)
         (renderer nil)
+        (production-system nil)
         (completed-p nil))
     (open-canvas canvas)
     (unwind-protect
@@ -949,10 +958,15 @@ the selector is the whole of the difference."
                   (let ((mcluv:*embedded-mirror-target* canvas)
                         (mcluv:*embedded-mirror-context* context)
                         (mcluv:*embedded-mirror-device* device*))
+                    (when (typep solid 'streaming-scene)
+                      (setf production-system
+                            (production:make-single-worker-production-system
+                             :name "LUFT mesh producer")))
                     (clim:make-application-frame
                      'viewer :frame-manager manager :enable t
                              :canvas canvas :context context
                              :device device* :renderer renderer*
+                             :production-system production-system
                              :camera camera :source solid
                              :bevel-width bevel-width
                              :inspector-p inspector-p))))
@@ -985,6 +999,8 @@ the selector is the whole of the difference."
                  completed-p t)
            viewer)
       (unless completed-p
+        (when production-system
+          (production:stop-production-system production-system))
         (when renderer (destroy-renderer renderer))
         (when (eq :open (canvas-state canvas)) (close-canvas canvas))
         (when device (ignore-errors (destroy device)))))))
@@ -1038,21 +1054,40 @@ the atelier UI."
        (let* ((bevel-width (or bevel-width (viewer-bevel-width viewer)))
               (context (viewer-context viewer))
               (old (viewer-renderer viewer))
+              (old-production-system (viewer-production-system viewer))
+              (candidate-renderer nil)
+              (production-system nil)
               (was-running-p (viewer-running-p viewer)))
          (setf (viewer-running-p viewer) nil)
          (unwind-protect
-              (let ((renderer (make-renderer (viewer-device viewer)
-                                             (canvas-format context)
-                                             (canvas-extent context))))
-                (unless (typep solid 'streaming-scene)
-                  (renderer-set-mesh renderer 0
-                                     (make-render-mesh
-                                      solid :bevel-width bevel-width)))
-                (setf (viewer-renderer viewer) renderer
-                      (viewer-source viewer) solid
-                      (viewer-bevel-width viewer) bevel-width
-                      (viewer-inspection viewer) nil))
+              (handler-case
+                  (let ((renderer
+                          (setf candidate-renderer
+                                (make-renderer (viewer-device viewer)
+                                               (canvas-format context)
+                                               (canvas-extent context)))))
+                    (if (typep solid 'streaming-scene)
+                        (setf production-system
+                              (production:make-single-worker-production-system
+                               :name "LUFT mesh producer"))
+                        (renderer-set-mesh renderer 0
+                                           (make-render-mesh
+                                            solid :bevel-width bevel-width)))
+                    (setf (viewer-renderer viewer) renderer
+                          (viewer-production-system viewer) production-system
+                          (viewer-source viewer) solid
+                          (viewer-bevel-width viewer) bevel-width
+                          (viewer-inspection viewer) nil
+                          candidate-renderer nil))
+                (error (condition)
+                  (when candidate-renderer
+                    (destroy-renderer candidate-renderer))
+                  (when production-system
+                    (production:stop-production-system production-system))
+                  (error condition)))
            (setf (viewer-running-p viewer) was-running-p))
+         (when old-production-system
+           (production:stop-production-system old-production-system))
          (when old (destroy-renderer old))))))
   (values))
 
@@ -1104,6 +1139,12 @@ and an interactive STOP-VIEWER the same idempotent application operation."
                                  (lambda (timestamp)
                                    (declare (ignore timestamp)))))))
                    (setf (canvas-event-handler canvas) nil)
+                   (when (viewer-production-system viewer)
+                     (release :production-system
+                              (lambda ()
+                                (production:stop-production-system
+                                 (viewer-production-system viewer))))
+                     (setf (viewer-production-system viewer) nil))
                    (release :surface-views
                             (lambda ()
                               (release-viewer-surface-views viewer)))

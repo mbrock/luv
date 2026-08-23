@@ -3,9 +3,76 @@
   (:local-nicknames (#:clim #:clim)
                     (#:climi #:clim-internals)
                     (#:luv #:luv)
+                    (#:production #:luv.production)
                     (#:render #:luft.render)))
 
 (in-package #:luft.render.tests)
+
+(defun make-two-chunk-streaming-scene ()
+  (let ((builder (luft.render::make-scene-builder :horizontal-bits 7)))
+    ;; These cells share a face across the X chunk boundary.
+    (luft.render::scene-builder-cell builder 63 4 4)
+    (luft.render::scene-builder-cell builder 64 4 4)
+    (render:make-streaming-scene
+     (luft.render::finish-scene-builder builder) :frames-per-load 1)))
+
+(deftest a-streaming-mesh-request-owns-an-immutable-residency-snapshot
+  (let* ((scene (make-two-chunk-streaming-scene))
+         (left (luft:chunk-key-at 63 4))
+         (right (luft:chunk-key-at 64 4)))
+    (setf (gethash left (luft.render::streaming-scene-loaded scene)) t)
+    (let* ((snapshot
+             (luft.render::make-streaming-mesh-snapshot
+              scene left luft:+mesh-bevel-width+))
+           (request
+             (make-instance 'luft.render::streaming-mesh-request
+                            :key left :snapshot snapshot))
+           (before
+             (production:perform-production-request request)))
+      (ok (luft.render::current-streaming-mesh-request-p scene request))
+      (setf (gethash right (luft.render::streaming-scene-loaded scene)) t)
+      (ok (not (luft.render::current-streaming-mesh-request-p scene request)))
+      ;; The old request remains independently executable, while a current
+      ;; oracle observes and closes the newly resident cross-chunk seam.
+      (ok (equalp (luft:surface-mesh-face-instance-words before)
+                  (luft:surface-mesh-face-instance-words
+                   (production:perform-production-request request))))
+      (ok (not (equalp
+                (luft:surface-mesh-face-instance-words before)
+                (luft:surface-mesh-face-instance-words
+                 (render:mesh-streaming-chunk
+                  scene left luft:+mesh-bevel-width+))))))))
+
+(deftest a-streaming-residency-cohort-publishes-only-when-complete
+  (let* ((scene (make-two-chunk-streaming-scene))
+         (left (luft:chunk-key-at 63 4))
+         (right (luft:chunk-key-at 64 4)))
+    (setf (gethash left (luft.render::streaming-scene-loaded scene)) t
+          (gethash right (luft.render::streaming-scene-loaded scene)) t
+          (luft.render::streaming-scene-cohort scene) (list left right))
+    (flet ((request (key ticket)
+             (let ((request
+                     (make-instance
+                      'luft.render::streaming-mesh-request
+                      :key key
+                      :snapshot
+                      (luft.render::make-streaming-mesh-snapshot
+                       scene key luft:+mesh-bevel-width+))))
+               (setf (production:production-request-ticket request) ticket
+                     (gethash key
+                              (luft.render::streaming-scene-outstanding scene))
+                     ticket)
+               request)))
+      (let ((left-request (request left 1))
+            (right-request (request right 2)))
+        (ok (luft.render::accept-streaming-mesh-result
+             scene left-request :left-mesh))
+        (ok (null (luft.render::ready-streaming-scene-meshes scene)))
+        (ok (luft.render::accept-streaming-mesh-result
+             scene right-request :right-mesh))
+        (ok (equal (list (cons left :left-mesh)
+                         (cons right :right-mesh))
+                   (luft.render::ready-streaming-scene-meshes scene)))))))
 
 (defun key-event (class key-name &key character modifiers repeat-p)
   (make-instance class

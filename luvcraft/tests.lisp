@@ -791,7 +791,7 @@
               :simulation-duration)
              (luvcraft::luvcraft-frame-benchmark luvcraft::drain-seconds
               :benchmark-drain-duration)
-             (luvcraft::production-result luvcraft::elapsed-seconds
+             (luvcraft::production-result luv.production::elapsed-seconds
               :production-duration)
              (luvcraft::luvcraft-lighting-state luvcraft::last-latency-seconds
               :lighting-reconciliation-duration)
@@ -1521,8 +1521,8 @@
   ((title :initarg :title :accessor canvas-title)))
 
 (defun production-system-active-request (system)
-  (sb-thread:with-mutex ((luvcraft::production-system-lock system))
-    (luvcraft::production-system-active-request system)))
+  (sb-thread:with-mutex ((luv.production::production-system-lock system))
+    (luv.production::production-system-active-request system)))
 
 (defun wait-until (predicate &key (timeout 2.0))
   (let ((deadline (+ (get-internal-real-time)
@@ -2354,13 +2354,14 @@
            (luvcraft::schedule-production-request system latest)
            (multiple-value-bind (result present-p)
                (sb-concurrency:receive-message
-                (luvcraft::production-system-result-mailbox system) :timeout 5.0)
+                (luv.production::production-system-result-mailbox system)
+                :timeout 5.0)
              (ok present-p)
              (ok (null (luvcraft::production-result-condition result)))
              (ok (<= (luvcraft::production-system-pending-count system) 2))))
       (luvcraft::stop-production-system system))
     (ok (not (sb-thread:thread-alive-p
-              (luvcraft::production-system-thread system))))))
+              (luv.production::production-system-thread system))))))
 
 (deftest production-system-keeps-one-result-behind-its-owner
   (let* ((system (luvcraft::make-single-worker-production-system
@@ -2384,14 +2385,17 @@
            (ok (wait-until
                 (lambda ()
                   (and (= 1 (sb-concurrency:mailbox-count
-                             (luvcraft::production-system-result-mailbox system)))
+                             (luv.production::production-system-result-mailbox
+                              system)))
                        (not (eq (production-system-active-request system)
                                 first))))))
            (ok (null (production-system-active-request system)))
            (ok (= 1 (sb-concurrency:mailbox-count
-                     (luvcraft::production-system-result-mailbox system))))
+                     (luv.production::production-system-result-mailbox
+                      system))))
            (ok (nth-value
-                1 (gethash :second (luvcraft::production-system-desired system))))
+                1 (gethash :second
+                           (luv.production::production-system-desired system))))
            (multiple-value-bind (result present-p)
                (luvcraft::receive-production-result-no-hang system)
              (ok present-p)
@@ -2402,7 +2406,8 @@
            (sb-thread:signal-semaphore second-gate)
            (multiple-value-bind (result present-p)
                (sb-concurrency:receive-message
-                (luvcraft::production-system-result-mailbox system) :timeout 2.0)
+                (luv.production::production-system-result-mailbox system)
+                :timeout 2.0)
              (ok present-p)
              (ok (eq (luvcraft::production-result-value result) :second))))
       (sb-thread:signal-semaphore first-gate)

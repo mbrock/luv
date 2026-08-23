@@ -11,6 +11,7 @@
 (defpackage #:luft.render
   (:use #:cl #:luv)
   (:local-nicknames (#:shaders #:luft.render.shaders)
+                    (#:production #:luv.production)
                     (#:vec3 #:luv.arithmetic.lisp.vec3))
   (:export #:scene
            #:scene-solid
@@ -24,7 +25,8 @@
            #:*gallery*
            #:make-render-mesh
            #:renderer
-           #:renderer-set-mesh #:renderer-remove-mesh #:renderer-clear-meshes
+           #:renderer-set-mesh #:renderer-set-meshes
+           #:renderer-remove-mesh #:renderer-clear-meshes
            #:streaming-scene #:make-streaming-scene
            #:advance-streaming-scene #:mesh-streaming-chunk
            #:make-highland-sanctuary-scene
