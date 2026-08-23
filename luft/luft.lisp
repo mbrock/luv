@@ -10,14 +10,15 @@
    ;; Domains and sites.
    #:world-domain #:make-world-domain #:world-domain=
    #:world-domain-x-bits #:world-domain-y-bits
-   #:world-domain-x-mask #:world-domain-y-mask
-   #:world-domain-x-period #:world-domain-y-period
+   #:world-domain-x-limit #:world-domain-y-limit
    #:site #:extent-mask #:axis #:side
    #:+vertex-extent+ #:+x-edge-extent+ #:+y-edge-extent+ #:+z-edge-extent+
    #:+xy-face-extent+ #:+xz-face-extent+ #:+yz-face-extent+ #:+cell-extent+
    #:+extent-bits+ #:+site-sign-bit+ #:+site-tag-bits+
-   #:+horizontal-capacity-bits+ #:+vertical-coordinate-bits+
-   #:+x-shift+ #:+y-shift+ #:+z-shift+ #:+site-mask+ #:+top-z+
+   #:+vertical-coordinate-bits+
+   #:+z-shift+ #:+x-local-shift+ #:+y-local-shift+
+   #:+chunk-bits+ #:+chunk-size+ #:+chunk-morton-shift+
+   #:+site-mask+ #:+top-z+
    #:axis-index #:index-axis #:axis-bit #:make-extent
    #:make-site #:checked-site #:site-valid-p
    #:site-extent #:site-x #:site-y #:site-z #:site-anchor #:site-dimension
@@ -26,6 +27,14 @@
    #:step-site #:site-forward #:site-backward
    #:site-boundary-polarity #:site-boundary-low #:site-boundary-high
    #:map-site-boundary #:site-coface-forward #:site-coface-backward
+   ;; Chunks.
+   #:chunk-key #:site-chunk-key #:site-chunk-local #:chunk-key-at
+   #:chunk-key-x #:chunk-key-y #:chunk-origin-x #:chunk-origin-y
+   #:map-chain-chunks
+   ;; Boundary conditions.
+   #:outside-domain #:outside-domain-domain
+   #:outside-domain-x #:outside-domain-y #:outside-domain-z
+   #:outside-domain-occupancy #:treat-as-air #:treat-as-solid
    ;; Chains.
    #:chain #:chain-domain #:make-chain #:chain-count #:chain-empty-p
    #:chain-sites #:chain-site-count #:chain-site-p #:map-chain #:chain=
@@ -63,13 +72,26 @@
 
 ;;; ---------------------------------------------------------------------------
 ;;; Packed sites and domains
+;;;
+;;; A site packs, from the least significant bit up: the extent mask (3),
+;;; the polarity sign (1), Z (8), the within-chunk X and Y (6 each), and the
+;;; Morton-interleaved chunk coordinates (12+12).  Numeric order is therefore
+;;; chunk-major with hierarchical (Morton) chunk locality, then column-major
+;;; within a chunk: every (x, y) column's Z run is contiguous, and every
+;;; power-of-two block of chunks is a contiguous range of any sorted vector.
+;;;
+;;; Coordinates do not wrap.  A domain is a box; probing beyond it is an
+;;; explicit OUTSIDE-DOMAIN condition with boundary restarts, so the policy
+;;; for what lies past an edge belongs to the caller (a chunk store, a whole
+;;; world, a test harness), never to the coordinate arithmetic.
 
-(deftype site () '(unsigned-byte 60))
+(deftype site () '(unsigned-byte 48))
 (deftype extent-mask () '(unsigned-byte 3))
 (deftype axis () '(member :x :y :z))
 (deftype side () '(member :low :high))
 (deftype local-edge () '(member :u-low :u-high :v-low :v-high))
 (deftype local-corner () '(member :low-low :low-high :high-low :high-high))
+(deftype chunk-key () '(unsigned-byte 24))
 
 (defconstant +vertex-extent+ #b000)
 (defconstant +x-edge-extent+ #b001)
@@ -84,44 +106,66 @@
 (defconstant +site-sign-bit+ 3)
 (defconstant +negative-site-mask+ (ash 1 +site-sign-bit+))
 (defconstant +site-tag-bits+ 4)
-(defconstant +horizontal-capacity-bits+ 24)
 (defconstant +vertical-coordinate-bits+ 8)
-(defconstant +x-shift+ +site-tag-bits+)
-(defconstant +y-shift+ (+ +x-shift+ +horizontal-capacity-bits+))
-(defconstant +z-shift+ (+ +y-shift+ +horizontal-capacity-bits+))
+(defconstant +chunk-bits+ 6)
+(defconstant +chunk-size+ (ash 1 +chunk-bits+))
+(defconstant +chunk-axis-bits+ 12)
+(defconstant +z-shift+ +site-tag-bits+)
+(defconstant +x-local-shift+ (+ +z-shift+ +vertical-coordinate-bits+))
+(defconstant +y-local-shift+ (+ +x-local-shift+ +chunk-bits+))
+(defconstant +chunk-morton-shift+ (+ +y-local-shift+ +chunk-bits+))
 (defconstant +top-z+ (1- (ash 1 +vertical-coordinate-bits+)))
-(defconstant +site-mask+ (1- (ash 1 60)))
+(defconstant +site-mask+ (1- (ash 1 48)))
+
+(declaim (inline %spread-chunk-axis %compact-chunk-axis %chunk-morton))
+(defun %spread-chunk-axis (value)
+  "Spread a 12-bit chunk coordinate onto the even bit positions."
+  (let ((v (logand value #xfff)))
+    (setf v (logand (logior v (ash v 8)) #x00ff00ff)
+          v (logand (logior v (ash v 4)) #x0f0f0f0f)
+          v (logand (logior v (ash v 2)) #x33333333)
+          v (logand (logior v (ash v 1)) #x55555555))
+    v))
+
+(defun %compact-chunk-axis (value)
+  "Compact the even bit positions back into a 12-bit chunk coordinate."
+  (let ((v (logand value #x555555)))
+    (setf v (logand (logior v (ash v -1)) #x33333333)
+          v (logand (logior v (ash v -2)) #x0f0f0f0f)
+          v (logand (logior v (ash v -4)) #x00ff00ff)
+          v (logand (logior v (ash v -8)) #x0000ffff))
+    v))
+
+(defun %chunk-morton (chunk-x chunk-y)
+  (logior (%spread-chunk-axis chunk-x)
+          (ash (%spread-chunk-axis chunk-y) 1)))
 
 (defstruct (world-domain
-             (:constructor %make-world-domain (x-bits y-bits x-mask y-mask))
+             (:constructor %make-world-domain (x-bits y-bits))
              (:copier nil))
-  (x-bits 24 :type (integer 1 24) :read-only t)
-  (y-bits 24 :type (integer 1 24) :read-only t)
-  (x-mask #xffffff :type (unsigned-byte 24) :read-only t)
-  (y-mask #xffffff :type (unsigned-byte 24) :read-only t))
+  (x-bits 6 :type (integer 1 17) :read-only t)
+  (y-bits 6 :type (integer 1 17) :read-only t))
 
-(defun make-world-domain (&key (horizontal-bits 24)
+(defun make-world-domain (&key (horizontal-bits 6)
                                (x-bits horizontal-bits)
                                (y-bits horizontal-bits))
-  "Make a domain with independent power-of-two X and Y periods."
-  (check-type horizontal-bits (integer 1 24))
-  (check-type x-bits (integer 1 24))
-  (check-type y-bits (integer 1 24))
-  (%make-world-domain x-bits y-bits
-                      (1- (ash 1 x-bits))
-                      (1- (ash 1 y-bits))))
+  "Make a boxed domain with power-of-two X and Y cell extents."
+  (check-type x-bits (integer 1 17))
+  (check-type y-bits (integer 1 17))
+  (%make-world-domain x-bits y-bits))
 
 (defun world-domain= (a b)
   (check-type a world-domain)
   (check-type b world-domain)
-  (and (= (world-domain-x-mask a) (world-domain-x-mask b))
-       (= (world-domain-y-mask a) (world-domain-y-mask b))))
+  (and (= (world-domain-x-bits a) (world-domain-x-bits b))
+       (= (world-domain-y-bits a) (world-domain-y-bits b))))
 
-(declaim (inline world-domain-x-period world-domain-y-period))
-(defun world-domain-x-period (domain)
-  (1+ (world-domain-x-mask domain)))
-(defun world-domain-y-period (domain)
-  (1+ (world-domain-y-mask domain)))
+(declaim (inline world-domain-x-limit world-domain-y-limit))
+(defun world-domain-x-limit (domain)
+  "The domain's cell count along X; anchors range over [0, limit]."
+  (ash 1 (world-domain-x-bits domain)))
+(defun world-domain-y-limit (domain)
+  (ash 1 (world-domain-y-bits domain)))
 
 (declaim (inline axis-index index-axis axis-bit))
 (defun axis-index (axis)
@@ -135,16 +179,28 @@
   (reduce #'logior axes :key #'axis-bit :initial-value 0))
 
 (declaim (inline site-extent site-x site-y site-z site-negative-p
-                 site-positive-p site-polarity site-geometry opposite-site))
+                 site-positive-p site-polarity site-geometry opposite-site
+                 site-chunk-key site-chunk-local))
 (defun site-extent (site)
   (check-type site site)
   (ldb (byte +extent-bits+ 0) site))
+(defun site-chunk-key (site)
+  "The Morton-interleaved chunk coordinates of SITE."
+  (check-type site site)
+  (ldb (byte (* 2 +chunk-axis-bits+) +chunk-morton-shift+) site))
+(defun site-chunk-local (site)
+  "SITE with its chunk bits cleared: a valid site of the chunk-local box."
+  (check-type site site)
+  (ldb (byte +chunk-morton-shift+ 0) site))
 (defun site-x (site)
   (check-type site site)
-  (ldb (byte +horizontal-capacity-bits+ +x-shift+) site))
+  (logior (ash (%compact-chunk-axis (site-chunk-key site)) +chunk-bits+)
+          (ldb (byte +chunk-bits+ +x-local-shift+) site)))
 (defun site-y (site)
   (check-type site site)
-  (ldb (byte +horizontal-capacity-bits+ +y-shift+) site))
+  (logior (ash (%compact-chunk-axis (ash (site-chunk-key site) -1))
+               +chunk-bits+)
+          (ldb (byte +chunk-bits+ +y-local-shift+) site)))
 (defun site-z (site)
   (check-type site site)
   (ldb (byte +vertical-coordinate-bits+ +z-shift+) site))
@@ -174,29 +230,44 @@
 (defun site-valid-p (domain thing)
   (check-type domain world-domain)
   (and (typep thing 'site)
-       (= thing (logand thing +site-mask+))
-       (= (site-x thing)
-          (logand (site-x thing) (world-domain-x-mask domain)))
-       (= (site-y thing)
-          (logand (site-y thing) (world-domain-y-mask domain)))
-       (not (and (= (site-z thing) +top-z+)
-                 (logbitp 2 (site-extent thing))))))
+       (let ((extent (site-extent thing)))
+         (and (<= (site-x thing)
+                  (- (world-domain-x-limit domain)
+                     (if (logbitp 0 extent) 1 0)))
+              (<= (site-y thing)
+                  (- (world-domain-y-limit domain)
+                     (if (logbitp 1 extent) 1 0)))
+              (not (and (= (site-z thing) +top-z+)
+                        (logbitp 2 extent)))))))
 
 (defun make-site (domain x y z &optional (extent +vertex-extent+) (polarity 1))
-  "Pack a canonical site.  X/Y wrap; Z and Z extent do not."
+  "Pack a canonical site inside DOMAIN's box.  No coordinate wraps: anchors
+range over [0, limit] per horizontal axis, and a site extending along an
+axis cannot begin on that axis's far boundary."
   (check-type domain world-domain)
   (check-type x integer)
   (check-type y integer)
   (check-type z (integer 0 255))
   (check-type extent extent-mask)
   (check-type polarity (member 1 -1))
+  (unless (and (<= 0 x (- (world-domain-x-limit domain)
+                          (if (logbitp 0 extent) 1 0)))
+               (<= 0 y (- (world-domain-y-limit domain)
+                          (if (logbitp 1 extent) 1 0))))
+    (error "Site anchor (~D ~D ~D) with extent ~3,'0B lies outside the ~
+            ~Dx~D-cell domain."
+           x y z extent
+           (world-domain-x-limit domain) (world-domain-y-limit domain)))
   (when (and (= z +top-z+) (logbitp 2 extent))
     (error "A Z-extended site cannot begin on plane ~D." +top-z+))
   (logior extent
           (if (minusp polarity) +negative-site-mask+ 0)
-          (ash (logand x (world-domain-x-mask domain)) +x-shift+)
-          (ash (logand y (world-domain-y-mask domain)) +y-shift+)
-          (ash z +z-shift+)))
+          (ash z +z-shift+)
+          (ash (ldb (byte +chunk-bits+ 0) x) +x-local-shift+)
+          (ash (ldb (byte +chunk-bits+ 0) y) +y-local-shift+)
+          (ash (%chunk-morton (ash x (- +chunk-bits+))
+                              (ash y (- +chunk-bits+)))
+               +chunk-morton-shift+)))
 
 (defun checked-site (domain site)
   (unless (site-valid-p domain site)
@@ -213,23 +284,24 @@
              extent (site-polarity site)))
 
 (defun step-site (domain site axis delta)
-  "Translate SITE; return NIL only when a Z step leaves the valid domain."
+  "Translate SITE; return NIL when the step leaves DOMAIN's box."
   (checked-site domain site)
   (check-type delta integer)
-  (ecase axis
-    (:x (make-site domain (+ (site-x site) delta)
-                   (site-y site) (site-z site)
-                   (site-extent site) (site-polarity site)))
-    (:y (make-site domain (site-x site)
-                   (+ (site-y site) delta) (site-z site)
-                   (site-extent site) (site-polarity site)))
-    (:z (let ((z (+ (site-z site) delta)))
-          (if (or (< z 0) (> z +top-z+)
-                  (and (= z +top-z+)
-                       (logbitp 2 (site-extent site))))
-              nil
-              (make-site domain (site-x site) (site-y site) z
-                         (site-extent site) (site-polarity site)))))))
+  (let ((x (site-x site)) (y (site-y site)) (z (site-z site))
+        (extent (site-extent site)))
+    (ecase axis
+      (:x (incf x delta))
+      (:y (incf y delta))
+      (:z (incf z delta)))
+    (if (or (minusp x) (minusp y) (minusp z)
+            (> x (- (world-domain-x-limit domain)
+                    (if (logbitp 0 extent) 1 0)))
+            (> y (- (world-domain-y-limit domain)
+                    (if (logbitp 1 extent) 1 0)))
+            (> z +top-z+)
+            (and (= z +top-z+) (logbitp 2 extent)))
+        nil
+        (make-site domain x y z extent (site-polarity site)))))
 
 (declaim (inline site-forward site-backward))
 (defun site-forward (domain site axis) (step-site domain site axis 1))
@@ -276,10 +348,14 @@
         (funcall function (site-boundary-high domain site axis) axis :high)))))
 
 (defun site-coface-forward (domain site axis)
-  "Return the coface whose signed low boundary is SITE, or NIL above Z."
+  "Return the coface whose signed low boundary is SITE, or NIL at the box."
   (checked-site domain site)
   (%require-extent site axis nil)
-  (when (and (eq axis :z) (= (site-z site) +top-z+))
+  (when (or (and (eq axis :z) (= (site-z site) +top-z+))
+            (and (eq axis :x)
+                 (= (site-x site) (world-domain-x-limit domain)))
+            (and (eq axis :y)
+                 (= (site-y site) (world-domain-y-limit domain))))
     (return-from site-coface-forward nil))
   (let* ((extent (logior (site-extent site) (axis-bit axis)))
          (geometry (%site-with-extent domain (site-geometry site) extent)))
@@ -492,13 +568,89 @@
   "Return the normalized boundary of an ordinary solid three-chain."
   (boundary-chain solid-chain))
 
+(define-condition outside-domain (error)
+  ((domain :initarg :domain :reader outside-domain-domain)
+   (x :initarg :x :reader outside-domain-x)
+   (y :initarg :y :reader outside-domain-y)
+   (z :initarg :z :reader outside-domain-z))
+  (:report (lambda (condition stream)
+             (format stream "Cell (~D ~D ~D) lies outside the domain ~S."
+                     (outside-domain-x condition)
+                     (outside-domain-y condition)
+                     (outside-domain-z condition)
+                     (outside-domain-domain condition))))
+  (:documentation
+   "A cell probe left its box.  The signaling probe offers the boundary
+restarts TREAT-AS-AIR, TREAT-AS-SOLID, and USE-VALUE, so the caller's
+handler decides what lies past the edge: a world treats it as air, a chunk
+store answers from the neighboring chunk or defers, a test refuses."))
+
+(defun outside-domain-occupancy (domain x y z)
+  "Signal OUTSIDE-DOMAIN for one probe, offering the boundary restarts."
+  (restart-case (error 'outside-domain :domain domain :x x :y y :z z)
+    (treat-as-air ()
+      :report "Treat the missing cell as air."
+      0)
+    (treat-as-solid ()
+      :report "Treat the missing cell as solid."
+      1)
+    (use-value (bit)
+      :report "Supply the occupancy bit."
+      bit)))
+
 (defun chain-cell-occupancy-bit (chain x y z)
-  "Treat positive cubic-site occurrences in CHAIN as Boolean occupancy."
-  (if (or (< z 0) (>= z +top-z+))
-      0
-      (if (chain-site-p
-           chain (make-site (chain-domain chain) x y z +cell-extent+ 1))
-          1 0)))
+  "Treat positive cubic-site occurrences in CHAIN as Boolean occupancy.
+Cells above and below the Z range are air; probes beyond the horizontal
+box signal OUTSIDE-DOMAIN with the boundary restarts."
+  (let ((domain (chain-domain chain)))
+    (cond ((or (< z 0) (>= z +top-z+)) 0)
+          ((or (< x 0) (>= x (world-domain-x-limit domain))
+               (< y 0) (>= y (world-domain-y-limit domain)))
+           (outside-domain-occupancy domain x y z))
+          ((chain-site-p chain (make-site domain x y z +cell-extent+ 1)) 1)
+          (t 0))))
+
+;;; ---------------------------------------------------------------------------
+;;; Chunk vocabulary
+;;;
+;;; A chunk is the aligned 64x64-cell full-height column block named by the
+;;; Morton-interleaved chunk coordinates in a site's top bits.  Because those
+;;; bits are the most significant, a normalized chain is chunk-contiguous:
+;;; each chunk, and each power-of-two block of chunks, is one contiguous run.
+
+(defun chunk-key-at (x y)
+  "The chunk key of the cell column at world coordinates X, Y."
+  (%chunk-morton (ash x (- +chunk-bits+)) (ash y (- +chunk-bits+))))
+
+(defun chunk-key-x (key)
+  "The chunk-grid X coordinate of KEY."
+  (%compact-chunk-axis key))
+(defun chunk-key-y (key)
+  (%compact-chunk-axis (ash key -1)))
+
+(defun chunk-origin-x (key)
+  "The world X coordinate of KEY's low corner."
+  (ash (chunk-key-x key) +chunk-bits+))
+(defun chunk-origin-y (key)
+  (ash (chunk-key-y key) +chunk-bits+))
+
+(defun map-chain-chunks (function chain)
+  "Call FUNCTION with each (chunk-key chunk-chain) run of CHAIN in order."
+  (let* ((sites (%chain-sites chain))
+         (count (length sites))
+         (start 0))
+    (loop while (< start count) do
+      (let ((key (site-chunk-key (aref sites start)))
+            (end (1+ start)))
+        (loop while (and (< end count)
+                         (= key (site-chunk-key (aref sites end))))
+              do (incf end))
+        (let ((run (make-array (- end start)
+                               :element-type '(unsigned-byte 64))))
+          (replace run sites :start2 start :end2 end)
+          (funcall function key (%make-chain (chain-domain chain) run)))
+        (setf start end)))
+    chain))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Occupancy stars and strict-minority moment classification
@@ -511,15 +663,14 @@
                   value))))
 
 (defun cell-occupancy-bit (domain occupancy x y z)
-  "Central occupancy convention: wrap X/Y; cells outside Z=0..254 are air.
-OCCUPANCY must return a stable NIL, T, 0, or 1 for each canonical cell."
-  (if (or (< z 0) (>= z +top-z+))
-      0
-      (%occupancy-bit
-       (funcall occupancy
-                (logand x (world-domain-x-mask domain))
-                (logand y (world-domain-y-mask domain))
-                z))))
+  "Central occupancy convention: cells outside Z=0..254 are air; probes
+beyond the horizontal box signal OUTSIDE-DOMAIN with boundary restarts.
+OCCUPANCY must return a stable NIL, T, 0, or 1 for each in-domain cell."
+  (cond ((or (< z 0) (>= z +top-z+)) 0)
+        ((or (< x 0) (>= x (world-domain-x-limit domain))
+             (< y 0) (>= y (world-domain-y-limit domain)))
+         (outside-domain-occupancy domain x y z))
+        (t (%occupancy-bit (funcall occupancy x y z)))))
 
 (defun site-star-occupancy-mask (domain site occupancy)
   "Pack SITE's complete incident-cell star.

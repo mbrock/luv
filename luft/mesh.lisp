@@ -363,45 +363,9 @@ star corpus; signal that boundary explicitly instead of silently welding it."
         (+ (* (%normal-trit-key nx ny nz) 256) star-mask)))
 
 ;;; ---------------------------------------------------------------------------
-;;; Materialized occupancy
-
-(defun %materialize-occupancy (solid)
-  "Validate SOLID's cells and index them by their packed site values."
-  (let* ((sites (%chain-sites solid))
-         (field (make-hash-table :test #'eql :size (max 64 (length sites)))))
-    (loop for cell across sites do
-      (unless (and (= (site-extent cell) +cell-extent+)
-                   (site-positive-p cell))
-        (error "A solid mesh requires positive cells, not ~S." cell))
-      (setf (gethash cell field) t))
-    field))
-
-(declaim (inline %occupied-bit))
-(defun %occupied-bit (field domain x y z)
-  "Central occupancy convention: wrap X/Y; cells outside Z=0..254 are air."
-  (declare (optimize (speed 3) (safety 1)))
-  (if (or (< z 0) (>= z +top-z+))
-      0
-      (if (gethash (make-site domain x y z +cell-extent+ 1) field) 1 0)))
-
-(defun %star-mask-at (field domain x y z)
-  "Pack the eight-cell occupancy star of the lattice vertex at X Y Z.
-
-Bit conventions match SITE-STAR-OCCUPANCY-MASK on a vertex site."
-  (declare (optimize (speed 3) (safety 1)))
-  (let ((mask 0))
-    (dotimes (sample 8 mask)
-      (when (= 1 (%occupied-bit
-                  field domain
-                  (- x (if (logbitp 0 sample) 0 1))
-                  (- y (if (logbitp 1 sample) 0 1))
-                  (- z (if (logbitp 2 sample) 0 1))))
-        (setf mask (logior mask (ash 1 sample)))))))
-
-;;; ---------------------------------------------------------------------------
 ;;; Packed lattice keys
 ;;;
-;;; Unwrapped mesher coordinates: X and Y lie in [-1, 2^24], Z in [-1, 256].
+;;; Unwrapped mesher coordinates: X and Y lie in [-1, 2^18], Z in [-1, 256].
 ;;; The +1 bias keeps boundary anchors one step below zero packable.  Numeric
 ;;; key order is (axis, x, y, z) lexicographic order.
 
@@ -421,6 +385,65 @@ Bit conventions match SITE-STAR-OCCUPANCY-MASK on a vertex site."
   (- (ldb (byte 25 +mesh-key-y-shift+) key) 1))
 (defun %lattice-key-z (key)
   (- (ldb (byte 9 0) key) 1))
+
+;;; ---------------------------------------------------------------------------
+;;; Materialized occupancy
+;;;
+;;; A field binds one solid's occupancy to a cell-coordinate box.  Probes
+;;; inside the box are one EQL lookup on a packed lattice key; probes outside
+;;; it signal OUTSIDE-DOMAIN with the boundary restarts, so the caller's
+;;; policy (whole-world air, a chunk store, a strict test) decides the edge.
+
+(defstruct (occupancy-field
+             (:constructor %make-occupancy-field (domain table x0 x1 y0 y1)))
+  (domain nil :type world-domain :read-only t)
+  (table nil :type hash-table :read-only t)
+  ;; Half-open cell-coordinate bounds of the resident box.
+  (x0 0 :type fixnum :read-only t)
+  (x1 0 :type fixnum :read-only t)
+  (y0 0 :type fixnum :read-only t)
+  (y1 0 :type fixnum :read-only t))
+
+(defun %materialize-occupancy (solid x0 x1 y0 y1)
+  "Validate SOLID's cells and index them over the given cell box."
+  (let* ((sites (%chain-sites solid))
+         (domain (chain-domain solid))
+         (table (make-hash-table :test #'eql :size (max 64 (length sites)))))
+    (loop for cell across sites do
+      (unless (and (= (site-extent cell) +cell-extent+)
+                   (site-positive-p cell))
+        (error "A solid mesh requires positive cells, not ~S." cell))
+      (setf (gethash (%lattice-key (site-x cell) (site-y cell) (site-z cell))
+                     table)
+            t))
+    (%make-occupancy-field domain table x0 x1 y0 y1)))
+
+(declaim (inline %occupied-bit))
+(defun %occupied-bit (field domain x y z)
+  "Occupancy of one cell: air beyond Z, a lookup inside the field's box,
+and an OUTSIDE-DOMAIN signal with boundary restarts past its edges."
+  (declare (optimize (speed 3) (safety 1)))
+  (cond ((or (< z 0) (>= z +top-z+)) 0)
+        ((and (<= (occupancy-field-x0 field) x)
+              (< x (occupancy-field-x1 field))
+              (<= (occupancy-field-y0 field) y)
+              (< y (occupancy-field-y1 field)))
+         (if (gethash (%lattice-key x y z) (occupancy-field-table field)) 1 0))
+        (t (outside-domain-occupancy domain x y z))))
+
+(defun %star-mask-at (field domain x y z)
+  "Pack the eight-cell occupancy star of the lattice vertex at X Y Z.
+
+Bit conventions match SITE-STAR-OCCUPANCY-MASK on a vertex site."
+  (declare (optimize (speed 3) (safety 1)))
+  (let ((mask 0))
+    (dotimes (sample 8 mask)
+      (when (= 1 (%occupied-bit
+                  field domain
+                  (- x (if (logbitp 0 sample) 0 1))
+                  (- y (if (logbitp 1 sample) 0 1))
+                  (- z (if (logbitp 2 sample) 0 1))))
+        (setf mask (logior mask (ash 1 sample)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Templates, instance streams, and the builder
@@ -1424,10 +1447,24 @@ points are site-local with the fan bias."
 ;;; ---------------------------------------------------------------------------
 ;;; Entry point
 
+(defun %call-with-boundary-policy (policy thunk)
+  "Run THUNK under one OUTSIDE-DOMAIN policy.
+
+:AIR answers every out-of-box probe with the TREAT-AS-AIR restart; :SIGNAL
+leaves the condition for the caller's own handlers (a chunk store, a test)."
+  (ecase policy
+    (:air (handler-bind ((outside-domain
+                           (lambda (condition)
+                             (declare (ignore condition))
+                             (invoke-restart 'treat-as-air))))
+            (funcall thunk)))
+    (:signal (funcall thunk))))
+
 (defun make-surface-mesh
     (solid &key (stock-function (constantly 0))
                 (chamfer-stock-function (lambda (stocks) (first stocks)))
-                (bevel-width +mesh-bevel-width+))
+                (bevel-width +mesh-bevel-width+)
+                (boundary :air))
   "Classify SOLID into exact integer face, edge, and vertex instance streams.
 
 Below the medial limit, every exposed cell face emits the same width-dependent
@@ -1446,30 +1483,37 @@ lattice-site closure.  It must return one stock for that entire chamfer."
                (<= 1 bevel-width (/ +mesh-cell-size+ 2)))
     (error "Bevel width ~S must be an integer between one and four ticks."
            bevel-width))
+  (check-type boundary (member :air :signal))
   (let* ((domain (chain-domain solid))
-         (field (%materialize-occupancy solid))
+         (field (%materialize-occupancy
+                 solid
+                 0 (world-domain-x-limit domain)
+                 0 (world-domain-y-limit domain)))
          (builder (%make-surface-mesh-builder domain bevel-width))
          (boundary-builder
            (if (= bevel-width (/ +mesh-cell-size+ 2))
                (%make-surface-mesh-builder
                 domain (1- (/ +mesh-cell-size+ 2)))
                builder)))
-    (loop for cell across (%chain-sites solid) do
-      (let ((cx (site-x cell)) (cy (site-y cell)) (cz (site-z cell)))
-        (dotimes (axis-number 3)
-          (dolist (side '(-1 1))
-            (when (= 0 (%occupied-bit
-                        field domain
-                        (+ cx (if (= axis-number 0) side 0))
-                        (+ cy (if (= axis-number 1) side 0))
-                        (+ cz (if (= axis-number 2) side 0))))
-              (%emit-cell-face boundary-builder field domain cell
-                               axis-number side
-                               stock-function chamfer-stock-function))))))
-    (loop for key across (%collect-edge-keys solid) do
-      (%emit-edge-bands boundary-builder field domain key stock-function
-                        chamfer-stock-function))
-    (%count-singular-vertex-stars builder field domain solid)
-    (%emit-boundary-derived-fans builder field domain
-                                 chamfer-stock-function boundary-builder)
-    (%finish-surface-mesh builder)))
+    (%call-with-boundary-policy
+     boundary
+     (lambda ()
+       (loop for cell across (%chain-sites solid) do
+         (let ((cx (site-x cell)) (cy (site-y cell)) (cz (site-z cell)))
+           (dotimes (axis-number 3)
+             (dolist (side '(-1 1))
+               (when (= 0 (%occupied-bit
+                           field domain
+                           (+ cx (if (= axis-number 0) side 0))
+                           (+ cy (if (= axis-number 1) side 0))
+                           (+ cz (if (= axis-number 2) side 0))))
+                 (%emit-cell-face boundary-builder field domain cell
+                                  axis-number side
+                                  stock-function chamfer-stock-function))))))
+       (loop for key across (%collect-edge-keys solid) do
+         (%emit-edge-bands boundary-builder field domain key stock-function
+                           chamfer-stock-function))
+       (%count-singular-vertex-stars builder field domain solid)
+       (%emit-boundary-derived-fans builder field domain
+                                    chamfer-stock-function boundary-builder)
+       (%finish-surface-mesh builder)))))
