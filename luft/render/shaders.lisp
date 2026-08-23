@@ -13,7 +13,7 @@
   (defvar *screen-ambient-occlusion-strength* 0.38)
   (defvar *screen-ambient-occlusion-radius* 0.95)
   (defvar *ambient-pigment-strength* 0.82)
-  (defvar *earth-set-stone-strength* 0.78))
+  (defvar *earth-set-stone-strength* 0.72))
 
 (define-shader-function paper-hash (site)
   (let* ((scattered (fract (* site 0.1031)))
@@ -68,6 +68,71 @@
                (vec3 4.3 29.1 11.7)))))
     (+ 1.0
        (* #.*stock-tooth* (- (+ (* 0.55 coarse) (* 0.45 fine)) 0.5)))))
+
+(define-shader-function earth-set-stone-tone
+    (point normal ambient-occlusion stock stone-tone soil-tone subsoil-tone)
+  "Weather one stone chamfer from its packed incident-substrate reading."
+  (let* ((turf-set-p (if (< (abs (- stock 4.0)) 0.5) 1.0 0.0))
+         (soil-set-p (if (< (abs (- stock 5.0)) 0.5) 1.0 0.0))
+         (deep-set-p (if (< (abs (- stock 6.0)) 0.5) 1.0 0.0))
+         (clump
+           (paper-noise (+ (* point (vec3 1.25 1.25 4.5))
+                           (vec3 7.1 19.3 3.7))))
+         (grit (paper-noise (+ (* point 9.0) (vec3 31.7 5.9 13.1))))
+         (break
+           (paper-noise (+ (* point (vec3 3.1 3.1 7.7))
+                           (vec3 2.9 41.3 17.1))))
+         (coverage (+ (* turf-set-p 0.50)
+                      (* soil-set-p 0.67)
+                      (* deep-set-p 0.82)))
+         (breakup
+           (smoothstep
+            0.43 0.61
+            (+ (* 0.52 clump) (* 0.20 grit) (* 0.24 break)
+               (* 0.24 ambient-occlusion)
+               (* -0.13 (max 0.0 (swizzle normal :z)))
+               #.*earth-set-stone-strength* -0.60)))
+         (earth-weight
+           (clamp (+ coverage (* 0.30 (- breakup 0.5))) 0.0 1.0))
+         (earth-pigment
+           (mix
+            (mix soil-tone subsoil-tone
+                 (+ (* 0.18 grit) (* 0.34 break) (* 0.22 soil-set-p)))
+            subsoil-tone
+            (* deep-set-p (+ 0.45 (* 0.25 grit)))))
+         (weathered-stone
+           (mix stone-tone soil-tone (+ 0.16 (* 0.10 grit)))))
+    (* (mix weathered-stone earth-pigment earth-weight)
+       (- 1.0 (* 0.20 (* earth-weight clump))))))
+
+(define-shader-function turf-edge-tone
+    (point normal grass-tone soil-tone)
+  "Roll a grassy top into soil with a world-stable broken fringe."
+  (let* ((fray (paper-noise (+ (* point 4.2) (vec3 11.7 3.1 29.3))))
+         (turf-weight
+           (smoothstep 0.42 0.78
+                       (+ (max 0.0 (swizzle normal :z))
+                          (* 0.24 (- fray 0.5))))))
+    (mix soil-tone grass-tone turf-weight)))
+
+(define-shader-function foundation-stone-tone
+    (point stone-tone soil-tone subsoil-tone)
+  "Let terrain climb an irregular fraction of its lowest exposed stone course."
+  (let* ((weather
+           (paper-noise (+ (* point (vec3 1.9 1.9 3.7))
+                           (vec3 23.3 8.7 5.1))))
+         (grit (paper-noise (+ (* point 8.0) (vec3 5.7 17.9 37.1))))
+         (height (fract (swizzle point :z)))
+         (earth
+           (- 1.0
+              (smoothstep 0.10 0.52
+                          (+ height (* 0.22 (- weather 0.5))))))
+         (weathered-stone
+           (mix stone-tone soil-tone (+ 0.16 (* 0.10 grit))))
+         (earth-pigment
+           (mix soil-tone subsoil-tone (+ 0.25 (* 0.45 grit)))))
+    (* (mix weathered-stone earth-pigment earth)
+       (- 1.0 (* 0.12 earth)))))
 
 (define-shader-function paper-tonemap (radiance)
   (let* ((numerator
@@ -642,29 +707,9 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
          (soil-tone (vec3 0.42 0.32 0.21))
          (subsoil-tone (vec3 0.24 0.18 0.13))
          (stone-tone (vec3 0.53 0.49 0.39))
-         (earth-set-p (if (< (abs (- stock 4.0)) 0.5) 1.0 0.0))
-         ;; Two continuous world-space scales keep the contact stain stable
-         ;; across triangles without repeating one decision per voxel face.
-         ;; AO admits more earth in sheltered joins while upward-facing rolls
-         ;; retain a little more exposed stone.
-         (contact-clump
-           (paper-noise (+ (* paper-point 1.7)
-                           (vec3 7.1 19.3 3.7))))
-         (contact-grit
-           (paper-noise (+ (* (swizzle paper-point :yzx) 8.5)
-                           (vec3 31.7 5.9 13.1))))
-         (earth-weight
-           (* earth-set-p
-              (smoothstep
-               0.38 0.58
-               (+ (* 0.62 contact-clump)
-                  (* 0.22 contact-grit)
-                  (* 0.28 ambient-occlusion)
-                  (* -0.10 (max 0.0 (swizzle normal :z)))
-                  #.*earth-set-stone-strength* -0.68))))
-         (earth-pigment
-           (mix soil-tone subsoil-tone (* 0.30 contact-grit)))
-         (earth-set-tone (mix stone-tone earth-pigment earth-weight))
+         (earth-set-p (if (> stock 3.5)
+                          (if (< stock 6.5) 1.0 0.0)
+                          0.0))
          (tone (if (< stock 0.5)
                    grass-tone
                    (if (< stock 1.5)
@@ -673,7 +718,17 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
                            subsoil-tone
                            (if (< stock 3.5)
                                stone-tone
-                               earth-set-tone)))))
+                               (if (< stock 6.5)
+                                   (earth-set-stone-tone
+                                    world-position normal ambient-occlusion
+                                    stock stone-tone soil-tone subsoil-tone)
+                                   (if (< stock 7.5)
+                                       (turf-edge-tone
+                                        world-position normal
+                                        grass-tone soil-tone)
+                                       (foundation-stone-tone
+                                        world-position stone-tone
+                                        soil-tone subsoil-tone))))))))
          (bloom
            (paper-noise (+ (* paper-point 0.17) (vec3 2.7 17.1 8.3))))
          (mottle
@@ -753,7 +808,10 @@ the half-step midpoint, so its fore-aft lever runs symmetrically from +D/2 to
               (+ 0.28 (* 0.72 wrapped))
               ;; Earth-filled contacts should not receive the pristine white
               ;; paper rim which makes ordinary cut-stone edges legible.
-              (- 1.0 (* earth-set-p 0.78))))
+              ;; Locally exposed stone still catches light; pigment clumps
+              ;; swallow it.  This makes the edge breakup and colour breakup
+              ;; describe one material decision rather than two overlays.
+              (- 1.0 (* earth-set-p 0.82))))
          (construction-wire
            (* (swizzle render-parameters :y)
               (min 1.0 (+ (* all-wire 0.18) (* boundary-wire 0.82)))))

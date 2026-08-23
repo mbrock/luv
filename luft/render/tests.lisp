@@ -92,6 +92,7 @@
              :character character :modifiers modifiers))
 
 (deftest the-viewer-is-the-mcclim-application
+  (ok (= 2 luft:+mesh-bevel-width+))
   (ok (string= "1/8" (luft.render::bevel-width-label 1)))
   (ok (string= "1/4" (luft.render::bevel-width-label 2)))
   (ok (string= "1/2" (luft.render::bevel-width-label 4)))
@@ -361,7 +362,7 @@
                        (zerop (mod (aref lattice (+ offset 2))
                                    luft:+mesh-cell-size+))))))))))
 
-(deftest terrain-chamfers-use-one-side-material
+(deftest terrain-chamfers-distinguish-the-living-top-edge
   (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
          (scene (progn
                   (luft.render::scene-builder-cell builder 4 4 4)
@@ -370,26 +371,27 @@
     (flet ((instance-stocks (words)
              (loop for offset from 3 below (length words) by 4
                    collect (ldb (byte 4 16) (aref words offset)))))
-      ;; Every closure of an isolated terrain cell joins its top to a side,
-      ;; so it resolves uniformly to soil (1), never grass (0).
-      (dolist (words (list (luft:surface-mesh-band-instance-words mesh)
-                           (luft:surface-mesh-fan-instance-words mesh)))
-        (ok (plusp (length words)))
-        (ok (every (lambda (stock) (= stock 1))
-                   (instance-stocks words)))))))
+      (let ((stocks
+              (mapcan #'instance-stocks
+                      (list (luft:surface-mesh-band-instance-words mesh)
+                            (luft:surface-mesh-fan-instance-words mesh)))))
+        (ok (plusp (length stocks)))
+        (ok (member luft.render::+turf-edge-stock+ stocks))
+        (ok (member luft.render::+soil-stock+ stocks))))))
 
-(deftest flat-terrain-closures-continue-the-grass-material
+(deftest flat-terrain-closures-retain-a-living-edge-reading
   (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
          (scene (progn
                   (luft.render::scene-builder-box builder 4 5 4 5 4 4)
                   (luft.render::finish-scene-builder builder)))
          (mesh (render:make-render-mesh scene)))
-    (flet ((contains-grass-p (words)
+    (flet ((contains-turf-edge-p (words)
              (loop for offset from 3 below (length words) by 4
-                   thereis (zerop (ldb (byte 4 16) (aref words offset))))))
-      (ok (contains-grass-p
+                   thereis (= luft.render::+turf-edge-stock+
+                              (ldb (byte 4 16) (aref words offset))))))
+      (ok (contains-turf-edge-p
            (luft:surface-mesh-band-instance-words mesh)))
-      (ok (contains-grass-p
+      (ok (contains-turf-edge-p
            (luft:surface-mesh-fan-instance-words mesh))))))
 
 (deftest miter-study-chamfers-do-not-use-the-terrain-top-stock
@@ -404,13 +406,17 @@
   (ok (= luft.render::+stone-stock+
          (luft.render::scene-chamfer-stock
           (list luft.render::+stone-stock+))))
-  (ok (= luft.render::+earth-set-stone-stock+
+  (ok (= luft.render::+turf-set-stone-stock+
          (luft.render::scene-chamfer-stock
           (list luft.render::+stone-stock+ luft.render::+grass-stock+))))
-  (ok (= luft.render::+earth-set-stone-stock+
+  (ok (= luft.render::+soil-set-stone-stock+
          (luft.render::scene-chamfer-stock
           (list luft.render::+soil-stock+ luft.render::+stone-stock+))))
-  (ok (= luft.render::+soil-stock+
+  (ok (= luft.render::+deep-set-stone-stock+
+         (luft.render::scene-chamfer-stock
+          (list luft.render::+stone-stock+ luft.render::+grass-stock+
+                luft.render::+subsoil-stock+))))
+  (ok (= luft.render::+turf-edge-stock+
          (luft.render::scene-chamfer-stock
           (list luft.render::+grass-stock+ luft.render::+soil-stock+)))))
 
@@ -426,13 +432,38 @@
              (loop for offset from 3 below (length words) by 4
                    collect (ldb (byte 4 16) (aref words offset)))))
       (ok (notany (lambda (stock)
-                    (= stock luft.render::+earth-set-stone-stock+))
+                    (member stock
+                            (list luft.render::+turf-set-stone-stock+
+                                  luft.render::+soil-set-stone-stock+
+                                  luft.render::+deep-set-stone-stock+)))
                   (stocks (luft:surface-mesh-face-instance-words mesh))))
       (ok (some (lambda (stock)
-                  (= stock luft.render::+earth-set-stone-stock+))
+                  (member stock
+                          (list luft.render::+turf-set-stone-stock+
+                                luft.render::+soil-set-stone-stock+
+                                luft.render::+deep-set-stone-stock+)))
                 (append
                  (stocks (luft:surface-mesh-band-instance-words mesh))
                  (stocks (luft:surface-mesh-fan-instance-words mesh))))))))
+
+(deftest terrain-borne-architecture-marks-only-its-lowest-face-course
+  (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
+         (scene (progn
+                  (luft.render::scene-builder-box builder 4 6 4 6 2 2)
+                  (luft.render::scene-builder-box
+                   builder 5 5 5 5 3 4 :architecture-p t)
+                  (luft.render::finish-scene-builder builder)))
+         (mesh (render:make-render-mesh scene))
+         (face-stocks
+           (loop with words = (luft:surface-mesh-face-instance-words mesh)
+                 for offset from 3 below (length words) by 4
+                 collect (ldb (byte 4 16) (aref words offset)))))
+    (ok (member luft.render::+foundation-stone-stock+ face-stocks))
+    (ok (member luft.render::+stone-stock+ face-stocks))
+    (ok (notany (lambda (stock)
+                  (<= luft.render::+turf-set-stone-stock+ stock
+                      luft.render::+deep-set-stone-stock+))
+                face-stocks))))
 
 (deftest directional-star-ambient-occlusion-measures-the-outward-hemisphere
   (ok (= 0 (luft::%directional-star-ambient-occlusion #b00000000 '(0 0 1))))
@@ -505,13 +536,13 @@
                   view view #(0.5 0.5 0.001 0.001) 1.0 7.25)))))
       (let ((perspective (lane :perspective))
             (isometric (lane :isometric))
-            (quarter
+            (eighth
               (let ((render:*projection* :isometric))
                 (let ((view
                         (luft.render::capture-frame-view
                          camera 1100 800 #(0.0 0.0))))
                   (luft.render::camera-uniform-data
-                   view view #(0.5 0.5 0.001 0.001) 1.0 7.25 2)))))
+                   view view #(0.5 0.5 0.001 0.001) 1.0 7.25 1)))))
         (ok (= 56 (length perspective)))
         (ok (typep perspective '(simple-array single-float (56))))
         (ok (= 1.0 (aref perspective 22)))
@@ -526,8 +557,8 @@
           (ok (< (abs (- (depth isometric
                                luft.render::+orthographic-far+) 1.0))
                  1d-4)))
-        (ok (= (aref perspective 20) 0.125))
-        (ok (= (aref quarter 20) 0.25))
+        (ok (= (aref perspective 20) 0.25))
+        (ok (= (aref eighth 20) 0.125))
         (ok (= (aref perspective 21) render:*wireframe*))
         (ok (equalp #(0.5 0.5 0.001 0.001)
                     (subseq perspective 48 52)))

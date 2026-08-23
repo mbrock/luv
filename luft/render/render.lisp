@@ -7,8 +7,16 @@
 (defconstant +soil-stock+ 1)
 (defconstant +subsoil-stock+ 2)
 (defconstant +stone-stock+ 3)
-(defconstant +earth-set-stone-stock+ 4
-  "Stone where an architectural chamfer bears directly on terrain.")
+(defconstant +turf-set-stone-stock+ 4
+  "Stone at a chamfer shared with a grassy terrain top.")
+(defconstant +soil-set-stone-stock+ 5
+  "Stone at a chamfer shared with an exposed terrain side.")
+(defconstant +deep-set-stone-stock+ 6
+  "Stone at a chamfer shared with a terrain underside.")
+(defconstant +turf-edge-stock+ 7
+  "The living transition where a grassy terrain top rolls into exposed soil.")
+(defconstant +foundation-stone-stock+ 8
+  "The lowest exposed course of stone borne by a terrain cell.")
 
 (defclass scene ()
   ((solid :initarg :solid :reader scene-solid)
@@ -281,11 +289,28 @@ same view also retains the truncated wall miter preserved by #DJK8HW."
                                 luft:+cell-extent+ 1)
                 axis :backward))))
 
+(defun scene-foundation-cell-p (scene cell)
+  "Whether architectural CELL is immediately borne by non-architectural earth."
+  (let ((z (luft:site-z cell)))
+    (when (plusp z)
+      (let ((below
+              (luft:make-site
+               (luft:chain-domain (scene-solid scene))
+               (luft:site-x cell) (luft:site-y cell) (1- z)
+               luft:+cell-extent+ 1)))
+        (and (= 1 (luft:chain-cell-occupancy-bit
+                   (scene-solid scene)
+                   (luft:site-x below) (luft:site-y below) (luft:site-z below)))
+             (not (gethash below (scene-architecture-cells scene))))))))
+
 (defun scene-face-stock (scene face)
   "The paper surface-palette slot for FACE in SCENE."
   (multiple-value-bind (cell axis side)
       (face-solid-cell (scene-solid scene) face)
-    (cond ((gethash cell (scene-architecture-cells scene)) +stone-stock+)
+    (cond ((gethash cell (scene-architecture-cells scene))
+           (if (scene-foundation-cell-p scene cell)
+               +foundation-stone-stock+
+               +stone-stock+))
           ((not (eq axis :z)) +soil-stock+)
           ((eq side :backward) +grass-stock+)
           (t +subsoil-stock+))))
@@ -295,17 +320,29 @@ same view also retains the truncated wall miter preserved by #DJK8HW."
 
 The paper palette's terrain top is grass, terrain side is soil, and terrain
 underside is dark soil.  A unanimous closure continues that face material;
-a mixed terrain chamfer exposes soil.  A mixed stone--terrain chamfer is its
-own earth-set reading rather than letting pristine stone win the whole join."
-  (cond ((and (member +stone-stock+ stocks)
-              (some (lambda (stock)
-                      (<= +grass-stock+ stock +subsoil-stock+))
-                    stocks))
-         +earth-set-stone-stock+)
-        ((member +stone-stock+ stocks) +stone-stock+)
-        ((every (lambda (stock) (= stock (first stocks))) (rest stocks))
-         (first stocks))
-        (t +soil-stock+)))
+a mixed terrain chamfer exposes soil.  Stone--terrain chamfers retain the
+deepest incident substrate, so the shader can weather a turf line differently
+from an exposed or buried foundation without adding per-site material objects."
+  (flet ((stone-p (stock)
+           (member stock (list +stone-stock+ +foundation-stone-stock+))))
+    (cond ((and (some #'stone-p stocks)
+                (member +subsoil-stock+ stocks))
+           +deep-set-stone-stock+)
+          ((and (some #'stone-p stocks)
+                (member +soil-stock+ stocks))
+           +soil-set-stone-stock+)
+          ((and (some #'stone-p stocks)
+                (member +grass-stock+ stocks))
+           +turf-set-stone-stock+)
+          ((every (lambda (stock) (= stock (first stocks))) (rest stocks))
+           (first stocks))
+          ((some #'stone-p stocks) +stone-stock+)
+          ((and (member +grass-stock+ stocks)
+                (some (lambda (stock)
+                        (<= +soil-stock+ stock +subsoil-stock+))
+                      stocks))
+           +turf-edge-stock+)
+          (t +soil-stock+))))
 
 (defun default-face-stock (face)
   (mod (+ (luft:site-x face) (* 2 (luft:site-y face))

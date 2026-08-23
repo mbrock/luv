@@ -31,8 +31,8 @@
 ;;;   thirteen bits and are read from tables built once at load.
 
 (defconstant +mesh-cell-size+ 8)
-(defconstant +mesh-bevel-width+ 1
-  "Default bevel width in eighth-cell integer ticks.")
+(defconstant +mesh-bevel-width+ 2
+  "Default bevel width in eighth-cell integer ticks (one quarter cell).")
 (defconstant +mesh-instance-word-count+ 4)
 (defconstant +mesh-template-vertex-word-count+ 4)
 (defconstant +mesh-template-coordinate-bias+ 16)

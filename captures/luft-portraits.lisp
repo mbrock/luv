@@ -43,7 +43,8 @@
             luft.render:*inspection-ink-p* old-inspection-ink-p))))
 
 (defun capture-luft-material-contact
-    (pathname position isometric-height title)
+    (pathname position isometric-height title
+     &key (yaw 2.2455373) (pitch -0.5165006))
   (let ((viewer nil)
         (old-projection luft.render:*projection*)
         (old-isometric-height luft.render:*isometric-height*)
@@ -67,7 +68,7 @@
                   :camera
                   (luft.render:make-fly-camera
                    :position position
-                   :yaw 2.2455373 :pitch -0.5165006)
+                   :yaw yaw :pitch pitch)
                   :title title
                   :width 1100 :height 800))
            (luft.render:capture-viewer-frame
@@ -91,12 +92,44 @@
 (luv:define-capture luft-material-contact-closeup
     (:figure ER7HST :kind :image :extension "png" :layout :landscape
      :description
-     "The earth-set foot of the sanctuary's eastern stone wall at fillet scale.")
+     "The earth-set foot of the sanctuary's west turret at fillet scale.")
   (pathname)
   (capture-luft-material-contact
    pathname
-   (luv.arithmetic.lisp.vec3:make-vec3 66.0 16.0 43.0)
-   8.0 "LUFT material contact closeup"))
+   (luv.arithmetic.lisp.vec3:make-vec3 -9.3 14.3 38.8)
+   4.0 "LUFT material contact closeup"
+   :yaw 0.90 :pitch -0.5165006))
+
+(luv:define-capture luft-material-contact-stairs
+    (:figure S8TAIR :kind :image :extension "png" :layout :landscape
+     :description
+     "A tight oblique view across the sanctuary stair and terrace contacts.")
+  (pathname)
+  (capture-luft-material-contact
+   pathname
+   (luv.arithmetic.lisp.vec3:make-vec3 48.0 19.0 32.0)
+   7.0 "LUFT stair material contacts"))
+
+(luv:define-capture luft-material-contact-west-foot
+    (:figure W3STFT :kind :image :extension "png" :layout :landscape
+     :description
+     "The opposite sanctuary foot, viewed across turf toward the west turret.")
+  (pathname)
+  (capture-luft-material-contact
+   pathname
+   (luv.arithmetic.lisp.vec3:make-vec3 -7.0 14.0 41.0)
+   8.0 "LUFT west foundation contacts"
+   :yaw 0.90 :pitch -0.5165006))
+
+(luv:define-capture luft-material-contact-bridge-foot
+    (:figure BR1DGE :kind :image :extension "png" :layout :landscape
+     :description
+     "The lower bridge piers where stone meets exposed banks and undersoil.")
+  (pathname)
+  (capture-luft-material-contact
+   pathname
+   (luv.arithmetic.lisp.vec3:make-vec3 43.0 -5.0 20.0)
+   7.0 "LUFT bridge foundation contacts"))
 
 (defun capture-luft-miter-closeup (pathname wireframe title)
   "Capture the #xCD wall termination at the normal chamfer width. #L7N4MO"
