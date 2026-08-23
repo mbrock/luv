@@ -49,6 +49,24 @@
      viewer (luft.render::viewer-key-command viewer (key-release :w)))
     (ok (not (luft.render::viewer-control-active-p viewer :forward)))))
 
+(deftest orthographic-walk-moves-on-the-ground-without-zooming
+  (let* ((viewer (clim:make-application-frame 'render:viewer))
+         (camera (render:viewer-camera viewer))
+         (before (render:camera-position camera))
+         (render:*projection* :isometric)
+         (render:*isometric-height* 18.0))
+    (setf (luft.render::viewer-last-timestamp viewer) 1.0)
+    (luft.render::set-viewer-control viewer :forward t)
+    (luft.render::advance-viewer-camera viewer 1.1)
+    (let ((after (render:camera-position camera)))
+      (ok (or (/= (luv.arithmetic.lisp.vec3:vec3-x before)
+                  (luv.arithmetic.lisp.vec3:vec3-x after))
+              (/= (luv.arithmetic.lisp.vec3:vec3-y before)
+                  (luv.arithmetic.lisp.vec3:vec3-y after))))
+      (ok (= (luv.arithmetic.lisp.vec3:vec3-z before)
+             (luv.arithmetic.lisp.vec3:vec3-z after)))
+      (ok (= 18.0 render:*isometric-height*)))))
+
 (deftest the-spike-scene-is-one-indexed-integer-mesh
   (let* ((mesh (render:make-render-mesh
                 (render:make-manifold-spike-scene)))

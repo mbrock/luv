@@ -615,16 +615,16 @@ the selector is the whole of the difference."
                         (+ (vec3:vec3-z position)
                            (* amount (vec3:vec3-z direction))))))))
         ;; A dolly along the viewing ray is invisible in an orthographic
-        ;; projection, so W/S change its scale instead.  Perspective retains
-        ;; the ordinary fly-camera dolly.
+        ;; projection.  There W/S walk across the XY ground in the camera's
+        ;; yaw direction; the wheel remains the independent scale control.
         (if (eq *projection* :isometric)
-            (let ((zoom-rate (* dt (viewer-speed viewer) 0.12)))
+            (let ((ground-forward
+                    (vec3:make-vec3 (cos (camera-yaw camera))
+                                    (sin (camera-yaw camera)) 0.0)))
               (when (viewer-control-active-p viewer :forward)
-                (setf *isometric-height*
-                      (* *isometric-height* (exp (- zoom-rate)))))
+                (move ground-forward step))
               (when (viewer-control-active-p viewer :backward)
-                (setf *isometric-height*
-                      (* *isometric-height* (exp zoom-rate)))))
+                (move ground-forward (- step))))
             (progn
               (when (viewer-control-active-p viewer :forward)
                 (move forward step))
