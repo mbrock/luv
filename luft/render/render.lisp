@@ -285,11 +285,13 @@ same view also retains the truncated wall miter preserved by #DJK8HW."
   "Resolve one whole chamfer from its incident face STOCKS.
 
 The paper palette's terrain top is grass (0), terrain side is soil (1), and
-terrain underside is dark soil (2).  A chamfer faces out through the terrain
-side, so every non-architectural chamfer is soil regardless of which subset
-of terrain faces generated its triangles.  Architecture (3) is an explicit
-authored material and wins at a terrain--architecture join."
-  (if (member 3 stocks) 3 1))
+terrain underside is dark soil (2).  A unanimous closure continues that face
+material; a mixed terrain chamfer exposes soil.  Architecture (3) is an
+explicit authored material and wins at a terrain--architecture join."
+  (cond ((member 3 stocks) 3)
+        ((every (lambda (stock) (= stock (first stocks))) (rest stocks))
+         (first stocks))
+        (t 1)))
 
 (defun default-face-stock (face)
   (mod (+ (luft:site-x face) (* 2 (luft:site-y face))

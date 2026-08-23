@@ -305,15 +305,29 @@
     (flet ((instance-stocks (words)
              (loop for offset from 3 below (length words) by 4
                    collect (ldb (byte 4 16) (aref words offset)))))
-      ;; A terrain chamfer resolves uniformly to soil (1), never grass (0),
-      ;; even where its geometric closure sees only a horizontal face.
+      ;; Every closure of an isolated terrain cell joins its top to a side,
+      ;; so it resolves uniformly to soil (1), never grass (0).
       (dolist (words (list (luft:surface-mesh-band-instance-words mesh)
                            (luft:surface-mesh-fan-instance-words mesh)))
         (ok (plusp (length words)))
         (ok (every (lambda (stock) (= stock 1))
                    (instance-stocks words)))))))
 
-(deftest a-scene-never-gives-a-chamfer-the-terrain-top-stock
+(deftest flat-terrain-closures-continue-the-grass-material
+  (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
+         (scene (progn
+                  (luft.render::scene-builder-box builder 4 5 4 5 4 4)
+                  (luft.render::finish-scene-builder builder)))
+         (mesh (render:make-render-mesh scene)))
+    (flet ((contains-grass-p (words)
+             (loop for offset from 3 below (length words) by 4
+                   thereis (zerop (ldb (byte 4 16) (aref words offset))))))
+      (ok (contains-grass-p
+           (luft:surface-mesh-band-instance-words mesh)))
+      (ok (contains-grass-p
+           (luft:surface-mesh-fan-instance-words mesh))))))
+
+(deftest miter-study-chamfers-do-not-use-the-terrain-top-stock
   (let ((mesh (render:make-render-mesh (render:make-miter-study-scene))))
     (dolist (words (list (luft:surface-mesh-band-instance-words mesh)
                          (luft:surface-mesh-fan-instance-words mesh)))
