@@ -44,7 +44,9 @@
 
 (defun capture-luft-material-contact
     (pathname position isometric-height title
-     &key (yaw 2.2455373) (pitch -0.5165006) player-p bevel-profile)
+     &key (yaw 2.2455373) (pitch -0.5165006) player-p bevel-profile solid
+       (bevel-width luft:+mesh-bevel-width+) (wireframe 0.0)
+       inspection-ink-p)
   (let ((viewer nil)
         (old-projection luft.render:*projection*)
         (old-isometric-height luft.render:*isometric-height*)
@@ -54,18 +56,19 @@
          (progn
            (setf luft.render:*projection* :isometric
                  luft.render:*isometric-height* isometric-height
-                 luft.render:*wireframe* 0.0
-                 luft.render:*inspection-ink-p* nil)
+                 luft.render:*wireframe* wireframe
+                 luft.render:*inspection-ink-p* inspection-ink-p)
            (setf viewer
                  (luft.render:start-viewer
                   :solid
-                  (let ((scene (luft.render:make-mountain-sanctuary-scene)))
+                  (let ((scene (or solid
+                                   (luft.render:make-mountain-sanctuary-scene))))
                     ;; Material plates isolate the solid renderer.  A lighting
                     ;; plate deliberately keeps the separate SDF player pass.
                     (unless player-p
                       (setf (slot-value scene 'luft.render::player-p) nil))
                     scene)
-                  :bevel-width luft:+mesh-bevel-width+
+                  :bevel-width bevel-width
                   :bevel-profile bevel-profile
                   :camera
                   (luft.render:make-fly-camera
@@ -180,13 +183,131 @@
 (luv:define-capture luft-material-bevel-policy-contact
     (:figure J01NTS :kind :image :extension "png" :layout :landscape
      :description
-     "A close view of the unresolved junction between independently meshed material widths.")
+     "The sanctuary's authored low wall protecting width-one stairs from the terrain-four field.")
   (pathname)
   (capture-luft-material-contact
    pathname
    (luv.arithmetic.lisp.vec3:make-vec3 80.0 43.0 32.0)
    7.0 "LUFT material bevel policy - contact"
    :bevel-profile (luft.render:make-material-bevel-profile)))
+
+(luv:define-capture luft-material-bevel-policy-contact-construction
+    (:figure WSEK3C :kind :image :extension "png" :layout :landscape
+     :description
+     "The unprotected material-width contact with triangle construction ink enabled.")
+  (pathname)
+  (capture-luft-material-contact
+   pathname
+   (luv.arithmetic.lisp.vec3:make-vec3 80.0 43.0 32.0)
+   7.0 "LUFT material bevel policy - contact construction"
+   :solid (luft.render:make-mountain-sanctuary-scene
+           :stair-boundary :open)
+   :bevel-profile (luft.render:make-material-bevel-profile)
+   :wireframe 1.0))
+
+(macrolet ((define-uniform-contact-capture (name width)
+             `(luv:define-capture ,name
+                  (:figure WSEK3C :kind :image :extension "png"
+                   :layout :landscape
+                   :description
+                   ,(format nil
+                            "The production material contact under uniform bevel width ~D."
+                            width))
+                (pathname)
+                (capture-luft-material-contact
+                 pathname
+                 (luv.arithmetic.lisp.vec3:make-vec3 80.0 43.0 32.0)
+                 7.0 ,(format nil "LUFT uniform width ~D - contact" width)
+                 :solid (luft.render:make-mountain-sanctuary-scene
+                         :stair-boundary :open)
+                 :bevel-width ,width))))
+  (define-uniform-contact-capture luft-bevel-width-one-contact 1)
+  (define-uniform-contact-capture luft-bevel-width-two-contact 2)
+  (define-uniform-contact-capture luft-bevel-width-four-contact 4))
+
+(defun capture-luft-material-bevel-stair-boundary
+    (pathname boundary wireframe title)
+  (capture-luft-material-contact
+   pathname
+   (luv.arithmetic.lisp.vec3:make-vec3 62.0 42.0 33.0)
+   9.0 title :yaw 1.5707964 :pitch -0.588
+   :solid (luft.render:make-mountain-sanctuary-scene
+           :stair-boundary boundary)
+   :bevel-profile (luft.render:make-material-bevel-profile)
+   :wireframe wireframe))
+
+(luv:define-capture luft-material-bevel-stair-open
+    (:figure WSEK3C :kind :image :extension "png" :layout :landscape
+     :description
+     "The unprotected production stair, centered as the baseline for authored support geometry.")
+  (pathname)
+  (capture-luft-material-bevel-stair-boundary
+   pathname :open 0.0 "LUFT material bevel - open stair"))
+
+(luv:define-capture luft-material-bevel-stair-open-construction
+    (:figure WSEK3C :kind :image :extension "png" :layout :landscape
+     :description
+     "The unprotected stair baseline with triangle construction ink enabled.")
+  (pathname)
+  (capture-luft-material-bevel-stair-boundary
+   pathname :open 1.0 "LUFT material bevel - open stair construction"))
+
+(luv:define-capture luft-material-bevel-stair-border
+    (:figure WSEK3C :kind :image :extension "png" :layout :landscape
+     :description
+     "The production stair with an authored one-cell stone border level with every tread.")
+  (pathname)
+  (capture-luft-material-bevel-stair-boundary
+   pathname :border 0.0 "LUFT material bevel - stair border"))
+
+(luv:define-capture luft-material-bevel-stair-border-construction
+    (:figure WSEK3C :kind :image :extension "png" :layout :landscape
+     :description
+     "The one-cell stair border with triangle construction ink enabled.")
+  (pathname)
+  (capture-luft-material-bevel-stair-boundary
+   pathname :border 1.0 "LUFT material bevel - stair border construction"))
+
+(luv:define-capture luft-material-bevel-stair-low-wall
+    (:figure WSEK3C :kind :image :extension "png" :layout :landscape
+     :description
+     "The production stair protected by a one-course ascending masonry wall.")
+  (pathname)
+  (capture-luft-material-bevel-stair-boundary
+   pathname :low-wall 0.0 "LUFT material bevel - stair low wall"))
+
+(luv:define-capture luft-material-bevel-stair-low-wall-construction
+    (:figure WSEK3C :kind :image :extension "png" :layout :landscape
+     :description
+     "The authored low-wall stair with triangle construction ink enabled.")
+  (pathname)
+  (capture-luft-material-bevel-stair-boundary
+   pathname :low-wall 1.0 "LUFT material bevel - stair low wall construction"))
+
+(defun capture-luft-material-bevel-transition (pathname wireframe title)
+  (capture-luft-material-contact
+   pathname
+   (luv.arithmetic.lisp.vec3:make-vec3 9.5 -0.5 6.5)
+   2.5 title :yaw 2.0899425 :pitch -0.36
+   :solid (luft.render:make-material-bevel-transition-study-scene)
+   :bevel-profile (luft.render:make-material-bevel-profile)
+   :wireframe wireframe))
+
+(luv:define-capture luft-material-bevel-transition-clean
+    (:figure WSEK3C :kind :image :extension "png" :layout :landscape
+     :description
+     "The isolated five-cell 1/2/4 transition after exact T-junction contraction.")
+  (pathname)
+  (capture-luft-material-bevel-transition
+   pathname 0.0 "LUFT isolated material bevel transition"))
+
+(luv:define-capture luft-material-bevel-transition-construction
+    (:figure WSEK3C :kind :image :extension "png" :layout :landscape
+     :description
+     "The isolated five-cell 1/2/4 transition with triangle construction ink.")
+  (pathname)
+  (capture-luft-material-bevel-transition
+   pathname 1.0 "LUFT isolated material bevel transition construction"))
 
 (defun capture-luft-miter-closeup (pathname wireframe title)
   "Capture the #xCD wall termination at the normal chamfer width. #L7N4MO"

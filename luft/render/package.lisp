@@ -26,6 +26,7 @@
            #:*light*
            #:make-manifold-spike-scene
            #:make-mountain-sanctuary-scene
+           #:make-material-bevel-transition-study-scene
            #:make-miter-study-scene
            #:make-traveler-study-scene
            #:make-demo-solid

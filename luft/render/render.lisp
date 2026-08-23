@@ -157,6 +157,36 @@ boundary rather than being allocated per cell."))
                (scene-builder-cell builder x y (1+ z) :architecture-p t)))
   builder)
 
+(defun scene-builder-staircase
+    (builder x0 x1 y0 step-count base-top
+     &key (boundary :open))
+  "Author an ascending masonry stair and its optional support boundary.
+
+BOUNDARY is a deliberately small modeling vocabulary.  :OPEN emits only the
+treads, :BORDER adds a one-cell stone strip level with each tread, and
+:LOW-WALL raises that strip one course above it.  The extra cells are ordinary
+authored solid and material input; the bevel mesher receives no special-case
+stair topology. #WSEK3C"
+  (check-type boundary (member :open :border :low-wall))
+  (let ((boundary-rise
+          (ecase boundary
+            (:open nil)
+            (:border 0)
+            (:low-wall 1))))
+    (loop for step below step-count
+          for y from y0
+          for top = (+ base-top step)
+          do (scene-builder-box builder x0 x1 y y 0 top
+                                :architecture-p t)
+             (when boundary-rise
+               (scene-builder-box builder (1- x0) (1- x0) y y
+                                   0 (+ top boundary-rise)
+                                   :architecture-p t)
+               (scene-builder-box builder (1+ x1) (1+ x1) y y
+                                   0 (+ top boundary-rise)
+                                   :architecture-p t))))
+  builder)
+
 (defun finish-scene-builder (builder &key player-p)
   (let* ((cells (scene-builder-cells builder))
          (chain-builder
@@ -267,7 +297,8 @@ an intentional battlement rather than the accidental edge of a voxel field."
   builder)
 
 (defun make-mountain-sanctuary-scene
-    (&key (beacon-placement *beacon-material-placement*))
+    (&key (beacon-placement *beacon-material-placement*)
+      (stair-boundary :low-wall))
   "A broad Lonely-Mountains world carrying a bridge and walled sanctuary.
 
 This is the old Holm's architectural sentence with its material menagerie
@@ -315,16 +346,19 @@ turrets, an arcaded hall and a remote ridge beacon."
                                 across :axis :y))
     (scene-builder-corbel builder 27 32 8 42 (1- deck) 1)
     (scene-builder-box builder 25 34 6 44 deck deck :architecture-p t)
-    (loop for y from 6 to 44 do
+    (check-type stair-boundary (member :open :border :low-wall))
+    ;; The old bridge rail overlaps the first six stair courses.  Preserve it
+    ;; for the open historical scene, but let authored stair boundaries own
+    ;; that stretch so the comparison changes one modeling decision at a time.
+    (loop for y from 6 to (if (eq stair-boundary :open) 44 38) do
       (scene-builder-cell builder 25 y (1+ deck) :architecture-p t)
       (scene-builder-cell builder 34 y (1+ deck) :architecture-p t)
       (when (zerop (mod y 5))
         (scene-builder-cell builder 25 y (+ deck 2) :architecture-p t)
         (scene-builder-cell builder 34 y (+ deck 2) :architecture-p t)))
     (scene-builder-box builder 26 33 38 47 deck (+ plateau 5) :solid-p nil)
-    (loop for step from 0 to 6 for y from 39 do
-      (scene-builder-box builder 26 33 y y 0 (+ deck step)
-                         :architecture-p t))
+    (scene-builder-staircase builder 26 33 39 7 deck
+                             :boundary stair-boundary)
     ;; Bed the sanctuary into the uneven ridge before raising its walls.  The
     ;; two-course podium is shallow enough to disappear into the higher turf,
     ;; but where the mountain falls away it remains a continuous load path
@@ -411,6 +445,19 @@ else, so a turnaround can be shot around him without moving him."
   (let ((builder (make-scene-builder :horizontal-bits 7)))
     (scene-builder-box builder 56 67 40 58 11 13 :architecture-p t)
     (finish-scene-builder builder :player-p t)))
+
+(defun make-material-bevel-transition-study-scene ()
+  "Build the five-cell medial T-junction regression. #WSEK3C
+
+Two ascending architectural columns meet the corner of a two-cell terrain
+column.  Widths one, two, and four occur in one tiny surface; the width-four
+medial collapse leaves exactly one long-edge/short-edge T-junction for the
+site-local contraction pass to resolve."
+  (let ((builder (make-scene-builder :horizontal-bits 4)))
+    (scene-builder-box builder 6 6 4 4 2 3)
+    (scene-builder-cell builder 5 4 2 :architecture-p t)
+    (scene-builder-box builder 5 5 5 5 2 3 :architecture-p t)
+    (finish-scene-builder builder)))
 
 (defun make-miter-study-scene ()
   "Build the wall-side stepped mountain used to judge mixed miters. #Z5NDTA
@@ -592,30 +639,37 @@ from an exposed or buried foundation without adding per-site material objects."
                                    :bevel-width bevel-width))))
 
 (defun make-material-bevel-mesh (scene profile)
-  "Build one watertight mesh with a conservative material width at each site.
+  "Build one watertight mesh with a semantic material width at each site.
 
 The ordinary width-one mesher supplies one exact topology witness.  PROFILE is
-compiled after that build to a dense stock-to-width lane, and each canonical
-lattice vertex selects the minimum requested width among all incident stocks.
-Terrain therefore reaches width four only where its whole local surface star
-permits it; architecture pulls its incident sites back to width one, with the
-unchanged witness triangles forming the transition between them."
+compiled after that build into a dense stock-to-material-mask lane.  Each
+canonical lattice vertex ORs the masks of all incident stocks: terrain-only,
+architecture-only, and mixed stars select the profile's terrain, architecture,
+and contact widths.  The unchanged witness triangles form the transitions.
+
+The second value is a five-entry vector counting sites at widths zero through
+four; it is diagnostic evidence and does not become retained mesh state."
   (check-type scene scene)
   (check-type profile material-bevel-profile)
   ;; The witness build also interns every authored material assembly reached by
   ;; the chamfer stock function.  Freeze the dense policy only afterward.
-  (let* ((witness (make-render-mesh scene :bevel-width 1))
-         (width-table (compile-material-bevel-profile profile)))
-    (luft:vary-surface-mesh-bevel-widths
-     witness
-     (lambda (x y z stocks)
-       (declare (ignore x y z))
-       (reduce #'min stocks
-               :key (lambda (stock)
-                      (unless (< stock (length width-table))
-                        (error "Mesh stock ~D is outside the compiled material bevel profile of ~D entries."
-                               stock (length width-table)))
-                      (aref width-table stock)))))))
+  (let ((witness (make-render-mesh scene :bevel-width 1)))
+    (multiple-value-bind (stock-masks site-widths)
+        (compile-material-bevel-site-policy profile)
+      (luft:vary-surface-mesh-bevel-widths
+       witness
+       (lambda (x y z stocks)
+         (declare (ignore x y z))
+         (let ((site-mask 0))
+           (dolist (stock stocks)
+             (unless (< stock (length stock-masks))
+               (error "Mesh stock ~D is outside the compiled material bevel policy of ~D entries."
+                      stock (length stock-masks)))
+             (setf site-mask (logior site-mask (aref stock-masks stock))))
+           (unless (<= 1 site-mask 3)
+             (error "Incident mesh stocks ~S compiled to invalid material bevel mask ~D."
+                    stocks site-mask))
+           (aref site-widths site-mask)))))))
 
 (defun make-material-bevel-meshes (scene profile)
   "Return the single site-local material bevel mesh in renderer slot zero."
