@@ -488,9 +488,26 @@ wedged image looks like, and the difference has to be visible from here.")
        (every #'upper-case-p (subseq value 0 3))
        (every #'digit-char-p (subseq value 3))))
 
+(defun ensure-sly-dependency-core ()
+  (let* ((builder
+           (merge-pathnames #P"scripts/build-sly-dependency-core"
+                            *project-root*))
+         (core (merge-pathnames #P"build/sly-dependencies.core"
+                                *project-root*))
+         (process
+           (sb-ext:run-program
+            (namestring builder) nil
+            :search nil :input nil :output t :error t :wait t)))
+    (unless (zerop (sb-ext:process-exit-code process))
+      (error "Could not build the Sly dependency core"))
+    (unless (probe-file core)
+      (error "Sly dependency core builder did not produce ~A" core))
+    core))
+
 (defun start-server (&key quiet (name (default-lisp-name)))
   "Start a new Lisp incarnation. Explicit START intentionally permits peers."
-  (let* ((server-path (merge-pathnames #P"sly-server.lisp" *project-root*))
+  (let* ((dependency-core (ensure-sly-dependency-core))
+         (server-path (merge-pathnames #P"sly-server.lisp" *project-root*))
          (output
            (run-swash-output
             "start"
@@ -498,7 +515,8 @@ wedged image looks like, and the difference has to be visible from here.")
             "--tag" (format nil "LUV_ROOT=~A" (namestring *project-root*))
             "--tag" (format nil "LUV_NAME=~A" name)
             "--" "env" (format nil "LUV_NAME=~A" name)
-            "sbcl" "--noinform" "--disable-debugger"
+            "sbcl" "--core" (namestring dependency-core)
+            "--noinform" "--disable-debugger"
             "--load" (namestring server-path)))
          (separator (or (position-if (lambda (character)
                                        (find character " \t\r\n"))

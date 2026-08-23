@@ -1,0 +1,67 @@
+#!/bin/sh
+
+# Build an SBCL core containing Slynk and the external dependency closure of
+# the systems loaded by sly-server.lisp. Checkout systems deliberately remain
+# outside the image so editing them never requires rebuilding the core.
+
+set -eu
+
+project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+. "$project_root/scripts/require-dev-environment"
+
+cd "$project_root"
+mkdir -p build
+
+core="$project_root/build/sly-dependencies.core"
+stamp="$project_root/build/sly-dependencies.environment"
+lock="$project_root/build/.sly-dependency-core-build.lock"
+
+dependency_environment() {
+  printf '%s\n' \
+    "sbcl=$(realpath "$(command -v sbcl)")" \
+    "slynk=${LUV_SLYNK_DIR:-}" \
+    "source-registry=${CL_SOURCE_REGISTRY:-}" \
+    "libraries=${LD_LIBRARY_PATH:-}"
+}
+
+current_environment=$(dependency_environment)
+stale=
+if [ ! -r "$core" ] || [ ! -r "$stamp" ]; then
+  stale=1
+elif [ "$(cat "$stamp")" != "$current_environment" ]; then
+  stale=1
+else
+  for source in "$project_root"/*.asd \
+                "$project_root/scripts/sly-dependency-core.lisp" \
+                "$project_root/scripts/build-sly-dependency-core"; do
+    if [ "$source" -nt "$core" ]; then
+      stale=1
+      break
+    fi
+  done
+fi
+
+if [ -z "$stale" ]; then
+  exit 0
+fi
+
+if ! mkdir "$lock" 2>/dev/null; then
+  printf 'Another Sly dependency core build is active; retry this command.\n' >&2
+  exit 1
+fi
+cleanup() {
+  rm -f "$core.tmp" "$stamp.tmp"
+  rmdir "$lock" 2>/dev/null || :
+}
+trap cleanup EXIT HUP INT TERM
+
+export LUV_SLY_DEPENDENCY_CORE_OUTPUT="$core.tmp"
+
+printf 'Building cached Sly dependency core...\n'
+rm -f "$core.tmp"
+sbcl --noinform --non-interactive --disable-debugger \
+  --load "$project_root/scripts/sly-dependency-core.lisp" < /dev/null
+mv "$core.tmp" "$core"
+printf '%s\n' "$current_environment" > "$stamp.tmp"
+mv "$stamp.tmp" "$stamp"
+printf 'Cached Sly dependency core at %s\n' "$core"

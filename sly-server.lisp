@@ -40,7 +40,10 @@
    `(:source-registry
      (:tree ,(namestring slynk-root))
      :inherit-configuration))
-  (asdf:load-asd (merge-pathnames #P"slynk.asd" slynk-root))
+  ;; A dependency-core boot already has Slynk registered and loaded. Loading
+  ;; its ASD again invalidates that completed operation and noisily reloads it.
+  (unless (asdf:find-system :slynk nil)
+    (asdf:load-asd (merge-pathnames #P"slynk.asd" slynk-root)))
   ;; Slynk first, so the wiki's IN-READTABLE forms can register their
   ;; readtables while the durable image is assembled.
   (asdf:load-system :slynk)
