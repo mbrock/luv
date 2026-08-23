@@ -92,6 +92,86 @@
       (ok (zerop (hash-table-count
                   (luft.render::streaming-scene-loaded scene)))))))
 
+(deftest a-streaming-window-assigns-medial-meshes-only-to-its-far-ring
+  (let ((builder (luft.render::make-scene-builder :horizontal-bits 9)))
+    (dotimes (chunk-x 5)
+      (dotimes (chunk-y 5)
+        (luft.render::scene-builder-cell
+         builder (* chunk-x luft:+chunk-size+)
+         (* chunk-y luft:+chunk-size+) 0)))
+    (let* ((scene
+             (render:make-streaming-scene
+              (luft.render::finish-scene-builder builder)
+              :residency-radius 2 :lod-radius 1))
+           (system
+             (production:make-single-worker-production-system
+              :name "LUFT LoD policy test")))
+      (unwind-protect
+           (progn
+             (ok (luft.render::retarget-streaming-scene
+                  scene system 2 128 128))
+             (ok (= 25 (hash-table-count
+                        (luft.render::streaming-scene-loaded scene))))
+             (ok (= 9
+                    (loop for width being the hash-values of
+                          (luft.render::streaming-scene-loaded scene)
+                          count (= width 2))))
+             (ok (= 16
+                    (loop for width being the hash-values of
+                          (luft.render::streaming-scene-loaded scene)
+                          count (= width 4))))
+             (let* ((key (luft:chunk-key-at 128 128))
+                    (snapshot
+                      (luft.render::make-streaming-mesh-snapshot scene key 2))
+                    (request
+                      (make-instance 'luft.render::streaming-mesh-request
+                                     :key key :snapshot snapshot)))
+               (ok (luft.render::current-streaming-mesh-request-p
+                    scene request))
+               (setf (gethash key (luft.render::streaming-scene-loaded scene))
+                     4)
+               (ok (not (luft.render::current-streaming-mesh-request-p
+                         scene request)))))
+        (production:stop-production-system system)))))
+
+(deftest a-pure-lod-shift-remeshes-only-chunks-whose-tier-changed
+  (let ((builder (luft.render::make-scene-builder :horizontal-bits 8)))
+    (dotimes (chunk-x 4)
+      (dotimes (chunk-y 4)
+        (luft.render::scene-builder-cell
+         builder (* chunk-x luft:+chunk-size+)
+         (* chunk-y luft:+chunk-size+) 0)))
+    (let* ((scene
+             (render:make-streaming-scene
+              (luft.render::finish-scene-builder builder)
+              :residency-radius 3 :lod-radius 1))
+           (system
+             (production:make-single-worker-production-system
+              :name "LUFT LoD shift test")))
+      (unwind-protect
+           (progn
+             (ok (luft.render::retarget-streaming-scene
+                  scene system 2 64 64))
+             ;; Model completion of the initial cohort; tickets already in the
+             ;; worker are harmless because the second scheduling supersedes
+             ;; every changed key with a newer ticket.
+             (setf (luft.render::streaming-scene-cohort scene) nil
+                   (luft.render::streaming-scene-removals scene) nil)
+             (clrhash (luft.render::streaming-scene-outstanding scene))
+             (ok (luft.render::retarget-streaming-scene
+                  scene system 2 128 64))
+             (ok (= 6 (length
+                       (luft.render::streaming-scene-cohort scene))))
+             (ok (= 9
+                    (loop for width being the hash-values of
+                          (luft.render::streaming-scene-loaded scene)
+                          count (= width 2))))
+             (ok (= 7
+                    (loop for width being the hash-values of
+                          (luft.render::streaming-scene-loaded scene)
+                          count (= width 4)))))
+        (production:stop-production-system system)))))
+
 (deftest highland-landscape-is-deterministic-and-regionally-varied
   (let* ((size 256)
          (heights
@@ -120,6 +200,8 @@
   (let ((scene
           (render:make-highland-sanctuary-scene :horizontal-bits 6)))
     (ok (typep scene 'render:streaming-scene))
+    (ok (= 2 (luft.render::streaming-scene-residency-radius scene)))
+    (ok (= 1 (luft.render::streaming-scene-lod-radius scene)))
     (ok (= 1 (hash-table-count
               (luft.render::streaming-scene-store scene))))))
 

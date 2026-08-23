@@ -324,7 +324,7 @@
 ;;; citadel-scale read that caught the old sine terrain's repetition. #H1GHLD
 
 (defun wait-for-luft-landscape-residency (viewer)
-  (loop for attempt below 120
+  (loop for attempt below 240
         for scene = (luft.render::viewer-source viewer)
         for loaded = (hash-table-count
                       (luft.render::streaming-scene-loaded scene))
@@ -332,7 +332,16 @@
                            (luft.render::streaming-scene-outstanding scene))
         when (and (plusp loaded) (zerop outstanding)
                   (null (luft.render::streaming-scene-cohort scene)))
-          return t
+          do (format t
+                     "capture LUFT highlands: ready with ~D near and ~D medial chunks~%"
+                     (loop for width being the hash-values of
+                           (luft.render::streaming-scene-loaded scene)
+                           count (< width 4))
+                     (loop for width being the hash-values of
+                           (luft.render::streaming-scene-loaded scene)
+                           count (= width 4)))
+             (force-output)
+             (return t)
         when (zerop (mod attempt 20))
           do (format t "capture LUFT highlands: ~D chunks loaded, ~D pending~%"
                      loaded outstanding)
@@ -388,3 +397,13 @@
    pathname
    (luv.arithmetic.lisp.vec3:make-vec3 217.0 136.0 48.0)
    2.18 -0.22 "LUFT highland citadel"))
+
+(luv:define-capture luft-highland-lod-distance
+    (:figure L0DDST :kind :image :extension "png" :layout :landscape
+     :description
+     "The widened highland horizon with full-detail near chunks and medial far chunks.")
+  (pathname)
+  (capture-luft-highland-landscape
+   pathname
+   (luv.arithmetic.lisp.vec3:make-vec3 122.0 91.0 78.0)
+   2.20 -0.20 "LUFT highland LoD distance"))

@@ -1816,6 +1816,10 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                     :accessor streaming-scene-frames-per-load)
    (residency-radius :initarg :residency-radius :initform 1
                      :accessor streaming-scene-residency-radius)
+   (lod-radius :initarg :lod-radius :initform nil
+               :accessor streaming-scene-lod-radius)
+   (far-bevel-width :initarg :far-bevel-width :initform 4
+                    :accessor streaming-scene-far-bevel-width)
    (focus :initform nil :accessor streaming-scene-focus)
    (frame-counter :initform 0 :accessor streaming-scene-frame-counter)))
 
@@ -1833,8 +1837,13 @@ cohort untouched. No frame can interleave with the owner-thread publication."
   ((snapshot :initarg :snapshot :reader streaming-mesh-request-snapshot)))
 
 (defun make-streaming-scene
-    (scene &key (frames-per-load 15) (residency-radius 1))
-  "Wrap SCENE in bounded camera-driven chunk residency."
+    (scene &key (frames-per-load 15) (residency-radius 1) lod-radius
+                 (far-bevel-width 4))
+  "Wrap SCENE in bounded camera-driven chunk residency.
+
+When LOD-RADIUS is non-NIL, chunks beyond that Chebyshev distance use the
+medial FAR-BEVEL-WIDTH mesh tier. The tier retains the same occupied cells and
+chunk boundaries while omitting the zero-area face and edge-band families."
   (let ((streaming (make-instance
                     'streaming-scene
                     :solid (scene-solid scene)
@@ -1842,7 +1851,9 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                     :material-cells (scene-material-cells scene)
                     :material-program (scene-material-program scene)
                     :frames-per-load frames-per-load
-                    :residency-radius residency-radius)))
+                    :residency-radius residency-radius
+                    :lod-radius lod-radius
+                    :far-bevel-width far-bevel-width)))
     (luft:map-chain-chunks
      (lambda (key chain)
        (setf (gethash key (streaming-scene-store streaming)) chain))
@@ -1863,6 +1874,19 @@ cohort untouched. No frame can interleave with the owner-thread publication."
   (and (<= (abs (- (luft:chunk-key-x left) (luft:chunk-key-x right))) 1)
        (<= (abs (- (luft:chunk-key-y left) (luft:chunk-key-y right))) 1)))
 
+(defun streaming-scene-key-distance (key focus)
+  "Chebyshev chunk distance between KEY and FOCUS."
+  (max (abs (- (luft:chunk-key-x key) (car focus)))
+       (abs (- (luft:chunk-key-y key) (cdr focus)))))
+
+(defun streaming-scene-bevel-width-at (scene key focus near-bevel-width)
+  "Select KEY's mesh tier under FOCUS."
+  (let ((lod-radius (streaming-scene-lod-radius scene)))
+    (if (and lod-radius
+             (> (streaming-scene-key-distance key focus) lod-radius))
+        (streaming-scene-far-bevel-width scene)
+        near-bevel-width)))
+
 (defun retarget-streaming-scene
     (scene production-system bevel-width world-x world-y)
   "Batch SCENE's desired window around a camera position and mesh it once."
@@ -1874,31 +1898,44 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                       (luft:chunk-key-y focus-key)))
          (desired (streaming-scene-keys-near scene (car focus) (cdr focus)))
          (loaded (streaming-scene-loaded scene))
+         (desired-widths (make-hash-table :test #'eql))
          (arrivals
            (remove-if (lambda (key) (gethash key loaded)) desired))
          (departures
            (loop for key being the hash-keys of loaded
                  unless (member key desired :test #'eql)
                    collect key))
-         (changes (append arrivals departures)))
-    (setf (streaming-scene-focus scene) focus)
-    (when changes
-      (clrhash loaded)
-      (dolist (key desired) (setf (gethash key loaded) t))
-      (let ((affected
-              (remove-if-not
-               (lambda (key)
-                 (some (lambda (changed)
-                         (chunk-keys-neighbor-p key changed))
-                       changes))
-               desired)))
-        (setf (streaming-scene-cohort scene) affected
-              (streaming-scene-removals scene) departures)
-        (dolist (key affected)
-          (schedule-streaming-scene-mesh
-           scene production-system key bevel-width
-           (if (member key arrivals :test #'eql) 0 1))))
-      t)))
+         (lod-changes nil))
+    (dolist (key desired)
+      (let ((width
+              (streaming-scene-bevel-width-at
+               scene key focus bevel-width)))
+        (setf (gethash key desired-widths) width)
+        (multiple-value-bind (old-width present-p) (gethash key loaded)
+          (when (and present-p (not (eql old-width width)))
+            (push key lod-changes)))))
+    (let ((residency-changes (append arrivals departures))
+          (changes (append arrivals departures lod-changes)))
+      (setf (streaming-scene-focus scene) focus)
+      (when changes
+        (clrhash loaded)
+        (dolist (key desired)
+          (setf (gethash key loaded) (gethash key desired-widths)))
+        (let ((affected
+                (remove-if-not
+                 (lambda (key)
+                   (or (member key lod-changes :test #'eql)
+                       (some (lambda (changed)
+                               (chunk-keys-neighbor-p key changed))
+                             residency-changes)))
+                 desired)))
+          (setf (streaming-scene-cohort scene) affected
+                (streaming-scene-removals scene) departures)
+          (dolist (key affected)
+            (schedule-streaming-scene-mesh
+             scene production-system key (gethash key loaded)
+             (streaming-scene-key-distance key focus))))
+        t))))
 
 (defun streaming-scene-neighborhood-keys (scene key)
   "Return the loaded 3 by 3 chunk neighborhood observed while meshing KEY."
@@ -1913,7 +1950,8 @@ cohort untouched. No frame can interleave with the owner-thread publication."
 
 (defun streaming-scene-mesh-stamp (scene key bevel-width)
   "Name the exact residency and geometry parameters observed by KEY's mesh."
-  (list bevel-width (streaming-scene-neighborhood-keys scene key)))
+  (list bevel-width (gethash key (streaming-scene-loaded scene))
+        (streaming-scene-neighborhood-keys scene key)))
 
 (defun make-streaming-mesh-snapshot (scene key bevel-width)
   "Capture immutable chains for the neighborhood KEY currently observes."
@@ -2216,4 +2254,6 @@ GPU even though the authored landscape remains available as one solid."
                (base (highland-landscape-height x y size :seed seed)))
           (build-highland-lookout builder x y base :citadel-p citadel-p))))
     (let ((scene (finish-scene-builder builder)))
-      (if streaming-p (make-streaming-scene scene) scene))))
+      (if streaming-p
+          (make-streaming-scene scene :residency-radius 2 :lod-radius 1)
+          scene))))
