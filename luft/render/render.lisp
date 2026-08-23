@@ -286,7 +286,9 @@ same view also retains the truncated wall miter preserved by #DJK8HW."
           (* 3 (luft:site-z face)) (luft:site-extent face))
        4))
 
-(defun make-render-mesh (source &key stock-function)
+(defun make-render-mesh
+    (source &key stock-function
+                 (bevel-width luft:+mesh-bevel-width+))
   "Classify SOURCE into the face, edge, and vertex template-instance ABI."
   (let* ((scene (and (typep source 'scene) source))
          (solid (if scene (scene-solid source) source))
@@ -296,7 +298,8 @@ same view also retains the truncated wall miter preserved by #DJK8HW."
                              #'default-face-stock)))
     (check-type solid luft:chain)
     (zone (:luft/rematerialize :value (luft:chain-count solid))
-      (luft:make-surface-mesh solid :stock-function stock-function))))
+      (luft:make-surface-mesh solid :stock-function stock-function
+                                   :bevel-width bevel-width))))
 
 (defparameter *gallery*
   ;; Each entry is one isolated complex, named by the star configuration it
@@ -579,7 +582,7 @@ consequence of its own occupancy star and can be read on its own."
                (let ((offset (* vertex
                                 luft:+mesh-template-vertex-word-count+)))
                  (loop for axis below 3
-                       collect (+ (* 8 (nth axis base))
+                       collect (+ (* luft:+mesh-cell-size+ (nth axis base))
                                   (- (aref templates (+ offset axis))
                                      luft:+mesh-template-coordinate-bias+)))))
              (sample-axis-edge (left right)
@@ -605,7 +608,11 @@ consequence of its own occupancy star and can be read on its own."
                      for vertex-start = (aref ranges (* 2 template-id))
                      for vertex-count = (aref ranges (1+ (* 2 template-id)))
                      do (when fan-p
-                          (remember (mapcar (lambda (x) (* 8 x)) base) 2))
+                          (remember
+                           (mapcar (lambda (x)
+                                     (* luft:+mesh-cell-size+ x))
+                                   base)
+                           2))
                         (loop for vertex from vertex-start
                                 below (+ vertex-start vertex-count)
                               do (remember (template-position base vertex) 1))

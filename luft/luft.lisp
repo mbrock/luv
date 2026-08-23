@@ -41,7 +41,7 @@
    ;; Manifold-sheet mesh.
    #:+mesh-cell-size+ #:+mesh-bevel-width+ #:+mesh-instance-word-count+
    #:+mesh-template-vertex-word-count+ #:+mesh-template-coordinate-bias+
-   #:surface-mesh #:surface-mesh-domain
+   #:surface-mesh #:surface-mesh-domain #:surface-mesh-bevel-width
    #:surface-mesh-template-vertex-words #:surface-mesh-template-ranges
    #:surface-mesh-template-count
    #:surface-mesh-face-instance-words #:surface-mesh-face-instance-count

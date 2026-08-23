@@ -25,6 +25,8 @@
              :character character :modifiers modifiers))
 
 (deftest the-viewer-is-the-mcclim-application
+  (ok (string= "1/8" (luft.render::bevel-width-label 1)))
+  (ok (string= "1/4" (luft.render::bevel-width-label 2)))
   (let ((viewer (clim:make-application-frame 'render:viewer)))
     (ok (typep viewer 'clim:application-frame))
     (ok (null (climi::frame-process viewer)))
@@ -41,6 +43,8 @@
                (luft.render::viewer-key-command viewer (key-press :r))))
     (ok (equal '(luft.render::com-toggle-construction-lines)
                (luft.render::viewer-key-command viewer (key-press :c))))
+    (ok (equal '(luft.render::com-toggle-bevel-width)
+               (luft.render::viewer-key-command viewer (key-press :b))))
     (ok (equal '(luft.render::com-toggle-fullscreen)
                (luft.render::viewer-key-command viewer (key-press :f11))))
     (ok (equal '(luft.render::com-quit)
@@ -88,26 +92,33 @@
                     luft:+mesh-template-vertex-word-count+)))))
 
 (deftest the-connected-miter-study-uses-the-site-stream-abi
-  (let ((mesh (render:make-render-mesh
-               (render:make-miter-study-scene))))
-    (ok (plusp (luft:surface-mesh-face-triangle-count mesh)))
-    (ok (plusp (luft:surface-mesh-band-triangle-count mesh)))
-    (ok (plusp (luft:surface-mesh-fan-triangle-count mesh)))
-    (ok (zerop (luft:surface-mesh-singular-star-count mesh)))
-    (ok (luft::%mesh-closed-p mesh))
-    (let ((lattice (luft.render::mesh-lattice-point-words mesh)))
-      (ok (loop for offset from 3 below (length lattice) by 4
-                thereis (zerop (aref lattice offset))))
-      (ok (loop for offset from 3 below (length lattice) by 4
-                thereis (= 1 (aref lattice offset))))
-      (ok (loop for offset from 3 below (length lattice) by 4
-                thereis (= 2 (aref lattice offset))))
-      (ok (loop for offset from 0 below (length lattice) by 4
-                always (or (/= 2 (aref lattice (+ offset 3)))
-                           (and (zerop (mod (aref lattice offset) 8))
-                                (zerop (mod (aref lattice (+ offset 1)) 8))
-                                (zerop (mod (aref lattice (+ offset 2))
-                                            8)))))))))
+  (dolist (bevel-width '(1 2))
+    (let ((mesh (render:make-render-mesh
+                 (render:make-miter-study-scene)
+                 :bevel-width bevel-width)))
+      (ok (= bevel-width (luft:surface-mesh-bevel-width mesh)))
+      (ok (plusp (luft:surface-mesh-face-triangle-count mesh)))
+      (ok (plusp (luft:surface-mesh-band-triangle-count mesh)))
+      (ok (plusp (luft:surface-mesh-fan-triangle-count mesh)))
+      (ok (zerop (luft:surface-mesh-singular-star-count mesh)))
+      (ok (luft::%mesh-closed-p mesh))
+      (let ((lattice (luft.render::mesh-lattice-point-words mesh)))
+        (ok (loop for offset from 3 below (length lattice) by 4
+                  thereis (zerop (aref lattice offset))))
+        (ok (loop for offset from 3 below (length lattice) by 4
+                  thereis (= 1 (aref lattice offset))))
+        (ok (loop for offset from 3 below (length lattice) by 4
+                  thereis (= 2 (aref lattice offset))))
+        (ok (loop for offset from 0 below (length lattice) by 4
+                  always
+                  (or (/= 2 (aref lattice (+ offset 3)))
+                      (and
+                       (zerop (mod (aref lattice offset)
+                                   luft:+mesh-cell-size+))
+                       (zerop (mod (aref lattice (+ offset 1))
+                                   luft:+mesh-cell-size+))
+                       (zerop (mod (aref lattice (+ offset 2))
+                                   luft:+mesh-cell-size+))))))))))
 
 (deftest mesh-and-presentation-shaders-lower-through-both-conventional-backends
   (let* ((vertex (luft.render.shaders:mesh-vertex-specification))
@@ -151,7 +162,14 @@
                  (luft.render::camera-uniform-data
                   view view #(0.5 0.5 0.001 0.001) 1.0)))))
       (let ((perspective (lane :perspective))
-            (isometric (lane :isometric)))
+            (isometric (lane :isometric))
+            (quarter
+              (let ((render:*projection* :isometric))
+                (let ((view
+                        (luft.render::capture-frame-view
+                         camera 1100 800 #(0.0 0.0))))
+                  (luft.render::camera-uniform-data
+                   view view #(0.5 0.5 0.001 0.001) 1.0 2)))))
         (ok (= 52 (length perspective)))
         (ok (typep perspective '(simple-array single-float (52))))
         (ok (= 1.0 (aref perspective 22)))
@@ -167,6 +185,7 @@
                                luft.render::+orthographic-far+) 1.0))
                  1d-4)))
         (ok (= (aref perspective 20) 0.125))
+        (ok (= (aref quarter 20) 0.25))
         (ok (= (aref perspective 21) render:*wireframe*))
         (ok (equalp #(0.5 0.5 0.001 0.001)
                     (subseq perspective 48 52)))))))

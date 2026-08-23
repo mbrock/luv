@@ -6,18 +6,19 @@
 ;;; square, edge records select flat collars or crease bands, and vertex records
 ;;; select flat corner patches or Arc junction fans.  Records contain only a
 ;;; lattice base coordinate, a stock, and a template index.  Template vertices
-;;; are exact small integer offsets from that base; vertex-owned offsets are all
-;;; in {-1,0,1}^3.
+;;; are exact small integer offsets from that base; vertex-owned offsets stay
+;;; inside the configured bevel-width domain around the lattice site.
 
 (defconstant +mesh-cell-size+ 8)
-(defconstant +mesh-bevel-width+ 1)
+(defconstant +mesh-bevel-width+ 1
+  "Default bevel width in eighth-cell integer ticks.")
 (defconstant +mesh-instance-word-count+ 4)
 (defconstant +mesh-template-vertex-word-count+ 4)
 (defconstant +mesh-template-coordinate-bias+ 16)
 
 (defstruct (surface-mesh
              (:constructor %make-surface-mesh
-                 (domain template-vertex-words template-ranges
+                 (domain bevel-width template-vertex-words template-ranges
                   face-instance-words face-draws
                   band-instance-words band-draws
                   fan-instance-words fan-draws
@@ -25,6 +26,7 @@
                   singular-star-count))
              (:copier nil))
   (domain nil :type world-domain :read-only t)
+  (bevel-width +mesh-bevel-width+ :type (integer 1 3) :read-only t)
   (template-vertex-words #()
                          :type (simple-array (unsigned-byte 32) (*))
                          :read-only t)
@@ -268,8 +270,9 @@ star corpus; signal that boundary explicitly instead of silently welding it."
   (template nil :type mesh-template :read-only t))
 
 (defstruct (surface-mesh-builder
-             (:constructor %make-surface-mesh-builder (domain)))
+             (:constructor %make-surface-mesh-builder (domain bevel-width)))
   (domain nil :type world-domain :read-only t)
+  (bevel-width +mesh-bevel-width+ :type (integer 1 3) :read-only t)
   (templates nil :type list)
   (template-table (make-hash-table :test #'equal) :type hash-table)
   (face-instances nil :type list)
@@ -459,6 +462,7 @@ star corpus; signal that boundary explicitly instead of silently welding it."
              (surface-mesh-builder-fan-instances builder) template-ranges)
           (%make-surface-mesh
            (surface-mesh-builder-domain builder)
+           (surface-mesh-builder-bevel-width builder)
            template-words template-ranges
            face-words face-draws band-words band-draws fan-words fan-draws
            face-triangles band-triangles fan-triangles
@@ -495,7 +499,8 @@ star corpus; signal that boundary explicitly instead of silently welding it."
 
 (defun %emit-cell-face
     (builder domain occupancy cell axis-number side stock-function)
-  (let* ((cell-coordinates (%cell-coordinates cell))
+  (let* ((bevel-width (surface-mesh-builder-bevel-width builder))
+         (cell-coordinates (%cell-coordinates cell))
          (tangents (%other-axis-numbers axis-number))
          (plane (* +mesh-cell-size+
                    (+ (nth axis-number cell-coordinates)
@@ -511,26 +516,28 @@ star corpus; signal that boundary explicitly instead of silently welding it."
                        (if (%face-crease-p
                             domain occupancy cell-coordinates axis-number side
                             u -1)
-                           +mesh-bevel-width+ 0)))
+                           bevel-width 0)))
              (u-high (- (+ u-anchor +mesh-cell-size+)
                         (if (%face-crease-p
                              domain occupancy cell-coordinates axis-number side
                              u 1)
-                            +mesh-bevel-width+ 0)))
+                            bevel-width 0)))
              (v-low (+ v-anchor
                        (if (%face-crease-p
                             domain occupancy cell-coordinates axis-number side
                             v -1)
-                           +mesh-bevel-width+ 0)))
+                           bevel-width 0)))
              (v-high (- (+ v-anchor +mesh-cell-size+)
                         (if (%face-crease-p
                              domain occupancy cell-coordinates axis-number side
                              v 1)
-                            +mesh-bevel-width+ 0)))
-             (u-cuts (vector u-low (1+ u-anchor)
-                             (1- (+ u-anchor +mesh-cell-size+)) u-high))
-             (v-cuts (vector v-low (1+ v-anchor)
-                             (1- (+ v-anchor +mesh-cell-size+)) v-high)))
+                            bevel-width 0)))
+             (u-cuts (vector u-low (+ u-anchor bevel-width)
+                             (- (+ u-anchor +mesh-cell-size+) bevel-width)
+                             u-high))
+             (v-cuts (vector v-low (+ v-anchor bevel-width)
+                             (- (+ v-anchor +mesh-cell-size+) bevel-width)
+                             v-high)))
         (labels ((point (u-value v-value)
                    (let ((result (list 0 0 0)))
                      (setf (nth axis-number result) plane
@@ -615,7 +622,7 @@ star corpus; signal that boundary explicitly instead of silently welding it."
       (t (error "Impossible edge transition count ~D." (length transitions))))))
 
 (defun %edge-transition-data
-    (domain anchor axis-number quadrants states transition-index)
+    (domain anchor axis-number quadrants states transition-index bevel-width)
   (let* ((next-index (mod (1+ transition-index) 4))
          (left (aref quadrants transition-index))
          (right (aref quadrants next-index))
@@ -639,7 +646,7 @@ star corpus; signal that boundary explicitly instead of silently welding it."
               (if (plusp (first empty)) 1 -1)
               (if (plusp (second empty)) 1 -1))
           (nth other-axis offset)
-          (* +mesh-bevel-width+
+          (* bevel-width
              (if (= other-axis (first cross-axes))
                  (first occupied)
                  (second occupied))))
@@ -671,7 +678,8 @@ star corpus; signal that boundary explicitly instead of silently welding it."
 
 (defun %emit-edge-bands
     (builder domain occupancy key stock-function)
-  (let* ((axis-number (first key))
+  (let* ((bevel-width (surface-mesh-builder-bevel-width builder))
+         (axis-number (first key))
          (anchor (rest key))
          (quadrants (%cross-quadrants axis-number))
          (states (make-array 4 :element-type 'bit)))
@@ -684,10 +692,10 @@ star corpus; signal that boundary explicitly instead of silently welding it."
     (dolist (group (%edge-run-transition-groups states))
       (let* ((left (%edge-transition-data
                     domain anchor axis-number quadrants states
-                    (first group)))
+                    (first group) bevel-width))
              (right (%edge-transition-data
                      domain anchor axis-number quadrants states
-                     (second group)))
+                     (second group) bevel-width))
              (left-normal (getf left :normal))
              (right-normal (getf right :normal)))
         ;; Equal normals are one flat face continued across a cell boundary;
@@ -714,11 +722,11 @@ star corpus; signal that boundary explicitly instead of silently welding it."
                         (list (rail left low) (rail right low)
                               (rail right high) (rail left high))
                         normal stock :band)))
-              ;; The edge owns only its invariant six-tick middle.  Both
-              ;; one-tick ends are part of the two lattice-site fans.
+              ;; The edge owns the middle after both vertex-site domains are
+              ;; removed.  Those width-sized ends belong to the two fans.
               (patch anchor
-                     (+ axis-low +mesh-bevel-width+)
-                     (- axis-high +mesh-bevel-width+)))))))))
+                     (+ axis-low bevel-width)
+                     (- axis-high bevel-width)))))))))
 
 (defun %collect-vertex-keys (solid)
   (let ((vertices (make-hash-table :test #'equal)))
@@ -790,15 +798,15 @@ star corpus; signal that boundary explicitly instead of silently welding it."
                   (%point-lexicographically-less-p
                    (second left-key) (second right-key)))))))))
 
-(defun %boundary-edge-site (left right)
-  "Find the unique lattice vertex whose one-tick domain contains LEFT--RIGHT."
+(defun %boundary-edge-site (left right bevel-width)
+  "Find the lattice vertex whose bevel domain contains LEFT--RIGHT."
   (loop for l in left
         for r in right
         for coordinate = (round (/ (+ l r) (* 2 +mesh-cell-size+)))
         unless (and (<= (abs (- l (* +mesh-cell-size+ coordinate)))
-                        +mesh-bevel-width+)
+                        bevel-width)
                     (<= (abs (- r (* +mesh-cell-size+ coordinate)))
-                        +mesh-bevel-width+))
+                        bevel-width))
           do (error "Open edge ~S--~S is not local to a lattice vertex."
                     left right)
         collect coordinate))
@@ -825,10 +833,12 @@ star corpus; signal that boundary explicitly instead of silently welding it."
     (nreverse cycles)))
 
 (defun %boundary-cycles-by-site (builder)
-  (let ((by-site (make-hash-table :test #'equal)))
+  (let ((by-site (make-hash-table :test #'equal))
+        (bevel-width (surface-mesh-builder-bevel-width builder)))
     (dolist (edge (%builder-open-boundary-edges builder))
       (push edge
-            (gethash (%boundary-edge-site (first edge) (second edge))
+            (gethash (%boundary-edge-site
+                      (first edge) (second edge) bevel-width)
                      by-site)))
     (sort
      (loop for site being the hash-keys of by-site
@@ -976,18 +986,23 @@ star corpus; signal that boundary explicitly instead of silently welding it."
       (incf (surface-mesh-builder-singular-star-count builder)))))
 
 (defun make-surface-mesh
-    (solid &key (stock-function (constantly 0)))
+    (solid &key (stock-function (constantly 0))
+                (bevel-width +mesh-bevel-width+))
   "Classify SOLID into exact integer face, edge, and vertex instance streams.
 
-Every exposed cell face emits the same six-by-six central square.  Coplanar
-collars and bevel bands are edge-owned.  The remaining open boundary around
-each lattice vertex is coned to that vertex to produce its fan.  Each stream
-is sorted by template so the renderer can issue direct instanced draws.
+Every exposed cell face emits the same width-dependent central square.
+Coplanar collars and bevel bands are edge-owned.  Site-local fans, caps, and
+strips close the remaining lattice-vertex boundaries.  Each stream is sorted
+by template so the renderer can issue direct instanced draws.
 STOCK-FUNCTION is called with an oriented boundary face."
   (check-type solid chain)
   (check-type stock-function function)
+  (unless (and (integerp bevel-width)
+               (< 0 bevel-width (/ +mesh-cell-size+ 2)))
+    (error "Bevel width ~S must be an integer between one and three ticks."
+           bevel-width))
   (let* ((domain (chain-domain solid))
-         (builder (%make-surface-mesh-builder domain))
+         (builder (%make-surface-mesh-builder domain bevel-width))
          (occupancy (lambda (x y z)
                       (chain-cell-occupancy-bit solid x y z))))
     (loop for cell across (chain-sites solid) do

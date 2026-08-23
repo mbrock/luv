@@ -268,7 +268,9 @@ the selector is the whole of the difference."
          :projection (vector px py pz pw)
          :divisor divisor :jitter jitter)))))
 
-(defun camera-uniform-data (view previous inspection-parameters ink-strength)
+(defun camera-uniform-data
+    (view previous inspection-parameters ink-strength
+     &optional (bevel-width luft:+mesh-bevel-width+))
   (flet ((lane (vector fourth)
            (list (vec3:vec3-x vector) (vec3:vec3-y vector)
                  (vec3:vec3-z vector) fourth)))
@@ -282,7 +284,7 @@ the selector is the whole of the difference."
               (lane (frame-view-up view) 0.0)
               (lane (frame-view-forward view) 0.0)
               (coerce (frame-view-projection view) 'list)
-              (list (/ luft:+mesh-bevel-width+ luft:+mesh-cell-size+)
+              (list (/ bevel-width luft:+mesh-cell-size+)
                     *wireframe*
                     (frame-view-divisor view) ink-strength)
               (lane (frame-view-position previous) 0.0)
@@ -381,7 +383,8 @@ the selector is the whole of the difference."
      renderer encoder surface-view extent
      (camera-uniform-data
       view previous (viewer-inspection-parameters viewer extent)
-     (if (and inspection *inspection-ink-p*) 1.0 0.0))
+      (if (and inspection *inspection-ink-p*) 1.0 0.0)
+      (luft:surface-mesh-bevel-width (renderer-mesh renderer)))
      :jitter jitter :view view
      :construction-p (plusp *wireframe*)
      :overlay-encoder
@@ -420,15 +423,21 @@ the selector is the whole of the difference."
           (draw))
         (draw))))
 
+(defun bevel-width-label (bevel-width)
+  (let ((divisor (gcd bevel-width luft:+mesh-cell-size+)))
+    (format nil "~D/~D"
+            (/ bevel-width divisor)
+            (/ luft:+mesh-cell-size+ divisor))))
+
 (defun display-site-inspector (viewer stream)
   "Draw VIEWER's current sparse ray hit as McCLIM presentations."
   (clim:draw-rectangle* stream 0 0 +site-inspector-width+
                         +site-inspector-height+
                         :ink (clim:make-rgb-color 0.025 0.070 0.090))
   (clim:draw-text* stream
-                   (if (plusp *wireframe*)
-                       "LUFT SITE  ·  C CONSTRUCTION ON"
-                       "LUFT SITE  ·  C CONSTRUCTION OFF")
+                   (format nil "LUFT · BEVEL ~A · C LINES ~A"
+                           (bevel-width-label (viewer-bevel-width viewer))
+                           (if (plusp *wireframe*) "ON" "OFF"))
                    18 25 :align-y :center :text-size 14
                    :text-face :bold
                    :ink (clim:make-rgb-color 0.42 0.91 0.94))
@@ -523,6 +532,8 @@ the selector is the whole of the difference."
    (source :initarg :source :initform (make-miter-study-scene)
            :accessor viewer-source)
    (renderer :initarg :renderer :initform nil :accessor viewer-renderer)
+   (bevel-width :initarg :bevel-width :initform luft:+mesh-bevel-width+
+                :accessor viewer-bevel-width)
    (camera :initarg :camera :initform (make-fly-camera) :reader viewer-camera)
    (surface-views :initform (make-hash-table :test #'eql)
                   :reader viewer-surface-views)
@@ -703,6 +714,17 @@ the selector is the whole of the difference."
       (setf (renderer-history-valid-p (viewer-renderer viewer)) nil))
     (refresh-viewer-inspector viewer)))
 
+(clim:define-command (com-toggle-bevel-width
+                      :command-table luft-atelier
+                      :name "Toggle Bevel Width"
+                      :keystroke (:b))
+    ()
+  (let* ((viewer (viewer-command-viewer))
+         (bevel-width (if (= 1 (viewer-bevel-width viewer)) 2 1)))
+    (refresh-viewer-renderer
+     viewer :solid (viewer-source viewer) :bevel-width bevel-width)
+    (refresh-viewer-inspector viewer)))
+
 (clim:define-command (com-release-pointer :command-table luft-window
                                           :name "Release Pointer"
                                           :keystroke (:escape))
@@ -857,6 +879,7 @@ the selector is the whole of the difference."
 
 (defun start-viewer (&key
                        (solid (make-miter-study-scene))
+                       (bevel-width luft:+mesh-bevel-width+)
                        (camera (make-fly-camera))
                        (title "LUFT miter-study spike")
                        (width 1100) (height 800)
@@ -890,7 +913,8 @@ the selector is the whole of the difference."
                 (renderer*
                   (setf renderer
                         (make-renderer
-                         device* (make-render-mesh solid)
+                         device* (make-render-mesh solid
+                                                  :bevel-width bevel-width)
                          (canvas-format context) (canvas-extent context))))
                 (port (clim:find-port :server-path '(:luv-gpu)))
                 (manager
@@ -904,7 +928,8 @@ the selector is the whole of the difference."
                      'viewer :frame-manager manager :enable t
                              :canvas canvas :context context
                              :device device* :renderer renderer*
-                             :camera camera :source solid))))
+                             :camera camera :source solid
+                             :bevel-width bevel-width))))
            (setf (canvas-event-handler canvas) viewer)
            (refresh-viewer-inspector viewer)
            (let* ((mirror (viewer-inspector-mirror viewer))
@@ -970,15 +995,17 @@ false when the subject is the geometry rather than the atelier UI."
       (destroy buffer))))
 
 (defun refresh-viewer-renderer (&optional (viewer *viewer*)
-                                &key (solid (make-miter-study-scene)))
-  "Rebuild VIEWER's renderer so edited shaders and geometry take effect."
+                                &key (solid (make-miter-study-scene))
+                                     bevel-width)
+  "Rebuild VIEWER at BEVEL-WIDTH so edited geometry and shaders take effect."
   (when viewer
     (luv::call-on-sdl-canvas-thread
      (viewer-canvas viewer)
      (lambda ()
-       (let* ((context (viewer-context viewer))
+       (let* ((bevel-width (or bevel-width (viewer-bevel-width viewer)))
+              (context (viewer-context viewer))
               (old (viewer-renderer viewer))
-              (mesh (make-render-mesh solid))
+              (mesh (make-render-mesh solid :bevel-width bevel-width))
               (was-running-p (viewer-running-p viewer)))
          (setf (viewer-running-p viewer) nil)
          (unwind-protect
@@ -987,6 +1014,7 @@ false when the subject is the geometry rather than the atelier UI."
                                    (canvas-format context)
                                    (canvas-extent context))
                     (viewer-source viewer) solid
+                    (viewer-bevel-width viewer) bevel-width
                     (viewer-inspection viewer) nil)
            (setf (viewer-running-p viewer) was-running-p))
          (when old (destroy-renderer old))))))
