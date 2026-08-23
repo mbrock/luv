@@ -35,6 +35,7 @@
    #:outside-domain #:outside-domain-domain
    #:outside-domain-x #:outside-domain-y #:outside-domain-z
    #:outside-domain-occupancy #:treat-as-air #:treat-as-solid
+   #:missing-chunk #:missing-chunk-domain #:missing-chunk-key #:use-chunk
    ;; Chains.
    #:chain #:chain-domain #:make-chain #:chain-count #:chain-empty-p
    #:chain-sites #:chain-site-count #:chain-site-p #:map-chain #:chain=
@@ -62,7 +63,7 @@
    #:surface-mesh-triangle-count #:surface-mesh-face-triangle-count
    #:surface-mesh-band-triangle-count #:surface-mesh-fan-triangle-count
    #:surface-mesh-singular-star-count
-   #:star-singular-p #:decompose-star-mask #:make-surface-mesh
+   #:star-singular-p #:decompose-star-mask #:make-surface-mesh #:mesh-chunk
    ;; Tests.
    #:run-luft-tests))
 
@@ -597,6 +598,19 @@ store answers from the neighboring chunk or defers, a test refuses."))
     (use-value (bit)
       :report "Supply the occupancy bit."
       bit)))
+
+(define-condition missing-chunk (error)
+  ((domain :initarg :domain :reader missing-chunk-domain)
+   (key :initarg :key :reader missing-chunk-key))
+  (:report (lambda (condition stream)
+             (let ((key (missing-chunk-key condition)))
+               (format stream "Chunk (~D ~D) [key ~D] is not resident."
+                       (chunk-key-x key) (chunk-key-y key) key))))
+  (:documentation
+   "A probe crossed into a chunk that is not resident in the probing field.
+The signaling probe offers USE-CHUNK (supply the chunk's chain), plus the
+TREAT-AS-AIR and TREAT-AS-SOLID boundary restarts for the whole chunk, so a
+streaming store answers with data, defers, or fills with a constant."))
 
 (defun chain-cell-occupancy-bit (chain x y z)
   "Treat positive cubic-site occurrences in CHAIN as Boolean occupancy.

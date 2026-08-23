@@ -333,6 +333,85 @@
                  (make-surface-mesh (%solid-for-star #x01)
                                     :bevel-width width)))))))
 
+(defun %chunk-test-world ()
+  "A four-chunk world with solids straddling every seam and the world box."
+  (let* ((domain (make-world-domain :horizontal-bits 7))
+         (builder (make-chain-builder domain :initial-capacity 16384)))
+    (flet ((patch (x0 x1 y0 y1)
+             (loop for x from x0 below x1 do
+               (loop for y from y0 below y1 do
+                 (let ((height
+                         (max 1 (+ 4 (floor (* 2.5 (+ (sin (* x 0.37))
+                                                      (cos (* y 0.29)))))))))
+                   (dotimes (z height)
+                     (chain-builder-add-site
+                      builder
+                      (make-site domain x y z +cell-extent+ 1))))))))
+      ;; A cross over both interior seams, and both world-box corners.
+      (patch 48 80 48 80)
+      (patch 0 8 0 8)
+      (patch 120 128 120 128))
+    (finish-chain-builder builder)))
+
+(defun %canonical-triangle-counts (meshes)
+  (let ((table (make-hash-table :test #'equal)))
+    (dolist (mesh meshes table)
+      (%map-mesh-triangles
+       (lambda (kind a b c)
+         (declare (ignore kind))
+         (let* ((rotations
+                  (list (append a b c) (append b c a) (append c a b)))
+                (best (first rotations)))
+           (dolist (rotation (rest rotations))
+             (when (loop for l in rotation for r in best
+                         when (/= l r) return (< l r)
+                         finally (return nil))
+               (setf best rotation)))
+           (incf (gethash best table 0))))
+       mesh))))
+
+(defun %triangle-counts= (left right)
+  (and (= (hash-table-count left) (hash-table-count right))
+       (loop for key being the hash-keys of left using (hash-value count)
+             always (= count (gethash key right 0)))))
+
+(defun %test-chunked-meshing ()
+  (%with-test-section ("chunked meshing equals whole-world meshing")
+    (let* ((world (%chunk-test-world))
+           (store (make-hash-table :test #'eql))
+           (whole (make-surface-mesh world))
+           (chunk-meshes '()))
+      (map-chain-chunks
+       (lambda (key chain) (setf (gethash key store) chain))
+       world)
+      (%check (= 4 (hash-table-count store)))
+      (loop for key being the hash-keys of store using (hash-value chain)
+            do (push
+                (handler-bind
+                    ((missing-chunk
+                       (lambda (condition)
+                         (let ((neighbor (gethash (missing-chunk-key condition)
+                                                  store)))
+                           (if neighbor
+                               (invoke-restart 'use-chunk neighbor)
+                               (invoke-restart 'treat-as-air)))))
+                     (outside-domain
+                       (lambda (condition)
+                         (declare (ignore condition))
+                         (invoke-restart 'treat-as-air))))
+                  (mesh-chunk chain key))
+                chunk-meshes))
+      (%check (= (surface-mesh-triangle-count whole)
+                 (reduce #'+ chunk-meshes
+                         :key #'surface-mesh-triangle-count)))
+      (%check (= (surface-mesh-singular-star-count whole)
+                 (reduce #'+ chunk-meshes
+                         :key #'surface-mesh-singular-star-count)))
+      (%check (%triangle-counts=
+               (%canonical-triangle-counts (list whole))
+               (%canonical-triangle-counts chunk-meshes))
+              "chunked triangles differ from the whole-world mesh"))))
+
 (defun run-luft-tests (&key (stream *standard-output*))
   "Run the retained topology and replacement manifold-sheet mesh claims."
   (let ((*luft-test-count* 0)
@@ -340,6 +419,7 @@
     (%test-sites-and-chains)
     (%test-sheet-decomposition)
     (%test-surface-mesh)
+    (%test-chunked-meshing)
     (when stream
       (format stream "~&LUFT: ~D checks passed.~%" *luft-test-count*))
     (values t *luft-test-count*)))
