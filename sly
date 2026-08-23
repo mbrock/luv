@@ -48,5 +48,27 @@ fi
 
 . "$project_root/scripts/require-dev-environment"
 
+sly_client="$project_root/build/sly-client"
+sly_client_stamp="$project_root/build/sly-client.environment"
+resolved_sbcl=$(realpath "$(command -v sbcl)")
+sly_client_stale=
+
+if [ ! -x "$sly_client" ] || [ ! -r "$sly_client_stamp" ]; then
+  sly_client_stale=1
+elif [ "$project_root/sly-client.asd" -nt "$sly_client" ] \
+  || [ "$project_root/scripts/sly-client.lisp" -nt "$sly_client" ] \
+  || [ "$project_root/parinfer/implementation.lisp" -nt "$sly_client" ]; then
+  sly_client_stale=1
+elif ! { IFS= read -r built_root && IFS= read -r built_sbcl; } \
+  < "$sly_client_stamp" \
+  || [ "$built_root" != "$project_root" ] \
+  || [ "$built_sbcl" != "$resolved_sbcl" ]; then
+  sly_client_stale=1
+fi
+
+if [ -n "$sly_client_stale" ]; then
+  "$project_root/scripts/build-sly-client"
+fi
+
 cd "$project_root"
-exec sbcl --script "$project_root/scripts/sly-client.lisp" "$@"
+exec "$sly_client" "$@"

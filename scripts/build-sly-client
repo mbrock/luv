@@ -1,0 +1,47 @@
+#!/bin/sh
+
+# Build the short-lived ./sly command client as an executable SBCL core. The
+# launcher rebuilds it only when its Lisp sources or SBCL environment change.
+
+set -eu
+
+project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+. "$project_root/scripts/require-dev-environment"
+
+cd "$project_root"
+mkdir -p build
+
+lock=build/.sly-client-build.lock
+if ! mkdir "$lock" 2>/dev/null; then
+  if [ -r "$lock/pid" ] && IFS= read -r builder_pid < "$lock/pid" \
+    && kill -0 "$builder_pid" 2>/dev/null; then
+    printf 'Another ./sly client build is active (pid %s); retry this command.\n' \
+      "$builder_pid" >&2
+    exit 1
+  fi
+  rm -f "$lock/pid"
+  rmdir "$lock" 2>/dev/null || {
+    printf 'Cannot reclaim stale ./sly client build lock: %s/%s\n' \
+      "$project_root" "$lock" >&2
+    exit 1
+  }
+  mkdir "$lock"
+fi
+printf '%s\n' "$$" > "$lock/pid"
+cleanup() {
+  rm -f "$lock/pid"
+  rmdir "$lock" 2>/dev/null || :
+}
+trap cleanup EXIT HUP INT TERM
+
+printf 'Building cached ./sly client core...\n'
+sbcl --noinform --non-interactive --disable-debugger \
+  --eval '(require :asdf)' \
+  --eval '(asdf:load-asd (truename "sly-client.asd"))' \
+  --eval '(asdf:operate (quote asdf:program-op) "sly-client")'
+
+resolved_sbcl=$(realpath "$(command -v sbcl)")
+stamp=build/sly-client.environment
+printf '%s\n%s\n' "$project_root" "$resolved_sbcl" > "$stamp.tmp"
+mv "$stamp.tmp" "$stamp"
+printf 'Cached ./sly client at %s/build/sly-client\n' "$project_root"

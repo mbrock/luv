@@ -1,42 +1,40 @@
-;;;; Lisp entry point run by the Nix-backed ./sly launcher.
-
-(defparameter cl-user::*sly-client-directory*
-  (make-pathname :name nil :type nil :defaults *load-truename*))
-
-(load (merge-pathnames
-       #P"../parinfer/implementation.lisp"
-       cl-user::*sly-client-directory*))
+;;;; The short-lived command client for a managed Luv Lisp image. ASDF's
+;;;; PROGRAM-OP freezes this file and its dependencies into build/sly-client.
 
 (defpackage #:sly-client
-  (:use #:cl))
+  (:use #:cl)
+  (:export #:entry-point))
 
 (in-package #:sly-client)
 
-(require :sb-bsd-sockets)
-(require :sb-posix)
-(require :asdf)
-(asdf:load-system :cl-json)
-
-(defparameter *host* (or (sb-ext:posix-getenv "LUV_SLYNK_HOST") "127.0.0.1"))
-(defparameter *port*
-  (parse-integer (or (sb-ext:posix-getenv "LUV_SLYNK_PORT") "0")))
-(defparameter *expected-listener-pid*
-  (let ((value (sb-ext:posix-getenv "LUV_SLYNK_PID")))
-    (and value (parse-integer value :junk-allowed t))))
+(defparameter *host* "127.0.0.1")
+(defparameter *port* 0)
+(defparameter *expected-listener-pid* nil)
 (defparameter *project-root*
-  (truename
-   (merge-pathnames
-    #P"../"
-    cl-user::*sly-client-directory*)))
-(defparameter *swash*
-  (or (sb-ext:posix-getenv "LUV_SWASH")
-      (error "LUV_SWASH is not set; refresh the luv development profile")))
-(defparameter *lisp-selector* (sb-ext:posix-getenv "LUV_LISP_SELECTOR"))
+  (asdf:system-source-directory "sly-client"))
+(defparameter *swash* nil)
+(defparameter *lisp-selector* nil)
 (defparameter *managed-lisp* nil)
 (defparameter *current-command* nil)
 (defparameter *server-start-timeout* 120)
 (defparameter *slynk-handshake-timeout* 3)
 (defparameter *default-output-limit* (* 256 1024))
+
+(defun configure-from-environment ()
+  "Read invocation-specific state after the cached core starts."
+  (let ((listener-pid (sb-ext:posix-getenv "LUV_SLYNK_PID")))
+    (setf *host* (or (sb-ext:posix-getenv "LUV_SLYNK_HOST") "127.0.0.1")
+          *port* (parse-integer
+                  (or (sb-ext:posix-getenv "LUV_SLYNK_PORT") "0"))
+          *expected-listener-pid*
+          (and listener-pid
+               (parse-integer listener-pid :junk-allowed t))
+          *swash*
+          (or (sb-ext:posix-getenv "LUV_SWASH")
+              (error "LUV_SWASH is not set; refresh the luv development profile"))
+          *lisp-selector* (sb-ext:posix-getenv "LUV_LISP_SELECTOR")
+          *managed-lisp* nil
+          *current-command* nil)))
 
 (define-condition slynk-handshake-timeout (error) ()
   (:report
@@ -2105,37 +2103,40 @@ shows them.~%" failure-count))))))
       (t
        (error "Unknown command: ~A" command)))))
 
-(let* ((original-output *standard-output*)
-       (original-error *error-output*)
-       (limit (handler-case
-                  (configured-output-limit)
-                (error (condition)
-                  (format original-error "sly: ~A~%" condition)
-                  (sb-ext:exit :code 1))))
-       (budget (and (plusp limit)
-                    (make-output-budget :limit limit)))
-       (exit-code
-         (let ((*standard-output*
-                 (if budget
-                     (make-instance 'limited-output-stream
-                                    :target original-output
-                                    :budget budget)
-                     original-output))
-               (*error-output*
-                 (if budget
-                     (make-instance 'limited-output-stream
-                                    :target original-error
-                                    :budget budget)
-                     original-error)))
-           (handler-case
-               (main (cdr sb-ext:*posix-argv*))
-             (error (condition)
-               (format *error-output* "sly: ~A~%" condition)
-               1)))))
-  (when (and budget (output-budget-truncated-p budget))
-    (force-output original-output)
-    (format original-error
-            "~&[sly output truncated after ~D bytes; set LUV_SLY_MAX_OUTPUT=0 for unlimited]~%"
-            limit)
-    (force-output original-error))
-  (sb-ext:exit :code exit-code))
+(defun entry-point ()
+  (let* ((original-output *standard-output*)
+         (original-error *error-output*)
+         (limit (handler-case
+                    (configured-output-limit)
+                  (error (condition)
+                    (format original-error "sly: ~A~%" condition)
+                    (sb-ext:exit :code 1))))
+         (budget (and (plusp limit)
+                      (make-output-budget :limit limit)))
+         (exit-code
+           (let ((*standard-output*
+                   (if budget
+                       (make-instance 'limited-output-stream
+                                      :target original-output
+                                      :budget budget)
+                       original-output))
+                 (*error-output*
+                   (if budget
+                       (make-instance 'limited-output-stream
+                                      :target original-error
+                                      :budget budget)
+                       original-error)))
+             (handler-case
+                 (progn
+                   (configure-from-environment)
+                   (main (cdr sb-ext:*posix-argv*)))
+               (error (condition)
+                 (format *error-output* "sly: ~A~%" condition)
+                 1)))))
+    (when (and budget (output-budget-truncated-p budget))
+      (force-output original-output)
+      (format original-error
+              "~&[sly output truncated after ~D bytes; set LUV_SLY_MAX_OUTPUT=0 for unlimited]~%"
+              limit)
+      (force-output original-error))
+    (sb-ext:exit :code exit-code)))

@@ -44,6 +44,11 @@ read-only `load-op` plan: an empty plan is current, while a nonempty plan lists
 the compile and load actions ASDF would perform. These commands inspect the
 selected live image; they do not load or rebuild anything.
 
+The command client is itself the `sly-client` ASDF program system. `./sly`
+executes a checkout-local cached SBCL core from `build/sly-client`, rebuilding
+it automatically when the client, Parinfer implementation, system definition,
+or profile SBCL changes. `make sly-client` performs the same build explicitly.
+
 Install the native and Lisp dependencies once as a durable Nix profile:
 
 ```sh

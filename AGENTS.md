@@ -80,6 +80,11 @@ The surfaces have distinct jobs:
 - `build/luvcraft`: shipped/CI executable. `./sly --luvcraft ...` is only for
   deliberately attaching to that standalone process.
 
+`./sly` launches the cached `sly-client` ASDF program in
+`build/sly-client`, not a fresh `sbcl --script`. The launcher automatically
+rebuilds that core when its Lisp sources, ASDF definition, or profile SBCL
+changes; use `make sly-client` to request the build directly.
+
 # The development profile is the environment
 
 Ordinary development uses one durable Nix profile rather than evaluating a
