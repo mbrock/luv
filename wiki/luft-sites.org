@@ -278,15 +278,23 @@ popping, because both meshes are the same surface.  This is a compression
 pass over the streams of #8UGGY0, not an ownership decision in the
 representation.
 
-The first streaming realization deliberately proves a narrower step.  Its
-far tier greedily merges equal-stock faces of the exact /cubical/ boundary,
-so large shelves and cliffs become maximal rectangles and chunk seams remain
-identical, but bevel ornament disappears at the tier boundary.  In the
-16-chunk highland view, the seven far chunks became 9,170 rectangles (18,340
-triangles total), and one representative far chunk materialized in 17 ms.
-This is useful distance geometry, not yet the stronger same-beveled-surface
-compression claimed above; dissolving coplanar face, band, and fan edges is
-still the path to a literally pop-free tier.
+The first streaming realization proved a narrower cubical tier: equal-stock
+faces became maximal rectangles, but bevel ornament disappeared at the tier
+boundary.  The next pass now operates on the /medial surface itself/.  It
+groups triangles by exact primitive plane, stock, ambient value, and stream;
+cancels shared edges; traces simple oriented boundaries; and ear-clips those
+boundaries while retaining every boundary vertex.  A non-simple group falls
+back to its original triangles.  All 256 vertex stars preserve closure,
+nondegeneracy, and an exact per-plane doubled-area signature against the
+unmerged rebuild oracle.
+
+The first 512 by 512 highland sample is promising but names the CPU tradeoff
+honestly.  One 84,794-cell outer chunk fell from 65,536 medial triangles to
+18,466, a 71.8% reduction with identical plane signatures and the same 1,024
+chunk-boundary edges.  Meshing rose from 316 ms and 80 MB consed to 484 ms and
+254 MB because this exploratory pass decodes and regroups the finished stream.
+That is already substantially cheaper to draw and upload; moving compression
+into site-stream construction is the next step if production latency matters.
 
 * NEXT Implement the site-stream LUFT renderer backbone
 :PROPERTIES:

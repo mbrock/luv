@@ -5,7 +5,7 @@
 (defparameter *inspection-ink-p* t
   "Whether a ray hit gets a blueprint reticle and local triangle-edge lens.")
 
-(defparameter *inspection-reach* 200.0
+(defparameter *inspection-reach* 600.0
   "How far, in cells, the atelier's pointer ray may inspect.")
 
 (defparameter *projection* :isometric
@@ -316,7 +316,7 @@ the selector is the whole of the difference."
     (let ((near (if (eq *projection* :isometric)
                     +orthographic-near+ 0.1))
           (far (if (eq *projection* :isometric)
-                   +orthographic-far+ 200.0)))
+                   +orthographic-far+ 600.0)))
       (multiple-value-bind (px py pz pw divisor)
           (projection-lane width height (camera-field-of-view camera)
                            near far)

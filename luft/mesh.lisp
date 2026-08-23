@@ -1647,6 +1647,272 @@ witness scan."
            (surface-mesh-builder-singular-star-count builder)))))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Exact coplanar compression
+
+(defun %point-order< (left right)
+  (loop for l in left
+        for r in right
+        when (/= l r) return (< l r)
+        finally (return nil)))
+
+(defun %ordered-point-edge (left right)
+  (if (%point-order< left right)
+      (list left right)
+      (list right left)))
+
+(defun %point-cross (a b c)
+  (let ((ux (- (first b) (first a)))
+        (uy (- (second b) (second a)))
+        (uz (- (third b) (third a)))
+        (vx (- (first c) (first a)))
+        (vy (- (second c) (second a)))
+        (vz (- (third c) (third a))))
+    (list (- (* uy vz) (* uz vy))
+          (- (* uz vx) (* ux vz))
+          (- (* ux vy) (* uy vx)))))
+
+(defun %point-dot (left right)
+  (+ (* (first left) (first right))
+     (* (second left) (second right))
+     (* (third left) (third right))))
+
+(defun %primitive-plane-normal (a b c)
+  (let* ((cross (%point-cross a b c))
+         (divisor (reduce #'gcd cross :key #'abs)))
+    (unless (plusp divisor)
+      (error "Degenerate triangle in coplanar compression: ~S ~S ~S."
+             a b c))
+    (mapcar (lambda (coordinate) (/ coordinate divisor)) cross)))
+
+(defun %map-surface-mesh-triangle-records (function mesh)
+  "Call FUNCTION with kind, stock, ambient, mask, normal, and three points."
+  (let ((templates (surface-mesh-template-vertex-words mesh))
+        (ranges (surface-mesh-template-ranges mesh)))
+    (labels ((point (base vertex)
+               (loop for axis below 3
+                     collect (+ (* +mesh-cell-size+ (nth axis base))
+                                (- (aref templates
+                                         (+ (* vertex
+                                               +mesh-template-vertex-word-count+)
+                                            axis))
+                                   +mesh-template-coordinate-bias+))))
+             (visit (words kind)
+               (loop for offset from 0 below (length words) by 4
+                     for base = (list (aref words offset)
+                                      (aref words (+ offset 1))
+                                      (aref words (+ offset 2)))
+                     for meta = (aref words (+ offset 3))
+                     for template-id = (ldb (byte 16 0) meta)
+                     for stock = (ldb (byte +mesh-instance-stock-bit-count+
+                                            +mesh-instance-stock-shift+)
+                                      meta)
+                     for ambient = (ldb (byte 2
+                                              +mesh-instance-ambient-occlusion-shift+)
+                                        meta)
+                     for start = (aref ranges (* 2 template-id))
+                     for count = (aref ranges (1+ (* 2 template-id)))
+                     do (loop for vertex from start below (+ start count) by 3
+                              for attributes =
+                                (aref templates
+                                      (+ (* vertex
+                                            +mesh-template-vertex-word-count+)
+                                         3))
+                              for a = (point base vertex)
+                              for b = (point base (1+ vertex))
+                              for c = (point base (+ vertex 2))
+                              for normal = (%primitive-plane-normal a b c)
+                              do (funcall function kind stock ambient
+                                          (ldb (byte 3 10) attributes)
+                                          normal a b c)))))
+      (visit (surface-mesh-face-instance-words mesh) :face)
+      (visit (surface-mesh-band-instance-words mesh) :band)
+      (visit (surface-mesh-fan-instance-words mesh) :junction))))
+
+(defun %coplanar-group-loops (triangles)
+  "Return oriented boundary loops, or NIL when the union is not simple."
+  (let ((edges (make-hash-table :test #'equal)))
+    (dolist (triangle triangles)
+      (destructuring-bind (mask a b c) triangle
+        (declare (ignore mask))
+        (dolist (edge (list (list a b) (list b c) (list c a)))
+          (let ((key (%ordered-point-edge (first edge) (second edge))))
+            (if (gethash key edges)
+                (remhash key edges)
+                (setf (gethash key edges) edge))))))
+    (let ((next (make-hash-table :test #'equal))
+          (incoming (make-hash-table :test #'equal)))
+      (loop for edge being the hash-values of edges do
+        (destructuring-bind (start end) edge
+          (when (gethash start next)
+            (return-from %coplanar-group-loops nil))
+          (setf (gethash start next) end)
+          (incf (gethash end incoming 0))))
+      (loop for start being the hash-keys of next
+            unless (= 1 (gethash start incoming 0))
+              do (return-from %coplanar-group-loops nil))
+      (let ((loops nil))
+        (loop while (plusp (hash-table-count next)) do
+          (let* ((start (sort (loop for point being the hash-keys of next
+                                    collect point)
+                              #'%point-order<))
+                 (start (first start))
+                 (point start)
+                 (loop nil))
+            (loop do (push point loop)
+                     (multiple-value-bind (following present-p)
+                         (gethash point next)
+                       (unless present-p
+                         (return-from %coplanar-group-loops nil))
+                       (remhash point next)
+                       (setf point following))
+                  until (equal point start))
+            (push (nreverse loop) loops)))
+        (nreverse loops)))))
+
+(defun %point-in-oriented-triangle-p (point a b c normal)
+  (and (not (member point (list a b c) :test #'equal))
+       (>= (%point-dot (%point-cross a b point) normal) 0)
+       (>= (%point-dot (%point-cross b c point) normal) 0)
+       (>= (%point-dot (%point-cross c a point) normal) 0)))
+
+(defun %triangulate-coplanar-loop (loop normal)
+  "Ear-clip one positively oriented simple integer polygon."
+  ;; Retain collinear boundary vertices: another coplanar attribute group or
+  ;; differently oriented plane may meet there. Removing such a vertex would
+  ;; preserve the continuous surface but introduce a topological T-junction.
+  (let ((points loop)
+        (triangles nil))
+    (when (< (length points) 3)
+      (return-from %triangulate-coplanar-loop nil))
+    (loop while (> (length points) 3) do
+      (let ((ear-index nil)
+            (count (length points)))
+        (dotimes (index count)
+          (let ((a (nth (mod (1- index) count) points))
+                (b (nth index points))
+                (c (nth (mod (1+ index) count) points)))
+            (when (and (plusp (%point-dot (%point-cross a b c) normal))
+                       (notany (lambda (point)
+                                 (%point-in-oriented-triangle-p
+                                  point a b c normal))
+                               points))
+              (setf ear-index index)
+              (return))))
+        (unless ear-index
+          (return-from %triangulate-coplanar-loop nil))
+        (let* ((count (length points))
+               (a (nth (mod (1- ear-index) count) points))
+               (b (nth ear-index points))
+               (c (nth (mod (1+ ear-index) count) points)))
+          (push (list a b c) triangles)
+          (setf points
+                (loop for point in points
+                      for index from 0
+                      unless (= index ear-index) collect point)))))
+    (push points triangles)
+    (nreverse triangles)))
+
+(defun %emit-global-triangle (builder kind stock ambient mask normal triangle)
+  (destructuring-bind (a b c) triangle
+    (let* ((minimums
+             (loop for axis below 3
+                   collect (min (nth axis a) (nth axis b) (nth axis c))))
+           (base (mapcar (lambda (coordinate)
+                           (floor coordinate +mesh-cell-size+))
+                         minimums))
+           (origin (mapcar (lambda (coordinate)
+                             (* coordinate +mesh-cell-size+))
+                           base))
+           (scratch (surface-mesh-builder-vertex-scratch builder)))
+      (%scratch-triangle
+       scratch 0 (ecase kind (:face 0) (:band 1) (:junction 2)) mask
+       (- (first a) (first origin))
+       (- (second a) (second origin))
+       (- (third a) (third origin))
+       (- (first b) (first origin))
+       (- (second b) (second origin))
+       (- (third b) (third origin))
+       (- (first c) (first origin))
+       (- (second c) (second origin))
+       (- (third c) (third origin))
+       (first normal) (second normal) (third normal))
+      (%emit-instance builder kind (first base) (second base) (third base)
+                      stock ambient 3))))
+
+(defun %coplanar-group-key< (left right)
+  (flet ((numeric-key (key)
+           (destructuring-bind (kind stock ambient normal plane) key
+             (list (ecase kind (:face 0) (:band 1) (:junction 2))
+                   stock ambient
+                   (first normal) (second normal) (third normal) plane))))
+    (loop for l in (numeric-key left)
+          for r in (numeric-key right)
+          when (/= l r) return (< l r)
+          finally (return nil))))
+
+(defun %coplanar-merged-surface-mesh (mesh)
+  "Dissolve only interior edges between exactly coplanar equal-attribute faces.
+
+The output has the same points, oriented planes, stocks, ambient values,
+silhouette, and depth as MESH. Groups with a non-simple boundary retain their
+original triangles, making the unmerged medial mesh a local rebuild oracle."
+  (let ((groups (make-hash-table :test #'equal))
+        (builder (%make-surface-mesh-builder
+                  (surface-mesh-domain mesh) (surface-mesh-bevel-width mesh))))
+    (%map-surface-mesh-triangle-records
+     (lambda (kind stock ambient mask normal a b c)
+       (let ((key (list kind stock ambient normal (%point-dot normal a))))
+         (push (list mask a b c) (gethash key groups))))
+     mesh)
+    (dolist (key (sort (loop for key being the hash-keys of groups collect key)
+                       #'%coplanar-group-key<))
+      (let ((triangles (gethash key groups)))
+        (destructuring-bind (kind stock ambient normal plane) key
+               (declare (ignore plane))
+               (let ((loops (%coplanar-group-loops triangles))
+                     (merged nil)
+                     (boundary (make-hash-table :test #'equal)))
+                 (when loops
+                   (dolist (loop loops)
+                     (loop for point on loop
+                           for a = (first point)
+                           for b = (or (second point) (first loop))
+                           do (setf (gethash (%ordered-point-edge a b) boundary)
+                                    t)))
+                   (setf merged
+                         (loop for loop in loops
+                               when (plusp
+                                     (loop for point on loop
+                                           for a = (first point)
+                                           for b = (or (second point)
+                                                       (first loop))
+                                           sum (%point-dot
+                                                (%point-cross '(0 0 0) a b)
+                                                normal)))
+                                 append (%triangulate-coplanar-loop loop normal)
+                               else do (setf loops nil))))
+                 (if (and loops merged)
+                     (dolist (triangle merged)
+                       (destructuring-bind (a b c) triangle
+                         (let ((mask
+                                 (logior
+                                  (if (gethash (%ordered-point-edge b c)
+                                               boundary) #b001 0)
+                                  (if (gethash (%ordered-point-edge c a)
+                                               boundary) #b010 0)
+                                  (if (gethash (%ordered-point-edge a b)
+                                               boundary) #b100 0))))
+                           (%emit-global-triangle builder kind stock ambient
+                                                  mask normal triangle))))
+                     (dolist (triangle triangles)
+                       (%emit-global-triangle builder kind stock ambient
+                                              (first triangle) normal
+                                              (rest triangle))))))))
+    (setf (surface-mesh-builder-singular-star-count builder)
+          (surface-mesh-singular-star-count mesh))
+    (%finish-surface-mesh builder)))
+
+;;; ---------------------------------------------------------------------------
 ;;; Entry point
 
 (defun %call-with-boundary-policy (policy thunk)
@@ -1874,7 +2140,8 @@ depth relative to the cubical boundary; it only dissolves interior edges."
      &key (stock-function (constantly 0))
           (chamfer-stock-function (lambda (stocks) (first stocks)))
           (bevel-width +mesh-bevel-width+)
-          planar-merge-p)
+          planar-merge-p
+          coplanar-merge-p)
   "Classify one chunk's solid CHUNK into the instance-stream ABI.
 
 CHUNK holds exactly the cells of the chunk named by CHUNK-KEY.  Probes
@@ -1890,7 +2157,11 @@ own lattice vertices.  Witness faces and bands are recomputed from the
 When PLANAR-MERGE-P is true, emit the exact unbeveled cubical boundary as
 greedily merged coplanar rectangles. This far-distance representation keeps
 occupancy, normals, materials, silhouette, and chunk seams while omitting
-bevel ornament and all geometrically redundant interior face edges."
+bevel ornament and all geometrically redundant interior face edges.
+
+When COPLANAR-MERGE-P is true, first construct the requested bevel surface,
+then exactly dissolve its coplanar interior edges. This retains the full
+surface and falls back group-by-group whenever a boundary is not simple."
   (check-type chunk chain)
   (check-type stock-function function)
   (check-type chamfer-stock-function function)
@@ -1999,4 +2270,7 @@ bevel ornament and all geometrically redundant interior face edges."
                                      (%make-boundary-packing-for-box
                                       (1- x0) x1 (1- y0) y1)
                                      x0 ox1 y0 oy1 t)
-        (%finish-surface-mesh builder)))))
+        (let ((mesh (%finish-surface-mesh builder)))
+          (if coplanar-merge-p
+              (%coplanar-merged-surface-mesh mesh)
+              mesh))))))

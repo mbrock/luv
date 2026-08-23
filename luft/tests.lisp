@@ -180,6 +180,25 @@
      mesh)
     (loop for point being the hash-keys of points collect point)))
 
+(defun %mesh-oriented-plane-areas (mesh)
+  "Exact per-plane doubled-area signature, including render attributes."
+  (let ((areas (make-hash-table :test #'equal)))
+    (%map-surface-mesh-triangle-records
+     (lambda (kind stock ambient mask normal a b c)
+       (declare (ignore mask))
+       (let* ((cross (%point-cross a b c))
+              (key (list kind stock ambient normal (%point-dot normal a)))
+              (area (/ (%point-dot cross normal)
+                       (%point-dot normal normal))))
+         (incf (gethash key areas 0) area)))
+     mesh)
+    areas))
+
+(defun %same-plane-areas-p (left right)
+  (and (= (hash-table-count left) (hash-table-count right))
+       (loop for key being the hash-keys of left using (hash-value area)
+             always (= area (gethash key right -1)))))
+
 (defun %stream-template-coordinates-within-p (mesh instance-words low high)
   (let ((templates (surface-mesh-template-vertex-words mesh))
         (ranges (surface-mesh-template-ranges mesh)))
@@ -321,12 +340,24 @@
       (%check (%mesh-closed-p medial))
       (%check (%mesh-nondegenerate-p medial)))
     (dotimes (mask 256)
-      (let ((mesh
-              (make-surface-mesh (%solid-for-star mask) :bevel-width 4)))
+      (let* ((mesh
+               (make-surface-mesh (%solid-for-star mask) :bevel-width 4))
+             (merged (%coplanar-merged-surface-mesh mesh)))
         (%check (%mesh-closed-p mesh)
                 (format nil "medial mask ~2,'0X" mask))
         (%check (%mesh-nondegenerate-p mesh)
-                (format nil "medial mask ~2,'0X" mask))))
+                (format nil "medial mask ~2,'0X" mask))
+        (%check (%mesh-closed-p merged)
+                (format nil "merged medial mask ~2,'0X" mask))
+        (%check (%mesh-nondegenerate-p merged)
+                (format nil "merged medial mask ~2,'0X" mask))
+        (%check (<= (surface-mesh-triangle-count merged)
+                    (surface-mesh-triangle-count mesh))
+                (format nil "merged count mask ~2,'0X" mask))
+        (%check (%same-plane-areas-p
+                 (%mesh-oriented-plane-areas mesh)
+                 (%mesh-oriented-plane-areas merged))
+                (format nil "merged plane areas mask ~2,'0X" mask))))
     (dolist (width '(0 5 1/2))
       (%check (%signals-error-p
                (lambda ()

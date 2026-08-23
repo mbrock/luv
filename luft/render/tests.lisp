@@ -92,35 +92,39 @@
       (ok (zerop (hash-table-count
                   (luft.render::streaming-scene-loaded scene)))))))
 
-(deftest a-streaming-window-assigns-planar-meshes-only-to-its-far-ring
+(deftest a-streaming-window-uses-detail-medial-and-merged-medial-rings
   (let ((builder (luft.render::make-scene-builder :horizontal-bits 9)))
-    (dotimes (chunk-x 5)
-      (dotimes (chunk-y 5)
+    (dotimes (chunk-x 7)
+      (dotimes (chunk-y 7)
         (luft.render::scene-builder-cell
          builder (* chunk-x luft:+chunk-size+)
          (* chunk-y luft:+chunk-size+) 0)))
     (let* ((scene
              (render:make-streaming-scene
               (luft.render::finish-scene-builder builder)
-              :residency-radius 2 :lod-radius 1))
+              :residency-radius 3 :lod-radius 1 :merge-radius 2))
            (system
              (production:make-single-worker-production-system
               :name "LUFT LoD policy test")))
       (unwind-protect
            (progn
              (ok (luft.render::retarget-streaming-scene
-                  scene system 2 128 128))
-             (ok (= 25 (hash-table-count
+                  scene system 2 192 192))
+             (ok (= 49 (hash-table-count
                         (luft.render::streaming-scene-loaded scene))))
              (ok (= 9
                     (loop for width being the hash-values of
                           (luft.render::streaming-scene-loaded scene)
                           count (= width 2))))
-             (ok (= 16
+             (ok (= 40
                     (loop for width being the hash-values of
                           (luft.render::streaming-scene-loaded scene)
                           count (= width 4))))
-             (let* ((key (luft:chunk-key-at 128 128))
+             (ok (= 24
+                    (loop for merge-p being the hash-values of
+                          (luft.render::streaming-scene-merged scene)
+                          count merge-p)))
+             (let* ((key (luft:chunk-key-at 192 192))
                     (snapshot
                       (luft.render::make-streaming-mesh-snapshot scene key 2))
                     (request
@@ -191,6 +195,38 @@
                     (luft:surface-mesh-template-vertex-words mesh)))
           (ok (luft::%mesh-closed-p mesh)))))))
 
+(deftest coplanar-compression-keeps-the-medial-chunk-surface-exact
+  (let ((builder (luft.render::make-scene-builder :horizontal-bits 6)))
+    (loop for x from 4 below 12 do
+      (loop for y from 4 below 12 do
+        (dotimes (z (+ 2 (floor (+ x y) 3)))
+          (luft.render::scene-builder-cell builder x y z))))
+    (let* ((scene (luft.render::finish-scene-builder builder))
+           (key (luft:chunk-key-at 4 4))
+           (chunk nil))
+      (luft:map-chain-chunks
+       (lambda (chunk-key chain)
+         (when (= chunk-key key) (setf chunk chain)))
+       (luft.render::scene-solid scene))
+      (handler-bind
+          ((luft:missing-chunk
+             (lambda (condition)
+               (declare (ignore condition))
+               (invoke-restart 'luft:treat-as-air)))
+           (luft:outside-domain
+             (lambda (condition)
+               (declare (ignore condition))
+               (invoke-restart 'luft:treat-as-air))))
+        (let ((medial (luft:mesh-chunk chunk key :bevel-width 4))
+              (merged (luft:mesh-chunk chunk key :bevel-width 4
+                                                 :coplanar-merge-p t)))
+          (ok (< (luft:surface-mesh-triangle-count merged)
+                 (luft:surface-mesh-triangle-count medial)))
+          (ok (luft::%mesh-closed-p merged))
+          (ok (luft::%same-plane-areas-p
+               (luft::%mesh-oriented-plane-areas medial)
+               (luft::%mesh-oriented-plane-areas merged))))))))
+
 (deftest a-pure-lod-shift-remeshes-only-chunks-whose-tier-changed
   (let ((builder (luft.render::make-scene-builder :horizontal-bits 8)))
     (dotimes (chunk-x 4)
@@ -257,8 +293,9 @@
   (let ((scene
           (render:make-highland-sanctuary-scene :horizontal-bits 6)))
     (ok (typep scene 'render:streaming-scene))
-    (ok (= 2 (luft.render::streaming-scene-residency-radius scene)))
+    (ok (= 3 (luft.render::streaming-scene-residency-radius scene)))
     (ok (= 1 (luft.render::streaming-scene-lod-radius scene)))
+    (ok (= 2 (luft.render::streaming-scene-merge-radius scene)))
     (ok (= 1 (hash-table-count
               (luft.render::streaming-scene-store scene))))))
 
@@ -1233,7 +1270,7 @@
                  (let ((clip (+ (* view-z (aref data 18)) (aref data 19))))
                    (if (zerop (aref data 22)) clip (/ clip view-z)))))
           (ok (< (abs (depth perspective 0.1)) 1d-4))
-          (ok (< (abs (- (depth perspective 200.0) 1.0)) 1d-4))
+          (ok (< (abs (- (depth perspective 600.0) 1.0)) 1d-4))
           (ok (< (abs (depth isometric
                             luft.render::+orthographic-near+)) 1d-4))
           (ok (< (abs (- (depth isometric

@@ -1804,6 +1804,8 @@ cohort untouched. No frame can interleave with the owner-thread publication."
           :reader streaming-scene-store)
    (loaded :initform (make-hash-table :test #'eql)
            :reader streaming-scene-loaded)
+   (merged :initform (make-hash-table :test #'eql)
+           :reader streaming-scene-merged)
    (outstanding :initform (make-hash-table :test #'eql)
                 :reader streaming-scene-outstanding)
    (staged :initform (make-hash-table :test #'eql)
@@ -1818,6 +1820,8 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                      :accessor streaming-scene-residency-radius)
    (lod-radius :initarg :lod-radius :initform nil
                :accessor streaming-scene-lod-radius)
+   (merge-radius :initarg :merge-radius :initform nil
+                 :accessor streaming-scene-merge-radius)
    (far-bevel-width :initarg :far-bevel-width :initform 4
                     :accessor streaming-scene-far-bevel-width)
    (focus :initform nil :accessor streaming-scene-focus)
@@ -1825,12 +1829,12 @@ cohort untouched. No frame can interleave with the owner-thread publication."
 
 (defstruct (streaming-mesh-snapshot
              (:constructor %make-streaming-mesh-snapshot
-                 (scene key bevel-width planar-merge-p neighborhood stamp)))
+                 (scene key bevel-width coplanar-merge-p neighborhood stamp)))
   "Immutable CPU input for one chunk mesh request."
   (scene nil :read-only t)
   (key 0 :type luft:chunk-key :read-only t)
   (bevel-width luft:+mesh-bevel-width+ :read-only t)
-  (planar-merge-p nil :type boolean :read-only t)
+  (coplanar-merge-p nil :type boolean :read-only t)
   (neighborhood nil :type hash-table :read-only t)
   (stamp nil :read-only t))
 
@@ -1838,14 +1842,14 @@ cohort untouched. No frame can interleave with the owner-thread publication."
   ((snapshot :initarg :snapshot :reader streaming-mesh-request-snapshot)))
 
 (defun make-streaming-scene
-    (scene &key (frames-per-load 15) (residency-radius 1) lod-radius
+    (scene &key (frames-per-load 15) (residency-radius 1) lod-radius merge-radius
                  (far-bevel-width 4))
   "Wrap SCENE in bounded camera-driven chunk residency.
 
-When LOD-RADIUS is non-NIL, chunks beyond that Chebyshev distance use a
-greedily merged planar mesh tier. The tier retains the same cubical occupancy,
-materials, silhouette, and chunk boundaries while dissolving redundant
-coplanar edges. FAR-BEVEL-WIDTH names the tier in residency state."
+When LOD-RADIUS is non-NIL, chunks beyond that Chebyshev distance use
+FAR-BEVEL-WIDTH. When MERGE-RADIUS is non-NIL, chunks beyond it additionally
+dissolve exactly coplanar edges without changing that bevel surface.
+FAR-BEVEL-WIDTH names the medial tier in residency state."
   (let ((streaming (make-instance
                     'streaming-scene
                     :solid (scene-solid scene)
@@ -1855,6 +1859,7 @@ coplanar edges. FAR-BEVEL-WIDTH names the tier in residency state."
                     :frames-per-load frames-per-load
                     :residency-radius residency-radius
                     :lod-radius lod-radius
+                    :merge-radius merge-radius
                     :far-bevel-width far-bevel-width)))
     (luft:map-chain-chunks
      (lambda (key chain)
@@ -1889,11 +1894,11 @@ coplanar edges. FAR-BEVEL-WIDTH names the tier in residency state."
         (streaming-scene-far-bevel-width scene)
         near-bevel-width)))
 
-(defun streaming-scene-planar-p-at (scene key focus)
-  "Whether KEY uses SCENE's exact coplanar far tier under FOCUS."
-  (let ((lod-radius (streaming-scene-lod-radius scene)))
-    (and focus lod-radius
-         (> (streaming-scene-key-distance key focus) lod-radius))))
+(defun streaming-scene-coplanar-p-at (scene key focus)
+  "Whether KEY uses SCENE's exact coplanar compression under FOCUS."
+  (let ((merge-radius (streaming-scene-merge-radius scene)))
+    (and focus merge-radius
+         (> (streaming-scene-key-distance key focus) merge-radius))))
 
 (defun retarget-streaming-scene
     (scene production-system bevel-width world-x world-y)
@@ -1906,7 +1911,9 @@ coplanar edges. FAR-BEVEL-WIDTH names the tier in residency state."
                       (luft:chunk-key-y focus-key)))
          (desired (streaming-scene-keys-near scene (car focus) (cdr focus)))
          (loaded (streaming-scene-loaded scene))
+         (merged (streaming-scene-merged scene))
          (desired-widths (make-hash-table :test #'eql))
+         (desired-merged (make-hash-table :test #'eql))
          (arrivals
            (remove-if (lambda (key) (gethash key loaded)) desired))
          (departures
@@ -1917,18 +1924,24 @@ coplanar edges. FAR-BEVEL-WIDTH names the tier in residency state."
     (dolist (key desired)
       (let ((width
               (streaming-scene-bevel-width-at
-               scene key focus bevel-width)))
-        (setf (gethash key desired-widths) width)
+               scene key focus bevel-width))
+            (merge-p (streaming-scene-coplanar-p-at scene key focus)))
+        (setf (gethash key desired-widths) width
+              (gethash key desired-merged) merge-p)
         (multiple-value-bind (old-width present-p) (gethash key loaded)
-          (when (and present-p (not (eql old-width width)))
+          (when (and present-p
+                     (or (not (eql old-width width))
+                         (not (eql (gethash key merged) merge-p))))
             (push key lod-changes)))))
     (let ((residency-changes (append arrivals departures))
           (changes (append arrivals departures lod-changes)))
       (setf (streaming-scene-focus scene) focus)
       (when changes
         (clrhash loaded)
+        (clrhash merged)
         (dolist (key desired)
-          (setf (gethash key loaded) (gethash key desired-widths)))
+          (setf (gethash key loaded) (gethash key desired-widths)
+                (gethash key merged) (gethash key desired-merged)))
         (let ((affected
                 (remove-if-not
                  (lambda (key)
@@ -1956,9 +1969,9 @@ coplanar edges. FAR-BEVEL-WIDTH names the tier in residency state."
             do (push candidate keys))
     (sort keys #'<)))
 
-(defun streaming-scene-mesh-stamp (scene key bevel-width planar-merge-p)
+(defun streaming-scene-mesh-stamp (scene key bevel-width coplanar-merge-p)
   "Name the exact residency and geometry parameters observed by KEY's mesh."
-  (list bevel-width planar-merge-p
+  (list bevel-width coplanar-merge-p
         (gethash key (streaming-scene-loaded scene))
         (streaming-scene-neighborhood-keys scene key)))
 
@@ -1966,15 +1979,13 @@ coplanar edges. FAR-BEVEL-WIDTH names the tier in residency state."
   "Capture immutable chains for the neighborhood KEY currently observes."
   (let ((neighborhood (make-hash-table :test #'eql))
         (store (streaming-scene-store scene))
-        (planar-merge-p
-          (streaming-scene-planar-p-at
-           scene key (streaming-scene-focus scene))))
+        (coplanar-merge-p (gethash key (streaming-scene-merged scene))))
     (dolist (neighbor (streaming-scene-neighborhood-keys scene key))
       (setf (gethash neighbor neighborhood) (gethash neighbor store)))
     (%make-streaming-mesh-snapshot
-     scene key bevel-width planar-merge-p neighborhood
+     scene key bevel-width coplanar-merge-p neighborhood
      (streaming-scene-mesh-stamp
-      scene key bevel-width planar-merge-p))))
+      scene key bevel-width coplanar-merge-p))))
 
 (defun mesh-streaming-snapshot (snapshot)
   "Mesh one worker-owned residency snapshot without reading owner state."
@@ -2004,8 +2015,8 @@ coplanar edges. FAR-BEVEL-WIDTH names the tier in residency state."
                            :chamfer-stock-function chamfer-stock-function
                            :bevel-width
                            (streaming-mesh-snapshot-bevel-width snapshot)
-                           :planar-merge-p
-                           (streaming-mesh-snapshot-planar-merge-p
+                           :coplanar-merge-p
+                           (streaming-mesh-snapshot-coplanar-merge-p
                             snapshot)))))))
 
 (defun mesh-streaming-chunk (scene key bevel-width)
@@ -2037,7 +2048,7 @@ coplanar edges. FAR-BEVEL-WIDTH names the tier in residency state."
                  scene
                  (streaming-mesh-snapshot-key snapshot)
                  (streaming-mesh-snapshot-bevel-width snapshot)
-                 (streaming-mesh-snapshot-planar-merge-p snapshot))))))
+                 (streaming-mesh-snapshot-coplanar-merge-p snapshot))))))
 
 (defun accept-streaming-mesh-result (scene request mesh)
   "Stage MESH when REQUEST is still the latest description of its chunk."
@@ -2241,12 +2252,12 @@ upland instead of repeating one periodic profile."
        (cons (- x tower-outer) (+ x tower-outer)) :axis :y))))
 
 (defun make-highland-sanctuary-scene
-    (&key (horizontal-bits 8) (seed 121) (streaming-p t))
+    (&key (horizontal-bits 9) (seed 121) (streaming-p t))
   "Make a large varied landscape with mountain chains and sparse ruins.
 
-The default 256 by 256 world spans sixteen LUFT chunks. STREAMING-P wraps it
-in bounded camera-driven residency, so only the nearby mesh cohort reaches the
-GPU even though the authored landscape remains available as one solid."
+The default 512 by 512 world spans sixty-four LUFT chunks. STREAMING-P wraps
+it in a seven-by-seven camera-driven window: full bevel nearby, medial terrain
+in the middle ring, and exact coplanar compression in the outer ring."
   (let* ((builder (make-scene-builder :horizontal-bits horizontal-bits))
          (size (ash 1 horizontal-bits)))
     (dotimes (x size)
@@ -2272,5 +2283,6 @@ GPU even though the authored landscape remains available as one solid."
           (build-highland-lookout builder x y base :citadel-p citadel-p))))
     (let ((scene (finish-scene-builder builder)))
       (if streaming-p
-          (make-streaming-scene scene :residency-radius 2 :lod-radius 1)
+          (make-streaming-scene scene :residency-radius 3 :lod-radius 1
+                                :merge-radius 2)
           scene))))
