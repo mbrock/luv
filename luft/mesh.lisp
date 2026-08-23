@@ -358,16 +358,20 @@ star corpus; signal that boundary explicitly instead of silently welding it."
                       (list template)))
         template)))
 
-(defun %emit-polygon (builder base points normal stock kind)
+(defun %emit-template-instance (builder base vertices stock kind)
   (check-type stock (unsigned-byte 4))
-  (let* ((vertices (%polygon-template-vertices base points normal kind))
-         (template (%intern-mesh-template builder vertices))
+  (let* ((template (%intern-mesh-template builder vertices))
          (instance (%make-mesh-instance base stock template)))
     (ecase kind
       (:face (push instance (surface-mesh-builder-face-instances builder)))
       (:band (push instance (surface-mesh-builder-band-instances builder)))
       (:junction (push instance (surface-mesh-builder-fan-instances builder))))
     instance))
+
+(defun %emit-polygon (builder base points normal stock kind)
+  (%emit-template-instance
+   builder base (%polygon-template-vertices base points normal kind)
+   stock kind))
 
 (defun %simple-u32-vector (source)
   (let ((copy (make-array (length source) :element-type '(unsigned-byte 32))))
@@ -541,19 +545,20 @@ star corpus; signal that boundary explicitly instead of silently welding it."
                            (nth v base) (+ (nth v base) v-cell))
                      base)))
           ;; Uniformly partition the exact old face rectangle.  Its 6x6 heart
-          ;; is face-owned; nonempty side cells are edge-owned; nonempty corner
-          ;; cells are vertex-owned.
+          ;; is face-owned and its nonempty side cells are edge-owned.  Leave
+          ;; the four corner cells open: the lattice-site fan closes their
+          ;; actual boundary after every face and edge instance is present.
           (dotimes (u-cell 3)
             (dotimes (v-cell 3)
               (let ((u0 (aref u-cuts u-cell))
                     (u1 (aref u-cuts (1+ u-cell)))
                     (v0 (aref v-cuts v-cell))
                     (v1 (aref v-cuts (1+ v-cell))))
-                (when (and (< u0 u1) (< v0 v1))
-                  (let ((kind (cond ((and (= u-cell 1) (= v-cell 1))
-                                     :face)
-                                    ((or (= u-cell 1) (= v-cell 1)) :band)
-                                    (t :junction))))
+                (when (and (< u0 u1) (< v0 v1)
+                           (or (= u-cell 1) (= v-cell 1)))
+                  (let ((kind (if (and (= u-cell 1) (= v-cell 1))
+                                  :face
+                                  :band)))
                     (%emit-polygon
                      builder
                      (site-base (if (= u-cell 2) 1 0)
@@ -652,33 +657,10 @@ star corpus; signal that boundary explicitly instead of silently welding it."
      (* 3 (+ 1 (second normal)))
      (* 9 (+ 1 (third normal)))))
 
-(defun %band-pair-key (left right)
-  (let ((a (%normal-key left)) (b (%normal-key right)))
-    (if (< a b) (cons a b) (cons b a))))
-
 (defun %parallel-normal-p (left right)
   (let ((left-key (%normal-key left)))
     (or (= left-key (%normal-key right))
         (= left-key (%normal-key (mapcar #'- right))))))
-
-(defun %boundary-edge-normal (mask edge)
-  (let* ((low (%cube-edge-low edge))
-         (high (%cube-edge-high edge))
-         (occupied (if (logbitp low mask) low high))
-         (empty (if (= occupied low) high low))
-         (difference (logxor low high))
-         (axis-number (1- (integer-length difference)))
-         (normal (list 0 0 0)))
-    (setf (nth axis-number normal)
-          (%sample-direction-component empty axis-number))
-    normal))
-
-(defun %radial-band-pair-keys (mask axis-number sign)
-  (loop for pair in (%radial-transition-groups mask axis-number sign)
-        for left = (%boundary-edge-normal mask (first pair))
-        for right = (%boundary-edge-normal mask (second pair))
-        unless (%parallel-normal-p left right)
-          collect (%band-pair-key left right)))
 
 (defun %vertex-star-mask (domain occupancy coordinates)
   (site-star-occupancy-mask
@@ -686,14 +668,6 @@ star corpus; signal that boundary explicitly instead of silently welding it."
    (make-site domain (first coordinates) (second coordinates)
               (third coordinates) +vertex-extent+ 1)
    occupancy))
-
-(defun %band-continues-p
-    (domain occupancy vertex axis-number radial-sign pair-key)
-  (member pair-key
-          (%radial-band-pair-keys
-           (%vertex-star-mask domain occupancy vertex)
-           axis-number radial-sign)
-          :test #'equal))
 
 (defun %emit-edge-bands
     (builder domain occupancy key stock-function)
@@ -720,18 +694,11 @@ star corpus; signal that boundary explicitly instead of silently welding it."
         ;; opposite normals are two sheets touching at the lattice edge.
         ;; Neither relation owns a bevel band between the faces.
         (unless (%parallel-normal-p left-normal right-normal)
-          (let* ((pair-key (%band-pair-key left-normal right-normal))
-                 (high-vertex (%offset-coordinates anchor axis-number 1))
+          (let* ((high-vertex (%offset-coordinates anchor axis-number 1))
                  (axis-low (* +mesh-cell-size+
                               (nth axis-number anchor)))
                  (axis-high (* +mesh-cell-size+
                                (nth axis-number high-vertex)))
-                 (low-continues-p
-                   (%band-continues-p
-                    domain occupancy anchor axis-number -1 pair-key))
-                 (high-continues-p
-                   (%band-continues-p
-                    domain occupancy high-vertex axis-number 1 pair-key))
                  (base (mapcar (lambda (coordinate)
                                  (* +mesh-cell-size+ coordinate))
                                anchor))
@@ -741,23 +708,17 @@ star corpus; signal that boundary explicitly instead of silently welding it."
                        (%point-with-component
                         (mapcar #'+ base (getf data :offset))
                         axis-number coordinate))
-                     (patch (site-base low high kind)
+                     (patch (site-base low high)
                        (%emit-polygon
                         builder site-base
                         (list (rail left low) (rail right low)
                               (rail right high) (rail left high))
-                        normal stock kind)))
-              ;; Every edge owns the same six-tick middle.  Any extension to
-              ;; a lattice vertex is moved into that vertex's fan stream.
+                        normal stock :band)))
+              ;; The edge owns only its invariant six-tick middle.  Both
+              ;; one-tick ends are part of the two lattice-site fans.
               (patch anchor
                      (+ axis-low +mesh-bevel-width+)
-                     (- axis-high +mesh-bevel-width+) :band)
-              (when low-continues-p
-                (patch anchor axis-low (+ axis-low +mesh-bevel-width+)
-                       :junction))
-              (when high-continues-p
-                (patch high-vertex (- axis-high +mesh-bevel-width+) axis-high
-                       :junction)))))))))
+                     (- axis-high +mesh-bevel-width+)))))))))
 
 (defun %collect-vertex-keys (solid)
   (let ((vertices (make-hash-table :test #'equal)))
@@ -776,62 +737,245 @@ star corpus; signal that boundary explicitly instead of silently welding it."
                   when (/= l r) return (< l r)
                   finally (return nil))))))
 
-(defun %cycle-stock-face (domain original-mask cycle vertex)
-  (let* ((edge (first cycle))
-         (low (%cube-edge-low edge))
-         (high (%cube-edge-high edge))
-         (occupied (if (logbitp low original-mask) low high))
-         (empty (if (= occupied low) high low))
-         (difference (logxor occupied empty))
-         (normal-axis (1- (integer-length difference)))
-         (normal-side (%sample-direction-component empty normal-axis))
-         (cell-coordinates
-           (loop for axis-number below 3
-                 collect (+ (nth axis-number vertex)
-                            (if (logbitp axis-number occupied) 0 -1))))
-         (cell (make-site domain
-                          (first cell-coordinates)
-                          (second cell-coordinates)
-                          (third cell-coordinates)
-                          +cell-extent+ 1)))
-    (%cell-face domain cell normal-axis normal-side)))
+(defun %point-lexicographically-less-p (left right)
+  (loop for l in left
+        for r in right
+        when (/= l r) return (< l r)
+        finally (return nil)))
 
-(defun %emit-vertex-junctions
-    (builder domain occupancy vertex stock-function)
-  (let* ((mask (%vertex-star-mask domain occupancy vertex))
-         (cycles (%star-sheet-cycles mask)))
-    (when (star-singular-p mask)
-      (incf (surface-mesh-builder-singular-star-count builder)))
-    (dolist (cycle cycles)
-      (let* ((virtual-mask (%cycle-virtual-mask mask cycle))
-             (entry (aref *arc-junction-table* virtual-mask))
-             (stock (funcall stock-function
-                             (%cycle-stock-face
-                              domain mask cycle vertex)))
-             (origin (mapcar (lambda (coordinate)
-                               (* +mesh-cell-size+ coordinate))
-                             vertex)))
-        (unless (getf entry :regular-star)
-          (error "Sheet cycle from ~2,'0X produced singular mask ~2,'0X."
-                 mask virtual-mask))
-        (dolist (face (getf entry :faces))
-          (%emit-polygon
-           builder
-           vertex
-           (mapcar (lambda (point) (mapcar #'+ origin point))
-                   (getf face :points))
-           (getf face :normal)
-           stock :junction))))))
+(defun %geometric-edge-key (left right)
+  (if (%point-lexicographically-less-p left right)
+      (list left right)
+      (list right left)))
+
+(defun %instance-point (instance local-point)
+  (loop for coordinate in (mesh-instance-base instance)
+        for local-coordinate in local-point
+        collect (+ (* +mesh-cell-size+ coordinate) local-coordinate)))
+
+(defun %builder-open-boundary-edges (builder)
+  "Return the directed edges occurring once in the face and band streams."
+  (let ((observations (make-hash-table :test #'equal)))
+    (dolist (instance
+             (append (surface-mesh-builder-face-instances builder)
+                     (surface-mesh-builder-band-instances builder)))
+      (loop for tail on (mesh-template-vertices
+                         (mesh-instance-template instance))
+            by #'cdddr
+            while tail
+            for points =
+              (mapcar (lambda (vertex)
+                        (%instance-point instance (first vertex)))
+                      (list (first tail) (second tail) (third tail)))
+            do (dotimes (index 3)
+                 (let ((left (nth index points))
+                       (right (nth (mod (1+ index) 3) points)))
+                   (push (list left right (mesh-instance-stock instance))
+                         (gethash (%geometric-edge-key left right)
+                                  observations))))))
+    (sort
+     (loop for key being the hash-keys of observations
+             using (hash-value edges)
+           when (= 1 (length edges))
+             collect (first edges)
+           when (> (length edges) 2)
+             do (error "Face and edge streams meet ~D times at ~S."
+                       (length edges) key))
+     (lambda (left right)
+       (let ((left-key (%geometric-edge-key (first left) (second left)))
+             (right-key (%geometric-edge-key (first right) (second right))))
+         (or (%point-lexicographically-less-p
+              (first left-key) (first right-key))
+             (and (equal (first left-key) (first right-key))
+                  (%point-lexicographically-less-p
+                   (second left-key) (second right-key)))))))))
+
+(defun %boundary-edge-site (left right)
+  "Find the unique lattice vertex whose one-tick domain contains LEFT--RIGHT."
+  (loop for l in left
+        for r in right
+        for coordinate = (round (/ (+ l r) (* 2 +mesh-cell-size+)))
+        unless (and (<= (abs (- l (* +mesh-cell-size+ coordinate)))
+                        +mesh-bevel-width+)
+                    (<= (abs (- r (* +mesh-cell-size+ coordinate)))
+                        +mesh-bevel-width+))
+          do (error "Open edge ~S--~S is not local to a lattice vertex."
+                    left right)
+        collect coordinate))
+
+(defun %boundary-edge-cycles (edges site)
+  "Order the consistently directed boundary EDGES into loops at SITE."
+  (let ((pending (copy-list edges))
+        (cycles nil))
+    (loop while pending do
+      (let* ((first-edge (pop pending))
+             (first-point (first first-edge))
+             (next-point (second first-edge))
+             (cycle (list first-edge)))
+        (loop until (equal next-point first-point) do
+          (let ((next-edge
+                  (find next-point pending :key #'first :test #'equal)))
+            (unless next-edge
+              (error "Open boundary at lattice site ~S stops at ~S."
+                     site next-point))
+            (setf pending (delete next-edge pending :count 1 :test #'eq)
+                  cycle (append cycle (list next-edge))
+                  next-point (second next-edge))))
+        (push cycle cycles)))
+    (nreverse cycles)))
+
+(defun %boundary-cycles-by-site (builder)
+  (let ((by-site (make-hash-table :test #'equal)))
+    (dolist (edge (%builder-open-boundary-edges builder))
+      (push edge
+            (gethash (%boundary-edge-site (first edge) (second edge))
+                     by-site)))
+    (sort
+     (loop for site being the hash-keys of by-site
+             using (hash-value edges)
+           collect (cons site (%boundary-edge-cycles edges site)))
+     #'%point-lexicographically-less-p :key #'first)))
+
+(defun %emit-triangular-boundary-cap (builder site cycle)
+  (let* ((a (first (first cycle)))
+         (b (first (second cycle)))
+         (c (first (third cycle)))
+         (normal (%cross (%point- c a) (%point- b a)))
+         (stock (third (first cycle))))
+    ;; The observed loop follows the existing surface winding.  Reverse its
+    ;; order so the cap pairs every boundary edge with opposite winding.
+    (%emit-polygon builder site (list a c b) normal stock :junction)))
+
+(defun %squared-distance (left right)
+  (reduce #'+ (mapcar (lambda (l r)
+                        (let ((difference (- l r)))
+                          (* difference difference)))
+                      left right)))
+
+(defun %cycle-planar-through-site-p (site cycle)
+  (let* ((origin (mapcar (lambda (coordinate)
+                           (* +mesh-cell-size+ coordinate))
+                         site))
+         (vectors (mapcar (lambda (edge)
+                            (%point- (first edge) origin))
+                          cycle))
+         (normal
+           (loop for left on vectors
+                 thereis
+                 (loop for right in (rest left)
+                       for cross = (%cross (first left) right)
+                       when (some (complement #'zerop) cross)
+                         return cross))))
+    (and normal
+         (every (lambda (vector) (zerop (%dot normal vector))) vectors))))
+
+(defun %cycle-boundary-stock-table (cycle)
+  (let ((stocks (make-hash-table :test #'equal)))
+    (dolist (edge cycle stocks)
+      (setf (gethash (%geometric-edge-key (first edge) (second edge)) stocks)
+            (third edge)))))
+
+(defun %triangle-boundary-mask (a b c boundary-stocks)
+  (logior (if (gethash (%geometric-edge-key b c) boundary-stocks) #b001 0)
+          (if (gethash (%geometric-edge-key c a) boundary-stocks) #b010 0)
+          (if (gethash (%geometric-edge-key a b) boundary-stocks) #b100 0)))
+
+(defun %triangle-boundary-stock (a b c boundary-stocks fallback)
+  (or (gethash (%geometric-edge-key b c) boundary-stocks)
+      (gethash (%geometric-edge-key c a) boundary-stocks)
+      (gethash (%geometric-edge-key a b) boundary-stocks)
+      fallback))
+
+(defun %emit-boundary-strip-triangle
+    (builder site a b c boundary-stocks fallback-stock)
+  (let ((normal (%cross (%point- b a) (%point- c a))))
+    (%emit-template-instance
+     builder site
+     (%triangle-template-vertices
+      site a b c normal :junction
+      (%triangle-boundary-mask a b c boundary-stocks))
+     (%triangle-boundary-stock a b c boundary-stocks fallback-stock)
+     :junction)))
+
+(defun %emit-boundary-strip (builder site cycle)
+  "Triangulate CYCLE without introducing its lattice-site origin as geometry."
+  (let ((points (mapcar #'first cycle))
+        (boundary-stocks (%cycle-boundary-stock-table cycle))
+        (fallback-stock (third (first cycle))))
+    ;; Repeatedly remove the end whose replacement diagonal is shorter.  The
+    ;; remaining vertices stay a contiguous interval of the boundary, giving
+    ;; a deterministic local triangle strip rather than a long fan of spokes.
+    (loop while (> (length points) 3) do
+      (let* ((first (first points))
+             (second (second points))
+             (last (car (last points)))
+             (penultimate (car (last points 2))))
+        (if (<= (%squared-distance second last)
+                (%squared-distance first penultimate))
+            (progn
+              (%emit-boundary-strip-triangle
+               builder site first last second
+               boundary-stocks fallback-stock)
+              (setf points (rest points)))
+            (progn
+              (%emit-boundary-strip-triangle
+               builder site first last penultimate
+               boundary-stocks fallback-stock)
+              (setf points (butlast points))))))
+    (destructuring-bind (a b c) points
+      (%emit-boundary-strip-triangle
+       builder site a c b boundary-stocks fallback-stock))))
+
+(defun %emit-centered-boundary-fan (builder site cycle)
+  (let ((origin (mapcar (lambda (coordinate)
+                          (* +mesh-cell-size+ coordinate))
+                        site)))
+    (dolist (edge cycle)
+      (destructuring-bind (left right stock) edge
+        ;; A boundary edge incident on the center is already a radial edge of
+        ;; this fan.  Its neighboring non-radial segment emits the triangle.
+        (unless (or (equal left origin) (equal right origin))
+          (let ((normal (%cross (%point- right origin)
+                                (%point- left origin))))
+            (when (every #'zerop normal)
+              (error "Open edge ~S--~S is radial to lattice site ~S."
+                     left right site))
+            ;; Bit zero denotes the outer RIGHT--LEFT edge.  The other two
+            ;; edges are triangulation diagonals inside the complete fan.
+            ;; Keep each sector as its own instance for now because STOCK is
+            ;; an instance attribute and may vary around a mixed junction.
+            (%emit-template-instance
+             builder site
+             (%triangle-template-vertices
+              site origin right left normal :junction #b001)
+             stock :junction)))))))
+
+(defun %emit-boundary-derived-fans (builder)
+  "Close each face/band boundary loop with a local lattice-site fan template."
+  (dolist (entry (%boundary-cycles-by-site builder))
+    (let ((site (first entry)))
+      (dolist (cycle (rest entry))
+        (cond ((= 3 (length cycle))
+               (%emit-triangular-boundary-cap builder site cycle))
+              ((%cycle-planar-through-site-p site cycle)
+               (%emit-centered-boundary-fan builder site cycle))
+              (t
+               (%emit-boundary-strip builder site cycle)))))))
+
+(defun %count-singular-vertex-stars (builder domain occupancy vertices)
+  (dolist (vertex vertices)
+    (when (star-singular-p (%vertex-star-mask domain occupancy vertex))
+      (incf (surface-mesh-builder-singular-star-count builder)))))
 
 (defun make-surface-mesh
     (solid &key (stock-function (constantly 0)))
   "Classify SOLID into exact integer face, edge, and vertex instance streams.
 
 Every exposed cell face emits the same six-by-six central square.  Coplanar
-collars and bevel bands are edge-owned.  Flat corner patches and Arc junction
-polygons are vertex-owned.  Each stream is sorted by template so the renderer
-can issue direct instanced draws.  STOCK-FUNCTION is called with an oriented
-boundary face."
+collars and bevel bands are edge-owned.  The remaining open boundary around
+each lattice vertex is coned to that vertex to produce its fan.  Each stream
+is sorted by template so the renderer can issue direct instanced draws.
+STOCK-FUNCTION is called with an oriented boundary face."
   (check-type solid chain)
   (check-type stock-function function)
   (let* ((domain (chain-domain solid))
@@ -852,6 +996,7 @@ boundary face."
                                stock-function))))))
     (dolist (edge (%collect-edge-keys solid))
       (%emit-edge-bands builder domain occupancy edge stock-function))
-    (dolist (vertex (%collect-vertex-keys solid))
-      (%emit-vertex-junctions builder domain occupancy vertex stock-function))
+    (let ((vertices (%collect-vertex-keys solid)))
+      (%count-singular-vertex-stars builder domain occupancy vertices))
+    (%emit-boundary-derived-fans builder)
     (%finish-surface-mesh builder)))

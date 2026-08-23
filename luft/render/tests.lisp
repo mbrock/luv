@@ -94,6 +94,7 @@
     (ok (plusp (luft:surface-mesh-band-triangle-count mesh)))
     (ok (plusp (luft:surface-mesh-fan-triangle-count mesh)))
     (ok (zerop (luft:surface-mesh-singular-star-count mesh)))
+    (ok (luft::%mesh-closed-p mesh))
     (let ((lattice (luft.render::mesh-lattice-point-words mesh)))
       (ok (loop for offset from 3 below (length lattice) by 4
                 thereis (zerop (aref lattice offset))))

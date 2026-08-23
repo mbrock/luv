@@ -179,6 +179,14 @@
                            +mesh-template-coordinate-bias+)
                       always (<= low coordinate high))))))
 
+(defun %fan-templates-are-triangles-p (mesh)
+  (let ((ranges (surface-mesh-template-ranges mesh))
+        (instances (surface-mesh-fan-instance-words mesh)))
+    (loop for offset from 0 below (length instances) by 4
+          for template-id = (ldb (byte 16 0) (aref instances (+ offset 3)))
+          for count = (aref ranges (1+ (* 2 template-id)))
+          always (= 3 count))))
+
 (defun %test-surface-mesh ()
   (%with-test-section ("integer site streams")
     (%check (equal '(0 -1 0) (%normal-direction-code '(0 -2 0))))
@@ -192,6 +200,7 @@
       (%check (= 44 (surface-mesh-triangle-count one)))
       (%check (%stream-template-coordinates-within-p
                one (surface-mesh-fan-instance-words one) -1 1))
+      (%check (%fan-templates-are-triangles-p one))
       (%check (%mesh-closed-p one)))
     (let ((pair (make-surface-mesh (%solid-for-star #x03))))
       (%check (zerop (surface-mesh-singular-star-count pair)))
@@ -199,7 +208,8 @@
       (%check (plusp (surface-mesh-band-instance-count pair)))
       (%check (plusp (surface-mesh-fan-instance-count pair)))
       (%check (%stream-template-coordinates-within-p
-               pair (surface-mesh-fan-instance-words pair) -1 1)))
+               pair (surface-mesh-fan-instance-words pair) -1 1))
+      (%check (%fan-templates-are-triangles-p pair)))
     (dolist (mask '(#x06 #x18 #x69))
       (let ((mesh (make-surface-mesh (%solid-for-star mask))))
         (%check (plusp (surface-mesh-singular-star-count mesh))
