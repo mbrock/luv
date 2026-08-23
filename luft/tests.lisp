@@ -210,6 +210,33 @@
                                             +mesh-template-vertex-word-count+)
                                          axis))))))))))
 
+(defun %every-fan-triangle-at-site-uses-site-p (mesh site)
+  (let ((templates (surface-mesh-template-vertex-words mesh))
+        (ranges (surface-mesh-template-ranges mesh))
+        (instances (surface-mesh-fan-instance-words mesh))
+        (found nil))
+    (loop for offset from 0 below (length instances) by 4
+          do (when (loop for axis below 3
+                         always (= (nth axis site)
+                                   (aref instances (+ offset axis))))
+               (setf found t)
+               (let* ((template-id
+                        (ldb (byte 16 0) (aref instances (+ offset 3))))
+                      (start (aref ranges (* 2 template-id)))
+                      (count (aref ranges (1+ (* 2 template-id)))))
+                 (unless
+                     (loop for vertex from start below (+ start count)
+                           thereis
+                           (loop for axis below 3
+                                 always
+                                 (= +mesh-template-coordinate-bias+
+                                    (aref templates
+                                          (+ (* vertex
+                                                +mesh-template-vertex-word-count+)
+                                             axis)))))
+                   (return nil))))
+          finally (return found))))
+
 (defun %test-surface-mesh ()
   (%with-test-section ("integer site streams")
     (%check (equal '(0 -1 0) (%normal-direction-code '(0 -2 0))))
@@ -233,8 +260,12 @@
       (%check (%stream-template-coordinates-within-p
                pair (surface-mesh-fan-instance-words pair) -1 1))
       (%check (%fan-templates-are-triangles-p pair)))
-    (let ((concave-corner (make-surface-mesh (%solid-for-star #x8f)))
+    (let ((convex-trapezoid (make-surface-mesh (%solid-for-star #x70)))
+          (concave-corner (make-surface-mesh (%solid-for-star #x8f)))
           (concave-run (make-surface-mesh (%solid-for-star #xcf))))
+      (%check (%fan-site-used-as-vertex-p convex-trapezoid '(8 8 8)))
+      (%check (%every-fan-triangle-at-site-uses-site-p
+               convex-trapezoid '(8 8 8)))
       (%check (%fan-site-used-as-vertex-p concave-corner '(8 8 8)))
       (%check (not (%fan-site-used-as-vertex-p concave-run '(8 8 8)))))
     (dolist (mask '(#x06 #x18 #x69))

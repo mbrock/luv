@@ -953,11 +953,10 @@ star corpus; signal that boundary explicitly instead of silently welding it."
 (defun %vertex-fan-uses-center-p (domain occupancy site cycle)
   (let ((mask (%vertex-star-mask domain occupancy site)))
     (or (%cycle-planar-through-site-p site cycle)
-        ;; Four cells forming the floor plus one cell on its other side is the
-        ;; ordinary concave corner: its surface really passes through SITE and
-        ;; the surrounding sectors meet there.  The six- and seven-cell
+        ;; The ordinary five-cell concave corner and its upside-down three-cell
+        ;; complement both pass through SITE.  The six- and seven-cell
         ;; chamfer/fillet runs do not; coning those creates the ornaments.
-        (= 5 (logcount mask)))))
+        (member (logcount mask) '(3 5)))))
 
 (defun %emit-boundary-derived-fans (builder domain occupancy)
   "Close each face/band boundary loop with a local lattice-site fan template."
