@@ -5,11 +5,7 @@
 (require :sb-posix)
 
 (defparameter *project-root* (uiop:ensure-directory-pathname (truename "./")))
-(defparameter *root-systems*
-  '(:luv :luvcraft :luvcraft/agent :luvcraft/birthday :luv-wiki :luft/render))
-(defparameter *local-asds*
-  '("luv.asd" "luvcraft.asd" "luv-wiki.asd" "luft.asd" "telegram.asd"
-    "mqtt.asd" "openai.asd" "chrome-cdp.asd" "sly-client.asd"))
+(defparameter *root-systems* '(:luv-workbench))
 
 (defun dependency-name (specification)
   (cond
@@ -66,13 +62,12 @@
   (asdf:initialize-source-registry
    `(:source-registry
      (:tree ,(namestring slynk-root))
+     (:directory ,(namestring *project-root*))
      :inherit-configuration))
   (asdf:load-asd (merge-pathnames #P"slynk.asd" slynk-root))
   (format t "Loading Slynk into the dependency core.~%")
   (force-output)
   (asdf:load-system :slynk)
-  (dolist (file *local-asds*)
-    (asdf:load-asd (merge-pathnames file *project-root*)))
   (let ((external (external-system-boundary)))
     (format t "Loading ~D external ASDF boundary systems.~%" (length external))
     (force-output)

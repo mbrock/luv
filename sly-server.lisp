@@ -39,6 +39,7 @@
   (asdf:initialize-source-registry
    `(:source-registry
      (:tree ,(namestring slynk-root))
+     (:directory ,(namestring project-root))
      :inherit-configuration))
   ;; A dependency-core boot already has Slynk registered and loaded. Loading
   ;; its ASD again invalidates that completed operation and noisily reloads it.
@@ -47,19 +48,11 @@
   ;; Slynk first, so the wiki's IN-READTABLE forms can register their
   ;; readtables while the durable image is assembled.
   (asdf:load-system :slynk)
-  (asdf:load-asd (merge-pathnames #P"luv.asd" project-root))
-  (asdf:load-asd (merge-pathnames #P"luvcraft.asd" project-root))
-  (asdf:load-asd (merge-pathnames #P"luv-wiki.asd" project-root))
-  (asdf:load-asd (merge-pathnames #P"luft.asd" project-root))
-  (asdf:load-asd (merge-pathnames #P"telegram.asd" project-root))
-  (asdf:load-asd (merge-pathnames #P"mqtt.asd" project-root))
-  (asdf:load-asd (merge-pathnames #P"openai.asd" project-root))
-  (asdf:load-asd (merge-pathnames #P"chrome-cdp.asd" project-root))
-  (asdf:load-asd (merge-pathnames #P"sly-client.asd" project-root))
+  ;; One aggregate gives ASDF one plan instead of making it rediscover the
+  ;; overlapping closure separately for every requested root.
   (load (merge-pathnames #P"scripts/sly-asdf-status.lisp" project-root))
   (load (merge-pathnames #P"luvcraft/build-progress.lisp" project-root))
-  (let ((systems '(:luv :luvcraft :luvcraft/agent :luvcraft/birthday
-                   :luv-wiki :luft/render)))
+  (let ((systems '(:luv-workbench)))
     ;; The server's outer log is relayed by ./sly while this boot runs, so keep
     ;; narration there. Per-file compiler/toolchain chatter still gets the
     ;; build progress module's focused logs.
@@ -70,11 +63,11 @@
                (typep condition
                       (find-symbol "DEADLINE-EXCEEDED" "LUV-BUILD"))))
       (build-call "START" project-root :system systems :invocation "sly boot"
-                  :redirect-output-p nil)
+                  :redirect-output-p nil :report-plan-p nil
+                  :defer-archive-p t)
       (handler-case
           (progn
-            (dolist (system systems)
-              (asdf:load-system system))
+            (asdf:load-system "luv-workbench")
             (build-call "FINISH" :done))
         (error (condition)
           (if (deadline-exceeded-p condition)
@@ -102,4 +95,19 @@
     (format t "~&Luv Slynk is ready on 127.0.0.1:~D (Swash ~A).~%"
             port session)
     (force-output)
+    (sb-thread:make-thread
+     (lambda ()
+       (handler-case
+           (multiple-value-bind (archive count)
+               (funcall (find-symbol "ARCHIVE-DEFERRED-LOGS" "LUV-BUILD"))
+             (when archive
+               (format t "~&Packed deferred build logs into ~A (~D build~:P).~%"
+                       (namestring (uiop:enough-pathname archive project-root))
+                       count)
+               (force-output)))
+         (error (condition)
+           (format *error-output* "~&Deferred build-log packing failed: ~A~%"
+                   condition)
+           (force-output *error-output*))))
+     :name "Sly build-log packer")
     (loop (sleep 3600))))
