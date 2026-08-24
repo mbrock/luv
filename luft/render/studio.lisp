@@ -35,6 +35,26 @@ predict.")
    (field-of-view :initarg :field-of-view :initform (* 70.0 (/ pi 180))
                   :accessor camera-field-of-view)))
 
+(defclass viewer-mode () ())
+
+(defclass isometric-walk-mode (viewer-mode) ()
+  (:documentation
+   "Absolute-pointer LUFT play: hover terrain, click a route, scroll zoom."))
+
+(defclass orbit-mode (viewer-mode) ()
+  (:documentation
+   "The original relative-pointer atelier orbit and direct keyboard mode."))
+
+(defgeneric viewer-mode-inspection-p (mode)
+  (:documentation "Whether MODE continuously points into LUFT terrain."))
+
+(defmethod viewer-mode-inspection-p ((mode viewer-mode)) nil)
+(defmethod viewer-mode-inspection-p ((mode isometric-walk-mode)) t)
+
+(defgeneric viewer-mode-allows-atelier-keys-p (mode))
+(defmethod viewer-mode-allows-atelier-keys-p ((mode viewer-mode)) nil)
+(defmethod viewer-mode-allows-atelier-keys-p ((mode isometric-walk-mode)) t)
+
 (defclass site-inspection ()
   ((source :initarg :source :reader site-inspection-source)
    (site :initarg :site :reader site-inspection-site)
@@ -397,7 +417,7 @@ the selector is the whole of the difference."
       (let* ((ndc-x (- (* 2.0 (/ pointer-x width)) 1.0))
              (ndc-y (- 1.0 (* 2.0 (/ pointer-y height))))
              (right-scale (/ ndc-x (aref projection 0)))
-             (up-scale (/ (- ndc-y) (aref projection 1))))
+             (up-scale (/ ndc-y (aref projection 1))))
         (if (eq *projection* :perspective)
             (values
              (camera-position camera)
@@ -420,7 +440,10 @@ the selector is the whole of the difference."
 
 (defun update-viewer-inspection (viewer)
   (multiple-value-bind (origin direction) (viewer-pointer-ray viewer)
-    (let* ((inspection (raycast-site (viewer-source viewer) origin direction))
+    (let* ((inspection
+             (handler-case
+                 (raycast-site (viewer-source viewer) origin direction)
+               (luft:outside-domain () nil)))
            (changed-p
              (not (same-inspected-site-p
                    inspection (viewer-inspection viewer)))))
@@ -489,7 +512,10 @@ before the operation boundary, or it would encode through resources which the
          (view (capture-frame-view (viewer-camera viewer)
                                    width height jitter))
          (previous (or (renderer-previous-view renderer) view))
-         (inspection (and inspector-p (update-viewer-inspection viewer)))
+         (inspection
+           (and (or inspector-p
+                    (viewer-mode-inspection-p (viewer-mode viewer)))
+                (update-viewer-inspection viewer)))
          (player (viewer-player viewer))
          (player-p (and player (typep (viewer-source viewer) 'scene)
                         (scene-player-p (viewer-source viewer)))))
@@ -679,6 +705,8 @@ before the operation boundary, or it would encode through resources which the
    (camera :initarg :camera :initform (make-fly-camera) :reader viewer-camera)
    (player :initarg :player :initform (make-walking-player)
            :accessor viewer-player)
+   (mode :initarg :mode :initform (make-instance 'isometric-walk-mode)
+         :accessor viewer-mode)
    (surface-views :initform (make-hash-table :test #'eql)
                   :reader viewer-surface-views)
    (controls :initform (make-hash-table :test #'eq)
@@ -763,7 +791,10 @@ before the operation boundary, or it would encode through resources which the
 
 (defun set-viewer-control (viewer direction active-p)
   (if active-p
-      (setf (gethash direction (viewer-controls viewer)) t)
+      (progn
+        (when (viewer-player viewer)
+          (cancel-walking-player-route (viewer-player viewer)))
+        (setf (gethash direction (viewer-controls viewer)) t))
       (remhash direction (viewer-controls viewer)))
   viewer)
 
@@ -781,10 +812,16 @@ before the operation boundary, or it would encode through resources which the
         (let ((forward (- (if (viewer-control-active-p viewer :forward) 1 0)
                           (if (viewer-control-active-p viewer :backward) 1 0)))
               (right (- (if (viewer-control-active-p viewer :right) 1 0)
-                        (if (viewer-control-active-p viewer :left) 1 0))))
+                        (if (viewer-control-active-p viewer :left) 1 0)))
+              (maximum-distance nil))
+          (when (and (zerop forward) (zerop right))
+            (multiple-value-setq (forward right maximum-distance)
+              (walking-player-route-control (viewer-player viewer) camera)))
           (advance-walking-player (viewer-player viewer)
                                   (viewer-source viewer) camera
-                                  forward right dt)
+                                  (or forward 0.0) (or right 0.0) dt
+                                  :maximum-distance maximum-distance)
+          (trim-walking-player-route (viewer-player viewer))
           ;; The first timestamp establishes the follow pose immediately.
           ;; Subsequent zero-duration samples preserve it; in Common Lisp a
           ;; numeric zero is true, so DT alone cannot express that distinction.
@@ -925,6 +962,27 @@ before the operation boundary, or it would encode through resources which the
   (let ((canvas (viewer-canvas (viewer-command-viewer))))
     (set-canvas-fullscreen canvas (not (canvas-fullscreen-p canvas)))))
 
+(defun set-viewer-mode (viewer mode)
+  "Install MODE and make its pointer ownership immediately true on screen."
+  (check-type mode viewer-mode)
+  (clear-viewer-controls viewer)
+  (when (viewer-pointer-captured-p viewer)
+    (set-canvas-relative-pointer-mode (viewer-canvas viewer) nil)
+    (setf (viewer-pointer-captured-p viewer) nil))
+  (setf (viewer-mode viewer) mode)
+  viewer)
+
+(clim:define-command (com-toggle-viewer-mode :command-table luft-window
+                                             :name "Toggle Interaction Mode"
+                                             :keystroke (:m))
+    ()
+  (let ((viewer (viewer-command-viewer)))
+    (set-viewer-mode
+     viewer
+     (if (typep (viewer-mode viewer) 'isometric-walk-mode)
+         (make-instance 'orbit-mode)
+         (make-instance 'isometric-walk-mode)))))
+
 (clim:define-command (com-quit :command-table luft-window
                                :name "Quit"
                                :keystroke (#\q :control))
@@ -982,6 +1040,7 @@ before the operation boundary, or it would encode through resources which the
     (or (mcluv:canvas-key-event-command
          viewer event :command-table window)
         (when (or (viewer-pointer-captured-p viewer)
+                  (viewer-mode-allows-atelier-keys-p (viewer-mode viewer))
                   (intersection '(:control :meta :super)
                                 (canvas-key-event-modifiers event)))
           (mcluv:canvas-key-event-command
@@ -1010,24 +1069,57 @@ before the operation boundary, or it would encode through resources which the
       (clim:execute-frame-command viewer command)))
   nil)
 
+(defgeneric handle-viewer-mode-pointer-press (mode viewer canvas event))
+
 (defmethod handle-canvas-event
     ((viewer viewer) canvas (event canvas-pointer-button-press-event))
   (setf (viewer-pointer-x viewer) (canvas-pointer-event-x event)
         (viewer-pointer-y viewer) (canvas-pointer-event-y event))
-  (when (not (viewer-pointer-captured-p viewer))
+  (handle-viewer-mode-pointer-press
+   (viewer-mode viewer) viewer canvas event)
+  nil)
+
+(defmethod handle-viewer-mode-pointer-press
+    ((mode isometric-walk-mode) viewer canvas event)
+  (declare (ignore mode canvas))
+  (let ((player (viewer-player viewer)))
+    (when player
+      (case (canvas-pointer-event-button event)
+        (:left
+         (let ((inspection (update-viewer-inspection viewer)))
+           (when inspection
+             (let ((site (site-inspection-site inspection))
+                   (cell (site-inspection-cell inspection)))
+               ;; Only an upward horizontal surface promises a standable
+               ;; destination.  Walls remain useful inspection targets but do
+               ;; not turn into surprising roof teleports.
+               (when (and (= luft:+xy-face-extent+ (luft:site-extent site))
+                          (luft:site-positive-p site))
+                 (start-walking-player-route
+                  player (viewer-source viewer)
+                  (luft:site-x cell) (luft:site-y cell)
+                  (1+ (luft:site-z cell))))))))
+        (:right
+         (multiple-value-bind (origin direction) (viewer-pointer-ray viewer)
+           (throw-walking-player-ball player origin direction)))))))
+
+(defmethod handle-viewer-mode-pointer-press
+    ((mode orbit-mode) viewer canvas event)
+  (declare (ignore mode event))
+  (unless (viewer-pointer-captured-p viewer)
     (set-canvas-relative-pointer-mode canvas t)
     (setf (viewer-pointer-captured-p viewer) t))
   (when (viewer-player viewer)
     (multiple-value-bind (origin direction) (viewer-pointer-ray viewer)
-      (throw-walking-player-ball (viewer-player viewer) origin direction)))
-  nil)
+      (throw-walking-player-ball (viewer-player viewer) origin direction))))
 
 (defmethod handle-canvas-event
     ((viewer viewer) canvas (event canvas-pointer-wheel-event))
   (declare (ignore canvas))
   (let ((factor (expt 1.10 (- (canvas-pointer-event-scroll-y event)))))
     (if (eq *projection* :isometric)
-        (setf *isometric-height* (* *isometric-height* factor))
+        (setf *isometric-height*
+              (max 6.0 (min 96.0 (* *isometric-height* factor))))
         (let ((camera (viewer-camera viewer)))
           (setf (camera-field-of-view camera)
                 (max 0.43633232
@@ -1040,7 +1132,8 @@ before the operation boundary, or it would encode through resources which the
   (declare (ignore canvas))
   (setf (viewer-pointer-x viewer) (canvas-pointer-event-x event)
         (viewer-pointer-y viewer) (canvas-pointer-event-y event))
-  (when (viewer-pointer-captured-p viewer)
+  (when (and (typep (viewer-mode viewer) 'orbit-mode)
+             (viewer-pointer-captured-p viewer))
     (let ((camera (viewer-camera viewer))
           (sensitivity (viewer-sensitivity viewer)))
       (decf (camera-yaw camera)
@@ -1071,7 +1164,7 @@ before the operation boundary, or it would encode through resources which the
                        bevel-profile
                        surface-mesh
                        (camera (make-fly-camera))
-                       (title "LUFT — walk the mountain · WASD · mouse orbit")
+                       (title "LUFT — click to walk · scroll to zoom · M orbit")
                        (width 1100) (height 800)
                        fullscreen-p
                        (inspector-p nil)

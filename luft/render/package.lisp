@@ -52,6 +52,15 @@
            #:walking-player
            #:make-walking-player
            #:walking-player-position
+           #:walking-player-route
+           #:walking-route
+           #:walking-route-start
+           #:walking-route-destination
+           #:walking-route-cells
+           #:walking-route-status
+           #:walking-route-detail
+           #:walking-route-visits
+           #:start-walking-player-route
            #:viewer-player
            ;; Retained across the live refoundation package reload.
            #:inspection-camera
@@ -61,6 +70,9 @@
            #:camera-yaw
            #:camera-pitch
            #:viewer-camera
+           #:viewer-mode
+           #:isometric-walk-mode
+           #:orbit-mode
            #:viewer-inspection
            #:site-inspection
            #:site-inspection-site

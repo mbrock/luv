@@ -14,6 +14,14 @@
 (defconstant +walking-player-speed+ 7.0)
 (defconstant +walking-player-gravity+ -24.0)
 (defconstant +walking-player-jump-speed+ 9.0)
+(defparameter *walking-path-horizontal-radius* 80
+  "Farthest horizontal cell distance admitted by one click-to-walk route.")
+(defparameter *walking-path-vertical-radius* 16
+  "Farthest vertical cell distance admitted by one click-to-walk route.")
+(defparameter *walking-path-visit-limit* 20000
+  "Maximum standable cells considered by one click-to-walk search.")
+(defparameter *walking-route-arrival-radius* 0.09
+  "Horizontal distance from a cell centre which completes one waypoint.")
 (defconstant +thrown-ball-speed+ 18.0)
 (defconstant +thrown-ball-radius+ 0.32)
 
@@ -55,6 +63,7 @@ and projectile terrain publication materializes nearby boundary colliders."
           :accessor walking-player-speed)
    (vertical-velocity :initform 0.0 :accessor walking-player-vertical-velocity)
    (grounded-p :initform t :accessor walking-player-grounded-p)
+   (route :initform nil :accessor walking-player-route)
    (jump-requested-p :initform nil
                      :accessor walking-player-jump-requested-p)
    (spell-flash :initform 0.0 :accessor walking-player-spell-flash)
@@ -70,6 +79,21 @@ and projectile terrain publication materializes nearby boundary colliders."
 
 POSITION is the centre of the character's feet.  Heading and gait are
 semantic animation inputs; keys and shader clocks are deliberately absent."))
+
+(defclass walking-route ()
+  ((start :initarg :start :reader walking-route-start)
+   (destination :initarg :destination :reader walking-route-destination)
+   (cells :initarg :cells :accessor walking-route-cells)
+   (status :initarg :status :initform :running
+           :accessor walking-route-status)
+   (detail :initarg :detail :initform nil :accessor walking-route-detail)
+   (visits :initarg :visits :initform 0 :reader walking-route-visits))
+  (:documentation
+   "One inspectable discrete intention realized by the continuous player.
+
+START, DESTINATION, and CELLS are packed LUFT cell sites at the character's
+foot height.  The route owns no duplicate terrain field; collision remains
+authoritative while the player crosses between its cell-centre waypoints."))
 
 (defmethod initialize-instance :after ((player walking-player) &key)
   ;; INITARG sharing above names the semantic initial value.  Temporal state
@@ -131,6 +155,170 @@ for a remote roof, so a wall cannot teleport the player onto its top."
                     (walking-player-clear-at-p
                      solid x y candidate-base))
             return (coerce candidate-base 'single-float))))
+
+(defun walking-player-standable-cell-p (source x y z)
+  "Whether the player can stand at the centre of the exact foot cell X,Y,Z."
+  (let ((solid (inspection-source-solid source)))
+    (and (= 1 (collision-cell-occupancy-bit solid x y (1- z)))
+         (walking-player-clear-at-p solid (+ x 0.5) (+ y 0.5) z))))
+
+(defun nearby-walking-cell-p (cell start)
+  (and (<= (+ (abs (- (luft:site-x cell) (luft:site-x start)))
+              (abs (- (luft:site-y cell) (luft:site-y start))))
+           *walking-path-horizontal-radius*)
+       (<= (abs (- (luft:site-z cell) (luft:site-z start)))
+           *walking-path-vertical-radius*)))
+
+(defun map-walking-cell-neighbors (function source cell start)
+  "Call FUNCTION for four-connected, nearby standable neighbors of CELL."
+  (let* ((solid (inspection-source-solid source))
+         (domain (luft:chain-domain solid))
+         (x (luft:site-x cell))
+         (y (luft:site-y cell))
+         (z (luft:site-z cell)))
+    (dolist (offset '((0 1) (1 0) (0 -1) (-1 0)))
+      (destructuring-bind (dx dy) offset
+        (let* ((next-x (+ x dx))
+               (next-y (+ y dy))
+               (next-z
+                 (walking-player-support-height
+                  source (+ next-x 0.5) (+ next-y 0.5) z)))
+          (when next-z
+            (handler-case
+                (let ((next
+                        (luft:make-site
+                         domain next-x next-y (round next-z)
+                         luft:+cell-extent+ 1)))
+                  (when (nearby-walking-cell-p next start)
+                    (funcall function next)))
+              (luft:outside-domain () nil))))))))
+
+(defun reconstruct-walking-route (parents start destination)
+  (let ((cells nil)
+        (cell destination))
+    (loop until (= cell start)
+          do (push cell cells)
+             (setf cell (gethash cell parents)))
+    cells))
+
+(defun find-walking-route (player source destination)
+  "Return a bounded four-connected route from PLAYER to DESTINATION.
+
+DESTINATION is a packed LUFT foot cell.  A returned failed route retains the
+reason and search count, so a click that cannot be honored is inspectable
+rather than silently becoming a straight-line collision attempt."
+  (let* ((solid (inspection-source-solid source))
+         (domain (luft:chain-domain solid))
+         (position (walking-player-position player))
+         (start
+           (luft:make-site
+            domain (floor (vec3:vec3-x position))
+            (floor (vec3:vec3-y position))
+            (floor (vec3:vec3-z position)) luft:+cell-extent+ 1)))
+    (labels ((route (cells status detail visits)
+               (make-instance 'walking-route
+                              :start start :destination destination
+                              :cells cells :status status :detail detail
+                              :visits visits)))
+      (unless (nearby-walking-cell-p destination start)
+        (return-from find-walking-route
+          (route nil :failed "destination is outside the local path window" 0)))
+      (unless (walking-player-standable-cell-p
+               source (luft:site-x destination) (luft:site-y destination)
+               (luft:site-z destination))
+        (return-from find-walking-route
+          (route nil :failed "destination is not a clear supported cell" 0)))
+      (when (= start destination)
+        (return-from find-walking-route
+          (route nil :arrived "already there" 0)))
+      (let ((parents (make-hash-table :test #'eql))
+            (seen (make-hash-table :test #'eql))
+            (queue (make-array 64 :adjustable t :fill-pointer 0))
+            (head 0)
+            (visits 0))
+        (setf (gethash start seen) t)
+        (vector-push-extend start queue)
+        (loop while (and (< head (length queue))
+                         (< visits *walking-path-visit-limit*))
+              for cell = (aref queue head)
+              do (incf head)
+                 (incf visits)
+                 (map-walking-cell-neighbors
+                  (lambda (next)
+                    (unless (gethash next seen)
+                      (setf (gethash next seen) t
+                            (gethash next parents) cell)
+                      (when (= next destination)
+                        (return-from find-walking-route
+                          (route
+                           (reconstruct-walking-route
+                            parents start destination)
+                           :running nil visits)))
+                      (vector-push-extend next queue)))
+                  source cell start))
+        (route nil :failed "no local walkable path reaches the destination"
+               visits)))))
+
+(defun start-walking-player-route (player source x y z)
+  "Replace PLAYER's current intention with a route to foot cell X,Y,Z."
+  (let* ((domain (luft:chain-domain (inspection-source-solid source)))
+         (destination
+           (handler-case
+               (luft:make-site domain x y z luft:+cell-extent+ 1)
+             (luft:outside-domain () nil)))
+         (route
+           (if destination
+               (find-walking-route player source destination)
+               (make-instance
+                'walking-route :start nil :destination nil :cells nil
+                :status :failed :detail "destination is outside the world"))))
+    (setf (walking-player-route player) route)
+    route))
+
+(defun cancel-walking-player-route (player &optional (detail "manual movement"))
+  "Return movement authority to direct input, retaining the cancelled route."
+  (let ((route (walking-player-route player)))
+    (when (and route (eq :running (walking-route-status route)))
+      (setf (walking-route-status route) :cancelled
+            (walking-route-detail route) detail)))
+  player)
+
+(defun walking-player-reached-route-cell-p (player cell)
+  (let* ((position (walking-player-position player))
+         (dx (- (+ (luft:site-x cell) 0.5) (vec3:vec3-x position)))
+         (dy (- (+ (luft:site-y cell) 0.5) (vec3:vec3-y position)))
+         (horizontal-distance (sqrt (+ (* dx dx) (* dy dy)))))
+    (and (< horizontal-distance *walking-route-arrival-radius*)
+         (< (abs (- (luft:site-z cell) (vec3:vec3-z position))) 0.16))))
+
+(defun trim-walking-player-route (player)
+  (let ((route (walking-player-route player)))
+    (when (and route (eq :running (walking-route-status route)))
+      (loop while (and (walking-route-cells route)
+                       (walking-player-reached-route-cell-p
+                        player (first (walking-route-cells route))))
+            do (pop (walking-route-cells route)))
+      (unless (walking-route-cells route)
+        (setf (walking-route-status route) :arrived
+              (walking-route-detail route) "destination reached"))))
+  player)
+
+(defun walking-player-route-control (player camera)
+  "Return camera-relative axes and remaining distance for PLAYER's route."
+  (trim-walking-player-route player)
+  (let ((route (walking-player-route player)))
+    (when (and route (eq :running (walking-route-status route)))
+      (let* ((cell (first (walking-route-cells route)))
+             (position (walking-player-position player))
+             (dx (- (+ (luft:site-x cell) 0.5) (vec3:vec3-x position)))
+             (dy (- (+ (luft:site-y cell) 0.5) (vec3:vec3-y position)))
+             (distance (sqrt (+ (* dx dx) (* dy dy))))
+             (direction-x (/ dx (max distance 1.0e-6)))
+             (direction-y (/ dy (max distance 1.0e-6)))
+             (yaw (camera-yaw camera)))
+        (values (+ (* (cos yaw) direction-x) (* (sin yaw) direction-y))
+                (- (* (sin yaw) direction-x) (* (cos yaw) direction-y))
+                distance)))))
 
 (defun try-walking-player-axis (player source axis amount)
   "Sweep PLAYER along one horizontal AXIS, sliding at blocked boundaries."
@@ -297,7 +485,8 @@ for a remote roof, so a wall cannot teleport the player onto its top."
               (walking-player-grounded-p player) t))))
   player)
 
-(defun advance-walking-player (player source camera forward right seconds)
+(defun advance-walking-player
+    (player source camera forward right seconds &key maximum-distance)
   "Advance PLAYER from camera-relative movement axes for SECONDS."
   (begin-walking-player-frame player)
   (let ((length (sqrt (+ (* forward forward) (* right right)))))
@@ -307,7 +496,8 @@ for a remote roof, so a wall cannot teleport the player onto its top."
                (yaw (camera-yaw camera))
                (direction-x (+ (* (cos yaw) forward) (* (sin yaw) right)))
                (direction-y (+ (* (sin yaw) forward) (* (- (cos yaw)) right)))
-               (distance (* seconds (walking-player-speed player)))
+               (distance (min (* seconds (walking-player-speed player))
+                              (or maximum-distance most-positive-single-float)))
                (position (walking-player-position player))
                (before-x (vec3:vec3-x position))
                (before-y (vec3:vec3-y position)))

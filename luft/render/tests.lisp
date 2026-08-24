@@ -354,6 +354,10 @@
     (ok (not (luft.render::viewer-inspector-p viewer)))
     (ok (luft.render::viewer-inspector-p
          (clim:make-application-frame 'render:viewer :inspector-p t)))
+    (ok (typep (render:viewer-mode viewer) 'render:isometric-walk-mode))
+    (ok (equal '(luft.render::com-start-moving :forward)
+               (luft.render::viewer-key-command viewer (key-press :w))))
+    (setf (render:viewer-mode viewer) (make-instance 'render:orbit-mode))
     (ok (null (luft.render::viewer-key-command viewer (key-press :w))))
     (ok (equal '(luft.render::com-toggle-fullscreen)
                (luft.render::viewer-key-command
@@ -374,6 +378,8 @@
                (luft.render::viewer-key-command viewer (key-press :b))))
     (ok (equal '(luft.render::com-toggle-fullscreen)
                (luft.render::viewer-key-command viewer (key-press :f11))))
+    (ok (equal '(luft.render::com-toggle-viewer-mode)
+               (luft.render::viewer-key-command viewer (key-press :m))))
     (ok (equal '(luft.render::com-quit)
                (luft.render::viewer-key-command
                 viewer (key-press :q :character #\q
@@ -384,6 +390,45 @@
     (clim:execute-frame-command
      viewer (luft.render::viewer-key-command viewer (key-release :w)))
     (ok (not (luft.render::viewer-control-active-p viewer :forward)))))
+
+(deftest click-to-walk-routes-around-a-character-high-wall
+  (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
+         (player
+           (render:make-walking-player
+            :position (luv.arithmetic.lisp.vec3:make-vec3 1.5 2.5 1.0))))
+    (luft.render::scene-builder-box builder 0 15 0 15 0 0)
+    ;; The direct row is blocked.  The only short way around the north end
+    ;; crosses Y=5, proving the click produced a route rather than a velocity.
+    (loop for y from 0 to 4 do
+      (loop for z from 1 to 4 do
+        (luft.render::scene-builder-cell builder 3 y z)))
+    (let* ((scene (luft.render::finish-scene-builder builder :player-p t))
+           (route
+             (render:start-walking-player-route player scene 5 2 1)))
+      (ok (eq :running (render:walking-route-status route)))
+      (ok (find 5 (render:walking-route-cells route)
+                :key #'luft:site-y))
+      (ok (> (length (render:walking-route-cells route)) 4))
+      (ok (plusp (render:walking-route-visits route)))
+      (loop repeat 1200
+            while (eq :running (render:walking-route-status route))
+            do (multiple-value-bind (forward right maximum-distance)
+                   (luft.render::walking-player-route-control
+                    player (render:make-fly-camera :yaw 0.0))
+                 (luft.render::advance-walking-player
+                  player scene (render:make-fly-camera :yaw 0.0)
+                  (or forward 0.0) (or right 0.0) (/ 1.0 120.0)
+                  :maximum-distance maximum-distance)
+                 (luft.render::trim-walking-player-route player)))
+      (ok (eq :arrived (render:walking-route-status route)))
+      (ok (< (abs (- 5.5
+                     (luv.arithmetic.lisp.vec3:vec3-x
+                      (render:walking-player-position player))))
+             0.12))
+      (ok (< (abs (- 2.5
+                     (luv.arithmetic.lisp.vec3:vec3-y
+                      (render:walking-player-position player))))
+             0.12)))))
 
 (deftest orthographic-walk-moves-on-the-ground-without-zooming
   (let* ((viewer (clim:make-application-frame 'render:viewer))
@@ -1607,6 +1652,31 @@
                     (subseq perspective 92 96)))
         (ok (equalp #(0.0 1.0 0.0 0.0)
                     (subseq perspective 96 100)))))))
+
+(deftest an-off-centre-pointer-ray-inverts-the-rendered-projection
+  (let* ((canvas (make-instance 'luv:sdl-canvas :width 1000 :height 800))
+         (camera
+           (render:make-fly-camera
+            :position (luv.arithmetic.lisp.vec3:make-vec3 0.0 0.0 10.0)
+            :yaw 0.0 :pitch 0.0))
+         (viewer
+           (clim:make-application-frame
+            'render:viewer :canvas canvas :camera camera))
+         (render:*projection* :isometric)
+         (render:*isometric-height* 20.0))
+    ;; At yaw and pitch zero camera UP is world +Z.  A pointer one quarter of
+    ;; the viewport below centre must therefore start five cells below the
+    ;; camera, not at the vertically mirrored point five cells above it.
+    (setf (luft.render::viewer-pointer-x viewer) 500.0
+          (luft.render::viewer-pointer-y viewer) 600.0)
+    (multiple-value-bind (origin direction)
+        (luft.render::viewer-pointer-ray viewer)
+      (ok (< (abs (- 5.0
+                     (luv.arithmetic.lisp.vec3:vec3-z origin)))
+             1.0e-6))
+      (ok (< (abs (- 1.0
+                     (luv.arithmetic.lisp.vec3:vec3-x direction)))
+             1.0e-6)))))
 
 (deftest the-light-frame-is-texel-stable-under-subtexel-camera-motion
   (let* ((light luft.render:*light*)
