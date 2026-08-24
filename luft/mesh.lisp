@@ -377,6 +377,9 @@ star corpus; signal that boundary explicitly instead of silently welding it."
 
 (declaim (inline %lattice-key %lattice-key-x %lattice-key-y %lattice-key-z))
 (defun %lattice-key (x y z)
+  (declare (optimize (speed 3) (safety 1))
+           (type (integer -1 #.(ash 1 18)) x y)
+           (type (integer -1 511) z))
   (logior (ash (+ x 1) +mesh-key-x-shift+)
           (ash (+ y 1) +mesh-key-y-shift+)
           (+ z 1)))
@@ -392,19 +395,25 @@ star corpus; signal that boundary explicitly instead of silently welding it."
 ;;; Materialized occupancy
 ;;;
 ;;; A field binds one solid's occupancy to a cell-coordinate box.  Probes
-;;; inside the box are one EQL lookup on a packed lattice key; probes outside
+;;; inside an ordinary-size box are one dense bit-vector lookup; probes outside
 ;;; it signal OUTSIDE-DOMAIN with the boundary restarts, so the caller's
 ;;; policy (whole-world air, a chunk store, a strict test) decides the edge.
 
 (defstruct (occupancy-field
-             (:constructor %make-occupancy-field (domain table x0 x1 y0 y1)))
+             (:constructor %make-occupancy-field
+                 (domain bits table x0 x1 y0 y1 y-span)))
   (domain nil :type world-domain :read-only t)
-  (table nil :type hash-table :read-only t)
+  ;; Resident occupancy is dense unless the horizontal box would make an
+  ;; unreasonable allocation.  The sparse fallback preserves whole-domain
+  ;; meshing for very large, lightly populated worlds.
+  (bits nil :type (or null simple-bit-vector) :read-only t)
+  (table nil :type (or null hash-table) :read-only t)
   ;; Half-open cell-coordinate bounds of the resident box.
   (x0 0 :type fixnum :read-only t)
   (x1 0 :type fixnum :read-only t)
   (y0 0 :type fixnum :read-only t)
   (y1 0 :type fixnum :read-only t)
+  (y-span 1 :type (integer 1 #.(ash 1 18)) :read-only t)
   ;; Resolutions of probes past the box but inside the world: chunk key to
   ;; :AIR, :SOLID, or a cell table, each obtained from one MISSING-CHUNK
   ;; signal and cached for every later probe into that chunk.
@@ -424,9 +433,32 @@ star corpus; signal that boundary explicitly instead of silently welding it."
     table))
 
 (defun %materialize-occupancy (solid x0 x1 y0 y1)
-  "Validate SOLID's cells and index them over the given cell box."
-  (%make-occupancy-field (chain-domain solid) (%chunk-cells-table solid)
-                         x0 x1 y0 y1))
+  "Validate SOLID's cells and materialize them over the given cell box."
+  (declare (type fixnum x0 x1 y0 y1))
+  (let* ((y-span (- y1 y0))
+         (volume (* (- x1 x0) y-span +top-z+))
+         (dense-p (<= volume (* 128 1024 1024)))
+         (bits (when dense-p
+                 (make-array volume :element-type 'bit :initial-element 0)))
+         (table (unless dense-p
+                  (make-hash-table :test #'eql
+                                   :size (max 64 (chain-count solid))))))
+    (loop for cell across (%chain-sites solid) do
+      (unless (and (= (site-extent cell) +cell-extent+)
+                   (site-positive-p cell))
+        (error "A solid mesh requires positive cells, not ~S." cell))
+      (let ((x (site-x cell)) (y (site-y cell)) (z (site-z cell)))
+        (unless (and (<= x0 x) (< x x1) (<= y0 y) (< y y1)
+                     (<= 0 z) (< z +top-z+))
+          (error "Cell ~S lies outside its occupancy box." cell))
+        (if bits
+            (setf (sbit bits
+                        (+ z (* +top-z+
+                                (+ (- y y0) (* y-span (- x x0))))))
+                  1)
+            (setf (gethash (%lattice-key x y z) table) t))))
+    (%make-occupancy-field
+     (chain-domain solid) bits table x0 x1 y0 y1 y-span)))
 
 (defun %resolve-chunk (field key)
   "Signal MISSING-CHUNK once for KEY and cache the handler's resolution."
@@ -450,17 +482,43 @@ star corpus; signal that boundary explicitly instead of silently welding it."
       (%resolve-chunk field key)))
 
 (declaim (inline %occupied-bit))
+(declaim (inline %dense-occupancy-index))
+(defun %dense-occupancy-index (field x y z)
+  (declare (optimize (speed 3) (safety 1))
+           (type occupancy-field field)
+           (type fixnum x y z))
+  (the fixnum
+       (+ z
+          (the fixnum
+               (* +top-z+
+                  (the fixnum
+                       (+ (the fixnum (- y (occupancy-field-y0 field)))
+                          (the fixnum
+                               (* (occupancy-field-y-span field)
+                                  (the fixnum
+                                       (- x
+                                          (occupancy-field-x0 field))))))))))))
+
 (defun %occupied-bit (field domain x y z)
   "Occupancy of one cell: air beyond Z, a lookup inside the field's box,
 one cached MISSING-CHUNK resolution per non-resident chunk inside the
 world, and an OUTSIDE-DOMAIN signal past the world's own edges."
-  (declare (optimize (speed 3) (safety 1)))
+  (declare (optimize (speed 3) (safety 1))
+           (type occupancy-field field)
+           (type world-domain domain)
+           (type fixnum x y z))
   (cond ((or (< z 0) (>= z +top-z+)) 0)
         ((and (<= (occupancy-field-x0 field) x)
               (< x (occupancy-field-x1 field))
               (<= (occupancy-field-y0 field) y)
               (< y (occupancy-field-y1 field)))
-         (if (gethash (%lattice-key x y z) (occupancy-field-table field)) 1 0))
+         (let ((bits (occupancy-field-bits field)))
+           (if bits
+               (sbit bits (%dense-occupancy-index field x y z))
+               (if (gethash (%lattice-key x y z)
+                            (occupancy-field-table field))
+                   1
+                   0))))
         ((or (< x 0) (>= x (world-domain-x-limit domain))
              (< y 0) (>= y (world-domain-y-limit domain)))
          (outside-domain-occupancy domain x y z))
@@ -475,7 +533,10 @@ world, and an OUTSIDE-DOMAIN signal past the world's own edges."
   "Pack the eight-cell occupancy star of the lattice vertex at X Y Z.
 
 Bit conventions match SITE-STAR-OCCUPANCY-MASK on a vertex site."
-  (declare (optimize (speed 3) (safety 1)))
+  (declare (optimize (speed 3) (safety 1))
+           (type occupancy-field field)
+           (type world-domain domain)
+           (type fixnum x y z))
   (let ((mask 0))
     (dotimes (sample 8 mask)
       (when (= 1 (%occupied-bit
@@ -538,6 +599,12 @@ Bit conventions match SITE-STAR-OCCUPANCY-MASK on a vertex site."
   (face-stream (%make-instance-stream) :type instance-stream :read-only t)
   (band-stream (%make-instance-stream) :type instance-stream :read-only t)
   (fan-stream (%make-instance-stream) :type instance-stream :read-only t)
+  ;; When configured for bevel construction, face and band emission update
+  ;; this shared parity table directly from the already-oriented scratch
+  ;; vertices.  Builders without it retain the general replay path used by
+  ;; mesh transformations elsewhere in this file.
+  (boundary-packing nil)
+  (boundary-observations nil)
   (singular-star-count 0 :type (integer 0 *)))
 
 (defun %intern-template (builder scratch count)
@@ -582,6 +649,9 @@ Bit conventions match SITE-STAR-OCCUPANCY-MASK on a vertex site."
                (typep base-z '(unsigned-byte 32)))
     (error "Instance base coordinate is unsigned: ~S."
            (list base-x base-y base-z)))
+  (when (and (member kind '(:face :band))
+             (surface-mesh-builder-boundary-observations builder))
+    (%observe-scratch-boundary-edges builder base-x base-y base-z stock count))
   (let* ((template (%intern-template
                     builder (surface-mesh-builder-vertex-scratch builder)
                     count))
@@ -797,44 +867,63 @@ Bit conventions match SITE-STAR-OCCUPANCY-MASK on a vertex site."
       (setf (svref table states) (%edge-run-transition-groups states))))
   "Transition groups for every quadrant occupancy pattern, built once.")
 
-(defun %collect-edge-keys (cells)
-  "Return the packed (axis, anchor) keys of every edge incident to CELLS.
+(defun %make-edge-candidates (cell-count)
+  "An emission-order buffer of packed lattice edges discovered at faces."
+  (make-array (max 64 cell-count)
+              :element-type '(unsigned-byte 64)
+              :adjustable t :fill-pointer 0))
 
-CELLS is a vector of packed lattice keys naming solid cell anchors."
+(defun %append-face-edge-keys
+    (candidates cell-x cell-y cell-z axis-number side)
+  "Append the four lattice edges of one exposed cell face."
   (declare (optimize (speed 3) (safety 1))
-           (type (simple-array (unsigned-byte 64) (*)) cells))
-  (let ((seen (make-hash-table :test #'eql
-                               :size (* 8 (max 8 (length cells))))))
-    (loop for cell-key across cells do
-      (let ((cx (%lattice-key-x cell-key))
-            (cy (%lattice-key-y cell-key))
-            (cz (%lattice-key-z cell-key)))
-        (dotimes (axis-number 3)
-          (let ((u (svref +axis-u+ axis-number))
-                (v (svref +axis-v+ axis-number)))
-            (dotimes (u-side 2)
-              (dotimes (v-side 2)
-                (let ((x cx) (y cy) (z cz))
-                  (macrolet ((bump (axis-form amount)
-                               `(let ((axis ,axis-form))
-                                  (case axis
-                                    (0 (incf x ,amount))
-                                    (1 (incf y ,amount))
-                                    (t (incf z ,amount))))))
-                    (bump u u-side)
-                    (bump v v-side))
-                  (setf (gethash (logior (ash axis-number
-                                              +mesh-key-axis-shift+)
-                                         (%lattice-key x y z))
-                                 seen)
-                        t))))))))
-    (let ((keys (make-array (hash-table-count seen)
-                            :element-type '(unsigned-byte 64)))
-          (write 0))
-      (loop for key being the hash-keys of seen
-            do (setf (aref keys write) key)
-               (incf write))
-      (sort keys #'<))))
+           (type (vector (unsigned-byte 64)) candidates)
+           (type fixnum cell-x cell-y cell-z axis-number side))
+  (let ((x cell-x) (y cell-y) (z cell-z)
+        (u (svref +axis-u+ axis-number))
+        (v (svref +axis-v+ axis-number)))
+    (macrolet ((bump (axis amount)
+                 `(case ,axis
+                    (0 (incf x ,amount))
+                    (1 (incf y ,amount))
+                    (t (incf z ,amount))))
+               (edge (edge-axis)
+                 `(vector-push-extend
+                   (logior (ash ,edge-axis +mesh-key-axis-shift+)
+                           (%lattice-key x y z))
+                   candidates)))
+      (when (plusp side) (bump axis-number 1))
+      (edge u)
+      (bump v 1)
+      (edge u)
+      (bump v -1)
+      (edge v)
+      (bump u 1)
+      (edge v)))
+  candidates)
+
+(defun %unique-edge-candidates (candidates)
+  "Sort and compact CANDIDATES into an exact simple packed edge vector."
+  (declare (optimize (speed 3) (safety 1))
+           (type (vector (unsigned-byte 64)) candidates))
+  (sort candidates #'<)
+  (let* ((count (fill-pointer candidates))
+         (unique-count
+           (if (zerop count)
+               0
+               (let ((write 1)
+                     (previous (aref candidates 0)))
+                 (loop for read from 1 below count
+                       for key = (aref candidates read)
+                       unless (= key previous)
+                         do (setf (aref candidates write) key
+                                  previous key)
+                            (incf write))
+                 write)))
+         (result (make-array unique-count
+                             :element-type '(unsigned-byte 64))))
+    (replace result candidates :end2 unique-count)
+    result))
 
 (defun %chain-cell-keys (chain)
   "The packed lattice keys of CHAIN's cells, in chain order."
@@ -1129,6 +1218,19 @@ eighth-cell anchor beyond it, so the packed anchor box is widened by two."
 Returns a table from PACKING's fixnum edge keys to count<<36 | left12<<24 |
 right12<<12 | stock12, where the 12-bit points are anchor-local."
   (declare (optimize (speed 3) (safety 1)))
+  (let ((observations
+          (surface-mesh-builder-boundary-observations (first builders))))
+    (when observations
+      (unless (every (lambda (builder)
+                       (and (eq observations
+                                (surface-mesh-builder-boundary-observations
+                                 builder))
+                            (eq packing
+                                (surface-mesh-builder-boundary-packing
+                                 builder))))
+                     builders)
+        (error "Sheet builders do not share one boundary observation table."))
+      (return-from %builder-open-boundary-table observations)))
   (let* ((triangles
            (loop for builder in builders
                  for templates = (surface-mesh-builder-templates builder)
@@ -1151,6 +1253,85 @@ right12<<12 | stock12, where the 12-bit points are anchor-local."
         (%scan-stream-boundary-edges
          (surface-mesh-builder-band-stream builder) templates packing
          observations)))))
+
+(defun %enable-boundary-observations (builders packing estimated-cells)
+  "Make BUILDERS update one boundary parity table during sheet emission."
+  (let ((observations
+          (make-hash-table :test #'eql
+                           :size (max 4096 (* 4 estimated-cells)))))
+    (dolist (builder builders observations)
+      (setf (surface-mesh-builder-boundary-packing builder) packing
+            (surface-mesh-builder-boundary-observations builder)
+            observations))))
+
+(defun %observe-scratch-boundary-edges
+    (builder base-x base-y base-z stock count)
+  "Parity-count oriented SCRATCH triangles before template interning."
+  (declare (optimize (speed 3) (safety 1))
+           (type fixnum base-x base-y base-z count))
+  (let ((packing (surface-mesh-builder-boundary-packing builder))
+        (observations
+          (surface-mesh-builder-boundary-observations builder))
+        (vertices (surface-mesh-builder-vertex-scratch builder))
+        (ox (* +mesh-cell-size+ base-x))
+        (oy (* +mesh-cell-size+ base-y))
+        (oz (* +mesh-cell-size+ base-z)))
+    (flet ((global-x (vertex)
+             (+ ox (- (ldb (byte +mesh-template-coordinate-bit-count+ 0)
+                           (aref vertices vertex))
+                      +mesh-template-coordinate-bias+)))
+           (global-y (vertex)
+             (+ oy (- (ldb (byte +mesh-template-coordinate-bit-count+
+                                 +mesh-template-coordinate-bit-count+)
+                               (aref vertices vertex))
+                      +mesh-template-coordinate-bias+)))
+           (global-z (vertex)
+             (+ oz (- (ldb (byte +mesh-template-coordinate-bit-count+
+                                 (* 2 +mesh-template-coordinate-bit-count+))
+                               (aref vertices vertex))
+                      +mesh-template-coordinate-bias+))))
+      (loop for triangle from 0 below count by 3 do
+        (dotimes (index 3)
+          (let* ((left (+ triangle index))
+                 (right (+ triangle (mod (1+ index) 3)))
+                 (lx (global-x left)) (ly (global-y left))
+                 (lz (global-z left))
+                 (rx (global-x right)) (ry (global-y right))
+                 (rz (global-z right))
+                 (anchor-x (ash (min lx rx) -3))
+                 (anchor-y (ash (min ly ry) -3))
+                 (anchor-z (ash (min lz rz) -3))
+                 (left12
+                   (logior (ash (- lx (* 8 anchor-x)) 8)
+                           (ash (- ly (* 8 anchor-y)) 4)
+                           (- lz (* 8 anchor-z))))
+                 (right12
+                   (logior (ash (- rx (* 8 anchor-x)) 8)
+                           (ash (- ry (* 8 anchor-y)) 4)
+                           (- rz (* 8 anchor-z))))
+                 (key (%boundary-edge-key
+                       packing anchor-x anchor-y anchor-z
+                       (if (< left12 right12)
+                           (logior (ash left12 12) right12)
+                           (logior (ash right12 12) left12))))
+                 (existing (gethash key observations)))
+            (if existing
+                (let ((next-count
+                        (1+ (ash existing
+                                 (- +boundary-observation-count-shift+)))))
+                  (when (> next-count 2)
+                    (error "Face and edge streams meet ~D times at ~S."
+                           next-count key))
+                  (setf (gethash key observations)
+                        (dpb next-count
+                             (byte 4 +boundary-observation-count-shift+)
+                             existing)))
+                (setf (gethash key observations)
+                      (logior
+                       (ash 1 +boundary-observation-count-shift+)
+                       (ash left12 +fan-record-left-shift+)
+                       (ash right12 +fan-record-right-shift+)
+                       stock)))))))))
 
 (defun %scan-stream-boundary-edges (stream templates packing observations)
   (declare (optimize (speed 3) (safety 1)))
@@ -1243,7 +1424,7 @@ right12<<12 | stock12, where the 12-bit points are anchor-local."
     (builders packing bevel-width drop-nonlocal-p)
   "Group the open boundary's directed edges by owning lattice vertex.
 
-Returns a table from packed site keys to lists of fan records whose 12-bit
+Returns a table from packed site keys to packed vectors of fan records whose 12-bit
 points are site-local with the fan bias.  An open edge not contained in any
 vertex's bevel domain is an invariant violation for a whole solid; for a
 chunk's witness scan it is the witness truncation boundary, provably outside
@@ -1297,34 +1478,48 @@ every owned site's bevel domain, and DROP-NONLOCAL-P discards it."
                                           (- rz (* 8 site-z)))
                               +fan-record-right-shift+)
                          stock)))
-                 (push record
-                       (gethash (%lattice-key site-x site-y site-z)
-                                by-site))))))))
+                 (let* ((key (%lattice-key site-x site-y site-z))
+                        (records
+                          (or (gethash key by-site)
+                              (setf (gethash key by-site)
+                                    (make-array
+                                     8 :element-type '(unsigned-byte 64)
+                                       :adjustable t :fill-pointer 0)))))
+                   (vector-push-extend record records))))))))
      observations)
     by-site))
 
 (defun %fan-record-cycles (site-x site-y site-z records)
   "Order consistently directed fan RECORDS into loops at the site."
-  (let ((pending (copy-list records))
+  (let ((used (make-array (length records) :element-type 'bit
+                                           :initial-element 0))
         (cycles nil))
-    (loop while pending do
-      (let* ((first-record (pop pending))
-             (first-point (%fan-record-left first-record))
-             (next-point (%fan-record-right first-record))
-             (cycle (list first-record)))
-        (loop until (= next-point first-point) do
-          (let ((next-record
-                  (find next-point pending :key #'%fan-record-left)))
-            (unless next-record
-              (error "Open boundary at lattice site ~S stops at ~S."
-                     (list site-x site-y site-z)
-                     (list (%fan-point-x next-point)
-                           (%fan-point-y next-point)
-                           (%fan-point-z next-point))))
-            (setf pending (delete next-record pending :count 1)
-                  cycle (append cycle (list next-record))
-                  next-point (%fan-record-right next-record))))
-        (push cycle cycles)))
+    (dotimes (start (length records))
+      (when (zerop (sbit used start))
+        (let* ((first-record (aref records start))
+               (first-point (%fan-record-left first-record))
+               (next-point (%fan-record-right first-record))
+               (cycle (list first-record)))
+          (setf (sbit used start) 1)
+          (loop until (= next-point first-point) do
+            (let ((next-index nil))
+              (dotimes (index (length records))
+                (when (and (zerop (sbit used index))
+                           (= next-point
+                              (%fan-record-left (aref records index))))
+                  (setf next-index index)
+                  (return)))
+              (unless next-index
+                (error "Open boundary at lattice site ~S stops at ~S."
+                       (list site-x site-y site-z)
+                       (list (%fan-point-x next-point)
+                             (%fan-point-y next-point)
+                             (%fan-point-z next-point))))
+              (let ((next-record (aref records next-index)))
+                (setf (sbit used next-index) 1
+                      cycle (cons next-record cycle)
+                      next-point (%fan-record-right next-record)))))
+          (push (nreverse cycle) cycles))))
     (nreverse cycles)))
 
 (defun %rescale-fan-record (record site-x site-y site-z
@@ -1590,40 +1785,51 @@ witness scan."
     (values words ranges)))
 
 (defun %finish-instance-stream (stream ranges)
-  "Order one columnar stream by template and derive its draws."
+  "Counting-scatter one columnar stream by template and derive its draws."
   (let* ((source (instance-stream-words stream))
          (count (instance-stream-count stream))
-         (order (make-array count :element-type '(unsigned-byte 32)))
+         (template-count (truncate (length ranges) 2))
+         (counts (make-array template-count
+                             :element-type '(unsigned-byte 32)
+                             :initial-element 0))
+         (starts (make-array template-count
+                             :element-type '(unsigned-byte 32)))
+         (writes (make-array template-count
+                             :element-type '(unsigned-byte 32)))
          (words (make-array (* +mesh-instance-word-count+ count)
                             :element-type '(unsigned-byte 32)))
          (draws nil)
          (triangle-count 0))
-    ;; Seed the permutation with reversed emission order: instances were
-    ;; historically accumulated by PUSH, so equal templates draw in reverse
-    ;; emission order, and the stable sort preserves that tie order.
-    (dotimes (index count)
-      (setf (aref order index) (- count 1 index)))
     (flet ((template-id (index)
              (ldb (byte 16 0)
                   (aref source (+ (* +mesh-instance-word-count+ index) 3)))))
-      (setf order (stable-sort order #'< :key #'template-id))
-      (loop for instance-index from 0
-            for source-index across order
-            for template-id = (template-id source-index)
-            for vertex-start = (aref ranges (* 2 template-id))
-            for vertex-count = (aref ranges (1+ (* 2 template-id)))
-            do (replace words source
-                        :start1 (* +mesh-instance-word-count+ instance-index)
-                        :start2 (* +mesh-instance-word-count+ source-index)
-                        :end2 (* +mesh-instance-word-count+
-                                 (1+ source-index)))
-               (incf triangle-count (truncate vertex-count 3))
-               (let ((draw (first draws)))
-                 (if (and draw (= template-id (first draw)))
-                     (incf (fifth draw))
-                     (push (list template-id vertex-start vertex-count
-                                 instance-index 1)
-                           draws)))))
+      (dotimes (source-index count)
+        (incf (aref counts (template-id source-index))))
+      (let ((start 0))
+        (dotimes (template-id template-count)
+          (setf (aref starts template-id) start
+                (aref writes template-id) start)
+          (incf start (aref counts template-id))))
+      ;; Descending source traversal preserves the historical reverse
+      ;; emission order within each template bucket without a permutation.
+      (loop for source-index downfrom (1- count) to 0 do
+        (let* ((template-id (template-id source-index))
+               (instance-index (aref writes template-id)))
+          (replace words source
+                   :start1 (* +mesh-instance-word-count+ instance-index)
+                   :start2 (* +mesh-instance-word-count+ source-index)
+                   :end2 (* +mesh-instance-word-count+ (1+ source-index)))
+          (incf (aref writes template-id))))
+      (dotimes (template-id template-count)
+        (let ((instances (aref counts template-id)))
+          (when (plusp instances)
+            (let ((vertex-start (aref ranges (* 2 template-id)))
+                  (vertex-count (aref ranges (1+ (* 2 template-id)))))
+              (push (list template-id vertex-start vertex-count
+                          (aref starts template-id) instances)
+                    draws)
+              (incf triangle-count
+                    (* instances (truncate vertex-count 3))))))))
     (values words (nreverse draws) triangle-count)))
 
 (defun %finish-surface-mesh (builder)
@@ -2343,23 +2549,30 @@ lattice-site closure.  It must return one stock for that entire chamfer."
      boundary
      (lambda ()
        (let ((cells (%chain-cell-keys solid))
+             (edge-candidates
+               (%make-edge-candidates (chain-count solid)))
              (x-limit (world-domain-x-limit domain))
              (y-limit (world-domain-y-limit domain)))
-         (%emit-exposed-cell-faces boundary-builder field domain
-                                   (%chain-sites solid)
-                                   stock-function chamfer-stock-function)
-         (loop for key across (%collect-edge-keys cells)
-               do (%emit-edge-bands boundary-builder field domain key
-                                    stock-function chamfer-stock-function))
-         (%count-singular-vertex-stars builder field domain cells
-                                       0 (1+ x-limit) 0 (1+ y-limit))
          (multiple-value-bind (x0 x1 y0 y1) (%cell-key-box cells)
-           (%emit-boundary-derived-fans builder field domain
-                                        chamfer-stock-function
-                                        (list boundary-builder)
-                                        (%make-boundary-packing-for-box
-                                         x0 x1 y0 y1)
-                                        0 (1+ x-limit) 0 (1+ y-limit) nil))
+           (let ((packing (%make-boundary-packing-for-box x0 x1 y0 y1)))
+             (%enable-boundary-observations
+              (list boundary-builder) packing (chain-count solid))
+             (%emit-exposed-cell-faces boundary-builder field domain
+                                       (%chain-sites solid)
+                                       stock-function chamfer-stock-function
+                                       edge-candidates)
+             (loop for key across (%unique-edge-candidates edge-candidates)
+                   do (%emit-edge-bands
+                       boundary-builder field domain key
+                       stock-function chamfer-stock-function))
+             (%count-singular-vertex-stars builder field domain cells
+                                           0 (1+ x-limit) 0 (1+ y-limit))
+             (%emit-boundary-derived-fans builder field domain
+                                          chamfer-stock-function
+                                          (list boundary-builder)
+                                          packing
+                                          0 (1+ x-limit) 0 (1+ y-limit)
+                                          nil)))
          (%finish-surface-mesh builder))))))
 
 (defun %cell-key-box (cells)
@@ -2377,7 +2590,8 @@ lattice-site closure.  It must return one stock for that entire chamfer."
         (values x0 (1+ x1) y0 (1+ y1)))))
 
 (defun %emit-exposed-cell-faces
-    (target field domain cells stock-function chamfer-stock-function)
+    (target field domain cells stock-function chamfer-stock-function
+     &optional edge-candidates)
   "Emit every exposed face of the packed cell sites in CELLS into TARGET."
   (loop for cell across cells do
     (let ((cx (site-x cell)) (cy (site-y cell)) (cz (site-z cell)))
@@ -2388,8 +2602,12 @@ lattice-site closure.  It must return one stock for that entire chamfer."
                       (+ cx (if (= axis-number 0) side 0))
                       (+ cy (if (= axis-number 1) side 0))
                       (+ cz (if (= axis-number 2) side 0))))
+            (when edge-candidates
+              (%append-face-edge-keys edge-candidates cx cy cz
+                                      axis-number side))
             (%emit-cell-face target field domain cell axis-number side
-                             stock-function chamfer-stock-function)))))))
+                             stock-function chamfer-stock-function))))))
+  edge-candidates)
 
 (defconstant +planar-coordinate-bit-count+ 16)
 
@@ -2603,50 +2821,57 @@ surface and falls back group-by-group whenever a boundary is not simple."
                                  '(simple-array (unsigned-byte 64) (*)))
                          #'<))
              (own-cells (%chain-cell-keys chunk))
+             (edge-candidates
+               (%make-edge-candidates (+ (chain-count chunk)
+                                         (length halo))))
              (region-cells (concatenate
                             '(simple-array (unsigned-byte 64) (*))
                             own-cells halo))
              (halo-sites (make-array (length halo)
                                      :element-type '(unsigned-byte 64))))
-        (loop for key across halo
-              for index from 0
-              do (setf (aref halo-sites index)
-                       (make-site domain
-                                  (%lattice-key-x key)
-                                  (%lattice-key-y key)
-                                  (%lattice-key-z key)
-                                  +cell-extent+ 1)))
-        ;; Owned faces ship; halo faces are witnesses for the seam scan.
-        (%emit-exposed-cell-faces ship-sheets field domain
-                                  (%chain-sites chunk)
-                                  stock-function chamfer-stock-function)
-        (%emit-exposed-cell-faces witness-sheets field domain halo-sites
-                                  stock-function chamfer-stock-function)
-        (loop for key across (%collect-edge-keys region-cells)
-              do (let* ((anchor (ldb (byte +mesh-key-axis-shift+ 0) key))
-                        (x (%lattice-key-x anchor))
-                        (y (%lattice-key-y anchor)))
-                   ;; High-seam anchors belong to the next chunk over and
-                   ;; matter to none of this chunk's fans; skip them.
-                   (when (and (<= (1- x0) x) (< x ox1)
-                              (<= (1- y0) y) (< y oy1))
-                     (%emit-edge-bands
-                      (if (and (<= x0 x) (<= y0 y))
-                          ship-sheets
-                          witness-sheets)
-                      field domain key
-                      stock-function chamfer-stock-function))))
-        (%count-singular-vertex-stars builder field domain region-cells
-                                      x0 ox1 y0 oy1)
-        (%emit-boundary-derived-fans builder field domain
-                                     chamfer-stock-function
-                                     (list ship-sheets witness-sheets)
-                                     ;; The scan covers this chunk's cells
-                                     ;; plus its low-side halo ring.
-                                     (%make-boundary-packing-for-box
-                                      (1- x0) x1 (1- y0) y1)
-                                     x0 ox1 y0 oy1 t)
-        (let ((mesh (%finish-surface-mesh builder)))
-          (if coplanar-merge-p
-              (%coplanar-merged-surface-mesh mesh)
-              mesh))))))
+        (let ((packing (%make-boundary-packing-for-box
+                        (1- x0) x1 (1- y0) y1)))
+          (%enable-boundary-observations
+           (list ship-sheets witness-sheets) packing
+           (+ (chain-count chunk) (length halo)))
+          (loop for key across halo
+                for index from 0
+                do (setf (aref halo-sites index)
+                         (make-site domain
+                                    (%lattice-key-x key)
+                                    (%lattice-key-y key)
+                                    (%lattice-key-z key)
+                                    +cell-extent+ 1)))
+          ;; Owned faces ship; halo faces are witnesses for the seam scan.
+          (%emit-exposed-cell-faces ship-sheets field domain
+                                    (%chain-sites chunk)
+                                    stock-function chamfer-stock-function
+                                    edge-candidates)
+          (%emit-exposed-cell-faces witness-sheets field domain halo-sites
+                                    stock-function chamfer-stock-function
+                                    edge-candidates)
+          (loop for key across (%unique-edge-candidates edge-candidates)
+                do (let* ((anchor (ldb (byte +mesh-key-axis-shift+ 0) key))
+                          (x (%lattice-key-x anchor))
+                          (y (%lattice-key-y anchor)))
+                     ;; High-seam anchors belong to the next chunk over and
+                     ;; matter to none of this chunk's fans; skip them.
+                     (when (and (<= (1- x0) x) (< x ox1)
+                                (<= (1- y0) y) (< y oy1))
+                       (%emit-edge-bands
+                        (if (and (<= x0 x) (<= y0 y))
+                            ship-sheets
+                            witness-sheets)
+                        field domain key
+                        stock-function chamfer-stock-function))))
+          (%count-singular-vertex-stars builder field domain region-cells
+                                        x0 ox1 y0 oy1)
+          (%emit-boundary-derived-fans builder field domain
+                                       chamfer-stock-function
+                                       (list ship-sheets witness-sheets)
+                                       packing
+                                       x0 ox1 y0 oy1 t)
+          (let ((mesh (%finish-surface-mesh builder)))
+            (if coplanar-merge-p
+                (%coplanar-merged-surface-mesh mesh)
+                mesh)))))))
