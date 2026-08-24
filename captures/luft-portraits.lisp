@@ -226,6 +226,39 @@
   (define-uniform-contact-capture luft-bevel-width-two-contact 2)
   (define-uniform-contact-capture luft-bevel-width-four-contact 4))
 
+(defun capture-luft-sanctuary-tower (pathname bevel-width title)
+  "Frame the sanctuary's ridge-beacon tower at one LUFT bevel width."
+  (capture-luft-material-contact
+   pathname
+   (luv.arithmetic.lisp.vec3:make-vec3 112.0 50.0 42.0)
+   10.0 title :yaw 2.2455373 :pitch -0.5165006
+   :solid (luft.render:make-mountain-sanctuary-scene)
+   :bevel-width bevel-width))
+
+(luv:define-capture luft-sanctuary-tower-bevel-one
+    (:figure T0W1R1 :kind :image :extension "png" :layout :landscape
+     :description
+     "The sanctuary ridge-beacon tower under a uniform one-eighth-cell bevel.")
+  (pathname)
+  (capture-luft-sanctuary-tower
+   pathname 1 "LUFT sanctuary tower - bevel 1/8"))
+
+(luv:define-capture luft-sanctuary-tower-bevel-two
+    (:figure T0W2R2 :kind :image :extension "png" :layout :landscape
+     :description
+     "The same sanctuary ridge-beacon tower under a uniform quarter-cell bevel.")
+  (pathname)
+  (capture-luft-sanctuary-tower
+   pathname 2 "LUFT sanctuary tower - bevel 1/4"))
+
+(luv:define-capture luft-sanctuary-tower-bevel-four
+    (:figure T0W4R4 :kind :image :extension "png" :layout :landscape
+     :description
+     "The same sanctuary ridge-beacon tower under a uniform half-cell medial bevel.")
+  (pathname)
+  (capture-luft-sanctuary-tower
+   pathname 4 "LUFT sanctuary tower - bevel 1/2"))
+
 (defun capture-luft-material-bevel-stair-boundary
     (pathname boundary wireframe title)
   (capture-luft-material-contact
