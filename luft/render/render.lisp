@@ -210,7 +210,8 @@ stair topology. #WSEK3C"
   "Three isolated singular-star fixtures for the manifold-sheet spike.
 
 The plots exercise an edge-touching pair, a corner-touching pair, and the
-four-sheet parity star.  Nothing else in the scene can hide their junctions."
+four-sheet parity star.  Nothing else in the scene can hide their junctions.
+#WSEK3C"
   (let ((builder (make-scene-builder :horizontal-bits 6)))
     (labels ((place-star (mask centre-x)
                (dotimes (sample 8)
@@ -221,8 +222,14 @@ four-sheet parity star.  Nothing else in the scene can hide their junctions."
                     (+ 10 (if (logbitp 1 sample) 0 -1))
                     (+ 6 (if (logbitp 2 sample) 0 -1)))))))
       (place-star #x06 10)
-      (place-star #x18 16)
-      (place-star #x69 22))
+      (place-star #x18 14)
+      (place-star #x69 18))
+    (finish-scene-builder builder)))
+
+(defun make-bevel-limit-study-scene ()
+  "One isolated stone cell for comparing sub-medial and medial bevels."
+  (let ((builder (make-scene-builder :horizontal-bits 4)))
+    (scene-builder-cell builder 6 4 3 :architecture-p t)
     (finish-scene-builder builder)))
 
 (defconstant +sanctuary-plateau-height+ 19)
@@ -638,7 +645,8 @@ from an exposed or buried foundation without adding per-site material objects."
                                    chamfer-stock-function
                                    :bevel-width bevel-width))))
 
-(defun make-material-bevel-mesh (scene profile)
+(defun make-material-bevel-mesh
+    (scene profile &key (contract-t-junctions-p t))
   "Build one watertight mesh with a semantic material width at each site.
 
 The ordinary width-one mesher supplies one exact topology witness.  PROFILE is
@@ -648,7 +656,11 @@ architecture-only, and mixed stars select the profile's terrain, architecture,
 and contact widths.  The unchanged witness triangles form the transitions.
 
 The second value is a five-entry vector counting sites at widths zero through
-four; it is diagnostic evidence and does not become retained mesh state."
+four; it is diagnostic evidence and does not become retained mesh state.
+
+CONTRACT-T-JUNCTIONS-P should remain true in production.  NIL returns the
+deliberately open pre-contraction diagnostic mesh used to exhibit the exact
+medial T-junction repaired by the default path."
   (check-type scene scene)
   (check-type profile material-bevel-profile)
   ;; The witness build also interns every authored material assembly reached by
@@ -669,7 +681,8 @@ four; it is diagnostic evidence and does not become retained mesh state."
            (unless (<= 1 site-mask 3)
              (error "Incident mesh stocks ~S compiled to invalid material bevel mask ~D."
                     stocks site-mask))
-           (aref site-widths site-mask)))))))
+           (aref site-widths site-mask)))
+       :contract-t-junctions-p contract-t-junctions-p))))
 
 (defun make-material-bevel-meshes (scene profile)
   "Return the single site-local material bevel mesh in renderer slot zero."

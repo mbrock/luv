@@ -66,6 +66,8 @@
    #:surface-mesh-singular-star-count
    #:star-singular-p #:decompose-star-mask #:make-surface-mesh #:mesh-chunk
            #:select-surface-mesh-stocks
+           #:surface-mesh-with-triangle-ink
+           #:surface-mesh-split-neighborhood
            #:vary-surface-mesh-bevel-widths
    ;; Tests.
    #:run-luft-tests))

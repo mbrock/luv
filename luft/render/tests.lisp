@@ -1262,6 +1262,7 @@
       (ok (plusp (aref width-census 4)))
       (ok (= 3 (getf diagnostics :unmatched-edge-count)))
       (ok (= 1 (getf diagnostics :repaired-edge-count)))
+      (ok (zerop (getf diagnostics :residual-edge-count)))
       (ok (luft::%mesh-closed-p mesh))
       (ok (luft::%mesh-nondegenerate-p mesh))
       ;; Contracting the medial T-junction may subdivide a neighbour, but it
@@ -1276,6 +1277,45 @@
           (ok (>= minimum-angle (- witness-minimum-angle 1.0d-9)))
           (ok (<= maximum-aspect (+ witness-maximum-aspect 1.0d-9)))
           (ok (<= sliver-count witness-sliver-count)))))))
+
+(deftest material-bevel-transition-can-exhibit-the-uncontracted-t-junction
+  (multiple-value-bind (mesh width-census diagnostics)
+      (render:make-material-bevel-mesh
+       (render:make-material-bevel-transition-study-scene)
+       (render:make-material-bevel-profile)
+       :contract-t-junctions-p nil)
+    (declare (ignore width-census))
+    (ok (= 3 (getf diagnostics :unmatched-edge-count)))
+    (ok (zerop (getf diagnostics :repaired-edge-count)))
+    (ok (= 3 (getf diagnostics :residual-edge-count)))
+    (ok (not (luft::%mesh-closed-p mesh)))
+    ;; The diagnostic mesh omits zero-area triangles.  Its defect is solely
+    ;; the long-edge/short-edge connectivity mismatch exposed by construction
+    ;; ink, not a retained degenerate primitive.
+    (ok (luft::%mesh-nondegenerate-p mesh))))
+
+(deftest material-bevel-transition-isolates-the-exact-split-neighborhood
+  (let ((scene (render:make-material-bevel-transition-study-scene))
+        (profile (render:make-material-bevel-profile)))
+    (flet ((neighborhood (contract-p)
+             (multiple-value-bind (mesh width-census diagnostics)
+                 (render:make-material-bevel-mesh
+                  scene profile :contract-t-junctions-p contract-p)
+               (declare (ignore width-census))
+               (luft:surface-mesh-split-neighborhood
+                mesh (first (getf diagnostics :candidate-splits))))))
+      (let ((uncontracted (neighborhood nil))
+            (contracted (neighborhood t)))
+        (ok (= 3 (luft:surface-mesh-triangle-count uncontracted)))
+        (ok (= 4 (luft:surface-mesh-triangle-count contracted)))
+        (ok (luft::%mesh-nondegenerate-p uncontracted))
+        (ok (luft::%mesh-nondegenerate-p contracted))
+        (let ((inked (luft:surface-mesh-with-triangle-ink contracted)))
+          (ok (= (luft:surface-mesh-triangle-count contracted)
+                 (luft:surface-mesh-triangle-count inked)))
+          (ok (luft::%same-plane-areas-p
+               (luft::%mesh-oriented-plane-areas contracted)
+               (luft::%mesh-oriented-plane-areas inked))))))))
 
 (defun check-authored-stair-boundary (boundary)
   (multiple-value-bind (mesh width-census diagnostics)

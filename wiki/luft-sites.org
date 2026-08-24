@@ -315,6 +315,33 @@ authored support geometry decides where an important architectural line should
 survive them.  The sanctuary now authors the low wall by default; =:open= and
 =:border= remain named experimental variants under the same capture camera.
 
+The capture set also has a small degeneracy atlas rather than asking a whole
+landscape to explain local topology.  One isolated cell at widths one, two,
+and four makes the medial event literal.  Widths one and two have the same
+44-triangle account---12 face, 24 band, and 8 fan triangles---while their
+points move inward.  At width four the faces and bands have zero area and are
+omitted; the eight corner-fan triangles survive as the medial octahedron.
+No zero-area primitive is retained.
+
+The T-junction plate is smaller still.  The evaluator reports the exact
+=(left middle right)= split created by a collapsed witness triangle, and
+[[lisp:surface-mesh-split-neighborhood]] retains only real output triangles
+incident to those points.  Before contraction this is a three-triangle patch:
+one face owns the long =left-right= edge while two bands own =left-middle= and
+=middle-right=.  After contraction it is four triangles because that face is
+split at =middle=.  Both occupy the same geometric surface, which is why an
+ordinary wireframe can make the defect invisible; the topology-ink closeup
+shows the added diagonal without changing any point.
+
+Finally, the singular-star plate keeps a distinct pathology distinct.  Its
+=#x06=, =#x18=, and =#x69= occupancies make cells meet only at an edge, a
+corner, or a parity junction.  Those are not medial-width degeneracies.  The
+star decomposition separates their incident sheets before bevel realization;
+the combined fixture reports ten singular stars and produces 352
+nondegenerate triangles in a closed mesh.  The clean and construction plates
+show both the apparent separated solids and the fan triangulation that makes
+that separation topologically honest.
+
 * Coplanar merging is exact level of detail
 :PROPERTIES:
 :ID: YGP21F

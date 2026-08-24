@@ -45,7 +45,7 @@
 (defun capture-luft-material-contact
     (pathname position isometric-height title
      &key (yaw 2.2455373) (pitch -0.5165006) player-p bevel-profile solid
-       (bevel-width luft:+mesh-bevel-width+) (wireframe 0.0)
+       surface-mesh (bevel-width luft:+mesh-bevel-width+) (wireframe 0.0)
        inspection-ink-p)
   (let ((viewer nil)
         (old-projection luft.render:*projection*)
@@ -70,6 +70,7 @@
                     scene)
                   :bevel-width bevel-width
                   :bevel-profile bevel-profile
+                  :surface-mesh surface-mesh
                   :camera
                   (luft.render:make-fly-camera
                    :position position
@@ -284,14 +285,74 @@
   (capture-luft-material-bevel-stair-boundary
    pathname :low-wall 1.0 "LUFT material bevel - stair low wall construction"))
 
-(defun capture-luft-material-bevel-transition (pathname wireframe title)
-  (capture-luft-material-contact
-   pathname
-   (luv.arithmetic.lisp.vec3:make-vec3 9.5 -0.5 6.5)
-   2.5 title :yaw 2.0899425 :pitch -0.36
-   :solid (luft.render:make-material-bevel-transition-study-scene)
-   :bevel-profile (luft.render:make-material-bevel-profile)
-   :wireframe wireframe))
+(defun capture-luft-bevel-limit-cell (pathname width title)
+  (let* ((scene (luft.render:make-bevel-limit-study-scene))
+         (mesh (luft.render:make-render-mesh scene :bevel-width width)))
+    (capture-luft-material-contact
+     pathname
+     (luv.arithmetic.lisp.vec3:make-vec3 9.5 -0.5 5.75)
+     1.35 title :yaw 2.0899425 :pitch -0.36
+     :solid scene :surface-mesh (luft:surface-mesh-with-triangle-ink mesh)
+     :bevel-width width :wireframe 1.0)))
+
+(luv:define-capture luft-bevel-limit-width-one-construction
+    (:figure WSEK3C :kind :image :extension "png" :layout :landscape
+     :description
+     "One cell below the medial limit at width one, retaining faces, edge bands, and corner patches.")
+  (pathname)
+  (capture-luft-bevel-limit-cell
+   pathname 1 "LUFT one-cell bevel width one"))
+
+(luv:define-capture luft-bevel-limit-width-two-construction
+    (:figure WSEK3C :kind :image :extension "png" :layout :landscape
+     :description
+     "The same cell at the ordinary width two, with narrower faces and broader bands.")
+  (pathname)
+  (capture-luft-bevel-limit-cell
+   pathname 2 "LUFT one-cell bevel width two"))
+
+(luv:define-capture luft-bevel-limit-width-four-construction
+    (:figure WSEK3C :kind :image :extension "png" :layout :landscape
+     :description
+     "The same cell at the medial width four, where faces and edge bands have contracted away.")
+  (pathname)
+  (capture-luft-bevel-limit-cell
+   pathname 4 "LUFT one-cell medial bevel width four"))
+
+(defun capture-luft-material-bevel-transition
+    (pathname wireframe title
+     &key (contract-t-junctions-p t)
+       (position (luv.arithmetic.lisp.vec3:make-vec3 9.5 -0.5 6.5))
+       (isometric-height 2.5) split-neighborhood-p)
+  (let* ((scene (luft.render:make-material-bevel-transition-study-scene))
+         (profile (luft.render:make-material-bevel-profile)))
+    (multiple-value-bind (mesh width-census diagnostics)
+        (luft.render:make-material-bevel-mesh
+         scene profile
+         :contract-t-junctions-p contract-t-junctions-p)
+      (declare (ignore width-census))
+      (let* ((source-mesh
+               (if split-neighborhood-p
+                   (luft:surface-mesh-split-neighborhood
+                    mesh (first (getf diagnostics :candidate-splits)))
+                   mesh))
+             (display-mesh
+               (if (plusp wireframe)
+                   (luft:surface-mesh-with-triangle-ink source-mesh)
+                   source-mesh)))
+        (capture-luft-material-contact
+         pathname
+         position isometric-height title :yaw 2.0899425 :pitch -0.36
+         :solid scene :surface-mesh display-mesh :wireframe wireframe)))))
+
+(luv:define-capture luft-material-bevel-transition-uncontracted-construction
+    (:figure WSEK3C :kind :image :extension "png" :layout :landscape
+     :description
+     "The isolated five-cell mixed-width surface with collapsed triangles omitted but its medial T-junction deliberately unrepaired.")
+  (pathname)
+  (capture-luft-material-bevel-transition
+   pathname 1.0 "LUFT uncontracted medial T-junction"
+   :contract-t-junctions-p nil))
 
 (luv:define-capture luft-material-bevel-transition-clean
     (:figure WSEK3C :kind :image :extension "png" :layout :landscape
@@ -308,6 +369,57 @@
   (pathname)
   (capture-luft-material-bevel-transition
    pathname 1.0 "LUFT isolated material bevel transition construction"))
+
+(luv:define-capture luft-material-bevel-t-junction-uncontracted-closeup
+    (:figure WSEK3C :kind :image :extension "png" :layout :landscape
+     :description
+     "A topology-ink closeup of the long edge meeting two short edges after a medial triangle collapses.")
+  (pathname)
+  (capture-luft-material-bevel-transition
+   pathname 1.0 "LUFT uncontracted medial T-junction closeup"
+   :contract-t-junctions-p nil
+   :position (luv.arithmetic.lisp.vec3:make-vec3 8.77 -0.35 5.75)
+   :isometric-height 1.35 :split-neighborhood-p t))
+
+(luv:define-capture luft-material-bevel-t-junction-contracted-closeup
+    (:figure WSEK3C :kind :image :extension "png" :layout :landscape
+     :description
+     "The same topology-ink closeup after the long neighbouring edge is split at the collapsed triangle's middle vertex.")
+  (pathname)
+  (capture-luft-material-bevel-transition
+   pathname 1.0 "LUFT contracted medial T-junction closeup"
+   :position (luv.arithmetic.lisp.vec3:make-vec3 8.77 -0.35 5.75)
+   :isometric-height 1.35 :split-neighborhood-p t))
+
+(defun capture-luft-manifold-spikes (pathname wireframe title)
+  (let* ((scene (luft.render:make-manifold-spike-scene))
+         (mesh (luft.render:make-render-mesh scene :bevel-width 2))
+         (display-mesh
+           (if (plusp wireframe)
+               (luft:surface-mesh-with-triangle-ink mesh)
+               mesh)))
+    (capture-luft-material-contact
+     pathname
+     (luv.arithmetic.lisp.vec3:make-vec3 7.6 3.1 9.9)
+     6.5 title :yaw 0.7853982 :pitch -0.45
+     :solid scene :surface-mesh display-mesh
+     :bevel-width 2 :wireframe wireframe)))
+
+(luv:define-capture luft-manifold-spikes-clean
+    (:figure WSEK3C :kind :image :extension "png" :layout :landscape
+     :description
+     "Edge-touching, corner-touching, and parity occupancy stars resolved into isolated manifold sheets.")
+  (pathname)
+  (capture-luft-manifold-spikes
+   pathname 0.0 "LUFT singular occupancy stars"))
+
+(luv:define-capture luft-manifold-spikes-construction
+    (:figure WSEK3C :kind :image :extension "png" :layout :landscape
+     :description
+     "The three singular occupancy stars with their manifold-sheet triangulation exposed.")
+  (pathname)
+  (capture-luft-manifold-spikes
+   pathname 1.0 "LUFT singular occupancy stars construction"))
 
 (defun capture-luft-miter-closeup (pathname wireframe title)
   "Capture the #xCD wall termination at the normal chamfer width. #L7N4MO"
