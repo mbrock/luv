@@ -668,20 +668,8 @@ medial T-junction repaired by the default path."
   (let ((witness (make-render-mesh scene :bevel-width 1)))
     (multiple-value-bind (stock-masks site-widths)
         (compile-material-bevel-site-policy profile)
-      (luft:vary-surface-mesh-bevel-widths
-       witness
-       (lambda (x y z stocks)
-         (declare (ignore x y z))
-         (let ((site-mask 0))
-           (dolist (stock stocks)
-             (unless (< stock (length stock-masks))
-               (error "Mesh stock ~D is outside the compiled material bevel policy of ~D entries."
-                      stock (length stock-masks)))
-             (setf site-mask (logior site-mask (aref stock-masks stock))))
-           (unless (<= 1 site-mask 3)
-             (error "Incident mesh stocks ~S compiled to invalid material bevel mask ~D."
-                    stocks site-mask))
-           (aref site-widths site-mask)))
+      (luft:vary-surface-mesh-bevel-widths-from-stock-masks
+       witness stock-masks site-widths
        :contract-t-junctions-p contract-t-junctions-p))))
 
 (defun make-material-bevel-meshes (scene profile)

@@ -103,6 +103,84 @@
                       (third coordinates) +cell-extent+ 1)))))
     (finish-chain-builder builder)))
 
+(defun %asymmetric-site-bevel-width (x y z stocks)
+  "Exercise every supported width without hiding axis-order mistakes."
+  (declare (ignore stocks))
+  (1+ (mod (+ x (* 2 y) (* 3 z)) 4)))
+
+(defun %witness-site-stock-table (witness)
+  "Materialize the callback contract independently through the list oracle."
+  (let ((stocks-by-site (make-hash-table :test #'eql)))
+    (%map-surface-mesh-triangle-records
+     (lambda (kind stock ambient mask normal a b c)
+       (declare (ignore kind ambient mask normal))
+       (dolist (point (list a b c))
+         (multiple-value-bind (site direction)
+             (%unit-bevel-point-site point)
+           (declare (ignore direction))
+           (pushnew stock
+                    (gethash (%lattice-key (first site)
+                                           (second site)
+                                           (third site))
+                             stocks-by-site)
+                    :test #'=))))
+     witness)
+    (maphash (lambda (site stocks)
+               (setf (gethash site stocks-by-site) (sort stocks #'<)))
+             stocks-by-site)
+    stocks-by-site))
+
+(defun %same-surface-mesh-representation-p (left right)
+  "Compare every retained field of two independently compiled meshes."
+  (and (world-domain= (surface-mesh-domain left)
+                      (surface-mesh-domain right))
+       (= (surface-mesh-bevel-width left)
+          (surface-mesh-bevel-width right))
+       (= (surface-mesh-singular-star-count left)
+          (surface-mesh-singular-star-count right))
+       (= (surface-mesh-face-triangle-count left)
+          (surface-mesh-face-triangle-count right))
+       (= (surface-mesh-band-triangle-count left)
+          (surface-mesh-band-triangle-count right))
+       (= (surface-mesh-fan-triangle-count left)
+          (surface-mesh-fan-triangle-count right))
+       (equalp (surface-mesh-template-vertex-words left)
+               (surface-mesh-template-vertex-words right))
+       (equalp (surface-mesh-template-ranges left)
+               (surface-mesh-template-ranges right))
+       (equalp (surface-mesh-face-instance-words left)
+               (surface-mesh-face-instance-words right))
+       (equal (surface-mesh-face-draws left)
+              (surface-mesh-face-draws right))
+       (equalp (surface-mesh-band-instance-words left)
+               (surface-mesh-band-instance-words right))
+       (equal (surface-mesh-band-draws left)
+              (surface-mesh-band-draws right))
+       (equalp (surface-mesh-fan-instance-words left)
+               (surface-mesh-fan-instance-words right))
+       (equal (surface-mesh-fan-draws left)
+              (surface-mesh-fan-draws right))))
+
+(defun %vary-by-stock-mask-oracle
+    (witness stock-masks site-widths contract-t-junctions-p)
+  (flet ((width (x y z stocks)
+           (declare (ignore x y z))
+           (let ((site-mask 0))
+             (dolist (stock stocks)
+               (setf site-mask
+                     (logior site-mask (aref stock-masks stock))))
+             (aref site-widths site-mask))))
+    (multiple-value-bind (generic generic-census generic-diagnostics)
+        (vary-surface-mesh-bevel-widths
+         witness #'width :contract-t-junctions-p contract-t-junctions-p)
+      (multiple-value-bind (compiled compiled-census compiled-diagnostics)
+          (vary-surface-mesh-bevel-widths-from-stock-masks
+           witness stock-masks site-widths
+           :contract-t-junctions-p contract-t-junctions-p)
+        (values (%same-surface-mesh-representation-p generic compiled)
+                (equalp generic-census compiled-census)
+                (equal generic-diagnostics compiled-diagnostics))))))
+
 (defun %map-mesh-triangles (function mesh)
   (let ((templates (surface-mesh-template-vertex-words mesh))
         (ranges (surface-mesh-template-ranges mesh)))
@@ -141,23 +219,27 @@
       (list left right)
       (list right left)))
 
-(defun %mesh-geometric-edge-counts (mesh)
-  (let ((counts (make-hash-table :test #'equal)))
+(defun %mesh-geometric-edge-records (mesh)
+  "Return undirected edge keys mapped to (incidence . orientation balance)."
+  (let ((records (make-hash-table :test #'equal)))
     (%map-mesh-triangles
      (lambda (kind a b c)
        (declare (ignore kind))
        (let ((points (vector a b c)))
          (dotimes (index 3)
-           (incf (gethash (%ordered-edge
-                           (aref points index)
-                           (aref points (mod (1+ index) 3)))
-                          counts 0)))))
+           (let* ((left (aref points index))
+                  (right (aref points (mod (1+ index) 3)))
+                  (edge (%ordered-edge left right))
+                  (record (or (gethash edge records)
+                              (setf (gethash edge records) (cons 0 0)))))
+             (incf (car record))
+             (incf (cdr record) (if (equal left (first edge)) 1 -1))))))
      mesh)
-    counts))
+    records))
 
 (defun %mesh-closed-p (mesh)
-  (loop for count being the hash-values of (%mesh-geometric-edge-counts mesh)
-        always (= count 2)))
+  (loop for record being the hash-values of (%mesh-geometric-edge-records mesh)
+        always (and (= (car record) 2) (zerop (cdr record)))))
 
 (defun %mesh-nondegenerate-p (mesh)
   (let ((nondegenerate-p t))
@@ -389,11 +471,189 @@
                 (format nil "mixed affine closure mask ~2,'0X" mask))
         (%check (%mesh-nondegenerate-p varied)
                 (format nil "mixed affine triangles mask ~2,'0X" mask))))
+    ;; The parity policy above happens not to collapse any three-distinct-point
+    ;; triangle.  This asymmetric field makes all four widths meet and forces
+    ;; the contraction path in every nonempty occupancy star.
+    (dotimes (mask 256)
+      (let ((witness
+              (make-surface-mesh (%solid-for-star mask) :bevel-width 1)))
+        (multiple-value-bind (varied census diagnostics)
+            (vary-surface-mesh-bevel-widths
+             witness #'%asymmetric-site-bevel-width)
+          (%check (%mesh-closed-p varied)
+                  (format nil "mixed repair closure mask ~2,'0X" mask))
+          (%check (%mesh-nondegenerate-p varied)
+                  (format nil "mixed repair triangles mask ~2,'0X" mask))
+          (%check (zerop (getf diagnostics :residual-edge-count))
+                  (format nil "mixed repair residual mask ~2,'0X" mask))
+          (unless (zerop mask)
+            (%check (plusp (getf diagnostics :repaired-edge-count))
+                    (format nil "mixed repair exercised mask ~2,'0X" mask)))
+          (when (= mask #x01)
+            (%check (equalp #(0 2 2 2 2) census))
+            (%check (= 4 (getf diagnostics :collapsed-triangle-count)))
+            (%check (= 12 (getf diagnostics :unmatched-edge-count)))
+            (%check (= 4 (getf diagnostics :repaired-edge-count)))
+            (%check (= 4 (length (getf diagnostics :candidate-splits))))
+            (%check (= 44 (surface-mesh-triangle-count varied)))))))
+    ;; A three-distinct-point collapse is only a geometric split candidate.
+    ;; Its synthetic queried edges may all be absent from the realized mesh;
+    ;; those zero counts are not unmatched boundary edges.
+    (let ((witness
+            (make-surface-mesh (%solid-for-star #x01) :bevel-width 1)))
+      (multiple-value-bind (varied census diagnostics)
+          (vary-surface-mesh-bevel-widths
+           witness
+           (lambda (x y z stocks)
+             (declare (ignore stocks))
+             (1+ (mod (+ x y z) 4)))
+           :contract-t-junctions-p nil)
+        (%check (equalp #(0 1 1 3 3) census))
+        (%check (= 6 (getf diagnostics :collapsed-triangle-count)))
+        (%check (= 3 (length (getf diagnostics :candidate-splits))))
+        (%check (zerop (getf diagnostics :unmatched-edge-count)))
+        (%check (zerop (getf diagnostics :repaired-edge-count)))
+        (%check (zerop (getf diagnostics :residual-edge-count)))
+        (%check (= 38 (surface-mesh-triangle-count varied)))
+        (%check (%mesh-closed-p varied))
+        (%check (%mesh-nondegenerate-p varied))))
+    ;; The semantic callback is deliberately outside the dense loop: each
+    ;; canonical site is presented exactly once with its complete, sorted,
+    ;; duplicate-free set of incident stocks.
+    (let* ((witness
+             (make-surface-mesh (%solid-for-star #x69) :bevel-width 1
+                                :stock-function
+                                (lambda (face)
+                                  (mod (+ (site-x face)
+                                          (* 2 (site-y face))
+                                          (* 3 (site-z face)))
+                                       7))))
+           (expected (%witness-site-stock-table witness))
+           (seen (make-hash-table :test #'eql)))
+      (vary-surface-mesh-bevel-widths
+       witness
+       (lambda (x y z stocks)
+         (let ((site (%lattice-key x y z)))
+           (%check (not (gethash site seen)))
+           (%check (equal stocks (gethash site expected)))
+           (setf (gethash site seen) t)
+           (%asymmetric-site-bevel-width x y z stocks))))
+      (%check (= (hash-table-count expected) (hash-table-count seen))))
+    ;; The production stock-mask fold is only a denser policy compiler.  Its
+    ;; complete retained representation must match the generic callback that
+    ;; computes the same commutative, idempotent OR at every site.
+    (let ((stock-masks
+            (make-array 8 :element-type '(unsigned-byte 8)
+                          :initial-contents '(1 2 4 1 2 4 3 5)))
+          (site-widths
+            (make-array 8 :element-type '(unsigned-byte 8)
+                          :initial-contents '(0 1 2 3 4 1 2 4))))
+      (dotimes (mask 256)
+        (let* ((solid (%solid-for-star mask))
+               (witness
+                 (make-surface-mesh
+                  solid :bevel-width 1
+                  :stock-function
+                  (lambda (face)
+                    (mod (+ (site-x face) (* 2 (site-y face))
+                            (* 3 (site-z face)) (site-extent face))
+                         8))
+                  :chamfer-stock-function
+                  (lambda (stocks) (mod (reduce #'+ stocks) 8)))))
+          (multiple-value-bind (same-mesh same-census same-diagnostics)
+              (%vary-by-stock-mask-oracle
+               witness stock-masks site-widths t)
+            (%check same-mesh
+                    (format nil "compiled policy mesh mask ~2,'0X" mask))
+            (%check same-census
+                    (format nil "compiled policy census mask ~2,'0X" mask))
+            (%check same-diagnostics
+                    (format nil "compiled policy diagnostics mask ~2,'0X"
+                            mask)))))
+      (let ((witness
+              (make-surface-mesh (%solid-for-star #x01) :bevel-width 1)))
+        (multiple-value-bind (same-mesh same-census same-diagnostics)
+            (%vary-by-stock-mask-oracle
+             witness #(1) #(0 4) nil)
+          (%check same-mesh)
+          (%check same-census)
+          (%check same-diagnostics))))
+    ;; A sparse pair whose tight bounding volume is much larger than its site
+    ;; count exercises the compiled field's EQL fallback rather than the dense
+    ;; page result used by the exhaustive corpus above.
+    (let* ((domain (make-world-domain :horizontal-bits 7))
+           (solid
+             (%chain-from-sites
+              domain
+              (list (make-site domain 1 1 1 +cell-extent+ 1)
+                    (make-site domain 65 65 1 +cell-extent+ 1))))
+           (witness (make-surface-mesh solid :bevel-width 1)))
+      (multiple-value-bind (varied census diagnostics)
+          (vary-surface-mesh-bevel-widths-from-stock-masks
+           witness
+           (make-array 1 :element-type '(unsigned-byte 8)
+                         :initial-contents '(1))
+           (make-array 2 :element-type '(unsigned-byte 8)
+                         :initial-contents '(0 2)))
+        (%check (equalp #(0 0 16 0 0) census))
+        (%check (%mesh-closed-p varied))
+        (%check (%mesh-nondegenerate-p varied))
+        (%check (zerop (getf diagnostics :residual-edge-count)))))
+    ;; Packed global points and bounded spatial edge keys must work at both
+    ;; horizontal extremes and on the highest legal cell layer.  The two
+    ;; asymmetric far-edge cases catch accidental X/Y field interchange.
+    (let* ((domain (make-world-domain :horizontal-bits 17))
+           (limit (world-domain-x-limit domain)))
+      (dolist (cell `((0 0 0)
+                      (,(1- limit) 13 254)
+                      (13 ,(1- limit) 254)
+                      (,(1- limit) ,(1- limit) 254)))
+        (destructuring-bind (x y z) cell
+          (let* ((solid
+                   (%chain-from-sites
+                    domain (list (make-site domain x y z +cell-extent+ 1))))
+                 (witness (make-surface-mesh solid :bevel-width 1)))
+            (multiple-value-bind (varied census diagnostics)
+                (vary-surface-mesh-bevel-widths
+                 witness #'%asymmetric-site-bevel-width)
+              (declare (ignore census))
+              (%check (%mesh-closed-p varied)
+                      (format nil "mixed domain boundary ~S" cell))
+              (%check (%mesh-nondegenerate-p varied)
+                      (format nil "mixed domain triangles ~S" cell))
+              (%check (zerop (getf diagnostics :residual-edge-count))
+                      (format nil "mixed domain residual ~S" cell)))))))
     (dolist (width '(0 5 1/2))
       (%check (%signals-error-p
                (lambda ()
                  (make-surface-mesh (%solid-for-star #x01)
-                                    :bevel-width width)))))))
+                                    :bevel-width width))))
+      (%check (%signals-error-p
+               (lambda ()
+                 (vary-surface-mesh-bevel-widths
+                  (make-surface-mesh (%solid-for-star #x01) :bevel-width 1)
+                  (lambda (x y z stocks)
+                    (declare (ignore x y z stocks))
+                    width))))))
+    (%check (%signals-error-p
+             (lambda ()
+               (vary-surface-mesh-bevel-widths
+                (make-surface-mesh (%solid-for-star #x01) :bevel-width 2)
+                #'%asymmetric-site-bevel-width))))
+    (let ((witness
+            (make-surface-mesh (%solid-for-star #x01) :bevel-width 1)))
+      (%check (%signals-error-p
+               (lambda ()
+                 (vary-surface-mesh-bevel-widths-from-stock-masks
+                  witness #() #(0 1)))))
+      (%check (%signals-error-p
+               (lambda ()
+                 (vary-surface-mesh-bevel-widths-from-stock-masks
+                  witness #(0) #(0 1)))))
+      (%check (%signals-error-p
+               (lambda ()
+                 (vary-surface-mesh-bevel-widths-from-stock-masks
+                  witness #(1) #(0 5))))))))
 
 (defun %chunk-test-world ()
   "A four-chunk world with solids straddling every seam and the world box."

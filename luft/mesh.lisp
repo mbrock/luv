@@ -41,6 +41,9 @@
 (defconstant +mesh-instance-stock-bit-count+ 12)
 (defconstant +mesh-instance-ambient-occlusion-shift+ 28)
 
+(deftype mesh-global-tick ()
+  '(integer 0 #.(ash 1 (+ 17 3))))
+
 (defstruct (surface-mesh
              (:constructor %make-surface-mesh
                  (domain bevel-width template-vertex-words template-ranges
@@ -576,11 +579,17 @@ Bit conventions match SITE-STAR-OCCUPANCY-MASK on a vertex site."
                (* 2 +mesh-template-coordinate-bit-count+))
           (ash attributes +mesh-vertex-attribute-shift+)))
 
-(defstruct (instance-stream (:constructor %make-instance-stream ()))
+(defstruct (instance-stream
+             (:constructor %make-instance-stream-from-words (words)))
   ;; Four ABI words per instance in emission order: base x, y, z, meta.
-  (words (make-array 4096 :element-type '(unsigned-byte 32)
-                          :adjustable t :fill-pointer 0)
+  (words (make-array 0 :element-type '(unsigned-byte 32)
+                        :adjustable t :fill-pointer 0)
          :type (vector (unsigned-byte 32))))
+
+(defun %make-instance-stream (&optional (word-capacity 4096))
+  (%make-instance-stream-from-words
+   (make-array word-capacity :element-type '(unsigned-byte 32)
+                             :adjustable t :fill-pointer 0)))
 
 (defun instance-stream-count (stream)
   (/ (fill-pointer (instance-stream-words stream))
@@ -606,6 +615,19 @@ Bit conventions match SITE-STAR-OCCUPANCY-MASK on a vertex site."
   (boundary-packing nil)
   (boundary-observations nil)
   (singular-star-count 0 :type (integer 0 *)))
+
+(defun %reserve-builder-triangle-capacities
+    (builder face-triangles band-triangles fan-triangles)
+  "Replace an unused builder's default streams with measured capacities."
+  (flet ((reserve (stream triangles)
+           (setf (instance-stream-words stream)
+                 (make-array (* +mesh-instance-word-count+ triangles)
+                             :element-type '(unsigned-byte 32)
+                             :adjustable t :fill-pointer 0))))
+    (reserve (surface-mesh-builder-face-stream builder) face-triangles)
+    (reserve (surface-mesh-builder-band-stream builder) band-triangles)
+    (reserve (surface-mesh-builder-fan-stream builder) fan-triangles))
+  builder)
 
 (defun %intern-template (builder scratch count)
   (declare (optimize (speed 3) (safety 1))
@@ -674,13 +696,28 @@ Bit conventions match SITE-STAR-OCCUPANCY-MASK on a vertex site."
   "Write one oriented triangle of template-local vertices; return next offset."
   (declare (optimize (speed 3) (safety 1))
            (type (simple-array fixnum (*)) scratch)
-           (type fixnum offset ax ay az bx by bz cx cy cz nx ny nz))
-  (let* ((ux (- bx ax)) (uy (- by ay)) (uz (- bz az))
-         (vx (- cx ax)) (vy (- cy ay)) (vz (- cz az))
-         (px (- (* uy vz) (* uz vy)))
-         (py (- (* uz vx) (* ux vz)))
-         (pz (- (* ux vy) (* uy vx)))
-         (orientation (+ (* px nx) (* py ny) (* pz nz))))
+           (type (integer 0 3) offset)
+           (type (integer 0 2) kind-code)
+           (type (unsigned-byte 3) boundary-edge-mask)
+           (type (integer -2048 2047) ax ay az bx by bz cx cy cz)
+           (type (signed-byte 29) nx ny nz))
+  (let* ((ux (the (signed-byte 13) (- bx ax)))
+         (uy (the (signed-byte 13) (- by ay)))
+         (uz (the (signed-byte 13) (- bz az)))
+         (vx (the (signed-byte 13) (- cx ax)))
+         (vy (the (signed-byte 13) (- cy ay)))
+         (vz (the (signed-byte 13) (- cz az)))
+         (px (the (signed-byte 26)
+               (- (the fixnum (* uy vz)) (the fixnum (* uz vy)))))
+         (py (the (signed-byte 26)
+               (- (the fixnum (* uz vx)) (the fixnum (* ux vz)))))
+         (pz (the (signed-byte 26)
+               (- (the fixnum (* ux vy)) (the fixnum (* uy vx)))))
+         (orientation
+           (the fixnum
+             (+ (the fixnum (* px nx))
+                (the fixnum (* py ny))
+                (the fixnum (* pz nz))))))
     (when (zerop orientation)
       (error "Degenerate ~[face~;band~;junction~] triangle ~S ~S ~S."
              kind-code (list ax ay az) (list bx by bz) (list cx cy cz)))
@@ -1112,7 +1149,7 @@ Ownership is the half-open box [OX0, OX1) x [OY0, OY1) of site coordinates."
 ;;; left12<<24 | right12<<12 | stock12, where a point12 is
 ;;; (x+4)<<8|(y+4)<<4|(z+4).
 ;;;
-;;; The key itself is one fixnum, because a boundary packing states the
+;;; The key itself is one fixnum, because a spatial-edge packing states the
 ;;; horizontal anchor box the scan covers -- one chunk plus its halo, or a
 ;;; whole solid's own extent -- and stores anchors relative to that box's
 ;;; origin: ((x * y-span + y) * 257 + (z + 1)) << 24 | undirected edge.  A
@@ -1151,17 +1188,19 @@ Ownership is the half-open box [OX0, OX1) x [OY0, OY1) of site coordinates."
         (logior (ash left 12) right)
         (logior (ash right 12) left))))
 
-(defconstant +boundary-z-span+ 257
+(defconstant +spatial-edge-anchor-z-span+ 257
   "Anchor Z values run from -1 through 255 inclusive.")
 
-(defstruct (boundary-packing
-             (:constructor %make-boundary-packing (origin-x origin-y y-span)))
+(defstruct (spatial-edge-packing
+             (:constructor %make-spatial-edge-packing
+                 (origin-x origin-y y-span x-stride)))
   "The anchor box one parity scan covers, and thus its fixnum key layout."
   (origin-x 0 :type fixnum :read-only t)
   (origin-y 0 :type fixnum :read-only t)
-  (y-span 1 :type (integer 1 *) :read-only t))
+  (y-span 1 :type fixnum :read-only t)
+  (x-stride +spatial-edge-anchor-z-span+ :type fixnum :read-only t))
 
-(defun %make-boundary-packing-for-box (x0 x1 y0 y1)
+(defun %make-spatial-edge-packing-for-box (x0 x1 y0 y1)
   "Pack anchors of the cell box [X0, X1) x [Y0, Y1).
 
 Instance bases lie inside the box and template offsets reach at most one
@@ -1170,33 +1209,247 @@ eighth-cell anchor beyond it, so the packed anchor box is widened by two."
          (origin-y (- y0 2))
          (x-span (+ (- x1 x0) 4))
          (y-span (+ (- y1 y0) 4)))
-    (unless (typep (ash (* x-span y-span +boundary-z-span+) 24) 'fixnum)
-      (error "A solid spanning ~Dx~D cells is too wide for one boundary ~
+    (unless (typep (ash (* x-span y-span
+                           +spatial-edge-anchor-z-span+)
+                        24)
+                   'fixnum)
+      (error "A solid spanning ~Dx~D cells is too wide for one spatial-edge ~
               scan; mesh it by chunks."
              x-span y-span))
-    (%make-boundary-packing origin-x origin-y y-span)))
+    (%make-spatial-edge-packing
+     origin-x origin-y y-span
+     (* y-span +spatial-edge-anchor-z-span+))))
 
-(declaim (inline %boundary-edge-key %boundary-key-anchor-x
-                 %boundary-key-anchor-y %boundary-key-anchor-z))
-(defun %boundary-edge-key (packing anchor-x anchor-y anchor-z edge)
-  (logior (ash (+ (* (+ (* (- anchor-x (boundary-packing-origin-x packing))
-                           (boundary-packing-y-span packing))
-                        (- anchor-y (boundary-packing-origin-y packing)))
-                     +boundary-z-span+)
-                  (1+ anchor-z))
-               24)
-          edge))
+(declaim (inline %spatial-edge-key-from-anchor
+                 %spatial-edge-key-anchor-x
+                 %spatial-edge-key-anchor-y %spatial-edge-key-anchor-z))
+(defun %spatial-edge-key-from-anchor
+    (packing anchor-x anchor-y anchor-z edge)
+  (let ((anchor-index
+          (the fixnum
+            (+ (the fixnum
+                 (* (the fixnum
+                      (- anchor-x
+                         (spatial-edge-packing-origin-x packing)))
+                    (spatial-edge-packing-x-stride packing)))
+               (the fixnum
+                 (* (the fixnum
+                      (- anchor-y
+                         (spatial-edge-packing-origin-y packing)))
+                    +spatial-edge-anchor-z-span+))
+               (the fixnum (1+ anchor-z))))))
+    (the fixnum (logior (the fixnum (ash anchor-index 24)) edge))))
 
-(defun %boundary-key-anchor-x (packing key)
-  (+ (boundary-packing-origin-x packing)
+(defun %spatial-edge-key-anchor-x (packing key)
+  (+ (spatial-edge-packing-origin-x packing)
      (truncate (ash key -24)
-               (* (boundary-packing-y-span packing) +boundary-z-span+))))
-(defun %boundary-key-anchor-y (packing key)
-  (+ (boundary-packing-origin-y packing)
-     (mod (truncate (ash key -24) +boundary-z-span+)
-          (boundary-packing-y-span packing))))
-(defun %boundary-key-anchor-z (key)
-  (1- (mod (ash key -24) +boundary-z-span+)))
+               (spatial-edge-packing-x-stride packing))))
+(defun %spatial-edge-key-anchor-y (packing key)
+  (+ (spatial-edge-packing-origin-y packing)
+     (mod (truncate (ash key -24) +spatial-edge-anchor-z-span+)
+          (spatial-edge-packing-y-span packing))))
+(defun %spatial-edge-key-anchor-z (key)
+  (1- (mod (ash key -24) +spatial-edge-anchor-z-span+)))
+
+(declaim (inline %pack-spatial-edge))
+(defun %pack-spatial-edge (packing lx ly lz rx ry rz)
+  "Return one bounded-box key and the directed local endpoints of an edge.
+
+PACKING supplies only the anchor's horizontal frame.  The low 24 key bits are
+the two undirected 12-bit endpoint coordinates inside their shared eighth-cell
+anchor.  This codec is shared by open-sheet boundary assembly and by local
+variable-bevel transition repair; boundary status is a use of the key, not a
+different geometric representation."
+  (declare (optimize (speed 3) (safety 1))
+           (type spatial-edge-packing packing)
+           (type fixnum lx ly lz rx ry rz))
+  (let* ((anchor-x (ash (min lx rx) -3))
+         (anchor-y (ash (min ly ry) -3))
+         (anchor-z (ash (min lz rz) -3))
+         (lox (- lx (ash anchor-x 3)))
+         (loy (- ly (ash anchor-y 3)))
+         (loz (- lz (ash anchor-z 3)))
+         (rox (- rx (ash anchor-x 3)))
+         (roy (- ry (ash anchor-y 3)))
+         (roz (- rz (ash anchor-z 3))))
+    (unless (and (<= 0 lox 15) (<= 0 loy 15) (<= 0 loz 15)
+                 (<= 0 rox 15) (<= 0 roy 15) (<= 0 roz 15))
+      (error "Mesh edge ~S--~S spans more than one anchor cell."
+             (list lx ly lz) (list rx ry rz)))
+    (let* ((left12 (logior (ash lox 8) (ash loy 4) loz))
+           (right12 (logior (ash rox 8) (ash roy 4) roz))
+           (edge (if (< left12 right12)
+                     (logior (ash left12 12) right12)
+                     (logior (ash right12 12) left12))))
+      (values (%spatial-edge-key-from-anchor
+               packing anchor-x anchor-y anchor-z edge)
+              left12 right12))))
+
+(defun %spatial-edge-points (packing key)
+  "Decode KEY to its two lexicographically ordered global tick points."
+  (let* ((anchor-x (%spatial-edge-key-anchor-x packing key))
+         (anchor-y (%spatial-edge-key-anchor-y packing key))
+         (anchor-z (%spatial-edge-key-anchor-z key))
+         (edge (ldb (byte 24 0) key))
+         (left (ldb (byte 12 12) edge))
+         (right (ldb (byte 12 0) edge)))
+    (flet ((point (local)
+             (list (+ (ash anchor-x 3) (ldb (byte 4 8) local))
+                   (+ (ash anchor-y 3) (ldb (byte 4 4) local))
+                   (+ (ash anchor-z 3) (ldb (byte 4 0) local)))))
+      (values (point left) (point right)))))
+
+(defconstant +source-anchor-filter-bit-limit+ (* 16 1024 1024))
+(defconstant +maximum-variable-bevel-displacement+ 3)
+
+(defstruct (source-anchor-filter
+             (:constructor %make-source-anchor-filter-record
+                 (bits table x0 y0 z0 x-span y-span z-span)))
+  "A dense-or-sparse conservative preimage of transformed spatial edges."
+  (bits nil :type (or null simple-bit-vector) :read-only t)
+  (table nil :type (or null hash-table) :read-only t)
+  (x0 0 :type fixnum :read-only t)
+  (y0 0 :type fixnum :read-only t)
+  (z0 0 :type fixnum :read-only t)
+  (x-span 1 :type fixnum :read-only t)
+  (y-span 1 :type fixnum :read-only t)
+  (z-span 1 :type fixnum :read-only t))
+
+(declaim (inline %spatial-edge-minimum-components))
+(defun %spatial-edge-minimum-components (packing key)
+  "Decode the componentwise minimum endpoint of one spatial-edge KEY."
+  (let* ((anchor-x (%spatial-edge-key-anchor-x packing key))
+         (anchor-y (%spatial-edge-key-anchor-y packing key))
+         (anchor-z (%spatial-edge-key-anchor-z key))
+         (edge (ldb (byte 24 0) key))
+         (left (ldb (byte 12 12) edge))
+         (right (ldb (byte 12 0) edge)))
+    (values (+ (ash anchor-x 3)
+               (min (ldb (byte 4 8) left) (ldb (byte 4 8) right)))
+            (+ (ash anchor-y 3)
+               (min (ldb (byte 4 4) left) (ldb (byte 4 4) right)))
+            (+ (ash anchor-z 3)
+               (min (ldb (byte 4 0) left) (ldb (byte 4 0) right))))))
+
+(defun %make-source-anchor-filter (packing spatial-edges)
+  "Return the bounded preimage of SPATIAL-EDGES under variable bevel motion.
+
+A width-one endpoint moves by at most three ticks per axis.  Componentwise
+edge minima therefore move by at most three ticks, so each transformed edge
+has at most two possible source anchors per axis and eight in total.  The
+filter may admit false positives, but cannot omit an edge that can transform
+to one of SPATIAL-EDGES."
+  (when (plusp (hash-table-count spatial-edges))
+    (let ((x0 most-positive-fixnum) (x1 most-negative-fixnum)
+          (y0 most-positive-fixnum) (y1 most-negative-fixnum)
+          (z0 most-positive-fixnum) (z1 most-negative-fixnum))
+      (loop for key being the hash-keys of spatial-edges do
+        (multiple-value-bind (x y z)
+            (%spatial-edge-minimum-components packing key)
+          (let ((low-x
+                  (ash (- x +maximum-variable-bevel-displacement+) -3))
+                (high-x
+                  (ash (+ x +maximum-variable-bevel-displacement+) -3))
+                (low-y
+                  (ash (- y +maximum-variable-bevel-displacement+) -3))
+                (high-y
+                  (ash (+ y +maximum-variable-bevel-displacement+) -3))
+                (low-z
+                  (ash (- z +maximum-variable-bevel-displacement+) -3))
+                (high-z
+                  (ash (+ z +maximum-variable-bevel-displacement+) -3)))
+            (setf x0 (min x0 low-x) x1 (max x1 high-x)
+                  y0 (min y0 low-y) y1 (max y1 high-y)
+                  z0 (min z0 low-z) z1 (max z1 high-z)))))
+      (let* ((x-span (1+ (- x1 x0)))
+             (y-span (1+ (- y1 y0)))
+             (z-span (1+ (- z1 z0)))
+             (volume (* x-span y-span z-span))
+             (bits
+               (when (<= volume +source-anchor-filter-bit-limit+)
+                 (make-array volume :element-type 'bit :initial-element 0)))
+             (table
+               (unless bits
+                 (make-hash-table
+                  :test #'eql
+                  :size (max 16 (* 8 (hash-table-count spatial-edges))))))
+             (filter
+               (%make-source-anchor-filter-record
+                bits table x0 y0 z0 x-span y-span z-span)))
+        (flet ((mark (x y z)
+                 (if bits
+                     (setf (sbit bits
+                                 (+ (- z z0)
+                                    (* z-span
+                                       (+ (- y y0)
+                                          (* y-span (- x x0))))))
+                           1)
+                     (setf (gethash (%lattice-key x y z) table) t))))
+          (loop for key being the hash-keys of spatial-edges do
+            (multiple-value-bind (x y z)
+                (%spatial-edge-minimum-components packing key)
+              (loop for source-x
+                      from (ash (- x +maximum-variable-bevel-displacement+) -3)
+                        to (ash (+ x +maximum-variable-bevel-displacement+) -3)
+                    do (loop for source-y
+                              from (ash
+                                    (- y +maximum-variable-bevel-displacement+)
+                                    -3)
+                                to (ash
+                                    (+ y +maximum-variable-bevel-displacement+)
+                                    -3)
+                             do (loop for source-z
+                                       from (ash
+                                             (- z
+                                                +maximum-variable-bevel-displacement+)
+                                             -3)
+                                         to (ash
+                                             (+ z
+                                                +maximum-variable-bevel-displacement+)
+                                             -3)
+                                      do (mark source-x source-y source-z)))))))
+        filter))))
+
+(declaim (inline %source-edge-anchor-filter-member-p
+                 %triangle-touches-source-anchor-filter-p))
+(defun %source-edge-anchor-filter-member-p
+    (filter lx ly lz rx ry rz)
+  (declare (optimize (speed 3) (safety 1))
+           (type source-anchor-filter filter)
+           (type fixnum lx ly lz rx ry rz))
+  (let ((x (ash (min lx rx) -3))
+        (y (ash (min ly ry) -3))
+        (z (ash (min lz rz) -3))
+        (bits (source-anchor-filter-bits filter)))
+    (if bits
+        (let ((dx (the fixnum (- x (source-anchor-filter-x0 filter))))
+              (dy (the fixnum (- y (source-anchor-filter-y0 filter))))
+              (dz (the fixnum (- z (source-anchor-filter-z0 filter)))))
+          (declare (type fixnum dx dy dz))
+          (and (<= 0 dx) (< dx (source-anchor-filter-x-span filter))
+               (<= 0 dy) (< dy (source-anchor-filter-y-span filter))
+               (<= 0 dz) (< dz (source-anchor-filter-z-span filter))
+               (= 1 (sbit bits
+                          (the fixnum
+                            (+ dz
+                               (the fixnum
+                                 (* (source-anchor-filter-z-span filter)
+                                    (the fixnum
+                                      (+ dy
+                                         (the fixnum
+                                           (* (source-anchor-filter-y-span filter)
+                                              dx))))))))))))
+        (gethash (%lattice-key x y z)
+                 (source-anchor-filter-table filter)))))
+
+(defun %triangle-touches-source-anchor-filter-p
+    (filter ax ay az bx by bz cx cy cz)
+  (declare (optimize (speed 3) (safety 1))
+           (type source-anchor-filter filter)
+           (type fixnum ax ay az bx by bz cx cy cz))
+  (or (%source-edge-anchor-filter-member-p filter ax ay az bx by bz)
+      (%source-edge-anchor-filter-member-p filter bx by bz cx cy cz)
+      (%source-edge-anchor-filter-member-p filter cx cy cz ax ay az)))
 
 (defun %stream-triangle-count (stream templates)
   (declare (optimize (speed 3) (safety 1)))
@@ -1298,40 +1551,27 @@ right12<<12 | stock12, where the 12-bit points are anchor-local."
                  (lz (global-z left))
                  (rx (global-x right)) (ry (global-y right))
                  (rz (global-z right))
-                 (anchor-x (ash (min lx rx) -3))
-                 (anchor-y (ash (min ly ry) -3))
-                 (anchor-z (ash (min lz rz) -3))
-                 (left12
-                   (logior (ash (- lx (* 8 anchor-x)) 8)
-                           (ash (- ly (* 8 anchor-y)) 4)
-                           (- lz (* 8 anchor-z))))
-                 (right12
-                   (logior (ash (- rx (* 8 anchor-x)) 8)
-                           (ash (- ry (* 8 anchor-y)) 4)
-                           (- rz (* 8 anchor-z))))
-                 (key (%boundary-edge-key
-                       packing anchor-x anchor-y anchor-z
-                       (if (< left12 right12)
-                           (logior (ash left12 12) right12)
-                           (logior (ash right12 12) left12))))
-                 (existing (gethash key observations)))
-            (if existing
-                (let ((next-count
-                        (1+ (ash existing
-                                 (- +boundary-observation-count-shift+)))))
-                  (when (> next-count 2)
-                    (error "Face and edge streams meet ~D times at ~S."
-                           next-count key))
+                 (key nil) (left12 nil) (right12 nil))
+            (multiple-value-setq (key left12 right12)
+              (%pack-spatial-edge packing lx ly lz rx ry rz))
+            (let ((existing (gethash key observations)))
+              (if existing
+                  (let ((next-count
+                          (1+ (ash existing
+                                   (- +boundary-observation-count-shift+)))))
+                    (when (> next-count 2)
+                      (error "Face and edge streams meet ~D times at ~S."
+                             next-count key))
+                    (setf (gethash key observations)
+                          (dpb next-count
+                               (byte 4 +boundary-observation-count-shift+)
+                               existing)))
                   (setf (gethash key observations)
-                        (dpb next-count
-                             (byte 4 +boundary-observation-count-shift+)
-                             existing)))
-                (setf (gethash key observations)
-                      (logior
-                       (ash 1 +boundary-observation-count-shift+)
-                       (ash left12 +fan-record-left-shift+)
-                       (ash right12 +fan-record-right-shift+)
-                       stock)))))))))
+                        (logior
+                         (ash 1 +boundary-observation-count-shift+)
+                         (ash left12 +fan-record-left-shift+)
+                         (ash right12 +fan-record-right-shift+)
+                         stock))))))))))
 
 (defun %scan-stream-boundary-edges (stream templates packing observations)
   (declare (optimize (speed 3) (safety 1)))
@@ -1375,50 +1615,36 @@ right12<<12 | stock12, where the 12-bit points are anchor-local."
                                        (lz (global-z left))
                                        (rx (global-x right))
                                        (ry (global-y right))
-                                       (rz (global-z right))
-                                       (anchor-x (ash (min lx rx) -3))
-                                       (anchor-y (ash (min ly ry) -3))
-                                       (anchor-z (ash (min lz rz) -3))
-                                       (left12
-                                         (logior
-                                          (ash (- lx (* 8 anchor-x)) 8)
-                                          (ash (- ly (* 8 anchor-y)) 4)
-                                          (- lz (* 8 anchor-z))))
-                                       (right12
-                                         (logior
-                                          (ash (- rx (* 8 anchor-x)) 8)
-                                          (ash (- ry (* 8 anchor-y)) 4)
-                                          (- rz (* 8 anchor-z))))
-                                       (key
-                                         (%boundary-edge-key
-                                          packing anchor-x anchor-y anchor-z
-                                          (if (< left12 right12)
-                                              (logior (ash left12 12)
-                                                      right12)
-                                              (logior (ash right12 12)
-                                                      left12))))
-                                       (existing
-                                         (gethash key observations)))
-                                  (cond
-                                    ((null existing)
-                                     (setf (gethash key observations)
-                                           (logior
-                                            (ash 1 +boundary-observation-count-shift+)
-                                            (ash left12 +fan-record-left-shift+)
-                                            (ash right12 +fan-record-right-shift+)
-                                            stock)))
-                                    (t
-                                     (let ((count
-                                             (1+ (ash existing
-                                                      (- +boundary-observation-count-shift+)))))
-                                       (when (> count 2)
-                                         (error "Face and edge streams meet ~D times at ~S."
-                                                count key))
-                                       (setf (gethash key observations)
-                                             (dpb count
-                                                  (byte 4
-                                                        +boundary-observation-count-shift+)
-                                                  existing)))))))))))))
+                                       (rz (global-z right)))
+                                  (multiple-value-bind (key left12 right12)
+                                      (%pack-spatial-edge
+                                       packing lx ly lz rx ry rz)
+                                    (let ((existing
+                                            (gethash key observations)))
+                                      (cond
+                                        ((null existing)
+                                         (setf (gethash key observations)
+                                               (logior
+                                                (ash 1
+                                                     +boundary-observation-count-shift+)
+                                                (ash left12
+                                                     +fan-record-left-shift+)
+                                                (ash right12
+                                                     +fan-record-right-shift+)
+                                                stock)))
+                                        (t
+                                         (let ((count
+                                                 (1+ (ash existing
+                                                          (- +boundary-observation-count-shift+)))))
+                                           (when (> count 2)
+                                             (error "Face and edge streams meet ~D times at ~S."
+                                                    count key))
+                                           (setf (gethash key observations)
+                                                 (dpb count
+                                                      (byte
+                                                       4
+                                                       +boundary-observation-count-shift+)
+                                                      existing)))))))))))))))
 
 (defun %attribute-open-edges-to-sites
     (builders packing bevel-width drop-nonlocal-p)
@@ -1436,9 +1662,9 @@ every owned site's bevel domain, and DROP-NONLOCAL-P discards it."
      (lambda (key value)
        (when (= 1 (ash value (- +boundary-observation-count-shift+)))
          (block attribute
-           (let* ((anchor-x (%boundary-key-anchor-x packing key))
-                  (anchor-y (%boundary-key-anchor-y packing key))
-                  (anchor-z (%boundary-key-anchor-z key))
+           (let* ((anchor-x (%spatial-edge-key-anchor-x packing key))
+                  (anchor-y (%spatial-edge-key-anchor-y packing key))
+                  (anchor-z (%spatial-edge-key-anchor-z key))
                   (left12 (ldb (byte 12 +fan-record-left-shift+) value))
                   (right12 (ldb (byte 12 +fan-record-right-shift+) value))
                   (stock (ldb (byte +fan-record-stock-bit-count+ 0) value))
@@ -1975,6 +2201,226 @@ not as a substitute for a variable-width junction construction."
       (visit (surface-mesh-band-instance-words mesh) :band)
       (visit (surface-mesh-fan-instance-words mesh) :junction))))
 
+(defmacro %do-surface-mesh-triangle-scalars
+    ((mesh kind stock ambient mask
+      ax ay az bx by bz cx cy cz)
+     &body body)
+  "Iterate MESH's packed triangles with scalar coordinates and no callback.
+
+This is the dense-loop counterpart to %MAP-SURFACE-MESH-TRIANGLE-RECORDS.
+The latter deliberately materializes convenient point and normal lists for
+cold transformations and inspection; performance-sensitive compilers should
+keep the packed instance/template representation through their inner loop."
+  (let ((mesh-value (gensym "MESH"))
+        (templates (gensym "TEMPLATES"))
+        (ranges (gensym "RANGES"))
+        (visit (gensym "VISIT"))
+        (words (gensym "WORDS"))
+        (kind-value (gensym "KIND"))
+        (offset (gensym "OFFSET"))
+        (base-x (gensym "BASE-X"))
+        (base-y (gensym "BASE-Y"))
+        (base-z (gensym "BASE-Z"))
+        (meta (gensym "META"))
+        (stock-value (gensym "STOCK"))
+        (ambient-value (gensym "AMBIENT"))
+        (template-id (gensym "TEMPLATE-ID"))
+        (start (gensym "START"))
+        (count (gensym "COUNT"))
+        (vertex (gensym "VERTEX"))
+        (attributes (gensym "ATTRIBUTES")))
+    (labels ((coordinate (base vertex-offset axis)
+               `(the mesh-global-tick
+                  (+ (ash (the fixnum ,base) 3)
+                     (- (aref ,templates
+                              (+ (* (+ ,vertex ,vertex-offset)
+                                    +mesh-template-vertex-word-count+)
+                                 ,axis))
+                        +mesh-template-coordinate-bias+)))))
+      `(let* ((,mesh-value ,mesh)
+              (,templates (surface-mesh-template-vertex-words ,mesh-value))
+              (,ranges (surface-mesh-template-ranges ,mesh-value)))
+         (flet ((,visit (,words ,kind-value)
+                  (declare (type (simple-array (unsigned-byte 32) (*)) ,words))
+                  (loop for ,offset fixnum from 0 below (length ,words)
+                          by +mesh-instance-word-count+
+                        for ,base-x = (aref ,words ,offset)
+                        for ,base-y = (aref ,words (+ ,offset 1))
+                        for ,base-z = (aref ,words (+ ,offset 2))
+                        for ,meta = (aref ,words (+ ,offset 3))
+                        for ,template-id = (ldb (byte 16 0) ,meta)
+                        for ,stock-value =
+                          (ldb (byte +mesh-instance-stock-bit-count+
+                                     +mesh-instance-stock-shift+)
+                               ,meta)
+                        for ,ambient-value =
+                          (ldb (byte 2
+                                     +mesh-instance-ambient-occlusion-shift+)
+                               ,meta)
+                        for ,start = (aref ,ranges (* 2 ,template-id))
+                        for ,count = (aref ,ranges (1+ (* 2 ,template-id)))
+                        do (loop for ,vertex fixnum from ,start
+                                   below (+ ,start ,count) by 3
+                                 for ,attributes =
+                                   (aref ,templates
+                                         (+ (* ,vertex
+                                               +mesh-template-vertex-word-count+)
+                                            3))
+                                 do (let ((,kind ,kind-value)
+                                          (,stock ,stock-value)
+                                          (,ambient ,ambient-value)
+                                          (,mask (ldb (byte 3 10) ,attributes))
+                                          (,ax ,(coordinate base-x 0 0))
+                                          (,ay ,(coordinate base-y 0 1))
+                                          (,az ,(coordinate base-z 0 2))
+                                          (,bx ,(coordinate base-x 1 0))
+                                          (,by ,(coordinate base-y 1 1))
+                                          (,bz ,(coordinate base-z 1 2))
+                                          (,cx ,(coordinate base-x 2 0))
+                                          (,cy ,(coordinate base-y 2 1))
+                                          (,cz ,(coordinate base-z 2 2)))
+                                      (declare
+                                       (ignorable ,kind ,stock ,ambient ,mask
+                                                  ,ax ,ay ,az ,bx ,by ,bz
+                                                  ,cx ,cy ,cz)
+                                       (type fixnum ,stock ,ambient ,mask)
+                                       (type mesh-global-tick
+                                             ,ax ,ay ,az ,bx ,by ,bz
+                                             ,cx ,cy ,cz))
+                                      ,@body)))))
+           (,visit (surface-mesh-face-instance-words ,mesh-value) :face)
+           (,visit (surface-mesh-band-instance-words ,mesh-value) :band)
+           (,visit (surface-mesh-fan-instance-words ,mesh-value) :junction))))))
+
+(declaim (inline %unit-bevel-coordinate-site-and-direction)
+         (ftype (function (mesh-global-tick)
+                  (values (integer 0 #.(ash 1 17))
+                          (integer -1 1) &optional))
+                %unit-bevel-coordinate-site-and-direction))
+(defun %unit-bevel-coordinate-site-and-direction (coordinate)
+  "Decode one nonnegative width-one tick coordinate without materialization."
+  (declare (optimize (speed 3) (safety 1))
+           (type mesh-global-tick coordinate))
+  (let ((cell (ash coordinate -3)))
+    (case (logand coordinate 7)
+      (0 (values cell 0))
+      (1 (values cell 1))
+      (7 (values (1+ cell) -1))
+      (t (error "Width-one point coordinate ~D has no canonical lattice-site owner."
+                coordinate)))))
+
+(declaim (inline %unit-bevel-point-owner)
+         (ftype (function
+                  (mesh-global-tick mesh-global-tick mesh-global-tick)
+                  (values (integer 0 #.(ash 1 17))
+                          (integer 0 #.(ash 1 17))
+                          (integer 0 #.(ash 1 17))
+                          (integer -1 1) (integer -1 1) (integer -1 1)
+                          &optional))
+                %unit-bevel-point-owner))
+(defun %unit-bevel-point-owner (x y z)
+  "Return the scalar owner site and local direction for a witness point."
+  (multiple-value-bind (site-x direction-x)
+      (%unit-bevel-coordinate-site-and-direction x)
+    (multiple-value-bind (site-y direction-y)
+        (%unit-bevel-coordinate-site-and-direction y)
+      (multiple-value-bind (site-z direction-z)
+          (%unit-bevel-coordinate-site-and-direction z)
+        (values site-x site-y site-z
+                direction-x direction-y direction-z)))))
+
+(defconstant +global-mesh-point-z-bit-count+ 12)
+(defconstant +global-mesh-point-axis-bit-count+ 21)
+(defconstant +global-mesh-point-y-shift+ +global-mesh-point-z-bit-count+)
+(defconstant +global-mesh-point-x-shift+
+  (+ +global-mesh-point-z-bit-count+ +global-mesh-point-axis-bit-count+))
+
+(declaim (inline %pack-global-mesh-point
+                 %global-mesh-point-x %global-mesh-point-y
+                 %global-mesh-point-z %global-mesh-point-distance-squared))
+(defun %pack-global-mesh-point (x y z)
+  "Pack a world-domain tick point into one lexicographically ordered fixnum."
+  (declare (optimize (speed 3) (safety 1))
+           (type mesh-global-tick x y z))
+  (unless (and (typep x '(unsigned-byte #.+global-mesh-point-axis-bit-count+))
+               (typep y '(unsigned-byte #.+global-mesh-point-axis-bit-count+))
+               (typep z '(unsigned-byte #.+global-mesh-point-z-bit-count+)))
+    (error "Global mesh point ~S exceeds the LUFT world-domain tick range."
+           (list x y z)))
+  (logior (ash x +global-mesh-point-x-shift+)
+          (ash y +global-mesh-point-y-shift+)
+          z))
+
+(defun %global-mesh-point-x (point)
+  (ldb (byte +global-mesh-point-axis-bit-count+
+             +global-mesh-point-x-shift+)
+       point))
+(defun %global-mesh-point-y (point)
+  (ldb (byte +global-mesh-point-axis-bit-count+
+             +global-mesh-point-y-shift+)
+       point))
+(defun %global-mesh-point-z (point)
+  (ldb (byte +global-mesh-point-z-bit-count+ 0) point))
+
+(defun %global-mesh-point-distance-squared (left right)
+  (let ((dx (- (%global-mesh-point-x right) (%global-mesh-point-x left)))
+        (dy (- (%global-mesh-point-y right) (%global-mesh-point-y left)))
+        (dz (- (%global-mesh-point-z right) (%global-mesh-point-z left))))
+    (+ (* dx dx) (* dy dy) (* dz dz))))
+
+(defun %global-mesh-point-list (point)
+  (list (%global-mesh-point-x point)
+        (%global-mesh-point-y point)
+        (%global-mesh-point-z point)))
+
+(declaim (inline %triangle-cross-scalars)
+         (ftype (function
+                  (mesh-global-tick mesh-global-tick mesh-global-tick
+                   mesh-global-tick mesh-global-tick mesh-global-tick
+                   mesh-global-tick mesh-global-tick mesh-global-tick)
+                  (values (signed-byte 29) (signed-byte 29)
+                          (signed-byte 29) &optional))
+                %triangle-cross-scalars))
+(defun %triangle-cross-scalars (ax ay az bx by bz cx cy cz)
+  (declare (optimize (speed 3) (safety 1))
+           (type mesh-global-tick ax ay az bx by bz cx cy cz))
+  (let ((ux (the (signed-byte 14) (- bx ax)))
+        (uy (the (signed-byte 14) (- by ay)))
+        (uz (the (signed-byte 14) (- bz az)))
+        (vx (the (signed-byte 14) (- cx ax)))
+        (vy (the (signed-byte 14) (- cy ay)))
+        (vz (the (signed-byte 14) (- cz az))))
+    (values (the (signed-byte 29)
+              (- (the fixnum (* uy vz)) (the fixnum (* uz vy))))
+            (the (signed-byte 29)
+              (- (the fixnum (* uz vx)) (the fixnum (* ux vz))))
+            (the (signed-byte 29)
+              (- (the fixnum (* ux vy)) (the fixnum (* uy vx)))))))
+
+(defun %emit-global-triangle-scalars
+    (builder kind stock ambient mask nx ny nz
+     ax ay az bx by bz cx cy cz)
+  "Emit one global-tick triangle without point, base, origin, or normal lists."
+  (declare (optimize (speed 3) (safety 1))
+           (type surface-mesh-builder builder)
+           (type fixnum stock ambient mask)
+           (type (signed-byte 29) nx ny nz)
+           (type mesh-global-tick ax ay az bx by bz cx cy cz))
+  (let* ((base-x (ash (min ax bx cx) -3))
+         (base-y (ash (min ay by cy) -3))
+         (base-z (ash (min az bz cz) -3))
+         (origin-x (ash base-x 3))
+         (origin-y (ash base-y 3))
+         (origin-z (ash base-z 3))
+         (scratch (surface-mesh-builder-vertex-scratch builder)))
+    (%scratch-triangle
+     scratch 0 (ecase kind (:face 0) (:band 1) (:junction 2)) mask
+     (- ax origin-x) (- ay origin-y) (- az origin-z)
+     (- bx origin-x) (- by origin-y) (- bz origin-z)
+     (- cx origin-x) (- cy origin-y) (- cz origin-z)
+     nx ny nz)
+    (%emit-instance builder kind base-x base-y base-z stock ambient 3)))
+
 (defun %unit-bevel-point-site (point)
   "Return the canonical lattice site and local direction owning POINT.
 
@@ -1993,161 +2439,550 @@ on, one tick above, or one tick below its owning lattice plane."
                     coordinate)))))
     (values (nreverse site) (nreverse direction))))
 
-(defun %point-distance-squared (left right)
-  (loop for l in left
-        for r in right
-        sum (let ((difference (- r l))) (* difference difference))))
-
-(defun %collapsed-triangle-split (a b c)
-  "Return the long edge and its interior point for a collinear triangle.
-
-When three distinct transformed points become collinear, dropping their
-triangle leaves a long edge on one neighbour opposite two shorter edges on the
-others.  The returned split is the exact T-junction contraction needed to make
-those three neighbours share the same two edges."
-  (let ((points (remove-duplicates (list a b c) :test #'equal)))
-    (when (= 3 (length points))
-      (destructuring-bind (a b c) points
-        (let ((candidates
-                (list (list (%point-distance-squared a b) a b c)
-                      (list (%point-distance-squared b c) b c a)
-                      (list (%point-distance-squared c a) c a b))))
-          (destructuring-bind (length left right middle)
-              (reduce (lambda (left right)
-                        (if (> (first left) (first right)) left right))
-                      candidates)
-            (declare (ignore length))
-            (values (%ordered-point-edge left right) middle)))))))
-
 (declaim (ftype function %triangulate-coplanar-loop))
 
-(defun vary-surface-mesh-bevel-widths
-    (witness width-function &key (contract-t-junctions-p t))
-  "Evaluate one width-one WITNESS at a locally selected width per vertex site.
+(defconstant +dense-bevel-site-field-byte-limit+ (* 16 1024 1024))
+(defconstant +dense-bevel-site-field-sparsity-limit+ 16)
+(defconstant +bevel-site-page-edge+ 8)
+(defconstant +bevel-site-page-volume+
+  (* +bevel-site-page-edge+ +bevel-site-page-edge+ +bevel-site-page-edge+))
+;; Budget every possible page plus a conservative two-word directory entry.
+;; The actual directory is one pointer per page, so this keeps the fast path
+;; bounded without depending on implementation-specific object sizes.
+(defconstant +bevel-site-page-directory-limit+
+  (floor +dense-bevel-site-field-byte-limit+
+         (+ +bevel-site-page-volume+ 16)))
 
-WIDTH-FUNCTION is called once for each canonical lattice vertex as
-  (WIDTH-FUNCTION X Y Z INCIDENT-STOCKS)
-where INCIDENT-STOCKS is a sorted list of the packed stocks on witness
-triangles using that site.  It must return an integer width from one through
-four.
+(declaim (inline %dense-bevel-site-index))
+(defun %dense-bevel-site-index
+    (x y z x0 y0 z0 y-span z-span)
+  (declare (optimize (speed 3) (safety 1))
+           (type fixnum x y z x0 y0 z0 y-span z-span))
+  (the fixnum
+    (+ (the fixnum (- z z0))
+       (the fixnum
+         (* z-span
+            (the fixnum
+              (+ (the fixnum (- y y0))
+                 (the fixnum (* y-span (the fixnum (- x x0)))))))))))
 
-Every witness vertex has the exact affine form 8*S + Q with Q in {-1,0,1}^3.
-The result replaces it by 8*S + WIDTH(S)*Q.  Since every incident primitive
-uses the same canonical S, shared vertices remain equal without stitching.
-At the medial limit a witness triangle can collapse to three collinear points.
-The result contracts that triangle by splitting its surviving neighbour's long
-edge at the middle point, eliminating the otherwise visible T-junction without
-inventing a surface.  WITNESS remains the rebuild oracle for topology and
-uniform-width geometry.  Transition triangles may leave the uniform mesher's
-26 exact normal directions.  The packed trit normal remains an orientation
-witness; fragment shading derives the actual primitive normal from world-space
-position derivatives, so the new directions are not lighting-quantized.
+(defun %paged-byte-stock-mask-policy-p (domain stock-masks site-widths)
+  "Whether STOCK-MASKS can use the bounded direct page directory for DOMAIN."
+  (and (typep stock-masks '(simple-array (unsigned-byte 8) (*)))
+       (typep site-widths '(simple-array (unsigned-byte 8) (*)))
+       ;; Zero is the unobserved-site sentinel inside a page.  Wider or zero
+       ;; masks retain the fully general EQL hash compiler below.
+       (loop for stock-mask across stock-masks always (plusp stock-mask))
+       (let* ((x-pages (ceiling (1+ (world-domain-x-limit domain))
+                               +bevel-site-page-edge+))
+              (y-pages (ceiling (1+ (world-domain-y-limit domain))
+                               +bevel-site-page-edge+))
+              (z-pages (ceiling (1+ +top-z+) +bevel-site-page-edge+)))
+         (<= (* x-pages y-pages z-pages)
+             +bevel-site-page-directory-limit+))))
 
-The second value is a five-entry site census indexed by width.  The third is a
-diagnostic plist containing the collapsed-triangle, unmatched-edge, repaired-
-edge, and residual-edge counts.
+(defun %compile-paged-byte-stock-mask-bevel-sites
+    (witness stock-masks site-widths width-census)
+  "Fold a positive byte stock lane through sparse 8-cubed pages.
 
-CONTRACT-T-JUNCTIONS-P defaults true.  NIL deliberately omits collapsed
-triangles without subdividing their surviving neighbours, returning the open
-diagnostic surface that motivates the contraction.  Production callers should
-retain the default; the uncontracted surface exists only for topology study."
+Return the sparse or dense realized width field, its exact site count and
+maximum width, and its inclusive coordinate bounds.  Pages are only the
+one-pass accumulation language; the returned field has the same tight layout
+used by the generic compiler and all realization passes."
+  (declare (optimize (speed 3) (safety 1))
+           (type surface-mesh witness)
+           (type (simple-array (unsigned-byte 8) (*)) stock-masks)
+           (type (simple-array (unsigned-byte 8) (*)) site-widths)
+           (type (simple-array (unsigned-byte 32) (5)) width-census))
+  (let* ((domain (surface-mesh-domain witness))
+         (x-pages (ceiling (1+ (world-domain-x-limit domain))
+                           +bevel-site-page-edge+))
+         (y-pages (ceiling (1+ (world-domain-y-limit domain))
+                           +bevel-site-page-edge+))
+         (z-pages (ceiling (1+ +top-z+) +bevel-site-page-edge+))
+         (directory-count (* x-pages y-pages z-pages))
+         (pages (make-array directory-count :initial-element nil))
+         (touched
+           (make-array (min 1024 directory-count)
+                       :element-type '(unsigned-byte 32)
+                       :adjustable t :fill-pointer 0))
+         (site-count 0)
+         (minimum-site-x most-positive-fixnum)
+         (maximum-site-x most-negative-fixnum)
+         (minimum-site-y most-positive-fixnum)
+         (maximum-site-y most-negative-fixnum)
+         (minimum-site-z most-positive-fixnum)
+         (maximum-site-z most-negative-fixnum))
+    (declare (type fixnum x-pages y-pages z-pages directory-count site-count
+                          minimum-site-x maximum-site-x
+                          minimum-site-y maximum-site-y
+                          minimum-site-z maximum-site-z))
+    (labels ((directory-index (x y z)
+               (the fixnum
+                 (+ (ash z -3)
+                    (the fixnum
+                      (* z-pages
+                         (the fixnum
+                           (+ (ash y -3)
+                              (the fixnum (* y-pages (ash x -3))))))))))
+             (local-index (x y z)
+               (the (unsigned-byte 9)
+                 (logior (logand z 7)
+                         (ash (logand y 7) 3)
+                         (ash (logand x 7) 6))))
+             (observe (x y z stock-mask)
+               (declare (type (integer 0 #.(ash 1 17)) x y)
+                        (type (integer 0 255) z)
+                        (type (unsigned-byte 8) stock-mask))
+               (let* ((page-index (directory-index x y z))
+                      (page (aref pages page-index)))
+                 (unless page
+                   (setf page
+                         (make-array +bevel-site-page-volume+
+                                     :element-type '(unsigned-byte 8)
+                                     :initial-element 0)
+                         (aref pages page-index) page)
+                   (vector-push-extend page-index touched))
+                 (let* ((page
+                          (the (simple-array (unsigned-byte 8)
+                                             (#.+bevel-site-page-volume+))
+                            page))
+                        (index (local-index x y z))
+                        (old (aref page index)))
+                   (when (zerop old)
+                     (incf site-count)
+                     (setf minimum-site-x (min minimum-site-x x)
+                           maximum-site-x (max maximum-site-x x)
+                           minimum-site-y (min minimum-site-y y)
+                           maximum-site-y (max maximum-site-y y)
+                           minimum-site-z (min minimum-site-z z)
+                           maximum-site-z (max maximum-site-z z)))
+                   (setf (aref page index) (logior old stock-mask))))))
+      (declare
+       (inline directory-index local-index observe)
+       (ftype (function (fixnum fixnum fixnum) fixnum)
+              directory-index local-index)
+       (ftype (function (fixnum fixnum fixnum (unsigned-byte 8)) *) observe))
+      (%do-surface-mesh-triangle-scalars
+          (witness kind stock ambient mask
+                   ax ay az bx by bz cx cy cz)
+        (declare (ignore kind ambient mask))
+        (unless (< stock (length stock-masks))
+          (error "Mesh stock ~D is outside the compiled bevel policy of ~D entries."
+                 stock (length stock-masks)))
+        (let ((stock-mask (aref stock-masks stock)))
+          (multiple-value-bind (asx asy asz)
+              (%unit-bevel-point-owner ax ay az)
+            (multiple-value-bind (bsx bsy bsz)
+                (%unit-bevel-point-owner bx by bz)
+              (multiple-value-bind (csx csy csz)
+                  (%unit-bevel-point-owner cx cy cz)
+                (observe asx asy asz stock-mask)
+                (unless (and (= asx bsx) (= asy bsy) (= asz bsz))
+                  (observe bsx bsy bsz stock-mask))
+                (unless (or (and (= asx csx) (= asy csy) (= asz csz))
+                            (and (= bsx csx) (= bsy csy) (= bsz csz)))
+                  (observe csx csy csz stock-mask))))))))
+    (when (zerop site-count)
+      (setf minimum-site-x 0 maximum-site-x 0
+            minimum-site-y 0 maximum-site-y 0
+            minimum-site-z 0 maximum-site-z 0))
+    (let* ((site-x-span (1+ (- maximum-site-x minimum-site-x)))
+           (site-y-span (1+ (- maximum-site-y minimum-site-y)))
+           (site-z-span (1+ (- maximum-site-z minimum-site-z)))
+           (site-volume (* site-x-span site-y-span site-z-span))
+           (dense-widths
+             (when (and (plusp site-count)
+                        (<= site-volume +dense-bevel-site-field-byte-limit+)
+                        (<= site-volume
+                            (* +dense-bevel-site-field-sparsity-limit+
+                               site-count)))
+               (make-array site-volume :element-type '(unsigned-byte 8)
+                                        :initial-element 0)))
+           (width-by-site
+             (unless dense-widths
+               (make-hash-table :test #'eql :size (max 16 site-count))))
+           (maximum-width 1))
+      (declare (type fixnum site-x-span site-y-span site-z-span site-volume
+                            maximum-width))
+      (loop for page-index across touched do
+        (multiple-value-bind (page-x remainder)
+            (truncate page-index (* y-pages z-pages))
+          (multiple-value-bind (page-y page-z)
+              (truncate remainder z-pages)
+            (let ((page
+                    (the (simple-array (unsigned-byte 8)
+                                       (#.+bevel-site-page-volume+))
+                      (aref pages page-index))))
+              (dotimes (index +bevel-site-page-volume+)
+                (let ((site-mask (aref page index)))
+                  (unless (zerop site-mask)
+                    (let ((x (+ (ash page-x 3) (ash index -6)))
+                          (y (+ (ash page-y 3) (ldb (byte 3 3) index)))
+                          (z (+ (ash page-z 3) (ldb (byte 3 0) index))))
+                      (declare (type fixnum x y z))
+                      (unless (< site-mask (length site-widths))
+                        (error "Incident mesh stocks compiled to invalid bevel mask ~D at ~S."
+                               site-mask (list x y z)))
+                      (let ((width (aref site-widths site-mask)))
+                        (unless (and (integerp width) (<= 1 width 4))
+                          (error "Site-local bevel policy assigned invalid width ~S at ~S."
+                                 width (list x y z)))
+                        (setf maximum-width (max maximum-width width))
+                        (incf (aref width-census width))
+                        (if dense-widths
+                            (setf (aref dense-widths
+                                        (%dense-bevel-site-index
+                                         x y z
+                                         minimum-site-x minimum-site-y
+                                         minimum-site-z
+                                         site-y-span site-z-span))
+                                  width)
+                            (setf (gethash (%lattice-key x y z) width-by-site)
+                                  width)))))))))))
+      (values width-by-site dense-widths site-count maximum-width
+              minimum-site-x maximum-site-x
+              minimum-site-y maximum-site-y
+              minimum-site-z maximum-site-z))))
+
+(defun %vary-surface-mesh-bevel-widths
+    (witness width-function stock-masks site-widths contract-t-junctions-p)
+  "Compile one of the two site policies and realize its shared scalar mesh."
   (check-type witness surface-mesh)
-  (check-type width-function function)
+  (when width-function
+    (check-type width-function function))
+  (when stock-masks
+    (check-type stock-masks vector)
+    (check-type site-widths vector))
+  (unless (if width-function
+              (and (null stock-masks) (null site-widths))
+              (and stock-masks site-widths))
+    (error "Specify exactly one site-local bevel policy representation."))
   (unless (= 1 (surface-mesh-bevel-width witness))
     (error "A site-local bevel witness must have width one, not ~D."
            (surface-mesh-bevel-width witness)))
-  ;; This deliberately simple exact prototype expands the witness triangles
-  ;; and interns sites in hash tables.  A production emitter can compile the
-  ;; same site field densely without changing the affine invariant above.
-  (let ((stocks-by-site (make-hash-table :test #'eql))
-        (width-by-site (make-hash-table :test #'eql))
+  ;; Site policy remains semantic.  The renderer's positive byte-mask lane
+  ;; folds through bounded sparse pages; arbitrary masks and the generic
+  ;; callback retain the EQL table oracle.  Triangle realization stays in the
+  ;; witness's packed scalar language, and both compilers produce the same
+  ;; tight dense-or-sparse width field below.
+  (let ((width-by-site nil)
+        (dense-widths nil)
+        (site-count 0)
         (width-census (make-array 5 :element-type '(unsigned-byte 32)
                                    :initial-element 0))
-        (maximum-width 1))
-    (%map-surface-mesh-triangle-records
-     (lambda (kind stock ambient mask normal a b c)
-       (declare (ignore kind ambient mask normal))
-       (dolist (point (list a b c))
-         (multiple-value-bind (site direction)
-             (%unit-bevel-point-site point)
-           (declare (ignore direction))
-           (pushnew stock
-                    (gethash (%lattice-key (first site)
-                                           (second site)
-                                           (third site))
-                             stocks-by-site)
-                    :test #'=))))
-     witness)
-    (maphash
-     (lambda (key stocks)
-       (let ((width
-               (funcall width-function
+        (maximum-width 1)
+        (minimum-site-x most-positive-fixnum)
+        (maximum-site-x most-negative-fixnum)
+        (minimum-site-y most-positive-fixnum)
+        (maximum-site-y most-negative-fixnum)
+        (minimum-site-z most-positive-fixnum)
+        (maximum-site-z most-negative-fixnum))
+    (if (and stock-masks
+             (%paged-byte-stock-mask-policy-p
+              (surface-mesh-domain witness) stock-masks site-widths))
+        (multiple-value-setq
+            (width-by-site dense-widths site-count maximum-width
+             minimum-site-x maximum-site-x
+             minimum-site-y maximum-site-y
+             minimum-site-z maximum-site-z)
+          (%compile-paged-byte-stock-mask-bevel-sites
+           witness stock-masks site-widths width-census))
+        (progn
+          (setf width-by-site
+                (make-hash-table
+                 :test #'eql
+                 :size
+                 (max 16 (truncate (surface-mesh-triangle-count witness) 8))))
+          (labels ((owner-key (x y z)
+                     (multiple-value-bind
+                           (site-x site-y site-z
+                            direction-x direction-y direction-z)
+                         (%unit-bevel-point-owner x y z)
+                       (declare (ignore direction-x direction-y direction-z))
+                       (setf minimum-site-x (min minimum-site-x site-x)
+                             maximum-site-x (max maximum-site-x site-x)
+                             minimum-site-y (min minimum-site-y site-y)
+                             maximum-site-y (max maximum-site-y site-y)
+                             minimum-site-z (min minimum-site-z site-z)
+                             maximum-site-z (max maximum-site-z site-z))
+                       (%lattice-key site-x site-y site-z)))
+                   (observe-stock (key stock)
+                     (pushnew stock (gethash key width-by-site) :test #'=))
+                   (observe-stock-mask (key stock-mask)
+                     (setf (gethash key width-by-site)
+                           (the fixnum
+                             (logior stock-mask
+                                     (the fixnum
+                                       (gethash key width-by-site 0)))))))
+            (declare
+             (inline owner-key observe-stock observe-stock-mask)
+             (ftype (function
+                      (mesh-global-tick mesh-global-tick mesh-global-tick)
+                      fixnum)
+                    owner-key)
+             (ftype (function (fixnum fixnum) *)
+                    observe-stock observe-stock-mask))
+            (if stock-masks
+                (%do-surface-mesh-triangle-scalars
+                    (witness kind stock ambient mask
+                             ax ay az bx by bz cx cy cz)
+                  (declare (ignore kind ambient mask))
+                  (unless (< stock (length stock-masks))
+                    (error "Mesh stock ~D is outside the compiled bevel policy of ~D entries."
+                           stock (length stock-masks)))
+                  (let ((stock-mask (aref stock-masks stock)))
+                    (unless (typep stock-mask '(unsigned-byte 61))
+                      (error "Mesh stock ~D has invalid compiled bevel mask ~S."
+                             stock stock-mask))
+                    (let* ((stock-mask (the fixnum stock-mask))
+                           (a (owner-key ax ay az))
+                           (b (owner-key bx by bz))
+                           (c (owner-key cx cy cz)))
+                      (observe-stock-mask a stock-mask)
+                      (unless (= b a)
+                        (observe-stock-mask b stock-mask))
+                      (unless (or (= c a) (= c b))
+                        (observe-stock-mask c stock-mask)))))
+                (%do-surface-mesh-triangle-scalars
+                    (witness kind stock ambient mask
+                             ax ay az bx by bz cx cy cz)
+                  (declare (ignore kind ambient mask))
+                  (let ((a (owner-key ax ay az))
+                        (b (owner-key bx by bz))
+                        (c (owner-key cx cy cz)))
+                    (observe-stock a stock)
+                    (unless (= b a)
+                      (observe-stock b stock))
+                    (unless (or (= c a) (= c b))
+                      (observe-stock c stock))))))
+          (labels ((record-width (key width)
+                     (unless (and (integerp width)
+                                  (<= 1 width (/ +mesh-cell-size+ 2)))
+                       (error "Site-local bevel policy assigned invalid width ~S at ~S."
+                              width (list (%lattice-key-x key)
+                                          (%lattice-key-y key)
+                                          (%lattice-key-z key))))
+                     (setf (gethash key width-by-site) width
+                           maximum-width (max maximum-width width))
+                     (incf (aref width-census width))))
+            (if stock-masks
+                (maphash
+                 (lambda (key site-mask)
+                   (unless (and (plusp site-mask)
+                                (< site-mask (length site-widths)))
+                     (error "Incident mesh stocks compiled to invalid bevel mask ~D at ~S."
+                            site-mask (list (%lattice-key-x key)
+                                            (%lattice-key-y key)
+                                            (%lattice-key-z key))))
+                   (record-width key (aref site-widths site-mask)))
+                 width-by-site)
+                (maphash
+                 (lambda (key stocks)
+                   (record-width
+                    key
+                    (funcall width-function
+                             (%lattice-key-x key)
+                             (%lattice-key-y key)
+                             (%lattice-key-z key)
+                             (sort stocks #'<))))
+                 width-by-site)))
+          (setf site-count (hash-table-count width-by-site))
+          (when (zerop site-count)
+            (setf minimum-site-x 0 maximum-site-x 0
+                  minimum-site-y 0 maximum-site-y 0
+                  minimum-site-z 0 maximum-site-z 0))))
+    (let* ((site-x-span (1+ (- maximum-site-x minimum-site-x)))
+           (site-y-span (1+ (- maximum-site-y minimum-site-y)))
+           (site-z-span (1+ (- maximum-site-z minimum-site-z)))
+           (site-volume (* site-x-span site-y-span site-z-span))
+           (dense-widths
+             (or dense-widths
+                 (when (and (plusp site-count)
+                            (<= site-volume +dense-bevel-site-field-byte-limit+)
+                            (<= site-volume
+                                (* +dense-bevel-site-field-sparsity-limit+
+                                   site-count)))
+                   (make-array site-volume :element-type '(unsigned-byte 8)
+                                            :initial-element 0))))
+           (packing
+             (%make-spatial-edge-packing-for-box
+              minimum-site-x (1+ maximum-site-x)
+              minimum-site-y (1+ maximum-site-y)))
+           (builder (%make-surface-mesh-builder
+                     (surface-mesh-domain witness) maximum-width))
+           ;; Only a three-distinct-point collinear collapse can create the
+           ;; long-edge/two-short-edge mismatch.  Count that exact local edge
+           ;; neighborhood, not every edge in the otherwise closed witness.
+           (candidate-splits (make-hash-table :test #'eql))
+           (queried-edge-counts (make-hash-table :test #'eql))
+           (repair-splits (make-hash-table :test #'eql))
+           (queried-source-filter nil)
+           (repair-source-filter nil)
+           (live-triangle-counts
+             (make-array 3 :element-type '(unsigned-byte 32)
+                           :initial-element 0))
+           (collapsed-triangle-count 0))
+      (declare (type fixnum site-x-span site-y-span site-z-span
+                            site-volume site-count))
+      (when (and dense-widths width-by-site
+                 (plusp (hash-table-count width-by-site)))
+        (maphash
+         (lambda (key width)
+           (setf (aref dense-widths
+                       (%dense-bevel-site-index
                         (%lattice-key-x key)
                         (%lattice-key-y key)
                         (%lattice-key-z key)
-                        (sort (copy-list stocks) #'<))))
-         (unless (and (integerp width)
-                      (<= 1 width (/ +mesh-cell-size+ 2)))
-           (error "Site-local bevel policy assigned invalid width ~S at ~S."
-                  width (list (%lattice-key-x key)
-                              (%lattice-key-y key)
-                              (%lattice-key-z key))))
-         (setf (gethash key width-by-site) width
-               maximum-width (max maximum-width width))
-         (incf (aref width-census width))))
-     stocks-by-site)
-    (let ((builder (%make-surface-mesh-builder
-                    (surface-mesh-domain witness) maximum-width))
-          (edge-counts (make-hash-table :test #'equal))
-          (candidate-splits (make-hash-table :test #'equal))
-          (repair-splits (make-hash-table :test #'equal))
-          (collapsed-triangle-count 0))
+                        minimum-site-x minimum-site-y minimum-site-z
+                        site-y-span site-z-span))
+                 width))
+         width-by-site)
+        (clrhash width-by-site))
       (setf (surface-mesh-builder-singular-star-count builder)
             (surface-mesh-singular-star-count witness))
-      (labels ((transformed-point (point)
-                 (multiple-value-bind (site direction)
-                     (%unit-bevel-point-site point)
-                   (let* ((key (%lattice-key (first site)
-                                             (second site)
-                                             (third site)))
-                          (width (gethash key width-by-site)))
-                     (unless width
-                       (error "No site-local bevel width was compiled for ~S."
-                              site))
-                     (loop for coordinate in site
-                           for component in direction
-                           collect (+ (* +mesh-cell-size+ coordinate)
-                                      (* width component))))))
-               (count-edge (left right)
-                 (incf (gethash (%ordered-point-edge left right)
-                                edge-counts 0)))
-               (scan-transition (kind stock ambient mask normal a b c)
-                 (declare (ignore kind stock ambient mask normal))
-                 (let* ((ta (transformed-point a))
-                        (tb (transformed-point b))
-                        (tc (transformed-point c))
-                        (cross (%point-cross ta tb tc)))
-                   (if (every #'zerop cross)
-                       (progn
-                         (incf collapsed-triangle-count)
-                         (multiple-value-bind (edge middle)
-                             (%collapsed-triangle-split ta tb tc)
-                           (when edge
-                             (pushnew middle (gethash edge candidate-splits)
-                                      :test #'equal))))
-                       (progn
-                         (count-edge ta tb)
-                         (count-edge tb tc)
-                         (count-edge tc ta)))))
-               (edge-splits (left right)
-                 (sort (copy-list
-                        (gethash (%ordered-point-edge left right)
-                                 repair-splits))
-                       #'<
-                       :key (lambda (point)
-                              (%point-distance-squared left point))))
+      (labels ((site-width (site-x site-y site-z)
+                 (let ((width
+                         (if dense-widths
+                             (aref dense-widths
+                                   (%dense-bevel-site-index
+                                    site-x site-y site-z
+                                    minimum-site-x minimum-site-y minimum-site-z
+                                    site-y-span site-z-span))
+                             (gethash (%lattice-key site-x site-y site-z)
+                                      width-by-site))))
+                   (unless (and (integerp width) (<= 1 width 4))
+                     (error "No site-local bevel width was compiled for ~S."
+                            (list site-x site-y site-z)))
+                   (the (integer 1 4) width)))
+               (transformed-triangle
+                   (ax ay az bx by bz cx cy cz)
+                 (multiple-value-bind
+                       (asx asy asz adx ady adz)
+                     (%unit-bevel-point-owner ax ay az)
+                   (multiple-value-bind
+                         (bsx bsy bsz bdx bdy bdz)
+                       (%unit-bevel-point-owner bx by bz)
+                     (multiple-value-bind
+                           (csx csy csz cdx cdy cdz)
+                         (%unit-bevel-point-owner cx cy cz)
+                       (let* ((aw (site-width asx asy asz))
+                              (bw
+                                (if (and (= asx bsx) (= asy bsy) (= asz bsz))
+                                    aw
+                                    (site-width bsx bsy bsz)))
+                              (cw
+                                (cond
+                                  ((and (= asx csx) (= asy csy) (= asz csz))
+                                   aw)
+                                  ((and (= bsx csx) (= bsy csy) (= bsz csz))
+                                   bw)
+                                  (t (site-width csx csy csz))))
+                              (ad (1- aw)) (bd (1- bw)) (cd (1- cw)))
+                         (declare (type (integer 1 4) aw bw cw)
+                                  (type (integer 0 3) ad bd cd))
+                         (values (+ ax (* ad adx))
+                                 (+ ay (* ad ady))
+                                 (+ az (* ad adz))
+                                 (+ bx (* bd bdx))
+                                 (+ by (* bd bdy))
+                                 (+ bz (* bd bdz))
+                                 (+ cx (* cd cdx))
+                                 (+ cy (* cd cdy))
+                                 (+ cz (* cd cdz))))))))
+               (spatial-edge-key (lx ly lz rx ry rz)
+                 (nth-value 0
+                   (%pack-spatial-edge packing lx ly lz rx ry rz)))
+               (packed-point-edge-key (left right)
+                 (spatial-edge-key
+                  (%global-mesh-point-x left)
+                  (%global-mesh-point-y left)
+                  (%global-mesh-point-z left)
+                  (%global-mesh-point-x right)
+                  (%global-mesh-point-y right)
+                  (%global-mesh-point-z right)))
+               (record-candidate (lx ly lz rx ry rz middle)
+                 (let ((edge (spatial-edge-key lx ly lz rx ry rz)))
+                   (pushnew middle (gethash edge candidate-splits) :test #'=)))
+               (discover-transition (kind ax ay az bx by bz cx cy cz)
+                 (multiple-value-bind
+                       (tax tay taz tbx tby tbz tcx tcy tcz)
+                     (transformed-triangle
+                      ax ay az bx by bz cx cy cz)
+                   (multiple-value-bind (nx ny nz)
+                       (%triangle-cross-scalars
+                        tax tay taz tbx tby tbz tcx tcy tcz)
+                     (if (and (zerop nx) (zerop ny) (zerop nz))
+                         (progn
+                           (incf collapsed-triangle-count)
+                           (unless
+                               (or (and (= tax tbx) (= tay tby) (= taz tbz))
+                                   (and (= tbx tcx) (= tby tcy) (= tbz tcz))
+                                   (and (= tcx tax) (= tcy tay) (= tcz taz)))
+                             (let* ((pa
+                                      (%pack-global-mesh-point tax tay taz))
+                                    (pb
+                                      (%pack-global-mesh-point tbx tby tbz))
+                                    (pc
+                                      (%pack-global-mesh-point tcx tcy tcz))
+                                    (ab
+                                      (%global-mesh-point-distance-squared pa pb))
+                                    (bc
+                                      (%global-mesh-point-distance-squared pb pc))
+                                    (ca
+                                      (%global-mesh-point-distance-squared pc pa)))
+                               ;; Match the reference reduction's later-edge
+                               ;; tie preference, though a collinear interior
+                               ;; point gives the long edge a strict maximum.
+                               (if (> ab bc)
+                                   (if (> ab ca)
+                                       (record-candidate
+                                        tax tay taz tbx tby tbz pc)
+                                       (record-candidate
+                                        tcx tcy tcz tax tay taz pb))
+                                   (if (> bc ca)
+                                       (record-candidate
+                                        tbx tby tbz tcx tcy tcz pa)
+                                       (record-candidate
+                                        tcx tcy tcz tax tay taz pb))))))
+                         (incf
+                          (aref live-triangle-counts
+                                (ecase kind
+                                  (:face 0)
+                                  (:band 1)
+                                  (:junction 2))))))))
+               (count-queried-edge (lx ly lz rx ry rz)
+                 (let ((key (spatial-edge-key lx ly lz rx ry rz)))
+                   (multiple-value-bind (count present-p)
+                       (gethash key queried-edge-counts)
+                     (when present-p
+                       (setf (gethash key queried-edge-counts) (1+ count))))))
+               (scan-queried-transition (ax ay az bx by bz cx cy cz)
+                 (multiple-value-bind
+                       (tax tay taz tbx tby tbz tcx tcy tcz)
+                     (transformed-triangle
+                      ax ay az bx by bz cx cy cz)
+                   (multiple-value-bind (nx ny nz)
+                       (%triangle-cross-scalars
+                        tax tay taz tbx tby tbz tcx tcy tcz)
+                     (unless (and (zerop nx) (zerop ny) (zerop nz))
+                       (count-queried-edge tax tay taz tbx tby tbz)
+                       (count-queried-edge tbx tby tbz tcx tcy tcz)
+                       (count-queried-edge tcx tcy tcz tax tay taz)))))
+               (edge-splits (lx ly lz rx ry rz)
+                 (let* ((edge (spatial-edge-key lx ly lz rx ry rz))
+                        (points (gethash edge repair-splits)))
+                   (when points
+                     (let* ((left (%pack-global-mesh-point lx ly lz))
+                            (right (%pack-global-mesh-point rx ry rz))
+                            (ordered (if (< left right) points (reverse points))))
+                       (mapcar #'%global-mesh-point-list ordered)))))
                (edge-points (left right)
-                 (append (list left) (edge-splits left right) (list right)))
+                 (append (list left)
+                         (edge-splits
+                          (first left) (second left) (third left)
+                          (first right) (second right) (third right))
+                         (list right)))
                (mark-visible-edge (table left right bit mask)
                  (when (logtest bit mask)
                    (loop for points on (edge-points left right)
@@ -2164,90 +2999,208 @@ retain the default; the uncontracted surface exists only for topology study."
                              #b010 0)
                          (if (gethash (%ordered-point-edge a b) visible)
                              #b100 0)))
-               (emit-transition (kind stock ambient mask normal a b c)
-                 (let* ((ta (transformed-point a))
-                        (tb (transformed-point b))
-                        (tc (transformed-point c))
-                        (cross (%point-cross ta tb tc)))
-                   (unless (every #'zerop cross)
-                     (unless (plusp (%point-dot cross normal))
-                       (error "Site-local bevel folded ~S triangle ~S ~S ~S into ~S ~S ~S."
-                              kind a b c ta tb tc))
-                     (let ((ab (edge-splits ta tb))
-                           (bc (edge-splits tb tc))
-                           (ca (edge-splits tc ta)))
-                       (if (not (or ab bc ca))
-                           (%emit-global-triangle
-                            builder kind stock ambient mask
-                            (%primitive-plane-normal ta tb tc)
-                            (list ta tb tc))
-                           (let* ((loop (append (list ta) ab (list tb) bc
-                                                (list tc) ca))
-                                  (triangles
-                                    (%triangulate-coplanar-loop loop cross))
-                                  (visible (make-hash-table :test #'equal)))
-                             (unless triangles
-                               (error "Could not contract site-local bevel T-junction around ~S."
-                                      loop))
-                             (mark-visible-edge visible ta tb #b100 mask)
-                             (mark-visible-edge visible tb tc #b001 mask)
-                             (mark-visible-edge visible tc ta #b010 mask)
-                             (dolist (triangle triangles)
-                               (destructuring-bind (a b c) triangle
-                                 (%emit-global-triangle
-                                  builder kind stock ambient
-                                  (triangle-boundary-mask visible a b c)
-                                  (%primitive-plane-normal a b c)
-                                  triangle))))))))))
-        ;; First find the exact geometric edge mismatch caused only by
-        ;; collinear medial-limit collapses.  Uniform width-four regions have
-        ;; no mismatch and consequently receive no needless subdivisions.
-        (%map-surface-mesh-triangle-records #'scan-transition witness)
+               (emit-transition
+                   (kind stock ambient mask ax ay az bx by bz cx cy cz
+                    repair-neighborhood-p)
+                 (multiple-value-bind
+                       (tax tay taz tbx tby tbz tcx tcy tcz)
+                     (transformed-triangle
+                      ax ay az bx by bz cx cy cz)
+                   (multiple-value-bind (nx ny nz)
+                       (%triangle-cross-scalars
+                        tax tay taz tbx tby tbz tcx tcy tcz)
+                     (unless (and (zerop nx) (zerop ny) (zerop nz))
+                           (multiple-value-bind (onx ony onz)
+                               (%triangle-cross-scalars
+                                ax ay az bx by bz cx cy cz)
+                             (unless
+                                 (plusp
+                                  (the fixnum
+                                    (+ (the fixnum (* nx onx))
+                                       (the fixnum (* ny ony))
+                                       (the fixnum (* nz onz)))))
+                               (error "Site-local bevel folded ~S triangle ~S ~S ~S into ~S ~S ~S."
+                                      kind
+                                      (list ax ay az) (list bx by bz) (list cx cy cz)
+                                      (list tax tay taz) (list tbx tby tbz)
+                                      (list tcx tcy tcz))))
+                           (let ((ab (when repair-neighborhood-p
+                                       (edge-splits
+                                        tax tay taz tbx tby tbz)))
+                                 (bc (when repair-neighborhood-p
+                                       (edge-splits
+                                        tbx tby tbz tcx tcy tcz)))
+                                 (ca (when repair-neighborhood-p
+                                       (edge-splits
+                                        tcx tcy tcz tax tay taz))))
+                             (if (not (or ab bc ca))
+                                 (%emit-global-triangle-scalars
+                                  builder kind stock ambient mask nx ny nz
+                                  tax tay taz tbx tby tbz tcx tcy tcz)
+                                 (let* ((ta (list tax tay taz))
+                                        (tb (list tbx tby tbz))
+                                        (tc (list tcx tcy tcz))
+                                        (cross (list nx ny nz))
+                                        (loop (append (list ta) ab (list tb) bc
+                                                      (list tc) ca))
+                                        (triangles
+                                          (%triangulate-coplanar-loop loop cross))
+                                        (visible (make-hash-table :test #'equal)))
+                                   (unless triangles
+                                     (error "Could not contract site-local bevel T-junction around ~S."
+                                            loop))
+                                   (mark-visible-edge visible ta tb #b100 mask)
+                                   (mark-visible-edge visible tb tc #b001 mask)
+                                   (mark-visible-edge visible tc ta #b010 mask)
+                                   (dolist (triangle triangles)
+                                     (destructuring-bind (a b c) triangle
+                                       (%emit-global-triangle
+                                        builder kind stock ambient
+                                        (triangle-boundary-mask visible a b c)
+                                        (%primitive-plane-normal a b c)
+                                        triangle)))))))))))
+        (declare
+         (inline site-width transformed-triangle spatial-edge-key
+                 packed-point-edge-key record-candidate count-queried-edge
+                 edge-splits)
+         (ftype (function (fixnum fixnum fixnum) (integer 1 4)) site-width)
+         (ftype (function
+                  (mesh-global-tick mesh-global-tick mesh-global-tick
+                   mesh-global-tick mesh-global-tick mesh-global-tick
+                   mesh-global-tick mesh-global-tick mesh-global-tick)
+                  (values mesh-global-tick mesh-global-tick mesh-global-tick
+                          mesh-global-tick mesh-global-tick mesh-global-tick
+                          mesh-global-tick mesh-global-tick mesh-global-tick
+                          &optional))
+                transformed-triangle))
+        (%do-surface-mesh-triangle-scalars
+            (witness kind stock ambient mask
+                     ax ay az bx by bz cx cy cz)
+          (declare (ignore stock ambient mask))
+          (discover-transition kind ax ay az bx by bz cx cy cz))
+        (setf queried-edge-counts
+              (make-hash-table
+               :test #'eql :size (max 16 (* 3 (hash-table-count candidate-splits)))))
+        (maphash
+         (lambda (edge points)
+           (multiple-value-bind (left right)
+               (%spatial-edge-points packing edge)
+             (let* ((left-packed
+                      (%pack-global-mesh-point
+                       (first left) (second left) (third left)))
+                    (right-packed
+                      (%pack-global-mesh-point
+                       (first right) (second right) (third right)))
+                    (points
+                      (sort points #'<
+                            :key (lambda (point)
+                                   (%global-mesh-point-distance-squared
+                                    left-packed point)))))
+               (setf (gethash edge candidate-splits) points
+                     (gethash edge queried-edge-counts) 0)
+               (loop with previous = left-packed
+                     for point in points
+                     do (setf (gethash (packed-point-edge-key previous point)
+                                       queried-edge-counts)
+                              0
+                              previous point)
+                     finally
+                        (setf (gethash
+                               (packed-point-edge-key previous right-packed)
+                               queried-edge-counts)
+                              0)))))
+         candidate-splits)
+        (setf queried-source-filter
+              (%make-source-anchor-filter packing queried-edge-counts))
+        (when queried-source-filter
+          (%do-surface-mesh-triangle-scalars
+              (witness kind stock ambient mask
+                       ax ay az bx by bz cx cy cz)
+            (declare (ignore kind stock ambient mask))
+            (when (%triangle-touches-source-anchor-filter-p
+                   queried-source-filter ax ay az bx by bz cx cy cz)
+              (scan-queried-transition ax ay az bx by bz cx cy cz))))
         (let ((unmatched-edge-count
-                (loop for count being the hash-values of edge-counts
-                      count (/= count 2))))
+                (loop for count being the hash-values of queried-edge-counts
+                      count (not (or (zerop count) (= count 2))))))
           (when contract-t-junctions-p
             (maphash
              (lambda (edge points)
-               (when (= 1 (gethash edge edge-counts 0))
-                 (destructuring-bind (left right) edge
-                   (let* ((points
-                            (sort (copy-list points) #'<
-                                  :key (lambda (point)
-                                         (%point-distance-squared left point))))
-                          (chain (append (list left) points (list right))))
-                     (when (loop for tail on chain
-                                 while (rest tail)
+               (when (= 1 (gethash edge queried-edge-counts 0))
+                 (multiple-value-bind (left right)
+                     (%spatial-edge-points packing edge)
+                   (let ((left
+                           (%pack-global-mesh-point
+                            (first left) (second left) (third left)))
+                         (right
+                           (%pack-global-mesh-point
+                            (first right) (second right) (third right))))
+                     (when (loop with previous = left
+                                 for point in points
                                  always (= 1 (gethash
-                                              (%ordered-point-edge
-                                               (first tail) (second tail))
-                                              edge-counts 0)))
+                                              (packed-point-edge-key previous point)
+                                              queried-edge-counts 0))
+                                 do (setf previous point)
+                                 finally (return
+                                           (= 1 (gethash
+                                                 (packed-point-edge-key
+                                                  previous right)
+                                                 queried-edge-counts 0))))
                        (setf (gethash edge repair-splits) points))))))
              candidate-splits)
+            (setf repair-source-filter
+                  (%make-source-anchor-filter packing repair-splits))
             ;; Prove that the selected contractions account for the entire
             ;; mismatch before changing any triangles.  A new failure mode
             ;; must become explicit rather than rendering another hairline
             ;; crack.
             (maphash
              (lambda (edge points)
-               (decf (gethash edge edge-counts))
-               (destructuring-bind (left right) edge
-                 (loop for tail on (append (list left) points (list right))
-                       while (rest tail)
-                       do (incf (gethash
-                                 (%ordered-point-edge
-                                  (first tail) (second tail))
-                                 edge-counts 0)))))
+               (decf (gethash edge queried-edge-counts))
+               (multiple-value-bind (left right)
+                   (%spatial-edge-points packing edge)
+                 (let ((left
+                         (%pack-global-mesh-point
+                          (first left) (second left) (third left)))
+                       (right
+                         (%pack-global-mesh-point
+                          (first right) (second right) (third right))))
+                   (loop with previous = left
+                         for point in points
+                         do (incf (gethash
+                                   (packed-point-edge-key previous point)
+                                   queried-edge-counts 0))
+                            (setf previous point)
+                         finally
+                            (incf (gethash
+                                   (packed-point-edge-key previous right)
+                                   queried-edge-counts 0))))))
              repair-splits))
           (let ((residual-edge-count
-                  (loop for count being the hash-values of edge-counts
+                  (loop for count being the hash-values of queried-edge-counts
                         count (not (or (zerop count) (= count 2))))))
             (when (and contract-t-junctions-p
                        (plusp residual-edge-count))
               (error "Site-local bevel contraction left ~D of ~D unmatched edges after ~D repairs."
                      residual-edge-count unmatched-edge-count
                      (hash-table-count repair-splits)))
-            (%map-surface-mesh-triangle-records #'emit-transition witness)
+            (let ((repair-point-count
+                    (loop for points being the hash-values of repair-splits
+                          sum (length points))))
+              (%reserve-builder-triangle-capacities
+               builder
+               (+ (aref live-triangle-counts 0) repair-point-count)
+               (+ (aref live-triangle-counts 1) repair-point-count)
+               (+ (aref live-triangle-counts 2) repair-point-count)))
+            (%do-surface-mesh-triangle-scalars
+                (witness kind stock ambient mask
+                         ax ay az bx by bz cx cy cz)
+              (emit-transition kind stock ambient mask
+                               ax ay az bx by bz cx cy cz
+                               (and repair-source-filter
+                                    (%triangle-touches-source-anchor-filter-p
+                                     repair-source-filter
+                                     ax ay az bx by bz cx cy cz))))
             (values
              (%finish-surface-mesh builder)
              width-census
@@ -2259,9 +3212,66 @@ retain the default; the uncontracted surface exists only for topology study."
                    (loop for edge being the hash-keys of candidate-splits
                            using (hash-value points)
                          append
-                         (loop for point in points
-                               collect (list (first edge) point
-                                             (second edge))))))))))))
+                         (multiple-value-bind (left right)
+                             (%spatial-edge-points packing edge)
+                           (loop for point in points
+                                 collect
+                                 (list left (%global-mesh-point-list point)
+                                       right))))))))))))
+
+(defun vary-surface-mesh-bevel-widths
+    (witness width-function &key (contract-t-junctions-p t))
+  "Evaluate one closed width-one WITNESS at a local width per vertex site.
+
+WIDTH-FUNCTION is called once for each canonical lattice vertex as
+  (WIDTH-FUNCTION X Y Z INCIDENT-STOCKS)
+where INCIDENT-STOCKS is a sorted, duplicate-free list of the packed stocks on
+witness triangles using that site.  It must return an integer width from one
+through four.
+
+Every witness vertex has the exact affine form 8*S + Q with Q in {-1,0,1}^3.
+The result replaces it by 8*S + WIDTH(S)*Q.  Since every incident primitive
+uses the same canonical S, shared vertices remain equal without stitching.
+At the medial limit a witness triangle can collapse to three collinear points.
+The result contracts that triangle by splitting its surviving neighbour's long
+edge at the middle point, eliminating the otherwise visible T-junction without
+inventing a surface.  WITNESS remains the rebuild oracle for topology and
+uniform-width geometry.  Transition triangles may leave the uniform mesher's
+26 exact normal directions.  The packed trit normal remains an orientation
+witness; fragment shading derives the actual primitive normal from world-space
+position derivatives, so the new directions are not lighting-quantized.
+
+The second value is a five-entry site census indexed by width.  The third is a
+diagnostic plist containing the collapsed-triangle, locally unmatched-edge,
+repaired-edge, and residual-edge counts.  For the required closed width-one
+witness, only a collapse can change edge parity, so the queried local counts
+are the complete transition defect.
+
+CONTRACT-T-JUNCTIONS-P defaults true.  NIL deliberately omits collapsed
+triangles without subdividing their surviving neighbours, returning the open
+diagnostic surface that motivates the contraction.  Production callers should
+retain the default; the uncontracted surface exists only for topology study."
+  (check-type width-function function)
+  (%vary-surface-mesh-bevel-widths
+   witness width-function nil nil contract-t-junctions-p))
+
+(defun vary-surface-mesh-bevel-widths-from-stock-masks
+    (witness stock-masks site-widths &key (contract-t-junctions-p t))
+  "Evaluate a closed width-one WITNESS from an incident-stock mask policy.
+
+STOCK-MASKS is indexed by packed triangle stock.  The masks of every stock
+incident on a canonical vertex site are combined with LOGIOR, then that mask
+indexes SITE-WIDTHS.  This is the dense production form of the generic callback
+contract: it preserves the same shared site field and the same realization and
+repair algorithm without constructing stock lists in the triangle loop.
+
+Every referenced stock mask must be a positive fixnum bit mask, and each
+combined mask must be a valid SITE-WIDTHS index.  Index zero is unused; every
+selected entry must be an integer width from one through four."
+  (check-type stock-masks vector)
+  (check-type site-widths vector)
+  (%vary-surface-mesh-bevel-widths
+   witness nil stock-masks site-widths contract-t-junctions-p))
 
 (defun %coplanar-group-loops (triangles)
   "Return oriented boundary loops, or NIL when the union is not simple."
@@ -2554,7 +3564,7 @@ lattice-site closure.  It must return one stock for that entire chamfer."
              (x-limit (world-domain-x-limit domain))
              (y-limit (world-domain-y-limit domain)))
          (multiple-value-bind (x0 x1 y0 y1) (%cell-key-box cells)
-           (let ((packing (%make-boundary-packing-for-box x0 x1 y0 y1)))
+           (let ((packing (%make-spatial-edge-packing-for-box x0 x1 y0 y1)))
              (%enable-boundary-observations
               (list boundary-builder) packing (chain-count solid))
              (%emit-exposed-cell-faces boundary-builder field domain
@@ -2829,7 +3839,7 @@ surface and falls back group-by-group whenever a boundary is not simple."
                             own-cells halo))
              (halo-sites (make-array (length halo)
                                      :element-type '(unsigned-byte 64))))
-        (let ((packing (%make-boundary-packing-for-box
+        (let ((packing (%make-spatial-edge-packing-for-box
                         (1- x0) x1 (1- y0) y1)))
           (%enable-boundary-observations
            (list ship-sheets witness-sheets) packing

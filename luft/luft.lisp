@@ -69,6 +69,7 @@
            #:surface-mesh-with-triangle-ink
            #:surface-mesh-split-neighborhood
            #:vary-surface-mesh-bevel-widths
+           #:vary-surface-mesh-bevel-widths-from-stock-masks
    ;; Tests.
    #:run-luft-tests))
 

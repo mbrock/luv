@@ -1353,9 +1353,14 @@
       (ok (plusp (aref width-census 1)))
       (ok (plusp (aref width-census 2)))
       (ok (plusp (aref width-census 4)))
+      (ok (equalp #(0 11 5 0 7) width-census))
+      (ok (= 31 (getf diagnostics :collapsed-triangle-count)))
       (ok (= 3 (getf diagnostics :unmatched-edge-count)))
       (ok (= 1 (getf diagnostics :repaired-edge-count)))
       (ok (zerop (getf diagnostics :residual-edge-count)))
+      (ok (equal '(((48 34 26) (48 36 28) (48 38 30)))
+                 (getf diagnostics :candidate-splits)))
+      (ok (= 190 (luft:surface-mesh-triangle-count mesh)))
       (ok (luft::%mesh-closed-p mesh))
       (ok (luft::%mesh-nondegenerate-p mesh))
       ;; Contracting the medial T-junction may subdivide a neighbour, but it
@@ -1370,6 +1375,39 @@
           (ok (>= minimum-angle (- witness-minimum-angle 1.0d-9)))
           (ok (<= maximum-aspect (+ witness-maximum-aspect 1.0d-9)))
           (ok (<= sliver-count witness-sliver-count)))))))
+
+(deftest compiled-material-site-field-matches-its-generic-repair-oracle
+  (let* ((scene (render:make-material-bevel-transition-study-scene))
+         ;; Compile the material vocabulary only after witness construction;
+         ;; chamfer assembly can intern stocks while building that witness.
+         (witness (render:make-render-mesh scene :bevel-width 1))
+         (profile (render:make-material-bevel-profile)))
+    (multiple-value-bind (stock-masks site-widths)
+        (luft.render::compile-material-bevel-site-policy profile)
+      (ok (luft::%paged-byte-stock-mask-policy-p
+           (luft:surface-mesh-domain witness) stock-masks site-widths))
+      (flet ((generic-width (x y z stocks)
+               (declare (ignore x y z))
+               (let ((site-mask 0))
+                 (dolist (stock stocks)
+                   (setf site-mask
+                         (logior site-mask (aref stock-masks stock))))
+                 (aref site-widths site-mask))))
+        (dolist (contract-p '(nil t))
+          (multiple-value-bind
+                (generic generic-census generic-diagnostics)
+              (luft:vary-surface-mesh-bevel-widths
+               witness #'generic-width
+               :contract-t-junctions-p contract-p)
+            (multiple-value-bind
+                  (compiled compiled-census compiled-diagnostics)
+                (luft:vary-surface-mesh-bevel-widths-from-stock-masks
+                 witness stock-masks site-widths
+                 :contract-t-junctions-p contract-p)
+              (ok (luft::%same-surface-mesh-representation-p
+                   generic compiled))
+              (ok (equalp generic-census compiled-census))
+              (ok (equal generic-diagnostics compiled-diagnostics)))))))))
 
 (deftest material-bevel-transition-can-exhibit-the-uncontracted-t-junction
   (multiple-value-bind (mesh width-census diagnostics)
