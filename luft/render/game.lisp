@@ -163,35 +163,80 @@ for a remote roof, so a wall cannot teleport the player onto its top."
          (walking-player-clear-at-p solid (+ x 0.5) (+ y 0.5) z))))
 
 (defun nearby-walking-cell-p (cell start)
-  (and (<= (+ (abs (- (luft:site-x cell) (luft:site-x start)))
-              (abs (- (luft:site-y cell) (luft:site-y start))))
+  (and (<= (max (abs (- (luft:site-x cell) (luft:site-x start)))
+                (abs (- (luft:site-y cell) (luft:site-y start))))
            *walking-path-horizontal-radius*)
        (<= (abs (- (luft:site-z cell) (luft:site-z start)))
            *walking-path-vertical-radius*)))
 
 (defun map-walking-cell-neighbors (function source cell start)
-  "Call FUNCTION for four-connected, nearby standable neighbors of CELL."
+  "Call FUNCTION with each nearby eight-connected neighbor and step cost."
   (let* ((solid (inspection-source-solid source))
          (domain (luft:chain-domain solid))
          (x (luft:site-x cell))
          (y (luft:site-y cell))
          (z (luft:site-z cell)))
-    (dolist (offset '((0 1) (1 0) (0 -1) (-1 0)))
+    (dolist (offset '((0 1) (1 0) (0 -1) (-1 0)
+                       (1 1) (1 -1) (-1 -1) (-1 1)))
       (destructuring-bind (dx dy) offset
         (let* ((next-x (+ x dx))
                (next-y (+ y dy))
                (next-z
                  (walking-player-support-height
                   source (+ next-x 0.5) (+ next-y 0.5) z)))
-          (when next-z
+          (when (and next-z
+                     ;; A diagonal may pass beside a wall, but never through
+                     ;; the point where two blocked cardinal cells meet.
+                     (or (zerop dx) (zerop dy)
+                         (and (walking-player-support-height
+                               source (+ x dx 0.5) (+ y 0.5) z)
+                              (walking-player-support-height
+                               source (+ x 0.5) (+ y dy 0.5) z))))
             (handler-case
                 (let ((next
                         (luft:make-site
                          domain next-x next-y (round next-z)
                          luft:+cell-extent+ 1)))
                   (when (nearby-walking-cell-p next start)
-                    (funcall function next)))
+                    (funcall function next
+                             (if (and (/= dx 0) (/= dy 0))
+                                 (sqrt 2.0)
+                                 1.0))))
               (luft:outside-domain () nil))))))))
+
+(defun walking-route-octile-distance (from to)
+  (let ((dx (abs (- (luft:site-x from) (luft:site-x to))))
+        (dy (abs (- (luft:site-y from) (luft:site-y to)))))
+    (+ (max dx dy) (* (1- (sqrt 2.0)) (min dx dy)))))
+
+(defun walking-route-frontier-push (frontier priority cost cell)
+  (vector-push-extend (list priority cost cell) frontier)
+  (loop with child = (1- (length frontier))
+        while (plusp child)
+        for parent = (floor (1- child) 2)
+        while (< priority (first (aref frontier parent)))
+        do (rotatef (aref frontier child) (aref frontier parent))
+           (setf child parent))
+  frontier)
+
+(defun walking-route-frontier-pop (frontier)
+  (let ((minimum (aref frontier 0))
+        (last (vector-pop frontier)))
+    (when (plusp (length frontier))
+      (setf (aref frontier 0) last)
+      (loop with parent = 0
+            for left = (1+ (* 2 parent))
+            while (< left (length frontier))
+            for right = (1+ left)
+            for child = (if (and (< right (length frontier))
+                                 (< (first (aref frontier right))
+                                    (first (aref frontier left))))
+                            right left)
+            while (< (first (aref frontier child))
+                     (first (aref frontier parent)))
+            do (rotatef (aref frontier parent) (aref frontier child))
+               (setf parent child)))
+    minimum))
 
 (defun reconstruct-walking-route (parents start destination)
   (let ((cells nil)
@@ -202,7 +247,7 @@ for a remote roof, so a wall cannot teleport the player onto its top."
     cells))
 
 (defun find-walking-route (player source destination)
-  "Return a bounded four-connected route from PLAYER to DESTINATION.
+  "Return a bounded, eight-connected octile route from PLAYER to DESTINATION.
 
 DESTINATION is a packed LUFT foot cell.  A returned failed route retains the
 reason and search count, so a click that cannot be honored is inspectable
@@ -232,30 +277,39 @@ rather than silently becoming a straight-line collision attempt."
         (return-from find-walking-route
           (route nil :arrived "already there" 0)))
       (let ((parents (make-hash-table :test #'eql))
-            (seen (make-hash-table :test #'eql))
-            (queue (make-array 64 :adjustable t :fill-pointer 0))
-            (head 0)
+            (costs (make-hash-table :test #'eql))
+            (frontier (make-array 64 :adjustable t :fill-pointer 0))
             (visits 0))
-        (setf (gethash start seen) t)
-        (vector-push-extend start queue)
-        (loop while (and (< head (length queue))
+        (setf (gethash start costs) 0.0)
+        (walking-route-frontier-push
+         frontier (walking-route-octile-distance start destination) 0.0 start)
+        (loop while (and (plusp (length frontier))
                          (< visits *walking-path-visit-limit*))
-              for cell = (aref queue head)
-              do (incf head)
-                 (incf visits)
-                 (map-walking-cell-neighbors
-                  (lambda (next)
-                    (unless (gethash next seen)
-                      (setf (gethash next seen) t
-                            (gethash next parents) cell)
-                      (when (= next destination)
-                        (return-from find-walking-route
-                          (route
-                           (reconstruct-walking-route
-                            parents start destination)
-                           :running nil visits)))
-                      (vector-push-extend next queue)))
-                  source cell start))
+              for entry = (walking-route-frontier-pop frontier)
+              for cost = (second entry)
+              for cell = (third entry)
+              when (= cost (gethash cell costs))
+                do (incf visits)
+                   (when (= cell destination)
+                     (return-from find-walking-route
+                       (route
+                        (reconstruct-walking-route parents start destination)
+                        :running nil visits)))
+                   (map-walking-cell-neighbors
+                    (lambda (next step-cost)
+                      (let ((next-cost (+ cost step-cost)))
+                        (when (< next-cost
+                                 (gethash next costs
+                                          most-positive-single-float))
+                          (setf (gethash next costs) next-cost
+                                (gethash next parents) cell)
+                          (walking-route-frontier-push
+                           frontier
+                           (+ next-cost
+                              (walking-route-octile-distance
+                               next destination))
+                           next-cost next))))
+                    source cell start))
         (route nil :failed "no local walkable path reaches the destination"
                visits)))))
 

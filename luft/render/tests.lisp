@@ -430,6 +430,20 @@
                       (render:walking-player-position player))))
              0.12)))))
 
+(deftest click-to-walk-authors-straight-diagonal-waypoints
+  (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
+         (player
+           (render:make-walking-player
+            :position (luv.arithmetic.lisp.vec3:make-vec3 1.5 1.5 1.0))))
+    (luft.render::scene-builder-box builder 0 15 0 15 0 0)
+    (let* ((scene (luft.render::finish-scene-builder builder :player-p t))
+           (route (render:start-walking-player-route player scene 6 6 1))
+           (cells (render:walking-route-cells route)))
+      (ok (= 5 (length cells)))
+      (loop for cell in cells
+            for coordinate from 2
+            do (ok (= coordinate (luft:site-x cell) (luft:site-y cell)))))))
+
 (deftest orthographic-walk-moves-on-the-ground-without-zooming
   (let* ((viewer (clim:make-application-frame 'render:viewer))
          (camera (render:viewer-camera viewer))
