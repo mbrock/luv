@@ -536,8 +536,25 @@ rather than silently becoming a straight-line collision attempt."
         (max 0.0 (- (walking-player-spell-flash player) (* 2.4 seconds))))
   player)
 
+(defun soft-follow-step (current target seconds quiet-radius)
+  "Move CURRENT calmly toward TARGET, catching up harder as separation grows.
+
+QUIET-RADIUS is a soft camera zone: motion inside it is treated as local
+character movement rather than a reason to reframe.  Outside it, an exact
+exponential response makes the result independent of frame rate, while its
+rate rises with distance so large discontinuities do not leave the player
+behind."
+  (let* ((difference (- target current))
+         (distance (abs difference))
+         (excess (max 0.0 (- distance quiet-radius))))
+    (if (zerop excess)
+        current
+        (let* ((rate (+ 1.8 (* 0.9 excess)))
+               (blend (- 1.0 (exp (- (* rate seconds))))))
+          (+ current (* (signum difference) excess blend))))))
+
 (defun follow-walking-player (camera player &key (distance 18.0) seconds)
-  "Follow PLAYER with a soft look-ahead rather than a rigid camera weld."
+  "Follow PLAYER through a quiet zone with distance-sensitive catch-up."
   (multiple-value-bind (right up forward) (camera-basis camera)
     (declare (ignore right up))
     (let* ((player-position (walking-player-position player))
@@ -550,17 +567,22 @@ rather than silently becoming a straight-line collision attempt."
            (target-x (- aim-x (* distance (vec3:vec3-x forward))))
            (target-y (- aim-y (* distance (vec3:vec3-y forward))))
            (target-z (- aim-z (* distance (vec3:vec3-z forward))))
-           (camera-position (camera-position camera))
-           (blend (if seconds (min 1.0 (* seconds 8.0)) 1.0)))
-      (setf (vec3:vec3-x camera-position)
-            (+ (vec3:vec3-x camera-position)
-               (* blend (- target-x (vec3:vec3-x camera-position))))
-            (vec3:vec3-y camera-position)
-            (+ (vec3:vec3-y camera-position)
-               (* blend (- target-y (vec3:vec3-y camera-position))))
-            (vec3:vec3-z camera-position)
-            (+ (vec3:vec3-z camera-position)
-               (* blend (- target-z (vec3:vec3-z camera-position)))))))
+           (camera-position (camera-position camera)))
+      (if (null seconds)
+          (setf (vec3:vec3-x camera-position) target-x
+                (vec3:vec3-y camera-position) target-y
+                (vec3:vec3-z camera-position) target-z)
+          (setf (vec3:vec3-x camera-position)
+                (soft-follow-step (vec3:vec3-x camera-position)
+                                  target-x seconds 0.28)
+                (vec3:vec3-y camera-position)
+                (soft-follow-step (vec3:vec3-y camera-position)
+                                  target-y seconds 0.28)
+                ;; Terrain relief is much less important than lateral travel:
+                ;; let a whole stair tread pass without bobbing the frame.
+                (vec3:vec3-z camera-position)
+                (soft-follow-step (vec3:vec3-z camera-position)
+                                  target-z seconds 0.85)))))
   camera)
 
 (defun walking-player-render-lanes (player)

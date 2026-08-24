@@ -460,6 +460,40 @@
                 (render:camera-position camera))))
         (ok (= 18.0 render:*isometric-height*))))))
 
+(deftest following-camera-ignores-small-relief-and-catches-large-jumps
+  (let* ((camera (render:make-fly-camera :yaw 0.0 :pitch -0.5))
+         (player (render:make-walking-player)))
+    (luft.render::follow-walking-player camera player)
+    (let* ((camera-position (render:camera-position camera))
+           (settled-z (luv.arithmetic.lisp.vec3:vec3-z camera-position)))
+      ;; A stair-sized vertical discrepancy belongs to the traveler, not the
+      ;; composition, and remains inside the camera's quiet zone.
+      (incf (luv.arithmetic.lisp.vec3:vec3-z
+             (render:walking-player-position player))
+            0.75)
+      (luft.render::follow-walking-player camera player :seconds 0.1)
+      (ok (= settled-z
+             (luv.arithmetic.lisp.vec3:vec3-z camera-position)))
+      ;; A fall or teleport is well outside that zone and closes most of its
+      ;; error promptly instead of inheriting the gentle local response.
+      (incf (luv.arithmetic.lisp.vec3:vec3-z
+             (render:walking-player-position player))
+            12.0)
+      (let ((before-error
+              (abs (- (- (+ (luv.arithmetic.lisp.vec3:vec3-z
+                             (render:walking-player-position player))
+                            1.45)
+                         (* 18.0 (sin -0.5)))
+                      (luv.arithmetic.lisp.vec3:vec3-z camera-position)))))
+        (luft.render::follow-walking-player camera player :seconds 0.1)
+        (let ((after-error
+                (abs (- (- (+ (luv.arithmetic.lisp.vec3:vec3-z
+                               (render:walking-player-position player))
+                              1.45)
+                           (* 18.0 (sin -0.5)))
+                        (luv.arithmetic.lisp.vec3:vec3-z camera-position)))))
+          (ok (< after-error (* 0.45 before-error))))))))
+
 (deftest walking-player-climbs-one-step-but-not-a-character-high-wall
   (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
          (camera (render:make-fly-camera
