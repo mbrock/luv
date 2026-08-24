@@ -584,6 +584,11 @@ before the operation boundary, or it would encode through resources which the
             (/ bevel-width divisor)
             (/ luft:+mesh-cell-size+ divisor))))
 
+(defun viewer-bevel-label (viewer)
+  (if (viewer-bevel-profile viewer)
+      "mixed"
+      (bevel-width-label (viewer-bevel-width viewer))))
+
 (defun next-bevel-width (bevel-width)
   (case bevel-width
     (1 2)
@@ -597,7 +602,7 @@ before the operation boundary, or it would encode through resources which the
                         :ink (clim:make-rgb-color 0.025 0.070 0.090))
   (clim:draw-text* stream
                    (format nil "LUFT · BEVEL ~A · C LINES ~A"
-                           (bevel-width-label (viewer-bevel-width viewer))
+                           (viewer-bevel-label viewer)
                            (if (plusp *wireframe*) "ON" "OFF"))
                    18 25 :align-y :center :text-size 14
                    :text-face :bold
@@ -938,10 +943,22 @@ before the operation boundary, or it would encode through resources which the
                       :keystroke (:b))
     ()
   (let* ((viewer (viewer-command-viewer))
-         (bevel-width (next-bevel-width (viewer-bevel-width viewer))))
-    (refresh-viewer-renderer
-     viewer :solid (viewer-source viewer) :bevel-width bevel-width
-            :bevel-profile nil)
+         (profile (viewer-bevel-profile viewer))
+         (bevel-width (viewer-bevel-width viewer)))
+    (cond
+      (profile
+       (refresh-viewer-renderer
+        viewer :solid (viewer-source viewer) :bevel-width 1
+               :bevel-profile nil))
+      ((= bevel-width 4)
+       (refresh-viewer-renderer
+        viewer :solid (viewer-source viewer) :bevel-width 4
+               :bevel-profile (make-material-bevel-profile)))
+      (t
+       (refresh-viewer-renderer
+        viewer :solid (viewer-source viewer)
+               :bevel-width (next-bevel-width bevel-width)
+               :bevel-profile nil)))
     (refresh-viewer-inspector viewer)))
 
 (clim:define-command (com-release-pointer :command-table luft-window

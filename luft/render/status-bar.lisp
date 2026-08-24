@@ -25,7 +25,7 @@
 (defmethod mcluv:status-bar-channel-value
     ((channel (eql :bevel)) (viewer viewer) bar)
   (declare (ignore channel bar))
-  (bevel-width-label (viewer-bevel-width viewer)))
+  (viewer-bevel-label viewer))
 
 (defmethod mcluv:status-bar-channel-value
     ((channel (eql :view)) (viewer viewer) bar)
