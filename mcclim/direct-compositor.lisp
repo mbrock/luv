@@ -831,6 +831,60 @@ HUD panel can rotate, scale, or project the same retained command stream."
   ;; closes that seam without waiting for an application render pass.
   (prepare-direct-gpu-mirror compositor))
 
+(defgeneric evict-direct-gpu-mirror-frame-key (compositor frame-key)
+  (:documentation
+   "Evict COMPOSITOR's GPU state retained for one canvas FRAME-KEY.
+
+The state and all bind groups which borrow its affine buffer are detached before
+any native resource is destroyed.  Other drawable slots remain available."))
+
+(defmethod evict-direct-gpu-mirror-frame-key
+    ((compositor direct-gpu-mirror-compositor) frame-key)
+  (alexandria:when-let
+      ((frame-state
+         (gethash frame-key (direct-widget-frame-states compositor))))
+    (let ((bind-groups nil)
+          (failures nil))
+      ;; Collect every cache entry which borrows FRAME-STATE before mutating a
+      ;; table.  Common Lisp does not promise that REMHASH during MAPHASH is
+      ;; portable, and logical detachment must precede fallible destruction.
+      (dolist (table (list (direct-widget-text-bind-groups compositor)
+                           (direct-widget-image-bind-groups compositor)
+                           (direct-widget-lattice-bind-groups compositor)))
+        (let ((keys nil))
+          (maphash
+           (lambda (key group)
+             (when (eq frame-state (second key))
+               (push key keys)
+               (push group bind-groups)))
+           table)
+          (dolist (key keys)
+            (remhash key table))))
+      (remhash frame-key (direct-widget-frame-states compositor))
+      (labels ((attempt (object thunk)
+                 (handler-case
+                     (funcall thunk)
+                   (error (condition)
+                     (push (cons object condition) failures)))))
+        (attempt
+         (direct-widget-frame-source-state frame-state)
+         (lambda ()
+           (release-gpu-frame-state
+            (direct-widget-frame-source-state frame-state))))
+        (dolist (resource
+                  (remove-duplicates
+                   (append bind-groups
+                           (list
+                            (direct-widget-frame-shape-bind-group frame-state)
+                            (direct-widget-frame-buffer frame-state)))
+                   :test #'eq))
+          (when resource
+            (attempt resource (lambda () (luv:destroy resource)))))
+        (when failures
+          (error 'direct-mirror-release-error
+                 :failures (nreverse failures))))))
+  compositor)
+
 (defun direct-gpu-mirror-frame-resource-key (overlay surface-texture)
   "Return the bounded backend frame key for SURFACE-TEXTURE.
 

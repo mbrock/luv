@@ -12,6 +12,29 @@
     (error "Synthetic renderer resource release failure."))
   probe)
 
+(defclass world-panel-order-probe ()
+  ((depth :initarg :depth :reader world-panel-order-probe-depth)))
+
+(defmethod luvcraft-overlay-stage ((probe world-panel-order-probe))
+  (declare (ignore probe))
+  :world-panel)
+
+(defmethod luvcraft-world-panel-depth
+    ((probe world-panel-order-probe) session)
+  (declare (ignore session))
+  (world-panel-order-probe-depth probe))
+
+(deftest native-density-world-panels-order-back-to-front
+  (let* ((near (make-instance 'world-panel-order-probe :depth 1.0))
+         (middle (make-instance 'world-panel-order-probe :depth 2.0))
+         (far (make-instance 'world-panel-order-probe :depth 3.0))
+         (scene (gensym "SCENE"))
+         (session (make-instance 'luvcraft-session)))
+    (setf (luvcraft-session-overlays session)
+          (list near scene far middle))
+    (ok (equal (list far middle near)
+               (luvcraft::luvcraft-world-panels-back-to-front session)))))
+
 (deftest session-coordinates-one-renderer-owner
   (let* ((pipeline (gensym "PIPELINE"))
          (resource (gensym "RESOURCE"))
@@ -34,22 +57,31 @@
 (deftest frame-attachments-publish-as-one-session-facing-cohort
   (let* ((old-color (gensym "OLD-COLOR"))
          (old-depth (gensym "OLD-DEPTH"))
+         (old-panel-color (gensym "OLD-PANEL-COLOR"))
+         (old-panel-depth (gensym "OLD-PANEL-DEPTH"))
          (new-color (gensym "NEW-COLOR"))
          (new-depth (gensym "NEW-DEPTH"))
+         (new-panel-color (gensym "NEW-PANEL-COLOR"))
+         (new-panel-depth (gensym "NEW-PANEL-DEPTH"))
          (old-attachments
            (list :render-extent '(640 480)
                  :presentation-extent '(1280 960)
                  :color-texture old-color
-                 :depth-texture old-depth))
+                 :depth-texture old-depth
+                 :world-panel-color-texture old-panel-color
+                 :world-panel-depth-texture old-panel-depth))
          (new-attachments
            (list :render-extent '(1280 720)
                  :presentation-extent '(2560 1440)
                  :color-texture new-color
-                 :depth-texture new-depth))
+                 :depth-texture new-depth
+                 :world-panel-color-texture new-panel-color
+                 :world-panel-depth-texture new-panel-depth))
          (renderer
            (make-instance 'luvcraft-renderer
                           :frame-attachments old-attachments
-                          :resources (list old-color old-depth)))
+                          :resources (list old-color old-depth
+                                           old-panel-color old-panel-depth)))
          (session (make-instance 'luvcraft-session :renderer renderer)))
     (ok (eq old-attachments
             (luvcraft::luvcraft-renderer-frame-attachments renderer)))
@@ -64,8 +96,32 @@
                (luvcraft::luvcraft-session-presentation-extent session)))
     (ok (eq new-color (luvcraft::luvcraft-session-color-texture session)))
     (ok (eq new-depth (luvcraft::luvcraft-session-depth-texture session)))
-    (ok (equal (list new-color new-depth old-color old-depth)
+    (ok (eq new-panel-color
+            (luvcraft::luvcraft-session-world-panel-color-texture session)))
+    (ok (eq new-panel-depth
+            (luvcraft::luvcraft-session-world-panel-depth-texture session)))
+    (ok (equal (list new-color new-depth new-panel-color new-panel-depth
+                     old-color old-depth old-panel-color old-panel-depth)
                (luvcraft::luvcraft-renderer-resources renderer)))))
+
+(deftest presentation-depth-composes-native-density-world-panels
+  (let* ((specification
+           (luvcraft.shaders:focus-post-fragment-specification))
+         (resources (shader:shader-specification-resources specification))
+         (panel-color
+           (find 'world-panel-color resources
+                 :key #'shader:shader-object-name :test #'string-equal))
+         (panel-depth
+           (find 'world-panel-depth resources
+                 :key #'shader:shader-object-name :test #'string-equal)))
+    (ok panel-color)
+    (ok panel-depth)
+    (ok (= 7 (shader:shader-resource-binding panel-color)))
+    (ok (= 8 (shader:shader-resource-binding panel-depth)))
+    (ok (find 'panel-visible
+              (shader:shader-specification-bindings specification)
+              :key #'shader:shader-object-name :test #'string-equal))
+    (ok (> (length (spv:assemble-shader-specification specification)) 5))))
 
 (deftest live-session-migration-adopts-the-old-render-inventory
   (let* ((atlas (gensym "ATLAS"))

@@ -30,6 +30,7 @@
            #:luv-gpu-medium
            #:direct-gpu-mirror-compositor
            #:encode-direct-gpu-mirror
+           #:evict-direct-gpu-mirror-frame-key
            #:luv-pointer
            #:mirror-sheet
            #:mirror-target

@@ -220,6 +220,18 @@ of making them click the world again.")
 (define-luvcraft-renderer-forwarder
     luvcraft-session-depth-view luvcraft-renderer-depth-view)
 (define-luvcraft-renderer-forwarder
+    luvcraft-session-world-panel-color-texture
+    luvcraft-renderer-world-panel-color-texture)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-world-panel-color-view
+    luvcraft-renderer-world-panel-color-view)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-world-panel-depth-texture
+    luvcraft-renderer-world-panel-depth-texture)
+(define-luvcraft-renderer-forwarder
+    luvcraft-session-world-panel-depth-view
+    luvcraft-renderer-world-panel-depth-view)
+(define-luvcraft-renderer-forwarder
     luvcraft-session-presentation-texture
     luvcraft-renderer-presentation-texture)
 (define-luvcraft-renderer-forwarder
@@ -392,15 +404,30 @@ new renderer; owned resource and frame-state collections retain identity."
 
 (defgeneric luvcraft-overlay-stage (overlay)
   (:documentation
-   "Return where OVERLAY draws: :SCENE, :VIEWMODEL, :HUD, or :NONE.
+   "Return where OVERLAY draws: :SCENE, :WORLD-PANEL, :VIEWMODEL, :HUD, or
+:NONE.
 
 Scene overlays inhabit world depth; viewmodels are first-person geometry above
-the world but below held items and the crosshair; HUD overlays follow scene
-postprocessing.  :NONE participates in no render pass."))
+the world but below held items and the crosshair.  World panels retain world
+projection and depth while drawing analytic application graphics at native
+presentation density.  HUD overlays follow scene postprocessing.  :NONE
+participates in no render pass."))
 
 (defmethod luvcraft-overlay-stage (overlay)
   (declare (ignore overlay))
   :scene)
+
+(defgeneric luvcraft-world-panel-depth (overlay session)
+  (:documentation
+   "Return OVERLAY's positive camera-space depth for world-panel ordering.
+
+Native-density panels are alpha-composited far to near before their completed
+depth layer meets the game scene.  Non-spatial panel implementations may keep
+the stable attachment order by returning the default zero depth."))
+
+(defmethod luvcraft-world-panel-depth (overlay session)
+  (declare (ignore overlay session))
+  0.0)
 
 (defgeneric luvcraft-overlay-live-shader-pipelines (overlay)
   (:documentation
@@ -432,6 +459,17 @@ among its own; none by default.")
 (defmethod release-luvcraft-overlay (overlay)
   (declare (ignore overlay))
   nil)
+
+(defgeneric evict-luvcraft-overlay-frame-key (overlay frame-key)
+  (:documentation
+   "Evict OVERLAY resources retained for one canvas FRAME-KEY.
+
+Offscreen captures use a fresh target, so an overlay which caches per-frame GPU
+state must detach that entry before the shared capture target is destroyed."))
+
+(defmethod evict-luvcraft-overlay-frame-key (overlay frame-key)
+  (declare (ignore frame-key))
+  overlay)
 
 (defgeneric handle-luvcraft-overlay-event (overlay session canvas event)
   (:documentation

@@ -114,6 +114,14 @@ streaming, overlays, and presentation; it does not duplicate its inventory."))
 (define-luvcraft-frame-attachment-reader
     luvcraft-renderer-depth-view :depth-view)
 (define-luvcraft-frame-attachment-reader
+    luvcraft-renderer-world-panel-color-texture :world-panel-color-texture)
+(define-luvcraft-frame-attachment-reader
+    luvcraft-renderer-world-panel-color-view :world-panel-color-view)
+(define-luvcraft-frame-attachment-reader
+    luvcraft-renderer-world-panel-depth-texture :world-panel-depth-texture)
+(define-luvcraft-frame-attachment-reader
+    luvcraft-renderer-world-panel-depth-view :world-panel-depth-view)
+(define-luvcraft-frame-attachment-reader
     luvcraft-renderer-presentation-texture :presentation-texture)
 (define-luvcraft-frame-attachment-reader
     luvcraft-renderer-presentation-view :presentation-view)

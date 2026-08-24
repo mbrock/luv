@@ -336,6 +336,7 @@
            #:edit-block-world-source
            #:edit-luvcraft-block
            #:encode-luvcraft-overlay
+           #:evict-luvcraft-overlay-frame-key
            #:focus-luvcraft-session
            #:handle-luvcraft-overlay-event
            #:handle-luvcraft-focus-event
@@ -407,6 +408,7 @@
            #:luvcraft-overlay-focus-insets
            #:luvcraft-session-focus-insets
            #:luvcraft-overlay-stage
+           #:luvcraft-world-panel-depth
            #:luvcraft-session-mesh
            #:luvcraft-session-meshed-world-revision
            #:luvcraft-session-outstanding-production

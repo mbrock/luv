@@ -110,6 +110,54 @@
   (when (owned-overlay-fail-release-p overlay)
     (error "Deliberate overlay release failure.")))
 
+(defclass capture-frame-key-context (canvas-context) ())
+
+(defmethod canvas-frame-resource-key
+    ((context capture-frame-key-context) target)
+  (declare (ignore context))
+  (list :capture-target target))
+
+(defclass capture-frame-key-eviction-probe ()
+  ((keys :initform nil :accessor capture-frame-key-eviction-probe-keys)
+   (canvas :initarg :canvas :reader capture-frame-key-eviction-probe-canvas)
+   (owner-thread-p :initform nil
+                   :accessor capture-frame-key-eviction-probe-owner-thread-p)))
+
+(defmethod evict-luvcraft-overlay-frame-key
+    ((probe capture-frame-key-eviction-probe) frame-key)
+  (push frame-key (capture-frame-key-eviction-probe-keys probe))
+  (setf (capture-frame-key-eviction-probe-owner-thread-p probe)
+        (canvas-thread-p (capture-frame-key-eviction-probe-canvas probe)))
+  probe)
+
+(deftest capture-cleanup-evicts-overlay-frame-keys-on-the-canvas-thread
+  (let* ((canvas (make-instance 'overlay-owner-canvas))
+         (context (make-instance 'capture-frame-key-context))
+         (session (make-instance 'luvcraft-session
+                                 :canvas canvas :context context))
+         (first (make-instance 'capture-frame-key-eviction-probe
+                               :canvas canvas))
+         (second (make-instance 'capture-frame-key-eviction-probe
+                                :canvas canvas))
+         (terminal
+           (allocate-instance (find-class 'terminal-display)))
+         (target (list :offscreen-texture))
+         (capture (make-instance 'application-capture
+                                 :application session :kind :screenshot)))
+    (unwind-protect
+         (progn
+           ;; The second direct presentation stands behind a terminal-display
+           ;; owner, like the Telegram and film-browser wall modes do.
+           (setf (terminal-display-mode-overlay terminal) second
+                 (luvcraft-session-overlays session) (list first terminal)
+                 (capture-target capture) target)
+           (cleanup-capture session capture)
+           (dolist (probe (list first second))
+             (ok (equal (list (list :capture-target target))
+                        (capture-frame-key-eviction-probe-keys probe)))
+             (ok (capture-frame-key-eviction-probe-owner-thread-p probe))))
+      (close-overlay-owner-canvas canvas))))
+
 (deftest stopped-luvcraft-sessions-consume-and-reject-late-overlays
   (let* ((canvas (make-instance 'overlay-owner-canvas))
          (session (make-instance 'luvcraft-session :canvas canvas))
@@ -1898,6 +1946,8 @@
     (let* ((benchmark
              (luvcraft::make-luvcraft-frame-benchmark
               :scenario :streaming :samples samples
+              :width 960 :height 640
+              :presentation-width 1920 :presentation-height 1280
               :completion-seconds 0.004d0
               :entering-chunk-count 9 :settled-frame 1))
            (transition
@@ -1906,6 +1956,7 @@
              (with-output-to-string (stream)
                (luvcraft:print-luvcraft-frame-benchmark benchmark stream))))
       (ok (= 2 (length transition)))
+      (ok (search "scene: 960x640; presentation: 1920x1280" text))
       (ok (search "9 entering chunks, 2 frames" text))
       (ok (search "settled: frame 1" text)))))
 

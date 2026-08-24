@@ -54,7 +54,7 @@
 
 (defun usage (&optional (stream *standard-output*))
   (format stream "Usage: luvcraft [--metal | --vulkan] [--tracy] [--fullscreen] [--world FILE | --birthday]~%")
-  (format stream "       luvcraft [--help | --smoke-test PNG | --vulkan-smoke-test PNG | --metal-smoke-test PNG | --metal-text-closeup PNG | --metal-benchmark [FRAMES [CSV [SCENARIO]]]]~%")
+  (format stream "       luvcraft [--help | --smoke-test PNG | --vulkan-smoke-test PNG | --metal-smoke-test PNG | --metal-text-closeup PNG | --metal-benchmark [FRAMES [CSV [SCENARIO [DENSITY]]]]]~%")
   (format stream "~%")
   (format stream "With no arguments, resume the world using Metal 4 on macOS and Vulkan elsewhere.~%")
   (format stream "--metal and --vulkan explicitly select an interactive backend.~%")
@@ -66,7 +66,7 @@
   (format stream "--vulkan-smoke-test renders one hidden Vulkan frame and exits.~%")
   (format stream "--metal-smoke-test renders one hidden Metal 4 frame and exits.~%")
   (format stream "--metal-text-closeup renders the enlarged Slug world-text proof.~%")
-  (format stream "--metal-benchmark measures steady or streaming Metal frames.~%")
+  (format stream "--metal-benchmark measures steady or streaming Metal frames; DENSITY is standard or retina.~%")
   (format stream "--serve-surface renders a hidden game into the IOSurface named on stdin.~%"))
 
 (defun make-metal-provider ()
@@ -174,10 +174,18 @@
         (t (error "Benchmark scenario must be steady or streaming, not ~S."
                   argument))))
 
-(defun run-metal-benchmark (&optional frame-count pathname scenario)
+(defun parse-benchmark-density (argument)
+  (cond ((or (null argument) (string= argument "standard")) nil)
+        ((string= argument "retina") t)
+        (t (error "Benchmark density must be standard or retina, not ~S."
+                  argument))))
+
+(defun run-metal-benchmark
+    (&optional frame-count pathname scenario density)
   (benchmark-luvcraft-frame-performance
    :frame-count (if frame-count (parse-frame-count frame-count) 120)
    :scenario (parse-benchmark-scenario scenario)
+   :high-pixel-density-p (parse-benchmark-density density)
    :csv-pathname (or (and pathname (pathname pathname))
                      #P"build/luvcraft-metal-benchmark.csv")))
 
@@ -209,10 +217,11 @@
           (string= (first arguments) "--serve-surface"))
      #+darwin (serve-luvcraft-mirror)
      #-darwin (error "--serve-surface needs IOSurface, which is Darwin only."))
-    ((and (<= 1 (length arguments) 4)
+    ((and (<= 1 (length arguments) 5)
           (string= (first arguments) "--metal-benchmark"))
      (run-metal-benchmark
-      (second arguments) (third arguments) (fourth arguments)))
+      (second arguments) (third arguments) (fourth arguments)
+      (fifth arguments)))
     (t
      (multiple-value-bind
            (provider world-pathname tracy-p fullscreen-p birthday-p interactive-p)

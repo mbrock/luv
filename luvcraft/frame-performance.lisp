@@ -169,6 +169,8 @@ connection rather than once at startup."
   (device "" :type string)
   (width 0 :type fixnum)
   (height 0 :type fixnum)
+  (presentation-width 0 :type fixnum)
+  (presentation-height 0 :type fixnum)
   (warmup-count 0 :type fixnum)
   (samples #() :type vector)
   (completion-seconds 0d0 :type double-float
@@ -244,9 +246,11 @@ connection rather than once at startup."
     (format stream "  device: ~A~%" (luvcraft-frame-benchmark-device benchmark))
     (format stream "  scenario: ~(~A~)~%"
             (luvcraft-frame-benchmark-scenario benchmark))
-    (format stream "  frame: ~Dx~D, ~D warmup + ~D measured~%"
+    (format stream "  scene: ~Dx~D; presentation: ~Dx~D, ~D warmup + ~D measured~%"
             (luvcraft-frame-benchmark-width benchmark)
             (luvcraft-frame-benchmark-height benchmark)
+            (luvcraft-frame-benchmark-presentation-width benchmark)
+            (luvcraft-frame-benchmark-presentation-height benchmark)
             (luvcraft-frame-benchmark-warmup-count benchmark)
             count)
     (when first

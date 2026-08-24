@@ -627,9 +627,10 @@ the frame uniform cannot silently diverge between shader and host."
   "Create the scene and presentation attachments as one GPU-object cohort.
 
 The scene is drawn at RENDER-EXTENT into a linear HDR colour attachment with
-its own depth buffer and reduced lens chain.  The tonemapped result is scaled
-into PRESENTATION-EXTENT, where direct retained UI is evaluated at the
-drawable's native density before the complete image is copied to the surface."
+its own depth buffer and reduced lens chain.  World-space application panels
+draw analytically into a transparent colour/depth pair at PRESENTATION-EXTENT;
+the presentation shader depth-composes that pair over the scaled scene before
+native-density HUD and the complete surface copy."
   (let ((bloom-extent (luvcraft-bloom-extent render-extent))
         (made nil)
         (completed-p nil))
@@ -663,24 +664,42 @@ drawable's native density before the complete image is copied to the surface."
                      (texture "block world bloom secondary" bloom-extent
                               +luvcraft-bloom-color-format+
                               '(:render-attachment :texture-binding))
-                   (multiple-value-bind (presentation-texture presentation-view)
-                       (texture "block world presentation color"
+                   (multiple-value-bind
+                         (world-panel-color-texture world-panel-color-view)
+                       (texture "world application panel color"
                                 presentation-extent
-                                (canvas-format context)
-                                '(:render-attachment :copy-src))
-                     (setf completed-p t)
-                     (list :render-extent render-extent
-                           :presentation-extent presentation-extent
-                           :color-texture color-texture
-                           :color-view color-view
-                           :depth-texture depth-texture
-                           :depth-view depth-view
-                           :bloom-primary-texture bloom-primary-texture
-                           :bloom-primary-view bloom-primary-view
-                           :bloom-secondary-texture bloom-secondary-texture
-                           :bloom-secondary-view bloom-secondary-view
-                           :presentation-texture presentation-texture
-                           :presentation-view presentation-view))))))
+                                +luvcraft-scene-color-format+
+                                '(:render-attachment :texture-binding))
+                     (multiple-value-bind
+                           (world-panel-depth-texture world-panel-depth-view)
+                         (texture "world application panel depth"
+                                  presentation-extent :depth32-float
+                                  '(:render-attachment :texture-binding))
+                       (multiple-value-bind
+                             (presentation-texture presentation-view)
+                           (texture "block world presentation color"
+                                    presentation-extent
+                                    (canvas-format context)
+                                    '(:render-attachment :copy-src))
+                         (setf completed-p t)
+                         (list :render-extent render-extent
+                               :presentation-extent presentation-extent
+                               :color-texture color-texture
+                               :color-view color-view
+                               :depth-texture depth-texture
+                               :depth-view depth-view
+                               :world-panel-color-texture
+                               world-panel-color-texture
+                               :world-panel-color-view world-panel-color-view
+                               :world-panel-depth-texture
+                               world-panel-depth-texture
+                               :world-panel-depth-view world-panel-depth-view
+                               :bloom-primary-texture bloom-primary-texture
+                               :bloom-primary-view bloom-primary-view
+                               :bloom-secondary-texture bloom-secondary-texture
+                               :bloom-secondary-view bloom-secondary-view
+                               :presentation-texture presentation-texture
+                               :presentation-view presentation-view))))))))
         (unless completed-p
           ;; Preserve the originating creation failure and make a best effort
           ;; to retire every partial candidate, even if one DESTROY also errs.
@@ -957,7 +976,13 @@ drawable's native density before the complete image is copied to the surface."
                           :resource ,(luvcraft-session-bloom-secondary-view
                                        session))
                          (:binding 6
-                          :resource ,(luvcraft-session-atlas-sampler session)))))
+                          :resource ,(luvcraft-session-atlas-sampler session))
+                         (:binding 7
+                          :resource
+                          ,(luvcraft-session-world-panel-color-view session))
+                         (:binding 8
+                          :resource
+                          ,(luvcraft-session-world-panel-depth-view session)))))
                      bloom-scene-bind-group
                      (make-luvcraft-bloom-bind-group
                       session post-uniform-buffer
@@ -1146,6 +1171,16 @@ completes."
        (luvcraft-session-renderer session)
        (make-luvcraft-frame-extents render-extent presentation-extent)))
     (values render-extent presentation-extent)))
+
+(defun luvcraft-world-panels-back-to-front (session)
+  "Return SESSION's native-density world panels in painter order."
+  (stable-sort
+   (loop for overlay in (luvcraft-session-overlays session)
+         when (eq :world-panel (luvcraft-overlay-stage overlay))
+           collect overlay)
+   #'>
+   :key (lambda (overlay)
+          (luvcraft-world-panel-depth overlay session))))
 
 (zdefun (encode-luvcraft-frame :zone :luvcraft/encode-frame)
     (session surface-texture encoder &key readback-buffer sample
@@ -1483,6 +1518,39 @@ completes."
           (lens-stage (luvcraft-session-sun-shaft-pipeline session)
                       (luvcraft-frame-bloom-primary-bind-group frame)
                       secondary-view secondary)))
+      ;; Retained application panels stay world-projected, but they are not
+      ;; another low-resolution scene material.  Draw their analytic command
+      ;; streams at the physical presentation extent into a transparent HDR
+      ;; layer.  Far-to-near ordering gives each panel ordinary painter
+      ;; semantics; its depth writes use :ALWAYS because independently
+      ;; generated coplanar analytic vertices are not bit-identical enough for
+      ;; an equality depth test.  The final native depth is then compared with
+      ;; the logical scene depth in the post shader.
+      (zone (:luvcraft/world-panel-pass)
+        (let ((pass
+                (begin-render-pass
+                 encoder
+                 (make-render-pass-descriptor
+                  :color-attachments
+                  `((:view
+                     ,(luvcraft-session-world-panel-color-view session)
+                     :load-op :clear :store-op :store
+                     :clear-value #(0.0 0.0 0.0 0.0)))
+                  :depth-stencil-attachment
+                  `(:view ,(luvcraft-session-world-panel-depth-view session)
+                    :depth-load-op :clear :depth-store-op :store
+                    :depth-clear-value 1.0)))))
+          (dolist (overlay (luvcraft-world-panels-back-to-front session))
+            (guarding-luvcraft-overlay (session overlay :overlay-encode)
+              (encode-luvcraft-overlay
+               overlay session pass surface-texture)))
+          (end-pass pass))
+        (prepare-texture
+         encoder (luvcraft-session-world-panel-color-texture session)
+         :texture-binding)
+        (prepare-texture
+         encoder (luvcraft-session-world-panel-depth-texture session)
+         :texture-binding))
       (let ((pass
               (begin-render-pass
                encoder
@@ -2152,7 +2220,9 @@ non-NIL value selects display-paced animation because FIFO scanout, rather
                                   (:binding 3 :type :uniform-buffer)
                                   (:binding 4 :type :texture)
                                   (:binding 5 :type :texture)
-                                  (:binding 6 :type :sampler))))))
+                                  (:binding 6 :type :sampler)
+                                  (:binding 7 :type :texture)
+                                  (:binding 8 :type :texture))))))
                   (bloom-layout
                     (keep
                      (create

@@ -270,6 +270,97 @@
     (error "scripted release failure"))
   probe)
 
+(defun make-direct-eviction-frame-state (events name &key fail-shape-p)
+  (let ((source-state (make-instance 'mcluv::gpu-mirror-frame-state)))
+    (setf (mcluv::gpu-frame-state-vertex-buffer source-state)
+          (make-instance 'direct-release-probe
+                         :name (list name :source) :events events))
+    (make-instance
+     'mcluv::direct-widget-frame-state
+     :buffer (make-instance 'direct-release-probe
+                            :name (list name :buffer) :events events)
+     :shape-bind-group
+     (make-instance 'direct-release-probe
+                    :name (list name :shape) :events events
+                    :failp fail-shape-p)
+     :source-state source-state)))
+
+(deftest direct-frame-key-eviction-is-complete-and-bounded
+  (let* ((events (make-array 0 :adjustable t :fill-pointer 0))
+         (mirror
+           (make-instance 'mcluv::luv-gpu-mirror
+                          :sheet nil :target nil :context nil))
+         (compositor
+           (make-instance 'mcluv:direct-gpu-mirror-compositor :mirror mirror))
+         (drawable-state
+           (make-direct-eviction-frame-state events :drawable)))
+    (setf (gethash :drawable
+                   (mcluv::direct-widget-frame-states compositor))
+          drawable-state)
+    ;; Each capture target has a fresh identity.  Repeating screenshots must
+    ;; return every per-frame cache to the one persistent drawable slot.
+    (dotimes (capture-index 2)
+      (let* ((frame-key (list :capture capture-index))
+             (frame-state
+               (make-direct-eviction-frame-state events frame-key)))
+        (setf (gethash frame-key
+                       (mcluv::direct-widget-frame-states compositor))
+              frame-state)
+        (loop for table in
+                (list (mcluv::direct-widget-text-bind-groups compositor)
+                      (mcluv::direct-widget-image-bind-groups compositor)
+                      (mcluv::direct-widget-lattice-bind-groups compositor))
+              for kind in '(:text :image :lattice)
+              do (setf (gethash (list kind frame-state) table)
+                       (make-instance
+                        'direct-release-probe
+                        :name (list frame-key kind) :events events)))
+        (ok (eq compositor
+                (mcluv:evict-direct-gpu-mirror-frame-key
+                 compositor frame-key)))
+        (ok (= 1 (hash-table-count
+                  (mcluv::direct-widget-frame-states compositor))))
+        (dolist (table
+                  (list (mcluv::direct-widget-text-bind-groups compositor)
+                        (mcluv::direct-widget-image-bind-groups compositor)
+                        (mcluv::direct-widget-lattice-bind-groups compositor)))
+          (ok (zerop (hash-table-count table))))
+        ;; Retrying cleanup cannot release wrappers a second time.
+        (let ((release-count (length events)))
+          (mcluv:evict-direct-gpu-mirror-frame-key compositor frame-key)
+          (ok (= release-count (length events))))))
+    ;; A failing native wrapper must not strand the state or prevent sibling
+    ;; resources from being released, and a retry remains a no-op.
+    (let* ((frame-key '(:capture :failing))
+           (frame-state
+             (make-direct-eviction-frame-state
+              events frame-key :fail-shape-p t))
+           (image-group
+             (make-instance 'direct-release-probe
+                            :name (list frame-key :image) :events events)))
+      (setf (gethash frame-key
+                     (mcluv::direct-widget-frame-states compositor))
+            frame-state
+            (gethash (list :image frame-state)
+                     (mcluv::direct-widget-image-bind-groups compositor))
+            image-group)
+      (ok (signals
+           (mcluv:evict-direct-gpu-mirror-frame-key compositor frame-key)
+           'mcluv::direct-mirror-release-error))
+      (ok (= 1 (hash-table-count
+                (mcluv::direct-widget-frame-states compositor))))
+      (ok (zerop (hash-table-count
+                  (mcluv::direct-widget-image-bind-groups compositor))))
+      (let ((release-count (length events)))
+        (mcluv:evict-direct-gpu-mirror-frame-key compositor frame-key)
+        (ok (= release-count (length events)))))
+    (ok (eq drawable-state
+            (gethash :drawable
+                     (mcluv::direct-widget-frame-states compositor))))
+    ;; The two complete capture cohorts contribute six releases each; the
+    ;; deliberately failing cohort still attempts all four of its resources.
+    (ok (= 16 (length events)))))
+
 (deftest direct-compositor-release-is-exhaustive-and-idempotent
   (let* ((events (make-array 0 :adjustable t :fill-pointer 0))
          (mirror

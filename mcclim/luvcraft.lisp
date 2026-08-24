@@ -61,7 +61,7 @@ drawable during replay."))
 (defmethod luvcraft-widget-render-target
     ((overlay luvcraft-world-widget-overlay) session surface-texture)
   (declare (ignore overlay surface-texture))
-  (luvcraft::luvcraft-session-color-texture session))
+  (luvcraft::luvcraft-session-world-panel-color-texture session))
 
 (defmethod luvcraft-widget-render-target
     ((overlay luvcraft-hud-widget-overlay) session surface-texture)
@@ -113,12 +113,37 @@ drawable during replay."))
     ((overlay luvcraft-world-widget-overlay))
   (declare (ignore overlay))
   '(:format :depth32-float
-    :depth-write-enabled nil :depth-compare :less))
+    ;; Every command in one retained stream belongs to the same authored
+    ;; plane, but separate analytic pipelines can round the projected depth in
+    ;; opposite directions.  ALWAYS preserves McCLIM painter order without
+    ;; coplanar z-fighting; the application orders complete panels far to near.
+    :depth-write-enabled t :depth-compare :always))
 
 (defmethod direct-gpu-mirror-depth-stencil
     ((overlay luvcraft-hud-widget-overlay))
   (declare (ignore overlay))
   nil)
+
+(defmethod luvcraft:luvcraft-overlay-stage
+    ((overlay luvcraft-world-widget-overlay))
+  (declare (ignore overlay))
+  :world-panel)
+
+(defmethod luvcraft:luvcraft-world-panel-depth
+    ((overlay luvcraft-world-widget-overlay) session)
+  "Return OVERLAY's signed distance along SESSION's camera forward axis."
+  (let* ((camera (luvcraft:luvcraft-session-camera session))
+         (camera-position (luvcraft:camera-position camera))
+         (center (widget-overlay-center overlay)))
+    (multiple-value-bind (ignored-right ignored-up forward)
+        (luvcraft:camera-basis camera)
+      (declare (ignore ignored-right ignored-up))
+      (+ (* (- (vec:vec3-x center) (vec:vec3-x camera-position))
+            (vec:vec3-x forward))
+         (* (- (vec:vec3-y center) (vec:vec3-y camera-position))
+            (vec:vec3-y forward))
+         (* (- (vec:vec3-z center) (vec:vec3-z camera-position))
+            (vec:vec3-z forward))))))
 
 (defmethod prepare-mirror-compositor-revision
     ((overlay luvcraft-world-widget-overlay) mirror revision)
@@ -465,6 +490,10 @@ shared semantic McCLIM compositor used by LUFT and other applications."
     (unless (eq :disowned (frame-state frame))
       (destroy-frame frame)))
   overlay)
+
+(defmethod luvcraft:evict-luvcraft-overlay-frame-key
+    ((overlay luvcraft-direct-widget-overlay) frame-key)
+  (evict-direct-gpu-mirror-frame-key overlay frame-key))
 
 (defun add-scaled-vector (origin &rest vector-scales)
   (let ((x (vec:vec3-x origin))

@@ -2501,7 +2501,14 @@ distribution overhead."
                    :sample-transfer :identity)
       (shaft-color :texture-2d :set 0 :binding 5
                    :sample-transfer :identity)
-      (depth-sampler :sampler :set 0 :binding 6)))
+      (depth-sampler :sampler :set 0 :binding 6)
+      ;; World-space application panels keep their semantic GPU geometry at
+      ;; native presentation density.  Their depth is compared with the
+      ;; deliberately lower-density game depth below, without asking either
+      ;; attachment domain to masquerade as the other.
+      (world-panel-color :texture-2d :set 0 :binding 7
+                         :sample-transfer :identity)
+      (world-panel-depth :depth-texture-2d :set 0 :binding 8)))
   (let* ((texel (swizzle post-control :xy))
          (presentation-texel (swizzle presentation-control :xy))
          (active (swizzle post-control :z))
@@ -2539,7 +2546,17 @@ distribution overhead."
                  (sample scene-color scene-sampler (- (+ uv-input dx) dy))
                  (sample scene-color scene-sampler (- (- uv-input dx) dy)))
               0.0625))
-         (radiance (swizzle (mix sharp blurred blur-amount) :xyz))
+         (scene-radiance (swizzle (mix sharp blurred blur-amount) :xyz))
+         (panel (sample world-panel-color scene-sampler uv-input))
+         (panel-depth
+           (swizzle (sample world-panel-depth depth-sampler uv-input) :x))
+         ;; A transparent clear has alpha zero, but the strict comparison also
+         ;; keeps the depth clear from becoming a surface in front of sky.
+         (panel-visible (if (< panel-depth depth) 1.0 0.0))
+         (panel-alpha (* (swizzle panel :w) panel-visible))
+         (radiance
+           (+ (* (swizzle panel :xyz) panel-visible)
+              (* scene-radiance (- 1.0 panel-alpha))))
          ;; The chain already carries exposed units; the scene does not.
          (bloom
            (swizzle (sample bloom-color scene-sampler uv-input) :xyz))
@@ -2547,8 +2564,12 @@ distribution overhead."
            (swizzle (sample shaft-color scene-sampler uv-input) :xyz))
          (exposed
            (+ (* radiance exposure)
-              (* bloom (swizzle lens-control :x))
-              (* shafts (swizzle lens-control :y))))
+              ;; A panel in front of the scene also occludes scene-produced
+              ;; bloom and shafts.  The panel itself stays out of the reduced
+              ;; lens chain, preserving its analytic native-density edges.
+              (* (+ (* bloom (swizzle lens-control :x))
+                    (* shafts (swizzle lens-control :y)))
+                 (- 1.0 panel-alpha))))
          (graded (aces-filmic exposed))
          ;; The two grading controls a colourist reaches for first, in the
          ;; order they belong in: saturation about the image's own luminance,

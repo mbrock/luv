@@ -63,7 +63,8 @@
       (width 960) (height 640)
       (world (make-empty-little-block-world :seed 121))
       (camera (make-instance 'fly-camera))
-      (scenario :steady) csv-pathname (stream *standard-output*))
+      (scenario :steady) (high-pixel-density-p nil)
+      csv-pathname (stream *standard-output*))
   "Measure steady or streaming world frames through the real Metal path.
 
 The streaming scenario moves one chunk in +X after warmup and records the
@@ -80,6 +81,7 @@ drainage and is intentionally not labelled as GPU time."
   (check-type width (integer 1))
   (check-type height (integer 1))
   (check-type scenario (member :steady :streaming))
+  (check-type high-pixel-density-p boolean)
   (let ((session nil)
         (samples (make-array frame-count))
         (provider (make-instance 'metal-gpu-provider)))
@@ -90,8 +92,11 @@ drainage and is intentionally not labelled as GPU time."
                   :title "luvcraft Metal frame benchmark"
                   :width width :height height
                   :visible-p nil :frames-per-second nil
-                  ;; WIDTH and HEIGHT are benchmark controls, not window points.
-                  :high-pixel-density-p nil
+                  ;; WIDTH and HEIGHT remain the logical scene controls.  The
+                  ;; Retina benchmark deliberately lets SDL make the drawable
+                  ;; denser, then records both extents below so the physical
+                  ;; post-pass cost cannot disappear behind the input size.
+                  :high-pixel-density-p high-pixel-density-p
                   :provider provider :world world :camera camera
                   :sky-clock
                   (make-instance 'sky-clock :pinned-day-fraction 0.5)))
@@ -129,6 +134,10 @@ drainage and is intentionally not labelled as GPU time."
                                     'double-float))
                           (trace
                             (make-cpu-trace :label "representative frame"))
+                          (render-extent
+                            (luvcraft-session-render-extent session))
+                          (presentation-extent
+                            (luvcraft-session-presentation-extent session))
                           (benchmark
                             (make-luvcraft-frame-benchmark
                              :backend :metal
@@ -136,7 +145,10 @@ drainage and is intentionally not labelled as GPU time."
                              :device
                              (benchmark-metal-device-name
                               (luvcraft-session-device session))
-                             :width width :height height
+                             :width (first render-extent)
+                             :height (second render-extent)
+                             :presentation-width (first presentation-extent)
+                             :presentation-height (second presentation-extent)
                              :warmup-count warmup-count :samples samples
                              :completion-seconds
                              (/ (- finished batch-start) units)

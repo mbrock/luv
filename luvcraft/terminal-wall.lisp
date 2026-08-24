@@ -1701,6 +1701,15 @@ supplies a uniform whose camera is expressed in that space instead."))
   (ghostty:close-terminal (terminal-display-terminal display))
   display)
 
+(defmethod evict-luvcraft-overlay-frame-key
+    ((display terminal-display) frame-key)
+  ;; Presentation modes are child overlays rather than independent session
+  ;; attachments, so propagate capture-target eviction through this owner.
+  (alexandria:when-let
+      ((overlay (terminal-display-mode-overlay display)))
+    (evict-luvcraft-overlay-frame-key overlay frame-key))
+  display)
+
 (defmethod handle-luvcraft-focus-event
     ((display terminal-display) session canvas (event canvas-key-event))
   ;; Keys still reach the shell under a portal: that is how the child gets

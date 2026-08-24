@@ -16,7 +16,7 @@
   (push (list revision target-format depth-stencil)
         (direct-overlay-preparation-observations overlay)))
 
-(deftest static-luvcraft-world-overlay-prepares-its-scene-target
+(deftest static-luvcraft-world-overlay-prepares-its-hdr-panel-target
   (let* ((mirror
            (make-instance 'mcluv:luv-gpu-mirror
                           :sheet nil :target nil :context nil))
@@ -27,14 +27,15 @@
            (make-instance 'direct-overlay-preparation-probe
                           :session nil :frame nil :mirror mirror))
          (expected
-           (list
-            (list revision :rgba16-float
-                  '(:format :depth32-float
-                    :depth-write-enabled nil :depth-compare :less)))))
+            (list
+             (list revision :rgba16-float
+                   '(:format :depth32-float
+                     :depth-write-enabled t
+                     :depth-compare :always)))))
     ;; Seed the static semantic revision while no compositor is attached.
     (mcluv::publish-gpu-mirror-prepared-revision mirror revision)
     (setf (mcluv:mirror-compositor mirror) overlay)
-    ;; Repaint publication and static refresh must agree on the actual scene
+    ;; Repaint publication and static refresh must agree on the actual panel
     ;; attachment; otherwise each semantic edit would discard the cohort that
     ;; the pre-pass boundary had just installed.
     (mcluv::prepare-mirror-compositor-revision overlay mirror revision)
@@ -92,6 +93,10 @@
                 'mcluv:luvcraft-world-widget-overlay))
   (ok (not (subtypep 'mcluv:luvcraft-hotbar-overlay
                      'mcluv:luvcraft-world-widget-overlay)))
+  (ok (eq :world-panel
+          (luvcraft:luvcraft-overlay-stage
+           (allocate-instance
+            (find-class 'mcluv:luvcraft-world-widget-overlay)))))
   (dolist (class '(mcluv:luvcraft-hotbar-overlay
                    mcluv:luvcraft-inventory-overlay
                    mcluv::luvcraft-metabar-overlay))
@@ -126,7 +131,7 @@
         (allocate-instance
          (find-class 'mcluv:luvcraft-hud-widget-overlay)))))
   (ok (equal '(:format :depth32-float
-               :depth-write-enabled nil :depth-compare :less)
+               :depth-write-enabled t :depth-compare :always)
              (mcluv::direct-gpu-mirror-depth-stencil
               (allocate-instance
                (find-class 'mcluv:luvcraft-world-widget-overlay)))))
@@ -142,6 +147,21 @@
     (ok (search "using namespace metal"
                 (luv.msl:msl-document-source
                  (luv.msl:compile-msl specification))))))
+
+(deftest world-panels-target-the-native-density-hdr-attachment
+  (let* ((target (gensym "WORLD-PANEL-COLOR"))
+         (renderer
+           (make-instance
+            'luvcraft::luvcraft-renderer
+            :frame-attachments
+            (list :world-panel-color-texture target)))
+         (session
+           (make-instance 'luvcraft:luvcraft-session :renderer renderer))
+         (overlay
+           (make-instance 'mcluv:luvcraft-world-widget-overlay
+                          :session session :frame nil :mirror nil)))
+    (ok (eq target
+            (mcluv::luvcraft-widget-render-target overlay session nil)))))
 
 (deftest widget-focus-probes-the-logical-retina-center
   (let* ((canvas (make-instance 'luv:sdl-canvas :width 1000 :height 500))

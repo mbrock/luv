@@ -3,6 +3,8 @@
 LUVCRAFT_BENCHMARK_FRAMES ?= 120
 LUVCRAFT_BENCHMARK_CSV ?= build/luvcraft-metal-benchmark.csv
 LUVCRAFT_BENCHMARK_SCENARIO ?= steady
+LUVCRAFT_BENCHMARK_DENSITY ?= standard
+LUVCRAFT_RETINA_BENCHMARK_CSV ?= build/luvcraft-metal-retina-benchmark.csv
 LUVCRAFT_STREAMING_BENCHMARK_CSV ?= build/luvcraft-metal-streaming-benchmark.csv
 LUFT_MESHER_BENCHMARK_CSV ?= build/luft-mesher-benchmark.csv
 LUFT_MESHER_BENCHMARK_SIZES ?= 8,16,32,64
@@ -20,7 +22,7 @@ TRACY_MCCLIM_PAINT_TRACE ?= build/mcclim-paints.tracy
 
 FASL_CACHE := $(HOME)/.cache/common-lisp
 
-.PHONY: all sly-client luvcraft luft run test capture showcase-bootstrap showcase-render showcase-deploy showcase-publish showcase-status clean-fasls parinfer-check shader-validate msl-validate smoke vulkan-smoke metal-smoke metal-text-closeup metal-benchmark metal-streaming-benchmark luft-mesher-benchmark luft-z-fiber-benchmark luft-blender-oracle luft-blender-oracle-check tracy-streaming tracy-mcclim-roundrect tracy-mcclim-paints readme-screenshots mcclim-gallery wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw roundrect-proof slug-proof slug-text-proof clean
+.PHONY: all sly-client luvcraft luft run test capture showcase-bootstrap showcase-render showcase-deploy showcase-publish showcase-status clean-fasls parinfer-check sly-build-lock-check shader-validate msl-validate smoke vulkan-smoke metal-smoke metal-text-closeup metal-benchmark metal-streaming-benchmark metal-retina-benchmark luft-mesher-benchmark luft-z-fiber-benchmark luft-blender-oracle luft-blender-oracle-check tracy-streaming tracy-mcclim-roundrect tracy-mcclim-paints readme-screenshots mcclim-gallery wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw roundrect-proof slug-proof slug-text-proof clean
 
 all: luvcraft luft
 
@@ -36,7 +38,7 @@ luft:
 run: luvcraft
 	./scripts/dev ./build/luvcraft
 
-test: parinfer-check shader-validate
+test: parinfer-check sly-build-lock-check shader-validate
 	@./scripts/dev sbcl --noinform --non-interactive --load scripts/test.lisp
 
 capture:
@@ -59,6 +61,9 @@ showcase-status:
 
 parinfer-check:
 	@./scripts/dev sh -c 'tmp=$$(mktemp); trap "rm -f $$tmp" EXIT; if ! ./sly parinfer --batch --strict --check $$(rg --files -g"*.lisp") >"$$tmp" 2>&1; then cat "$$tmp"; exit 1; fi; echo "parinfer: strict check passed."'
+
+sly-build-lock-check:
+	@./scripts/dev python3 scripts/with-build-lock-tests.py
 
 shader-validate:
 	@mkdir -p build
@@ -182,10 +187,13 @@ metal-text-closeup: luvcraft
 
 metal-benchmark: luvcraft
 	mkdir -p build
-	./scripts/dev ./build/luvcraft --metal-benchmark $(LUVCRAFT_BENCHMARK_FRAMES) $(LUVCRAFT_BENCHMARK_CSV) $(LUVCRAFT_BENCHMARK_SCENARIO)
+	./scripts/dev ./build/luvcraft --metal-benchmark $(LUVCRAFT_BENCHMARK_FRAMES) $(LUVCRAFT_BENCHMARK_CSV) $(LUVCRAFT_BENCHMARK_SCENARIO) $(LUVCRAFT_BENCHMARK_DENSITY)
 
 metal-streaming-benchmark:
 	$(MAKE) metal-benchmark LUVCRAFT_BENCHMARK_SCENARIO=streaming LUVCRAFT_BENCHMARK_CSV=$(LUVCRAFT_STREAMING_BENCHMARK_CSV)
+
+metal-retina-benchmark:
+	$(MAKE) metal-benchmark LUVCRAFT_BENCHMARK_DENSITY=retina LUVCRAFT_BENCHMARK_CSV=$(LUVCRAFT_RETINA_BENCHMARK_CSV)
 
 luft-mesher-benchmark:
 	mkdir -p build
