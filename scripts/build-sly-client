@@ -12,27 +12,19 @@ cd "$project_root"
 mkdir -p build
 
 lock=build/.sly-client-build.lock
-if ! mkdir "$lock" 2>/dev/null; then
-  if [ -r "$lock/pid" ] && IFS= read -r builder_pid < "$lock/pid" \
-    && kill -0 "$builder_pid" 2>/dev/null; then
-    printf 'Another ./sly client build is active (pid %s); retry this command.\n' \
-      "$builder_pid" >&2
-    exit 1
-  fi
-  rm -f "$lock/pid"
-  rmdir "$lock" 2>/dev/null || {
-    printf 'Cannot reclaim stale ./sly client build lock: %s/%s\n' \
-      "$project_root" "$lock" >&2
-    exit 1
-  }
-  mkdir "$lock"
+if [ "${LUV_SLY_CLIENT_LOCK_HELD:-}" != 1 ]; then
+  exec python3 "$project_root/scripts/with-build-lock.py" \
+    "$project_root/$lock" "./sly client" "build-sly-client" \
+    -- env LUV_SLY_CLIENT_LOCK_HELD=1 "$0"
 fi
-printf '%s\n' "$$" > "$lock/pid"
+
 cleanup() {
-  rm -f "$lock/pid"
-  rmdir "$lock" 2>/dev/null || :
+  rm -f build/sly-client.environment.tmp
 }
-trap cleanup EXIT HUP INT TERM
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 printf 'Building cached ./sly client core...\n'
 sbcl --noinform --non-interactive --disable-debugger \

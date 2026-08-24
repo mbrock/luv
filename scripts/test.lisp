@@ -15,6 +15,7 @@
     (asdf:load-asd (truename "luv-wiki.asd"))
     (asdf:load-asd (truename "luv-wiki-site.asd"))
     (asdf:load-asd (truename "luft.asd"))
+    (asdf:load-asd (truename "sly-client.asd"))
     (asdf:load-system :rove)
     (load (merge-pathnames #P"luv/test-reporter.lisp"))
     (uiop:symbol-call :luv.test-reporter :register-luv-reporter)
@@ -24,6 +25,7 @@
                       :luv/mcclim :luv/lobby/mcclim :luv/application-agent
                       :luv/ghostty :luv/libav :luvcraft :luvcraft/agent
                       :mqtt :openai :chrome-cdp
+                      :sly-client/test
                       :luv-wiki :luft :luft/render
                       :luft/z-fiber-benchmark))
       (format t "~&~A~%" (string-downcase (asdf:component-name (asdf:find-system system))))

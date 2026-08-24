@@ -45,15 +45,19 @@ if [ -z "$stale" ]; then
   exit 0
 fi
 
-if ! mkdir "$lock" 2>/dev/null; then
-  printf 'Another Sly dependency core build is active; retry this command.\n' >&2
-  exit 1
+if [ "${LUV_SLY_DEPENDENCY_CORE_LOCK_HELD:-}" != 1 ]; then
+  exec python3 "$project_root/scripts/with-build-lock.py" \
+    "$lock" "Sly dependency core" "build-sly-dependency-core" \
+    -- env LUV_SLY_DEPENDENCY_CORE_LOCK_HELD=1 "$0"
 fi
+
 cleanup() {
   rm -f "$core.tmp" "$stamp.tmp"
-  rmdir "$lock" 2>/dev/null || :
 }
-trap cleanup EXIT HUP INT TERM
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 export LUV_SLY_DEPENDENCY_CORE_OUTPUT="$core.tmp"
 

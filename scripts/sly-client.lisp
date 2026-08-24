@@ -244,7 +244,8 @@ wedged image looks like, and the difference has to be visible from here.")
         do (setf start (1+ newline))))
 
 (defstruct lisp-instance
-  id name root started last-activity activity state port pid)
+  id name root started started-universal-time
+  last-activity activity state port pid)
 
 (defun run-swash-output (&rest arguments)
   (let ((output (make-string-output-stream))
@@ -294,49 +295,120 @@ wedged image looks like, and the difference has to be visible from here.")
 (defun parse-decimal (value)
   (and value (parse-integer value :junk-allowed t)))
 
+(defun process-alive-p (pid)
+  (and (integerp pid)
+       (plusp pid)
+       (handler-case
+           (progn
+             (sb-posix:kill pid 0)
+             t)
+         (error () nil))))
+
+(defun endpoint-alive-p (port)
+  (and (integerp port)
+       (plusp port)
+       (let ((*host* "127.0.0.1")
+             (*port* port))
+         (handler-case
+             (connection-available-p)
+           (slynk-handshake-timeout () nil)))))
+
+(defvar *process-alive-probe* #'process-alive-p)
+(defvar *endpoint-alive-probe* #'endpoint-alive-p)
+(defvar *universal-time-provider* #'get-universal-time)
+(defvar *swash-events-provider* #'swash-events)
+
+(defun starting-lisp-current-p (instance)
+  (let ((started (lisp-instance-started-universal-time instance)))
+    (and started
+         (let ((age (- (funcall *universal-time-provider*) started)))
+           (and (not (minusp age))
+                (<= age *server-start-timeout*))))))
+
+(defun lisp-instance-live-p (instance)
+  (case (lisp-instance-state instance)
+    (:starting
+     (starting-lisp-current-p instance))
+    (:ready
+     (and (lisp-instance-pid instance)
+          (lisp-instance-port instance)
+          (funcall *process-alive-probe* (lisp-instance-pid instance))
+          (funcall *endpoint-alive-probe* (lisp-instance-port instance))))
+    (otherwise nil)))
+
+(defun reconcile-lisp-instance (instance)
+  (when (and (member (lisp-instance-state instance) '(:starting :ready))
+             (not (lisp-instance-live-p instance)))
+    (setf (lisp-instance-state instance) :stale
+          (lisp-instance-activity instance) "stale"))
+  instance)
+
 (defun lisp-instances ()
   "Reconstruct the Lisp registry from portable Swash journal events."
   (let ((by-id (make-hash-table :test #'equal)))
-    (dolist (event (swash-events "--field" "LUV_KIND=LISP"))
+    (dolist (event (funcall *swash-events-provider*
+                            "--field" "LUV_KIND=LISP"))
       (let* ((id (event-field "SWASH_SESSION" event))
-             (name (event-name event))
+             (kind (event-name event))
              (instance (gethash id by-id)))
-        (when (and (member name '("started" "lisp-starting") :test #'string=)
-                   (null instance))
+        ;; Swash's portable lifecycle events do not inherit user tags. The
+        ;; first tagged event may therefore be ordinary process output or the
+        ;; server's SLYNK-READY event if the starting client was interrupted
+        ;; before it could publish LISP-STARTING. Any LUV_KIND=LISP event is
+        ;; enough to establish the session; later events fill in its identity.
+        (when (and id (null instance))
           (setf instance
                 (make-lisp-instance
                  :id id
                  :name (or (event-field "LUV_NAME" event) id)
                  :root (event-field "LUV_ROOT" event)
                  :started (json-value "timestamp" event)
+                 :started-universal-time
+                 (parse-decimal (event-field "LUV_STARTED_AT" event))
                  :state :starting)
                 (gethash id by-id) instance))
         (when instance
           (setf (lisp-instance-last-activity instance) (json-value "timestamp" event)
-                (lisp-instance-activity instance) name)
+                (lisp-instance-activity instance) kind)
+          (let ((event-name (event-field "LUV_NAME" event))
+                (event-root (event-field "LUV_ROOT" event))
+                (started-at
+                  (parse-decimal (event-field "LUV_STARTED_AT" event))))
+            (when event-name
+              (setf (lisp-instance-name instance) event-name))
+            (when event-root
+              (setf (lisp-instance-root instance) event-root))
+            (when started-at
+              (setf (lisp-instance-started-universal-time instance)
+                    started-at)))
           (cond
-            ((string= name "slynk-ready")
+            ((string= kind "slynk-ready")
              (setf (lisp-instance-port instance)
                    (parse-decimal (event-field "LUV_SLYNK_PORT" event))
                    (lisp-instance-pid instance)
                    (parse-decimal (event-field "LUV_SLYNK_PID" event))
                    (lisp-instance-state instance) :ready))
-            ((string= name "exited")
+            ((member kind '("exited" "lisp-retired") :test #'string=)
              (setf (lisp-instance-state instance) :exited))))))
     ;; Sessions started by the immediately preceding Swash revision did not
     ;; copy tags onto lifecycle events. Fold untagged exits during migration;
     ;; this is also harmless insurance for imported journals.
-    (dolist (event (swash-events "--event" "exited"))
+    (dolist (event (funcall *swash-events-provider* "--event" "exited"))
       (let ((instance (gethash (event-field "SWASH_SESSION" event) by-id)))
         (when instance
           (setf (lisp-instance-state instance) :exited
                 (lisp-instance-last-activity instance) (json-value "timestamp" event)
                 (lisp-instance-activity instance) "exited"))))
-    (sort (loop for instance being each hash-value of by-id collect instance)
-          #'string< :key #'lisp-instance-started)))
+    (mapcar
+     #'reconcile-lisp-instance
+     (sort (loop for instance being each hash-value of by-id collect instance)
+           #'string< :key #'lisp-instance-started))))
 
 (defun running-lisp-p (instance)
-  (not (eq (lisp-instance-state instance) :exited)))
+  (member (lisp-instance-state instance) '(:starting :ready)))
+
+(defun stale-lisp-p (instance)
+  (eq (lisp-instance-state instance) :stale))
 
 (defun same-root-p (left right)
   (and left right
@@ -372,38 +444,84 @@ wedged image looks like, and the difference has to be visible from here.")
     instances))
 
 (defun matching-lisps (selector instances)
-  (or (let ((exact
+  (and (plusp (length selector))
+       (or (let ((exact
+                   (remove-if-not
+                    (lambda (instance)
+                      (string= selector (lisp-instance-id instance)))
+                    instances)))
+             (and exact exact))
+           (remove-if-not
+            (lambda (instance)
+              (or (string= selector (lisp-instance-name instance))
+                  (and (<= (length selector) (length (lisp-instance-id instance)))
+                       (string= selector (lisp-instance-id instance)
+                                :end2 (length selector)))))
+            instances))))
+
+(defun stale-lisp-selection-error (instances)
+  (error "Stale managed Lisp~P ~{~A~^, ~} must be selected by full session ID; use ./sly --lisp ID status, log, stop, or restart"
+         (length instances)
+         (mapcar #'lisp-instance-id instances)))
+
+(defun choose-lisp (&key start-if-missing allow-explicit-stale refuse-if-stale
+                         (instances nil instances-supplied-p))
+  (when (and *lisp-selector* (zerop (length *lisp-selector*)))
+    (error "Lisp selector must not be empty"))
+  (let* ((all (if instances-supplied-p instances (lisp-instances)))
+         (running (remove-if-not #'running-lisp-p all))
+         (exact-instance
+           (and *lisp-selector*
+                (find *lisp-selector* all
+                      :key #'lisp-instance-id :test #'string=)))
+         ;; An unhealthy session is deliberately never a work target. Lifecycle
+         ;; commands may recover one only through its complete Swash identity;
+         ;; names and prefixes are not precise enough for a destructive action.
+         (explicit-stale
+           (and allow-explicit-stale
+                exact-instance
+                (stale-lisp-p exact-instance)
+                exact-instance))
+         (eligible (if explicit-stale
+                       (cons explicit-stale running)
+                       running))
+         (candidates
+           (cond
+             ((and exact-instance (running-lisp-p exact-instance))
+              (list exact-instance))
+             (explicit-stale (list explicit-stale))
+             (*lisp-selector*
+              (matching-lisps *lisp-selector* eligible))
+             (t
               (remove-if-not
                (lambda (instance)
-                 (string= selector (lisp-instance-id instance)))
-               instances)))
-        (and exact exact))
-      (remove-if-not
-       (lambda (instance)
-         (or (string= selector (lisp-instance-name instance))
-             (and (<= (length selector) (length (lisp-instance-id instance)))
-                  (string= selector (lisp-instance-id instance)
-                           :end2 (length selector)))))
-       instances)))
-
-(defun choose-lisp (&key start-if-missing (instances nil instances-supplied-p))
-  (let* ((running (remove-if-not
-                   #'running-lisp-p
-                   (if instances-supplied-p instances (lisp-instances))))
-         (candidates
-           (if *lisp-selector*
-               (matching-lisps *lisp-selector* running)
-               (remove-if-not
-                (lambda (instance)
-                  (same-root-p (lisp-instance-root instance)
-                               (namestring *project-root*)))
-                running))))
+                 (same-root-p (lisp-instance-root instance)
+                              (namestring *project-root*)))
+               running))))
+         (stale-matches
+           (and *lisp-selector*
+                (matching-lisps *lisp-selector*
+                                (remove-if-not #'stale-lisp-p all))))
+         (stale-for-root
+           (remove-if-not
+            (lambda (instance)
+              (and (stale-lisp-p instance)
+                   (same-root-p (lisp-instance-root instance)
+                                (namestring *project-root*))))
+            all)))
     (cond
+      ((and stale-matches
+            (null exact-instance))
+       (stale-lisp-selection-error stale-matches))
       ((null candidates)
        (cond
+         (stale-matches
+          (stale-lisp-selection-error stale-matches))
          (*lisp-selector*
           (print-lisp-list)
           (error "No running Lisp matches ~S" *lisp-selector*))
+         ((and stale-for-root (or start-if-missing refuse-if-stale))
+          (stale-lisp-selection-error stale-for-root))
          (start-if-missing (start-server :quiet t))
          (t nil)))
       ((cdr candidates)
@@ -507,6 +625,7 @@ wedged image looks like, and the difference has to be visible from here.")
 (defun start-server (&key quiet (name (default-lisp-name)))
   "Start a new Lisp incarnation. Explicit START intentionally permits peers."
   (let* ((dependency-core (ensure-sly-dependency-core))
+         (started-at (funcall *universal-time-provider*))
          (server-path (merge-pathnames #P"sly-server.lisp" *project-root*))
          (output
            (run-swash-output
@@ -514,6 +633,7 @@ wedged image looks like, and the difference has to be visible from here.")
             "--tag" "LUV_KIND=LISP"
             "--tag" (format nil "LUV_ROOT=~A" (namestring *project-root*))
             "--tag" (format nil "LUV_NAME=~A" name)
+            "--tag" (format nil "LUV_STARTED_AT=~D" started-at)
             "--" "env" (format nil "LUV_NAME=~A" name)
             "sbcl" "--core" (namestring dependency-core)
             "--noinform" "--disable-debugger"
@@ -532,23 +652,40 @@ wedged image looks like, and the difference has to be visible from here.")
                       "--message" (format nil "Starting Lisp ~A" name)
                       "--field" "LUV_KIND=LISP"
                       "--field" (format nil "LUV_ROOT=~A" (namestring *project-root*))
-                      "--field" (format nil "LUV_NAME=~A" name))
+                      "--field" (format nil "LUV_NAME=~A" name)
+                      "--field" (format nil "LUV_STARTED_AT=~D" started-at))
     (let* ((instance
              (make-lisp-instance
               :id session :name name :root (namestring *project-root*)
-              :state :starting))
+              :started-universal-time started-at :state :starting))
            (follow
              (sb-ext:run-program
               *swash* (list "follow" session)
               :search nil :input nil :output t :error t :wait nil)))
       (wait-for-lisp instance :follow-process follow :quiet quiet))))
 
+(defun lisp-identity-fields (instance)
+  (list "LUV_KIND=LISP"
+        (format nil "LUV_ROOT=~A" (lisp-instance-root instance))
+        (format nil "LUV_NAME=~A" (lisp-instance-name instance))))
+
+(defun lisp-activity-fields (instance)
+  (append (lisp-identity-fields instance)
+          (list (format nil "LUV_COMMAND=~A" *current-command*))))
+
+(defun emit-managed-lisp-event (instance event message &rest fields)
+  (apply #'run-swash-output
+         "emit" (lisp-instance-id instance)
+         "--event" event
+         "--message" message
+         (loop for field in (append (lisp-identity-fields instance) fields)
+               append (list "--field" field))))
+
 (defun emit-lisp-activity ()
   (when (and *managed-lisp* *current-command*)
-    (run-swash-output "emit" (lisp-instance-id *managed-lisp*)
-                      "--event" "sly-activity"
-                      "--message" (format nil "./sly ~A" *current-command*)
-                      "--field" (format nil "LUV_COMMAND=~A" *current-command*))))
+    (emit-managed-lisp-event
+     *managed-lisp* "sly-activity" (format nil "./sly ~A" *current-command*)
+     (format nil "LUV_COMMAND=~A" *current-command*))))
 
 (defun ensure-server ()
   (if (attach-only-p)
@@ -1025,6 +1162,47 @@ the frames after CODE failed, else 0."
     (with-slynk-handshake-timeout
       (assert-stream-listener-project stream))))
 
+(defun first-whitespace-delimited-field (line)
+  (let* ((trimmed (string-left-trim '(#\Space #\Tab) line))
+         (end (position-if (lambda (character)
+                             (member character '(#\Space #\Tab)))
+                           trimmed)))
+    (subseq trimmed 0 end)))
+
+(defun swash-session-running-p (instance)
+  (find (lisp-instance-id instance)
+        (split-lines (run-swash-output "-a"))
+        :key #'first-whitespace-delimited-field
+        :test #'string=))
+
+(defvar *swash-session-running-probe* #'swash-session-running-p)
+(defvar *swash-stop-runner*
+  (lambda (instance)
+    (run-swash "stop" (lisp-instance-id instance))))
+(defvar *managed-lisp-event-emitter* #'emit-managed-lisp-event)
+
+(defun stop-managed-lisp (instance)
+  "Stop INSTANCE when Swash still owns it, then retire its journal identity.
+
+An unhealthy session whose host has already disappeared is already stopped;
+publishing LISP-RETIRED makes that fact durable so RESTART can proceed. If its
+host is still present, Swash remains the only authority allowed to stop it."
+  (let ((stale-p (stale-lisp-p instance)))
+    (when (or (not stale-p)
+              (funcall *swash-session-running-probe* instance))
+      (handler-case
+          (funcall *swash-stop-runner* instance)
+        (error (condition)
+          ;; The host may have exited between the status query and STOP. That
+          ;; is a successful stop; any still-running host remains an error.
+          (when (or (not stale-p)
+                    (funcall *swash-session-running-probe* instance))
+            (error condition)))))
+    (funcall *managed-lisp-event-emitter*
+             instance "lisp-retired"
+             (format nil "Retired Lisp ~A" (lisp-instance-name instance)))
+    t))
+
 (defun stop-server ()
   (when (attach-only-p)
     (let ((listener-pid (listener-process-id)))
@@ -1034,13 +1212,14 @@ the frames after CODE failed, else 0."
           (format t "The external Slynk endpoint is not running on ~A:~D.~%"
                   *host* *port*)))
     (return-from stop-server nil))
-  (let ((instance (choose-lisp)))
+  (let ((instance (choose-lisp :allow-explicit-stale t
+                               :refuse-if-stale t)))
     (if (null instance)
         (progn
           (format t "This checkout has no running Lisp.~%")
           nil)
         (progn
-          (run-swash "stop" (lisp-instance-id instance))
+          (stop-managed-lisp instance)
           (format t "Stopped Lisp ~A (~A).~%"
                   (lisp-instance-id instance) (lisp-instance-name instance))
           t))))
@@ -1048,14 +1227,36 @@ the frames after CODE failed, else 0."
 (defun restart-server ()
   (when (attach-only-p)
     (error "restart manages a Swash Lisp, not a standalone luvcraft"))
-  (let ((instance (choose-lisp)))
+  (let ((instance (choose-lisp :allow-explicit-stale t
+                               :refuse-if-stale t)))
     (if instance
         (let ((name (lisp-instance-name instance)))
-          (run-swash "stop" (lisp-instance-id instance))
+          (stop-managed-lisp instance)
           (format t "Stopped Lisp ~A (~A).~%"
                   (lisp-instance-id instance) name)
           (start-server :name name))
         (start-server))))
+
+(defun report-managed-server-status (instance)
+  (cond
+    ((null instance)
+     (format t "This checkout has no running Lisp.~%"))
+    ((eq (lisp-instance-state instance) :ready)
+     (select-managed-lisp instance)
+     (format t "Selected ~A (~A) for this checkout.~%"
+             (lisp-instance-id instance) (lisp-instance-name instance))
+     (handler-case
+         (progn
+           (assert-listener-project)
+           (print-game-status))
+       (error (condition)
+         (format t "Slynk health: ~A~%" condition))))
+    ((eq (lisp-instance-state instance) :starting)
+     (format t "Lisp ~A (~A) is still starting.~%"
+             (lisp-instance-id instance) (lisp-instance-name instance)))
+    (t
+     (format t "Lisp ~A (~A) is stale or unhealthy; inspect its log, then stop or restart it by full session ID.~%"
+             (lisp-instance-id instance) (lisp-instance-name instance)))))
 
 (defun server-status ()
   (when (attach-only-p)
@@ -1066,23 +1267,14 @@ the frames after CODE failed, else 0."
           (format t "External Slynk is not accepting connections on ~A:~D.~%"
                   *host* *port*)))
     (return-from server-status nil))
-  (let* ((instances (print-lisp-list))
-         (instance (choose-lisp :instances instances)))
-    (when (and instance (eq (lisp-instance-state instance) :ready))
-      (select-managed-lisp instance)
-      (format t "~%Selected ~A (~A) for this checkout.~%"
-              (lisp-instance-id instance) (lisp-instance-name instance))
-      (handler-case
-          (progn
-            (assert-listener-project)
-            (print-game-status))
-        (error (condition)
-          (format t "Slynk health: ~A~%" condition))))))
+  (report-managed-server-status
+   (choose-lisp :allow-explicit-stale t)))
 
 (defun print-server-log-tail ()
   (when (attach-only-p)
     (error "log is available for Swash-managed Lisps, not standalone luvcraft"))
-  (let ((instance (choose-lisp)))
+  (let ((instance (choose-lisp :allow-explicit-stale t
+                               :refuse-if-stale t)))
     (if instance
         (run-swash "poll" (lisp-instance-id instance))
         (format t "This checkout has no running Lisp.~%"))))

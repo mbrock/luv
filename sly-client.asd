@@ -11,3 +11,16 @@
   :build-operation "program-op"
   :build-pathname "build/sly-client"
   :entry-point "sly-client:entry-point")
+
+(asdf:defsystem "sly-client/test"
+  :description "Lifecycle-selection tests for the managed Sly client."
+  :depends-on ("sly-client" "rove")
+  :serial t
+  :components ((:file "scripts/sly-client-tests"))
+  :perform (test-op (operation component)
+             (declare (ignore operation component))
+             (unless (uiop:symbol-call '#:rove '#:run-suite
+                                       (uiop:symbol-call '#:rove '#:find-suite
+                                                         '#:sly-client.tests)
+                                       :style :spec)
+               (error "Sly client tests failed"))))

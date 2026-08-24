@@ -1,16 +1,16 @@
 ---
 name: luv-development
-description: Use when starting or diagnosing development in a luv checkout or worktree; running builds, tests, or SBCL scripts; managing the durable ./sly image or a live luvcraft process; checking the Nix development profile or ASDF cache; or investigating slow, stale, crossed, or apparently hung Lisp work.
+description: Use when starting or diagnosing development in a luv checkout or worktree; running builds, tests, or SBCL scripts; managing Swash-supervised ./sly images or a live game process; checking the Nix development profile or ASDF cache; or investigating slow, stale, crossed, or apparently hung Lisp work.
 ---
 
 # Luv development
 
-Keep the checkout, environment, compiled artifacts, and live Lisp image aligned. Treat an unexplained pause as a process to inspect, not a reason to launch more SBCLs.
+Keep the checkout, environment, compiled artifacts, and selected live Lisp aligned. Treat an unexplained pause as a process to inspect, not a reason to launch unmanaged SBCLs.
 
-## Start here: one Lisp, one game
+## Start here: managed Lisps, one selected game
 
-One durable image per checkout; the game normally runs inside it.  This is
-the whole workflow — do not invent another:
+Swash supervises durable Lisp images across checkouts, and the game normally
+runs inside one selected image. This is the ordinary workflow:
 
 ```sh
 ./sly play                              # boot the image and open the real game
@@ -18,6 +18,9 @@ the whole workflow — do not invent another:
 ./sly screenshot build/frame.png        # capture what the game shows
 ./sly stop-playing                      # checkpoint and close the game
 ./sly restart                           # explicit recovery if the image is wrecked
+./sly list                              # all managed Lisps across checkouts
+./sly systems                           # live ASDF registration and freshness
+./sly stale                             # loaded systems with pending ASDF work
 ```
 
 - Work in small evals against `luvcraft:*session*`; redefine code with
@@ -28,6 +31,9 @@ the whole workflow — do not invent another:
   debugger prompt on stdin, which then looks like a hang.
 - Learn the tools before improvising: `./sly --help`, `./sly describe`,
   `apropos`, `edit`, `xref`, `inspect`.
+- Multiple Lisps are explicit: create one with `./sly start --name NAME` and
+  select it with `./sly --lisp ID-or-NAME COMMAND`. An unqualified command
+  refuses to guess when several Lisps match the checkout.
 - `build/luvcraft` (`make luvcraft`) is the standalone executable for
   shipping and CI (`make smoke`); `./sly --luvcraft ...` attaches to it.
   Do not run it alongside the image while developing — two windows, two
@@ -36,8 +42,8 @@ the whole workflow — do not invent another:
 ## Start in a checkout
 
 1. Run `git status --short --branch` and preserve unrelated work.
-2. Run `./scripts/dev --status`. Note the checkout-specific Slynk port, the SBCL version, the Vulkan layer path, and the ASDF cache root.
-3. Run `./sly status`. A linked worktree has its own stable port and image; the primary checkout keeps port 4005.
+2. Run `./scripts/dev --status`. Note the SBCL version, `LUV_SWASH`, the Vulkan layer path, and the ASDF cache root.
+3. Run `./sly list`, then `./sly status`. Swash assigns each image a stable session identity and publishes its kernel-assigned Slynk port in the journal.
 4. Prefer `./scripts/dev COMMAND` for one-shot native tools and `./sly COMMAND` for Lisp exploration. Do not invoke an ambient Homebrew or system SBCL.
 
 The durable Nix development profile is the ordinary environment. Install or
@@ -52,44 +58,53 @@ direnv allow         # once; .envrc only sources the same activation file
 Normal commands do not evaluate Nix and do not enter a subshell. The profile
 is a deliberate GC-rooted dependency checkpoint; `flake.lock` still makes it
 reproducible when refreshed. CI may enter the equivalent environment once
-around a whole job with `nix develop -c`. Restart the checkout's durable image
-after refreshing the profile.
+around a whole job with `nix develop -c`. Restart each selected image that
+should enter the refreshed profile environment.
 
 ## Choose the execution path
 
-- Use `./sly play`, then `eval`, `inspect`, `describe`, `apropos`, `edit`, or `xref` for iterative work. Each invocation opens a fresh client connection to the checkout's durable image.
+- Use `./sly play`, then `eval`, `inspect`, `describe`, `apropos`, `edit`, or `xref` for iterative work. Each invocation opens a fresh client connection to the selected image.
 - Use `./scripts/luv COMMAND` for named one-shot luvcraft tools such as `gazetteer`; these do not share the live game.
 - Use `./sly --luvcraft ...` only to inspect the standalone game named by `build/luvcraft.slynk`; `luvcraft:*session*` is its live session.
 - Use `./scripts/dev sbcl --non-interactive ...` for isolated verification that must start clean.
 - Use Make targets for their intended artifacts. Expect the first build in a new absolute checkout path to compile local systems into a distinct ASDF cache subtree; later loads should be much faster.
 - Use `./sly parinfer ...` for its connection-free Lisp indentation checks.
 
-Do not replace a broken durable image with an ad hoc sequence of fresh SBCL processes. That hides stale state and leaves the shared development surface broken.
+Do not replace a broken managed image with an ad hoc sequence of fresh SBCL processes. That hides stale state and leaves the shared development surface broken.
 
-## Manage the image
+## Manage images
 
 ```sh
 ./sly play
+./sly list
 ./sly status
 ./sly restart
 ./sly log
 ./sly stop-playing
 ./sly stop
+./sly start --name experiment
+./sly --lisp experiment status
+./sly systems
+./sly system luv/test
+./sly stale
 ```
 
-`./sly` derives a stable port from the linked-worktree path, serializes concurrent startup, and verifies the live image's project root before evaluating. Override with `LUV_SLYNK_PORT=PORT` only to resolve the unlikely case of two derived ports colliding.
+`./sly` asks Swash to create and supervise each image, normally lets the kernel
+choose its Slynk port, and discovers the port, PID, project root, and name from
+the journaled ready event. Commands select by checkout when exactly one image
+matches, or by the explicit `--lisp` name or six-character session ID.
 
 If the image lacks a new system, package, readtable, native dependency, or method:
 
-1. Check `./sly status` and `./sly log`.
-2. Stop it with `./sly stop` when it is managed by this checkout and no interactive client needs its state.
+1. Check `./sly list`, `./sly status`, `./sly systems`, and `./sly log`.
+2. Stop the selected image with `./sly stop` when no interactive client needs its state.
 3. Refresh and reactivate the development profile if the flake environment
    changed.
 4. Run `./sly start`, then confirm the missing capability with a small eval.
 
-Never kill an image reported as belonging to another checkout or as Emacs/external. Stop it through its owner.
-
-If `./sly status` reports that the port accepts TCP but answers no Slynk handshake, it also names the processes holding it -- usually shells the terminal wall spawned, which inherited the listening socket and outlived their image. `./sly reclaim` kills those holders and frees the port; `./sly start` does it on its own. Neither ever kills a Lisp: a Lisp holding the port is reported so its owner can deal with it.
+Never kill a managed image by PID or disturb one belonging to another checkout.
+Select it by Swash identity and stop it through `./sly`; use `./sly list` to make
+ownership visible before lifecycle actions.
 
 ## Five seconds of silence means broken
 
@@ -113,9 +128,9 @@ A responsive image and a stuck call are different things: if `./sly eval "(+ 1 2
 ## Diagnose slow or stuck work
 
 1. Observe the last emitted compilation unit; a fresh worktree compiles its own source-path cache, but a normal cold project load should keep printing progress.
-2. Run `./scripts/dev --status` and `./sly status` in another terminal.
-3. Inspect processes with `ps ax -o pid,ppid,etime,state,command | grep -E '[s]bcl|[n]ix (develop|build)|[l]uv-env'`.
-4. For a managed image, inspect `./sly log`. For a Make/SBCL process, capture its command and parent before interrupting it.
+2. Run `./scripts/dev --status`, `./sly list`, and `./sly status` in another terminal.
+3. Inspect processes with `ps ax -o pid,ppid,etime,state,command | grep -E '[s]wash|[s]bcl|[n]ix (develop|build)|[l]uv-env'`.
+4. For a managed image, inspect its selected `./sly log` and Swash identity. For a Make/SBCL process, capture its command and parent before interrupting it.
 5. Distinguish CPU-heavy compilation from sleeping/waiting. Do not start a duplicate build: concurrent work obscures ownership and can contend for outputs.
 6. If a failed `./sly eval` enters the Slynk debugger, choose a printed restart number or `a` to abort; it is waiting for input, not compiling.
 
