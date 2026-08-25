@@ -2,105 +2,190 @@
 
 ;;; Animated torch-flame substrate
 ;;;
-;;; A torch remains a semantic oriented face attachment.  This file compiles
-;;; that sparse identity to exactly one UVec4 while leaving renderer residency,
-;;; upload, and draw ownership to the caller.  Its CPU functions are deliberately
-;;; scalar references for the shader field and integral rather than a second
-;;; retained representation.
+;;; A torch remains a sparse semantic attachment, while its rendered body and
+;;; flame share one frame realized against the final surface.  The GPU boundary
+;;; is deliberately plain: three Vec4 rows containing origin/seed,
+;;; normal/flags, and tangent/scale.  Its CPU functions are scalar references
+;;; for the shader field and integral rather than a second retained
+;;; representation.
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (defconstant +torch-flame-instance-word-count+ 4)
+  (defconstant +torch-flame-instance-row-count+ 3)
+  (defconstant +torch-flame-instance-scalar-count+ 12)
   (defconstant +torch-flame-sample-count+ 9)
-  (defconstant +torch-flame-cell-size+ 8.0f0)
   (defconstant +torch-flame-wick-offset+ 0.5f0)
   (defconstant +torch-flame-length+ 0.42f0)
   (defconstant +torch-flame-proxy-radius+ 0.38f0)
   (defconstant +torch-flame-wall-bend+ 0.055f0)
-  (defconstant +torch-flame-extinction+ 6.4f0))
+  (defconstant +torch-flame-extinction+ 6.4f0)
+  ;; The authored material supplies hue and baseline HDR strength.  Heat is a
+  ;; dimensionless scalar response, not a second hidden RGB palette.
+  (defconstant +torch-flame-cool-radiance-scale+ 1.0f0)
+  (defconstant +torch-flame-heat-radiance-gain+ 2.0f0)
+  (defconstant +torch-flame-frame-tolerance+ 2.0f-4)
+  (defconstant +torch-flame-maximum-flags+ #.(1- (ash 1 24)))
+  ;; The one exact 24-bit float lane is shared by both renderers.  Keeping the
+  ;; material and sampled light beside the realized frame makes flame and body
+  ;; publication one immutable transaction instead of two index-coupled
+  ;; sidecars.
+  (defconstant +torch-body-assembly-bit-count+ 12)
+  (defconstant +torch-body-light-bit-count+ 12)
+  (defconstant +torch-body-vertex-row-count+ 2)
+  (defconstant +torch-body-vertex-scalar-count+ 8)
+  (defconstant +torch-body-side-count+ 8))
 
-(deftype torch-flame-orientation-code () '(integer 0 5))
-(deftype torch-flame-instance-words ()
-  '(simple-array (unsigned-byte 32) (4)))
+(deftype torch-flame-instance-data ()
+  '(simple-array single-float (12)))
 
-(defun torch-flame-orientation-code (axis side)
-  "Return the stable three-bit code for oriented AXIS/SIDE."
-  (check-type axis luft:axis)
-  (check-type side luft:side)
-  (+ (* 2 (ecase axis (:x 0) (:y 1) (:z 2)))
-     (if (eq side :high) 1 0)))
+(defun pack-torch-body-frame-flags (assembly-id packed-voxel-light)
+  "Pack a 12-bit material assembly and RGB4 voxel light into frame FLAGS."
+  (check-type assembly-id (unsigned-byte 12))
+  (check-type packed-voxel-light (unsigned-byte 12))
+  (logior assembly-id
+          (ash packed-voxel-light +torch-body-assembly-bit-count+)))
 
-(defun torch-flame-orientation-axis (code)
-  (check-type code torch-flame-orientation-code)
-  (ecase (ash code -1) (0 :x) (1 :y) (2 :z)))
+(defun unpack-torch-body-frame-flags (flags)
+  "Return the assembly id and packed RGB4 voxel light encoded by FLAGS."
+  (unless (and (realp flags)
+               (= flags (floor flags))
+               (<= 0 flags +torch-flame-maximum-flags+))
+    (error "Torch body flags are not an exact 24-bit nonnegative integer: ~S."
+           flags))
+  (let ((flags (floor flags)))
+    (values
+     (ldb (byte +torch-body-assembly-bit-count+ 0) flags)
+     (ldb (byte +torch-body-light-bit-count+
+                +torch-body-assembly-bit-count+)
+          flags))))
 
-(defun torch-flame-orientation-side (code)
-  (check-type code torch-flame-orientation-code)
-  (if (oddp code) :high :low))
+(declaim (inline %torch-flame-finite-single-float-p))
 
-(defun torch-flame-orientation-normal (code)
-  "Return CODE's exact outward normal as three integer values."
-  (check-type code torch-flame-orientation-code)
-  (ecase code
-    (0 (values -1 0 0))
-    (1 (values 1 0 0))
-    (2 (values 0 -1 0))
-    (3 (values 0 1 0))
-    (4 (values 0 0 -1))
-    (5 (values 0 0 1))))
+(defun %torch-flame-finite-single-float-p (value)
+  (and (= value value)
+       (<= (abs value) most-positive-single-float)))
 
-(defun %torch-flame-face-orientation-code (face)
-  (multiple-value-bind (nx ny nz) (luft:face-oriented-normal face)
-    (cond ((minusp nx) 0) ((plusp nx) 1)
-          ((minusp ny) 2) ((plusp ny) 3)
-          ((minusp nz) 4) ((plusp nz) 5)
-          (t (error "Torch face ~S has no oriented normal." face)))))
+(defun validate-torch-flame-frame (data &optional (offset 0))
+  "Validate one three-Vec4 torch frame in DATA starting at OFFSET.
 
-(defun pack-torch-flame-attachment (face)
-  "Pack oriented FACE as center ticks XYZ plus one three-bit orientation code.
-
-The result is exactly one GPU UVec4.  Reserved bits in W are zero; animation
-phase is derived from XYZ so immutable scene publication needs no per-frame
-instance rewrite."
-  (unless (= 2 (luft:site-dimension face))
-    (error "A torch flame needs an oriented face site, not ~S." face))
-  (let ((words (make-array +torch-flame-instance-word-count+
-                           :element-type '(unsigned-byte 32))))
-    (loop for coordinate in
-          (list (luft:site-x face) (luft:site-y face) (luft:site-z face))
-          for axis-number below 3
-          do (setf (aref words axis-number)
-                   (+ (* 8 coordinate)
-                      (if (logbitp axis-number (luft:site-extent face)) 4 0))))
-    (setf (aref words 3) (%torch-flame-face-orientation-code face))
-    words))
-
-(defun unpack-torch-flame-attachment (words &optional (offset 0))
-  "Return center ticks, AXIS, and SIDE from one packed attachment in WORDS."
-  (check-type words (array (unsigned-byte 32) (*)))
+The normal and tangent must already be unit length and mutually orthogonal.
+FLAGS is an exactly represented nonnegative integer in the normal row's W
+lane, SEED is in [0,1), and SCALE is strictly positive.  Return DATA."
+  (check-type data (array single-float (*)))
   (check-type offset (integer 0 *))
-  (unless (<= (+ offset +torch-flame-instance-word-count+) (length words))
-    (error "Torch flame UVec4 at ~D exceeds a ~D-word array."
-           offset (length words)))
-  (let ((code (aref words (+ offset 3))))
-    (unless (typep code 'torch-flame-orientation-code)
-      (error "Invalid packed torch-flame orientation word ~D." code))
-    (values (aref words offset)
-            (aref words (+ offset 1))
-            (aref words (+ offset 2))
-            (torch-flame-orientation-axis code)
-            (torch-flame-orientation-side code))))
+  (unless (<= (+ offset +torch-flame-instance-scalar-count+) (length data))
+    (error "Torch frame at ~D exceeds a ~D-scalar array."
+           offset (length data)))
+  (loop for index from offset below (+ offset +torch-flame-instance-scalar-count+)
+        for value = (aref data index)
+        unless (%torch-flame-finite-single-float-p value)
+          do (error "Torch frame scalar ~D is not finite: ~S." index value))
+  (let* ((seed (aref data (+ offset 3)))
+         (nx (aref data (+ offset 4)))
+         (ny (aref data (+ offset 5)))
+         (nz (aref data (+ offset 6)))
+         (flags (aref data (+ offset 7)))
+         (tx (aref data (+ offset 8)))
+         (ty (aref data (+ offset 9)))
+         (tz (aref data (+ offset 10)))
+         (scale (aref data (+ offset 11)))
+         (normal-length-squared (+ (* nx nx) (* ny ny) (* nz nz)))
+         (tangent-length-squared (+ (* tx tx) (* ty ty) (* tz tz)))
+         (normal-tangent-dot (+ (* nx tx) (* ny ty) (* nz tz))))
+    (unless (and (<= 0.0f0 seed) (< seed 1.0f0))
+      (error "Torch frame seed must be in [0,1), not ~S." seed))
+    (unless (<= (abs (- normal-length-squared 1.0f0))
+                +torch-flame-frame-tolerance+)
+      (error "Torch frame normal is not unit length: (~S ~S ~S)."
+             nx ny nz))
+    (unless (<= (abs (- tangent-length-squared 1.0f0))
+                +torch-flame-frame-tolerance+)
+      (error "Torch frame tangent is not unit length: (~S ~S ~S)."
+             tx ty tz))
+    (unless (<= (abs normal-tangent-dot) +torch-flame-frame-tolerance+)
+      (error "Torch frame normal and tangent are not orthogonal: ~S."
+             normal-tangent-dot))
+    (unless (and (<= 0.0f0 flags (coerce +torch-flame-maximum-flags+
+                                          'single-float))
+                 (= flags (floor flags)))
+      (error "Torch frame flags are not an exact 24-bit nonnegative integer: ~S."
+             flags))
+    (unless (plusp scale)
+      (error "Torch frame scale must be positive, not ~S." scale)))
+  data)
 
-(defun torch-flame-effect-uniform-data (time &optional (previous-time time))
-  "Return one float32 Vec4 holding current time, previous time, and two zeros.
+(defun pack-torch-flame-frame
+    (origin-x origin-y origin-z seed
+     normal-x normal-y normal-z flags
+     tangent-x tangent-y tangent-z scale)
+  "Pack and validate one arbitrary realized torch frame as three Vec4 rows."
+  (let ((data
+          (make-array
+           +torch-flame-instance-scalar-count+ :element-type 'single-float
+           :initial-contents
+           (mapcar (lambda (value) (coerce value 'single-float))
+                   (list origin-x origin-y origin-z seed
+                         normal-x normal-y normal-z flags
+                         tangent-x tangent-y tangent-z scale)))))
+    (validate-torch-flame-frame data)
+    data))
 
-The caller owns both clock values; this interface never consults wall time, so
-captures and CPU/GPU comparisons can replay the flame field exactly."
+(defun unpack-torch-flame-frame (data &optional (offset 0))
+  "Return origin, seed, normal, flags, tangent, and scale for one frame."
+  (validate-torch-flame-frame data offset)
+  (values-list
+   (loop for index from offset below (+ offset +torch-flame-instance-scalar-count+)
+         collect (aref data index))))
+
+(defun %torch-flame-reference-seed (tick-x tick-y tick-z)
+  (let ((value
+          (* (sin (+ (* tick-x 0.01731) (* tick-y 0.01173)
+                     (* tick-z 0.02357)))
+             43758.5453)))
+    (- value (floor value))))
+
+(defun torch-flame-face-seed (face)
+  "Return FACE's stable animation seed without realizing a surface frame."
+  (unless (= 2 (luft:site-dimension face))
+    (error "A torch seed needs an oriented face site, not ~S." face))
+  (let ((ticks
+          (loop for coordinate in
+                (list (luft:site-x face)
+                      (luft:site-y face)
+                      (luft:site-z face))
+                for axis-number below 3
+                collect (+ (* 8 coordinate)
+                           (if (logbitp axis-number (luft:site-extent face))
+                               4 0)))))
+    (%torch-flame-reference-seed
+     (first ticks) (second ticks) (third ticks))))
+
+(defun %torch-flame-authored-hdr-radiance ()
+  "Return the flame material's authored linear HDR radiance as three values."
+  (destructuring-bind (red green blue)
+      (material-kind-base-tone *torch-flame-material*)
+    (let ((strength
+            (material-kind-surface-emission *torch-flame-material*)))
+      (unless (and (realp strength) (not (minusp strength))
+                   (every (lambda (channel)
+                            (and (realp channel) (not (minusp channel))))
+                          (list red green blue)))
+        (error "Torch flame radiance must be nonnegative, not tone ~S at ~S."
+               (list red green blue) strength))
+      (values (* red strength) (* green strength) (* blue strength)))))
+
+(defun torch-flame-effect-uniform-data (time)
+  "Return one float32 Vec4 holding current time and authored linear HDR RGB.
+
+The RGB lanes are the flame material's base tone times its surface emission.
+The caller owns the clock; this interface never consults wall time, so captures
+and CPU/GPU comparisons can replay the flame effect exactly."
   (check-type time real)
-  (check-type previous-time real)
-  (make-array 4 :element-type 'single-float
-                :initial-contents
-                (list (coerce time 'single-float)
-                      (coerce previous-time 'single-float) 0.0f0 0.0f0)))
+  (multiple-value-bind (red green blue)
+      (%torch-flame-authored-hdr-radiance)
+    (make-array 4 :element-type 'single-float
+                  :initial-contents
+                  (mapcar (lambda (value) (coerce value 'single-float))
+                          (list time red green blue)))))
 
 (declaim (inline %torch-flame-clamp %torch-flame-smoothstep
                  %torch-flame-fract))
@@ -115,80 +200,90 @@ captures and CPU/GPU comparisons can replay the flame field exactly."
 (defun %torch-flame-fract (value)
   (- value (floor value)))
 
-(defun %torch-flame-reference-frame (code)
-  (multiple-value-bind (nx ny nz) (torch-flame-orientation-normal code)
-    (if (not (zerop nz))
-        (values nx ny nz 1.0 0.0 0.0 0.0 1.0 0.0 0.0)
-        (values nx ny nz ny (- nx) 0.0 0.0 0.0 1.0 1.0))))
-
-(defun %torch-flame-reference-seed (tick-x tick-y tick-z)
-  (%torch-flame-fract
-   (* (sin (+ (* tick-x 0.01731) (* tick-y 0.01173) (* tick-z 0.02357)))
-      43758.5453)))
-
 (defun %torch-flame-reference-field
     (instance point-x point-y point-z time)
-  (let* ((tick-x (aref instance 0))
-         (tick-y (aref instance 1))
-         (tick-z (aref instance 2))
-         (code (aref instance 3))
-         (face-x (/ tick-x +torch-flame-cell-size+))
-         (face-y (/ tick-y +torch-flame-cell-size+))
-         (face-z (/ tick-z +torch-flame-cell-size+))
-         (seed (%torch-flame-reference-seed tick-x tick-y tick-z)))
-    (check-type code torch-flame-orientation-code)
-    (multiple-value-bind (nx ny nz ux uy uz vx vy vz wallness)
-        (%torch-flame-reference-frame code)
-      (let* ((wick-x (+ face-x (* nx +torch-flame-wick-offset+)))
-             (wick-y (+ face-y (* ny +torch-flame-wick-offset+)))
-             (wick-z (+ face-z (* nz +torch-flame-wick-offset+)))
-             (qx (- point-x wick-x))
-             (qy (- point-y wick-y))
-             (qz (- point-z wick-z))
-             (axial (/ (+ (* qx nx) (* qy ny) (* qz nz))
-                       +torch-flame-length+))
-             (height (%torch-flame-clamp axial 0.0 1.0))
-             (height-squared (* height height))
-             (sway-u (* 0.105 height-squared
-                        (sin (+ (* time 5.1) (* seed 19.7)
-                                (* height 5.3)))))
-             (sway-v (+ (* 0.075 height-squared
-                           (sin (+ (* time 6.7) (* seed 31.1)
-                                   (* height 7.1))))
-                        (* +torch-flame-wall-bend+ wallness height-squared)))
-             (center-x (+ wick-x (* nx +torch-flame-length+ height)
-                          (* ux sway-u) (* vx sway-v)))
-             (center-y (+ wick-y (* ny +torch-flame-length+ height)
-                          (* uy sway-u) (* vy sway-v)))
-             (center-z (+ wick-z (* nz +torch-flame-length+ height)
-                          (* uz sway-u) (* vz sway-v)))
-             (rx (- point-x center-x))
-             (ry (- point-y center-y))
-             (rz (- point-z center-z))
-             (radial (sqrt (+ (* rx rx) (* ry ry) (* rz rz))))
-             (bulge (%torch-flame-smoothstep 0.0 0.22 height))
-             (radius (* (- 1.0 height) (+ 0.055 (* 0.13 bulge))))
-             (signed-distance (- radial radius))
-             (begin (%torch-flame-smoothstep -0.02 0.08 axial))
-             (end (- 1.0 (%torch-flame-smoothstep 0.78 1.04 axial)))
-             (inside (- 1.0 (%torch-flame-smoothstep
-                             -0.025 0.035 signed-distance)))
-             (wave (+ 0.5 (* 0.5
-                             (sin (+ (* point-x 17.1) (* point-y 13.7)
-                                     (* point-z 19.3) (* time -8.1)
-                                     (* seed 23.9))))))
-             (fine (+ 0.5 (* 0.5
-                             (sin (+ (* point-x -31.7) (* point-y 27.3)
-                                     (* point-z 23.1) (* time 11.3)
-                                     (* seed 7.7))))))
-             (density (* begin end inside
-                         (+ 0.68 (* 0.22 wave) (* 0.10 fine))))
-             (centrality
-               (%torch-flame-clamp
-                (/ (- signed-distance) (max radius 0.001)) 0.0 1.0))
-             (heat (%torch-flame-clamp
-                    (+ 0.20 (* 0.95 centrality) (* -0.32 height)) 0.0 1.0)))
-        (values signed-distance density heat)))))
+  (validate-torch-flame-frame instance)
+  (let* ((origin-x (aref instance 0))
+         (origin-y (aref instance 1))
+         (origin-z (aref instance 2))
+         (seed (aref instance 3))
+         (nx (aref instance 4))
+         (ny (aref instance 5))
+         (nz (aref instance 6))
+         (tx (aref instance 8))
+         (ty (aref instance 9))
+         (tz (aref instance 10))
+         (scale (aref instance 11))
+         ;; B = N x T, hence T x B = N for the validated orthonormal pair.
+         (bx (- (* ny tz) (* nz ty)))
+         (by (- (* nz tx) (* nx tz)))
+         (bz (- (* nx ty) (* ny tx)))
+         ;; Project world up into the actual surface tangent plane.  Its length
+         ;; continuously replaces the old axis-specific wallness switch.
+         (gravity-x (* (- nz) nx))
+         (gravity-y (* (- nz) ny))
+         (gravity-z (- 1.0 (* nz nz)))
+         (gravity-strength
+           (sqrt (max 0.0 (+ (* gravity-x gravity-x)
+                             (* gravity-y gravity-y)
+                             (* gravity-z gravity-z)))))
+         (gravity-divisor (max gravity-strength 1.0e-6))
+         (gravity-x (/ gravity-x gravity-divisor))
+         (gravity-y (/ gravity-y gravity-divisor))
+         (gravity-z (/ gravity-z gravity-divisor))
+         (wick-distance (* +torch-flame-wick-offset+ scale))
+         (flame-length (* +torch-flame-length+ scale))
+         (wick-x (+ origin-x (* nx wick-distance)))
+         (wick-y (+ origin-y (* ny wick-distance)))
+         (wick-z (+ origin-z (* nz wick-distance)))
+         (qx (- point-x wick-x))
+         (qy (- point-y wick-y))
+         (qz (- point-z wick-z))
+         (axial (/ (+ (* qx nx) (* qy ny) (* qz nz)) flame-length))
+         (height (%torch-flame-clamp axial 0.0 1.0))
+         (height-squared (* height height))
+         (sway-u (* scale 0.105 height-squared
+                    (sin (+ (* time 5.1) (* seed 19.7) (* height 5.3)))))
+         (sway-v (* scale 0.075 height-squared
+                    (sin (+ (* time 6.7) (* seed 31.1) (* height 7.1)))))
+         (gravity-bend (* scale +torch-flame-wall-bend+ gravity-strength
+                          height-squared))
+         (center-x (+ wick-x (* nx flame-length height)
+                      (* tx sway-u) (* bx sway-v)
+                      (* gravity-x gravity-bend)))
+         (center-y (+ wick-y (* ny flame-length height)
+                      (* ty sway-u) (* by sway-v)
+                      (* gravity-y gravity-bend)))
+         (center-z (+ wick-z (* nz flame-length height)
+                      (* tz sway-u) (* bz sway-v)
+                      (* gravity-z gravity-bend)))
+         (rx (- point-x center-x))
+         (ry (- point-y center-y))
+         (rz (- point-z center-z))
+         (radial (sqrt (+ (* rx rx) (* ry ry) (* rz rz))))
+         (bulge (%torch-flame-smoothstep 0.0 0.22 height))
+         (radius (* scale (- 1.0 height) (+ 0.055 (* 0.13 bulge))))
+         (signed-distance (- radial radius))
+         (begin (%torch-flame-smoothstep -0.02 0.08 axial))
+         (end (- 1.0 (%torch-flame-smoothstep 0.78 1.04 axial)))
+         (inside (- 1.0 (%torch-flame-smoothstep
+                         -0.025 0.035 signed-distance)))
+         (wave (+ 0.5 (* 0.5
+                         (sin (+ (* point-x 17.1) (* point-y 13.7)
+                                 (* point-z 19.3) (* time -8.1)
+                                 (* seed 23.9))))))
+         (fine (+ 0.5 (* 0.5
+                         (sin (+ (* point-x -31.7) (* point-y 27.3)
+                                 (* point-z 23.1) (* time 11.3)
+                                 (* seed 7.7))))))
+         (density (* begin end inside
+                     (+ 0.68 (* 0.22 wave) (* 0.10 fine))))
+         (centrality
+           (%torch-flame-clamp
+            (/ (- signed-distance) (max radius 0.001)) 0.0 1.0))
+         (heat (%torch-flame-clamp
+                (+ 0.20 (* 0.95 centrality) (* -0.32 height)) 0.0 1.0)))
+    (values signed-distance density heat)))
 
 (defun torch-flame-reference-signed-distance
     (instance point-x point-y point-z time)
@@ -203,8 +298,15 @@ captures and CPU/GPU comparisons can replay the flame field exactly."
                 instance point-x point-y point-z time)))
 
 (defun torch-flame-reference-integrate-ray
-    (instance origin-x origin-y origin-z ray-x ray-y ray-z time)
-  "Return the fixed-sample premultiplied HDR RGBA flame integral along RAY."
+    (instance origin-x origin-y origin-z ray-x ray-y ray-z time
+     &key maximum-path-length)
+  "Return the fixed-sample premultiplied HDR RGBA flame integral along RAY.
+
+MAXIMUM-PATH-LENGTH, when supplied, clips the proxy chord to the visible
+distance in front of opaque scene depth.  It is clamped to the canonical proxy
+chord exactly as the fragment shader does, so zero is a deterministic empty
+integral and callers can compare full, partial, and fully occluded rays."
+  (validate-torch-flame-frame instance)
   (let* ((ray-length (sqrt (+ (* ray-x ray-x) (* ray-y ray-y)
                               (* ray-z ray-z)))))
     (when (zerop ray-length)
@@ -212,91 +314,491 @@ captures and CPU/GPU comparisons can replay the flame field exactly."
     (let* ((ray-x (/ ray-x ray-length))
            (ray-y (/ ray-y ray-length))
            (ray-z (/ ray-z ray-length))
-           (path-length (* 2.0 +torch-flame-proxy-radius+))
+           (full-path-length
+             (* 2.0 +torch-flame-proxy-radius+ (aref instance 11)))
+           (path-length
+             (if maximum-path-length
+                 (%torch-flame-clamp maximum-path-length
+                                     0.0 full-path-length)
+                 full-path-length))
            (step-length (/ path-length +torch-flame-sample-count+))
            (red 0.0) (green 0.0) (blue 0.0) (alpha 0.0))
-      (dotimes (sample +torch-flame-sample-count+)
-        (let ((travel (* (+ sample 0.5) step-length)))
-          (multiple-value-bind (distance density heat)
-              (%torch-flame-reference-field
-               instance
-               (+ origin-x (* ray-x travel))
-               (+ origin-y (* ray-y travel))
-               (+ origin-z (* ray-z travel)) time)
-            (declare (ignore distance))
-            (let* ((sample-alpha
-                     (- 1.0 (exp (- (* density +torch-flame-extinction+
-                                        step-length)))))
-                   (transmittance (- 1.0 alpha))
-                   (weight (* transmittance sample-alpha))
-                   (emission-red (+ 2.6 (* heat 3.6)))
-                   (emission-green (+ 0.16 (* heat 3.04)))
-                   (emission-blue (+ 0.018 (* heat 0.702))))
-              (incf red (* weight emission-red))
-              (incf green (* weight emission-green))
-              (incf blue (* weight emission-blue))
-              (incf alpha weight)))))
+      (multiple-value-bind (authored-red authored-green authored-blue)
+          (%torch-flame-authored-hdr-radiance)
+        (dotimes (sample +torch-flame-sample-count+)
+          (let ((travel (* (+ sample 0.5) step-length)))
+            (multiple-value-bind (distance density heat)
+                (%torch-flame-reference-field
+                 instance
+                 (+ origin-x (* ray-x travel))
+                 (+ origin-y (* ray-y travel))
+                 (+ origin-z (* ray-z travel)) time)
+              (declare (ignore distance))
+              (let* ((sample-alpha
+                       (- 1.0 (exp (- (* density +torch-flame-extinction+
+                                          step-length)))))
+                     (transmittance (- 1.0 alpha))
+                     (weight (* transmittance sample-alpha))
+                     (radiance-scale
+                       (+ +torch-flame-cool-radiance-scale+
+                          (* heat +torch-flame-heat-radiance-gain+))))
+                (incf red (* weight authored-red radiance-scale))
+                (incf green (* weight authored-green radiance-scale))
+                (incf blue (* weight authored-blue radiance-scale))
+                (incf alpha weight))))))
       (values red green blue alpha))))
+
+;;; Canonical torch body
+;;;
+;;; This is deliberately an expanded triangle stream rather than another
+;;; semantic mesh.  Each vertex is two Vec4 rows: local position plus its
+;;; barycentric selector, then the flat local normal plus a boundary-edge mask.
+;;; The attachment frame is the only world-space placement representation.
+
+(defun %torch-body-point (radius angle height)
+  (vector (coerce (* radius (cos angle)) 'single-float)
+          (coerce (* radius (sin angle)) 'single-float)
+          (coerce height 'single-float)))
+
+(defun %torch-body-emit-triangle
+    (data point-a point-b point-c expected-normal)
+  (let* ((ab-x (- (aref point-b 0) (aref point-a 0)))
+         (ab-y (- (aref point-b 1) (aref point-a 1)))
+         (ab-z (- (aref point-b 2) (aref point-a 2)))
+         (ac-x (- (aref point-c 0) (aref point-a 0)))
+         (ac-y (- (aref point-c 1) (aref point-a 1)))
+         (ac-z (- (aref point-c 2) (aref point-a 2)))
+         (normal-x (- (* ab-y ac-z) (* ab-z ac-y)))
+         (normal-y (- (* ab-z ac-x) (* ab-x ac-z)))
+         (normal-z (- (* ab-x ac-y) (* ab-y ac-x)))
+         (facing (+ (* normal-x (aref expected-normal 0))
+                    (* normal-y (aref expected-normal 1))
+                    (* normal-z (aref expected-normal 2)))))
+    (when (minusp facing)
+      (rotatef point-b point-c)
+      (setf normal-x (- normal-x)
+            normal-y (- normal-y)
+            normal-z (- normal-z)))
+    (let ((normal-length
+            (sqrt (+ (* normal-x normal-x)
+                     (* normal-y normal-y)
+                     (* normal-z normal-z)))))
+      (when (zerop normal-length)
+        (error "Degenerate canonical torch-body triangle: ~S ~S ~S."
+               point-a point-b point-c))
+      (setf normal-x (/ normal-x normal-length)
+            normal-y (/ normal-y normal-length)
+            normal-z (/ normal-z normal-length))
+      (loop for point in (list point-a point-b point-c)
+            for barycentric-index from 0
+            do (vector-push-extend (aref point 0) data)
+               (vector-push-extend (aref point 1) data)
+               (vector-push-extend (aref point 2) data)
+               (vector-push-extend
+                (coerce barycentric-index 'single-float) data)
+               (vector-push-extend (coerce normal-x 'single-float) data)
+               (vector-push-extend (coerce normal-y 'single-float) data)
+               (vector-push-extend (coerce normal-z 'single-float) data)
+               ;; Faceting comes from the actual face normals.  Internal
+               ;; triangle diagonals are not semantic construction edges.
+               (vector-push-extend 0.0f0 data)))))
+
+(defun %make-torch-body-vertex-data ()
+  (let ((data
+          (make-array 128 :element-type 'single-float
+                           :adjustable t :fill-pointer 0))
+        (bottom-radius 0.145f0)
+        (socket-height 0.16f0)
+        (socket-radius 0.078f0)
+        (shaft-height 0.50f0)
+        (shaft-radius 0.055f0)
+        (bottom-centre #(0.0f0 0.0f0 0.0f0))
+        (top-centre #(0.0f0 0.0f0 0.50f0)))
+    (labels ((angle (index)
+               (* 2.0f0 (coerce pi 'single-float)
+                  (/ (mod index +torch-body-side-count+)
+                     +torch-body-side-count+)))
+             (ring-point (radius height index)
+               (%torch-body-point radius (angle index) height))
+             (radial-normal (index axial)
+               (let ((middle (angle (+ index 0.5f0))))
+                 (vector (coerce (cos middle) 'single-float)
+                         (coerce (sin middle) 'single-float)
+                         (coerce axial 'single-float))))
+             (emit-frustum-side
+                 (index lower-radius lower-height upper-radius upper-height)
+               (let* ((next (1+ index))
+                      (lower-a
+                        (ring-point lower-radius lower-height index))
+                      (lower-b
+                        (ring-point lower-radius lower-height next))
+                      (upper-a
+                        (ring-point upper-radius upper-height index))
+                      (upper-b
+                        (ring-point upper-radius upper-height next))
+                      (axial
+                        (/ (- lower-radius upper-radius)
+                           (- upper-height lower-height)))
+                      (expected (radial-normal index axial)))
+                 (%torch-body-emit-triangle
+                  data lower-a lower-b upper-b expected)
+                 (%torch-body-emit-triangle
+                  data lower-a upper-b upper-a expected))))
+      (dotimes (side +torch-body-side-count+)
+        (let ((bottom-a (ring-point bottom-radius 0.0f0 side))
+              (bottom-b (ring-point bottom-radius 0.0f0 (1+ side))))
+          (%torch-body-emit-triangle
+           data bottom-centre bottom-b bottom-a #(0.0f0 0.0f0 -1.0f0)))
+        (emit-frustum-side
+         side bottom-radius 0.0f0 socket-radius socket-height)
+        (emit-frustum-side
+         side socket-radius socket-height shaft-radius shaft-height)
+        (let ((top-a (ring-point shaft-radius shaft-height side))
+              (top-b (ring-point shaft-radius shaft-height (1+ side))))
+          (%torch-body-emit-triangle
+           data top-centre top-a top-b #(0.0f0 0.0f0 1.0f0)))))
+    (make-array (length data) :element-type 'single-float
+                              :initial-contents data)))
+
+(defparameter *torch-body-vertex-data* (%make-torch-body-vertex-data))
+
+(defun torch-body-vertex-count ()
+  "Return the canonical expanded triangle vertex count for one torch body."
+  (/ (length *torch-body-vertex-data*)
+     +torch-body-vertex-scalar-count+))
+
+(defun torch-body-vertex-data ()
+  "Return a fresh float32 copy of the canonical two-Vec4-per-vertex body."
+  (copy-seq *torch-body-vertex-data*))
+
+(defun torch-body-reference-vertex (frame vertex-index)
+  "Transform one canonical body vertex through arbitrary realized FRAME.
+
+Return world position, normalized world normal, barycentric selector, and
+boundary-edge mask.  This is the scalar oracle for both body vertex shaders."
+  (validate-torch-flame-frame frame)
+  (check-type vertex-index (integer 0 *))
+  (unless (< vertex-index (torch-body-vertex-count))
+    (error "Torch body vertex ~D exceeds the ~D-vertex canonical body."
+           vertex-index (torch-body-vertex-count)))
+  (let* ((offset (* vertex-index +torch-body-vertex-scalar-count+))
+         (local-x (aref *torch-body-vertex-data* offset))
+         (local-y (aref *torch-body-vertex-data* (+ offset 1)))
+         (local-z (aref *torch-body-vertex-data* (+ offset 2)))
+         (barycentric-index
+           (round (aref *torch-body-vertex-data* (+ offset 3))))
+         (local-normal-x (aref *torch-body-vertex-data* (+ offset 4)))
+         (local-normal-y (aref *torch-body-vertex-data* (+ offset 5)))
+         (local-normal-z (aref *torch-body-vertex-data* (+ offset 6)))
+         (boundary-edge-mask
+           (round (aref *torch-body-vertex-data* (+ offset 7))))
+         (origin-x (aref frame 0))
+         (origin-y (aref frame 1))
+         (origin-z (aref frame 2))
+         (normal-x (aref frame 4))
+         (normal-y (aref frame 5))
+         (normal-z (aref frame 6))
+         (tangent-x (aref frame 8))
+         (tangent-y (aref frame 9))
+         (tangent-z (aref frame 10))
+         (scale (aref frame 11))
+         ;; B=NxT, so local X/Y/Z map to a right-handed T/B/N frame.
+         (bitangent-x (- (* normal-y tangent-z)
+                         (* normal-z tangent-y)))
+         (bitangent-y (- (* normal-z tangent-x)
+                         (* normal-x tangent-z)))
+         (bitangent-z (- (* normal-x tangent-y)
+                         (* normal-y tangent-x)))
+         (world-x
+           (+ origin-x
+              (* scale (+ (* local-x tangent-x)
+                          (* local-y bitangent-x)
+                          (* local-z normal-x)))))
+         (world-y
+           (+ origin-y
+              (* scale (+ (* local-x tangent-y)
+                          (* local-y bitangent-y)
+                          (* local-z normal-y)))))
+         (world-z
+           (+ origin-z
+              (* scale (+ (* local-x tangent-z)
+                          (* local-y bitangent-z)
+                          (* local-z normal-z)))))
+         (world-normal-x
+           (+ (* local-normal-x tangent-x)
+              (* local-normal-y bitangent-x)
+              (* local-normal-z normal-x)))
+         (world-normal-y
+           (+ (* local-normal-x tangent-y)
+              (* local-normal-y bitangent-y)
+              (* local-normal-z normal-y)))
+         (world-normal-z
+           (+ (* local-normal-x tangent-z)
+              (* local-normal-y bitangent-z)
+              (* local-normal-z normal-z)))
+         (world-normal-length
+           (sqrt (+ (* world-normal-x world-normal-x)
+                    (* world-normal-y world-normal-y)
+                    (* world-normal-z world-normal-z)))))
+    (values world-x world-y world-z
+            (/ world-normal-x world-normal-length)
+            (/ world-normal-y world-normal-length)
+            (/ world-normal-z world-normal-length)
+            barycentric-index boundary-edge-mask)))
 
 (in-package #:luft.render.shaders)
 
-(define-shader-function torch-flame-orientation-normal (orientation)
-  (if (= orientation (uint 0.0))
-      (vec3 -1.0 0.0 0.0)
-      (if (= orientation (uint 1.0))
-          (vec3 1.0 0.0 0.0)
-          (if (= orientation (uint 2.0))
-              (vec3 0.0 -1.0 0.0)
-              (if (= orientation (uint 3.0))
-                  (vec3 0.0 1.0 0.0)
-                  (if (= orientation (uint 4.0))
-                      (vec3 0.0 0.0 -1.0)
-                      (vec3 0.0 0.0 1.0)))))))
+(define-shader-function torch-frame-bitangent (normal tangent)
+  "Derive B=NxT, so T/B/N is right-handed for every realized frame."
+  (vec3 (- (* (swizzle normal :y) (swizzle tangent :z))
+           (* (swizzle normal :z) (swizzle tangent :y)))
+        (- (* (swizzle normal :z) (swizzle tangent :x))
+           (* (swizzle normal :x) (swizzle tangent :z)))
+        (- (* (swizzle normal :x) (swizzle tangent :y))
+           (* (swizzle normal :y) (swizzle tangent :x)))))
 
-(define-shader-function torch-flame-tangent-u (normal)
-  (if (> (abs (swizzle normal :z)) 0.5)
-      (vec3 1.0 0.0 0.0)
-      (vec3 (swizzle normal :y) (- (swizzle normal :x)) 0.0)))
+(define-shader-function torch-frame-world-position
+    (local-position origin normal tangent scale)
+  (let* ((bitangent (torch-frame-bitangent normal tangent)))
+    (+ origin
+       (* scale
+          (+ (* tangent (swizzle local-position :x))
+             (* bitangent (swizzle local-position :y))
+             (* normal (swizzle local-position :z)))))))
 
-(define-shader-function torch-flame-tangent-v (normal)
-  (if (> (abs (swizzle normal :z)) 0.5)
-      (vec3 0.0 1.0 0.0)
-      (vec3 0.0 0.0 1.0)))
+(define-shader-function torch-frame-world-normal
+    (local-normal normal tangent)
+  (let* ((bitangent (torch-frame-bitangent normal tangent)))
+    (normalize
+     (+ (* tangent (swizzle local-normal :x))
+        (* bitangent (swizzle local-normal :y))
+        (* normal (swizzle local-normal :z))))))
 
-(define-shader-function torch-flame-seed (ticks)
-  (fract
-   (* (sin (+ (* (swizzle ticks :x) 0.01731)
-              (* (swizzle ticks :y) 0.01173)
-              (* (swizzle ticks :z) 0.02357)))
-      43758.5453)))
+(define-live-shader torch-body-vertex-specification
+    (:stage :vertex
+     :inputs ((vertex-index :uint :built-in :vertex-index)
+              (instance-index :uint :built-in :instance-index))
+     ;; This interface intentionally matches MESH-FRAGMENT-SPECIFICATION
+     ;; exactly, including interpolation qualifiers.
+     :outputs ((clip-position :vec4 :built-in :position)
+               (world-position-output :vec3 :location 0)
+               (mesh-normal-output :vec3 :location 1 :interpolation :flat)
+               (assembly-output :float :location 2 :interpolation :flat)
+               (barycentric-output :vec3 :location 3)
+               (current-clip-output :vec4 :location 4)
+               (previous-clip-output :vec4 :location 5)
+               (shadow-sample-output :vec3 :location 6)
+               (boundary-edge-mask-output :uint :location 7
+                                          :interpolation :flat)
+               (ambient-occlusion-output :float :location 8
+                                         :interpolation :flat)
+               (voxel-light-output :vec3 :location 9))
+     :resources
+     ((torch-frames :storage-buffer :binding 0 :element :vec4)
+      (torch-body-vertices :storage-buffer :binding 1 :element :vec4)
+      (camera-state :uniform-block :binding 2
+       :members ((camera-position :vec4)
+                 (camera-right :vec4)
+                 (camera-up :vec4)
+                 (camera-forward :vec4)
+                 (camera-projection :vec4)
+                 (render-parameters :vec4)
+                 (previous-camera-position :vec4)
+                 (previous-camera-right :vec4)
+                 (previous-camera-up :vec4)
+                 (previous-camera-forward :vec4)
+                 (previous-camera-projection :vec4)
+                 (temporal-parameters :vec4)
+                 (inspection-parameters :vec4)
+                 (character-parameters :vec4)
+                 (sun-vector :vec4)
+                 (sun-color-vector :vec4)
+                 (sky-color-vector :vec4)
+                 (ground-color-vector :vec4)
+                 (shadow-row-x :vec4)
+                 (shadow-row-y :vec4)
+                 (shadow-row-z :vec4)
+                 (shadow-row-w :vec4)
+                 (shadow-control :vec4)))))
+  (let* ((frame-base
+           (* instance-index
+              (uint #.luft.render::+torch-flame-instance-row-count+)))
+         (origin-row (buffer-element torch-frames frame-base))
+         (frame-normal-row
+           (buffer-element torch-frames (+ frame-base (uint 1.0))))
+         (tangent-row
+           (buffer-element torch-frames (+ frame-base (uint 2.0))))
+         (origin (swizzle origin-row :xyz))
+         (normal (swizzle frame-normal-row :xyz))
+         (tangent (swizzle tangent-row :xyz))
+         (scale (swizzle tangent-row :w))
+         (frame-flags (uint (swizzle frame-normal-row :w)))
+         (assembly-id
+           (float
+            (ldb (byte #.luft.render::+torch-body-assembly-bit-count+ 0)
+                 frame-flags)))
+         (packed-light
+           (ldb (byte #.luft.render::+torch-body-light-bit-count+
+                      #.luft.render::+torch-body-assembly-bit-count+)
+                frame-flags))
+         (voxel-light
+           (/ (vec3 (float (ldb (byte 4 0) packed-light))
+                    (float (ldb (byte 4 4) packed-light))
+                    (float (ldb (byte 4 8) packed-light)))
+              15.0))
+         (vertex-base
+           (* vertex-index
+              (uint #.luft.render::+torch-body-vertex-row-count+)))
+         (local-position-row
+           (buffer-element torch-body-vertices vertex-base))
+         (local-normal-row
+           (buffer-element torch-body-vertices
+                           (+ vertex-base (uint 1.0))))
+         (local-position (swizzle local-position-row :xyz))
+         (local-normal (swizzle local-normal-row :xyz))
+         (world-position
+           (torch-frame-world-position
+            local-position origin normal tangent scale))
+         (world-normal
+           (torch-frame-world-normal local-normal normal tangent))
+         (barycentric-index (uint (swizzle local-position-row :w)))
+         (boundary-edge-mask (uint (swizzle local-normal-row :w)))
+         (barycentric
+           (if (= barycentric-index (uint 0.0))
+               (vec3 1.0 0.0 0.0)
+               (if (= barycentric-index (uint 1.0))
+                   (vec3 0.0 1.0 0.0)
+                   (vec3 0.0 0.0 1.0))))
+         (current-clip
+           (mesh-view-clip world-position camera-position camera-right
+                           camera-up camera-forward camera-projection
+                           (swizzle render-parameters :z)))
+         (previous-clip
+           (mesh-view-clip world-position previous-camera-position
+                           previous-camera-right previous-camera-up
+                           previous-camera-forward previous-camera-projection
+                           (swizzle render-parameters :z)))
+         (light-clip
+           (light-clip-position world-position shadow-row-x shadow-row-y
+                                shadow-row-z shadow-row-w))
+         (jitter (swizzle temporal-parameters :xy)))
+    (set-output clip-position
+                (vec4 (+ (swizzle current-clip :x)
+                         (* (swizzle jitter :x) (swizzle current-clip :w)))
+                      (+ (swizzle current-clip :y)
+                         (* (swizzle jitter :y) (swizzle current-clip :w)))
+                      (swizzle current-clip :z)
+                      (swizzle current-clip :w)))
+    (set-output world-position-output world-position)
+    (set-output mesh-normal-output world-normal)
+    (set-output assembly-output assembly-id)
+    (set-output barycentric-output barycentric)
+    (set-output current-clip-output current-clip)
+    (set-output previous-clip-output previous-clip)
+    (set-output shadow-sample-output
+                (vec3 (+ (* (swizzle light-clip :x) 0.5) 0.5)
+                      (+ (* (swizzle light-clip :y) 0.5) 0.5)
+                      (swizzle light-clip :z)))
+    (set-output boundary-edge-mask-output boundary-edge-mask)
+    (set-output ambient-occlusion-output 0.0)
+    (set-output voxel-light-output voxel-light)))
+
+(define-live-shader torch-body-shadow-vertex-specification
+    (:stage :vertex
+     :inputs ((vertex-index :uint :built-in :vertex-index)
+              (instance-index :uint :built-in :instance-index))
+     :outputs ((clip-position :vec4 :built-in :position))
+     :resources
+     ((torch-frames :storage-buffer :binding 0 :element :vec4)
+      (torch-body-vertices :storage-buffer :binding 1 :element :vec4)
+      (camera-state :uniform-block :binding 2
+       :members ((camera-position :vec4)
+                 (camera-right :vec4)
+                 (camera-up :vec4)
+                 (camera-forward :vec4)
+                 (camera-projection :vec4)
+                 (render-parameters :vec4)
+                 (previous-camera-position :vec4)
+                 (previous-camera-right :vec4)
+                 (previous-camera-up :vec4)
+                 (previous-camera-forward :vec4)
+                 (previous-camera-projection :vec4)
+                 (temporal-parameters :vec4)
+                 (inspection-parameters :vec4)
+                 (character-parameters :vec4)
+                 (sun-vector :vec4)
+                 (sun-color-vector :vec4)
+                 (sky-color-vector :vec4)
+                 (ground-color-vector :vec4)
+                 (shadow-row-x :vec4)
+                 (shadow-row-y :vec4)
+                 (shadow-row-z :vec4)
+                 (shadow-row-w :vec4)
+                 (shadow-control :vec4)))))
+  (let* ((frame-base
+           (* instance-index
+              (uint #.luft.render::+torch-flame-instance-row-count+)))
+         (origin-row (buffer-element torch-frames frame-base))
+         (frame-normal-row
+           (buffer-element torch-frames (+ frame-base (uint 1.0))))
+         (tangent-row
+           (buffer-element torch-frames (+ frame-base (uint 2.0))))
+         (origin (swizzle origin-row :xyz))
+         (normal (swizzle frame-normal-row :xyz))
+         (tangent (swizzle tangent-row :xyz))
+         (scale (swizzle tangent-row :w))
+         (vertex-base
+           (* vertex-index
+              (uint #.luft.render::+torch-body-vertex-row-count+)))
+         (local-position-row
+           (buffer-element torch-body-vertices vertex-base))
+         (world-position
+           (torch-frame-world-position
+            (swizzle local-position-row :xyz)
+            origin normal tangent scale)))
+    (set-output clip-position
+                (light-clip-position world-position
+                                     shadow-row-x shadow-row-y
+                                     shadow-row-z shadow-row-w))))
 
 (define-shader-function torch-flame-field
-    (point face-center normal seed time)
+    (point origin normal tangent seed scale time)
   "Return signed distance, density, heat, and radius at POINT."
-  (let* ((tangent-u (torch-flame-tangent-u normal))
-         (tangent-v (torch-flame-tangent-v normal))
-         (wallness (- 1.0 (abs (swizzle normal :z))))
-         (wick (+ face-center
-                  (* normal #.luft.render::+torch-flame-wick-offset+)))
+  (let* ((bitangent (torch-frame-bitangent normal tangent))
+         (world-up-projection
+           (- (vec3 0.0 0.0 1.0)
+              (* normal (swizzle normal :z))))
+         (gravity-strength
+           (sqrt (max (dot world-up-projection world-up-projection) 0.0)))
+         (gravity-direction
+           (if (> gravity-strength 1e-6)
+               (/ world-up-projection gravity-strength)
+               (vec3 0.0 0.0 0.0)))
+         (flame-length (* #.luft.render::+torch-flame-length+ scale))
+         (wick (+ origin
+                  (* normal
+                     (* #.luft.render::+torch-flame-wick-offset+ scale))))
          (offset (- point wick))
-         (axial (/ (dot offset normal)
-                   #.luft.render::+torch-flame-length+))
+         (axial (/ (dot offset normal) flame-length))
          (height (clamp axial 0.0 1.0))
          (height-squared (* height height))
          (sway-u
-           (* 0.105 height-squared
+           (* scale 0.105 height-squared
               (sin (+ (* time 5.1) (* seed 19.7) (* height 5.3)))))
          (sway-v
-           (+ (* 0.075 height-squared
-                 (sin (+ (* time 6.7) (* seed 31.1) (* height 7.1))))
-              (* #.luft.render::+torch-flame-wall-bend+
-                 wallness height-squared)))
+           (* scale 0.075 height-squared
+              (sin (+ (* time 6.7) (* seed 31.1) (* height 7.1)))))
+         (gravity-bend
+           (* scale #.luft.render::+torch-flame-wall-bend+
+              gravity-strength height-squared))
          (center (+ wick
-                    (* normal (* #.luft.render::+torch-flame-length+ height))
-                    (* tangent-u sway-u) (* tangent-v sway-v)))
+                    (* normal (* flame-length height))
+                    (* tangent sway-u)
+                    (* bitangent sway-v)
+                    (* gravity-direction gravity-bend)))
          (radial (sqrt (max (dot (- point center) (- point center)) 1e-12)))
          (bulge (smoothstep 0.0 0.22 height))
-         (radius (* (- 1.0 height) (+ 0.055 (* 0.13 bulge))))
+         (radius (* scale (- 1.0 height) (+ 0.055 (* 0.13 bulge))))
          (signed-distance (- radial radius))
          (begin (smoothstep -0.02 0.08 axial))
          (end (- 1.0 (smoothstep 0.78 1.04 axial)))
@@ -329,38 +831,39 @@ captures and CPU/GPU comparisons can replay the flame field exactly."
               (instance-index :uint :built-in :instance-index))
      :outputs ((clip-position :vec4 :built-in :position)
                (proxy-world-position-output :vec3 :location 0)
-               (face-center-output :vec3 :location 1 :interpolation :flat)
+               (origin-output :vec3 :location 1 :interpolation :flat)
                (normal-output :vec3 :location 2 :interpolation :flat)
-               (seed-output :float :location 3 :interpolation :flat)
-               (current-clip-output :vec4 :location 4)
-               (previous-clip-output :vec4 :location 5))
+               (tangent-output :vec3 :location 3 :interpolation :flat)
+               (frame-parameters-output :vec2 :location 4
+                                        :interpolation :flat)
+               (current-clip-output :vec4 :location 5))
      :resources
-     ((flame-instances :storage-buffer :binding 0 :element :uvec4)
+     ((flame-instances :storage-buffer :binding 0 :element :vec4)
       (camera-state :uniform-block :binding 1
        :members ((camera-position :vec4)
                  (camera-right :vec4)
                  (camera-up :vec4)
                  (camera-forward :vec4)
                  (camera-projection :vec4)
-                 (render-parameters :vec4)
-                 (previous-camera-position :vec4)
-                 (previous-camera-right :vec4)
-                 (previous-camera-up :vec4)
-                 (previous-camera-forward :vec4)
-                 (previous-camera-projection :vec4)
-                 (temporal-parameters :vec4)))))
-  (let* ((instance (buffer-element flame-instances instance-index))
-         (ticks (vec3 (float (swizzle instance :x))
-                      (float (swizzle instance :y))
-                      (float (swizzle instance :z))))
-         (orientation (ldb (byte 3 0) (swizzle instance :w)))
-         (normal (torch-flame-orientation-normal orientation))
-         (face-center (/ ticks #.luft.render::+torch-flame-cell-size+))
+                 (render-parameters :vec4)))))
+  (let* ((base-row (* instance-index (uint 3.0)))
+         (origin-row (buffer-element flame-instances base-row))
+         (normal-row
+           (buffer-element flame-instances (+ base-row (uint 1.0))))
+         (tangent-row
+           (buffer-element flame-instances (+ base-row (uint 2.0))))
+         (origin (swizzle origin-row :xyz))
+         (seed (swizzle origin-row :w))
+         (normal (swizzle normal-row :xyz))
+         (tangent (swizzle tangent-row :xyz))
+         (scale (swizzle tangent-row :w))
+         (proxy-radius (* #.luft.render::+torch-flame-proxy-radius+ scale))
          (volume-center
-           (+ face-center
+           (+ origin
               (* normal
-                 (+ #.luft.render::+torch-flame-wick-offset+
-                    (* #.luft.render::+torch-flame-length+ 0.5)))))
+                 (* scale
+                    (+ #.luft.render::+torch-flame-wick-offset+
+                       (* #.luft.render::+torch-flame-length+ 0.5))))))
          (index (float vertex-index))
          (right-corner (if (= index 2.0) 1.0
                            (if (= index 3.0) 1.0
@@ -372,59 +875,34 @@ captures and CPU/GPU comparisons can replay the flame field exactly."
                        (- (* bottom-corner 2.0) 1.0)))
          (proxy-world-position
            (+ (- volume-center
-                 (* (swizzle camera-forward :xyz)
-                    #.luft.render::+torch-flame-proxy-radius+))
+                 (* (swizzle camera-forward :xyz) proxy-radius))
               (* (swizzle camera-right :xyz)
-                 (* (swizzle corner :x)
-                    #.luft.render::+torch-flame-proxy-radius+))
+                 (* (swizzle corner :x) proxy-radius))
               (* (swizzle camera-up :xyz)
-                 (* (swizzle corner :y)
-                    #.luft.render::+torch-flame-proxy-radius+))))
-         (previous-proxy-world-position
-           (+ (- volume-center
-                 (* (swizzle previous-camera-forward :xyz)
-                    #.luft.render::+torch-flame-proxy-radius+))
-              (* (swizzle previous-camera-right :xyz)
-                 (* (swizzle corner :x)
-                    #.luft.render::+torch-flame-proxy-radius+))
-              (* (swizzle previous-camera-up :xyz)
-                 (* (swizzle corner :y)
-                    #.luft.render::+torch-flame-proxy-radius+))))
+                 (* (swizzle corner :y) proxy-radius))))
          (current-clip
            (mesh-view-clip proxy-world-position camera-position camera-right
                            camera-up camera-forward camera-projection
-                           (swizzle render-parameters :z)))
-         (previous-clip
-           (mesh-view-clip previous-proxy-world-position
-                           previous-camera-position previous-camera-right
-                           previous-camera-up previous-camera-forward
-                           previous-camera-projection
-                           (swizzle render-parameters :z)))
-         (jitter (swizzle temporal-parameters :xy)))
-    (set-output clip-position
-                (vec4 (+ (swizzle current-clip :x)
-                         (* (swizzle jitter :x) (swizzle current-clip :w)))
-                      (+ (swizzle current-clip :y)
-                         (* (swizzle jitter :y) (swizzle current-clip :w)))
-                      (swizzle current-clip :z)
-                      (swizzle current-clip :w)))
+                           (swizzle render-parameters :z))))
+    ;; Procedural radiance is a post-temporal composite.  Rasterize the stable,
+    ;; unjittered proxy and never author a motion/history footprint for it.
+    (set-output clip-position current-clip)
     (set-output proxy-world-position-output proxy-world-position)
-    (set-output face-center-output face-center)
+    (set-output origin-output origin)
     (set-output normal-output normal)
-    (set-output seed-output (torch-flame-seed ticks))
-    (set-output current-clip-output current-clip)
-    (set-output previous-clip-output previous-clip)))
+    (set-output tangent-output tangent)
+    (set-output frame-parameters-output (vec2 seed scale))
+    (set-output current-clip-output current-clip)))
 
 (define-live-shader torch-flame-fragment-specification
     (:stage :fragment
      :inputs ((proxy-world-position :vec3 :location 0)
-              (face-center :vec3 :location 1 :interpolation :flat)
+              (origin :vec3 :location 1 :interpolation :flat)
               (normal :vec3 :location 2 :interpolation :flat)
-              (seed :float :location 3 :interpolation :flat)
-              (current-clip :vec4 :location 4)
-              (previous-clip :vec4 :location 5))
-     :outputs ((color-output :vec4 :location 0)
-               (motion-output :vec2 :location 1))
+              (tangent :vec3 :location 3 :interpolation :flat)
+              (frame-parameters :vec2 :location 4 :interpolation :flat)
+              (current-clip :vec4 :location 5))
+     :outputs ((color-output :vec4 :location 0))
      :resources
      ((camera-state :uniform-block :binding 1
        :members ((camera-position :vec4)
@@ -432,15 +910,66 @@ captures and CPU/GPU comparisons can replay the flame field exactly."
                  (camera-up :vec4)
                  (camera-forward :vec4)
                  (camera-projection :vec4)
-                 (render-parameters :vec4)))
+                 (render-parameters :vec4)
+                 (previous-camera-position :vec4)
+                 (previous-camera-right :vec4)
+                 (previous-camera-up :vec4)
+                 (previous-camera-forward :vec4)
+                 (previous-camera-projection :vec4)
+                 (temporal-parameters :vec4)
+                 (inspection-parameters :vec4)))
       (effect-state :uniform-block :binding 2
-       :members ((flame-effect-parameters :vec4)))))
+       :members ((flame-effect-parameters :vec4)))
+      (opaque-depth :depth-texture-2d :binding 3)
+      (depth-sampler :sampler :binding 4)))
   (let* ((ray (if (< (swizzle render-parameters :z) 0.5)
                   (normalize (swizzle camera-forward :xyz))
                   (normalize (- proxy-world-position
                                 (swizzle camera-position :xyz)))))
          (time (swizzle flame-effect-parameters :x))
-         (path-length (* 2.0 #.luft.render::+torch-flame-proxy-radius+))
+         (authored-radiance (swizzle flame-effect-parameters :yzw))
+         (seed (swizzle frame-parameters :x))
+         (scale (swizzle frame-parameters :y))
+         (full-path-length
+           (* 2.0 #.luft.render::+torch-flame-proxy-radius+ scale))
+         ;; Opaque depth was rendered with the current projection jitter while
+         ;; this post-temporal proxy is deliberately stable.  Four nearest
+         ;; taps conservatively choose the closest covered internal pixel at an
+         ;; edge, avoiding bright half-flames leaking through a bevel silhouette.
+         (depth-uv
+           (+ (mesh-clip-uv current-clip)
+              (* (swizzle temporal-parameters :xy) 0.5)))
+         (half-texel (* (swizzle inspection-parameters :zw) 0.5))
+         (depth-a
+           (swizzle
+            (sample opaque-depth depth-sampler (+ depth-uv half-texel)) :x))
+         (depth-b
+           (swizzle
+            (sample opaque-depth depth-sampler (- depth-uv half-texel)) :x))
+         (depth-c
+           (swizzle
+            (sample opaque-depth depth-sampler
+                    (+ depth-uv
+                       (vec2 (swizzle half-texel :x)
+                             (- (swizzle half-texel :y))))) :x))
+         (depth-d
+           (swizzle
+            (sample opaque-depth depth-sampler
+                    (+ depth-uv
+                       (vec2 (- (swizzle half-texel :x))
+                             (swizzle half-texel :y)))) :x))
+         (scene-depth (min (min depth-a depth-b) (min depth-c depth-d)))
+         (opaque-view-depth
+           (view-depth scene-depth camera-projection
+                       (swizzle render-parameters :z)))
+         (proxy-view-depth
+           (dot (- proxy-world-position (swizzle camera-position :xyz))
+                (swizzle camera-forward :xyz)))
+         (ray-view-rate
+           (max (dot ray (swizzle camera-forward :xyz)) 1e-5))
+         (path-length
+           (clamp (/ (- opaque-view-depth proxy-view-depth) ray-view-rate)
+                  0.0 full-path-length))
          (step-length (/ path-length
                          (float #.luft.render::+torch-flame-sample-count+)))
          (integrated
@@ -450,7 +979,7 @@ captures and CPU/GPU comparisons can replay the flame field exactly."
              (let* ((travel (* (+ sample 0.5) step-length))
                     (point (+ proxy-world-position (* ray travel)))
                     (field (torch-flame-field
-                            point face-center normal seed time))
+                            point origin normal tangent seed scale time))
                     (density (swizzle field :y))
                     (heat (swizzle field :z))
                     (sample-alpha
@@ -460,11 +989,20 @@ captures and CPU/GPU comparisons can replay the flame field exactly."
                                     step-length)))))
                     (transmittance (- 1.0 (swizzle state :w)))
                     (weight (* transmittance sample-alpha))
-                    (emission
-                      (mix (vec3 2.6 0.16 0.018)
-                           (vec3 6.2 3.2 0.72) heat)))
+                    (radiance-scale
+                      (+ #.luft.render::+torch-flame-cool-radiance-scale+
+                         (* heat
+                            #.luft.render::+torch-flame-heat-radiance-gain+)))
+                    (emission (* authored-radiance radiance-scale)))
                (vec4 (+ (swizzle state :xyz) (* emission weight))
                      (+ (swizzle state :w) weight))))))
-    (set-output color-output integrated)
-    (set-output motion-output
-                (mesh-temporal-motion previous-clip current-clip))))
+    (set-output color-output integrated)))
+
+(define-live-shader torch-flame-composite-copy-fragment-specification
+    (:stage :fragment
+     :inputs ((ndc :vec2 :location 0))
+     :outputs ((color-output :vec4 :location 0))
+     :resources ((scene :texture-2d :binding 0 :sample-transfer :identity)
+                 (scene-sampler :sampler :binding 1)))
+  (let* ((uv (+ (* ndc 0.5) (vec2 0.5 0.5))))
+    (set-output color-output (sample scene scene-sampler uv))))

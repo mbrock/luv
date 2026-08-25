@@ -76,13 +76,22 @@
    #:surface-mesh-band-triangle-count #:surface-mesh-fan-triangle-count
    #:surface-mesh-singular-star-count
    #:surface-mesh-voxel-light #:surface-mesh-companions
+   #:surface-mesh-attachments
+   #:surface-attachment-frame #:surface-attachment-frame-origin
+   #:surface-attachment-frame-normal #:surface-attachment-frame-tangent
+   #:surface-attachment-frame-primitive-kinds
+   #:surface-attachment-frame-stocks
+   #:resolve-surface-attachment-frame
    #:star-singular-p #:decompose-star-mask #:make-surface-mesh #:mesh-chunk
-   #:make-face-torch-mesh
+   #:coplanar-compressed-surface-mesh
            #:select-surface-mesh-stocks
            #:surface-mesh-with-triangle-ink
            #:surface-mesh-split-neighborhood
            #:vary-surface-mesh-bevel-widths
            #:vary-surface-mesh-bevel-widths-from-stock-masks
+           #:vary-uncontracted-surface-mesh-bevel-widths-diagnostic
+           #:vary-uncontracted-surface-mesh-bevel-widths-from-stock-masks-diagnostic
+           #:vary-surface-mesh-cohort-bevel-widths-from-stock-masks
    ;; Tests.
    #:run-luft-tests))
 

@@ -7,6 +7,8 @@
            #:player-sdf-vertex-specification
            #:torch-flame-fragment-specification
            #:torch-flame-vertex-specification
+           #:torch-body-vertex-specification
+           #:torch-body-shadow-vertex-specification
            #:mesh-fragment-specification
            #:mesh-vertex-specification
            #:shadow-vertex-specification
@@ -24,16 +26,27 @@
                     (#:vec3 #:luv.arithmetic.lisp.vec3))
   (:export #:scene
            #:scene-solid
+           #:scene-authored-voxel-light
            #:scene-voxel-light
+           #:scene-voxel-light-propagation-p
            #:scene-torches
-           #:+torch-flame-instance-word-count+
+           #:scene-mesh-generation
+           #:scene-mesh-generation-light-generation
+           #:scene-mesh-generation-request-stamp
+           #:scene-mesh-generation-result-stamp
+           #:+torch-flame-instance-row-count+
+           #:+torch-flame-instance-scalar-count+
            #:+torch-flame-sample-count+
-           #:torch-flame-orientation-code
-           #:torch-flame-orientation-axis
-           #:torch-flame-orientation-side
-           #:torch-flame-orientation-normal
-           #:pack-torch-flame-attachment
-           #:unpack-torch-flame-attachment
+           #:pack-torch-flame-frame
+           #:validate-torch-flame-frame
+           #:unpack-torch-flame-frame
+           #:pack-torch-body-frame-flags
+           #:unpack-torch-body-frame-flags
+           #:+torch-body-vertex-row-count+
+           #:+torch-body-vertex-scalar-count+
+           #:torch-body-vertex-data
+           #:torch-body-vertex-count
+           #:torch-body-reference-vertex
            #:torch-flame-effect-uniform-data
            #:torch-flame-reference-signed-distance
            #:torch-flame-reference-density
@@ -54,15 +67,18 @@
            #:gallery-plot-origin
            #:*gallery*
            #:make-render-mesh
+           #:make-whole-domain-diagnostic-mesh
            #:scene-builder-torch
            #:material-bevel-profile #:make-material-bevel-profile
            #:material-bevel-width #:compile-material-bevel-profile
            #:make-material-bevel-mesh
+           #:make-uncontracted-material-bevel-diagnostic-mesh
            #:make-material-bevel-meshes
            #:renderer
            #:renderer-set-mesh #:renderer-set-meshes
            #:renderer-remove-mesh #:renderer-clear-meshes
            #:streaming-scene #:make-streaming-scene
+           #:streaming-scene-light-generation
            #:mesh-streaming-chunk
            #:make-highland-sanctuary-scene
            #:fly-camera

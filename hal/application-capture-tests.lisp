@@ -9,6 +9,7 @@
 
 (defvar *capture-probe-destroy-events* nil)
 (defvar *capture-probe-destroy-failures* nil)
+(defvar *capture-probe-frame-request-serial* nil)
 
 (defclass capture-probe-texture
     (luv:gpu-texture capture-probe-resource)
@@ -147,6 +148,8 @@
 (defclass capture-probe-canvas (luv:canvas)
   ((context :initarg :context :reader capture-probe-canvas-context)
    (state :initarg :state :initform :open :accessor capture-probe-canvas-state)
+   (frame-request-serial
+    :initform 0 :accessor capture-probe-canvas-frame-request-serial)
    (native-thread
     :initarg :native-thread :initform nil
     :reader capture-probe-canvas-native-thread)))
@@ -162,12 +165,14 @@
       (capture-probe-canvas-native-thread canvas)))
 
 (defmethod luv:request-canvas-frame ((canvas capture-probe-canvas) function)
-  (declare (ignore canvas))
-  (funcall function 0.0d0))
+  (let ((*capture-probe-frame-request-serial*
+          (incf (capture-probe-canvas-frame-request-serial canvas))))
+    (funcall function 0.0d0)))
 
 (defclass capture-probe-application ()
   ((canvas :initarg :canvas :reader capture-probe-application-canvas)
    (events :initform nil :accessor capture-probe-application-events)
+   (frame-phases :initform nil :accessor capture-probe-application-frame-phases)
    (fail-encode-p :initarg :fail-encode-p :initform nil
                   :reader capture-probe-fail-encode-p)
    (fail-cleanup-p :initarg :fail-cleanup-p :initform nil
@@ -186,6 +191,12 @@
 (defun note-capture-probe-event (application event)
   (setf (capture-probe-application-events application)
         (append (capture-probe-application-events application) (list event))))
+
+(defun note-capture-probe-frame-phase (application phase frame-index)
+  (setf (capture-probe-application-frame-phases application)
+        (append
+         (capture-probe-application-frame-phases application)
+         (list (list phase frame-index *capture-probe-frame-request-serial*)))))
 
 (defmethod luv:capture-canvas ((application capture-probe-application))
   (capture-probe-application-canvas application))
@@ -209,7 +220,8 @@
     ((application capture-probe-application)
      (capture luv:application-capture) frame-index)
   (declare (ignore capture))
-  (note-capture-probe-event application (list :advance frame-index)))
+  (note-capture-probe-event application (list :advance frame-index))
+  (note-capture-probe-frame-phase application :advance frame-index))
 
 (defmethod luv:encode-capture-frame
     ((application capture-probe-application)
@@ -217,6 +229,7 @@
   (declare (ignore encoder extent))
   (let ((frame (luv:capture-frame-index capture)))
     (note-capture-probe-event application (list :encode frame))
+    (note-capture-probe-frame-phase application :encode frame)
     (when (capture-probe-fail-encode-p application)
       (error "Deliberate capture probe encoding failure."))
     (let ((value (+ (luv:capture-option capture :pixel-value 20) frame))
@@ -617,6 +630,14 @@
              (:progress 2 3)
              :cleanup)
            (capture-probe-application-events application)))
+      ;; Advancement and encoding share one serialized native-frame request.
+      ;; An off-thread advance has NIL here; separate requests have distinct
+      ;; serials, so this deterministically guards both sides of the contract.
+      (ok (equal
+           '((:advance 0 1) (:encode 0 1)
+             (:advance 1 2) (:encode 1 2)
+             (:advance 2 3) (:encode 2 3))
+           (capture-probe-application-frame-phases application)))
       (ok (= 2 (length waits)))
       (ok (< (abs (- 0.4d0 (second waits))) 1.0d-9))
       (ok (< (abs (- 0.3d0 (first waits))) 1.0d-9)))))

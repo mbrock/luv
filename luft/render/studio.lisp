@@ -518,8 +518,10 @@ before the operation boundary, or it would encode through resources which the
                 (update-viewer-inspection viewer)))
          (player (viewer-player viewer))
          (player-p (and player (typep (viewer-source viewer) 'scene)
-                        (scene-player-p (viewer-source viewer)))))
-    (maintain-renderer-exposure renderer)
+                        (scene-player-p (viewer-source viewer))))
+         (exposure
+           (or (viewer-fixed-exposure viewer)
+               (maintain-renderer-exposure renderer))))
     ;; Instrument state is now immutable for this frame.  Encoding below only
     ;; replays prepared GPU commands against the renderer borrowed afterward.
     (encode-renderer-frame
@@ -529,7 +531,7 @@ before the operation boundary, or it would encode through resources which the
       (if (and inspection *inspection-ink-p*) 1.0 0.0)
       (and player-p player)
       (viewer-bevel-width viewer)
-      (renderer-exposure renderer))
+      exposure)
      :jitter jitter :view view
      :player-p player-p
      :effect-time (or *flame-time* (viewer-last-timestamp viewer) 0.0)
@@ -708,6 +710,8 @@ before the operation boundary, or it would encode through resources which the
                 :accessor viewer-bevel-width)
    (bevel-profile :initarg :bevel-profile :initform nil
                   :accessor viewer-bevel-profile)
+   (fixed-exposure :initarg :fixed-exposure :initform nil
+                   :reader viewer-fixed-exposure)
    (camera :initarg :camera :initform (make-fly-camera) :reader viewer-camera)
    (player :initarg :player :initform (make-walking-player)
            :accessor viewer-player)
@@ -866,7 +870,8 @@ before the operation boundary, or it would encode through resources which the
           (let ((position (camera-position (viewer-camera viewer))))
             (retarget-streaming-scene
              source production-system (viewer-bevel-width viewer)
-             (vec3:vec3-x position) (vec3:vec3-y position))))))))
+             (vec3:vec3-x position) (vec3:vec3-y position)
+             (viewer-bevel-profile viewer))))))))
 
 (defun render-viewer-frame (viewer timestamp)
   (declare (ignore timestamp))
@@ -1176,11 +1181,27 @@ before the operation boundary, or it would encode through resources which the
   (declare (ignore viewer canvas event))
   nil)
 
+(defun normalized-viewer-fixed-exposure (value)
+  "Return VALUE as a positive finite single float, or NIL for adaptation."
+  (when value
+    (unless (realp value)
+      (error "A fixed viewer exposure must be a positive finite real, not ~S."
+             value))
+    (let ((single (coerce value 'single-float)))
+      (unless (and (> single 0.0f0)
+                   (= single single)
+                   (<= single most-positive-single-float))
+        (error "A fixed viewer exposure must be positive and finite, not ~S."
+               value))
+      single)))
+
 (defun start-viewer (&key
                        (solid (make-mountain-sanctuary-scene))
                        (bevel-width 2)
                        bevel-profile
                        surface-mesh
+                       surface-generation
+                       fixed-exposure
                        (camera (make-fly-camera))
                        (title "LUFT — click to walk · scroll to zoom · M orbit")
                        (width 1100) (height 800)
@@ -1190,18 +1211,24 @@ before the operation boundary, or it would encode through resources which the
                        (provider *gpu-provider*))
   "Open the indexed-instanced LUFT renderer as a McCLIM atelier.
 
-BEVEL-PROFILE enables the experimental material-selected width cohorts for a
-non-streaming scene.  BEVEL-WIDTH remains the camera/inspection reference and
-the uniform fallback.  SURFACE-MESH supplies an already constructed diagnostic
-mesh while retaining SOLID as the semantic inspection source."
-  (when (and bevel-profile (typep solid 'streaming-scene))
-    (error "Material bevel profiles do not yet support streaming scenes."))
+BEVEL-PROFILE enables one compiled material-selected site policy in static and
+streaming scenes. BEVEL-WIDTH remains the camera/inspection reference and the
+uniform fallback. SURFACE-MESH supplies an already constructed diagnostic mesh
+while retaining SOLID as the semantic inspection source. SURFACE-GENERATION,
+when supplied with that mesh, preserves its exact immutable realized-light
+cohort. FIXED-EXPOSURE disables temporal adaptation for reproducible evidence."
+  (check-type solid scene)
+  (setf fixed-exposure (normalized-viewer-fixed-exposure fixed-exposure))
+  (when (and surface-generation (null surface-mesh))
+    (error "SURFACE-GENERATION is only meaningful with SURFACE-MESH."))
   (when surface-mesh
     (check-type surface-mesh luft:surface-mesh)
     (when bevel-profile
-      (error "Specify either SURFACE-MESH or BEVEL-PROFILE, not both."))
-    (when (typep solid 'streaming-scene)
-      (error "An explicit surface mesh requires a non-streaming scene.")))
+      (error "Specify either SURFACE-MESH or BEVEL-PROFILE, not both.")))
+  (when surface-generation
+    (check-type surface-generation scene-mesh-generation)
+    (unless (eq solid (scene-mesh-generation-scene surface-generation))
+      (error "SURFACE-GENERATION belongs to a different semantic scene.")))
   (let ((canvas
           (make-sdl-canvas
            :title title :width width :height height :visible-p nil
@@ -1251,7 +1278,9 @@ mesh while retaining SOLID as the semantic inspection source."
                         (let ((mcluv:*embedded-mirror-target* canvas)
                               (mcluv:*embedded-mirror-context* context)
                               (mcluv:*embedded-mirror-device* device*))
-                          (when (typep solid 'streaming-scene)
+                          (when (and (typep solid 'streaming-scene)
+                                     (null surface-mesh))
+                            (reset-streaming-scene-publication solid)
                             (setf production-system
                                   (production:make-single-worker-production-system
                                    :name "LUFT mesh producer")))
@@ -1269,22 +1298,32 @@ mesh while retaining SOLID as the semantic inspection source."
                                                 (make-walking-player))
                                    :bevel-width bevel-width
                                    :bevel-profile bevel-profile
+                                   :fixed-exposure fixed-exposure
                                    :inspector-p inspector-p)))))
-           ;; Torch attachments are a small immutable scene-global effect;
-           ;; install them once rather than repeating them in chunk populations.
-           (renderer-set-scene-torches
-            renderer* (and (typep solid 'scene) solid))
-           (unless (typep solid 'streaming-scene)
-             (cond
-               (surface-mesh
-                (renderer-set-mesh renderer* 0 surface-mesh))
-               (bevel-profile
+           (cond
+             (surface-mesh
+              (renderer-set-mesh
+               renderer* 0 surface-mesh
+               :scene-generation surface-generation)
+              ;; A synchronous streaming snapshot remains a static diagnostic
+              ;; until a later explicit refresh.  Only successful renderer
+              ;; publication makes its exact field reusable by the view.
+              (when (and surface-generation
+                         (typep solid 'streaming-scene))
+                (setf (streaming-scene-light-generation solid)
+                      (scene-mesh-generation-light-generation
+                       surface-generation))))
+             ((typep solid 'streaming-scene))
+             (bevel-profile
+              (multiple-value-bind (meshes generation)
+                  (make-material-bevel-meshes solid bevel-profile)
                 (renderer-set-meshes
-                 renderer* (make-material-bevel-meshes solid bevel-profile)))
-               (t
-                (renderer-set-mesh renderer* 0
-                                   (make-render-mesh
-                                    solid :bevel-width bevel-width)))))
+                 renderer* meshes :scene-generation generation)))
+             (t
+              (multiple-value-bind (mesh generation)
+                  (make-render-mesh solid :bevel-width bevel-width)
+                (renderer-set-mesh
+                 renderer* 0 mesh :scene-generation generation))))
            (attach-viewer-live-artifact
             viewer renderer-source-values renderer-source-revision)
            (setf (canvas-event-handler canvas) viewer)
@@ -1427,8 +1466,6 @@ production gets the same opportunity to publish as it does in the window."
                                             (viewer-bevel-profile viewer))))
   "Rebuild VIEWER at BEVEL-WIDTH or its material BEVEL-PROFILE."
   (when viewer
-    (when (and bevel-profile (typep solid 'streaming-scene))
-      (error "Material bevel profiles do not yet support streaming scenes."))
     (luv::call-on-sdl-canvas-thread
      (viewer-canvas viewer)
      (lambda ()
@@ -1459,21 +1496,23 @@ production gets the same opportunity to publish as it does in the window."
                                   candidate-source-values source-values
                                   candidate-source-revision before)
                             created)))
-                    (renderer-set-scene-torches
-                     renderer (and (typep solid 'scene) solid))
                     (cond
                       ((typep solid 'streaming-scene)
                        (setf production-system
                              (production:make-single-worker-production-system
                               :name "LUFT mesh producer")))
                       (bevel-profile
-                       (renderer-set-meshes
-                        renderer
-                        (make-material-bevel-meshes solid bevel-profile)))
+                       (multiple-value-bind (meshes generation)
+                           (make-material-bevel-meshes solid bevel-profile)
+                         (renderer-set-meshes
+                          renderer meshes :scene-generation generation)))
                       (t
-                       (renderer-set-mesh renderer 0
-                                          (make-render-mesh
-                                           solid :bevel-width bevel-width))))
+                       (multiple-value-bind (mesh generation)
+                           (make-render-mesh solid :bevel-width bevel-width)
+                         (renderer-set-mesh
+                          renderer 0 mesh :scene-generation generation))))
+                    (when (typep solid 'streaming-scene)
+                      (reset-streaming-scene-publication solid))
                     (setf (viewer-renderer viewer) renderer
                           (viewer-production-system viewer) production-system
                           (viewer-source viewer) solid

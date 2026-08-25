@@ -203,6 +203,66 @@
                  (luv::vulkan-queue-retirement-ledger queue)))))
       (setf (symbol-function frontier-symbol) original-frontier))))
 
+(deftest vulkan-submit-rejects-destroyed-nontexture-dependencies-before-native
+  (let* ((luv::*gpu-retirement-ledger-custodians*
+           (make-hash-table :test #'eq))
+         (luv::*gpu-retirement-custodian-service-enabled-p* nil)
+         (device
+           (make-instance
+            'luv::vulkan-gpu-device
+            :handle :fake-device :instance :fake-instance
+            :physical-device :fake-physical-device :queue-family 0))
+         (queue
+           (make-instance
+            'luv::vulkan-gpu-queue
+            :handle :fake-queue :device device :family 0
+            :timeline :fake-timeline))
+         (attempts (list 0 0 0))
+         (resource
+           (make-instance
+            'vulkan-retirement-probe
+            :handle :fake-buffer :attempts attempts :fail-p (list nil)))
+         (command-buffer
+           (make-vulkan-submit-probe-command-buffer
+            device :fake-command-buffer :resources (list resource)))
+         (native-submits 0)
+         (frontier-symbol 'luv::vulkan-queue-completed-frontier)
+         (submit-symbol 'luv.vulkan:submit-command-buffers)
+         (original-frontier (symbol-function frontier-symbol))
+         (original-submit (symbol-function submit-symbol)))
+    (setf (luv::vulkan-device-queue device) queue)
+    (unwind-protect
+         (progn
+           (setf (symbol-function frontier-symbol)
+                 (lambda (queue)
+                   (declare (ignore queue))
+                   0)
+                 (symbol-function submit-symbol)
+                 (lambda (&rest arguments)
+                   (declare (ignore arguments))
+                   (incf native-submits)))
+           ;; A never-submitted resource is physically eligible at frontier
+           ;; zero.  Its recorded command buffer must become unsubmitable rather
+           ;; than passing a stale native handle to Vulkan.
+           (luv::vulkan-destroy-or-defer
+            resource device
+            (lambda ()
+              (setf (luv::vulkan-object-destroyed-p resource) t)
+              #+sbcl (sb-ext:cancel-finalization resource)))
+           (ok (equal '(1 1 1) attempts))
+           (ok (signals
+                (luv:submit queue command-buffer)
+                'luv:gpu-object-destroyed-error))
+           (ok (zerop native-submits))
+           (ok (zerop (luv::vulkan-queue-submission-counter queue)))
+           (ok (eq :ready
+                   (luv::vulkan-command-buffer-state command-buffer)))
+           (ok (null (luv::vulkan-queue-live-submissions queue))))
+      (setf (symbol-function frontier-symbol) original-frontier
+            (symbol-function submit-symbol) original-submit)
+      #+sbcl (sb-ext:cancel-finalization device)
+      #+sbcl (sb-ext:cancel-finalization queue))))
+
 (deftest vulkan-custodian-service-retires-an-unobserved-completion
   (let* ((luv::*gpu-retirement-ledger-custodians*
            (make-hash-table :test #'eq))
@@ -972,6 +1032,54 @@
            (luv:make-bind-group-layout-descriptor :entries entries)))
     (ok (equal entries
                (luv::texture-sampler-uniform-layout-entries descriptor)))))
+
+(deftest single-uniform-layouts-retain-the-generic-stage-contract
+  (let* ((device
+           (make-instance
+            'luv::vulkan-gpu-device
+            :handle :fake-device :instance :fake-instance
+            :physical-device :fake-physical-device :queue-family 0))
+         (mesh-shader-symbol 'luv.vulkan:physical-device-mesh-shader-p)
+         (create-symbol
+           'luv.vulkan:create-uniform-buffer-descriptor-set-layout)
+         (original-mesh-shader (symbol-function mesh-shader-symbol))
+         (original-create (symbol-function create-symbol))
+         (native-calls '())
+         (layouts '()))
+    (unwind-protect
+         (progn
+           (setf (symbol-function mesh-shader-symbol)
+                 (lambda (physical-device)
+                   (declare (ignore physical-device))
+                   nil)
+                 (symbol-function create-symbol)
+                 (lambda (native-device &key binding stages)
+                   (push (list native-device binding stages) native-calls)
+                   (list :layout binding stages)))
+           (dolist (entries
+                    '(((:binding 3 :type :uniform-buffer))
+                      ((:binding 5 :type :uniform-buffer
+                        :stages (:fragment)))))
+             (let ((layout
+                     (luv:create
+                      device
+                      (luv:make-bind-group-layout-descriptor
+                       :label "single uniform stage probe"
+                       :entries entries))))
+               (push layout layouts)
+               (ok (equal (getf (first
+                                 (luv::vulkan-bind-group-layout-entries
+                                  layout))
+                                :stages)
+                          (or (getf (first entries) :stages)
+                              '(:vertex :fragment))))))
+           (ok (equal '((:fake-device 3 (:vertex :fragment))
+                        (:fake-device 5 (:fragment)))
+                      (reverse native-calls))))
+      (dolist (layout layouts)
+        #+sbcl (sb-ext:cancel-finalization layout))
+      (setf (symbol-function mesh-shader-symbol) original-mesh-shader
+            (symbol-function create-symbol) original-create))))
 
 (deftest definitions-retain-abi-metadata-without-call-classes
   (let ((description (lvk:vulkan-function-description 'vk:create-instance)))

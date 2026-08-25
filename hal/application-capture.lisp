@@ -294,9 +294,10 @@ CLEANUP-CAPTURE is called even when this method exits by error."))
   (:documentation
    "Advance application-owned work before offscreen film frame FRAME-INDEX.
 
-This runs on the film caller after BEFORE-FRAME and before GPU encoding.  A
-streaming application can publish completed products here without putting its
-world model or simulation policy into the shared capture loop."))
+This runs on the canvas's native frame thread after BEFORE-FRAME and immediately
+before that frame's GPU encoding.  A streaming application can therefore publish
+completed products without racing an encoded but not yet submitted native frame,
+or putting its world model or simulation policy into the shared capture loop."))
 
 (defmethod advance-capture-frame
     ((application t) (capture application-capture) frame-index)
@@ -415,8 +416,11 @@ The method must not destroy the shared target or readback buffer."))
       :size (* 4 width height)
       :usage '(:copy-dst)))))
 
-(defun render-capture-frame (capture)
-  "Render and synchronously read one frame from an established CAPTURE."
+(defun render-capture-frame (capture &key advance-p)
+  "Render and synchronously read one frame from an established CAPTURE.
+
+When ADVANCE-P is true, advance the application inside the same native canvas
+request which encodes and submits the frame."
   (let* ((application (capture-application capture))
          (canvas (capture-native-canvas capture))
          (device (capture-native-device capture))
@@ -425,6 +429,9 @@ The method must not destroy the shared target or readback buffer."))
      canvas
      (lambda (timestamp)
        (declare (ignore timestamp))
+       (when advance-p
+         (advance-capture-frame
+          application capture (capture-frame-index capture)))
        (ensure-capture-relationship-current capture)
        (let ((encoder nil)
              (commands nil))
@@ -546,8 +553,7 @@ and the optional metadata value from ENCODE-CAPTURE-FRAME."
         (return))
       (setf (capture-frame-index capture) frame)
       (when before-frame (funcall before-frame frame))
-      (advance-capture-frame application capture frame)
-      (funcall writer (render-capture-frame capture))
+      (funcall writer (render-capture-frame capture :advance-p t))
       (when progress-function
         (funcall progress-function frame frame-count))
       ;; Absolute deadlines prevent encoding variance from accumulating drift.

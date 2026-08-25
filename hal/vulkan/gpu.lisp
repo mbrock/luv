@@ -1344,12 +1344,16 @@ VK_EXT_mesh_shader is enabled, so ask the device first."
         ((and (= 1 (length entries))
               (eq :uniform-buffer (getf (first entries) :type)))
          (let* ((entry (uniform-buffer-layout-entry descriptor))
-                (binding (getf entry :binding)))
+                (entries (vulkan-descriptor-layout-stages
+                          device (list entry)))
+                (entry (first entries))
+                (binding (getf entry :binding))
+                (stages (getf entry :stages)))
            (make-instance
             'vulkan-gpu-bind-group-layout
             :label (gpu-descriptor-label descriptor)
             :handle (lvk:create-uniform-buffer-descriptor-set-layout
-                     (vulkan-handle device) :binding binding)
+                     (vulkan-handle device) :binding binding :stages stages)
             :device device :entries entries)))
         (t
          (let ((entries (vulkan-descriptor-layout-stages
@@ -3093,6 +3097,14 @@ lowering later without changing this queue-level operation."
            :operation :submit
            :state (vulkan-command-buffer-state command-buffer)
            :expected-state :ready))
+  ;; The finished command buffer retains every direct and indirect dependency
+  ;; recorded by its encoder.  DESTROY may already have retired an unsubmitted
+  ;; dependency at frontier zero, so reject the complete captured set before
+  ;; handing the native command buffer to Vulkan.  Textures remain a separate
+  ;; subset below because their device and scheduled-layout state also needs
+  ;; validation.
+  (dolist (resource (vulkan-command-buffer-resources command-buffer))
+    (ensure-live-vulkan-object resource :submit))
   (dolist (texture (vulkan-command-buffer-textures command-buffer))
     (ensure-live-vulkan-object texture :submit)
     (unless (eq (vulkan-queue-device queue)

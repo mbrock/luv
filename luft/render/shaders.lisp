@@ -166,8 +166,30 @@
            (paper-noise
             (+ (* (swizzle point :zxy) 10.7) (vec3 5.3 19.1 37.7))))
          (weathered-stone
-           (+ (* 0.72 stone-grain) (* 0.28 stone-pit))))
-    (- (if (< profile 1.5) granular weathered-stone) 0.5)))
+           (+ (* 0.72 stone-grain) (* 0.28 stone-pit)))
+         ;; Forged metal has broad hammer undulation, directional working
+         ;; marks, and restrained fine tooth.  It is not weathered masonry
+         ;; with a bronze pigment laid over it.
+         (forge-hammer
+           (paper-noise
+            (+ (* point (vec3 2.9 2.9 1.7)) (vec3 13.7 31.3 5.9))))
+         (forge-flow
+           (paper-noise
+            (+ (vec3 (* (swizzle point :x) 1.3)
+                     (* (swizzle point :y) 8.7)
+                     (* (swizzle point :z) 3.7))
+               (vec3 37.1 7.3 19.7))))
+         (forge-tooth
+           (paper-noise
+            (+ (* (swizzle point :yzx) 15.1) (vec3 3.7 23.9 41.3))))
+         (forged-metal
+           (+ (* 0.66 forge-hammer)
+              (* 0.24 forge-flow)
+              (* 0.10 forge-tooth))))
+    (- (if (< profile 1.5)
+           granular
+           (if (< profile 3.5) weathered-stone forged-metal))
+       0.5)))
 
 (define-shader-function dressed-stone-tone (point normal stone-tone)
   "Suggest laid courses and hand-dressed blocks without texture coordinates."
@@ -273,15 +295,49 @@
          (gate (smoothstep #.*highlight-glow-threshold* 1.55 luminance)))
     (* color gate)))
 
-(define-shader-function gemstone-environment-radiance
+(define-shader-function material-environment-radiance
     (direction sun sun-color sky ground)
-  "A cheap continuous environment for dielectric reflection and transmission."
+  "A cheap continuous environment for material reflection and transmission."
   (let* ((hemisphere
            (mix ground sky
                 (smoothstep -0.25 0.65 (swizzle direction :z))))
          (sun-glint
            (expt (max 0.0 (dot direction sun)) 72.0)))
     (+ hemisphere (* sun-color (* sun-glint 1.65)))))
+
+(define-shader-function material-f0 (base metalness)
+  "Mix dielectric and colored metallic normal-incidence reflectance."
+  (mix (vec3 0.04 0.04 0.04)
+       (clamp base (vec3 0.0 0.0 0.0) (vec3 1.0 1.0 1.0))
+       metalness))
+
+(define-shader-function material-schlick-fresnel (f0 cosine)
+  "Return vector Schlick Fresnel for normal-incidence reflectance F0."
+  (mix f0 (vec3 1.0 1.0 1.0)
+       (expt (- 1.0 (clamp cosine 0.0 1.0)) 5.0)))
+
+(define-shader-function metal-environment-reflection
+    (f0 roughness metalness normal view indirect sun sun-color sky ground)
+  "Return a restrained rough-metal reflection of the continuous environment."
+  (let* ((reflection-direction
+           (normalize (- (* normal (* 2.0 (dot normal view))) view)))
+         (reflected-environment
+           (material-environment-radiance
+            reflection-direction sun sun-color sky ground))
+         (rough-environment
+           (mix reflected-environment indirect (* roughness 0.65)))
+         (environment-fresnel
+           (material-schlick-fresnel f0 (max 0.0 (dot normal view)))))
+    (* rough-environment
+       (* environment-fresnel (* metalness 0.18)))))
+
+(define-shader-function drafted-material-radiance
+    (radiance sky fog construction-ink construction-wire blueprint reticle)
+  "Apply LUFT's paper, construction, and reticle treatment to scene radiance."
+  (mix
+   (mix (mix (* radiance 1.08) sky fog)
+        construction-ink construction-wire)
+   blueprint reticle))
 
 (define-shader-function gemstone-refracted-direction (view normal ior)
   "The air-to-crystal Snell direction, without requiring a REFRACT intrinsic."
@@ -318,7 +374,7 @@
          (reflection-direction
            (normalize (- (* normal (* 2.0 (dot normal view))) view)))
          (reflection
-           (gemstone-environment-radiance
+           (material-environment-radiance
             reflection-direction sun sun-color sky ground))
          (red-direction
            (gemstone-refracted-direction
@@ -329,13 +385,13 @@
            (gemstone-refracted-direction
             view normal (+ ior half-spread)))
          (red-transmission
-           (gemstone-environment-radiance
+           (material-environment-radiance
             red-direction sun sun-color sky ground))
          (green-transmission
-           (gemstone-environment-radiance
+           (material-environment-radiance
             green-direction sun sun-color sky ground))
          (blue-transmission
-           (gemstone-environment-radiance
+           (material-environment-radiance
             blue-direction sun sun-color sky ground))
          (dispersed-transmission
            (vec3 (swizzle red-transmission :x)
@@ -1709,7 +1765,7 @@ that he is standing on something."
          (normal (if (< (dot geometric-normal mesh-normal) 0.0)
                      (* geometric-normal -1.0)
                      geometric-normal))
-         (descriptor-row (uint (* assembly-id 7.0)))
+         (descriptor-row (uint (* assembly-id 8.0)))
          (primary
            (buffer-element material-descriptors descriptor-row))
          (secondary
@@ -1718,20 +1774,24 @@ that he is standing on something."
          (tertiary
            (buffer-element material-descriptors
                            (+ descriptor-row (uint 2.0))))
-         (frame-origin
+         (physical
            (buffer-element material-descriptors
                            (+ descriptor-row (uint 3.0))))
-         (frame-x
+         (frame-origin
            (buffer-element material-descriptors
                            (+ descriptor-row (uint 4.0))))
-         (frame-y
+         (frame-x
            (buffer-element material-descriptors
                            (+ descriptor-row (uint 5.0))))
-         (frame-z
+         (frame-y
            (buffer-element material-descriptors
                            (+ descriptor-row (uint 6.0))))
+         (frame-z
+           (buffer-element material-descriptors
+                           (+ descriptor-row (uint 7.0))))
          (opacity (swizzle frame-y :w))
          (surface-emission (swizzle frame-z :w))
+         (metalness (clamp (swizzle physical :x) 0.0 1.0))
          (material-point
            (material-frame-point
             world-position (swizzle frame-origin :xyz)
@@ -1847,6 +1907,10 @@ that he is standing on something."
          (n-dot-h (max 0.0 (dot shading-normal half-vector)))
          (n-dot-l (max facing 0.0))
          (v-dot-h (max 0.0 (dot view-direction half-vector)))
+         ;; The physical row is material-generic: dielectric F0 remains 0.04,
+         ;; while metals take their colored normal-incidence reflectance from
+         ;; the same procedural base colour which would otherwise be diffuse.
+         (f0 (material-f0 base metalness))
          (alpha (* roughness roughness))
          (alpha-squared (* alpha alpha))
          (distribution-denominator
@@ -1866,14 +1930,17 @@ that he is standing on something."
                        alpha-squared))))
          (visibility
            (/ 0.5 (max 0.0001 (+ visibility-light visibility-view))))
-         (fresnel (+ 0.04 (* 0.96 (expt (- 1.0 v-dot-h) 5.0))))
+         (fresnel (material-schlick-fresnel f0 v-dot-h))
          (specular
            (* sun-color
               (* (* 0.34 direct-visibility)
                  (* distribution
                     (* visibility (* fresnel n-dot-l))))))
-         (lit (+ (* base (* light (stock-tooth material-point)))
-                 specular
+         (diffuse
+           (* base
+              (* (* light (stock-tooth material-point))
+                 (- 1.0 metalness))))
+         (lit (+ diffuse specular
                  (* primary-tone surface-emission)))
          ;; Keep scene radiance linear and HDR here.  The universal
          ;; presentation pass blooms, tone maps, and grades it exactly once.
@@ -1927,6 +1994,22 @@ that he is standing on something."
                 (vec4 (* radiance opacity) opacity))
     (set-output motion-output
                 (mesh-temporal-motion previous-clip current-clip))
+    ;; Only a physically metallic material pays for the extra environment
+    ;; sample.  Dispatch is on the generic descriptor property, never on the
+    ;; torch kernel code.
+    (when (> metalness 0.0)
+      (set-output
+       color-output
+       (vec4
+        (*
+         (drafted-material-radiance
+          (+ lit
+             (metal-environment-reflection
+              f0 roughness metalness shading-normal view-direction
+              indirect-light sun sun-color sky ground))
+          sky fog construction-ink construction-wire blueprint reticle)
+         opacity)
+        opacity)))
     ;; Shader WHEN lowers to real structured control flow.  Keeping the
     ;; dielectric work behind it means soil, stone, and attachments do not pay
     ;; for three Snell evaluations and the inclusion field.

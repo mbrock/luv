@@ -8,6 +8,8 @@
   ((name :initarg :name :reader material-kind-name)
    (base-tone :initarg :base-tone :reader material-kind-base-tone)
    (roughness :initarg :roughness :reader material-kind-roughness)
+   (metalness :initarg :metalness :initform 0.0
+              :reader material-kind-metalness)
    (relief :initarg :relief :reader material-kind-relief)
    ;; Propagation, visible radiance, and transmission are deliberately
    ;; independent.  A source illuminates its own cell before LIGHT-OPACITY is
@@ -22,8 +24,28 @@
             :reader material-kind-opacity))
   (:documentation "A reusable substance and its renderer-facing response."))
 
-(defclass earth-material-kind (material-kind) ())
+(defclass earth-material-kind (material-kind)
+  ((top-tone :initarg :top-tone :initform nil
+             :reader %earth-material-kind-top-tone)
+   (side-tone :initarg :side-tone :initform nil
+              :reader %earth-material-kind-side-tone)
+   (underside-tone :initarg :underside-tone :initform nil
+                   :reader %earth-material-kind-underside-tone))
+  (:documentation
+   "Earth may author distinct exposed-top, side, and underside tones.
+
+Each optional tone deliberately inherits BASE-TONE when omitted.  This keeps
+custom earth honest about its own lineage instead of acquiring the built-in
+terrain palette as an accidental renderer default."))
 (defclass stone-material-kind (material-kind) ())
+(defclass metal-material-kind (material-kind)
+  ((metalness :initform 1.0))
+  (:documentation
+   "A material whose optical response is metallic.
+
+METALNESS remains ordinary inspectable material data compiled into the
+physical GPU descriptor row.  Metal does not inherit any topology family;
+renderer attachments are explicitly non-meshed in the bevel policy."))
 (defclass luminous-material-kind (material-kind) ())
 (defclass crystal-material-kind (luminous-material-kind)
   ((index-of-refraction :initarg :index-of-refraction :initform 1.5
@@ -42,6 +64,30 @@
                  :reader crystal-material-arris-lustre))
   (:documentation
    "A dielectric crystal with compiled, raster-friendly gemstone optics."))
+
+(defmethod shared-initialize :after
+    ((kind material-kind) slot-names &key &allow-other-keys)
+  "Validate bounded physical properties at the semantic object boundary."
+  (declare (ignore slot-names))
+  (let ((metalness (material-kind-metalness kind)))
+    (unless (and (realp metalness) (<= 0.0 metalness 1.0))
+      (error "Material ~S has metalness ~S outside [0, 1]."
+             (material-kind-name kind) metalness))))
+
+(defun earth-material-kind-top-tone (kind)
+  "Return KIND's authored top tone, or its base tone when omitted."
+  (or (%earth-material-kind-top-tone kind)
+      (material-kind-base-tone kind)))
+
+(defun earth-material-kind-side-tone (kind)
+  "Return KIND's authored side tone, or its base tone when omitted."
+  (or (%earth-material-kind-side-tone kind)
+      (material-kind-base-tone kind)))
+
+(defun earth-material-kind-underside-tone (kind)
+  "Return KIND's authored underside tone, or its base tone when omitted."
+  (or (%earth-material-kind-underside-tone kind)
+      (material-kind-base-tone kind)))
 
 (defclass material-frame ()
   ((name :initarg :name :reader material-frame-name)
@@ -71,6 +117,16 @@
   (:documentation
    "One exposed face's derived interpretation of an authored placement."))
 
+(defclass surface-closure-summary ()
+  ((readings :initarg :readings :reader surface-closure-summary-readings))
+  (:documentation
+   "The canonical set of actual face readings incident to one derived stock.
+
+This is material provenance for recursive band and fan closure.  It is
+deliberately separate from an assembly's three renderer descriptor readings:
+those lanes describe an appearance, and may include shader context which was
+not an incident surface."))
+
 (defclass surface-assembly ()
   ((name :initarg :name :reader surface-assembly-name)
    (relation :initarg :relation :reader surface-assembly-relation)
@@ -79,9 +135,16 @@
               :reader surface-assembly-secondary)
    (tertiary :initarg :tertiary :initform nil
              :reader surface-assembly-tertiary)
-   (kernel :initarg :kernel :reader surface-assembly-kernel))
+   (kernel :initarg :kernel :reader surface-assembly-kernel)
+   (closure-summary :initarg :closure-summary
+                    :reader surface-assembly-closure-summary))
   (:documentation
-   "An interned face, band, or fan material relation compiled for rendering."))
+   "An interned face, band, or fan material relation compiled for rendering.
+
+CLOSURE-SUMMARY is part of the assembly's semantic identity even when two
+assemblies compile to identical GPU descriptor rows.  A later fan must be able
+to recover every real incident reading from the stocks produced for its
+surrounding bands."))
 
 (defun ensure-semantic-instance (current class &rest initargs)
   "Reinitialize CURRENT when it still has CLASS, preserving live identity."
@@ -108,6 +171,9 @@
       (ensure-semantic-instance
        *earth-material* 'earth-material-kind
        :name :earth :base-tone '(0.42 0.32 0.21)
+       :top-tone '(0.18 0.31 0.105)
+       :side-tone '(0.42 0.32 0.21)
+       :underside-tone '(0.24 0.18 0.13)
        :roughness 0.92 :relief :granular)
       *limestone-material*
       (ensure-semantic-instance
@@ -132,9 +198,9 @@
        :arris-lustre 0.88)
       *torch-body-material*
       (ensure-semantic-instance
-       *torch-body-material* 'stone-material-kind
-       :name :torch-bronze :base-tone '(0.16 0.075 0.025)
-       :roughness 0.58 :relief :weathered-stone)
+       *torch-body-material* 'metal-material-kind
+       :name :torch-bronze :base-tone '(0.47 0.17 0.04)
+       :roughness 0.52 :metalness 0.88 :relief :forged-metal)
       *torch-flame-material*
       (ensure-semantic-instance
        *torch-flame-material* 'luminous-material-kind
@@ -191,7 +257,6 @@
 (defvar *foundation-stone-reading* nil)
 (defvar *crystal-reading* nil)
 (defvar *torch-body-reading* nil)
-(defvar *torch-flame-reading* nil)
 
 (setf *grass-reading*
       (ensure-semantic-instance
@@ -227,13 +292,8 @@
       *torch-body-reading*
       (ensure-semantic-instance
        *torch-body-reading* 'surface-reading :name :torch-bronze
-       :kind *torch-body-material* :tone '(0.16 0.075 0.025) :finish :forged
-       :frame *sanctuary-material-frame* :role :torch-body)
-      *torch-flame-reading*
-      (ensure-semantic-instance
-       *torch-flame-reading* 'surface-reading :name :torch-flame
-       :kind *torch-flame-material* :tone '(1.0 0.36 0.055) :finish :faceted
-       :frame *sanctuary-material-frame* :role :torch-flame))
+       :kind *torch-body-material* :tone '(0.47 0.17 0.04) :finish :forged
+       :frame *sanctuary-material-frame* :role :torch-body))
 
 (flet ((seed (placement &rest readings)
          (clrhash (material-placement-readings placement))
@@ -241,8 +301,8 @@
            (setf (gethash (surface-reading-role reading)
                           (material-placement-readings placement))
                  reading))))
-  ;; Seeding retains the first nine assembly identities as a rebuild oracle;
-  ;; any later placement receives the same semantic readings in its own frame.
+  ;; Built-in placements retain their inspectable readings across live rebuilds;
+  ;; later placements derive equivalent readings in their own authored frames.
   (seed *terrain-material-placement*
         *grass-reading* *soil-reading* *subsoil-reading*)
   (seed *highland-rock-material-placement*)
@@ -263,11 +323,150 @@
                            :frame (material-placement-frame placement)
                            :role role))))
 
+(defun authored-placement-role-reading (kind placement role tone)
+  "Intern ROLE from KIND using only PLACEMENT-authored appearance data."
+  (unless (eq kind (material-placement-kind placement))
+    (error "Material kind ~S does not own placement ~S."
+           (material-kind-name kind) (material-placement-name placement)))
+  (placement-surface-reading
+   placement role role tone (material-placement-finish placement)))
+
+(defgeneric material-role-surface-reading (kind placement role)
+  (:documentation
+   "Read one supported semantic ROLE from an authored material placement.
+
+This is the single cold derivation protocol shared by per-face interpretation
+and dense placement compilation.  It intentionally has no catchall method: a
+new material role must state its tone law instead of inheriting a built-in
+substance's literals."))
+
+(defmethod material-role-surface-reading
+    ((kind earth-material-kind) placement (role (eql :exposed-top)))
+  (authored-placement-role-reading
+   kind placement role (earth-material-kind-top-tone kind)))
+
+(defmethod material-role-surface-reading
+    ((kind earth-material-kind) placement (role (eql :exposed-side)))
+  (authored-placement-role-reading
+   kind placement role (earth-material-kind-side-tone kind)))
+
+(defmethod material-role-surface-reading
+    ((kind earth-material-kind) placement (role (eql :underside)))
+  (authored-placement-role-reading
+   kind placement role (earth-material-kind-underside-tone kind)))
+
+(defmethod material-role-surface-reading
+    ((kind stone-material-kind) placement (role (eql :natural-rock)))
+  (authored-placement-role-reading
+   kind placement role (material-kind-base-tone kind)))
+
+(defmethod material-role-surface-reading
+    ((kind stone-material-kind) placement (role (eql :architecture)))
+  (authored-placement-role-reading
+   kind placement role (material-kind-base-tone kind)))
+
+(defmethod material-role-surface-reading
+    ((kind stone-material-kind) placement (role (eql :foundation)))
+  (authored-placement-role-reading
+   kind placement role (material-kind-base-tone kind)))
+
+(defmethod material-role-surface-reading
+    ((kind crystal-material-kind) placement (role (eql :crystal)))
+  (authored-placement-role-reading
+   kind placement role (material-kind-base-tone kind)))
+
+(defvar *surface-reading-intern-table* (make-hash-table :test #'equalp))
+
+(defun surface-reading-semantic-key (reading)
+  "Return READING's complete stable cold-path identity."
+  (let* ((kind (surface-reading-kind reading))
+         (frame (surface-reading-frame reading)))
+    (list
+     (class-name (class-of kind))
+     (material-kind-name kind)
+     (material-kind-base-tone kind)
+     (material-kind-roughness kind)
+     (material-kind-metalness kind)
+     (material-kind-relief kind)
+     (material-kind-light-opacity kind)
+     (material-kind-light-emission kind)
+     (material-kind-surface-emission kind)
+     (material-kind-opacity kind)
+     (when (typep kind 'crystal-material-kind)
+       (list (crystal-material-index-of-refraction kind)
+             (crystal-material-dispersion kind)
+             (crystal-material-internal-scatter kind)
+             (crystal-material-chatoyancy kind)
+             (crystal-material-anisotropic-sharpness kind)
+             (crystal-material-adularescence kind)
+             (crystal-material-arris-lustre kind)))
+     (surface-reading-role reading)
+     (surface-reading-name reading)
+     (surface-reading-tone reading)
+     (surface-reading-finish reading)
+     (material-frame-name frame)
+     (material-frame-origin frame)
+     (material-frame-axes frame))))
+
+(defun canonical-surface-reading (reading)
+  "Intern semantically identical readings across scene rebuilds."
+  (check-type reading surface-reading)
+  (let ((key (surface-reading-semantic-key reading)))
+    (multiple-value-bind (canonical present-p)
+        (gethash key *surface-reading-intern-table*)
+      (if present-p
+          canonical
+          (setf (gethash key *surface-reading-intern-table*) reading)))))
+
+(defun canonical-surface-reading-or-nil (reading)
+  (and reading (canonical-surface-reading reading)))
+
+(defvar *surface-closure-summary-intern-table*
+  (make-hash-table :test #'equalp))
+
+(defun surface-closure-reading-order-key (reading)
+  "Return the deterministic ordering key used by canonical summary sets."
+  (prin1-to-string (surface-reading-semantic-key reading)))
+
+(defun canonical-surface-closure-readings (readings)
+  "Return READINGS as a sorted duplicate-free list of canonical readings."
+  (sort
+   (remove-duplicates
+    (mapcar #'canonical-surface-reading readings) :test #'eq)
+   #'string< :key #'surface-closure-reading-order-key))
+
+(defun intern-surface-closure-summary (readings)
+  "Intern the canonical set of actual incident READINGS."
+  (let* ((canonical (canonical-surface-closure-readings readings))
+         (key (mapcar #'surface-reading-semantic-key canonical)))
+    (unless canonical
+      (error "A surface closure summary cannot be empty."))
+    (multiple-value-bind (summary present-p)
+        (gethash key *surface-closure-summary-intern-table*)
+      (if present-p
+          summary
+          (setf (gethash key *surface-closure-summary-intern-table*)
+                (make-instance
+                 'surface-closure-summary
+                 :readings (coerce canonical 'simple-vector)))))))
+
+(defun join-surface-closure-summaries (left right)
+  "Return the canonical set union of closure summaries LEFT and RIGHT."
+  (intern-surface-closure-summary
+   (append (coerce (surface-closure-summary-readings left) 'list)
+           (coerce (surface-closure-summary-readings right) 'list))))
+
 (defun ensure-surface-assembly
-    (current name relation primary &key secondary tertiary kernel)
-  (ensure-semantic-instance
-   current 'surface-assembly :name name :relation relation :primary primary
-   :secondary secondary :tertiary tertiary :kernel kernel))
+    (current name relation primary
+     &key secondary tertiary kernel closure-readings)
+  (let ((primary (canonical-surface-reading primary)))
+    (ensure-semantic-instance
+     current 'surface-assembly :name name :relation relation
+     :primary primary
+     :secondary (canonical-surface-reading-or-nil secondary)
+     :tertiary (canonical-surface-reading-or-nil tertiary) :kernel kernel
+     :closure-summary
+     (intern-surface-closure-summary (or closure-readings (list primary))))))
 
 (defvar *grass-surface* nil)
 (defvar *soil-surface* nil)
@@ -280,7 +479,6 @@
 (defvar *foundation-stone-surface* nil)
 (defvar *crystal-surface* nil)
 (defvar *torch-body-surface* nil)
-(defvar *torch-flame-surface* nil)
 
 (setf *grass-surface*
       (ensure-surface-assembly *grass-surface* :grass :face *grass-reading*
@@ -297,27 +495,30 @@
       *turf-set-stone-surface*
       (ensure-surface-assembly
        *turf-set-stone-surface* :turf-set-limestone :contact *stone-reading*
-       :secondary *grass-reading* :tertiary *subsoil-reading*
-       :kernel :earth-set-stone)
+       :secondary *grass-reading*
+       :kernel :earth-set-stone
+       :closure-readings (list *stone-reading* *grass-reading*))
       *soil-set-stone-surface*
       (ensure-surface-assembly
        *soil-set-stone-surface* :soil-set-limestone :contact *stone-reading*
-       :secondary *soil-reading* :tertiary *subsoil-reading*
-       :kernel :earth-set-stone)
+       :secondary *soil-reading*
+       :kernel :earth-set-stone
+       :closure-readings (list *stone-reading* *soil-reading*))
       *deep-set-stone-surface*
       (ensure-surface-assembly
        *deep-set-stone-surface* :deep-set-limestone :contact *stone-reading*
-       :secondary *subsoil-reading* :tertiary *subsoil-reading*
-       :kernel :earth-set-stone)
+       :secondary *subsoil-reading*
+       :kernel :earth-set-stone
+       :closure-readings (list *stone-reading* *subsoil-reading*))
       *turf-edge-surface*
       (ensure-surface-assembly
        *turf-edge-surface* :turf-edge :contact *grass-reading*
-       :secondary *soil-reading* :kernel :turf-edge)
+       :secondary *soil-reading* :kernel :turf-edge
+       :closure-readings (list *grass-reading* *soil-reading*))
       *foundation-stone-surface*
       (ensure-surface-assembly
        *foundation-stone-surface* :foundation-limestone :face
-       *foundation-stone-reading* :secondary *soil-reading*
-       :tertiary *subsoil-reading* :kernel :foundation-stone)
+       *foundation-stone-reading* :kernel :foundation-stone)
       *crystal-surface*
       (ensure-surface-assembly
        *crystal-surface* :aether-crystal :face *crystal-reading*
@@ -325,11 +526,7 @@
       *torch-body-surface*
       (ensure-surface-assembly
        *torch-body-surface* :torch-bronze :attachment *torch-body-reading*
-       :kernel :torch-body)
-      *torch-flame-surface*
-      (ensure-surface-assembly
-       *torch-flame-surface* :torch-flame :attachment *torch-flame-reading*
-       :kernel :torch-flame))
+       :kernel :torch-body))
 
 (defparameter *surface-assembly-vocabulary*
   (domains:make-identity-vocabulary-domain
@@ -337,10 +534,9 @@
                   *stone-surface* *turf-set-stone-surface*
                   *soil-set-stone-surface* *deep-set-stone-surface*
                   *turf-edge-surface* *foundation-stone-surface*
-                  *crystal-surface* *torch-body-surface*
-                  *torch-flame-surface*)
+                  *crystal-surface* *torch-body-surface*)
    :limit #x1000)
-  "The assembly domain; its first nine offsets retain the legacy GPU oracle.")
+  "The renderer-global assembly ABI; scene programs close their own subsets.")
 
 (defun surface-assembly-offset (assembly)
   (domains:identity-vocabulary-offset *surface-assembly-vocabulary* assembly))
@@ -354,21 +550,47 @@
 
 (defclass material-bevel-profile ()
   ((terrain-width :initarg :terrain-width :initform 4
+                  :type (integer 1 4)
                   :reader material-bevel-profile-terrain-width)
    (architecture-width :initarg :architecture-width :initform 1
+                       :type (integer 1 4)
                        :reader material-bevel-profile-architecture-width)
    (crystal-width :initarg :crystal-width :initform 4
+                  :type (integer 1 4)
                   :reader material-bevel-profile-crystal-width)
    (contact-width :initarg :contact-width :initform 2
-                  :reader material-bevel-profile-contact-width))
+                  :type (integer 1 4)
+                  :reader material-bevel-profile-contact-width)
+   (terrain-architecture-width
+    :initarg :terrain-architecture-width :initform nil
+    :type (or null (integer 1 4))
+    :reader material-bevel-profile-terrain-architecture-width)
+   (terrain-crystal-width
+    :initarg :terrain-crystal-width :initform nil
+    :type (or null (integer 1 4))
+    :reader material-bevel-profile-terrain-crystal-width)
+   (architecture-crystal-width
+    :initarg :architecture-crystal-width :initform nil
+    :type (or null (integer 1 4))
+    :reader material-bevel-profile-architecture-crystal-width)
+   (three-way-width
+    :initarg :three-way-width :initform nil
+    :type (or null (integer 1 4))
+    :reader material-bevel-profile-three-way-width))
   (:documentation
    "A semantic assignment of LUFT integer bevel widths to material relations."))
 
 (defun make-material-bevel-profile
     (&key (terrain-width 4) (architecture-width 1) (crystal-width 4)
-          (contact-width 2))
+          (contact-width 2)
+          (terrain-architecture-width contact-width)
+          (terrain-crystal-width contact-width)
+          (architecture-crystal-width contact-width)
+          (three-way-width contact-width))
   (dolist (width (list terrain-width architecture-width crystal-width
-                       contact-width))
+                       contact-width terrain-architecture-width
+                       terrain-crystal-width architecture-crystal-width
+                       three-way-width))
     (unless (and (integerp width)
                  (<= 1 width (/ luft:+mesh-cell-size+ 2)))
       (error "Material bevel width ~S must be an integer between one and four ticks."
@@ -377,69 +599,124 @@
                  :terrain-width terrain-width
                  :architecture-width architecture-width
                  :crystal-width crystal-width
-                 :contact-width contact-width))
+                 :contact-width contact-width
+                 :terrain-architecture-width terrain-architecture-width
+                 :terrain-crystal-width terrain-crystal-width
+                 :architecture-crystal-width architecture-crystal-width
+                 :three-way-width three-way-width))
 
-(defun architecture-surface-reading-p (reading)
-  (member (surface-reading-role reading) '(:architecture :foundation)))
+(defun material-bevel-profile-mixed-width (profile width)
+  "Resolve an optional relation-specific WIDTH through CONTACT-WIDTH."
+  (or width (material-bevel-profile-contact-width profile)))
 
 (defun surface-assembly-readings (assembly)
-  (remove-duplicates
-   (remove nil (list (surface-assembly-primary assembly)
-                     (surface-assembly-secondary assembly)
-                     (surface-assembly-tertiary assembly)))
-   :test #'eq))
+  "Return the actual incident readings retained by ASSEMBLY's closure summary."
+  (coerce
+   (surface-closure-summary-readings
+    (surface-assembly-closure-summary assembly))
+   'list))
 
 (defconstant +material-bevel-terrain-mask+ #b01)
 (defconstant +material-bevel-architecture-mask+ #b10)
 (defconstant +material-bevel-crystal-mask+ #b100)
+(defconstant +material-bevel-terrain-architecture-mask+ #b011)
+(defconstant +material-bevel-terrain-crystal-mask+ #b101)
+(defconstant +material-bevel-architecture-crystal-mask+ #b110)
+(defconstant +material-bevel-three-way-mask+ #b111)
+(defconstant +material-bevel-non-meshed-mask+ #x80)
+
+(defgeneric material-bevel-family-mask (kind reading)
+  (:documentation
+   "Compile KIND and its semantic surface READING to one topology-family bit.
+
+This cold protocol deliberately distinguishes rendered attachments from mesh
+materials.  The positive NON-MESHED sentinel keeps dense policy lanes total
+without assigning an attachment a false terrain or architecture identity."))
+
+(defmethod material-bevel-family-mask
+    ((kind earth-material-kind) reading)
+  (declare (ignore kind))
+  (ecase (surface-reading-role reading)
+    ((:exposed-top :exposed-side :underside)
+     +material-bevel-terrain-mask+)))
+
+(defmethod material-bevel-family-mask
+    ((kind stone-material-kind) reading)
+  (declare (ignore kind))
+  (ecase (surface-reading-role reading)
+    ((:architecture :foundation) +material-bevel-architecture-mask+)
+    (:natural-rock +material-bevel-terrain-mask+)))
+
+(defmethod material-bevel-family-mask
+    ((kind crystal-material-kind) reading)
+  (declare (ignore kind))
+  (ecase (surface-reading-role reading)
+    (:crystal +material-bevel-crystal-mask+)))
+
+(defmethod material-bevel-family-mask
+    ((kind metal-material-kind) reading)
+  (declare (ignore kind))
+  (ecase (surface-reading-role reading)
+    (:torch-body +material-bevel-non-meshed-mask+)))
 
 (defun surface-reading-material-bevel-mask (reading)
-  (cond ((typep (surface-reading-kind reading) 'crystal-material-kind)
-         +material-bevel-crystal-mask+)
-        ((architecture-surface-reading-p reading)
-         +material-bevel-architecture-mask+)
-        (t +material-bevel-terrain-mask+)))
+  (material-bevel-family-mask (surface-reading-kind reading) reading))
 
 (defun surface-assembly-material-bevel-mask (assembly)
-  "Return the terrain/architecture bits represented by ASSEMBLY.
+  "Return the semantic material-family mask represented by ASSEMBLY.
 
-A face is owned by its primary authored reading.  Secondary soil readings on
-foundation faces describe weathering and therefore do not turn a homogeneous
-architectural site into a material contact.  Bands and junctions retain every
-incident reading, so their mask records a genuine mixed relation."
-  (if (eq :face (surface-assembly-relation assembly))
-      (surface-reading-material-bevel-mask
-       (surface-assembly-primary assembly))
-      (reduce #'logior (surface-assembly-readings assembly)
-              :key #'surface-reading-material-bevel-mask
-              :initial-value 0)))
+Descriptor secondary and tertiary readings may be shader-only context.  The
+closure summary is the authoritative set of participating material families."
+  (reduce #'logior (surface-assembly-readings assembly)
+          :key #'surface-reading-material-bevel-mask
+          :initial-value 0))
 
 (defgeneric material-bevel-width (profile assembly)
   (:documentation
-   "Return the integer LUFT bevel width assigned to semantic ASSEMBLY."))
+   "Return ASSEMBLY's LUFT bevel width, or zero for a non-meshed descriptor."))
 
 (defmethod material-bevel-width
     ((profile material-bevel-profile) (assembly surface-assembly))
   (let ((mask (surface-assembly-material-bevel-mask assembly)))
-    (cond ((= mask +material-bevel-terrain-mask+)
+    (cond ((= mask +material-bevel-non-meshed-mask+) 0)
+          ((= mask +material-bevel-terrain-mask+)
            (material-bevel-profile-terrain-width profile))
           ((= mask +material-bevel-architecture-mask+)
            (material-bevel-profile-architecture-width profile))
           ((= mask +material-bevel-crystal-mask+)
            (material-bevel-profile-crystal-width profile))
-          (t (material-bevel-profile-contact-width profile)))))
+          ((= mask +material-bevel-terrain-architecture-mask+)
+           (material-bevel-profile-mixed-width
+            profile
+            (material-bevel-profile-terrain-architecture-width profile)))
+          ((= mask +material-bevel-terrain-crystal-mask+)
+           (material-bevel-profile-mixed-width
+            profile (material-bevel-profile-terrain-crystal-width profile)))
+          ((= mask +material-bevel-architecture-crystal-mask+)
+           (material-bevel-profile-mixed-width
+            profile
+            (material-bevel-profile-architecture-crystal-width profile)))
+          ((= mask +material-bevel-three-way-mask+)
+           (material-bevel-profile-mixed-width
+            profile (material-bevel-profile-three-way-width profile)))
+          (t
+           (error "Material assembly ~S has invalid bevel mask ~3,'0B."
+                  assembly mask)))))
 
 (defun compile-material-bevel-profile
     (profile &optional (vocabulary *surface-assembly-vocabulary*))
-  "Compile PROFILE to one unsigned-byte width per packed assembly stock."
+  "Compile PROFILE to one byte per stock; zero denotes a non-meshed stock."
   (check-type profile material-bevel-profile)
   (let* ((members (domains:identity-vocabulary-members vocabulary))
          (widths (make-array (length members) :element-type '(unsigned-byte 8))))
     (loop for assembly across members
           for stock from 0
+          for mask = (surface-assembly-material-bevel-mask assembly)
           for width = (material-bevel-width profile assembly)
-          do (unless (and (integerp width)
-                          (<= 1 width (/ luft:+mesh-cell-size+ 2)))
+          do (unless (if (= mask +material-bevel-non-meshed-mask+)
+                         (eql width 0)
+                         (and (integerp width)
+                              (<= 1 width (/ luft:+mesh-cell-size+ 2))))
                (error "Material bevel policy assigned invalid width ~S to ~S."
                       width assembly))
              (setf (aref widths stock) width))
@@ -450,37 +727,66 @@ incident reading, so their mask records a genuine mixed relation."
   "Compile PROFILE into dense stock masks and site widths.
 
 The first value is one terrain/architecture/crystal bit mask per packed
-assembly stock.  The second is an eight-entry byte table indexed by the OR of
-every incident stock mask.  Pure sites select their semantic width; every
-mixed contact selects CONTACT-WIDTH."
+assembly stock.  Non-meshed renderer descriptors receive the named positive
+rejection sentinel, which preserves the paged byte compiler and necessarily
+indexes outside the second value if such a stock ever reaches topology.  The
+second value is an eight-entry byte table indexed by the OR of every valid
+incident stock mask.  Pure and mixed sites each select their semantic relation
+width; CONTACT-WIDTH is constructor shorthand for all four mixed relations."
   (check-type profile material-bevel-profile)
   ;; Compile the ordinary stock widths as the validation oracle.  In
   ;; particular, a profile made without MAKE-MATERIAL-BEVEL-PROFILE must not
   ;; smuggle an out-of-range width into the site table.
   (compile-material-bevel-profile profile vocabulary)
+  (dolist (width
+           (list
+            (material-bevel-profile-mixed-width
+             profile
+             (material-bevel-profile-terrain-architecture-width profile))
+            (material-bevel-profile-mixed-width
+             profile (material-bevel-profile-terrain-crystal-width profile))
+            (material-bevel-profile-mixed-width
+             profile
+             (material-bevel-profile-architecture-crystal-width profile))
+            (material-bevel-profile-mixed-width
+             profile (material-bevel-profile-three-way-width profile))))
+    (unless (and (integerp width)
+                 (<= 1 width (/ luft:+mesh-cell-size+ 2)))
+      (error "Material bevel policy assigned invalid mixed width ~S." width)))
   (let* ((members (domains:identity-vocabulary-members vocabulary))
          (stock-masks
            (make-array (length members) :element-type '(unsigned-byte 8)))
          (site-widths
-           (make-array 8 :element-type '(unsigned-byte 8)
-                         :initial-element
-                         (material-bevel-profile-contact-width profile))))
+           (make-array 8 :element-type '(unsigned-byte 8))))
     (setf (aref site-widths 0) 0
           (aref site-widths +material-bevel-terrain-mask+)
           (material-bevel-profile-terrain-width profile)
           (aref site-widths +material-bevel-architecture-mask+)
           (material-bevel-profile-architecture-width profile)
           (aref site-widths +material-bevel-crystal-mask+)
-          (material-bevel-profile-crystal-width profile))
+          (material-bevel-profile-crystal-width profile)
+          (aref site-widths +material-bevel-terrain-architecture-mask+)
+          (material-bevel-profile-mixed-width
+           profile
+           (material-bevel-profile-terrain-architecture-width profile))
+          (aref site-widths +material-bevel-terrain-crystal-mask+)
+          (material-bevel-profile-mixed-width
+           profile (material-bevel-profile-terrain-crystal-width profile))
+          (aref site-widths +material-bevel-architecture-crystal-mask+)
+          (material-bevel-profile-mixed-width
+           profile
+           (material-bevel-profile-architecture-crystal-width profile))
+          (aref site-widths +material-bevel-three-way-mask+)
+          (material-bevel-profile-mixed-width
+           profile (material-bevel-profile-three-way-width profile)))
     (loop for assembly across members
           for stock from 0
           do (setf (aref stock-masks stock)
                    (surface-assembly-material-bevel-mask assembly)))
     (values stock-masks site-widths)))
 
-;; The first nine vocabulary members are the stable renderer ABI.  The tests
-;; rebuild this exact prefix from the semantic objects, so these literals are
-;; available while this file itself is being compiled in a clean image.
+;; These named built-in offsets are a stable renderer ABI.  Material closure
+;; never classifies an assembly by this prefix or by a numeric stock range.
 (defconstant +grass-stock+ 0)
 (defconstant +soil-stock+ 1)
 (defconstant +subsoil-stock+ 2)
@@ -491,7 +797,7 @@ mixed contact selects CONTACT-WIDTH."
 (defconstant +turf-edge-stock+ 7)
 (defconstant +foundation-stone-stock+ 8)
 
-(defconstant +surface-assembly-descriptor-row-count+ 7)
+(defconstant +surface-assembly-descriptor-row-count+ 8)
 
 (defun surface-kernel-code (kernel)
   "Compile the intentionally closed shader-kernel ABI."
@@ -504,21 +810,22 @@ mixed contact selects CONTACT-WIDTH."
     (:turf-edge 2)
     (:foundation-stone 3)
     (:crystal 8)
-    (:torch-body 9)
-    (:torch-flame 10)))
+    (:torch-body 9)))
 
 (defun material-relief-code (relief)
   "Compile the closed procedural-relief ABI shared by all surface kernels."
   (ecase relief
     (:granular 1)
     (:weathered-stone 2)
-    (:crystal 3)))
+    (:crystal 3)
+    (:forged-metal 4)))
 
 (defun material-relief-amplitude (relief)
   (ecase relief
     (:granular 0.028)
     (:weathered-stone 0.020)
-    (:crystal 0.012)))
+    (:crystal 0.012)
+    (:forged-metal 0.010)))
 
 (defun surface-assembly-material-kind (assembly)
   (surface-reading-kind (surface-assembly-primary assembly)))
@@ -529,6 +836,9 @@ mixed contact selects CONTACT-WIDTH."
 (defun surface-assembly-surface-emission (assembly)
   (material-kind-surface-emission
    (surface-assembly-material-kind assembly)))
+
+(defun surface-assembly-metalness (assembly)
+  (material-kind-metalness (surface-assembly-material-kind assembly)))
 
 (defun surface-assembly-translucent-p (assembly)
   (< (surface-assembly-opacity assembly) 1.0))
@@ -546,13 +856,15 @@ mixed contact selects CONTACT-WIDTH."
     (&optional (vocabulary *surface-assembly-vocabulary*))
   "Compile VOCABULARY into fixed-stride float32 rows for direct GPU indexing.
 
-Each assembly owns seven vec4 rows: primary/kernel, secondary/contact variant,
-tertiary/roughness, then frame origin/relief profile and its three axes.  A
-crystal reuses otherwise redundant secondary and tertiary tone lanes for IOR,
-dispersion, scatter, chatoyancy, anisotropic sharpness, adularescence, and
-arris lustre; tertiary W remains roughness.  The X row carries relief
-amplitude, Y carries visual opacity, and Z carries HDR surface emission.
-Propagation loss and RGB source strength remain CPU-only material facts."
+Each assembly owns eight vec4 rows: primary/kernel, secondary/contact variant,
+tertiary/roughness, an explicit physical row, then frame origin/relief profile
+and its three axes.  Physical X is metalness; YZW are reserved and compile to
+zero.  A crystal reuses otherwise redundant secondary and tertiary tone lanes
+for IOR, dispersion, scatter, chatoyancy, anisotropic sharpness,
+adularescence, and arris lustre; tertiary W remains roughness.  The X axis row
+carries relief amplitude, Y carries visual opacity, and Z carries HDR surface
+emission.  Propagation loss and RGB source strength remain CPU-only material
+facts."
   (let* ((members (domains:identity-vocabulary-members vocabulary))
          (words
            (make-array (* (length members)
@@ -601,13 +913,16 @@ Propagation loss and RGB source strength remain CPU-only material facts."
                                (tone-of tertiary secondary)
                                (list (material-kind-roughness kind))))))
                (put-row (+ row 3)
+                        (list (surface-assembly-metalness assembly)
+                              0.0 0.0 0.0))
+               (put-row (+ row 4)
                         (append
                          (material-frame-origin frame)
                          (list (material-relief-code
                                 (material-kind-relief
                                  (surface-reading-kind primary))))))
                (loop for axis in (material-frame-axes frame)
-                     for axis-row from (+ row 4)
+                     for axis-row from (+ row 5)
                      for amplitude = (material-relief-amplitude
                                       (material-kind-relief
                                        (surface-reading-kind primary)))
@@ -616,8 +931,8 @@ Propagation loss and RGB source strength remain CPU-only material facts."
                          (append
                           axis
                           (list
-                           (cond ((= axis-row (+ row 4)) amplitude)
-                                 ((= axis-row (+ row 5))
+                           (cond ((= axis-row (+ row 5)) amplitude)
+                                 ((= axis-row (+ row 6))
                                   (surface-assembly-opacity assembly))
                                  (t
                                   (surface-assembly-surface-emission
@@ -637,154 +952,394 @@ Propagation loss and RGB source strength remain CPU-only material facts."
 
 (defmethod material-face-reading
     ((kind earth-material-kind) placement scene cell axis side)
-  (declare (ignore kind scene cell))
-  (cond ((not (eq axis :z))
-         (placement-surface-reading
-          placement :exposed-side :soil '(0.42 0.32 0.21) :cut))
-        ((eq side :backward)
-         (placement-surface-reading
-          placement :exposed-top :grass '(0.18 0.31 0.105) :living))
-        (t
-         (placement-surface-reading
-          placement :underside :subsoil '(0.24 0.18 0.13) :broken))))
+  (declare (ignore scene cell))
+  (material-role-surface-reading
+   kind placement
+   (cond ((not (eq axis :z)) :exposed-side)
+         ((eq side :backward) :exposed-top)
+         (t :underside))))
 
 (defmethod material-face-reading
     ((kind stone-material-kind) placement scene cell axis side)
-  (declare (ignore kind axis side))
-  (if (eq :terrain-rock (material-placement-role placement))
-      (placement-surface-reading
-       placement :natural-rock :highland-rock '(0.29 0.30 0.27) :weathered)
-      (if (scene-foundation-cell-p scene cell)
-          (placement-surface-reading
-           placement :foundation :foundation-limestone '(0.53 0.49 0.39)
-           :earth-weathered)
-          (placement-surface-reading
-           placement :architecture :dressed-limestone '(0.53 0.49 0.39)
-           :dressed))))
+  (declare (ignore axis side))
+  (material-role-surface-reading
+   kind placement
+   (cond ((eq :terrain-rock (material-placement-role placement))
+          :natural-rock)
+         ((scene-foundation-cell-p scene cell) :foundation)
+         (t :architecture))))
 
 (defmethod material-face-reading
     ((kind crystal-material-kind) placement scene cell axis side)
-  (declare (ignore kind scene cell axis side))
-  (placement-surface-reading
-   placement :crystal :aether-crystal '(0.16 0.68 0.94) :faceted))
+  (declare (ignore scene cell axis side))
+  (material-role-surface-reading kind placement :crystal))
 
 (defun find-surface-assembly
-    (relation primary secondary tertiary kernel)
+    (relation primary secondary tertiary kernel closure-summary)
   (find-if (lambda (assembly)
              (and (eq relation (surface-assembly-relation assembly))
                   (eq primary (surface-assembly-primary assembly))
                   (eq secondary (surface-assembly-secondary assembly))
                   (eq tertiary (surface-assembly-tertiary assembly))
-                  (eq kernel (surface-assembly-kernel assembly))))
+                  (eq kernel (surface-assembly-kernel assembly))
+                  (eq closure-summary
+                      (surface-assembly-closure-summary assembly))))
            (domains:identity-vocabulary-members
             *surface-assembly-vocabulary*)))
 
 (defun intern-surface-assembly
-    (relation primary &key secondary tertiary kernel name)
+    (relation primary
+     &key secondary tertiary kernel name closure-readings closure-summary)
   "Intern a small semantic assembly at mesh-compilation time."
-  (or (find-surface-assembly relation primary secondary tertiary kernel)
-      (let ((assembly
-              (make-instance
-               'surface-assembly :name (or name
-                                           (list relation
-                                                 (surface-reading-name primary)))
-               :relation relation :primary primary :secondary secondary
-               :tertiary tertiary :kernel kernel)))
-        (surface-assembly-offset assembly)
-        assembly)))
+  (let ((primary (canonical-surface-reading primary))
+        (secondary (canonical-surface-reading-or-nil secondary))
+        (tertiary (canonical-surface-reading-or-nil tertiary)))
+    (when (and closure-readings closure-summary)
+      (error "Specify closure readings or a closure summary, not both."))
+    (let ((closure-summary
+            (or closure-summary
+                (intern-surface-closure-summary
+                 (or closure-readings (list primary))))))
+      (or (find-surface-assembly
+           relation primary secondary tertiary kernel closure-summary)
+        (let ((assembly
+                (make-instance
+                 'surface-assembly
+                 :name (or name
+                           (list relation (surface-reading-name primary)))
+                 :relation relation :primary primary :secondary secondary
+                 :tertiary tertiary :kernel kernel
+                 :closure-summary closure-summary)))
+          (surface-assembly-offset assembly)
+          assembly)))))
+
+(defgeneric material-reading-surface-kernel (kind reading)
+  (:documentation
+   "Select the closed shader kernel for one canonical surface reading.
+
+This protocol runs only while compiling semantic material objects.  Methods
+are deliberately total only for supported material families and roles: a new
+reading must declare its rendering law here instead of silently becoming a
+stone face in the dense mesh ABI."))
+
+(defmethod material-reading-surface-kernel
+    ((kind earth-material-kind) reading)
+  (declare (ignore kind))
+  (ecase (surface-reading-role reading)
+    (:exposed-top :grass)
+    (:exposed-side :soil)
+    (:underside :subsoil)))
+
+(defmethod material-reading-surface-kernel
+    ((kind stone-material-kind) reading)
+  (declare (ignore kind))
+  (ecase (surface-reading-role reading)
+    ((:architecture :natural-rock) :stone)
+    (:foundation :foundation-stone)))
+
+(defmethod material-reading-surface-kernel
+    ((kind crystal-material-kind) reading)
+  (declare (ignore kind))
+  (ecase (surface-reading-role reading)
+    (:crystal :crystal)))
+
+(defmethod material-reading-surface-kernel
+    ((kind metal-material-kind) reading)
+  (declare (ignore kind))
+  (ecase (surface-reading-role reading)
+    (:torch-body :torch-body)))
 
 (defun face-reading-assembly (reading)
-  (cond ((eq reading *grass-reading*) *grass-surface*)
-        ((eq reading *soil-reading*) *soil-surface*)
-        ((eq reading *subsoil-reading*) *subsoil-surface*)
-        ((eq reading *stone-reading*) *stone-surface*)
-        ((eq reading *foundation-stone-reading*) *foundation-stone-surface*)
-        ((eq reading *crystal-reading*) *crystal-surface*)
-        ((eq reading *torch-body-reading*) *torch-body-surface*)
-        ((eq reading *torch-flame-reading*) *torch-flame-surface*)
-        (t
-         (intern-surface-assembly
-          :face reading
-          :secondary (and (eq (surface-reading-role reading) :foundation)
-                          *soil-reading*)
-          :tertiary (and (eq (surface-reading-role reading) :foundation)
-                         *subsoil-reading*)
-          :kernel (case (surface-reading-role reading)
-                    (:exposed-top :grass)
-                    (:exposed-side :soil)
-                    (:underside :subsoil)
-                    (:foundation :foundation-stone)
-                    (:crystal :crystal)
-                    (:torch-body :torch-body)
-                    (:torch-flame :torch-flame)
-                    (otherwise :stone))))))
+  (let ((reading (canonical-surface-reading reading)))
+    (cond ((eq reading *grass-reading*) *grass-surface*)
+          ((eq reading *soil-reading*) *soil-surface*)
+          ((eq reading *subsoil-reading*) *subsoil-surface*)
+          ((eq reading *stone-reading*) *stone-surface*)
+          ((eq reading *foundation-stone-reading*) *foundation-stone-surface*)
+          ((eq reading *crystal-reading*) *crystal-surface*)
+          ((eq reading *torch-body-reading*) *torch-body-surface*)
+          (t
+           (intern-surface-assembly
+            :face reading
+            :kernel
+            (material-reading-surface-kernel
+             (surface-reading-kind reading) reading)
+            :closure-readings (list reading))))))
 
 (defun stone-reading-p (reading)
   (typep (surface-reading-kind reading) 'stone-material-kind))
 
+(defun contact-reading-semantic-key (reading)
+  "Return a stable cold-path key for otherwise equivalent contact readings."
+  (prin1-to-string (surface-reading-semantic-key reading)))
+
+(defun higher-ranked-contact-reading (left right role-ranks)
+  "Choose one owner by semantic rank, independent of argument order."
+  (let ((left (canonical-surface-reading left))
+        (right (canonical-surface-reading right)))
+    (if (eq left right)
+        left
+        (let ((left-rank
+              (or (cdr (assoc (surface-reading-role left) role-ranks)) 0))
+            (right-rank
+              (or (cdr (assoc (surface-reading-role right) role-ranks)) 0)))
+          (cond ((> left-rank right-rank) left)
+                ((< left-rank right-rank) right)
+                (t
+                 (let ((left-key (contact-reading-semantic-key left))
+                       (right-key (contact-reading-semantic-key right)))
+                   (cond ((string< left-key right-key) left)
+                         ((string< right-key left-key) right)
+                         (t
+                          (error
+                           "Distinct contact readings ~S and ~S have the same semantic key."
+                           left right))))))))))
+
+(defun host-contact-surface-assembly (host guest &key closure-summary)
+  "Intern a contact rendered by HOST while retaining GUEST as context."
+  (if (eq host guest)
+      (face-reading-assembly host)
+      (intern-surface-assembly
+       :contact host :secondary guest
+       :kernel (surface-assembly-kernel (face-reading-assembly host))
+       :closure-summary
+       (or closure-summary
+           (intern-surface-closure-summary (list host guest))))))
+
+(defun earth-set-stone-contact-surface-assembly
+    (stone earth &key closure-summary)
+  "Intern a stone-owned contact weathered by an actual incident earth reading."
+  (intern-surface-assembly
+   :contact stone :secondary earth
+   :kernel :earth-set-stone
+   :closure-summary
+   (or closure-summary
+       (intern-surface-closure-summary (list stone earth)))))
+
+(defun surface-assembly-with-closure-summary (appearance summary)
+  "Return APPEARANCE with complete closure provenance SUMMARY."
+  (if (eq summary (surface-assembly-closure-summary appearance))
+      appearance
+      (intern-surface-assembly
+       (surface-assembly-relation appearance)
+       (surface-assembly-primary appearance)
+       :secondary (surface-assembly-secondary appearance)
+       :tertiary (surface-assembly-tertiary appearance)
+       :kernel (surface-assembly-kernel appearance)
+       :name (surface-assembly-name appearance)
+       :closure-summary summary)))
+
+(defgeneric material-contact-surface-assembly
+    (left-kind right-kind left-reading right-reading)
+  (:documentation
+   "Resolve an unordered semantic contact to an assembly whose primary owns it.
+
+Methods are intentionally defined only for supported material families.  The
+cold compiler calls both argument orders and requires the same interned result;
+there is no unknown-material fallback for the dense mesher to inherit."))
+
+(defmethod material-contact-surface-assembly
+    ((left-kind earth-material-kind) (right-kind earth-material-kind)
+     left right)
+  (declare (ignore left-kind right-kind))
+  (let* ((summary (intern-surface-closure-summary (list left right)))
+         (owner
+           (higher-ranked-contact-reading
+            left right '((:exposed-top . 3) (:exposed-side . 2)
+                         (:underside . 1))))
+         (guest (if (eq owner left) right left)))
+    (cond ((eq owner guest) (face-reading-assembly owner))
+          ((eq (surface-reading-role owner) :exposed-top)
+           (intern-surface-assembly
+            :contact owner :secondary guest :kernel :turf-edge
+            :closure-summary summary))
+          (t
+           (surface-assembly-with-closure-summary
+            (face-reading-assembly owner) summary)))))
+
+(defmethod material-contact-surface-assembly
+    ((left-kind stone-material-kind) (right-kind stone-material-kind)
+     left right)
+  (declare (ignore left-kind right-kind))
+  (surface-assembly-with-closure-summary
+   (face-reading-assembly
+    (higher-ranked-contact-reading
+     left right '((:architecture . 4) (:foundation . 3)
+                  (:natural-rock . 2) (:torch-body . 1))))
+   (intern-surface-closure-summary (list left right))))
+
+(defmethod material-contact-surface-assembly
+    ((left-kind luminous-material-kind) (right-kind luminous-material-kind)
+     left right)
+  (declare (ignore left-kind right-kind))
+  (surface-assembly-with-closure-summary
+   (face-reading-assembly
+    (higher-ranked-contact-reading left right '((:crystal . 1))))
+   (intern-surface-closure-summary (list left right))))
+
+(defmethod material-contact-surface-assembly
+    ((left-kind earth-material-kind) (right-kind stone-material-kind)
+     earth stone)
+  (declare (ignore left-kind right-kind))
+  (earth-set-stone-contact-surface-assembly stone earth))
+
+(defmethod material-contact-surface-assembly
+    ((left-kind stone-material-kind) (right-kind earth-material-kind)
+     stone earth)
+  (declare (ignore left-kind right-kind))
+  (earth-set-stone-contact-surface-assembly stone earth))
+
+(defmethod material-contact-surface-assembly
+    ((left-kind earth-material-kind) (right-kind luminous-material-kind)
+     earth luminous)
+  (declare (ignore left-kind right-kind))
+  (host-contact-surface-assembly earth luminous))
+
+(defmethod material-contact-surface-assembly
+    ((left-kind luminous-material-kind) (right-kind earth-material-kind)
+     luminous earth)
+  (declare (ignore left-kind right-kind))
+  (host-contact-surface-assembly earth luminous))
+
+(defmethod material-contact-surface-assembly
+    ((left-kind stone-material-kind) (right-kind luminous-material-kind)
+     stone luminous)
+  (declare (ignore left-kind right-kind))
+  (host-contact-surface-assembly stone luminous))
+
+(defmethod material-contact-surface-assembly
+    ((left-kind luminous-material-kind) (right-kind stone-material-kind)
+     luminous stone)
+  (declare (ignore left-kind right-kind))
+  (host-contact-surface-assembly stone luminous))
+
+(defun reading-contact-surface-assembly (left right)
+  "Resolve one reading pair through the cold semantic contact protocol."
+  (material-contact-surface-assembly
+   (surface-reading-kind left) (surface-reading-kind right) left right))
+
 (defun chamfer-surface-assembly (readings)
-  "Resolve incident face READINGS as one current-width surface assembly."
-  (labels ((role-reading (role)
-             (find role readings :key #'surface-reading-role))
-           (stone-reading () (find-if #'stone-reading-p readings))
-           (earth-set (earth)
-             (let ((stone (stone-reading)))
-               (intern-surface-assembly
-                :contact stone :secondary earth :tertiary *subsoil-reading*
-                :kernel :earth-set-stone))))
-    (cond ((and (stone-reading) (role-reading :underside))
-           (earth-set (role-reading :underside)))
-          ((and (stone-reading) (role-reading :exposed-side))
-           (earth-set (role-reading :exposed-side)))
-          ((and (stone-reading) (role-reading :exposed-top))
-           (earth-set (role-reading :exposed-top)))
-          ((every (lambda (reading) (eq reading (first readings)))
-                  (rest readings))
-           (face-reading-assembly (first readings)))
-          ((stone-reading) (face-reading-assembly (stone-reading)))
-          ((and (role-reading :exposed-top)
-                (or (role-reading :exposed-side)
-                    (role-reading :underside)))
-           *turf-edge-surface*)
-          (t *soil-surface*))))
+  "Resolve actual incident READINGS through one canonical closure summary."
+  (surface-closure-summary-assembly
+   (intern-surface-closure-summary readings)))
+
+(defun highest-ranked-summary-reading (readings role-ranks)
+  "Choose one deterministic reading from READINGS using ROLE-RANKS."
+  (reduce (lambda (left right)
+            (higher-ranked-contact-reading left right role-ranks))
+          readings))
+
+(defun surface-closure-host-reading (summary)
+  "Choose the appearance owner for SUMMARY through the contact protocol."
+  (let ((readings
+          (coerce (surface-closure-summary-readings summary) 'list)))
+    (reduce
+     (lambda (left right)
+       (surface-assembly-primary
+        (reading-contact-surface-assembly left right)))
+     readings)))
+
+(defgeneric material-closure-surface-assembly (host-kind host summary)
+  (:documentation
+   "Select one renderer appearance for complete incident SUMMARY.
+
+This is a cold semantic protocol.  The material program invokes it while
+closing its finite summary algebra; meshing consumes only the resulting dense
+stock tables."))
+
+(defmethod material-closure-surface-assembly
+    ((host-kind earth-material-kind) host summary)
+  (declare (ignore host-kind))
+  (let* ((readings
+           (coerce (surface-closure-summary-readings summary) 'list))
+         (luminous
+           (remove-if-not
+            (lambda (reading)
+              (typep (surface-reading-kind reading)
+                     'luminous-material-kind))
+            readings))
+         (earth
+           (remove-if-not
+            (lambda (reading)
+              (typep (surface-reading-kind reading) 'earth-material-kind))
+            readings))
+         (appearance
+           (cond
+             ;; A luminous guest remains explicit material context; it never
+             ;; degrades to the soil fallback once a fan joins derived bands.
+             (luminous
+              (host-contact-surface-assembly
+               host
+               (highest-ranked-summary-reading
+                luminous '((:crystal . 1)))))
+             ;; Living earth edges retain the strongest non-top earth reading
+             ;; as appearance context.  The full set remains in SUMMARY.
+             ((and (eq :exposed-top (surface-reading-role host))
+                   (> (length earth) 1))
+              (reading-contact-surface-assembly
+               host
+               (highest-ranked-summary-reading
+                (remove host earth :test #'eq)
+                '((:exposed-side . 2) (:underside . 1)))))
+             (t (face-reading-assembly host)))))
+    (surface-assembly-with-closure-summary appearance summary)))
+
+(defmethod material-closure-surface-assembly
+    ((host-kind stone-material-kind) host summary)
+  (declare (ignore host-kind))
+  (let* ((readings
+           (coerce (surface-closure-summary-readings summary) 'list))
+         (earth
+           (remove-if-not
+            (lambda (reading)
+              (typep (surface-reading-kind reading) 'earth-material-kind))
+            readings))
+         (luminous
+           (remove-if-not
+            (lambda (reading)
+              (typep (surface-reading-kind reading)
+                     'luminous-material-kind))
+            readings))
+         (appearance
+           (cond
+             ;; A luminous guest is the visible bezel context at a three-way
+             ;; closure too; the complete summary still retains earth for any
+             ;; later join.  Stone remains the host in the descriptor.
+             (luminous
+              (host-contact-surface-assembly
+               host
+               (highest-ranked-summary-reading
+                luminous '((:crystal . 1)))))
+             ;; Stone weathering is governed by the deepest earth surface
+             ;; which was actually incident, never by descriptor tertiary.
+             (earth
+              (earth-set-stone-contact-surface-assembly
+               host
+               (highest-ranked-summary-reading
+                earth '((:underside . 3) (:exposed-side . 2)
+                        (:exposed-top . 1)))))
+             (t (face-reading-assembly host)))))
+    (surface-assembly-with-closure-summary appearance summary)))
+
+(defmethod material-closure-surface-assembly
+    ((host-kind luminous-material-kind) host summary)
+  (declare (ignore host-kind))
+  (surface-assembly-with-closure-summary
+   (face-reading-assembly host) summary))
+
+(defun surface-closure-summary-assembly (summary)
+  "Select and intern the appearance stock for canonical SUMMARY."
+  (let ((host (surface-closure-host-reading summary)))
+    (material-closure-surface-assembly
+     (surface-reading-kind host) host summary)))
 
 (defun closure-surface-assembly (assemblies)
-  "Resolve an edge or fan closure without erasing incident assembly identity.
-
-Fan construction may present assemblies already derived for surrounding bands;
-those are not interchangeable with their primary face readings. This resolver
-therefore preserves the legacy recursive decision exactly while expressing it
-in semantic identities rather than numeric ranges."
-  (flet ((stone-face-p (assembly)
-           (member assembly (list *stone-surface*
-                                  *foundation-stone-surface*))))
-    (if (every (lambda (assembly)
-                 (member assembly
-                         (list *grass-surface* *soil-surface* *subsoil-surface*
-                               *stone-surface* *turf-set-stone-surface*
-                               *soil-set-stone-surface* *deep-set-stone-surface*
-                               *turf-edge-surface* *foundation-stone-surface*)))
-               assemblies)
-        (cond ((and (some #'stone-face-p assemblies)
-                    (member *subsoil-surface* assemblies))
-               *deep-set-stone-surface*)
-              ((and (some #'stone-face-p assemblies)
-                    (member *soil-surface* assemblies))
-               *soil-set-stone-surface*)
-              ((and (some #'stone-face-p assemblies)
-                    (member *grass-surface* assemblies))
-               *turf-set-stone-surface*)
-              ((every (lambda (assembly) (eq assembly (first assemblies)))
-                      (rest assemblies))
-               (first assemblies))
-              ((some #'stone-face-p assemblies) *stone-surface*)
-              ((and (member *grass-surface* assemblies)
-                    (or (member *soil-surface* assemblies)
-                        (member *subsoil-surface* assemblies)))
-               *turf-edge-surface*)
-              (t *soil-surface*))
-        (chamfer-surface-assembly
-         (mapcar #'surface-assembly-primary assemblies)))))
+  "Join face or derived band ASSEMBLIES without losing incident provenance."
+  (unless assemblies
+    (error "A surface closure must have at least one incident assembly."))
+  (surface-closure-summary-assembly
+   (reduce #'join-surface-closure-summaries assemblies
+           :key #'surface-assembly-closure-summary)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Scene material compilation
@@ -793,37 +1348,27 @@ in semantic identities rather than numeric ranges."
 (defconstant +material-placement-architecture-flag+ #x01)
 (defconstant +material-placement-earth-flag+ #x02)
 
-(defconstant +assembly-legacy-flag+ #x01)
-(defconstant +assembly-legacy-stone-flag+ #x02)
-(defconstant +assembly-legacy-grass-flag+ #x04)
-(defconstant +assembly-legacy-soil-flag+ #x08)
-(defconstant +assembly-legacy-subsoil-flag+ #x10)
-
-(defconstant +assembly-primary-stone-flag+ #x01)
-(defconstant +assembly-primary-grass-flag+ #x02)
-(defconstant +assembly-primary-soil-flag+ #x04)
-(defconstant +assembly-primary-subsoil-flag+ #x08)
+(defconstant +material-program-no-summary+ #xffff)
 
 (defclass material-program ()
   ((placement-face-stocks :initarg :placement-face-stocks
                           :reader material-program-placement-face-stocks)
    (placement-flags :initarg :placement-flags
                     :reader material-program-placement-flags)
-   (assembly-flags :initarg :assembly-flags
-                   :reader material-program-assembly-flags)
-   (assembly-primary-flags :initarg :assembly-primary-flags
-                           :reader material-program-assembly-primary-flags)
-   (assembly-primary-reading-offsets
-    :initarg :assembly-primary-reading-offsets
-    :reader material-program-assembly-primary-reading-offsets)
-   (assembly-face-stocks :initarg :assembly-face-stocks
-                         :reader material-program-assembly-face-stocks)
-   (reading-contact-stocks :initarg :reading-contact-stocks
-                           :reader material-program-reading-contact-stocks)
-   (reading-count :initarg :reading-count
-                  :reader material-program-reading-count))
+   (assembly-summary-masks
+    :initarg :assembly-summary-masks
+    :reader material-program-assembly-summary-masks)
+   (summary-stocks :initarg :summary-stocks
+                   :reader material-program-summary-stocks)
+   (summary-count :initarg :summary-count
+                  :reader material-program-summary-count))
   (:documentation
-   "Scene-closed dense decisions consumed by face, band, and fan meshing."))
+   "Scene-closed dense decisions consumed by face, band, and fan meshing.
+
+ASSEMBLY-SUMMARY-MASKS recovers provenance from any reachable input or
+derived stock.  Bitwise OR is the finite associative, commutative, idempotent
+set-union algebra; SUMMARY-STOCKS lowers each nonzero joined mask back to its
+fully interned appearance assembly."))
 
 (defgeneric compile-material-placement (kind placement)
   (:documentation
@@ -834,44 +1379,37 @@ in semantic identities rather than numeric ranges."
 
 (defmethod compile-material-placement
     ((kind earth-material-kind) placement)
-  (declare (ignore kind))
   (incf *material-placement-compilation-count*)
-  (let ((side (placement-surface-reading
-               placement :exposed-side :soil '(0.42 0.32 0.21) :cut))
-        (top (placement-surface-reading
-              placement :exposed-top :grass '(0.18 0.31 0.105) :living))
-        (underside (placement-surface-reading
-                    placement :underside :subsoil '(0.24 0.18 0.13) :broken)))
+  (let ((side (material-role-surface-reading
+               kind placement :exposed-side))
+        (top (material-role-surface-reading
+              kind placement :exposed-top))
+        (underside (material-role-surface-reading
+                    kind placement :underside)))
     (vector side side side side top underside nil)))
 
 (defmethod compile-material-placement
     ((kind stone-material-kind) placement)
-  (declare (ignore kind))
   (incf *material-placement-compilation-count*)
   (if (eq :terrain-rock (material-placement-role placement))
       (let ((rock
-              (placement-surface-reading
-               placement :natural-rock :highland-rock '(0.29 0.30 0.27)
-               :weathered)))
+              (material-role-surface-reading
+               kind placement :natural-rock)))
         (vector rock rock rock rock rock rock nil))
       (let ((architecture
-              (placement-surface-reading
-               placement :architecture :dressed-limestone '(0.53 0.49 0.39)
-               :dressed))
+              (material-role-surface-reading
+               kind placement :architecture))
             (foundation
-              (placement-surface-reading
-               placement :foundation :foundation-limestone '(0.53 0.49 0.39)
-               :earth-weathered)))
+              (material-role-surface-reading
+               kind placement :foundation)))
         (vector architecture architecture architecture architecture
                 architecture architecture foundation))))
 
 (defmethod compile-material-placement
     ((kind crystal-material-kind) placement)
-  (declare (ignore kind))
   (incf *material-placement-compilation-count*)
   (let ((crystal
-          (placement-surface-reading
-           placement :crystal :aether-crystal '(0.16 0.68 0.94) :faceted)))
+          (material-role-surface-reading kind placement :crystal)))
     (vector crystal crystal crystal crystal crystal crystal nil)))
 
 (defun compile-material-light-opacity-table (placement-vocabulary)
@@ -889,22 +1427,6 @@ in semantic identities rather than numeric ranges."
                       (material-placement-name placement) opacity))
              (setf (aref opacities index) opacity))
     opacities))
-
-(defun compile-material-render-class-table (placement-vocabulary)
-  "Compile authored placements to dense opaque/translucent phase bytes."
-  (let* ((placements
-           (domains:identity-vocabulary-members placement-vocabulary))
-         (classes
-           (make-array (length placements) :element-type '(unsigned-byte 8))))
-    (loop for placement across placements
-          for index from 0
-          do (setf (aref classes index)
-                   (if (< (material-kind-opacity
-                           (material-placement-kind placement))
-                          1.0)
-                       1
-                       0)))
-    classes))
 
 (defun material-kind-packed-light-emission (kind)
   (destructuring-bind (red green blue) (material-kind-light-emission kind)
@@ -926,35 +1448,135 @@ in semantic identities rather than numeric ranges."
      material-cells)
     sources))
 
-(defun legacy-surface-assembly-p (assembly)
-  (member assembly
-          (list *grass-surface* *soil-surface* *subsoil-surface*
-                *stone-surface* *turf-set-stone-surface*
-                *soil-set-stone-surface* *deep-set-stone-surface*
-                *turf-edge-surface* *foundation-stone-surface*)))
+(defun compile-material-closure-automaton (seed-assemblies)
+  "Close SEED-ASSEMBLIES under semantic summary union and compile dense lanes.
 
-(defun ensure-reading-closure-assemblies (reading)
-  "Intern the face result that the dense resolver may select for READING."
-  (face-reading-assembly reading))
+Only assemblies reachable from this material program participate.  Unrelated
+assemblies retained by the renderer-global ABI cannot enlarge the automaton."
+  (let ((seed-by-reading (make-hash-table :test #'eq))
+        (readings nil))
+    (dolist (assembly seed-assemblies)
+      (let* ((summary (surface-assembly-closure-summary assembly))
+             (members (surface-closure-summary-readings summary)))
+        (unless (= 1 (length members))
+          (error "Material closure seed ~S is not a face singleton."
+                 assembly))
+        (let ((reading (aref members 0)))
+          (pushnew reading readings :test #'eq)
+          (setf (gethash reading seed-by-reading) assembly))))
+    (setf readings
+          (sort readings #'string< :key #'surface-closure-reading-order-key))
+    (unless readings
+      (error "A material program must expose at least one face assembly."))
+    (let* ((reading-count (length readings))
+           (summary-count (1- (ash 1 reading-count))))
+      (when (>= summary-count #x1000)
+        (error
+         "~D face readings require ~D closure stocks, exceeding the 12-bit ABI."
+         reading-count summary-count))
+      (let* ((global-count
+               (length
+                (domains:identity-vocabulary-members
+                 *surface-assembly-vocabulary*)))
+             (new-stock-upper-bound (- summary-count reading-count)))
+        (when (> (+ global-count new-stock-upper-bound) #x1000)
+          (error
+           "Closing ~D face readings may require ~D new stocks, but only ~D renderer ABI slots remain."
+           reading-count new-stock-upper-bound (- #x1000 global-count))))
+      (let ((summaries (make-array summary-count))
+            (assemblies (make-array summary-count)))
+        ;; Offset M-1 denotes exactly the nonempty seed-reading bit set M.
+        ;; Enumerating each set once avoids a pairwise fixed-point interning
+        ;; pass while preserving the inspectable canonical summary objects.
+        (loop for mask from 1 to summary-count
+              for offset from 0
+              for members =
+                (loop for reading in readings
+                      for bit from 0
+                      when (logbitp bit mask) collect reading)
+              for summary = (intern-surface-closure-summary members)
+              for assembly =
+                (if (= 1 (logcount mask))
+                    (or (gethash (first members) seed-by-reading)
+                        (error "Material closure lost singleton seed ~S."
+                               (first members)))
+                    (surface-closure-summary-assembly summary))
+              do (unless (eq summary
+                              (surface-assembly-closure-summary assembly))
+                   (error "Closure appearance ~S did not retain its summary."
+                          assembly))
+                 (setf (aref summaries offset) summary
+                       (aref assemblies offset) assembly))
+        (let* ((maximum-stock
+                 (loop for assembly across assemblies
+                       maximize (surface-assembly-offset assembly)))
+               (stock-summary-masks
+                 (make-array (1+ maximum-stock)
+                             :element-type '(unsigned-byte 16)
+                             :initial-element +material-program-no-summary+))
+               (summary-stocks
+                 (make-array (1+ summary-count)
+                             :element-type '(unsigned-byte 16))))
+          (loop for summary across summaries
+                for assembly across assemblies
+                for summary-mask from 1
+                for stock = (surface-assembly-offset assembly)
+                do (unless (= +material-program-no-summary+
+                              (aref stock-summary-masks stock))
+                     (error
+                      "Assembly stock ~D represents more than one closure summary."
+                      stock))
+                   (setf (aref stock-summary-masks stock) summary-mask
+                         (aref summary-stocks summary-mask) stock)
+                   (unless (eq summary
+                               (surface-assembly-closure-summary
+                                (surface-assembly-at stock)))
+                     (error
+                      "Assembly stock ~D does not round-trip its closure summary."
+                      stock)))
+          ;; A nonzero summary mask is the actual seed-reading set.  LOGIOR in
+          ;; the hot resolver is therefore the concrete ACI join, without a
+          ;; redundant quadratic table.
+          (values
+           stock-summary-masks summary-stocks summary-count))))))
 
-(defun earth-contact-reading-p (reading)
-  (and (typep (surface-reading-kind reading) 'earth-material-kind)
-       (member (surface-reading-role reading)
-               '(:exposed-top :exposed-side :underside))))
+(defun make-material-program
+    (placement-vocabulary
+     &key (active-placement-offsets nil active-placement-offsets-supplied-p))
+  "Bind semantic placement and assembly meaning once into dense stock tables.
 
-(defun make-material-program (placement-vocabulary)
-  "Bind semantic placement and assembly meaning once into dense stock tables."
+ACTIVE-PLACEMENT-OFFSETS, when supplied, is a duplicate-free scene-local set
+of authored placements which can actually reach meshing.  Every placement
+still receives its face rows, but unrelated vocabulary members do not enlarge
+the closure automaton.  An explicitly empty set uses placement zero as an
+inert, callable empty-scene fallback.  Omitting the keyword retains the
+all-members inspection/test convention."
   (let* ((placements
            (domains:identity-vocabulary-members placement-vocabulary))
          (placement-count (length placements))
+         (active-placements
+           (when active-placement-offsets-supplied-p
+             (unless (plusp placement-count)
+               (error "A material program requires a nonempty placement vocabulary."))
+             (let ((active (make-hash-table :test #'eql)))
+               (dolist (offset (or active-placement-offsets (list 0)) active)
+                 (unless (and (integerp offset)
+                              (<= 0 offset) (< offset placement-count))
+                   (error "Active material placement offset ~S is outside 0..~D."
+                          offset (1- placement-count)))
+                 (when (gethash offset active)
+                   (error "Duplicate active material placement offset ~D."
+                          offset))
+                 (setf (gethash offset active) t)))))
          (placement-readings (make-array placement-count))
          (placement-face-stocks
            (make-array (* placement-count +material-placement-face-stride+)
                        :element-type '(unsigned-byte 16)))
          (placement-flags
            (make-array placement-count :element-type '(unsigned-byte 8)
-                                       :initial-element 0)))
-    ;; This is the only material-kind generic dispatch in scene compilation.
+                                       :initial-element 0))
+         (seed-assemblies nil))
+    ;; Placement dispatch happens once here, never in dense meshing.
     (loop for placement across placements
           for placement-offset from 0
           for readings = (compile-material-placement
@@ -970,199 +1592,58 @@ in semantic identities rather than numeric ranges."
                      (logior (aref placement-flags placement-offset)
                              +material-placement-earth-flag+)))
              (loop for reading across readings
-                   when reading do (ensure-reading-closure-assemblies reading)))
-    ;; A previous scene may have extended the renderer-global assembly ABI.
-    ;; Close those primaries too before fixing this program's array bounds.
-    (loop for assembly across
-          (copy-seq
-           (domains:identity-vocabulary-members *surface-assembly-vocabulary*))
-          do (ensure-reading-closure-assemblies
-              (surface-assembly-primary assembly)))
-    ;; Intern the cross-product of authored stone and earth readings once.  A
-    ;; contact then retains both placements' tone and frame without a hot hash.
-    (let ((primary-readings
-            (make-array 16 :adjustable t :fill-pointer 0))
-          (primary-reading-offsets (make-hash-table :test #'eq)))
-      (loop for assembly across
-            (domains:identity-vocabulary-members
-             *surface-assembly-vocabulary*)
-            for reading = (surface-assembly-primary assembly)
-            unless (gethash reading primary-reading-offsets) do
-              (setf (gethash reading primary-reading-offsets)
-                    (length primary-readings))
-              (vector-push-extend reading primary-readings))
-      (loop for stone across primary-readings
-            when (stone-reading-p stone) do
-              (loop for earth across primary-readings
-                    when (earth-contact-reading-p earth) do
-                      (chamfer-surface-assembly (list stone earth))))
-      ;; All assembly interning is complete before the arrays receive their size.
-      (let* ((assemblies
-               (domains:identity-vocabulary-members
-                *surface-assembly-vocabulary*))
-             (assembly-count (length assemblies))
-             (reading-count (length primary-readings))
-             (assembly-flags
-               (make-array assembly-count :element-type '(unsigned-byte 8)
-                                          :initial-element 0))
-             (primary-flags
-               (make-array assembly-count :element-type '(unsigned-byte 8)
-                                          :initial-element 0))
-             (assembly-reading-offsets
-               (make-array assembly-count :element-type '(unsigned-byte 16)))
-             (face-stocks
-               (make-array assembly-count :element-type '(unsigned-byte 16)))
-             (reading-contacts
-               (make-array (* reading-count reading-count)
-                           :element-type '(unsigned-byte 16)
-                           :initial-element +soil-stock+)))
-        (loop for readings across placement-readings
-              for placement-offset from 0
-              do (loop for reading across readings
-                       for face from 0
-                       when reading do
-                         (setf (aref placement-face-stocks
-                                     (+ (* placement-offset
-                                           +material-placement-face-stride+)
-                                        face))
-                               (surface-assembly-offset
-                                (face-reading-assembly reading)))))
-        (loop for assembly across assemblies
-              for stock from 0
-              for primary = (surface-assembly-primary assembly)
-              for role = (surface-reading-role primary)
-              for stone-p = (stone-reading-p primary)
-              do (setf (aref assembly-reading-offsets stock)
-                       (gethash primary primary-reading-offsets)
-                       (aref face-stocks stock)
-                       (surface-assembly-offset
-                        (face-reading-assembly primary)))
-                 (when (legacy-surface-assembly-p assembly)
-                   (setf (aref assembly-flags stock)
-                         (logior +assembly-legacy-flag+
-                                 (cond
-                                   ((member assembly
-                                            (list *stone-surface*
-                                                  *foundation-stone-surface*))
-                                    +assembly-legacy-stone-flag+)
-                                   ((eq assembly *grass-surface*)
-                                    +assembly-legacy-grass-flag+)
-                                   ((eq assembly *soil-surface*)
-                                    +assembly-legacy-soil-flag+)
-                                   ((eq assembly *subsoil-surface*)
-                                    +assembly-legacy-subsoil-flag+)
-                                   (t 0)))))
-                 (setf (aref primary-flags stock)
-                       (cond (stone-p +assembly-primary-stone-flag+)
-                             ((eq role :exposed-top)
-                              +assembly-primary-grass-flag+)
-                             ((eq role :exposed-side)
-                              +assembly-primary-soil-flag+)
-                             ((eq role :underside)
-                              +assembly-primary-subsoil-flag+)
-                             (t 0))))
-        (loop for stone across primary-readings
-              for stone-offset from 0
-              when (stone-reading-p stone) do
-                (loop for earth across primary-readings
-                      for earth-offset from 0
-                      when (earth-contact-reading-p earth) do
-                        (setf (aref reading-contacts
-                                    (+ (* stone-offset reading-count)
-                                       earth-offset))
-                              (surface-assembly-offset
-                               (chamfer-surface-assembly
-                                (list stone earth))))))
-        (make-instance
-         'material-program
-         :placement-face-stocks placement-face-stocks
-         :placement-flags placement-flags
-         :assembly-flags assembly-flags
-         :assembly-primary-flags primary-flags
-         :assembly-primary-reading-offsets assembly-reading-offsets
-         :assembly-face-stocks face-stocks
-         :reading-contact-stocks reading-contacts
-         :reading-count reading-count)))))
+                   for face from 0
+                   when reading do
+                     (let ((assembly (face-reading-assembly reading)))
+                       (setf (aref placement-face-stocks
+                                   (+ (* placement-offset
+                                         +material-placement-face-stride+)
+                                      face))
+                             (surface-assembly-offset assembly))
+                       (when (or (null active-placements)
+                                 (gethash placement-offset active-placements))
+                         (pushnew assembly seed-assemblies :test #'eq)))))
+    (multiple-value-bind (assembly-summary-masks summary-stocks summary-count)
+        (compile-material-closure-automaton seed-assemblies)
+      (make-instance
+       'material-program
+       :placement-face-stocks placement-face-stocks
+       :placement-flags placement-flags
+       :assembly-summary-masks assembly-summary-masks
+       :summary-stocks summary-stocks
+       :summary-count summary-count))))
 
 (defun make-compiled-material-chamfer-stock-function (program)
   "Capture PROGRAM's dense lanes as one dispatch-free chamfer resolver."
-  (let ((assembly-flags
-          (the (simple-array (unsigned-byte 8) (*))
-               (material-program-assembly-flags program)))
-        (primary-flags
-          (the (simple-array (unsigned-byte 8) (*))
-               (material-program-assembly-primary-flags program)))
-        (face-stocks
+  (let ((assembly-summary-masks
           (the (simple-array (unsigned-byte 16) (*))
-               (material-program-assembly-face-stocks program)))
-        (reading-offsets
+               (material-program-assembly-summary-masks program)))
+        (summary-stocks
           (the (simple-array (unsigned-byte 16) (*))
-               (material-program-assembly-primary-reading-offsets program)))
-        (reading-contacts
-          (the (simple-array (unsigned-byte 16) (*))
-               (material-program-reading-contact-stocks program)))
-        (reading-count
-          (the (integer 0 #x1000)
-               (material-program-reading-count program))))
+               (material-program-summary-stocks program)))
+        (summary-count
+          (the (integer 1 #xffff)
+               (material-program-summary-count program))))
     (lambda (stocks)
       (declare (optimize (speed 3) (safety 1)))
-      (let ((all-legacy-p t)
-            (same-stock-p t)
-            (same-primary-p t)
-            (first-stock (the (unsigned-byte 16) (first stocks)))
-            (first-primary (aref face-stocks (first stocks)))
-            legacy-stone legacy-grass-p legacy-soil-p legacy-subsoil-p
-            primary-stone primary-grass primary-soil primary-subsoil)
-        (dolist (stock stocks)
+      (unless stocks
+        (error "A compiled material chamfer cannot be empty."))
+      (let* ((first-stock (the (unsigned-byte 16) (first stocks)))
+             (summary-mask (aref assembly-summary-masks first-stock)))
+        (when (= summary-mask +material-program-no-summary+)
+          (error "Assembly stock ~D is outside this material program."
+                 first-stock))
+        (dolist (stock (rest stocks))
           (declare (type (unsigned-byte 16) stock))
-          (let ((legacy (aref assembly-flags stock))
-                (primary (aref primary-flags stock)))
-            (unless (logtest +assembly-legacy-flag+ legacy)
-              (setf all-legacy-p nil))
-            (unless (= stock first-stock) (setf same-stock-p nil))
-            (unless (= (aref face-stocks stock) first-primary)
-              (setf same-primary-p nil))
-            (when (logtest +assembly-legacy-stone-flag+ legacy)
-              (unless legacy-stone (setf legacy-stone stock)))
-            (when (logtest +assembly-legacy-grass-flag+ legacy)
-              (setf legacy-grass-p t))
-            (when (logtest +assembly-legacy-soil-flag+ legacy)
-              (setf legacy-soil-p t))
-            (when (logtest +assembly-legacy-subsoil-flag+ legacy)
-              (setf legacy-subsoil-p t))
-            (when (logtest +assembly-primary-stone-flag+ primary)
-              (unless primary-stone (setf primary-stone stock)))
-            (when (logtest +assembly-primary-grass-flag+ primary)
-              (unless primary-grass (setf primary-grass stock)))
-            (when (logtest +assembly-primary-soil-flag+ primary)
-              (unless primary-soil (setf primary-soil stock)))
-            (when (logtest +assembly-primary-subsoil-flag+ primary)
-              (unless primary-subsoil (setf primary-subsoil stock)))))
-        (if all-legacy-p
-            (cond ((and legacy-stone legacy-subsoil-p)
-                   +deep-set-stone-stock+)
-                  ((and legacy-stone legacy-soil-p) +soil-set-stone-stock+)
-                  ((and legacy-stone legacy-grass-p) +turf-set-stone-stock+)
-                  (same-stock-p first-stock)
-                  (legacy-stone +stone-stock+)
-                  ((and legacy-grass-p (or legacy-soil-p legacy-subsoil-p))
-                   +turf-edge-stock+)
-                  (t +soil-stock+))
-            (flet ((contact (stone earth)
-                     (aref reading-contacts
-                           (+ (* (aref reading-offsets stone) reading-count)
-                              (aref reading-offsets earth)))))
-              (cond ((and primary-stone primary-subsoil)
-                     (contact primary-stone primary-subsoil))
-                    ((and primary-stone primary-soil)
-                     (contact primary-stone primary-soil))
-                    ((and primary-stone primary-grass)
-                     (contact primary-stone primary-grass))
-                    (same-primary-p first-primary)
-                    (primary-stone (aref face-stocks primary-stone))
-                    ((and primary-grass (or primary-soil primary-subsoil))
-                     +turf-edge-stock+)
-                    (t +soil-stock+))))))))
+          (let ((right (aref assembly-summary-masks stock)))
+            (when (= right +material-program-no-summary+)
+              (error "Assembly stock ~D is outside this material program."
+                     stock))
+            (setf summary-mask (logior summary-mask right))))
+        (when (> summary-mask summary-count)
+          (error "Material closure mask ~D exceeds this material program."
+                 summary-mask))
+        (aref summary-stocks summary-mask)))))
 
 (defun compiled-material-chamfer-stock (program stocks)
   "Resolve STOCKS through a freshly captured PROGRAM, for inspection/tests."

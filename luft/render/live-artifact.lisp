@@ -140,16 +140,21 @@ revisions immediately before and after the call."
                   (viewer-device viewer)
                   (canvas-format (viewer-context viewer))
                   (canvas-extent (viewer-context viewer))))
-           ;; The old renderer retains the immutable CPU stream specifically so
-           ;; a shader-only live rebuild can transact the same semantic flames
-           ;; without remeshing or reading mutable scene state.
-           (renderer-set-flame-instance-words
-            candidate (renderer-flame-instance-words old))
-           (dolist (key (renderer-slot-order old))
-             (renderer-set-mesh
-              candidate key
-              (mesh-slot-prepared-mesh
-               (gethash key (renderer-mesh-slots old)))))
+           ;; Realized torch frames are mesh-owned derived data.  Reinstall the
+           ;; entire immutable slot cohort in one transaction and explicitly
+           ;; retain the exact generation which justified those fields.  A
+           ;; shader-only rebuild must never erase or reconstruct provenance.
+           (renderer-set-meshes
+            candidate
+            (mapcar
+             (lambda (key)
+               (cons key
+                     (mesh-slot-prepared-mesh
+                      (gethash key (renderer-mesh-slots old)))))
+             (renderer-slot-order old))
+            :scene-generation
+            (renderer-publication-scene-generation
+             (renderer-publication old)))
            (setf completed-p t)
            (make-renderer-live-candidate candidate))
       (unless completed-p

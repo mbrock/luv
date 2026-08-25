@@ -191,44 +191,75 @@
         ;; horizontal lane in the population sampler's memoization key.
         (%check (/= (%voxel-light-lattice-key 0 (ash 1 17) 0)
                     (%voxel-light-lattice-key 1 0 0)))))
+    ;; Sparse attachments are resolved from the finished surface rather than
+    ;; compiled as cubical, width-independent companion geometry.
     (let* ((domain (make-world-domain :horizontal-bits 4))
            (cell (make-site domain 7 7 7 +cell-extent+ 1))
+           (solid (%chain-from-sites domain (list cell)))
            (faces
              (loop for axis in '(:x :y :z)
                    append
                    (list (site-boundary-low domain cell axis)
-                         (site-boundary-high domain cell axis))))
-           (narrow (make-face-torch-mesh domain faces 0 1 :bevel-width 1))
-           (medial (make-face-torch-mesh domain faces 0 1 :bevel-width 4)))
-      (%check (= (* 6 32) (surface-mesh-triangle-count narrow)))
-      ;; Attachment geometry is bevel-independent, including the medial limit.
-      (%check (equalp (surface-mesh-template-vertex-words narrow)
-                      (surface-mesh-template-vertex-words medial)))
-      (%check (equalp (surface-mesh-fan-instance-words narrow)
-                      (surface-mesh-fan-instance-words medial)))
-      (dolist (face faces)
-        (let* ((mesh (make-face-torch-mesh domain (list face) 0 1))
-               (center
-                 (loop for coordinate in
-                       (list (site-x face) (site-y face) (site-z face))
-                       for axis-number from 0
-                       collect (+ (* +mesh-cell-size+ coordinate)
-                                  (if (logbitp axis-number (site-extent face))
-                                      4 0))))
-               (contact-p nil))
-          (multiple-value-bind (nx ny nz) (face-oriented-normal face)
-            (%map-surface-mesh-triangle-records
-             (lambda (kind stock ambient mask normal a b c)
-               (declare (ignore kind stock ambient mask normal))
-               (dolist (point (list a b c))
-                 (when (equal point center) (setf contact-p t))
-                 (%check
-                  (not (minusp
-                        (+ (* nx (- (first point) (first center)))
-                           (* ny (- (second point) (second center)))
-                           (* nz (- (third point) (third center)))))))))
-             mesh))
-          (%check contact-p))))))
+                         (site-boundary-high domain cell axis)))))
+      (labels ((dot (left right)
+                 (loop for l across left for r across right sum (* l r)))
+               (unit-p (vector)
+                 (< (abs (- (sqrt (dot vector vector)) 1.0)) 1.0e-5)))
+        (dolist (width '(1 2 3 4))
+          (let ((mesh (make-surface-mesh solid :bevel-width width)))
+            (dolist (face faces)
+              (let* ((frame (resolve-surface-attachment-frame mesh face))
+                     (normal (surface-attachment-frame-normal frame))
+                     (tangent (surface-attachment-frame-tangent frame)))
+                (multiple-value-bind (nx ny nz) (face-oriented-normal face)
+                  (%check (> (+ (* nx (aref normal 0))
+                                (* ny (aref normal 1))
+                                (* nz (aref normal 2)))
+                             0.9999)))
+                (%check (unit-p normal))
+                (%check (unit-p tangent))
+                (%check (< (abs (dot normal tangent)) 1.0e-5))))))
+        ;; One stable chart point is flat at width one and lies on the actual
+        ;; diagonal bevel at widths two and four.  Both origin and frame must
+        ;; therefore change with the realized geometry.
+        (let* ((face (site-boundary-high domain cell :z))
+               (narrow
+                 (resolve-surface-attachment-frame
+                  (make-surface-mesh solid :bevel-width 1) face :u 0.6d0))
+               (medium
+                 (resolve-surface-attachment-frame
+                  (make-surface-mesh solid :bevel-width 2) face :u 0.6d0))
+               (medial
+                 (resolve-surface-attachment-frame
+                  (make-surface-mesh solid :bevel-width 4) face :u 0.6d0))
+               (narrow-normal (surface-attachment-frame-normal narrow))
+               (medium-normal (surface-attachment-frame-normal medium))
+               (medium-origin (surface-attachment-frame-origin medium))
+               (medial-origin (surface-attachment-frame-origin medial)))
+          (%check (equal '(:face)
+                         (surface-attachment-frame-primitive-kinds narrow)))
+          (%check (equal '(:band)
+                         (surface-attachment-frame-primitive-kinds medium)))
+          (%check (equal '(:junction)
+                         (surface-attachment-frame-primitive-kinds medial)))
+          (%check (> (aref narrow-normal 2) 0.9999))
+          (%check (> (aref medium-normal 0) 0.7))
+          (%check (> (aref medium-normal 2) 0.7))
+          (%check (< (aref medium-origin 2) 8.0))
+          (%check (< (aref medial-origin 2) (aref medium-origin 2))))
+        ;; A separate parallel surface farther along the authored ray is not
+        ;; part of the support cell's bevel slab and cannot steal the mount.
+        (let* ((distant-cell
+                 (make-site domain 7 7 9 +cell-extent+ 1))
+               (two-surfaces
+                 (%chain-from-sites domain (list cell distant-cell)))
+               (face (site-boundary-high domain cell :z))
+               (frame
+                 (resolve-surface-attachment-frame
+                  (make-surface-mesh two-surfaces :bevel-width 2) face)))
+          (%check (< (abs (- 8.0
+                            (aref (surface-attachment-frame-origin frame) 2)))
+                     1.0e-6)))))))
 
 (defun %solid-for-star (mask &key (centre '(8 8 8)))
   (let* ((domain (make-world-domain :horizontal-bits 5))
@@ -304,6 +335,713 @@
        (equal (surface-mesh-fan-draws left)
               (surface-mesh-fan-draws right))))
 
+(defun %test-source-stock-provenance ()
+  (%with-test-section ("occupied source provenance for face stocks")
+    (let* ((domain (make-world-domain :horizontal-bits 4))
+           (cell (make-site domain 7 6 5 +cell-extent+ 1))
+           (solid (%chain-from-sites domain (list cell)))
+           (stocks-by-face (make-hash-table :test #'eql))
+           (expected-calls '())
+           (observed-calls '())
+           (next-stock 0))
+      ;; This table is an independent face oracle for the legacy callback.
+      ;; The provenance callback below never consults SOLID or reverse-probes
+      ;; either incidence of FACE to recover the occupied cell.
+      (dolist (axis '(:x :y :z))
+        (dolist (side '(:forward :backward))
+          (let ((face (if (eq side :forward)
+                          (site-boundary-low domain cell axis)
+                          (site-boundary-high domain cell axis))))
+            (setf (gethash face stocks-by-face) next-stock)
+            (push (list face cell axis side next-stock) expected-calls)
+            (incf next-stock))))
+      (labels ((face-stock (face)
+                 (multiple-value-bind (stock present-p)
+                     (gethash face stocks-by-face)
+                   (unless present-p
+                     (error "Unexpected oriented face ~S in stock oracle."
+                            face))
+                   stock))
+               (source-stock (face source-cell axis side)
+                 (let ((expected-face
+                         (if (eq side :forward)
+                             (site-boundary-low domain source-cell axis)
+                             (site-boundary-high domain source-cell axis))))
+                   (unless (and (= source-cell cell)
+                                (member axis '(:x :y :z))
+                                (member side '(:forward :backward))
+                                (= face expected-face))
+                     (error "Bad source-stock provenance ~S."
+                            (list face source-cell axis side)))
+                   (let ((stock (face-stock face)))
+                     (pushnew (list face source-cell axis side stock)
+                              observed-calls :test #'equal)
+                     stock))))
+        (let ((legacy
+                (make-surface-mesh solid :stock-function #'face-stock))
+              (provenance
+                (make-surface-mesh
+                 solid
+                 :stock-function
+                 (lambda (face)
+                   (declare (ignore face))
+                   (error "Legacy stock callback was not superseded."))
+                 :source-stock-function #'source-stock)))
+          (%check (= 6 (length observed-calls)))
+          (%check (null (set-exclusive-or expected-calls observed-calls
+                                          :test #'equal)))
+          (%check (%same-surface-mesh-representation-p legacy provenance)))))))
+
+(defun %surface-attachment-ray-oracle
+    (meshes face &key (u 0.0d0) (v 0.0d0))
+  "Return the pre-local-chart ray result, or NIL when that ray misses."
+  (unless (listp meshes) (setf meshes (list meshes)))
+  (multiple-value-bind (u-name v-name) (face-tangent-axes face)
+    (multiple-value-bind (normal-x normal-y normal-z)
+        (face-oriented-normal face)
+      (let* ((authored-normal
+               (mapcar #'coerce (list normal-x normal-y normal-z)
+                       (make-list 3 :initial-element 'double-float)))
+             (u-axis (%surface-frame-axis-vector u-name))
+             (v-axis (%surface-frame-axis-vector v-name))
+             (v-axis
+               (if (minusp
+                    (%surface-frame-dot
+                     (%surface-frame-cross u-axis v-axis) authored-normal))
+                   (%surface-frame-scale -1.0d0 v-axis)
+                   v-axis))
+             (center
+               (loop for coordinate in
+                     (list (site-x face) (site-y face) (site-z face))
+                     for axis-number below 3
+                     collect
+                     (coerce
+                      (+ (* +mesh-cell-size+ coordinate)
+                         (if (logbitp axis-number (site-extent face))
+                             (/ +mesh-cell-size+ 2)
+                             0))
+                      'double-float)))
+             (chart-u (coerce u 'double-float))
+             (chart-v (coerce v 'double-float))
+             (chart-scale (max 1.0d0 (+ (abs chart-u) (abs chart-v))))
+             (chart
+               (%surface-frame+
+                center
+                (%surface-frame-scale
+                 (* 0.5d0 +mesh-cell-size+ (/ chart-u chart-scale)) u-axis)
+                (%surface-frame-scale
+                 (* 0.5d0 +mesh-cell-size+ (/ chart-v chart-scale)) v-axis)))
+             (maximum-inset
+               (reduce #'max meshes :key #'surface-mesh-bevel-width))
+             (tie-epsilon (* 1.0d-7 (max 1 maximum-inset)))
+             (best-displacement nil)
+             (hits nil))
+        (dolist (mesh meshes)
+          (%map-surface-mesh-triangle-records
+           (lambda (kind stock ambient mask primitive-normal a b c)
+             (declare (ignore ambient mask))
+             (let* ((primitive-normal
+                      (mapcar (lambda (value) (coerce value 'double-float))
+                              primitive-normal))
+                    (denominator
+                      (%surface-frame-dot primitive-normal authored-normal)))
+               (when (> denominator 1.0d-10)
+                 (let* ((displacement
+                          (/ (- (%surface-frame-dot primitive-normal a)
+                                (%surface-frame-dot primitive-normal chart))
+                             denominator))
+                        (point
+                          (%surface-frame+
+                           chart
+                           (%surface-frame-scale displacement
+                                                 authored-normal))))
+                   (when (and
+                          (<= (- (+ maximum-inset tie-epsilon))
+                              displacement tie-epsilon)
+                          (%surface-frame-point-in-projected-triangle-p
+                           point a b c u-axis v-axis))
+                     (cond
+                       ((or (null best-displacement)
+                            (> displacement
+                               (+ best-displacement tie-epsilon)))
+                        (setf best-displacement displacement
+                              hits
+                              (list
+                               (list kind stock primitive-normal point))))
+                       ((<= (abs (- displacement best-displacement))
+                            tie-epsilon)
+                        (push (list kind stock primitive-normal point)
+                              hits))))))))
+           mesh))
+        (when hits
+          (let* ((unit-normals
+                   (remove-duplicates
+                    (mapcar (lambda (hit)
+                              (%surface-frame-unit (third hit)))
+                            hits)
+                    :test (lambda (left right)
+                            (> (%surface-frame-dot left right)
+                               (- 1.0d0 1.0d-10)))))
+                 (normal
+                   (%surface-frame-unit
+                    (reduce #'%surface-frame+ unit-normals)))
+                 (projected-u
+                   (%surface-frame+
+                    u-axis
+                    (%surface-frame-scale
+                     (- (%surface-frame-dot u-axis normal)) normal)))
+                 (tangent
+                   (if (> (%surface-frame-dot projected-u projected-u)
+                          1.0d-12)
+                       (%surface-frame-unit projected-u)
+                       (%surface-frame-unit
+                        (%surface-frame+
+                         v-axis
+                         (%surface-frame-scale
+                          (- (%surface-frame-dot v-axis normal)) normal)))))
+                 (point (fourth (first hits))))
+            (values point normal tangent
+                    (sort (remove-duplicates (mapcar #'first hits))
+                          #'< :key
+                          (lambda (kind)
+                            (ecase kind
+                              (:face 0) (:band 1) (:junction 2))))
+                    (sort (remove-duplicates (mapcar #'second hits)) #'<))))))))
+
+(defun %check-surface-attachment-ray-preservation
+    (frame meshes face u v)
+  "Assert exact old-ray preservation when the independent oracle has a hit."
+  (multiple-value-bind (point normal tangent primitive-kinds stocks)
+      (%surface-attachment-ray-oracle meshes face :u u :v v)
+    (when point
+      (let ((expected-origin
+              (map '(simple-array single-float (3))
+                   (lambda (coordinate)
+                     (coerce (/ coordinate +mesh-cell-size+) 'single-float))
+                   point))
+            (expected-normal
+              (map '(simple-array single-float (3))
+                   (lambda (component) (coerce component 'single-float))
+                   normal))
+            (expected-tangent
+              (map '(simple-array single-float (3))
+                   (lambda (component) (coerce component 'single-float))
+                   tangent)))
+        (%check (equalp expected-origin
+                        (surface-attachment-frame-origin frame)))
+        (%check (equalp expected-normal
+                        (surface-attachment-frame-normal frame)))
+        (%check (equalp expected-tangent
+                        (surface-attachment-frame-tangent frame)))
+        (%check (equal primitive-kinds
+                       (surface-attachment-frame-primitive-kinds frame)))
+        (%check (equal stocks (surface-attachment-frame-stocks frame)))))))
+
+(defun %test-surface-attachment-square-chart ()
+  (%with-test-section ("surface attachment square-chart realization")
+    (let* ((domain (make-world-domain :horizontal-bits 4))
+           (cell (make-site domain 7 7 7 +cell-extent+ 1))
+           (solid (%chain-from-sites domain (list cell)))
+           (faces
+             (loop for axis in '(:x :y :z)
+                   append (list (site-boundary-low domain cell axis)
+                                (site-boundary-high domain cell axis))))
+           (samples
+             '((0.0d0 0.0d0)
+               (-1.0d0 0.0d0) (1.0d0 0.0d0)
+               (0.0d0 -1.0d0) (0.0d0 1.0d0)
+               (-1.0d0 -1.0d0) (-1.0d0 1.0d0)
+               (1.0d0 -1.0d0) (1.0d0 1.0d0)))
+           (epsilon 1.0d-4))
+      (labels ((dot (left right)
+                 (loop for axis below 3
+                       sum (* (aref left axis) (aref right axis))))
+               (cross (left right)
+                 (vector (- (* (aref left 1) (aref right 2))
+                            (* (aref left 2) (aref right 1)))
+                         (- (* (aref left 2) (aref right 0))
+                            (* (aref left 0) (aref right 2)))
+                         (- (* (aref left 0) (aref right 1))
+                            (* (aref left 1) (aref right 0)))))
+               (unit-p (vector)
+                 (< (abs (- (sqrt (dot vector vector)) 1.0d0)) 1.0d-5))
+               (distance (left right)
+                 (sqrt
+                  (loop for axis below 3
+                        for delta = (- (aref left axis) (aref right axis))
+                        sum (* delta delta))))
+               (check-frame (frame face)
+                 (let* ((normal (surface-attachment-frame-normal frame))
+                        (tangent (surface-attachment-frame-tangent frame))
+                        (bitangent (cross normal tangent))
+                        (recovered-normal (cross tangent bitangent)))
+                   (multiple-value-bind (nx ny nz)
+                       (face-oriented-normal face)
+                     (%check (> (+ (* nx (aref normal 0))
+                                   (* ny (aref normal 1))
+                                   (* nz (aref normal 2)))
+                                0.0)))
+                   (%check (unit-p normal))
+                   (%check (unit-p tangent))
+                   (%check (unit-p bitangent))
+                   (%check (< (abs (dot normal tangent)) 1.0d-5))
+                   (%check (> (dot recovered-normal normal) 0.9999d0)))))
+        (dolist (width '(1 2 3 4))
+          (let ((mesh (make-surface-mesh solid :bevel-width width)))
+            (dolist (face faces)
+              (dolist (sample samples)
+                (destructuring-bind (u v) sample
+                  (let ((frame
+                          (resolve-surface-attachment-frame
+                           mesh face :u u :v v)))
+                    (check-frame frame face)
+                    (%check-surface-attachment-ray-preservation
+                     frame mesh face u v))))
+              ;; Each exact logical corner must also be the continuous limit
+              ;; of both incident square-chart edges.  Only position is
+              ;; compared: the exact point may intentionally carry a normal-
+              ;; cone bisector while either neighboring point is smooth.
+              (dolist (corner '((-1.0d0 -1.0d0) (-1.0d0 1.0d0)
+                                (1.0d0 -1.0d0) (1.0d0 1.0d0)))
+                (destructuring-bind (u v) corner
+                  (let* ((exact
+                           (resolve-surface-attachment-frame
+                            mesh face :u u :v v))
+                         (near-u
+                           (resolve-surface-attachment-frame
+                            mesh face :u (* u (- 1.0d0 epsilon)) :v v))
+                         (near-v
+                           (resolve-surface-attachment-frame
+                            mesh face :u u :v (* v (- 1.0d0 epsilon))))
+                         (origin
+                           (surface-attachment-frame-origin exact)))
+                    (%check
+                     (< (distance origin
+                                  (surface-attachment-frame-origin near-u))
+                        1.0d-3))
+                    (%check
+                     (< (distance origin
+                                  (surface-attachment-frame-origin near-v))
+                        1.0d-3))))))))))))
+
+(defun %surface-attachment-test-chart (face u v)
+  "Return the independent mesh-tick chart geometry used by attachment tests."
+  (multiple-value-bind (u-name v-name) (face-tangent-axes face)
+    (multiple-value-bind (normal-x normal-y normal-z)
+        (face-oriented-normal face)
+      (let* ((normal
+               (mapcar #'coerce (list normal-x normal-y normal-z)
+                       (make-list 3 :initial-element 'double-float)))
+             (u-axis (%surface-frame-axis-vector u-name))
+             (v-axis (%surface-frame-axis-vector v-name))
+             (v-axis
+               (if (minusp
+                    (%surface-frame-dot
+                     (%surface-frame-cross u-axis v-axis) normal))
+                   (%surface-frame-scale -1.0d0 v-axis)
+                   v-axis))
+             (center
+               (loop for coordinate in
+                     (list (site-x face) (site-y face) (site-z face))
+                     for axis-number below 3
+                     collect
+                     (coerce
+                      (+ (* +mesh-cell-size+ coordinate)
+                         (if (logbitp axis-number (site-extent face))
+                             (/ +mesh-cell-size+ 2)
+                             0))
+                      'double-float)))
+             (u (coerce u 'double-float))
+             (v (coerce v 'double-float))
+             (scale (max 1.0d0 (+ (abs u) (abs v))))
+             (chart
+               (%surface-frame+
+                center
+                (%surface-frame-scale
+                 (* 0.5d0 +mesh-cell-size+ (/ u scale)) u-axis)
+                (%surface-frame-scale
+                 (* 0.5d0 +mesh-cell-size+ (/ v scale)) v-axis))))
+        (values center chart u-axis v-axis normal)))))
+
+(defun %surface-attachment-test-candidate-normals
+    (meshes face u v frame)
+  "Return distinct eligible normals incident to FRAME's selected point."
+  (unless (listp meshes) (setf meshes (list meshes)))
+  (multiple-value-bind (center chart u-axis v-axis authored-normal)
+      (%surface-attachment-test-chart face u v)
+    (let* ((maximum-inset
+             (reduce #'max meshes :key #'surface-mesh-bevel-width))
+           (selection-epsilon (* 1.0d-7 (max 1 maximum-inset)))
+           (point-epsilon 1.0d-5)
+           (point-squared-epsilon (* point-epsilon point-epsilon))
+           (maximum-radius-squared
+             (* (+ maximum-inset selection-epsilon)
+                (+ maximum-inset selection-epsilon)))
+           (selected-point
+             (loop for coordinate across
+                   (surface-attachment-frame-origin frame)
+                   collect (* +mesh-cell-size+
+                              (coerce coordinate 'double-float))))
+           (normals nil))
+      (dolist (mesh meshes)
+        (%map-surface-mesh-triangle-records
+         (lambda (kind stock ambient mask primitive-normal a b c)
+           (declare (ignore kind stock ambient mask))
+           (let* ((primitive-normal
+                    (mapcar (lambda (value) (coerce value 'double-float))
+                            primitive-normal))
+                  (denominator
+                    (%surface-frame-dot primitive-normal authored-normal)))
+             (when (> denominator 1.0d-10)
+               (multiple-value-bind (point radius-squared)
+                   (%surface-frame-nearest-projected-triangle-point
+                    chart a b c u-axis v-axis authored-normal
+                    primitive-normal denominator)
+                 (let ((displacement
+                         (%surface-frame-dot
+                          (%surface-frame+
+                           point (%surface-frame-scale -1.0d0 chart))
+                          authored-normal)))
+                   (when (and
+                          (<= (- (+ maximum-inset selection-epsilon))
+                              displacement selection-epsilon)
+                          (<= radius-squared maximum-radius-squared)
+                          (%surface-frame-point-in-support-footprint-p
+                           point center u-axis v-axis selection-epsilon)
+                          (<= (%surface-frame-point-distance-squared
+                               point selected-point)
+                              point-squared-epsilon))
+                     (push (%surface-frame-unit primitive-normal)
+                           normals)))))))
+         mesh))
+      (remove-duplicates
+       normals
+       :test (lambda (left right)
+               (> (%surface-frame-dot left right)
+                  (- 1.0d0 1.0d-10)))))))
+
+(defun %check-local-surface-attachment-frame
+    (meshes face u v width frame)
+  "Check local ownership, actual incidence, and an orthonormal frame."
+  (multiple-value-bind (center chart u-axis v-axis authored-normal)
+      (%surface-attachment-test-chart face u v)
+    (let* ((point
+             (loop for coordinate across
+                   (surface-attachment-frame-origin frame)
+                   collect (* +mesh-cell-size+
+                              (coerce coordinate 'double-float))))
+           (normal
+             (loop for component across
+                   (surface-attachment-frame-normal frame)
+                   collect (coerce component 'double-float)))
+           (tangent
+             (loop for component across
+                   (surface-attachment-frame-tangent frame)
+                   collect (coerce component 'double-float)))
+           (offset (%surface-frame+
+                    point (%surface-frame-scale -1.0d0 chart)))
+           (displacement (%surface-frame-dot offset authored-normal))
+           (radius-squared
+             (max 0.0d0
+                  (- (%surface-frame-dot offset offset)
+                     (* displacement displacement))))
+           (center-offset
+             (%surface-frame+
+              point (%surface-frame-scale -1.0d0 center)))
+           (bitangent (%surface-frame-cross normal tangent))
+           (incident-normals
+             (%surface-attachment-test-candidate-normals
+              meshes face u v frame))
+           (cone-normal
+             (and incident-normals
+                  (%surface-frame-unit
+                   (reduce #'%surface-frame+ incident-normals))))
+           (epsilon (* 1.0d-5 (max 1 width))))
+      (%check incident-normals)
+      (%check (> (%surface-frame-dot normal authored-normal) 0.0d0))
+      (%check (< (abs (- (%surface-frame-dot normal normal) 1.0d0))
+                 epsilon))
+      (%check (< (abs (- (%surface-frame-dot tangent tangent) 1.0d0))
+                 epsilon))
+      (%check (< (abs (- (%surface-frame-dot bitangent bitangent) 1.0d0))
+                 epsilon))
+      (%check (< (abs (%surface-frame-dot normal tangent)) epsilon))
+      (%check (> (%surface-frame-dot
+                  (%surface-frame-cross tangent bitangent) normal)
+                 (- 1.0d0 epsilon)))
+      (%check (> (%surface-frame-dot cone-normal normal)
+                 (- 1.0d0 epsilon)))
+      (%check (<= (- (+ width epsilon)) displacement epsilon))
+      (%check (<= radius-squared
+                  (* (+ width epsilon) (+ width epsilon))))
+      (%check (<= (abs (%surface-frame-dot center-offset u-axis))
+                  (+ (* 0.5d0 +mesh-cell-size+) epsilon)))
+      (%check (<= (abs (%surface-frame-dot center-offset v-axis))
+                  (+ (* 0.5d0 +mesh-cell-size+) epsilon)))
+      (%check (surface-attachment-frame-primitive-kinds frame))
+      (values (sqrt radius-squared) point incident-normals))))
+
+(defun %surface-attachment-test-offset-coordinates
+    (coordinates axis amount)
+  (let ((result (copy-list coordinates)))
+    (incf (nth (axis-index axis) result) amount)
+    result))
+
+(defun %surface-attachment-test-site (domain coordinates)
+  (make-site domain
+             (first coordinates) (second coordinates) (third coordinates)
+             +cell-extent+ 1))
+
+(defun %surface-attachment-test-boundary (domain cell axis side)
+  (ecase side
+    (:low (site-boundary-low domain cell axis))
+    (:high (site-boundary-high domain cell axis))))
+
+(defun %test-surface-attachment-off-ray-shared-edge-ties ()
+  (%with-test-section ("off-ray attachment crease cone under symmetry")
+    (let* ((domain (make-world-domain :horizontal-bits 4))
+           (cell (make-site domain 8 8 8 +cell-extent+ 1))
+           (faces
+             (loop for axis in '(:x :y :z)
+                   append (list (site-boundary-low domain cell axis)
+                                (site-boundary-high domain cell axis)))))
+      (labels ((oriented-triangle (a b c normal)
+                 (if (plusp
+                      (%surface-frame-dot (%point-cross a b c) normal))
+                     (list a b c)
+                     (list a c b))))
+        (dolist (face faces)
+          (multiple-value-bind (center chart u-axis v-axis authored-normal)
+              (%surface-attachment-test-chart face 0.0d0 0.0d0)
+            (declare (ignore center chart))
+            (dolist (reflection '(-1.0d0 1.0d0))
+              (dolist (width '(1 2 3 4))
+                (let* ((width (coerce width 'double-float))
+                       (side-axis
+                         (%surface-frame-scale reflection v-axis))
+                       (a '(0.0d0 0.0d0 0.0d0))
+                       (b (%surface-frame-scale width u-axis))
+                       (c-flat (%surface-frame-scale width side-axis))
+                       (c-fold
+                         (%surface-frame+
+                          c-flat
+                          (%surface-frame-scale
+                           (* 0.5d0 width) authored-normal)))
+                       (flat
+                         (oriented-triangle a b c-flat authored-normal))
+                       (fold
+                         (oriented-triangle a b c-fold authored-normal))
+                       (query
+                         (%surface-frame+
+                          (%surface-frame-scale 0.5d0 b)
+                          (%surface-frame-scale
+                           (* -0.25d0 width) side-axis)))
+                       (flat-normal
+                         (apply #'%point-cross flat))
+                       (fold-normal
+                         (apply #'%point-cross fold))
+                       (flat-denominator
+                         (%surface-frame-dot flat-normal authored-normal))
+                       (fold-denominator
+                         (%surface-frame-dot fold-normal authored-normal))
+                       (epsilon (* 1.0d-7 width))
+                       (point-squared-epsilon (* epsilon epsilon))
+                       (radius-squared-epsilon
+                         (+ (* 2.0d0 width epsilon)
+                            point-squared-epsilon)))
+                  (%check
+                   (not (%surface-frame-point-in-projected-triangle-p
+                         query (first flat) (second flat) (third flat)
+                         u-axis v-axis)))
+                  (%check
+                   (not (%surface-frame-point-in-projected-triangle-p
+                         query (first fold) (second fold) (third fold)
+                         u-axis v-axis)))
+                  (multiple-value-bind (flat-point flat-radius-squared)
+                      (%surface-frame-nearest-projected-triangle-point
+                       query (first flat) (second flat) (third flat)
+                       u-axis v-axis authored-normal flat-normal
+                       flat-denominator)
+                    (multiple-value-bind (fold-point fold-radius-squared)
+                        (%surface-frame-nearest-projected-triangle-point
+                         query (first fold) (second fold) (third fold)
+                         u-axis v-axis authored-normal fold-normal
+                         fold-denominator)
+                      (%check
+                       (<= (%surface-frame-point-distance-squared
+                            flat-point fold-point)
+                           point-squared-epsilon))
+                      (%check (> flat-radius-squared 0.0d0))
+                      (%check
+                       (eq :tie
+                           (%surface-frame-candidate-relation
+                            fold-radius-squared 0.0d0 fold-point
+                            flat-radius-squared 0.0d0 flat-point
+                            epsilon radius-squared-epsilon
+                            point-squared-epsilon)))
+                      (let* ((flat-unit (%surface-frame-unit flat-normal))
+                             (fold-unit (%surface-frame-unit fold-normal))
+                             (cone
+                               (%surface-frame-unit
+                                (%surface-frame+ flat-unit fold-unit))))
+                        (%check
+                         (< (%surface-frame-dot flat-unit fold-unit)
+                            (- 1.0d0 1.0d-5)))
+                        (%check (> (%surface-frame-dot cone authored-normal)
+                                   0.0d0))
+                        (%check
+                         (> (%surface-frame-dot cone flat-unit)
+                            (%surface-frame-dot fold-unit flat-unit)))
+                        (%check
+                         (> (%surface-frame-dot cone fold-unit)
+                            (%surface-frame-dot flat-unit fold-unit)))))))))))))))
+
+(defun %test-surface-attachment-local-support-chart ()
+  (%with-test-section ("local support-face attachment realization")
+    (let ((domain (make-world-domain :horizontal-bits 5))
+          (support-coordinates '(8 8 8))
+          (epsilon 1.0d-5))
+      ;; Every oriented face, both chart axes, and both reflections realize
+      ;; the ordinary reentrant step which the old normal-only ray missed.
+      (dolist (normal-axis '(:x :y :z))
+        (dolist (side '(:low :high))
+          (let* ((support
+                   (%surface-attachment-test-site
+                    domain support-coordinates))
+                 (face
+                   (%surface-attachment-test-boundary
+                    domain support normal-axis side)))
+            (multiple-value-bind
+                  (center chart u-axis v-axis authored-normal)
+                (%surface-attachment-test-chart face 0.0d0 0.0d0)
+              (declare (ignore center chart))
+              (multiple-value-bind (u-name v-name)
+                  (face-tangent-axes face)
+                (dolist (chart-axis '(:u :v))
+                  (let ((tangent-name
+                          (ecase chart-axis (:u u-name) (:v v-name)))
+                        (tangent-vector
+                          (ecase chart-axis (:u u-axis) (:v v-axis))))
+                    (dolist (reflection '(-1 1))
+                      (let* ((normal-step
+                               (round
+                                (nth (axis-index normal-axis)
+                                     authored-normal)))
+                             (tangent-step
+                               (* reflection
+                                  (round
+                                   (nth (axis-index tangent-name)
+                                        tangent-vector))))
+                             (adjacent-coordinates
+                               (%surface-attachment-test-offset-coordinates
+                                support-coordinates tangent-name tangent-step))
+                             (raised-coordinates
+                               (%surface-attachment-test-offset-coordinates
+                                adjacent-coordinates normal-axis normal-step))
+                             (solid
+                               (%chain-from-sites
+                                domain
+                                (list
+                                 support
+                                 (%surface-attachment-test-site
+                                  domain adjacent-coordinates)
+                                 (%surface-attachment-test-site
+                                  domain raised-coordinates))))
+                             (u
+                               (if (eq chart-axis :u)
+                                   (* 0.6d0 reflection)
+                                   0.0d0))
+                             (v
+                               (if (eq chart-axis :v)
+                                   (* 0.6d0 reflection)
+                                   0.0d0)))
+                        (dolist (width '(1 2 3 4))
+                          (let* ((mesh
+                                   (make-surface-mesh
+                                    solid :bevel-width width))
+                                 (frame
+                                   (resolve-surface-attachment-frame
+                                    mesh face :u u :v v)))
+                            (multiple-value-bind
+                                  (radius point incident-normals)
+                                (%check-local-surface-attachment-frame
+                                 mesh face u v width frame)
+                              (declare (ignore point incident-normals))
+                              (if (= width 1)
+                                  (%check (< radius epsilon))
+                                  (%check (> radius epsilon))))
+                            (%check-surface-attachment-ray-preservation
+                             frame mesh face u v)))))))))
+            ;; A disconnected parallel wall two cells outward remains outside
+            ;; the strict inward slab under every width and face orientation.
+            (multiple-value-bind
+                  (center chart u-axis v-axis authored-normal)
+                (%surface-attachment-test-chart face 0.0d0 0.0d0)
+              (declare (ignore chart u-axis v-axis))
+              (let* ((normal-step
+                       (round
+                        (nth (axis-index normal-axis) authored-normal)))
+                     (distant-coordinates
+                       (%surface-attachment-test-offset-coordinates
+                        support-coordinates normal-axis (* 2 normal-step)))
+                     (solid
+                       (%chain-from-sites
+                        domain
+                        (list support
+                              (%surface-attachment-test-site
+                               domain distant-coordinates)))))
+                (dolist (width '(1 2 3 4))
+                  (let* ((mesh
+                           (make-surface-mesh solid :bevel-width width))
+                         (frame
+                           (resolve-surface-attachment-frame mesh face)))
+                    (multiple-value-bind (radius point incident-normals)
+                        (%check-local-surface-attachment-frame
+                         mesh face 0.0d0 0.0d0 width frame)
+                      (declare (ignore incident-normals))
+                      (%check (< radius epsilon))
+                      (%check
+                       (< (sqrt
+                           (%surface-frame-point-distance-squared point center))
+                          epsilon)))
+                    (%check-surface-attachment-ray-preservation
+                     frame mesh face 0.0d0 0.0d0))))))))
+      ;; Deterministic continuity sweep through the canonical former width-two
+      ;; miss.  Every selected origin remains incident to the local closed
+      ;; patch and adjacent chart samples cannot jump across another surface.
+      (let* ((support-coordinates '(6 7 4))
+             (support
+               (%surface-attachment-test-site domain support-coordinates))
+             (adjacent
+               (%surface-attachment-test-site domain '(7 7 4)))
+             (raised
+               (%surface-attachment-test-site domain '(7 7 5)))
+             (solid (%chain-from-sites domain (list support adjacent raised)))
+             (face (site-boundary-high domain support :z))
+             (mesh (make-surface-mesh solid :bevel-width 2))
+             (previous-point nil)
+             (last-radius nil))
+        (dolist (u '(0.45d0 0.50d0 0.55d0 0.60d0
+                     0.65d0 0.70d0 0.75d0 0.80d0))
+          (let ((frame
+                  (resolve-surface-attachment-frame
+                   mesh face :u u :v 0.0d0)))
+            (multiple-value-bind (radius point incident-normals)
+                (%check-local-surface-attachment-frame
+                 mesh face u 0.0d0 2 frame)
+              (declare (ignore incident-normals))
+              (when previous-point
+                (%check
+                 (< (sqrt
+                     (%surface-frame-point-distance-squared
+                      point previous-point))
+                    0.5d0)))
+              (setf previous-point point
+                    last-radius radius))
+            (%check-surface-attachment-ray-preservation
+             frame mesh face u 0.0d0)))
+        (%check (> last-radius epsilon))))))
+
 (defun %vary-by-stock-mask-oracle
     (witness stock-masks site-widths contract-t-junctions-p)
   (flet ((width (x y z stocks)
@@ -314,12 +1052,17 @@
                      (logior site-mask (aref stock-masks stock))))
              (aref site-widths site-mask))))
     (multiple-value-bind (generic generic-census generic-diagnostics)
-        (vary-surface-mesh-bevel-widths
-         witness #'width :contract-t-junctions-p contract-t-junctions-p)
+        (funcall
+         (if contract-t-junctions-p
+             #'vary-surface-mesh-bevel-widths
+             #'vary-uncontracted-surface-mesh-bevel-widths-diagnostic)
+         witness #'width)
       (multiple-value-bind (compiled compiled-census compiled-diagnostics)
-          (vary-surface-mesh-bevel-widths-from-stock-masks
-           witness stock-masks site-widths
-           :contract-t-junctions-p contract-t-junctions-p)
+          (funcall
+           (if contract-t-junctions-p
+               #'vary-surface-mesh-bevel-widths-from-stock-masks
+               #'vary-uncontracted-surface-mesh-bevel-widths-from-stock-masks-diagnostic)
+           witness stock-masks site-widths)
         (values (%same-surface-mesh-representation-p generic compiled)
                 (equalp generic-census compiled-census)
                 (equal generic-diagnostics compiled-diagnostics))))))
@@ -658,12 +1401,11 @@
     (let ((witness
             (make-surface-mesh (%solid-for-star #x01) :bevel-width 1)))
       (multiple-value-bind (varied census diagnostics)
-          (vary-surface-mesh-bevel-widths
+          (vary-uncontracted-surface-mesh-bevel-widths-diagnostic
            witness
            (lambda (x y z stocks)
              (declare (ignore stocks))
-             (1+ (mod (+ x y z) 4)))
-           :contract-t-junctions-p nil)
+             (1+ (mod (+ x y z) 4))))
         (%check (equalp #(0 1 1 3 3) census))
         (%check (= 6 (getf diagnostics :collapsed-triangle-count)))
         (%check (= 3 (length (getf diagnostics :candidate-splits))))
@@ -728,6 +1470,15 @@
                             mask)))))
       (let ((witness
               (make-surface-mesh (%solid-for-star #x01) :bevel-width 1)))
+        ;; Keep the odd interior width explicit in the packed production-policy
+        ;; equality oracle; width three is neither the narrow witness nor the
+        ;; medial-collapse endpoint exercised by the diagnostic case below.
+        (multiple-value-bind (same-mesh same-census same-diagnostics)
+            (%vary-by-stock-mask-oracle
+             witness #(1) #(0 3) t)
+          (%check same-mesh "compiled width-three policy mesh")
+          (%check same-census "compiled width-three policy census")
+          (%check same-diagnostics "compiled width-three policy diagnostics"))
         (multiple-value-bind (same-mesh same-census same-diagnostics)
             (%vary-by-stock-mask-oracle
              witness #(1) #(0 4) nil)
@@ -848,6 +1599,44 @@
            (incf (gethash best table 0))))
        mesh))))
 
+(defun %canonical-triangle-record-counts (meshes)
+  "Count oriented triangles including every retained non-normal attribute."
+  (labels ((number-list< (left right)
+             (loop for l in left for r in right
+                   when (/= l r) return (< l r)
+                   finally (return nil)))
+           (rotate-mask (mask)
+             ;; Boundary bits name the edge opposite A, B, and C.  Rotating
+             ;; (A B C) to (B C A) rotates those three bits in the same order.
+             (logior (if (logbitp 1 mask) #b001 0)
+                     (if (logbitp 2 mask) #b010 0)
+                     (if (logbitp 0 mask) #b100 0)))
+           (canonical-record (kind stock ambient mask a b c)
+             (let* ((mask-1 (rotate-mask mask))
+                    (mask-2 (rotate-mask mask-1))
+                    (rotations
+                      (list (list mask a b c)
+                            (list mask-1 b c a)
+                            (list mask-2 c a b)))
+                    (best (first rotations)))
+               (dolist (rotation (rest rotations))
+                 (when (number-list<
+                        (append (second rotation) (third rotation)
+                                (fourth rotation) (list (first rotation)))
+                        (append (second best) (third best)
+                                (fourth best) (list (first best))))
+                   (setf best rotation)))
+               (list kind stock ambient best))))
+    (let ((table (make-hash-table :test #'equal)))
+      (dolist (mesh meshes table)
+        (%map-surface-mesh-triangle-records
+         (lambda (kind stock ambient mask normal a b c)
+           (declare (ignore normal))
+           (incf (gethash
+                  (canonical-record kind stock ambient mask a b c)
+                  table 0)))
+         mesh)))))
+
 (defun %triangle-counts= (left right)
   (and (= (hash-table-count left) (hash-table-count right))
        (loop for key being the hash-keys of left using (hash-value count)
@@ -888,7 +1677,224 @@
       (%check (%triangle-counts=
                (%canonical-triangle-counts (list whole))
                (%canonical-triangle-counts chunk-meshes))
-              "chunked triangles differ from the whole-world mesh"))))
+              "chunked triangles differ from the whole-world mesh"))
+    ;; A sparse cell on a high chunk seam leaves its edge and vertex
+    ;; primitives canonically owned by the adjacent, otherwise empty chunk.
+    ;; Streaming must therefore materialize that empty owner; meshing only
+    ;; chunks present in the sparse solid is not a complete surface oracle.
+    (dolist (seam '((63 20 64 20) (20 63 20 64)))
+      (destructuring-bind (cell-x cell-y empty-x empty-y) seam
+        (let* ((domain (make-world-domain :horizontal-bits 7))
+               (cell (make-site domain cell-x cell-y 20 +cell-extent+ 1))
+               (solid (%chain-from-sites domain (list cell)))
+               (occupied-key (site-chunk-key cell))
+               (empty-key (chunk-key-at empty-x empty-y))
+               (empty (%chain-from-sites domain '()))
+               (store (make-hash-table :test #'eql))
+               (whole (make-surface-mesh solid)))
+          (setf (gethash occupied-key store) solid
+                (gethash empty-key store) empty)
+          (labels ((owner-mesh (key)
+                     (handler-bind
+                         ((missing-chunk
+                            (lambda (condition)
+                              (multiple-value-bind (neighbor present-p)
+                                  (gethash (missing-chunk-key condition) store)
+                                (if present-p
+                                    (invoke-restart 'use-chunk neighbor)
+                                    (invoke-restart 'treat-as-air)))))
+                          (outside-domain
+                            (lambda (condition)
+                              (declare (ignore condition))
+                              (invoke-restart 'treat-as-air))))
+                       (mesh-chunk (gethash key store) key))))
+            (let* ((occupied-mesh (owner-mesh occupied-key))
+                   (empty-owner-mesh (owner-mesh empty-key))
+                   (cohort (list occupied-mesh empty-owner-mesh)))
+              (%check (not (%mesh-closed-p occupied-mesh)))
+              (%check (plusp (surface-mesh-triangle-count empty-owner-mesh)))
+              (%check (%meshes-closed-p cohort))
+              (%check
+               (%triangle-counts=
+                (%canonical-triangle-record-counts (list whole))
+                (%canonical-triangle-record-counts cohort))
+               "explicit empty seam owner differs from whole-world oracle"))))))))
+
+(defun %test-owner-preserving-variable-bevel-cohort ()
+  (%with-test-section ("owner-preserving variable bevel cohort")
+    (let* ((domain (make-world-domain :horizontal-bits 7))
+           ;; Translate the retained five-cell 1/2/4 medial T-junction fixture
+           ;; onto the X=64,Y=64 chunk corner.  Three chunks contain cells;
+           ;; the diagonal +X+Y chunk is a sparse, virtual owner whose edge and
+           ;; vertex primitives must nevertheless participate in the cohort.
+           (solid
+             (%chain-from-sites
+              domain
+              (list (make-site domain 64 63 2 +cell-extent+ 1)
+                    (make-site domain 64 63 3 +cell-extent+ 1)
+                    (make-site domain 63 63 2 +cell-extent+ 1)
+                    (make-site domain 63 64 2 +cell-extent+ 1)
+                    (make-site domain 63 64 3 +cell-extent+ 1))))
+           (store (make-hash-table :test #'eql))
+           (diagonal-owner (chunk-key-at 64 64))
+           (stock-masks
+             (make-array 3 :element-type '(unsigned-byte 8)
+                           :initial-contents '(1 2 3)))
+           (site-widths
+             (make-array 4 :element-type '(unsigned-byte 8)
+                           :initial-contents '(0 4 1 2))))
+      (map-chain-chunks
+       (lambda (key chain) (setf (gethash key store) chain))
+       solid)
+      (setf (gethash diagonal-owner store) (make-chain domain))
+      (let ((keys (sort (loop for key being the hash-keys of store collect key)
+                        #'<)))
+        (%check (= 4 (length keys)))
+        (%check (chain-empty-p (gethash diagonal-owner store)))
+        (labels ((face-solid-cell (face)
+                   (let* ((extent (site-extent face))
+                          (axis (cond ((= extent +xy-face-extent+) :z)
+                                      ((= extent +xz-face-extent+) :y)
+                                      (t :x)))
+                          (x (site-x face))
+                          (y (site-y face))
+                          (z (site-z face))
+                          (back-x (if (eq axis :x) (1- x) x))
+                          (back-y (if (eq axis :y) (1- y) y))
+                          (back-z (if (eq axis :z) (1- z) z)))
+                     (if (= 1 (chain-cell-occupancy-bit solid x y z))
+                         (make-site domain x y z +cell-extent+ 1)
+                         (make-site domain back-x back-y back-z
+                                    +cell-extent+ 1))))
+                 (face-stock (face)
+                   (let ((cell (face-solid-cell face)))
+                     (if (= 63 (site-y cell))
+                         1
+                         0)))
+                 (chamfer-stock (stocks)
+                   (if (or (member 2 stocks :test #'=)
+                           (and (member 0 stocks :test #'=)
+                                (member 1 stocks :test #'=)))
+                       2
+                       (first stocks)))
+                 (chunk-witness (key)
+                   (handler-bind
+                       ((missing-chunk
+                          (lambda (condition)
+                            (let ((neighbor
+                                    (gethash (missing-chunk-key condition)
+                                             store)))
+                              (if neighbor
+                                  (invoke-restart 'use-chunk neighbor)
+                                  (invoke-restart 'treat-as-air)))))
+                        (outside-domain
+                          (lambda (condition)
+                            (declare (ignore condition))
+                            (invoke-restart 'treat-as-air))))
+                     (mesh-chunk
+                      (gethash key store) key
+                      :stock-function #'face-stock
+                      :chamfer-stock-function #'chamfer-stock
+                      :bevel-width 1))))
+          (let* ((whole-witness
+                   (make-surface-mesh
+                    solid :stock-function #'face-stock
+                    :chamfer-stock-function #'chamfer-stock
+                    :bevel-width 1))
+                 (owner-witnesses
+                   (mapcar (lambda (key) (cons key (chunk-witness key))) keys)))
+            (%check
+             (plusp
+              (surface-mesh-triangle-count
+               (cdr (assoc diagonal-owner owner-witnesses :test #'=))))
+             "empty diagonal owner did not receive canonical primitives")
+            (let ((stocks-by-site (make-hash-table :test #'eql))
+                  (owners-by-site (make-hash-table :test #'eql)))
+              (dolist (owner-witness owner-witnesses)
+                (let ((owner (car owner-witness)))
+                  (maphash
+                   (lambda (site stocks)
+                     (pushnew owner (gethash site owners-by-site) :test #'=)
+                     (dolist (stock stocks)
+                       (pushnew stock (gethash site stocks-by-site) :test #'=)))
+                   (%witness-site-stock-table (cdr owner-witness)))))
+              (%check
+               (loop for site being the hash-keys of stocks-by-site
+                       using (hash-value stocks)
+                     thereis
+                     (and (= 64 (%lattice-key-x site))
+                          (= 64 (%lattice-key-y site))
+                          (> (length (gethash site owners-by-site)) 1)
+                          (> (length stocks) 1)))
+               "no mixed-material site crossed the diagonal owner corner"))
+            (multiple-value-bind
+                  (whole width-census whole-diagnostics)
+                (vary-surface-mesh-bevel-widths-from-stock-masks
+                 whole-witness stock-masks site-widths)
+              (multiple-value-bind
+                    (owner-meshes cohort-census cohort-diagnostics)
+                  (vary-surface-mesh-cohort-bevel-widths-from-stock-masks
+                   owner-witnesses stock-masks site-widths)
+                (%check (equal keys (mapcar #'car owner-meshes)))
+                (%check (equalp width-census cohort-census))
+                (%check (zerop (getf cohort-diagnostics
+                                     :residual-edge-count)))
+                (%check (plusp (getf cohort-diagnostics
+                                     :repaired-edge-count))
+                        (format nil "~S ~S"
+                                cohort-census cohort-diagnostics))
+                (%check (%meshes-closed-p (mapcar #'cdr owner-meshes)))
+                (%check (every #'%mesh-nondegenerate-p
+                               (mapcar #'cdr owner-meshes)))
+                (%check
+                 (%triangle-counts=
+                  (%canonical-triangle-record-counts (list whole))
+                  (%canonical-triangle-record-counts
+                   (mapcar #'cdr owner-meshes)))
+                 "owner-keyed transformed triangles differ from whole oracle")
+                (%check (= (getf whole-diagnostics :collapsed-triangle-count)
+                           (getf cohort-diagnostics
+                                 :collapsed-triangle-count)))
+                ;; Rebuild each owner while the complete four-owner closure is
+                ;; guard context.  The selected product must be byte-for-byte
+                ;; the same owner mesh as the all-output cohort; replacing it
+                ;; beside all retained owners must recover the whole oracle.
+                (let ((subset-repair-count 0)
+                      (subset-repair-owner-count 0))
+                  (dolist (output-owner keys)
+                    (multiple-value-bind
+                          (output-meshes subset-census subset-diagnostics)
+                        (vary-surface-mesh-cohort-bevel-widths-from-stock-masks
+                         owner-witnesses stock-masks site-widths
+                         :output-owners (list output-owner))
+                      (%check (= 1 (length output-meshes)))
+                      (%check (equal output-owner (caar output-meshes)))
+                      (%check (equalp width-census subset-census))
+                      (%check (zerop (getf subset-diagnostics
+                                           :residual-edge-count)))
+                      (incf subset-repair-count
+                            (getf subset-diagnostics :repaired-edge-count))
+                      (when (plusp (getf subset-diagnostics
+                                        :repaired-edge-count))
+                        (incf subset-repair-owner-count))
+                      (%check
+                       (%same-surface-mesh-representation-p
+                        (cdar output-meshes)
+                        (cdr (assoc output-owner owner-meshes :test #'equal))))
+                      (let ((replacement
+                              (cons
+                               (cdar output-meshes)
+                               (loop for owner-mesh in owner-meshes
+                                     unless (equal output-owner
+                                                   (car owner-mesh))
+                                       collect (cdr owner-mesh)))))
+                        (%check (%meshes-closed-p replacement))
+                        (%check
+                         (%triangle-counts=
+                          (%canonical-triangle-record-counts (list whole))
+                          (%canonical-triangle-record-counts replacement))))))
+                  (%check (plusp subset-repair-count))
+                  (%check (plusp subset-repair-owner-count)))))))))))
 
 (defun run-luft-tests (&key (stream *standard-output*))
   "Run the retained topology and replacement manifold-sheet mesh claims."
@@ -896,9 +1902,14 @@
         (*luft-test-section* nil))
     (%test-sites-and-chains)
     (%test-voxel-light)
+    (%test-source-stock-provenance)
+    (%test-surface-attachment-square-chart)
+    (%test-surface-attachment-off-ray-shared-edge-ties)
+    (%test-surface-attachment-local-support-chart)
     (%test-sheet-decomposition)
     (%test-surface-mesh)
     (%test-chunked-meshing)
+    (%test-owner-preserving-variable-bevel-cohort)
     (when stream
       (format stream "~&LUFT: ~D checks passed.~%" *luft-test-count*))
     (values t *luft-test-count*)))
