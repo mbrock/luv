@@ -87,6 +87,149 @@
     ;; covered junction and cannot be disguised as an ordinary eight-bit star.
     (%check (%signals-error-p (lambda () (decompose-star-mask #x6f))))))
 
+(defun %test-voxel-light ()
+  (%with-test-section ("packed RGB voxel-light frontier and face torches")
+    (%check (= #xc3f (pack-voxel-light 15 3 12)))
+    (%check (= (pack-voxel-light 11 9 13)
+               (voxel-light-componentwise-max
+                (pack-voxel-light 11 2 13)
+                (pack-voxel-light 4 9 7))))
+    (let* ((domain (make-world-domain :horizontal-bits 4))
+           (materials (make-hash-table :test #'eql))
+           (opacity
+             (make-array 1 :element-type '(unsigned-byte 8)
+                           :initial-contents '(15)))
+           (source-cell (make-site domain 8 8 8 +cell-extent+ 1))
+           (wall-cell (make-site domain 9 8 8 +cell-extent+ 1)))
+      ;; Placement offset zero is real opaque matter; absent cells are air.
+      (setf (gethash wall-cell materials) 0)
+      (let ((field
+              (solve-voxel-light
+               domain materials opacity
+               (list (make-voxel-light-source
+                      source-cell (pack-voxel-light 15 0 0))))))
+        (%check (voxel-light-field-direct-p field))
+        (%check (= 15 (voxel-light-red (voxel-light-at-site field source-cell))))
+        (%check (= 14 (voxel-light-red (voxel-light-at field 7 8 8))))
+        (%check (zerop (voxel-light-at-site field wall-cell)))
+        (%check (plusp (voxel-light-field-visits field)))
+        (%check (plusp (voxel-light-field-page-count field)))))
+    ;; A source owns its emission before its own material is considered;
+    ;; attenuation is paid only when the frontier enters the next cell.
+    (let* ((domain (make-world-domain :horizontal-bits 4))
+           (materials (make-hash-table :test #'eql))
+           (opacity
+             (make-array 2 :element-type '(unsigned-byte 8)
+                           :initial-contents '(15 1)))
+           (source (make-site domain 8 8 8 +cell-extent+ 1))
+           (transmissive (make-site domain 9 8 8 +cell-extent+ 1))
+           (air (make-site domain 10 8 8 +cell-extent+ 1))
+           (wall (make-site domain 11 8 8 +cell-extent+ 1)))
+      (setf (gethash source materials) 0
+            (gethash transmissive materials) 1
+            (gethash wall materials) 0)
+      (let ((field
+              (solve-voxel-light
+               domain materials opacity
+               (list (make-voxel-light-source
+                      source (pack-voxel-light 15 10 4))))))
+        (%check (= (pack-voxel-light 15 10 4)
+                   (voxel-light-at-site field source)))
+        (%check (= (pack-voxel-light 13 8 2)
+                   (voxel-light-at-site field transmissive)))
+        (%check (= (pack-voxel-light 12 7 1)
+                   (voxel-light-at-site field air)))
+        (%check (zerop (voxel-light-at-site field wall)))))
+    ;; A weighted detour is an independent max-fixpoint oracle: entering the
+    ;; lossy direct cell is dimmer than walking four all-air edges around it.
+    (let* ((domain (make-world-domain :horizontal-bits 4))
+           (materials (make-hash-table :test #'eql))
+           (opacity
+             (make-array 1 :element-type '(unsigned-byte 8)
+                           :initial-element 4))
+           (source (make-site domain 4 4 4 +cell-extent+ 1))
+           (lossy (make-site domain 5 4 4 +cell-extent+ 1)))
+      (setf (gethash lossy materials) 0)
+      (let ((field
+              (solve-voxel-light
+               domain materials opacity
+               (list (make-voxel-light-source
+                      source (pack-voxel-light 15 0 0))))))
+        (%check (= 10 (voxel-light-red (voxel-light-at-site field lossy))))
+        (%check (= 11 (voxel-light-red (voxel-light-at field 6 4 4))))))
+    ;; Improving red on a site that already retains blue level 15 re-enters
+    ;; bucket 15.  The red lane must then continue through the site.
+    (flet ((mixed-field (domain)
+             (let ((opacity
+                     (make-array 1 :element-type '(unsigned-byte 8)
+                                   :initial-element 15)))
+               (solve-voxel-light
+                domain (make-hash-table :test #'eql) opacity
+                (list
+                 (make-voxel-light-source
+                  (make-site domain 6 6 6 +cell-extent+ 1)
+                  (pack-voxel-light 0 0 15))
+                 (make-voxel-light-source
+                  (make-site domain 5 6 6 +cell-extent+ 1)
+                  (pack-voxel-light 10 0 0)))))))
+      (let* ((direct (mixed-field (make-world-domain :horizontal-bits 4)))
+             (sparse (mixed-field (make-world-domain :horizontal-bits 17)))
+             (joined (voxel-light-at direct 6 6 6))
+             (continued (voxel-light-at direct 7 6 6)))
+        (%check (= 9 (voxel-light-red joined)))
+        (%check (= 15 (voxel-light-blue joined)))
+        (%check (= 8 (voxel-light-red continued)))
+        (%check (= 14 (voxel-light-blue continued)))
+        (%check (not (voxel-light-field-direct-p sparse)))
+        (%check (= continued (voxel-light-at sparse 7 6 6)))
+        ;; Mesh sampling is spatial, not reverse-mapped to an ambiguous site.
+        (%check (= (pack-voxel-light 10 0 15)
+                   (voxel-light-at-mesh-point direct 52 52 52)))
+        (%check (= (voxel-light-at-mesh-point direct 52 52 52)
+                   (voxel-light-at-mesh-point sparse 52 52 52)))
+        ;; Inclusive far-boundary lattice coordinates do not alias the next
+        ;; horizontal lane in the population sampler's memoization key.
+        (%check (/= (%voxel-light-lattice-key 0 (ash 1 17) 0)
+                    (%voxel-light-lattice-key 1 0 0)))))
+    (let* ((domain (make-world-domain :horizontal-bits 4))
+           (cell (make-site domain 7 7 7 +cell-extent+ 1))
+           (faces
+             (loop for axis in '(:x :y :z)
+                   append
+                   (list (site-boundary-low domain cell axis)
+                         (site-boundary-high domain cell axis))))
+           (narrow (make-face-torch-mesh domain faces 0 1 :bevel-width 1))
+           (medial (make-face-torch-mesh domain faces 0 1 :bevel-width 4)))
+      (%check (= (* 6 32) (surface-mesh-triangle-count narrow)))
+      ;; Attachment geometry is bevel-independent, including the medial limit.
+      (%check (equalp (surface-mesh-template-vertex-words narrow)
+                      (surface-mesh-template-vertex-words medial)))
+      (%check (equalp (surface-mesh-fan-instance-words narrow)
+                      (surface-mesh-fan-instance-words medial)))
+      (dolist (face faces)
+        (let* ((mesh (make-face-torch-mesh domain (list face) 0 1))
+               (center
+                 (loop for coordinate in
+                       (list (site-x face) (site-y face) (site-z face))
+                       for axis-number from 0
+                       collect (+ (* +mesh-cell-size+ coordinate)
+                                  (if (logbitp axis-number (site-extent face))
+                                      4 0))))
+               (contact-p nil))
+          (multiple-value-bind (nx ny nz) (face-oriented-normal face)
+            (%map-surface-mesh-triangle-records
+             (lambda (kind stock ambient mask normal a b c)
+               (declare (ignore kind stock ambient mask normal))
+               (dolist (point (list a b c))
+                 (when (equal point center) (setf contact-p t))
+                 (%check
+                  (not (minusp
+                        (+ (* nx (- (first point) (first center)))
+                           (* ny (- (second point) (second center)))
+                           (* nz (- (third point) (third center)))))))))
+             mesh))
+          (%check contact-p))))))
+
 (defun %solid-for-star (mask &key (centre '(8 8 8)))
   (let* ((domain (make-world-domain :horizontal-bits 5))
          (builder (make-chain-builder domain :initial-capacity 8)))
@@ -237,9 +380,22 @@
      mesh)
     records))
 
+(defun %meshes-closed-p (meshes)
+  "Return true when MESHES form one closed, consistently oriented cohort."
+  (let ((records (make-hash-table :test #'equal)))
+    (dolist (mesh meshes)
+      (maphash
+       (lambda (edge record)
+         (let ((combined (or (gethash edge records)
+                             (setf (gethash edge records) (cons 0 0)))))
+           (incf (car combined) (car record))
+           (incf (cdr combined) (cdr record))))
+       (%mesh-geometric-edge-records mesh)))
+    (loop for record being the hash-values of records
+          always (and (= (car record) 2) (zerop (cdr record))))))
+
 (defun %mesh-closed-p (mesh)
-  (loop for record being the hash-values of (%mesh-geometric-edge-records mesh)
-        always (and (= (car record) 2) (zerop (cdr record)))))
+  (%meshes-closed-p (list mesh)))
 
 (defun %mesh-nondegenerate-p (mesh)
   (let ((nondegenerate-p t))
@@ -739,6 +895,7 @@
   (let ((*luft-test-count* 0)
         (*luft-test-section* nil))
     (%test-sites-and-chains)
+    (%test-voxel-light)
     (%test-sheet-decomposition)
     (%test-surface-mesh)
     (%test-chunked-meshing)

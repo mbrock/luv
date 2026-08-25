@@ -8,11 +8,24 @@
   ((name :initarg :name :reader material-kind-name)
    (base-tone :initarg :base-tone :reader material-kind-base-tone)
    (roughness :initarg :roughness :reader material-kind-roughness)
-   (relief :initarg :relief :reader material-kind-relief))
+   (relief :initarg :relief :reader material-kind-relief)
+   ;; Propagation, visible radiance, and transmission are deliberately
+   ;; independent.  A source illuminates its own cell before LIGHT-OPACITY is
+   ;; applied to light entering that cell.
+   (light-opacity :initarg :light-opacity :initform 15
+                  :reader material-kind-light-opacity)
+   (light-emission :initarg :light-emission :initform '(0 0 0)
+                   :reader material-kind-light-emission)
+   (surface-emission :initarg :surface-emission :initform 0.0
+                     :reader material-kind-surface-emission)
+   (opacity :initarg :opacity :initform 1.0
+            :reader material-kind-opacity))
   (:documentation "A reusable substance and its renderer-facing response."))
 
 (defclass earth-material-kind (material-kind) ())
 (defclass stone-material-kind (material-kind) ())
+(defclass luminous-material-kind (material-kind) ())
+(defclass crystal-material-kind (luminous-material-kind) ())
 
 (defclass material-frame ()
   ((name :initarg :name :reader material-frame-name)
@@ -63,6 +76,9 @@
 (defvar *earth-material* nil)
 (defvar *limestone-material* nil)
 (defvar *highland-rock-material* nil)
+(defvar *crystal-material* nil)
+(defvar *torch-body-material* nil)
+(defvar *torch-flame-material* nil)
 (defvar *world-material-frame* nil)
 (defvar *sanctuary-material-frame* nil)
 (defvar *beacon-material-frame* nil)
@@ -70,6 +86,7 @@
 (defvar *highland-rock-material-placement* nil)
 (defvar *sanctuary-material-placement* nil)
 (defvar *beacon-material-placement* nil)
+(defvar *crystal-material-placement* nil)
 
 (setf *earth-material*
       (ensure-semantic-instance
@@ -86,6 +103,24 @@
        *highland-rock-material* 'stone-material-kind
        :name :highland-rock :base-tone '(0.29 0.30 0.27)
        :roughness 0.94 :relief :weathered-stone)
+      *crystal-material*
+      (ensure-semantic-instance
+       *crystal-material* 'crystal-material-kind
+       :name :aether-crystal :base-tone '(0.16 0.68 0.94)
+       :roughness 0.18 :relief :crystal
+       :light-opacity 1 :light-emission '(3 11 15)
+       :surface-emission 0.65 :opacity 0.42)
+      *torch-body-material*
+      (ensure-semantic-instance
+       *torch-body-material* 'stone-material-kind
+       :name :torch-bronze :base-tone '(0.16 0.075 0.025)
+       :roughness 0.58 :relief :weathered-stone)
+      *torch-flame-material*
+      (ensure-semantic-instance
+       *torch-flame-material* 'luminous-material-kind
+       :name :torch-flame :base-tone '(1.0 0.36 0.055)
+       :roughness 0.12 :relief :crystal
+       :light-emission '(15 9 3) :surface-emission 1.8 :opacity 1.0)
       *world-material-frame*
       (ensure-semantic-instance
        *world-material-frame* 'material-frame
@@ -122,13 +157,21 @@
       (ensure-semantic-instance
        *beacon-material-placement* 'material-placement
        :name :ridge-beacon-limestone :kind *limestone-material* :finish :dressed
-       :frame *beacon-material-frame* :role :architecture))
+       :frame *beacon-material-frame* :role :architecture)
+      *crystal-material-placement*
+      (ensure-semantic-instance
+       *crystal-material-placement* 'material-placement
+       :name :aether-crystal :kind *crystal-material* :finish :faceted
+       :frame *sanctuary-material-frame* :role :crystal))
 
 (defvar *grass-reading* nil)
 (defvar *soil-reading* nil)
 (defvar *subsoil-reading* nil)
 (defvar *stone-reading* nil)
 (defvar *foundation-stone-reading* nil)
+(defvar *crystal-reading* nil)
+(defvar *torch-body-reading* nil)
+(defvar *torch-flame-reading* nil)
 
 (setf *grass-reading*
       (ensure-semantic-instance
@@ -155,7 +198,22 @@
        *foundation-stone-reading* 'surface-reading :name :foundation-limestone
        :kind *limestone-material* :tone '(0.53 0.49 0.39)
        :finish :earth-weathered :frame *sanctuary-material-frame*
-       :role :foundation))
+       :role :foundation)
+      *crystal-reading*
+      (ensure-semantic-instance
+       *crystal-reading* 'surface-reading :name :aether-crystal
+       :kind *crystal-material* :tone '(0.16 0.68 0.94) :finish :faceted
+       :frame *sanctuary-material-frame* :role :crystal)
+      *torch-body-reading*
+      (ensure-semantic-instance
+       *torch-body-reading* 'surface-reading :name :torch-bronze
+       :kind *torch-body-material* :tone '(0.16 0.075 0.025) :finish :forged
+       :frame *sanctuary-material-frame* :role :torch-body)
+      *torch-flame-reading*
+      (ensure-semantic-instance
+       *torch-flame-reading* 'surface-reading :name :torch-flame
+       :kind *torch-flame-material* :tone '(1.0 0.36 0.055) :finish :faceted
+       :frame *sanctuary-material-frame* :role :torch-flame))
 
 (flet ((seed (placement &rest readings)
          (clrhash (material-placement-readings placement))
@@ -170,7 +228,8 @@
   (seed *highland-rock-material-placement*)
   (seed *sanctuary-material-placement*
         *stone-reading* *foundation-stone-reading*)
-  (seed *beacon-material-placement*))
+  (seed *beacon-material-placement*)
+  (seed *crystal-material-placement* *crystal-reading*))
 
 (defun placement-surface-reading
     (placement role name tone finish)
@@ -199,6 +258,9 @@
 (defvar *deep-set-stone-surface* nil)
 (defvar *turf-edge-surface* nil)
 (defvar *foundation-stone-surface* nil)
+(defvar *crystal-surface* nil)
+(defvar *torch-body-surface* nil)
+(defvar *torch-flame-surface* nil)
 
 (setf *grass-surface*
       (ensure-surface-assembly *grass-surface* :grass :face *grass-reading*
@@ -235,14 +297,28 @@
       (ensure-surface-assembly
        *foundation-stone-surface* :foundation-limestone :face
        *foundation-stone-reading* :secondary *soil-reading*
-       :tertiary *subsoil-reading* :kernel :foundation-stone))
+       :tertiary *subsoil-reading* :kernel :foundation-stone)
+      *crystal-surface*
+      (ensure-surface-assembly
+       *crystal-surface* :aether-crystal :face *crystal-reading*
+       :kernel :crystal)
+      *torch-body-surface*
+      (ensure-surface-assembly
+       *torch-body-surface* :torch-bronze :attachment *torch-body-reading*
+       :kernel :torch-body)
+      *torch-flame-surface*
+      (ensure-surface-assembly
+       *torch-flame-surface* :torch-flame :attachment *torch-flame-reading*
+       :kernel :torch-flame))
 
 (defparameter *surface-assembly-vocabulary*
   (domains:make-identity-vocabulary-domain
    :members (list *grass-surface* *soil-surface* *subsoil-surface*
                   *stone-surface* *turf-set-stone-surface*
                   *soil-set-stone-surface* *deep-set-stone-surface*
-                  *turf-edge-surface* *foundation-stone-surface*)
+                  *turf-edge-surface* *foundation-stone-surface*
+                  *crystal-surface* *torch-body-surface*
+                  *torch-flame-surface*)
    :limit #x1000)
   "The assembly domain; its first nine offsets retain the legacy GPU oracle.")
 
@@ -261,14 +337,18 @@
                   :reader material-bevel-profile-terrain-width)
    (architecture-width :initarg :architecture-width :initform 1
                        :reader material-bevel-profile-architecture-width)
+   (crystal-width :initarg :crystal-width :initform 4
+                  :reader material-bevel-profile-crystal-width)
    (contact-width :initarg :contact-width :initform 2
                   :reader material-bevel-profile-contact-width))
   (:documentation
    "A semantic assignment of LUFT integer bevel widths to material relations."))
 
 (defun make-material-bevel-profile
-    (&key (terrain-width 4) (architecture-width 1) (contact-width 2))
-  (dolist (width (list terrain-width architecture-width contact-width))
+    (&key (terrain-width 4) (architecture-width 1) (crystal-width 4)
+          (contact-width 2))
+  (dolist (width (list terrain-width architecture-width crystal-width
+                       contact-width))
     (unless (and (integerp width)
                  (<= 1 width (/ luft:+mesh-cell-size+ 2)))
       (error "Material bevel width ~S must be an integer between one and four ticks."
@@ -276,6 +356,7 @@
   (make-instance 'material-bevel-profile
                  :terrain-width terrain-width
                  :architecture-width architecture-width
+                 :crystal-width crystal-width
                  :contact-width contact-width))
 
 (defun architecture-surface-reading-p (reading)
@@ -290,11 +371,14 @@
 
 (defconstant +material-bevel-terrain-mask+ #b01)
 (defconstant +material-bevel-architecture-mask+ #b10)
+(defconstant +material-bevel-crystal-mask+ #b100)
 
 (defun surface-reading-material-bevel-mask (reading)
-  (if (architecture-surface-reading-p reading)
-      +material-bevel-architecture-mask+
-      +material-bevel-terrain-mask+))
+  (cond ((typep (surface-reading-kind reading) 'crystal-material-kind)
+         +material-bevel-crystal-mask+)
+        ((architecture-surface-reading-p reading)
+         +material-bevel-architecture-mask+)
+        (t +material-bevel-terrain-mask+)))
 
 (defun surface-assembly-material-bevel-mask (assembly)
   "Return the terrain/architecture bits represented by ASSEMBLY.
@@ -316,14 +400,14 @@ incident reading, so their mask records a genuine mixed relation."
 
 (defmethod material-bevel-width
     ((profile material-bevel-profile) (assembly surface-assembly))
-  (ecase (surface-assembly-material-bevel-mask assembly)
-    (#.+material-bevel-terrain-mask+
-     (material-bevel-profile-terrain-width profile))
-    (#.+material-bevel-architecture-mask+
-     (material-bevel-profile-architecture-width profile))
-    (#.(logior +material-bevel-terrain-mask+
-               +material-bevel-architecture-mask+)
-     (material-bevel-profile-contact-width profile))))
+  (let ((mask (surface-assembly-material-bevel-mask assembly)))
+    (cond ((= mask +material-bevel-terrain-mask+)
+           (material-bevel-profile-terrain-width profile))
+          ((= mask +material-bevel-architecture-mask+)
+           (material-bevel-profile-architecture-width profile))
+          ((= mask +material-bevel-crystal-mask+)
+           (material-bevel-profile-crystal-width profile))
+          (t (material-bevel-profile-contact-width profile)))))
 
 (defun compile-material-bevel-profile
     (profile &optional (vocabulary *surface-assembly-vocabulary*))
@@ -345,10 +429,10 @@ incident reading, so their mask records a genuine mixed relation."
     (profile &optional (vocabulary *surface-assembly-vocabulary*))
   "Compile PROFILE into dense stock masks and site widths.
 
-The first value is one terrain/architecture bit mask per packed assembly
-stock.  The second is a four-entry byte table indexed by the OR of every
-incident stock mask: terrain-only, architecture-only, and mixed sites select
-the profile's terrain, architecture, and contact widths respectively."
+The first value is one terrain/architecture/crystal bit mask per packed
+assembly stock.  The second is an eight-entry byte table indexed by the OR of
+every incident stock mask.  Pure sites select their semantic width; every
+mixed contact selects CONTACT-WIDTH."
   (check-type profile material-bevel-profile)
   ;; Compile the ordinary stock widths as the validation oracle.  In
   ;; particular, a profile made without MAKE-MATERIAL-BEVEL-PROFILE must not
@@ -358,13 +442,16 @@ the profile's terrain, architecture, and contact widths respectively."
          (stock-masks
            (make-array (length members) :element-type '(unsigned-byte 8)))
          (site-widths
-           (make-array
-            4 :element-type '(unsigned-byte 8)
-            :initial-contents
-            (list 0
-                  (material-bevel-profile-terrain-width profile)
-                  (material-bevel-profile-architecture-width profile)
-                  (material-bevel-profile-contact-width profile)))))
+           (make-array 8 :element-type '(unsigned-byte 8)
+                         :initial-element
+                         (material-bevel-profile-contact-width profile))))
+    (setf (aref site-widths 0) 0
+          (aref site-widths +material-bevel-terrain-mask+)
+          (material-bevel-profile-terrain-width profile)
+          (aref site-widths +material-bevel-architecture-mask+)
+          (material-bevel-profile-architecture-width profile)
+          (aref site-widths +material-bevel-crystal-mask+)
+          (material-bevel-profile-crystal-width profile))
     (loop for assembly across members
           for stock from 0
           do (setf (aref stock-masks stock)
@@ -395,18 +482,36 @@ the profile's terrain, architecture, and contact widths respectively."
     (:stone 4)
     (:earth-set-stone 1)
     (:turf-edge 2)
-    (:foundation-stone 3)))
+    (:foundation-stone 3)
+    (:crystal 8)
+    (:torch-body 9)
+    (:torch-flame 10)))
 
 (defun material-relief-code (relief)
   "Compile the closed procedural-relief ABI shared by all surface kernels."
   (ecase relief
     (:granular 1)
-    (:weathered-stone 2)))
+    (:weathered-stone 2)
+    (:crystal 3)))
 
 (defun material-relief-amplitude (relief)
   (ecase relief
     (:granular 0.028)
-    (:weathered-stone 0.020)))
+    (:weathered-stone 0.020)
+    (:crystal 0.012)))
+
+(defun surface-assembly-material-kind (assembly)
+  (surface-reading-kind (surface-assembly-primary assembly)))
+
+(defun surface-assembly-opacity (assembly)
+  (material-kind-opacity (surface-assembly-material-kind assembly)))
+
+(defun surface-assembly-surface-emission (assembly)
+  (material-kind-surface-emission
+   (surface-assembly-material-kind assembly)))
+
+(defun surface-assembly-translucent-p (assembly)
+  (< (surface-assembly-opacity assembly) 1.0))
 
 (defun surface-contact-variant (assembly)
   (if (eq (surface-assembly-kernel assembly) :earth-set-stone)
@@ -422,9 +527,10 @@ the profile's terrain, architecture, and contact widths respectively."
   "Compile VOCABULARY into fixed-stride float32 rows for direct GPU indexing.
 
 Each assembly owns seven vec4 rows: primary/kernel, secondary/contact variant,
-tertiary/roughness, then frame origin/relief profile and its three axes (with
-relief amplitude beside X). The fixed stride is small enough for direct
-indexing while leaving material meaning on the CPU."
+tertiary/roughness, then frame origin/relief profile and its three axes.  The
+X row carries relief amplitude, Y carries visual opacity, and Z carries HDR
+surface emission.  Propagation loss and RGB source strength remain CPU-only
+material facts."
   (let* ((members (domains:identity-vocabulary-members vocabulary))
          (words
            (make-array (* (length members)
@@ -466,17 +572,24 @@ indexing while leaving material meaning on the CPU."
                      for amplitude = (material-relief-amplitude
                                       (material-kind-relief
                                        (surface-reading-kind primary)))
-                     do (put-row axis-row
-                                 (append axis
-                                         (list (if (= axis-row (+ row 4))
-                                                   amplitude 0.0)))))))
+                     do (put-row
+                         axis-row
+                         (append
+                          axis
+                          (list
+                           (cond ((= axis-row (+ row 4)) amplitude)
+                                 ((= axis-row (+ row 5))
+                                  (surface-assembly-opacity assembly))
+                                 (t
+                                  (surface-assembly-surface-emission
+                                   assembly)))))))))
     words))
 
 (defun make-scene-material-vocabulary ()
   "Return the authored placement vocabulary shared by one scene's cells."
   (domains:make-identity-vocabulary-domain
    :members (list *terrain-material-placement* *highland-rock-material-placement*
-                  *sanctuary-material-placement*)
+                  *sanctuary-material-placement* *crystal-material-placement*)
    :limit #x10000))
 
 (defgeneric material-face-reading (kind placement scene cell axis side)
@@ -510,6 +623,12 @@ indexing while leaving material meaning on the CPU."
            placement :architecture :dressed-limestone '(0.53 0.49 0.39)
            :dressed))))
 
+(defmethod material-face-reading
+    ((kind crystal-material-kind) placement scene cell axis side)
+  (declare (ignore kind scene cell axis side))
+  (placement-surface-reading
+   placement :crystal :aether-crystal '(0.16 0.68 0.94) :faceted))
+
 (defun find-surface-assembly
     (relation primary secondary tertiary kernel)
   (find-if (lambda (assembly)
@@ -541,6 +660,9 @@ indexing while leaving material meaning on the CPU."
         ((eq reading *subsoil-reading*) *subsoil-surface*)
         ((eq reading *stone-reading*) *stone-surface*)
         ((eq reading *foundation-stone-reading*) *foundation-stone-surface*)
+        ((eq reading *crystal-reading*) *crystal-surface*)
+        ((eq reading *torch-body-reading*) *torch-body-surface*)
+        ((eq reading *torch-flame-reading*) *torch-flame-surface*)
         (t
          (intern-surface-assembly
           :face reading
@@ -553,6 +675,9 @@ indexing while leaving material meaning on the CPU."
                     (:exposed-side :soil)
                     (:underside :subsoil)
                     (:foundation :foundation-stone)
+                    (:crystal :crystal)
+                    (:torch-body :torch-body)
+                    (:torch-flame :torch-flame)
                     (otherwise :stone))))))
 
 (defun stone-reading-p (reading)
@@ -700,6 +825,67 @@ in semantic identities rather than numeric ranges."
                :earth-weathered)))
         (vector architecture architecture architecture architecture
                 architecture architecture foundation))))
+
+(defmethod compile-material-placement
+    ((kind crystal-material-kind) placement)
+  (declare (ignore kind))
+  (incf *material-placement-compilation-count*)
+  (let ((crystal
+          (placement-surface-reading
+           placement :crystal :aether-crystal '(0.16 0.68 0.94) :faceted)))
+    (vector crystal crystal crystal crystal crystal crystal nil)))
+
+(defun compile-material-light-opacity-table (placement-vocabulary)
+  "Compile authored placement optics to one entered-cell u8 loss lane."
+  (let* ((placements
+           (domains:identity-vocabulary-members placement-vocabulary))
+         (opacities
+           (make-array (length placements) :element-type '(unsigned-byte 8))))
+    (loop for placement across placements
+          for index from 0
+          for opacity = (material-kind-light-opacity
+                         (material-placement-kind placement))
+          do (unless (typep opacity '(integer 0 15))
+               (error "Material ~S has invalid voxel-light opacity ~S."
+                      (material-placement-name placement) opacity))
+             (setf (aref opacities index) opacity))
+    opacities))
+
+(defun compile-material-render-class-table (placement-vocabulary)
+  "Compile authored placements to dense opaque/translucent phase bytes."
+  (let* ((placements
+           (domains:identity-vocabulary-members placement-vocabulary))
+         (classes
+           (make-array (length placements) :element-type '(unsigned-byte 8))))
+    (loop for placement across placements
+          for index from 0
+          do (setf (aref classes index)
+                   (if (< (material-kind-opacity
+                           (material-placement-kind placement))
+                          1.0)
+                       1
+                       0)))
+    classes))
+
+(defun material-kind-packed-light-emission (kind)
+  (destructuring-bind (red green blue) (material-kind-light-emission kind)
+    (luft:pack-voxel-light red green blue)))
+
+(defun compile-material-light-sources (material-cells placement-vocabulary)
+  "Return packed RGB4 sources for every emissive authored cell."
+  (let ((placements
+          (domains:identity-vocabulary-members placement-vocabulary))
+        (sources nil))
+    (maphash
+     (lambda (cell placement-offset)
+       (let* ((placement (aref placements placement-offset))
+              (emission
+                (material-kind-packed-light-emission
+                 (material-placement-kind placement))))
+         (unless (zerop emission)
+           (push (luft:make-voxel-light-source cell emission) sources))))
+     material-cells)
+    sources))
 
 (defun legacy-surface-assembly-p (assembly)
   (member assembly

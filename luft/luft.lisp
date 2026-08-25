@@ -48,6 +48,17 @@
    #:local-edge #:local-corner
    #:face-tangent-axes #:face-oriented-normal #:orient-face-outward
    #:face-edge-site #:face-corner-site
+   ;; Sparse voxel light.
+   #:+maximum-voxel-light-level+
+   #:pack-voxel-light #:voxel-light-red #:voxel-light-green
+   #:voxel-light-blue #:voxel-light-componentwise-max
+   #:voxel-light-field #:voxel-light-field-domain
+   #:voxel-light-field-revision #:voxel-light-field-page-count
+   #:voxel-light-field-visits #:voxel-light-field-pushes
+   #:voxel-light-field-stale-pops
+   #:make-voxel-light-source #:solve-voxel-light
+   #:voxel-light-at #:voxel-light-at-site
+   #:voxel-light-at-lattice-point #:voxel-light-at-mesh-point
    ;; Manifold-sheet mesh.
    #:+mesh-cell-size+ #:+mesh-bevel-width+ #:+mesh-instance-word-count+
    #:+mesh-instance-stock-bit-count+
@@ -64,7 +75,9 @@
    #:surface-mesh-triangle-count #:surface-mesh-face-triangle-count
    #:surface-mesh-band-triangle-count #:surface-mesh-fan-triangle-count
    #:surface-mesh-singular-star-count
+   #:surface-mesh-voxel-light #:surface-mesh-companions
    #:star-singular-p #:decompose-star-mask #:make-surface-mesh #:mesh-chunk
+   #:make-face-torch-mesh
            #:select-surface-mesh-stocks
            #:surface-mesh-with-triangle-ink
            #:surface-mesh-split-neighborhood

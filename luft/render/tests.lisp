@@ -960,6 +960,70 @@
       (ok (equalp #(0.18 0.31 0.105 0.0)
                   (subseq words (+ contact 4) (+ contact 8)))))))
 
+(deftest crystal-optics-compile-as-independent-render-and-light-facts
+  (let* ((words (luft.render::surface-assembly-descriptor-words))
+         (stride (* luft.render::+surface-assembly-descriptor-row-count+ 4))
+         (crystal (* (luft.render::surface-assembly-offset
+                      luft.render::*crystal-surface*)
+                     stride))
+         (flame (* (luft.render::surface-assembly-offset
+                    luft.render::*torch-flame-surface*)
+                   stride))
+         (vocabulary (luft.render::make-scene-material-vocabulary))
+         (opacities
+           (luft.render::compile-material-light-opacity-table vocabulary))
+         (crystal-placement
+           (luv.domains:identity-vocabulary-offset
+            vocabulary luft.render::*crystal-material-placement*)))
+    ;; Descriptor Y.w is visual opacity and Z.w is visible HDR emission.
+    (ok (< (abs (- 0.42 (aref words (+ crystal 23)))) 1.0e-6))
+    (ok (< (abs (- 0.65 (aref words (+ crystal 27)))) 1.0e-6))
+    (ok (= 1.0 (aref words (+ flame 23))))
+    (ok (< (abs (- 1.8 (aref words (+ flame 27)))) 1.0e-6))
+    ;; Propagation is a separate CPU lane: crystal transmits with entered
+    ;; opacity one while ordinary authored solids remain fully blocking.
+    (ok (= 1 (aref opacities crystal-placement)))
+    (ok (= 15 (aref opacities 0)))
+    (ok (= (luft:pack-voxel-light 3 11 15)
+           (luft.render::material-kind-packed-light-emission
+            luft.render::*crystal-material*)))))
+
+(deftest voxel-light-shrine-retains-semantic-torches-and-colored-sources
+  (let* ((scene (render:make-voxel-light-shrine-scene))
+         (solid (render:scene-solid scene))
+         (domain (luft:chain-domain solid))
+         (field (render:scene-voxel-light scene))
+         (crystal (luft:make-site domain 12 13 5 luft:+cell-extent+ 1))
+         (backing (luft:make-site domain 12 13 4 luft:+cell-extent+ 1))
+         (crystal-light (luft:voxel-light-at-site field crystal)))
+    (ok (= 4 (length (render:scene-torches scene))))
+    ;; Collision retains the occupied union, while rendering keeps a closed
+    ;; transmissive volume and its opaque contact backing in separate phases.
+    (ok (luft:chain-site-p (render:scene-solid scene) crystal))
+    (ok (luft:chain-site-p (luft.render::scene-translucent-solid scene)
+                           crystal))
+    (ok (not (luft:chain-site-p (luft.render::scene-opaque-solid scene)
+                                crystal)))
+    (ok (luft:chain-site-p (luft.render::scene-opaque-solid scene) backing))
+    (ok (not (luft:chain-site-p
+              (luft.render::scene-translucent-solid scene) backing)))
+    (ok (>= (luft:voxel-light-red crystal-light) 3))
+    (ok (>= (luft:voxel-light-green crystal-light) 11))
+    (ok (= (luft:voxel-light-blue crystal-light) 15))
+    (ok (plusp (luft:voxel-light-field-visits field)))
+    (loop for attachment across (render:scene-torches scene)
+          for support = (luft.render::torch-attachment-support-cell attachment)
+          for source = (luft.render::torch-attachment-source-cell attachment)
+          for light = (luft:voxel-light-at-site field source)
+          do (ok (luft:chain-site-p solid support))
+             (ok (not (luft:chain-site-p solid source)))
+             ;; Its own warm source survives componentwise joins with other
+             ;; torches and the cyan crystals; neighboring sources may only
+             ;; raise lanes, never replace or add them arithmetically.
+             (ok (= 15 (luft:voxel-light-red light)))
+             (ok (>= (luft:voxel-light-green light) 9))
+             (ok (>= (luft:voxel-light-blue light) 3)))))
+
 (deftest authored-placement-frames-compile-to-distinct-dense-assemblies
   (let* ((scene (render:make-mountain-sanctuary-scene))
          (domain (luft:chain-domain (luft.render::scene-solid scene)))
@@ -1213,6 +1277,118 @@
     (ok (= (* 2 (length (luft.render::render-population-instance-words single)))
            (length (luft.render::render-population-instance-words double))))))
 
+(deftest shrine-population-keeps-light-parallel-and-translucency-separate
+  (let* ((scene (render:make-voxel-light-shrine-scene))
+         (mesh (render:make-material-bevel-mesh
+                scene (render:make-material-bevel-profile)))
+         (population (luft.render::make-render-population (list mesh)))
+         (instances
+           (+ (luft.render::render-population-triangle-instance-count
+               population)
+              (luft.render::render-population-quad-instance-count
+               population)))
+         (companions (luft:surface-mesh-companions mesh))
+         (crystal-mesh (first companions))
+         (torch-mesh (second companions))
+         (backing-face-p nil))
+    (ok (= 2 (length companions)))
+    (ok (luft::%mesh-closed-p crystal-mesh))
+    (ok (luft::%mesh-nondegenerate-p crystal-mesh))
+    (ok (eq (render:scene-voxel-light scene)
+            (luft:surface-mesh-voxel-light mesh)))
+    (ok (eq (render:scene-voxel-light scene)
+            (luft:surface-mesh-voxel-light crystal-mesh)))
+    (ok (= (* 4 instances)
+           (length (luft.render::render-population-instance-words population))))
+    (ok (= (* 2 instances)
+           (length (luft.render::render-population-light-words population))))
+    (ok (plusp
+         (luft.render::render-population-opaque-triangle-instance-count
+          population)))
+    (ok (plusp
+         (luft.render::render-population-translucent-triangle-instance-count
+          population)))
+    ;; Four body/flame attachments contribute 32 triangles apiece without
+    ;; becoming voxel occupancy or changing either voxel phase.
+    (ok (= 128 (luft:surface-mesh-triangle-count torch-mesh)))
+    ;; The architecture phase retains the top sheet at the crystal contact;
+    ;; binary union meshing used to cancel this backing face completely.
+    (luft::%map-mesh-triangles
+     (lambda (kind a b c)
+       (when (and (eq kind :face)
+                  (every (lambda (point) (= 40 (third point))) (list a b c))
+                  (every (lambda (point)
+                           (and (<= 96 (first point) 104)
+                                (<= 104 (second point) 112)))
+                         (list a b c)))
+         (setf backing-face-p t)))
+     mesh)
+    (ok backing-face-p)
+    (ok (some #'plusp
+              (coerce (luft.render::render-population-light-words population)
+                      'list)))))
+
+(deftest streaming-phases-retain-both-sides-of-a-chunk-seam-contact
+  (let* ((builder (luft.render::make-scene-builder :horizontal-bits 7))
+         (scene
+           (progn
+             (luft.render::scene-builder-cell
+              builder 63 8 4 :architecture-p t)
+             (luft.render::scene-builder-cell
+              builder 64 8 4
+              :material luft.render::*crystal-material-placement*)
+             (luft.render::finish-scene-builder builder)))
+         (streaming (render:make-streaming-scene scene))
+         (left (luft:chunk-key-at 63 8))
+         (right (luft:chunk-key-at 64 8)))
+    (setf (gethash left (luft.render::streaming-scene-loaded streaming)) 2
+          (gethash right (luft.render::streaming-scene-loaded streaming)) 2)
+    (let* ((left-mesh (render:mesh-streaming-chunk streaming left 2))
+           (right-mesh (render:mesh-streaming-chunk streaming right 2))
+           (right-crystal (first (luft:surface-mesh-companions right-mesh)))
+           (translucent-cohort
+             (append (luft:surface-mesh-companions left-mesh)
+                     (luft:surface-mesh-companions right-mesh))))
+      (flet ((interface-face-p (mesh)
+               (let ((found nil))
+                 (luft::%map-mesh-triangles
+                  (lambda (kind a b c)
+                    (when (and (eq kind :face)
+                               (every (lambda (point) (= 512 (first point)))
+                                      (list a b c)))
+                      (setf found t)))
+                  mesh)
+                 found)))
+        ;; The target chunk has no opaque cells, but its captured empty phase
+        ;; chain remains distinct from an unknown residency boundary.
+        (ok (null (gethash right
+                           (luft.render::streaming-scene-opaque-store
+                            streaming))))
+        (ok (null (gethash left
+                           (luft.render::streaming-scene-translucent-store
+                            streaming))))
+        (ok (interface-face-p left-mesh))
+        (ok right-crystal)
+        (ok (interface-face-p right-crystal))
+        (ok (luft::%meshes-closed-p (list left-mesh right-mesh)))
+        (ok (luft::%meshes-closed-p translucent-cohort))
+        ;; A chunk's root can be deliberately open at an ownership seam; the
+        ;; full crystal cell belongs to this target chunk and remains closed.
+        (ok (luft::%mesh-closed-p right-crystal))))))
+
+(deftest an-empty-streaming-neighborhood-materializes-one-empty-root
+  (let* ((scene
+           (luft.render::finish-scene-builder
+            (luft.render::make-scene-builder :horizontal-bits 7)))
+         (streaming (render:make-streaming-scene scene))
+         (key (luft:chunk-key-at 64 64)))
+    (setf (gethash key (luft.render::streaming-scene-loaded streaming)) 2)
+    (let ((mesh (render:mesh-streaming-chunk streaming key 2)))
+      (ok (zerop (luft:surface-mesh-triangle-count mesh)))
+      (ok (null (luft:surface-mesh-companions mesh)))
+      (ok (eq (render:scene-voxel-light scene)
+              (luft:surface-mesh-voxel-light mesh))))))
+
 (deftest the-connected-miter-study-uses-the-site-stream-abi
   (dolist (bevel-width '(1 2 4))
     (let ((mesh (render:make-render-mesh
@@ -1250,7 +1426,10 @@
 (deftest material-bevel-profile-compiles-semantic-widths-once
   (let* ((profile (render:make-material-bevel-profile
                    :terrain-width 4 :architecture-width 1 :contact-width 2))
-         (widths (render:compile-material-bevel-profile profile)))
+         (widths (render:compile-material-bevel-profile profile))
+         (crystal-stock
+           (luft.render::surface-assembly-offset
+            luft.render::*crystal-surface*)))
     (ok (= 4 (aref widths luft.render::+grass-stock+)))
     (ok (= 4 (aref widths luft.render::+soil-stock+)))
     (ok (= 4 (aref widths luft.render::+turf-edge-stock+)))
@@ -1259,12 +1438,15 @@
     (ok (= 2 (aref widths luft.render::+turf-set-stone-stock+)))
     (ok (= 2 (aref widths luft.render::+soil-set-stone-stock+)))
     (ok (= 2 (aref widths luft.render::+deep-set-stone-stock+)))
+    (ok (= 4 (aref widths crystal-stock)))
     (multiple-value-bind (stock-masks site-widths)
         (luft.render::compile-material-bevel-site-policy profile)
       (ok (= luft.render::+material-bevel-terrain-mask+
              (aref stock-masks luft.render::+grass-stock+)))
       (ok (= luft.render::+material-bevel-architecture-mask+
              (aref stock-masks luft.render::+stone-stock+)))
+      (ok (= luft.render::+material-bevel-crystal-mask+
+             (aref stock-masks crystal-stock)))
       (ok (= (logior luft.render::+material-bevel-terrain-mask+
                      luft.render::+material-bevel-architecture-mask+)
              (aref stock-masks luft.render::+turf-set-stone-stock+)))
@@ -1272,6 +1454,8 @@
                      luft.render::+material-bevel-terrain-mask+)))
       (ok (= 1 (aref site-widths
                      luft.render::+material-bevel-architecture-mask+)))
+      (ok (= 4 (aref site-widths
+                     luft.render::+material-bevel-crystal-mask+)))
       (ok (= 2 (aref site-widths
                      (logior luft.render::+material-bevel-terrain-mask+
                              luft.render::+material-bevel-architecture-mask+)))))))

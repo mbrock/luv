@@ -105,6 +105,84 @@
    (luv.arithmetic.lisp.vec3:make-vec3 89.0 33.0 41.0)
    20.0 "LUFT stylized lighting study" :player-p t))
 
+(defun make-luft-voxel-light-capture-light (source)
+  "Return a dim environment that leaves local voxel light legible."
+  (make-instance
+   'luft.render:light
+   :name :voxel-light-night
+   :sun-direction (luft.render::light-sun-direction source)
+   :sun-color #(0.12 0.08 0.14 0.18)
+   :sky-color #(0.035 0.055 0.11 1.0)
+   :ground-color #(0.018 0.012 0.032 1.0)
+   :shadow-half-extent (luft.render::light-shadow-half-extent source)
+   :shadow-depth-radius (luft.render::light-shadow-depth-radius source)
+   :shadow-base-bias (luft.render::light-shadow-base-bias source)
+   :shadow-filter-radius (luft.render::light-shadow-filter-radius source)))
+
+(defun make-luft-voxel-light-capture-scene (propagation-p)
+  "Return the shrine with emissive surfaces on and optional propagated light."
+  (let ((scene (luft.render:make-voxel-light-shrine-scene)))
+    (unless propagation-p
+      ;; Preserve the luminous crystal and torch materials so this is a strict
+      ;; propagated-light A/B rather than an unrelated material comparison.
+      (setf (slot-value scene 'luft.render::voxel-light)
+            (luft:solve-voxel-light
+             (luft:chain-domain (luft.render:scene-solid scene))
+             (make-hash-table :test #'eql)
+             (make-array 0 :element-type '(unsigned-byte 8)) #())))
+    scene))
+
+(defun capture-luft-voxel-light-shrine
+    (pathname position isometric-height title
+     &key (yaw 2.2455373) (pitch -0.28) (propagation-p t))
+  "Capture the authored shrine under one fixed, deliberately dim light."
+  (let ((old-light luft.render:*light*))
+    (unwind-protect
+         (progn
+           ;; START-VIEWER owns another thread, so publish the capture light
+           ;; before constructing it just like the other renderer globals.
+           (setf luft.render:*light*
+                 (make-luft-voxel-light-capture-light old-light))
+           (capture-luft-material-contact
+            pathname position isometric-height title
+            :yaw yaw :pitch pitch
+            :solid (make-luft-voxel-light-capture-scene propagation-p)
+            :bevel-profile
+            (luft.render:make-material-bevel-profile
+             :terrain-width 2 :architecture-width 2
+             :crystal-width 4 :contact-width 2)))
+      (setf luft.render:*light* old-light))))
+
+(luv:define-capture luft-voxel-light-shrine-context
+    (:figure VXLGHT :kind :image :extension "png" :layout :landscape
+     :description
+     "A dim receiving shrine showing colored voxel light, four face torches, and two translucent crystals.")
+  (pathname)
+  (capture-luft-voxel-light-shrine
+   pathname
+   (luv.arithmetic.lisp.vec3:make-vec3 23.0 -1.0 13.5)
+   14.0 "LUFT voxel-light shrine"))
+
+(luv:define-capture luft-voxel-light-shrine-propagation-off
+    (:figure VXLGHT :kind :image :extension "png" :layout :landscape
+     :description
+     "The identical shrine and emissive materials with propagated voxel light disabled.")
+  (pathname)
+  (capture-luft-voxel-light-shrine
+   pathname
+   (luv.arithmetic.lisp.vec3:make-vec3 23.0 -1.0 13.5)
+   14.0 "LUFT voxel-light shrine - propagation off" :propagation-p nil))
+
+(luv:define-capture luft-voxel-light-shrine-close
+    (:figure VXLGHT :kind :image :extension "png" :layout :landscape
+     :description
+     "A fixed close view of the wall torch, crystal transmission, and colored receiver light.")
+  (pathname)
+  (capture-luft-voxel-light-shrine
+   pathname
+   (luv.arithmetic.lisp.vec3:make-vec3 18.2 7.0 11.2)
+   7.5 "LUFT voxel-light shrine close" :pitch -0.36))
+
 (luv:define-capture luft-material-contact-closeup
     (:figure ER7HST :kind :image :extension "png" :layout :landscape
      :description

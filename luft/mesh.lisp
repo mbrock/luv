@@ -76,7 +76,11 @@
   (face-triangle-count 0 :type (integer 0 *) :read-only t)
   (band-triangle-count 0 :type (integer 0 *) :read-only t)
   (fan-triangle-count 0 :type (integer 0 *) :read-only t)
-  (singular-star-count 0 :type (integer 0 *) :read-only t))
+  (singular-star-count 0 :type (integer 0 *) :read-only t)
+  ;; Derived render products stay beside the compact topology instead of
+  ;; consuming its already-full four-word instance ABI.
+  (voxel-light nil :type (or null voxel-light-field))
+  (companions nil :type list))
 
 (defun surface-mesh-template-count (mesh)
   (/ (length (surface-mesh-template-ranges mesh)) 2))
@@ -3383,6 +3387,157 @@ selected entry must be an integer width from one through four."
        (first normal) (second normal) (third normal))
       (%emit-instance builder kind (first base) (second base) (third base)
                       stock ambient 3))))
+
+;;; ---------------------------------------------------------------------------
+;;; Semantic face attachments
+
+(defun %torch-axis-vector (axis)
+  (ecase axis
+    (:x '(1 0 0))
+    (:y '(0 1 0))
+    (:z '(0 0 1))))
+
+(defun %torch-vector-cross (a b)
+  (list (- (* (second a) (third b)) (* (third a) (second b)))
+        (- (* (third a) (first b)) (* (first a) (third b)))
+        (- (* (first a) (second b)) (* (second a) (first b)))))
+
+(defun %torch-vector-dot (a b)
+  (+ (* (first a) (first b))
+     (* (second a) (second b))
+     (* (third a) (third b))))
+
+(defun %torch-vector-scale (amount vector)
+  (mapcar (lambda (component) (* amount component)) vector))
+
+(defun %torch-vector+ (&rest vectors)
+  (loop for axis below 3
+        collect (loop for vector in vectors sum (nth axis vector))))
+
+(defun %torch-face-frame (domain face)
+  (%require-face domain face)
+  (multiple-value-bind (u-axis v-axis) (face-tangent-axes face)
+    (multiple-value-bind (nx ny nz) (face-oriented-normal face)
+      (let* ((normal (list nx ny nz))
+             (u (%torch-axis-vector u-axis))
+             (v (%torch-axis-vector v-axis)))
+        ;; Maintain a right-handed frame even when FACE has negative polarity.
+        (when (minusp (%torch-vector-dot (%torch-vector-cross u v) normal))
+          (setf v (%torch-vector-scale -1 v)))
+        (values u v normal)))))
+
+(defun %torch-face-center (face)
+  (loop for coordinate in (list (site-x face) (site-y face) (site-z face))
+        for axis-number from 0
+        collect (+ (* +mesh-cell-size+ coordinate)
+                   (if (logbitp axis-number (site-extent face))
+                       (/ +mesh-cell-size+ 2)
+                       0))))
+
+(defun %emit-facing-torch-triangle
+    (builder stock expected-normal a b c)
+  (let ((normal (%primitive-plane-normal a b c)))
+    (when (minusp (%torch-vector-dot normal expected-normal))
+      (rotatef b c)
+      (setf normal (%primitive-plane-normal a b c)))
+    (%emit-global-triangle builder :junction stock 0 #b111 normal
+                           (list a b c))))
+
+(defun %torch-ring-center (ring)
+  (loop for axis below 3
+        collect (truncate
+                 (loop for point in ring sum (nth axis point))
+                 (length ring))))
+
+(defun %emit-torch-cone
+    (builder stock apex ring normal ring-radius axial-distance tip-p)
+  (dotimes (index (length ring))
+    (let* ((next (mod (1+ index) (length ring)))
+           (a (nth index ring))
+           (b (nth next ring))
+           (ring-center (%torch-ring-center ring))
+           (radial (%torch-vector+
+                    (%torch-vector+ a b)
+                    (%torch-vector-scale -2 ring-center)))
+           (expected
+             (%torch-vector+
+              (%torch-vector-scale axial-distance radial)
+              (%torch-vector-scale
+               (if tip-p (* 2 ring-radius) (* -2 ring-radius))
+               normal))))
+      (if tip-p
+          (%emit-facing-torch-triangle builder stock expected a apex b)
+          (%emit-facing-torch-triangle builder stock expected apex b a)))))
+
+(defun %emit-torch-frustum
+    (builder stock lower upper normal lower-radius upper-radius axial-distance)
+  (unless (= (length lower) (length upper))
+    (error "Torch frustum rings have different vertex counts."))
+  (dotimes (index (length lower))
+    (let* ((next (mod (1+ index) (length lower)))
+           (a (nth index lower))
+           (b (nth next lower))
+           (c (nth next upper))
+           (d (nth index upper))
+           (lower-center (%torch-ring-center lower))
+           (upper-center (%torch-ring-center upper))
+           (radial (%torch-vector+
+                    (%torch-vector+ a b c d)
+                    (%torch-vector-scale -2 lower-center)
+                    (%torch-vector-scale -2 upper-center)))
+           (expected
+             (%torch-vector+
+              (%torch-vector-scale axial-distance radial)
+              (%torch-vector-scale
+               (* -4 (- upper-radius lower-radius)) normal))))
+      (%emit-facing-torch-triangle builder stock expected a c d)
+      (%emit-facing-torch-triangle builder stock expected a b c))))
+
+(defun make-face-torch-mesh
+    (domain faces body-stock flame-stock &key (bevel-width +mesh-bevel-width+))
+  "Compile sparse oriented face attachments into an independent site stream.
+
+Each torch touches its semantic cubical face at one exact point, then grows
+only into the outward neighboring cell.  The attachment therefore remains
+coherent when a material bevel reaches width four and its central face patch
+vanishes.  FACES are oriented face sites; BODY-STOCK and FLAME-STOCK retain
+independent opaque/luminous material semantics in the renderer."
+  (check-type domain world-domain)
+  (check-type body-stock (unsigned-byte #.+mesh-instance-stock-bit-count+))
+  (check-type flame-stock (unsigned-byte #.+mesh-instance-stock-bit-count+))
+  (check-type bevel-width (integer 1 4))
+  (let ((builder (%make-surface-mesh-builder domain bevel-width)))
+    (map nil
+         (lambda (face)
+           (multiple-value-bind (u v normal)
+               (%torch-face-frame domain face)
+             (let ((center (%torch-face-center face)))
+               (labels ((point (distance u-radius v-radius)
+                          (%torch-vector+
+                           center
+                           (%torch-vector-scale distance normal)
+                           (%torch-vector-scale u-radius u)
+                           (%torch-vector-scale v-radius v)))
+                        (ring (distance radius)
+                          (list (point distance radius 0)
+                                (point distance radius radius)
+                                (point distance 0 radius)
+                                (point distance (- radius) radius)
+                                (point distance (- radius) 0)
+                                (point distance (- radius) (- radius))
+                                (point distance 0 (- radius))
+                                (point distance radius (- radius)))))
+                 (let ((socket (ring 1 1))
+                       (shaft (ring 4 1))
+                       (tip (point 7 0 0)))
+                   (%emit-torch-cone builder body-stock center socket
+                                     normal 1 1 nil)
+                   (%emit-torch-frustum builder body-stock socket shaft
+                                        normal 1 1 3)
+                   (%emit-torch-cone builder flame-stock tip shaft
+                                     normal 1 3 t))))))
+         faces)
+    (%finish-surface-mesh builder)))
 
 (defun surface-mesh-with-triangle-ink (mesh)
   "Return MESH's exact triangles with every primitive edge marked visible.

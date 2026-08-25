@@ -22,11 +22,19 @@
 
 (defclass scene ()
   ((solid :initarg :solid :reader scene-solid)
+   ;; Collision/raycast truth remains one union.  Rendering retains separate
+   ;; phase solids so an opaque backing face is not cancelled merely because
+   ;; the adjacent occupied voxel is translucent.
+   (opaque-solid :initarg :opaque-solid :reader scene-opaque-solid)
+   (translucent-solid :initarg :translucent-solid
+                      :reader scene-translucent-solid)
    (material-vocabulary :initarg :material-vocabulary
                         :reader scene-material-vocabulary)
    (material-cells :initarg :material-cells :reader scene-material-cells)
    (material-program :initarg :material-program
                      :reader scene-material-program)
+   (voxel-light :initarg :voxel-light :reader scene-voxel-light)
+   (torches :initarg :torches :initform #() :reader scene-torches)
    (player-p :initarg :player-p :initform nil :reader scene-player-p))
   (:documentation
    "One authored solid and its vocabulary-closed material-placement field.
@@ -34,6 +42,13 @@
 The solid remains LUFT's topological truth. The sparse authored field stores
 only dense vocabulary offsets; semantic material objects remain at the scene
 boundary rather than being allocated per cell."))
+
+(defclass torch-attachment ()
+  ((support-cell :initarg :support-cell :reader torch-attachment-support-cell)
+   (face :initarg :face :reader torch-attachment-face)
+   (source-cell :initarg :source-cell :reader torch-attachment-source-cell))
+  (:documentation
+   "A sparse semantic attachment keyed by an oriented cubical face site."))
 
 (defclass scene-builder ()
   ((domain :initarg :domain :reader scene-builder-domain)
@@ -43,7 +58,10 @@ boundary rather than being allocated per cell."))
    (material-vocabulary :initform (make-scene-material-vocabulary)
                         :reader scene-builder-material-vocabulary)
    (material-cells :initform (make-hash-table :test #'eql)
-                   :reader scene-builder-material-cells)))
+                   :reader scene-builder-material-cells)
+   (torches :initform (make-hash-table :test #'eql)
+            :reader scene-builder-torches)
+   (light-revision :initform 0 :accessor scene-builder-light-revision)))
 
 (defun make-scene-builder (&key (horizontal-bits 6) (origin-x 0) (origin-y 0))
   (make-instance 'scene-builder
@@ -72,6 +90,34 @@ boundary rather than being allocated per cell."))
           (progn
             (remhash site (scene-builder-cells builder))
             (remhash site (scene-builder-material-cells builder))))))
+  (incf (scene-builder-light-revision builder))
+  builder)
+
+(defun scene-builder-torch (builder x y z axis side)
+  "Attach a torch to SUPPORT cell X/Y/Z's outward AXIS/SIDE face.
+
+The attachment is not voxel occupancy.  Its light source is the adjacent
+outward cell and its geometry is keyed by the oriented semantic face, so the
+same identity survives every bevel width."
+  (check-type axis luft:axis)
+  (check-type side luft:side)
+  (let* ((domain (scene-builder-domain builder))
+         (support
+           (luft:make-site domain
+                           (+ x (scene-builder-origin-x builder))
+                           (+ y (scene-builder-origin-y builder)) z
+                           luft:+cell-extent+ 1))
+         (face (ecase side
+                 (:low (luft:site-boundary-low domain support axis))
+                 (:high (luft:site-boundary-high domain support axis))))
+         (source (luft:step-site domain support axis
+                                 (if (eq side :low) -1 1))))
+    (unless source
+      (error "Torch face ~S points outside the LUFT domain." face))
+    (setf (gethash face (scene-builder-torches builder))
+          (make-instance 'torch-attachment
+                         :support-cell support :face face :source-cell source)))
+  (incf (scene-builder-light-revision builder))
   builder)
 
 (defun scene-builder-box
@@ -189,22 +235,72 @@ stair topology. #WSEK3C"
 
 (defun finish-scene-builder (builder &key player-p)
   (let* ((cells (scene-builder-cells builder))
+         (material-cells (scene-builder-material-cells builder))
+         (material-vocabulary (scene-builder-material-vocabulary builder))
+         (render-classes
+           (compile-material-render-class-table material-vocabulary))
          (chain-builder
            (luft:make-chain-builder (scene-builder-domain builder)
-                                    :initial-capacity (hash-table-count cells))))
+                                    :initial-capacity (hash-table-count cells)))
+         (opaque-builder
+           (luft:make-chain-builder (scene-builder-domain builder)
+                                    :initial-capacity (hash-table-count cells)))
+         (translucent-builder
+           (luft:make-chain-builder (scene-builder-domain builder)
+                                    :initial-capacity 16)))
     (maphash (lambda (site present-p)
                (declare (ignore present-p))
-               (luft:chain-builder-add-site chain-builder site))
+               (luft:chain-builder-add-site chain-builder site)
+               (let* ((offset (gethash site material-cells))
+                      (target
+                        (if (= 1 (aref render-classes offset))
+                            translucent-builder
+                            opaque-builder)))
+                 (luft:chain-builder-add-site target site)))
              cells)
-    (make-instance 'scene
-                   :solid (luft:finish-chain-builder chain-builder)
-                   :player-p player-p
-                   :material-vocabulary
-                   (scene-builder-material-vocabulary builder)
-                   :material-program
-                   (make-material-program
-                    (scene-builder-material-vocabulary builder))
-                   :material-cells (scene-builder-material-cells builder))))
+    (let ((torches nil))
+      (maphash
+       (lambda (face attachment)
+         (declare (ignore face))
+         (unless (gethash (torch-attachment-support-cell attachment) cells)
+           (error "Torch support cell ~S is not occupied."
+                  (torch-attachment-support-cell attachment)))
+         (when (gethash (torch-attachment-source-cell attachment) cells)
+           (error "Torch outward cell ~S is occupied."
+                  (torch-attachment-source-cell attachment)))
+         (push attachment torches))
+       (scene-builder-torches builder))
+      (setf torches
+            (coerce (sort torches #'< :key #'torch-attachment-face) 'vector))
+      (let* ((solid (luft:finish-chain-builder chain-builder))
+             (opaque-solid (luft:finish-chain-builder opaque-builder))
+             (translucent-solid
+               (luft:finish-chain-builder translucent-builder))
+             (sources
+               (compile-material-light-sources
+                material-cells material-vocabulary))
+             (torch-emission
+               (material-kind-packed-light-emission *torch-flame-material*)))
+        (loop for attachment across torches
+              do (push
+                  (luft:make-voxel-light-source
+                   (torch-attachment-source-cell attachment) torch-emission)
+                  sources))
+        (make-instance
+         'scene
+         :solid solid
+         :opaque-solid opaque-solid
+         :translucent-solid translucent-solid
+         :player-p player-p
+         :material-vocabulary material-vocabulary
+         :material-program (make-material-program material-vocabulary)
+         :material-cells material-cells
+         :torches torches
+         :voxel-light
+         (luft:solve-voxel-light
+          (scene-builder-domain builder) material-cells
+          (compile-material-light-opacity-table material-vocabulary)
+          sources :revision (scene-builder-light-revision builder)))))))
 
 (defun make-manifold-spike-scene ()
   "Three isolated singular-star fixtures for the manifold-sheet spike.
@@ -230,6 +326,29 @@ four-sheet parity star.  Nothing else in the scene can hide their junctions.
   "One isolated stone cell for comparing sub-medial and medial bevels."
   (let ((builder (make-scene-builder :horizontal-bits 4)))
     (scene-builder-cell builder 6 4 3 :architecture-p t)
+    (finish-scene-builder builder)))
+
+(defun make-voxel-light-shrine-scene ()
+  "A compact production fixture for colored propagation and face torches."
+  (let ((builder (make-scene-builder :horizontal-bits 6)))
+    ;; A pale receiving room with a dark backing visible through the crystal.
+    (scene-builder-box builder 6 18 6 18 4 4 :architecture-p t)
+    (scene-builder-box builder 6 18 18 18 5 13 :architecture-p t)
+    (scene-builder-box builder 6 6 7 18 5 11 :architecture-p t)
+    (scene-builder-box builder 7 17 9 11 12 12 :architecture-p t)
+    (scene-builder-box builder 10 14 17 17 5 9
+                       :material *highland-rock-material-placement*)
+    ;; Medial crystal silhouettes are point-contact jewels, not glass cubes.
+    (scene-builder-cell builder 12 13 5
+                        :material *crystal-material-placement*)
+    (scene-builder-cell builder 15 15 5
+                        :material *crystal-material-placement*)
+    ;; Floor, back-wall, side-wall, and ceiling attachments exercise four
+    ;; normals while remaining the same geometry at every bevel width.
+    (scene-builder-torch builder 8 10 4 :z :high)
+    (scene-builder-torch builder 8 18 8 :y :low)
+    (scene-builder-torch builder 6 14 7 :x :high)
+    (scene-builder-torch builder 16 10 12 :z :low)
     (finish-scene-builder builder)))
 
 (defconstant +sanctuary-plateau-height+ 19)
@@ -546,9 +665,16 @@ same view also retains the truncated wall miter preserved by #DJK8HW."
       (material-face-reading (material-placement-kind placement)
                              placement scene cell axis side))))
 
-(defun make-scene-face-stock-function (scene)
-  "Capture SCENE's dense material tables for repeated face classification."
-  (let* ((solid (scene-solid scene))
+(defun make-scene-face-stock-function
+    (scene &optional (phase-solid (scene-solid scene)))
+  "Capture SCENE's dense material tables for one render PHASE-SOLID.
+
+The phase solid determines which incident cell owns an emitted face.  The
+union solid remains the semantic support field, so an architectural cell borne
+by terrain retains its foundation reading even when the two materials happen
+to live in different render phases."
+  (let* ((solid phase-solid)
+         (semantic-solid (scene-solid scene))
          (domain (luft:chain-domain solid))
          (material-cells (scene-material-cells scene))
          (program (scene-material-program scene))
@@ -567,7 +693,7 @@ same view also retains the truncated wall miter preserved by #DJK8HW."
                             (luft:site-x cell) (luft:site-y cell) (1- z)
                             luft:+cell-extent+ 1)))
                      (and (= 1 (luft:chain-cell-occupancy-bit
-                                solid
+                                semantic-solid
                                 (luft:site-x below)
                                 (luft:site-y below)
                                 (luft:site-z below)))
@@ -622,6 +748,58 @@ from an exposed or buried foundation without adding per-site material objects."
           (* 3 (luft:site-z face)) (luft:site-extent face))
        4))
 
+(defun scene-torch-faces (scene &optional chunk-key)
+  (loop for attachment across (scene-torches scene)
+        when (or (null chunk-key)
+                 (= chunk-key
+                    (luft:site-chunk-key
+                     (torch-attachment-support-cell attachment))))
+          collect (torch-attachment-face attachment)))
+
+(defun decorate-scene-mesh (mesh scene &optional chunk-key)
+  "Attach immutable light and sparse face geometry without changing topology."
+  (labels ((attach-light (surface)
+             (setf (luft:surface-mesh-voxel-light surface)
+                   (scene-voxel-light scene))
+             (dolist (companion (luft:surface-mesh-companions surface))
+               (attach-light companion))))
+    (attach-light mesh))
+  (let ((faces (scene-torch-faces scene chunk-key)))
+    (when faces
+      (let ((torches
+              (luft:make-face-torch-mesh
+               (luft:surface-mesh-domain mesh) faces
+               (surface-assembly-offset *torch-body-surface*)
+               (surface-assembly-offset *torch-flame-surface*)
+               :bevel-width (luft:surface-mesh-bevel-width mesh))))
+        (setf (luft:surface-mesh-voxel-light torches)
+              (scene-voxel-light scene))
+        (setf (luft:surface-mesh-companions mesh)
+              (append (luft:surface-mesh-companions mesh)
+                      (list torches))))))
+  mesh)
+
+(defun %make-scene-phase-mesh
+    (scene solid bevel-width stock-function chamfer-stock-function)
+  "Build one undecorated closed render phase of SCENE."
+  (luft:make-surface-mesh
+   solid
+   :stock-function (or stock-function
+                       (make-scene-face-stock-function scene solid))
+   :chamfer-stock-function chamfer-stock-function
+   :bevel-width bevel-width))
+
+(defun %join-scene-phase-meshes (opaque translucent)
+  "Return one mesh tree whose alpha phase follows its opaque phase."
+  (cond (opaque
+         (when translucent
+           (setf (luft:surface-mesh-companions opaque)
+                 (append (luft:surface-mesh-companions opaque)
+                         (list translucent))))
+         opaque)
+        (translucent translucent)
+        (t (error "A scene has neither opaque nor translucent occupancy."))))
+
 (defun make-render-mesh
     (source &key stock-function chamfer-stock-function
                  (bevel-width luft:+mesh-bevel-width+))
@@ -629,9 +807,6 @@ from an exposed or buried foundation without adding per-site material objects."
   (let* ((scene (and (typep source 'scene) source))
          (solid (if scene (scene-solid source) source))
          (material-program (and scene (scene-material-program scene)))
-         (stock-function (or stock-function
-                             (and scene (make-scene-face-stock-function scene))
-                             #'default-face-stock))
          (chamfer-stock-function
            (or chamfer-stock-function
                (if scene
@@ -640,10 +815,26 @@ from an exposed or buried foundation without adding per-site material objects."
                    (lambda (stocks) (first stocks))))))
     (check-type solid luft:chain)
     (zone (:luft/rematerialize :value (luft:chain-count solid))
-      (luft:make-surface-mesh solid :stock-function stock-function
-                                   :chamfer-stock-function
-                                   chamfer-stock-function
-                                   :bevel-width bevel-width))))
+      (if scene
+          (let* ((opaque-solid (scene-opaque-solid scene))
+                 (translucent-solid (scene-translucent-solid scene))
+                 (opaque
+                   (when (or (not (luft:chain-empty-p opaque-solid))
+                             (luft:chain-empty-p translucent-solid))
+                     (%make-scene-phase-mesh
+                      scene opaque-solid bevel-width stock-function
+                      chamfer-stock-function)))
+                 (translucent
+                   (unless (luft:chain-empty-p translucent-solid)
+                     (%make-scene-phase-mesh
+                      scene translucent-solid bevel-width stock-function
+                      chamfer-stock-function)))
+                 (mesh (%join-scene-phase-meshes opaque translucent)))
+            (decorate-scene-mesh mesh scene))
+          (luft:make-surface-mesh
+           solid :stock-function (or stock-function #'default-face-stock)
+                 :chamfer-stock-function chamfer-stock-function
+                 :bevel-width bevel-width)))))
 
 (defun make-material-bevel-mesh
     (scene profile &key (contract-t-junctions-p t))
@@ -663,14 +854,54 @@ deliberately open pre-contraction diagnostic mesh used to exhibit the exact
 medial T-junction repaired by the default path."
   (check-type scene scene)
   (check-type profile material-bevel-profile)
-  ;; The witness build also interns every authored material assembly reached by
-  ;; the chamfer stock function.  Freeze the dense policy only afterward.
-  (let ((witness (make-render-mesh scene :bevel-width 1)))
+  ;; Build both closed phase witnesses before freezing the assembly-indexed
+  ;; policy.  This retains opaque backing at a translucent contact while each
+  ;; phase still uses the fast packed site-local realization independently.
+  (let* ((opaque-solid (scene-opaque-solid scene))
+         (translucent-solid (scene-translucent-solid scene))
+         (chamfer-stock-function
+           (make-compiled-material-chamfer-stock-function
+            (scene-material-program scene)))
+         (opaque-witness
+           (when (or (not (luft:chain-empty-p opaque-solid))
+                     (luft:chain-empty-p translucent-solid))
+             (%make-scene-phase-mesh
+              scene opaque-solid 1 nil chamfer-stock-function)))
+         (translucent-witness
+           (unless (luft:chain-empty-p translucent-solid)
+             (%make-scene-phase-mesh
+              scene translucent-solid 1 nil chamfer-stock-function))))
     (multiple-value-bind (stock-masks site-widths)
         (compile-material-bevel-site-policy profile)
-      (luft:vary-surface-mesh-bevel-widths-from-stock-masks
-       witness stock-masks site-widths
-       :contract-t-junctions-p contract-t-junctions-p))))
+      (labels ((vary (witness)
+                 (if witness
+                     (luft:vary-surface-mesh-bevel-widths-from-stock-masks
+                      witness stock-masks site-widths
+                      :contract-t-junctions-p contract-t-junctions-p)
+                     (values nil
+                             (make-array
+                              5 :element-type '(unsigned-byte 32)
+                                :initial-element 0)
+                             nil))))
+        (multiple-value-bind (opaque opaque-census opaque-diagnostic)
+            (vary opaque-witness)
+          (multiple-value-bind
+                (translucent translucent-census translucent-diagnostic)
+              (vary translucent-witness)
+            (let ((census
+                    (map '(simple-array (unsigned-byte 32) (5)) #'+
+                         opaque-census translucent-census))
+                  (diagnostic
+                    (cond ((and opaque-diagnostic translucent-diagnostic)
+                           (append opaque-diagnostic
+                                   (list :translucent-diagnostic
+                                         translucent-diagnostic)))
+                          (opaque-diagnostic opaque-diagnostic)
+                          (t translucent-diagnostic))))
+              (values
+               (decorate-scene-mesh
+                (%join-scene-phase-meshes opaque translucent) scene)
+               census diagnostic))))))))
 
 (defun make-material-bevel-meshes (scene profile)
   "Return the single site-local material bevel mesh in renderer slot zero."
@@ -777,24 +1008,40 @@ consequence of its own occupancy star and can be read on its own."
 
 (defstruct (render-population
              (:constructor %make-render-population
-                 (template-words instance-words triangle-instance-count
-                  quad-instance-count))
+                 (template-words instance-words light-words
+                  opaque-triangle-instance-count opaque-quad-instance-count
+                  translucent-triangle-instance-count
+                  translucent-quad-instance-count))
              (:copier nil))
-  "One compact fixed-arity draw population for a surface-mesh cohort."
+  "One compact geometry/light population split into opaque and alpha cohorts."
   (template-words #() :type (simple-array (unsigned-byte 32) (*)) :read-only t)
   (instance-words #() :type (simple-array (unsigned-byte 32) (*)) :read-only t)
-  (triangle-instance-count 0 :type (integer 0 *) :read-only t)
-  (quad-instance-count 0 :type (integer 0 *) :read-only t))
+  ;; Two packed u32 words parallel every four-word instance.  Triangles carry
+  ;; three RGB4 samples; quads carry their four unique corner samples.
+  (light-words #() :type (simple-array (unsigned-byte 32) (*)) :read-only t)
+  (opaque-triangle-instance-count 0 :type (integer 0 *) :read-only t)
+  (opaque-quad-instance-count 0 :type (integer 0 *) :read-only t)
+  (translucent-triangle-instance-count 0 :type (integer 0 *) :read-only t)
+  (translucent-quad-instance-count 0 :type (integer 0 *) :read-only t))
+
+(defun render-population-triangle-instance-count (population)
+  (+ (render-population-opaque-triangle-instance-count population)
+     (render-population-translucent-triangle-instance-count population)))
+
+(defun render-population-quad-instance-count (population)
+  (+ (render-population-opaque-quad-instance-count population)
+     (render-population-translucent-quad-instance-count population)))
 
 (defstruct (resident-population
              (:constructor %make-resident-population
-                 (population instance-buffer template-buffer bind-group
-                  shadow-bind-group))
+                 (population instance-buffer template-buffer light-buffer
+                  bind-group shadow-bind-group))
              (:copier nil))
   "One chunk's CPU population and independently retained GPU realization."
   (population nil :type render-population :read-only t)
   (instance-buffer nil :read-only t)
   (template-buffer nil :read-only t)
+  (light-buffer nil :read-only t)
   (bind-group nil :read-only t)
   (shadow-bind-group nil :read-only t))
 
@@ -810,29 +1057,89 @@ consequence of its own occupancy star and can be read on its own."
   (check-type mesh luft:surface-mesh)
   (%make-prepared-render-mesh mesh (make-render-population (list mesh))))
 
-(defun make-render-population (meshes)
-  "Canonicalize and concatenate MESHES into two fixed-arity instance runs.
+(defun %render-light-point-key (x y z)
+  (logior z (ash y 12) (ash x 33)))
 
-Every source template contains either one triangle or one quad. Templates are
-interned by their exact packed vertices, padded to a fixed six-vertex stride,
-and selected by the low sixteen bits of each remapped instance record. The
-returned population stores triangle instances first and quad instances second,
-so the complete surface needs at most two direct instanced draws."
+(defun %render-instance-light-words
+    (mesh template-id vertex-count base-x base-y base-z
+     point-cache lattice-cache)
+  "Return the two-word RGB4 sidecar for one mesh-local instance."
+  (let ((field (luft:surface-mesh-voxel-light mesh)))
+    ;; Every finished scene owns an immutable field, including source-free
+    ;; scenes.  Avoid the exact 64-probe point sampler entirely when that
+    ;; field has no materialized pages; the parallel GPU ABI still receives
+    ;; two zero words per instance.
+    (if (or (null field)
+            (zerop (luft:voxel-light-field-page-count field)))
+        (values 0 0)
+        (let* ((ranges (luft:surface-mesh-template-ranges mesh))
+               (vertices (luft:surface-mesh-template-vertex-words mesh))
+               (start (aref ranges (* 2 template-id))))
+          (labels ((sample (local-index)
+                     (let* ((vertex (+ start local-index))
+                            (word (* vertex
+                                     luft:+mesh-template-vertex-word-count+))
+                            (x (+ (* luft:+mesh-cell-size+ base-x)
+                                  (- (aref vertices word)
+                                     luft:+mesh-template-coordinate-bias+)))
+                            (y (+ (* luft:+mesh-cell-size+ base-y)
+                                  (- (aref vertices (+ word 1))
+                                     luft:+mesh-template-coordinate-bias+)))
+                            (z (+ (* luft:+mesh-cell-size+ base-z)
+                                  (- (aref vertices (+ word 2))
+                                     luft:+mesh-template-coordinate-bias+)))
+                            (key (%render-light-point-key x y z)))
+                       (multiple-value-bind (light present-p)
+                           (gethash key point-cache)
+                         (if present-p
+                             light
+                             (setf (gethash key point-cache)
+                                   (luft:voxel-light-at-mesh-point
+                                    field x y z lattice-cache)))))))
+            (declare (inline sample))
+            (let ((sample-0 (sample 0))
+                  (sample-1 (sample 1))
+                  (sample-2 (sample 2))
+                  (sample-3 (if (= vertex-count 3) 0 (sample 5))))
+              (values (logior sample-0 (ash sample-1 16))
+                      (logior sample-2 (ash sample-3 16)))))))))
+
+(defun make-render-population (meshes)
+  "Canonicalize MESHES into geometry, colored-light, and render-class runs.
+
+Templates remain interned and padded to six vertices.  Instances and their
+two-word light sidecars are laid out as opaque triangles, opaque quads,
+translucent triangles, then translucent quads.  Each class therefore needs at
+most two direct instanced draws, while shared exact world points receive the
+same cached trilinear voxel-light sample across bevel primitives."
   (let ((template-index (make-hash-table :test #'equalp))
         (template-words
           (make-array 256 :element-type '(unsigned-byte 32)
                           :adjustable t :fill-pointer 0))
-        (triangle-words
-          (make-array 256 :element-type '(unsigned-byte 32)
-                          :adjustable t :fill-pointer 0))
-        (quad-words
-          (make-array 256 :element-type '(unsigned-byte 32)
-                          :adjustable t :fill-pointer 0))
-        (assembly-count
-          (length (domains:identity-vocabulary-members
-                   *surface-assembly-vocabulary*)))
-        (triangle-count 0)
-        (quad-count 0))
+        (instance-runs
+          (make-array
+           4 :initial-contents
+           (loop repeat 4 collect
+             (make-array 256 :element-type '(unsigned-byte 32)
+                             :adjustable t :fill-pointer 0))))
+        (light-runs
+          (make-array
+           4 :initial-contents
+           (loop repeat 4 collect
+             (make-array 128 :element-type '(unsigned-byte 32)
+                             :adjustable t :fill-pointer 0))))
+        (assemblies
+          (domains:identity-vocabulary-members
+           *surface-assembly-vocabulary*))
+        (render-classes nil)
+        (counts (make-array 4 :initial-element 0)))
+    ;; Collapse semantic opacity to one dense render-class byte before the
+    ;; instance loop.  The vocabulary is frozen for this population build.
+    (setf render-classes
+          (map '(simple-array (unsigned-byte 8) (*))
+               (lambda (assembly)
+                 (if (surface-assembly-translucent-p assembly) 1 0))
+               assemblies))
     (labels ((intern-template (mesh template-id)
                (let* ((ranges (luft:surface-mesh-template-ranges mesh))
                       (vertices (luft:surface-mesh-template-vertex-words mesh))
@@ -871,7 +1178,9 @@ so the complete surface needs at most two direct instanced draws."
                            do (vector-push-extend 0 template-words))
                      (setf (gethash key template-index) global-id))
                    (values global-id vertex-count))))
-             (append-stream (words global-ids vertex-counts)
+             (append-stream
+                 (mesh words global-ids vertex-counts
+                  point-cache lattice-cache)
                (loop for offset from 0 below (length words)
                        by luft:+mesh-instance-word-count+
                      for packed = (aref words (+ offset 3))
@@ -881,22 +1190,32 @@ so the complete surface needs at most two direct instanced draws."
                             packed)
                      for global-id = (aref global-ids local-id)
                      for vertex-count = (aref vertex-counts local-id)
-                     for destination = (if (= vertex-count 3)
-                                           triangle-words
-                                           quad-words)
-                     do (unless (< assembly-id assembly-count)
+                     do (unless (< assembly-id (length assemblies))
                           (error "LUFT surface assembly ~D is outside the resident vocabulary of ~D entries."
-                                 assembly-id assembly-count))
-                        (loop for word-offset below 3
-                              do (vector-push-extend
-                                  (aref words (+ offset word-offset))
-                                  destination))
-                        (vector-push-extend
-                         (logior global-id (logand packed #xffff0000))
-                         destination)
-                        (if (= vertex-count 3)
-                            (incf triangle-count)
-                            (incf quad-count))))
+                                 assembly-id (length assemblies)))
+                        (let* ((translucent-p
+                                 (= 1 (aref render-classes assembly-id)))
+                               (run (+ (if translucent-p 2 0)
+                                       (if (= vertex-count 3) 0 1)))
+                               (destination (aref instance-runs run))
+                               (light-destination (aref light-runs run))
+                               (base-x (aref words offset))
+                               (base-y (aref words (+ offset 1)))
+                               (base-z (aref words (+ offset 2))))
+                          (loop for word-offset below 3
+                                do (vector-push-extend
+                                    (aref words (+ offset word-offset))
+                                    destination))
+                          (vector-push-extend
+                           (logior global-id (logand packed #xffff0000))
+                           destination)
+                          (multiple-value-bind (light-0 light-1)
+                              (%render-instance-light-words
+                               mesh local-id vertex-count base-x base-y base-z
+                               point-cache lattice-cache)
+                            (vector-push-extend light-0 light-destination)
+                            (vector-push-extend light-1 light-destination))
+                          (incf (aref counts run)))))
              (append-mesh (mesh)
                ;; Mesh-local template IDs are dense. Resolve each one exactly
                ;; once, then the large instance streams become a linear copy.
@@ -907,28 +1226,35 @@ so the complete surface needs at most two direct instanced draws."
                                     :element-type '(unsigned-byte 16)))
                       (vertex-counts
                         (make-array template-count
-                                    :element-type '(unsigned-byte 8))))
+                                    :element-type '(unsigned-byte 8)))
+                      (point-cache (make-hash-table :test #'eql))
+                      (lattice-cache (make-hash-table :test #'eql)))
                  (dotimes (local-id template-count)
                    (multiple-value-bind (global-id vertex-count)
                        (intern-template mesh local-id)
                      (setf (aref global-ids local-id) global-id
                            (aref vertex-counts local-id) vertex-count)))
                  (append-stream
-                  (luft:surface-mesh-face-instance-words mesh)
-                  global-ids vertex-counts)
+                  mesh (luft:surface-mesh-face-instance-words mesh)
+                  global-ids vertex-counts point-cache lattice-cache)
                  (append-stream
-                  (luft:surface-mesh-band-instance-words mesh)
-                  global-ids vertex-counts)
+                  mesh (luft:surface-mesh-band-instance-words mesh)
+                  global-ids vertex-counts point-cache lattice-cache)
                  (append-stream
-                  (luft:surface-mesh-fan-instance-words mesh)
-                  global-ids vertex-counts))))
-      (dolist (mesh meshes)
-        (append-mesh mesh)))
+                 mesh (luft:surface-mesh-fan-instance-words mesh)
+                  global-ids vertex-counts point-cache lattice-cache)
+                 (dolist (companion (luft:surface-mesh-companions mesh))
+                   (append-mesh companion)))))
+      (dolist (mesh meshes) (append-mesh mesh)))
     (%make-render-population
      (coerce template-words '(simple-array (unsigned-byte 32) (*)))
      (concatenate '(simple-array (unsigned-byte 32) (*))
-                  triangle-words quad-words)
-     triangle-count quad-count)))
+                  (aref instance-runs 0) (aref instance-runs 1)
+                  (aref instance-runs 2) (aref instance-runs 3))
+     (concatenate '(simple-array (unsigned-byte 32) (*))
+                  (aref light-runs 0) (aref light-runs 1)
+                  (aref light-runs 2) (aref light-runs 3))
+     (aref counts 0) (aref counts 1) (aref counts 2) (aref counts 3))))
 
 (defstruct (mesh-slot (:constructor %make-mesh-slot) (:copier nil))
   "One mesh's semantic residency and optional construction-overlay resources."
@@ -951,6 +1277,8 @@ so the complete surface needs at most two direct instanced draws."
    (vertex-module :initarg :vertex-module :accessor renderer-vertex-module)
    (fragment-module :initarg :fragment-module :accessor renderer-fragment-module)
    (pipeline :initarg :pipeline :accessor renderer-pipeline)
+   (translucent-pipeline :initarg :translucent-pipeline
+                         :accessor renderer-translucent-pipeline)
    (shadow-texture :initarg :shadow-texture :accessor renderer-shadow-texture)
    (shadow-view :initarg :shadow-view :accessor renderer-shadow-view)
    (shadow-sampler :initarg :shadow-sampler :accessor renderer-shadow-sampler)
@@ -1342,6 +1670,7 @@ overlay data is deliberately absent until construction mode asks for it."
   (when resident
     (dolist (resource (list (resident-population-bind-group resident)
                             (resident-population-shadow-bind-group resident)
+                            (resident-population-light-buffer resident)
                             (resident-population-template-buffer resident)
                             (resident-population-instance-buffer resident)))
       (when resource (ignore-errors (destroy resource)))))
@@ -1353,7 +1682,8 @@ overlay data is deliberately absent until construction mode asks for it."
   (let* ((device (renderer-device renderer))
          (instance-words (render-population-instance-words population))
          (template-words (render-population-template-words population))
-         instance-buffer template-buffer bind-group
+         (light-words (render-population-light-words population))
+         instance-buffer template-buffer light-buffer bind-group
          shadow-bind-group
          (completed-p nil))
     (flet ((stream-buffer (label words)
@@ -1372,6 +1702,8 @@ overlay data is deliberately absent until construction mode asks for it."
                    (stream-buffer "luft resident site instances" instance-words)
                    template-buffer
                    (stream-buffer "luft canonical site templates" template-words)
+                   light-buffer
+                   (stream-buffer "luft resident voxel-light sidecars" light-words)
                    bind-group
                    (create device
                            (make-bind-group-descriptor
@@ -1387,7 +1719,8 @@ overlay data is deliberately absent until construction mode asks for it."
                               (:binding 4
                                :resource ,(renderer-shadow-view renderer))
                               (:binding 5
-                               :resource ,(renderer-shadow-sampler renderer)))))
+                               :resource ,(renderer-shadow-sampler renderer))
+                              (:binding 6 :resource ,light-buffer))))
                    shadow-bind-group
                    (create device
                            (make-bind-group-descriptor
@@ -1400,14 +1733,14 @@ overlay data is deliberately absent until construction mode asks for it."
                                :resource ,(renderer-camera-buffer renderer))))))
              (let ((resident
                      (%make-resident-population
-                      population instance-buffer template-buffer bind-group
-                      shadow-bind-group)))
+                      population instance-buffer template-buffer light-buffer
+                      bind-group shadow-bind-group)))
                (setf completed-p t)
                resident))
         (unless completed-p
           (dolist (resource
-                    (list shadow-bind-group bind-group template-buffer
-                          instance-buffer))
+                    (list shadow-bind-group bind-group light-buffer
+                          template-buffer instance-buffer))
             (when resource (ignore-errors (destroy resource)))))))))
 
 (defun %refresh-renderer-slot-order (renderer)
@@ -1475,7 +1808,7 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                              '(:rgba16-float)))
          camera-buffer material-buffer
          layout
-         vertex-module fragment-module pipeline
+         vertex-module fragment-module pipeline translucent-pipeline
          shadow-texture shadow-view shadow-sampler shadow-layout
          shadow-vertex-module shadow-pipeline
          player-sdf-layout player-sdf-bind-group player-sdf-vertex-module
@@ -1534,7 +1867,8 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                                      (:binding 2 :type :uniform-buffer)
                                      (:binding 3 :type :storage-buffer)
                                      (:binding 4 :type :texture)
-                                     (:binding 5 :type :sampler))))
+                                     (:binding 5 :type :sampler)
+                                     (:binding 6 :type :storage-buffer))))
                  shadow-layout
                  (create device
                          (make-bind-group-layout-descriptor
@@ -1566,6 +1900,25 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                           :primitive '(:topology :triangle-list)
                           :depth-stencil
                           '(:format :depth32-float :depth-write-enabled t
+                            :depth-compare :less)))
+                 translucent-pipeline
+                 (create device
+                         (make-render-pipeline-descriptor
+                          :label "luft translucent site stream pipeline"
+                          :layout layout
+                          :vertex `(:module ,vertex-module)
+                          :fragment
+                          `(:module ,fragment-module
+                            :targets
+                            ,(loop for format in target-formats
+                                   for first = t then nil
+                                   collect `(:format ,format
+                                             ,@(when first
+                                                 '(:blend
+                                                   :premultiplied-alpha)))))
+                          :primitive '(:topology :triangle-list)
+                          :depth-stencil
+                          '(:format :depth32-float :depth-write-enabled nil
                             :depth-compare :less)))
                  shadow-vertex-module
                  (create device
@@ -1792,6 +2145,7 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                                 :vertex-module vertex-module
                                 :fragment-module fragment-module
                                 :pipeline pipeline
+                                :translucent-pipeline translucent-pipeline
                                 :shadow-texture shadow-texture
                                 :shadow-view shadow-view
                                 :shadow-sampler shadow-sampler
@@ -1864,23 +2218,42 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                                         player-sdf-vertex-module player-sdf-layout
                                         shadow-pipeline shadow-vertex-module
                                         shadow-layout shadow-sampler shadow-view
-                                        shadow-texture pipeline fragment-module
+                                        shadow-texture translucent-pipeline
+                                        pipeline fragment-module
                                         vertex-module layout material-buffer
                                         camera-buffer)))
           (when resource (ignore-errors (destroy resource))))))))
 
-(defun draw-resident-population (pass resident bind-group)
-  "Issue the two fixed-arity draws shared by the sun and scene passes."
+(defun draw-resident-opaque-population (pass resident bind-group)
+  "Draw only depth-writing, shadow-casting instances from RESIDENT."
   (let* ((population (resident-population-population resident))
          (triangle-count
-           (render-population-triangle-instance-count population))
-         (quad-count (render-population-quad-instance-count population)))
+           (render-population-opaque-triangle-instance-count population))
+         (quad-count
+           (render-population-opaque-quad-instance-count population)))
     (when (plusp (+ triangle-count quad-count))
       (set-bind-group pass 0 bind-group)
       (when (plusp triangle-count)
         (draw pass 3 triangle-count))
       (when (plusp quad-count)
         (draw pass 6 quad-count 0 triangle-count)))))
+
+(defun draw-resident-translucent-population (pass resident bind-group)
+  "Draw alpha-blended instances after the complete opaque scene."
+  (let* ((population (resident-population-population resident))
+         (opaque-offset
+           (+ (render-population-opaque-triangle-instance-count population)
+              (render-population-opaque-quad-instance-count population)))
+         (triangle-count
+           (render-population-translucent-triangle-instance-count population))
+         (quad-count
+           (render-population-translucent-quad-instance-count population)))
+    (when (plusp (+ triangle-count quad-count))
+      (set-bind-group pass 0 bind-group)
+      (when (plusp triangle-count)
+        (draw pass 3 triangle-count 0 opaque-offset))
+      (when (plusp quad-count)
+        (draw pass 6 quad-count 0 (+ opaque-offset triangle-count))))))
 
 (defun exposure-probe-average-luminance (bytes)
   "Decode the geometric-mean luminance encoded by the 32x16 GPU probe."
@@ -1991,7 +2364,7 @@ cohort untouched. No frame can interleave with the owner-thread publication."
         (let ((resident
                 (mesh-slot-resident
                  (gethash key (renderer-mesh-slots renderer)))))
-          (draw-resident-population
+          (draw-resident-opaque-population
            shadow-pass resident
            (resident-population-shadow-bind-group resident))))
       (end-pass shadow-pass))
@@ -2030,7 +2403,14 @@ cohort untouched. No frame can interleave with the owner-thread publication."
       (let ((resident
               (mesh-slot-resident
                (gethash key (renderer-mesh-slots renderer)))))
-        (draw-resident-population
+        (draw-resident-opaque-population
+         pass resident (resident-population-bind-group resident))))
+    (set-pipeline pass (renderer-translucent-pipeline renderer))
+    (dolist (key (renderer-slot-order renderer))
+      (let ((resident
+              (mesh-slot-resident
+               (gethash key (renderer-mesh-slots renderer)))))
+        (draw-resident-translucent-population
          pass resident (resident-population-bind-group resident))))
     (when player-p
       (set-pipeline pass (renderer-player-sdf-pipeline renderer))
@@ -2141,6 +2521,7 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                   (renderer-shadow-sampler renderer)
                   (renderer-shadow-view renderer)
                   (renderer-shadow-texture renderer)
+                  (renderer-translucent-pipeline renderer)
                   (renderer-pipeline renderer) (renderer-fragment-module renderer)
                   (renderer-vertex-module renderer)
                   (renderer-layout renderer)
@@ -2181,6 +2562,7 @@ cohort untouched. No frame can interleave with the owner-thread publication."
         (renderer-shadow-sampler renderer) nil
         (renderer-shadow-view renderer) nil
         (renderer-shadow-texture renderer) nil
+        (renderer-translucent-pipeline renderer) nil
         (renderer-pipeline renderer) nil
         (renderer-fragment-module renderer) nil
         (renderer-vertex-module renderer) nil
@@ -2204,6 +2586,10 @@ cohort untouched. No frame can interleave with the owner-thread publication."
 (defclass streaming-scene (scene)
   ((store :initform (make-hash-table :test #'eql)
           :reader streaming-scene-store)
+   (opaque-store :initform (make-hash-table :test #'eql)
+                 :reader streaming-scene-opaque-store)
+   (translucent-store :initform (make-hash-table :test #'eql)
+                      :reader streaming-scene-translucent-store)
    (loaded :initform (make-hash-table :test #'eql)
            :reader streaming-scene-loaded)
    (merged :initform (make-hash-table :test #'eql)
@@ -2231,13 +2617,15 @@ cohort untouched. No frame can interleave with the owner-thread publication."
 
 (defstruct (streaming-mesh-snapshot
              (:constructor %make-streaming-mesh-snapshot
-                 (scene key bevel-width coplanar-merge-p neighborhood stamp)))
+                 (scene key bevel-width coplanar-merge-p
+                  opaque-neighborhood translucent-neighborhood stamp)))
   "Immutable CPU input for one chunk mesh request."
   (scene nil :read-only t)
   (key 0 :type luft:chunk-key :read-only t)
   (bevel-width luft:+mesh-bevel-width+ :read-only t)
   (coplanar-merge-p nil :type boolean :read-only t)
-  (neighborhood nil :type hash-table :read-only t)
+  (opaque-neighborhood nil :type hash-table :read-only t)
+  (translucent-neighborhood nil :type hash-table :read-only t)
   (stamp nil :read-only t))
 
 (defclass streaming-mesh-request (production:production-request)
@@ -2255,9 +2643,14 @@ FAR-BEVEL-WIDTH names the medial tier in residency state."
   (let ((streaming (make-instance
                     'streaming-scene
                     :solid (scene-solid scene)
+                    :opaque-solid (scene-opaque-solid scene)
+                    :translucent-solid (scene-translucent-solid scene)
                     :material-vocabulary (scene-material-vocabulary scene)
                     :material-cells (scene-material-cells scene)
                     :material-program (scene-material-program scene)
+                    :voxel-light (scene-voxel-light scene)
+                    :torches (scene-torches scene)
+                    :player-p (scene-player-p scene)
                     :frames-per-load frames-per-load
                     :residency-radius residency-radius
                     :lod-radius lod-radius
@@ -2267,6 +2660,14 @@ FAR-BEVEL-WIDTH names the medial tier in residency state."
      (lambda (key chain)
        (setf (gethash key (streaming-scene-store streaming)) chain))
      (scene-solid scene))
+    (luft:map-chain-chunks
+     (lambda (key chain)
+       (setf (gethash key (streaming-scene-opaque-store streaming)) chain))
+     (scene-opaque-solid scene))
+    (luft:map-chain-chunks
+     (lambda (key chain)
+       (setf (gethash key (streaming-scene-translucent-store streaming)) chain))
+     (scene-translucent-solid scene))
     streaming))
 
 (defun streaming-scene-keys-near (scene focus-x focus-y)
@@ -2374,18 +2775,28 @@ FAR-BEVEL-WIDTH names the medial tier in residency state."
 (defun streaming-scene-mesh-stamp (scene key bevel-width coplanar-merge-p)
   "Name the exact residency and geometry parameters observed by KEY's mesh."
   (list bevel-width coplanar-merge-p
+        (luft:voxel-light-field-revision (scene-voxel-light scene))
         (gethash key (streaming-scene-loaded scene))
         (streaming-scene-neighborhood-keys scene key)))
 
 (defun make-streaming-mesh-snapshot (scene key bevel-width)
   "Capture immutable chains for the neighborhood KEY currently observes."
-  (let ((neighborhood (make-hash-table :test #'eql))
-        (store (streaming-scene-store scene))
-        (coplanar-merge-p (gethash key (streaming-scene-merged scene))))
+  (let ((opaque-neighborhood (make-hash-table :test #'eql))
+        (translucent-neighborhood (make-hash-table :test #'eql))
+        (opaque-store (streaming-scene-opaque-store scene))
+        (translucent-store (streaming-scene-translucent-store scene))
+        (coplanar-merge-p (gethash key (streaming-scene-merged scene)))
+        (empty (luft:make-chain (luft:chain-domain (scene-solid scene)))))
     (dolist (neighbor (streaming-scene-neighborhood-keys scene key))
-      (setf (gethash neighbor neighborhood) (gethash neighbor store)))
+      ;; Presence records residency.  An empty phase chain is still a captured
+      ;; answer and must not be confused with an unknown/out-of-window chunk.
+      (setf (gethash neighbor opaque-neighborhood)
+            (gethash neighbor opaque-store empty)
+            (gethash neighbor translucent-neighborhood)
+            (gethash neighbor translucent-store empty)))
     (%make-streaming-mesh-snapshot
-     scene key bevel-width coplanar-merge-p neighborhood
+     scene key bevel-width coplanar-merge-p
+     opaque-neighborhood translucent-neighborhood
      (streaming-scene-mesh-stamp
       scene key bevel-width coplanar-merge-p))))
 
@@ -2393,33 +2804,57 @@ FAR-BEVEL-WIDTH names the medial tier in residency state."
   "Mesh one worker-owned residency snapshot without reading owner state."
   (let* ((scene (streaming-mesh-snapshot-scene snapshot))
          (key (streaming-mesh-snapshot-key snapshot))
-         (neighborhood (streaming-mesh-snapshot-neighborhood snapshot))
-         (stock-function (make-scene-face-stock-function scene))
          (chamfer-stock-function
            (make-compiled-material-chamfer-stock-function
             (scene-material-program scene))))
-    (handler-bind
-        ((luft:missing-chunk
-           (lambda (condition)
-             (multiple-value-bind (chain present-p)
-                 (gethash (luft:missing-chunk-key condition) neighborhood)
-               (if present-p
-                   (invoke-restart 'luft:use-chunk chain)
-                   (invoke-restart 'luft:treat-as-air)))))
-         (luft:outside-domain
-           (lambda (condition)
-             (declare (ignore condition))
-             (invoke-restart 'luft:treat-as-air))))
-      (let ((chain (gethash key neighborhood)))
-        (zone (:luft/rematerialize :value (luft:chain-count chain))
-          (luft:mesh-chunk chain key
-                           :stock-function stock-function
-                           :chamfer-stock-function chamfer-stock-function
-                           :bevel-width
-                           (streaming-mesh-snapshot-bevel-width snapshot)
-                           :coplanar-merge-p
-                           (streaming-mesh-snapshot-coplanar-merge-p
-                            snapshot)))))))
+    (labels ((mesh-phase (solid neighborhood)
+               (handler-bind
+                   ((luft:missing-chunk
+                      (lambda (condition)
+                        (multiple-value-bind (chain present-p)
+                            (gethash (luft:missing-chunk-key condition)
+                                     neighborhood)
+                          (if present-p
+                              (invoke-restart 'luft:use-chunk chain)
+                              (invoke-restart 'luft:treat-as-air)))))
+                    (luft:outside-domain
+                      (lambda (condition)
+                        (declare (ignore condition))
+                        (invoke-restart 'luft:treat-as-air))))
+                 (let ((chain (gethash key neighborhood)))
+                   (zone (:luft/rematerialize :value (luft:chain-count chain))
+                     (luft:mesh-chunk
+                      chain key
+                      :stock-function
+                      (make-scene-face-stock-function scene solid)
+                      :chamfer-stock-function chamfer-stock-function
+                      :bevel-width
+                      (streaming-mesh-snapshot-bevel-width snapshot)
+                      :coplanar-merge-p
+                      (streaming-mesh-snapshot-coplanar-merge-p snapshot))))))
+             (active-phase-p (neighborhood)
+               (loop for chain being the hash-values of neighborhood
+                     thereis (not (luft:chain-empty-p chain)))))
+      (let* ((opaque-neighborhood
+               (streaming-mesh-snapshot-opaque-neighborhood snapshot))
+             (translucent-neighborhood
+               (streaming-mesh-snapshot-translucent-neighborhood snapshot))
+             (opaque-active-p (active-phase-p opaque-neighborhood))
+             (translucent-active-p (active-phase-p translucent-neighborhood))
+             (opaque
+               ;; One empty root preserves the mesh ABI when neither phase has
+               ;; resident occupancy.  Otherwise inactive phases stay skipped.
+               (when (or opaque-active-p (not translucent-active-p))
+                 (mesh-phase
+                  (scene-opaque-solid scene)
+                  opaque-neighborhood)))
+             (translucent
+               (when translucent-active-p
+                 (mesh-phase
+                  (scene-translucent-solid scene)
+                  translucent-neighborhood)))
+             (mesh (%join-scene-phase-meshes opaque translucent)))
+        (decorate-scene-mesh mesh scene key)))))
 
 (defun mesh-streaming-chunk (scene key bevel-width)
   "Synchronously mesh KEY from the same immutable snapshot workers receive."

@@ -1428,9 +1428,11 @@ that he is standing on something."
                (boundary-edge-mask-output :uint :location 7
                                           :interpolation :flat)
                (ambient-occlusion-output :float :location 8
-                                          :interpolation :flat))
+                                          :interpolation :flat)
+               (voxel-light-output :vec3 :location 9))
      :resources ((instances :storage-buffer :binding 0 :element :uvec4)
                  (template-vertices :storage-buffer :binding 1 :element :uvec4)
+                 (light-sidecars :storage-buffer :binding 6 :element :uvec2)
                  (camera-state :uniform-block :binding 2
                   :members ((camera-position :vec4)
                             (camera-right :vec4)
@@ -1461,6 +1463,25 @@ that he is standing on something."
          (template-index
            (+ (* template-id (uint 6.0)) vertex-index))
          (template-vertex (buffer-element template-vertices template-index))
+         (light-sidecar (buffer-element light-sidecars instance-index))
+         (packed-light
+           (if (= vertex-index (uint 0.0))
+               (ldb (byte 16 0) (swizzle light-sidecar :x))
+               (if (= vertex-index (uint 1.0))
+                   (ldb (byte 16 16) (swizzle light-sidecar :x))
+                   (if (= vertex-index (uint 2.0))
+                       (ldb (byte 16 0) (swizzle light-sidecar :y))
+                       (if (= vertex-index (uint 3.0))
+                           (ldb (byte 16 0) (swizzle light-sidecar :x))
+                           (if (= vertex-index (uint 4.0))
+                               (ldb (byte 16 0) (swizzle light-sidecar :y))
+                               (ldb (byte 16 16)
+                                    (swizzle light-sidecar :y))))))))
+         (voxel-light
+           (/ (vec3 (float (ldb (byte 4 0) packed-light))
+                    (float (ldb (byte 4 4) packed-light))
+                    (float (ldb (byte 4 8) packed-light)))
+              15.0))
          (attributes (swizzle template-vertex :w))
          (world-position (mesh-world-position instance template-vertex))
          (mesh-normal
@@ -1513,7 +1534,8 @@ that he is standing on something."
                       (+ (* (swizzle light-clip :y) 0.5) 0.5)
                       (swizzle light-clip :z)))
     (set-output boundary-edge-mask-output boundary-edge-mask)
-    (set-output ambient-occlusion-output ambient-occlusion)))
+    (set-output ambient-occlusion-output ambient-occlusion)
+    (set-output voxel-light-output voxel-light)))
 
 (define-live-shader mesh-fragment-specification
     (:stage :fragment
@@ -1525,7 +1547,8 @@ that he is standing on something."
               (previous-clip :vec4 :location 5)
               (shadow-sample :vec3 :location 6)
               (boundary-edge-mask :uint :location 7 :interpolation :flat)
-              (ambient-occlusion :float :location 8 :interpolation :flat))
+              (ambient-occlusion :float :location 8 :interpolation :flat)
+              (voxel-light :vec3 :location 9))
      :outputs ((color-output :vec4 :location 0)
                (motion-output :vec2 :location 1))
      :resources ((camera-state :uniform-block :binding 2
@@ -1590,6 +1613,8 @@ that he is standing on something."
          (frame-z
            (buffer-element material-descriptors
                            (+ descriptor-row (uint 6.0))))
+         (opacity (swizzle frame-y :w))
+         (surface-emission (swizzle frame-z :w))
          (material-point
            (material-frame-point
             world-position (swizzle frame-origin :xyz)
@@ -1635,9 +1660,11 @@ that he is standing on something."
                                    (if (< kernel-code 6.5)
                                        (natural-earth-tone
                                         material-point normal primary-tone 1.0)
-                                       (natural-earth-tone
-                                        material-point normal primary-tone
-                                        -0.5)))))))))
+                                       (if (< kernel-code 7.5)
+                                           (natural-earth-tone
+                                            material-point normal primary-tone
+                                            -0.5)
+                                           primary-tone)))))))))
          (bloom
            (paper-noise (+ (* paper-point 0.17) (vec3 2.7 17.1 8.3))))
          (mottle
@@ -1688,9 +1715,14 @@ that he is standing on something."
          (warm-return
            (* sun-color
               (* 0.085 direct-shape (- 1.0 direct-visibility))))
+         ;; RGB4 is deliberately exposed as raw normalized light.  The square
+         ;; response keeps the old luvcraft falloff character, while the gain
+         ;; leaves headroom for overlapping warm and cyan sources instead of
+         ;; turning their frontier shells into clipped color bands.
+         (local-light (* 0.45 (* voxel-light voxel-light)))
          (light (+ (* sun-color (* direct-shape direct-visibility))
                    (* indirect-light ambient-accessibility)
-                   warm-return))
+                   warm-return local-light))
          (view-direction
            (normalize (- (swizzle camera-position :xyz) world-position)))
          (half-vector (normalize (+ view-direction sun)))
@@ -1723,7 +1755,9 @@ that he is standing on something."
               (* (* 0.34 direct-visibility)
                  (* distribution
                     (* visibility (* fresnel n-dot-l))))))
-         (lit (+ (* base (* light (stock-tooth material-point))) specular))
+         (lit (+ (* base (* light (stock-tooth material-point)))
+                 specular
+                 (* primary-tone surface-emission)))
          ;; Keep scene radiance linear and HDR here.  The universal
          ;; presentation pass blooms, tone maps, and grades it exactly once.
          (mapped-paper (* lit 1.08))
@@ -1772,7 +1806,8 @@ that he is standing on something."
          (blueprint (vec3 0.30 0.90 0.94))
          (drafted (mix paper construction-ink construction-wire))
          (radiance (mix drafted blueprint reticle)))
-    (set-output color-output (vec4 radiance 1.0))
+    (set-output color-output
+                (vec4 (* radiance opacity) opacity))
     (set-output motion-output
                 (mesh-temporal-motion previous-clip current-clip))))
 

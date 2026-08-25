@@ -22,6 +22,8 @@
                     (#:vec3 #:luv.arithmetic.lisp.vec3))
   (:export #:scene
            #:scene-solid
+           #:scene-voxel-light
+           #:scene-torches
            #:light
            #:*light*
            #:make-bevel-limit-study-scene
@@ -30,12 +32,14 @@
            #:make-material-bevel-transition-study-scene
            #:make-miter-study-scene
            #:make-traveler-study-scene
+           #:make-voxel-light-shrine-scene
            #:make-demo-solid
            #:make-gallery-solid
            #:gallery-plot-report
            #:gallery-plot-origin
            #:*gallery*
            #:make-render-mesh
+           #:scene-builder-torch
            #:material-bevel-profile #:make-material-bevel-profile
            #:material-bevel-width #:compile-material-bevel-profile
            #:make-material-bevel-mesh
