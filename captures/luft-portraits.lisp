@@ -183,6 +183,212 @@
    (luv.arithmetic.lisp.vec3:make-vec3 18.2 7.0 11.2)
    7.5 "LUFT voxel-light shrine close" :pitch -0.36))
 
+(defun make-luft-gemstone-gallery-scene ()
+  "Build one compact atlas of crystal/support relations and torch directions."
+  (let ((builder (luft.render::make-scene-builder :horizontal-bits 6)))
+    ;; A grass court, dressed back wall, side return, and overhead stone beam
+    ;; give the same crystal material four substantially different supports.
+    (luft.render::scene-builder-box builder 4 33 4 29 2 3)
+    (luft.render::scene-builder-box builder 4 33 28 29 4 15
+                                    :architecture-p t)
+    (luft.render::scene-builder-box builder 4 5 13 28 4 12
+                                    :architecture-p t)
+    (luft.render::scene-builder-box builder 6 27 11 13 15 15
+                                    :architecture-p t)
+    (luft.render::scene-builder-box builder 14 19 6 9 4 4
+                                    :architecture-p t)
+    ;; Grass jewels and a short stone-mounted constellation in the foreground.
+    (dolist (cell '((8 7 4) (10 8 4) (8 10 4) (11 11 4)))
+      (destructuring-bind (x y z) cell
+        (luft.render::scene-builder-cell
+         builder x y z :material luft.render::*crystal-material-placement*)))
+    (dolist (cell '((15 7 5) (17 7 5) (19 7 5) (16 9 5) (18 9 5)))
+      (destructuring-bind (x y z) cell
+        (luft.render::scene-builder-cell
+         builder x y z :material luft.render::*crystal-material-placement*)))
+    ;; A deliberately contiguous wall row tests whether the grip becomes one
+    ;; composed bevel rhythm instead of a line of unrelated glued-on sockets.
+    (loop for x from 8 to 14
+          do (luft.render::scene-builder-cell
+              builder x 27 10
+              :material luft.render::*crystal-material-placement*))
+    ;; A diamond/cross pattern exposes both convex perimeter and concave joins.
+    (dolist (cell '((21 27 10) (23 27 8) (23 27 10) (23 27 12)
+                    (25 27 10)))
+      (destructuring-bind (x y z) cell
+        (luft.render::scene-builder-cell
+         builder x y z :material luft.render::*crystal-material-placement*)))
+    ;; Hanging points, plus a side-wall pair, rotate the same contact law onto
+    ;; downward and horizontal normals.
+    (dolist (x '(8 12 17 22 26))
+      (luft.render::scene-builder-cell
+       builder x 12 14 :material luft.render::*crystal-material-placement*))
+    (dolist (cell '((6 18 7) (6 21 9) (6 24 7)))
+      (destructuring-bind (x y z) cell
+        (luft.render::scene-builder-cell
+         builder x y z :material luft.render::*crystal-material-placement*)))
+    ;; Four attachment normals share one authored flame implementation.
+    (luft.render::scene-builder-torch builder 29 8 3 :z :high)
+    (luft.render::scene-builder-torch builder 18 28 13 :y :low)
+    (luft.render::scene-builder-torch builder 5 16 9 :x :high)
+    (luft.render::scene-builder-torch builder 25 12 15 :z :low)
+    (luft.render::finish-scene-builder builder)))
+
+(defun make-luft-gemstone-capture-light (source)
+  "A balanced studio environment whose warm and blue hemispheres refract."
+  (make-instance
+   'luft.render:light
+   :name :gemstone-atelier
+   :sun-direction (luft.render::light-sun-direction source)
+   :sun-color #(0.78 0.56 0.37 0.64)
+   :sky-color #(0.15 0.25 0.52 1.0)
+   :ground-color #(0.10 0.055 0.045 1.0)
+   :shadow-half-extent (luft.render::light-shadow-half-extent source)
+   :shadow-depth-radius (luft.render::light-shadow-depth-radius source)
+   :shadow-base-bias (luft.render::light-shadow-base-bias source)
+   :shadow-filter-radius (luft.render::light-shadow-filter-radius source)))
+
+(defun capture-luft-gemstone-gallery
+    (pathname contact-width position isometric-height title
+     &key (yaw 2.18) (pitch -0.28) (flame-time 0.43))
+  "Capture one fixed gallery view while varying only the bezel contact width."
+  (let ((old-light luft.render:*light*)
+        (old-flame-time luft.render:*flame-time*))
+    (unwind-protect
+         (progn
+           (setf luft.render:*light*
+                 (make-luft-gemstone-capture-light old-light)
+                 luft.render:*flame-time* flame-time)
+           (capture-luft-material-contact
+            pathname position isometric-height title :yaw yaw :pitch pitch
+            :solid (make-luft-gemstone-gallery-scene)
+            :bevel-profile
+            (luft.render:make-material-bevel-profile
+             :terrain-width 2 :architecture-width 2
+             :crystal-width 4 :contact-width contact-width)))
+      (setf luft.render:*light* old-light
+            luft.render:*flame-time* old-flame-time))))
+
+(macrolet ((define-gemstone-width-capture (name width description)
+             `(luv:define-capture ,name
+                  (:figure G3MOPT :kind :image :extension "png"
+                   :layout :landscape :description ,description)
+                (pathname)
+                (capture-luft-gemstone-gallery
+                 pathname ,width
+                 (luv.arithmetic.lisp.vec3:make-vec3 34.0 -7.0 16.0)
+                 17.0 ,(format nil "LUFT gemstone gallery - bevel ~D" width)))))
+  (define-gemstone-width-capture
+      luft-gemstone-gallery-bevel-1 1
+    "The fixed gemstone atlas with a narrow one-tick stone-crystal bezel.")
+  (define-gemstone-width-capture
+      luft-gemstone-gallery-bevel-2 2
+    "The identical gemstone atlas with the two-tick stone-crystal bezel.")
+  (define-gemstone-width-capture
+      luft-gemstone-gallery-bevel-4 4
+    "The identical gemstone atlas with the medial four-tick contact bezel."))
+
+(luv:define-capture luft-gemstone-gallery-wall-row
+    (:figure G3MOPT :kind :image :extension "png" :layout :landscape
+     :description
+     "A close view of a contiguous wall row and diamond-pattern crystal grips.")
+  (pathname)
+  (capture-luft-gemstone-gallery
+   pathname 2
+   (luv.arithmetic.lisp.vec3:make-vec3 29.0 5.0 15.0)
+   10.5 "LUFT gemstone wall row" :yaw 2.05 :pitch -0.12))
+
+(luv:define-capture luft-gemstone-gallery-hanging-and-grass
+    (:figure G3MOPT :kind :image :extension "png" :layout :landscape
+     :description
+     "A close view comparing hanging, grass-borne, and stone-borne crystals.")
+  (pathname)
+  (capture-luft-gemstone-gallery
+   pathname 2
+   (luv.arithmetic.lisp.vec3:make-vec3 31.0 -3.0 18.0)
+   11.0 "LUFT hanging and grass crystals" :yaw 2.24 :pitch -0.30))
+
+(luv:define-capture luft-gemstone-gallery-grass-and-stone
+    (:figure G3MOPT :kind :image :extension "png" :layout :landscape
+     :description
+     "A close view of crystal collars composed directly from grass and stone supports.")
+  (pathname)
+  (capture-luft-gemstone-gallery
+   pathname 2
+   (luv.arithmetic.lisp.vec3:make-vec3 30.0 -14.0 14.0)
+   9.5 "LUFT grass and stone crystal grips" :yaw 2.18 :pitch -0.35))
+
+(macrolet ((define-flame-phase-capture (name time description)
+             `(luv:define-capture ,name
+                  (:figure FL4MES :kind :image :extension "png"
+                   :layout :landscape :description ,description)
+                (pathname)
+                (capture-luft-gemstone-gallery
+                 pathname 2
+                 (luv.arithmetic.lisp.vec3:make-vec3 34.0 2.0 7.0)
+                 5.0 "LUFT volumetric torch flame phase"
+                 :yaw 2.18 :pitch -0.35 :flame-time ,time))))
+  (define-flame-phase-capture
+      luft-gemstone-flame-phase-a 0.0
+    "The fixed gemstone gallery at the authored start of its flame clock.")
+  (define-flame-phase-capture
+      luft-gemstone-flame-phase-b 0.65
+    "The identical camera 0.65 seconds later in the volumetric flame field."))
+
+(defun film-luft-gemstone-flames
+    (pathname &key (seconds 4) (frame-rate 24))
+  "Film one upright representative of the shared oriented flame volume."
+  (let ((viewer nil)
+        (old-light luft.render:*light*)
+        (old-projection luft.render:*projection*)
+        (old-isometric-height luft.render:*isometric-height*)
+        (old-wireframe luft.render:*wireframe*)
+        (old-inspection-ink-p luft.render:*inspection-ink-p*)
+        (old-flame-time luft.render:*flame-time*))
+    (unwind-protect
+         (progn
+           (setf luft.render:*light*
+                 (make-luft-gemstone-capture-light old-light)
+                 luft.render:*projection* :isometric
+                 luft.render:*isometric-height* 6.0
+                 luft.render:*wireframe* 0.0
+                 luft.render:*inspection-ink-p* nil
+                 luft.render:*flame-time* 0.0)
+           (setf viewer
+                 (luft.render:start-viewer
+                  :solid (make-luft-gemstone-gallery-scene)
+                  :bevel-width luft:+mesh-bevel-width+
+                  :bevel-profile
+                  (luft.render:make-material-bevel-profile
+                   :terrain-width 2 :architecture-width 2
+                   :crystal-width 4 :contact-width 2)
+                  :camera
+                  (luft.render:make-fly-camera
+                   :position
+                   (luv.arithmetic.lisp.vec3:make-vec3 34.0 2.0 7.0)
+                   :yaw 2.18 :pitch -0.35)
+                  :title "LUFT volumetric torch flames"
+                  :width 1100 :height 800))
+           (luft.render:film-viewer
+            viewer pathname :seconds seconds :frame-rate frame-rate
+            :before-frame
+            (lambda (frame)
+              (setf luft.render:*flame-time* (/ frame (float frame-rate))))))
+      (when viewer (luft.render:stop-viewer viewer))
+      (setf luft.render:*light* old-light
+            luft.render:*projection* old-projection
+            luft.render:*isometric-height* old-isometric-height
+            luft.render:*wireframe* old-wireframe
+            luft.render:*inspection-ink-p* old-inspection-ink-p
+            luft.render:*flame-time* old-flame-time))))
+
+(luv:define-capture luft-gemstone-flames
+    (:figure FL4MES :kind :video :extension "mp4" :layout :landscape
+     :description
+     "A close deterministic film of the SDF flame shared by all four gallery torch orientations.")
+  (pathname)
+  (film-luft-gemstone-flames pathname))
+
 (luv:define-capture luft-material-contact-closeup
     (:figure ER7HST :kind :image :extension "png" :layout :landscape
      :description

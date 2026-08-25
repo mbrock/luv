@@ -140,6 +140,11 @@ revisions immediately before and after the call."
                   (viewer-device viewer)
                   (canvas-format (viewer-context viewer))
                   (canvas-extent (viewer-context viewer))))
+           ;; The old renderer retains the immutable CPU stream specifically so
+           ;; a shader-only live rebuild can transact the same semantic flames
+           ;; without remeshing or reading mutable scene state.
+           (renderer-set-flame-instance-words
+            candidate (renderer-flame-instance-words old))
            (dolist (key (renderer-slot-order old))
              (renderer-set-mesh
               candidate key

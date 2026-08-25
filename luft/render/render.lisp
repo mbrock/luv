@@ -9,6 +9,12 @@
 (defparameter *temporal-upscaling-p* t
   "Whether LUFT uses MetalFX temporal reconstruction on Metal devices.")
 
+(defparameter *flame-time* nil
+  "Optional deterministic torch-flame time in seconds.
+
+NIL lets the live viewer pass its monotonic presentation clock.  Captures may
+dynamically bind a real value to reproduce the exact same flame field.")
+
 (defconstant +exposure-probe-width+ 32)
 (defconstant +exposure-probe-height+ 16)
 (defconstant +exposure-probe-buffer-count+ 3)
@@ -756,6 +762,21 @@ from an exposed or buried foundation without adding per-site material objects."
                      (torch-attachment-support-cell attachment))))
           collect (torch-attachment-face attachment)))
 
+(defun scene-torch-flame-instance-words (scene)
+  "Pack all of SCENE's immutable torch attachments into one UVec4 stream."
+  (check-type scene scene)
+  (let* ((torches (scene-torches scene))
+         (words
+           (make-array (* +torch-flame-instance-word-count+ (length torches))
+                       :element-type '(unsigned-byte 32))))
+    (loop for attachment across torches
+          for offset from 0 by +torch-flame-instance-word-count+
+          do (replace words
+                      (pack-torch-flame-attachment
+                       (torch-attachment-face attachment))
+                      :start1 offset))
+    words))
+
 (defun decorate-scene-mesh (mesh scene &optional chunk-key)
   "Attach immutable light and sparse face geometry without changing topology."
   (labels ((attach-light (surface)
@@ -766,12 +787,18 @@ from an exposed or buried foundation without adding per-site material objects."
     (attach-light mesh))
   (let ((faces (scene-torch-faces scene chunk-key)))
     (when faces
-      (let ((torches
-              (luft:make-face-torch-mesh
-               (luft:surface-mesh-domain mesh) faces
-               (surface-assembly-offset *torch-body-surface*)
-               (surface-assembly-offset *torch-flame-surface*)
-               :bevel-width (luft:surface-mesh-bevel-width mesh))))
+      (let* ((body-stock (surface-assembly-offset *torch-body-surface*))
+             (whole-torches
+               (luft:make-face-torch-mesh
+                (luft:surface-mesh-domain mesh) faces body-stock
+                (surface-assembly-offset *torch-flame-surface*)
+                :bevel-width (luft:surface-mesh-bevel-width mesh)))
+             ;; The semantic torch mesher still authors a useful exact flame
+             ;; cone, but the animated volume now owns that role.  Borrow only
+             ;; the bronze socket and shaft instances without remeshing them.
+             (torches
+               (luft:select-surface-mesh-stocks
+                whole-torches (lambda (stock) (= stock body-stock)))))
         (setf (luft:surface-mesh-voxel-light torches)
               (scene-voxel-light scene))
         (setf (luft:surface-mesh-companions mesh)
@@ -816,21 +843,14 @@ from an exposed or buried foundation without adding per-site material objects."
     (check-type solid luft:chain)
     (zone (:luft/rematerialize :value (luft:chain-count solid))
       (if scene
-          (let* ((opaque-solid (scene-opaque-solid scene))
-                 (translucent-solid (scene-translucent-solid scene))
-                 (opaque
-                   (when (or (not (luft:chain-empty-p opaque-solid))
-                             (luft:chain-empty-p translucent-solid))
-                     (%make-scene-phase-mesh
-                      scene opaque-solid bevel-width stock-function
-                      chamfer-stock-function)))
-                 (translucent
-                   (unless (luft:chain-empty-p translucent-solid)
-                     (%make-scene-phase-mesh
-                      scene translucent-solid bevel-width stock-function
-                      chamfer-stock-function)))
-                 (mesh (%join-scene-phase-meshes opaque translucent)))
-            (decorate-scene-mesh mesh scene))
+          ;; The complete mixed-material union is the visible geometry.  Its
+          ;; ordinary bevel topology is exactly what invents the coherent host
+          ;; collar around a protruding crystal; render population later sorts
+          ;; its instances into opaque and translucent assembly runs.
+          (decorate-scene-mesh
+           (%make-scene-phase-mesh
+            scene solid bevel-width stock-function chamfer-stock-function)
+           scene)
           (luft:make-surface-mesh
            solid :stock-function (or stock-function #'default-face-stock)
                  :chamfer-stock-function chamfer-stock-function
@@ -854,54 +874,22 @@ deliberately open pre-contraction diagnostic mesh used to exhibit the exact
 medial T-junction repaired by the default path."
   (check-type scene scene)
   (check-type profile material-bevel-profile)
-  ;; Build both closed phase witnesses before freezing the assembly-indexed
-  ;; policy.  This retains opaque backing at a translucent contact while each
-  ;; phase still uses the fast packed site-local realization independently.
-  (let* ((opaque-solid (scene-opaque-solid scene))
-         (translucent-solid (scene-translucent-solid scene))
+  ;; One union witness owns the visible envelope, including the unexpectedly
+  ;; lovely mixed-material collar formed by its ordinary contact bands.
+  (let* ((solid (scene-solid scene))
          (chamfer-stock-function
            (make-compiled-material-chamfer-stock-function
             (scene-material-program scene)))
-         (opaque-witness
-           (when (or (not (luft:chain-empty-p opaque-solid))
-                     (luft:chain-empty-p translucent-solid))
-             (%make-scene-phase-mesh
-              scene opaque-solid 1 nil chamfer-stock-function)))
-         (translucent-witness
-           (unless (luft:chain-empty-p translucent-solid)
-             (%make-scene-phase-mesh
-              scene translucent-solid 1 nil chamfer-stock-function))))
+         (witness
+           (%make-scene-phase-mesh
+            scene solid 1 nil chamfer-stock-function)))
     (multiple-value-bind (stock-masks site-widths)
         (compile-material-bevel-site-policy profile)
-      (labels ((vary (witness)
-                 (if witness
-                     (luft:vary-surface-mesh-bevel-widths-from-stock-masks
-                      witness stock-masks site-widths
-                      :contract-t-junctions-p contract-t-junctions-p)
-                     (values nil
-                             (make-array
-                              5 :element-type '(unsigned-byte 32)
-                                :initial-element 0)
-                             nil))))
-        (multiple-value-bind (opaque opaque-census opaque-diagnostic)
-            (vary opaque-witness)
-          (multiple-value-bind
-                (translucent translucent-census translucent-diagnostic)
-              (vary translucent-witness)
-            (let ((census
-                    (map '(simple-array (unsigned-byte 32) (5)) #'+
-                         opaque-census translucent-census))
-                  (diagnostic
-                    (cond ((and opaque-diagnostic translucent-diagnostic)
-                           (append opaque-diagnostic
-                                   (list :translucent-diagnostic
-                                         translucent-diagnostic)))
-                          (opaque-diagnostic opaque-diagnostic)
-                          (t translucent-diagnostic))))
-              (values
-               (decorate-scene-mesh
-                (%join-scene-phase-meshes opaque translucent) scene)
-               census diagnostic))))))))
+      (multiple-value-bind (mesh census diagnostic)
+          (luft:vary-surface-mesh-bevel-widths-from-stock-masks
+           witness stock-masks site-widths
+           :contract-t-junctions-p contract-t-junctions-p)
+        (values (decorate-scene-mesh mesh scene) census diagnostic)))))
 
 (defun make-material-bevel-meshes (scene profile)
   "Return the single site-local material bevel mesh in renderer slot zero."
@@ -1264,6 +1252,18 @@ same cached trilinear voxel-light sample across bevel primitives."
   (lattice-point-count 0)
   (lattice-point-group nil))
 
+(defun %copy-torch-flame-instance-words (source)
+  "Validate and copy a packed UVec4 stream across an ownership boundary."
+  (check-type source vector)
+  (unless (zerop (mod (length source) +torch-flame-instance-word-count+))
+    (error "A ~D-word flame stream is not an integral UVec4 population."
+           (length source)))
+  (map '(simple-array (unsigned-byte 32) (*))
+       (lambda (word)
+         (check-type word (unsigned-byte 32))
+         word)
+       source))
+
 (defclass renderer ()
   ((device :initarg :device :reader renderer-device)
    ;; Chunk key (or any EQL key) to resident MESH-SLOT; SLOT-ORDER is the
@@ -1279,6 +1279,27 @@ same cached trilinear voxel-light sample across bevel primitives."
    (pipeline :initarg :pipeline :accessor renderer-pipeline)
    (translucent-pipeline :initarg :translucent-pipeline
                          :accessor renderer-translucent-pipeline)
+   ;; Flames are one global immutable sparse population.  Their scene identity
+   ;; is independent of chunk mesh residency, while their clock alone changes
+   ;; every frame through the sixteen-byte effect uniform.
+   (flame-instance-words
+    :initform (make-array 0 :element-type '(unsigned-byte 32))
+    :accessor renderer-flame-instance-words)
+   (flame-instance-count :initform 0 :accessor renderer-flame-instance-count)
+   (flame-instance-buffer :initarg :flame-instance-buffer
+                          :accessor renderer-flame-instance-buffer)
+   (flame-effect-buffer :initarg :flame-effect-buffer
+                        :accessor renderer-flame-effect-buffer)
+   (flame-bind-group :initarg :flame-bind-group
+                     :accessor renderer-flame-bind-group)
+   (flame-layout :initarg :flame-layout :accessor renderer-flame-layout)
+   (flame-vertex-module :initarg :flame-vertex-module
+                        :accessor renderer-flame-vertex-module)
+   (flame-fragment-module :initarg :flame-fragment-module
+                          :accessor renderer-flame-fragment-module)
+   (flame-pipeline :initarg :flame-pipeline
+                   :accessor renderer-flame-pipeline)
+   (previous-flame-time :initform nil :accessor renderer-previous-flame-time)
    (shadow-texture :initarg :shadow-texture :accessor renderer-shadow-texture)
    (shadow-view :initarg :shadow-view :accessor renderer-shadow-view)
    (shadow-sampler :initarg :shadow-sampler :accessor renderer-shadow-sampler)
@@ -1353,6 +1374,59 @@ same cached trilinear voxel-light sample across bevel primitives."
    (previous-view :initform nil :accessor renderer-previous-view)
    (history-valid-p :initform nil :accessor renderer-history-valid-p)
    (history-used-p :initform nil :accessor renderer-history-used-p)))
+
+(defun renderer-set-flame-instance-words (renderer source)
+  "Transactionally replace RENDERER's immutable global flame population."
+  (check-type renderer renderer)
+  (let* ((words (%copy-torch-flame-instance-words source))
+         (count (/ (length words) +torch-flame-instance-word-count+))
+         (device (renderer-device renderer))
+         (buffer nil)
+         (bind-group nil)
+         (installed-p nil))
+    (unwind-protect
+         (progn
+           (setf buffer
+                 (create device
+                         (make-buffer-descriptor
+                          :label "luft global torch flame instances"
+                          :size (max 16 (* 4 (length words)))
+                          :usage '(:storage :copy-dst))))
+           (when (plusp (length words))
+             (write-buffer buffer words))
+           (setf bind-group
+                 (create device
+                         (make-bind-group-descriptor
+                          :label "luft global torch flames"
+                          :layout (renderer-flame-layout renderer)
+                          :entries
+                          `((:binding 0 :resource ,buffer)
+                            (:binding 1
+                             :resource ,(renderer-camera-buffer renderer))
+                            (:binding 2
+                             :resource ,(renderer-flame-effect-buffer
+                                         renderer))))))
+           (let ((old-group (renderer-flame-bind-group renderer))
+                 (old-buffer (renderer-flame-instance-buffer renderer)))
+             (setf (renderer-flame-instance-words renderer) words
+                   (renderer-flame-instance-count renderer) count
+                   (renderer-flame-instance-buffer renderer) buffer
+                   (renderer-flame-bind-group renderer) bind-group
+                   installed-p t)
+             (when old-group (ignore-errors (destroy old-group)))
+             (when old-buffer (ignore-errors (destroy old-buffer))))
+           renderer)
+      (unless installed-p
+        (when bind-group (ignore-errors (destroy bind-group)))
+        (when buffer (ignore-errors (destroy buffer)))))))
+
+(defun renderer-set-scene-torches (renderer scene)
+  "Install SCENE's complete sparse torch population, or clear it for NIL."
+  (renderer-set-flame-instance-words
+   renderer
+   (if scene
+       (scene-torch-flame-instance-words scene)
+       (make-array 0 :element-type '(unsigned-byte 32)))))
 
 (defun metal-temporal-device-p (device)
   #+darwin (and *temporal-upscaling-p* (typep device 'metal-gpu-device))
@@ -1813,6 +1887,8 @@ cohort untouched. No frame can interleave with the owner-thread publication."
          shadow-vertex-module shadow-pipeline
          player-sdf-layout player-sdf-bind-group player-sdf-vertex-module
          player-sdf-fragment-module player-sdf-pipeline
+         flame-layout flame-instance-buffer flame-effect-buffer flame-bind-group
+         flame-vertex-module flame-fragment-module flame-pipeline
          lattice-point-layout lattice-point-vertex-module
          lattice-point-fragment-module lattice-point-pipeline
          present-layout present-bind-group present-vertex-module
@@ -1831,6 +1907,20 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                          (make-buffer-descriptor
                           :label "luft frame state"
                           :size 432 :usage '(:uniform :copy-dst)))
+                 flame-effect-buffer
+                 (create device
+                         (make-buffer-descriptor
+                          :label "luft torch flame effect time"
+                          :size 16 :usage '(:uniform :copy-dst))))
+           ;; Publish ownership to the constructor unwind list before the
+           ;; first fallible upload touches this resource.
+           (write-buffer flame-effect-buffer
+                         (torch-flame-effect-uniform-data 0.0))
+           (setf flame-instance-buffer
+                 (create device
+                         (make-buffer-descriptor
+                          :label "luft empty torch flame instances"
+                          :size 16 :usage '(:storage :copy-dst)))
                  material-buffer
                  (let ((words (surface-assembly-descriptor-words)))
                    (let ((buffer
@@ -1982,6 +2072,53 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                           `((:binding 0 :resource ,camera-buffer)
                             (:binding 1 :resource ,shadow-view)
                             (:binding 2 :resource ,shadow-sampler)))))
+           (setf flame-layout
+                 (create device
+                         (make-bind-group-layout-descriptor
+                          :label "luft torch flame layout"
+                          :entries '((:binding 0 :type :storage-buffer)
+                                     (:binding 1 :type :uniform-buffer)
+                                     (:binding 2 :type :uniform-buffer))))
+                 flame-vertex-module
+                 (create device
+                         (make-shader-module-descriptor
+                          :label "luft torch flame vertex"
+                          :language :mathematical
+                          :code (shaders:torch-flame-vertex-specification)))
+                 flame-fragment-module
+                 (create device
+                         (make-shader-module-descriptor
+                          :label "luft torch flame fragment"
+                          :language :mathematical
+                          :code (shaders:torch-flame-fragment-specification)))
+                 flame-pipeline
+                 (create device
+                         (make-render-pipeline-descriptor
+                          :label "luft volumetric torch flame pipeline"
+                          :layout flame-layout
+                          :vertex `(:module ,flame-vertex-module)
+                          :fragment
+                          `(:module ,flame-fragment-module
+                            :targets
+                            ,(loop for format in target-formats
+                                   for first = t then nil
+                                   collect `(:format ,format
+                                             ,@(when first
+                                                 '(:blend
+                                                   :premultiplied-alpha)))))
+                          :primitive '(:topology :triangle-list)
+                          :depth-stencil
+                          '(:format :depth32-float :depth-write-enabled nil
+                            :depth-compare :less)))
+                 flame-bind-group
+                 (create device
+                         (make-bind-group-descriptor
+                          :label "luft empty torch flames"
+                          :layout flame-layout
+                          :entries
+                          `((:binding 0 :resource ,flame-instance-buffer)
+                            (:binding 1 :resource ,camera-buffer)
+                            (:binding 2 :resource ,flame-effect-buffer)))))
            (setf lattice-point-layout
                  (create device
                          (make-bind-group-layout-descriptor
@@ -2146,6 +2283,13 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                                 :fragment-module fragment-module
                                 :pipeline pipeline
                                 :translucent-pipeline translucent-pipeline
+                                :flame-instance-buffer flame-instance-buffer
+                                :flame-effect-buffer flame-effect-buffer
+                                :flame-bind-group flame-bind-group
+                                :flame-layout flame-layout
+                                :flame-vertex-module flame-vertex-module
+                                :flame-fragment-module flame-fragment-module
+                                :flame-pipeline flame-pipeline
                                 :shadow-texture shadow-texture
                                 :shadow-view shadow-view
                                 :shadow-sampler shadow-sampler
@@ -2216,6 +2360,10 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                                         player-sdf-bind-group player-sdf-pipeline
                                         player-sdf-fragment-module
                                         player-sdf-vertex-module player-sdf-layout
+                                        flame-bind-group flame-pipeline
+                                        flame-fragment-module flame-vertex-module
+                                        flame-layout flame-effect-buffer
+                                        flame-instance-buffer
                                         shadow-pipeline shadow-vertex-module
                                         shadow-layout shadow-sampler shadow-view
                                         shadow-texture translucent-pipeline
@@ -2346,9 +2494,18 @@ cohort untouched. No frame can interleave with the owner-thread publication."
 
 (defun encode-renderer-frame
     (renderer encoder surface-texture extent camera-uniform-data
-     &key jitter view player-p construction-p overlay-encoder)
+     &key jitter view player-p construction-p overlay-encoder
+       (effect-time
+         (or *flame-time* (/ (renderer-frame-index renderer) 60.0))))
   (ensure-renderer-extent renderer extent)
   (write-buffer (renderer-camera-buffer renderer) camera-uniform-data)
+  (check-type effect-time real)
+  (let ((current (coerce effect-time 'single-float)))
+    (write-buffer
+     (renderer-flame-effect-buffer renderer)
+     (torch-flame-effect-uniform-data
+      current (or (renderer-previous-flame-time renderer) current)))
+    (setf (renderer-previous-flame-time renderer) current))
   (let ((shadow-pass
             (begin-render-pass
              encoder
@@ -2412,6 +2569,10 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                (gethash key (renderer-mesh-slots renderer)))))
         (draw-resident-translucent-population
          pass resident (resident-population-bind-group resident))))
+    (when (plusp (renderer-flame-instance-count renderer))
+      (set-pipeline pass (renderer-flame-pipeline renderer))
+      (set-bind-group pass 0 (renderer-flame-bind-group renderer))
+      (draw pass 6 (renderer-flame-instance-count renderer)))
     (when player-p
       (set-pipeline pass (renderer-player-sdf-pipeline renderer))
       (set-bind-group pass 0 (renderer-player-sdf-bind-group renderer))
@@ -2510,6 +2671,13 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                   (renderer-lattice-point-fragment-module renderer)
                   (renderer-lattice-point-vertex-module renderer)
                   (renderer-lattice-point-layout renderer)
+                  (renderer-flame-bind-group renderer)
+                  (renderer-flame-pipeline renderer)
+                  (renderer-flame-fragment-module renderer)
+                  (renderer-flame-vertex-module renderer)
+                  (renderer-flame-layout renderer)
+                  (renderer-flame-effect-buffer renderer)
+                  (renderer-flame-instance-buffer renderer)
                   (renderer-player-sdf-bind-group renderer)
                   (renderer-player-sdf-pipeline renderer)
                   (renderer-player-sdf-fragment-module renderer)
@@ -2551,6 +2719,17 @@ cohort untouched. No frame can interleave with the owner-thread publication."
         (renderer-lattice-point-fragment-module renderer) nil
         (renderer-lattice-point-vertex-module renderer) nil
         (renderer-lattice-point-layout renderer) nil
+        (renderer-flame-bind-group renderer) nil
+        (renderer-flame-pipeline renderer) nil
+        (renderer-flame-fragment-module renderer) nil
+        (renderer-flame-vertex-module renderer) nil
+        (renderer-flame-layout renderer) nil
+        (renderer-flame-effect-buffer renderer) nil
+        (renderer-flame-instance-buffer renderer) nil
+        (renderer-flame-instance-words renderer)
+        (make-array 0 :element-type '(unsigned-byte 32))
+        (renderer-flame-instance-count renderer) 0
+        (renderer-previous-flame-time renderer) nil
         (renderer-player-sdf-bind-group renderer) nil
         (renderer-player-sdf-pipeline renderer) nil
         (renderer-player-sdf-fragment-module renderer) nil

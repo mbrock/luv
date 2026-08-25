@@ -8,6 +8,52 @@
 
 (in-package #:luft.render.tests)
 
+(defclass flame-resource-probe-device (luv:gpu-device)
+  ((events :initform nil :accessor flame-resource-probe-events)
+   (fail-bind-group-p :initform nil
+                      :accessor flame-resource-probe-fail-bind-group-p)))
+
+(defclass flame-resource-probe ()
+  ((kind :initarg :kind :reader flame-resource-probe-kind)
+   (device :initarg :device :reader flame-resource-probe-device)
+   (data :initform nil :accessor flame-resource-probe-data)))
+
+(defmethod luv:create
+    ((device flame-resource-probe-device) (descriptor luv::buffer-descriptor))
+  (let ((resource
+          (make-instance 'flame-resource-probe
+                         :kind :buffer :device device)))
+    (push (list :create-buffer (luv::buffer-descriptor-size descriptor))
+          (flame-resource-probe-events device))
+    resource))
+
+(defmethod luv:create
+    ((device flame-resource-probe-device)
+     (descriptor luv::bind-group-descriptor))
+  (when (flame-resource-probe-fail-bind-group-p device)
+    (error "Injected flame bind-group construction failure."))
+  (let ((resource
+          (make-instance 'flame-resource-probe
+                         :kind :bind-group :device device)))
+    (push (list :create-bind-group
+                (length (luv::bind-group-descriptor-entries descriptor)))
+          (flame-resource-probe-events device))
+    resource))
+
+(defmethod luv:write-buffer
+    ((resource flame-resource-probe) data &key (offset 0))
+  (setf (flame-resource-probe-data resource) (copy-seq data))
+  (push (list :write offset (length data))
+        (flame-resource-probe-events
+         (flame-resource-probe-device resource)))
+  resource)
+
+(defmethod luv:destroy ((resource flame-resource-probe))
+  (push (list :destroy (flame-resource-probe-kind resource))
+        (flame-resource-probe-events
+         (flame-resource-probe-device resource)))
+  (values))
+
 (defun make-two-chunk-streaming-scene ()
   (let ((builder (luft.render::make-scene-builder :horizontal-bits 7)))
     ;; These cells share a face across the X chunk boundary.
@@ -975,9 +1021,14 @@
          (crystal-placement
            (luv.domains:identity-vocabulary-offset
             vocabulary luft.render::*crystal-material-placement*)))
+    ;; Crystal-only secondary/tertiary tone lanes are a compact optical ABI.
+    (ok (equalp #(1.62 0.48 0.58 0.42)
+                (subseq words (+ crystal 4) (+ crystal 8))))
+    (ok (equalp #(18.0 0.30 0.88 0.14)
+                (subseq words (+ crystal 8) (+ crystal 12))))
     ;; Descriptor Y.w is visual opacity and Z.w is visible HDR emission.
-    (ok (< (abs (- 0.42 (aref words (+ crystal 23)))) 1.0e-6))
-    (ok (< (abs (- 0.65 (aref words (+ crystal 27)))) 1.0e-6))
+    (ok (< (abs (- 0.48 (aref words (+ crystal 23)))) 1.0e-6))
+    (ok (< (abs (- 0.30 (aref words (+ crystal 27)))) 1.0e-6))
     (ok (= 1.0 (aref words (+ flame 23))))
     (ok (< (abs (- 1.8 (aref words (+ flame 27)))) 1.0e-6))
     ;; Propagation is a separate CPU lane: crystal transmits with entered
@@ -997,8 +1048,8 @@
          (backing (luft:make-site domain 12 13 4 luft:+cell-extent+ 1))
          (crystal-light (luft:voxel-light-at-site field crystal)))
     (ok (= 4 (length (render:scene-torches scene))))
-    ;; Collision retains the occupied union, while rendering keeps a closed
-    ;; transmissive volume and its opaque contact backing in separate phases.
+    ;; Collision and static rendering retain the occupied union; the semantic
+    ;; phase chains still classify the crystal and its opaque backing apart.
     (ok (luft:chain-site-p (render:scene-solid scene) crystal))
     (ok (luft:chain-site-p (luft.render::scene-translucent-solid scene)
                            crystal))
@@ -1023,6 +1074,107 @@
              (ok (= 15 (luft:voxel-light-red light)))
              (ok (>= (luft:voxel-light-green light) 9))
              (ok (>= (luft:voxel-light-blue light) 3)))))
+
+(deftest torch-flames-pack-six-orientations-and-replay-their-volume-integral
+  (let ((builder (luft.render::make-scene-builder :horizontal-bits 4)))
+    (luft.render::scene-builder-cell builder 7 7 7 :architecture-p t)
+    (dolist (axis '(:x :y :z))
+      (dolist (side '(:low :high))
+        (luft.render::scene-builder-torch builder 7 7 7 axis side)))
+    (let* ((scene (luft.render::finish-scene-builder builder))
+           (words (luft.render::scene-torch-flame-instance-words scene))
+           (owned (luft.render::%copy-torch-flame-instance-words words))
+           (codes
+             (sort
+              (loop for offset from 3 below (length words)
+                      by render:+torch-flame-instance-word-count+
+                    collect (aref words offset))
+              #'<))
+           (top-offset
+             (loop for offset from 0 below (length words)
+                     by render:+torch-flame-instance-word-count+
+                   when (= 5 (aref words (+ offset 3))) return offset))
+           (top (subseq words top-offset
+                        (+ top-offset render:+torch-flame-instance-word-count+)))
+           (clock (render:torch-flame-effect-uniform-data 4.25 4.0)))
+      (ok (= 6 (/ (length words)
+                  render:+torch-flame-instance-word-count+)))
+      (ok (equal '(0 1 2 3 4 5) codes))
+      (ok (not (eq words owned)))
+      (ok (equalp words owned))
+      (setf (aref owned 0) 0)
+      (ok (/= (aref words 0) (aref owned 0)))
+      (ok (equalp #(4.25 4.0 0.0 0.0) clock))
+      (let ((density
+              (render:torch-flame-reference-density
+               top 7.5 7.5 8.62 1.25)))
+        (ok (plusp density))
+        (ok (= density
+               (render:torch-flame-reference-density
+                top 7.5 7.5 8.62 1.25))))
+      (multiple-value-bind (red green blue alpha)
+          (render:torch-flame-reference-integrate-ray
+           top 7.5 7.5 7.83 0.0 0.0 1.0 1.25)
+        (ok (> red green blue 0.0))
+        (ok (< 0.0 alpha 1.0))))))
+
+(deftest renderer-flame-population-replacement-is-owned-and-transactional
+  (let* ((device (make-instance 'flame-resource-probe-device))
+         (old-buffer
+           (make-instance 'flame-resource-probe
+                          :kind :old-buffer :device device))
+         (old-group
+           (make-instance 'flame-resource-probe
+                          :kind :old-bind-group :device device))
+         (camera
+           (make-instance 'flame-resource-probe :kind :camera :device device))
+         (effect
+           (make-instance 'flame-resource-probe :kind :effect :device device))
+         (renderer
+           (make-instance
+            'luft.render::renderer
+            :device device :camera-buffer camera
+            :flame-layout :flame-layout :flame-effect-buffer effect
+            :flame-instance-buffer old-buffer :flame-bind-group old-group))
+         (source
+           (make-array 8 :element-type '(unsigned-byte 32)
+                         :initial-contents '(56 60 60 0 64 60 60 1))))
+    (luft.render::renderer-set-flame-instance-words renderer source)
+    (let ((installed-buffer
+            (luft.render::renderer-flame-instance-buffer renderer))
+          (installed-group
+            (luft.render::renderer-flame-bind-group renderer)))
+      (ok (= 2 (luft.render::renderer-flame-instance-count renderer)))
+      (ok (equalp source
+                  (luft.render::renderer-flame-instance-words renderer)))
+      (ok (equalp source (flame-resource-probe-data installed-buffer)))
+      (setf (aref source 0) 0)
+      (ok (= 56 (aref (luft.render::renderer-flame-instance-words renderer) 0)))
+      (ok (member '(:destroy :old-bind-group)
+                  (flame-resource-probe-events device) :test #'equal))
+      (ok (member '(:destroy :old-buffer)
+                  (flame-resource-probe-events device) :test #'equal))
+      ;; Failure after candidate-buffer creation retires only that candidate;
+      ;; the last complete population and bind group remain published.
+      (setf (flame-resource-probe-fail-bind-group-p device) t)
+      (ok (handler-case
+              (progn
+                (luft.render::renderer-set-flame-instance-words
+                 renderer #(60 56 60 2))
+                nil)
+            (error () t)))
+      (ok (eq installed-buffer
+              (luft.render::renderer-flame-instance-buffer renderer)))
+      (ok (eq installed-group
+              (luft.render::renderer-flame-bind-group renderer)))
+      (ok (= 2 (luft.render::renderer-flame-instance-count renderer)))
+      (ok (member '(:destroy :buffer)
+                  (flame-resource-probe-events device) :test #'equal))
+      (ok (handler-case
+              (progn
+                (luft.render::%copy-torch-flame-instance-words #(1 2 3))
+                nil)
+            (error () t))))))
 
 (deftest authored-placement-frames-compile-to-distinct-dense-assemblies
   (let* ((scene (render:make-mountain-sanctuary-scene))
@@ -1277,6 +1429,132 @@
     (ok (= (* 2 (length (luft.render::render-population-instance-words single)))
            (length (luft.render::render-population-instance-words double))))))
 
+(defun mesh-open-edges (mesh)
+  (let ((records (luft::%mesh-geometric-edge-records mesh)))
+    (loop for edge being the hash-keys of records using (hash-value record)
+          when (= 1 (car record)) collect edge)))
+
+(defun make-centred-crystal-bezel-test-scene ()
+  "One crystal protruding from the centre of a three-by-three stone support."
+  (let ((builder (luft.render::make-scene-builder :horizontal-bits 4)))
+    (luft.render::scene-builder-box
+     builder 4 6 4 6 4 4 :architecture-p t)
+    (luft.render::scene-builder-cell
+     builder 5 5 5
+     :material luft.render::*crystal-material-placement*)
+    (luft.render::finish-scene-builder builder)))
+
+(defun direct-material-bevel-union (scene profile)
+  "Build the mixed union directly, without the static render entry point."
+  (let* ((chamfer-stock-function
+           (luft.render::make-compiled-material-chamfer-stock-function
+            (luft.render::scene-material-program scene)))
+         (witness
+           (luft.render::%make-scene-phase-mesh
+            scene (render:scene-solid scene) 1 nil chamfer-stock-function)))
+    (multiple-value-bind (stock-masks site-widths)
+        (luft.render::compile-material-bevel-site-policy profile)
+      (luft:vary-surface-mesh-bevel-widths-from-stock-masks
+       witness stock-masks site-widths))))
+
+(deftest static-crystal-meshes-are-the-direct-union-at-widths-one-two-and-four
+  (let ((scene (make-centred-crystal-bezel-test-scene)))
+    (dolist (width '(1 2 4))
+      (let* ((profile
+               (render:make-material-bevel-profile
+                :terrain-width 2 :architecture-width 2
+                :crystal-width 4 :contact-width width))
+             (material-mesh (render:make-material-bevel-mesh scene profile))
+             (material-oracle (direct-material-bevel-union scene profile))
+             (uniform-mesh
+               (render:make-render-mesh scene :bevel-width width))
+             (uniform-oracle
+               (luft.render::%make-scene-phase-mesh
+                scene (render:scene-solid scene) width nil
+                (luft.render::make-compiled-material-chamfer-stock-function
+                 (luft.render::scene-material-program scene)))))
+        (ok (luft::%same-surface-mesh-representation-p
+             material-oracle material-mesh))
+        (ok (luft::%same-surface-mesh-representation-p
+             uniform-oracle uniform-mesh))
+        (ok (luft::%mesh-closed-p material-mesh))
+        (ok (luft::%mesh-nondegenerate-p material-mesh))))))
+
+(defun make-gallery-support-crystal-test-scene (position)
+  "The reduced gallery plinth with one crystal on an edge or corner."
+  (let ((builder (luft.render::make-scene-builder :horizontal-bits 5)))
+    (luft.render::scene-builder-box
+     builder 14 19 6 9 4 4 :architecture-p t)
+    (destructuring-bind (x y z)
+        (ecase position
+          (:edge '(16 9 5))
+          (:corner '(19 9 5)))
+      (luft.render::scene-builder-cell
+       builder x y z
+       :material luft.render::*crystal-material-placement*))
+    (luft.render::finish-scene-builder builder)))
+
+(deftest gallery-support-edge-and-corner-crystals-build-as-one-closed-union
+  (dolist (position '(:edge :corner))
+    (let* ((scene (make-gallery-support-crystal-test-scene position))
+           (mesh
+             (render:make-material-bevel-mesh
+              scene
+              (render:make-material-bevel-profile
+               :terrain-width 2 :architecture-width 2
+               :crystal-width 4 :contact-width 2)))
+           (population (luft.render::make-render-population (list mesh))))
+      (ok (null (luft:surface-mesh-companions mesh)))
+      (ok (luft::%mesh-closed-p mesh))
+      (ok (luft::%mesh-nondegenerate-p mesh))
+      (ok (plusp
+           (luft.render::render-population-opaque-triangle-instance-count
+            population)))
+      (ok (plusp
+           (luft.render::render-population-translucent-triangle-instance-count
+            population))))))
+
+(deftest contiguous-crystal-row-has-one-original-perimeter-without-cell-teeth
+  (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
+         (scene
+           (progn
+             (luft.render::scene-builder-box
+              builder 3 7 3 5 3 3 :architecture-p t)
+             (loop for x from 4 to 6
+                   do (luft.render::scene-builder-cell
+                       builder x 4 4
+                       :material luft.render::*crystal-material-placement*))
+             (luft.render::finish-scene-builder builder)))
+         (mesh
+           (render:make-material-bevel-mesh
+            scene
+            (render:make-material-bevel-profile
+             :terrain-width 2 :architecture-width 2
+             :crystal-width 4 :contact-width 2)))
+         (crystal-stock
+           (luft.render::surface-assembly-offset
+            luft.render::*crystal-surface*))
+         (crystal-exterior
+           (luft:select-surface-mesh-stocks
+            mesh (lambda (stock) (= stock crystal-stock))))
+         (edges (mesh-open-edges crystal-exterior))
+         (points
+           (sort
+            (remove-duplicates (mapcan #'copy-list edges) :test #'equal)
+            #'luft::%point-order<)))
+    ;; Canonical-site subdivisions remain along the long sides, but all points
+    ;; lie on one chamfered outer collar; no host tooth rises between crystals.
+    (ok
+     (equal
+      '((32 34 34) (32 38 34) (34 32 34) (34 40 34)
+        (38 32 34) (38 40 34) (40 32 34) (40 40 34)
+        (42 32 34) (42 40 34) (46 32 34) (46 40 34)
+        (48 32 34) (48 40 34) (50 32 34) (50 40 34)
+        (54 32 34) (54 40 34) (56 34 34) (56 38 34))
+      points))
+    (ok (= 20 (length edges)))
+    (ok (luft::%mesh-closed-p mesh))))
+
 (deftest shrine-population-keeps-light-parallel-and-translucency-separate
   (let* ((scene (render:make-voxel-light-shrine-scene))
          (mesh (render:make-material-bevel-mesh
@@ -1288,16 +1566,14 @@
               (luft.render::render-population-quad-instance-count
                population)))
          (companions (luft:surface-mesh-companions mesh))
-         (crystal-mesh (first companions))
-         (torch-mesh (second companions))
-         (backing-face-p nil))
-    (ok (= 2 (length companions)))
-    (ok (luft::%mesh-closed-p crystal-mesh))
-    (ok (luft::%mesh-nondegenerate-p crystal-mesh))
+         (torch-mesh (first companions)))
+    (ok (= 1 (length companions)))
+    (ok (luft::%mesh-closed-p mesh))
+    (ok (luft::%mesh-nondegenerate-p mesh))
     (ok (eq (render:scene-voxel-light scene)
             (luft:surface-mesh-voxel-light mesh)))
     (ok (eq (render:scene-voxel-light scene)
-            (luft:surface-mesh-voxel-light crystal-mesh)))
+            (luft:surface-mesh-voxel-light torch-mesh)))
     (ok (= (* 4 instances)
            (length (luft.render::render-population-instance-words population))))
     (ok (= (* 2 instances)
@@ -1308,22 +1584,20 @@
     (ok (plusp
          (luft.render::render-population-translucent-triangle-instance-count
           population)))
-    ;; Four body/flame attachments contribute 32 triangles apiece without
-    ;; becoming voxel occupancy or changing either voxel phase.
-    (ok (= 128 (luft:surface-mesh-triangle-count torch-mesh)))
-    ;; The architecture phase retains the top sheet at the crystal contact;
-    ;; binary union meshing used to cancel this backing face completely.
-    (luft::%map-mesh-triangles
-     (lambda (kind a b c)
-       (when (and (eq kind :face)
-                  (every (lambda (point) (= 40 (third point))) (list a b c))
-                  (every (lambda (point)
-                           (and (<= 96 (first point) 104)
-                                (<= 104 (second point) 112)))
-                         (list a b c)))
-         (setf backing-face-p t)))
-     mesh)
-    (ok backing-face-p)
+    ;; The exact socket and shaft retain 24 bronze triangles per attachment;
+    ;; the old eight-triangle static flame cone is now a separate volume draw.
+    (ok (= 96 (luft:surface-mesh-triangle-count torch-mesh)))
+    (let ((body-stock
+            (luft.render::surface-assembly-offset
+             luft.render::*torch-body-surface*)))
+      (dolist (stream (list (luft:surface-mesh-face-instance-words torch-mesh)
+                            (luft:surface-mesh-band-instance-words torch-mesh)
+                            (luft:surface-mesh-fan-instance-words torch-mesh)))
+        (ok (loop for offset from 3 below (length stream) by 4
+                  always (= body-stock
+                            (ldb
+                             (byte luft:+mesh-instance-stock-bit-count+ 16)
+                             (aref stream offset)))))))
     (ok (some #'plusp
               (coerce (luft.render::render-population-light-words population)
                       'list)))))
@@ -1790,6 +2064,10 @@
            (luft.render.shaders:player-sdf-vertex-specification))
          (player-fragment
            (luft.render.shaders:player-sdf-fragment-specification))
+         (flame-vertex
+           (luft.render.shaders:torch-flame-vertex-specification))
+         (flame-fragment
+           (luft.render.shaders:torch-flame-fragment-specification))
          (present-vertex
            (luft.render.shaders:present-vertex-specification))
          (present-fragment
@@ -1804,6 +2082,10 @@
            (luv.msl:msl-document-source (luv.msl:compile-msl vertex)))
          (fragment-msl
            (luv.msl:msl-document-source (luv.msl:compile-msl fragment)))
+         (flame-vertex-msl
+           (luv.msl:msl-document-source (luv.msl:compile-msl flame-vertex)))
+         (flame-fragment-msl
+           (luv.msl:msl-document-source (luv.msl:compile-msl flame-fragment)))
          (present-fragment-msl
            (luv.msl:msl-document-source
             (luv.msl:compile-msl present-fragment))))
@@ -1816,6 +2098,13 @@
     (ok (search "sampler shadow_sampler" fragment-msl))
     (ok (search "barycentric" fragment-msl))
     (ok (search "motion_output" fragment-msl))
+    (ok (search "gemstone_radiance" fragment-msl))
+    (ok (search "[[instance_id]]" flame-vertex-msl))
+    (ok (search "flame_instances" flame-vertex-msl))
+    (ok (search "flame_effect_parameters" flame-fragment-msl))
+    ;; The expensive dielectric response must remain structured control flow,
+    ;; not an eager select paid by every ordinary terrain fragment.
+    (ok (search "if (abs((kernel_code - 8.0f)) < 0.5f)" fragment-msl))
     (ok (search "depth2d<float> scene_depth" present-fragment-msl))
     (ok (search "highlight_energy" present-fragment-msl))
     (ok (search "paper_grade" present-fragment-msl))
@@ -1833,6 +2122,8 @@
     (ok (luv.msl:compile-msl player-fragment))
     (ok (luv.spir-v:compile-shader-specification player-vertex))
     (ok (luv.spir-v:compile-shader-specification player-fragment))
+    (ok (luv.spir-v:compile-shader-specification flame-vertex))
+    (ok (luv.spir-v:compile-shader-specification flame-fragment))
     (ok (luv.msl:compile-msl sky-fragment))
     (ok (luv.msl:compile-msl sky-temporal-fragment))
     (ok (luv.msl:compile-msl exposure-probe-fragment))

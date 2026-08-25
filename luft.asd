@@ -27,6 +27,7 @@
                              (:file "materials")
                              (:file "lighting")
                              (:file "shaders")
+                             (:file "flame-shaders")
                              (:file "render")))))
 
 (defsystem "luft/render"

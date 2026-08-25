@@ -5,6 +5,8 @@
            #:lattice-point-vertex-specification
            #:player-sdf-fragment-specification
            #:player-sdf-vertex-specification
+           #:torch-flame-fragment-specification
+           #:torch-flame-vertex-specification
            #:mesh-fragment-specification
            #:mesh-vertex-specification
            #:shadow-vertex-specification
@@ -24,6 +26,19 @@
            #:scene-solid
            #:scene-voxel-light
            #:scene-torches
+           #:+torch-flame-instance-word-count+
+           #:+torch-flame-sample-count+
+           #:torch-flame-orientation-code
+           #:torch-flame-orientation-axis
+           #:torch-flame-orientation-side
+           #:torch-flame-orientation-normal
+           #:pack-torch-flame-attachment
+           #:unpack-torch-flame-attachment
+           #:torch-flame-effect-uniform-data
+           #:torch-flame-reference-signed-distance
+           #:torch-flame-reference-density
+           #:torch-flame-reference-integrate-ray
+           #:*flame-time*
            #:light
            #:*light*
            #:make-bevel-limit-study-scene

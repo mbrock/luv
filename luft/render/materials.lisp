@@ -25,7 +25,23 @@
 (defclass earth-material-kind (material-kind) ())
 (defclass stone-material-kind (material-kind) ())
 (defclass luminous-material-kind (material-kind) ())
-(defclass crystal-material-kind (luminous-material-kind) ())
+(defclass crystal-material-kind (luminous-material-kind)
+  ((index-of-refraction :initarg :index-of-refraction :initform 1.5
+                        :reader crystal-material-index-of-refraction)
+   (dispersion :initarg :dispersion :initform 0.0
+               :reader crystal-material-dispersion)
+   (internal-scatter :initarg :internal-scatter :initform 0.0
+                     :reader crystal-material-internal-scatter)
+   (chatoyancy :initarg :chatoyancy :initform 0.0
+               :reader crystal-material-chatoyancy)
+   (anisotropic-sharpness :initarg :anisotropic-sharpness :initform 1.0
+                          :reader crystal-material-anisotropic-sharpness)
+   (adularescence :initarg :adularescence :initform 0.0
+                  :reader crystal-material-adularescence)
+   (arris-lustre :initarg :arris-lustre :initform 0.0
+                 :reader crystal-material-arris-lustre))
+  (:documentation
+   "A dielectric crystal with compiled, raster-friendly gemstone optics."))
 
 (defclass material-frame ()
   ((name :initarg :name :reader material-frame-name)
@@ -107,9 +123,13 @@
       (ensure-semantic-instance
        *crystal-material* 'crystal-material-kind
        :name :aether-crystal :base-tone '(0.16 0.68 0.94)
-       :roughness 0.18 :relief :crystal
+       :roughness 0.14 :relief :crystal
        :light-opacity 1 :light-emission '(3 11 15)
-       :surface-emission 0.65 :opacity 0.42)
+       :surface-emission 0.30 :opacity 0.48
+       :index-of-refraction 1.62 :dispersion 0.48
+       :internal-scatter 0.58 :chatoyancy 0.42
+       :anisotropic-sharpness 18.0 :adularescence 0.30
+       :arris-lustre 0.88)
       *torch-body-material*
       (ensure-semantic-instance
        *torch-body-material* 'stone-material-kind
@@ -527,10 +547,12 @@ mixed contact selects CONTACT-WIDTH."
   "Compile VOCABULARY into fixed-stride float32 rows for direct GPU indexing.
 
 Each assembly owns seven vec4 rows: primary/kernel, secondary/contact variant,
-tertiary/roughness, then frame origin/relief profile and its three axes.  The
-X row carries relief amplitude, Y carries visual opacity, and Z carries HDR
-surface emission.  Propagation loss and RGB source strength remain CPU-only
-material facts."
+tertiary/roughness, then frame origin/relief profile and its three axes.  A
+crystal reuses otherwise redundant secondary and tertiary tone lanes for IOR,
+dispersion, scatter, chatoyancy, anisotropic sharpness, adularescence, and
+arris lustre; tertiary W remains roughness.  The X row carries relief
+amplitude, Y carries visual opacity, and Z carries HDR surface emission.
+Propagation loss and RGB source strength remain CPU-only material facts."
   (let* ((members (domains:identity-vocabulary-members vocabulary))
          (words
            (make-array (* (length members)
@@ -548,19 +570,36 @@ material facts."
             for primary = (surface-assembly-primary assembly)
             for secondary = (or (surface-assembly-secondary assembly) primary)
             for tertiary = (or (surface-assembly-tertiary assembly) secondary)
+            for kind = (surface-reading-kind primary)
             for frame = (surface-reading-frame primary)
             for row = (* index +surface-assembly-descriptor-row-count+)
             do (put-row row
                         (append (tone-of primary primary)
                                 (list (surface-kernel-code
                                        (surface-assembly-kernel assembly)))))
-               (put-row (+ row 1)
-                        (append (tone-of secondary primary)
-                                (list (surface-contact-variant assembly))))
-               (put-row (+ row 2)
-                        (append (tone-of tertiary secondary)
-                                (list (material-kind-roughness
-                                       (surface-reading-kind primary)))))
+               (if (typep kind 'crystal-material-kind)
+                   (progn
+                     (put-row
+                      (+ row 1)
+                      (list (crystal-material-index-of-refraction kind)
+                            (crystal-material-dispersion kind)
+                            (crystal-material-internal-scatter kind)
+                            (crystal-material-chatoyancy kind)))
+                     (put-row
+                      (+ row 2)
+                      (list (crystal-material-anisotropic-sharpness kind)
+                            (crystal-material-adularescence kind)
+                            (crystal-material-arris-lustre kind)
+                            (material-kind-roughness kind))))
+                   (progn
+                     (put-row (+ row 1)
+                              (append
+                               (tone-of secondary primary)
+                               (list (surface-contact-variant assembly))))
+                     (put-row (+ row 2)
+                              (append
+                               (tone-of tertiary secondary)
+                               (list (material-kind-roughness kind))))))
                (put-row (+ row 3)
                         (append
                          (material-frame-origin frame)

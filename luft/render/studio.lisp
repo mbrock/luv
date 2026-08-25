@@ -532,6 +532,7 @@ before the operation boundary, or it would encode through resources which the
       (renderer-exposure renderer))
      :jitter jitter :view view
      :player-p player-p
+     :effect-time (or *flame-time* (viewer-last-timestamp viewer) 0.0)
      ;; Dense lattice dots are a close-study diagnostic, not a terrain view:
      ;; streamed chunks can each contain more than a million markers. The
      ;; shader-backed construction lines remain controlled by *WIREFRAME*.
@@ -1269,6 +1270,10 @@ mesh while retaining SOLID as the semantic inspection source."
                                    :bevel-width bevel-width
                                    :bevel-profile bevel-profile
                                    :inspector-p inspector-p)))))
+           ;; Torch attachments are a small immutable scene-global effect;
+           ;; install them once rather than repeating them in chunk populations.
+           (renderer-set-scene-torches
+            renderer* (and (typep solid 'scene) solid))
            (unless (typep solid 'streaming-scene)
              (cond
                (surface-mesh
@@ -1454,6 +1459,8 @@ production gets the same opportunity to publish as it does in the window."
                                   candidate-source-values source-values
                                   candidate-source-revision before)
                             created)))
+                    (renderer-set-scene-torches
+                     renderer (and (typep solid 'scene) solid))
                     (cond
                       ((typep solid 'streaming-scene)
                        (setf production-system

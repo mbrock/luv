@@ -273,6 +273,123 @@
          (gate (smoothstep #.*highlight-glow-threshold* 1.55 luminance)))
     (* color gate)))
 
+(define-shader-function gemstone-environment-radiance
+    (direction sun sun-color sky ground)
+  "A cheap continuous environment for dielectric reflection and transmission."
+  (let* ((hemisphere
+           (mix ground sky
+                (smoothstep -0.25 0.65 (swizzle direction :z))))
+         (sun-glint
+           (expt (max 0.0 (dot direction sun)) 72.0)))
+    (+ hemisphere (* sun-color (* sun-glint 1.65)))))
+
+(define-shader-function gemstone-refracted-direction (view normal ior)
+  "The air-to-crystal Snell direction, without requiring a REFRACT intrinsic."
+  (let* ((incident (* view -1.0))
+         (eta (/ 1.0 ior))
+         (cosine (- 0.0 (dot normal incident)))
+         (radicand
+           (- 1.0 (* (* eta eta) (- 1.0 (* cosine cosine))))))
+    (normalize
+     (+ (* incident eta)
+        (* normal
+           (- (* eta cosine) (sqrt (max 0.0 radicand))))))))
+
+(define-shader-function gemstone-radiance
+    (ordinary primary-tone optics figures material-point normal view
+     half-vector frame-axis frame-up sun sun-color sky ground n-dot-v n-dot-l
+     boundary-edge-pixels)
+  "A raster-friendly dielectric gem: dispersion, inclusions, moon-glow, arrises."
+  (let* ((ior (swizzle optics :x))
+         (dispersion (swizzle optics :y))
+         ;; Match KHR_materials_dispersion's artist-facing 20/Abbe-number
+         ;; convention. HALF-SPREAD is the actual IOR distance from green to
+         ;; red or blue under the linear visible-spectrum approximation.
+         (half-spread (* (* (- ior 1.0) 0.025) dispersion))
+         (internal-scatter (swizzle optics :z))
+         (chatoyancy-gain (swizzle optics :w))
+         (anisotropic-sharpness (swizzle figures :x))
+         (adularescence-gain (swizzle figures :y))
+         (arris-gain (swizzle figures :z))
+         (ratio (/ (- ior 1.0) (+ ior 1.0)))
+         (f0 (* ratio ratio))
+         (fresnel
+           (+ f0 (* (- 1.0 f0) (expt (- 1.0 n-dot-v) 5.0))))
+         (reflection-direction
+           (normalize (- (* normal (* 2.0 (dot normal view))) view)))
+         (reflection
+           (gemstone-environment-radiance
+            reflection-direction sun sun-color sky ground))
+         (red-direction
+           (gemstone-refracted-direction
+            view normal (max 1.01 (- ior half-spread))))
+         (green-direction
+           (gemstone-refracted-direction view normal ior))
+         (blue-direction
+           (gemstone-refracted-direction
+            view normal (+ ior half-spread)))
+         (red-transmission
+           (gemstone-environment-radiance
+            red-direction sun sun-color sky ground))
+         (green-transmission
+           (gemstone-environment-radiance
+            green-direction sun sun-color sky ground))
+         (blue-transmission
+           (gemstone-environment-radiance
+            blue-direction sun sun-color sky ground))
+         (dispersed-transmission
+           (vec3 (swizzle red-transmission :x)
+                 (swizzle green-transmission :y)
+                 (swizzle blue-transmission :z)))
+         (absorption-tone
+           (mix (vec3 1.0 1.0 1.0) primary-tone internal-scatter))
+         (transmission (* dispersed-transmission absorption-tone))
+         (projected-axis (- frame-axis (* normal (dot frame-axis normal))))
+         (axis-length
+           (sqrt (max 0.000001 (dot projected-axis projected-axis))))
+         (inclusion-axis (/ projected-axis axis-length))
+         ;; Oriented needle inclusions scatter a line perpendicular to their
+         ;; axis.  One restrained band reads as chatoyancy; adding rotated axes
+         ;; later naturally extends this to asterism.
+         (inclusion-alignment
+           (abs (dot half-vector inclusion-axis)))
+         (chatoyant-band
+           (expt (max 0.0 (- 1.0 inclusion-alignment))
+                 anisotropic-sharpness))
+         (chatoyant-visibility
+           (* (smoothstep 0.02 0.72 n-dot-l)
+              (+ 0.28 (* 0.72 n-dot-v))))
+         (cloud-a
+           (paper-noise
+            (+ (* material-point (vec3 0.42 0.42 0.13))
+               (vec3 7.3 19.1 3.7))))
+         (cloud-b
+           (paper-noise
+            (+ (* (swizzle material-point :yzx) (vec3 0.19 0.63 0.31))
+               (vec3 23.7 5.1 11.9))))
+         (interior-cloud (mix cloud-a cloud-b 0.38))
+         (adular-lobe
+           (* (* (- 1.0 fresnel)
+                 (+ 0.38 (* 0.62 (abs (dot view frame-up)))))
+              (smoothstep 0.34 0.78 interior-cloud)))
+         (arris
+           (- 1.0 (smoothstep 0.38 1.42 boundary-edge-pixels)))
+         (body (* ordinary (+ 0.24 (* 0.30 (- 1.0 fresnel)))))
+         (reflected (* reflection (+ 0.10 (* fresnel 1.20))))
+         (transmitted (* transmission (* (- 1.0 fresnel) 0.52)))
+         (chatoyant
+           (* (vec3 0.76 1.02 1.18)
+              (* chatoyancy-gain
+                 (* chatoyant-band chatoyant-visibility))))
+         (adularescent
+           (* (vec3 0.25 0.62 1.08)
+              (* adularescence-gain adular-lobe)))
+         (edge-light
+           (* (mix sun-color (vec3 0.62 0.94 1.16) 0.42)
+              (* arris-gain
+                 (* arris (+ 0.24 (* 0.76 fresnel)))))))
+    (+ body reflected transmitted chatoyant adularescent edge-light)))
+
 (define-shader-function mesh-view-clip
     (point position right up forward projection divisor)
   (let* ((relative (- point (swizzle position :xyz)))
@@ -1809,7 +1926,29 @@ that he is standing on something."
     (set-output color-output
                 (vec4 (* radiance opacity) opacity))
     (set-output motion-output
-                (mesh-temporal-motion previous-clip current-clip))))
+                (mesh-temporal-motion previous-clip current-clip))
+    ;; Shader WHEN lowers to real structured control flow.  Keeping the
+    ;; dielectric work behind it means soil, stone, and attachments do not pay
+    ;; for three Snell evaluations and the inclusion field.
+    (when (< (abs (- kernel-code 8.0)) 0.5)
+      (set-output
+       color-output
+       (vec4
+        (*
+         (mix
+          (mix
+           (mix
+            (gemstone-radiance
+             mapped-paper primary-tone secondary tertiary material-point
+             shading-normal view-direction half-vector
+             (swizzle frame-x :xyz) (swizzle frame-z :xyz)
+             sun sun-color sky ground n-dot-v n-dot-l
+             boundary-edge-pixels)
+            sky fog)
+           construction-ink construction-wire)
+          blueprint reticle)
+         opacity)
+        opacity)))))
 
 (define-live-shader shadow-vertex-specification
     (:stage :vertex
