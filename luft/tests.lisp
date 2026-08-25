@@ -1260,6 +1260,43 @@
 
 (defun %test-surface-mesh ()
   (%with-test-section ("integer site streams")
+    ;; This strength reduction must preserve Common Lisp ROUND exactly,
+    ;; including negative values and ties to even.
+    (loop for sum from -128 to 128
+          do (%check (= (%nearest-edge-site-coordinate sum 0)
+                        (round sum (* 2 +mesh-cell-size+)))))
+    ;; Quad-grain observation must retain the triangle replay's directed open
+    ;; perimeter exactly while omitting only its twice-seen construction edge.
+    (labels ((open-records (table)
+               (sort
+                (loop for key being the hash-keys of table
+                        using (hash-value value)
+                      when (= 1 (ash value
+                                     (- +boundary-observation-count-shift+)))
+                        collect (cons key value))
+                #'< :key #'car))
+             (check-quad (normal-z)
+               (let* ((domain (make-world-domain :horizontal-bits 5))
+                      (builder (%make-surface-mesh-builder domain 2))
+                      (packing (%make-spatial-edge-packing-for-box 0 1 0 1))
+                      (replayed (make-hash-table :test #'eql))
+                      (p0 #(0 0 8)) (p1 #(8 0 8))
+                      (p2 #(8 8 8)) (p3 #(0 8 8)))
+                 (%enable-boundary-observations (list builder) packing 1)
+                 (%emit-quad builder :face 0 0 1 p0 p1 p2 p3
+                             0 0 normal-z 7 0)
+                 (%scan-stream-boundary-edges
+                  (surface-mesh-builder-face-stream builder)
+                  (surface-mesh-builder-templates builder)
+                  packing replayed)
+                 (let ((direct
+                         (surface-mesh-builder-boundary-observations builder)))
+                   (%check (= 4 (hash-table-count direct)))
+                   (%check (= 5 (hash-table-count replayed)))
+                   (%check (equal (open-records direct)
+                                  (open-records replayed)))))))
+      (check-quad 1)
+      (check-quad -1))
     (%check (equal '(0 -1 0) (%normal-direction-code '(0 -2 0))))
     (dolist (bevel-width '(1 2 3))
       (flet ((mesh-for-star (mask)
