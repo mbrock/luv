@@ -12,7 +12,7 @@
     flake = false;
   };
   inputs.swash = {
-    url = "github:lessrest/swash/7693999a872c36b88a87b3d4dad4918e6a4a724e";
+    url = "github:lessrest/swash/fcc1005aceee44cd1b9285edb73c5d5be039414e";
     flake = false;
   };
   # Keep this tag equal to the Tracy profiler you actually run: the client and
@@ -277,9 +277,9 @@
             "${pkgs.emacsPackages.sly}/share/emacs/site-lisp/elpa/${pkgs.emacsPackages.sly.pname}-${pkgs.emacsPackages.sly.version}";
           swashPackage = pkgs.buildGoModule {
             pname = "swash";
-            version = "0-unstable-2026-08-24";
+            version = "0-unstable-2026-08-25";
             src = swash;
-            vendorHash = "sha256-QliqQWIf2sU6hexErhx3mGq/6FP+sM3Krlf7cKnu0gQ=";
+            vendorHash = "sha256-bS3eFqaKLHCUfehIfFwJrW7YBQJLD6d82zYGiU2HCLs=";
             subPackages = [ "cmd/swash" ];
             CGO_CFLAGS = "-I${swash}/cvendor";
             env.GOWORK = "off";

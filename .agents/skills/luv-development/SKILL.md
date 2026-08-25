@@ -112,7 +112,7 @@ ownership visible before lifecycle actions.
 
 Silence is almost always something that was told not to speak, or something waiting for input nobody is going to send:
 
-- **A pipe ate the progress.** `-L`, `--verbose`, `-x`, and `--progress` mostly write to a TTY and go mute into `tee`, `head`, or a pager. Never pipe a progress-reporting command; run it in tmux and read the pane.
+- **A pipe ate the progress.** `-L`, `--verbose`, `-x`, and `--progress` can go mute into `tee`, `head`, or a pager. Never pipe a progress-reporting command. Start long work in Swash and inspect its journal with `poll` or `follow`; use tmux only when Swash is unavailable or the work is inherently interactive.
 - **Stdin was left open.** A failed `./sly eval` prints a backtrace and waits for a restart number. Redirect `< /dev/null` so it aborts and says why instead of waiting forever for a keystroke.
 - **It is talking to the network.** `nix build nixpkgs#foo` resolves the registry alias over `channels.nixos.org` and can hang there with nothing on screen; prefer a reference through this repo's pinned flake.
 
@@ -124,6 +124,20 @@ Make it talk, then find it:
 4. Split the silent step into several small ones. The one that does not come back has named itself.
 
 A responsive image and a stuck call are different things: if `./sly eval "(+ 1 2)" < /dev/null` returns instantly while another eval does not, the image is fine and the block is inside that specific form — take it apart rather than blaming the connection.
+
+For a detached one-shot build, let Swash select the available backend:
+
+```sh
+./scripts/dev sh -c '"$LUV_SWASH" start -- make all'
+./scripts/dev sh -c '"$LUV_SWASH" poll SESSION'
+./scripts/dev sh -c '"$LUV_SWASH" follow SESSION'
+```
+
+`start` prints the session ID, `poll` shows recent output, and `follow` streams
+to completion and returns the build's exit status. The portable backend writes
+directly to an SQLite/WAL journal and needs no journal socket or daemon.
+Ordinary builds do not need `--tty`; reserve it for commands that are actually
+interactive.
 
 ## Diagnose slow or stuck work
 

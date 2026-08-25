@@ -38,9 +38,14 @@ Never wait it out. Never poll it hoping. Never chain sleeps. Do this instead:
 4. **Split it.** A silent compound step becomes several small steps, each of
    which either returns or is the culprit. The one that does not come back
    has named itself.
-5. **Long jobs run in tmux**, on a real TTY, where the pane can be read at
-   any moment -- not in a pipeline whose output arrives only at the end, and
-   not in a background task whose file stays empty.
+5. **Long jobs run in Swash**:
+   `./scripts/dev sh -c '"$LUV_SWASH" start -- make all'`, then
+   `./scripts/dev sh -c '"$LUV_SWASH" poll ID'` for a snapshot or
+   `./scripts/dev sh -c '"$LUV_SWASH" follow ID'` to stream to completion and
+   receive the command's exit status. Swash selects its backend automatically;
+   its portable backend journals directly to SQLite/WAL and needs no socket or
+   daemon. Ordinary builds do not need a TTY. Use tmux only as the fallback
+   when Swash itself is unavailable or the work is inherently interactive.
 
 Reporting "it seems to be taking a while" is not a status. Neither is trying
 it again the same way. If a command has gone quiet, you have a defect in
