@@ -78,8 +78,9 @@ to guess when several match. `./sly --help` is the command map. Do not run
 The surfaces have distinct jobs:
 
 - `./sly`: persistent interactive development; use this by default.
-- `./scripts/dev COMMAND`: one clean process in the checkout environment;
-  use it for tests, builds, and native command-line tools.
+- Native tools (`make`, `sbcl`, `swash`, and the rest of the profile) run
+  directly when `LUV_DEV_ENVIRONMENT=1`. `./scripts/dev COMMAND` is the
+  fallback when a shell did not inherit the environment; `--status` diagnoses it.
 - `./scripts/luv COMMAND`: named one-shot luvcraft tools such as `gazetteer`.
 - `build/luvcraft`: shipped/CI executable. `./sly --luvcraft ...` is only for
   deliberately attaching to that standalone process.
@@ -93,11 +94,12 @@ changes; use `make sly-client` to request the build directly.
 
 Ordinary development uses one durable Nix profile rather than evaluating a
 flake or entering a subshell per command. Install or refresh it explicitly
-with `./scripts/install-dev-profile`, then source
-`$HOME/.nix-profile/share/luv/env.sh` from the login shell. The checkout's
-`.envrc` performs only that source operation and is therefore instantaneous.
-Every script refuses to run when the profile is not active. `nix develop -c`
-remains a CI/from-scratch proof, not part of the edit/test loop.
+with `./scripts/install-dev-profile`. Orb login shells receive the profile and
+checkout registry automatically; their `BASH_ENV` propagates both to
+non-interactive Bash commands. The checkout's `.envrc` activates the same
+profile locally. Use `./scripts/dev COMMAND` only to repair or diagnose a shell
+that missed activation. `nix develop -c` remains a CI/from-scratch proof, not
+part of the edit/test loop.
 
 # Working style
 

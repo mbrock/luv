@@ -2,18 +2,21 @@
 
 set -euo pipefail
 
-profile_environment="$HOME/.nix-profile/share/luv/env.sh"
-if [[ ! -r "$profile_environment" ]]; then
-  printf 'luv development profile is missing; run .agents/setup\n' >&2
+orb_environment="$HOME/.config/luv/orb-env.sh"
+if [[ ! -r "$orb_environment" ]]; then
+  printf 'luv orb environment is missing; run .agents/setup\n' >&2
   exit 1
 fi
 
 # shellcheck disable=SC1090
-source "$profile_environment"
+source "$orb_environment"
 
 case "$(command -v sbcl 2>/dev/null)" in
   "$HOME/.nix-profile/"*|/nix/store/*)
-    printf 'luv development profile ready.\n'
+    case ":${CL_SOURCE_REGISTRY:-}:" in
+      *:"$LUV_PROJECT_ROOT/":*) printf 'luv orb environment ready.\n' ;;
+      *) printf 'luv checkout is missing from ASDF discovery.\n' >&2; exit 1 ;;
+    esac
     ;;
   *)
     printf 'luv development profile did not provide SBCL.\n' >&2

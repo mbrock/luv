@@ -42,9 +42,9 @@ runs inside one selected image. This is the ordinary workflow:
 ## Start in a checkout
 
 1. Run `git status --short --branch` and preserve unrelated work.
-2. Run `./scripts/dev --status`. Note the SBCL version, `LUV_SWASH`, the Vulkan layer path, and the ASDF cache root.
+2. Confirm `LUV_DEV_ENVIRONMENT=1` and `command -v sbcl` resolves into the Nix profile. Use `./scripts/dev --status` only when the inherited environment is absent or suspect.
 3. Run `./sly list`, then `./sly status`. Swash assigns each image a stable session identity and publishes its kernel-assigned Slynk port in the journal.
-4. Prefer `./scripts/dev COMMAND` for one-shot native tools and `./sly COMMAND` for Lisp exploration. Do not invoke an ambient Homebrew or system SBCL.
+4. Run one-shot native tools directly and use `./sly COMMAND` for Lisp exploration. `./scripts/dev COMMAND` is the fallback activator, not the ordinary prefix. Never use an ambient Homebrew or system SBCL.
 
 The durable Nix development profile is the ordinary environment. Install or
 refresh it only when locked dependencies change:
@@ -58,15 +58,16 @@ direnv allow         # once; .envrc only sources the same activation file
 Normal commands do not evaluate Nix and do not enter a subshell. The profile
 is a deliberate GC-rooted dependency checkpoint; `flake.lock` still makes it
 reproducible when refreshed. CI may enter the equivalent environment once
-around a whole job with `nix develop -c`. Restart each selected image that
-should enter the refreshed profile environment.
+around a whole job with `nix develop -c`. Orb login shells activate the full
+environment and export `BASH_ENV` so nested non-interactive Bash commands keep
+it. Restart each selected image that should enter a refreshed profile.
 
 ## Choose the execution path
 
 - Use `./sly play`, then `eval`, `inspect`, `describe`, `apropos`, `edit`, or `xref` for iterative work. Each invocation opens a fresh client connection to the selected image.
 - Use `./scripts/luv COMMAND` for named one-shot luvcraft tools such as `gazetteer`; these do not share the live game.
 - Use `./sly --luvcraft ...` only to inspect the standalone game named by `build/luvcraft.slynk`; `luvcraft:*session*` is its live session.
-- Use `./scripts/dev sbcl --non-interactive ...` for isolated verification that must start clean.
+- Use `sbcl --non-interactive ...` for isolated verification that must start clean; add `./scripts/dev` only if the shell missed activation.
 - Use Make targets for their intended artifacts. Expect the first build in a new absolute checkout path to compile local systems into a distinct ASDF cache subtree; later loads should be much faster.
 - Use `./sly parinfer ...` for its connection-free Lisp indentation checks.
 
@@ -142,7 +143,7 @@ commands that are actually interactive.
 ## Diagnose slow or stuck work
 
 1. Observe the last emitted compilation unit; a fresh worktree compiles its own source-path cache, but a normal cold project load should keep printing progress.
-2. Run `./scripts/dev --status`, `./sly list`, and `./sly status` in another terminal.
+2. Check `LUV_DEV_ENVIRONMENT`, `command -v sbcl`, `./sly list`, and `./sly status` in another terminal; use `./scripts/dev --status` if activation looks wrong.
 3. Inspect processes with `ps ax -o pid,ppid,etime,state,command | grep -E '[s]wash|[s]bcl|[n]ix (develop|build)|[l]uv-env'`.
 4. For a managed image, inspect its selected `./sly log` and Swash identity. For a Make/SBCL process, capture its command and parent before interrupting it.
 5. Distinguish CPU-heavy compilation from sleeping/waiting. Do not start a duplicate build: concurrent work obscures ownership and can contend for outputs.
