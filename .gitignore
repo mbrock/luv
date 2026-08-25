@@ -5,3 +5,4 @@ capture.ppm
 *.fasl
 *.blend1
 .direnv/
+.amp/portals/*

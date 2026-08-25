@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+step() {
+  local label=$1
+  shift
+  printf '\n==> %s\n' "$label"
+  local started=$SECONDS
+  "$@"
+  printf '<== %s (%ss)\n' "$label" "$((SECONDS - started))"
+}
+
+install_system_packages() {
+  local package
+  local -a missing=()
+  for package in ca-certificates curl git xz-utils; do
+    dpkg-query -W -f='${Status}' "$package" 2>/dev/null \
+      | grep -Fqx 'install ok installed' || missing+=("$package")
+  done
+
+  if ((${#missing[@]})); then
+    sudo apt-get update
+    sudo apt-get install -y "${missing[@]}"
+  else
+    printf 'Required system packages are already installed.\n'
+  fi
+}
+
+install_nix() {
+  if ! command -v nix >/dev/null 2>&1 \
+    && [[ -x /nix/var/nix/profiles/default/bin/nix ]]; then
+    # A stale snapshot can retain Nix without retaining its parent process's PATH.
+    export PATH="/nix/var/nix/profiles/default/bin:$PATH"
+  fi
+
+  if command -v nix >/dev/null 2>&1; then
+    nix --version
+    return
+  fi
+
+  local installer
+  installer=$(mktemp)
+  trap "rm -f '$installer'" EXIT
+  curl --fail --location --show-error --progress-bar \
+    https://install.determinate.systems/nix >"$installer"
+  sh "$installer" install --no-confirm
+  rm -f "$installer"
+  trap - EXIT
+}
+
+activate_nix() {
+  local profile
+  for profile in \
+    /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh \
+    "$HOME/.nix-profile/etc/profile.d/nix.sh"; do
+    if [[ -r "$profile" ]]; then
+      # shellcheck disable=SC1090
+      source "$profile"
+      return
+    fi
+  done
+
+  printf 'Nix was installed but no profile activation script was found.\n' >&2
+  return 1
+}
+
+install_login_hook() {
+  local marker='# luv orb development profile v1'
+  touch "$HOME/.bash_profile"
+  if grep -Fqx "$marker" "$HOME/.bash_profile"; then
+    printf 'Login-shell development hook is already installed.\n'
+    return
+  fi
+
+  cat >>"$HOME/.bash_profile" <<EOF
+
+$marker
+if [[ \${PWD} == "$repo_root" ]]; then
+  if [[ -r /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]]; then
+    . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+  fi
+  case ":\$PATH:" in
+    *:/nix/var/nix/profiles/default/bin:*) ;;
+    *) export PATH="/nix/var/nix/profiles/default/bin:\$PATH" ;;
+  esac
+  if [[ -r \$HOME/.nix-profile/share/luv/env.sh ]]; then
+    . \$HOME/.nix-profile/share/luv/env.sh
+  fi
+fi
+EOF
+}
+
+step 'Check system packages' install_system_packages
+step 'Install Nix when needed' install_nix
+activate_nix
+step 'Build and install the locked development profile' \
+  ./scripts/install-dev-profile
+step 'Configure login-shell activation' install_login_hook
+
+printf '\nOrb setup complete.\n'
