@@ -94,11 +94,26 @@ fi
 EOF
 }
 
+install_agent_commands() {
+  local bin_dir="$HOME/.local/bin"
+  local swash="$HOME/.nix-profile/bin/swash"
+
+  if [[ ! -x "$swash" ]]; then
+    printf 'Development profile did not provide Swash at %s.\n' "$swash" >&2
+    return 1
+  fi
+
+  mkdir -p "$bin_dir"
+  ln -sfn "$swash" "$bin_dir/swash"
+  printf 'Swash is directly available on the orb agent PATH.\n'
+}
+
 step 'Check system packages' install_system_packages
 step 'Install Nix when needed' install_nix
 activate_nix
 step 'Build and install the locked development profile' \
   ./scripts/install-dev-profile
+step 'Expose agent commands' install_agent_commands
 step 'Configure login-shell activation' install_login_hook
 
 printf '\nOrb setup complete.\n'

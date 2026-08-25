@@ -39,10 +39,9 @@ Never wait it out. Never poll it hoping. Never chain sleeps. Do this instead:
    which either returns or is the culprit. The one that does not come back
    has named itself.
 5. **Long jobs run in Swash**:
-   `./scripts/dev sh -c '"$LUV_SWASH" start -- make all'`, then
-   `./scripts/dev sh -c '"$LUV_SWASH" poll ID'` for a snapshot or
-   `./scripts/dev sh -c '"$LUV_SWASH" follow ID'` to stream to completion and
-   receive the command's exit status. Swash selects its backend automatically;
+   `swash start -- make all`, then `swash poll ID` for a snapshot or
+   `swash follow ID` to stream to completion and receive the command's exit
+   status. Bare `swash` lists sessions. Swash selects its backend automatically;
    its portable backend journals directly to SQLite/WAL and needs no socket or
    daemon. Ordinary builds do not need a TTY. Use tmux only as the fallback
    when Swash itself is unavailable or the work is inherently interactive.

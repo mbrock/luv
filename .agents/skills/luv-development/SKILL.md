@@ -128,16 +128,16 @@ A responsive image and a stuck call are different things: if `./sly eval "(+ 1 2
 For a detached one-shot build, let Swash select the available backend:
 
 ```sh
-./scripts/dev sh -c '"$LUV_SWASH" start -- make all'
-./scripts/dev sh -c '"$LUV_SWASH" poll SESSION'
-./scripts/dev sh -c '"$LUV_SWASH" follow SESSION'
+swash start -- make all
+swash poll SESSION
+swash follow SESSION
 ```
 
 `start` prints the session ID, `poll` shows recent output, and `follow` streams
-to completion and returns the build's exit status. The portable backend writes
-directly to an SQLite/WAL journal and needs no journal socket or daemon.
-Ordinary builds do not need `--tty`; reserve it for commands that are actually
-interactive.
+to completion and returns the build's exit status. Bare `swash` lists sessions.
+The portable backend writes directly to an SQLite/WAL journal and needs no
+journal socket or daemon. Ordinary builds do not need `--tty`; reserve it for
+commands that are actually interactive.
 
 ## Diagnose slow or stuck work
 
