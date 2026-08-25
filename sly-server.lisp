@@ -71,7 +71,8 @@
       (handler-case
           (progn
             (asdf:load-system "luv-workbench")
-            (build-call "FINISH" :done))
+            (when (build-call "FINISH" :done)
+              (sb-ext:exit :code 1 :abort t)))
         (error (condition)
           (if (deadline-exceeded-p condition)
               (progn

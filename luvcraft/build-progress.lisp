@@ -4,9 +4,10 @@
 ;;;; console and is the only thing that prints.  They speak over an
 ;;;; SB-CONCURRENCY mailbox, which the display thread reads with a timeout, so
 ;;;; that it keeps a heartbeat even while the build says nothing.  Past a
-;;;; deadline the display thread interrupts the build thread and the build
-;;;; fails: a file that takes more than a few seconds to compile is a defect,
-;;;; not a slow step.
+;;;; policy deadline the display records a violation but lets the compiler
+;;;; finish.  At twice that deadline it interrupts the build thread.  A
+;;;; completed build with violations still exits unsuccessfully: a file that
+;;;; takes more than a few seconds to compile is a defect, not a slow step.
 ;;;;
 ;;;; Nothing is muted.  Compiler chatter and the C toolchain's pkg-config and
 ;;;; gcc noise are redirected -- at the file descriptor level, since
@@ -36,7 +37,8 @@
 (defpackage #:luv-build
   (:use #:cl)
   (:export #:start #:finish #:failed #:archive-deferred-logs
-           #:deadline-exceeded #:deadline-exceeded-label #:*log-directory*))
+           #:deadline-exceeded #:deadline-exceeded-label
+           #:policy-violated-p #:*log-directory*))
 
 (in-package #:luv-build)
 
@@ -48,8 +50,12 @@
         (let ((n (ignore-errors (parse-integer spec))))
           (if (and n (plusp n)) n nil))
         3))
-  "Seconds a single file may compile before the build is failed.
-NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
+  "Seconds a file may compile before it violates policy.
+Compilation is interrupted at twice this limit. NIL disables both limits;
+LUV_BUILD_DEADLINE overrides the default, and 0 disables it.")
+
+(defparameter *hard-deadline-multiplier* 2
+  "How much longer than policy a compiler may run before it is interrupted.")
 
 (defvar *log-directory* nil)
 (defvar *project-root* nil)
@@ -60,6 +66,8 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
   "How the narrated operation names itself in its opening comment.")
 (defvar *defer-archive-p* nil
   "Whether a successful build leaves log packing to ARCHIVE-DEFERRED-LOGS.")
+(defvar *policy-violated-p* nil)
+(defvar *policy-status-path* nil)
 
 (defparameter *id-characters* "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
   "The wiki's alphabet for short references; a build gets one of the same shape.")
@@ -108,6 +116,23 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
                      (deadline-exceeded-label condition)
                      (deadline-exceeded-seconds condition)))))
 
+(defun policy-violated-p ()
+  *policy-violated-p*)
+
+(defun hard-deadline-seconds ()
+  (and *deadline-seconds*
+       (* *deadline-seconds* *hard-deadline-multiplier*)))
+
+(defun mark-policy-violation (label)
+  (setf *policy-violated-p* t)
+  (when *policy-status-path*
+    (ensure-directories-exist *policy-status-path*)
+    (with-open-file (out *policy-status-path*
+                         :direction :output
+                         :if-exists :append
+                         :if-does-not-exist :create)
+      (format out "~A~%" label))))
+
 (defun send (&rest message)
   (when *mailbox*
     (sb-concurrency:send-message *mailbox* message)))
@@ -145,6 +170,7 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
   (loads-total nil) (loads-done 0)
   (system nil) (system-start nil)
   (current nil) (current-kind nil) (current-start nil)
+  (current-violation nil) (violations '())
   (current-log nil) (failed nil) (failed-log nil) (failed-seconds nil)
   (failure nil)
   (tripped nil)
@@ -190,11 +216,29 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
       (sb-ext:exit :code 1 :abort t)))
   (let ((start (display-current-start state)))
     (when (and start *deadline-seconds*
-               (> (elapsed start) *deadline-seconds*))
-      (trip-deadline state (elapsed start)))))
+               (eq (display-current-kind state) :compile))
+      (let ((seconds (elapsed start)))
+        (when (and (> seconds *deadline-seconds*)
+                   (null (display-current-violation state)))
+          (let ((violation
+                  (make-record :violation
+                               (display-current state)
+                               (display-system state)
+                               (- (since-start state) seconds)
+                               nil)))
+            (setf (display-current-violation state) violation)
+            (push violation (display-violations state))
+            (mark-policy-violation (display-current state))
+            (remark "Deadline violation: ~A passed ~Ds; allowing up to ~Ds."
+                    (here (display-current state)) *deadline-seconds*
+                    (hard-deadline-seconds))))
+        (when (> seconds (hard-deadline-seconds))
+          (trip-deadline state seconds))))))
 
 (defun trip-deadline (state seconds)
   (let ((label (display-current state)))
+    (when (display-current-violation state)
+      (setf (record-seconds (display-current-violation state)) seconds))
     (setf (display-failed-seconds state) seconds)
     ;; Stop watching and let the build thread die of the error; the report is
     ;; printed when it comes back through FINISH.  The display loop must not
@@ -217,7 +261,7 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
             (format out ";; ~A after ~,1Fs~%" label seconds)
             (sb-debug:print-backtrace :stream out :count 200)))
          (error 'deadline-exceeded :label label
-                                   :seconds *deadline-seconds*))))))
+                                   :seconds (hard-deadline-seconds)))))))
 
 ;;; What the build is worth saying about itself afterwards
 
@@ -248,6 +292,12 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
                       :compiled (display-compiles-done state)
                       :loaded (display-loads-done state)
                       :failed (display-failed state)
+                      :violations
+                      (mapcar (lambda (r)
+                                (list :name (record-label r)
+                                      :system (record-system r)
+                                      :seconds (record-seconds r)))
+                              (reverse (display-violations state)))
                       :actions
                       (mapcar (lambda (r)
                                 (list :kind (record-kind r)
@@ -262,15 +312,22 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
 
 (defun report (state reason)
   "What the build has to say for itself, once it is over."
-  (let ((sexp (write-sexp-log state reason))
+  (let ((sexp (write-sexp-log
+               state
+               (if (and (eq reason :done) (display-violations state))
+                   :deadline-violations
+                   reason)))
         (raw (directory-bytes *log-directory*)))
     (say "")
     (ecase reason
       (:deadline
        (remark "Error: DREADFUL COMPILATION UNIT!")
        (remark)
-       (remark "Compilation of ~A was aborted." (here (display-failed state)))
-       (remark "Project policy requires under ~Ds per file." *deadline-seconds*))
+       (remark "Compilation of ~A was aborted after ~A."
+               (here (display-failed state))
+               (format-seconds (display-failed-seconds state)))
+       (remark "Project policy requires under ~Ds per file and stops work at ~Ds."
+               *deadline-seconds* (hard-deadline-seconds)))
       (:error
        (remark "Error: THE BUILD FAILED!")
        (remark)
@@ -298,7 +355,22 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
                (namestring (uiop:enough-pathname sexp *project-root*)))
        (remark)
        (report-cost)))
+    (when (and (eq reason :done) (display-violations state))
+      (report-policy-violations state))
     (say "")))
+
+(defun report-policy-violations (state)
+  (let ((violations (reverse (display-violations state))))
+    (remark "Error: COMPILATION DEADLINE VIOLATIONS!")
+    (remark)
+    (remark "Project policy requires under ~Ds per file; ~D file~:P exceeded it."
+            *deadline-seconds* (length violations))
+    (dolist (violation violations)
+      (remark "~7A  ~A"
+              (format-seconds (record-seconds violation))
+              (here (record-label violation))))
+    (remark)
+    (remark "All files completed and outputs were written, but the build fails policy.")))
 
 (defun report-work (state)
   "What a successful build did, and what took the time."
@@ -374,18 +446,22 @@ NIL disables the deadline; LUV_BUILD_DEADLINE overrides it, 0 disables it.")
          (setf (display-current-log state) log
                (display-current state) label
                (display-current-kind state) action-kind
-               (display-current-start state) (get-internal-real-time))
+               (display-current-start state) (get-internal-real-time)
+               (display-current-violation state) nil)
          ;; Announced before the work, so the stamp says when it began and a
          ;; file that never finishes has still named itself.
          (when (eq action-kind :compile)
            (action-line state label))))
       (:end
        (destructuring-bind (action-kind label seconds) args
+         (when (display-current-violation state)
+           (setf (record-seconds (display-current-violation state)) seconds))
          (push (make-record action-kind label (display-system state)
                             (- (since-start state) seconds) seconds)
                (display-history state))
          (setf (display-current state) nil
-               (display-current-start state) nil)
+               (display-current-start state) nil
+               (display-current-violation state) nil)
          (ecase action-kind
            (:compile (incf (display-compiles-done state)))
            (:load (incf (display-loads-done state))))))
@@ -619,7 +695,13 @@ Returns the current build's archive, and how many were made."
                                   (redirect-output-p t)
                                   (report-plan-p t)
                                   (defer-archive-p nil))
-  (setf *project-root* project-root
+  (let ((status (uiop:getenv "LUV_BUILD_POLICY_STATUS")))
+    (setf *policy-status-path*
+          (and status (merge-pathnames status project-root))))
+  (when *policy-status-path*
+    (ignore-errors (delete-file *policy-status-path*)))
+  (setf *policy-violated-p* nil
+        *project-root* project-root
         *system* system
         *invocation* invocation
         *defer-archive-p* defer-archive-p
@@ -674,4 +756,4 @@ another thread is alive."
         *console* nil
         *saved-standard-output-fd* nil
         *saved-error-output-fd* nil)
-  (values))
+  *policy-violated-p*)

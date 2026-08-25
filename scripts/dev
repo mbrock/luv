@@ -8,6 +8,11 @@ project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
 . "$project_root/scripts/require-dev-environment"
 
+# Let ASDF discover every root system definition in this checkout.  The
+# profile owns external dependencies; this dynamic entry owns the checkout.
+CL_SOURCE_REGISTRY="$project_root/:${CL_SOURCE_REGISTRY:-}"
+export CL_SOURCE_REGISTRY
+
 if [ "${1:-}" = "--status" ]; then
   printf 'checkout: %s\n' "$project_root"
   printf 'environment: active luv development profile\n'

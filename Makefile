@@ -30,10 +30,20 @@ sly-client:
 	./scripts/build-sly-client
 
 luvcraft:
-	./scripts/dev sbcl --script luvcraft/build.lisp
+	@status=build/.luvcraft-build-policy; \
+		rm -f "$$status"; \
+		LUV_BUILD_POLICY_STATUS="$$status" ./scripts/dev sbcl --script luvcraft/build.lisp; result=$$?; \
+		if [ "$$result" -eq 0 ] && [ -e "$$status" ]; then result=1; fi; \
+		rm -f "$$status"; \
+		exit "$$result"
 
 luft:
-	./scripts/dev sbcl --script luft/build.lisp
+	@status=build/.luft-build-policy; \
+		rm -f "$$status"; \
+		LUV_BUILD_POLICY_STATUS="$$status" ./scripts/dev sbcl --script luft/build.lisp; result=$$?; \
+		if [ "$$result" -eq 0 ] && [ -e "$$status" ]; then result=1; fi; \
+		rm -f "$$status"; \
+		exit "$$result"
 
 run: luvcraft
 	./scripts/dev ./build/luvcraft
