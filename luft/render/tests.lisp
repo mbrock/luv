@@ -572,8 +572,10 @@
               (probe-bind-group-resource group 2)))
       (ok (eq (luft.render::renderer-sampler renderer)
               (probe-bind-group-resource group 3)))
-      (ok (eq (luft.render::renderer-camera-buffer renderer)
+      (ok (eq (luft.render::renderer-depth-view renderer)
               (probe-bind-group-resource group 4)))
+      (ok (eq (luft.render::renderer-camera-buffer renderer)
+              (probe-bind-group-resource group 5)))
       (ok (equal '(640 360 1)
                  (luv::texture-descriptor-size
                   (flame-resource-probe-descriptor history))))

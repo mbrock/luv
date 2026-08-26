@@ -12,6 +12,9 @@
 (defparameter *vulkan-temporal-history-weight* 0.97f0
   "Baseline retained history for Luft's inspectable Vulkan temporal resolve.")
 
+(defparameter *vulkan-temporal-depth-tolerance* 0.045f0
+  "Maximum log-view-depth disagreement accepted by Vulkan temporal history.")
+
 (defparameter *flame-time* nil
   "Optional deterministic torch-flame time in seconds.
 
@@ -2590,7 +2593,8 @@ subpixel samples but does not claim a stable reconstruction-upscaling filter."
                            (:binding 1 :resource ,motion-view)
                            (:binding 2 :resource ,history-view)
                            (:binding 3 :resource ,(renderer-sampler renderer))
-                           (:binding 4
+                           (:binding 4 :resource ,depth-view)
+                           (:binding 5
                             :resource ,(renderer-camera-buffer renderer))))))))
              (setf composite
                    (create
@@ -3946,7 +3950,8 @@ exactly when its complete old descriptor vector is a prefix of the new one."
                                 (:binding 1 :type :texture)
                                 (:binding 2 :type :texture)
                                 (:binding 3 :type :sampler)
-                                (:binding 4 :type :uniform-buffer))))
+                                (:binding 4 :type :texture)
+                                (:binding 5 :type :uniform-buffer))))
                    temporal-fragment-module
                    (create
                     device
@@ -4237,10 +4242,11 @@ exactly when its complete old descriptor vector is a prefix of the new one."
   (ensure-renderer-extent renderer extent)
   (when (renderer-shader-temporal-p renderer)
     ;; These W components are padding to every geometry consumer.  The Vulkan
-    ;; resolve reads them as its per-frame validity and accumulation weight.
+    ;; resolve reads them as validity, accumulation weight, and depth tolerance.
     (setf (aref camera-uniform-data 27)
           (if (renderer-history-valid-p renderer) 1.0f0 0.0f0)
-          (aref camera-uniform-data 31) *vulkan-temporal-history-weight*))
+          (aref camera-uniform-data 31) *vulkan-temporal-history-weight*
+          (aref camera-uniform-data 35) *vulkan-temporal-depth-tolerance*))
   (write-buffer (renderer-camera-buffer renderer) camera-uniform-data)
   (check-type effect-time real)
   (write-buffer
@@ -4368,6 +4374,8 @@ exactly when its complete old descriptor vector is a prefix of the new one."
         (prepare-texture encoder (renderer-scene-texture renderer)
                          :texture-binding)
         (prepare-texture encoder (renderer-motion-texture renderer)
+                         :texture-binding)
+        (prepare-texture encoder (renderer-depth-texture renderer)
                          :texture-binding)
         (unless history-valid-p
           (encode encoder
