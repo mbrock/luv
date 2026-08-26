@@ -41,6 +41,7 @@
                  (:file "luft")
                  (:file "luft-miters")
                  (:file "luft-sites")
+                 (:file "luft-mesher-workbook")
                  (:file "temporal-antialiasing")
                  (:file "wiki-site")
                  (:static-file "site.js")

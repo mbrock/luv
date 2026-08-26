@@ -1,0 +1,332 @@
+#+title: A worksheet for the columnar LUFT mesher
+#+startup: overview
+
+This is a deliberately provisional work page.  The geometric construction,
+proofs, and history remain on the site-sum page (#BFSI2X); this page asks how
+to execute that construction efficiently for streaming chunks.  It records
+the present machine evidence, the representation thesis suggested by reading
+the packed topology and query together, and an order of experiments.  Once the
+implementation settles, the durable conclusions can move to the more general
+LUFT pages and this worksheet can become historical evidence.
+
+* The chain is the reusable fact; the neighborhood is the query
+:PROPERTIES:
+:ID: PWUMY7
+:END:
+
+The columnar mesher already removed the general builder, transient geometry
+objects, template hashing, and packed intermediary jobs.  Its remaining large
+costs mostly occur before and around those typed relations: each mesh rebuild
+derives dense occupancy from a sparse chain, indexes neighboring chains into
+hash tables, rediscovers vertical extent, and resolves material provenance
+through canonical sites and world-scale hashes.  In database terms, the query
+is no longer the main problem; it rematerializes its base tables for every
+execution.
+
+LUFT's actual value semantics suggest a narrower answer than mutable chunk
+state.  A [[lisp:luft:make-chain][chain]] is a normalized immutable value whose packed sites are sorted in
+chunk-major, column-major order.  An edit produces a new chain; unchanged
+chunks retain the same chain object.  Derived state can therefore be memoized
+by chain identity without an invalidation protocol.  Old facts become
+unreachable with the old chain.
+
+The boundary of that idea is as important as the idea itself:
+
+- Memoize by chain alone only functions of one chain: occupancy fibers, column
+  metadata, and vertical metadata.
+- A material lane also depends on the immutable authored-material assignment
+  snapshot.  Its key must name that source (and the material program if the
+  lane stores interpreted stocks rather than source offsets); chain identity
+  alone is not enough when occupancy stays fixed but authored material changes.
+- Do not memoize star selection, topology relations, or finished meshes by one
+  chain.  Seam stars depend on a neighborhood of chains, and tuple-keyed caches
+  would make residency and lifetime harder for a stage that is already cheap.
+- Preserve the missing-chunk and outside-domain restart contract.  The fast
+  path can change the resolved representation without weakening the semantic
+  boundary or the reference mesher.
+
+The intended flow is consequently:
+
+#+begin_example
+immutable chain ──derive once──▶ chain facts
+                                      │
+neighborhood of chain facts ──────────┤
+chain + authored material snapshot ──▶ material lane
+                                      ▼
+  occupancy window → selected stars → typed topology rows
+                   → material lanes  → renderer instance streams
+#+end_example
+
+“Query engine” remains a useful execution analogy, not a request for a generic
+planner or operator framework.  This is a fixed-schema, chunk-bounded program
+whose inspectable relations currently make differential testing inexpensive.
+
+* The baseline localizes both execution and reconstruction
+:PROPERTIES:
+:ID: BF4UNN
+:END:
+
+=make luft-mesher-profile= measures the production-shaped mountain-sanctuary
+chunk and writes aggregate and stage-isolated SB-SPROF reports.  The first
+default run under SBCL 2.6.6 measured 44,036 occupied cells, 9,946 selected
+sites, and 156,252 output triangles:
+
+| phase        | ms/chunk | aggregate | MiB/chunk |
+|--------------+----------+-----------+-----------|
+| aggregate    |   26.182 |    100.0% |     4.312 |
+| materials    |    8.960 |     34.2% |     0.001 |
+| planning     |    5.044 |     19.3% |     0.000 |
+| projection   |    3.873 |     14.8% |     1.819 |
+| halo index   |    3.778 |     14.4% |     2.083 |
+| Z bounds     |    1.902 |      7.3% |     0.000 |
+| occupancy    |    0.839 |      3.2% |     0.144 |
+| selection    |    0.560 |      2.1% |     0.291 |
+
+The isolated phases account for 95.3% of aggregate latency and essentially
+all allocation.  Their profiles say more than the labels:
+
+- Material resolution constructs validated face and cell sites, searches the
+  authored-material hash, and sometimes binary-searches the world chain for
+  foundation semantics.  The production scene stock closure ignores the face
+  object it is handed, so part of this cost has no semantic consumer.
+- =halo-index= rebuilds EQL cell hashes for the three low neighbors consulted
+  by this fixture's Z-bounds pass.  A general star window can touch all eight
+  neighboring chunks.  The important observation is not the exact count in
+  this fixture, but that already packed chains are expanded into whole-cell
+  hashes to answer narrow fiber probes.
+- Planning still computes descriptor identity, edge state, and compact
+  contributor masks even though these are finite functions of an eight-bit
+  star mask.
+- Projection scans twelve contributor slots for every patch row even when
+  only a few mask bits are set, and allocates the final renderer ABI streams.
+
+Selection's AVX2 gather is on nearly every selection-stage stack, but the whole
+stage is only 2.1% of aggregate time.  That is simply the current division of
+work, not a conclusion about where SIMD will or will not matter after the data
+flow changes.
+
+* Chain facts are narrow materialized views
+:PROPERTIES:
+:ID: 7CG2MB
+:END:
+
+One chain-derived record can give every neighboring query direct access to the
+representation it currently rebuilds:
+
+- 64 by 64 columns of four 64-bit occupancy words;
+- a column-start table mapping each column to its first rank in chain order;
+- enough vertical metadata to bound a window without scanning packed cells;
+  and
+- optionally other topology-only facts proved to depend on this chain alone.
+
+A weak synchronized EQ table is one possible owner.  A derived-state table in
+the streaming store is another.  The invariant matters more than the first
+container: publication must be atomic, readers must see a fully initialized
+record, and the key must be the immutable chain object rather than only its
+chunk coordinate.  Concurrent requests may redundantly derive the same cheap
+record, but they must never observe a partial one.
+
+The occupancy field's resolution need not become a new public boundary.
+=use-chunk= can still resolve a missing key to its chain; the width-one path can
+then obtain that chain's fibers rather than call =%chunk-cells-table=.  Halo
+materialization becomes copies and masks of four-word fibers instead of one
+=gethash= per sampled Z cell.
+
+Vertical metadata needs one experiment rather than an assumption.  A global
+min/max per neighboring chain is a correct over-approximation, but a tall cell
+far from the shared edge could enlarge the selected Z interval unnecessarily.
+Per-column nonempty-word metadata, or exact ranges for the boundary strips,
+may preserve the current narrow-halo bound more cheaply.  Measure selected
+window volume as well as elapsed time before deleting the exact scan.
+
+The packed ordering also makes the current full membership-validation scan
+unnecessary.  Since chunk bits are the most significant site bits and a chain
+is sorted, checking the first and last occupied sites proves that every site
+belongs to the named chunk.  This is a small independent cut, but it is another
+case where the existing representation should answer directly.
+
+* Material identity follows occupied-cell rank
+:PROPERTIES:
+:ID: XP3UHE
+:END:
+
+The authored scene currently maps packed cell sites to material offsets with a
+world-scale hash.  The compiled material program already turns those offsets
+into dense placement flags, oriented face stocks, and chamfer summaries.  The
+missing bridge is a chain-indexed material field whose key also names the
+authored-material assignment snapshot.
+
+Packed chain order makes that field compact.  Within one chunk, all occupied Z
+cells of an X/Y column are contiguous.  For an occupied cell, its rank is:
+
+#+begin_example
+column-start[x,y] + popcount(occupancy bits below z)
+#+end_example
+
+A =(chain, authored-material-map)= derived value can therefore hold one
+unsigned 16-bit material offset per occupied cell, in chain order.  Construction
+pays one authored hash lookup per cell once for that pair.  A hot face-stock
+probe then performs fiber/rank arithmetic and dense material-program reads.
+Foundation classification becomes an occupancy test below the cell plus one
+placement flag read; because LUFT chunks divide X and Y but span Z, that cell
+remains in the same chunk.  If the derived lane stores final stocks instead of
+source offsets, the material program becomes another explicit key dependency.
+
+This compiled material field belongs on the production streaming path beside
+the compiled chamfer algebra.  The closure-based source-stock protocol remains
+valuable for the general reference and diagnostic callers.  Package ownership
+is still open: topology-only rank data belongs in LUFT, while the association
+between authored offsets and a renderer material program belongs to the scene
+material layer.  The implementation should preserve that dependency direction
+rather than make core topology know renderer classes.
+
+Before building the field, there is one direct cut: the internal production
+resolver can accept =(cell, axis, side)= and construct an oriented face only in
+the legacy one-argument adapter.  The current production closure ignores its
+=face= argument.  The profile should lose =make-site=, =site-valid-p=, and
+boundary-site construction from the material stage without changing one
+material result.
+
+* Static stars should name static topology rows
+:PROPERTIES:
+:ID: 1D77HO
+:END:
+
+The proposal of #3IKS3Y survives the broader representation review, but no
+longer needs to be the first structural step.  For every star mask, the edge
+state, descriptor identity, template ID, compact contributor mask, source
+sample offset, and ambient flag are immutable.  Compile them into flat typed
+face, band, and fan row vocabularies once.  Planning then copies rows while
+adding site and material-base ordinals instead of translating one finite
+vocabulary into another at runtime.
+
+Ownership divides sites into a large ordinary interior and a small seam.  For
+a full 65 by 65 lattice window, only sites on the two X or two Y boundary
+columns need the source-cell ownership predicates.  Interior sites can append
+precompiled rows directly; seam rows carry their static source offsets and pay
+the half-open chunk-bound checks.  This is a regular iteration surface on which
+bulk copies or SIMD may eventually be natural, but the representation should
+be justified first by deleting translation work.
+
+Keep the typed relations while they remain useful evidence.  Planning and
+projection could eventually fuse into template histograms and direct bucket
+writes, but that would remove an inspectable differential boundary.  Fuse only
+if row appends become a measured dominant cost after the larger representation
+changes.
+
+Projection has one smaller direct representation cut: iterate the set bits of
+each compact contributor mask instead of testing all twelve slots.  Its 1.8
+MiB of stream words is mostly final renderer output, not automatically waste;
+pool it only if ownership inspection shows that it is copied or discarded
+rather than handed onward as the ABI value.
+
+* The contracts which optimization must not hide
+:PROPERTIES:
+:ID: L38W75
+:END:
+
+- Chains remain normalized immutable values; identity reuse is an optimization
+  witness, not a substitute for chain equality.
+- Cached facts depend on exactly one chain unless their key names every other
+  dependency.  Material assignments are independent of occupancy, while seam
+  stars and meshes are neighborhood results.
+- Missing chunks and outside-domain occupancy retain explicit caller policy.
+- Half-open source-cell ownership emits each seam primitive exactly once,
+  including virtual owners at the world edge.
+- Material resolution preserves occupied source cell, oriented axis and side,
+  foundation semantics, and the closed chamfer algebra.
+- Final face, band, and fan streams retain their template grouping, draw order,
+  stocks, ambient values, singular-star count, and exact triangle census.
+- The surface-proportional mesher remains the semantic oracle until the new
+  path is stable.  The packed-job batch can be reconsidered later; removing a
+  second oracle is not part of the performance work itself.
+
+* A cohort, not one chunk, measures reuse
+:PROPERTIES:
+:ID: 5BAI3B
+:END:
+
+The stage profiler remains the right microscope for one query.  Chain-derived
+state additionally needs a production-shaped cohort benchmark with three
+named regimes:
+
+1. /cold cohort/: no chain facts or material fields exist;
+2. /warm cohort/: mesh the same resident chains again; and
+3. /one edit/: replace one chain and remesh its affected owners while all
+   unchanged neighbor chains retain identity.
+
+Record total cohort latency and allocation, per-chunk distributions, derived
+record builds and hits, selected-site count, relation rows, and output census.
+The memo proposal is falsified if warm cohorts do not remove halo/index/Z work,
+if cache residency is disproportionate to resident chain data, or if vertical
+over-approximation materially enlarges selection.  The material-field proposal
+is falsified if its cold construction plus retained memory does not buy back
+repeated authored lookup across real remeshes.
+
+Every step keeps the exhaustive 256-star differential, real seam and
+missing-residency cases, and material-sensitive mountain-sanctuary comparison
+against the reference.  Performance evidence never substitutes for those
+semantic checks.
+
+* NEXT Stop constructing ignored face sites
+:PROPERTIES:
+:ID: XCNPYI
+:END:
+
+/Intent./ Let the production stock resolver consume the source cell, axis, and
+side it actually uses; construct an oriented face lazily only for the legacy
+one-argument stock callback.
+
+/Evidence./ Material resolution is 34.2% of aggregate time.  Its flat profile
+contains the complete checked-site construction chain, while
+[[lisp:luft.render::make-scene-face-stock-function][the production closure]] ignores =face=.
+
+/Done when./ All material and full-mesh differentials remain exact, the
+material-stage report no longer attributes samples to constructing the ignored
+face, and ordinary aggregate timing records the effect.
+
+* TODO Reuse chain-local occupancy facts
+:PROPERTIES:
+:ID: IS4S0L
+:END:
+
+/Intent./ Derive fibers, column starts, and adequate vertical metadata once per
+immutable chain; let width-one neighbor resolutions consume those facts
+without whole-chain cell hashes.
+
+/Evidence./ Occupancy, halo indexing, and Z-bounds currently cost about 6.5 ms
+and 2.2 MiB per build before selection begins.  Unchanged streaming neighbors
+retain EQ-identical chains across remeshes.
+
+/Done when./ Cold, warm, and one-edit cohort measurements expose the expected
+reuse; no narrow-halo selection explodes; concurrent publication is complete;
+and seam, missing-chunk, and outside-domain differentials remain exact.
+
+* TODO Compile material fields over chain order
+:PROPERTIES:
+:ID: LQSV44
+:END:
+
+/Intent./ Resolve authored material offsets once into a chain-order lane keyed
+by the chain and immutable authored-material snapshot, then make production
+stock lookup a rank probe followed by dense material-program reads.
+
+/Evidence./ Material resolution is the largest remaining stage, dominated by
+canonical-site operations, authored hashes, and world-chain searches whose
+answers are already represented by occupancy and the compiled material tables.
+
+/Done when./ The production path performs no authored hash or world-chain
+search per contributor, foundation semantics and all stocks match the
+reference, and cohort measurements include cold construction, reuse, and
+retained memory.
+
+* IDEA Fuse relations only after they cease to explain the work
+:PROPERTIES:
+:ID: GPL9Z3
+:END:
+
+Static row histograms could eventually write renderer buckets directly and
+remove the face/band/fan relation materialization.  The current relations are
+small, typed, inspectable, and useful for differential tests.  Keep them until
+profiling after chain facts, material fields, and #3IKS3Y says their appends or
+reads dominate; otherwise fusion would spend clarity before it buys time.

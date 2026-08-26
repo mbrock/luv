@@ -471,10 +471,14 @@ move end-to-end latency.  Halo indexing also exposes a new concrete target:
 2.08 MiB and 3.78 ms are spent rebuilding hash tables for three already packed
 neighbor chunks before the columnar query proper can use them.
 
-* NEXT Compile query-native topology dimension rows
+* TODO Compile query-native topology dimension rows
 :PROPERTIES:
 :ID: 3IKS3Y
 :END:
+
+The current worksheet #PWUMY7 places chain-local occupancy facts and compiled
+material fields before this step; the topology-row proposal itself remains the
+same.
 
 The 256 star masks are already a finite dimension.  Compile each mask's face,
 oriented edge-band, and fan rows directly into query-native template IDs,
