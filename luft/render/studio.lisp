@@ -500,6 +500,9 @@ the selector is the whole of the difference."
                 release-viewer-live-artifact
                 force-viewer-live-artifact-refresh
                 note-viewer-renderer-replacement
+                encode-viewer-frame-recording
+                stop-viewer-frame-recording
+                %stop-viewer-frame-recording
                 %perform-viewer-stop))
 
 (defun prepare-viewer-frame-renderer (viewer)
@@ -524,6 +527,9 @@ before the operation boundary, or it would encode through resources which the
     (viewer encoder surface-texture extent
      &key (inspector-p (viewer-inspector-p viewer)))
   (let* ((renderer (prepare-viewer-frame-renderer viewer))
+         (frame
+           (renderer-frame-state-for
+            renderer (viewer-context viewer) surface-texture))
          (surface-view (viewer-surface-view viewer surface-texture))
          (render-extent (renderer-render-scale-extent renderer extent))
          (width (first render-extent))
@@ -550,7 +556,7 @@ before the operation boundary, or it would encode through resources which the
     ;; Instrument state is now immutable for this frame.  Encoding below only
     ;; replays prepared GPU commands against the renderer borrowed afterward.
     (encode-renderer-frame
-     renderer encoder surface-view extent
+     renderer frame encoder surface-view extent
      (camera-uniform-data
       view previous (viewer-inspection-parameters viewer render-extent)
       (if (and inspection *inspection-ink-p*) 1.0 0.0)
@@ -760,6 +766,7 @@ before the operation boundary, or it would encode through resources which the
    (sensitivity :initarg :sensitivity :initform 0.0032
                 :accessor viewer-sensitivity)
    (shader-diagnostic :initform nil :accessor viewer-shader-diagnostic)
+   (frame-recorder :initform nil :accessor viewer-frame-recorder)
    (running-p :initform t :accessor viewer-running-p)
    (stop-controller
     :initarg :stop-controller
@@ -899,7 +906,6 @@ before the operation boundary, or it would encode through resources which the
              (viewer-bevel-profile viewer))))))))
 
 (defun render-viewer-frame (viewer timestamp)
-  (declare (ignore timestamp))
   (when (viewer-running-p viewer)
     ;; Source callbacks only advance revisions.  Compilation and complete
     ;; cohort publication happen here, before this frame borrows the renderer.
@@ -910,7 +916,9 @@ before the operation boundary, or it would encode through resources which the
      (lambda (surface-texture encoder presentation-time)
        (advance-viewer-camera viewer presentation-time)
        (let ((extent (canvas-extent (viewer-context viewer))))
-         (encode-viewer-frame viewer encoder surface-texture extent))))))
+         (encode-viewer-frame viewer encoder surface-texture extent)
+         (encode-viewer-frame-recording
+          viewer encoder surface-texture extent timestamp))))))
 
 (defun viewer-command-viewer ()
   "Return the LUFT application receiving the current McCLIM command."
@@ -1123,8 +1131,11 @@ before the operation boundary, or it would encode through resources which the
     ((viewer viewer) canvas (event canvas-pointer-button-press-event))
   (setf (viewer-pointer-x viewer) (canvas-pointer-event-x event)
         (viewer-pointer-y viewer) (canvas-pointer-event-y event))
-  (handle-viewer-mode-pointer-press
-   (viewer-mode viewer) viewer canvas event)
+  (if (and (viewer-frame-recorder viewer)
+           (eq :right (canvas-pointer-event-button event)))
+      (stop-viewer-frame-recording viewer)
+      (handle-viewer-mode-pointer-press
+       (viewer-mode viewer) viewer canvas event))
   nil)
 
 (defmethod handle-viewer-mode-pointer-press
@@ -1481,6 +1492,541 @@ production gets the same opportunity to publish as it does in the window."
    :label "LUFT film"
    :options '(:inspector-p nil)))
 
+(defstruct viewer-frame-recorder-state
+  "A timestamped CPU ring fed by a small asynchronous GPU staging ring."
+  directory
+  title
+  seconds
+  capacity
+  extent
+  format
+  buffers
+  submitted
+  stage-frames
+  stage-times
+  frames
+  times
+  frame-numbers
+  (next-frame 0))
+
+(defun %drain-viewer-frame-recorder (recorder &key wait-p)
+  "Move completed staging copies into RECORDER's timestamped CPU ring."
+  (let ((submitted (viewer-frame-recorder-state-submitted recorder))
+        (buffers (viewer-frame-recorder-state-buffers recorder)))
+    (dotimes (index (length buffers))
+      (when (= 1 (aref submitted index))
+        (multiple-value-bind (pixels ready-p)
+            (if wait-p
+                (values (read-buffer (aref buffers index)) t)
+                (read-buffer-if-ready (aref buffers index)))
+          (when ready-p
+            (let* ((frame
+                     (aref (viewer-frame-recorder-state-stage-frames recorder)
+                           index))
+                   (slot
+                     (mod frame
+                          (viewer-frame-recorder-state-capacity recorder))))
+              (setf (aref (viewer-frame-recorder-state-frames recorder) slot)
+                    pixels
+                    (aref (viewer-frame-recorder-state-times recorder) slot)
+                    (aref (viewer-frame-recorder-state-stage-times recorder)
+                          index)
+                    (aref (viewer-frame-recorder-state-frame-numbers recorder)
+                          slot)
+                    frame
+                    (aref submitted index) 0
+                    (aref (viewer-frame-recorder-state-stage-frames recorder)
+                          index)
+                    nil
+                    (aref (viewer-frame-recorder-state-stage-times recorder)
+                          index)
+                    nil)))))))
+  recorder)
+
+(defun encode-viewer-frame-recording
+    (viewer encoder surface-texture extent timestamp)
+  "Append the exact presented frame to VIEWER's active two-second ring."
+  (alexandria:when-let ((recorder (viewer-frame-recorder viewer)))
+    (unless (equal extent (viewer-frame-recorder-state-extent recorder))
+      (format t "~&LUFT frame ring stopping at resize from ~S to ~S.~%"
+              (viewer-frame-recorder-state-extent recorder) extent)
+      (%stop-viewer-frame-recording viewer)
+      (return-from encode-viewer-frame-recording (values)))
+    (%drain-viewer-frame-recorder recorder)
+    (let* ((submitted (viewer-frame-recorder-state-submitted recorder))
+           (stage (position 0 submitted)))
+      ;; Never stall gameplay merely to obtain a diagnostic frame.  Four
+      ;; staging buffers normally leave several complete submissions to map.
+      (when stage
+        (let ((frame (viewer-frame-recorder-state-next-frame recorder)))
+          (encode encoder
+                  (make-gpu-copy-texture-to-buffer-command
+                   :source surface-texture
+                   :destination
+                   (aref (viewer-frame-recorder-state-buffers recorder)
+                         stage)))
+          (setf (aref (viewer-frame-recorder-state-stage-frames recorder)
+                      stage)
+                frame
+                (aref (viewer-frame-recorder-state-stage-times recorder)
+                      stage)
+                timestamp
+                (viewer-frame-recorder-state-next-frame recorder)
+                (1+ frame)
+                (aref submitted stage) 1)))))
+  (values))
+
+(defun %viewer-frame-recorder-entries (recorder)
+  "Return retained (FRAME TIMESTAMP PIXELS) entries in presentation order."
+  (let ((entries nil)
+        (latest-time nil))
+    (dotimes (slot (viewer-frame-recorder-state-capacity recorder))
+      (alexandria:when-let
+          ((frame
+             (aref (viewer-frame-recorder-state-frame-numbers recorder)
+                   slot)))
+        (let ((time (aref (viewer-frame-recorder-state-times recorder) slot)))
+          (push (list frame time
+                      (aref (viewer-frame-recorder-state-frames recorder) slot))
+                entries)
+          (when (or (null latest-time) (> time latest-time))
+            (setf latest-time time)))))
+    (when latest-time
+      (setf entries
+            (delete-if
+             (lambda (entry)
+               (> (- latest-time (second entry))
+                  (viewer-frame-recorder-state-seconds recorder)))
+             entries)))
+    (sort entries #'< :key #'first)))
+
+(defun %write-viewer-frame-recording (recorder entries)
+  "Write chronological PNG evidence and a small manifest."
+  (let* ((directory (viewer-frame-recorder-state-directory recorder))
+         (extent (viewer-frame-recorder-state-extent recorder))
+         (format (viewer-frame-recorder-state-format recorder))
+         (manifest (merge-pathnames "manifest.sexp" directory)))
+    (ensure-directories-exist manifest)
+    (destructuring-bind (width height) extent
+      (loop for entry in entries
+            for ordinal from 0
+            for path = (merge-pathnames
+                        (format nil "frame-~4,'0D.png" ordinal) directory)
+            do (luv::write-rgba-png
+                path (third entry) width height format)))
+    (with-open-file
+        (stream manifest :direction :output :if-exists :supersede
+                         :if-does-not-exist :create)
+      (with-standard-io-syntax
+        (pprint
+         (list :version 1 :extent extent :format format
+               :seconds (viewer-frame-recorder-state-seconds recorder)
+               :frame-count (length entries)
+               :source-frames (mapcar #'first entries)
+               :timestamps (mapcar #'second entries))
+         stream)))
+    (format t "~&LUFT frame ring wrote ~D frames to ~A~%"
+            (length entries) directory)
+    (force-output)
+    directory))
+
+(defun %start-viewer-frame-recording
+    (&optional (viewer *viewer*) &key (seconds 2.0) directory)
+  "Start recording exact presented frames into a two-second rolling ring."
+  (when (viewer-frame-recorder viewer)
+    (error "LUFT's frame ring is already recording; right-click to stop it."))
+  (check-type seconds (real (0) *))
+  (let* ((extent (copy-list (canvas-extent (viewer-context viewer))))
+         (format (canvas-format (viewer-context viewer)))
+         ;; Sixty is the viewer's requested maximum cadence.  Timestamps trim
+         ;; this allocation to the actual final two seconds at lower rates.
+         (capacity (max 2 (ceiling (* seconds 60))))
+         (frame-bytes (* 4 (first extent) (second extent)))
+         (directory
+           (uiop:ensure-directory-pathname
+            (or directory
+                (merge-pathnames
+                 (format nil "build/frame-ring-~D-~D/"
+                         (get-universal-time) (get-internal-real-time))
+                 (uiop:getcwd)))))
+         (buffers
+           (make-array
+            4 :initial-contents
+            (loop repeat 4 collect
+              (create
+               (viewer-device viewer)
+               (make-buffer-descriptor
+                :label "LUFT live frame ring staging"
+                :size frame-bytes :usage '(:copy-dst)))))))
+    (setf (viewer-frame-recorder viewer)
+          (make-viewer-frame-recorder-state
+           :directory directory :title (canvas-title (viewer-canvas viewer))
+           :seconds (coerce seconds 'double-float)
+           :capacity capacity :extent extent :format format :buffers buffers
+           :submitted (make-array 4 :element-type 'bit :initial-element 0)
+           :stage-frames (make-array 4 :initial-element nil)
+           :stage-times (make-array 4 :initial-element nil)
+           :frames (make-array capacity :initial-element nil)
+           :times (make-array capacity :initial-element nil)
+           :frame-numbers (make-array capacity :initial-element nil)))
+    (setf (canvas-title (viewer-canvas viewer))
+          "LUFT — RECORDING LAST 2 SECONDS · right-click to save")
+    (format t "~&LUFT frame ring recording ~,1F seconds; right-click to stop.~%"
+            seconds)
+    (force-output)
+    directory))
+
+(defun start-viewer-frame-recording
+    (&optional (viewer *viewer*) &key (seconds 2.0) directory)
+  "Start VIEWER's live ring safely from M-x, Sly, or another thread."
+  (luv::call-on-sdl-canvas-thread
+   (viewer-canvas viewer)
+   (lambda ()
+     (%start-viewer-frame-recording
+      viewer :seconds seconds :directory directory))))
+
+(defun %stop-viewer-frame-recording (&optional (viewer *viewer*))
+  "Stop VIEWER's live frame ring and write its retained PNG frames."
+  (alexandria:when-let ((recorder (viewer-frame-recorder viewer)))
+    ;; Detach first: the stopping click cannot enqueue another copy while the
+    ;; staging resources are being drained and retired.
+    (setf (viewer-frame-recorder viewer) nil)
+    (when (viewer-frame-recorder-state-title recorder)
+      (setf (canvas-title (viewer-canvas viewer))
+            (viewer-frame-recorder-state-title recorder)))
+    (unwind-protect
+         (progn
+           (%drain-viewer-frame-recorder recorder :wait-p t)
+           (let ((entries (%viewer-frame-recorder-entries recorder)))
+             (sb-thread:make-thread
+              (lambda () (%write-viewer-frame-recording recorder entries))
+              :name "LUFT frame ring PNG writer")
+             (viewer-frame-recorder-state-directory recorder)))
+      (map nil #'destroy (viewer-frame-recorder-state-buffers recorder)))))
+
+(defun stop-viewer-frame-recording (&optional (viewer *viewer*))
+  "Stop VIEWER's live ring safely from right-click, Sly, or another thread."
+  (luv::call-on-sdl-canvas-thread
+   (viewer-canvas viewer)
+   (lambda () (%stop-viewer-frame-recording viewer))))
+
+(clim:define-command (com-record-frame-ring
+                      :command-table luft-atelier
+                      :name "Record Two-Second Frame Ring")
+    ()
+  (start-viewer-frame-recording (viewer-command-viewer)))
+
+(defun %bright-frame-discontinuity
+    (current previous width height
+     &key (top 30) (threshold 230) (jump 40) (radius 2)
+          (border 32) (sample-limit 64) following)
+  "Measure bright CURRENT pixels absent near the same place in adjacent frames.
+
+Return the candidate count, largest brightness jump, and a bounded list of
+(X Y CURRENT PREVIOUS-MAX DELTA) witnesses.  When FOLLOWING is supplied,
+require the brightness to be absent there too and return
+(X Y CURRENT PREVIOUS-MAX FOLLOWING-MAX DELTA) witnesses.  The neighborhood
+tolerates slow camera motion; TOP excludes the atelier status strip and BORDER
+excludes newly entering content at the other three screen boundaries."
+  (check-type current (simple-array (unsigned-byte 8) (*)))
+  (check-type previous (simple-array (unsigned-byte 8) (*)))
+  (when following
+    (check-type following (simple-array (unsigned-byte 8) (*))))
+  (unless (and (= (length current) (length previous) (* width height 4))
+               (or (null following) (= (length following) (length current))))
+    (error "Frame discontinuity inputs do not share ~Dx~D BGRA storage."
+           width height))
+  (labels ((brightness (pixels x y)
+             (let ((offset (* 4 (+ x (* y width)))))
+               (max (aref pixels offset)
+                    (aref pixels (+ offset 1))
+                    (aref pixels (+ offset 2))))))
+    (let ((count 0)
+          (largest 0)
+          (samples nil))
+      (loop for y from (max top border radius)
+              below (- height (max border radius)) do
+        (loop for x from (max border radius)
+                below (- width (max border radius))
+              for value = (brightness current x y)
+              when (>= value threshold) do
+                (let ((old-maximum 0)
+                      (next-maximum 0))
+                  (loop for dy from (- radius) to radius do
+                    (loop for dx from (- radius) to radius do
+                      (setf old-maximum
+                            (max old-maximum
+                                 (brightness previous (+ x dx) (+ y dy))))
+                      (when following
+                        (setf next-maximum
+                              (max next-maximum
+                                   (brightness following
+                                               (+ x dx) (+ y dy)))))))
+                  (let ((delta (- value (if following
+                                            (max old-maximum next-maximum)
+                                            old-maximum))))
+                    (when (>= delta jump)
+                      (incf count)
+                      (setf largest (max largest delta))
+                      (when (< (length samples) sample-limit)
+                        (push (if following
+                                  (list x y value old-maximum next-maximum
+                                        delta)
+                                  (list x y value old-maximum delta))
+                              samples)))))))
+      (values count largest (nreverse samples)))))
+
+(defun %write-frame-ring-evidence
+    (directory ring-path frame-count capacity centre width height format radius)
+  "Write chronological PNGs around CENTRE from an exact raw frame ring."
+  (let ((first-retained (max 0 (- frame-count capacity)))
+        (first-frame (max 0 (- centre radius)))
+        (last-frame (min (1- frame-count) (+ centre radius)))
+        (frame-bytes (* width height 4))
+        (paths nil))
+    (with-open-file
+        (stream ring-path :direction :input
+                          :element-type '(unsigned-byte 8))
+      (loop for frame from (max first-retained first-frame) to last-frame do
+        (let ((pixels
+                (make-array frame-bytes :element-type '(unsigned-byte 8)))
+              (path
+                (merge-pathnames
+                 (format nil "frame-~6,'0D.png" frame) directory)))
+          (file-position stream (* (mod frame capacity) frame-bytes))
+          (unless (= frame-bytes (read-sequence pixels stream))
+            (error "The frame ring ended while reading frame ~D." frame))
+          (luv::write-rgba-png path pixels width height format)
+          (push path paths))))
+    (nreverse paths)))
+
+(defun record-viewer-frame-ring
+    (directory &optional (viewer *viewer*)
+     &key (capacity 500) (max-frames 500)
+          (yaw-step 0.00075f0) (pitch-amplitude 0.0f0)
+          (warmup 16) (post-roll 24) (evidence-radius 8)
+          (bright-threshold 230) (bright-jump 40)
+          (bright-neighborhood-radius 2) (bright-border 32)
+          (trigger-count 12))
+  "Record exact moving-camera output and retain the latest CAPACITY frames.
+
+Frames are native BGRA bytes in RING.BGRA, addressed by FRAME mod CAPACITY as
+described by MANIFEST.SEXP.  A reproducible slow camera orbit runs while the
+ordinary viewer is paused.  Flame time and exposure are fixed.  When at least
+TRIGGER-COUNT newly bright pixels appear without a nearby bright predecessor,
+record POST-ROLL more frames and export PNG evidence around the trigger.  A
+NIL TRIGGER-COUNT disables online scoring so the complete run can be rescored
+later with SCAN-VIEWER-FRAME-RING's stronger three-frame detector.
+
+If no trigger occurs, export around the highest-scoring frame.  Return the
+manifest property list.  This diagnostic records final presentation pixels;
+it makes no claim about which earlier render pass caused a discontinuity."
+  (check-type viewer viewer)
+  (check-type capacity (integer 2 *))
+  (check-type max-frames (integer 2 *))
+  (check-type warmup (integer 0 *))
+  (check-type post-roll (integer 0 *))
+  (let* ((directory (uiop:ensure-directory-pathname directory))
+         (ring-path (merge-pathnames "ring.bgra" directory))
+         (manifest-path (merge-pathnames "manifest.sexp" directory))
+         (camera (viewer-camera viewer))
+         (saved-yaw (camera-yaw camera))
+         (saved-pitch (camera-pitch camera))
+         (saved-flame-time *flame-time*)
+         (saved-fixed-exposure (viewer-fixed-exposure viewer))
+         (fixed-exposure (renderer-exposure (viewer-renderer viewer)))
+         (capture
+           (make-instance 'luv:application-capture
+                          :application viewer :kind :film
+                          :label "LUFT exact frame ring"
+                          :options '(:inspector-p nil)))
+         (previous nil)
+         (records nil)
+         (trigger-frame nil)
+         (best-frame 0)
+         (best-count -1)
+         (frame-count 0)
+         extent format)
+    (ensure-directories-exist ring-path)
+    (unwind-protect
+         (progn
+           (setf *flame-time* 1.0f0
+                 (slot-value viewer 'fixed-exposure) fixed-exposure)
+           (luv::call-with-capture-target
+            (lambda (capture)
+              (setf extent (copy-list (luv::capture-extent capture))
+                    format (luv::capture-format capture))
+              (destructuring-bind (width height) extent
+                (let ((frame-bytes (* width height 4)))
+                  (with-open-file
+                      (ring ring-path :direction :io
+                                      :if-exists :supersede
+                                      :if-does-not-exist :create
+                                      :element-type '(unsigned-byte 8))
+                    (loop for frame below max-frames do
+                      (setf (camera-yaw camera)
+                            (+ saved-yaw (* frame yaw-step))
+                            (camera-pitch camera)
+                            (+ saved-pitch
+                               (* pitch-amplitude
+                                  (sin (* frame 0.03125f0))))
+                            (luv:capture-frame-index capture) frame)
+                      (let ((pixels
+                              (luv::render-capture-frame
+                               capture :advance-p t))
+                            (count 0)
+                            (largest 0)
+                            (samples nil))
+                        (when (and trigger-count previous (>= frame warmup))
+                          (multiple-value-setq (count largest samples)
+                            (%bright-frame-discontinuity
+                             pixels previous width height
+                             :threshold bright-threshold :jump bright-jump
+                             :radius bright-neighborhood-radius
+                             :border bright-border)))
+                        (file-position ring
+                                       (* (mod frame capacity) frame-bytes))
+                        (write-sequence pixels ring)
+                        (setf frame-count (1+ frame))
+                        (when (> count best-count)
+                          (setf best-count count best-frame frame))
+                        (push (list :frame frame
+                                    :renderer-frame
+                                    (renderer-frame-index
+                                     (viewer-renderer viewer))
+                                    :yaw (camera-yaw camera)
+                                    :pitch (camera-pitch camera)
+                                    :new-bright count
+                                    :largest-jump largest
+                                    :samples samples)
+                              records)
+                        (when (and trigger-count (null trigger-frame)
+                                   (>= frame warmup)
+                                   (>= count trigger-count))
+                          (setf trigger-frame frame)
+                          (format t
+                                  "LUFT frame ring trigger ~D: ~D new bright pixels, largest jump ~D.~%"
+                                  frame count largest)
+                          (force-output))
+                        (when (zerop (mod frame 60))
+                          (format t "LUFT frame ring: ~D / ~D, best ~D at ~D.~%"
+                                  frame max-frames best-count best-frame)
+                          (force-output))
+                        (setf previous pixels)
+                        (when (and trigger-frame
+                                   (>= frame (+ trigger-frame post-roll)))
+                          (return))))))))
+            capture))
+      (setf (camera-yaw camera) saved-yaw
+            (camera-pitch camera) saved-pitch
+            *flame-time* saved-flame-time
+            (slot-value viewer 'fixed-exposure) saved-fixed-exposure))
+    (let* ((centre (or trigger-frame
+                       (and (>= best-count 0) best-frame)
+                       (1- frame-count)))
+           (report
+             (list :version 1 :extent extent :format format
+                   :capacity capacity :frame-count frame-count
+                   :first-retained-frame (max 0 (- frame-count capacity))
+                   :slot-rule '(mod frame capacity)
+                   :ring-path (namestring ring-path)
+                   :trigger-frame trigger-frame
+                   :evidence-centre centre
+                   :best-frame best-frame :best-count best-count
+                   :yaw-step yaw-step :pitch-amplitude pitch-amplitude
+                   :bright-threshold bright-threshold
+                   :bright-jump bright-jump
+                   :bright-neighborhood-radius bright-neighborhood-radius
+                   :bright-border bright-border
+                   :trigger-count trigger-count
+                   :records (nreverse records))))
+      (with-open-file
+          (stream manifest-path :direction :output :if-exists :supersede
+                                :if-does-not-exist :create)
+        (with-standard-io-syntax (pprint report stream)))
+      (setf (getf report :evidence-paths)
+            (%write-frame-ring-evidence
+             directory ring-path frame-count capacity centre
+             (first extent) (second extent) format evidence-radius))
+      report)))
+
+(defun scan-viewer-frame-ring
+    (directory
+     &key (top 30) (bright-threshold 230) (bright-jump 40)
+          (bright-neighborhood-radius 2) (bright-border 32)
+          (trigger-count 12) (evidence-radius 8))
+  "Rescore an existing exact frame ring without rendering it again."
+  (let* ((directory (uiop:ensure-directory-pathname directory))
+         (manifest-path (merge-pathnames "manifest.sexp" directory))
+         (scan-path (merge-pathnames "scan.sexp" directory))
+         (source
+           (with-open-file (stream manifest-path :direction :input)
+             (with-standard-io-syntax (read stream))))
+         (extent (getf source :extent))
+         (width (first extent))
+         (height (second extent))
+         (format (getf source :format))
+         (capacity (getf source :capacity))
+         (frame-count (getf source :frame-count))
+         (first-frame (getf source :first-retained-frame))
+         (ring-path (pathname (getf source :ring-path)))
+         (frame-bytes (* width height 4))
+         (previous nil)
+         (current nil)
+         (records nil)
+         (trigger-frame nil)
+         (best-frame first-frame)
+         (best-count -1))
+    (with-open-file
+        (ring ring-path :direction :input :element-type '(unsigned-byte 8))
+      (loop for following-frame from first-frame below frame-count do
+        (let ((following
+                (make-array frame-bytes :element-type '(unsigned-byte 8)))
+              (count 0)
+              (largest 0)
+              (samples nil))
+          (file-position ring (* (mod following-frame capacity) frame-bytes))
+          (unless (= frame-bytes (read-sequence following ring))
+            (error "The frame ring ended while scanning frame ~D."
+                   following-frame))
+          (when (and previous current)
+            (multiple-value-setq (count largest samples)
+              (%bright-frame-discontinuity
+               current previous width height
+               :top top :threshold bright-threshold :jump bright-jump
+               :radius bright-neighborhood-radius :border bright-border
+               :following following))
+            (let ((frame (1- following-frame)))
+              (when (> count best-count)
+                (setf best-count count best-frame frame))
+              (when (and (null trigger-frame) (>= count trigger-count))
+                (setf trigger-frame frame))
+              (push (list :frame frame :transient-bright count
+                          :largest-jump largest :samples samples)
+                    records)))
+          (setf previous current
+                current following))))
+    (let* ((centre (or trigger-frame best-frame))
+           (report
+             (list :version 2 :detector :three-frame-bright-transient
+                   :source-manifest (namestring manifest-path)
+                   :trigger-frame trigger-frame :evidence-centre centre
+                   :best-frame best-frame :best-count best-count
+                   :top top :bright-threshold bright-threshold
+                   :bright-jump bright-jump
+                   :bright-neighborhood-radius bright-neighborhood-radius
+                   :bright-border bright-border :trigger-count trigger-count
+                   :records (nreverse records))))
+      (with-open-file
+          (stream scan-path :direction :output :if-exists :supersede
+                            :if-does-not-exist :create)
+        (with-standard-io-syntax (pprint report stream)))
+      (setf (getf report :evidence-paths)
+            (%write-frame-ring-evidence
+             directory ring-path frame-count capacity centre
+             width height format evidence-radius))
+      report)))
+
 (defun refresh-viewer-renderer (&optional (viewer *viewer*)
                                 &key (solid (make-mountain-sanctuary-scene))
                                      (bevel-width
@@ -1579,6 +2125,8 @@ production gets the same opportunity to publish as it does in the window."
   ;; renderer, canvas, or device release can begin.
   (quiesce-application-captures viewer)
   (setf (viewer-running-p viewer) nil)
+  (when (viewer-frame-recorder viewer)
+    (stop-viewer-frame-recording viewer))
   (let ((canvas (viewer-canvas viewer)))
     (unwind-protect-releasing
         (with-release-report

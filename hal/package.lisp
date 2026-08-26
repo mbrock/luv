@@ -799,6 +799,15 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))))
            #:canvas-state
            #:canvas-context-state
            #:canvas-frame-resource-key
+           #:canvas-frame-resource-cache
+           #:make-canvas-frame-resource-cache
+           #:canvas-frame-resource
+           #:evict-canvas-frame-resource
+           #:evict-canvas-frame-resource-key
+           #:clear-canvas-frame-resource-cache
+           #:destroy-canvas-frame-resource-cache
+           #:canvas-frame-resource-count
+           #:map-canvas-frame-resources
            #:call-with-sdl-main-thread
            #:open-canvas
            #:present-canvas-frame

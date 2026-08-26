@@ -572,10 +572,8 @@
               (probe-bind-group-resource group 2)))
       (ok (eq (luft.render::renderer-sampler renderer)
               (probe-bind-group-resource group 3)))
-      (ok (eq (luft.render::renderer-depth-view renderer)
-              (probe-bind-group-resource group 4)))
       (ok (eq (luft.render::renderer-camera-buffer renderer)
-              (probe-bind-group-resource group 5)))
+              (probe-bind-group-resource group 4)))
       (ok (equal '(640 360 1)
                  (luv::texture-descriptor-size
                   (flame-resource-probe-descriptor history))))
@@ -5660,6 +5658,82 @@
     ;; cross no light-space texel boundary, and therefore leaves X/Y rows exact.
     (ok (equalp (subseq rows 0 8) (subseq nearby-rows 0 8)))
     (ok (= 36 (length (luft.render::light-uniform-data light center))))))
+
+(deftest bright-frame-discontinuities-tolerate-local-motion
+  (let* ((width 9)
+         (height 7)
+         (bytes (* width height 4))
+         (previous
+           (make-array bytes :element-type '(unsigned-byte 8)
+                             :initial-element 0))
+         (current
+           (make-array bytes :element-type '(unsigned-byte 8)
+                             :initial-element 0)))
+    (labels ((brighten (pixels x y value)
+               (let ((offset (* 4 (+ x (* y width)))))
+                 (setf (aref pixels offset) value
+                       (aref pixels (+ offset 1)) value
+                       (aref pixels (+ offset 2)) value
+                       (aref pixels (+ offset 3)) 255))))
+      ;; A bright point moving by one pixel is explained by the old local
+      ;; neighborhood; a remote bright eruption is not.
+      (brighten previous 2 3 250)
+      (brighten current 3 3 250)
+      (brighten current 7 4 245)
+      (multiple-value-bind (count largest samples)
+          (luft.render::%bright-frame-discontinuity
+           current previous width height
+           :top 0 :threshold 230 :jump 40 :radius 1 :border 0)
+        (ok (= 1 count))
+        (ok (= 245 largest))
+        (ok (equal '((7 4 245 0 245)) samples))))))
+
+(deftest bright-frame-transients-must-vanish-on-both-sides
+  (let* ((width 9)
+         (height 7)
+         (bytes (* width height 4))
+         (previous
+           (make-array bytes :element-type '(unsigned-byte 8)
+                             :initial-element 0))
+         (current
+           (make-array bytes :element-type '(unsigned-byte 8)
+                             :initial-element 0))
+         (following
+           (make-array bytes :element-type '(unsigned-byte 8)
+                             :initial-element 0)))
+    (labels ((brighten (pixels x y value)
+               (let ((offset (* 4 (+ x (* y width)))))
+                 (setf (aref pixels offset) value
+                       (aref pixels (+ offset 1)) value
+                       (aref pixels (+ offset 2)) value
+                       (aref pixels (+ offset 3)) 255))))
+      ;; Smooth motion is explained on both sides.  A new surface entering in
+      ;; CURRENT and persisting in FOLLOWING is explained on its latter side.
+      ;; Only the one-frame eruption is a transient.
+      (brighten previous 1 2 250)
+      (brighten current 2 2 250)
+      (brighten following 3 2 250)
+      (brighten current 5 3 245)
+      (brighten following 5 3 245)
+      (brighten current 7 4 240)
+      (multiple-value-bind (count largest samples)
+          (luft.render::%bright-frame-discontinuity
+           current previous width height
+           :top 0 :threshold 230 :jump 40 :radius 1 :border 0
+           :following following)
+        (ok (= 1 count))
+        (ok (= 240 largest))
+        (ok (equal '((7 4 240 0 0 240)) samples))))))
+
+(deftest a-live-frame-ring-keeps-only-its-final-time-window
+  (let ((recorder
+          (luft.render::make-viewer-frame-recorder-state
+           :seconds 2.0d0 :capacity 5
+           :frames (vector :zero :one :two :three :four)
+           :times (vector 0.0d0 1.0d0 2.0d0 3.0d0 4.0d0)
+           :frame-numbers (vector 0 1 2 3 4))))
+    (ok (equal '((2 2.0d0 :two) (3 3.0d0 :three) (4 4.0d0 :four))
+               (luft.render::%viewer-frame-recorder-entries recorder)))))
 
 (deftest a-pointer-ray-retains-the-semantic-boundary-site
   (let* ((domain (luft:make-world-domain :horizontal-bits 4))

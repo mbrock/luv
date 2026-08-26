@@ -9,7 +9,8 @@
 (in-package #:luvcraft)
 
 (defclass luvcraft-frame-state ()
-  ((uniform-buffer :initarg :uniform-buffer
+  ((key :initarg :key :reader luvcraft-frame-key)
+   (uniform-buffer :initarg :uniform-buffer
                    :reader luvcraft-frame-uniform-buffer)
    ;; WRITE-BUFFER writes mapped host-visible memory directly.  Animated
    ;; streams therefore belong to the presentation slot: reacquiring this
@@ -24,6 +25,10 @@
                             :reader luvcraft-frame-physics-instance-buffer)
    (body-vertex-buffer :initarg :body-vertex-buffer
                        :reader luvcraft-frame-body-vertex-buffer)
+   (crosshair-vertex-buffer :initarg :crosshair-vertex-buffer
+                            :reader luvcraft-frame-crosshair-vertex-buffer)
+   (cursor-vertex-buffer :initarg :cursor-vertex-buffer
+                         :reader luvcraft-frame-cursor-vertex-buffer)
    (scene-bind-group :initarg :scene-bind-group
                      :reader luvcraft-frame-scene-bind-group)
    (shadow-bind-group :initarg :shadow-bind-group
@@ -59,6 +64,8 @@
           (luvcraft-frame-physics-vertex-buffer state)
           (luvcraft-frame-physics-instance-buffer state)
           (luvcraft-frame-body-vertex-buffer state)
+          (luvcraft-frame-crosshair-vertex-buffer state)
+          (luvcraft-frame-cursor-vertex-buffer state)
           (luvcraft-frame-uniform-buffer state)
           (coerce (luvcraft-frame-world-text-bind-groups state) 'list))
    :test #'eq))
@@ -852,26 +859,25 @@ native-density HUD and the complete surface copy."
           (ignore-errors (release-live-shader-pipeline pipeline)))
         (when quad-buffer (ignore-errors (destroy quad-buffer)))))))
 
-(defun luvcraft-frame-state (session surface-texture)
-  (let ((key
-          (canvas-frame-resource-key
-           (luvcraft-session-context session) surface-texture)))
-    (or (gethash key (luvcraft-session-frame-states session))
-      (let ((buffer nil)
-            (particle-vertex-buffer nil)
-            (critter-vertex-buffer nil)
-            (physics-vertex-buffer nil)
-            (physics-instance-buffer nil)
-            (body-vertex-buffer nil)
-            (scene-bind-group nil)
-            (shadow-bind-group nil)
-            (post-uniform-buffer nil)
-            (post-bind-group nil)
-            (bloom-scene-bind-group nil)
-            (bloom-primary-bind-group nil)
-            (bloom-secondary-bind-group nil)
-            (world-text-bind-groups #())
-            (completed-p nil))
+(defun make-luvcraft-frame-state (session key)
+  "Construct one complete presentation-slot-local state for SESSION."
+  (let ((buffer nil)
+        (particle-vertex-buffer nil)
+        (critter-vertex-buffer nil)
+        (physics-vertex-buffer nil)
+        (physics-instance-buffer nil)
+        (body-vertex-buffer nil)
+        (crosshair-vertex-buffer nil)
+        (cursor-vertex-buffer nil)
+        (scene-bind-group nil)
+        (shadow-bind-group nil)
+        (post-uniform-buffer nil)
+        (post-bind-group nil)
+        (bloom-scene-bind-group nil)
+        (bloom-primary-bind-group nil)
+        (bloom-secondary-bind-group nil)
+        (world-text-bind-groups #())
+        (completed-p nil))
         (unwind-protect
              (progn
                (setf buffer
@@ -915,6 +921,26 @@ native-density HUD and the complete surface copy."
                       (make-buffer-descriptor
                        :label "player body vertices"
                        :size +player-body-buffer-size+
+                       :usage '(:vertex)))
+                     crosshair-vertex-buffer
+                     (let* ((extent (luvcraft-session-render-extent session))
+                            (data
+                              (make-block-world-crosshair-vertices
+                               (first extent) (second extent))))
+                       (let ((new
+                               (create
+                                (luvcraft-session-device session)
+                                (make-buffer-descriptor
+                                 :label "block world frame crosshair vertices"
+                                 :size (* 4 (length data)) :usage '(:vertex)))))
+                         (write-buffer new data)
+                         new))
+                     cursor-vertex-buffer
+                     (create
+                      (luvcraft-session-device session)
+                      (make-buffer-descriptor
+                       :label "block world frame cursor vertices"
+                       :size (* 4 5 +luvcraft-cursor-vertex-count+)
                        :usage '(:vertex)))
                      scene-bind-group
                      (create
@@ -1007,12 +1033,15 @@ native-density HUD and the complete surface copy."
                (let ((state
                        (make-instance
                         'luvcraft-frame-state
+                        :key key
                         :uniform-buffer buffer
                         :particle-vertex-buffer particle-vertex-buffer
                         :critter-vertex-buffer critter-vertex-buffer
                         :physics-vertex-buffer physics-vertex-buffer
                         :physics-instance-buffer physics-instance-buffer
                         :body-vertex-buffer body-vertex-buffer
+                        :crosshair-vertex-buffer crosshair-vertex-buffer
+                        :cursor-vertex-buffer cursor-vertex-buffer
                         :scene-bind-group scene-bind-group
                         :shadow-bind-group shadow-bind-group
                         :post-uniform-buffer post-uniform-buffer
@@ -1024,10 +1053,7 @@ native-density HUD and the complete surface copy."
                  (dolist (resource (luvcraft-frame-state-resources state))
                    (remember-luvcraft-renderer-resource
                     (luvcraft-session-renderer session) resource))
-                 (setf (gethash key
-                                (luvcraft-session-frame-states session))
-                       state
-                       completed-p t)
+                 (setf completed-p t)
                  state))
           (unless completed-p
             (dolist (group
@@ -1043,11 +1069,31 @@ native-density HUD and the complete surface copy."
             (when post-bind-group (destroy post-bind-group))
             (when post-uniform-buffer (destroy post-uniform-buffer))
             (when body-vertex-buffer (destroy body-vertex-buffer))
+            (when cursor-vertex-buffer (destroy cursor-vertex-buffer))
+            (when crosshair-vertex-buffer (destroy crosshair-vertex-buffer))
             (when physics-instance-buffer (destroy physics-instance-buffer))
             (when physics-vertex-buffer (destroy physics-vertex-buffer))
             (when critter-vertex-buffer (destroy critter-vertex-buffer))
             (when particle-vertex-buffer (destroy particle-vertex-buffer))
-            (when buffer (destroy buffer))))))))
+            (when buffer (destroy buffer))))))
+
+(defun luvcraft-frame-state (session surface-texture)
+  "Acquire SESSION's safely reusable state for SURFACE-TEXTURE."
+  (canvas-frame-resource
+   (luvcraft-renderer-frame-resource-cache
+    (luvcraft-session-renderer session))
+   (luvcraft-session-context session) surface-texture
+   (lambda (key acquired-surface)
+     (declare (ignore acquired-surface))
+     (make-luvcraft-frame-state session key))))
+
+(defun release-luvcraft-frame-state (renderer state)
+  "Release STATE through RENDERER's sole GPU-resource inventory."
+  (with-release-report
+    (dolist (resource (luvcraft-frame-state-resources state))
+      (releasing :frame-state-resource
+        (release-luvcraft-renderer-resource renderer resource))))
+  (values))
 
 (defun discard-luvcraft-frame-states (renderer)
   "Forget every cached per-drawable binding, which names images that are gone.
@@ -1056,16 +1102,9 @@ native-density HUD and the complete surface copy."
 notice that their scene, depth, and lens-chain views belong to the previous
 window.  Dropping them here makes the next frame rebuild them against the
 attachments the renderer actually holds."
-  (let ((states (luvcraft-renderer-frame-states renderer)))
-    (with-release-report
-      (maphash
-       (lambda (key state)
-         (declare (ignore key))
-         (dolist (resource (luvcraft-frame-state-resources state))
-           (releasing :frame-state-resource
-             (release-luvcraft-renderer-resource renderer resource))))
-       states)
-      (clrhash states)))
+  (clear-canvas-frame-resource-cache
+   (luvcraft-renderer-frame-resource-cache renderer)
+   (lambda (state) (release-luvcraft-frame-state renderer state)))
   (values))
 
 (defmethod release-luvcraft-component ((renderer luvcraft-renderer))
@@ -1116,18 +1155,8 @@ attachments the renderer actually holds."
            ;; The new cohort exists before any old object is released.  If
            ;; creation fails, MAKE-LUVCRAFT-FRAME-ATTACHMENTS destroys its
            ;; partial candidate and the installed renderer remains coherent.
-           ;; Vertex writes also precede publication so a failed write leaves
-           ;; the old extent installed and makes the next frame retry.
-           (write-buffer
-            (luvcraft-renderer-crosshair-vertex-buffer renderer)
-            (make-block-world-crosshair-vertices
-             (first render-extent) (second render-extent)))
-           (write-buffer
-            (luvcraft-renderer-cursor-vertex-buffer renderer)
-            (make-luvcraft-cursor-vertices
-             (first render-extent) (second render-extent)
-             (/ (first render-extent) 2.0)
-             (/ (second render-extent) 2.0)))
+           ;; Frame-local crosshair/cursor streams are rebuilt after this
+           ;; invalidation, against the newly published extent.
            (discard-luvcraft-frame-states renderer)
            (install-luvcraft-frame-attachments renderer attachments)
            (setf installed-p t)
@@ -1469,7 +1498,7 @@ completes."
           (set-pipeline pass (luvcraft-session-crosshair-native-pipeline session))
           (set-bind-group pass 0 (luvcraft-frame-scene-bind-group frame))
           (set-vertex-buffer
-           pass 0 (luvcraft-session-crosshair-vertex-buffer session))
+           pass 0 (luvcraft-frame-crosshair-vertex-buffer frame))
           (draw pass +block-world-crosshair-vertex-count+))
         (end-pass pass))
       (prepare-texture encoder (luvcraft-session-color-texture session)
@@ -1575,21 +1604,22 @@ completes."
         (when (and include-hud-p
                    (luvcraft-session-software-cursor-p session)
                    (luvcraft-session-modal-focus session))
-          ;; Motion events publish only the newest pointer state.  Consume it
-          ;; once at the frame boundary, no matter how many reports SDL drained.
-          (when (luvcraft-session-pointer-dirty-p session)
-            (write-buffer
-             (luvcraft-session-cursor-vertex-buffer session)
-             (make-luvcraft-cursor-vertices
-              (first extent) (second extent)
-              (or (luvcraft-session-pointer-x session) (/ (first extent) 2.0))
-              (or (luvcraft-session-pointer-y session)
-                  (/ (second extent) 2.0))))
-            (setf (luvcraft-session-pointer-dirty-p session) nil))
+          ;; Every presentation slot carries its own mapped cursor stream.
+          ;; Reacquisition makes this overwrite safe even when another slot is
+          ;; still being read; writing every visit also brings an older slot to
+          ;; the newest coalesced pointer position.
+          (write-buffer
+           (luvcraft-frame-cursor-vertex-buffer frame)
+           (make-luvcraft-cursor-vertices
+            (first extent) (second extent)
+            (or (luvcraft-session-pointer-x session) (/ (first extent) 2.0))
+            (or (luvcraft-session-pointer-y session)
+                (/ (second extent) 2.0))))
+          (setf (luvcraft-session-pointer-dirty-p session) nil)
           (set-pipeline pass (luvcraft-session-cursor-native-pipeline session))
           (set-bind-group pass 0 (luvcraft-frame-scene-bind-group frame))
           (set-vertex-buffer
-           pass 0 (luvcraft-session-cursor-vertex-buffer session))
+           pass 0 (luvcraft-frame-cursor-vertex-buffer frame))
           (draw pass +luvcraft-cursor-vertex-count+))
         (end-pass pass)))
     (with-luvcraft-frame-timing

@@ -3,6 +3,60 @@
 (deftest temporal-motion-format-has-two-half-float-lanes
   (ok (= 4 (luv:texture-format-bytes-per-texel :rg16-float))))
 
+(defclass frame-resource-key-context (luv:canvas-context) ())
+
+(defmethod luv:canvas-frame-resource-key
+    ((context frame-resource-key-context) surface)
+  (declare (ignore context))
+  (car surface))
+
+(deftest canvas-frame-resources-follow-stable-presentation-slots
+  (let ((cache (luv:make-canvas-frame-resource-cache))
+        (context (make-instance 'frame-resource-key-context))
+        (constructions 0))
+    (flet ((construct (key surface)
+             (incf constructions)
+             (list key (cdr surface))))
+      (multiple-value-bind (first created-p key)
+          (luv:canvas-frame-resource cache context '(7 . :first) #'construct)
+        (ok created-p)
+        (ok (= 7 key))
+        (ok (equal '(7 :first) first))
+        (multiple-value-bind (again created-again-p)
+            (luv:canvas-frame-resource cache context '(7 . :new-wrapper)
+                                       #'construct)
+          (ok (eq first again))
+          (ok (not created-again-p))))
+      (ok (= 1 constructions))
+      (ok (= 1 (luv:canvas-frame-resource-count cache))))))
+
+(deftest canvas-frame-resource-release-is-retryable
+  (let* ((entries (make-hash-table :test #'eql))
+         (cache (luv:make-canvas-frame-resource-cache :entries entries))
+         (context (make-instance 'frame-resource-key-context))
+         (fail-p t)
+         (releases 0))
+    (luv:canvas-frame-resource
+     cache context '(3 . :surface) (lambda (key surface)
+                                    (declare (ignore key surface))
+                                    :owned))
+    (flet ((release (value)
+             (ok (eq :owned value))
+             (incf releases)
+             (when fail-p (error "injected frame resource release failure"))))
+      (ok (signals (luv:evict-canvas-frame-resource-key cache 3 #'release)
+                   'simple-error))
+      (ok (= 1 (luv:canvas-frame-resource-count cache)))
+      (setf fail-p nil)
+      (luv:destroy-canvas-frame-resource-cache cache #'release)
+      (ok (= 2 releases))
+      (ok (zerop (luv:canvas-frame-resource-count cache)))
+      (ok (signals
+           (luv:canvas-frame-resource cache context '(3 . :surface)
+                                      (lambda (&rest arguments)
+                                        (declare (ignore arguments)) :new))
+           'simple-error)))))
+
 (deftest buffer-uploads-preserve-sixteen-bit-storage
   (multiple-value-bind (foreign-type element-size)
       (luv::buffer-data-foreign-type

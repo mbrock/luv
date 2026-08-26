@@ -274,6 +274,7 @@ offsets and of headers."
      (:file "gpu")
      (:file "canvas")
      (:file "application-lifecycle")
+     (:file "frame-resources")
      (:file "live-artifact")
      (:file "png")
      (:file "video")

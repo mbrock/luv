@@ -51,23 +51,17 @@
 (defun release-luvcraft-capture-frame-state (session target)
   "Release per-target frame state cached while encoding TARGET."
   (let* ((renderer (luvcraft-session-renderer session))
-         (states (luvcraft-session-frame-states session))
          (key (canvas-frame-resource-key
                (luvcraft-session-context session) target))
-         (state (gethash key states)))
+         (cache (luvcraft-renderer-frame-resource-cache renderer)))
     (with-release-report
       (dolist (overlay (copy-list (luvcraft-session-overlays session)))
         (releasing (list :capture-overlay-frame-key overlay)
           (evict-luvcraft-overlay-frame-key overlay key)))
-      (when state
-        ;; Detach the dying target's identity before any native release can
-        ;; signal, so cleanup remains idempotent under a partial driver failure.
-        (remhash key states)
-        (dolist (resource
-                  (remove-duplicates
-                   (luvcraft-frame-state-resources state) :test #'eq))
-          (releasing :capture-frame-state-resource
-            (release-luvcraft-renderer-resource renderer resource))))))
+      (releasing :capture-frame-state
+        (evict-canvas-frame-resource-key
+         cache key
+         (lambda (state) (release-luvcraft-frame-state renderer state))))))
   (values))
 
 (defmethod luv:cleanup-capture

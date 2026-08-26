@@ -161,7 +161,9 @@ the default hand holds things but does nothing with them."))
    ;; body itself once it is attached to a session.
    (sdf-pipeline :initform nil :accessor player-body-sdf-pipeline)
    (sdf-vertex-buffer :initform nil :accessor player-body-sdf-vertex-buffer)
-   (sdf-instance-buffer :initform nil :accessor player-body-sdf-instance-buffer)
+   (sdf-instance-buffers
+    :initform (make-canvas-frame-resource-cache)
+    :reader player-body-sdf-instance-buffers)
    (sdf-instance-data :initform nil :accessor player-body-sdf-instance-data))
   (:documentation "The first-person body: two arms and what they hold."))
 
@@ -174,7 +176,7 @@ the default hand holds things but does nothing with them."))
     (list (player-body-sdf-pipeline body))))
 
 (defun place-player-body-sdf (body)
-  "Publish BODY's current view-local palms to its SDF instance buffer."
+  "Pack BODY's current view-local palms into its CPU instance data."
   (let ((data (player-body-sdf-instance-data body)))
     (loop for pose in (list (player-body-hand-pose body :left)
                             (player-body-hand-pose body :right))
@@ -185,19 +187,32 @@ the default hand holds things but does nothing with them."))
                      (aref data (+ offset 1)) (coerce y 'single-float)
                      (aref data (+ offset 2)) (coerce z 'single-float)
                      (aref data (+ offset 3)) 1.0)))
-    (write-buffer (player-body-sdf-instance-buffer body) data))
+    data)
   body)
 
 (defmethod encode-luvcraft-overlay
     ((body player-body) session pass surface-texture)
   (when (player-body-sdf-pipeline body)
     (place-player-body-sdf body)
-    (let ((frame (luvcraft-frame-state session surface-texture)))
+    (let* ((frame (luvcraft-frame-state session surface-texture))
+           (instance-buffer
+             (canvas-frame-resource
+              (player-body-sdf-instance-buffers body)
+              (luvcraft-session-context session) surface-texture
+              (lambda (key surface)
+                (declare (ignore key surface))
+                (create
+                 (luvcraft-session-device session)
+                 (make-buffer-descriptor
+                  :label "player SDF frame-local palms"
+                  :size (* 4 (length (player-body-sdf-instance-data body)))
+                  :usage '(:vertex)))))))
+      (write-buffer instance-buffer (player-body-sdf-instance-data body))
       (set-pipeline
        pass (live-shader-pipeline-native-pipeline
              (player-body-sdf-pipeline body)))
       (set-vertex-buffer pass 0 (player-body-sdf-vertex-buffer body))
-      (set-vertex-buffer pass 1 (player-body-sdf-instance-buffer body))
+      (set-vertex-buffer pass 1 instance-buffer)
       (set-bind-group pass 0 (luvcraft-frame-scene-bind-group frame))
       (draw pass 6 1)))
   body)
@@ -205,11 +220,11 @@ the default hand holds things but does nothing with them."))
 (defmethod release-luvcraft-overlay ((body player-body))
   (when (player-body-sdf-pipeline body)
     (release-live-shader-pipeline (player-body-sdf-pipeline body)))
-  (dolist (resource (list (player-body-sdf-instance-buffer body)
-                          (player-body-sdf-vertex-buffer body)))
+  (destroy-canvas-frame-resource-cache
+   (player-body-sdf-instance-buffers body) #'destroy)
+  (dolist (resource (list (player-body-sdf-vertex-buffer body)))
     (when resource (destroy resource)))
   (setf (player-body-sdf-pipeline body) nil
-        (player-body-sdf-instance-buffer body) nil
         (player-body-sdf-vertex-buffer body) nil
         (player-body-sdf-instance-data body) nil)
   (values))
@@ -223,7 +238,6 @@ the default hand holds things but does nothing with them."))
            (vertex-data (make-world-text-quad-vertices))
            (instance-data (make-array 8 :element-type 'single-float))
            (vertex-buffer nil)
-           (instance-buffer nil)
            (pipeline nil)
            (transferred-p nil)
            (completed-p nil))
@@ -235,13 +249,6 @@ the default hand holds things but does nothing with them."))
                     (make-buffer-descriptor
                      :label "player SDF proxy"
                      :size (* 4 (length vertex-data))
-                     :usage '(:vertex :copy-dst)))
-                   instance-buffer
-                   (create
-                    device
-                    (make-buffer-descriptor
-                     :label "player SDF palms"
-                     :size (* 4 (length instance-data))
                      :usage '(:vertex :copy-dst)))
                    pipeline
                    (make-live-shader-pipeline
@@ -270,7 +277,6 @@ the default hand holds things but does nothing with them."))
              (write-buffer vertex-buffer vertex-data)
              (setf (player-body-sdf-pipeline body) pipeline
                    (player-body-sdf-vertex-buffer body) vertex-buffer
-                   (player-body-sdf-instance-buffer body) instance-buffer
                    (player-body-sdf-instance-data body) instance-data)
              (place-player-body-sdf body)
              ;; ADD owns BODY and its installed resources from this point,
@@ -282,8 +288,12 @@ the default hand holds things but does nothing with them."))
         (unless (or completed-p transferred-p)
           (when pipeline
             (ignore-errors (release-live-shader-pipeline pipeline)))
-          (when instance-buffer (ignore-errors (destroy instance-buffer)))
           (when vertex-buffer (ignore-errors (destroy vertex-buffer))))))))
+
+(defmethod evict-luvcraft-overlay-frame-key ((body player-body) frame-key)
+  (evict-canvas-frame-resource-key
+   (player-body-sdf-instance-buffers body) frame-key #'destroy)
+  body)
 
 (defun put-away-hand-item (body session)
   "Pocket whatever BODY holds and return it, or NIL when the hand was empty."

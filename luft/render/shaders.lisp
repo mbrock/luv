@@ -2191,10 +2191,6 @@ that he is standing on something."
       (/ (swizzle projection :w)
          (- depth (swizzle projection :z)))))
 
-(define-shader-function temporal-depth-witness (depth projection divisor)
-  "Encode view depth compactly enough for half-float temporal history."
-  (log (+ 1.0 (max 0.0 (view-depth depth projection divisor)))))
-
 (define-shader-function depth-occlusion (centre sample radius)
   (let* ((delta (- centre sample))
          (near (smoothstep 0.025 (* radius 0.42) delta))
@@ -2403,8 +2399,7 @@ that he is standing on something."
       (motion-texture :texture-2d :binding 1 :sample-transfer :identity)
       (history :texture-2d :binding 2 :sample-transfer :identity)
       (temporal-sampler :sampler :binding 3)
-      (current-depth :depth-texture-2d :binding 4)
-      (camera-state :uniform-block :binding 5
+      (camera-state :uniform-block :binding 4
        :members ((camera-position :vec4)
                  (camera-right :vec4)
                  (camera-up :vec4)
@@ -2464,36 +2459,17 @@ that he is standing on something."
                  (step (swizzle history-uv :y) 1.0))))
          (old (rgb-to-ycocg
                (swizzle (sample history temporal-sampler history-uv) :xyz)))
-         ;; History alpha is not presentation alpha: the resolve owns it as a
-         ;; log-view-depth witness.  Comparing in this space remains useful
-         ;; after RGBA16F storage and rejects both foreground trails on newly
-         ;; revealed background and bright background leaking onto a moving
-         ;; silhouette.  A generous band tolerates depth interpolation and
-         ;; the small real view-depth change between adjacent camera frames.
-         (depth
-           (swizzle (texel-load current-depth pixel) :x))
-         (depth-witness
-           (temporal-depth-witness depth camera-projection
-                                   (swizzle render-parameters :z)))
-         (old-depth-witness
-           (swizzle (sample history temporal-sampler history-uv) :w))
-         (depth-consistent
-           (- 1.0
-              (step (swizzle previous-camera-up :w)
-                    (abs (- old-depth-witness depth-witness)))))
          (clipped (clamp old neighbourhood-min neighbourhood-max))
          (speed (clamp (* (sqrt (dot velocity velocity)) 48.0) 0.0 1.0))
          ;; The otherwise-unused W components of these previous-view lanes
          ;; carry resolve validity and weight without changing the frame ABI.
          (history-weight
-           (* (* (* (swizzle previous-camera-position :w) inside)
-                 depth-consistent)
+           (* (* (swizzle previous-camera-position :w) inside)
               (* (swizzle previous-camera-right :w)
                  (- 1.0 (* speed 0.35)))))
          (resolved (ycocg-to-rgb (mix c11 clipped history-weight))))
-    ;; Downstream presentation consumes RGB only.  Preserve current log depth
-    ;; in alpha so the next frame can validate its reprojected colour.
-    (set-output color-output (vec4 resolved depth-witness))))
+    ;; Alpha is current-frame focus metadata, never temporal colour history.
+    (set-output color-output (vec4 resolved (swizzle centre :w)))))
 
 (define-live-shader present-fragment-specification
     (:stage :fragment

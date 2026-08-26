@@ -901,7 +901,8 @@ candidate that loses to release or another publication is detached and closed."
   ((agent :initarg :agent :initarg :gnome :reader body-overlay-gnome)
    (pipeline :initarg :pipeline :accessor gnome-body-pipeline)
    (vertex-buffer :initarg :vertex-buffer :accessor gnome-body-vertex-buffer)
-   (instance-buffer :initarg :instance-buffer :accessor gnome-body-instance-buffer)
+   (instance-buffers :initform (luv:make-canvas-frame-resource-cache)
+                     :reader gnome-body-instance-buffers)
    (instance-data :initarg :instance-data :reader gnome-body-instance-data))
   (:documentation
    "The shared conservative billboard and GPU resources for one SDF agent."))
@@ -930,7 +931,7 @@ candidate that loses to release or another publication is detached and closed."
             (* (gnome-figure-radius) stature))))
 
 (defun place-gnome-body (overlay)
-  "Publish OVERLAY's conservative sphere and retained forward direction."
+  "Pack OVERLAY's conservative sphere and retained forward direction."
   (let* ((agent (body-overlay-gnome overlay))
          (yaw (embodied-agent-facing-yaw agent))
          (data (gnome-body-instance-data overlay)))
@@ -944,19 +945,32 @@ candidate that loses to release or another publication is detached and closed."
             (aref data 5) 0.0
             (aref data 6) (coerce (cos yaw) 'single-float)
             (aref data 7) 0.0))
-    (luv:write-buffer (gnome-body-instance-buffer overlay) data))
+    data)
   overlay)
 
 (defmethod luvcraft:encode-luvcraft-overlay
     ((overlay sdf-agent-body-overlay) session pass surface-texture)
   (place-gnome-body overlay)
-  (let ((frame (luvcraft::luvcraft-frame-state session surface-texture)))
+  (let* ((frame (luvcraft::luvcraft-frame-state session surface-texture))
+         (instance-buffer
+           (luv:canvas-frame-resource
+            (gnome-body-instance-buffers overlay)
+            (luvcraft:luvcraft-session-context session) surface-texture
+            (lambda (key surface)
+              (declare (ignore key surface))
+              (luv:create
+               (luvcraft:luvcraft-session-device session)
+               (luv:make-buffer-descriptor
+                :label "agent SDF frame-local instance"
+                :size (* 4 (length (gnome-body-instance-data overlay)))
+                :usage '(:vertex)))))))
+    (luv:write-buffer instance-buffer (gnome-body-instance-data overlay))
     (luv:set-pipeline
      pass
      (luvcraft::live-shader-pipeline-native-pipeline
       (gnome-body-pipeline overlay)))
     (luv:set-vertex-buffer pass 0 (gnome-body-vertex-buffer overlay))
-    (luv:set-vertex-buffer pass 1 (gnome-body-instance-buffer overlay))
+    (luv:set-vertex-buffer pass 1 instance-buffer)
     (luv:set-bind-group pass 0 (luvcraft::luvcraft-frame-scene-bind-group frame))
     (luv:draw pass 6 1))
   overlay)
@@ -965,11 +979,11 @@ candidate that loses to release or another publication is detached and closed."
   (when (gnome-body-pipeline overlay)
     (luvcraft::release-live-shader-pipeline (gnome-body-pipeline overlay))
     (setf (gnome-body-pipeline overlay) nil))
-  (dolist (resource (list (gnome-body-instance-buffer overlay)
-                          (gnome-body-vertex-buffer overlay)))
+  (luv:destroy-canvas-frame-resource-cache
+   (gnome-body-instance-buffers overlay) #'luv:destroy)
+  (dolist (resource (list (gnome-body-vertex-buffer overlay)))
     (when resource (luv:destroy resource)))
-  (setf (gnome-body-instance-buffer overlay) nil
-        (gnome-body-vertex-buffer overlay) nil)
+  (setf (gnome-body-vertex-buffer overlay) nil)
   (when (eq overlay (gnome-body (body-overlay-gnome overlay)))
     (setf (gnome-body (body-overlay-gnome overlay)) nil))
   (values))
@@ -981,7 +995,6 @@ candidate that loses to release or another publication is detached and closed."
          (vertex-data (luvcraft::make-world-text-quad-vertices))
          (instance-data (make-array 8 :element-type 'single-float))
          (vertex-buffer nil)
-         (instance-buffer nil)
          (pipeline nil)
          (completed-p nil))
     (unwind-protect
@@ -992,13 +1005,6 @@ candidate that loses to release or another publication is detached and closed."
                       (luv:make-buffer-descriptor
                        :label (format nil "~A proxy" label)
                        :size (* 4 (length vertex-data))
-                       :usage '(:vertex :copy-dst)))
-                     instance-buffer
-                     (luv:create
-                      device
-                      (luv:make-buffer-descriptor
-                       :label (format nil "~A instance" label)
-                       :size (* 4 (length instance-data))
                        :usage '(:vertex :copy-dst)))
                      pipeline
                      (luvcraft::make-live-shader-pipeline
@@ -1028,7 +1034,6 @@ candidate that loses to release or another publication is detached and closed."
            (let ((overlay (make-instance class
                                          :agent agent :pipeline pipeline
                                          :vertex-buffer vertex-buffer
-                                         :instance-buffer instance-buffer
                                          :instance-data instance-data)))
              (place-gnome-body overlay)
              (setf (gnome-body agent) overlay
@@ -1039,8 +1044,13 @@ candidate that loses to release or another publication is detached and closed."
         (when pipeline
           (ignore-errors
             (luvcraft::release-live-shader-pipeline pipeline)))
-        (when instance-buffer (ignore-errors (luv:destroy instance-buffer)))
         (when vertex-buffer (ignore-errors (luv:destroy vertex-buffer)))))))
+
+(defmethod luvcraft:evict-luvcraft-overlay-frame-key
+    ((overlay sdf-agent-body-overlay) frame-key)
+  (luv:evict-canvas-frame-resource-key
+   (gnome-body-instance-buffers overlay) frame-key #'luv:destroy)
+  overlay)
 
 (defun ensure-gnome-body (gnome)
   (or (gnome-body gnome)

@@ -321,23 +321,22 @@ The first pass is a coherent baseline, not the last word in temporal quality.
 The next evidence should come from moving silhouettes and animated materials,
 where colour clipping alone has the least information.
 
-** DONE Make the Vulkan disocclusion test depth-aware
+** TODO Make the Vulkan disocclusion test depth-aware
 :PROPERTIES:
 :ID: 1MZC4T
 :END:
 
-/Intent./ Sample current depth in Luft's shader resolve and reject history
-whose reprojected depth no longer describes the visible surface.  MetalFX
-already receives depth under #NL5J0J; this mark concerns the inspectable
-Vulkan implementation.
+/Intent./ Sample the retained current depth in Luft's shader resolve, choose
+the frontmost velocity from a small neighbourhood at silhouettes, and reject
+history whose reprojected depth no longer describes the visible surface.  This
+is velocity dilation and disocclusion testing, one connected improvement rather
+than two unrelated filters.  MetalFX already receives depth under #NL5J0J;
+this mark concerns the inspectable Vulkan implementation.
 
 /Evidence./ Current motion is exact at its own pixel and the YCoCg box rejects
-many stale colours.  Vulkan now samples current visibility depth during the
-resolve and stores a logarithmic view-depth witness in the otherwise-unused
-alpha lane of its RGBA16F history.  A reprojected colour whose witness no
-longer agrees with the current surface is rejected before blending, covering
-both foreground trails on newly exposed background and bright background
-leaking through a moving foreground silhouette.
+many stale colours, but Vulkan discards depth after visibility and cannot yet
+distinguish a newly revealed background from the foreground that occupied its
+old address.
 
 /Done when./ A camera orbit around the stock and field studio pieces leaves no
 foreground-coloured trail on newly exposed sky or wall, with a capture or

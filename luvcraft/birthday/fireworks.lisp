@@ -689,8 +689,8 @@ and return how many instances are ready to draw."
    (pipeline :initarg :pipeline :accessor fireworks-overlay-pipeline)
    (vertex-buffer :initarg :vertex-buffer
                   :accessor fireworks-overlay-vertex-buffer)
-   (instance-buffer :initarg :instance-buffer
-                    :accessor fireworks-overlay-instance-buffer)
+   (instance-buffers :initform (luv:make-canvas-frame-resource-cache)
+                     :reader fireworks-overlay-instance-buffers)
    (instance-data :initarg :instance-data
                   :reader fireworks-overlay-instance-data)
    (instance-count :initform 0 :accessor fireworks-overlay-instance-count)
@@ -714,25 +714,36 @@ and return how many instances are ready to draw."
     (let ((count (fill-firework-instances
                   show (fireworks-overlay-instance-data overlay))))
       (setf (fireworks-overlay-instance-count overlay) count)
-      ;; One queue write of the whole preallocated lane; the draw below
-      ;; only reads the live prefix.
-      (when (plusp count)
-        (luv:write-buffer (fireworks-overlay-instance-buffer overlay)
-                          (fireworks-overlay-instance-data overlay)))))
+      ;; GPU publication waits until encoding selects a safe presentation slot.
+      ))
   overlay)
 
 (defmethod luvcraft:encode-luvcraft-overlay
     ((overlay fireworks-overlay) session pass surface-texture)
   (let ((count (fireworks-overlay-instance-count overlay)))
     (when (plusp count)
-      (let ((frame (luvcraft::luvcraft-frame-state session surface-texture)))
+      (let* ((frame (luvcraft::luvcraft-frame-state session surface-texture))
+             (instance-buffer
+               (luv:canvas-frame-resource
+                (fireworks-overlay-instance-buffers overlay)
+                (luvcraft:luvcraft-session-context session) surface-texture
+                (lambda (key surface)
+                  (declare (ignore key surface))
+                  (luv:create
+                   (luvcraft:luvcraft-session-device session)
+                   (luv:make-buffer-descriptor
+                    :label "birthday frame-local spark instances"
+                    :size (* 4 (length
+                                (fireworks-overlay-instance-data overlay)))
+                    :usage '(:vertex)))))))
+        (luv:write-buffer instance-buffer
+                          (fireworks-overlay-instance-data overlay))
         (luv:set-pipeline
          pass
          (luvcraft::live-shader-pipeline-native-pipeline
           (fireworks-overlay-pipeline overlay)))
         (luv:set-vertex-buffer pass 0 (fireworks-overlay-vertex-buffer overlay))
-        (luv:set-vertex-buffer pass 1 (fireworks-overlay-instance-buffer
-                                       overlay))
+        (luv:set-vertex-buffer pass 1 instance-buffer)
         (luv:set-bind-group pass 0 (luvcraft::luvcraft-frame-scene-bind-group
                                     frame))
         (luv:draw pass 6 count))))
@@ -743,12 +754,18 @@ and return how many instances are ready to draw."
     (luvcraft::release-live-shader-pipeline
      (fireworks-overlay-pipeline overlay))
     (setf (fireworks-overlay-pipeline overlay) nil))
-  (dolist (resource (list (fireworks-overlay-instance-buffer overlay)
-                          (fireworks-overlay-vertex-buffer overlay)))
+  (luv:destroy-canvas-frame-resource-cache
+   (fireworks-overlay-instance-buffers overlay) #'luv:destroy)
+  (dolist (resource (list (fireworks-overlay-vertex-buffer overlay)))
     (when resource (luv:destroy resource)))
-  (setf (fireworks-overlay-instance-buffer overlay) nil
-        (fireworks-overlay-vertex-buffer overlay) nil)
+  (setf (fireworks-overlay-vertex-buffer overlay) nil)
   (values))
+
+(defmethod luvcraft:evict-luvcraft-overlay-frame-key
+    ((overlay fireworks-overlay) frame-key)
+  (luv:evict-canvas-frame-resource-key
+   (fireworks-overlay-instance-buffers overlay) frame-key #'luv:destroy)
+  overlay)
 
 (defun find-fireworks-overlay (session)
   (find-if (lambda (overlay) (typep overlay 'fireworks-overlay))
@@ -778,7 +795,6 @@ overlay; calling again while a show runs returns the running one."
                            :element-type 'single-float
                            :initial-element 0.0))
              (vertex-buffer nil)
-             (instance-buffer nil)
              (pipeline nil)
              (completed-p nil))
         (unwind-protect
@@ -789,13 +805,6 @@ overlay; calling again while a show runs returns the running one."
                       (luv:make-buffer-descriptor
                        :label "birthday spark quad"
                        :size (* 4 (length vertex-data))
-                       :usage '(:vertex :copy-dst)))
-                     instance-buffer
-                     (luv:create
-                      device
-                      (luv:make-buffer-descriptor
-                       :label "birthday spark instances"
-                       :size (* 4 (length instance-data))
                        :usage '(:vertex :copy-dst)))
                      pipeline
                      (luvcraft::make-live-shader-pipeline
@@ -826,7 +835,6 @@ overlay; calling again while a show runs returns the running one."
                (let ((overlay (make-instance 'fireworks-overlay
                                              :show show :pipeline pipeline
                                              :vertex-buffer vertex-buffer
-                                             :instance-buffer instance-buffer
                                              :instance-data instance-data)))
                  (setf completed-p t)
                  (luvcraft:add-luvcraft-overlay session overlay)))
@@ -834,7 +842,6 @@ overlay; calling again while a show runs returns the running one."
             (when pipeline
               (ignore-errors
                 (luvcraft::release-live-shader-pipeline pipeline)))
-            (when instance-buffer (ignore-errors (luv:destroy instance-buffer)))
             (when vertex-buffer (ignore-errors (luv:destroy vertex-buffer))))))))
 
 (defun stop-birthday-fireworks (session)

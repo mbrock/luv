@@ -90,12 +90,21 @@ drawable-matched resolution where native-density application UI is composed."))
    (frame-states :initarg :frame-states
                  :initform (make-hash-table :test #'eql)
                  :reader luvcraft-renderer-frame-states)
+   (frame-resource-cache :initform nil
+                         :accessor luvcraft-renderer-frame-resource-cache)
    (resources :initarg :resources :initform nil
               :accessor luvcraft-renderer-resources))
   (:documentation
    "The sole owner of a session's frame attachments, layouts, pipelines, and
 per-drawable GPU state.  The session coordinates this owner with simulation,
 streaming, overlays, and presentation; it does not duplicate its inventory."))
+
+(defmethod initialize-instance :after ((renderer luvcraft-renderer) &key)
+  ;; Keep FRAME-STATES as an inspectable compatibility view while the Luv
+  ;; cache owns its creation/eviction protocol.
+  (setf (luvcraft-renderer-frame-resource-cache renderer)
+        (make-canvas-frame-resource-cache
+         :entries (luvcraft-renderer-frame-states renderer))))
 
 (defmacro define-luvcraft-frame-attachment-reader (name key)
   `(defmethod ,name ((renderer luvcraft-renderer))

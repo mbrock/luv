@@ -346,6 +346,52 @@ machine, staging and readback policy, cache policy beyond the chosen storage,
 or deterministic zero initialization.  Those contracts should be added only
 with an owner and a testable exclusion rule.
 
+* DONE Presentation slots own mutable frame contents
+:PROPERTIES:
+:ID: 5OROXO
+:END:
+
+Object retention and content stability are different proofs.  A submission
+which retains a buffer prevents its native allocation from disappearing; it
+does not snapshot bytes in persistently mapped memory.  Luft made that gap
+visible as rare one-frame seams: the CPU overwrote one shared camera uniform
+while an older Vulkan submission was still transforming triangles from it.
+Waiting for =submitted-work-done= before each upload removed the corruption,
+but also serialized CPU and GPU work.
+
+=canvas-frame-resource-cache= expresses the narrower rule both presentation
+backends already make available.  =canvas-frame-resource-key= identifies a
+stable drawable or swapchain slot.  After that slot is acquired again, its
+previous presentation has completed far enough that application-owned mapped
+buffers associated with the slot may be overwritten.  The cache constructs a
+value on first acquisition and returns the same value on later acquisitions;
+eviction calls the application's releaser before forgetting ownership, while
+a failed release remains present for retry.  A value may be one buffer or a
+cohort of buffers and the bind groups which name them.
+
+Luft now keeps camera and flame-effect uniforms per presentation slot.  Every
+camera-dependent scene, shadow, temporal, flame, and presentation bind group
+is derived inside the same slot state.  Target or residency publication drops
+those derived groups while retaining the slot's upload buffers, and the
+ordinary HAL retirement ledger makes their immediate logical destruction safe.
+The diagnostic whole-queue wait is gone.
+
+Luvcraft's earlier drawable-keyed state is now owned through the same helper.
+Its camera, post, particle, critter, physics, held-item, crosshair, and software
+cursor streams are slot-local.  The independently animated first-person body,
+agent bodies, and fireworks each own their own small frame-resource cache;
+their CPU arrays may change every frame, but GPU publication writes only the
+newly acquired slot's buffer.  Static populations and transactional replacement
+paths still allocate, fill, publish, and submission-defer the predecessor
+instead of multiplying them per frame.
+
+This is intentionally not a promise that arbitrary =write-buffer= calls are
+safe.  Offscreen callers must provide an equivalent completion boundary, and a
+future debug check may reject writes whose buffer has a newer submission than
+the queue frontier.  The reusable pattern closes the ordinary presentation
+case without conflating allocation reclamation, mapped-content exclusion, and
+command access barriers.
+
 * The remaining questions are local and testable
 :PROPERTIES:
 :ID: V3N7QJ
@@ -357,7 +403,8 @@ Its open proofs are adjacent to working mechanisms:
 - make dependency capture completeness visible when a new command kind is
   added;
 - grow texture state into the access-hazard model demanded by real workloads;
-- give host writes and reads a resource-specific exclusion protocol;
+- diagnose host writes which lack either presentation-slot ownership or an
+  explicit completion boundary;
 - decide what adapter selection, capabilities, device loss, and initialization
   guarantees luv actually wants; and
 - reclaim completed records during long idle periods only if measurement says

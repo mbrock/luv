@@ -12,9 +12,6 @@
 (defparameter *vulkan-temporal-history-weight* 0.97f0
   "Baseline retained history for Luft's inspectable Vulkan temporal resolve.")
 
-(defparameter *vulkan-temporal-depth-tolerance* 0.045f0
-  "Maximum log-view-depth disagreement accepted by Vulkan temporal history.")
-
 (defparameter *flame-time* nil
   "Optional deterministic torch-flame time in seconds.
 
@@ -2100,6 +2097,9 @@ ambiguously co-owned, or retired by a population rollback."
    ;; with another generation's order or attachment buffers.
    (publication :initarg :publication :accessor renderer-publication)
    (camera-buffer :initarg :camera-buffer :accessor renderer-camera-buffer)
+   (frame-resources
+    :initform (make-canvas-frame-resource-cache)
+    :reader renderer-frame-resources)
    (layout :initarg :layout :accessor renderer-layout)
    (vertex-module :initarg :vertex-module :accessor renderer-vertex-module)
    (fragment-module :initarg :fragment-module :accessor renderer-fragment-module)
@@ -2212,6 +2212,199 @@ ambiguously co-owned, or retired by a population rollback."
    (previous-view :initform nil :accessor renderer-previous-view)
    (history-valid-p :initform nil :accessor renderer-history-valid-p)
    (history-used-p :initform nil :accessor renderer-history-used-p)))
+
+(defstruct (renderer-frame-state
+             (:constructor %make-renderer-frame-state
+                 (&key camera-buffer flame-effect-buffer)))
+  "Mutable uploads and dependent bindings local to one presentation slot."
+  camera-buffer
+  flame-effect-buffer
+  (bind-groups (make-hash-table :test #'equal)))
+
+(defun make-renderer-frame-state (renderer)
+  "Allocate one complete mutable upload cohort for RENDERER."
+  (let ((camera nil)
+        (effect nil)
+        (completed-p nil))
+    (unwind-protect
+         (progn
+           (setf camera
+                 (create
+                  (renderer-device renderer)
+                  (make-buffer-descriptor
+                   :label "luft presentation-slot camera state"
+                   :size 432 :usage '(:uniform :copy-dst)))
+                 effect
+                 (create
+                  (renderer-device renderer)
+                  (make-buffer-descriptor
+                   :label "luft presentation-slot flame effect"
+                   :size 16 :usage '(:uniform :copy-dst))))
+           (setf completed-p t)
+           (%make-renderer-frame-state
+            :camera-buffer camera :flame-effect-buffer effect))
+      (unless completed-p
+        (when effect (ignore-errors (destroy effect)))
+        (when camera (ignore-errors (destroy camera)))))))
+
+(defun destroy-renderer-frame-state (state)
+  "Release one presentation-slot upload cohort and its derived bindings."
+  (with-release-report
+    (maphash
+     (lambda (key group)
+       (declare (ignore key))
+       (releasing :frame-bind-group (destroy group)))
+     (renderer-frame-state-bind-groups state))
+    (clrhash (renderer-frame-state-bind-groups state))
+    (releasing :frame-flame-effect-buffer
+      (destroy (renderer-frame-state-flame-effect-buffer state)))
+    (releasing :frame-camera-buffer
+      (destroy (renderer-frame-state-camera-buffer state))))
+  (values))
+
+(defun clear-renderer-frame-bind-groups (renderer)
+  "Drop bindings derived from a superseded target or scene generation."
+  (map-canvas-frame-resources
+   (lambda (state key)
+     (declare (ignore key))
+     (let ((groups (renderer-frame-state-bind-groups state)))
+       (with-release-report
+         (dolist (binding-key
+                   (loop for key being the hash-keys of groups collect key))
+           (releasing (list :frame-bind-group binding-key)
+             (destroy (gethash binding-key groups))
+             (remhash binding-key groups))))))
+   (renderer-frame-resources renderer))
+  renderer)
+
+(defun renderer-frame-bind-group (renderer frame key label layout entries)
+  "Return FRAME's binding KEY, creating it transactionally from ENTRIES."
+  (let ((groups (renderer-frame-state-bind-groups frame)))
+    (or (gethash key groups)
+        (let ((group
+                (create
+                 (renderer-device renderer)
+                 (make-bind-group-descriptor
+                  :label label :layout layout :entries entries))))
+          (setf (gethash key groups) group)))))
+
+(defun renderer-frame-state-for (renderer context surface-texture)
+  "Acquire RENDERER's safely reusable mutable state for SURFACE-TEXTURE."
+  (canvas-frame-resource
+   (renderer-frame-resources renderer) context surface-texture
+   (lambda (key surface)
+     (declare (ignore key surface))
+     (make-renderer-frame-state renderer))))
+
+(defun renderer-frame-resident-bind-group (renderer frame resident shadow-p)
+  "Bind one immutable resident population to FRAME's camera upload."
+  (let ((camera (renderer-frame-state-camera-buffer frame)))
+    (if shadow-p
+        (renderer-frame-bind-group
+         renderer frame (list :resident-shadow resident)
+         "luft frame-local resident shadow population"
+         (renderer-shadow-layout renderer)
+         `((:binding 0 :resource ,(resident-population-instance-buffer resident))
+           (:binding 1 :resource ,(resident-population-template-buffer resident))
+           (:binding 2 :resource ,camera)))
+        (renderer-frame-bind-group
+         renderer frame (list :resident-scene resident
+                              (renderer-material-buffer renderer)
+                              (renderer-shadow-view renderer))
+         "luft frame-local resident site population"
+         (renderer-layout renderer)
+         `((:binding 0 :resource ,(resident-population-instance-buffer resident))
+           (:binding 1 :resource ,(resident-population-template-buffer resident))
+           (:binding 2 :resource ,camera)
+           (:binding 3 :resource ,(renderer-material-buffer renderer))
+           (:binding 4 :resource ,(renderer-shadow-view renderer))
+           (:binding 5 :resource ,(renderer-shadow-sampler renderer))
+           (:binding 6 :resource ,(resident-population-light-buffer resident)))))))
+
+(defun renderer-frame-torch-body-bind-group (renderer frame shadow-p)
+  (let ((camera (renderer-frame-state-camera-buffer frame))
+        (instances (renderer-flame-instance-buffer renderer)))
+    (if shadow-p
+        (renderer-frame-bind-group
+         renderer frame (list :torch-shadow instances)
+         "luft frame-local torch-body shadows"
+         (renderer-shadow-layout renderer)
+         `((:binding 0 :resource ,instances)
+           (:binding 1 :resource ,(renderer-torch-body-vertex-buffer renderer))
+           (:binding 2 :resource ,camera)))
+        (renderer-frame-bind-group
+         renderer frame (list :torch-scene instances
+                              (renderer-material-buffer renderer)
+                              (renderer-shadow-view renderer))
+         "luft frame-local torch bodies"
+         (renderer-torch-body-layout renderer)
+         `((:binding 0 :resource ,instances)
+           (:binding 1 :resource ,(renderer-torch-body-vertex-buffer renderer))
+           (:binding 2 :resource ,camera)
+           (:binding 3 :resource ,(renderer-material-buffer renderer))
+           (:binding 4 :resource ,(renderer-shadow-view renderer))
+           (:binding 5 :resource ,(renderer-shadow-sampler renderer)))))))
+
+(defun renderer-frame-sky-bind-group (renderer frame)
+  (renderer-frame-bind-group
+   renderer frame '(:sky) "luft frame-local HDR sky"
+   (renderer-sky-layout renderer)
+   `((:binding 0 :resource ,(renderer-frame-state-camera-buffer frame)))))
+
+(defun renderer-frame-player-bind-group (renderer frame)
+  (renderer-frame-bind-group
+   renderer frame (list :player (renderer-shadow-view renderer))
+   "luft frame-local walking player SDF"
+   (renderer-player-sdf-layout renderer)
+   `((:binding 0 :resource ,(renderer-frame-state-camera-buffer frame))
+     (:binding 1 :resource ,(renderer-shadow-view renderer))
+     (:binding 2 :resource ,(renderer-shadow-sampler renderer)))))
+
+(defun renderer-frame-lattice-bind-group (renderer frame slot)
+  (renderer-frame-bind-group
+   renderer frame (list :lattice slot (mesh-slot-lattice-point-buffer slot))
+   "luft frame-local eighth-cell lattice points"
+   (renderer-lattice-point-layout renderer)
+   `((:binding 0 :resource ,(mesh-slot-lattice-point-buffer slot))
+     (:binding 1 :resource ,(renderer-frame-state-camera-buffer frame)))))
+
+(defun renderer-frame-temporal-bind-group (renderer frame)
+  (renderer-frame-bind-group
+   renderer frame
+   (list :temporal (renderer-scene-view renderer)
+         (renderer-motion-view renderer) (renderer-history-view renderer))
+   "luft frame-local temporal resolve inputs"
+   (renderer-temporal-layout renderer)
+   `((:binding 0 :resource ,(renderer-scene-view renderer))
+     (:binding 1 :resource ,(renderer-motion-view renderer))
+     (:binding 2 :resource ,(renderer-history-view renderer))
+     (:binding 3 :resource ,(renderer-sampler renderer))
+     (:binding 4 :resource ,(renderer-frame-state-camera-buffer frame)))))
+
+(defun renderer-frame-flame-bind-group (renderer frame)
+  (renderer-frame-bind-group
+   renderer frame
+   (list :flame (renderer-flame-instance-buffer renderer)
+         (renderer-depth-view renderer))
+   "luft frame-local post-temporal torch flames"
+   (renderer-flame-layout renderer)
+   `((:binding 0 :resource ,(renderer-flame-instance-buffer renderer))
+     (:binding 1 :resource ,(renderer-frame-state-camera-buffer frame))
+     (:binding 2 :resource ,(renderer-frame-state-flame-effect-buffer frame))
+     (:binding 3 :resource ,(renderer-depth-view renderer))
+     (:binding 4 :resource ,(renderer-flame-depth-sampler renderer)))))
+
+(defun renderer-frame-present-bind-group (renderer frame)
+  (renderer-frame-bind-group
+   renderer frame
+   (list :present (renderer-composite-view renderer)
+         (renderer-depth-view renderer))
+   "luft frame-local HDR presentation"
+   (renderer-present-layout renderer)
+   `((:binding 0 :resource ,(renderer-composite-view renderer))
+     (:binding 1 :resource ,(renderer-sampler renderer))
+     (:binding 2 :resource ,(renderer-depth-view renderer))
+     (:binding 3 :resource ,(renderer-frame-state-camera-buffer frame)))))
 
 (defun renderer-extent (renderer)
   (renderer-target-generation-extent
@@ -2644,8 +2837,7 @@ subpixel samples but does not claim a stable reconstruction-upscaling filter."
                            (:binding 1 :resource ,motion-view)
                            (:binding 2 :resource ,history-view)
                            (:binding 3 :resource ,(renderer-sampler renderer))
-                           (:binding 4 :resource ,depth-view)
-                           (:binding 5
+                           (:binding 4
                             :resource ,(renderer-camera-buffer renderer))))))))
              (setf composite
                    (create
@@ -2732,6 +2924,9 @@ subpixel samples but does not claim a stable reconstruction-upscaling filter."
            ;; is visible, and the old resources remain live until afterward.
            (setf (renderer-target-generation renderer) candidate
                  installed-p t)
+           (with-release-warnings
+             (releasing :superseded-frame-bindings
+               (clear-renderer-frame-bind-groups renderer)))
            (setf (renderer-previous-view renderer) nil
                  (renderer-history-valid-p renderer) nil
                  (renderer-history-used-p renderer) nil)
@@ -3438,8 +3633,11 @@ exactly when its complete old descriptor vector is a prefix of the new one."
              ;; renderer transaction; both candidates are complete already.
              (setf (renderer-publication renderer) staged-publication
                    (renderer-target-generation renderer)
-                   staged-target-generation)
-             (setf installed-p t)
+                   staged-target-generation
+                   installed-p t)
+             (with-release-warnings
+               (releasing :superseded-frame-bindings
+                 (clear-renderer-frame-bind-groups renderer)))
              ;; Residency changes invalidate the previous color/depth/motion
              ;; correspondence.  The next temporal encode must reset rather
              ;; than blend arrivals with history in which they did not exist,
@@ -4001,8 +4199,7 @@ exactly when its complete old descriptor vector is a prefix of the new one."
                                 (:binding 1 :type :texture)
                                 (:binding 2 :type :texture)
                                 (:binding 3 :type :sampler)
-                                (:binding 4 :type :texture)
-                                (:binding 5 :type :uniform-buffer))))
+                                (:binding 4 :type :uniform-buffer))))
                    temporal-fragment-module
                    (create
                     device
@@ -4286,22 +4483,21 @@ exactly when its complete old descriptor vector is a prefix of the new one."
             (renderer-frame-index renderer)))))
 
 (defun encode-renderer-frame
-    (renderer encoder surface-texture extent camera-uniform-data
+    (renderer frame encoder surface-texture extent camera-uniform-data
      &key jitter view player-p construction-p overlay-encoder
        (effect-time
          (or *flame-time* (/ (renderer-frame-index renderer) 60.0))))
   (ensure-renderer-extent renderer extent)
   (when (renderer-shader-temporal-p renderer)
     ;; These W components are padding to every geometry consumer.  The Vulkan
-    ;; resolve reads them as validity, accumulation weight, and depth tolerance.
+    ;; resolve reads them as its per-frame validity and accumulation weight.
     (setf (aref camera-uniform-data 27)
           (if (renderer-history-valid-p renderer) 1.0f0 0.0f0)
-          (aref camera-uniform-data 31) *vulkan-temporal-history-weight*
-          (aref camera-uniform-data 35) *vulkan-temporal-depth-tolerance*))
-  (write-buffer (renderer-camera-buffer renderer) camera-uniform-data)
+          (aref camera-uniform-data 31) *vulkan-temporal-history-weight*))
+  (write-buffer (renderer-frame-state-camera-buffer frame) camera-uniform-data)
   (check-type effect-time real)
   (write-buffer
-   (renderer-flame-effect-buffer renderer)
+   (renderer-frame-state-flame-effect-buffer frame)
    (torch-flame-effect-uniform-data (coerce effect-time 'single-float)))
   (let ((shadow-pass
             (begin-render-pass
@@ -4320,12 +4516,14 @@ exactly when its complete old descriptor vector is a prefix of the new one."
                  (gethash key (renderer-mesh-slots renderer)))))
           (draw-resident-opaque-population
            shadow-pass resident
-           (resident-population-shadow-bind-group resident))))
+           (renderer-frame-resident-bind-group
+            renderer frame resident t))))
       (when (plusp (renderer-flame-instance-count renderer))
         (set-pipeline shadow-pass
                       (renderer-torch-body-shadow-pipeline renderer))
         (set-bind-group shadow-pass 0
-                        (renderer-torch-body-shadow-bind-group renderer))
+                        (renderer-frame-torch-body-bind-group
+                         renderer frame t))
         (draw shadow-pass (torch-body-vertex-count)
               (renderer-flame-instance-count renderer)))
       (end-pass shadow-pass))
@@ -4357,7 +4555,7 @@ exactly when its complete old descriptor vector is a prefix of the new one."
     ;; the selected temporal implementation reconstructs it, and the exposure
     ;; probe meters the same pixels presentation will grade.
     (set-pipeline pass (renderer-sky-pipeline renderer))
-    (set-bind-group pass 0 (renderer-sky-bind-group renderer))
+    (set-bind-group pass 0 (renderer-frame-sky-bind-group renderer frame))
     (draw pass 3)
     (set-pipeline pass (renderer-pipeline renderer))
     (dolist (key (renderer-slot-order renderer))
@@ -4365,10 +4563,12 @@ exactly when its complete old descriptor vector is a prefix of the new one."
               (mesh-slot-resident
                (gethash key (renderer-mesh-slots renderer)))))
         (draw-resident-opaque-population
-         pass resident (resident-population-bind-group resident))))
+         pass resident
+         (renderer-frame-resident-bind-group renderer frame resident nil))))
     (when (plusp (renderer-flame-instance-count renderer))
       (set-pipeline pass (renderer-torch-body-pipeline renderer))
-      (set-bind-group pass 0 (renderer-torch-body-bind-group renderer))
+      (set-bind-group pass 0
+                      (renderer-frame-torch-body-bind-group renderer frame nil))
       (draw pass (torch-body-vertex-count)
             (renderer-flame-instance-count renderer)))
     (set-pipeline pass (renderer-translucent-pipeline renderer))
@@ -4377,10 +4577,11 @@ exactly when its complete old descriptor vector is a prefix of the new one."
               (mesh-slot-resident
                (gethash key (renderer-mesh-slots renderer)))))
         (draw-resident-translucent-population
-         pass resident (resident-population-bind-group resident))))
+         pass resident
+         (renderer-frame-resident-bind-group renderer frame resident nil))))
     (when player-p
       (set-pipeline pass (renderer-player-sdf-pipeline renderer))
-      (set-bind-group pass 0 (renderer-player-sdf-bind-group renderer))
+      (set-bind-group pass 0 (renderer-frame-player-bind-group renderer frame))
       (draw pass 6 2))
     (when construction-p
       ;; Populate at most one diagnostic slot per frame. The overlay is a
@@ -4395,7 +4596,9 @@ exactly when its complete old descriptor vector is a prefix of the new one."
       (dolist (key (renderer-slot-order renderer))
         (let ((slot (gethash key (renderer-mesh-slots renderer))))
           (when (plusp (mesh-slot-lattice-point-count slot))
-            (set-bind-group pass 0 (mesh-slot-lattice-point-group slot))
+            (set-bind-group pass 0
+                            (renderer-frame-lattice-bind-group
+                             renderer frame slot))
             (draw pass 6 (mesh-slot-lattice-point-count slot))))))
     (when (renderer-metalfx-temporal-p renderer)
       (signal-temporal-scaler-inputs pass
@@ -4426,8 +4629,6 @@ exactly when its complete old descriptor vector is a prefix of the new one."
                          :texture-binding)
         (prepare-texture encoder (renderer-motion-texture renderer)
                          :texture-binding)
-        (prepare-texture encoder (renderer-depth-texture renderer)
-                         :texture-binding)
         (unless history-valid-p
           (encode encoder
                   (make-gpu-clear-texture-command
@@ -4446,7 +4647,7 @@ exactly when its complete old descriptor vector is a prefix of the new one."
                      :clear-value #(0.0 0.0 0.0 1.0)))))))
           (set-pipeline resolve-pass (renderer-temporal-pipeline renderer))
           (set-bind-group resolve-pass 0
-                          (renderer-temporal-bind-group renderer))
+                          (renderer-frame-temporal-bind-group renderer frame))
           (draw resolve-pass 3)
           (end-pass resolve-pass))
         ;; One explicit full-resolution history keeps the extent cohort small:
@@ -4490,7 +4691,8 @@ exactly when its complete old descriptor vector is a prefix of the new one."
       (draw composite-pass 3)
       (when (plusp (renderer-flame-instance-count renderer))
         (set-pipeline composite-pass (renderer-flame-pipeline renderer))
-        (set-bind-group composite-pass 0 (renderer-flame-bind-group renderer))
+        (set-bind-group composite-pass 0
+                        (renderer-frame-flame-bind-group renderer frame))
         (draw composite-pass 6 (renderer-flame-instance-count renderer)))
       (end-pass composite-pass))
     (prepare-texture encoder (renderer-composite-texture renderer)
@@ -4505,7 +4707,8 @@ exactly when its complete old descriptor vector is a prefix of the new one."
               `((:view ,surface-texture :load-op :clear :store-op :store
                  :clear-value #(0.0 0.0 0.0 1.0)))))))
       (set-pipeline present-pass (renderer-present-pipeline renderer))
-      (set-bind-group present-pass 0 (renderer-present-bind-group renderer))
+      (set-bind-group present-pass 0
+                      (renderer-frame-present-bind-group renderer frame))
       (draw present-pass 3)
       ;; Both MetalFX and the direct HDR path publish here.  The atelier
       ;; overlay remains later than tone mapping and glow in either case.
@@ -4517,6 +4720,8 @@ exactly when its complete old descriptor vector is a prefix of the new one."
   renderer)
 
 (defun destroy-renderer (renderer)
+  (destroy-canvas-frame-resource-cache
+   (renderer-frame-resources renderer) #'destroy-renderer-frame-state)
   (destroy-renderer-targets renderer)
   (loop for slot being the hash-values of (renderer-mesh-slots renderer)
         do (%destroy-mesh-slot slot))
