@@ -469,8 +469,8 @@ code".
 The first renderer assigned layout with a table of head counts and a
 growing set of role strings and special cases; =let= bindings drawn as a
 two-column grid, =loop= keywords starting rows, and lambda lists whose
-sublists are =(var default)= clauses made that untenable.  The design that
-replaced it follows clos-design: a =layout= is an object, and a list is
+sublists are =(var default)= clauses made that untenable.  The replacement
+makes a =layout= an object, and a list is
 drawn by the layout that its *operator* and the *role its parent gave it*
 select together (dispatch on the relationship, not on one participant).
 
@@ -674,8 +674,8 @@ the hand table to true overrides.  Alongside, the renderer's remaining
 =typecase= and =typep= on layout classes (=lambda-list-of=,
 =docstring-position-p=, =layout-pairs-index=, the =data-callee= test)
 become generics with methods on the layouts, and =child-role= answers a
-placement and a child layout rather than a space-separated role string
-that =role-p= parses back, per =clos-design=.
+placement and a child layout directly rather than a space-separated role
+string that =role-p= parses back.
 
 /Done when./ Each item lands as its own small commit with the source
 pages checked in the browser; the layout table is shorter than today;
@@ -909,8 +909,8 @@ association between a class or generic function and its wiki figures
 structural: =(defclass ... (:metaclass documented-class) (:figures LNRY72))=
 or a =wiki:figures= slot on a metaobject, so the browser and the site can ask
 an object which figures explain it and a figure which definitions realize
-it.  clos-design's rule applies: use the MOP only when the definition itself
-carries the meaning.  Vague on purpose until the package and browser exist.
+it.  The MOP belongs here only when the definition itself carries the meaning.
+Vague on purpose until the package and browser exist.
 
 * IDEA Source-anchored file links
 :PROPERTIES:
