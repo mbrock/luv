@@ -444,7 +444,10 @@ star corpus; signal that boundary explicitly instead of silently welding it."
   ;; :AIR, :SOLID, or the supplied chain's CHAIN-CHUNK-FACTS, each obtained
   ;; from one MISSING-CHUNK signal and cached for every later probe into
   ;; that chunk.
-  (resolutions (make-hash-table :test #'eql) :type hash-table :read-only t))
+  (resolutions (make-hash-table :test #'eql) :type hash-table :read-only t)
+  ;; Chunk key to the chain supplied by USE-CHUNK, retained so material
+  ;; lanes can key their per-chain cache by the neighbor's chain identity.
+  (chunk-chains (make-hash-table :test #'eql) :type hash-table :read-only t))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Chain-local occupancy facts
@@ -629,6 +632,149 @@ may be domain-clipped without copying; nothing may mutate the field."
                       (setf bits (logand bits (1- bits))))))))))))
     facts))
 
+(declaim (inline %chain-facts-cell-rank))
+(defun %chain-facts-cell-rank (facts x y z)
+  "The chain rank of the occupied cell at world X Y Z under FACTS.
+
+The rank is the CSR start of the cell's column plus the population of its
+fiber below Z.  The caller asserts occupancy; an unoccupied cell yields the
+rank its insertion would have."
+  (declare (optimize (speed 3) (safety 1))
+           (type chain-chunk-facts facts)
+           (type fixnum x y z))
+  (let* ((column (logior (ash (logand y (1- +chunk-size+)) +chunk-bits+)
+                         (logand x (1- +chunk-size+))))
+         (start (aref (chain-chunk-facts-column-starts facts) column))
+         (words (chain-chunk-facts-words facts))
+         (base (%chain-facts-fiber-base x y))
+         (word-index (ash z -6))
+         (count 0))
+    (declare (type fixnum count))
+    (dotimes (word word-index)
+      (incf count (logcount (aref words (+ base word)))))
+    (the fixnum
+         (+ start count
+            (logcount (logand (aref words (+ base word-index))
+                              (1- (ash 1 (logand z 63)))))))))
+
+(defun map-chain-facts-cells-ranked (function facts)
+  "Call FUNCTION over every occupied cell of FACTS in chain-rank order.
+
+FUNCTION receives the rank, world X, Y, and Z, and BELOW-OCCUPIED-P: whether
+the cell at Z minus one is also occupied.  Ranks ascend from zero in exactly
+the chain's site order (column by column, Z ascending within a column), so a
+consumer filling a chain-rank lane may write sequentially and may resolve the
+cell below at the previous rank whenever BELOW-OCCUPIED-P is true."
+  (declare (optimize (speed 3) (safety 1))
+           (type function function)
+           (type chain-chunk-facts facts))
+  (let ((key (chain-chunk-facts-chunk-key facts))
+        (rank 0))
+    (declare (type fixnum rank))
+    (unless (minusp key)
+      (let ((x0 (chunk-origin-x key))
+            (y0 (chunk-origin-y key))
+            (words (chain-chunk-facts-words facts)))
+        (dotimes (local-y +chunk-size+)
+          (dotimes (local-x +chunk-size+)
+            (let ((base (%chain-facts-fiber-base local-x local-y))
+                  (previous-z -2))
+              (declare (type fixnum previous-z))
+              (dotimes (word +occupancy-fiber-word-count+)
+                (let ((bits (aref words (+ base word))))
+                  (loop while (plusp bits) do
+                    (let* ((bit (1- (integer-length (logand bits (- bits)))))
+                           (z (+ (* word 64) bit)))
+                      (funcall function rank
+                               (+ x0 local-x) (+ y0 local-y) z
+                               (= previous-z (1- z)))
+                      (setf previous-z z)
+                      (incf rank)
+                      (setf bits (logand bits (1- bits))))))))))))
+    facts))
+
+;;; ---------------------------------------------------------------------------
+;;; Compiled material lanes
+;;;
+;;; A material source lets the production width-one query resolve every
+;;; contributor stock through dense chain-rank lanes instead of authored
+;;; hashes.  The caller supplies the authored side once: a snapshot key
+;;; identifying the immutable authored-material state, a fill function that
+;;; writes one packed entry per occupied cell in chain-rank order, and the
+;;; dense face-stock table those entries index.  An entry packs the cell's
+;;; placement offset above one bit selecting the foundation face:
+;;;
+;;;   entry = (placement-offset << 1) | foundation-face-bit
+;;;
+;;; At query time a contributor's stock is the face-stock table at
+;;; placement-offset * FACE-STRIDE plus the face index: FOUNDATION-FACE-INDEX
+;;; when the entry's low bit is set, otherwise twice the axis number plus one
+;;; for a negative outward normal.  Lanes cache per chain, keyed by the chain
+;;; itself (never by a facts record, whose identity may duplicate under
+;;; concurrent derivation) and validated against the snapshot key, so a
+;;; material-only edit rebuilds lanes while chain facts survive.
+
+(defstruct (width-one-material-source
+             (:constructor make-width-one-material-source)
+             (:copier nil))
+  "The authored-material side of compiled width-one material lanes."
+  (snapshot-key nil :read-only t)
+  (fill-function (error "A material source needs a fill function.")
+   :type function :read-only t)
+  (face-stocks #.(make-array 0 :element-type '(unsigned-byte 16))
+   :type (simple-array (unsigned-byte 16) (*)) :read-only t)
+  (face-stride 7 :type (integer 1 64) :read-only t)
+  (foundation-face-index 6 :type (integer 0 63) :read-only t))
+
+(defstruct (chain-material-lane
+             (:constructor %make-chain-material-lane (snapshot-key entries))
+             (:copier nil))
+  "One chain's compiled material entries under one authored snapshot."
+  (snapshot-key nil :read-only t)
+  (entries #.(make-array 0 :element-type '(unsigned-byte 32))
+           :type (simple-array (unsigned-byte 32) (*)) :read-only t))
+
+(defvar *chain-material-lane-table*
+  (make-hash-table :test #'eq :weakness :key :synchronized t)
+  "Weak synchronized EQ table from immutable chains to material lanes.")
+
+;; Advisory reuse evidence, like the chain-facts counters above.
+(defvar *material-lane-build-count* 0
+  "Count of material lane fills, for reuse evidence in benchmarks.")
+(defvar *material-lane-hit-count* 0
+  "Count of material lane cache hits, for reuse evidence in benchmarks.")
+
+(defun %reset-material-lanes (&key clear-cache)
+  "Zero the lane counters; with CLEAR-CACHE, also drop every cached lane."
+  (setf *material-lane-build-count* 0
+        *material-lane-hit-count* 0)
+  (when clear-cache
+    (clrhash *chain-material-lane-table*))
+  (values))
+
+(defun %chain-material-lane (chain source)
+  "CHAIN's material lane under SOURCE's snapshot, filling it when absent.
+
+A cached lane is current only while its snapshot key remains EQ to the
+source's; an authored edit publishes a new snapshot key and the next query
+refills the lane over unchanged chain facts."
+  (let ((lane (gethash chain *chain-material-lane-table*)))
+    (cond ((and lane
+                (eq (chain-material-lane-snapshot-key lane)
+                    (width-one-material-source-snapshot-key source)))
+           (incf *material-lane-hit-count*)
+           lane)
+          (t
+           (let ((entries (make-array (chain-count chain)
+                                      :element-type '(unsigned-byte 32))))
+             (funcall (width-one-material-source-fill-function source)
+                      (%chain-chunk-facts chain) entries)
+             (incf *material-lane-build-count*)
+             (setf (gethash chain *chain-material-lane-table*)
+                   (%make-chain-material-lane
+                    (width-one-material-source-snapshot-key source)
+                    entries)))))))
+
 (defun %materialize-occupancy (solid x0 x1 y0 y1)
   "Validate SOLID's cells and materialize them over the given cell box."
   (declare (type fixnum x0 x1 y0 y1))
@@ -675,6 +821,8 @@ may be domain-clipped without copying; nothing may mutate the field."
                             (= (chain-chunk-facts-chunk-key facts) key))
                   (error "Chain with chunk key ~D cannot resolve chunk ~D."
                          (chain-chunk-facts-chunk-key facts) key))
+                (setf (gethash key (occupancy-field-chunk-chains field))
+                      chain)
                 facts))
             (treat-as-air ()
               :report "Treat the whole chunk as air."

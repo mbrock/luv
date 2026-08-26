@@ -611,6 +611,114 @@
              material-count write))
     workspace))
 
+(defun %materialize-width-one-query-lane-materials
+    (workspace chunk chunk-key facts field material-source algebra
+     x0 y0 material-count)
+  "Evaluate the material dimension through compiled chain-rank lanes.
+
+Each contributor's cell resolves to a rank in its chunk's chain, the chain's
+lane entry at that rank names the authored placement and foundation face,
+and the dense face-stock table finishes the lookup without touching authored
+hashes.  Contributors classify by exact chunk key: boundary sites sample
+cells one step past the owner box on every side, and each such neighbor's
+chain identity was recorded by the occupancy FIELD when its chunk resolved."
+  (declare (optimize (speed 3) (safety 1))
+           (type width-one-query-workspace workspace)
+           (type chain chunk)
+           (type fixnum chunk-key)
+           (type chain-chunk-facts facts)
+           (type occupancy-field field)
+           (type width-one-material-source material-source)
+           (type compiled-chamfer-algebra algebra)
+           (type (integer 0 #.(ash 1 17)) x0 y0)
+           (type fixnum material-count))
+  (let* ((sites (width-one-query-workspace-sites workspace))
+         (stocks
+           (%query-ub16-capacity
+            (width-one-query-workspace-stocks workspace) material-count))
+         (summaries
+           (%query-ub16-capacity
+            (width-one-query-workspace-summaries workspace) material-count))
+         (face-stocks
+           (width-one-material-source-face-stocks material-source))
+         (face-stride
+           (width-one-material-source-face-stride material-source))
+         (foundation-face-index
+           (width-one-material-source-foundation-face-index material-source))
+         (owner-entries
+           (chain-material-lane-entries
+            (%chain-material-lane chunk material-source)))
+         (neighbor-key -1)
+         (neighbor-facts facts)
+         (neighbor-entries owner-entries)
+         (write 0))
+    (declare (type (simple-array (unsigned-byte 16) (*)) stocks summaries)
+             (type (simple-array (unsigned-byte 32) (*))
+                   owner-entries neighbor-entries)
+             (type chain-chunk-facts neighbor-facts)
+             (type fixnum neighbor-key write))
+    (setf (width-one-query-workspace-stocks workspace) stocks
+          (width-one-query-workspace-summaries workspace) summaries)
+    (dotimes (site-row (width-one-query-sites-count sites))
+      (let* ((star-mask (aref (width-one-query-sites-mask sites) site-row))
+             (site-x (+ x0 (aref (width-one-query-sites-x sites) site-row)))
+             (site-y (+ y0 (aref (width-one-query-sites-y sites) site-row)))
+             (site-z (aref (width-one-query-sites-z sites) site-row))
+             (pattern (svref *width-one-vertex-pattern-table* star-mask)))
+        (loop for contributor across
+              (width-one-vertex-pattern-contributors pattern)
+              unless (minusp contributor) do
+                (let* ((sample (ldb (byte 3 0) contributor))
+                       (axis-number (ldb (byte 2 3) contributor))
+                       (cell-x (- site-x (if (logbitp 0 sample) 0 1)))
+                       (cell-y (- site-y (if (logbitp 1 sample) 0 1)))
+                       (cell-z (- site-z (if (logbitp 2 sample) 0 1)))
+                       (cell-key (chunk-key-at cell-x cell-y))
+                       (cell-facts facts)
+                       (entries owner-entries))
+                  (declare (type (simple-array (unsigned-byte 32) (*))
+                                 entries))
+                  (unless (= cell-key chunk-key)
+                    ;; Halo contributors cluster by chunk, so one memoized
+                    ;; neighbor covers almost every consecutive lookup.
+                    (unless (= cell-key neighbor-key)
+                      (let ((neighbor
+                              (gethash
+                               cell-key
+                               (occupancy-field-chunk-chains field))))
+                        (unless neighbor
+                          (error
+                           "No chain recorded for halo chunk ~D of ~D."
+                           cell-key chunk-key))
+                        (setf neighbor-key cell-key
+                              neighbor-facts (%chain-chunk-facts neighbor)
+                              neighbor-entries
+                              (chain-material-lane-entries
+                               (%chain-material-lane
+                                neighbor material-source)))))
+                    (setf cell-facts neighbor-facts
+                          entries neighbor-entries))
+                  (let* ((rank (%chain-facts-cell-rank
+                                cell-facts cell-x cell-y cell-z))
+                         (entry (aref entries rank))
+                         (face-index
+                           (if (logbitp 0 entry)
+                               foundation-face-index
+                               (+ (* 2 axis-number)
+                                  (if (logbitp 5 contributor) 0 1))))
+                         (stock
+                           (aref face-stocks
+                                 (+ (* (ash entry -1) face-stride)
+                                    face-index))))
+                    (setf (aref stocks write) stock
+                          (aref summaries write)
+                          (%compiled-chamfer-stock-summary algebra stock))
+                    (incf write))))))
+    (unless (= write material-count)
+      (error "Width-one query planned ~D material rows, wrote ~D."
+             material-count write))
+    workspace))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Projection into the renderer ABI
 
@@ -802,7 +910,8 @@
 ;;; Chunk-only entry point
 
 (defun %mesh-width-one-chunk-query
-    (chunk chunk-key stock-function algebra outside-domain-policy)
+    (chunk chunk-key stock-function algebra outside-domain-policy
+     material-source)
   (let* ((domain (chain-domain chunk))
          (grid-x (chunk-key-x chunk-key))
          (grid-y (chunk-key-y chunk-key))
@@ -836,8 +945,12 @@
         (multiple-value-bind (material-count singular-count)
             (%plan-width-one-query
              packed-sites workspace x0 x1 y0 y1 ox1 oy1)
-          (%materialize-width-one-query-materials
-           workspace domain stock-function algebra x0 y0 material-count)
+          (if material-source
+              (%materialize-width-one-query-lane-materials
+               workspace chunk chunk-key facts field material-source algebra
+               x0 y0 material-count)
+              (%materialize-width-one-query-materials
+               workspace domain stock-function algebra x0 y0 material-count))
           (%finish-width-one-query
            workspace domain algebra singular-count x0 y0))))))
 
@@ -848,10 +961,14 @@
           (chamfer-stock-function (lambda (stocks) (first stocks)))
           chamfer-algebra
           outside-domain-policy
+          material-source
           (bevel-width +mesh-bevel-width+))
   "Mesh one streaming chunk, retaining the general mesher as its oracle.
 
 Width one plus a compiled CHAMFER-ALGEBRA runs the finite columnar query.
+A MATERIAL-SOURCE additionally compiles the authored materials into
+chain-rank lanes, replacing per-contributor stock-function calls with dense
+array reads; the stock functions remain the reference path and the fallback.
 Other widths and callers without a closed material algebra use the retained
 surface-proportional implementation, including its boundary restart contract."
   (check-type chunk chain)
@@ -860,6 +977,7 @@ surface-proportional implementation, including its boundary restart contract."
   (check-type chamfer-stock-function function)
   (check-type chamfer-algebra (or null compiled-chamfer-algebra))
   (check-type outside-domain-policy (member nil :air :solid))
+  (check-type material-source (or null width-one-material-source))
   (unless (and (integerp bevel-width)
                (<= 1 bevel-width (/ +mesh-cell-size+ 2)))
     (error "Bevel width ~S must be an integer between one and four ticks."
@@ -869,7 +987,7 @@ surface-proportional implementation, including its boundary restart contract."
        chunk chunk-key
        (%make-face-stock-resolver
         (chain-domain chunk) stock-function source-stock-function)
-       chamfer-algebra outside-domain-policy)
+       chamfer-algebra outside-domain-policy material-source)
       (%mesh-chunk-reference
        chunk chunk-key
        :stock-function stock-function

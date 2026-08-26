@@ -334,7 +334,7 @@ the query-versus-reference triangle census over all four production chunks.
 The column-starts lane already gives the material-field experiment below its
 chain-order rank structure for free.
 
-* NEXT Compile material fields over chain order
+* DONE Compile material fields over chain order
 :PROPERTIES:
 :ID: LQSV44
 :END:
@@ -352,6 +352,31 @@ search per contributor, foundation semantics and all stocks match the
 reference, and cohort measurements include cold construction, reuse, and
 retained memory.
 
+/Result./ A [[lisp:luft:width-one-material-source][width-one material source]] now carries the authored side once --
+a snapshot key, a chain-order fill function, and the dense face-stock
+table -- and [[lisp:luft::%chain-material-lane][a weak chain-keyed lane cache]] compiles each chain's
+authored placements into one =(placement-offset << 1) | foundation-bit=
+u32 per occupied cell.  The production materializer resolves every
+contributor with a CSR rank probe over the existing chain facts plus two
+dense array reads; contributors classify by exact chunk key, and halo
+chains come from the occupancy field, which records each chain as its
+chunk resolves.  The renderer's fill function walks
+[[lisp:luft:map-chain-facts-cells-ranked][cells in chain-rank order]] and reproduces the foundation rule exactly,
+reading the cell below at the previous rank instead of a second authored
+lookup.  Materials fell from 5.200 to about 1.12 ms per build and the
+aggregate from 16.223 to about 10.4 ms/chunk at unchanged 2.1 MiB; the
+cold lane fill costs about 5 ms per owner-plus-halo neighborhood -- the
+former per-mesh cost, now paid once per chain per authored snapshot --
+and residency is four bytes per occupied cell held weakly by chain
+identity.  The cohort benchmark now proves the whole lifecycle with
+asserted claims: cold pays one facts and one lane build per resident
+chain, warm cohorts build nothing at 10 ms/chunk, one cell edit rebuilds
+exactly the replaced chain's facts and lane, and a material-only edit
+(a fresh snapshot key) rebuilds every lane over untouched facts.  Lane
+and hash paths produce identical triangles in the unit suite and in the
+query-versus-reference differential over all four production chunks.
+Planning (5.8 ms) and projection (4.3 ms) now dominate the aggregate.
+
 * IDEA Fuse relations only after they cease to explain the work
 :PROPERTIES:
 :ID: GPL9Z3
@@ -362,3 +387,6 @@ remove the face/band/fan relation materialization.  The current relations are
 small, typed, inspectable, and useful for differential tests.  Keep them until
 profiling after chain facts, material fields, and #3IKS3Y says their appends or
 reads dominate; otherwise fusion would spend clarity before it buys time.
+With chain facts and material lanes done, planning and projection together
+are about ten of the aggregate's 10.4 ms, so the relation half of that gate
+is now met; #3IKS3Y remains open.

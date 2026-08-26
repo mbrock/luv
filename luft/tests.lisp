@@ -1984,6 +1984,139 @@
                       (list packed-reference)))
                     (format nil "packed reference chunk ~D" key))))))))
 
+(defun %test-width-one-material-lanes ()
+  (%with-test-section ("width-one compiled material lanes")
+    ;; Authored side: every occupied cell names one of six placements; the
+    ;; first two carry the architecture flag and the middle two the earth
+    ;; flag, so architecture-on-earth columns exercise the foundation face.
+    ;; The stock function resolves the same rule through hashes; the lane
+    ;; path must reproduce it exactly through compiled chain-rank entries.
+    (let* ((world (%chunk-test-world))
+           (domain (chain-domain world))
+           (algebra (%make-width-one-test-chamfer-algebra))
+           (store (make-hash-table :test #'eql))
+           (placements (make-hash-table :test #'eql))
+           (placement-count 6)
+           (architecture-flag 1)
+           (earth-flag 2)
+           (placement-flags
+             (make-array placement-count :element-type '(unsigned-byte 8)))
+           (face-stocks
+             (make-array (* placement-count 7)
+                         :element-type '(unsigned-byte 16))))
+      (map-chain-chunks
+       (lambda (key chain) (setf (gethash key store) chain))
+       world)
+      (dotimes (offset placement-count)
+        (setf (aref placement-flags offset)
+              (cond ((< offset 2) architecture-flag)
+                    ((< offset 4) earth-flag)
+                    (t 0)))
+        (dotimes (face 7)
+          (setf (aref face-stocks (+ (* offset 7) face))
+                (svref #(1 2 4 8) (mod (+ offset face) 4)))))
+      (loop for chain being the hash-values of store do
+        (map-chain-facts-cells-ranked
+         (lambda (rank x y z below-occupied-p)
+           (declare (ignore rank below-occupied-p))
+           (setf (gethash (make-site domain x y z +cell-extent+ 1)
+                          placements)
+                 (mod (+ x (* 3 y) (* 5 z)) placement-count)))
+         (%chain-chunk-facts chain)))
+      (labels ((placement-at (cell)
+                 (multiple-value-bind (offset present-p)
+                     (gethash cell placements)
+                   (unless present-p
+                     (error "Cell ~S has no test placement." cell))
+                   offset))
+               (foundation-p (cell offset)
+                 (let ((z (site-z cell)))
+                   (and (plusp z)
+                        (logtest architecture-flag
+                                 (aref placement-flags offset))
+                        (let* ((below
+                                 (make-site domain (site-x cell)
+                                            (site-y cell) (1- z)
+                                            +cell-extent+ 1))
+                               (below-offset (gethash below placements)))
+                          (and below-offset
+                               (logtest earth-flag
+                                        (aref placement-flags
+                                              below-offset))
+                               t)))))
+               (stock-at (cell axis side)
+                 (let* ((offset (placement-at cell))
+                        (face (if (foundation-p cell offset)
+                                  6
+                                  (+ (* 2 (axis-index axis))
+                                     (if (eq side :forward) 1 0)))))
+                   (aref face-stocks (+ (* offset 7) face))))
+               (fill-lane (facts entries)
+                 (let ((previous-flags 0))
+                   (map-chain-facts-cells-ranked
+                    (lambda (rank x y z below-occupied-p)
+                      (let* ((offset
+                               (placement-at
+                                (make-site domain x y z +cell-extent+ 1)))
+                             (flags (aref placement-flags offset)))
+                        (setf (aref entries rank)
+                              (logior
+                               (ash offset 1)
+                               (if (and below-occupied-p
+                                        (logtest architecture-flag flags)
+                                        (logtest earth-flag previous-flags))
+                                   1
+                                   0))
+                              previous-flags flags)))
+                    facts)))
+               (make-source (snapshot-key)
+                 (make-width-one-material-source
+                  :snapshot-key snapshot-key
+                  :face-stocks face-stocks
+                  :face-stride 7
+                  :foundation-face-index 6
+                  :fill-function #'fill-lane))
+               (mesh-all (source)
+                 (loop for key being the hash-keys of store
+                         using (hash-value chain)
+                       collect
+                       (cons key
+                             (%canonical-triangle-record-counts
+                              (list
+                               (apply #'%mesh-test-chunk
+                                      chain key store
+                                      :source-stock-function #'stock-at
+                                      :chamfer-algebra algebra
+                                      :bevel-width 1
+                                      (when source
+                                        (list :material-source source)))))))))
+        (%reset-material-lanes :clear-cache t)
+        (let* ((source (make-source (list :materials)))
+               (lane-counts (mesh-all source))
+               (hash-counts (mesh-all nil))
+               (cold-builds *material-lane-build-count*))
+          (loop for (key . counts) in lane-counts
+                do (%check
+                    (%triangle-counts=
+                     counts (cdr (assoc key hash-counts)))
+                    (format nil "lane materials chunk ~D" key)))
+          (%check (= cold-builds (hash-table-count store))
+                  "cold pass builds one lane per chain")
+          ;; Warm reuse: unchanged chains under the same snapshot fill no
+          ;; lanes; a fresh snapshot key refills every lane once and still
+          ;; reproduces the same triangles over the surviving chain facts.
+          (mesh-all source)
+          (%check (= cold-builds *material-lane-build-count*)
+                  "warm pass builds no lanes")
+          (let ((edited-counts (mesh-all (make-source (list :materials)))))
+            (%check (= (* 2 cold-builds) *material-lane-build-count*)
+                    "material edit refills each lane once")
+            (loop for (key . counts) in edited-counts
+                  do (%check
+                      (%triangle-counts=
+                       counts (cdr (assoc key lane-counts)))
+                      (format nil "post-edit chunk ~D" key)))))))))
+
 (defun %test-chunked-meshing ()
   (%with-test-section ("chunked meshing equals whole-world meshing")
     (let* ((world (%chunk-test-world))
@@ -2252,6 +2385,7 @@
     (%test-surface-mesh)
     (%test-width-one-z-fibers)
     (%test-width-one-local-kernel)
+    (%test-width-one-material-lanes)
     (%test-chunked-meshing)
     (%test-owner-preserving-variable-bevel-cohort)
     (when stream

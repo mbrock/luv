@@ -6,8 +6,8 @@
 (in-package #:luft.mesh-query-profile)
 
 (defparameter *profile-phases*
-  '(:aggregate :chain-facts :occupancy :halo-index :z-bounds :selection
-    :planning :materials :projection))
+  '(:aggregate :chain-facts :material-lanes :occupancy :halo-index :z-bounds
+    :selection :planning :materials :projection))
 
 (defvar *profile-sink* nil)
 
@@ -21,6 +21,7 @@
   stock-function
   chamfer-stock-function
   algebra
+  material-source
   (grid-x 0 :type fixnum)
   (grid-y 0 :type fixnum)
   (x0 0 :type fixnum)
@@ -85,6 +86,15 @@
   (cons (luft::%derive-chain-chunk-facts (mesh-query-profile-case-chunk case))
         (loop for chunk in (mesh-query-profile-case-halo-chunks case)
               collect (luft::%derive-chain-chunk-facts chunk))))
+
+(defun %run-material-lanes (case)
+  "Fill owner and halo material lanes uncached: the cold lane cost."
+  (let ((source (mesh-query-profile-case-material-source case)))
+    (luft::%reset-material-lanes :clear-cache t)
+    (cons (luft::%chain-material-lane
+           (mesh-query-profile-case-chunk case) source)
+          (loop for chunk in (mesh-query-profile-case-halo-chunks case)
+                collect (luft::%chain-material-lane chunk source)))))
 
 (defun %run-occupancy (case)
   (setf (mesh-query-profile-case-field case)
@@ -153,10 +163,13 @@
       workspace)))
 
 (defun %run-materials (case)
-  (luft::%materialize-width-one-query-materials
+  (luft::%materialize-width-one-query-lane-materials
    (mesh-query-profile-case-workspace case)
-   (mesh-query-profile-case-domain case)
-   (mesh-query-profile-case-stock-function case)
+   (mesh-query-profile-case-chunk case)
+   (mesh-query-profile-case-chunk-key case)
+   (luft::%chain-chunk-facts (mesh-query-profile-case-chunk case))
+   (mesh-query-profile-case-field case)
+   (mesh-query-profile-case-material-source case)
    (mesh-query-profile-case-algebra case)
    (mesh-query-profile-case-x0 case)
    (mesh-query-profile-case-y0 case)
@@ -186,12 +199,14 @@
             (mesh-query-profile-case-chamfer-stock-function case)
             :chamfer-algebra (mesh-query-profile-case-algebra case)
             :outside-domain-policy :air
+            :material-source (mesh-query-profile-case-material-source case)
             :bevel-width 1)))))
 
 (defun %phase-function (phase)
   (ecase phase
     (:aggregate #'%run-aggregate)
     (:chain-facts #'%run-chain-facts)
+    (:material-lanes #'%run-material-lanes)
     (:occupancy #'%run-occupancy)
     (:halo-index #'%run-halo-index)
     (:z-bounds #'%run-z-bounds)
@@ -335,6 +350,8 @@
                  program)
                 :algebra
                 (luft.render::material-program-chamfer-algebra program)
+                :material-source
+                (luft.render::make-scene-material-source scene)
                 :grid-x grid-x :grid-y grid-y
                 :x0 x0 :x1 x1 :y0 y0 :y1 y1 :ox1 ox1 :oy1 oy1
                 :halo-chunks halo-chunks
@@ -396,11 +413,11 @@
              (mesh-query-profile-case-output case))
             timing-seconds profile-seconds sample-interval)
     (format stream
-            "Phase          ms/op    % aggregate     MiB/op   iterations~%~
-             ------------- ------- --------------- ---------- -----------~%")
+            "Phase           ms/op    % aggregate     MiB/op   iterations~%~
+             -------------- ------- --------------- ---------- -----------~%")
     (dolist (measurement measurements)
       (let ((milliseconds (%milliseconds-per-iteration measurement)))
-        (format stream "~13A ~7,3F ~14,1F ~10,3F ~11:D~%"
+        (format stream "~14A ~7,3F ~14,1F ~10,3F ~11:D~%"
                 (string-downcase
                  (symbol-name (phase-measurement-phase measurement)))
                 milliseconds
@@ -411,8 +428,11 @@
             "~%Aggregate reconstructs the complete query on every iteration~%~
              over the published chain-facts cache, so it is the warm cost.~%~
              Chain-facts derives owner and halo records uncached: the cold~%~
-             cost paid once per new chain identity.  Occupancy, halo-index,~%~
-             and Z-bounds consume the cache as production does.~%~
+             cost paid once per new chain identity.  Material-lanes fills~%~
+             owner and halo material lanes uncached: the cold cost paid once~%~
+             per chain identity under each authored snapshot.  Occupancy,~%~
+             halo-index, and Z-bounds consume the caches as production does.~%~
+             Materials evaluates the compiled lane path production runs.~%~
              Isolated stages reuse prepared inputs and warmed workspace capacities;~%~
              their percentages expose attribution but need not sum to 100%.~%~
              Each phase report contains self-sorted and cumulative-sorted samples.~%")))
@@ -481,6 +501,8 @@
   (bytes 0 :type integer)
   (builds 0 :type fixnum)
   (hits 0 :type fixnum)
+  (lane-builds 0 :type fixnum)
+  (lane-hits 0 :type fixnum)
   (sites 0 :type fixnum)
   (faces 0 :type fixnum)
   (bands 0 :type fixnum)
@@ -490,7 +512,7 @@
 (defun %store-keys (store)
   (sort (loop for key being the hash-keys of store collect key) #'<))
 
-(defun %run-mesh-cohort (label scene store keys)
+(defun %run-mesh-cohort (label scene store keys material-source)
   "Mesh every chunk in KEYS from STORE, recording reuse and output stats."
   (let* ((program (luft.render::scene-material-program scene))
          (stock-function (luft.render::make-scene-face-stock-function scene))
@@ -500,7 +522,9 @@
          (algebra (luft.render::material-program-chamfer-algebra program))
          (sites 0) (faces 0) (bands 0) (fans 0) (triangles 0))
     (setf luft::*chain-facts-build-count* 0
-          luft::*chain-facts-hit-count* 0)
+          luft::*chain-facts-hit-count* 0
+          luft::*material-lane-build-count* 0
+          luft::*material-lane-hit-count* 0)
     (sb-ext:gc :full t)
     (let ((bytes-before (sb-ext:get-bytes-consed))
           (start (get-internal-real-time)))
@@ -526,6 +550,7 @@
                     :chamfer-stock-function chamfer-stock-function
                     :chamfer-algebra algebra
                     :outside-domain-policy :air
+                    :material-source material-source
                     :bevel-width 1))))
           (incf sites
                 (length (luft::surface-mesh-workspace-width-one-sites
@@ -546,8 +571,24 @@
        :bytes (- (sb-ext:get-bytes-consed) bytes-before)
        :builds luft::*chain-facts-build-count*
        :hits luft::*chain-facts-hit-count*
+       :lane-builds luft::*material-lane-build-count*
+       :lane-hits luft::*material-lane-hit-count*
        :sites sites :faces faces :bands bands :fans fans
        :triangles triangles))))
+
+(defun %resnapshot-material-source (source)
+  "SOURCE's compiled materials under a fresh snapshot key.
+
+An authored material edit republishes the source with a new snapshot key;
+reusing the same fill function and face stocks isolates the lane-refill
+cost from any change in authored content."
+  (luft:make-width-one-material-source
+   :snapshot-key (list :material-edit)
+   :fill-function (luft::width-one-material-source-fill-function source)
+   :face-stocks (luft::width-one-material-source-face-stocks source)
+   :face-stride (luft::width-one-material-source-face-stride source)
+   :foundation-face-index
+   (luft::width-one-material-source-foundation-face-index source)))
 
 (defun %cohort-edited-chain (chunk)
   "Cancel CHUNK's middle cell, returning the new chain and the removed site."
@@ -573,18 +614,20 @@
            Runtime: ~A ~A on ~A~%~
            Fixture: mountain-sanctuary streaming store~%~
            Edit: cancelled cell ~D of chunk ~D, re-meshed the owners whose~%~
-           seams can see it~2%"
+           seams can see it; the material edit re-meshes every chunk under~%~
+           a fresh authored snapshot~2%"
           (lisp-implementation-type) (lisp-implementation-version)
           (machine-type) removed-cell edited-key)
   (format stream
-          "Cohort     chunks ms-total ms/chunk    MiB builds   hits~:
-   sites   faces   bands    fans triangles~%~
-           ---------- ------ -------- -------- ------ ------ ------~:
- ------- ------- ------- ------- ---------~%")
+          "Cohort        chunks ms-total ms/chunk    MiB builds   hits~:
+  lanes  lhits   sites   faces   bands    fans triangles~%~
+           ------------- ------ -------- -------- ------ ------ ------~:
+ ------ ------ ------- ------- ------- ------- ---------~%")
   (dolist (run runs)
     (let ((milliseconds (* 1000d0 (cohort-run-seconds run))))
       (format stream
-              "~10A ~6D ~8,2F ~8,2F ~6,1F ~6D ~6D ~7:D ~7:D ~7:D ~7:D ~9:D~%"
+              "~13A ~6D ~8,2F ~8,2F ~6,1F ~6D ~6D ~6D ~6D~:
+ ~7:D ~7:D ~7:D ~7:D ~9:D~%"
               (cohort-run-label run)
               (cohort-run-chunks run)
               milliseconds
@@ -592,6 +635,8 @@
               (/ (cohort-run-bytes run) 1048576d0)
               (cohort-run-builds run)
               (cohort-run-hits run)
+              (cohort-run-lane-builds run)
+              (cohort-run-lane-hits run)
               (cohort-run-sites run)
               (cohort-run-faces run)
               (cohort-run-bands run)
@@ -600,7 +645,11 @@
   (let ((cold (find "cold" runs :key #'cohort-run-label :test #'string=))
         (warms (remove-if-not
                 (lambda (label) (eql 0 (search "warm" label)))
-                runs :key #'cohort-run-label)))
+                runs :key #'cohort-run-label))
+        (one-edit (find "one-edit" runs
+                        :key #'cohort-run-label :test #'string=))
+        (material-edit (find "material-edit" runs
+                             :key #'cohort-run-label :test #'string=)))
     (format stream
             "~%Warm cohorts ~:[DIVERGE FROM~;reproduce~] the cold census ~
              (sites, rows, triangles).~%"
@@ -613,25 +662,45 @@
                              (cohort-run-triangles warm))))
                    warms))
     (format stream
-            "Cold pays one facts build per resident chain; warm cohorts~%~
-             build nothing; the edit builds exactly the one replaced chain.~%")))
+            "Cold pays one facts and one lane build per resident chain~:
+ (~:[DIVERGES~;holds~]).~%~
+             Warm cohorts build no facts and no lanes (~:[DIVERGES~;holds~]).~%~
+             The one-edit builds exactly the one replaced chain's facts~:
+ and lane (~:[DIVERGES~;holds~]).~%~
+             The material edit rebuilds every lane over untouched facts~:
+ (~:[DIVERGES~;holds~]).~%"
+            (and (= (cohort-run-builds cold) (cohort-run-chunks cold))
+                 (= (cohort-run-lane-builds cold) (cohort-run-chunks cold)))
+            (every (lambda (warm)
+                     (and (zerop (cohort-run-builds warm))
+                          (zerop (cohort-run-lane-builds warm))))
+                   warms)
+            (and one-edit
+                 (= 1 (cohort-run-builds one-edit))
+                 (= 1 (cohort-run-lane-builds one-edit)))
+            (and material-edit
+                 (zerop (cohort-run-builds material-edit))
+                 (= (cohort-run-lane-builds material-edit)
+                    (cohort-run-chunks material-edit))))))
 
 (defun run-mesh-cohort-benchmark
     (&key (output "build/luft-mesher-cohort.txt") (warm-iterations 5))
-  "Cold, warm, and one-edit cohort measurements of the production mesher."
+  "Cold, warm, one-edit, and material-edit cohorts of the production mesher."
   (check-type warm-iterations (integer 1))
   (luft:with-surface-mesh-workspace ()
     (let* ((scene (luft.render::make-streaming-scene
                    (luft.render::make-mountain-sanctuary-scene)))
            (store (luft.render::streaming-scene-store scene))
            (keys (%store-keys store))
+           (material-source (luft.render::make-scene-material-source scene))
            (runs '()))
-      ;; Cold: no published facts survive.
+      ;; Cold: no published facts or lanes survive.
       (luft::%reset-chain-facts :clear-cache t)
-      (push (%run-mesh-cohort "cold" scene store keys) runs)
+      (luft::%reset-material-lanes :clear-cache t)
+      (push (%run-mesh-cohort "cold" scene store keys material-source) runs)
       (dotimes (iteration warm-iterations)
         (push (%run-mesh-cohort (format nil "warm-~D" (1+ iteration))
-                                scene store keys)
+                                scene store keys material-source)
               runs))
       (multiple-value-bind (edited-key chunk) (%largest-streaming-chunk store)
         (multiple-value-bind (edited removed) (%cohort-edited-chain chunk)
@@ -642,7 +711,12 @@
             (setf (gethash edited-key edited-store) edited)
             (push (%run-mesh-cohort
                    "one-edit" scene edited-store
-                   (%cohort-affected-keys edited-key edited-store))
+                   (%cohort-affected-keys edited-key edited-store)
+                   material-source)
+                  runs)
+            (push (%run-mesh-cohort
+                   "material-edit" scene store keys
+                   (%resnapshot-material-source material-source))
                   runs)
             (let ((report
                     (with-output-to-string (stream)

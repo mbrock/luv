@@ -84,6 +84,8 @@
    #:resolve-surface-attachment-frame
    #:star-singular-p #:decompose-star-mask
    #:compiled-chamfer-algebra #:make-compiled-chamfer-algebra
+   #:width-one-material-source #:make-width-one-material-source
+   #:map-chain-facts-cells-ranked
    #:with-surface-mesh-workspace #:make-surface-mesh #:mesh-chunk
    #:coplanar-compressed-surface-mesh
            #:select-surface-mesh-stocks

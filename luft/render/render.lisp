@@ -1018,6 +1018,57 @@ same view also retains the truncated wall miter preserved by #DJK8HW."
                         +material-placement-face-stride+)
                      face-index))))))))
 
+(defun make-scene-material-source (scene)
+  "Compile SCENE's authored materials as a width-one material source.
+
+The fill function writes one packed entry per occupied cell in chain-rank
+order: the authored placement offset above the foundation-face bit.  The
+foundation rule matches MAKE-SCENE-FACE-STOCK-FUNCTION exactly -- an
+architecture placement resting on an earth placement reads face six -- but
+resolves the cell below at the previous rank instead of a second authored
+lookup, because chain-rank order visits each column bottom to top."
+  (let* ((domain (luft:chain-domain (scene-solid scene)))
+         (material-cells (scene-material-cells scene))
+         (program (scene-material-program scene))
+         (placement-flags
+           (the (simple-array (unsigned-byte 8) (*))
+                (material-program-placement-flags program))))
+    (luft:make-width-one-material-source
+     :snapshot-key program
+     :face-stocks (material-program-placement-face-stocks program)
+     :face-stride +material-placement-face-stride+
+     :foundation-face-index 6
+     :fill-function
+     (lambda (facts entries)
+       (declare (optimize (speed 3) (safety 1))
+                (type (simple-array (unsigned-byte 32) (*)) entries))
+       (let ((previous-flags 0))
+         (declare (type (unsigned-byte 8) previous-flags))
+         (luft:map-chain-facts-cells-ranked
+          (lambda (rank x y z below-occupied-p)
+            (declare (type fixnum rank x y z))
+            (let ((cell (luft:make-site domain x y z luft:+cell-extent+ 1)))
+              (multiple-value-bind (offset present-p)
+                  (gethash cell material-cells)
+                (unless present-p
+                  (error
+                   "Occupied scene cell ~S has no authored material placement."
+                   cell))
+                (let* ((flags (aref placement-flags offset))
+                       (foundation-bit
+                         (if (and below-occupied-p
+                                  (logtest
+                                   +material-placement-architecture-flag+
+                                   flags)
+                                  (logtest +material-placement-earth-flag+
+                                           previous-flags))
+                             1
+                             0)))
+                  (setf (aref entries rank)
+                        (logior (ash offset 1) foundation-bit)
+                        previous-flags flags)))))
+          facts))))))
+
 (defun scene-face-stock (scene face)
   "The current packed assembly offset for FACE in SCENE."
   (multiple-value-bind (cell axis side)
@@ -5043,6 +5094,7 @@ medial-collapse repairs cannot diverge at chunk seams."
     (let* ((scene (streaming-mesh-snapshot-scene snapshot))
            (neighborhood (streaming-mesh-snapshot-union-neighborhood snapshot))
            (material-program (scene-material-program scene))
+           (material-source (make-scene-material-source scene))
            (chamfer-stock-function
              (make-compiled-material-chamfer-stock-function
               material-program)))
@@ -5060,6 +5112,7 @@ medial-collapse repairs cannot diverge at chunk seams."
                       :chamfer-algebra
                       (material-program-chamfer-algebra material-program)
                       :outside-domain-policy :air
+                      :material-source material-source
                       :bevel-width width))))
                (decorate-owners (owners &optional surface-context)
                  (decorate-scene-meshes
