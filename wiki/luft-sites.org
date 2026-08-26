@@ -378,6 +378,45 @@ chunk-boundary edges.  Meshing rose from 316 ms and 80 MB consed to 484 ms and
 That is already substantially cheaper to draw and upload; moving compression
 into site-stream construction is the next step if production latency matters.
 
+* DONE Execute width-one chunks as a columnar query
+:PROPERTIES:
+:ID: BFSI2X
+:END:
+
+The first finite-neighborhood implementation proved the right semantics but
+still paid for two execution models.  It gathered packed active stars, packed
+each face, edge, and fan as another job word, then decoded those jobs into the
+general builder, allocating point vectors and hash-interning templates before
+a final counting scatter.  That was a batch-shaped prelude to the old mesher,
+not yet a batch mesher.
+
+=luft/mesh-query.lisp= is the chunk-only width-one implementation.  It treats
+the 256-star tables as dimension tables and executes five explicit stages:
+
+1. materialize one padded occupancy window and select nontrivial stars;
+2. project selected stars into local X, Y, Z, mask, and material-base columns;
+3. join topology tables into separate face, band, and fan relations;
+4. materialize each incident face stock and its algebra summary exactly once;
+5. project those relations directly into template-grouped renderer streams.
+
+Band and fan rows retain compact contributor-slot masks, so their final stock
+reduction never reconstructs radial transitions or cube-edge identities.
+Templates form one immutable 485-row vocabulary compiled from the executable
+oracle at load time.  A chunk build therefore creates no builder, point
+vectors, template hashes, packed topology jobs, or per-chunk template words.
+The surface-proportional and packed-job implementations remain callable as
+independent references.  The SB-SIMD occupancy selector also remains: it is a
+real native-code example and an interchangeable implementation of only the
+selection operator, not the architecture's reason to exist.
+
+The exhaustive differential compares the query with both references for all
+256 vertex stars and at real chunk seams.  On the mountain sanctuary's largest
+chunk (44,036 cells, 156,252 output triangles), eight warm sequential builds
+in one reusable workspace averaged 34.0 ms and 4.55 MB consed for the query,
+versus 46.5 ms and 12.34 MB for the packed-job reference: 27% less elapsed
+time and 63% less allocation in this x86-64 orb.  This is the first mesher
+change in the sequence whose gain is outside measurement noise.
+
 * NEXT Implement the site-stream LUFT renderer backbone
 :PROPERTIES:
 :ID: RO2OCL

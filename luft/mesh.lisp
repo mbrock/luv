@@ -963,7 +963,12 @@ for a bounded scan and never constructs per-edge or per-fan stock lists."
                               (simple-array (unsigned-byte 16) (*))))
   (width-one-summaries nil
                        :type (or null
-                                 (simple-array (unsigned-byte 16) (*)))))
+                                 (simple-array (unsigned-byte 16) (*))))
+  ;; The chunk-query implementation owns this object.  Keeping one opaque
+  ;; workspace here lets sequential streaming owners reuse its typed columns
+  ;; without coupling the surface-proportional reference mesher to their
+  ;; layout.
+  (width-one-query-workspace nil :type t))
 
 (defvar *surface-mesh-workspace* nil)
 
@@ -4263,7 +4268,7 @@ lattice-site closure.  It must return one stock for that entire chamfer."
                  batch builder algebra x0 y0))))))))
   (%finish-surface-mesh builder))
 
-(defun mesh-chunk
+(defun %mesh-chunk-reference
     (chunk chunk-key
      &key (stock-function (constantly 0))
           source-stock-function
@@ -4319,7 +4324,7 @@ alternate representation switch."
       (unless (= (site-chunk-key cell) chunk-key)
         (error "Cell ~S does not belong to chunk ~D." cell chunk-key)))
     (when (and (= bevel-width 1) chamfer-algebra)
-      (return-from mesh-chunk
+      (return-from %mesh-chunk-reference
         (%mesh-width-one-chunk-scan
          chunk chunk-key field domain stock-resolver chamfer-algebra builder
          x0 x1 y0 y1

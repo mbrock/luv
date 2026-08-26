@@ -1738,7 +1738,7 @@
       (setf (aref stocks mask) mask))
     (make-compiled-chamfer-algebra masks stocks 15)))
 
-(defun %mesh-test-chunk (chain key store &rest arguments)
+(defun %mesh-test-chunk-with (function chain key store arguments)
   (handler-bind
       ((missing-chunk
          (lambda (condition)
@@ -1751,7 +1751,13 @@
          (lambda (condition)
            (declare (ignore condition))
            (invoke-restart 'treat-as-air))))
-    (apply #'mesh-chunk chain key arguments)))
+    (apply function chain key arguments)))
+
+(defun %mesh-test-chunk (chain key store &rest arguments)
+  (%mesh-test-chunk-with #'mesh-chunk chain key store arguments))
+
+(defun %mesh-test-chunk-reference (chain key store &rest arguments)
+  (%mesh-test-chunk-with #'%mesh-chunk-reference chain key store arguments))
 
 (defun %test-width-one-z-fibers ()
   (%with-test-section ("width-one padded Z fibers and SIMD classification")
@@ -1913,17 +1919,30 @@
                   :source-stock-function #'%width-one-test-face-stock
                   :chamfer-stock-function #'%width-one-test-chamfer-stock
                   :chamfer-algebra algebra :bevel-width 1))
+               (packed-reference
+                 (%mesh-test-chunk-reference
+                  solid 0 empty-store
+                  :source-stock-function #'%width-one-test-face-stock
+                  :chamfer-stock-function #'%width-one-test-chamfer-stock
+                  :chamfer-algebra algebra :bevel-width 1))
                (oracle
                  (%mesh-test-chunk
                   solid 0 empty-store
                   :source-stock-function #'%width-one-test-face-stock
                   :chamfer-stock-function #'%width-one-test-chamfer-stock
-                  :bevel-width 1)))
+                  :bevel-width 1))
+               (fast-counts
+                 (%canonical-triangle-record-counts (list fast)))
+               (reference-counts
+                 (%canonical-triangle-record-counts (list packed-reference)))
+               (oracle-counts
+                 (%canonical-triangle-record-counts (list oracle))))
           (%check
-           (%triangle-counts=
-            (%canonical-triangle-record-counts (list fast))
-            (%canonical-triangle-record-counts (list oracle)))
+           (%triangle-counts= fast-counts oracle-counts)
            (format nil "star ~2,'0X" mask))
+          (%check
+           (%triangle-counts= fast-counts reference-counts)
+           (format nil "packed reference star ~2,'0X" mask))
           (%check (= (surface-mesh-singular-star-count fast)
                      (surface-mesh-singular-star-count oracle))
                   (format nil "singular star ~2,'0X" mask))))
@@ -1946,12 +1965,24 @@
                           chain key store
                           :source-stock-function #'%width-one-test-face-stock
                           :chamfer-stock-function #'%width-one-test-chamfer-stock
-                          :bevel-width 1)))
+                          :bevel-width 1))
+                       (packed-reference
+                         (%mesh-test-chunk-reference
+                          chain key store
+                          :source-stock-function #'%width-one-test-face-stock
+                          :chamfer-stock-function #'%width-one-test-chamfer-stock
+                          :chamfer-algebra algebra :bevel-width 1)))
                    (%check
                     (%triangle-counts=
                      (%canonical-triangle-record-counts (list fast))
                      (%canonical-triangle-record-counts (list oracle)))
-                    (format nil "chunk ~D" key))))))))
+                    (format nil "chunk ~D" key))
+                   (%check
+                    (%triangle-counts=
+                     (%canonical-triangle-record-counts (list fast))
+                     (%canonical-triangle-record-counts
+                      (list packed-reference)))
+                    (format nil "packed reference chunk ~D" key))))))))
 
 (defun %test-chunked-meshing ()
   (%with-test-section ("chunked meshing equals whole-world meshing")
