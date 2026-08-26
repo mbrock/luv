@@ -1,4 +1,0 @@
-interface:
-  display_name: "Luv Systems Design"
-  short_description: "Design semantic, allocation-aware luv systems"
-  default_prompt: "Use $luv-systems-design to design this luv or luvcraft subsystem around explicit meaning, dense data, and measured hot loops."

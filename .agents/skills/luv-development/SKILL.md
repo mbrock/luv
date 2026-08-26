@@ -5,14 +5,11 @@ description: Use when starting or diagnosing development in a luv checkout or wo
 
 # Luv development
 
-Keep the checkout, environment, compiled artifacts, and selected live Lisp aligned. Treat an unexplained pause as a process to inspect, not a reason to launch unmanaged SBCLs.
-
-## Start here: managed Lisps, one selected game
-
 Swash supervises durable Lisp images across checkouts, and the game normally
 runs inside one selected image. This is the ordinary workflow:
 
 ```sh
+./sly start
 ./sly play                              # boot the image and open the real game
 ./sly status                            # identify the image and game state
 ./sly screenshot build/frame.png        # capture what the game shows
@@ -107,71 +104,19 @@ Never kill a managed image by PID or disturb one belonging to another checkout.
 Select it by Swash identity and stop it through `./sly`; use `./sly list` to make
 ownership visible before lifecycle actions.
 
-## Five seconds of silence means broken
-
-**A command that runs longer than about five seconds without printing anything is not slow. It is broken, and finding out how is the task now.** Waiting it out, polling it, chaining sleeps, or running it again the same way are all refusals to look. So is reporting "it seems to be taking a while": that is not a status.
-
-Silence is almost always something that was told not to speak, or something waiting for input nobody is going to send:
-
-- **A pipe ate the progress.** `-L`, `--verbose`, `-x`, and `--progress` can go mute into `tee`, `head`, or a pager. Never pipe a progress-reporting command. Start long work in Swash and inspect its journal with `poll` or `follow`; use tmux only when Swash is unavailable or the work is inherently interactive.
-- **Stdin was left open.** A failed `./sly eval` prints a backtrace and waits for a restart number. Redirect `< /dev/null` so it aborts and says why instead of waiting forever for a keystroke.
-- **It is talking to the network.** `nix build nixpkgs#foo` resolves the registry alias over `channels.nixos.org` and can hang there with nothing on screen; prefer a reference through this repo's pinned flake.
-
-Make it talk, then find it:
-
-1. `ps ax -o pid,ppid,etime,state,command | grep -E '[s]bcl|[n]ix|[c]c1'` — is anything actually burning CPU, or is it all sleeping?
-2. `strace -f -p PID`, `cat /proc/PID/wchan`, `cat /proc/PID/stack` — one of these names the syscall it is parked in within seconds.
-3. `ss -tnp` for a socket that will never answer.
-4. Split the silent step into several small ones. The one that does not come back has named itself.
-
-A responsive image and a stuck call are different things: if `./sly eval "(+ 1 2)" < /dev/null` returns instantly while another eval does not, the image is fine and the block is inside that specific form — take it apart rather than blaming the connection.
-
-For a detached one-shot build, let Swash select the available backend:
-
 ```sh
-swash start -- make all
+swash run -- make all
 swash poll SESSION
 swash follow SESSION
 ```
 
-`start` prints the session ID, `poll` shows recent output, and `follow` streams
-to completion and returns the build's exit status. Bare `swash` lists sessions.
-The portable backend writes directly to an SQLite/WAL journal and needs no
-journal socket or daemon. Ordinary builds do not need `--tty`; reserve it for
-commands that are actually interactive.
-
-## Diagnose slow or stuck work
-
-1. Observe the last emitted compilation unit; a fresh worktree compiles its own source-path cache, but a normal cold project load should keep printing progress.
-2. Check `LUV_DEV_ENVIRONMENT`, `command -v sbcl`, `./sly list`, and `./sly status` in another terminal; use `./scripts/dev --status` if activation looks wrong.
-3. Inspect processes with `ps ax -o pid,ppid,etime,state,command | grep -E '[s]wash|[s]bcl|[n]ix (develop|build)|[l]uv-env'`.
-4. For a managed image, inspect its selected `./sly log` and Swash identity. For a Make/SBCL process, capture its command and parent before interrupting it.
-5. Distinguish CPU-heavy compilation from sleeping/waiting. Do not start a duplicate build: concurrent work obscures ownership and can contend for outputs.
-6. If a failed `./sly eval` enters the Slynk debugger, choose a printed restart number or `a` to abort; it is waiting for input, not compiling.
-
-A cold checkout-local load and a full program image build are different timings: ASDF compilation writes under `~/.cache/common-lisp/.../<absolute-checkout-path>/`, while `program-op` also writes a large executable core. Report the phase and elapsed time when diagnosing regressions.
-
-## Turn the Vulkan validation layer on
-
-The layer is packaged but not loaded; a run asks for it, and it has to be
-asked before the image starts, because the instance is created once:
-
-```sh
-env VK_LOADER_LAYERS_ENABLE='*validation*' ./sly start
-```
-
-luv installs its own debug messenger whenever `VK_EXT_debug_utils` is
-available, so anything the layer says arrives as a `:vulkan` log line with a
-Lisp backtrace taken where the offending call was made, and becomes a
-`VULKAN-VALIDATION-FAILURE` at the end of the frame -- caught by the canvas
-guard, retained, and reported by `./sly` like any other frame failure.
-Nothing speaks through the messenger unless a layer is loaded, so an
-ordinary run is unaffected.
-
-`WITH-VULKAN-VALIDATION` wraps any other Vulkan work the same way. Bind
-`*VULKAN-VALIDATION-ENABLED-P*` to NIL to keep a provider quiet, or
-`*VULKAN-VALIDATION-BACKTRACE-P*` to NIL when the backtraces cost more than
-they tell.
+`run` backgrounds it and prints the session ID if the command took
+longer than a few seconds, `poll` shows recent output, and `follow`
+streams to completion and returns the build's exit status. Bare
+`swash` lists sessions.  The portable backend writes directly to an
+SQLite/WAL journal and needs no journal socket or daemon. Ordinary
+builds do not need `--tty`; reserve it for commands that are actually
+interactive.
 
 ## Verify what the game shows
 
@@ -180,7 +125,3 @@ and writes the PNG; read the PNG.  Move the camera or open overlays with
 small evals first.  Named hidden views (no window) live in
 `luvcraft/gazetteer.lisp`: `scripts/luv gazetteer build/gazetteer`.
 Do not screenshot the desktop.
-
-## Finish
-
-Run only quick checks relevant to the change. Stop temporary checkout-managed images if their state is no longer useful. Commit and push coherent work according to `AGENTS.md`, without deleting caches or unrelated user files merely to make the tree look clean.

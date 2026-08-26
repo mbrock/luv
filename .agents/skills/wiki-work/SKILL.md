@@ -5,12 +5,6 @@ description: "Use when reading or editing luv's Org wiki (wiki/*.org), tracking 
 
 # Wiki work in luv
 
-> **Five seconds of silence means broken.** Any command here that runs more
-> than about five seconds without printing anything is a defect to be named,
-> not a wait to be endured — usually a pipe that ate the progress output or a
-> process parked on stdin. Make it talk, `strace` it, or split it up; never
-> poll it or run it again the same way. See `luv-development` and AGENTS.md.
-
 The wiki in `wiki/*.org` is the project's living design memory: the place
 where understanding, decisions, evidence, and the next small step are kept
 in prose. It is also a website (https://mbrock.github.io/luv/, rebuilt from
