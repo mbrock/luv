@@ -5,6 +5,8 @@ post at authored cell (25, 10, 16) in the mountain sanctuary, dusk light —
 across bevel configurations. Captured live via
 `(luft.render:refresh-viewer-renderer luft.render:*viewer* ...)` with the
 player at world (59.5, 35.5, 14) and `*isometric-height*` 9.0.
+`seam-macro-width-2.png` is a close study of the crystal/post seam at
+uniform width 2.
 
 | Image | Configuration |
 | --- | --- |
@@ -15,22 +17,34 @@ player at world (59.5, 35.5, 14) and `*isometric-height*` 9.0.
 | `mixed-arch-crystal-1.png` | default profile with `:architecture-crystal-width 1` |
 | `mixed-contact-1.png` | default profile with `:contact-width 1` (all mixed relations 1) |
 | `mixed-contact-4.png` | default profile with `:contact-width 4` (all mixed relations 4) |
+| `seam-macro-width-2.png` | uniform width 2, camera at `*isometric-height*` 4.5 |
 
-What the set shows:
+## The stone sliver in the crystal's base ring
 
-- Uniform widths are internally coherent: every contact chamfer has the same
-  width, so the crystal/stone boundary reads as one continuous seam. Width 1
-  keeps masonry but loses the jewel; width 4 gets the jewel but melts the
-  rails and posts into ridge tents.
-- The mixed profile buys the jewel-on-masonry contrast, and the contact width
-  decides how much of the supporting post the pale crystal *bezel* assembly
-  covers (`material-closure-surface-assembly` in
-  `luft/render/materials.lisp`: any chamfer closure containing a luminous
-  reading takes the crystal bezel appearance in its host).
-- The known incoherence: in `mixed-default.png` (and clearest in wider
-  mixed-mode captures) exactly one quad of the crystal's bottom bevel ring
-  renders as plain stone. The luminous-bezel rule sees only the faces
-  combinatorially incident to a patch's own site, so a patch in the ring
-  whose incident faces are both stone (post rim / rail top) never receives a
-  luminous reading, while its visual neighbors do. Visual adjacency and
-  combinatorial incidence disagree, and the ring breaks at that one patch.
+Every width except fully-medial 4 shows one stone quad interrupting the
+crystal's bottom bevel ring. A five-cell fixture (rail run, post, crystal
+cap) meshed through the scene material program shows the exact emission
+around the horizontal material seam, at every uniform width:
+
+- Each flat side splits at the seam: the post's top band is plain
+  `:LIMESTONE`, the crystal's bottom band is plain `:AETHER-CRYSTAL`.
+  Side geometry never crosses the material boundary, so each band takes its
+  own cell's material and the seam is sharp.
+- Each vertical corner is emitted as one `:JUNCTION` patch that spans both
+  cells across the seam (z from one bevel width below to one above it).
+  A seam-crossing patch must pick a single material; the closure algebra
+  resolves stone-plus-luminous to the contact assembly
+  `(:CONTACT :DRESSED-LIMESTONE)` — stone-primary with crystal provenance
+  (`material-closure-surface-assembly`, `luft/render/materials.lisp`).
+
+So the base ring interleaves crystal sides with dressed-limestone corners.
+From the isometric camera one corner column faces the viewer, and at widths
+one and two it is a thin sliver inside an otherwise glassy ring: the
+"one incoherent stone quad." At width 4 the same corner patches grow into
+the full medial taper between post and gem and read as a deliberate collar,
+which is why the medial mesh looks fine.
+
+The structural question this raises: should junction geometry split at a
+material seam the way band geometry already does (making the ring fully
+crystal and the collar fully stone), or should the seam-crossing contact
+assembly render crystal-primary instead of stone-primary?
