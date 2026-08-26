@@ -55,7 +55,8 @@
   ;; overlapping closure separately for every requested root.
   (load (merge-pathnames #P"scripts/sly-asdf-status.lisp" project-root))
   (load (merge-pathnames #P"luvcraft/build-progress.lisp" project-root))
-  (let ((systems '(:luv-workbench)))
+  (let* ((system (getenv-or "LUV_SLY_SYSTEM" "luv-workbench"))
+         (systems (list system)))
     ;; The server's outer log is relayed by ./sly while this boot runs, so keep
     ;; narration there. Per-file compiler/toolchain chatter still gets the
     ;; build progress module's focused logs.
@@ -70,7 +71,7 @@
                   :defer-archive-p t)
       (handler-case
           (progn
-            (asdf:load-system "luv-workbench")
+            (asdf:load-system system)
             (when (build-call "FINISH" :done)
               (sb-ext:exit :code 1 :abort t)))
         (error (condition)

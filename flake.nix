@@ -214,8 +214,6 @@
             ] ++ nixpkgs.lib.optionals pkgs.stdenv.isDarwin [
               pkgs.moltenvk
             ];
-          slimNativeLibraryPath =
-            nixpkgs.lib.makeLibraryPath nativeLibraryPackages;
           nativeLibraryPath = nixpkgs.lib.makeLibraryPath (
             nativeLibraryPackages ++ [ libghosttyVt ]
           );
@@ -266,6 +264,12 @@
                 lispPackages.float-features
                 lispPackages.trivial-main-thread
               ]);
+          # The slim image loads LUFT itself, but ./sly is also a Lisp program
+          # and needs its small JSON protocol dependency without relying on a
+          # developer's ambient Quicklisp installation.  Keep plain SBCL and
+          # name this source explicitly so the mutable checkout can prepend to
+          # one ordinary ASDF registry instead of composing Lisp wrappers.
+          slimClJson = pkgs.sbclPackages.cl-json;
           # Upstream's one ASDF system bundles otherwise independent SDL_image,
           # SDL_ttf, and SDL_mixer bindings.  Luv uses the first two but not the
           # mixer, so keep its eagerly loaded foreign library out of the normal
@@ -301,13 +305,14 @@
             inherit system;
             overlays = [ nix-wpe-webkit.overlays.default ];
           };
-          slimDevelopmentPackages = [
+          developmentPackages = [
             pkgs.bashInteractive
             lisp
             ffmpeg
             ffmpeg.dev
             pkgs.go
             mupdf
+            libghosttyVt
             pkgs.libffi
             pkgs.harfbuzz
             pkgs.mesa
@@ -323,15 +328,26 @@
             pkgs.vulkan-validation-layers
             pkgs.yt-dlp
           ];
-          developmentPackages = slimDevelopmentPackages ++ [ libghosttyVt ];
+          # Remote agents working on LUFT's topology and mesher need a Lisp,
+          # the managed-image tools, and little else.  Their Sly root is LUFT
+          # rather than the complete graphical workbench.
+          slimDevelopmentPackages = [
+            pkgs.bashInteractive
+            sbcl
+            slimClJson
+            pkgs.python3
+            swashPackage
+          ];
           lavapipeIcd =
             if system == "x86_64-linux" then "lvp_icd.x86_64.json"
             else if system == "aarch64-linux" then "lvp_icd.aarch64.json"
             else null;
-          commonDevelopmentEnvironment = {
+          developmentEnvironment = {
             LUV_DEV_ENVIRONMENT = "1";
+            LD_LIBRARY_PATH = nativeLibraryPath;
             LUV_MESA_LIBRARY_PATH = mesaLibraryPath;
             LUV_URBIT = "${pkgs.urbit}/bin/urbit";
+            LUV_GHOSTTY_LIBRARY = libghosttyVtLibrary;
             LUV_BASH = "${pkgs.bashInteractive}/bin/bash";
             LUV_SLYNK_DIR = "${slyRoot}/slynk";
             LUV_SWASH = "${swashPackage}/bin/swash";
@@ -350,14 +366,18 @@
             VK_DRIVER_FILES =
               "${pkgs.moltenvk}/share/vulkan/icd.d/MoltenVK_icd.json";
           };
-          slimDevelopmentEnvironment = commonDevelopmentEnvironment // {
-            LD_LIBRARY_PATH = slimNativeLibraryPath;
-          };
-          developmentEnvironment = commonDevelopmentEnvironment // {
-            LD_LIBRARY_PATH = nativeLibraryPath;
-            LUV_GHOSTTY_LIBRARY = libghosttyVtLibrary;
+          slimDevelopmentEnvironment = {
+            LUV_DEV_ENVIRONMENT = "1";
+            LUV_BASH = "${pkgs.bashInteractive}/bin/bash";
+            LUV_SLYNK_DIR = "${slyRoot}/slynk";
+            LUV_SWASH = "${swashPackage}/bin/swash";
+            LUV_SLY_SYSTEM = "luft";
+            CL_SOURCE_REGISTRY = "${slimClJson}//";
+            LD_LIBRARY_PATH = "";
           };
           developmentEnvironmentHook = ''
+            unset LUV_SLY_SYSTEM
+
             if [ "''${LUV_USE_NIX_MESA:-}" = 1 ]; then
               export LD_LIBRARY_PATH="$LUV_MESA_LIBRARY_PATH:$LD_LIBRARY_PATH"
             fi
@@ -395,8 +415,10 @@
             fi
           '';
           slimDevelopmentEnvironmentHook = ''
-            unset LUV_GHOSTTY_LIBRARY
-          '' + developmentEnvironmentHook;
+            unset LUV_GHOSTTY_LIBRARY LUV_FFMPEG_LIBDIR LUV_MUPDF_LIBDIR
+            unset LUV_URBIT LUV_YT_DLP LUV_MESA_LIBRARY_PATH LUV_LAVAPIPE_ICD
+            unset PKG_CONFIG_PATH CPATH VK_LAYER_PATH VK_DRIVER_FILES
+          '';
           makeProfileEnvironment = name: environment: hook: pkgs.writeTextFile {
             inherit name;
             destination = "/share/luv/env.sh";
@@ -436,11 +458,11 @@
           };
         in
         {
-          inherit pkgs wpePkgs sbcl lisp clSdl3WithoutMixer;
+          inherit pkgs wpePkgs sbcl lisp slimClJson clSdl3WithoutMixer;
           inherit dev developmentPackages developmentEnvironment;
           inherit slimDev slimDevelopmentPackages slimDevelopmentEnvironment;
           inherit developmentEnvironmentHook slimDevelopmentEnvironmentHook;
-          inherit nativeLibraryPath slimNativeLibraryPath mesaLibraryPath;
+          inherit nativeLibraryPath mesaLibraryPath;
           inherit slyRoot swashPackage;
           inherit ffmpeg ffmpegLibraryDirectory mupdf mupdfLibraryDirectory;
           inherit libghosttyVt libghosttyVtLibrary;

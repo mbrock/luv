@@ -28,9 +28,9 @@ Development happens in a durable SBCL image supervised by
 ```
 
 For remote or non-terminal work, `nix develop .#slim` (or
-`./scripts/install-dev-profile --slim`) omits libghostty-vt and its large Zig
-build graph. The Lisp workbench still loads; use the full profile when opening
-a Luvcraft terminal.
+`./scripts/install-dev-profile --slim`) provides just SBCL, Sly/Swash, Python,
+and Bash. Its managed image loads the `luft` mesher rather than the graphical
+workbench; use the full profile for rendering and game features.
 
 `./sly play` without a target opens Luvcraft. The same command also provides
 `eval`, `inspect`, `describe`, `apropos`, `edit`, and `xref` against the live

@@ -20,6 +20,7 @@ dependency_environment() {
   printf '%s\n' \
     "sbcl=$(realpath "$(command -v sbcl)")" \
     "slynk=${LUV_SLYNK_DIR:-}" \
+    "system=${LUV_SLY_SYSTEM:-luv-workbench}" \
     "source-registry=${CL_SOURCE_REGISTRY:-}" \
     "libraries=${LD_LIBRARY_PATH:-}"
 }

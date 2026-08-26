@@ -120,8 +120,8 @@ EOF
 step 'Check system packages' install_system_packages
 step 'Install Nix when needed' install_nix
 activate_nix
-step 'Build and install the locked development profile' \
-  ./scripts/install-dev-profile
+step 'Build and install the locked slim development profile' \
+  ./scripts/install-dev-profile --slim
 step 'Configure the orb shell environment' install_shell_environment
 
 printf '\nOrb setup complete.\n'

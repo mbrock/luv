@@ -102,9 +102,9 @@ The dependencies live in a durable Nix profile. Install or refresh it with
 `./scripts/dev COMMAND` is the fallback when activation was missed.
 
 Remote agents that will not open a Luvcraft terminal can use
-`nix develop .#slim` or `./scripts/install-dev-profile --slim`. This excludes
-libghostty-vt's expensive Zig build graph while retaining the Lisp workbench
-and other development tools.
+`nix develop .#slim` or `./scripts/install-dev-profile --slim`. It contains
+SBCL, Sly/Swash, Python, and Bash, and its managed image loads the `luft`
+mesher as its root. Use the full profile for rendering or game systems.
 
 Use `./sly` for interactive development. Use `make`, `sbcl`, or
 `./scripts/luv COMMAND` for isolated builds, tests, and one-shot tools.

@@ -5,7 +5,8 @@
 (require :sb-posix)
 
 (defparameter *project-root* (uiop:ensure-directory-pathname (truename "./")))
-(defparameter *root-systems* '(:luv-workbench))
+(defparameter *root-systems*
+  (list (or (uiop:getenv "LUV_SLY_SYSTEM") "luv-workbench")))
 
 (defun dependency-name (specification)
   (cond

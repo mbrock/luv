@@ -11,6 +11,11 @@ fi
 # shellcheck disable=SC1090
 source "$orb_environment"
 
+if [[ ${LUV_SLY_SYSTEM:-} != luft ]]; then
+  printf 'luv orb environment is not using the slim LUFT profile; run .agents/setup\n' >&2
+  exit 1
+fi
+
 case "$(command -v sbcl 2>/dev/null)" in
   "$HOME/.nix-profile/"*|/nix/store/*)
     case ":${CL_SOURCE_REGISTRY:-}:" in
