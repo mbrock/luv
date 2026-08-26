@@ -12,7 +12,7 @@
     flake = false;
   };
   inputs.swash = {
-    url = "github:lessrest/swash/fcc1005aceee44cd1b9285edb73c5d5be039414e";
+    url = "github:lessrest/swash/37355e2ab4009e047e14eac21bfbbd22b9931151";
     flake = false;
   };
   # Keep this tag equal to the Tracy profiler you actually run: the client and
@@ -279,10 +279,17 @@
             pname = "swash";
             version = "0-unstable-2026-08-25";
             src = swash;
-            vendorHash = "sha256-bS3eFqaKLHCUfehIfFwJrW7YBQJLD6d82zYGiU2HCLs=";
+            vendorHash = "sha256-uT/BAWjFhauqnf0KuaDf//YCF62setNh5x0c/TEjDrg=";
             subPackages = [ "cmd/swash" ];
             CGO_CFLAGS = "-I${swash}/cvendor";
             env.GOWORK = "off";
+            nativeBuildInputs = nixpkgs.lib.optionals pkgs.stdenv.isLinux [
+              pkgs.makeWrapper
+            ];
+            postFixup = nixpkgs.lib.optionalString pkgs.stdenv.isLinux ''
+              wrapProgram "$out/bin/swash" \
+                --prefix LD_LIBRARY_PATH : ${nixpkgs.lib.makeLibraryPath [ pkgs.systemd ]}
+            '';
           };
           # A second nixpkgs instance carrying the WPE overlay, so the main
           # `pkgs` above keeps its plain `legacyPackages` identity and nothing

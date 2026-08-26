@@ -171,17 +171,17 @@
     "swash": {
       "flake": false,
       "locked": {
-        "lastModified": 1787690454,
-        "narHash": "sha256-Fi0NDQ3QLs4rx/4Ugyq3MDz3xOGI+Ye0ZfKpuW3lMDU=",
+        "lastModified": 1787697769,
+        "narHash": "sha256-ozBKKYvx1A38cS1LGX9gTHkzkvh/x0V6GxKg1GpO5vg=",
         "owner": "lessrest",
         "repo": "swash",
-        "rev": "fcc1005aceee44cd1b9285edb73c5d5be039414e",
+        "rev": "37355e2ab4009e047e14eac21bfbbd22b9931151",
         "type": "github"
       },
       "original": {
         "owner": "lessrest",
         "repo": "swash",
-        "rev": "fcc1005aceee44cd1b9285edb73c5d5be039414e",
+        "rev": "37355e2ab4009e047e14eac21bfbbd22b9931151",
         "type": "github"
       }
     },
