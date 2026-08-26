@@ -1361,7 +1361,9 @@ stock tables."))
    (summary-stocks :initarg :summary-stocks
                    :reader material-program-summary-stocks)
    (summary-count :initarg :summary-count
-                  :reader material-program-summary-count))
+                  :reader material-program-summary-count)
+   (chamfer-algebra :initarg :chamfer-algebra
+                    :reader material-program-chamfer-algebra))
   (:documentation
    "Scene-closed dense decisions consumed by face, band, and fan meshing.
 
@@ -1611,7 +1613,10 @@ all-members inspection/test convention."
        :placement-flags placement-flags
        :assembly-summary-masks assembly-summary-masks
        :summary-stocks summary-stocks
-       :summary-count summary-count))))
+       :summary-count summary-count
+       :chamfer-algebra
+       (luft:make-compiled-chamfer-algebra
+        assembly-summary-masks summary-stocks summary-count)))))
 
 (defun make-compiled-material-chamfer-stock-function (program)
   "Capture PROGRAM's dense lanes as one dispatch-free chamfer resolver."

@@ -4594,10 +4594,12 @@
                 scene (render:scene-solid scene) width nil
                 (luft.render::make-compiled-material-chamfer-stock-function
                  (luft.render::scene-material-program scene)))))
-        (ok (luft::%same-surface-mesh-representation-p
-             material-oracle material-mesh))
-        (ok (luft::%same-surface-mesh-representation-p
-             uniform-oracle uniform-mesh))
+        (ok (canonical-mesh-cohorts-equal-p
+             (list material-oracle)
+             (surface-mesh-tree-meshes material-mesh)))
+        (ok (canonical-mesh-cohorts-equal-p
+             (list uniform-oracle)
+             (surface-mesh-tree-meshes uniform-mesh)))
         (ok (luft::%mesh-closed-p material-mesh))
         (ok (luft::%mesh-nondegenerate-p material-mesh))))))
 

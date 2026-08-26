@@ -1715,6 +1715,99 @@
        (loop for key being the hash-keys of left using (hash-value count)
              always (= count (gethash key right 0)))))
 
+(defun %width-one-test-face-stock (face cell axis side)
+  "Four singleton stocks whose LOGIOR is the test material-summary algebra."
+  (declare (ignore face))
+  (svref #(1 2 4 8)
+         (mod (+ (site-x cell) (* 3 (site-y cell)) (* 5 (site-z cell))
+                 (axis-index axis) (if (eq side :forward) 1 0))
+              4)))
+
+(defun %width-one-test-chamfer-stock (stocks)
+  (reduce #'logior stocks))
+
+(defun %make-width-one-test-chamfer-algebra ()
+  (let ((masks (make-array 9 :element-type '(unsigned-byte 16)
+                             :initial-element #xffff))
+        (stocks (make-array 16 :element-type '(unsigned-byte 16))))
+    (setf (aref masks 1) 1
+          (aref masks 2) 2
+          (aref masks 4) 4
+          (aref masks 8) 8)
+    (dotimes (mask 16)
+      (setf (aref stocks mask) mask))
+    (make-compiled-chamfer-algebra masks stocks 15)))
+
+(defun %mesh-test-chunk (chain key store &rest arguments)
+  (handler-bind
+      ((missing-chunk
+         (lambda (condition)
+           (multiple-value-bind (neighbor present-p)
+               (gethash (missing-chunk-key condition) store)
+             (if present-p
+                 (invoke-restart 'use-chunk neighbor)
+                 (invoke-restart 'treat-as-air)))))
+       (outside-domain
+         (lambda (condition)
+           (declare (ignore condition))
+           (invoke-restart 'treat-as-air))))
+    (apply #'mesh-chunk chain key arguments)))
+
+(defun %test-width-one-local-kernel ()
+  (%with-test-section ("width-one finite-neighborhood production kernel")
+    (let ((algebra (%make-width-one-test-chamfer-algebra))
+          (empty-store (make-hash-table :test #'eql)))
+      ;; The complete 256-star corpus checks all face states, all sixteen edge
+      ;; patterns in every orientation, every singular decomposition, material
+      ;; contributor union, AO, construction-edge masks, and triangle winding.
+      (dotimes (mask 256)
+        (let* ((solid (%solid-for-star mask))
+               (fast
+                 (%mesh-test-chunk
+                  solid 0 empty-store
+                  :source-stock-function #'%width-one-test-face-stock
+                  :chamfer-stock-function #'%width-one-test-chamfer-stock
+                  :chamfer-algebra algebra :bevel-width 1))
+               (oracle
+                 (%mesh-test-chunk
+                  solid 0 empty-store
+                  :source-stock-function #'%width-one-test-face-stock
+                  :chamfer-stock-function #'%width-one-test-chamfer-stock
+                  :bevel-width 1)))
+          (%check
+           (%triangle-counts=
+            (%canonical-triangle-record-counts (list fast))
+            (%canonical-triangle-record-counts (list oracle)))
+           (format nil "star ~2,'0X" mask))
+          (%check (= (surface-mesh-singular-star-count fast)
+                     (surface-mesh-singular-star-count oracle))
+                  (format nil "singular star ~2,'0X" mask))))
+      ;; Repeat the differential at real chunk seams, including every low-side
+      ;; halo resolution used by the direct owned-star scan.
+      (let* ((world (%chunk-test-world))
+             (store (make-hash-table :test #'eql)))
+        (map-chain-chunks
+         (lambda (key chain) (setf (gethash key store) chain))
+         world)
+        (loop for key being the hash-keys of store using (hash-value chain)
+              do (let ((fast
+                         (%mesh-test-chunk
+                          chain key store
+                          :source-stock-function #'%width-one-test-face-stock
+                          :chamfer-stock-function #'%width-one-test-chamfer-stock
+                          :chamfer-algebra algebra :bevel-width 1))
+                       (oracle
+                         (%mesh-test-chunk
+                          chain key store
+                          :source-stock-function #'%width-one-test-face-stock
+                          :chamfer-stock-function #'%width-one-test-chamfer-stock
+                          :bevel-width 1)))
+                   (%check
+                    (%triangle-counts=
+                     (%canonical-triangle-record-counts (list fast))
+                     (%canonical-triangle-record-counts (list oracle)))
+                    (format nil "chunk ~D" key))))))))
+
 (defun %test-chunked-meshing ()
   (%with-test-section ("chunked meshing equals whole-world meshing")
     (let* ((world (%chunk-test-world))
@@ -1981,6 +2074,7 @@
     (%test-surface-attachment-local-support-chart)
     (%test-sheet-decomposition)
     (%test-surface-mesh)
+    (%test-width-one-local-kernel)
     (%test-chunked-meshing)
     (%test-owner-preserving-variable-bevel-cohort)
     (when stream

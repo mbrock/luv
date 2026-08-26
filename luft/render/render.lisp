@@ -4824,9 +4824,10 @@ medial-collapse repairs cannot diverge at chunk seams."
   (luft:with-surface-mesh-workspace ()
     (let* ((scene (streaming-mesh-snapshot-scene snapshot))
            (neighborhood (streaming-mesh-snapshot-union-neighborhood snapshot))
+           (material-program (scene-material-program scene))
            (chamfer-stock-function
              (make-compiled-material-chamfer-stock-function
-              (scene-material-program scene))))
+              material-program)))
       (labels ((mesh-owner (key width)
                  (let ((chain (gethash key neighborhood)))
                    (unless chain
@@ -4838,6 +4839,8 @@ medial-collapse repairs cannot diverge at chunk seams."
                       :source-stock-function
                       (make-scene-face-stock-function scene)
                       :chamfer-stock-function chamfer-stock-function
+                      :chamfer-algebra
+                      (material-program-chamfer-algebra material-program)
                       :bevel-width width))))
                (decorate-owners (owners &optional surface-context)
                  (decorate-scene-meshes

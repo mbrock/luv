@@ -558,6 +558,67 @@ Bit conventions match SITE-STAR-OCCUPANCY-MASK on a vertex site."
         (setf mask (logior mask (ash 1 sample)))))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Compiled chamfer material algebra
+
+(defstruct (compiled-chamfer-algebra
+             (:constructor %make-compiled-chamfer-algebra
+                 (stock-summary-masks summary-stocks summary-count))
+             (:copier nil))
+  "Dense material-summary lanes borrowed by one meshing batch.
+
+STOCK-SUMMARY-MASKS maps an already compiled face stock to its nonzero
+contributor mask.  Bitwise OR is the associative, commutative, idempotent join;
+SUMMARY-STOCKS lowers the joined mask back to one compiled appearance stock.
+The semantic material compiler owns both arrays.  The mesher only borrows them
+for a bounded scan and never constructs per-edge or per-fan stock lists."
+  (stock-summary-masks #()
+                       :type (simple-array (unsigned-byte 16) (*))
+                       :read-only t)
+  (summary-stocks #()
+                  :type (simple-array (unsigned-byte 16) (*))
+                  :read-only t)
+  (summary-count 0 :type (integer 1 #xffff) :read-only t))
+
+(defun make-compiled-chamfer-algebra
+    (stock-summary-masks summary-stocks summary-count)
+  "Bind checked dense material-summary lanes for chunk meshing."
+  (check-type stock-summary-masks
+              (simple-array (unsigned-byte 16) (*)))
+  (check-type summary-stocks (simple-array (unsigned-byte 16) (*)))
+  (check-type summary-count (integer 1 #xffff))
+  (unless (> (length summary-stocks) summary-count)
+    (error "Summary stock lane of length ~D does not contain mask ~D."
+           (length summary-stocks) summary-count))
+  (%make-compiled-chamfer-algebra
+   stock-summary-masks summary-stocks summary-count))
+
+(declaim (inline %compiled-chamfer-stock-summary
+                 %compiled-chamfer-summary-stock))
+(defun %compiled-chamfer-stock-summary (algebra stock)
+  (declare (optimize (speed 3) (safety 1))
+           (type compiled-chamfer-algebra algebra)
+           (type (unsigned-byte 16) stock))
+  (let ((masks (compiled-chamfer-algebra-stock-summary-masks algebra)))
+    (unless (< stock (length masks))
+      (error "Assembly stock ~D is outside this compiled chamfer algebra."
+             stock))
+    (let ((summary (aref masks stock)))
+      (unless (<= 1 summary
+                  (compiled-chamfer-algebra-summary-count algebra))
+        (error "Assembly stock ~D has no summary in this chamfer algebra."
+               stock))
+      summary)))
+
+(defun %compiled-chamfer-summary-stock (algebra summary)
+  (declare (optimize (speed 3) (safety 1))
+           (type compiled-chamfer-algebra algebra)
+           (type (unsigned-byte 16) summary))
+  (unless (<= 1 summary (compiled-chamfer-algebra-summary-count algebra))
+    (error "Joined material summary ~D is outside this chamfer algebra."
+           summary))
+  (aref (compiled-chamfer-algebra-summary-stocks algebra) summary))
+
+;;; ---------------------------------------------------------------------------
 ;;; Templates, instance streams, and the builder
 
 (defstruct (mesh-template
@@ -2801,11 +2862,642 @@ lattice-site closure.  It must return one stock for that entire chamfer."
                              stock-function chamfer-stock-function))))))
   edge-candidates)
 
+;;; ---------------------------------------------------------------------------
+;;; Width-one local topology compiler and bounded chunk kernel
+;;;
+;;; MAKE-SURFACE-MESH above remains the deliberately surface-proportional
+;;; oracle.  The tables below are compiled once from that oracle.  Production
+;;; chunk meshing at width one scans owned lattice vertices, reads one eight-bit
+;;; star, and emits the face, edge, and vertex records anchored there without
+;;; candidate discovery, boundary reduction, site grouping, or cycle walking.
+
+(defstruct (width-one-template-descriptor
+             (:constructor %make-width-one-template-descriptor
+                 (vertices contributor-mask ambient-star-p))
+             (:copier nil))
+  (vertices #() :type (simple-array fixnum (*)) :read-only t)
+  (contributor-mask 0 :type (unsigned-byte 12) :read-only t)
+  (ambient-star-p nil :type boolean :read-only t))
+
+(defstruct (width-one-edge-pattern
+             (:constructor %make-width-one-edge-pattern
+                 (transitions descriptors))
+             (:copier nil))
+  ;; Four entries in radial transition order.  -1 is not a boundary;
+  ;; otherwise bits 0..1 name the occupied quadrant, bit 2 selects V rather
+  ;; than U as the normal axis, and bit 3 says the normal sign is positive.
+  (transitions #() :type simple-vector :read-only t)
+  ;; Three complete oriented descriptor vectors, indexed by edge axis.
+  (descriptors #() :type simple-vector :read-only t))
+
+(defstruct (width-one-vertex-pattern
+             (:constructor %make-width-one-vertex-pattern
+                 (contributors descriptors))
+             (:copier nil))
+  ;; Twelve cube-edge entries parallel to *STAR-CUBE-EDGES*.  -1 is not a
+  ;; boundary; otherwise bits 0..2 name the occupied sample, bits 3..4 the
+  ;; face-normal axis, and bit 5 says the normal sign is positive.
+  (contributors #() :type simple-vector :read-only t)
+  (descriptors #() :type simple-vector :read-only t))
+
+(defconstant +width-one-table-site+ 8)
+
+(defun %width-one-local-star-solid (domain mask)
+  (let ((builder (make-chain-builder domain :initial-capacity 8)))
+    (dotimes (sample 8)
+      (when (logbitp sample mask)
+        (chain-builder-add-site
+         builder
+         (make-site
+          domain
+          (+ +width-one-table-site+
+             (if (logbitp 0 sample) 0 -1))
+          (+ +width-one-table-site+
+             (if (logbitp 1 sample) 0 -1))
+          (+ +width-one-table-site+
+             (if (logbitp 2 sample) 0 -1))
+          +cell-extent+ 1))))
+    (finish-chain-builder builder)))
+
+(defun %width-one-cell-sample-at-table-site (cell)
+  (let ((sample 0))
+    (dotimes (axis-number 3 sample)
+      (let ((coordinate
+              (ecase axis-number
+                (0 (site-x cell)) (1 (site-y cell)) (2 (site-z cell)))))
+        (cond ((= coordinate +width-one-table-site+)
+               (setf sample (logior sample (ash 1 axis-number))))
+              ((/= coordinate (1- +width-one-table-site+))
+               (return-from %width-one-cell-sample-at-table-site nil)))))))
+
+(defun %width-one-face-plane-coordinate (cell axis-number normal-sign)
+  (+ (ecase axis-number
+       (0 (site-x cell)) (1 (site-y cell)) (2 (site-z cell)))
+     (if (plusp normal-sign) 1 0)))
+
+(defun %width-one-vertex-contributor-stock (cell axis side)
+  "Give one central-site incident face a distinct cube-edge bit."
+  (let* ((axis-number (axis-index axis))
+         (normal-sign (if (eq side :forward) -1 1))
+         (sample (%width-one-cell-sample-at-table-site cell)))
+    (if (and sample
+             (= +width-one-table-site+
+                (%width-one-face-plane-coordinate
+                 cell axis-number normal-sign)))
+        (let* ((edge (%cube-edge-key
+                      sample (logxor sample (ash 1 axis-number))))
+               (index (position edge *star-cube-edges* :test #'=)))
+          (unless index
+            (error "Central star face has no cube-edge contributor."))
+          (ash 1 index))
+        0)))
+
+(defun %width-one-quadrant-index (u-coordinate v-coordinate)
+  (cond ((and (= u-coordinate (1- +width-one-table-site+))
+              (= v-coordinate (1- +width-one-table-site+))) 0)
+        ((and (= u-coordinate +width-one-table-site+)
+              (= v-coordinate (1- +width-one-table-site+))) 1)
+        ((and (= u-coordinate +width-one-table-site+)
+              (= v-coordinate +width-one-table-site+)) 2)
+        ((and (= u-coordinate (1- +width-one-table-site+))
+              (= v-coordinate +width-one-table-site+)) 3)
+        (t nil)))
+
+(defun %width-one-edge-contributor-stock
+    (cell axis side edge-axis-number)
+  "Give one face incident to the selected positive edge its radial bit."
+  (let* ((axis-number (axis-index axis))
+         (normal-sign (if (eq side :forward) -1 1))
+         (u (svref +axis-u+ edge-axis-number))
+         (v (svref +axis-v+ edge-axis-number))
+         (coordinates (vector (site-x cell) (site-y cell) (site-z cell))))
+    (declare (dynamic-extent coordinates))
+    (if (or (= axis-number edge-axis-number)
+            (/= (aref coordinates edge-axis-number)
+                +width-one-table-site+)
+            (/= +width-one-table-site+
+                (%width-one-face-plane-coordinate
+                 cell axis-number normal-sign)))
+        0
+        (let* ((occupied
+                 (%width-one-quadrant-index
+                  (aref coordinates u) (aref coordinates v)))
+               (empty-u (+ (aref coordinates u)
+                           (if (= axis-number u) normal-sign 0)))
+               (empty-v (+ (aref coordinates v)
+                           (if (= axis-number v) normal-sign 0)))
+               (empty (%width-one-quadrant-index empty-u empty-v)))
+          (if (and occupied empty)
+              (let ((transition
+                      (loop for index below 4
+                            for next = (mod (1+ index) 4)
+                            when (or (and (= index occupied) (= next empty))
+                                     (and (= index empty) (= next occupied)))
+                              return index)))
+                (unless transition
+                  (error "Canonical edge face has no radial transition."))
+                (ash 1 transition))
+              0)))))
+
+(defun %width-one-or-contributors (stocks)
+  (reduce #'logior stocks))
+
+(declaim (inline %packed-template-coordinate %packed-template-attributes))
+(defun %packed-template-coordinate (vertex axis-number)
+  (- (ldb (byte +mesh-template-coordinate-bit-count+
+                (* axis-number +mesh-template-coordinate-bit-count+))
+          vertex)
+     +mesh-template-coordinate-bias+))
+
+(defun %packed-template-attributes (vertex)
+  (ash vertex (- +mesh-vertex-attribute-shift+)))
+
+(defun %finished-instance-template-vertices (mesh meta)
+  (let* ((template-id (ldb (byte 16 0) meta))
+         (ranges (surface-mesh-template-ranges mesh))
+         (start (aref ranges (* 2 template-id)))
+         (count (aref ranges (1+ (* 2 template-id))))
+         (words (surface-mesh-template-vertex-words mesh))
+         (vertices (make-array count :element-type 'fixnum)))
+    (dotimes (index count vertices)
+      (let ((offset (* +mesh-template-vertex-word-count+ (+ start index))))
+        (setf (aref vertices index)
+              (%pack-template-vertex
+               (- (aref words offset) +mesh-template-coordinate-bias+)
+               (- (aref words (+ offset 1)) +mesh-template-coordinate-bias+)
+               (- (aref words (+ offset 2)) +mesh-template-coordinate-bias+)
+               (aref words (+ offset 3))))))))
+
+(defun %width-one-edge-descriptors-for-state (domain state axis-number)
+  (let ((mask 0))
+    (let ((u (svref +axis-u+ axis-number))
+          (v (svref +axis-v+ axis-number)))
+      (dotimes (quadrant 4)
+        (when (logbitp quadrant state)
+          (let ((sample
+                  (logior
+                   (ash 1 axis-number)
+                   (if (plusp (svref +quadrant-u+ quadrant))
+                       (ash 1 u) 0)
+                   (if (plusp (svref +quadrant-v+ quadrant))
+                       (ash 1 v) 0))))
+            (setf mask (logior mask (ash 1 sample)))))))
+    (let* ((u (svref +axis-u+ axis-number))
+           (v (svref +axis-v+ axis-number))
+           (solid (%width-one-local-star-solid domain mask))
+           (mesh
+             (make-surface-mesh
+              solid :bevel-width 1
+              :source-stock-function
+              (lambda (face cell axis side)
+                (declare (ignore face))
+                (%width-one-edge-contributor-stock
+                 cell axis side axis-number))
+              :chamfer-stock-function #'%width-one-or-contributors))
+           (words (surface-mesh-band-instance-words mesh))
+           (descriptors nil)
+           (origin (* +mesh-cell-size+ +width-one-table-site+)))
+      (loop for offset from 0 below (length words)
+              by +mesh-instance-word-count+
+            for meta = (aref words (+ offset 3))
+            for vertices = (%finished-instance-template-vertices mesh meta)
+            when (= 6 (length vertices)) do
+              (let ((canonical (make-array 6 :element-type 'fixnum))
+                    (minimum-edge most-positive-fixnum)
+                    (maximum-edge most-negative-fixnum)
+                    (transverse-p t))
+                (dotimes (index 6)
+                  (let* ((vertex (aref vertices index))
+                         (global-x
+                           (+ (* +mesh-cell-size+ (aref words offset))
+                              (%packed-template-coordinate vertex 0)))
+                         (global-y
+                           (+ (* +mesh-cell-size+ (aref words (+ offset 1)))
+                              (%packed-template-coordinate vertex 1)))
+                         (global-z
+                           (+ (* +mesh-cell-size+ (aref words (+ offset 2)))
+                              (%packed-template-coordinate vertex 2)))
+                         (x (- global-x origin))
+                         (y (- global-y origin))
+                         (z (- global-z origin)))
+                    (let ((relative (vector x y z)))
+                      (declare (dynamic-extent relative))
+                      (unless (and (<= -1 (aref relative u) 1)
+                                   (<= -1 (aref relative v) 1))
+                        (setf transverse-p nil))
+                      (setf minimum-edge
+                            (min minimum-edge
+                                 (aref relative axis-number))
+                            maximum-edge
+                            (max maximum-edge
+                                 (aref relative axis-number))))
+                    (setf (aref canonical index)
+                          (%pack-template-vertex
+                           x y z (%packed-template-attributes vertex)))))
+                (when (and transverse-p
+                           (= minimum-edge 1) (= maximum-edge 7))
+                  (let ((contributors
+                          (ldb (byte +mesh-instance-stock-bit-count+
+                                     +mesh-instance-stock-shift+)
+                               meta)))
+                    (unless (plusp contributors)
+                      (error "Canonical edge descriptor lost its contributors."))
+                    (push (%make-width-one-template-descriptor
+                           canonical contributors (> (logcount contributors) 1))
+                          descriptors)))))
+      (coerce (nreverse descriptors) 'simple-vector))))
+
+(defun %width-one-edge-transition-descriptors (state)
+  (let ((descriptors (make-array 4 :initial-element -1)))
+    (dotimes (index 4 descriptors)
+      (let ((next (mod (1+ index) 4)))
+        (unless (eq (logbitp index state) (logbitp next state))
+          (let* ((occupied (if (logbitp index state) index next))
+                 (empty (if (= occupied index) next index))
+                 (qu-occupied (svref +quadrant-u+ occupied))
+                 (qu-empty (svref +quadrant-u+ empty))
+                 (qv-empty (svref +quadrant-v+ empty))
+                 (normal-v-p (= qu-occupied qu-empty))
+                 (normal-sign (if normal-v-p qv-empty qu-empty)))
+            (setf (svref descriptors index)
+                  (logior occupied
+                          (if normal-v-p #b100 0)
+                          (if (plusp normal-sign) #b1000 0)))))))))
+
+(defun %compile-width-one-edge-table (domain)
+  (let ((table (make-array 16)))
+    (dotimes (state 16 table)
+      (setf (svref table state)
+            (%make-width-one-edge-pattern
+             (%width-one-edge-transition-descriptors state)
+             (let ((oriented (make-array 3)))
+               (dotimes (axis-number 3 oriented)
+                 (setf (svref oriented axis-number)
+                       (%width-one-edge-descriptors-for-state
+                        domain state axis-number)))))))))
+
+(defun %width-one-vertex-contributor-descriptors (mask)
+  (let ((contributors (make-array 12 :initial-element -1)))
+    (loop for edge in *star-cube-edges*
+          for index from 0
+          when (%boundary-edge-p mask edge) do
+            (let* ((low (%cube-edge-low edge))
+                   (high (%cube-edge-high edge))
+                   (occupied (if (logbitp low mask) low high))
+                   (empty (if (= occupied low) high low))
+                   (axis-number (1- (integer-length (logxor low high))))
+                   (normal-sign-positive-p (logbitp axis-number empty)))
+              (setf (svref contributors index)
+                    (logior occupied (ash axis-number 3)
+                            (if normal-sign-positive-p #b100000 0)))))
+    contributors))
+
+(defun %width-one-vertex-descriptors-for-mask (domain mask)
+  (let* ((solid (%width-one-local-star-solid domain mask))
+         (mesh
+           (make-surface-mesh
+            solid :bevel-width 1
+            :source-stock-function
+            (lambda (face cell axis side)
+              (declare (ignore face))
+              (%width-one-vertex-contributor-stock cell axis side))
+            :chamfer-stock-function #'%width-one-or-contributors))
+         (words (surface-mesh-fan-instance-words mesh))
+         (descriptors nil))
+    (loop for offset from 0 below (length words) by +mesh-instance-word-count+
+          when (and (= (aref words offset) +width-one-table-site+)
+                    (= (aref words (+ offset 1)) +width-one-table-site+)
+                    (= (aref words (+ offset 2)) +width-one-table-site+))
+            do (let* ((meta (aref words (+ offset 3)))
+                      (vertices (%finished-instance-template-vertices mesh meta))
+                      (contributors
+                        (ldb (byte +mesh-instance-stock-bit-count+
+                                   +mesh-instance-stock-shift+)
+                             meta)))
+                 (unless (= 3 (length vertices))
+                   (error "Width-one fan table encountered a nontriangle."))
+                 (unless (plusp contributors)
+                   (error "Width-one fan descriptor lost its contributors."))
+                 (push (%make-width-one-template-descriptor
+                        vertices contributors t)
+                       descriptors)))
+    (coerce (nreverse descriptors) 'simple-vector)))
+
+(defun %compile-width-one-vertex-table (domain)
+  (let ((table (make-array 256)))
+    (dotimes (mask 256 table)
+      (setf (svref table mask)
+            (%make-width-one-vertex-pattern
+             (%width-one-vertex-contributor-descriptors mask)
+             (%width-one-vertex-descriptors-for-mask domain mask))))))
+
+(defparameter *width-one-face-source-table* #(-1 0 1 -1)
+  "Occupied sample along one face normal for its two-bit state.")
+
+(defparameter *width-one-table-domain*
+  (make-world-domain :horizontal-bits 5))
+
+(defparameter *width-one-edge-pattern-table*
+  (%compile-width-one-edge-table *width-one-table-domain*))
+
+(defparameter *width-one-vertex-pattern-table*
+  (%compile-width-one-vertex-table *width-one-table-domain*))
+
+(defun %width-one-sample-cell (domain site-x site-y site-z sample)
+  (make-site domain
+             (- site-x (if (logbitp 0 sample) 0 1))
+             (- site-y (if (logbitp 1 sample) 0 1))
+             (- site-z (if (logbitp 2 sample) 0 1))
+             +cell-extent+ 1))
+
+(defun %width-one-source-face (domain cell axis-number normal-sign)
+  (if (minusp normal-sign)
+      (site-boundary-low domain cell (index-axis axis-number))
+      (site-boundary-high domain cell (index-axis axis-number))))
+
+(defun %width-one-source-stock
+    (stock-function domain site-x site-y site-z sample axis-number normal-sign)
+  (let* ((cell (%width-one-sample-cell
+                domain site-x site-y site-z sample))
+         (face (%width-one-source-face
+                domain cell axis-number normal-sign)))
+    (funcall stock-function face cell (index-axis axis-number)
+             (if (minusp normal-sign) :forward :backward))))
+
+(defun %width-one-lower-contributors (algebra summaries contributor-mask)
+  (declare (optimize (speed 3) (safety 1))
+           (type compiled-chamfer-algebra algebra)
+           (type (simple-array (unsigned-byte 16) (*)) summaries)
+           (type (unsigned-byte 12) contributor-mask))
+  (let ((summary 0))
+    (dotimes (index (length summaries))
+      (when (logbitp index contributor-mask)
+        (setf summary (logior summary (aref summaries index)))))
+    (%compiled-chamfer-summary-stock algebra summary)))
+
+(defun %width-one-descriptor-normal (descriptor)
+  (let* ((vertex (aref (width-one-template-descriptor-vertices descriptor) 0))
+         (attributes (%packed-template-attributes vertex)))
+    (values (- (ldb (byte 2 0) attributes) 1)
+            (- (ldb (byte 2 2) attributes) 1)
+            (- (ldb (byte 2 4) attributes) 1))))
+
+(defun %emit-width-one-descriptor
+    (builder kind site-x site-y site-z descriptor stock star-mask)
+  (let* ((vertices (width-one-template-descriptor-vertices descriptor))
+         (scratch (surface-mesh-builder-vertex-scratch builder)))
+    (dotimes (index (length vertices))
+      (setf (aref scratch index) (aref vertices index)))
+    (multiple-value-bind (nx ny nz)
+        (%width-one-descriptor-normal descriptor)
+      (%emit-instance
+       builder kind site-x site-y site-z stock
+       (if (width-one-template-descriptor-ambient-star-p descriptor)
+           (%star-normal-ambient-occlusion star-mask nx ny nz)
+           0)
+       (length vertices)))))
+
+(defun %emit-width-one-face
+    (builder domain stock-function site-x site-y site-z axis-number source-bit)
+  (let* ((u (svref +axis-u+ axis-number))
+         (v (svref +axis-v+ axis-number))
+         (sample (logior (ash 1 u) (ash 1 v)
+                         (if (= source-bit 1) (ash 1 axis-number) 0)))
+         (normal-sign (if (zerop source-bit) 1 -1))
+         (stock (%width-one-source-stock
+                 stock-function domain site-x site-y site-z
+                 sample axis-number normal-sign))
+         (base (vector site-x site-y site-z))
+         (p0 (make-array 3)) (p1 (make-array 3))
+         (p2 (make-array 3)) (p3 (make-array 3))
+         (plane (* +mesh-cell-size+ (aref base axis-number)))
+         (u0 (+ (* +mesh-cell-size+ (aref base u)) 1))
+         (u1 (+ (* +mesh-cell-size+ (aref base u)) 7))
+         (v0 (+ (* +mesh-cell-size+ (aref base v)) 1))
+         (v1 (+ (* +mesh-cell-size+ (aref base v)) 7))
+         (nx (if (= axis-number 0) normal-sign 0))
+         (ny (if (= axis-number 1) normal-sign 0))
+         (nz (if (= axis-number 2) normal-sign 0)))
+    (declare (dynamic-extent base p0 p1 p2 p3))
+    (flet ((point (target uu vv)
+             (setf (aref target axis-number) plane
+                   (aref target u) uu
+                   (aref target v) vv)))
+      (point p0 u0 v0) (point p1 u1 v0)
+      (point p2 u1 v1) (point p3 u0 v1))
+    (%emit-quad builder :face site-x site-y site-z p0 p1 p2 p3
+                nx ny nz stock 0)))
+
+(defun %width-one-edge-state (star-mask axis-number)
+  (let ((u (svref +axis-u+ axis-number))
+        (v (svref +axis-v+ axis-number))
+        (state 0))
+    (dotimes (quadrant 4 state)
+      (let ((sample
+              (logior (ash 1 axis-number)
+                      (if (plusp (svref +quadrant-u+ quadrant))
+                          (ash 1 u) 0)
+                      (if (plusp (svref +quadrant-v+ quadrant))
+                          (ash 1 v) 0))))
+        (when (logbitp sample star-mask)
+          (setf state (logior state (ash 1 quadrant))))))))
+
+(defun %emit-width-one-edge
+    (builder domain stock-function algebra site-x site-y site-z
+     axis-number star-mask pattern x0 x1 y0 y1 edge-owned-p)
+  (let* ((u (svref +axis-u+ axis-number))
+         (v (svref +axis-v+ axis-number))
+         (transitions (width-one-edge-pattern-transitions pattern))
+         (summaries (make-array 4 :element-type '(unsigned-byte 16)
+                                  :initial-element 0))
+         (source-owned-mask 0))
+    (declare (dynamic-extent summaries))
+    (dotimes (index 4)
+      (let ((descriptor (svref transitions index)))
+        (unless (minusp descriptor)
+          (let* ((quadrant (ldb (byte 2 0) descriptor))
+                 (normal-axis
+                   (if (logbitp 2 descriptor) v u))
+                 (normal-sign (if (logbitp 3 descriptor) 1 -1))
+                 (sample
+                   (logior
+                    (ash 1 axis-number)
+                    (if (plusp (svref +quadrant-u+ quadrant))
+                        (ash 1 u) 0)
+                    (if (plusp (svref +quadrant-v+ quadrant))
+                        (ash 1 v) 0)))
+                 (stock (%width-one-source-stock
+                         stock-function domain site-x site-y site-z
+                         sample normal-axis normal-sign)))
+            (setf (aref summaries index)
+                  (%compiled-chamfer-stock-summary algebra stock))
+            (let ((source-x
+                    (- site-x (if (logbitp 0 sample) 0 1)))
+                  (source-y
+                    (- site-y (if (logbitp 1 sample) 0 1))))
+              (when (and (<= x0 source-x) (< source-x x1)
+                         (<= y0 source-y) (< source-y y1))
+                (setf source-owned-mask
+                      (logior source-owned-mask (ash 1 index)))))))))
+    (loop for descriptor across
+          (svref (width-one-edge-pattern-descriptors pattern) axis-number)
+          for contributors =
+            (width-one-template-descriptor-contributor-mask descriptor)
+          when (if (width-one-template-descriptor-ambient-star-p descriptor)
+                   edge-owned-p
+                   (logtest contributors source-owned-mask))
+            do (let ((stock (%width-one-lower-contributors
+                             algebra summaries contributors)))
+                 (%emit-width-one-descriptor
+                  builder :band site-x site-y site-z
+                  descriptor stock star-mask)))))
+
+(defun %emit-width-one-vertex
+    (builder domain stock-function algebra site-x site-y site-z
+     star-mask pattern)
+  (let ((summaries (make-array 12 :element-type '(unsigned-byte 16)
+                                 :initial-element 0)))
+    (declare (dynamic-extent summaries))
+    (loop for contributor across
+          (width-one-vertex-pattern-contributors pattern)
+          for index from 0
+          unless (minusp contributor) do
+            (let* ((sample (ldb (byte 3 0) contributor))
+                   (axis-number (ldb (byte 2 3) contributor))
+                   (normal-sign (if (logbitp 5 contributor) 1 -1))
+                   (stock (%width-one-source-stock
+                           stock-function domain site-x site-y site-z
+                           sample axis-number normal-sign)))
+              (setf (aref summaries index)
+                    (%compiled-chamfer-stock-summary algebra stock))))
+    (loop for descriptor across
+          (width-one-vertex-pattern-descriptors pattern)
+          for stock = (%width-one-lower-contributors
+                       algebra summaries
+                       (width-one-template-descriptor-contributor-mask
+                        descriptor))
+          do (%emit-width-one-descriptor
+              builder :junction site-x site-y site-z
+              descriptor stock star-mask))))
+
+(defun %width-one-chunk-star-z-bounds
+    (chunk field grid-x grid-y x0 x1 y0 y1)
+  "Bounds of cells which can touch this chunk's owned lattice vertices."
+  (let ((minimum-z +top-z+) (maximum-z -1))
+    (flet ((observe (x y z)
+             (when (and (<= (1- x0) x) (< x x1)
+                        (<= (1- y0) y) (< y y1))
+               (setf minimum-z (min minimum-z z)
+                     maximum-z (max maximum-z z)))))
+      (loop for cell across (%chain-sites chunk)
+            do (observe (site-x cell) (site-y cell) (site-z cell)))
+      (loop for (dx dy) in '((-1 0) (0 -1) (-1 -1)) do
+        (let ((nx (+ grid-x dx)) (ny (+ grid-y dy)))
+          (when (and (<= 0 nx) (<= 0 ny))
+            (let ((resolution
+                    (%field-chunk-resolution field (%chunk-morton nx ny))))
+              (case resolution
+                (:air nil)
+                (:solid
+                 (error "A fully solid chunk resolution cannot feed a mesh halo yet."))
+                (t
+                 (loop for key being the hash-keys of resolution
+                       do (let ((x (%lattice-key-x key))
+                                (y (%lattice-key-y key)))
+                            (when (or (< x x0) (< y y0))
+                              (observe x y (%lattice-key-z key)))))))))))
+      (if (minusp maximum-z)
+          (values nil nil)
+          (values minimum-z (1+ maximum-z))))))
+
+(defun %mesh-width-one-chunk-scan
+    (chunk chunk-key field domain stock-function algebra builder
+     x0 x1 y0 y1 ox1 oy1)
+  "Emit one bounded owner directly from its finite star tables."
+  (let ((grid-x (chunk-key-x chunk-key))
+        (grid-y (chunk-key-y chunk-key)))
+    (multiple-value-bind (z0 z1)
+        (%width-one-chunk-star-z-bounds
+         chunk field grid-x grid-y x0 x1 y0 y1)
+      (when z0
+        ;; Source-owned faces and flat collars may be anchored on the high
+        ;; seam.  True edge bands and fans still obey the half-open site box.
+        (loop for site-x from x0 to x1 do
+          (loop for site-y from y0 to y1 do
+            (loop for site-z from z0 to z1 do
+              (let ((star-mask
+                      (%star-mask-at field domain site-x site-y site-z)))
+                (unless (or (zerop star-mask) (= star-mask #xff))
+                  (let ((site-owned-p
+                          (and (< site-x ox1) (< site-y oy1))))
+                    (when (and site-owned-p
+                               (= 1 (sbit *star-singular-bits* star-mask)))
+                      (incf
+                       (surface-mesh-builder-singular-star-count builder)))
+                    (dotimes (axis-number 3)
+                      (let* ((u (svref +axis-u+ axis-number))
+                             (v (svref +axis-v+ axis-number))
+                             (low-sample (logior (ash 1 u) (ash 1 v)))
+                             (high-sample
+                               (logior low-sample (ash 1 axis-number)))
+                             (face-state
+                               (logior
+                                (if (logbitp low-sample star-mask) 1 0)
+                                (if (logbitp high-sample star-mask) 2 0)))
+                             (source-bit
+                               (svref *width-one-face-source-table*
+                                      face-state)))
+                        (unless (minusp source-bit)
+                          (let* ((source-sample
+                                   (if (zerop source-bit)
+                                       low-sample high-sample))
+                                 (source-x
+                                   (- site-x
+                                      (if (logbitp 0 source-sample) 0 1)))
+                                 (source-y
+                                   (- site-y
+                                      (if (logbitp 1 source-sample) 0 1))))
+                            ;; Faces belong to their occupied source cell, not
+                            ;; to the lattice vertex which anchors them.
+                            (when (and (<= x0 source-x) (< source-x x1)
+                                       (<= y0 source-y) (< source-y y1))
+                              (%emit-width-one-face
+                               builder domain stock-function
+                               site-x site-y site-z
+                               axis-number source-bit))))
+                        (let* ((edge-state
+                                 (%width-one-edge-state
+                                  star-mask axis-number))
+                               (pattern
+                                 (svref *width-one-edge-pattern-table*
+                                        edge-state)))
+                          (when (plusp
+                                 (length
+                                  (svref
+                                   (width-one-edge-pattern-descriptors pattern)
+                                   axis-number)))
+                            (%emit-width-one-edge
+                             builder domain stock-function algebra
+                             site-x site-y site-z axis-number star-mask pattern
+                             x0 x1 y0 y1 site-owned-p)))))
+                    (when site-owned-p
+                      (let ((pattern
+                              (svref *width-one-vertex-pattern-table*
+                                     star-mask)))
+                        (when (plusp
+                               (length
+                                (width-one-vertex-pattern-descriptors pattern)))
+                          (%emit-width-one-vertex
+                           builder domain stock-function algebra
+                           site-x site-y site-z star-mask pattern)))))))))))))
+  (%finish-surface-mesh builder))
+
 (defun mesh-chunk
     (chunk chunk-key
      &key (stock-function (constantly 0))
           source-stock-function
           (chamfer-stock-function (lambda (stocks) (first stocks)))
+          chamfer-algebra
           (bevel-width +mesh-bevel-width+))
   "Classify one chunk's solid CHUNK into the instance-stream ABI.
 
@@ -2815,15 +3507,18 @@ handler that answers USE-CHUNK from a store, or TREAT-AS-AIR to fill in --
   and probes past the world's box signal OUTSIDE-DOMAIN; MESH-CHUNK sets no
   policy of its own.  The mesh ships only what this chunk owns: faces of its
 own solid cells, bands whose edge anchors lie inside it, and fans at its
-own lattice vertices.  Witness faces and bands are recomputed from the
-  one-cell halo and scanned but never shipped, so seam fans close exactly as
-  a whole-world mesh would close them.  Exact coplanar compression is a
+own lattice vertices.  At width one, CHAMFER-ALGEBRA selects the bounded
+finite-neighborhood scan; omitting it retains the surface-proportional oracle.
+The oracle recomputes witness faces and bands from the one-cell halo but never
+ships them, so seam fans close exactly as a whole-world mesh would close them.
+Exact coplanar compression is a
 separate, explicitly named transform; this canonical topology producer has no
 alternate representation switch."
   (check-type chunk chain)
   (check-type stock-function function)
   (check-type source-stock-function (or null function))
   (check-type chamfer-stock-function function)
+  (check-type chamfer-algebra (or null compiled-chamfer-algebra))
   (unless (and (integerp bevel-width)
                (<= 1 bevel-width (/ +mesh-cell-size+ 2)))
     (error "Bevel width ~S must be an integer between one and four ticks."
@@ -2848,6 +3543,17 @@ alternate representation switch."
     (loop for cell across (%chain-sites chunk) do
       (unless (= (site-chunk-key cell) chunk-key)
         (error "Cell ~S does not belong to chunk ~D." cell chunk-key)))
+    (when (and (= bevel-width 1) chamfer-algebra)
+      (return-from mesh-chunk
+        (%mesh-width-one-chunk-scan
+         chunk chunk-key field domain stock-resolver chamfer-algebra builder
+         x0 x1 y0 y1
+         (if (>= (+ x0 +chunk-size+) (world-domain-x-limit domain))
+             (1+ (world-domain-x-limit domain))
+             (+ x0 +chunk-size+))
+         (if (>= (+ y0 +chunk-size+) (world-domain-y-limit domain))
+             (1+ (world-domain-y-limit domain))
+             (+ y0 +chunk-size+)))))
     ;; Owned sites are the half-open coordinate box of this chunk's grid
     ;; cell; anchors on the far seam belong to the next chunk over.  Owned
     ;; sites' cell stars reach exactly one cell below the origin per axis,
