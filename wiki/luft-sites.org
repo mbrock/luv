@@ -342,6 +342,64 @@ nondegenerate triangles in a closed mesh.  The clean and construction plates
 show both the apparent separated solids and the fan triangulation that makes
 that separation topologically honest.
 
+* The bezel appears only where a star happens to see both materials
+:PROPERTIES:
+:ID: DH3HR8
+:END:
+
+[[file:images/earth-stone-stone-primary.png]]
+
+A five-cell fixture — rail, post, crystal cap — meshed through the scene
+material program shows what the width-one path does at a horizontal
+material seam.  Flat sides split at the seam and keep their own cell's
+material: the post's top band is limestone, the crystal's bottom band is
+crystal.  The vertical corner junctions span both cells, and a patch that
+crosses the seam must choose one material; the closure resolves
+stone-plus-luminous to the dressed-limestone contact, so the gem's base
+ring carries one stone sliver at every width except medial four, where the
+same patches grow into a collar wide enough to read as intentional
+(=screenshots/crystal-bevels/= holds the width sweep).
+
+A second fixture — a stone wall standing on a grass plateau — shows the
+flat-quad counterpart.  Straight concave edges emit no mixed geometry at
+all, so a wall base meets the lawn cleanly; but each exterior wall corner
+emits one junction pinwheel on the flat grass whose star sees the wall's
+foundation faces, and the closure paints it foundation-limestone.  In the
+sanctuary this is the row of evenly spaced stone tabs at every pilaster,
+merlon, and stair corner.  Bezel material exists only where a star happens
+to include both materials, so the intended trim surfaces as isolated
+crumbs instead of a line.
+
+The direction is likewise settled pairwise rather than declared: the host
+reduction resolves earth-plus-stone stone-primary, so grass wears stone
+crumbs rather than stone wearing a turf lip.  Redefining one method —
+[[lisp:luft.render:material-closure-surface-assembly]] on the stone host,
+earth branch — to let the highest earth reading own the appearance clears
+every flat tab in the sanctuary in one refresh:
+
+[[file:images/earth-stone-earth-primary.png]]
+
+The lesson for the site-stream mesher is that the bezel deserves to be a
+principle rather than a coincidence of stars.  The living material laps
+over the harder one at a contact — grass around a set stone, turf over a
+foundation course — as #41HEJ1 already asks of bands and fans.  That
+means three commitments: a contact declares which side owns its lip; trim
+runs continuously along the contact curve through bands, fans, and seam
+rings, never surfacing on interior flat patches; and junction geometry
+that spans a material seam either splits there, as the bands already do,
+or belongs wholly to the declared owner.
+
+** TODO Give every material contact a declared bezel owner
+:PROPERTIES:
+:ID: 4UY1IC
+:END:
+
+/Intent./ When the site-stream renderer assigns materials to bands, fans,
+and seam geometry, replace the emergent host reduction with a declared
+owner per contact pair — earth over stone, stone bezel under crystal — and
+verify on the sanctuary that trim is continuous and flat interiors stay
+pure.
+
 * Coplanar merging is exact level of detail
 :PROPERTIES:
 :ID: YGP21F
