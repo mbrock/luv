@@ -1229,17 +1229,21 @@ for a bounded scan and never constructs per-edge or per-fan stock lists."
 (defconstant +axis-u+ (if (boundp '+axis-u+) (symbol-value '+axis-u+) #(1 0 0)))
 (defconstant +axis-v+ (if (boundp '+axis-v+) (symbol-value '+axis-v+) #(2 2 1)))
 
-(defun %make-face-stock-resolver (stock-function source-stock-function)
-  "Return the internal four-argument face-stock callback.
+(defun %make-face-stock-resolver (domain stock-function source-stock-function)
+  "Return the internal three-argument face-stock callback.
 
-Legacy STOCK-FUNCTION sees only the oriented face.  SOURCE-STOCK-FUNCTION is
-the provenance-aware form and receives FACE, occupied source CELL, normal
-AXIS, and whether that cell lies :FORWARD or :BACKWARD of FACE."
+SOURCE-STOCK-FUNCTION is the provenance-aware form and receives the occupied
+source CELL, its normal AXIS, and whether that cell lies :FORWARD or
+:BACKWARD of the emitting boundary face.  Legacy STOCK-FUNCTION sees only the
+oriented face, so its adapter is the one place that still constructs a
+checked boundary-face site."
   (if source-stock-function
       source-stock-function
-      (lambda (face cell axis side)
-        (declare (ignore cell axis side))
-        (funcall stock-function face))))
+      (lambda (cell axis side)
+        (funcall stock-function
+                 (if (eq side :forward)
+                     (site-boundary-low domain cell axis)
+                     (site-boundary-high domain cell axis))))))
 
 (defun %emit-cell-face
     (builder field domain cell axis-number side stock-function
@@ -1249,11 +1253,8 @@ AXIS, and whether that cell lies :FORWARD or :BACKWARD of FACE."
          (cx (site-x cell)) (cy (site-y cell)) (cz (site-z cell))
          (u (svref +axis-u+ axis-number))
          (v (svref +axis-v+ axis-number))
-         (face (if (minusp side)
-                   (site-boundary-low domain cell (index-axis axis-number))
-                   (site-boundary-high domain cell (index-axis axis-number))))
          (stock
-           (funcall stock-function face cell (index-axis axis-number)
+           (funcall stock-function cell (index-axis axis-number)
                     (if (minusp side) :forward :backward)))
          ;; The central square remains face-owned.  Its four collars are the
          ;; planar part of the chamfer, so they must take the same one-stock
@@ -1480,7 +1481,7 @@ AXIS, and whether that cell lies :FORWARD or :BACKWARD of FACE."
       (flet ((transition (transition-index)
                ;; Resolve one occupancy transition into its face normal axis
                ;; and sign, the occupied side's cross-axis offset sign, and
-               ;; the oriented boundary face carrying the stock.
+               ;; the occupied source cell carrying the stock.
                (let* ((next-index (mod (1+ transition-index) 4))
                       (occupied-index (if (logbitp transition-index states)
                                           transition-index
@@ -1502,22 +1503,16 @@ AXIS, and whether that cell lies :FORWARD or :BACKWARD of FACE."
                                        (quadrant-cell-x occupied-index)
                                        (quadrant-cell-y occupied-index)
                                        (quadrant-cell-z occupied-index)
-                                       +cell-extent+ 1))
-                      (face (if (minusp normal-sign)
-                                (site-boundary-low
-                                 domain cell (index-axis normal-axis))
-                                (site-boundary-high
-                                 domain cell (index-axis normal-axis)))))
+                                       +cell-extent+ 1)))
                  (values normal-axis normal-sign other-axis other-sign
-                         face cell))))
+                         cell))))
         (dolist (group (svref *edge-transition-group-table* states))
           (multiple-value-bind
-                (left-axis left-sign left-other left-other-sign
-                 left-face left-cell)
+                (left-axis left-sign left-other left-other-sign left-cell)
               (transition (first group))
             (multiple-value-bind
                   (right-axis right-sign right-other right-other-sign
-                   right-face right-cell)
+                   right-cell)
                 (transition (second group))
               ;; Equal normals are one flat face continued across a cell
               ;; boundary; opposite normals are two sheets touching at the
@@ -1554,12 +1549,12 @@ AXIS, and whether that cell lies :FORWARD or :BACKWARD of FACE."
                          (stock
                            (funcall chamfer-stock-function
                                     (list (funcall
-                                           stock-function left-face left-cell
+                                           stock-function left-cell
                                            (index-axis left-axis)
                                            (if (minusp left-sign)
                                                :forward :backward))
                                           (funcall stock-function
-                                                   right-face right-cell
+                                                   right-cell
                                                    (index-axis right-axis)
                                                    (if (minusp right-sign)
                                                        :forward
@@ -3082,10 +3077,11 @@ their boundary cycles while only the expanded site-local patches are emitted.
 Each stream is sorted by template so the renderer can issue direct instanced
 draws.
 STOCK-FUNCTION is called with an oriented boundary face.  When supplied,
-SOURCE-STOCK-FUNCTION supersedes it and receives FACE, the occupied source
-CELL, its normal AXIS, and :FORWARD or :BACKWARD incidence.  This provenance
-form lets a captured or streaming occupancy view classify the exact cell that
-caused emission without reverse-probing another solid.  CHAMFER-STOCK-FUNCTION
+SOURCE-STOCK-FUNCTION supersedes it and receives the occupied source CELL,
+its normal AXIS, and :FORWARD or :BACKWARD incidence.  This provenance form
+lets a captured or streaming occupancy view classify the exact cell that
+caused emission without reverse-probing another solid or constructing the
+boundary-face site it never reads.  CHAMFER-STOCK-FUNCTION
 receives the face stocks incident to one edge-owned collar, bevel, or
 lattice-site closure.  It must return one stock for that entire chamfer."
   (check-type solid chain)
@@ -3099,7 +3095,8 @@ lattice-site closure.  It must return one stock for that entire chamfer."
   (check-type boundary (member :air :signal))
   (let* ((domain (chain-domain solid))
          (stock-resolver
-           (%make-face-stock-resolver stock-function source-stock-function))
+           (%make-face-stock-resolver
+            domain stock-function source-stock-function))
          (field (%materialize-occupancy
                  solid
                  0 (world-domain-x-limit domain)
@@ -3365,8 +3362,7 @@ lattice-site closure.  It must return one stock for that entire chamfer."
              (make-surface-mesh
               solid :bevel-width 1
               :source-stock-function
-              (lambda (face cell axis side)
-                (declare (ignore face))
+              (lambda (cell axis side)
                 (%width-one-edge-contributor-stock
                  cell axis side axis-number))
               :chamfer-stock-function #'%width-one-or-contributors))
@@ -3506,8 +3502,7 @@ lattice-site closure.  It must return one stock for that entire chamfer."
            (make-surface-mesh
             solid :bevel-width 1
             :source-stock-function
-            (lambda (face cell axis side)
-              (declare (ignore face))
+            (lambda (cell axis side)
               (%width-one-vertex-contributor-stock cell axis side))
             :chamfer-stock-function #'%width-one-or-contributors))
          (words (surface-mesh-fan-instance-words mesh))
@@ -3645,18 +3640,11 @@ lattice-site closure.  It must return one stock for that entire chamfer."
              (- site-z (if (logbitp 2 sample) 0 1))
              +cell-extent+ 1))
 
-(defun %width-one-source-face (domain cell axis-number normal-sign)
-  (if (minusp normal-sign)
-      (site-boundary-low domain cell (index-axis axis-number))
-      (site-boundary-high domain cell (index-axis axis-number))))
-
 (defun %width-one-source-stock
     (stock-function domain site-x site-y site-z sample axis-number normal-sign)
-  (let* ((cell (%width-one-sample-cell
-                domain site-x site-y site-z sample))
-         (face (%width-one-source-face
-                domain cell axis-number normal-sign)))
-    (funcall stock-function face cell (index-axis axis-number)
+  (let ((cell (%width-one-sample-cell
+               domain site-x site-y site-z sample)))
+    (funcall stock-function cell (index-axis axis-number)
              (if (minusp normal-sign) :forward :backward))))
 
 (defun %materialize-width-one-materials
@@ -4311,7 +4299,8 @@ alternate representation switch."
            bevel-width))
   (let* ((domain (chain-domain chunk))
          (stock-resolver
-           (%make-face-stock-resolver stock-function source-stock-function))
+           (%make-face-stock-resolver
+            domain stock-function source-stock-function))
          (grid-x (chunk-key-x chunk-key))
          (grid-y (chunk-key-y chunk-key))
          (x0 (chunk-origin-x chunk-key))

@@ -991,9 +991,8 @@ same view also retains the truncated wall miter preserved by #DJK8HW."
                                  (logtest
                                   +material-placement-earth-flag+
                                   (aref placement-flags offset))))))))))
-      (lambda (face cell axis side)
+      (lambda (cell axis side)
         (declare (optimize (speed 3) (safety 1)))
-        (declare (ignore face))
         (multiple-value-bind (placement-offset present-p)
             (gethash cell material-cells)
           (unless present-p
@@ -1018,7 +1017,7 @@ same view also retains the truncated wall miter preserved by #DJK8HW."
   (multiple-value-bind (cell axis side)
       (face-solid-cell (scene-solid scene) face)
     (funcall (make-scene-face-stock-function scene)
-             face cell axis side)))
+             cell axis side)))
 
 (defun scene-chamfer-stock (stocks &optional material-program)
   "Resolve one whole chamfer from its incident face STOCKS.

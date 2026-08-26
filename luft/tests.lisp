@@ -362,17 +362,18 @@
                      (error "Unexpected oriented face ~S in stock oracle."
                             face))
                    stock))
-               (source-stock (face source-cell axis side)
-                 (let ((expected-face
+               (source-stock (source-cell axis side)
+                 ;; The provenance protocol no longer passes the oriented
+                 ;; face; CELL, AXIS, and SIDE must reconstruct it exactly.
+                 (let ((face
                          (if (eq side :forward)
                              (site-boundary-low domain source-cell axis)
                              (site-boundary-high domain source-cell axis))))
                    (unless (and (= source-cell cell)
                                 (member axis '(:x :y :z))
-                                (member side '(:forward :backward))
-                                (= face expected-face))
+                                (member side '(:forward :backward)))
                      (error "Bad source-stock provenance ~S."
-                            (list face source-cell axis side)))
+                            (list source-cell axis side)))
                    (let ((stock (face-stock face)))
                      (pushnew (list face source-cell axis side stock)
                               observed-calls :test #'equal)
@@ -1715,9 +1716,8 @@
        (loop for key being the hash-keys of left using (hash-value count)
              always (= count (gethash key right 0)))))
 
-(defun %width-one-test-face-stock (face cell axis side)
+(defun %width-one-test-face-stock (cell axis side)
   "Four singleton stocks whose LOGIOR is the test material-summary algebra."
-  (declare (ignore face))
   (svref #(1 2 4 8)
          (mod (+ (site-x cell) (* 3 (site-y cell)) (* 5 (site-z cell))
                  (axis-index axis) (if (eq side :forward) 1 0))

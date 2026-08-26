@@ -268,7 +268,7 @@ missing-residency cases, and material-sensitive mountain-sanctuary comparison
 against the reference.  Performance evidence never substitutes for those
 semantic checks.
 
-* NEXT Stop constructing ignored face sites
+* DONE Stop constructing ignored face sites
 :PROPERTIES:
 :ID: XCNPYI
 :END:
@@ -285,7 +285,18 @@ contains the complete checked-site construction chain, while
 material-stage report no longer attributes samples to constructing the ignored
 face, and ordinary aggregate timing records the effect.
 
-* TODO Reuse chain-local occupancy facts
+/Result./ The resolver protocol is now =(cell, axis, side)=;
+[[lisp:luft::%make-face-stock-resolver][the legacy adapter]] is the one place that still constructs a checked
+boundary-face site.  On the same mountain-sanctuary fixture the material
+stage fell from 8.960 to 5.143 ms/chunk and the aggregate from 26.182 to
+21.847 ms/chunk; the material flat profile retains only a 1.3% residual of
+=site-valid-p= from foundation occupancy probes, with =gethash=, the
+world-chain binary search, and =chain-cell-occupancy-bit= now dominating --
+exactly the cost named by the material-field experiment below.  The full
+LUFT differential suite and a query-versus-reference triangle-record census
+over all four resident production chunks remained exact.
+
+* NEXT Reuse chain-local occupancy facts
 :PROPERTIES:
 :ID: IS4S0L
 :END:

@@ -864,7 +864,8 @@ surface-proportional implementation, including its boundary restart contract."
   (if (and (= bevel-width 1) chamfer-algebra)
       (%mesh-width-one-chunk-query
        chunk chunk-key
-       (%make-face-stock-resolver stock-function source-stock-function)
+       (%make-face-stock-resolver
+        (chain-domain chunk) stock-function source-stock-function)
        chamfer-algebra outside-domain-policy)
       (%mesh-chunk-reference
        chunk chunk-key
