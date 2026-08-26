@@ -1,142 +1,151 @@
-# Luv in one page
+# Working in Luv
 
-Luv is a Common Lisp GPU workshop, not a conventional engine. It owns a small
-WebGPU-shaped HAL (hand-built Vulkan and native Metal 4), SDL3 canvas hosting,
-Lisp-defined mathematical shaders, and a McCLIM GPU backend. **Luvcraft** is the
-first-generation procedural block-world game. **Luft** is the current
-second-generation game experiment: canonical cubical topology, packed integer
-manifold-sheet meshing, and a playable McCLIM atelier.
+Luv is a Common Lisp GPU workshop: a small WebGPU-shaped HAL with hand-built
+Vulkan and native Metal 4 backends, an SDL3 canvas host, Lisp-defined
+mathematical shaders, and a McCLIM GPU backend. It is inspectable machinery,
+not a general-purpose engine.
 
-The unusual fact that governs development is that the application lives in a
-durable SBCL image. Swash supervises images across checkouts; `./sly` finds the
-one for this checkout and opens a fresh Slynk connection for each command. Keep
-the image and its window alive while inspecting and redefining the program.
+Two game experiments exercise it. **Luvcraft** is the original procedural
+block world, with streaming, simulation, persistence, and tools embedded in
+the world. **Luft** is the current second-generation experiment: canonical
+cubical topology, packed integer manifold-sheet meshes, and a playable McCLIM
+atelier.
 
-## The normal loop
+## Develop in the live image
+
+Ordinary work happens in a durable SBCL image supervised by Swash. `./sly`
+selects the image for this checkout and opens a fresh Slynk connection for
+each command. Keep the application alive while inspecting and redefining its
+code, classes, shaders, and tools.
 
 ```sh
+./sly start                             # boot without opening a game
 ./sly play luft                         # current experiment
-./sly play                              # Luvcraft (the default target)
-./sly status                            # selected image, target, canvas health
-./sly screenshot build/frame.png       # GPU capture, not a desktop screenshot
-./sly load luft/render                  # load safely while frames are held
-./sly stop-playing                      # close the target, keep the image
+./sly play                              # Luvcraft instead
+./sly status                            # image, game, and canvas health
+./sly screenshot build/frame.png       # capture the GPU frame
+./sly stop-playing                      # close the window, keep the Lisp
 ```
 
-`status` is meant to answer whether the application is genuinely alive. Its
-output has this shape (IDs and counters vary):
+A cold start narrates compilation and ends with a useful summary. One real
+start in this checkout said:
 
 ```text
-Selected 2f6a91 (luv) for this checkout.
-LUFT is playing: ./sly screenshot PNG; ./sly stop-playing closes it.
-The canvas loop is healthy (waiting, 18423 iterations, 18210 frames).
+;; Built (:luv-workbench) in 21s.
+;; 214 files compiled, 250 loaded, 41 systems.
+Lisp MKK067 (luv) is ready on 127.0.0.1:35435 (pid 936991).
 ```
 
-A frame error parks rendering but keeps the window event loop responsive.
-`./sly failures` prints every retained condition and backtrace; fix the cause,
-then `./sly resume`. `./sly load SYSTEM...` holds frames during ASDF loading
-and fences the next frame, so prefer it to an uncoordinated load while playing.
+Opening Luft returns the live viewer. The following commands then reported:
 
-The live roots are `luvcraft:*session*` and `luft.render:*viewer*`:
+```text
+$ ./sly status
+Selected MKK067 (luv) for this checkout.
+LUFT is playing: ./sly screenshot PNG; ./sly stop-playing closes it.
+The canvas loop is healthy (waiting, 737 iterations, 10 frames).
+
+$ ./sly screenshot build/frame.png
+("/home/mbrock/luv/build/frame.png" 950 1188 :BGRA8-UNORM-SRGB)
+```
+
+The health comes from the canvas loop, not merely the Lisp connection. A frame
+error parks drawing but leaves the window responsive; `./sly failures` shows
+the retained conditions and backtraces, and `./sly resume` runs frames again
+after the cause is fixed. Screenshots read the game's render target, not the
+desktop.
+
+## Explore before reading everything
+
+The live roots are `luft.render:*viewer*` and `luvcraft:*session*`:
 
 ```sh
-./sly inspect 'luft.render:*viewer*'
 ./sly eval '(type-of luft.render:*viewer*)'
-./sly describe start-viewer --package LUFT.RENDER
-./sly apropos mesh --package LUFT.RENDER
+./sly inspect 'luft.render:*viewer*'
+./sly describe mesh-chunk --package LUFT
+./sly apropos bevel --package LUFT
 ./sly edit mesh-chunk --package LUFT
 ./sly xref callers mesh-chunk --package LUFT
 ```
 
-`inspect` is interactive (`?` for commands, `q` to quit). `describe`,
-`apropos`, and `edit` accept several names. An evaluation error prints a
-backtrace and waits for a restart number or `a` to abort, so do not hide or
-pipe away its stdin.
+`describe` prints the real lambda list, derived type, documentation, and source
+file. `xref` prints callers with file, line, and a source excerpt; asking for
+callers of `mesh-chunk` leads directly into the chunked-meshing tests and
+`luft/render/render.lisp`. `inspect` is interactive (`?` for commands, `q` to
+leave).
 
-## Images and selection
-
-```sh
-./sly list                              # running Lisps in every checkout
-./sly start --name experiment
-./sly --lisp experiment status
-./sly restart                           # replace this checkout's selected image
-./sly log                               # recent Swash output
-./sly stop
-```
-
-`list` makes ownership explicit:
-
-```text
-ID      NAME             STATE    PID     PORT   STARTED              ACTIVE               ROOT
-2f6a91  luv              ready    81234   41927  2026-08-26 09:41:12  2026-08-26 10:03:54  /home/mbrock/luv/
-```
-
-Without `--lisp`, commands select the sole running image rooted at this
-checkout. If several match, `./sly` refuses to guess; select a name or the
-six-character Swash ID. `restart` is the right recovery when the image predates
-a changed `.asd`, flake environment, package, readtable, or native dependency.
-Do not route around a stale managed image with an unmanaged SBCL.
-
-Only one game target should own the image's window. Stop Luvcraft before
-starting Luft and vice versa. Lower-level `open-canvas` forms intentionally
-create another ownership lifecycle; use them only for HAL-level work.
-
-## Know what ASDF would do
+An evaluation error prints a backtrace and Lisp restarts instead of killing
+the image. It waits for a restart number or `a` to abort, so keep its stdin
+visible rather than piping it through `head` or `tail`.
 
 ```sh
-./sly systems                           # project systems: current/dirty/unloaded
-./sly system luft/render                # dependencies, timestamps, pending actions
-./sly stale                             # loaded systems with pending load actions
+./sly load luft/render                  # hold frames during load, then fence
+./sly systems                           # current, dirty, and unloaded systems
+./sly system luft/render                # dependencies and pending ASDF actions
+./sly stale                             # loaded systems with pending actions
 ```
 
-These are read-only reports from the selected image. A typical table is:
+The ASDF reports are read-only: `CURRENT` means a fresh `load-op` plan is
+empty, `DIRTY` gives its action count, and `UNLOADED` means no successful load
+is recorded in this image.
 
-```text
-STATE      PLAN   LOADED  SYSTEM                        DEFINITION
-current    0      yes     luft/render                   luft.asd
-dirty      4      yes     luv                           luv.asd
-unloaded   -      no      luv/test                      luv.asd
+Swash also makes multiple images and worktrees explicit. `./sly list` shows
+them all; create one with `./sly start --name experiment` and select it with
+`./sly --lisp experiment ...`. An unqualified command refuses to guess when
+several images match. `./sly log`, `restart`, and `stop` operate on the same
+selected image.
+
+## Environment and other tools
+
+The dependencies live in a durable Nix profile. Install or refresh it with
+`./scripts/install-dev-profile`; login shells and `.envrc` activate it.
+`./scripts/dev --status` explains the active environment, and
+`./scripts/dev COMMAND` is the fallback when activation was missed.
+
+Use `./sly` for interactive development. Use `make`, `sbcl`, or
+`./scripts/luv COMMAND` for isolated builds, tests, and one-shot tools.
+`build/luft-atelier` and `build/luvcraft` are standalone release/CI programs,
+separate from the managed image. `./sly` itself is a cached ASDF program in
+`build/sly-client`; `./sly --help` is its full command map.
+
+`make test` includes a strict repository-wide Parinfer check. For one file,
+use Parinfer as a tree/indentation diagnostic rather than a formatter:
+
+```sh
+./sly parinfer --strict --check path/to/file.lisp
+./sly parinfer --diff path/to/file.lisp
+./sly parinfer --write path/to/file.lisp
 ```
 
-`CURRENT` means a fresh ASDF `load-op` plan is empty; `DIRTY` reports how many
-actions ASDF would take; `UNLOADED` means the image has no successful load to
-assess. No command above performs the plan.
+`--diff` shows the tree implied by indentation. `--write` repairs validated
+unbalanced source but refuses to rewrite balanced, merely suspicious code.
 
-## Which entry point to use
+## The wiki is part of the source
 
-- `./sly`: persistent interactive development; use this by default.
-- Native `make`, `sbcl`, and `swash`: one-shot work in the activated profile.
-- `./scripts/luv COMMAND`: named one-shot Luvcraft tools such as `gazetteer`.
-- `build/luft-atelier` and `build/luvcraft`: standalone release/CI programs.
-  `./sly --luvcraft ...` deliberately attaches to the latter; do not run it
-  beside a managed game window.
+`wiki/*.org` is the design memory behind the code and the source for
+<https://mbrock.github.io/luv/>. Its unit is a small figure with a stable
+six-character ID. Figures link to one another, collect backlinks, and can be
+cited from comments or docstrings; the site connects those citations back to
+the definitions that embody them.
 
-`./sly` itself is a cached `sly-client` ASDF program at `build/sly-client`, not
-a fresh `sbcl --script`; the launcher rebuilds it when its sources or profile
-SBCL change. `make sly-client` requests that build explicitly.
+```sh
+scripts/wiki toc luft                   # figures and work marks on a page
+scripts/wiki marks next todo            # current small bets
+scripts/wiki figure UTRJ2T              # prose, subfigures, backlinks, code refs
+scripts/wiki mentions UTRJ2T            # every incoming mention
+scripts/wiki defs mesh-chunk            # matching Lisp definitions
+scripts/wiki dangling                    # unresolved figure references
+```
 
-The development environment is a durable Nix profile. Install or refresh it
-with `./scripts/install-dev-profile`; login shells and `.envrc` activate it.
-Run `./scripts/dev --status` if activation looks wrong, and use
-`./scripts/dev COMMAND` only as the fallback activator. `nix develop -c` is the
-from-scratch/CI path, not the normal loop. Restart managed images after a
-profile refresh.
+For example, `figure UTRJ2T` returns “The studio: a world of stars under the
+same cameras,” its prose, six subfigures, and the figures that mention it. Get
+new IDs from `scripts/wiki ids`; keep one idea per figure, and update a nearby
+`NEXT`, `TODO`, `WAIT`, `IDEA`, or `DONE` work mark when an experiment changes
+the plan. Run `scripts/wiki dangling` before committing wiki work and
+`scripts/wiki build` when the rendered result matters.
 
-## Checks and project memory
+## Working rhythm
 
-Run quick checks proportionate to the change. `make test` is the main suite;
-`./sly parinfer --check --file FILE` is the low-noise Lisp balance check, and
-`--strict` also detects a balanced tree that disagrees with indentation.
-`--diff` shows the candidate and `--write` repairs only validated unbalanced
-input.
-
-The Org files in `wiki/` are the design notebook and render to
-<https://mbrock.github.io/luv/>. Use `scripts/wiki` to find figures and
-mentions before editing them; source comments use stable wiki figure IDs.
-
-This is an experimental project: optimize for short iterations and useful
-save points. After a coherent change, run the quick relevant checks, commit,
-and push `origin main` unless the work is explicitly on another branch.
-Preserve unrelated changes; a pushed commit is a save point, not a release.
-
-`./sly --help` is the complete command map.
+Prefer small experiments, live inspection, and useful save points to ceremony.
+Preserve unrelated work. Run the quick relevant checks, then commit and push
+`origin main` unless the work is explicitly on another branch. A pushed commit
+is a durable iteration, not a claim that the experiment is finished.
