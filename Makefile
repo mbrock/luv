@@ -22,12 +22,16 @@ TRACY_MCCLIM_PAINT_TRACE ?= build/mcclim-paints.tracy
 
 FASL_CACHE := $(HOME)/.cache/common-lisp
 
-.PHONY: all sly-client luvcraft luft run test capture showcase-bootstrap showcase-render showcase-deploy showcase-publish showcase-status clean-fasls parinfer-check sly-build-lock-check shader-validate msl-validate smoke vulkan-smoke metal-smoke metal-text-closeup metal-benchmark metal-streaming-benchmark metal-retina-benchmark luft-mesher-benchmark luft-z-fiber-benchmark luft-blender-oracle luft-blender-oracle-check tracy-streaming tracy-mcclim-roundrect tracy-mcclim-paints readme-screenshots mcclim-gallery wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw roundrect-proof slug-proof slug-text-proof clean
+.PHONY: all sly-client luvcraft luft luft-core luft-test run test capture showcase-bootstrap showcase-render showcase-deploy showcase-publish showcase-status clean-fasls parinfer-check sly-build-lock-check shader-validate msl-validate smoke vulkan-smoke metal-smoke metal-text-closeup metal-benchmark metal-streaming-benchmark metal-retina-benchmark luft-mesher-benchmark luft-z-fiber-benchmark luft-blender-oracle luft-blender-oracle-check tracy-streaming tracy-mcclim-roundrect tracy-mcclim-paints readme-screenshots mcclim-gallery wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw roundrect-proof slug-proof slug-text-proof clean
 
-all: luvcraft luft
+ifeq ($(LUV_SLY_SYSTEM),luft)
+all: sly-client luft-core
+else
+all: sly-client luvcraft luft
+endif
 
 sly-client:
-	./scripts/build-sly-client
+	@./scripts/build-sly-client
 
 luvcraft:
 	@status=build/.luvcraft-build-policy; \
@@ -45,11 +49,26 @@ luft:
 		rm -f "$$status"; \
 		exit "$$result"
 
+luft-core:
+	@status=build/.luft-core-build-policy; \
+		rm -f "$$status"; \
+		LUV_BUILD_POLICY_STATUS="$$status" ./scripts/dev sbcl --script luft/build-core.lisp; result=$$?; \
+		if [ "$$result" -eq 0 ] && [ -e "$$status" ]; then result=1; fi; \
+		rm -f "$$status"; \
+		exit "$$result"
+
 run: luvcraft
 	./scripts/dev ./build/luvcraft
 
+ifeq ($(LUV_SLY_SYSTEM),luft)
+test: parinfer-check sly-build-lock-check luft-test
+else
 test: parinfer-check sly-build-lock-check shader-validate
 	@./scripts/dev sbcl --noinform --non-interactive --load scripts/test.lisp
+endif
+
+luft-test:
+	@./scripts/dev sbcl --script scripts/test-luft.lisp
 
 capture:
 	./scripts/captures render

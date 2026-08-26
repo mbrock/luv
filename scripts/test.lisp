@@ -4,8 +4,13 @@
   (merge-pathnames #P"../"
                    (uiop:pathname-directory-pathname *load-truename*)))
 
-(let ((*default-pathname-defaults* (project-root)))
-  (handler-bind ((warning #'muffle-warning))
+(let ((*default-pathname-defaults* (project-root))
+      (*compile-verbose* nil)
+      (*compile-print* nil)
+      (*load-verbose* nil)
+      (*load-print* nil))
+  (handler-bind ((warning #'muffle-warning)
+                 (sb-ext:compiler-note #'muffle-warning))
     (asdf:load-asd (truename "luv.asd"))
     (asdf:load-asd (truename "luvcraft.asd"))
     (asdf:load-asd (truename "telegram.asd"))
@@ -29,5 +34,4 @@
                       :luv-wiki :luft :luft/render
                       :luft/z-fiber-benchmark))
       (format t "~&~A~%" (string-downcase (asdf:component-name (asdf:find-system system))))
-      (asdf:test-system system)
-      (terpri))))
+      (asdf:test-system system))))

@@ -13,6 +13,32 @@ atelier.
 
 ## Develop in the live image
 
+Run `make` first in a new checkout or after pulling substantial changes. It is
+profile-aware: the full profile builds both applications, while the slim agent
+profile builds the non-graphical `luft` system. Either path also builds the
+`./sly` client and warms the FASL cache. Compiler detail goes into
+`build/logs/`; the console stays small and names the slow files:
+
+```text
+$ make
+000.4s  1/10  luft/luft.lisp
+...
+005.4s 10/10  luft/tests.lisp
+;; Built :luft in 5.8s.
+;; 10 files compiled, 10 loaded, 2 systems.
+
+$ make test
+parinfer: strict check passed.
+....
+Ran 4 tests in 0.2s
+OK
+LUFT: 22348 checks passed.
+```
+
+This makes the following Sly start mostly a load of already-compiled systems.
+Test output is failure-focused: successful Rove systems print one count;
+failures retain their descriptions and source locations.
+
 Ordinary work happens in a durable SBCL image supervised by Swash. `./sly`
 selects the image for this checkout and opens a fresh Slynk connection for
 each command. Keep the application alive while inspecting and redefining its

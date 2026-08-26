@@ -27,10 +27,15 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 printf 'Building cached ./sly client core...\n'
-sbcl --noinform --non-interactive --disable-debugger \
-  --eval '(require :asdf)' \
-  --eval '(asdf:load-asd (truename "sly-client.asd"))' \
-  --eval '(asdf:operate (quote asdf:program-op) "sly-client")'
+log=build/sly-client-build.log
+if ! sbcl --noinform --non-interactive --disable-debugger \
+    --eval '(require :asdf)' \
+    --eval '(asdf:load-asd (truename "sly-client.asd"))' \
+    --eval '(asdf:operate (quote asdf:program-op) "sly-client")' \
+    >"$log" 2>&1; then
+  cat "$log" >&2
+  exit 1
+fi
 
 resolved_sbcl=$(realpath "$(command -v sbcl)")
 stamp=build/sly-client.environment
