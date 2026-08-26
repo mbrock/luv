@@ -342,63 +342,82 @@ nondegenerate triangles in a closed mesh.  The clean and construction plates
 show both the apparent separated solids and the fan triangulation that makes
 that separation topologically honest.
 
-* The bezel appears only where a star happens to see both materials
+* Material contacts render as per-patch flips, not trim
 :PROPERTIES:
 :ID: DH3HR8
 :END:
 
+At bevel 1/8 in the sanctuary, flush grass/stone ground reads as tiles
+with square, half-square, and quarter-square bites of the wrong material
+at cell-regular intervals, and a crystal set on a stone post carries one
+stone sliver in its base ring.  These are measured behaviors of the
+current width-one path, recorded here for the site-stream rewrite.
+Facts, each from a small fixture meshed through its scene's material
+program:
+
+- Flush seam: a lawn beside a level architecture strip puts grass
+  junction squares (one tick) on the stone tops at every cell corner
+  along the seam, and limestone bands (one tick), limestone corner
+  squares, and whole limestone face sub-quads on the grass tops.  Both
+  directions of contamination occur at once on a straight, flat seam.
+- Horizontal material seam (crystal on stone post): flat sides split at
+  the seam and keep their own cell's material; the four vertical corner
+  junctions span both cells, must choose one material, and resolve to the
+  dressed-limestone contact.  Identical patch inventory at widths one,
+  two, and four; at medial four the same patches are the whole collar and
+  read as intentional (=screenshots/crystal-bevels/= holds the sweep).
+- A wall standing on a lawn: straight concave bases emit no mixed
+  geometry; each exterior wall corner emits one junction pinwheel of
+  foundation contact on the flat grass.
+
+The mechanism, strictly as measured: near a seam a flat surface is
+emitted as face pieces, one-tick rim bands, and one-tick corner
+junctions; each patch resolves its material independently through its
+own vertex-star closure, so any patch whose star touches the other
+material flips entirely.  No trim is drawn anywhere.  The direction of a
+flip comes from the pairwise host reduction
+([[lisp:luft.render:material-closure-surface-assembly]], stone-primary
+for earth-plus-stone); redefining that one method to earth-primary moves
+the bites from the grass side to the stone side, observed live in one
+renderer refresh:
+
 [[file:images/earth-stone-stone-primary.png]]
-
-A five-cell fixture — rail, post, crystal cap — meshed through the scene
-material program shows what the width-one path does at a horizontal
-material seam.  Flat sides split at the seam and keep their own cell's
-material: the post's top band is limestone, the crystal's bottom band is
-crystal.  The vertical corner junctions span both cells, and a patch that
-crosses the seam must choose one material; the closure resolves
-stone-plus-luminous to the dressed-limestone contact, so the gem's base
-ring carries one stone sliver at every width except medial four, where the
-same patches grow into a collar wide enough to read as intentional
-(=screenshots/crystal-bevels/= holds the width sweep).
-
-A second fixture — a stone wall standing on a grass plateau — shows the
-flat-quad counterpart.  Straight concave edges emit no mixed geometry at
-all, so a wall base meets the lawn cleanly; but each exterior wall corner
-emits one junction pinwheel on the flat grass whose star sees the wall's
-foundation faces, and the closure paints it foundation-limestone.  In the
-sanctuary this is the row of evenly spaced stone tabs at every pilaster,
-merlon, and stair corner.  Bezel material exists only where a star happens
-to include both materials, so the intended trim surfaces as isolated
-crumbs instead of a line.
-
-The direction is likewise settled pairwise rather than declared: the host
-reduction resolves earth-plus-stone stone-primary, so grass wears stone
-crumbs rather than stone wearing a turf lip.  Redefining one method —
-[[lisp:luft.render:material-closure-surface-assembly]] on the stone host,
-earth branch — to let the highest earth reading own the appearance clears
-every flat tab in the sanctuary in one refresh:
 
 [[file:images/earth-stone-earth-primary.png]]
 
-The lesson for the site-stream mesher is that the bezel deserves to be a
-principle rather than a coincidence of stars.  The living material laps
-over the harder one at a contact — grass around a set stone, turf over a
-foundation course — as #41HEJ1 already asks of bands and fans.  That
-means three commitments: a contact declares which side owns its lip; trim
-runs continuously along the contact curve through bands, fans, and seam
-rings, never surfacing on interior flat patches; and junction geometry
-that spans a material seam either splits there, as the bands already do,
-or belongs wholly to the declared owner.
+To observe: =./sly play luft=, bevel 1/8, walk the courtyard where lawn
+meets the podium and tower shoes.  To reproduce in data, mesh a fixture
+through its own material program and dump triangle records:
 
-** TODO Give every material contact a declared bezel owner
+#+begin_src lisp
+(let ((b (luft.render::make-scene-builder :horizontal-bits 5)))
+  (luft.render::scene-builder-box b 4 14 4 14 0 4)
+  (luft.render::scene-builder-box b 9 11 4 14 0 4 :architecture-p t)
+  (let* ((scene (luft.render::finish-scene-builder b))
+         (mesh (luft.render::%make-scene-union-mesh
+                scene (luft.render::scene-solid scene) 1 nil
+                (luft.render::make-compiled-material-chamfer-stock-function
+                 (luft.render::scene-material-program scene)))))
+    (luft::%map-surface-mesh-triangle-records
+     (lambda (kind stock ambient mask normal a b c)
+       (declare (ignore ambient mask normal))
+       ;; Filter by plane and region; resolve STOCK through
+       ;; SURFACE-ASSEMBLY-AT to name each patch's material.
+       (list kind stock a b c))
+     mesh)))
+#+end_src
+
+** TODO Give flat faces their own material and contacts their own geometry
 :PROPERTIES:
 :ID: 4UY1IC
 :END:
 
-/Intent./ When the site-stream renderer assigns materials to bands, fans,
-and seam geometry, replace the emergent host reduction with a declared
-owner per contact pair — earth over stone, stone bezel under crystal — and
-verify on the sanctuary that trim is continuous and flat interiors stay
-pure.
+/Intent./ In the site-stream mesher, flat face pieces take their material
+unconditionally from their own cell; contact material may appear only on
+geometry that belongs to the contact, with a declared owner per material
+pair, eventually as a continuous trim of chosen width in the spirit of
+#41HEJ1.  Verify on the sanctuary courtyard that seam tiles are solid and
+the crystal base ring is unbroken.
 
 * Coplanar merging is exact level of detail
 :PROPERTIES:
