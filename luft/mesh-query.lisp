@@ -98,18 +98,27 @@
    (make-array 0 :element-type '(unsigned-byte 16))))
 
 (defun %query-ub8-capacity (array capacity)
+  (declare (optimize (speed 3) (safety 1))
+           (type (simple-array (unsigned-byte 8) (*)) array)
+           (type fixnum capacity))
   (if (>= (length array) capacity)
       array
       (make-array (max 16 capacity (* 2 (length array)))
                   :element-type '(unsigned-byte 8))))
 
 (defun %query-ub16-capacity (array capacity)
+  (declare (optimize (speed 3) (safety 1))
+           (type (simple-array (unsigned-byte 16) (*)) array)
+           (type fixnum capacity))
   (if (>= (length array) capacity)
       array
       (make-array (max 16 capacity (* 2 (length array)))
                   :element-type '(unsigned-byte 16))))
 
 (defun %query-ub32-capacity (array capacity)
+  (declare (optimize (speed 3) (safety 1))
+           (type (simple-array (unsigned-byte 32) (*)) array)
+           (type fixnum capacity))
   (if (>= (length array) capacity)
       array
       (make-array (max 16 capacity (* 2 (length array)))
@@ -288,7 +297,13 @@
 (defparameter *maximum-width-one-fan-descriptors*
   (%maximum-width-one-fan-descriptors))
 
+(declaim (type (integer 0 12) *maximum-width-one-edge-descriptors*
+                                *maximum-width-one-fan-descriptors*))
+
 (defun %prepare-width-one-query-relations (workspace site-count)
+  (declare (optimize (speed 3) (safety 1))
+           (type width-one-query-workspace workspace)
+           (type (integer 0 #.(* 65 65 256)) site-count))
   (let* ((sites (width-one-query-workspace-sites workspace))
          (faces (width-one-query-workspace-faces workspace))
          (bands (width-one-query-workspace-bands workspace))
@@ -320,6 +335,8 @@
            (width-one-query-faces-material-offset faces) face-capacity)
           (width-one-query-faces-count faces) 0)
     (flet ((prepare-patches (relation capacity)
+             (declare (type width-one-query-patches relation)
+                      (type fixnum capacity))
              (setf (width-one-query-patches-site relation)
                    (%query-ub32-capacity
                     (width-one-query-patches-site relation) capacity)
@@ -343,7 +360,12 @@
 
 (defun %append-width-one-query-face
     (relation site template material-offset)
+  (declare (optimize (speed 3) (safety 1))
+           (type width-one-query-faces relation)
+           (type (unsigned-byte 32) site material-offset)
+           (type (unsigned-byte 16) template))
   (let ((row (width-one-query-faces-count relation)))
+    (declare (type fixnum row))
     (setf (aref (width-one-query-faces-site relation) row) site
           (aref (width-one-query-faces-template relation) row) template
           (aref (width-one-query-faces-material-offset relation) row)
@@ -352,7 +374,12 @@
 
 (defun %append-width-one-query-patch
     (relation site template contributor-mask ambient-star-p)
+  (declare (optimize (speed 3) (safety 1))
+           (type width-one-query-patches relation)
+           (type (unsigned-byte 32) site)
+           (type (unsigned-byte 16) template contributor-mask))
   (let ((row (width-one-query-patches-count relation)))
+    (declare (type fixnum row))
     (setf (aref (width-one-query-patches-site relation) row) site
           (aref (width-one-query-patches-template relation) row) template
           (aref (width-one-query-patches-contributor-mask relation) row)
@@ -362,30 +389,47 @@
           (width-one-query-patches-count relation) (1+ row))))
 
 (defun %width-one-query-compact-contributors (pattern cube-mask)
+  (declare (optimize (speed 3) (safety 1))
+           (type width-one-vertex-pattern pattern)
+           (type (unsigned-byte 12) cube-mask))
   (let ((compact 0)
         (slots (width-one-vertex-pattern-contributor-slots pattern)))
+    (declare (type (unsigned-byte 12) compact)
+             (type (simple-array fixnum (*)) slots))
     (dotimes (contributor-index 12 compact)
       (when (logbitp contributor-index cube-mask)
         (let ((slot (aref slots contributor-index)))
           (when (minusp slot)
             (error "Query primitive names absent contributor ~D."
                    contributor-index))
-          (setf compact (logior compact (ash 1 slot))))))))
+          (setf compact
+                (logior compact
+                        (ash 1 (the (integer 0 11) slot)))))))))
 
 (defun %width-one-query-edge-cube-contributors
     (transition-mask contributor-indices)
-  (declare (type (simple-array fixnum (*)) contributor-indices))
+  (declare (optimize (speed 3) (safety 1))
+           (type (unsigned-byte 4) transition-mask)
+           (type (simple-array fixnum (*)) contributor-indices))
   (let ((cube-mask 0))
+    (declare (type (unsigned-byte 12) cube-mask))
     (dotimes (transition 4 cube-mask)
       (when (logbitp transition transition-mask)
         (let ((index (aref contributor-indices transition)))
           (when (minusp index)
             (error "Query edge names absent radial transition ~D." transition))
-          (setf cube-mask (logior cube-mask (ash 1 index))))))))
+          (setf cube-mask
+                (logior cube-mask
+                        (ash 1 (the (integer 0 11) index)))))))))
 
 (defun %plan-width-one-query
     (packed-sites workspace x0 x1 y0 y1 ox1 oy1)
   "Lower selected stars to three typed primitive relations."
+  (declare (optimize (speed 3) (safety 1))
+           (type (vector (unsigned-byte 32)) packed-sites)
+           (type width-one-query-workspace workspace)
+           (type (integer 0 #.(1+ (ash 1 17)))
+                 x0 x1 y0 y1 ox1 oy1))
   (let* ((sites (width-one-query-workspace-sites workspace))
          (faces (width-one-query-workspace-faces workspace))
          (bands (width-one-query-workspace-bands workspace))
@@ -408,7 +452,8 @@
              (star-mask (%width-one-site-mask packed))
              (site-owned-p (and (< site-x ox1) (< site-y oy1)))
              (vertex-pattern
-               (svref *width-one-vertex-pattern-table* star-mask)))
+               (the width-one-vertex-pattern
+                 (svref *width-one-vertex-pattern-table* star-mask))))
         (setf (aref (width-one-query-sites-x sites) site-row) local-x
               (aref (width-one-query-sites-y sites) site-row) local-y
               (aref (width-one-query-sites-z sites) site-row) site-z
@@ -424,15 +469,16 @@
                    (= 1 (sbit *star-singular-bits* star-mask)))
           (incf singular-count))
         (dotimes (axis-number 3)
-          (let* ((u (svref +axis-u+ axis-number))
-                 (v (svref +axis-v+ axis-number))
+          (let* ((u (the (integer 0 2) (svref +axis-u+ axis-number)))
+                 (v (the (integer 0 2) (svref +axis-v+ axis-number)))
                  (low-sample (logior (ash 1 u) (ash 1 v)))
                  (high-sample (logior low-sample (ash 1 axis-number)))
                  (face-state
                    (logior (if (logbitp low-sample star-mask) 1 0)
                            (if (logbitp high-sample star-mask) 2 0)))
                  (source-bit
-                   (svref *width-one-face-source-table* face-state)))
+                   (the fixnum
+                     (svref *width-one-face-source-table* face-state))))
             (unless (minusp source-bit)
               (let* ((source-sample
                        (if (zerop source-bit) low-sample high-sample))
@@ -451,15 +497,20 @@
                    (+ material-count
                       (%width-one-contributor-slot
                        vertex-pattern
-                       (aref *width-one-face-contributor-indices*
-                             axis-number)))))))
+                       (aref
+                        (the (simple-array (unsigned-byte 8) (3))
+                          *width-one-face-contributor-indices*)
+                        axis-number)))))))
             (let* ((edge-state
                      (%width-one-edge-state star-mask axis-number))
                    (edge-pattern
-                     (svref *width-one-edge-pattern-table* edge-state))
+                     (the width-one-edge-pattern
+                       (svref *width-one-edge-pattern-table* edge-state)))
                    (descriptors
-                     (svref (width-one-edge-pattern-descriptors edge-pattern)
-                            axis-number)))
+                     (the simple-vector
+                       (svref
+                        (width-one-edge-pattern-descriptors edge-pattern)
+                        axis-number))))
               (when (plusp (length descriptors))
                 (let* ((contributor-indices
                          (the (simple-array fixnum (*))
@@ -468,13 +519,15 @@
                              edge-pattern)
                             axis-number)))
                        (source-owned-mask
-                         (%width-one-edge-source-owned-mask
-                          vertex-pattern contributor-indices site-x site-y
-                          x0 x1 y0 y1)))
+                         (the (unsigned-byte 4)
+                           (%width-one-edge-source-owned-mask
+                            vertex-pattern contributor-indices site-x site-y
+                            x0 x1 y0 y1))))
                   (loop for descriptor across descriptors
                         for transition-mask =
-                          (width-one-template-descriptor-contributor-mask
-                           descriptor)
+                          (the (unsigned-byte 4)
+                            (width-one-template-descriptor-contributor-mask
+                             descriptor))
                         when
                           (if
                            (width-one-template-descriptor-ambient-star-p
@@ -484,8 +537,9 @@
                           do
                              (%append-width-one-query-patch
                               bands site-row
-                              (%width-one-query-descriptor-template-id
-                               descriptor)
+                              (the (unsigned-byte 16)
+                                (%width-one-query-descriptor-template-id
+                                 descriptor))
                               (%width-one-query-compact-contributors
                                vertex-pattern
                                (%width-one-query-edge-cube-contributors
@@ -493,11 +547,13 @@
                               (width-one-template-descriptor-ambient-star-p
                                descriptor))))))))
         (when site-owned-p
-          (loop for descriptor across
-                (width-one-vertex-pattern-descriptors vertex-pattern)
+          (loop with descriptors of-type simple-vector =
+                  (width-one-vertex-pattern-descriptors vertex-pattern)
+                for descriptor across descriptors
                 do (%append-width-one-query-patch
                     fans site-row
-                    (%width-one-query-descriptor-template-id descriptor)
+                    (the (unsigned-byte 16)
+                      (%width-one-query-descriptor-template-id descriptor))
                     (%width-one-query-compact-contributors
                      vertex-pattern
                      (width-one-template-descriptor-contributor-mask
@@ -510,6 +566,13 @@
 (defun %materialize-width-one-query-materials
     (workspace domain stock-function algebra x0 y0 material-count)
   "Evaluate the material dimension once for every selected boundary edge."
+  (declare (optimize (speed 3) (safety 1))
+           (type width-one-query-workspace workspace)
+           (type world-domain domain)
+           (type function stock-function)
+           (type compiled-chamfer-algebra algebra)
+           (type (integer 0 #.(ash 1 17)) x0 y0)
+           (type fixnum material-count))
   (let* ((sites (width-one-query-workspace-sites workspace))
          (stocks
            (%query-ub16-capacity
@@ -518,6 +581,8 @@
            (%query-ub16-capacity
             (width-one-query-workspace-summaries workspace) material-count))
          (write 0))
+    (declare (type (simple-array (unsigned-byte 16) (*)) stocks summaries)
+             (type fixnum write))
     (setf (width-one-query-workspace-stocks workspace) stocks
           (width-one-query-workspace-summaries workspace) summaries)
     (dotimes (site-row (width-one-query-sites-count sites))
@@ -550,6 +615,9 @@
 ;;; Projection into the renderer ABI
 
 (defun %width-one-query-stream-layout (templates row-count)
+  (declare (optimize (speed 3) (safety 1))
+           (type (simple-array (unsigned-byte 16) (*)) templates)
+           (type fixnum row-count))
   (let* ((template-count
            (/ (length
                (width-one-query-vocabulary-ranges
@@ -564,6 +632,9 @@
                              :element-type '(unsigned-byte 32)))
          (words (make-array (* +mesh-instance-word-count+ row-count)
                             :element-type '(unsigned-byte 32))))
+    (declare (type fixnum template-count)
+             (type (simple-array (unsigned-byte 32) (*))
+                   counts starts writes words))
     (dotimes (row row-count)
       (incf (aref counts (aref templates row))))
     (let ((start 0))
@@ -574,11 +645,14 @@
     (values counts starts writes words)))
 
 (defun %width-one-query-draws (counts starts)
+  (declare (optimize (speed 3) (safety 1))
+           (type (simple-array (unsigned-byte 32) (*)) counts starts))
   (let ((ranges
           (width-one-query-vocabulary-ranges
            *width-one-query-vocabulary*))
         (draws nil)
         (triangle-count 0))
+    (declare (type fixnum triangle-count))
     (dotimes (template (length counts))
       (let ((instances (aref counts template)))
         (when (plusp instances)
@@ -591,6 +665,9 @@
     (values (nreverse draws) triangle-count)))
 
 (defun %project-width-one-query-faces (workspace x0 y0)
+  (declare (optimize (speed 3) (safety 1))
+           (type width-one-query-workspace workspace)
+           (type (integer 0 #.(ash 1 17)) x0 y0))
   (let* ((sites (width-one-query-workspace-sites workspace))
          (faces (width-one-query-workspace-faces workspace))
          (templates (width-one-query-faces-template faces))
@@ -598,6 +675,8 @@
          (stocks (width-one-query-workspace-stocks workspace)))
     (multiple-value-bind (counts starts writes words)
         (%width-one-query-stream-layout templates row-count)
+      (declare (type (simple-array (unsigned-byte 32) (*))
+                     counts starts writes words))
       ;; Reverse traversal preserves the reference finisher's bucket order.
       (loop for row fixnum downfrom (1- row-count) to 0 do
         (let* ((template (aref templates row))
@@ -624,6 +703,11 @@
         (values words draws triangles)))))
 
 (defun %width-one-query-patch-stock (workspace site-row contributor-mask algebra)
+  (declare (optimize (speed 3) (safety 1))
+           (type width-one-query-workspace workspace)
+           (type fixnum site-row)
+           (type (unsigned-byte 16) contributor-mask)
+           (type compiled-chamfer-algebra algebra))
   (let* ((sites (width-one-query-workspace-sites workspace))
          (summaries (width-one-query-workspace-summaries workspace))
          (base (aref (width-one-query-sites-material-base sites) site-row))
@@ -636,12 +720,19 @@
 
 (defun %project-width-one-query-patches
     (relation workspace algebra x0 y0)
+  (declare (optimize (speed 3) (safety 1))
+           (type width-one-query-patches relation)
+           (type width-one-query-workspace workspace)
+           (type compiled-chamfer-algebra algebra)
+           (type (integer 0 #.(ash 1 17)) x0 y0))
   (let* ((sites (width-one-query-workspace-sites workspace))
          (templates (width-one-query-patches-template relation))
          (row-count (width-one-query-patches-count relation))
          (vocabulary *width-one-query-vocabulary*))
     (multiple-value-bind (counts starts writes words)
         (%width-one-query-stream-layout templates row-count)
+      (declare (type (simple-array (unsigned-byte 32) (*))
+                     counts starts writes words))
       (loop for row fixnum downfrom (1- row-count) to 0 do
         (let* ((template (aref templates row))
                (site-row (aref (width-one-query-patches-site relation) row))
@@ -649,24 +740,29 @@
                (write (* +mesh-instance-word-count+ instance))
                (star-mask (aref (width-one-query-sites-mask sites) site-row))
                (ambient
-                 (if (zerop
-                      (aref (width-one-query-patches-ambient-star relation)
-                            row))
-                     0
-                     (%star-normal-ambient-occlusion
-                      star-mask
-                      (aref (width-one-query-vocabulary-normal-x vocabulary)
-                            template)
-                      (aref (width-one-query-vocabulary-normal-y vocabulary)
-                            template)
-                      (aref (width-one-query-vocabulary-normal-z vocabulary)
-                            template))))
+                 (the (unsigned-byte 2)
+                   (if (zerop
+                        (aref (width-one-query-patches-ambient-star relation)
+                              row))
+                       0
+                       (%star-normal-ambient-occlusion
+                        star-mask
+                        (aref
+                         (width-one-query-vocabulary-normal-x vocabulary)
+                         template)
+                        (aref
+                         (width-one-query-vocabulary-normal-y vocabulary)
+                         template)
+                        (aref
+                         (width-one-query-vocabulary-normal-z vocabulary)
+                         template)))))
                (stock
-                 (%width-one-query-patch-stock
-                  workspace site-row
-                  (aref (width-one-query-patches-contributor-mask relation)
-                        row)
-                  algebra)))
+                 (the (unsigned-byte 16)
+                   (%width-one-query-patch-stock
+                    workspace site-row
+                    (aref (width-one-query-patches-contributor-mask relation)
+                          row)
+                    algebra))))
           (setf (aref words write)
                 (+ x0 (aref (width-one-query-sites-x sites) site-row))
                 (aref words (+ write 1))

@@ -417,6 +417,49 @@ versus 46.5 ms and 12.34 MB for the packed-job reference: 27% less elapsed
 time and 63% less allocation in this x86-64 orb.  This is the first mesher
 change in the sequence whose gain is outside measurement noise.
 
+SB-SPROF and disassembly exposed an important failure of representation
+intent: the Lisp had typed columns, but the generated code still used generic
+arithmetic and hairy vector access around them.  In a 4,147-sample CPU profile,
+materialization, planning, patch projection, and the preliminary Z-bounds scan
+accounted for 30.6%, 26.3%, 20.5%, and 15.4% cumulatively.  AVX2 selection was
+only 1.5%.  Disassembly then showed generic shifts and unions in the tiny
+contributor loops, generic arithmetic in projection, and repeated dynamic
+array dispatch in planning.
+
+Declaring the actual finite ranges and specialized arrays made the machine
+code agree with the data model.  The planner fell from 4,382 to 3,435 native
+bytes, contributor compaction from 336 to 153, edge contributor mapping from
+275 to 142, materialization from 1,342 to 999, face projection from 906 to 762,
+and patch projection from 1,610 to 1,411.  No generic arithmetic or hairy
+access remains in those loops; the adjustable selected-site vector performs
+one backing-store operation before planning begins.  A new 4,319-sample
+profile averaged 26.7 ms per build under the profiler instead of 33.5 ms.
+Two ordinary 32-build runs averaged 26.3 and 28.1 ms with 4.55 MB consed,
+while the packed reference took 41.5 and 44.2 ms with 12.34 MB.  This is about
+another 20% query latency removed by generated-code inspection alone.
+
+The new profile moves the architectural frontier rather than vindicating
+SIMD.  Material resolution is 38.6% cumulative, dominated by constructing
+canonical sites and probing authored-material hashes; planning is 20.5%, with
+runtime contributor compaction and descriptor identity lookup still visible;
+the Z-bounds prepass is 20.1%; patch projection is 13.4%; and AVX2 gathering is
+2.2%.  These cumulative stacks overlap, but their ordering is decisive.
+
+* NEXT Compile query-native topology dimension rows
+:PROPERTIES:
+:ID: 3IKS3Y
+:END:
+
+The 256 star masks are already a finite dimension.  Compile each mask's face,
+oriented edge-band, and fan rows directly into query-native template IDs,
+compact contributor masks, source witnesses, and ambient flags.  Planning can
+then scan immutable typed rows instead of looking up descriptor identities,
+recomputing edge states, and translating cube-edge masks into compact material
+slots for every active site.  The statistical profile says those translations
+remain a material part of the now-smaller planner; the disassembly says their
+scalar loops are finally efficient enough that removing the work, rather than
+micro-optimizing it, is the honest next bet.
+
 * NEXT Implement the site-stream LUFT renderer backbone
 :PROPERTIES:
 :ID: RO2OCL

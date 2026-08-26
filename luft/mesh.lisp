@@ -367,13 +367,19 @@ star corpus; signal that boundary explicitly instead of silently welding it."
                 (%directional-star-ambient-occlusion mask normal))))))
   "Directional AO for every (normal trit key, star mask) pair, built once.")
 
+(declaim (type (simple-array (unsigned-byte 2) (*))
+               *directional-ambient-occlusion-table*))
+
 (declaim (inline %normal-trit-key %star-normal-ambient-occlusion))
 (defun %normal-trit-key (nx ny nz)
+  (declare (type (signed-byte 8) nx ny nz))
   (+ (1+ (signum nx))
      (* 3 (1+ (signum ny)))
      (* 9 (1+ (signum nz)))))
 
 (defun %star-normal-ambient-occlusion (star-mask nx ny nz)
+  (declare (type (unsigned-byte 8) star-mask)
+           (type (signed-byte 8) nx ny nz))
   (aref *directional-ambient-occlusion-table*
         (+ (* (%normal-trit-key nx ny nz) 256) star-mask)))
 
