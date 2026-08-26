@@ -15,7 +15,7 @@ An isometric picture has no vanishing point, so two chamfers the same width
 are the same width on screen wherever they sit.  That is what makes it the
 projection to judge a shape rule in.")
 
-(defparameter *isometric-height* 18.0
+(defparameter *isometric-height* 28.0
   "How many world units of height an isometric frame spans.")
 
 (defparameter *character-time* nil

@@ -819,6 +819,41 @@ turrets, an arcaded hall and a remote ridge beacon."
                                (1+ base) (+ base 4) :architecture-p t)
             (scene-builder-cell builder (+ court-x dx) (+ court-y dy)
                                 (+ base 5) :architecture-p t))))
+      ;; The sun never reaches the south-facing curtain, so the gate approach
+      ;; shows both luminous materials live: warm flames flanking the gate and
+      ;; cool crystal jewels bedded on the podium ledge below the wall.
+      (scene-builder-torch builder 26 45 22 :y :low)
+      (scene-builder-torch builder 34 45 22 :y :low)
+      (scene-builder-cell builder 22 44 19
+                          :material *crystal-material-placement*)
+      (scene-builder-cell builder 38 44 19
+                          :material *crystal-material-placement*)
+      ;; The arcaded hall keeps a pair of flames on its north wall and one
+      ;; floor crystal, visible through the central bay.
+      (scene-builder-torch builder 26 60 22 :y :low)
+      (scene-builder-torch builder 34 60 22 :y :low)
+      (scene-builder-cell builder 30 57 20
+                          :material *crystal-material-placement*)
+      ;; Scattered jewels probe the mesher's material transitions: point
+      ;; contacts capping three bridge-rail posts, corner stones completing
+      ;; the parapet ring where its diagonal merlons leave a gap, one block
+      ;; at a gate-jamb base, and shards bedded into the south cliff face.
+      (dolist (post '((25 10) (34 20) (25 30)))
+        (destructuring-bind (px py) post
+          (scene-builder-cell builder px py (+ deck 3)
+                              :material *crystal-material-placement*)))
+      (scene-builder-cell builder 13 44 (+ plateau 8)
+                          :material *crystal-material-placement*)
+      (scene-builder-cell builder 47 44 (+ plateau 8)
+                          :material *crystal-material-placement*)
+      (scene-builder-cell builder 26 45 plateau
+                          :material *crystal-material-placement*)
+      (dolist (shard '((50 37 4) (52 37 3)))
+        (destructuring-bind (sx sy depth) shard
+          (scene-builder-cell
+           builder sx sy
+           (max 3 (- (mountain-sanctuary-terrain-height sx sy) depth))
+           :material *crystal-material-placement*)))
       (finish-scene-builder builder :player-p player-p)))
 
 (defun make-traveler-study-scene ()

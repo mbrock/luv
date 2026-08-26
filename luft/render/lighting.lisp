@@ -29,11 +29,11 @@
 (setf *light*
       (ensure-semantic-instance
        *light* 'light
-       :name :late-afternoon
-       :sun-direction (vec3:vec3-normalize (vec3:make-vec3 -0.58 0.36 0.73))
-       :sun-color #(2.45 1.30 0.48 0.92)
-       :sky-color #(0.33 0.52 1.02 1.0)
-       :ground-color #(0.50 0.24 0.32 1.0)
+       :name :dusk
+       :sun-direction (vec3:vec3-normalize (vec3:make-vec3 -0.82 0.30 0.22))
+       :sun-color #(2.60 0.88 0.26 0.92)
+       :sky-color #(0.055 0.085 0.26 1.0)
+       :ground-color #(0.26 0.10 0.17 1.0)
        :shadow-half-extent 96.0
        :shadow-depth-radius 160.0
        :shadow-base-bias 0.00075
