@@ -1,5 +1,11 @@
 (in-package #:luvcraft.tests)
 
+(defmacro deftest-with-libghostty (name &body body)
+  `(deftest ,name
+     (if (uiop:getenv "LUV_GHOSTTY_LIBRARY")
+         (progn ,@body)
+         (skip "libghostty-vt unavailable"))))
+
 (defclass recording-command-encoder (gpu-command-encoder)
   ((commands :initform nil :accessor recording-command-encoder-commands)))
 
@@ -789,7 +795,7 @@
         (ok (not (luvcraft::luvcraft-session-focus-camera-active-p
                   session)))))))
 
-(deftest focused-terminal-display-sends-keys-to-its-pty
+(deftest-with-libghostty focused-terminal-display-sends-keys-to-its-pty
   (luv.ghostty:with-terminal (ghostty-terminal :columns 32 :rows 4)
     (let* ((device
              (luv.terminal:open-pty-device
@@ -853,7 +859,7 @@
       (change-terminal-display-mode display session :shell)
       (ok (eq :shell (terminal-display-mode display))))))
 
-(deftest terminal-display-pty-output-marks-a-frame-publication-dirty
+(deftest-with-libghostty terminal-display-pty-output-marks-a-frame-publication-dirty
   (luv.ghostty:with-terminal (terminal :columns 32 :rows 4)
     (let ((display (make-instance 'terminal-display :terminal terminal)))
       (attach-terminal-display-pty
@@ -1674,7 +1680,7 @@
         (ok (= 10 (/ (luvcraft::terminal-grid-domain-columns domain)
                      (terminal-surface-width surface))))))))
 
-(deftest terminal-display-fixture-really-crosses-ghostty
+(deftest-with-libghostty terminal-display-fixture-really-crosses-ghostty
   (ghostty:with-terminal (terminal :columns 80 :rows 24)
     (ghostty:write-terminal terminal (luvcraft::terminal-display-fixture))
     (let* ((domain (make-instance 'luvcraft::terminal-grid-domain

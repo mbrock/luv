@@ -46,7 +46,11 @@
 (uiop:register-image-dump-hook
  (lambda () (luv-build:finish :done)))
 
-(handler-case (asdf:make :luvcraft/program)
+(handler-case (progn
+                (asdf:make :luvcraft/program)
+                ;; A current PROGRAM-OP returns instead of dumping an image,
+                ;; so its dump hook never gets the chance to close the report.
+                (luv-build:finish :done))
   (luv-build:deadline-exceeded ()
     (luv-build:finish :deadline)
     (sb-ext:exit :code 1 :abort t))

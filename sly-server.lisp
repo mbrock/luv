@@ -54,7 +54,8 @@
   ;; One aggregate gives ASDF one plan instead of making it rediscover the
   ;; overlapping closure separately for every requested root.
   (load (merge-pathnames #P"scripts/sly-asdf-status.lisp" project-root))
-  (load (merge-pathnames #P"luvcraft/build-progress.lisp" project-root))
+  (handler-bind ((style-warning #'muffle-warning))
+    (load (merge-pathnames #P"luvcraft/build-progress.lisp" project-root)))
   (let* ((system (getenv-or "LUV_SLY_SYSTEM" "luv-workbench"))
          (systems (list system)))
     ;; The server's outer log is relayed by ./sly while this boot runs, so keep
@@ -67,8 +68,7 @@
                (typep condition
                       (find-symbol "DEADLINE-EXCEEDED" "LUV-BUILD"))))
       (build-call "START" project-root :system systems :invocation "sly boot"
-                  :redirect-output-p nil :report-plan-p nil
-                  :defer-archive-p t)
+                  :redirect-output-p nil :report-plan-p nil)
       (handler-case
           (progn
             (asdf:load-system system)
@@ -100,19 +100,4 @@
     (format t "~&Luv Slynk is ready on 127.0.0.1:~D (Swash ~A).~%"
             port session)
     (force-output)
-    (sb-thread:make-thread
-     (lambda ()
-       (handler-case
-           (multiple-value-bind (archive count)
-               (funcall (find-symbol "ARCHIVE-DEFERRED-LOGS" "LUV-BUILD"))
-             (when archive
-               (format t "~&Packed deferred build logs into ~A (~D build~:P).~%"
-                       (namestring (uiop:enough-pathname archive project-root))
-                       count)
-               (force-output)))
-         (error (condition)
-           (format *error-output* "~&Deferred build-log packing failed: ~A~%"
-                   condition)
-           (force-output *error-output*))))
-     :name "Sly build-log packer")
     (loop (sleep 3600))))

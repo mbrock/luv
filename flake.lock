@@ -80,18 +80,18 @@
     "mcclim": {
       "flake": false,
       "locked": {
-        "lastModified": 1784985853,
-        "narHash": "sha256-WjNzmCo3uofTAD8I56HILeXFrA4ZukwC6Qq+RVA+Hag=",
+        "lastModified": 1787473849,
+        "narHash": "sha256-q0oewh6VvdiOjBRKOMS1JAejIDtBSsqbs0K8Nruzno8=",
         "ref": "master",
-        "rev": "92b8f12b880cd752bdf817fe1a36258a03d96aff",
-        "revCount": 8808,
+        "rev": "4df4240b108cb83a53d4ec90de982feec9fc8062",
+        "revCount": 8849,
         "type": "git",
-        "url": "https://codeberg.org/McCLIM/McCLIM.git"
+        "url": "https://git.swa.sh/mcclim"
       },
       "original": {
         "ref": "master",
         "type": "git",
-        "url": "https://codeberg.org/McCLIM/McCLIM.git"
+        "url": "https://git.swa.sh/mcclim"
       }
     },
     "nix-wpe-webkit": {

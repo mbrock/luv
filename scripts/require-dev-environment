@@ -1,13 +1,11 @@
 # Sourced by luv scripts that need SBCL or native development dependencies.
 #
 # Activation is owned by the profile's env.sh: it puts the profile's bin
-# first on PATH and exports the registry and library variables.  The marker
-# LUV_DEV_ENVIRONMENT=1 alone is not proof of a usable environment -- it is
-# an exported variable and survives any later PATH reshuffling, so a shell
-# can inherit the marker while `sbcl` still resolves to Homebrew's.  Check
-# the thing the marker exists to protect -- which sbcl wins -- and re-source
-# the activation when the answer is wrong.  CI's `nix develop` shell passes
-# the same check because its sbcl resolves into /nix/store.
+# first on PATH and exports the registry and library variables.  A replaced
+# user-profile generation keeps the same SBCL pathname while its registry and
+# native-library paths change, so profile-backed commands always source the
+# current env.sh.  A `nix develop` shell resolves SBCL directly in /nix/store
+# and keeps the environment supplied by that shell.
 
 luv_sbcl_trustworthy() {
   case "$(command -v sbcl 2>/dev/null)" in
@@ -16,10 +14,16 @@ luv_sbcl_trustworthy() {
   esac
 }
 
-if { [ "${LUV_DEV_ENVIRONMENT:-}" != 1 ] || ! luv_sbcl_trustworthy; } \
-  && [ -r "$HOME/.nix-profile/share/luv/env.sh" ]; then
-  . "$HOME/.nix-profile/share/luv/env.sh"
-fi
+profile_environment="$HOME/.nix-profile/share/luv/env.sh"
+case "$(command -v sbcl 2>/dev/null)" in
+  "$HOME/.nix-profile/"*)
+    [ ! -r "$profile_environment" ] || . "$profile_environment"
+    ;;
+  /nix/store/*) ;;
+  *)
+    [ ! -r "$profile_environment" ] || . "$profile_environment"
+    ;;
+esac
 
 if [ "${LUV_DEV_ENVIRONMENT:-}" != 1 ] || ! luv_sbcl_trustworthy; then
   cat >&2 <<'USAGE'

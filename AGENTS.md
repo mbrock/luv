@@ -127,10 +127,12 @@ The dependencies live in a durable Nix profile. Install or refresh it with
 `./scripts/dev --status` explains the active environment, and
 `./scripts/dev COMMAND` is the fallback when activation was missed.
 
-Remote agents that will not open a Luvcraft terminal can use
-`nix develop .#slim` or `./scripts/install-dev-profile --slim`. It contains
-SBCL, Sly/Swash, Python, and Bash, and its managed image loads the `luft`
-mesher as its root. Use the full profile for rendering or game systems.
+Remote agents can use `nix develop .#slim` or
+`./scripts/install-dev-profile --slim`. It contains the complete Common Lisp
+dependency closure and ordinary build tools, but omits libghostty-vt, its
+large Zig closure, and unrelated workstation tools. The Ghostty binding
+remains available for compilation and inspection; using it needs the full
+profile.
 
 Use `./sly` for interactive development. Use `make`, `sbcl`, or
 `./scripts/luv COMMAND` for isolated builds, tests, and one-shot tools.

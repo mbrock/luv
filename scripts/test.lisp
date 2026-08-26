@@ -26,12 +26,17 @@
     (uiop:symbol-call :luv.test-reporter :register-luv-reporter)
     (setf (symbol-value (uiop:find-symbol* :*default-reporter* :rove)) :luv)
     (uiop:symbol-call :rove :use-reporter :luv)
-    (dolist (system '(:luv :luv/lobby :luv/tracy-capture
-                      :luv/mcclim :luv/lobby/mcclim :luv/application-agent
-                      :luv/ghostty :luv/libav :luvcraft :luvcraft/agent
-                      :mqtt :openai :chrome-cdp
-                      :sly-client/test
-                      :luv-wiki :luft :luft/render
-                      :luft/z-fiber-benchmark))
-      (format t "~&~A~%" (string-downcase (asdf:component-name (asdf:find-system system))))
-      (asdf:test-system system))))
+    (let ((systems '(:luv :luv/lobby :luv/tracy-capture
+                     :luv/mcclim :luv/lobby/mcclim :luv/application-agent
+                     :luv/ghostty :luv/libav :luvcraft :luvcraft/agent
+                     :mqtt :openai :chrome-cdp
+                     :sly-client/test
+                     :luv-wiki :luft :luft/render
+                     :luft/z-fiber-benchmark)))
+      (unless (uiop:getenv "LUV_GHOSTTY_LIBRARY")
+        (setf systems (remove :luv/ghostty systems))
+        (format t "~&luv/ghostty (libghostty-vt unavailable; skipped)~%"))
+      (dolist (system systems)
+        (format t "~&~A~%"
+                (string-downcase (asdf:component-name (asdf:find-system system))))
+        (asdf:test-system system)))))

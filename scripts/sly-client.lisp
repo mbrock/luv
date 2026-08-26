@@ -2171,18 +2171,6 @@ shows them.~%" failure-count))))))
    (format nil "(luv.sly.asdf:print-stale-systems :root (pathname ~S))"
            (namestring *project-root*))))
 
-(defun load-systems-form (systems)
-  ;; The slim Luft image has no LUV package until a rendering system is
-  ;; loaded.  Resolve the frame-holding function at evaluation time so the
-  ;; reader can still accept this form in that image.
-  (format nil
-          "(cl:let* ((luv (cl:find-package ~S))
-                     (hold (cl:and luv (cl:find-symbol ~S luv))))
-             (cl:if (cl:and hold (cl:fboundp hold))
-                    (cl:funcall hold (cl:lambda () ~{(asdf:load-system ~S)~^ ~}))
-                    (cl:progn ~{(asdf:load-system ~S)~^ ~})))"
-          "LUV" "CALL-WITH-CANVAS-FRAMES-HELD" systems systems))
-
 (defun main (arguments)
   (unless arguments
     (usage *error-output*)
@@ -2255,7 +2243,8 @@ shows them.~%" failure-count))))))
        ;; called it, and a redefinition is nothing a frame should run
        ;; through.  The fence after it says whether the next frame lived.
        (evaluate
-        (load-systems-form arguments)
+        (format nil "(luv:with-canvas-frames-held () ~{(asdf:load-system ~S)~^ ~})"
+                arguments)
         "CL-USER"))
       ((string= command "failures")
        (when arguments

@@ -42,11 +42,7 @@ else
   done
 fi
 
-if [ -z "$stale" ]; then
-  exit 0
-fi
-
-if [ "${LUV_SLY_DEPENDENCY_CORE_LOCK_HELD:-}" != 1 ]; then
+if [ -n "$stale" ] && [ "${LUV_SLY_DEPENDENCY_CORE_LOCK_HELD:-}" != 1 ]; then
   exec python3 "$project_root/scripts/with-build-lock.py" \
     "$lock" "Sly dependency core" "build-sly-dependency-core" \
     -- env LUV_SLY_DEPENDENCY_CORE_LOCK_HELD=1 "$0"
@@ -60,13 +56,19 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-export LUV_SLY_DEPENDENCY_CORE_OUTPUT="$core.tmp"
-
-printf 'Building cached Sly dependency core...\n'
-rm -f "$core.tmp"
-sbcl --noinform --non-interactive --disable-debugger \
-  --load "$project_root/scripts/sly-dependency-core.lisp" < /dev/null
-mv "$core.tmp" "$core"
-printf '%s\n' "$current_environment" > "$stamp.tmp"
-mv "$stamp.tmp" "$stamp"
-printf 'Cached Sly dependency core at %s\n' "$core"
+log="$project_root/build/sly-dependency-core-build.log"
+if [ -n "$stale" ]; then
+  export LUV_SLY_DEPENDENCY_CORE_OUTPUT="$core.tmp"
+  printf 'Building cached Sly dependency core...\n'
+  rm -f "$core.tmp"
+  if ! sbcl --noinform --non-interactive --disable-debugger \
+      --load "$project_root/scripts/sly-dependency-core.lisp" \
+      < /dev/null >"$log" 2>&1; then
+    cat "$log" >&2
+    exit 1
+  fi
+  mv "$core.tmp" "$core"
+  printf '%s\n' "$current_environment" > "$stamp.tmp"
+  mv "$stamp.tmp" "$stamp"
+  printf 'Cached Sly dependency core at %s\n' "$core"
+fi

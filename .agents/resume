@@ -11,8 +11,8 @@ fi
 # shellcheck disable=SC1090
 source "$orb_environment"
 
-if [[ ${LUV_SLY_SYSTEM:-} != luft ]]; then
-  printf 'luv orb environment is not using the slim LUFT profile; run .agents/setup\n' >&2
+if [[ -n ${LUV_SLY_SYSTEM:-} ]]; then
+  printf 'luv orb environment is using an obsolete restricted Sly root; run .agents/setup\n' >&2
   exit 1
 fi
 

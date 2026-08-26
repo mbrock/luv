@@ -36,7 +36,7 @@
 
 (defpackage #:luv-build
   (:use #:cl)
-  (:export #:start #:finish #:failed #:archive-deferred-logs
+  (:export #:start #:finish #:failed
            #:deadline-exceeded #:deadline-exceeded-label
            #:policy-violated-p #:*log-directory*))
 
@@ -64,8 +64,6 @@ LUV_BUILD_DEADLINE overrides the default, and 0 disables it.")
   "What this build is making, as ASDF names it.")
 (defvar *invocation* "make"
   "How the narrated operation names itself in its opening comment.")
-(defvar *defer-archive-p* nil
-  "Whether a successful build leaves log packing to ARCHIVE-DEFERRED-LOGS.")
 (defvar *policy-violated-p* nil)
 (defvar *policy-status-path* nil)
 
@@ -343,7 +341,7 @@ LUV_BUILD_DEADLINE overrides the default, and 0 disables it.")
        (report-work state)))
     (remark)
     (case reason
-      (:done (report-archive state raw))
+      (:done (report-logs state raw))
       (t
        (when (display-failed-log state)
          (remark "See verbose log for that system in ~A."
@@ -390,23 +388,12 @@ LUV_BUILD_DEADLINE overrides the default, and 0 disables it.")
       (remark "Slowest was ~A at ~A." (here (record-label slowest))
               (format-seconds (record-seconds slowest))))))
 
-(defun report-archive (state raw)
-  "Pack every build's logs away, and say what that came to."
-  (declare (ignorable state))
-  (if *defer-archive-p*
-      (progn
-        (remark "Logs will be packed after the service is ready (~A)."
-                (in-logs ""))
-        (remark))
-      (progn
-        (multiple-value-bind (archive count) (compact-logs)
-          (if archive
-              (remark "Logs packed into ~A: ~A became ~A, ~D build~:P archived."
-                      (namestring (uiop:enough-pathname archive *project-root*))
-                      (human-bytes raw) (human-bytes (file-bytes archive)) count)
-              (remark "Logs are in ~A." (in-logs ""))))
-        (remark)
-        (report-cost))))
+(defun report-logs (state raw)
+  "Keep the build's verbose output inspectable for troubleshooting."
+  (declare (ignore state raw))
+  (remark "Logs are in ~A." (in-logs ""))
+  (remark)
+  (report-cost))
 
 (defun report-cost ()
   (remark "Note: Build logs take ~A of the ~A build directory."
@@ -571,10 +558,20 @@ logs the way the systems themselves nest: luv.log beside luv/domains.log."
          (*compile-print* t)
          (*load-verbose* t)
          (*load-print* t)
-         (uiop:*uninteresting-conditions* '()))
+         (uiop:*uninteresting-conditions* '())
+         (uiop:*uninteresting-compiler-conditions* '()))
     (send :begin kind label (namestring (uiop:enough-pathname log *project-root*)))
     (multiple-value-prog1
-        (call-with-output-logged-to log thunk (format nil "~(~A~) ~A" kind label))
+        (call-with-output-logged-to
+         log
+         (lambda ()
+           (handler-bind
+               ((sb-ext:compiler-note
+                  (lambda (condition)
+                    (format *error-output* "~%; note: ~A~%" condition)
+                    (muffle-warning condition))))
+             (funcall thunk)))
+         (format nil "~(~A~) ~A" kind label))
       (send :end kind label (elapsed start)))))
 
 (defmethod asdf:perform :around ((op asdf:compile-op) (c asdf:cl-source-file))
@@ -648,53 +645,11 @@ logs the way the systems themselves nest: luv.log beside luv/domains.log."
         ((< bytes (* 1024 1024 1024)) (format nil "~,1F MB" (/ bytes 1048576.0)))
         (t (format nil "~,1F GB" (/ bytes 1073741824.0)))))
 
-(defun log-directory-id (directory)
-  (car (last (pathname-directory directory))))
-
-(defun archive-log-directory (directory)
-  "tar.zst one build's logs and remove the directory it came from."
-  (let* ((id (log-directory-id directory))
-         (archive (merge-pathnames (format nil "~A.tar.zst" id) (logs-root))))
-    (uiop:run-program (list "tar" "--use-compress-program" "zstd -9"
-                            "-cf" (sb-ext:native-namestring archive)
-                            "-C" (sb-ext:native-namestring (logs-root))
-                            id)
-                      :output :interactive :error-output :interactive)
-    (uiop:delete-directory-tree directory :validate t)
-    archive))
-
-(defun compact-logs ()
-  "Archive every build's logs, this one and any failures left lying about.
-Returns the current build's archive, and how many were made."
-  (let ((current nil) (count 0))
-    ;; The symlink would otherwise be walked as a directory of its own.
-    (ignore-errors
-     (sb-posix:unlink (sb-ext:native-namestring
-                       (merge-pathnames "latest" (logs-root)))))
-    (dolist (directory (uiop:subdirectories (logs-root)))
-      (let ((archive (ignore-errors (archive-log-directory directory))))
-        (when archive
-          (incf count)
-          (when (equal (log-directory-id directory) *build-id*)
-            (setf current archive)))))
-    (when current
-      (ignore-errors
-       (sb-posix:symlink (file-namestring current)
-                         (sb-ext:native-namestring
-                          (merge-pathnames "latest" (logs-root))))))
-    (values current count)))
-
-(defun archive-deferred-logs ()
-  "Pack logs left unpacked so a service could announce readiness first."
-  (multiple-value-prog1 (compact-logs)
-    (setf *defer-archive-p* nil)))
-
 ;;; Entry points
 
 (defun start (project-root &key system (invocation "make")
                                   (redirect-output-p t)
-                                  (report-plan-p t)
-                                  (defer-archive-p nil))
+                                  (report-plan-p t))
   (let ((status (uiop:getenv "LUV_BUILD_POLICY_STATUS")))
     (setf *policy-status-path*
           (and status (merge-pathnames status project-root))))
@@ -704,7 +659,6 @@ Returns the current build's archive, and how many were made."
         *project-root* project-root
         *system* system
         *invocation* invocation
-        *defer-archive-p* defer-archive-p
         *build-id* (make-build-id)
         *log-directory* (merge-pathnames (format nil "build/logs/~A/" *build-id*)
                                          project-root)

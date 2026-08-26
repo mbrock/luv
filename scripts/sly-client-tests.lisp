@@ -188,11 +188,3 @@
     (ok (member "LUV_ROOT=/tmp/luv/" fields :test #'string=))
     (ok (member "LUV_NAME=active" fields :test #'string=))
     (ok (member "LUV_COMMAND=eval" fields :test #'string=))))
-
-(deftest load-form-does-not-require-the-luv-package-at-read-time
-  (let ((form (sly-client::load-systems-form '("luft"))))
-    (ng (search "luv:" form :test #'char-equal))
-    (multiple-value-bind (object end)
-        (read-from-string form)
-      (ok object)
-      (ok (= end (length form))))))

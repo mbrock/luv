@@ -4,7 +4,7 @@
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
   inputs.ghostty.url = "github:ghostty-org/ghostty";
   inputs.mcclim = {
-    url = "git+https://codeberg.org/McCLIM/McCLIM.git?ref=master";
+    url = "git+https://git.swa.sh/mcclim?ref=master";
     flake = false;
   };
   inputs.cl-sdl3 = {
@@ -217,6 +217,20 @@
           nativeLibraryPath = nixpkgs.lib.makeLibraryPath (
             nativeLibraryPackages ++ [ libghosttyVt ]
           );
+          slimNativeLibraryPackages =
+            [
+              ffmpeg
+              pkgs.libffi
+              pkgs.harfbuzz
+              pkgs.openssl
+              pkgs.sdl3
+              pkgs.sdl3-image
+              pkgs.sdl3-ttf
+              pkgs.vulkan-loader
+            ] ++ nixpkgs.lib.optionals pkgs.stdenv.isDarwin [
+              pkgs.moltenvk
+            ];
+          slimNativeLibraryPath = nixpkgs.lib.makeLibraryPath slimNativeLibraryPackages;
           mesaLibraryPath = nixpkgs.lib.makeLibraryPath [ pkgs.mesa ];
           # Keep the owned CFFI binding and development tools available to SBCL.
           # McCLIM itself comes from the pinned source above.  Pull only the
@@ -264,12 +278,6 @@
                 lispPackages.float-features
                 lispPackages.trivial-main-thread
               ]);
-          # The slim image loads LUFT itself, but ./sly is also a Lisp program
-          # and needs its small JSON protocol dependency without relying on a
-          # developer's ambient Quicklisp installation.  Keep plain SBCL and
-          # name this source explicitly so the mutable checkout can prepend to
-          # one ordinary ASDF registry instead of composing Lisp wrappers.
-          slimClJson = pkgs.sbclPackages.cl-json;
           # Upstream's one ASDF system bundles otherwise independent SDL_image,
           # SDL_ttf, and SDL_mixer bindings.  Luv uses the first two but not the
           # mixer, so keep its eagerly loaded foreign library out of the normal
@@ -328,15 +336,27 @@
             pkgs.vulkan-validation-layers
             pkgs.yt-dlp
           ];
-          # Remote agents working on LUFT's topology and mesher need a Lisp,
-          # the managed-image tools, and little else.  Their Sly root is LUFT
-          # rather than the complete graphical workbench.
+          # Remote agents need the complete Lisp closure and the native/build
+          # tools exercised by ordinary builds, but not optional workstation
+          # programs or Ghostty's large Zig closure.  The Ghostty binding can
+          # still be compiled and inspected; explicitly loading libghostty-vt
+          # requires the full profile.
           slimDevelopmentPackages = [
             pkgs.bashInteractive
-            sbcl
-            slimClJson
+            lisp
+            ffmpeg
+            ffmpeg.dev
+            pkgs.libffi
+            pkgs.harfbuzz
+            pkgs.mesa
             pkgs.python3
+            pkgs.pkg-config
+            pkgs.sdl3
+            pkgs.spirv-tools
             swashPackage
+            pkgs.vulkan-headers
+            pkgs.vulkan-tools
+            pkgs.vulkan-validation-layers
           ];
           lavapipeIcd =
             if system == "x86_64-linux" then "lvp_icd.x86_64.json"
@@ -368,12 +388,23 @@
           };
           slimDevelopmentEnvironment = {
             LUV_DEV_ENVIRONMENT = "1";
+            LD_LIBRARY_PATH = slimNativeLibraryPath;
+            LUV_MESA_LIBRARY_PATH = mesaLibraryPath;
             LUV_BASH = "${pkgs.bashInteractive}/bin/bash";
             LUV_SLYNK_DIR = "${slyRoot}/slynk";
             LUV_SWASH = "${swashPackage}/bin/swash";
-            LUV_SLY_SYSTEM = "luft";
-            CL_SOURCE_REGISTRY = "${slimClJson}//";
-            LD_LIBRARY_PATH = "";
+            LUV_FFMPEG_LIBDIR = ffmpegLibraryDirectory;
+            CL_SOURCE_REGISTRY = "${mcclim}//:${clSdl3WithoutMixer}//";
+            PKG_CONFIG_PATH = "${ffmpeg.dev}/lib/pkgconfig";
+            CPATH = "${pkgs.vulkan-headers}/include";
+            VK_LAYER_PATH =
+              "${pkgs.vulkan-validation-layers}/share/vulkan/explicit_layer.d";
+          } // nixpkgs.lib.optionalAttrs (lavapipeIcd != null) {
+            LUV_LAVAPIPE_ICD =
+              "${pkgs.mesa}/share/vulkan/icd.d/${lavapipeIcd}";
+          } // nixpkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
+            VK_DRIVER_FILES =
+              "${pkgs.moltenvk}/share/vulkan/icd.d/MoltenVK_icd.json";
           };
           developmentEnvironmentHook = ''
             unset LUV_SLY_SYSTEM
@@ -414,10 +445,9 @@
               export VK_DRIVER_FILES="$LUV_LAVAPIPE_ICD"
             fi
           '';
-          slimDevelopmentEnvironmentHook = ''
-            unset LUV_GHOSTTY_LIBRARY LUV_FFMPEG_LIBDIR LUV_MUPDF_LIBDIR
-            unset LUV_URBIT LUV_YT_DLP LUV_MESA_LIBRARY_PATH LUV_LAVAPIPE_ICD
-            unset PKG_CONFIG_PATH CPATH VK_LAYER_PATH VK_DRIVER_FILES
+          slimDevelopmentEnvironmentHook = developmentEnvironmentHook + ''
+            unset LUV_GHOSTTY_LIBRARY
+            unset LUV_MUPDF_LIBDIR LUV_URBIT LUV_YT_DLP
           '';
           makeProfileEnvironment = name: environment: hook: pkgs.writeTextFile {
             inherit name;
@@ -458,7 +488,7 @@
           };
         in
         {
-          inherit pkgs wpePkgs sbcl lisp slimClJson clSdl3WithoutMixer;
+          inherit pkgs wpePkgs sbcl lisp clSdl3WithoutMixer;
           inherit dev developmentPackages developmentEnvironment;
           inherit slimDev slimDevelopmentPackages slimDevelopmentEnvironment;
           inherit developmentEnvironmentHook slimDevelopmentEnvironmentHook;
