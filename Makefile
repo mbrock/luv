@@ -10,6 +10,8 @@ LUFT_MESHER_PROFILE_DIRECTORY ?= build/luft-mesher-profile
 LUFT_MESHER_PROFILE_SECONDS ?= 2
 LUFT_MESHER_PROFILE_INTERVAL ?= 0.0005
 LUFT_MESHER_PROFILE_TIMING_SECONDS ?= 0.25
+LUFT_MESHER_COHORT_OUTPUT ?= build/luft-mesher-cohort.txt
+LUFT_MESHER_COHORT_WARM_ITERATIONS ?= 5
 LUFT_Z_FIBER_BENCHMARK_CSV ?= build/luft-z-fiber-benchmark.csv
 LUFT_Z_FIBER_BENCHMARK_WIDTHS ?= 16,32
 LUFT_Z_FIBER_BENCHMARK_PATTERNS ?= solid,terrain,architecture,caves,checkerboard
@@ -21,7 +23,7 @@ TRACY_MCCLIM_PAINT_TRACE ?= build/mcclim-paints.tracy
 
 FASL_CACHE := $(HOME)/.cache/common-lisp
 
-.PHONY: all sly-client luvcraft luft luft-core luft-test run test capture showcase-bootstrap showcase-render showcase-deploy showcase-publish showcase-status clean-fasls parinfer-check sly-build-lock-check shader-validate msl-validate smoke vulkan-smoke metal-smoke metal-text-closeup metal-benchmark metal-streaming-benchmark metal-retina-benchmark luft-mesher-profile luft-z-fiber-benchmark luft-blender-oracle luft-blender-oracle-check tracy-streaming tracy-mcclim-roundrect tracy-mcclim-paints readme-screenshots mcclim-gallery wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw roundrect-proof slug-proof slug-text-proof clean
+.PHONY: all sly-client luvcraft luft luft-core luft-test run test capture showcase-bootstrap showcase-render showcase-deploy showcase-publish showcase-status clean-fasls parinfer-check sly-build-lock-check shader-validate msl-validate smoke vulkan-smoke metal-smoke metal-text-closeup metal-benchmark metal-streaming-benchmark metal-retina-benchmark luft-mesher-profile luft-mesher-cohort luft-z-fiber-benchmark luft-blender-oracle luft-blender-oracle-check tracy-streaming tracy-mcclim-roundrect tracy-mcclim-paints readme-screenshots mcclim-gallery wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw roundrect-proof slug-proof slug-text-proof clean
 
 ifeq ($(LUV_SLY_SYSTEM),luft)
 all: sly-client luft-core
@@ -230,6 +232,12 @@ luft-mesher-profile:
 		$(LUFT_MESHER_PROFILE_SECONDS) \
 		$(LUFT_MESHER_PROFILE_INTERVAL) \
 		$(LUFT_MESHER_PROFILE_TIMING_SECONDS)
+
+luft-mesher-cohort:
+	mkdir -p build
+	./scripts/dev sbcl --script scripts/luft-mesher-cohort.lisp \
+		$(LUFT_MESHER_COHORT_OUTPUT) \
+		$(LUFT_MESHER_COHORT_WARM_ITERATIONS)
 
 luft-z-fiber-benchmark:
 	mkdir -p build

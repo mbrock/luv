@@ -296,7 +296,7 @@ exactly the cost named by the material-field experiment below.  The full
 LUFT differential suite and a query-versus-reference triangle-record census
 over all four resident production chunks remained exact.
 
-* NEXT Reuse chain-local occupancy facts
+* DONE Reuse chain-local occupancy facts
 :PROPERTIES:
 :ID: IS4S0L
 :END:
@@ -313,7 +313,28 @@ retain EQ-identical chains across remeshes.
 reuse; no narrow-halo selection explodes; concurrent publication is complete;
 and seam, missing-chunk, and outside-domain differentials remain exact.
 
-* TODO Compile material fields over chain order
+/Result./ [[lisp:luft::%chain-chunk-facts][A weak-keyed table]] now publishes one complete derived record per
+immutable single-chunk chain: occupancy fibers in field layout, chain-order
+column starts, and exact Z ranges for the whole chunk, the two high strips,
+and the corner column.  The owner field is a read-only wrap of those fibers;
+halo bit probes and window-column fills read fibers directly; star Z-bounds
+read the strip ranges, which are exact rather than over-approximated, so
+selection did not grow by a single site.  Warm occupancy, halo indexing,
+and Z-bounds now cost under a microsecond each (down from 0.850, 4.064, and
+1.840 ms); the aggregate fell from 21.847 to 16.223 ms/chunk and allocation
+from 4.3 to 2.1 MiB/chunk, with the cold derive costing 1.472 ms per
+owner-plus-halo neighborhood.  The new =make luft-mesher-cohort= benchmark
+confirms the lifecycle: the cold cohort builds exactly one record per
+resident chain, five warm cohorts build nothing while reproducing the cold
+census exactly, and one cell edit rebuilds exactly the one replaced chain.
+Residency is about 144 KiB per resident chain (128 KiB fibers, 16 KiB
+column starts) held weakly by chain identity.  Seam, missing-chunk, and
+outside-domain differentials and the full LUFT suite remained exact, as did
+the query-versus-reference triangle census over all four production chunks.
+The column-starts lane already gives the material-field experiment below its
+chain-order rank structure for free.
+
+* NEXT Compile material fields over chain order
 :PROPERTIES:
 :ID: LQSV44
 :END:

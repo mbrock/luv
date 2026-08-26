@@ -1,11 +1,12 @@
 (defpackage #:luft.mesh-query-profile
   (:use #:cl)
-  (:export #:run-mesh-query-profile))
+  (:export #:run-mesh-query-profile
+           #:run-mesh-cohort-benchmark))
 
 (in-package #:luft.mesh-query-profile)
 
 (defparameter *profile-phases*
-  '(:aggregate :occupancy :halo-index :z-bounds :selection
+  '(:aggregate :chain-facts :occupancy :halo-index :z-bounds :selection
     :planning :materials :projection))
 
 (defvar *profile-sink* nil)
@@ -79,10 +80,17 @@
            (invoke-restart 'luft:treat-as-air))))
     (funcall function)))
 
+(defun %run-chain-facts (case)
+  "Derive owner and halo chain facts uncached: the cold construction cost."
+  (cons (luft::%derive-chain-chunk-facts (mesh-query-profile-case-chunk case))
+        (loop for chunk in (mesh-query-profile-case-halo-chunks case)
+              collect (luft::%derive-chain-chunk-facts chunk))))
+
 (defun %run-occupancy (case)
   (setf (mesh-query-profile-case-field case)
-        (luft::%materialize-occupancy
-         (mesh-query-profile-case-chunk case)
+        (luft::%chain-facts-occupancy-field
+         (luft::%chain-chunk-facts (mesh-query-profile-case-chunk case))
+         (mesh-query-profile-case-domain case)
          (mesh-query-profile-case-x0 case)
          (mesh-query-profile-case-x1 case)
          (mesh-query-profile-case-y0 case)
@@ -91,7 +99,7 @@
 (defun %run-halo-index (case)
   (setf (mesh-query-profile-case-halo-tables case)
         (loop for chunk in (mesh-query-profile-case-halo-chunks case)
-              collect (luft::%chunk-cells-table chunk))))
+              collect (luft::%chain-chunk-facts chunk))))
 
 (defun %run-z-bounds (case)
   (%call-with-boundary-resolution
@@ -102,11 +110,7 @@
           (mesh-query-profile-case-chunk case)
           (mesh-query-profile-case-field case)
           (mesh-query-profile-case-grid-x case)
-          (mesh-query-profile-case-grid-y case)
-          (mesh-query-profile-case-x0 case)
-          (mesh-query-profile-case-x1 case)
-          (mesh-query-profile-case-y0 case)
-          (mesh-query-profile-case-y1 case))
+          (mesh-query-profile-case-grid-y case))
        (setf (mesh-query-profile-case-z0 case) z0
              (mesh-query-profile-case-z1 case) z1)
        z0))))
@@ -187,6 +191,7 @@
 (defun %phase-function (phase)
   (ecase phase
     (:aggregate #'%run-aggregate)
+    (:chain-facts #'%run-chain-facts)
     (:occupancy #'%run-occupancy)
     (:halo-index #'%run-halo-index)
     (:z-bounds #'%run-z-bounds)
@@ -403,8 +408,11 @@
                 (/ (%bytes-per-iteration measurement) 1048576d0)
                 (phase-measurement-iterations measurement))))
     (format stream
-            "~%Aggregate reconstructs the complete query on every iteration.~%~
-             Halo-index rebuilds the neighbor tables resolved during Z-bounds.~%~
+            "~%Aggregate reconstructs the complete query on every iteration~%~
+             over the published chain-facts cache, so it is the warm cost.~%~
+             Chain-facts derives owner and halo records uncached: the cold~%~
+             cost paid once per new chain identity.  Occupancy, halo-index,~%~
+             and Z-bounds consume the cache as production does.~%~
              Isolated stages reuse prepared inputs and warmed workspace capacities;~%~
              their percentages expose attribution but need not sum to 100%.~%~
              Each phase report contains self-sorted and cumulative-sorted samples.~%")))
@@ -457,3 +465,195 @@
           (%write-summary-csv stream measurements))
         (format t "~%Reports written under ~A~%" (namestring directory))
         measurements))))
+
+;;; ---------------------------------------------------------------------------
+;;; Chain-facts cohort benchmark
+;;;
+;;; The chain-facts experiment is only proved by cohorts: a cold cohort pays
+;;; every derivation, a warm cohort re-meshes EQ-identical chains against the
+;;; published cache, and a one-edit cohort replaces exactly one chain and
+;;; re-meshes the owners whose seams can see it.
+
+(defstruct (cohort-run (:constructor %make-cohort-run))
+  (label "" :type string)
+  (chunks 0 :type fixnum)
+  (seconds 0d0 :type double-float)
+  (bytes 0 :type integer)
+  (builds 0 :type fixnum)
+  (hits 0 :type fixnum)
+  (sites 0 :type fixnum)
+  (faces 0 :type fixnum)
+  (bands 0 :type fixnum)
+  (fans 0 :type fixnum)
+  (triangles 0 :type fixnum))
+
+(defun %store-keys (store)
+  (sort (loop for key being the hash-keys of store collect key) #'<))
+
+(defun %run-mesh-cohort (label scene store keys)
+  "Mesh every chunk in KEYS from STORE, recording reuse and output stats."
+  (let* ((program (luft.render::scene-material-program scene))
+         (stock-function (luft.render::make-scene-face-stock-function scene))
+         (chamfer-stock-function
+           (luft.render::make-compiled-material-chamfer-stock-function
+            program))
+         (algebra (luft.render::material-program-chamfer-algebra program))
+         (sites 0) (faces 0) (bands 0) (fans 0) (triangles 0))
+    (setf luft::*chain-facts-build-count* 0
+          luft::*chain-facts-hit-count* 0)
+    (sb-ext:gc :full t)
+    (let ((bytes-before (sb-ext:get-bytes-consed))
+          (start (get-internal-real-time)))
+      (dolist (key keys)
+        (let ((chunk (gethash key store)))
+          (handler-bind
+              ((luft:missing-chunk
+                 (lambda (condition)
+                   (multiple-value-bind (neighbor present-p)
+                       (gethash (luft:missing-chunk-key condition) store)
+                     (if present-p
+                         (invoke-restart 'luft:use-chunk neighbor)
+                         (invoke-restart 'luft:treat-as-air)))))
+               (luft:outside-domain
+                 (lambda (condition)
+                   (declare (ignore condition))
+                   (invoke-restart 'luft:treat-as-air))))
+            (incf triangles
+                  (luft:surface-mesh-triangle-count
+                   (luft:mesh-chunk
+                    chunk key
+                    :source-stock-function stock-function
+                    :chamfer-stock-function chamfer-stock-function
+                    :chamfer-algebra algebra
+                    :outside-domain-policy :air
+                    :bevel-width 1))))
+          (incf sites
+                (length (luft::surface-mesh-workspace-width-one-sites
+                         luft::*surface-mesh-workspace*)))
+          (let ((workspace (luft::%borrow-width-one-query-workspace)))
+            (incf faces
+                  (luft::width-one-query-faces-count
+                   (luft::width-one-query-workspace-faces workspace)))
+            (incf bands
+                  (luft::width-one-query-patches-count
+                   (luft::width-one-query-workspace-bands workspace)))
+            (incf fans
+                  (luft::width-one-query-patches-count
+                   (luft::width-one-query-workspace-fans workspace))))))
+      (%make-cohort-run
+       :label label :chunks (length keys)
+       :seconds (%elapsed-seconds start)
+       :bytes (- (sb-ext:get-bytes-consed) bytes-before)
+       :builds luft::*chain-facts-build-count*
+       :hits luft::*chain-facts-hit-count*
+       :sites sites :faces faces :bands bands :fans fans
+       :triangles triangles))))
+
+(defun %cohort-edited-chain (chunk)
+  "Cancel CHUNK's middle cell, returning the new chain and the removed site."
+  (let* ((sites (luft:chain-sites chunk))
+         (cell (aref sites (floor (length sites) 2)))
+         (builder (luft:make-chain-builder (luft:chain-domain chunk)
+                                           :initial-capacity 1)))
+    (luft:chain-builder-add-site builder (luft:opposite-site cell))
+    (values (luft:chain+ chunk (luft:finish-chain-builder builder)) cell)))
+
+(defun %cohort-affected-keys (key store)
+  "The resident owners whose width-one seams can see the chunk at KEY."
+  (let ((grid-x (luft:chunk-key-x key))
+        (grid-y (luft:chunk-key-y key)))
+    (loop for (dx dy) in '((0 0) (1 0) (0 1) (1 1))
+          for neighbor = (luft::%chunk-morton (+ grid-x dx) (+ grid-y dy))
+          when (nth-value 1 (gethash neighbor store))
+            collect neighbor)))
+
+(defun %write-cohort-report (stream runs edited-key removed-cell)
+  (format stream
+          "LUFT mesher chain-facts cohort benchmark~2%~
+           Runtime: ~A ~A on ~A~%~
+           Fixture: mountain-sanctuary streaming store~%~
+           Edit: cancelled cell ~D of chunk ~D, re-meshed the owners whose~%~
+           seams can see it~2%"
+          (lisp-implementation-type) (lisp-implementation-version)
+          (machine-type) removed-cell edited-key)
+  (format stream
+          "Cohort     chunks ms-total ms/chunk    MiB builds   hits~:
+   sites   faces   bands    fans triangles~%~
+           ---------- ------ -------- -------- ------ ------ ------~:
+ ------- ------- ------- ------- ---------~%")
+  (dolist (run runs)
+    (let ((milliseconds (* 1000d0 (cohort-run-seconds run))))
+      (format stream
+              "~10A ~6D ~8,2F ~8,2F ~6,1F ~6D ~6D ~7:D ~7:D ~7:D ~7:D ~9:D~%"
+              (cohort-run-label run)
+              (cohort-run-chunks run)
+              milliseconds
+              (/ milliseconds (max 1 (cohort-run-chunks run)))
+              (/ (cohort-run-bytes run) 1048576d0)
+              (cohort-run-builds run)
+              (cohort-run-hits run)
+              (cohort-run-sites run)
+              (cohort-run-faces run)
+              (cohort-run-bands run)
+              (cohort-run-fans run)
+              (cohort-run-triangles run))))
+  (let ((cold (find "cold" runs :key #'cohort-run-label :test #'string=))
+        (warms (remove-if-not
+                (lambda (label) (eql 0 (search "warm" label)))
+                runs :key #'cohort-run-label)))
+    (format stream
+            "~%Warm cohorts ~:[DIVERGE FROM~;reproduce~] the cold census ~
+             (sites, rows, triangles).~%"
+            (every (lambda (warm)
+                     (and (= (cohort-run-sites cold) (cohort-run-sites warm))
+                          (= (cohort-run-faces cold) (cohort-run-faces warm))
+                          (= (cohort-run-bands cold) (cohort-run-bands warm))
+                          (= (cohort-run-fans cold) (cohort-run-fans warm))
+                          (= (cohort-run-triangles cold)
+                             (cohort-run-triangles warm))))
+                   warms))
+    (format stream
+            "Cold pays one facts build per resident chain; warm cohorts~%~
+             build nothing; the edit builds exactly the one replaced chain.~%")))
+
+(defun run-mesh-cohort-benchmark
+    (&key (output "build/luft-mesher-cohort.txt") (warm-iterations 5))
+  "Cold, warm, and one-edit cohort measurements of the production mesher."
+  (check-type warm-iterations (integer 1))
+  (luft:with-surface-mesh-workspace ()
+    (let* ((scene (luft.render::make-streaming-scene
+                   (luft.render::make-mountain-sanctuary-scene)))
+           (store (luft.render::streaming-scene-store scene))
+           (keys (%store-keys store))
+           (runs '()))
+      ;; Cold: no published facts survive.
+      (luft::%reset-chain-facts :clear-cache t)
+      (push (%run-mesh-cohort "cold" scene store keys) runs)
+      (dotimes (iteration warm-iterations)
+        (push (%run-mesh-cohort (format nil "warm-~D" (1+ iteration))
+                                scene store keys)
+              runs))
+      (multiple-value-bind (edited-key chunk) (%largest-streaming-chunk store)
+        (multiple-value-bind (edited removed) (%cohort-edited-chain chunk)
+          (let ((edited-store (make-hash-table :test #'eql)))
+            (maphash (lambda (key chain)
+                       (setf (gethash key edited-store) chain))
+                     store)
+            (setf (gethash edited-key edited-store) edited)
+            (push (%run-mesh-cohort
+                   "one-edit" scene edited-store
+                   (%cohort-affected-keys edited-key edited-store))
+                  runs)
+            (let ((report
+                    (with-output-to-string (stream)
+                      (%write-cohort-report
+                       stream (reverse runs) edited-key removed))))
+              (write-string report)
+              (ensure-directories-exist output)
+              (with-open-file (stream output
+                                      :direction :output
+                                      :if-exists :supersede
+                                      :if-does-not-exist :create)
+                (write-string report stream))
+              (format t "~%Report written to ~A~%" output)
+              (reverse runs))))))))

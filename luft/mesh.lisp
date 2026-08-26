@@ -441,22 +441,193 @@ star corpus; signal that boundary explicitly instead of silently welding it."
   (y1 0 :type fixnum :read-only t)
   (y-span 1 :type (integer 1 #.(ash 1 18)) :read-only t)
   ;; Resolutions of probes past the box but inside the world: chunk key to
-  ;; :AIR, :SOLID, or a cell table, each obtained from one MISSING-CHUNK
-  ;; signal and cached for every later probe into that chunk.
+  ;; :AIR, :SOLID, or the supplied chain's CHAIN-CHUNK-FACTS, each obtained
+  ;; from one MISSING-CHUNK signal and cached for every later probe into
+  ;; that chunk.
   (resolutions (make-hash-table :test #'eql) :type hash-table :read-only t))
 
-(defun %chunk-cells-table (chain)
-  "Index CHAIN's cells by packed lattice key, validating them as positive."
-  (let ((table (make-hash-table :test #'eql
-                                :size (max 64 (chain-count chain)))))
-    (loop for cell across (%chain-sites chain) do
-      (unless (and (= (site-extent cell) +cell-extent+)
-                   (site-positive-p cell))
-        (error "A solid mesh requires positive cells, not ~S." cell))
-      (setf (gethash (%lattice-key (site-x cell) (site-y cell) (site-z cell))
-                     table)
-            t))
-    table))
+;;; ---------------------------------------------------------------------------
+;;; Chain-local occupancy facts
+;;;
+;;; One immutable single-chunk chain derives one immutable record: dense
+;;; four-word occupancy fibers over the 64x64 column box, chain-order column
+;;; starts, and exact Z ranges for the whole chunk and its high boundary
+;;; strips.  Streaming reuse is by chain identity -- an unchanged neighbor
+;;; keeps its EQ-identical chain across remeshes, so its facts are shared
+;;; rather than rebuilt.  Publication is atomic: a record enters the table
+;;; only after it is completely initialized, and concurrent duplicate
+;;; derivation is acceptable because every complete record of one chain is
+;;; equivalent.
+
+(defconstant +chunk-column-count+ (* +chunk-size+ +chunk-size+))
+(defconstant +chunk-fiber-word-count+
+  (* +chunk-column-count+ +occupancy-fiber-word-count+))
+
+(defstruct (chain-chunk-facts
+             (:constructor %make-chain-chunk-facts
+                 (chunk-key words column-starts
+                  minimum-z maximum-z
+                  high-x-minimum-z high-x-maximum-z
+                  high-y-minimum-z high-y-maximum-z
+                  corner-minimum-z corner-maximum-z))
+             (:copier nil))
+  "Facts derived from exactly one immutable single-chunk chain.
+
+WORDS is the dense fiber image of the chunk box in the occupancy-field
+layout anchored at the chunk origin with a 64-column Y span, so an
+occupancy field over the chunk may share it directly.  COLUMN-STARTS maps
+the chain-order column index (local Y major, then local X) to the rank of
+the column's first cell, with the chain count as its final sentinel.  The
+strip Z ranges are exact: HIGH-X covers local X 63, HIGH-Y covers local
+Y 63, and CORNER covers the single column at local (63, 63) -- the cells a
+low neighbor contributes across a width-one seam.  An empty range keeps
+MINIMUM above MAXIMUM.  The empty chain's CHUNK-KEY is -1."
+  (chunk-key -1 :type fixnum :read-only t)
+  (words #.(make-array 0 :element-type '(unsigned-byte 64))
+         :type occupancy-word-vector :read-only t)
+  (column-starts #.(make-array 0 :element-type '(unsigned-byte 32))
+                 :type (simple-array (unsigned-byte 32) (*)) :read-only t)
+  (minimum-z +top-z+ :type fixnum :read-only t)
+  (maximum-z -1 :type fixnum :read-only t)
+  (high-x-minimum-z +top-z+ :type fixnum :read-only t)
+  (high-x-maximum-z -1 :type fixnum :read-only t)
+  (high-y-minimum-z +top-z+ :type fixnum :read-only t)
+  (high-y-maximum-z -1 :type fixnum :read-only t)
+  (corner-minimum-z +top-z+ :type fixnum :read-only t)
+  (corner-maximum-z -1 :type fixnum :read-only t))
+
+(declaim (inline %chain-facts-fiber-base))
+(defun %chain-facts-fiber-base (x y)
+  "The fiber word base of world column (X, Y) inside its chunk's facts."
+  (declare (optimize (speed 3) (safety 1))
+           (type fixnum x y))
+  (the fixnum
+       (* +occupancy-fiber-word-count+
+          (the fixnum
+               (+ (logand y (1- +chunk-size+))
+                  (ash (logand x (1- +chunk-size+)) +chunk-bits+))))))
+
+(defun %derive-chain-chunk-facts (chain)
+  "Derive one complete facts record from CHAIN, validating its cells."
+  (let* ((sites (%chain-sites chain))
+         (count (length sites))
+         (words (make-array +chunk-fiber-word-count+
+                            :element-type '(unsigned-byte 64)
+                            :initial-element 0))
+         (column-starts (make-array (1+ +chunk-column-count+)
+                                    :element-type '(unsigned-byte 32)
+                                    :initial-element 0))
+         (chunk-key -1)
+         (minimum-z +top-z+) (maximum-z -1)
+         (high-x-minimum-z +top-z+) (high-x-maximum-z -1)
+         (high-y-minimum-z +top-z+) (high-y-maximum-z -1)
+         (corner-minimum-z +top-z+) (corner-maximum-z -1)
+         (column 0))
+    (when (plusp count)
+      (setf chunk-key (site-chunk-key (aref sites 0)))
+      ;; Chunk bits are the most significant site bits and chains are
+      ;; sorted, so equal first and last chunk keys prove that every cell
+      ;; belongs to the same chunk.
+      (unless (= chunk-key (site-chunk-key (aref sites (1- count))))
+        (error "Chain-local occupancy facts require a single-chunk chain."))
+      (loop for rank fixnum from 0 below count
+            for cell = (aref sites rank) do
+        (unless (and (= (site-extent cell) +cell-extent+)
+                     (site-positive-p cell))
+          (error "A solid mesh requires positive cells, not ~S." cell))
+        (let* ((z (site-z cell))
+               (local-x (ldb (byte +chunk-bits+ +x-local-shift+) cell))
+               (local-y (ldb (byte +chunk-bits+ +y-local-shift+) cell))
+               (cell-column (logior (ash local-y +chunk-bits+) local-x)))
+          (unless (< z +top-z+)
+            (error "Cell ~S lies outside its occupancy box." cell))
+          (loop while (<= column cell-column) do
+            (setf (aref column-starts column) rank)
+            (incf column))
+          (let ((index (+ (%chain-facts-fiber-base local-x local-y)
+                          (ash z -6))))
+            (setf (aref words index)
+                  (logior (aref words index) (ash 1 (logand z 63)))))
+          (setf minimum-z (min minimum-z z)
+                maximum-z (max maximum-z z))
+          (when (= local-x (1- +chunk-size+))
+            (setf high-x-minimum-z (min high-x-minimum-z z)
+                  high-x-maximum-z (max high-x-maximum-z z))
+            (when (= local-y (1- +chunk-size+))
+              (setf corner-minimum-z (min corner-minimum-z z)
+                    corner-maximum-z (max corner-maximum-z z))))
+          (when (= local-y (1- +chunk-size+))
+            (setf high-y-minimum-z (min high-y-minimum-z z)
+                  high-y-maximum-z (max high-y-maximum-z z))))))
+    (loop while (<= column +chunk-column-count+) do
+      (setf (aref column-starts column) count)
+      (incf column))
+    (%make-chain-chunk-facts
+     chunk-key words column-starts
+     minimum-z maximum-z
+     high-x-minimum-z high-x-maximum-z
+     high-y-minimum-z high-y-maximum-z
+     corner-minimum-z corner-maximum-z)))
+
+(defvar *chain-facts-table*
+  (make-hash-table :test #'eq :weakness :key :synchronized t)
+  "Weak synchronized EQ table from immutable chains to derived facts.")
+
+;; Reuse evidence for benchmarks.  The counts are advisory: concurrent
+;; increments may race, but publication correctness rests only on the
+;; synchronized table above.
+(defvar *chain-facts-build-count* 0
+  "Count of facts derivations, for reuse evidence in benchmarks.")
+(defvar *chain-facts-hit-count* 0
+  "Count of facts cache hits, for reuse evidence in benchmarks.")
+
+(defun %reset-chain-facts (&key clear-cache)
+  "Zero the reuse counters; with CLEAR-CACHE, also drop every cached record."
+  (setf *chain-facts-build-count* 0
+        *chain-facts-hit-count* 0)
+  (when clear-cache
+    (clrhash *chain-facts-table*))
+  (values))
+
+(defun %chain-chunk-facts (chain)
+  "CHAIN's derived facts, published atomically after full initialization."
+  (let ((facts (gethash chain *chain-facts-table*)))
+    (cond (facts
+           (incf *chain-facts-hit-count*)
+           facts)
+          (t
+           (let ((facts (%derive-chain-chunk-facts chain)))
+             (incf *chain-facts-build-count*)
+             (setf (gethash chain *chain-facts-table*) facts))))))
+
+(defun %chain-facts-occupancy-field (facts domain x0 x1 y0 y1)
+  "Wrap FACTS' fiber words as a read-only dense occupancy field.
+
+X0 and Y0 must be the facts chunk's origin.  The words cover the full
+64x64 column box with a 64-column Y span, so the half-open field bounds
+may be domain-clipped without copying; nothing may mutate the field."
+  (%make-occupancy-field
+   domain (chain-chunk-facts-words facts) nil x0 x1 y0 y1 +chunk-size+))
+
+(defun %map-chain-chunk-facts-cells (function facts)
+  "Call FUNCTION with the world X, Y, and Z of every occupied cell."
+  (let ((key (chain-chunk-facts-chunk-key facts)))
+    (unless (minusp key)
+      (let ((x0 (chunk-origin-x key))
+            (y0 (chunk-origin-y key))
+            (words (chain-chunk-facts-words facts)))
+        (dotimes (local-x +chunk-size+)
+          (dotimes (local-y +chunk-size+)
+            (let ((base (%chain-facts-fiber-base local-x local-y)))
+              (dotimes (word +occupancy-fiber-word-count+)
+                (let ((bits (aref words (+ base word))))
+                  (loop while (plusp bits) do
+                    (let ((bit (1- (integer-length (logand bits (- bits))))))
+                      (funcall function
+                               (+ x0 local-x) (+ y0 local-y)
+                               (+ (* word 64) bit))
+                      (setf bits (logand bits (1- bits))))))))))))
+    facts))
 
 (defun %materialize-occupancy (solid x0 x1 y0 y1)
   "Validate SOLID's cells and materialize them over the given cell box."
@@ -499,7 +670,12 @@ star corpus; signal that boundary explicitly instead of silently welding it."
                      :domain (occupancy-field-domain field) :key key)
             (use-chunk (chain)
               :report "Supply the chunk's chain."
-              (%chunk-cells-table chain))
+              (let ((facts (%chain-chunk-facts chain)))
+                (unless (or (minusp (chain-chunk-facts-chunk-key facts))
+                            (= (chain-chunk-facts-chunk-key facts) key))
+                  (error "Chain with chunk key ~D cannot resolve chunk ~D."
+                         (chain-chunk-facts-chunk-key facts) key))
+                facts))
             (treat-as-air ()
               :report "Treat the whole chunk as air."
               :air)
@@ -559,7 +735,11 @@ world, and an OUTSIDE-DOMAIN signal past the world's own edges."
            (case resolution
              (:air 0)
              (:solid 1)
-             (t (if (gethash (%lattice-key x y z) resolution) 1 0)))))))
+             (t
+              (ldb (byte 1 (logand z 63))
+                   (aref (chain-chunk-facts-words resolution)
+                         (+ (%chain-facts-fiber-base x y)
+                            (ash z -6))))))))))
 
 (defun %star-mask-at (field domain x y z)
   "Pack the eight-cell occupancy star of the lattice vertex at X Y Z.
@@ -662,9 +842,14 @@ Bit conventions match SITE-STAR-OCCUPANCY-MASK on a vertex site."
                 (aref words (+ destination-base 3))
                 +occupancy-top-word-mask+))
          (t
-          (loop for z fixnum from cell-z0 below cell-z1 do
-            (when (gethash (%lattice-key x y z) resolution)
-              (%set-occupancy-word-bit words destination-base z))))))))
+          ;; A whole-fiber copy, like the :SOLID fill, may set bits outside
+          ;; [CELL-Z0, CELL-Z1).  Sites in the selected Z window only read
+          ;; the cells at Z and Z-1, so the extra bits are never observed.
+          (let ((source (chain-chunk-facts-words resolution))
+                (source-base (%chain-facts-fiber-base x y)))
+            (dotimes (word +occupancy-fiber-word-count+)
+              (setf (aref words (+ destination-base word))
+                    (aref source (+ source-base word))))))))))
   words)
 
 (defun %materialize-width-one-star-window
@@ -3846,18 +4031,25 @@ lattice-site closure.  It must return one stock for that entire chamfer."
             builder :junction site-x site-y site-z
             descriptor stock star-mask)))
 
-(defun %width-one-chunk-star-z-bounds
-    (chunk field grid-x grid-y x0 x1 y0 y1)
-  "Bounds of cells which can touch this chunk's owned lattice vertices."
+(defun %width-one-chunk-star-z-bounds (chunk field grid-x grid-y)
+  "Bounds of cells which can touch this chunk's owned lattice vertices.
+
+The owner contributes its whole exact Z range.  Each low neighbor
+contributes only the boundary strip that reaches across the shared seam:
+the west neighbor its high-X strip, the south neighbor its high-Y strip,
+and the corner neighbor its single high-corner column.  All four ranges
+are precomputed chain facts, so no packed cells are scanned here."
   (let ((minimum-z +top-z+) (maximum-z -1))
-    (flet ((observe (x y z)
-             (when (and (<= (1- x0) x) (< x x1)
-                        (<= (1- y0) y) (< y y1))
-               (setf minimum-z (min minimum-z z)
-                     maximum-z (max maximum-z z)))))
-      (loop for cell across (%chain-sites chunk)
-            do (observe (site-x cell) (site-y cell) (site-z cell)))
-      (loop for (dx dy) in '((-1 0) (0 -1) (-1 -1)) do
+    (flet ((observe (low high)
+             (when (<= low high)
+               (setf minimum-z (min minimum-z low)
+                     maximum-z (max maximum-z high)))))
+      (let ((facts (%chain-chunk-facts chunk)))
+        (observe (chain-chunk-facts-minimum-z facts)
+                 (chain-chunk-facts-maximum-z facts)))
+      (loop for (dx dy strip) in '((-1 0 :high-x) (0 -1 :high-y)
+                                   (-1 -1 :corner))
+            do
         (let ((nx (+ grid-x dx)) (ny (+ grid-y dy)))
           (when (and (<= 0 nx) (<= 0 ny))
             (let ((resolution
@@ -3867,11 +4059,19 @@ lattice-site closure.  It must return one stock for that entire chamfer."
                 (:solid
                  (error "A fully solid chunk resolution cannot feed a mesh halo yet."))
                 (t
-                 (loop for key being the hash-keys of resolution
-                       do (let ((x (%lattice-key-x key))
-                                (y (%lattice-key-y key)))
-                            (when (or (< x x0) (< y y0))
-                              (observe x y (%lattice-key-z key)))))))))))
+                 (ecase strip
+                   (:high-x
+                    (observe
+                     (chain-chunk-facts-high-x-minimum-z resolution)
+                     (chain-chunk-facts-high-x-maximum-z resolution)))
+                   (:high-y
+                    (observe
+                     (chain-chunk-facts-high-y-minimum-z resolution)
+                     (chain-chunk-facts-high-y-maximum-z resolution)))
+                   (:corner
+                    (observe
+                     (chain-chunk-facts-corner-minimum-z resolution)
+                     (chain-chunk-facts-corner-maximum-z resolution))))))))))
       (if (minusp maximum-z)
           (values nil nil)
           (values minimum-z (1+ maximum-z))))))
@@ -4208,8 +4408,7 @@ lattice-site closure.  It must return one stock for that entire chamfer."
   (let ((grid-x (chunk-key-x chunk-key))
         (grid-y (chunk-key-y chunk-key)))
     (multiple-value-bind (z0 z1)
-        (%width-one-chunk-star-z-bounds
-         chunk field grid-x grid-y x0 x1 y0 y1)
+        (%width-one-chunk-star-z-bounds chunk field grid-x grid-y)
       (when z0
         (let ((sites
                 (%borrow-width-one-sites
@@ -4355,13 +4554,13 @@ alternate representation switch."
                  (error "A fully solid chunk resolution cannot feed ~
                          a mesh halo yet."))
                 (t
-                 (loop for key being the hash-keys of resolution
-                       do (let ((x (%lattice-key-x key))
-                                (y (%lattice-key-y key)))
-                            (when (and (<= (1- x0) x) (< x x1)
-                                       (<= (1- y0) y) (< y y1)
-                                       (or (< x x0) (< y y0)))
-                              (push key halo-list))))))))))
+                 (%map-chain-chunk-facts-cells
+                  (lambda (x y z)
+                    (when (and (<= (1- x0) x) (< x x1)
+                               (<= (1- y0) y) (< y y1)
+                               (or (< x x0) (< y y0)))
+                      (push (%lattice-key x y z) halo-list)))
+                  resolution)))))))
       (let* ((halo (sort (coerce halo-list
                                  '(simple-array (unsigned-byte 64) (*)))
                          #'<))

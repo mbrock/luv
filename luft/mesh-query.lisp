@@ -816,13 +816,16 @@
          (oy1 (if (>= (+ y0 +chunk-size+) (world-domain-y-limit domain))
                   (1+ (world-domain-y-limit domain))
                   (+ y0 +chunk-size+)))
-         (field (%materialize-occupancy chunk x0 x1 y0 y1)))
-    (loop for cell across (%chain-sites chunk) do
-      (unless (= (site-chunk-key cell) chunk-key)
-        (error "Cell ~S does not belong to chunk ~D." cell chunk-key)))
+         (facts (%chain-chunk-facts chunk))
+         (field (%chain-facts-occupancy-field facts domain x0 x1 y0 y1)))
+    ;; The derived facts already validated the chain as a single chunk's
+    ;; positive cells, so membership is one key comparison, not a scan.
+    (unless (or (minusp (chain-chunk-facts-chunk-key facts))
+                (= (chain-chunk-facts-chunk-key facts) chunk-key))
+      (error "Chunk chain with key ~D does not belong to chunk ~D."
+             (chain-chunk-facts-chunk-key facts) chunk-key))
     (multiple-value-bind (z0 z1)
-        (%width-one-chunk-star-z-bounds
-         chunk field grid-x grid-y x0 x1 y0 y1)
+        (%width-one-chunk-star-z-bounds chunk field grid-x grid-y)
       (let* ((packed-sites
                (%borrow-width-one-sites (max 16 (* 8 (chain-count chunk)))))
              (workspace (%borrow-width-one-query-workspace)))
