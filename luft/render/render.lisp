@@ -4841,6 +4841,7 @@ medial-collapse repairs cannot diverge at chunk seams."
                       :chamfer-stock-function chamfer-stock-function
                       :chamfer-algebra
                       (material-program-chamfer-algebra material-program)
+                      :outside-domain-policy :air
                       :bevel-width width))))
                (decorate-owners (owners &optional surface-context)
                  (decorate-scene-meshes

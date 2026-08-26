@@ -1753,6 +1753,97 @@
            (invoke-restart 'treat-as-air))))
     (apply #'mesh-chunk chain key arguments)))
 
+(defun %test-width-one-z-fibers ()
+  (%with-test-section ("width-one padded Z fibers and SIMD classification")
+    ;; The native kernel is an optimization of this scalar word algebra.  Use
+    ;; deterministic full-width values so every lane and every input position
+    ;; participates without making the test host-random.
+    (let ((low (make-array 16 :element-type '(unsigned-byte 64)))
+          (high (make-array 16 :element-type '(unsigned-byte 64)))
+          (scalar (make-array +occupancy-fiber-word-count+
+                              :element-type '(unsigned-byte 64)))
+          (native (make-array +occupancy-fiber-word-count+
+                              :element-type '(unsigned-byte 64)))
+          (state #x6a09e667f3bcc909)
+          (kernel (%width-one-active-word-kernel)))
+      (labels ((next-word ()
+                 (setf state
+                       (ldb (byte 64 0)
+                            (+ (* state #x5851f42d4c957f2d)
+                               #x14057b7ef767814f)))))
+        (dotimes (trial 64)
+          (dotimes (index 16)
+            (setf (aref low index) (next-word)
+                  (aref high index) (next-word)))
+          (%width-one-active-words-scalar
+           low high 0 4 8 12 scalar)
+          (funcall kernel low high 0 4 8 12 native)
+          (%check (equalp scalar native)
+                  (format nil "SIMD trial ~D" trial)))))
+    ;; Exercise the sentinel/carry boundaries by comparing every reconstructed
+    ;; star at selected XY positions against the original scalar occupancy
+    ;; oracle.  The authored cells straddle all four u64 words and both legal
+    ;; ends of the 0..254 cell interval.
+    (let* ((domain (make-world-domain :horizontal-bits 7))
+           (z-values '(0 1 62 63 64 65 126 127 128 129
+                       190 191 192 193 253 254))
+           (solid
+             (%chain-from-sites
+              domain
+              (loop for z in z-values
+                    append
+                    (list (make-site domain 0 0 z +cell-extent+ 1)
+                          (make-site domain 1 63 z +cell-extent+ 1)
+                          (make-site domain 63 1 z +cell-extent+ 1)))))
+           (field (%materialize-occupancy solid 0 64 0 64)))
+      (handler-bind
+          ((missing-chunk
+             (lambda (condition)
+               (declare (ignore condition))
+               (invoke-restart 'treat-as-air)))
+           (outside-domain
+             (lambda (condition)
+               (declare (ignore condition))
+               (invoke-restart 'treat-as-air))))
+        (let* ((window
+                 (%materialize-width-one-star-window
+                  field domain 0 64 0 64))
+               (air-window
+                 (%materialize-width-one-star-window
+                  field domain 0 64 0 64 :outside-domain-policy :air))
+               (low (width-one-star-window-low-words window))
+               (high (width-one-star-window-high-words window))
+               (window-x0 (width-one-star-window-x0 window))
+               (window-y0 (width-one-star-window-y0 window))
+               (y-span (width-one-star-window-y-span window)))
+          (%check
+           (equalp high (width-one-star-window-high-words air-window))
+           "constant AIR high fibers")
+          (%check
+           (equalp low (width-one-star-window-low-words air-window))
+           "constant AIR shifted fibers")
+          (dolist (x '(0 1 2 63 64))
+            (dolist (y '(0 1 2 63 64))
+              (let ((low-low
+                      (%width-one-window-fiber-base
+                       (1- x) (1- y) window-x0 window-y0 y-span))
+                    (high-low
+                      (%width-one-window-fiber-base
+                       x (1- y) window-x0 window-y0 y-span))
+                    (low-high
+                      (%width-one-window-fiber-base
+                       (1- x) y window-x0 window-y0 y-span))
+                    (high-high
+                      (%width-one-window-fiber-base
+                       x y window-x0 window-y0 y-span)))
+                (dotimes (z (1+ +top-z+))
+                  (%check
+                   (= (%star-mask-at field domain x y z)
+                      (%width-one-star-mask-from-fibers
+                       low high low-low high-low low-high high-high
+                       (ash z -6) (logand z 63)))
+                   (format nil "star (~D ~D ~D)" x y z)))))))))))
+
 (defun %test-width-one-local-kernel ()
   (%with-test-section ("width-one finite-neighborhood production kernel")
     (let ((algebra (%make-width-one-test-chamfer-algebra))
@@ -2074,6 +2165,7 @@
     (%test-surface-attachment-local-support-chart)
     (%test-sheet-decomposition)
     (%test-surface-mesh)
+    (%test-width-one-z-fibers)
     (%test-width-one-local-kernel)
     (%test-chunked-meshing)
     (%test-owner-preserving-variable-bevel-cohort)

@@ -13,8 +13,10 @@
 ;;; The mesher speaks the same packed-integer language as the chain substrate.
 ;;; Its working representations, and the identities they preserve:
 ;;;
-;;; - Occupancy is materialized once per build into an EQL table keyed by the
-;;;   packed positive cell sites of the solid; every probe is one lookup.
+;;; - Occupancy is materialized once per build into padded full-height Z
+;;;   fibers when its horizontal box is bounded, with an EQL table fallback
+;;;   for huge sparse boxes.  Four U64 words cover Z=0..255; bit 255 is the
+;;;   canonical air sentinel which keeps every fiber naturally SIMD-wide.
 ;;; - Lattice keys (edge anchors, vertex sites, boundary anchors) pack as
 ;;;   axis<<59 | (x+1)<<34 | (y+1)<<9 | (z+1), so numeric order is the
 ;;;   (axis, x, y, z) lexicographic order the streams are deterministically
@@ -406,18 +408,25 @@ star corpus; signal that boundary explicitly instead of silently welding it."
 ;;; Materialized occupancy
 ;;;
 ;;; A field binds one solid's occupancy to a cell-coordinate box.  Probes
-;;; inside an ordinary-size box are one dense bit-vector lookup; probes outside
+;;; inside an ordinary-size box are one dense Z-fiber lookup; probes outside
 ;;; it signal OUTSIDE-DOMAIN with the boundary restarts, so the caller's
 ;;; policy (whole-world air, a chunk store, a strict test) decides the edge.
 
+(defconstant +occupancy-fiber-word-count+ 4)
+(defconstant +occupancy-top-word-mask+ #x7fffffffffffffff)
+(defconstant +u64-mask+ #xffffffffffffffff)
+
+(deftype occupancy-word-vector ()
+  '(simple-array (unsigned-byte 64) (*)))
+
 (defstruct (occupancy-field
              (:constructor %make-occupancy-field
-                 (domain bits table x0 x1 y0 y1 y-span)))
+                 (domain words table x0 x1 y0 y1 y-span)))
   (domain nil :type world-domain :read-only t)
   ;; Resident occupancy is dense unless the horizontal box would make an
   ;; unreasonable allocation.  The sparse fallback preserves whole-domain
   ;; meshing for very large, lightly populated worlds.
-  (bits nil :type (or null simple-bit-vector) :read-only t)
+  (words nil :type (or null occupancy-word-vector) :read-only t)
   (table nil :type (or null hash-table) :read-only t)
   ;; Half-open cell-coordinate bounds of the resident box.
   (x0 0 :type fixnum :read-only t)
@@ -449,8 +458,10 @@ star corpus; signal that boundary explicitly instead of silently welding it."
   (let* ((y-span (- y1 y0))
          (volume (* (- x1 x0) y-span +top-z+))
          (dense-p (<= volume (* 128 1024 1024)))
-         (bits (when dense-p
-                 (make-array volume :element-type 'bit :initial-element 0)))
+         (words (when dense-p
+                  (make-array
+                   (* (- x1 x0) y-span +occupancy-fiber-word-count+)
+                   :element-type '(unsigned-byte 64) :initial-element 0)))
          (table (unless dense-p
                   (make-hash-table :test #'eql
                                    :size (max 64 (chain-count solid))))))
@@ -462,14 +473,17 @@ star corpus; signal that boundary explicitly instead of silently welding it."
         (unless (and (<= x0 x) (< x x1) (<= y0 y) (< y y1)
                      (<= 0 z) (< z +top-z+))
           (error "Cell ~S lies outside its occupancy box." cell))
-        (if bits
-            (setf (sbit bits
-                        (+ z (* +top-z+
-                                (+ (- y y0) (* y-span (- x x0))))))
-                  1)
+        (if words
+            (let ((index
+                    (+ (ash z -6)
+                       (* +occupancy-fiber-word-count+
+                          (+ (- y y0) (* y-span (- x x0)))))))
+              (setf (aref words index)
+                    (logior (aref words index)
+                            (ash 1 (logand z 63)))))
             (setf (gethash (%lattice-key x y z) table) t))))
     (%make-occupancy-field
-     (chain-domain solid) bits table x0 x1 y0 y1 y-span)))
+     (chain-domain solid) words table x0 x1 y0 y1 y-span)))
 
 (defun %resolve-chunk (field key)
   "Signal MISSING-CHUNK once for KEY and cache the handler's resolution."
@@ -492,16 +506,15 @@ star corpus; signal that boundary explicitly instead of silently welding it."
   (or (gethash key (occupancy-field-resolutions field))
       (%resolve-chunk field key)))
 
-(declaim (inline %occupied-bit))
-(declaim (inline %dense-occupancy-index))
-(defun %dense-occupancy-index (field x y z)
+(declaim (inline %occupied-bit %dense-occupancy-word-index))
+(defun %dense-occupancy-word-index (field x y z)
   (declare (optimize (speed 3) (safety 1))
            (type occupancy-field field)
            (type fixnum x y z))
   (the fixnum
-       (+ z
+       (+ (ash z -6)
           (the fixnum
-               (* +top-z+
+               (* +occupancy-fiber-word-count+
                   (the fixnum
                        (+ (the fixnum (- y (occupancy-field-y0 field)))
                           (the fixnum
@@ -523,9 +536,11 @@ world, and an OUTSIDE-DOMAIN signal past the world's own edges."
               (< x (occupancy-field-x1 field))
               (<= (occupancy-field-y0 field) y)
               (< y (occupancy-field-y1 field)))
-         (let ((bits (occupancy-field-bits field)))
-           (if bits
-               (sbit bits (%dense-occupancy-index field x y z))
+         (let ((words (occupancy-field-words field)))
+           (if words
+               (ldb (byte 1 (logand z 63))
+                    (aref words
+                          (%dense-occupancy-word-index field x y z)))
                (if (gethash (%lattice-key x y z)
                             (occupancy-field-table field))
                    1
@@ -556,6 +571,252 @@ Bit conventions match SITE-STAR-OCCUPANCY-MASK on a vertex site."
                   (- y (if (logbitp 1 sample) 0 1))
                   (- z (if (logbitp 2 sample) 0 1))))
         (setf mask (logior mask (ash 1 sample)))))))
+
+;;; The bounded production scan borrows a one-cell XY halo whose columns are
+;;; padded to the complete 256-position Z fiber.  HIGH-WORDS contains ordinary
+;;; cell occupancy; LOW-WORDS contains the same fibers shifted toward larger Z,
+;;; so bit Z denotes the cell at Z-1.  This binds boundary and residency
+;;; semantics once before the homogeneous word/SIMD kernel begins.
+
+(defstruct (width-one-star-window
+             (:constructor %make-width-one-star-window
+                 (high-words low-words x0 y0 y-span)))
+  (high-words #() :type occupancy-word-vector :read-only t)
+  (low-words #() :type occupancy-word-vector :read-only t)
+  (x0 0 :type fixnum :read-only t)
+  (y0 0 :type fixnum :read-only t)
+  (y-span 1 :type fixnum :read-only t))
+
+(declaim (inline %width-one-window-fiber-base
+                 %set-occupancy-word-bit))
+(defun %width-one-window-fiber-base (x y x0 y0 y-span)
+  (declare (optimize (speed 3) (safety 1))
+           (type fixnum x y x0 y0 y-span))
+  (the fixnum
+       (* +occupancy-fiber-word-count+
+          (the fixnum
+               (+ (the fixnum (- y y0))
+                  (the fixnum (* y-span (the fixnum (- x x0)))))))))
+
+(defun %set-occupancy-word-bit (words base z)
+  (declare (optimize (speed 3) (safety 1))
+           (type occupancy-word-vector words)
+           (type fixnum base z))
+  (let ((index (the fixnum (+ base (ash z -6)))))
+    (setf (aref words index)
+          (logior (aref words index) (ash 1 (logand z 63))))))
+
+(defun %fill-width-one-window-column
+    (field domain words destination-base x y
+     outside-domain-policy cell-z0 cell-z1)
+  (declare (type occupancy-field field)
+           (type world-domain domain)
+           (type occupancy-word-vector words)
+           (type (member nil :air :solid) outside-domain-policy)
+           (type fixnum destination-base x y cell-z0 cell-z1))
+  (cond
+    ((and (<= (occupancy-field-x0 field) x)
+          (< x (occupancy-field-x1 field))
+          (<= (occupancy-field-y0 field) y)
+          (< y (occupancy-field-y1 field)))
+     (let* ((source (the occupancy-word-vector
+                         (occupancy-field-words field)))
+            (source-base
+              (%width-one-window-fiber-base
+               x y
+               (occupancy-field-x0 field)
+               (occupancy-field-y0 field)
+               (occupancy-field-y-span field))))
+       (dotimes (word +occupancy-fiber-word-count+)
+         (setf (aref words (+ destination-base word))
+               (aref source (+ source-base word))))))
+    ((or (< x 0) (>= x (world-domain-x-limit domain))
+         (< y 0) (>= y (world-domain-y-limit domain)))
+     (case outside-domain-policy
+       (:air nil)
+       (:solid
+        (loop for z fixnum from cell-z0 below cell-z1
+              do (%set-occupancy-word-bit words destination-base z)))
+       (t
+        ;; USE-VALUE may deliberately vary by coordinate, so preserve the
+        ;; public boundary protocol for diagnostic callers without a constant
+        ;; bounded-production policy.
+        (loop for z fixnum from cell-z0 below cell-z1 do
+          (when (= 1 (outside-domain-occupancy domain x y z))
+            (%set-occupancy-word-bit words destination-base z))))))
+    (t
+     (let ((resolution
+             (%field-chunk-resolution field (chunk-key-at x y))))
+       (case resolution
+         (:air nil)
+         (:solid
+          (setf (aref words destination-base) +u64-mask+
+                (aref words (+ destination-base 1)) +u64-mask+
+                (aref words (+ destination-base 2)) +u64-mask+
+                (aref words (+ destination-base 3))
+                +occupancy-top-word-mask+))
+         (t
+          (loop for z fixnum from cell-z0 below cell-z1 do
+            (when (gethash (%lattice-key x y z) resolution)
+              (%set-occupancy-word-bit words destination-base z))))))))
+  words)
+
+(defun %materialize-width-one-star-window
+    (field domain x0 x1 y0 y1
+     &key (outside-domain-policy nil) (z0 0) (z1 +top-z+))
+  "Resolve the complete one-cell halo of a bounded owner into padded fibers."
+  (declare (type occupancy-field field)
+           (type world-domain domain)
+           (type (member nil :air :solid) outside-domain-policy)
+           (type fixnum x0 x1 y0 y1 z0 z1))
+  (unless (occupancy-field-words field)
+    (error "A bounded width-one scan requires dense resident occupancy."))
+  (let* ((window-x0 (1- x0))
+         (window-y0 (1- y0))
+         (x-span (+ (- x1 x0) 2))
+         (y-span (+ (- y1 y0) 2))
+         (word-count
+           (* x-span y-span +occupancy-fiber-word-count+))
+         (high-words
+           (make-array word-count :element-type '(unsigned-byte 64)
+                                   :initial-element 0))
+         (low-words
+           (make-array word-count :element-type '(unsigned-byte 64)))
+         ;; Sites Z0..Z1 need ordinary occupancy at Z and shifted occupancy
+         ;; at Z-1.  Clip exceptional halo work to that interval; resident
+         ;; fibers remain one cheap four-word copy.
+         (cell-z0 (max 0 (1- z0)))
+         (cell-z1 (min +top-z+ (1+ z1))))
+    (loop for x fixnum from window-x0 to x1 do
+      (loop for y fixnum from window-y0 to y1
+            for base fixnum = (%width-one-window-fiber-base
+                                x y window-x0 window-y0 y-span)
+            do (%fill-width-one-window-column
+                field domain high-words base x y
+                outside-domain-policy cell-z0 cell-z1)))
+    (loop for base fixnum from 0 below word-count
+          by +occupancy-fiber-word-count+ do
+      (let ((previous 0))
+        (declare (type (unsigned-byte 64) previous))
+        (dotimes (word +occupancy-fiber-word-count+)
+          (let ((current (aref high-words (+ base word))))
+            (setf (aref low-words (+ base word))
+                  (logand
+                   +u64-mask+
+                   (logior (ash current 1)
+                           (ldb (byte 1 63) previous)))
+                  previous current)))))
+    (%make-width-one-star-window
+     high-words low-words window-x0 window-y0 y-span)))
+
+(defun %width-one-active-words-scalar
+    (low high low-low high-low low-high high-high active)
+  (declare (optimize (speed 3) (safety 0))
+           (type occupancy-word-vector low high active)
+           (type fixnum low-low high-low low-high high-high))
+  (dotimes (word +occupancy-fiber-word-count+ active)
+    (let* ((p0 (aref low (+ low-low word)))
+           (p1 (aref low (+ high-low word)))
+           (p2 (aref low (+ low-high word)))
+           (p3 (aref low (+ high-high word)))
+           (p4 (aref high (+ low-low word)))
+           (p5 (aref high (+ high-low word)))
+           (p6 (aref high (+ low-high word)))
+           (p7 (aref high (+ high-high word))))
+      (setf (aref active word)
+            (logand
+             (logior p0 p1 p2 p3 p4 p5 p6 p7)
+             (lognot (logand p0 p1 p2 p3 p4 p5 p6 p7)))))))
+
+(defmacro define-width-one-active-simd-kernel (name package lanes)
+  (flet ((sym (name) (intern name package)))
+    (let ((aref-wide (sym (format nil "U64.~D-AREF" lanes)))
+          (and-wide (sym (format nil "U64.~D-AND" lanes)))
+          (or-wide (sym (format nil "U64.~D-OR" lanes)))
+          (not-wide (sym (format nil "U64.~D-NOT" lanes))))
+      `(defun ,name
+           (low high low-low high-low low-high high-high active)
+         (declare (optimize (speed 3) (safety 0))
+                  (type occupancy-word-vector low high active)
+                  (type fixnum low-low high-low low-high high-high))
+         (loop for word fixnum from 0 below +occupancy-fiber-word-count+
+               by ,lanes
+               for p0 = (,aref-wide low (+ low-low word))
+               for p1 = (,aref-wide low (+ high-low word))
+               for p2 = (,aref-wide low (+ low-high word))
+               for p3 = (,aref-wide low (+ high-high word))
+               for p4 = (,aref-wide high (+ low-low word))
+               for p5 = (,aref-wide high (+ high-low word))
+               for p6 = (,aref-wide high (+ low-high word))
+               for p7 = (,aref-wide high (+ high-high word))
+               do (setf (,aref-wide active word)
+                        (,and-wide
+                         (,or-wide p0 p1 p2 p3 p4 p5 p6 p7)
+                         (,not-wide
+                          (,and-wide p0 p1 p2 p3 p4 p5 p6 p7)))))
+         active))))
+
+#+x86-64
+(define-width-one-active-simd-kernel
+    %width-one-active-words-avx2 #:sb-simd-avx2 4)
+#+x86-64
+(define-width-one-active-simd-kernel
+    %width-one-active-words-sse2 #:sb-simd-sse2 2)
+#+arm64
+(define-width-one-active-simd-kernel
+    %width-one-active-words-neon #:sb-simd-neon 2)
+
+(defun %simd-instruction-set-available-p (name)
+  (sb-simd-internals:instruction-set-available-p
+   (sb-simd-internals:find-instruction-set name)))
+
+(defun %width-one-active-word-kernel ()
+  "Select native SIMD once per bounded chunk, retaining the scalar oracle."
+  #+x86-64
+  (cond ((%simd-instruction-set-available-p :avx2)
+         #'%width-one-active-words-avx2)
+        ((%simd-instruction-set-available-p :sse2)
+         #'%width-one-active-words-sse2)
+        (t #'%width-one-active-words-scalar))
+  #+arm64
+  (if (%simd-instruction-set-available-p :neon)
+      #'%width-one-active-words-neon
+      #'%width-one-active-words-scalar)
+  #-(or x86-64 arm64)
+  #'%width-one-active-words-scalar)
+
+(declaim (inline %width-one-star-mask-from-fibers))
+(defun %width-one-star-mask-from-fibers
+    (low high low-low high-low low-high high-high word bit)
+  (declare (optimize (speed 3) (safety 0))
+           (type occupancy-word-vector low high)
+           (type fixnum low-low high-low low-high high-high word bit))
+  (logior
+   (if (logbitp bit (aref low (+ low-low word))) #x01 0)
+   (if (logbitp bit (aref low (+ high-low word))) #x02 0)
+   (if (logbitp bit (aref low (+ low-high word))) #x04 0)
+   (if (logbitp bit (aref low (+ high-high word))) #x08 0)
+   (if (logbitp bit (aref high (+ low-low word))) #x10 0)
+   (if (logbitp bit (aref high (+ high-low word))) #x20 0)
+   (if (logbitp bit (aref high (+ low-high word))) #x40 0)
+   (if (logbitp bit (aref high (+ high-high word))) #x80 0)))
+
+(defun %width-one-z-range-masks (z0 z1)
+  (declare (type fixnum z0 z1))
+  (let ((masks
+          (make-array +occupancy-fiber-word-count+
+                      :element-type '(unsigned-byte 64)
+                      :initial-element 0)))
+    (dotimes (word +occupancy-fiber-word-count+ masks)
+      (let* ((word-z (* word 64))
+             (low (max z0 word-z))
+             (high (min z1 (+ word-z 63))))
+        (when (<= low high)
+          (let ((offset (- low word-z))
+                (count (1+ (- high low))))
+            (setf (aref masks word)
+                  (logand +u64-mask+
+                          (ash (1- (ash 1 count)) offset)))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Compiled chamfer material algebra
@@ -3410,86 +3671,124 @@ lattice-site closure.  It must return one stock for that entire chamfer."
           (values nil nil)
           (values minimum-z (1+ maximum-z))))))
 
+(defun %emit-width-one-star
+    (builder domain stock-function algebra site-x site-y site-z star-mask
+     x0 x1 y0 y1 ox1 oy1)
+  "Emit the finite-table geometry of one known nontrivial occupancy star."
+  (let ((site-owned-p (and (< site-x ox1) (< site-y oy1))))
+    (when (and site-owned-p
+               (= 1 (sbit *star-singular-bits* star-mask)))
+      (incf (surface-mesh-builder-singular-star-count builder)))
+    (dotimes (axis-number 3)
+      (let* ((u (svref +axis-u+ axis-number))
+             (v (svref +axis-v+ axis-number))
+             (low-sample (logior (ash 1 u) (ash 1 v)))
+             (high-sample (logior low-sample (ash 1 axis-number)))
+             (face-state
+               (logior (if (logbitp low-sample star-mask) 1 0)
+                       (if (logbitp high-sample star-mask) 2 0)))
+             (source-bit
+               (svref *width-one-face-source-table* face-state)))
+        (unless (minusp source-bit)
+          (let* ((source-sample
+                   (if (zerop source-bit) low-sample high-sample))
+                 (source-x
+                   (- site-x (if (logbitp 0 source-sample) 0 1)))
+                 (source-y
+                   (- site-y (if (logbitp 1 source-sample) 0 1))))
+            ;; Faces belong to their occupied source cell, not to the lattice
+            ;; vertex which anchors them.
+            (when (and (<= x0 source-x) (< source-x x1)
+                       (<= y0 source-y) (< source-y y1))
+              (%emit-width-one-face
+               builder domain stock-function site-x site-y site-z
+               axis-number source-bit))))
+        (let* ((edge-state
+                 (%width-one-edge-state star-mask axis-number))
+               (pattern
+                 (svref *width-one-edge-pattern-table* edge-state)))
+          (when (plusp
+                 (length
+                  (svref (width-one-edge-pattern-descriptors pattern)
+                         axis-number)))
+            (%emit-width-one-edge
+             builder domain stock-function algebra
+             site-x site-y site-z axis-number star-mask pattern
+             x0 x1 y0 y1 site-owned-p)))))
+    (when site-owned-p
+      (let ((pattern (svref *width-one-vertex-pattern-table* star-mask)))
+        (when (plusp
+               (length (width-one-vertex-pattern-descriptors pattern)))
+          (%emit-width-one-vertex
+           builder domain stock-function algebra
+           site-x site-y site-z star-mask pattern))))))
+
 (defun %mesh-width-one-chunk-scan
     (chunk chunk-key field domain stock-function algebra builder
-     x0 x1 y0 y1 ox1 oy1)
-  "Emit one bounded owner directly from its finite star tables."
+     x0 x1 y0 y1 ox1 oy1 outside-domain-policy)
+  "Emit one bounded owner from word-parallel Z fibers and finite tables."
   (let ((grid-x (chunk-key-x chunk-key))
         (grid-y (chunk-key-y chunk-key)))
     (multiple-value-bind (z0 z1)
         (%width-one-chunk-star-z-bounds
          chunk field grid-x grid-y x0 x1 y0 y1)
       (when z0
-        ;; Source-owned faces and flat collars may be anchored on the high
-        ;; seam.  True edge bands and fans still obey the half-open site box.
-        (loop for site-x from x0 to x1 do
-          (loop for site-y from y0 to y1 do
-            (loop for site-z from z0 to z1 do
-              (let ((star-mask
-                      (%star-mask-at field domain site-x site-y site-z)))
-                (unless (or (zerop star-mask) (= star-mask #xff))
-                  (let ((site-owned-p
-                          (and (< site-x ox1) (< site-y oy1))))
-                    (when (and site-owned-p
-                               (= 1 (sbit *star-singular-bits* star-mask)))
-                      (incf
-                       (surface-mesh-builder-singular-star-count builder)))
-                    (dotimes (axis-number 3)
-                      (let* ((u (svref +axis-u+ axis-number))
-                             (v (svref +axis-v+ axis-number))
-                             (low-sample (logior (ash 1 u) (ash 1 v)))
-                             (high-sample
-                               (logior low-sample (ash 1 axis-number)))
-                             (face-state
-                               (logior
-                                (if (logbitp low-sample star-mask) 1 0)
-                                (if (logbitp high-sample star-mask) 2 0)))
-                             (source-bit
-                               (svref *width-one-face-source-table*
-                                      face-state)))
-                        (unless (minusp source-bit)
-                          (let* ((source-sample
-                                   (if (zerop source-bit)
-                                       low-sample high-sample))
-                                 (source-x
-                                   (- site-x
-                                      (if (logbitp 0 source-sample) 0 1)))
-                                 (source-y
-                                   (- site-y
-                                      (if (logbitp 1 source-sample) 0 1))))
-                            ;; Faces belong to their occupied source cell, not
-                            ;; to the lattice vertex which anchors them.
-                            (when (and (<= x0 source-x) (< source-x x1)
-                                       (<= y0 source-y) (< source-y y1))
-                              (%emit-width-one-face
-                               builder domain stock-function
-                               site-x site-y site-z
-                               axis-number source-bit))))
-                        (let* ((edge-state
-                                 (%width-one-edge-state
-                                  star-mask axis-number))
-                               (pattern
-                                 (svref *width-one-edge-pattern-table*
-                                        edge-state)))
-                          (when (plusp
-                                 (length
-                                  (svref
-                                   (width-one-edge-pattern-descriptors pattern)
-                                   axis-number)))
-                            (%emit-width-one-edge
-                             builder domain stock-function algebra
-                             site-x site-y site-z axis-number star-mask pattern
-                             x0 x1 y0 y1 site-owned-p)))))
-                    (when site-owned-p
-                      (let ((pattern
-                              (svref *width-one-vertex-pattern-table*
-                                     star-mask)))
-                        (when (plusp
-                               (length
-                                (width-one-vertex-pattern-descriptors pattern)))
-                          (%emit-width-one-vertex
-                           builder domain stock-function algebra
-                           site-x site-y site-z star-mask pattern)))))))))))))
+        (let* ((window
+                 (%materialize-width-one-star-window
+                  field domain x0 x1 y0 y1
+                  :outside-domain-policy outside-domain-policy
+                  :z0 z0 :z1 z1))
+               (low (width-one-star-window-low-words window))
+               (high (width-one-star-window-high-words window))
+               (window-x0 (width-one-star-window-x0 window))
+               (window-y0 (width-one-star-window-y0 window))
+               (window-y-span (width-one-star-window-y-span window))
+               (range-masks (%width-one-z-range-masks z0 z1))
+               (active
+                 (make-array +occupancy-fiber-word-count+
+                             :element-type '(unsigned-byte 64)))
+               (active-kernel (%width-one-active-word-kernel)))
+          (declare (dynamic-extent range-masks active))
+          ;; Source-owned faces and flat collars may be anchored on the high
+          ;; seam.  True edge bands and fans still obey the half-open site box.
+          (loop for site-x fixnum from x0 to x1 do
+            (loop for site-y fixnum from y0 to y1 do
+              (let ((low-low
+                      (%width-one-window-fiber-base
+                       (1- site-x) (1- site-y)
+                       window-x0 window-y0 window-y-span))
+                    (high-low
+                      (%width-one-window-fiber-base
+                       site-x (1- site-y)
+                       window-x0 window-y0 window-y-span))
+                    (low-high
+                      (%width-one-window-fiber-base
+                       (1- site-x) site-y
+                       window-x0 window-y0 window-y-span))
+                    (high-high
+                      (%width-one-window-fiber-base
+                       site-x site-y
+                       window-x0 window-y0 window-y-span)))
+                (funcall active-kernel low high
+                         low-low high-low low-high high-high active)
+                (dotimes (word +occupancy-fiber-word-count+)
+                  (let ((active-word
+                          (logand (aref active word)
+                                  (aref range-masks word))))
+                    (loop while (plusp active-word) do
+                      (let* ((lowest (logand active-word (- active-word)))
+                             (bit (1- (integer-length lowest)))
+                             (site-z (+ (* word 64) bit))
+                             (star-mask
+                               (%width-one-star-mask-from-fibers
+                                low high low-low high-low low-high high-high
+                                word bit)))
+                        (%emit-width-one-star
+                         builder domain stock-function algebra
+                         site-x site-y site-z star-mask
+                         x0 x1 y0 y1 ox1 oy1)
+                        (setf active-word
+                              (logand active-word (1- active-word))))))))))))))
   (%finish-surface-mesh builder))
 
 (defun mesh-chunk
@@ -3498,6 +3797,7 @@ lattice-site closure.  It must return one stock for that entire chamfer."
           source-stock-function
           (chamfer-stock-function (lambda (stocks) (first stocks)))
           chamfer-algebra
+          outside-domain-policy
           (bevel-width +mesh-bevel-width+))
   "Classify one chunk's solid CHUNK into the instance-stream ABI.
 
@@ -3505,7 +3805,9 @@ CHUNK holds exactly the cells of the chunk named by CHUNK-KEY.  Probes
 leaving the chunk signal MISSING-CHUNK once per neighboring chunk -- bind a
 handler that answers USE-CHUNK from a store, or TREAT-AS-AIR to fill in --
   and probes past the world's box signal OUTSIDE-DOMAIN; MESH-CHUNK sets no
-  policy of its own.  The mesh ships only what this chunk owns: faces of its
+  policy of its own unless OUTSIDE-DOMAIN-POLICY is the constant :AIR or
+  :SOLID policy of a bounded production snapshot.  The mesh ships only what
+  this chunk owns: faces of its
 own solid cells, bands whose edge anchors lie inside it, and fans at its
 own lattice vertices.  At width one, CHAMFER-ALGEBRA selects the bounded
 finite-neighborhood scan; omitting it retains the surface-proportional oracle.
@@ -3519,6 +3821,7 @@ alternate representation switch."
   (check-type source-stock-function (or null function))
   (check-type chamfer-stock-function function)
   (check-type chamfer-algebra (or null compiled-chamfer-algebra))
+  (check-type outside-domain-policy (member nil :air :solid))
   (unless (and (integerp bevel-width)
                (<= 1 bevel-width (/ +mesh-cell-size+ 2)))
     (error "Bevel width ~S must be an integer between one and four ticks."
@@ -3553,7 +3856,8 @@ alternate representation switch."
              (+ x0 +chunk-size+))
          (if (>= (+ y0 +chunk-size+) (world-domain-y-limit domain))
              (1+ (world-domain-y-limit domain))
-             (+ y0 +chunk-size+)))))
+             (+ y0 +chunk-size+))
+         outside-domain-policy)))
     ;; Owned sites are the half-open coordinate box of this chunk's grid
     ;; cell; anchors on the far seam belong to the next chunk over.  Owned
     ;; sites' cell stars reach exactly one cell below the origin per axis,
