@@ -82,7 +82,8 @@
    #:surface-attachment-frame-primitive-kinds
    #:surface-attachment-frame-stocks
    #:resolve-surface-attachment-frame
-   #:star-singular-p #:decompose-star-mask #:make-surface-mesh #:mesh-chunk
+   #:star-singular-p #:decompose-star-mask
+   #:with-surface-mesh-workspace #:make-surface-mesh #:mesh-chunk
    #:coplanar-compressed-surface-mesh
            #:select-surface-mesh-stocks
            #:surface-mesh-with-triangle-ink

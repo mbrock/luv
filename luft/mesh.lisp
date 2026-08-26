@@ -23,10 +23,10 @@
 ;;;   coordinates plus the ABI attribute bits.  Templates intern by content.
 ;;; - Instances append to columnar (unsigned-byte 32) streams whose fourth
 ;;;   word is already the final ABI meta word (template | stock | ambient).
-;;; - The open boundary is parity-counted over packed canonical edges
-;;;   (anchor key + two 12-bit anchor-local endpoints); each surviving open
-;;;   edge becomes a single fixnum of site-local endpoints and stock, and the
-;;;   whole fan phase runs on those.
+;;; - Sheet quads append only their four external directed edges to packed
+;;;   UB64 streams.  A stable radix pass over the bounded chunk-relative edge
+;;;   key cancels pairs; oversized whole-domain diagnostics retain the EQL hash
+;;;   oracle.  Each surviving edge becomes one site-local endpoints/stock word.
 ;;; - STAR-SINGULAR-P and directional ambient occlusion are pure in at most
 ;;;   thirteen bits and are read from tables built once at load.
 
@@ -603,6 +603,74 @@ Bit conventions match SITE-STAR-OCCUPANCY-MASK on a vertex site."
   (/ (fill-pointer (instance-stream-words stream))
      +mesh-instance-word-count+))
 
+(defstruct (surface-mesh-workspace
+             (:constructor %make-surface-mesh-workspace ()))
+  "Reusable dense scratch owned by one sequential mesh cohort."
+  (edge-records nil :type (or null (vector (unsigned-byte 64))))
+  (radix-scratch nil :type (or null (vector (unsigned-byte 64))))
+  (radix-counts nil
+                :type (or null
+                          (simple-array (unsigned-byte 32) (*))))
+  (fan-records nil :type (or null (vector (unsigned-byte 64))))
+  (fan-links nil :type (or null (vector (unsigned-byte 64))))
+  (site-heads nil :type (or null (vector (unsigned-byte 32))))
+  (touched-sites nil :type (or null (vector (unsigned-byte 32)))))
+
+(defvar *surface-mesh-workspace* nil)
+
+(defun %prepare-workspace-ub64-vector (vector minimum-capacity)
+  (declare (type fixnum minimum-capacity))
+  (if (or (null vector)
+          (< (array-total-size vector) minimum-capacity))
+      (make-array (max 16 minimum-capacity
+                       (* 2 (if vector (array-total-size vector) 0)))
+                  :element-type '(unsigned-byte 64)
+                  :adjustable t :fill-pointer 0)
+      (progn
+        (setf (fill-pointer vector) 0)
+        vector)))
+
+(defun %prepare-workspace-ub32-vector (vector minimum-capacity)
+  (declare (type fixnum minimum-capacity))
+  (if (or (null vector)
+          (< (array-total-size vector) minimum-capacity))
+      (make-array (max 16 minimum-capacity
+                       (* 2 (if vector (array-total-size vector) 0)))
+                  :element-type '(unsigned-byte 32)
+                  :adjustable t :fill-pointer 0
+                  :initial-element 0)
+      (progn
+        (setf (fill-pointer vector) 0)
+        vector)))
+
+(defun %reset-surface-mesh-workspace (workspace)
+  "Release all borrowed lanes, clearing only site heads actually touched."
+  (when workspace
+    (let ((heads (surface-mesh-workspace-site-heads workspace))
+          (sites (surface-mesh-workspace-touched-sites workspace)))
+      (when (and heads sites)
+        (loop for site-index across sites
+              do (setf (aref heads site-index) 0))))
+    (dolist (vector
+             (list
+              (surface-mesh-workspace-edge-records workspace)
+              (surface-mesh-workspace-radix-scratch workspace)
+              (surface-mesh-workspace-fan-records workspace)
+              (surface-mesh-workspace-fan-links workspace)
+              (surface-mesh-workspace-site-heads workspace)
+              (surface-mesh-workspace-touched-sites workspace)))
+      (when vector
+        (setf (fill-pointer vector) 0))))
+  workspace)
+
+(defmacro with-surface-mesh-workspace (() &body body)
+  "Run BODY with reusable scratch for its sequential chunk-meshing calls."
+  `(let ((*surface-mesh-workspace*
+           (or *surface-mesh-workspace* (%make-surface-mesh-workspace))))
+     (unwind-protect
+          (progn ,@body)
+       (%reset-surface-mesh-workspace *surface-mesh-workspace*))))
+
 (defstruct (surface-mesh-builder
              (:constructor %make-surface-mesh-builder (domain bevel-width)))
   (domain nil :type world-domain :read-only t)
@@ -617,10 +685,12 @@ Bit conventions match SITE-STAR-OCCUPANCY-MASK on a vertex site."
   (band-stream (%make-instance-stream) :type instance-stream :read-only t)
   (fan-stream (%make-instance-stream) :type instance-stream :read-only t)
   ;; When configured for bevel construction, face and band emission update
-  ;; this shared parity table directly from the already-oriented scratch
-  ;; vertices.  Builders without it retain the general replay path used by
-  ;; mesh transformations elsewhere in this file.
+  ;; one shared packed observation stream, or the hash oracle for an oversized
+  ;; whole-domain scan.  Builders without either retain the general replay
+  ;; path used by mesh transformations elsewhere in this file.
   (boundary-packing nil)
+  (boundary-edge-records nil
+                         :type (or null (vector (unsigned-byte 64))))
   (boundary-observations nil)
   (singular-star-count 0 :type (integer 0 *)))
 
@@ -746,7 +816,8 @@ Bit conventions match SITE-STAR-OCCUPANCY-MASK on a vertex site."
 (defun %emit-quad (builder kind base-x base-y base-z p0 p1 p2 p3
                    nx ny nz stock ambient-occlusion)
   "Emit one instance for the quad P0 P1 P2 P3 (global ticks, simple-vectors)."
-  (when (surface-mesh-builder-boundary-observations builder)
+  (when (or (surface-mesh-builder-boundary-edge-records builder)
+            (surface-mesh-builder-boundary-observations builder))
     (%observe-quad-boundary-edges builder p0 p1 p2 p3 nx ny nz stock))
   (let ((ox (* +mesh-cell-size+ base-x))
         (oy (* +mesh-cell-size+ base-y))
@@ -1199,6 +1270,102 @@ Ownership is the half-open box [OX0, OX1) x [OY0, OY1) of site coordinates."
 (defconstant +fan-record-right-shift+ 12)
 (defconstant +fan-record-left-shift+ 24)
 (defconstant +boundary-observation-count-shift+ 36)
+(defconstant +boundary-edge-observation-direction-shift+ 12)
+(defconstant +boundary-edge-observation-key-shift+ 13)
+(defconstant +packed-boundary-anchor-limit+ (ash 1 27)
+  "Maximum anchor count whose key, direction, and stock fit one UB64 word.")
+(defconstant +boundary-edge-radix-bit-count+ 12)
+(defconstant +boundary-edge-radix-size+
+  (ash 1 +boundary-edge-radix-bit-count+))
+
+(defparameter *boundary-observation-strategy* :auto
+  "Boundary parity reducer: :AUTO, :PACKED, or the retained :HASH oracle.")
+
+(defun %borrow-boundary-edge-records (minimum-capacity)
+  (if *surface-mesh-workspace*
+      (let ((vector
+              (%prepare-workspace-ub64-vector
+               (surface-mesh-workspace-edge-records
+                *surface-mesh-workspace*)
+               minimum-capacity)))
+        (setf (surface-mesh-workspace-edge-records *surface-mesh-workspace*)
+              vector)
+        vector)
+      (make-array minimum-capacity :element-type '(unsigned-byte 64)
+                                   :adjustable t :fill-pointer 0)))
+
+(defun %borrow-boundary-radix-scratch (minimum-capacity)
+  (if *surface-mesh-workspace*
+      (let ((vector
+              (%prepare-workspace-ub64-vector
+               (surface-mesh-workspace-radix-scratch
+                *surface-mesh-workspace*)
+               minimum-capacity)))
+        (setf (surface-mesh-workspace-radix-scratch
+               *surface-mesh-workspace*)
+              vector)
+        vector)
+      (make-array minimum-capacity :element-type '(unsigned-byte 64))))
+
+(defun %borrow-boundary-radix-counts ()
+  (if *surface-mesh-workspace*
+      (or (surface-mesh-workspace-radix-counts *surface-mesh-workspace*)
+          (setf (surface-mesh-workspace-radix-counts
+                 *surface-mesh-workspace*)
+                (make-array +boundary-edge-radix-size+
+                            :element-type '(unsigned-byte 32)
+                            :initial-element 0)))
+      (make-array +boundary-edge-radix-size+
+                  :element-type '(unsigned-byte 32)
+                  :initial-element 0)))
+
+(defun %borrow-boundary-fan-records (minimum-capacity)
+  (if *surface-mesh-workspace*
+      (let ((vector
+              (%prepare-workspace-ub64-vector
+               (surface-mesh-workspace-fan-records *surface-mesh-workspace*)
+               minimum-capacity)))
+        (setf (surface-mesh-workspace-fan-records *surface-mesh-workspace*)
+              vector)
+        vector)
+      (make-array minimum-capacity :element-type '(unsigned-byte 64)
+                                   :adjustable t :fill-pointer 0)))
+
+(defun %borrow-boundary-fan-links (minimum-capacity)
+  (if *surface-mesh-workspace*
+      (let ((vector
+              (%prepare-workspace-ub64-vector
+               (surface-mesh-workspace-fan-links *surface-mesh-workspace*)
+               minimum-capacity)))
+        (setf (surface-mesh-workspace-fan-links *surface-mesh-workspace*) vector)
+        vector)
+      (make-array minimum-capacity :element-type '(unsigned-byte 64)
+                                   :adjustable t :fill-pointer 0)))
+
+(defun %borrow-boundary-site-heads (minimum-capacity)
+  (if *surface-mesh-workspace*
+      (let ((vector
+              (%prepare-workspace-ub32-vector
+               (surface-mesh-workspace-site-heads *surface-mesh-workspace*)
+               minimum-capacity)))
+        (setf (surface-mesh-workspace-site-heads *surface-mesh-workspace*) vector)
+        vector)
+      (make-array minimum-capacity :element-type '(unsigned-byte 32)
+                                   :adjustable t :fill-pointer 0
+                                   :initial-element 0)))
+
+(defun %borrow-boundary-touched-sites (minimum-capacity)
+  (if *surface-mesh-workspace*
+      (let ((vector
+              (%prepare-workspace-ub32-vector
+               (surface-mesh-workspace-touched-sites *surface-mesh-workspace*)
+               minimum-capacity)))
+        (setf (surface-mesh-workspace-touched-sites
+               *surface-mesh-workspace*)
+              vector)
+        vector)
+      (make-array minimum-capacity :element-type '(unsigned-byte 32)
+                                   :adjustable t :fill-pointer 0)))
 
 (defun %fan-point (x y z)
   (logior (ash (+ x +fan-local-bias+) 8)
@@ -1226,12 +1393,14 @@ Ownership is the half-open box [OX0, OX1) x [OY0, OY1) of site coordinates."
 
 (defstruct (spatial-edge-packing
              (:constructor %make-spatial-edge-packing
-                 (origin-x origin-y y-span x-stride)))
+                 (origin-x origin-y y-span x-stride anchor-count)))
   "The anchor box one parity scan covers, and thus its fixnum key layout."
   (origin-x 0 :type fixnum :read-only t)
   (origin-y 0 :type fixnum :read-only t)
   (y-span 1 :type fixnum :read-only t)
-  (x-stride +spatial-edge-anchor-z-span+ :type fixnum :read-only t))
+  (x-stride +spatial-edge-anchor-z-span+ :type fixnum :read-only t)
+  (anchor-count +spatial-edge-anchor-z-span+
+                :type (integer 1 *) :read-only t))
 
 (defun %make-spatial-edge-packing-for-box (x0 x1 y0 y1)
   "Pack anchors of the cell box [X0, X1) x [Y0, Y1).
@@ -1241,17 +1410,18 @@ eighth-cell anchor beyond it, so the packed anchor box is widened by two."
   (let* ((origin-x (- x0 2))
          (origin-y (- y0 2))
          (x-span (+ (- x1 x0) 4))
-         (y-span (+ (- y1 y0) 4)))
-    (unless (typep (ash (* x-span y-span
-                           +spatial-edge-anchor-z-span+)
-                        24)
+         (y-span (+ (- y1 y0) 4))
+         (anchor-count (* x-span y-span
+                          +spatial-edge-anchor-z-span+)))
+    (unless (typep (ash anchor-count 24)
                    'fixnum)
       (error "A solid spanning ~Dx~D cells is too wide for one spatial-edge ~
               scan; mesh it by chunks."
              x-span y-span))
     (%make-spatial-edge-packing
      origin-x origin-y y-span
-     (* y-span +spatial-edge-anchor-z-span+))))
+     (* y-span +spatial-edge-anchor-z-span+)
+     anchor-count)))
 
 (declaim (inline %spatial-edge-key-from-anchor
                  %spatial-edge-key-anchor-x
@@ -1498,25 +1668,9 @@ to one of SPATIAL-EDGES."
                     3)))
     count))
 
-(defun %builder-open-boundary-table (builders packing)
-  "Parity-count the BUILDERS' face and band streams' directed triangle edges.
-
-Returns a table from PACKING's fixnum edge keys to count<<36 | left12<<24 |
-right12<<12 | stock12, where the 12-bit points are anchor-local."
+(defun %scan-builders-open-boundary-table (builders packing)
+  "Replay BUILDERS' triangle streams into the retained boundary hash oracle."
   (declare (optimize (speed 3) (safety 1)))
-  (let ((observations
-          (surface-mesh-builder-boundary-observations (first builders))))
-    (when observations
-      (unless (every (lambda (builder)
-                       (and (eq observations
-                                (surface-mesh-builder-boundary-observations
-                                 builder))
-                            (eq packing
-                                (surface-mesh-builder-boundary-packing
-                                 builder))))
-                     builders)
-        (error "Sheet builders do not share one boundary observation table."))
-      (return-from %builder-open-boundary-table observations)))
   (let* ((triangles
            (loop for builder in builders
                  for templates = (surface-mesh-builder-templates builder)
@@ -1540,13 +1694,196 @@ right12<<12 | stock12, where the 12-bit points are anchor-local."
          (surface-mesh-builder-band-stream builder) templates packing
          observations)))))
 
+(declaim (inline %packed-boundary-observations-supported-p
+                 %pack-boundary-edge-observation
+                 %boundary-edge-observation-key
+                 %boundary-edge-observation-left
+                 %boundary-edge-observation-right
+                 %boundary-edge-observation-stock))
+
+(defun %packed-boundary-observations-supported-p (packing)
+  (<= (spatial-edge-packing-anchor-count packing)
+      +packed-boundary-anchor-limit+))
+
+(defun %pack-boundary-edge-observation (key left12 right12 stock)
+  "Pack one spatial key, directed orientation, and stock into a UB64 word."
+  (declare (optimize (speed 3) (safety 1))
+           (type fixnum key left12 right12 stock))
+  (the (unsigned-byte 64)
+       (logior
+        (ash key +boundary-edge-observation-key-shift+)
+        (if (> left12 right12)
+            (ash 1 +boundary-edge-observation-direction-shift+)
+            0)
+        stock)))
+
+(defun %boundary-edge-observation-key (record)
+  (declare (type (unsigned-byte 64) record))
+  (ash record (- +boundary-edge-observation-key-shift+)))
+
+(defun %boundary-edge-observation-left (record)
+  (declare (type (unsigned-byte 64) record))
+  (let ((key (%boundary-edge-observation-key record)))
+    (if (logbitp +boundary-edge-observation-direction-shift+ record)
+        (ldb (byte 12 0) key)
+        (ldb (byte 12 12) key))))
+
+(defun %boundary-edge-observation-right (record)
+  (declare (type (unsigned-byte 64) record))
+  (let ((key (%boundary-edge-observation-key record)))
+    (if (logbitp +boundary-edge-observation-direction-shift+ record)
+        (ldb (byte 12 12) key)
+        (ldb (byte 12 0) key))))
+
+(defun %boundary-edge-observation-stock (record)
+  (declare (type (unsigned-byte 64) record))
+  (ldb (byte +fan-record-stock-bit-count+ 0) record))
+
+(defun %radix-sort-packed-boundary-observations (records)
+  "Stably sort RECORDS by their bounded spatial key without boxed comparisons."
+  (declare (optimize (speed 3) (safety 1))
+           (type (vector (unsigned-byte 64)) records))
+  (let ((count (length records)))
+    (declare (type fixnum count))
+    (when (> count 1)
+      (let ((maximum-key 0))
+        (declare (type fixnum maximum-key))
+        (dotimes (index count)
+          (setf maximum-key
+                (max maximum-key
+                     (%boundary-edge-observation-key (aref records index)))))
+        (let ((scratch (%borrow-boundary-radix-scratch count))
+              (counts (%borrow-boundary-radix-counts))
+              (source records)
+              (target nil))
+          (declare (type (vector (unsigned-byte 64)) scratch source)
+                   (type (or null (vector (unsigned-byte 64))) target)
+                   (type (simple-array (unsigned-byte 32) (*)) counts))
+          ;; Workspace scratch has a fill pointer so it can be reset cheaply.
+          ;; Give sequence operations the active radix extent as well as the
+          ;; backing array extent used by AREF below.
+          (when (array-has-fill-pointer-p scratch)
+            (setf (fill-pointer scratch) count))
+          (setf target scratch)
+          (loop for shift fixnum from 0 by +boundary-edge-radix-bit-count+
+                while (< shift (integer-length maximum-key))
+                do
+            (fill counts 0)
+            (dotimes (index count)
+              (let ((digit
+                      (ldb (byte +boundary-edge-radix-bit-count+
+                                 (+ +boundary-edge-observation-key-shift+
+                                    shift))
+                           (aref source index))))
+                (declare (type (integer 0 #.(1- (ash 1 12))) digit))
+                (incf (aref counts digit))))
+            (let ((position 0))
+              (declare (type (unsigned-byte 32) position))
+              (dotimes (digit +boundary-edge-radix-size+)
+                (let ((frequency (aref counts digit)))
+                  (declare (type (unsigned-byte 32) frequency))
+                  (setf (aref counts digit) position)
+                  (incf position frequency))))
+            (dotimes (index count)
+              (let* ((record (aref source index))
+                     (digit
+                       (ldb (byte +boundary-edge-radix-bit-count+
+                                  (+ +boundary-edge-observation-key-shift+
+                                     shift))
+                            record))
+                     (position (aref counts digit)))
+                (declare (type (unsigned-byte 64) record)
+                         (type (integer 0 #.(1- (ash 1 12))) digit)
+                         (type (unsigned-byte 32) position))
+                (setf (aref target position) record
+                      (aref counts digit) (1+ position))))
+            (rotatef source target))
+          (unless (eq source records)
+            (replace records source :end1 count :end2 count))))))
+  records)
+
+(defun %reduce-packed-boundary-observations (records)
+  "Sort packed observations and compact their singleton open edges in place."
+  (declare (optimize (speed 3) (safety 1))
+           (type (vector (unsigned-byte 64)) records))
+  (%radix-sort-packed-boundary-observations records)
+  (let ((read 0)
+        (write 0)
+        (count (length records)))
+    (declare (type fixnum read write count))
+    (loop while (< read count) do
+      (let* ((record (aref records read))
+             (key (%boundary-edge-observation-key record))
+             (next (1+ read)))
+        (declare (type (unsigned-byte 64) record)
+                 (type fixnum key next))
+        (loop while (and (< next count)
+                         (= key (%boundary-edge-observation-key
+                                 (aref records next))))
+              do (incf next))
+        (case (- next read)
+          (1
+           (setf (aref records write) record)
+           (incf write))
+          (2 nil)
+          (t
+           (error "Face and edge streams meet ~D times at ~S."
+                  (- next read) key)))
+        (setf read next)))
+    (setf (fill-pointer records) write)
+    records))
+
+(defun %builder-open-boundary-source (builders packing)
+  "Return packed open records, or the retained hash boundary representation."
+  (let* ((first (first builders))
+         (records (surface-mesh-builder-boundary-edge-records first))
+         (observations
+           (surface-mesh-builder-boundary-observations first)))
+    (labels ((shared-p (builder)
+               (and (eq packing
+                        (surface-mesh-builder-boundary-packing builder))
+                    (eq records
+                        (surface-mesh-builder-boundary-edge-records builder))
+                    (eq observations
+                        (surface-mesh-builder-boundary-observations builder)))))
+      (cond
+        (records
+         (unless (every #'shared-p builders)
+           (error "Sheet builders do not share one packed boundary stream."))
+         (values (%reduce-packed-boundary-observations records) nil))
+        (observations
+         (unless (every #'shared-p builders)
+           (error "Sheet builders do not share one boundary observation table."))
+         (values nil observations))
+        (t
+         (values nil (%scan-builders-open-boundary-table builders packing)))))))
+
 (defun %enable-boundary-observations (builders packing estimated-cells)
-  "Make BUILDERS update one boundary parity table during sheet emission."
-  (let ((observations
-          (make-hash-table :test #'eql
-                           :size (max 4096 (* 4 estimated-cells)))))
-    (dolist (builder builders observations)
+  "Make BUILDERS share the selected boundary reducer during sheet emission."
+  (let* ((strategy
+           (ecase *boundary-observation-strategy*
+             (:auto
+              (if (%packed-boundary-observations-supported-p packing)
+                  :packed
+                  :hash))
+             (:packed
+              (unless (%packed-boundary-observations-supported-p packing)
+                (error "Boundary box has ~D anchors; packed observations support at most ~D."
+                       (spatial-edge-packing-anchor-count packing)
+                       +packed-boundary-anchor-limit+))
+              :packed)
+             (:hash :hash)))
+         (records
+           (when (eq strategy :packed)
+             (%borrow-boundary-edge-records
+              (max 4096 (* 8 estimated-cells)))))
+         (observations
+           (when (eq strategy :hash)
+             (make-hash-table :test #'eql
+                              :size (max 4096 (* 4 estimated-cells))))))
+    (dolist (builder builders strategy)
       (setf (surface-mesh-builder-boundary-packing builder) packing
+            (surface-mesh-builder-boundary-edge-records builder) records
             (surface-mesh-builder-boundary-observations builder)
             observations))))
 
@@ -1559,6 +1896,7 @@ before triangulation avoids packing, hashing, and cancelling that edge."
            (type simple-vector p0 p1 p2 p3)
            (type fixnum nx ny nz stock))
   (let* ((packing (surface-mesh-builder-boundary-packing builder))
+         (records (surface-mesh-builder-boundary-edge-records builder))
          (observations
            (surface-mesh-builder-boundary-observations builder))
          (ux (- (the fixnum (svref p1 0)) (the fixnum (svref p0 0))))
@@ -1579,24 +1917,28 @@ before triangulation avoids packing, hashing, and cancelling that edge."
                   packing
                   (svref left 0) (svref left 1) (svref left 2)
                   (svref right 0) (svref right 1) (svref right 2))
-               (let ((existing (gethash key observations)))
-                 (if existing
-                     (let ((next-count
-                             (1+ (ash existing
-                                      (- +boundary-observation-count-shift+)))))
-                       (when (> next-count 2)
-                         (error "Face and edge streams meet ~D times at ~S."
-                                next-count key))
-                       (setf (gethash key observations)
-                             (dpb next-count
-                                  (byte 4 +boundary-observation-count-shift+)
-                                  existing)))
-                     (setf (gethash key observations)
-                           (logior
-                            (ash 1 +boundary-observation-count-shift+)
-                            (ash left12 +fan-record-left-shift+)
-                            (ash right12 +fan-record-right-shift+)
-                            stock)))))))
+               (if records
+                   (vector-push-extend
+                    (%pack-boundary-edge-observation key left12 right12 stock)
+                    records)
+                   (let ((existing (gethash key observations)))
+                     (if existing
+                         (let ((next-count
+                                 (1+ (ash existing
+                                          (- +boundary-observation-count-shift+)))))
+                           (when (> next-count 2)
+                             (error "Face and edge streams meet ~D times at ~S."
+                                    next-count key))
+                           (setf (gethash key observations)
+                                 (dpb next-count
+                                      (byte 4 +boundary-observation-count-shift+)
+                                      existing)))
+                         (setf (gethash key observations)
+                               (logior
+                                (ash 1 +boundary-observation-count-shift+)
+                                (ash left12 +fan-record-left-shift+)
+                                (ash right12 +fan-record-right-shift+)
+                                stock))))))))
       (if (minusp orientation)
           (progn
             (observe p0 p3)
@@ -1712,7 +2054,7 @@ before triangulation avoids packing, hashing, and cancelling that edge."
   "Open fan records grouped sparsely, or by a chunk-local direct site index."
   (table nil :type (or null hash-table) :read-only t)
   (heads nil
-         :type (or null (simple-array (unsigned-byte 32) (*)))
+         :type (or null (vector (unsigned-byte 32)))
          :read-only t)
   (links nil :type (or null (vector (unsigned-byte 64))) :read-only t)
   (records nil :type (or null (vector (unsigned-byte 64))) :read-only t)
@@ -1735,158 +2077,166 @@ chunk's witness scan it is the witness truncation boundary, provably outside
 every owned site's bevel domain, and DROP-NONLOCAL-P discards it."
   (declare (optimize (speed 3) (safety 1))
            (type fixnum bevel-width ox0 ox1 oy0 oy1))
-  (let* ((observations (%builder-open-boundary-table builders packing))
-         (x-span (the fixnum (- ox1 ox0)))
-         (y-span (the fixnum (- oy1 oy0)))
-         (record-capacity
-           (max 16 (ceiling (* 3 (hash-table-count observations)) 5)))
-         (records
-           (make-array record-capacity :element-type '(unsigned-byte 64)
-                                       :adjustable t :fill-pointer 0))
-         ;; This lane first holds full-box site indices.  Dense grouping then
-         ;; overwrites each entry with the preceding record link.
-         (site-lane
-           (make-array record-capacity :element-type '(unsigned-byte 64)
-                                       :adjustable t :fill-pointer 0))
-         (minimum-z +boundary-site-z-span+)
-         (maximum-z -1))
-    (declare (type fixnum x-span y-span record-capacity
-                   minimum-z maximum-z))
-    (unless (and (plusp x-span) (plusp y-span))
-      (error "Empty boundary ownership box [~D,~D) x [~D,~D)."
-             ox0 ox1 oy0 oy1))
-    (maphash
-     (lambda (key value)
-       (declare (type fixnum key value))
-       (when (= 1 (ash value (- +boundary-observation-count-shift+)))
-         (block attribute
-           (let* ((anchor-x (%spatial-edge-key-anchor-x packing key))
-                  (anchor-y (%spatial-edge-key-anchor-y packing key))
-                  (anchor-z (%spatial-edge-key-anchor-z key))
-                  (left12 (ldb (byte 12 +fan-record-left-shift+) value))
-                  (right12 (ldb (byte 12 +fan-record-right-shift+) value))
-                  (stock (ldb (byte +fan-record-stock-bit-count+ 0) value))
-                  (lx (+ (* 8 anchor-x) (ldb (byte 4 8) left12)))
-                  (ly (+ (* 8 anchor-y) (ldb (byte 4 4) left12)))
-                  (lz (+ (* 8 anchor-z) (ldb (byte 4 0) left12)))
-                  (rx (+ (* 8 anchor-x) (ldb (byte 4 8) right12)))
-                  (ry (+ (* 8 anchor-y) (ldb (byte 4 4) right12)))
-                  (rz (+ (* 8 anchor-z) (ldb (byte 4 0) right12))))
-             (declare (type fixnum anchor-x anchor-y anchor-z
-                            lx ly lz rx ry rz)
-                      (type (unsigned-byte 12) left12 right12)
-                      (type (unsigned-byte #.+fan-record-stock-bit-count+)
-                            stock))
-             (flet ((site-coordinate (l r)
-                      (declare (type fixnum l r))
-                      ;; Find the lattice vertex whose bevel domain contains
-                      ;; the edge, exactly as the exact-rational original did.
-                      (let ((coordinate
-                              (%nearest-edge-site-coordinate l r)))
-                        (declare (type fixnum coordinate))
-                        (unless (and (<= (abs (- l (* +mesh-cell-size+
-                                                      coordinate)))
-                                         bevel-width)
-                                     (<= (abs (- r (* +mesh-cell-size+
-                                                      coordinate)))
-                                         bevel-width))
-                          (when drop-nonlocal-p
-                            (return-from attribute))
-                          (error "Open edge ~S--~S is not local to a lattice vertex."
-                                 (list lx ly lz) (list rx ry rz)))
-                        coordinate)))
-               (let ((site-x (site-coordinate lx rx))
-                     (site-y (site-coordinate ly ry))
-                     (site-z (site-coordinate lz rz)))
-                 (declare (type fixnum site-x site-y site-z))
-                 ;; Neighbor-owned witness sites never contribute to this
-                 ;; chunk.  Discard them before either grouping path.
-                 (when (and (<= ox0 site-x) (< site-x ox1)
-                            (<= oy0 site-y) (< site-y oy1))
-                   (unless (<= 0 site-z (1- +boundary-site-z-span+))
-                     (error "Boundary edge owns out-of-domain Z site ~D."
-                            site-z))
-                   (let ((record
-                           (logior
-                            (ash (%fan-point (- lx (* 8 site-x))
-                                             (- ly (* 8 site-y))
-                                             (- lz (* 8 site-z)))
-                                 +fan-record-left-shift+)
-                            (ash (%fan-point (- rx (* 8 site-x))
-                                             (- ry (* 8 site-y))
-                                             (- rz (* 8 site-z)))
-                                 +fan-record-right-shift+)
-                            stock))
-                         (site-index
-                           (+ site-z
-                              (* +boundary-site-z-span+
-                                 (+ (- site-y oy0)
-                                    (* y-span (- site-x ox0)))))))
-                     (declare (type (unsigned-byte 64) record site-index))
-                     (vector-push-extend record records)
-                     (vector-push-extend site-index site-lane)
-                     (setf minimum-z (min minimum-z site-z)
-                           maximum-z (max maximum-z site-z))))))))))
-     observations)
-    (let* ((record-count (fill-pointer records))
-           (origin-z (if (plusp record-count) minimum-z 0))
-           (z-span (if (plusp record-count)
-                       (1+ (- maximum-z minimum-z))
-                       1))
-           (dense-site-count (* x-span y-span z-span)))
-      (declare (type fixnum record-count origin-z z-span dense-site-count))
-      (if (<= dense-site-count +dense-boundary-site-limit+)
-          (let ((heads
-                  (make-array dense-site-count
-                              :element-type '(unsigned-byte 32)
-                              :initial-element 0))
-                (sites
-                  (make-array
-                   (max 16 (min dense-site-count
-                                (ceiling record-capacity 4)))
-                   :element-type '(unsigned-byte 32)
-                   :adjustable t :fill-pointer 0)))
-            (dotimes (record-index record-count)
-              (let* ((full-index (aref site-lane record-index))
-                     (site-z (mod full-index +boundary-site-z-span+))
-                     (horizontal-index
-                       (truncate full-index +boundary-site-z-span+))
-                     (site-index
-                       (+ (- site-z origin-z)
-                          (* z-span horizontal-index)))
-                     (head (aref heads site-index)))
-                (declare (type fixnum site-z horizontal-index site-index)
-                         (type (unsigned-byte 32) head))
-                (when (zerop head)
-                  (vector-push-extend site-index sites))
-                (setf (aref site-lane record-index) head
-                      (aref heads site-index) (1+ record-index))))
-            (%make-boundary-site-groups
-             nil heads site-lane records sites
-             ox0 oy0 origin-z y-span z-span))
-          (let ((by-site
-                  (make-hash-table
-                   :test #'eql :size (max 16 (ceiling record-count 4)))))
-            (dotimes (record-index record-count)
-              (let* ((full-index (aref site-lane record-index))
-                     (site-z (mod full-index +boundary-site-z-span+))
-                     (horizontal-index
-                       (truncate full-index +boundary-site-z-span+))
-                     (site-y (+ oy0 (mod horizontal-index y-span)))
-                     (site-x (+ ox0 (truncate horizontal-index y-span)))
-                     (key (%lattice-key site-x site-y site-z))
-                     (site-records
-                       (or (gethash key by-site)
-                           (setf (gethash key by-site)
-                                 (make-array
-                                  8 :element-type '(unsigned-byte 64)
-                                    :adjustable t :fill-pointer 0)))))
-                (declare (type fixnum site-z horizontal-index
-                               site-y site-x key))
-                (vector-push-extend (aref records record-index)
-                                    site-records)))
-            (%make-boundary-site-groups
-             by-site nil nil nil nil ox0 oy0 0 y-span 1))))))
+  (multiple-value-bind (edge-observations observations)
+      (%builder-open-boundary-source builders packing)
+    (let* ((x-span (the fixnum (- ox1 ox0)))
+           (y-span (the fixnum (- oy1 oy0)))
+           (open-edge-estimate
+             (if edge-observations
+                 (length edge-observations)
+                 (ceiling (* 3 (hash-table-count observations)) 5)))
+           (record-capacity (max 16 open-edge-estimate))
+           (records
+             (%borrow-boundary-fan-records record-capacity))
+           ;; This lane first holds full-box site indices.  Dense grouping then
+           ;; overwrites each entry with the preceding record link.
+           (site-lane
+             (%borrow-boundary-fan-links record-capacity))
+           (minimum-z +boundary-site-z-span+)
+           (maximum-z -1))
+      (declare (type fixnum x-span y-span open-edge-estimate record-capacity
+                     minimum-z maximum-z))
+      (unless (and (plusp x-span) (plusp y-span))
+        (error "Empty boundary ownership box [~D,~D) x [~D,~D)."
+               ox0 ox1 oy0 oy1))
+      (labels
+          ((attribute (key left12 right12 stock)
+             (declare (type fixnum key)
+                      (type (unsigned-byte 12) left12 right12 stock))
+             (block attribute
+               (let* ((anchor-x (%spatial-edge-key-anchor-x packing key))
+                      (anchor-y (%spatial-edge-key-anchor-y packing key))
+                      (anchor-z (%spatial-edge-key-anchor-z key))
+                      (lx (+ (* 8 anchor-x) (ldb (byte 4 8) left12)))
+                      (ly (+ (* 8 anchor-y) (ldb (byte 4 4) left12)))
+                      (lz (+ (* 8 anchor-z) (ldb (byte 4 0) left12)))
+                      (rx (+ (* 8 anchor-x) (ldb (byte 4 8) right12)))
+                      (ry (+ (* 8 anchor-y) (ldb (byte 4 4) right12)))
+                      (rz (+ (* 8 anchor-z) (ldb (byte 4 0) right12))))
+                 (declare (type fixnum anchor-x anchor-y anchor-z
+                                lx ly lz rx ry rz))
+                 (flet ((site-coordinate (l r)
+                          (declare (type fixnum l r))
+                          ;; Find the lattice vertex whose bevel domain contains
+                          ;; the edge, exactly as the exact-rational original did.
+                          (let ((coordinate
+                                  (%nearest-edge-site-coordinate l r)))
+                            (declare (type fixnum coordinate))
+                            (unless (and (<= (abs (- l (* +mesh-cell-size+
+                                                          coordinate)))
+                                             bevel-width)
+                                         (<= (abs (- r (* +mesh-cell-size+
+                                                          coordinate)))
+                                             bevel-width))
+                              (when drop-nonlocal-p
+                                (return-from attribute))
+                              (error "Open edge ~S--~S is not local to a lattice vertex."
+                                     (list lx ly lz) (list rx ry rz)))
+                            coordinate)))
+                   (let ((site-x (site-coordinate lx rx))
+                         (site-y (site-coordinate ly ry))
+                         (site-z (site-coordinate lz rz)))
+                     (declare (type fixnum site-x site-y site-z))
+                     ;; Neighbor-owned witness sites never contribute to this
+                     ;; chunk.  Discard them before either grouping path.
+                     (when (and (<= ox0 site-x) (< site-x ox1)
+                                (<= oy0 site-y) (< site-y oy1))
+                       (unless (<= 0 site-z (1- +boundary-site-z-span+))
+                         (error "Boundary edge owns out-of-domain Z site ~D."
+                                site-z))
+                       (let ((record
+                               (logior
+                                (ash (%fan-point (- lx (* 8 site-x))
+                                                 (- ly (* 8 site-y))
+                                                 (- lz (* 8 site-z)))
+                                     +fan-record-left-shift+)
+                                (ash (%fan-point (- rx (* 8 site-x))
+                                                 (- ry (* 8 site-y))
+                                                 (- rz (* 8 site-z)))
+                                     +fan-record-right-shift+)
+                                stock))
+                             (site-index
+                               (+ site-z
+                                  (* +boundary-site-z-span+
+                                     (+ (- site-y oy0)
+                                        (* y-span (- site-x ox0)))))))
+                         (declare (type (unsigned-byte 64) record site-index))
+                         (vector-push-extend record records)
+                         (vector-push-extend site-index site-lane)
+                         (setf minimum-z (min minimum-z site-z)
+                               maximum-z (max maximum-z site-z))))))))))
+        (if edge-observations
+            (loop for observation across edge-observations
+                  do (attribute
+                      (%boundary-edge-observation-key observation)
+                      (%boundary-edge-observation-left observation)
+                      (%boundary-edge-observation-right observation)
+                      (%boundary-edge-observation-stock observation)))
+            (maphash
+             (lambda (key value)
+               (declare (type fixnum key value))
+               (when (= 1 (ash value (- +boundary-observation-count-shift+)))
+                 (attribute
+                  key
+                  (ldb (byte 12 +fan-record-left-shift+) value)
+                  (ldb (byte 12 +fan-record-right-shift+) value)
+                  (ldb (byte +fan-record-stock-bit-count+ 0) value))))
+             observations)))
+      (let* ((record-count (fill-pointer records))
+             (origin-z (if (plusp record-count) minimum-z 0))
+             (z-span (if (plusp record-count)
+                         (1+ (- maximum-z minimum-z))
+                         1))
+             (dense-site-count (* x-span y-span z-span)))
+        (declare (type fixnum record-count origin-z z-span dense-site-count))
+        (if (<= dense-site-count +dense-boundary-site-limit+)
+            (let ((heads
+                    (%borrow-boundary-site-heads dense-site-count))
+                  (sites
+                    (%borrow-boundary-touched-sites
+                     (max 16 (min dense-site-count
+                                  (ceiling record-capacity 4))))))
+              (dotimes (record-index record-count)
+                (let* ((full-index (aref site-lane record-index))
+                       (site-z (mod full-index +boundary-site-z-span+))
+                       (horizontal-index
+                         (truncate full-index +boundary-site-z-span+))
+                       (site-index
+                         (+ (- site-z origin-z)
+                            (* z-span horizontal-index)))
+                       (head (aref heads site-index)))
+                  (declare (type fixnum site-z horizontal-index site-index)
+                           (type (unsigned-byte 32) head))
+                  (when (zerop head)
+                    (vector-push-extend site-index sites))
+                  (setf (aref site-lane record-index) head
+                        (aref heads site-index) (1+ record-index))))
+              (%make-boundary-site-groups
+               nil heads site-lane records sites
+               ox0 oy0 origin-z y-span z-span))
+            (let ((by-site
+                    (make-hash-table
+                     :test #'eql :size (max 16 (ceiling record-count 4)))))
+              (dotimes (record-index record-count)
+                (let* ((full-index (aref site-lane record-index))
+                       (site-z (mod full-index +boundary-site-z-span+))
+                       (horizontal-index
+                         (truncate full-index +boundary-site-z-span+))
+                       (site-y (+ oy0 (mod horizontal-index y-span)))
+                       (site-x (+ ox0 (truncate horizontal-index y-span)))
+                       (key (%lattice-key site-x site-y site-z))
+                       (site-records
+                         (or (gethash key by-site)
+                             (setf (gethash key by-site)
+                                   (make-array
+                                    8 :element-type '(unsigned-byte 64)
+                                      :adjustable t :fill-pointer 0)))))
+                  (declare (type fixnum site-z horizontal-index
+                                 site-y site-x key))
+                  (vector-push-extend (aref records record-index)
+                                      site-records)))
+              (%make-boundary-site-groups
+               by-site nil nil nil nil ox0 oy0 0 y-span 1)))))))
 
 (defun %fan-record-cycles (site-x site-y site-z records)
   "Order consistently directed fan RECORDS into loops at the site."
@@ -2123,58 +2473,61 @@ every owned site's bevel domain, and DROP-NONLOCAL-P discards it."
 
 Only lattice sites inside the half-open [OX0, OX1) x [OY0, OY1) box get
 fans; a chunk's neighbor owns the rest and closes them from its own
-witness scan."
+  witness scan."
   (let* ((source-width (surface-mesh-builder-bevel-width
                         (first sheet-builders)))
-         (target-width (surface-mesh-builder-bevel-width builder))
-         (groups (%attribute-open-edges-to-sites
-                  sheet-builders packing source-width
-                  ox0 ox1 oy0 oy1 drop-nonlocal-p))
-         (by-site (boundary-site-groups-table groups)))
-    (if by-site
-        (let ((site-keys (make-array (hash-table-count by-site)
-                                     :element-type '(unsigned-byte 64)))
-              (write 0))
-          (loop for key being the hash-keys of by-site
-                do (setf (aref site-keys write) key)
-                   (incf write))
-          (sort site-keys #'<)
-          (loop for key across site-keys
-                do (%emit-boundary-site-fans
-                    builder field domain chamfer-stock-function
-                    source-width target-width
-                    (%lattice-key-x key)
-                    (%lattice-key-y key)
-                    (%lattice-key-z key)
-                    (gethash key by-site))))
-        (let ((heads (boundary-site-groups-heads groups))
-              (links (boundary-site-groups-links groups))
-              (records (boundary-site-groups-records groups))
-              (sites (boundary-site-groups-sites groups))
-              (origin-x (boundary-site-groups-origin-x groups))
-              (origin-y (boundary-site-groups-origin-y groups))
-              (origin-z (boundary-site-groups-origin-z groups))
-              (y-span (boundary-site-groups-y-span groups))
-              (z-span (boundary-site-groups-z-span groups))
-              (site-records
-                (make-array 16 :element-type '(unsigned-byte 64)
-                               :adjustable t :fill-pointer 0)))
-          (sort sites #'<)
-          (loop for site-index across sites do
-            (let* ((site-z (+ origin-z (mod site-index z-span)))
-                   (horizontal-index (truncate site-index z-span))
-                   (site-y (+ origin-y (mod horizontal-index y-span)))
-                   (site-x (+ origin-x (truncate horizontal-index y-span)))
-                   (head (aref heads site-index)))
-              (setf (fill-pointer site-records) 0)
-              (loop while (plusp head) do
-                (let ((record-index (1- head)))
-                  (vector-push-extend (aref records record-index) site-records)
-                  (setf head (aref links record-index))))
-              (%emit-boundary-site-fans
-               builder field domain chamfer-stock-function
-               source-width target-width site-x site-y site-z
-               site-records)))))))
+         (target-width (surface-mesh-builder-bevel-width builder)))
+    (unwind-protect
+         (let* ((groups (%attribute-open-edges-to-sites
+                         sheet-builders packing source-width
+                         ox0 ox1 oy0 oy1 drop-nonlocal-p))
+                (by-site (boundary-site-groups-table groups)))
+           (if by-site
+               (let ((site-keys (make-array (hash-table-count by-site)
+                                            :element-type '(unsigned-byte 64)))
+                     (write 0))
+                 (loop for key being the hash-keys of by-site
+                       do (setf (aref site-keys write) key)
+                          (incf write))
+                 (sort site-keys #'<)
+                 (loop for key across site-keys
+                       do (%emit-boundary-site-fans
+                           builder field domain chamfer-stock-function
+                           source-width target-width
+                           (%lattice-key-x key)
+                           (%lattice-key-y key)
+                           (%lattice-key-z key)
+                           (gethash key by-site))))
+               (let ((heads (boundary-site-groups-heads groups))
+                     (links (boundary-site-groups-links groups))
+                     (records (boundary-site-groups-records groups))
+                     (sites (boundary-site-groups-sites groups))
+                     (origin-x (boundary-site-groups-origin-x groups))
+                     (origin-y (boundary-site-groups-origin-y groups))
+                     (origin-z (boundary-site-groups-origin-z groups))
+                     (y-span (boundary-site-groups-y-span groups))
+                     (z-span (boundary-site-groups-z-span groups))
+                     (site-records
+                       (make-array 16 :element-type '(unsigned-byte 64)
+                                      :adjustable t :fill-pointer 0)))
+                 (sort sites #'<)
+                 (loop for site-index across sites do
+                   (let* ((site-z (+ origin-z (mod site-index z-span)))
+                          (horizontal-index (truncate site-index z-span))
+                          (site-y (+ origin-y (mod horizontal-index y-span)))
+                          (site-x (+ origin-x (truncate horizontal-index y-span)))
+                          (head (aref heads site-index)))
+                     (setf (fill-pointer site-records) 0)
+                     (loop while (plusp head) do
+                       (let ((record-index (1- head)))
+                         (vector-push-extend
+                          (aref records record-index) site-records)
+                         (setf head (aref links record-index))))
+                     (%emit-boundary-site-fans
+                      builder field domain chamfer-stock-function
+                      source-width target-width site-x site-y site-z
+                      site-records))))))
+      (%reset-surface-mesh-workspace *surface-mesh-workspace*))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Finishing

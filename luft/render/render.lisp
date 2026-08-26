@@ -4821,92 +4821,93 @@ chunk is empty; excluding that owner drops real boundary triangles."
 The first value is an alist of output owner to final mesh.  A material profile
 is evaluated once over all guarded width-one witnesses, so shared sites and
 medial-collapse repairs cannot diverge at chunk seams."
-  (let* ((scene (streaming-mesh-snapshot-scene snapshot))
-         (neighborhood (streaming-mesh-snapshot-union-neighborhood snapshot))
-         (chamfer-stock-function
-           (make-compiled-material-chamfer-stock-function
-            (scene-material-program scene))))
-    (labels ((mesh-owner (key width)
-               (let ((chain (gethash key neighborhood)))
-                 (unless chain
-                   (error "Chunk ~D was not captured by this regional snapshot."
-                          key))
-                 (zone (:luft/rematerialize :value (luft:chain-count chain))
-                   (luft:mesh-chunk
-                    chain key
-                    :source-stock-function
-                    (make-scene-face-stock-function scene)
-                    :chamfer-stock-function chamfer-stock-function
-                    :bevel-width width))))
-             (decorate-owners (owners &optional surface-context)
-               (decorate-scene-meshes
-                owners scene :surface-context surface-context
-                :attachment-source-owners
-                (streaming-mesh-snapshot-resident-source-keys snapshot)
-                :request-stamp (streaming-mesh-snapshot-stamp snapshot)
-                :reusable-light-generation
-                (streaming-mesh-snapshot-reusable-light-generation snapshot)
-                :realize-torch-light-p
-                (streaming-mesh-snapshot-realize-torch-light-p snapshot))))
-      (handler-bind
-          ((luft:missing-chunk
-             (lambda (condition)
-               (multiple-value-bind (chain present-p)
-                   (gethash (luft:missing-chunk-key condition) neighborhood)
-                 (if present-p
-                     (invoke-restart 'luft:use-chunk chain)
-                     (invoke-restart 'luft:treat-as-air)))))
-           (luft:outside-domain
-             (lambda (condition)
-               (declare (ignore condition))
-               (invoke-restart 'luft:treat-as-air))))
-        (let ((profile (streaming-mesh-snapshot-bevel-profile snapshot)))
-          (if profile
-              (let ((witnesses
-                      (mapcar (lambda (key) (cons key (mesh-owner key 1)))
-                              (streaming-mesh-snapshot-witness-keys snapshot)))
-                    (output-keys
-                      (streaming-mesh-snapshot-output-keys snapshot))
-                    (context-keys
-                      (set-difference
-                       (streaming-mesh-snapshot-witness-keys snapshot)
-                       (streaming-mesh-snapshot-output-keys snapshot)
-                       :test #'eql)))
-                (multiple-value-bind (stock-masks site-widths)
-                    (compile-material-bevel-site-policy profile)
-                  (multiple-value-bind
-                        (owners census diagnostics surface-context)
-                      (luft:vary-surface-mesh-cohort-bevel-widths-from-stock-masks
-                       witnesses stock-masks site-widths
-                       :output-owners output-keys
-                       :realize-context-owners context-keys)
-                    (multiple-value-bind (decorated generation)
-                        (decorate-owners owners surface-context)
-                      (values decorated census diagnostics generation)))))
-              (let* ((output-keys
-                       (streaming-mesh-snapshot-output-keys snapshot))
-                     (all-owners
-                       (mapcar
-                        (lambda (key)
-                          (cons key
-                                (mesh-owner
-                                 key
-                                 (streaming-mesh-snapshot-bevel-width
-                                  snapshot))))
-                        (streaming-mesh-snapshot-witness-keys snapshot)))
-                     (owners
-                       (remove-if-not
-                        (lambda (entry)
-                          (member (car entry) output-keys :test #'eql))
-                        all-owners))
-                     (surface-context
-                       (remove-if
-                        (lambda (entry)
-                          (member (car entry) output-keys :test #'eql))
-                        all-owners)))
-                (multiple-value-bind (decorated generation)
-                    (decorate-owners owners surface-context)
-                  (values decorated nil nil generation)))))))))
+  (luft:with-surface-mesh-workspace ()
+    (let* ((scene (streaming-mesh-snapshot-scene snapshot))
+           (neighborhood (streaming-mesh-snapshot-union-neighborhood snapshot))
+           (chamfer-stock-function
+             (make-compiled-material-chamfer-stock-function
+              (scene-material-program scene))))
+      (labels ((mesh-owner (key width)
+                 (let ((chain (gethash key neighborhood)))
+                   (unless chain
+                     (error "Chunk ~D was not captured by this regional snapshot."
+                            key))
+                   (zone (:luft/rematerialize :value (luft:chain-count chain))
+                     (luft:mesh-chunk
+                      chain key
+                      :source-stock-function
+                      (make-scene-face-stock-function scene)
+                      :chamfer-stock-function chamfer-stock-function
+                      :bevel-width width))))
+               (decorate-owners (owners &optional surface-context)
+                 (decorate-scene-meshes
+                  owners scene :surface-context surface-context
+                  :attachment-source-owners
+                  (streaming-mesh-snapshot-resident-source-keys snapshot)
+                  :request-stamp (streaming-mesh-snapshot-stamp snapshot)
+                  :reusable-light-generation
+                  (streaming-mesh-snapshot-reusable-light-generation snapshot)
+                  :realize-torch-light-p
+                  (streaming-mesh-snapshot-realize-torch-light-p snapshot))))
+        (handler-bind
+            ((luft:missing-chunk
+               (lambda (condition)
+                 (multiple-value-bind (chain present-p)
+                     (gethash (luft:missing-chunk-key condition) neighborhood)
+                   (if present-p
+                       (invoke-restart 'luft:use-chunk chain)
+                       (invoke-restart 'luft:treat-as-air)))))
+             (luft:outside-domain
+               (lambda (condition)
+                 (declare (ignore condition))
+                 (invoke-restart 'luft:treat-as-air))))
+          (let ((profile (streaming-mesh-snapshot-bevel-profile snapshot)))
+            (if profile
+                (let ((witnesses
+                        (mapcar (lambda (key) (cons key (mesh-owner key 1)))
+                                (streaming-mesh-snapshot-witness-keys snapshot)))
+                      (output-keys
+                        (streaming-mesh-snapshot-output-keys snapshot))
+                      (context-keys
+                        (set-difference
+                         (streaming-mesh-snapshot-witness-keys snapshot)
+                         (streaming-mesh-snapshot-output-keys snapshot)
+                         :test #'eql)))
+                  (multiple-value-bind (stock-masks site-widths)
+                      (compile-material-bevel-site-policy profile)
+                    (multiple-value-bind
+                          (owners census diagnostics surface-context)
+                        (luft:vary-surface-mesh-cohort-bevel-widths-from-stock-masks
+                         witnesses stock-masks site-widths
+                         :output-owners output-keys
+                         :realize-context-owners context-keys)
+                      (multiple-value-bind (decorated generation)
+                          (decorate-owners owners surface-context)
+                        (values decorated census diagnostics generation)))))
+                (let* ((output-keys
+                         (streaming-mesh-snapshot-output-keys snapshot))
+                       (all-owners
+                         (mapcar
+                          (lambda (key)
+                            (cons key
+                                  (mesh-owner
+                                   key
+                                   (streaming-mesh-snapshot-bevel-width
+                                    snapshot))))
+                          (streaming-mesh-snapshot-witness-keys snapshot)))
+                       (owners
+                         (remove-if-not
+                          (lambda (entry)
+                            (member (car entry) output-keys :test #'eql))
+                          all-owners))
+                       (surface-context
+                         (remove-if
+                          (lambda (entry)
+                            (member (car entry) output-keys :test #'eql))
+                          all-owners)))
+                  (multiple-value-bind (decorated generation)
+                      (decorate-owners owners surface-context)
+                    (values decorated nil nil generation))))))))))
 
 (defun make-scene-regional-meshes
     (scene bevel-width &optional bevel-profile

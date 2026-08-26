@@ -1265,9 +1265,10 @@
     (loop for sum from -128 to 128
           do (%check (= (%nearest-edge-site-coordinate sum 0)
                         (round sum (* 2 +mesh-cell-size+)))))
-    ;; Quad-grain observation must retain the triangle replay's directed open
-    ;; perimeter exactly while omitting only its twice-seen construction edge.
-    (labels ((open-records (table)
+    ;; Packed quad-grain observation must retain the hash oracle's directed
+    ;; open perimeter while omitting construction diagonals and reducing the
+    ;; shared perimeter of adjacent quads.
+    (labels ((hash-open-records (table)
                (sort
                 (loop for key being the hash-keys of table
                         using (hash-value value)
@@ -1275,28 +1276,63 @@
                                      (- +boundary-observation-count-shift+)))
                         collect (cons key value))
                 #'< :key #'car))
+             (packed-open-records (records)
+               (loop for observation across
+                     (%reduce-packed-boundary-observations records)
+                     for key = (%boundary-edge-observation-key observation)
+                     collect
+                     (cons
+                      key
+                      (logior
+                       (ash 1 +boundary-observation-count-shift+)
+                       (ash (%boundary-edge-observation-left observation)
+                            +fan-record-left-shift+)
+                       (ash (%boundary-edge-observation-right observation)
+                            +fan-record-right-shift+)
+                       (%boundary-edge-observation-stock observation)))))
              (check-quad (normal-z)
                (let* ((domain (make-world-domain :horizontal-bits 5))
-                      (builder (%make-surface-mesh-builder domain 2))
-                      (packing (%make-spatial-edge-packing-for-box 0 1 0 1))
+                      (hash-builder (%make-surface-mesh-builder domain 2))
+                      (packed-builder (%make-surface-mesh-builder domain 2))
+                      (packing (%make-spatial-edge-packing-for-box 0 2 0 1))
                       (replayed (make-hash-table :test #'eql))
                       (p0 #(0 0 8)) (p1 #(8 0 8))
-                      (p2 #(8 8 8)) (p3 #(0 8 8)))
-                 (%enable-boundary-observations (list builder) packing 1)
-                 (%emit-quad builder :face 0 0 1 p0 p1 p2 p3
-                             0 0 normal-z 7 0)
+                      (p2 #(8 8 8)) (p3 #(0 8 8))
+                      (p4 #(16 0 8)) (p5 #(16 8 8)))
+                 (let ((*boundary-observation-strategy* :hash))
+                   (%enable-boundary-observations
+                    (list hash-builder) packing 2))
+                 (let ((*boundary-observation-strategy* :packed))
+                   (%enable-boundary-observations
+                    (list packed-builder) packing 2))
+                 (flet ((emit (builder)
+                          (%emit-quad builder :face 0 0 1 p0 p1 p2 p3
+                                      0 0 normal-z 7 0)
+                          (%emit-quad builder :face 1 0 1 p1 p4 p5 p2
+                                      0 0 normal-z 9 0)))
+                   (emit hash-builder)
+                   (emit packed-builder))
                  (%scan-stream-boundary-edges
-                  (surface-mesh-builder-face-stream builder)
-                  (surface-mesh-builder-templates builder)
+                  (surface-mesh-builder-face-stream hash-builder)
+                  (surface-mesh-builder-templates hash-builder)
                   packing replayed)
-                 (let ((direct
-                         (surface-mesh-builder-boundary-observations builder)))
-                   (%check (= 4 (hash-table-count direct)))
-                   (%check (= 5 (hash-table-count replayed)))
-                   (%check (equal (open-records direct)
-                                  (open-records replayed)))))))
+                 (let* ((direct
+                          (surface-mesh-builder-boundary-observations
+                           hash-builder))
+                        (packed
+                          (surface-mesh-builder-boundary-edge-records
+                           packed-builder))
+                        (expected (hash-open-records replayed)))
+                   (%check (= 7 (hash-table-count direct)))
+                   (%check (= 9 (hash-table-count replayed)))
+                   (%check (= 6 (length
+                                 (%reduce-packed-boundary-observations
+                                  packed))))
+                   (%check (equal (hash-open-records direct) expected))
+                   (%check (equal (packed-open-records packed) expected))))))
       (check-quad 1)
-      (check-quad -1))
+      (with-surface-mesh-workspace ()
+        (check-quad -1)))
     (%check (equal '(0 -1 0) (%normal-direction-code '(0 -2 0))))
     (dolist (bevel-width '(1 2 3))
       (flet ((mesh-for-star (mask)
