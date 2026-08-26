@@ -1579,7 +1579,13 @@ that he is standing on something."
                (* (* (player-contact-shade origin ray center sun deck-height)
                      deck-lit)
                   (- 1.0 coverage))))
-         (shade-color (* (vec3 0.155 0.140 0.205) contact))
+         ;; This pass is premultiplied over the already-lit deck.  A fixed
+         ;; positive "shadow pigment" becomes emissive wherever the deck is
+         ;; darker than that pigment—the pale halo we were seeing around the
+         ;; traveler.  Zero source radiance with positive alpha is pure
+         ;; attenuation, so the analytic footprint can only make the receiver
+         ;; darker.
+         (shade-color (vec3 0.0 0.0 0.0))
          (composite-alpha (+ coverage contact)))
     (set-output color-output
                 (vec4 (+ (* radiance coverage) shade-color) composite-alpha))

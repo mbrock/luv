@@ -557,7 +557,14 @@
               renderer '(640 360)))
            (history (luft.render::renderer-history-texture renderer))
            (resolved (luft.render::renderer-resolved-texture renderer))
-           (group (luft.render::renderer-temporal-bind-group renderer)))
+           (group (luft.render::renderer-temporal-bind-group renderer))
+           (frame
+             (luft.render::%make-renderer-frame-state
+              :camera-buffer :presentation-slot-camera
+              :flame-effect-buffer :unused))
+           (frame-group
+             (luft.render::renderer-frame-temporal-bind-group
+              renderer frame)))
       (ok (null (luft.render::renderer-temporal-scaler renderer)))
       (ok (equal '(640 360)
                  (luft.render::renderer-render-extent renderer)))
@@ -574,6 +581,11 @@
               (probe-bind-group-resource group 3)))
       (ok (eq (luft.render::renderer-camera-buffer renderer)
               (probe-bind-group-resource group 4)))
+      ;; The live encode uses the slot-derived group, not GENERATION's legacy
+      ;; inspectable group.  Its mutable camera upload comes from the
+      ;; reacquired presentation slot.
+      (ok (eq :presentation-slot-camera
+              (probe-bind-group-resource frame-group 4)))
       (ok (equal '(640 360 1)
                  (luv::texture-descriptor-size
                   (flame-resource-probe-descriptor history))))
@@ -591,6 +603,7 @@
                    (flame-resource-probe-descriptor
                     (luft.render::renderer-motion-texture renderer)))))
       (ok (= 17 (length (renderer-target-generation-resources generation))))
+      (luv:destroy frame-group)
       (luft.render::destroy-renderer-targets renderer)
       (ok (every-probe-resource-destroyed-once-p
            (flame-resource-probe-created-resources device) device)))))

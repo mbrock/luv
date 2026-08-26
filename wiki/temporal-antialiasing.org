@@ -336,7 +336,11 @@ this mark concerns the inspectable Vulkan implementation.
 /Evidence./ Current motion is exact at its own pixel and the YCoCg box rejects
 many stale colours, but Vulkan discards depth after visibility and cannot yet
 distinguish a newly revealed background from the foreground that occupied its
-old address.
+old address.  The first logarithmic depth-witness experiment was removed
+again: comparing jittered scene depth against reprojected history made temporal
+acceptance visibly alternate during camera motion.  The ray-marched traveler
+also does not write his true surface depth, so the sampled depth behind his
+billboard cannot validate his colour history.
 
 /Done when./ A camera orbit around the stock and field studio pieces leaves no
 foreground-coloured trail on newly exposed sky or wall, with a capture or
