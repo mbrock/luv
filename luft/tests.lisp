@@ -1848,6 +1848,60 @@
   (%with-test-section ("width-one finite-neighborhood production kernel")
     (let ((algebra (%make-width-one-test-chamfer-algebra))
           (empty-store (make-hash-table :test #'eql)))
+      ;; The material batch is indexed entirely by compiled cube-edge slots.
+      ;; Check that every descriptor mapping used by a face or edge state names
+      ;; one of the star's dense contributor lanes; emission must never recover
+      ;; this relation from a radial transition at run time.
+      (dotimes (mask 256)
+        (let* ((vertex-pattern
+                 (svref *width-one-vertex-pattern-table* mask))
+               (contributors
+                 (width-one-vertex-pattern-contributors vertex-pattern))
+               (slots
+                 (width-one-vertex-pattern-contributor-slots vertex-pattern))
+               (expected-slot 0))
+          (dotimes (contributor-index 12)
+            (if (minusp (aref contributors contributor-index))
+                (%check (= -1 (aref slots contributor-index))
+                        (format nil "absent contributor ~2,'0X/~D"
+                                mask contributor-index))
+                (progn
+                  (%check (= expected-slot (aref slots contributor-index))
+                          (format nil "dense contributor ~2,'0X/~D"
+                                  mask contributor-index))
+                  (incf expected-slot))))
+          (%check
+           (= expected-slot
+              (width-one-vertex-pattern-contributor-count vertex-pattern))
+           (format nil "contributor count ~2,'0X" mask))
+          (dotimes (axis-number 3)
+            (let* ((edge-state (%width-one-edge-state mask axis-number))
+                   (edge-pattern
+                     (svref *width-one-edge-pattern-table* edge-state))
+                   (indices
+                     (svref
+                      (width-one-edge-pattern-contributor-indices edge-pattern)
+                      axis-number)))
+              (dotimes (transition 4)
+                (let ((contributor-index (aref indices transition)))
+                  (unless (minusp contributor-index)
+                    (%check
+                     (not (minusp (aref contributors contributor-index)))
+                     (format nil "edge contributor ~2,'0X/~D/~D"
+                             mask axis-number transition))))))
+            (let* ((u (svref +axis-u+ axis-number))
+                   (v (svref +axis-v+ axis-number))
+                   (low (logior (ash 1 u) (ash 1 v)))
+                   (high (logior low (ash 1 axis-number))))
+              (when (not (eql (logbitp low mask) (logbitp high mask)))
+                (%check
+                 (not
+                  (minusp
+                   (aref
+                    contributors
+                    (aref *width-one-face-contributor-indices* axis-number))))
+                 (format nil "face contributor ~2,'0X/~D"
+                         mask axis-number)))))))
       ;; The complete 256-star corpus checks all face states, all sixteen edge
       ;; patterns in every orientation, every singular decomposition, material
       ;; contributor union, AO, construction-edge masks, and triangle winding.
