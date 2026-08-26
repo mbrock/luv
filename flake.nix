@@ -200,12 +200,11 @@
           # directory have to name that one explicitly.
           mupdf = pkgs.mupdf;
           mupdfLibraryDirectory = "${mupdf.out}/lib";
-          nativeLibraryPath = nixpkgs.lib.makeLibraryPath (
+          nativeLibraryPackages =
             [
               ffmpeg
               mupdf.out
               pkgs.libffi
-              libghosttyVt
               pkgs.harfbuzz
               pkgs.openssl
               pkgs.sdl3
@@ -214,7 +213,11 @@
               pkgs.vulkan-loader
             ] ++ nixpkgs.lib.optionals pkgs.stdenv.isDarwin [
               pkgs.moltenvk
-            ]
+            ];
+          slimNativeLibraryPath =
+            nixpkgs.lib.makeLibraryPath nativeLibraryPackages;
+          nativeLibraryPath = nixpkgs.lib.makeLibraryPath (
+            nativeLibraryPackages ++ [ libghosttyVt ]
           );
           mesaLibraryPath = nixpkgs.lib.makeLibraryPath [ pkgs.mesa ];
           # Keep the owned CFFI binding and development tools available to SBCL.
@@ -298,14 +301,13 @@
             inherit system;
             overlays = [ nix-wpe-webkit.overlays.default ];
           };
-          developmentPackages = [
+          slimDevelopmentPackages = [
             pkgs.bashInteractive
             lisp
             ffmpeg
             ffmpeg.dev
             pkgs.go
             mupdf
-            libghosttyVt
             pkgs.libffi
             pkgs.harfbuzz
             pkgs.mesa
@@ -321,16 +323,15 @@
             pkgs.vulkan-validation-layers
             pkgs.yt-dlp
           ];
+          developmentPackages = slimDevelopmentPackages ++ [ libghosttyVt ];
           lavapipeIcd =
             if system == "x86_64-linux" then "lvp_icd.x86_64.json"
             else if system == "aarch64-linux" then "lvp_icd.aarch64.json"
             else null;
-          developmentEnvironment = {
+          commonDevelopmentEnvironment = {
             LUV_DEV_ENVIRONMENT = "1";
-            LD_LIBRARY_PATH = nativeLibraryPath;
             LUV_MESA_LIBRARY_PATH = mesaLibraryPath;
             LUV_URBIT = "${pkgs.urbit}/bin/urbit";
-            LUV_GHOSTTY_LIBRARY = libghosttyVtLibrary;
             LUV_BASH = "${pkgs.bashInteractive}/bin/bash";
             LUV_SLYNK_DIR = "${slyRoot}/slynk";
             LUV_SWASH = "${swashPackage}/bin/swash";
@@ -348,6 +349,13 @@
           } // nixpkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
             VK_DRIVER_FILES =
               "${pkgs.moltenvk}/share/vulkan/icd.d/MoltenVK_icd.json";
+          };
+          slimDevelopmentEnvironment = commonDevelopmentEnvironment // {
+            LD_LIBRARY_PATH = slimNativeLibraryPath;
+          };
+          developmentEnvironment = commonDevelopmentEnvironment // {
+            LD_LIBRARY_PATH = nativeLibraryPath;
+            LUV_GHOSTTY_LIBRARY = libghosttyVtLibrary;
           };
           developmentEnvironmentHook = ''
             if [ "''${LUV_USE_NIX_MESA:-}" = 1 ]; then
@@ -386,8 +394,11 @@
               export VK_DRIVER_FILES="$LUV_LAVAPIPE_ICD"
             fi
           '';
-          profileEnvironment = pkgs.writeTextFile {
-            name = "luv-development-environment";
+          slimDevelopmentEnvironmentHook = ''
+            unset LUV_GHOSTTY_LIBRARY
+          '' + developmentEnvironmentHook;
+          makeProfileEnvironment = name: environment: hook: pkgs.writeTextFile {
+            inherit name;
             destination = "/share/luv/env.sh";
             text =
               ''
@@ -405,20 +416,32 @@
                 (nixpkgs.lib.mapAttrsToList
                   (name: value:
                     "export ${name}=${nixpkgs.lib.escapeShellArg value}")
-                  developmentEnvironment)
+                  environment)
               + "\n"
-              + developmentEnvironmentHook;
+              + hook;
           };
+          profileEnvironment = makeProfileEnvironment
+            "luv-development-environment" developmentEnvironment
+            developmentEnvironmentHook;
+          slimProfileEnvironment = makeProfileEnvironment
+            "luv-slim-development-environment" slimDevelopmentEnvironment
+            slimDevelopmentEnvironmentHook;
           dev = pkgs.buildEnv {
             name = "luv-dev";
             paths = developmentPackages ++ [ profileEnvironment ];
+          };
+          slimDev = pkgs.buildEnv {
+            name = "luv-slim-dev";
+            paths = slimDevelopmentPackages ++ [ slimProfileEnvironment ];
           };
         in
         {
           inherit pkgs wpePkgs sbcl lisp clSdl3WithoutMixer;
           inherit dev developmentPackages developmentEnvironment;
-          inherit developmentEnvironmentHook;
-          inherit nativeLibraryPath mesaLibraryPath slyRoot swashPackage;
+          inherit slimDev slimDevelopmentPackages slimDevelopmentEnvironment;
+          inherit developmentEnvironmentHook slimDevelopmentEnvironmentHook;
+          inherit nativeLibraryPath slimNativeLibraryPath mesaLibraryPath;
+          inherit slyRoot swashPackage;
           inherit ffmpeg ffmpegLibraryDirectory mupdf mupdfLibraryDirectory;
           inherit libghosttyVt libghosttyVtLibrary;
           inherit tracyClient tracyClientLibrary tracyTools;
@@ -442,6 +465,7 @@
           sbcl = env.sbcl;
           lisp = env.lisp;
           dev = env.dev;
+          slim-dev = env.slimDev;
           inherit luv-lobby;
           ffmpeg = env.ffmpeg;
           libghostty-vt = env.libghosttyVt;
@@ -464,6 +488,12 @@
           };
         in {
           default = env.pkgs.mkShell shellEnvironment;
+          # Remote and non-terminal work should not have to realize Ghostty's
+          # Zig toolchain and generated application-wide dependency cache.
+          slim = env.pkgs.mkShell (env.slimDevelopmentEnvironment // {
+            packages = env.slimDevelopmentPackages;
+            shellHook = env.slimDevelopmentEnvironmentHook;
+          });
           # Showcase publication alone needs git-annex.  It brings GHC and
           # its closure, so keep ordinary Lisp and capture development lean.
           # `scripts/showcase` enters this shell on Chapel and SWA itself.

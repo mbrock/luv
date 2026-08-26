@@ -27,6 +27,11 @@ Development happens in a durable SBCL image supervised by
 ./sly stop-playing                  # close the window; keep the Lisp
 ```
 
+For remote or non-terminal work, `nix develop .#slim` (or
+`./scripts/install-dev-profile --slim`) omits libghostty-vt and its large Zig
+build graph. The Lisp workbench still loads; use the full profile when opening
+a Luvcraft terminal.
+
 `./sly play` without a target opens Luvcraft. The same command also provides
 `eval`, `inspect`, `describe`, `apropos`, `edit`, and `xref` against the live
 image. See [AGENTS.md](AGENTS.md) for the concise development workflow and

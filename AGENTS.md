@@ -101,6 +101,11 @@ The dependencies live in a durable Nix profile. Install or refresh it with
 `./scripts/dev --status` explains the active environment, and
 `./scripts/dev COMMAND` is the fallback when activation was missed.
 
+Remote agents that will not open a Luvcraft terminal can use
+`nix develop .#slim` or `./scripts/install-dev-profile --slim`. This excludes
+libghostty-vt's expensive Zig build graph while retaining the Lisp workbench
+and other development tools.
+
 Use `./sly` for interactive development. Use `make`, `sbcl`, or
 `./scripts/luv COMMAND` for isolated builds, tests, and one-shot tools.
 `build/luft-atelier` and `build/luvcraft` are standalone release/CI programs,

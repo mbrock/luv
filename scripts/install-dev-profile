@@ -7,12 +7,27 @@ set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
+case "${1:-}" in
+  '')
+    output=dev
+    profile_name=luv-dev
+    ;;
+  --slim)
+    output=slim-dev
+    profile_name=luv-slim-dev
+    ;;
+  *)
+    printf 'Usage: %s [--slim]\n' "$0" >&2
+    exit 2
+    ;;
+esac
+
 printf 'Building the luv development profile from %s\n' "$project_root"
 store_path=$(nix build -L --no-link --print-out-paths \
-  "path:$project_root#dev" < /dev/null)
+  "path:$project_root#$output" < /dev/null)
 
 case "$store_path" in
-  /nix/store/*-luv-dev) ;;
+  /nix/store/*-"$profile_name") ;;
   *)
     printf 'Unexpected luv profile output: %s\n' "$store_path" >&2
     exit 1
@@ -24,6 +39,8 @@ esac
 # the previous installation as a rollback point.
 nix profile remove dev 2>/dev/null || :
 nix profile remove luv-dev 2>/dev/null || :
+nix profile remove slim-dev 2>/dev/null || :
+nix profile remove luv-slim-dev 2>/dev/null || :
 nix profile add "$store_path"
 
 profile_environment="$HOME/.nix-profile/share/luv/env.sh"
