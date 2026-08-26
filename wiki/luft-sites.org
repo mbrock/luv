@@ -445,6 +445,32 @@ runtime contributor compaction and descriptor identity lookup still visible;
 the Z-bounds prepass is 20.1%; patch projection is 13.4%; and AVX2 gathering is
 2.2%.  These cumulative stacks overlap, but their ordering is decisive.
 
+=make luft-mesher-profile= is the durable production-shaped baseline.  It
+selects the mountain sanctuary's largest streaming chunk, uses the real closed
+material program and =:air= world-boundary policy, and runs SB-SPROF only on
+the standalone image's main thread.  It calibrates an unsampled timing and
+allocation pass, then samples the aggregate query and each operational stage
+separately.  =build/luft-mesher-profile/summary.{txt,csv}= holds the census and
+timings; the eight phase files hold flat reports sorted once by self samples
+and once by cumulative samples.  The isolated phases reuse prepared inputs and
+warmed capacities.  =halo-index= separately rebuilds the three neighbor tables
+which ordinary execution resolves during Z-bounds, so the hidden preparation
+cost does not disappear merely because the isolated Z scan sees a warm field.
+
+The first default run under SBCL 2.6.6 measured the 44,036-cell, 9,946-site,
+156,252-triangle chunk at 26.18 ms and 4.31 MiB per aggregate build.  Isolated
+latencies were material resolution 8.96 ms (34.2% of aggregate), planning 5.04
+ms (19.3%), projection 3.87 ms (14.8%), halo indexing 3.78 ms (14.4%), Z-bounds
+1.90 ms (7.3%), occupancy 0.84 ms (3.2%), and selection 0.56 ms (2.1%).  These
+phases sum to 95.3% of aggregate latency and essentially all allocation.  The
+selection-only profile puts the AVX2 gather on 96.6% of that stage's sampled
+stacks, while selection itself is only 2.1% of aggregate time.  This is the
+precise present meaning of “SIMD contributes about 2%”: SIMD owns its small
+operator, but the present query gives that operator too little total work to
+move end-to-end latency.  Halo indexing also exposes a new concrete target:
+2.08 MiB and 3.78 ms are spent rebuilding hash tables for three already packed
+neighbor chunks before the columnar query proper can use them.
+
 * NEXT Compile query-native topology dimension rows
 :PROPERTIES:
 :ID: 3IKS3Y

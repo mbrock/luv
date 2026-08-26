@@ -6,11 +6,10 @@ LUVCRAFT_BENCHMARK_SCENARIO ?= steady
 LUVCRAFT_BENCHMARK_DENSITY ?= standard
 LUVCRAFT_RETINA_BENCHMARK_CSV ?= build/luvcraft-metal-retina-benchmark.csv
 LUVCRAFT_STREAMING_BENCHMARK_CSV ?= build/luvcraft-metal-streaming-benchmark.csv
-LUFT_MESHER_BENCHMARK_CSV ?= build/luft-mesher-benchmark.csv
-LUFT_MESHER_BENCHMARK_SIZES ?= 8,16,32,64
-LUFT_MESHER_BENCHMARK_PATTERNS ?= solid,terrain,architecture,checkerboard
-LUFT_MESHER_BENCHMARK_SAMPLES ?= 15
-LUFT_MESHER_BENCHMARK_WARMUPS ?= 3
+LUFT_MESHER_PROFILE_DIRECTORY ?= build/luft-mesher-profile
+LUFT_MESHER_PROFILE_SECONDS ?= 2
+LUFT_MESHER_PROFILE_INTERVAL ?= 0.0005
+LUFT_MESHER_PROFILE_TIMING_SECONDS ?= 0.25
 LUFT_Z_FIBER_BENCHMARK_CSV ?= build/luft-z-fiber-benchmark.csv
 LUFT_Z_FIBER_BENCHMARK_WIDTHS ?= 16,32
 LUFT_Z_FIBER_BENCHMARK_PATTERNS ?= solid,terrain,architecture,caves,checkerboard
@@ -22,7 +21,7 @@ TRACY_MCCLIM_PAINT_TRACE ?= build/mcclim-paints.tracy
 
 FASL_CACHE := $(HOME)/.cache/common-lisp
 
-.PHONY: all sly-client luvcraft luft luft-core luft-test run test capture showcase-bootstrap showcase-render showcase-deploy showcase-publish showcase-status clean-fasls parinfer-check sly-build-lock-check shader-validate msl-validate smoke vulkan-smoke metal-smoke metal-text-closeup metal-benchmark metal-streaming-benchmark metal-retina-benchmark luft-mesher-benchmark luft-z-fiber-benchmark luft-blender-oracle luft-blender-oracle-check tracy-streaming tracy-mcclim-roundrect tracy-mcclim-paints readme-screenshots mcclim-gallery wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw roundrect-proof slug-proof slug-text-proof clean
+.PHONY: all sly-client luvcraft luft luft-core luft-test run test capture showcase-bootstrap showcase-render showcase-deploy showcase-publish showcase-status clean-fasls parinfer-check sly-build-lock-check shader-validate msl-validate smoke vulkan-smoke metal-smoke metal-text-closeup metal-benchmark metal-streaming-benchmark metal-retina-benchmark luft-mesher-profile luft-z-fiber-benchmark luft-blender-oracle luft-blender-oracle-check tracy-streaming tracy-mcclim-roundrect tracy-mcclim-paints readme-screenshots mcclim-gallery wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw roundrect-proof slug-proof slug-text-proof clean
 
 ifeq ($(LUV_SLY_SYSTEM),luft)
 all: sly-client luft-core
@@ -224,14 +223,13 @@ metal-streaming-benchmark:
 metal-retina-benchmark:
 	$(MAKE) metal-benchmark LUVCRAFT_BENCHMARK_DENSITY=retina LUVCRAFT_BENCHMARK_CSV=$(LUVCRAFT_RETINA_BENCHMARK_CSV)
 
-luft-mesher-benchmark:
-	mkdir -p build
-	./scripts/dev sbcl --script scripts/luft-mesher-benchmark.lisp \
-		$(LUFT_MESHER_BENCHMARK_CSV) \
-		$(LUFT_MESHER_BENCHMARK_SIZES) \
-		$(LUFT_MESHER_BENCHMARK_PATTERNS) \
-		$(LUFT_MESHER_BENCHMARK_SAMPLES) \
-		$(LUFT_MESHER_BENCHMARK_WARMUPS)
+luft-mesher-profile:
+	mkdir -p $(LUFT_MESHER_PROFILE_DIRECTORY)
+	./scripts/dev sbcl --script scripts/luft-mesher-profile.lisp \
+		$(LUFT_MESHER_PROFILE_DIRECTORY) \
+		$(LUFT_MESHER_PROFILE_SECONDS) \
+		$(LUFT_MESHER_PROFILE_INTERVAL) \
+		$(LUFT_MESHER_PROFILE_TIMING_SECONDS)
 
 luft-z-fiber-benchmark:
 	mkdir -p build

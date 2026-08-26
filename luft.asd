@@ -96,6 +96,13 @@
                                                          '#:luft.render.tests))
                (error "LUFT render tests failed"))))
 
+(defsystem "luft/mesh-query-profile"
+  :description "Stage-isolated statistical profiles of the LUFT mesh query."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luft/renderer" "sb-sprof")
+  :components ((:file "luft/mesh-query-profile")))
+
 (defsystem "luft/z-fiber-benchmark"
   :description "Scalar and native-SIMD experiments for full-height LUFT fibers."
   :version "0.0.1"
