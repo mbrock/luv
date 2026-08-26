@@ -2319,11 +2319,16 @@ that he is standing on something."
                             (sun-color-vector :vec4)
                             (sky-color-vector :vec4)))))
   (let* ((divisor (swizzle render-parameters :z))
-         (ray (sky-view-ray ndc camera-right camera-up camera-forward
+         ;; The fullscreen triangle itself cannot move. Reconstruct the ray at
+         ;; the same jittered sample location as geometry, as the original
+         ;; Vulkan resolve did, and derive motion from that unjittered address.
+         (sample-ndc (- ndc (swizzle temporal-parameters :xy)))
+         (ray (sky-view-ray sample-ndc camera-right camera-up camera-forward
                             camera-projection divisor))
          (radiance
            (painted-sky-radiance
-            ndc camera-right camera-up camera-forward camera-projection divisor
+            sample-ndc camera-right camera-up camera-forward camera-projection
+            divisor
             sun-vector sun-color-vector sky-color-vector))
          (previous-z (dot ray (swizzle previous-camera-forward :xyz)))
          (previous-clip
@@ -2333,7 +2338,8 @@ that he is standing on something."
                        (swizzle previous-camera-projection :y)))
                  0.0
                  (mix 1.0 previous-z divisor)))
-         (current-clip (vec4 (swizzle ndc :x) (swizzle ndc :y) 0.0 1.0)))
+         (current-clip
+           (vec4 (swizzle sample-ndc :x) (swizzle sample-ndc :y) 0.0 1.0)))
     (set-output color-output (vec4 radiance 1.0))
     (set-output motion-output
                 (mesh-temporal-motion previous-clip current-clip))))
@@ -2365,6 +2371,105 @@ that he is standing on something."
          (luminance (max (dot average (vec3 0.2126 0.7152 0.0722)) 0.0001))
          (encoded (clamp (/ (+ (log luminance) 9.21034) 11.98293) 0.0 1.0)))
     (set-output color-output (vec4 encoded encoded encoded 1.0))))
+
+(define-shader-function rgb-to-ycocg (rgb)
+  "Put RGB into a luminance/chroma space whose box clips history usefully."
+  (vec3 (+ (* (swizzle rgb :x) 0.25)
+           (* (swizzle rgb :y) 0.50)
+           (* (swizzle rgb :z) 0.25))
+        (* 0.5 (- (swizzle rgb :x) (swizzle rgb :z)))
+        (+ (* (swizzle rgb :x) -0.25)
+           (* (swizzle rgb :y) 0.50)
+           (* (swizzle rgb :z) -0.25))))
+
+(define-shader-function ycocg-to-rgb (value)
+  "Invert RGB-TO-YCOCG."
+  (vec3 (+ (swizzle value :x) (swizzle value :y)
+           (- (swizzle value :z)))
+        (+ (swizzle value :x) (swizzle value :z))
+        (+ (swizzle value :x) (- (swizzle value :y))
+           (- (swizzle value :z)))))
+
+(define-live-shader temporal-resolve-fragment-specification
+    (:stage :fragment
+     :inputs ((ndc :vec2 :location 0))
+     :outputs ((color-output :vec4 :location 0))
+     :resources
+     ((current :texture-2d :binding 0 :sample-transfer :identity)
+      (motion-texture :texture-2d :binding 1 :sample-transfer :identity)
+      (history :texture-2d :binding 2 :sample-transfer :identity)
+      (temporal-sampler :sampler :binding 3)
+      (camera-state :uniform-block :binding 4
+       :members ((camera-position :vec4)
+                 (camera-right :vec4)
+                 (camera-up :vec4)
+                 (camera-forward :vec4)
+                 (camera-projection :vec4)
+                 (render-parameters :vec4)
+                 (previous-camera-position :vec4)
+                 (previous-camera-right :vec4)
+                 (previous-camera-up :vec4)
+                 (previous-camera-forward :vec4)
+                 (previous-camera-projection :vec4)
+                 (temporal-parameters :vec4)
+                 (inspection-parameters :vec4)))))
+  (let* ((uv (+ (* ndc 0.5) (vec2 0.5 0.5)))
+         ;; INSPECTION-PARAMETERS.ZW is the inverse internal scene extent.
+         ;; The resolve target and history are full-size, but the current
+         ;; neighbourhood and integer motion lookup remain in input pixels.
+         (texel (swizzle inspection-parameters :zw))
+         (dx (vec2 (swizzle texel :x) 0.0))
+         (dy (vec2 0.0 (swizzle texel :y)))
+         (centre (sample current temporal-sampler uv))
+         (c00 (rgb-to-ycocg
+               (swizzle (sample current temporal-sampler (- (- uv dx) dy))
+                        :xyz)))
+         (c10 (rgb-to-ycocg
+               (swizzle (sample current temporal-sampler (- uv dy)) :xyz)))
+         (c20 (rgb-to-ycocg
+               (swizzle (sample current temporal-sampler (+ (- uv dy) dx))
+                        :xyz)))
+         (c01 (rgb-to-ycocg
+               (swizzle (sample current temporal-sampler (- uv dx)) :xyz)))
+         (c11 (rgb-to-ycocg (swizzle centre :xyz)))
+         (c21 (rgb-to-ycocg
+               (swizzle (sample current temporal-sampler (+ uv dx)) :xyz)))
+         (c02 (rgb-to-ycocg
+               (swizzle (sample current temporal-sampler (+ (- uv dx) dy))
+                        :xyz)))
+         (c12 (rgb-to-ycocg
+               (swizzle (sample current temporal-sampler (+ uv dy)) :xyz)))
+         (c22 (rgb-to-ycocg
+               (swizzle (sample current temporal-sampler (+ (+ uv dx) dy))
+                        :xyz)))
+         (neighbourhood-min (min c00 c10 c20 c01 c11 c21 c02 c12 c22))
+         (neighbourhood-max (max c00 c10 c20 c01 c11 c21 c02 c12 c22))
+         ;; Motion excludes jitter and resolved history lives on the fixed
+         ;; output grid. A static point therefore reads the same history UV:
+         ;; following Halton here would move the resolve instead of gathering
+         ;; different subpixel samples into one output pixel.
+         (pixel (uvec2 (uint (/ (swizzle uv :x) (swizzle texel :x)))
+                       (uint (/ (swizzle uv :y) (swizzle texel :y)))))
+         (velocity (swizzle (texel-load motion-texture pixel) :xy))
+         (history-uv (+ uv velocity))
+         (inside
+           (* (* (step 0.0 (swizzle history-uv :x))
+                 (step (swizzle history-uv :x) 1.0))
+              (* (step 0.0 (swizzle history-uv :y))
+                 (step (swizzle history-uv :y) 1.0))))
+         (old (rgb-to-ycocg
+               (swizzle (sample history temporal-sampler history-uv) :xyz)))
+         (clipped (clamp old neighbourhood-min neighbourhood-max))
+         (speed (clamp (* (sqrt (dot velocity velocity)) 48.0) 0.0 1.0))
+         ;; The otherwise-unused W components of these previous-view lanes
+         ;; carry resolve validity and weight without changing the frame ABI.
+         (history-weight
+           (* (* (swizzle previous-camera-position :w) inside)
+              (* (swizzle previous-camera-right :w)
+                 (- 1.0 (* speed 0.35)))))
+         (resolved (ycocg-to-rgb (mix c11 clipped history-weight))))
+    ;; Alpha is current-frame focus metadata, never temporal colour history.
+    (set-output color-output (vec4 resolved (swizzle centre :w)))))
 
 (define-live-shader present-fragment-specification
     (:stage :fragment

@@ -5,7 +5,8 @@ Luft's temporal antialiasing is deliberately a renderer experiment rather
 than a new engine-wide temporal framework.  Both backends draw a jittered
 scene and write current-to-previous motion beside it before the lens and
 presentation pass.  Vulkan resolves those inputs with Luft's inspectable
-shader and two history images; Metal gives colour, depth, and motion to a
+shader, one explicit history image, and one distinct resolve output; Metal
+gives colour, depth, and motion to a
 MetalFX temporal scaler that owns its opaque history.
 
 The work also answers two architectural questions the small greenfield
@@ -55,12 +56,12 @@ does not move its triangle; it subtracts the same offset while reconstructing
 the view ray, which makes the sky and geometry samples belong to one jittered
 camera.
 
-The shared frame block grew append-only from nineteen to twenty-six vec4
-lanes.  Its established camera, lighting, material, lens, and deformation ABI
-did not move.  The suffix carries the previous view, current and previous
-jitter, inverse extent, history validity, and blend weight.
+The shared frame block carries the previous view, current and previous jitter,
+and inverse internal extent.  Vulkan's resolve reuses the otherwise-padding W
+components of two previous-view lanes for history validity and blend weight,
+so restoring the shader path did not change the established 27-vec4 ABI.
 
-* The frame graph has three passes and one ping-pong edge
+* The frame graph resolves before post-processing
 :PROPERTIES:
 :ID: 4I4Y3Z
 :END:
@@ -74,7 +75,7 @@ flowchart TB
   M --> R
   A["old RGBA16F history, Vulkan"] --> R
   R --> B["resolved RGBA16F"]
-  B -. "swap roles next frame" .-> A
+  B -. "copy after resolve" .-> A
   B --> P["lens or plain present"]
   P --> O["output attachment"]
 #+end_src
@@ -84,15 +85,16 @@ flowchart TB
 | Current colour | =RGBA16F= | This frame's jittered, pre-presentation colour; alpha is current focus metadata |
 | Motion | =RG16F= | Unjittered current-to-previous displacement in UV units |
 | Depth | =D32= | Surface visibility; consumed by MetalFX and retained for the Vulkan experiment |
-| Resolved colour | =RGBA16F= | Vulkan ping-pongs explicit history A/B; MetalFX owns native history behind one output |
+| Resolved colour | =RGBA16F= | Vulkan writes a distinct output and copies it to explicit history; MetalFX owns native history behind one output |
 | Output | Renderer format | Lens-processed or plainly presented result, normally sRGB |
 
-[[lisp:luft.render::encode-frame]] keeps this semantic order on both backends.
-Vulkan records three render passes and prepares textures between attachment
-and sampled states.  Metal ends the surface pass by signaling the scaler's
-fence, encodes MetalFX on the Metal 4 command encoder, then makes the lens pass
-wait on the same fence before sampling the resolved colour.  A cold or invalid
-frame resets the selected resolver; only after the whole sequence has encoded
+[[lisp:luft.render::encode-renderer-frame]] keeps this semantic order on both
+backends.  Vulkan ends the surface pass, samples current colour, exact motion,
+and old history in a fullscreen resolve, then copies the completed output into
+next frame's history before compositing flames and presenting.  Metal ends the
+surface pass by signaling the scaler's fence, encodes MetalFX on the Metal 4
+command encoder, then makes the composite pass wait before sampling resolved
+colour.  A cold or invalid frame rejects history; only after resolve encoding
 does Luft publish the frozen view.
 
 * Motion points from the current sample to its old address
@@ -108,18 +110,19 @@ clip-space jitter.  The motion attachment stores
 v = q(t-1) - q(t)
 #+end_example
 
-without jitter.  The current raster sample lies at $u=q_t+j_t/2$, so resolve
-addresses history at
+without jitter.  The current raster sample is displaced by $j_t/2$, but
+resolved history lives on the fixed output grid.  Resolve therefore addresses
+history at
 
 #+begin_example
-u + v + (j(t-1) - j(t))/2 = q(t-1) + j(t-1)/2.
+u + v
 #+end_example
 
-Keeping the two terms separate makes their conventions inspectable:
-[[lisp:luft.render.shaders::point-motion]] owns reprojection and the resolve
-shader owns the sampling pattern.  Static terrain writes motion by projecting
-its interpolated world point through both frozen views; the sky projects the
-same world direction from each camera origin.  Motion is loaded with exact
+Keeping jitter out of this address lets different raster samples accumulate
+into one stable output pixel.  The motion shader owns reprojection and the
+resolve shader owns the sampling pattern.  Static terrain writes motion by
+projecting its interpolated world point through both frozen views; the sky
+projects the same world direction from each camera origin.  Motion is loaded with exact
 =texel-load= rather than filtered at silhouettes, where blending foreground
 and background velocities would invent a third surface.
 
@@ -141,12 +144,12 @@ colour to the box before blending.  YCoCg makes this a box in luminance and two
 chroma axes rather than three unrelated RGB axes, so clipping changes hue less
 readily.
 
-The configured history share is 0.9.  It falls as screen motion rises and as
-the clipped old luminance differs from the centre; an out-of-frame address or
-an invalid history makes it zero.  This is rejection rather than a claim that
-old colour is true.  Alpha is never accumulated: Luft's lens reads alpha as
-this frame's focus distance metadata, so resolve copies it from the current
-centre.
+The configured Vulkan history share is 0.97.  It falls as screen motion rises;
+an out-of-frame address or invalid history makes it zero.  The YCoCg box clips
+old colour but deliberately does not reject alternate luminance at a static
+silhouette: that coverage is the evidence TAA exists to retain.  Alpha is never
+accumulated: Luft's lens reads alpha as this frame's focus metadata, so resolve
+copies it from the current centre.
 
 * History is a semantic cache
 :PROPERTIES:
@@ -154,36 +157,32 @@ centre.
 :END:
 
 A texture from the preceding submission is not necessarily history of the
-same picture.  Luft reuses it only when all of these remain true:
+same picture.  The current viewer invalidates it when any of these occur:
 
-- the scene object and its =scene-revision= are unchanged;
-- style, sky participation, the packed lighting/material/deformation lanes,
-  and the stock table compare equal;
-- extent is unchanged; and
+- a new extent-sized target generation is published;
+- a real mesh/material/lighting publication replaces renderer residency;
+- a viewer command changes a discrete rendered semantic such as construction
+  lines or bevel width; or
 - [[lisp:luft.render::frame-views-continuous-p]] judges translation, rotation,
-  and focal change to be motion rather than a camera cut.
+  or focal change to be a camera cut rather than motion.
 
-The key contains the /resolved numbers/, not merely =*light*= and
-=*material*= names, so hand-tuning an atelier special invalidates history too.
-[[lisp:luft.render:refresh-scene]] increments a publication revision, which
-catches rebuilding the same scene object instead of relying on identity as a
-change detector.  Resize, buffer re-publication, style changes, and teleports
-all produce one current-only frame before accumulation resumes.
+Each boundary produces one current-only frame before accumulation resumes.
+No-op residency requests preserve the exact target cohort and its history.
 
 * Frame resources are one extent-sized ownership cohort
 :PROPERTIES:
 :ID: T7RQTI
 :END:
 
-TAA made the old collection of renderer texture slots too easy to publish
-halfway through a resize.  A [[lisp:luft.render::frame-surfaces]] now owns the
-final colour and depth, optional current colour and motion, either two Vulkan
-histories or a MetalFX scaler and resolved output, their views, and the bind
-groups that depend on them.  [[lisp:luft.render::make-frame-surfaces]]
-constructs a complete candidate; resize publishes it as one value, resets
-history, and then retires the old cohort.  Destruction walks the opposite
-dependency order: bind groups, views, textures, then the longer-lived layouts
-and device resources.
+TAA made a loose collection of renderer texture slots too easy to publish
+halfway through a resize.  A
+[[lisp:luft.render::renderer-target-resources]] now owns depth, current colour,
+optional motion, resolve output, Vulkan history or a MetalFX scaler, composite
+colour, their views, and the bind groups that depend on them.
+[[lisp:luft.render::make-renderer-target-generation]] constructs a complete
+candidate; resize publishes it as one value, resets history, and then retires
+the old cohort.  Destruction walks the opposite dependency order: bind groups,
+scaler, views, textures, then the longer-lived layouts and device resources.
 
 Scene storage growth follows the same rule.  Sites, cell bits, cell stock
 slots, and their bind group form one generation.  If any buffer is too small,
@@ -214,9 +213,9 @@ consume an ordered target list.  Metal pipeline compilation and render-pass
 attachment setup now do the same.  The generic descriptors still describe a
 one-target pass without a special case at their callers.
 
-This is the useful boundary: multiple render targets and a format are portable
-GPU vocabulary; temporal rejection, ping-pong history, and camera-cut policy
-belong to the renderer.
+This is the useful boundary: multiple render targets, exact same-format image
+copies, and a format are portable GPU vocabulary; temporal rejection, history,
+and camera-cut policy belong to the renderer.
 
 * Two backend resolves share one semantic boundary
 :PROPERTIES:
@@ -287,6 +286,31 @@ frames.
 current-to-previous motion, resolves bounded history, presents it through the
 lens boundary, and survives scene publication and camera cuts.  Those
 conditions now hold.
+
+* DONE Restore Vulkan TAA after the Luft refoundation
+:PROPERTIES:
+:ID: 2QCRSU
+:END:
+
+/Intent./ Port the completed inspectable resolve into the current packed-mesh,
+streaming, HDR renderer after the August refoundation retained MetalFX but
+discarded the Vulkan history resources and pass.
+
+/Evidence./ The current renderer again selects =:shader= on Vulkan, compiles
+the YCoCg neighbourhood-clipping resolve to SPIR-V, owns a full-resolution
+=RGBA16F= history and distinct resolve target, and copies only after resolve.
+The target-cohort test proves the binding and usage identities.  A live Linux
+viewer rendered repeated native-resolution frames with history both valid and
+used, a healthy canvas loop, and successful GPU screenshots.  Deterministic
+stationary captures caught and removed two sources of shimmer: the sky now
+shares geometry's jittered ray, and luminance-difference rejection no longer
+throws away the alternating silhouette coverage TAA exists to accumulate.
+
+/Done when./ Linux no longer directly enlarges one aliased internal sample:
+geometry and sky jitter together, every scene style writes exact motion, the
+shader resolves and retains bounded history before flames and lens work, real
+Vulkan validation accepts the resource transitions, and the full test suite
+passes.
 
 * What the first resolve deliberately leaves open
 :PROPERTIES:

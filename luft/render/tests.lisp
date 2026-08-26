@@ -309,7 +309,7 @@
             (luft.render::%make-renderer-target-generation
              (luft.render::%make-renderer-target-resources
               '(1 1) '(1 1) nil nil resource nil nil nil nil nil nil nil nil nil
-              nil nil)
+              nil nil nil nil nil)
              (luft.render::%make-renderer-flame-target-join old-flame-group)))
       (values renderer device))))
 
@@ -318,7 +318,9 @@
     (luft.render::scene-builder-cell builder 4 4 4)
     (render:make-render-mesh (luft.render::finish-scene-builder builder))))
 
-(defun make-renderer-target-probe (temporal-p)
+(defun make-renderer-target-probe (temporal-p &optional
+                                                (temporal-kind
+                                                  (and temporal-p :metalfx)))
   (let* ((device (make-instance 'flame-resource-probe-device))
          (camera
            (make-instance 'flame-resource-probe
@@ -339,6 +341,7 @@
            (make-instance
             'luft.render::renderer
             :device device :color-format :bgra8-unorm :temporal-p temporal-p
+            :temporal-resolve-kind temporal-kind
             :camera-buffer camera
             :publication
             (luft.render::%make-empty-renderer-publication
@@ -351,6 +354,7 @@
           :exposure-layout
           (luft.render::renderer-composite-layout renderer)
           :composite-layout
+          (luft.render::renderer-temporal-layout renderer) :temporal-layout
           (luft.render::renderer-sampler renderer) sampler)
     (values renderer device)))
 
@@ -367,6 +371,9 @@
     (luft.render::renderer-target-generation-motion-view generation)
     (luft.render::renderer-target-generation-resolved-texture generation)
     (luft.render::renderer-target-generation-resolved-view generation)
+    (luft.render::renderer-target-generation-history-texture generation)
+    (luft.render::renderer-target-generation-history-view generation)
+    (luft.render::renderer-target-generation-temporal-bind-group generation)
     (luft.render::renderer-target-generation-composite-texture generation)
     (luft.render::renderer-target-generation-composite-view generation)
     (luft.render::renderer-target-generation-composite-source-bind-group
@@ -541,6 +548,59 @@
                            (flame-resource-probe-destroyed-resources device))))
                    (ok (every-probe-resource-destroyed-once-p
                         created device))))))))
+
+(deftest vulkan-temporal-targets-own-an-explicit-resolve-history
+  (multiple-value-bind (renderer device)
+      (make-renderer-target-probe t :shader)
+    (let* ((generation
+             (luft.render::replace-renderer-target-generation
+              renderer '(640 360)))
+           (history (luft.render::renderer-history-texture renderer))
+           (resolved (luft.render::renderer-resolved-texture renderer))
+           (group (luft.render::renderer-temporal-bind-group renderer)))
+      (ok (null (luft.render::renderer-temporal-scaler renderer)))
+      (ok (equal '(640 360)
+                 (luft.render::renderer-render-extent renderer)))
+      (ok history)
+      (ok resolved)
+      (ok group)
+      (ok (eq (luft.render::renderer-scene-view renderer)
+              (probe-bind-group-resource group 0)))
+      (ok (eq (luft.render::renderer-motion-view renderer)
+              (probe-bind-group-resource group 1)))
+      (ok (eq (luft.render::renderer-history-view renderer)
+              (probe-bind-group-resource group 2)))
+      (ok (eq (luft.render::renderer-sampler renderer)
+              (probe-bind-group-resource group 3)))
+      (ok (eq (luft.render::renderer-camera-buffer renderer)
+              (probe-bind-group-resource group 4)))
+      (ok (equal '(640 360 1)
+                 (luv::texture-descriptor-size
+                  (flame-resource-probe-descriptor history))))
+      (ok (member :copy-dst
+                  (luv::texture-descriptor-usage
+                   (flame-resource-probe-descriptor history))))
+      (ok (member :render-attachment
+                  (luv::texture-descriptor-usage
+                   (flame-resource-probe-descriptor resolved))))
+      (ok (member :copy-src
+                  (luv::texture-descriptor-usage
+                   (flame-resource-probe-descriptor resolved))))
+      (ok (member :texture-binding
+                  (luv::texture-descriptor-usage
+                   (flame-resource-probe-descriptor
+                    (luft.render::renderer-motion-texture renderer)))))
+      (ok (= 17 (length (renderer-target-generation-resources generation))))
+      (luft.render::destroy-renderer-targets renderer)
+      (ok (every-probe-resource-destroyed-once-p
+           (flame-resource-probe-created-resources device) device)))))
+
+(deftest ordinary-gpu-devices-select-the-inspectable-temporal-resolve
+  (let ((device (make-instance 'flame-resource-probe-device)))
+    (let ((luft.render::*temporal-upscaling-p* t))
+      (ok (eq :shader (luft.render::temporal-resolve-kind device))))
+    (let ((luft.render::*temporal-upscaling-p* nil))
+      (ok (null (luft.render::temporal-resolve-kind device))))))
 
 (deftest failed-frame-target-resize-preserves-the-exact-old-generation
   (dolist (temporal-p '(nil t))
@@ -5367,6 +5427,8 @@
            (luft.render.shaders:sky-fragment-specification))
          (sky-temporal-fragment
            (luft.render.shaders:sky-temporal-fragment-specification))
+         (temporal-resolve-fragment
+           (luft.render.shaders:temporal-resolve-fragment-specification))
          (exposure-probe-fragment
            (luft.render.shaders:exposure-probe-fragment-specification))
          (vertex-msl
@@ -5463,9 +5525,12 @@
     (ok (luv.spir-v:compile-shader-specification torch-body-shadow-vertex))
     (ok (luv.msl:compile-msl sky-fragment))
     (ok (luv.msl:compile-msl sky-temporal-fragment))
+    (ok (luv.msl:compile-msl temporal-resolve-fragment))
     (ok (luv.msl:compile-msl exposure-probe-fragment))
     (ok (luv.spir-v:compile-shader-specification sky-fragment))
     (ok (luv.spir-v:compile-shader-specification sky-temporal-fragment))
+    (ok (luv.spir-v:compile-shader-specification
+         temporal-resolve-fragment))
     (ok (luv.spir-v:compile-shader-specification exposure-probe-fragment))
     (ok (luv.spir-v:compile-shader-specification present-vertex))
     (ok (luv.spir-v:compile-shader-specification present-fragment))))

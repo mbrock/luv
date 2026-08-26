@@ -7,7 +7,10 @@
   "Linear internal resolution of the LUFT scene before temporal upscaling.")
 
 (defparameter *temporal-upscaling-p* t
-  "Whether LUFT uses MetalFX temporal reconstruction on Metal devices.")
+  "Whether LUFT uses temporal reconstruction on supported GPU devices.")
+
+(defparameter *vulkan-temporal-history-weight* 0.97f0
+  "Baseline retained history for Luft's inspectable Vulkan temporal resolve.")
 
 (defparameter *flame-time* nil
   "Optional deterministic torch-flame time in seconds.
@@ -1905,6 +1908,7 @@ attachment resource describe exactly this table."
                  (extent render-extent temporal-scaler
                   depth-texture depth-view scene-texture scene-view
                   motion-texture motion-view resolved-texture resolved-view
+                  history-texture history-view temporal-bind-group
                   composite-texture composite-view
                   composite-source-bind-group present-bind-group
                   exposure-probe-bind-group))
@@ -1921,6 +1925,9 @@ attachment resource describe exactly this table."
   (motion-view nil :read-only t)
   (resolved-texture nil :read-only t)
   (resolved-view nil :read-only t)
+  (history-texture nil :read-only t)
+  (history-view nil :read-only t)
+  (temporal-bind-group nil :read-only t)
   (composite-texture nil :read-only t)
   (composite-view nil :read-only t)
   (composite-source-bind-group nil :read-only t)
@@ -1949,7 +1956,7 @@ ambiguously co-owned, or retired by a population rollback."
 (defun %make-empty-renderer-target-generation ()
   (%make-renderer-target-generation
    (%make-renderer-target-resources
-    nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil)
+    nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil)
    (%make-renderer-flame-target-join nil)))
 
 (defmacro define-renderer-target-resource-reader (name)
@@ -1969,6 +1976,9 @@ ambiguously co-owned, or retired by a population rollback."
 (define-renderer-target-resource-reader motion-view)
 (define-renderer-target-resource-reader resolved-texture)
 (define-renderer-target-resource-reader resolved-view)
+(define-renderer-target-resource-reader history-texture)
+(define-renderer-target-resource-reader history-view)
+(define-renderer-target-resource-reader temporal-bind-group)
 (define-renderer-target-resource-reader composite-texture)
 (define-renderer-target-resource-reader composite-view)
 (define-renderer-target-resource-reader composite-source-bind-group)
@@ -2107,6 +2117,12 @@ ambiguously co-owned, or retired by a population rollback."
    (sky-pipeline :initform nil :accessor renderer-sky-pipeline)
    (color-format :initarg :color-format :reader renderer-color-format)
    (temporal-p :initarg :temporal-p :reader renderer-temporal-p)
+   (temporal-resolve-kind :initarg :temporal-resolve-kind :initform nil
+                          :reader renderer-temporal-resolve-kind)
+   (temporal-layout :initform nil :accessor renderer-temporal-layout)
+   (temporal-fragment-module :initform nil
+                             :accessor renderer-temporal-fragment-module)
+   (temporal-pipeline :initform nil :accessor renderer-temporal-pipeline)
    ;; The complete resize-owned identity is published by this one pointer.
    ;; Resource creation, target-dependent binding, and failure cleanup happen
    ;; before it changes; no frame can observe a partially replaced target set.
@@ -2185,6 +2201,18 @@ ambiguously co-owned, or retired by a population rollback."
 
 (defun renderer-resolved-view (renderer)
   (renderer-target-generation-resolved-view
+   (renderer-target-generation renderer)))
+
+(defun renderer-history-texture (renderer)
+  (renderer-target-generation-history-texture
+   (renderer-target-generation renderer)))
+
+(defun renderer-history-view (renderer)
+  (renderer-target-generation-history-view
+   (renderer-target-generation renderer)))
+
+(defun renderer-temporal-bind-group (renderer)
+  (renderer-target-generation-temporal-bind-group
    (renderer-target-generation renderer)))
 
 (defun renderer-composite-texture (renderer)
@@ -2314,10 +2342,19 @@ ambiguously co-owned, or retired by a population rollback."
         (when body-bind-group (ignore-errors (destroy body-bind-group)))
         (when buffer (ignore-errors (destroy buffer)))))))
 
-(defun metal-temporal-device-p (device)
-  #+darwin (and *temporal-upscaling-p* (typep device 'metal-gpu-device))
+(defun temporal-resolve-kind (device)
+  "Return the temporal implementation selected for DEVICE, or NIL."
   #-darwin (declare (ignore device))
-  #-darwin nil)
+  (when *temporal-upscaling-p*
+    #+darwin
+    (if (typep device 'metal-gpu-device) :metalfx :shader)
+    #-darwin :shader))
+
+(defun renderer-metalfx-temporal-p (renderer)
+  (eq :metalfx (renderer-temporal-resolve-kind renderer)))
+
+(defun renderer-shader-temporal-p (renderer)
+  (eq :shader (renderer-temporal-resolve-kind renderer)))
 
 (defun make-renderer-flame-depth-sampler (device)
   "Create the renderer-lifetime nearest sampler used only for opaque depth."
@@ -2389,13 +2426,16 @@ on rollback.  No target texture is duplicated for an ordinary residency edit."
              (renderer-target-resources-present-bind-group resources)
              (renderer-target-resources-exposure-probe-bind-group resources)
              (renderer-target-resources-composite-source-bind-group resources)
+             (renderer-target-resources-temporal-bind-group resources)
              (renderer-target-resources-temporal-scaler resources)
              (renderer-target-resources-composite-view resources)
+             (renderer-target-resources-history-view resources)
              (renderer-target-resources-resolved-view resources)
              (renderer-target-resources-motion-view resources)
              (renderer-target-resources-scene-view resources)
              (renderer-target-resources-depth-view resources)
              (renderer-target-resources-composite-texture resources)
+             (renderer-target-resources-history-texture resources)
              (renderer-target-resources-resolved-texture resources)
              (renderer-target-resources-motion-texture resources)
              (renderer-target-resources-scene-texture resources)
@@ -2425,16 +2465,29 @@ on rollback.  No target texture is duplicated for an ordinary residency edit."
             (max 2 (* 2 (round (* 0.5 *render-scale* dimension)))))
           extent))
 
+(defun renderer-render-scale-extent (renderer extent)
+  "Return RENDERER's internal extent for output EXTENT.
+
+MetalFX performs temporal upscaling from *RENDER-SCALE*.  Luft's inspectable
+Vulkan resolve is the original native-resolution TAA algorithm; it accumulates
+subpixel samples but does not claim a stable reconstruction-upscaling filter."
+  (if (renderer-shader-temporal-p renderer)
+      (copy-list extent)
+      (render-scale-extent extent)))
+
 (defun make-renderer-target-generation (renderer extent)
   "Stage one complete output-size generation without publishing it."
   (let* ((device (renderer-device renderer))
          (temporal-p (renderer-temporal-p renderer))
+         (metalfx-p (renderer-metalfx-temporal-p renderer))
+         (shader-temporal-p (renderer-shader-temporal-p renderer))
          ;; These owned copies are the immutable dimensions of the candidate.
          ;; Validate/list-copy before the first GPU allocation.
          (extent (copy-list extent))
-         (render-extent (render-scale-extent extent))
+         (render-extent (renderer-render-scale-extent renderer extent))
          scaler depth depth-view scene scene-view motion motion-view
-         resolved resolved-view composite composite-view
+         resolved resolved-view history history-view temporal-group
+         composite composite-view
          composite-source-group flame-group present-group exposure-probe-group
          resource-cohort flame-join generation
          (completed-p nil))
@@ -2443,13 +2496,14 @@ on rollback.  No target texture is duplicated for an ordinary residency edit."
              (cleanup-locals ()
                (dolist (resource
                          (list present-group exposure-probe-group flame-group
-                               composite-source-group scaler composite-view
-                               resolved-view motion-view scene-view depth-view
-                               composite resolved motion scene depth))
+                               composite-source-group temporal-group scaler
+                               composite-view history-view resolved-view
+                               motion-view scene-view depth-view composite
+                               history resolved motion scene depth))
                  (when resource (ignore-errors (destroy resource))))))
       (unwind-protect
            (progn
-             (when temporal-p
+             (when metalfx-p
                (setf scaler
                      (create
                       device
@@ -2490,8 +2544,11 @@ on rollback.  No target texture is duplicated for an ordinary residency edit."
                        :label "luft temporal motion" :size render-extent
                        :dimensions :2d :format :rg16-float
                        :usage
-                       (usage '(:render-attachment)
-                              (gpu-temporal-scaler-motion-usage scaler))))
+                       (usage (if shader-temporal-p
+                                  '(:render-attachment :texture-binding)
+                                  '(:render-attachment))
+                              (and scaler
+                                   (gpu-temporal-scaler-motion-usage scaler)))))
                      motion-view
                      (create
                       device (make-texture-view-descriptor :texture motion))
@@ -2502,11 +2559,39 @@ on rollback.  No target texture is duplicated for an ordinary residency edit."
                        :label "luft temporal resolve" :size extent
                        :dimensions :2d :format :rgba16-float
                        :usage
-                       (usage '(:texture-binding)
-                              (gpu-temporal-scaler-output-usage scaler))))
+                       (usage
+                        (if shader-temporal-p
+                            '(:render-attachment :texture-binding :copy-src)
+                            '(:texture-binding))
+                        (and scaler
+                             (gpu-temporal-scaler-output-usage scaler)))))
                      resolved-view
                      (create
-                      device (make-texture-view-descriptor :texture resolved))))
+                      device (make-texture-view-descriptor :texture resolved)))
+               (when shader-temporal-p
+                 (setf history
+                       (create
+                        device
+                        (make-texture-descriptor
+                         :label "luft temporal history" :size extent
+                         :dimensions :2d :format :rgba16-float
+                         :usage '(:texture-binding :copy-dst)))
+                       history-view
+                       (create
+                        device (make-texture-view-descriptor :texture history))
+                       temporal-group
+                       (create
+                        device
+                        (make-bind-group-descriptor
+                         :label "luft temporal resolve inputs"
+                         :layout (renderer-temporal-layout renderer)
+                         :entries
+                         `((:binding 0 :resource ,scene-view)
+                           (:binding 1 :resource ,motion-view)
+                           (:binding 2 :resource ,history-view)
+                           (:binding 3 :resource ,(renderer-sampler renderer))
+                           (:binding 4
+                            :resource ,(renderer-camera-buffer renderer))))))))
              (setf composite
                    (create
                     device
@@ -2556,7 +2641,8 @@ on rollback.  No target texture is duplicated for an ordinary residency edit."
              (setf resource-cohort
                    (%make-renderer-target-resources
                     extent render-extent scaler depth depth-view scene scene-view
-                    motion motion-view resolved resolved-view composite
+                    motion motion-view resolved resolved-view history history-view
+                    temporal-group composite
                     composite-view composite-source-group present-group
                     exposure-probe-group)
                    flame-join
@@ -3361,7 +3447,8 @@ exactly when its complete old descriptor vector is a prefix of the new one."
 
 (defun make-renderer (device color-format extent)
   "Create the shared LUFT pipeline state; meshes arrive via RENDERER-SET-MESH."
-  (let* ((temporal-p (metal-temporal-device-p device))
+  (let* ((temporal-kind (temporal-resolve-kind device))
+         (temporal-p (not (null temporal-kind)))
          (target-formats (if temporal-p
                              '(:rgba16-float :rg16-float)
                              '(:rgba16-float)))
@@ -3386,6 +3473,7 @@ exactly when its complete old descriptor vector is a prefix of the new one."
          lattice-point-fragment-module lattice-point-pipeline
          present-layout present-bind-group present-vertex-module
          present-fragment-module present-pipeline sampler
+         temporal-layout temporal-fragment-module temporal-pipeline
          sky-layout sky-bind-group sky-fragment-module sky-pipeline
          exposure-probe-layout exposure-probe-bind-group
          exposure-probe-texture exposure-probe-view
@@ -3848,11 +3936,40 @@ exactly when its complete old descriptor vector is a prefix of the new one."
                           :fragment `(:module ,exposure-probe-fragment-module
                                       :targets ((:format :rgba8-unorm)))
                           :primitive '(:topology :triangle-list))))
+           (when (eq temporal-kind :shader)
+             (setf temporal-layout
+                   (create
+                    device
+                    (make-bind-group-layout-descriptor
+                     :label "luft temporal resolve layout"
+                     :entries '((:binding 0 :type :texture)
+                                (:binding 1 :type :texture)
+                                (:binding 2 :type :texture)
+                                (:binding 3 :type :sampler)
+                                (:binding 4 :type :uniform-buffer))))
+                   temporal-fragment-module
+                   (create
+                    device
+                    (make-shader-module-descriptor
+                     :label "luft temporal resolve fragment"
+                     :language :mathematical
+                     :code (shaders:temporal-resolve-fragment-specification)))
+                   temporal-pipeline
+                   (create
+                    device
+                    (make-render-pipeline-descriptor
+                     :label "luft temporal resolve pipeline"
+                     :layout temporal-layout
+                     :vertex `(:module ,present-vertex-module)
+                     :fragment `(:module ,temporal-fragment-module
+                                 :targets ((:format :rgba16-float)))
+                     :primitive '(:topology :triangle-list)))))
            (setf renderer
                  (make-instance 'renderer
                                 :device device
                                 :color-format color-format
                                 :temporal-p temporal-p
+                                :temporal-resolve-kind temporal-kind
                                 :camera-buffer camera-buffer
                                 :publication
                                 (%make-empty-renderer-publication
@@ -3918,6 +4035,10 @@ exactly when its complete old descriptor vector is a prefix of the new one."
                  (renderer-present-fragment-module renderer)
                  present-fragment-module
                  (renderer-present-pipeline renderer) present-pipeline)
+           (setf (renderer-temporal-layout renderer) temporal-layout
+                 (renderer-temporal-fragment-module renderer)
+                 temporal-fragment-module
+                 (renderer-temporal-pipeline renderer) temporal-pipeline)
            (setf (renderer-sky-layout renderer) sky-layout
                  (renderer-sky-bind-group renderer) sky-bind-group
                  (renderer-sky-fragment-module renderer) sky-fragment-module
@@ -3950,7 +4071,9 @@ exactly when its complete old descriptor vector is a prefix of the new one."
                       (append
                        (and exposure-probe-buffers
                             (coerce exposure-probe-buffers 'list))
-                       (list present-pipeline present-fragment-module
+                       (list temporal-pipeline temporal-fragment-module
+                                        temporal-layout
+                                        present-pipeline present-fragment-module
                                         composite-pipeline
                                         composite-fragment-module
                                         present-vertex-module sampler
@@ -4112,6 +4235,12 @@ exactly when its complete old descriptor vector is a prefix of the new one."
        (effect-time
          (or *flame-time* (/ (renderer-frame-index renderer) 60.0))))
   (ensure-renderer-extent renderer extent)
+  (when (renderer-shader-temporal-p renderer)
+    ;; These W components are padding to every geometry consumer.  The Vulkan
+    ;; resolve reads them as its per-frame validity and accumulation weight.
+    (setf (aref camera-uniform-data 27)
+          (if (renderer-history-valid-p renderer) 1.0f0 0.0f0)
+          (aref camera-uniform-data 31) *vulkan-temporal-history-weight*))
   (write-buffer (renderer-camera-buffer renderer) camera-uniform-data)
   (check-type effect-time real)
   (write-buffer
@@ -4168,8 +4297,8 @@ exactly when its complete old descriptor vector is a prefix of the new one."
                :depth-store-op :store
                :depth-clear-value 1.0)))))
     ;; The atmosphere is scene-linear world radiance: geometry overwrites it,
-    ;; MetalFX reconstructs it, and the exposure probe meters the same pixels
-    ;; presentation will grade.
+    ;; the selected temporal implementation reconstructs it, and the exposure
+    ;; probe meters the same pixels presentation will grade.
     (set-pipeline pass (renderer-sky-pipeline renderer))
     (set-bind-group pass 0 (renderer-sky-bind-group renderer))
     (draw pass 3)
@@ -4211,11 +4340,11 @@ exactly when its complete old descriptor vector is a prefix of the new one."
           (when (plusp (mesh-slot-lattice-point-count slot))
             (set-bind-group pass 0 (mesh-slot-lattice-point-group slot))
             (draw pass 6 (mesh-slot-lattice-point-count slot))))))
-    (when temporal-p
+    (when (renderer-metalfx-temporal-p renderer)
       (signal-temporal-scaler-inputs pass
                                      (renderer-temporal-scaler renderer)))
     (end-pass pass)
-    (when temporal-p
+    (when (renderer-metalfx-temporal-p renderer)
       (let ((scaler (renderer-temporal-scaler renderer))
             (history-valid-p (renderer-history-valid-p renderer))
             (render-extent (renderer-render-extent renderer)))
@@ -4231,6 +4360,47 @@ exactly when its complete old descriptor vector is a prefix of the new one."
          (vector (* 0.5 (first render-extent) (aref jitter 0))
                  (* 0.5 (second render-extent) (aref jitter 1)))
          (not history-valid-p))
+        (setf (renderer-previous-view renderer) view
+              (renderer-history-valid-p renderer) t
+              (renderer-history-used-p renderer) history-valid-p)))
+    (when (renderer-shader-temporal-p renderer)
+      (let ((history-valid-p (renderer-history-valid-p renderer)))
+        (prepare-texture encoder (renderer-scene-texture renderer)
+                         :texture-binding)
+        (prepare-texture encoder (renderer-motion-texture renderer)
+                         :texture-binding)
+        (unless history-valid-p
+          (encode encoder
+                  (make-gpu-clear-texture-command
+                   :texture (renderer-history-texture renderer)
+                   :color #(0.0 0.0 0.0 0.0))))
+        (prepare-texture encoder (renderer-history-texture renderer)
+                         :texture-binding)
+        (let ((resolve-pass
+                (begin-render-pass
+                 encoder
+                 (make-render-pass-descriptor
+                  :label "luft temporal resolve"
+                  :color-attachments
+                  `((:view ,(renderer-resolved-view renderer)
+                     :load-op :clear :store-op :store
+                     :clear-value #(0.0 0.0 0.0 1.0)))))))
+          (set-pipeline resolve-pass (renderer-temporal-pipeline renderer))
+          (set-bind-group resolve-pass 0
+                          (renderer-temporal-bind-group renderer))
+          (draw resolve-pass 3)
+          (end-pass resolve-pass))
+        ;; One explicit full-resolution history keeps the extent cohort small:
+        ;; resolve never reads and writes the same image, and the completed
+        ;; result becomes next frame's input only after the render pass ends.
+        (encode encoder
+                (make-gpu-copy-texture-command
+                 :source (renderer-resolved-texture renderer)
+                 :destination (renderer-history-texture renderer)))
+        (prepare-texture encoder (renderer-resolved-texture renderer)
+                         :texture-binding)
+        (prepare-texture encoder (renderer-history-texture renderer)
+                         :texture-binding)
         (setf (renderer-previous-view renderer) view
               (renderer-history-valid-p renderer) t
               (renderer-history-used-p renderer) history-valid-p)))
@@ -4252,7 +4422,7 @@ exactly when its complete old descriptor vector is a prefix of the new one."
               `((:view ,(renderer-composite-view renderer)
                  :load-op :clear :store-op :store
                  :clear-value #(0.0 0.0 0.0 1.0)))))))
-      (when temporal-p
+      (when (renderer-metalfx-temporal-p renderer)
         (wait-temporal-scaler-output
          composite-pass (renderer-temporal-scaler renderer)))
       (set-pipeline composite-pass (renderer-composite-pipeline renderer))
@@ -4307,6 +4477,9 @@ exactly when its complete old descriptor vector is a prefix of the new one."
                   (renderer-sky-layout renderer)
                   (renderer-present-pipeline renderer)
                   (renderer-present-fragment-module renderer)
+                  (renderer-temporal-pipeline renderer)
+                  (renderer-temporal-fragment-module renderer)
+                  (renderer-temporal-layout renderer)
                   (renderer-composite-pipeline renderer)
                   (renderer-composite-fragment-module renderer)
                   (renderer-present-vertex-module renderer)
@@ -4362,6 +4535,9 @@ exactly when its complete old descriptor vector is a prefix of the new one."
         (renderer-sky-bind-group renderer) nil
         (renderer-sky-layout renderer) nil
         (renderer-present-fragment-module renderer) nil
+        (renderer-temporal-pipeline renderer) nil
+        (renderer-temporal-fragment-module renderer) nil
+        (renderer-temporal-layout renderer) nil
         (renderer-composite-pipeline renderer) nil
         (renderer-composite-fragment-module renderer) nil
         (renderer-present-vertex-module renderer) nil

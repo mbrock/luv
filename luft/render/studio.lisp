@@ -349,6 +349,29 @@ the selector is the whole of the difference."
          :projection (vector px py pz pw)
          :divisor divisor :jitter jitter)))))
 
+(defun frame-views-continuous-p (previous current)
+  "Whether PREVIOUS and CURRENT describe motion rather than a camera cut."
+  (and previous
+       (let* ((new-position (frame-view-position current))
+              (old-position (frame-view-position previous))
+              (delta (vec3:make-vec3
+                      (- (vec3:vec3-x new-position)
+                         (vec3:vec3-x old-position))
+                      (- (vec3:vec3-y new-position)
+                         (vec3:vec3-y old-position))
+                      (- (vec3:vec3-z new-position)
+                         (vec3:vec3-z old-position))))
+              (distance-squared (vec3:vec3-dot delta delta))
+              (facing (vec3:vec3-dot (frame-view-forward previous)
+                                     (frame-view-forward current)))
+              (old-projection (frame-view-projection previous))
+              (new-projection (frame-view-projection current)))
+         (and (< distance-squared 64.0)
+              (> facing 0.5)
+              (< (abs (- (aref old-projection 1)
+                         (aref new-projection 1)))
+                 0.25)))))
+
 (defun camera-uniform-data
     (view previous inspection-parameters ink-strength player
      &optional (bevel-width luft:+mesh-bevel-width+) (exposure 1.0f0))
@@ -502,7 +525,7 @@ before the operation boundary, or it would encode through resources which the
      &key (inspector-p (viewer-inspector-p viewer)))
   (let* ((renderer (prepare-viewer-frame-renderer viewer))
          (surface-view (viewer-surface-view viewer surface-texture))
-         (render-extent (render-scale-extent extent))
+         (render-extent (renderer-render-scale-extent renderer extent))
          (width (first render-extent))
          (height (second render-extent))
          (jitter (if (renderer-temporal-p renderer)
@@ -522,6 +545,8 @@ before the operation boundary, or it would encode through resources which the
          (exposure
            (or (viewer-fixed-exposure viewer)
                (maintain-renderer-exposure renderer))))
+    (unless (frame-views-continuous-p (renderer-previous-view renderer) view)
+      (setf (renderer-history-valid-p renderer) nil))
     ;; Instrument state is now immutable for this frame.  Encoding below only
     ;; replays prepared GPU commands against the renderer borrowed afterward.
     (encode-renderer-frame

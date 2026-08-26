@@ -2161,16 +2161,18 @@ ownership and cancel this finalizer."
     (reject-gpu-request command :same-copy-source-and-destination source))
   (unless (and (equal (gpu-texture-size source)
                       (gpu-texture-size destination))
-               ;; Vulkan permits image copies between size-compatible color
-               ;; formats.  Every format in this initial vocabulary is one
-               ;; four-byte color texel, including RGBA storage -> BGRA
-               ;; swapchain copies on Cocoa.
-               (member (gpu-texture-format source)
-                       '(:rgba8-unorm :rgba8-unorm-srgb
-                         :bgra8-unorm :bgra8-unorm-srgb))
-               (member (gpu-texture-format destination)
-                       '(:rgba8-unorm :rgba8-unorm-srgb
-                         :bgra8-unorm :bgra8-unorm-srgb)))
+               ;; Identical formats are always copy-compatible.  Vulkan also
+               ;; permits the established size-compatible four-byte color
+               ;; family used for RGBA storage -> BGRA presentation copies.
+               (or (eq (gpu-texture-format source)
+                       (gpu-texture-format destination))
+                   (and
+                    (member (gpu-texture-format source)
+                            '(:rgba8-unorm :rgba8-unorm-srgb
+                              :bgra8-unorm :bgra8-unorm-srgb))
+                    (member (gpu-texture-format destination)
+                            '(:rgba8-unorm :rgba8-unorm-srgb
+                              :bgra8-unorm :bgra8-unorm-srgb)))))
     (reject-gpu-request
      command :incompatible-copy
      (list :source-size (gpu-texture-size source)
