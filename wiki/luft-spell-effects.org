@@ -34,6 +34,17 @@ capsule wider and brighter would sacrifice the white core, the negative space
 between curls, and the difference between emitting fire and illuminated
 ground.  The useful target is the coordination of layers.
 
+The reference supplies that hierarchy of cues, not the palette.  The atelier
+today is a pastel dusk diorama — soft grass greens, rose masonry, small warm
+torches, cyan crystal motes:
+
+[[file:images/luft-atelier-dusk.png]]
+
+A beam graded straight from the gritty action-RPG plate would land in this
+scene as a foreign object.  The layered structure transfers; the color grade
+should be judged against live captures like this one, with the HDR palette in
+the effect frame of #TM41II as the knob that moves.
+
 * A spell effect should cross the renderer as one small frame
 :PROPERTIES:
 :ID: TM41II
@@ -44,7 +55,12 @@ origin, target or short spine, age, lifetime, stable seed, width, and an HDR
 palette.  One immutable /effect frame/ should freeze those values once per
 rendered frame.  Render products may then interpret the same frame as a core,
 participating sheath, ribbons, sparks, and light without independently reading
-mutable player state or inventing slightly different clocks.
+mutable player state or inventing slightly different clocks.  Two facts about
+the frame are worth fixing now because they are cheap today and breaking
+changes later: it should carry the previous frame's endpoints beside the
+current ones, since any layer that ever joins the motion-bearing scene pass of
+#6M978M needs exact prior geometry to write velocities; and it should name its
+composition class per #K8MOXW — for the first spells, /emission-only/.
 
 This is a boundary, not a spell class hierarchy.  It resembles the existing
 three-=vec4= torch flame instance and pinned =effect-time=: enough identity and
@@ -213,6 +229,16 @@ A promising split is:
 3. Apply spell light during opaque shading, before temporal resolution, so
    illuminated terrain has the terrain's own depth and motion.
 
+The split is the candidate for the motion rung, not the starting point.  A
+thin, far-brighter-than-white, subpixel primitive is close to worst-case
+content for a jittered temporal resolver: alternate jitter positions hit and
+miss it, and history blends the flicker into a crawling edge.  The same core
+drawn after resolution with an analytic coverage ramp is stable by
+construction on a pinned plate.  The reference plate of #DZR0E9 therefore
+draws the core post-resolution beside the sheath, and the motion rung compares
+the two placements as a measured A/B under a turning caster before the
+pre-resolution contract is adopted.
+
 This split needs evidence, not faith.  Unreal's
 [[https://dev.epicgames.com/documentation/en-us/unreal-engine/temporal-super-resolution-in-unreal-engine][TSR documentation]] calls out translucent VFX precisely because arbitrary
 layering, missing velocities, and separate translucency passes complicate
@@ -256,6 +282,74 @@ bloom when only magic should, that is evidence for a named emission attachment,
 not for spending scene alpha as an undocumented mask.  Epic's
 [[https://dev.epicgames.com/documentation/unreal-engine/post-process-effects-in-unreal-engine][post-process documentation]] is a useful reminder that bloom and exposure are
 coupled parts of the same HDR presentation problem.
+
+* Overlap stays additive until a medium absorbs
+:PROPERTIES:
+:ID: K8MOXW
+:END:
+
+One beam is the study; a fight is the destination.  In any D&D-shaped melee,
+overlap is the normal condition of the frame — two rays crossing, a burst
+behind them, sparks drifting through a torch flame, embers on the ground under
+all of it.  The good news is that the problem splits cleanly in two, and the
+first half is nearly free.
+
+Fire-family transients are emission-dominant.  Radiance that only adds
+composites commutatively, so any number of overlapping emissive proxies
+produce the same image in every draw order, with no sorting machinery at all.
+The decision for now is to stay inside that regime: each early spell layer
+writes scene-linear radiance but no meaningful opacity /against the scene/.
+A volume may still use extinction internally — the torch integral already
+converts density to transmittance while accumulating its own body, and the
+sheath of #1DATVA should too — but what it commits to the composite is
+emission with near-zero alpha.  The effect frame names this class explicitly
+so the renderer can rely on a declaration rather than inspect shaders.
+
+What overlap actually threatens in this regime is measurable rather than
+order-dependent.  Additive washout — many warm sources summing toward
+featureless white — is the Vulcan chapter's central warning, and it arrives
+much sooner with three casters than with one.  Overdraw multiplies where
+several proxies cover the same rays, which moves the off-screen
+half-resolution particle path of #23I3D1 up the ladder.  Two more costs scale
+worse than linearly and should be watched from the first two-effect capture:
+the bounded dynamic light list of #MMH4S2, whose capacity and clamping policy
+only become interesting at a melee's light count, and metering, where several
+simultaneous saturated regions strengthen the histogram/percentile case of
+#POPM2I.
+
+The second half is genuinely hard and explicitly deferred.  Fog cloud,
+darkness, smoke, and their relatives are extinction-bearing: they darken what
+lies behind them, and a beam crossing a fog bank should dim along the segment
+inside it.  Per-proxy integration composited in draw order is simply wrong for
+interleaved absorbing volumes — no proxy sort fixes it, because the correct
+answer samples both media along the same ray.  That is exactly the problem the
+Frostbite course solves with one shared integration structure that every
+medium injects density and emission into.  Because #23I3D1 unifies what
+density, extinction, emission, and depth /mean/ before unifying storage,
+migrating absorbing media into such a structure later is a storage change,
+not a redesign of each effect.
+
+** WAIT Absorbing media wait for an overlap plate
+:PROPERTIES:
+:ID: UYECJA
+:END:
+
+/Intent./ Keep extinction-bearing spell media out of scope until a measured
+plate shows what the additive regime cannot do, then scope shared integration
+to that captured failure instead of building it speculatively.
+
+/Evidence./ Additive emission commutes, so the emissive regime absorbs a
+melee's worth of overlapping fire with no new composition machinery; its real
+risks — washout, overdraw, light-list pressure, metering — are all measurable
+per rung.  Interleaved absorbing volumes are precisely where per-proxy draw
+order fails, and the shared optical quantities of #23I3D1 describe the
+eventual answer.
+
+/Done when./ A plate with one beam crossing one absorbing volume demonstrates
+a concrete captured composition failure of the additive regime and a
+shared-integration experiment is scoped to that capture with a budget — or the
+plate shows the draw-order artifacts are invisible at game scale and this
+deferral is renewed with that evidence attached.
 
 * Choose the cheapest representation that preserves each cue
 :PROPERTIES:
@@ -308,7 +402,9 @@ The path below deliberately postpones a generic spell system.
 5. Add a few ribbons and sparks, still deterministically seeded.
 6. Exercise motion, occlusion, and lifetime: caster turning, endpoint crossing
    a wall, camera movement, impact, and fade-out.
-7. Only then compare a flipbook, 2D simulation, or low-resolution distortion
+7. Overlap two emissive effects and record washout, overdraw, light-list
+   pressure, and metering against the single-effect baseline (#K8MOXW).
+8. Only then compare a flipbook, 2D simulation, or low-resolution distortion
    against the procedural baseline.
 
 Every rung should record GPU duration, proxy screen coverage, sample count,

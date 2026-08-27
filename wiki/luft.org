@@ -1014,3 +1014,63 @@ so the wrap becomes visible instead of surprising.
 
 /Done when./ Flying across the seam of a small domain shows the world repeat
 without a gap.
+
+* Going indoors must not hide the player
+:PROPERTIES:
+:ID: 75OOSW
+:END:
+
+The follow camera of [[lisp:luft.render::follow-walking-player]] frames the
+wizard from an isometric yaw family and tracks softly outside a quiet radius.
+Outdoors that is right.  The moment the player walks under authored stone —
+the castle at the head of the atelier stairs is already such a place — every
+roofed cell sits between camera and player, and the game presents a roof
+instead of a wizard.  Nothing in the stack yet has a notion of /indoors/: not
+the camera, not shading, not the world model.  This blocks ordinary play
+before caves or dungeons even exist, so it needs a first answer soon, and the
+spell work sharpens the stakes: dark interiors are where RGB4 torch light and
+the transient spell light of #MMH4S2 pay off most, and where the exposure
+policy of #POPM2I meets its hardest scene.
+
+A cubical world offers three honest mechanisms, in rising order of ownership.
+
+1. /A screen-space reveal./  Fragments of world geometry standing between
+   camera and player inside a screen-space aperture are dithered or faded
+   away.  This invents no new world truth — the terrain fragment stage already
+   has depth, and the player's projected position is one more uniform — but
+   the hole must be tuned to read as a lens, not as damage.
+2. /A horizontal cutaway./  Draw nothing above the player's current storey,
+   dollhouse style.  This is the most cubical answer — ledgers are already 8³
+   pages keyed by anchor — but the surface is a boundary: $\partial C$ has no
+   faces inside walls, so a cut exposes honest absence and needs a cap or a
+   stylized ceiling-section treatment before it looks deliberate rather than
+   broken.
+3. /Room semantics./  Detect roofed connected volumes as rooms; entering one
+   switches camera target, cut height, and light regime.  This is the
+   eventual gameplay-bearing answer and by far the most machinery, and it
+   would still want one of the first two mechanisms as its presentation.
+
+These are not exclusive: a shipped isometric game typically pairs a reveal or
+cutaway with room knowledge.  But only one of them is the smallest observable
+experiment.
+
+** NEXT A reveal that keeps the wizard visible under stone
+:PROPERTIES:
+:ID: 1PH7XR
+:END:
+
+/Intent./ Prove one de-occlusion mechanism — the screen-space reveal first,
+the cutaway as the competing bid — so that walking into the castle interior
+keeps the player, the floor underfoot, and the near walls readable without
+introducing a world-model concept of rooms.
+
+/Evidence./ The follow camera has no occlusion response today; climbing the
+atelier stairs into the castle hides the player completely.  The reveal needs
+only per-fragment facts the terrain shader already has plus the player's
+projected position; the cutaway first needs a cap policy for boundary meshes
+before its cut looks intentional.
+
+/Done when./ A pinned pair of screenshots shows the wizard outside and inside
+the castle with the interior readable, the reveal stable under small camera
+and player motion (no shimmering aperture edge), and the record naming the
+mechanism, its parameters, and its per-frame cost.
