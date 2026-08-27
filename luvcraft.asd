@@ -280,6 +280,15 @@
              (uiop:symbol-call '#:luv.test-support '#:test-package
                                '#:luvcraft.agent.tests)))
 
+(defsystem "luvcraft/shader-validation/test"
+  :description "External validation of every production SPIR-V shader."
+  :depends-on ("luvcraft/agent")
+  :components ((:file "scripts/shader-validation"))
+  :perform (test-op (operation component)
+             (declare (ignore operation component))
+             (uiop:symbol-call '#:luv.shader-validation
+                               '#:validate-production-shaders)))
+
 (defsystem "luvcraft/birthday"
   :description "A birthday party in the little world: meadow, gazebo, balloons, gnomes, fireworks."
   :version "0.0.1"

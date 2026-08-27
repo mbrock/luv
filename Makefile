@@ -70,14 +70,14 @@ run: luvcraft
 	./scripts/dev ./build/luvcraft
 
 ifeq ($(LUV_SLY_SYSTEM),luft)
-test:
+test: sly-client
 	@$(MAKE) --no-print-directory -j3 parinfer-check sly-build-lock-check luft-test
 else
-test:
+test: sly-client
 	@$(MAKE) --no-print-directory -j3 parinfer-check sly-build-lock-check test-suite
 
 test-suite:
-	@./scripts/dev python3 scripts/test.py --jobs $(TEST_JOBS)
+	@./scripts/dev sbcl --script scripts/test.lisp --jobs $(TEST_JOBS)
 endif
 
 luft-test:

@@ -591,31 +591,39 @@ logs the way the systems themselves nest: luv.log beside luv/domains.log."
 
 ;;; Plan
 
-(defun report-plan (systems)
-  "Count the distinct actions needed by SYSTEMS, so progress is a fraction."
+(defun report-actions (actions)
+  "Count ACTIONS by the kinds narrated by the progress display."
+  (let ((system-actions (make-hash-table :test #'equal))
+        (compile-actions (make-hash-table :test #'equal))
+        (load-actions (make-hash-table :test #'equal)))
+    (dolist (action actions)
+      (let* ((op (asdf/action:action-operation action))
+             (component (asdf/action:action-component action))
+             (key (list (class-name (class-of op)) component)))
+        (cond ((and (typep op 'asdf:prepare-op)
+                    (typep component 'asdf:system))
+               (setf (gethash key system-actions) t))
+              ((not (typep component 'asdf:cl-source-file)))
+              ((typep op 'asdf:compile-op)
+               (setf (gethash key compile-actions) t))
+              ((typep op 'asdf:load-op)
+               (setf (gethash key load-actions) t)))))
+    (send :plan :systems (hash-table-count system-actions)
+                :compiles (hash-table-count compile-actions)
+                :loads (hash-table-count load-actions))))
+
+(defun report-plan (systems operation)
+  "Plan SYSTEMS and report their distinct progress actions."
   (handler-case
-      (let ((system-actions (make-hash-table :test #'equal))
-            (compile-actions (make-hash-table :test #'equal))
-            (load-actions (make-hash-table :test #'equal)))
+      (let ((actions nil))
         (dolist (system (if (listp systems) systems (list systems)))
-          (dolist (action (asdf/plan:plan-actions
-                           (asdf/plan:make-plan
-                            nil (asdf:make-operation 'asdf:build-op)
-                            (asdf:find-system system))))
-            (let* ((op (asdf/action:action-operation action))
-                   (component (asdf/action:action-component action))
-                   (key (list (class-name (class-of op)) component)))
-              (cond ((and (typep op 'asdf:prepare-op)
-                          (typep component 'asdf:system))
-                     (setf (gethash key system-actions) t))
-                    ((not (typep component 'asdf:cl-source-file)))
-                    ((typep op 'asdf:compile-op)
-                     (setf (gethash key compile-actions) t))
-                    ((typep op 'asdf:load-op)
-                     (setf (gethash key load-actions) t))))))
-        (send :plan :systems (hash-table-count system-actions)
-                    :compiles (hash-table-count compile-actions)
-                    :loads (hash-table-count load-actions)))
+          (setf actions
+                (nconc actions
+                       (asdf/plan:plan-actions
+                        (asdf/plan:make-plan
+                         nil (asdf:make-operation operation)
+                         (asdf:find-system system))))))
+        (report-actions actions))
     (error (e)
       (send :note (format nil "plan unavailable: ~A" e)))))
 
@@ -647,7 +655,9 @@ logs the way the systems themselves nest: luv.log beside luv/domains.log."
 
 ;;; Entry points
 
-(defun start (project-root &key system (invocation "make")
+(defun start (project-root &key system plan plan-systems
+                                  (plan-operation 'asdf:build-op)
+                                  (invocation "make")
                                   (redirect-output-p t)
                                   (report-plan-p t))
   (let ((status (uiop:getenv "LUV_BUILD_POLICY_STATUS")))
@@ -683,7 +693,10 @@ logs the way the systems themselves nest: luv.log beside luv/domains.log."
   (when redirect-output-p
     (redirect-output-to (build-log)))
   (link-latest-logs)
-  (when (and system report-plan-p) (report-plan system))
+  (when report-plan-p
+    (cond (plan (report-actions (asdf/plan:plan-actions plan)))
+          ((or plan-systems system)
+           (report-plan (or plan-systems system) plan-operation))))
   (send :header)
   (values))
 

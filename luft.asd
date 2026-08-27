@@ -16,8 +16,21 @@
                (:file "luft/mesh-variation-plan")
                (:file "luft/mesh-variation-emit")
                (:file "luft/mesh-variation")
-               (:file "luft/mesh-compression")
-               (:file "luft/tests"))
+               (:file "luft/mesh-compression"))
+  :in-order-to ((test-op (test-op "luft/test"))))
+
+(defsystem "luft/test-support"
+  :description "LUFT's topology test claims and shared mesh diagnostics."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luft")
+  :components ((:file "luft/tests")))
+
+(defsystem "luft/test"
+  :description "Executable claims for LUFT topology and manifold-sheet meshing."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luft/test-support")
   :perform (test-op (operation component)
              (declare (ignore operation component))
              (uiop:symbol-call '#:luft '#:run-luft-tests)))
@@ -81,7 +94,7 @@
   :description "Executable claims for the indexed integer-mesh renderer."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luft/render" "luv/test-support")
+  :depends-on ("luft/render" "luft/test-support" "luv/test-support")
   :serial t
   :components ((:file "luft/render/tests")
                (:file "luft/render/quantity-tests")

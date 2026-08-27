@@ -15,4 +15,4 @@
   (handler-bind ((warning #'muffle-warning)
                  (sb-ext:compiler-note #'muffle-warning))
     (asdf:load-asd (truename "luft.asd"))
-    (asdf:test-system :luft)))
+    (asdf:test-system :luft/test)))
