@@ -42,7 +42,8 @@ USAGE
 fi
 
 if [ -z "${LUV_NATIVE_LIBRARY_PATH:-}" ] \
-  || ! command -v luv_activate_native_environment >/dev/null 2>&1; then
+  || { [ "${LUV_NATIVE_ENVIRONMENT_ACTIVE:-}" != 1 ] \
+       && ! command -v luv_activate_native_environment >/dev/null 2>&1; }; then
   cat >&2 <<'USAGE'
 luv: the installed development profile predates scoped native-library
 activation.  Refresh it once:
@@ -54,4 +55,6 @@ fi
 
 # Only explicit Luv launchers source this file.  The repository .envrc sources
 # env.sh directly and therefore leaves host tools on their own loader path.
-luv_activate_native_environment
+if [ "${LUV_NATIVE_ENVIRONMENT_ACTIVE:-}" != 1 ]; then
+  luv_activate_native_environment
+fi

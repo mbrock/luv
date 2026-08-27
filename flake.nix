@@ -431,6 +431,7 @@
               else
                 export LD_LIBRARY_PATH="$LUV_NATIVE_LIBRARY_PATH''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
               fi
+              export LUV_NATIVE_ENVIRONMENT_ACTIVE=1
             }
 
             ${nixpkgs.lib.optionalString pkgs.stdenv.isLinux ''
