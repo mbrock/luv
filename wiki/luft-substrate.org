@@ -256,15 +256,60 @@ equality against the retained oracle, allocation ceilings, Tracy zones at
 the same semantic boundaries.  Luft's determinism culture makes this easier,
 not harder.
 
+* Genericity and maturity are different axes
+:PROPERTIES:
+:ID: LX8GZ2
+:END:
+
+The layering history explains the present tension.  Luv began as the GPU
+HAL; luvcraft grew on top of it as the first, gloriously mixed application;
+Luft began as an atelier inside that atelier for rethinking voxel sites,
+became the cubical algebra, grew its own beveling renderer, and is now a
+game experiment in its own right.  Extraction into luv then started from
+the /battle-proved boring/ end — M-x commands, frame-slot GPU resources —
+where a shared curated layer multiplies every improvement.  The systems
+this page examines sit in a middle ground that the boring extractions never
+occupied: absolutely generic in shape, but still experimental in contract.
+
+The resolution is to treat luv membership as requiring both axes, and to
+place the three systems accordingly:
+
+- /The dimensional arithmetic and shader DSL is core luv, settled./  There
+  will not be a second implementation; Luft consuming it is ordinary use
+  of the substrate, not an adoption experiment.
+- /Columnar records are positionally in luv already/ — the module lives
+  inside =luv/arithmetic= — but their contract is still shaped by one
+  proving application.  What remains is not a move but a commitment, and
+  the right instrument for that is a second client rather than a review.
+  Luft's mesh streams are a friendly one: they append and reset but never
+  remove rows, so they exercise the storage contract without waiting on
+  the compaction vocabulary #34G2K8 still owes the particle client.
+- /The frontier system stays in luvcraft for now/ — the proving ground is
+  where it belongs while it has one domain and two clients from one
+  application.  Its semantic vocabulary (families, transfer and admission
+  laws, bindings) already smells durable; its execution machinery is
+  where luvcraft assumptions hide.  The extraction trigger is concrete:
+  the moment Luft wants compiled light or an invalidation program, the
+  extraction happens /then/, sized by what that client actually needs —
+  most plausibly the program/family/compiler layer moving to a neutral
+  home, bucket storage joining records, and neighborhood/window protocols
+  remaining per-world behind a protocol boundary.  Extracting earlier
+  would freeze guesses; this is the same second-client discipline the
+  substrate applied to itself in #BA9MCA.
+
+One consequence for the family generalization of #ASGG7Q: the RGB4 lattice
+join should be designed as part of that forcing-client work, under
+pressure from Luft's real solver and its oracle, not as a speculative
+widening of the scalar family beforehand.
+
 * What this page does not decide
 :PROPERTIES:
 :ID: RI26G7
 :END:
 
-- Whether the frontier language moves to a neutral =luv/frontiers= home with
-  domain and neighborhood protocols, or Luft grows a sibling realization
-  and the extraction happens on the third client.  The smallest honest
-  extraction is not yet scoped.
+- The smallest honest frontier extraction — which pieces cross to a
+  neutral home and which stay per-world — is scoped only when the forcing
+  client of #LX8GZ2 arrives, not before.
 - Whether Luft's core accepts =luv/arithmetic= and =luv/domains= as
   dependencies, or the field and columnar adoptions stay renderer-side
   until the core earns them.
