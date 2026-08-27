@@ -15,7 +15,7 @@
               string)))
 
 (defun new-deployment-id ()
-  (format nil "~36R-~6,'0R" (get-universal-time) (random (expt 36 6))))
+  (format nil "~36R-~36,6,'0R" (get-universal-time) (random (expt 36 6))))
 
 (defun deployment-pathname (id type)
   (unless (deployment-id-p id) (error "Invalid deployment ID."))

@@ -255,6 +255,12 @@ Nothing here refers to anything.
     (true (search "new Terminal" javascript))
     (false (search "at(document" javascript))))
 
+(define-test deployment-ids-are-safe-path-components
+  (loop repeat 20
+        for id = (wiki::new-deployment-id)
+        do (true (wiki::deployment-id-p id))
+           (true (= 2 (length (uiop:split-string id :separator '(#\-)))))))
+
 (defparameter *source*
   "(in-package #:luv.example)
 
