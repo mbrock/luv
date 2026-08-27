@@ -85,6 +85,45 @@ func TestNotifySystemdAbstractSocket(t *testing.T) {
 	}
 }
 
+func TestLobbyBrokerRetainsValuesAcrossRestart(t *testing.T) {
+	storeDir := filepath.Join(t.TempDir(), "mqtt")
+	const topic = "luv/store/OPENAI_API_KEY"
+	value := []byte("secret")
+
+	broker, err := newLobbyBroker(testLogger(), storeDir, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := broker.Options.Capabilities.MaximumMessageExpiryInterval; got != 0 {
+		t.Fatalf("maximum message expiry = %d, want unlimited (0)", got)
+	}
+	if err := broker.Serve(); err != nil {
+		t.Fatal(err)
+	}
+	if err := broker.Publish(topic, value, true, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := broker.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	restarted, err := newLobbyBroker(testLogger(), storeDir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restarted.Close()
+	if err := restarted.Serve(); err != nil {
+		t.Fatal(err)
+	}
+	messages := restarted.Topics.Messages(topic)
+	if len(messages) != 1 {
+		t.Fatalf("restored messages = %d, want 1", len(messages))
+	}
+	if got := string(messages[0].Payload); got != string(value) {
+		t.Fatalf("restored payload = %q, want %q", got, value)
+	}
+}
+
 func TestTailnetPrincipalAdmitsIdentifiedClient(t *testing.T) {
 	local, remote := net.Pipe()
 	defer local.Close()

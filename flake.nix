@@ -287,7 +287,7 @@
             version = "0.1.0";
             src = ./.;
             modRoot = "lobby";
-            vendorHash = "sha256-afdRnQqH2j8bWzK8GLrpCKofji6ilIXvWStngar2G20=";
+            vendorHash = "sha256-v9VmV3bJCrHl9wg2K8R3BxwLmF6Rux01DIIWwEdaPRU=";
             postInstall = ''
               mv "$out/bin/lobby" "$out/bin/luv-lobby"
             '';
