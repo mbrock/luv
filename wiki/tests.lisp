@@ -261,6 +261,12 @@ Nothing here refers to anything.
         do (true (wiki::deployment-id-p id))
            (true (= 2 (length (uiop:split-string id :separator '(#\-)))))))
 
+(define-test deployment-event-path-reaches-the-streaming-handler
+  (let* ((id "SAFE-123")
+         (response (wiki::deployment-response
+                    :get (format nil "/admin/deployments/~A/events" id))))
+    (true (functionp response))))
+
 (defparameter *source*
   "(in-package #:luv.example)
 

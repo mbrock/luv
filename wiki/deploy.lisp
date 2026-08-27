@@ -198,7 +198,7 @@
           (let ((prefix "/admin/deployments/") (suffix "/events"))
             (and (> (length path) (+ (length prefix) (length suffix)))
                  (uiop:string-prefix-p prefix path)
-                 (uiop:string-suffix-p suffix path))))
+                 (uiop:string-suffix-p path suffix))))
      (let* ((prefix "/admin/deployments/")
             (id (subseq path (length prefix) (- (length path) (length "/events")))))
        (if (deployment-id-p id)
