@@ -1,7 +1,8 @@
 # Sourced by luv scripts that need SBCL or native development dependencies.
 #
 # Activation is owned by the profile's env.sh: it puts the profile's bin
-# first on PATH and exports the registry and library variables.  A replaced
+# first on PATH and exports the registry and pinned library variables without
+# changing the ambient process loader.  A replaced
 # user-profile generation keeps the same SBCL pathname while its registry and
 # native-library paths change, so profile-backed commands always source the
 # current env.sh.  A `nix develop` shell resolves SBCL directly in /nix/store
@@ -39,3 +40,18 @@ env.sh; nothing on the edit/test path evaluates Nix.  CI may still use
 USAGE
   exit 1
 fi
+
+if [ -z "${LUV_NATIVE_LIBRARY_PATH:-}" ] \
+  || ! command -v luv_activate_native_environment >/dev/null 2>&1; then
+  cat >&2 <<'USAGE'
+luv: the installed development profile predates scoped native-library
+activation.  Refresh it once:
+
+  ./scripts/install-dev-profile
+USAGE
+  exit 1
+fi
+
+# Only explicit Luv launchers source this file.  The repository .envrc sources
+# env.sh directly and therefore leaves host tools on their own loader path.
+luv_activate_native_environment

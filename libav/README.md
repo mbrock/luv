@@ -42,9 +42,10 @@ system was compiled against is stated exactly once.
 
 `LUV_FFMPEG_LIBDIR`, which the Nix environment sets to the exact store path,
 is consulted before the platform search. This matters more than it looks:
-CFFI explodes `LD_LIBRARY_PATH` itself on both Darwin and Linux before
-consulting the system loader, and without the pin an unqualified soname is
-free to find a Homebrew FFmpeg instead.
+without the pin an unqualified soname is free to find a Homebrew FFmpeg
+instead. Luv launchers also provide their process trees with the Nix native
+library path, without exporting it merely because a shell entered the
+checkout.
 
 ## Running it
 

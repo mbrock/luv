@@ -57,9 +57,10 @@ luv's SDL and Vulkan boundaries use."
 ;;; the version this system was compiled against is stated exactly once.
 ;;; LUV_FFMPEG_LIBDIR, which the Nix environment sets to the exact store path,
 ;;; is consulted before the platform search: on both Darwin and Linux CFFI
-;;; explodes LD_LIBRARY_PATH itself before consulting the system loader, so an
+;;; searches process loader paths before consulting the system loader, so an
 ;;; unqualified soname would otherwise be free to find some other FFmpeg that
-;;; happens to be installed.
+;;; happens to be installed.  Luv launchers scope that loader environment to
+;;; their own process trees; entering the checkout does not export it.
 
 (defvar *libav-libraries* nil
   "The loaded libav* libraries, or NIL before anything asked for one.")

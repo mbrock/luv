@@ -23,6 +23,7 @@ if [ "${1:-}" = "--status" ]; then
   printf 'LUV_SLYNK_DIR: %s\n' "${LUV_SLYNK_DIR:-unset}"
   printf 'LUV_SWASH: %s\n' "${LUV_SWASH:-unset}"
   printf 'LUV_GHOSTTY_LIBRARY: %s\n' "${LUV_GHOSTTY_LIBRARY:-unset}"
+  printf 'LUV_NATIVE_LIBRARY_PATH: %s\n' "${LUV_NATIVE_LIBRARY_PATH:-unset}"
   printf 'VK_LAYER_PATH: %s\n' "${VK_LAYER_PATH:-unset}"
   printf 'CL_SOURCE_REGISTRY: %s\n' "${CL_SOURCE_REGISTRY:-unset}"
   printf 'ASDF cache: %s/.cache/common-lisp\n' "$HOME"

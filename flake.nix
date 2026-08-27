@@ -199,11 +199,10 @@
           # Vulkan and VAAPI off-Darwin, and FFmpeg's configure turns
           # VideoToolbox on by itself when it sees the frameworks.
           #
-          # CFFI finds these by soname: it searches LD_LIBRARY_PATH itself on
-          # both platforms, before falling back to the system loader, so the
-          # entry in NATIVE-LIBRARY-PATH below is what makes an unqualified
-          # "libavcodec.dylib" resolve to this build rather than to whatever
-          # Homebrew happens to have left in /usr/local/lib.
+          # CFFI finds these by soname through the process loader path.  Luv's
+          # launchers scope NATIVE-LIBRARY-PATH below to their process trees,
+          # while the exact FFmpeg directory remains the preferred binding
+          # path.  Entering the checkout itself must not affect host tools.
           ffmpeg = pkgs.ffmpeg;
           ffmpegLibraryDirectory = "${ffmpeg.lib}/lib";
           # MuPDF reads PDF.  Its shared library is found by soname the same
@@ -378,7 +377,10 @@
             else null;
           developmentEnvironment = {
             LUV_DEV_ENVIRONMENT = "1";
-            LD_LIBRARY_PATH = nativeLibraryPath;
+            # Entering the checkout must not alter the ELF loader for unrelated
+            # host tools (notably an orb's own git).  Luv launchers promote this
+            # path to LD_LIBRARY_PATH only for their process trees.
+            LUV_NATIVE_LIBRARY_PATH = nativeLibraryPath;
             LUV_MESA_LIBRARY_PATH = mesaLibraryPath;
             LUV_URBIT = "${pkgs.urbit}/bin/urbit";
             LUV_GHOSTTY_LIBRARY = libghosttyVtLibrary;
@@ -402,7 +404,7 @@
           };
           slimDevelopmentEnvironment = {
             LUV_DEV_ENVIRONMENT = "1";
-            LD_LIBRARY_PATH = slimNativeLibraryPath;
+            LUV_NATIVE_LIBRARY_PATH = slimNativeLibraryPath;
             LUV_MESA_LIBRARY_PATH = mesaLibraryPath;
             LUV_BASH = "${pkgs.bashInteractive}/bin/bash";
             LUV_SLYNK_DIR = "${slyRoot}/slynk";
@@ -423,9 +425,13 @@
           developmentEnvironmentHook = ''
             unset LUV_SLY_SYSTEM
 
-            if [ "''${LUV_USE_NIX_MESA:-}" = 1 ]; then
-              export LD_LIBRARY_PATH="$LUV_MESA_LIBRARY_PATH:$LD_LIBRARY_PATH"
-            fi
+            luv_activate_native_environment() {
+              if [ "''${LUV_USE_NIX_MESA:-}" = 1 ]; then
+                export LD_LIBRARY_PATH="$LUV_MESA_LIBRARY_PATH:$LUV_NATIVE_LIBRARY_PATH''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+              else
+                export LD_LIBRARY_PATH="$LUV_NATIVE_LIBRARY_PATH''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+              fi
+            }
 
             ${nixpkgs.lib.optionalString pkgs.stdenv.isLinux ''
               if [ -z "''${SDL_VIDEODRIVER:-}" ] \
@@ -550,7 +556,9 @@
           env = environmentFor system;
           shellEnvironment = env.developmentEnvironment // {
             packages = env.developmentPackages;
-            shellHook = env.developmentEnvironmentHook;
+            shellHook = env.developmentEnvironmentHook + ''
+              luv_activate_native_environment
+            '';
           };
         in {
           default = env.pkgs.mkShell shellEnvironment;
@@ -558,7 +566,9 @@
           # Zig toolchain and generated application-wide dependency cache.
           slim = env.pkgs.mkShell (env.slimDevelopmentEnvironment // {
             packages = env.slimDevelopmentPackages;
-            shellHook = env.slimDevelopmentEnvironmentHook;
+            shellHook = env.slimDevelopmentEnvironmentHook + ''
+              luv_activate_native_environment
+            '';
           });
           # Showcase publication alone needs git-annex.  It brings GHC and
           # its closure, so keep ordinary Lisp and capture development lean.
@@ -573,8 +583,9 @@
           # Enter with `nix develop .#mixer` (or `direnv shell .#mixer`).
           mixer = env.pkgs.mkShell (shellEnvironment // {
             packages = shellEnvironment.packages ++ [ env.pkgs.sdl3-mixer ];
-            LD_LIBRARY_PATH = nixpkgs.lib.makeLibraryPath [ env.pkgs.sdl3-mixer ]
-              + ":${shellEnvironment.LD_LIBRARY_PATH}";
+            LUV_NATIVE_LIBRARY_PATH =
+              nixpkgs.lib.makeLibraryPath [ env.pkgs.sdl3-mixer ]
+              + ":${shellEnvironment.LUV_NATIVE_LIBRARY_PATH}";
             CL_SOURCE_REGISTRY = "${mcclim}//:${cl-sdl3}//";
           });
           # Tracy is intentionally opt-in: its viewer is a large C++ build
@@ -585,8 +596,9 @@
               env.tracyClient
               env.tracyTools
             ];
-            LD_LIBRARY_PATH = nixpkgs.lib.makeLibraryPath [ env.tracyClient ]
-              + ":${shellEnvironment.LD_LIBRARY_PATH}";
+            LUV_NATIVE_LIBRARY_PATH =
+              nixpkgs.lib.makeLibraryPath [ env.tracyClient ]
+              + ":${shellEnvironment.LUV_NATIVE_LIBRARY_PATH}";
             LUV_TRACY_CLIENT = env.tracyClientLibrary;
             LUV_TRACY_CAPTURE = "${env.tracyTools}/bin/tracy-capture";
             LUV_TRACY_PROFILER = "${env.tracyTools}/bin/tracy";

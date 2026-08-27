@@ -34,13 +34,13 @@
    (lambda (condition stream)
      (declare (ignore condition))
      (format stream "libmupdf could not be loaded.  The Nix environment puts ~
-it on LD_LIBRARY_PATH and sets LUV_MUPDF_LIBDIR; outside it, pass a directory ~
+it on Luv's scoped native path and sets LUV_MUPDF_LIBDIR; outside it, pass a directory ~
 to LOAD-MUPDF."))))
 
 ;;;; Loading
 ;;;;
-;;;; The same pinning libav uses and for the same reason: CFFI explodes
-;;;; LD_LIBRARY_PATH itself before consulting the system loader, so an
+;;;; The same pinning libav uses and for the same reason: CFFI searches the
+;;;; process loader paths before consulting the system loader, so an
 ;;;; unqualified soname is free to find some other MuPDF that happens to be
 ;;;; installed.
 
