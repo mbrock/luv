@@ -49,33 +49,111 @@ local mesh ticks around the star at the origin; one voxel is
 (defun star-local-surface-triangles (star)
   "Resolve the complete local surface patch implied by occupancy STAR.
 
-Unlike STAR-TRIANGLES, this forgets which neighboring lattice point owns each
-face and band.  It asks the production query about every proper cubical
-orientation, brings each answer back into STAR's coordinates, and takes the
-geometric union.  The central junction is already wholly owned at this point,
-so its selected triangulation is retained rather than collecting equivalent
-rotated triangulations of the same patch."
+Unlike STAR-TRIANGLES, this includes the face quadrants and band half-edges
+owned by neighboring lattice points.  It enumerates those twelve face
+quadrants and six half-edges directly, selecting each production template
+once.  The central junction is already wholly owned at this point."
   (%check-star star)
-  (list :faces (%star-owned-triangle-rotation-union
-                star #'star-face-triangles)
-        :bands (%star-owned-triangle-rotation-union
-                star #'star-band-triangles)
+  (list :faces (%star-local-face-triangles star)
+        :bands (%star-local-band-triangles star)
         :junctions (star-junction-triangles star)))
 
-(defun %star-owned-triangle-rotation-union (star owned-triangles)
-  (%distinct-geometric-triangles
-   (loop for rotation in (star-rotations)
-         for rotated-star = (transform-star rotation star)
-         append
-         (transform-star-triangles
-          (%inverse-star-transformation rotation)
-          (funcall owned-triangles rotated-star)))))
+(defun %star-local-face-triangles (star)
+  (loop for axis-number below 3
+        append
+        (let ((u (svref +axis-u+ axis-number))
+              (v (svref +axis-v+ axis-number)))
+          (loop for u-high-p in '(nil t)
+                append
+                (loop for v-high-p in '(nil t)
+                      for low-sample =
+                        (logior (if u-high-p (ash 1 u) 0)
+                                (if v-high-p (ash 1 v) 0))
+                      for high-sample =
+                        (logior low-sample (ash 1 axis-number))
+                      for low-occupied-p = (logbitp low-sample star)
+                      for high-occupied-p = (logbitp high-sample star)
+                      unless (eq low-occupied-p high-occupied-p)
+                        append
+                        (%star-face-quadrant-triangles
+                         axis-number u-high-p v-high-p
+                         (if low-occupied-p 1 -1)))))))
 
-(defun %distinct-geometric-triangles (triangles)
-  "Keep one triangle for each distinct set of three vertex positions."
-  (remove-duplicates triangles
-                     :test #'equal
-                     :key #'%unoriented-triangle-key))
+(defun %star-face-quadrant-triangles
+    (axis-number u-high-p v-high-p normal-sign)
+  (let* ((u (svref +axis-u+ axis-number))
+         (v (svref +axis-v+ axis-number))
+         (u-base (if u-high-p 0 (- +mesh-cell-size+)))
+         (v-base (if v-high-p 0 (- +mesh-cell-size+)))
+         (far (1- +mesh-cell-size+))
+         (p0 (list 0 0 0)) (p1 (list 0 0 0))
+         (p2 (list 0 0 0)) (p3 (list 0 0 0)))
+    (setf (nth u p0) (+ u-base 1) (nth v p0) (+ v-base 1)
+          (nth u p1) (+ u-base far) (nth v p1) (+ v-base 1)
+          (nth u p2) (+ u-base far) (nth v p2) (+ v-base far)
+          (nth u p3) (+ u-base 1) (nth v p3) (+ v-base far))
+    (list (%star-oriented-triangle p0 p1 p2 axis-number normal-sign)
+          (%star-oriented-triangle p0 p2 p3 axis-number normal-sign))))
+
+(defun %star-oriented-triangle (a b c normal-axis normal-sign)
+  (let* ((u (svref +axis-u+ normal-axis))
+         (v (svref +axis-v+ normal-axis))
+         (orientation
+           (- (* (- (nth u b) (nth u a)) (- (nth v c) (nth v a)))
+              (* (- (nth v b) (nth v a)) (- (nth u c) (nth u a))))))
+    ;; AXIS-U and AXIS-V are cyclic for X and Z, but anticyclic for Y.
+    (when (= normal-axis 1)
+      (setf orientation (- orientation)))
+    (if (= (signum orientation) normal-sign)
+        (list a b c)
+        (list a c b))))
+
+(defun %star-local-band-triangles (star)
+  (loop for axis-number below 3
+        append
+        (loop for high-p in '(nil t)
+              for state = (%star-half-edge-state star axis-number high-p)
+              for pattern = (svref *width-one-edge-pattern-table* state)
+              append
+              (loop for descriptor across
+                    (svref (width-one-edge-pattern-descriptors pattern)
+                           axis-number)
+                    append
+                    (%star-translated-descriptor-triangles
+                     descriptor axis-number
+                     (if high-p 0 (- +mesh-cell-size+)))))))
+
+(defun %star-half-edge-state (star axis-number high-p)
+  (let ((u (svref +axis-u+ axis-number))
+        (v (svref +axis-v+ axis-number))
+        (state 0))
+    (dotimes (quadrant 4 state)
+      (let ((sample
+              (logior (if high-p (ash 1 axis-number) 0)
+                      (if (plusp (svref +quadrant-u+ quadrant))
+                          (ash 1 u) 0)
+                      (if (plusp (svref +quadrant-v+ quadrant))
+                          (ash 1 v) 0))))
+        (when (logbitp sample star)
+          (setf state (logior state (ash 1 quadrant))))))))
+
+(defun %star-translated-descriptor-triangles
+    (descriptor translated-axis translation)
+  (let ((vertices (width-one-template-descriptor-vertices descriptor)))
+    (unless (zerop (mod (length vertices) 3))
+      (error "Star descriptor has ~D vertices, not a triangle list."
+             (length vertices)))
+    (loop for vertex from 0 below (length vertices) by 3
+          collect
+          (loop for corner below 3
+                for packed = (aref vertices (+ vertex corner))
+                collect
+                (loop for axis-number below 3
+                      for coordinate =
+                        (%packed-template-coordinate packed axis-number)
+                      collect (if (= axis-number translated-axis)
+                                  (+ coordinate translation)
+                                  coordinate))))))
 
 (defun %unoriented-triangle-key (triangle)
   (sort (copy-list triangle) #'%star-point<))
