@@ -948,7 +948,7 @@ Evidence:
 Done when: a pinned-night capture shows the crystal face glowing and warming
 nearby surfaces, while tests cover placement/removal and cross-chunk falloff.
 
-** TODO Measure light-to-mesh latency
+** NEXT Measure light-to-mesh latency
 :PROPERTIES:
 :ID: WLLATM
 :END:
@@ -975,6 +975,12 @@ renderer publication.  The remaining scheduling experiment is therefore a
 regional light-generation succession and partial prepared-owner cohort, not a
 weaker publication boundary.  The repeatable burst capture and relight-cell
 counters above remain outstanding.
+
+Next experiment: add the repeatable edit/residency burst and relight-cell
+counters, then let one regional light generation retain prepared owners whose
+sample envelopes are provably disjoint from the edited light influence.  Keep
+the complete-cohort publication as the correctness oracle; the captured 8 ms
+publication cost is already too small to justify weakening it.
 
 Done when: the next scheduling decision is evidence-backed: keep owner-thread
 lighting, tune frame limits, or move captured light work into the existing

@@ -3,25 +3,28 @@
 
 This is a deliberately provisional work page.  The geometric construction,
 proofs, and history remain on the site-sum page (#BFSI2X); this page asks how
-to execute that construction efficiently for streaming chunks.  It records
-the present machine evidence, the representation thesis suggested by reading
-the packed topology and query together, and an order of experiments.  Once the
-implementation settles, the durable conclusions can move to the more general
-LUFT pages and this worksheet can become historical evidence.
+to execute that construction efficiently for streaming chunks.  Its first
+three experiments have settled: chain facts and chain-order material lanes
+reduced warm production-shaped builds from 26.2 to about 10.4 ms/chunk.  The
+remaining measured bet is #3IKS3Y, compiling static star translations into
+query-native topology rows.  Once that experiment settles, the durable
+conclusions can move to the general LUFT pages and this worksheet can become
+historical evidence.
 
 * The chain is the reusable fact; the neighborhood is the query
 :PROPERTIES:
 :ID: PWUMY7
 :END:
 
-The columnar mesher already removed the general builder, transient geometry
-objects, template hashing, and packed intermediary jobs.  Its remaining large
-costs mostly occur before and around those typed relations: each mesh rebuild
-derives dense occupancy from a sparse chain, indexes neighboring chains into
-hash tables, rediscovers vertical extent, and resolves material provenance
-through canonical sites and world-scale hashes.  In database terms, the query
-is no longer the main problem; it rematerializes its base tables for every
-execution.
+The columnar mesher first removed the general builder, transient geometry
+objects, template hashing, and packed intermediary jobs.  Profiling then found
+that each mesh rebuild derived dense occupancy from a sparse chain, indexed
+neighboring chains into hash tables, rediscovered vertical extent, and resolved
+material provenance through canonical sites and world-scale hashes.  The
+experiments below turned those repeated base-table reconstructions into
+identity-keyed chain facts and snapshot-keyed material lanes.  The query now
+spends almost all of its warm time translating static topology rows and
+projecting them into the renderer streams.
 
 LUFT's actual value semantics suggest a narrower answer than mutable chunk
 state.  A [[lisp:luft:make-chain][chain]] is a normalized immutable value whose packed sites are sorted in
@@ -61,15 +64,16 @@ chain + authored material snapshot ──▶ material lane
 planner or operator framework.  This is a fixed-schema, chunk-bounded program
 whose inspectable relations currently make differential testing inexpensive.
 
-* The baseline localizes both execution and reconstruction
+* The baseline localized both execution and reconstruction
 :PROPERTIES:
 :ID: BF4UNN
 :END:
 
 =make luft-mesher-profile= measures the production-shaped mountain-sanctuary
-chunk and writes aggregate and stage-isolated SB-SPROF reports.  The first
-default run under SBCL 2.6.6 measured 44,036 occupied cells, 9,946 selected
-sites, and 156,252 output triangles:
+chunk and writes aggregate and stage-isolated SB-SPROF reports.  The initial
+SBCL 2.6.6 run measured 44,036 occupied cells, 9,946 selected sites, and
+156,252 output triangles; this table is the before state for the experiments,
+not the current cost:
 
 | phase        | ms/chunk | aggregate | MiB/chunk |
 |--------------+----------+-----------+-----------|
@@ -104,6 +108,13 @@ Selection's AVX2 gather is on nearly every selection-stage stack, but the whole
 stage is only 2.1% of aggregate time.  That is simply the current division of
 work, not a conclusion about where SIMD will or will not matter after the data
 flow changes.
+
+After #XCNPYI, #IS4S0L, and #LQSV44, a warm cohort rebuild is about 10.4
+ms/chunk and 2.1 MiB/chunk.  Occupancy, halo indexing, and Z-bounds are each
+under a microsecond when their chain facts are warm; material resolution is
+about 1.12 ms.  Planning at 5.8 ms and projection at 4.3 ms now name the next
+work.  The old table remains useful because every reduction below was measured
+against the same fixture and exact output census.
 
 * Chain facts are narrow materialized views
 :PROPERTIES:
@@ -145,16 +156,21 @@ is sorted, checking the first and last occupied sites proves that every site
 belongs to the named chunk.  This is a small independent cut, but it is another
 case where the existing representation should answer directly.
 
+/Outcome./ #IS4S0L chose exact ranges for the whole chunk, both high boundary
+strips, and the corner column.  A weak synchronized EQ table publishes each
+complete record; neighbor queries borrow its fibers directly, and no selected
+window grew by one site.  The cohort benchmark observed exactly one facts
+record per cold resident chain, no warm rebuilds, and exactly one replacement
+after a one-cell edit.
+
 * Material identity follows occupied-cell rank
 :PROPERTIES:
 :ID: XP3UHE
 :END:
 
-The authored scene currently maps packed cell sites to material offsets with a
-world-scale hash.  The compiled material program already turns those offsets
-into dense placement flags, oriented face stocks, and chamfer summaries.  The
-missing bridge is a chain-indexed material field whose key also names the
-authored-material assignment snapshot.
+The authored scene maps packed cell sites to material offsets with a
+world-scale hash.  #LQSV44 added the missing bridge: a chain-indexed material
+lane whose currency also names the authored-material assignment snapshot.
 
 Packed chain order makes that field compact.  Within one chunk, all occupied Z
 cells of an X/Y column are contiguous.  For an occupied cell, its rank is:
@@ -163,37 +179,32 @@ cells of an X/Y column are contiguous.  For an occupied cell, its rank is:
 column-start[x,y] + popcount(occupancy bits below z)
 #+end_example
 
-A =(chain, authored-material-map)= derived value can therefore hold one
-unsigned 16-bit material offset per occupied cell, in chain order.  Construction
-pays one authored hash lookup per cell once for that pair.  A hot face-stock
-probe then performs fiber/rank arithmetic and dense material-program reads.
+A =(chain, authored-material-map)= derived value holds one u32
+=(placement-offset << 1) | foundation-bit= per occupied cell, in chain order.
+Construction pays one authored hash lookup per cell once for that pair.  A hot
+face-stock probe then performs fiber/rank arithmetic and dense material-program
+reads.
 Foundation classification becomes an occupancy test below the cell plus one
 placement flag read; because LUFT chunks divide X and Y but span Z, that cell
 remains in the same chunk.  If the derived lane stores final stocks instead of
 source offsets, the material program becomes another explicit key dependency.
 
-This compiled material field belongs on the production streaming path beside
-the compiled chamfer algebra.  The closure-based source-stock protocol remains
-valuable for the general reference and diagnostic callers.  Package ownership
-is still open: topology-only rank data belongs in LUFT, while the association
-between authored offsets and a renderer material program belongs to the scene
-material layer.  The implementation should preserve that dependency direction
-rather than make core topology know renderer classes.
-
-Before building the field, there is one direct cut: the internal production
-resolver can accept =(cell, axis, side)= and construct an oriented face only in
-the legacy one-argument adapter.  The current production closure ignores its
-=face= argument.  The profile should lose =make-site=, =site-valid-p=, and
-boundary-site construction from the material stage without changing one
-material result.
+The compiled material field now sits on the production streaming path beside
+the compiled chamfer algebra.  Topology-only rank data remains in LUFT; the
+renderer supplies the authored snapshot key, chain-order fill function, and
+dense face-stock table, so core topology does not acquire renderer classes.
+The closure-based source-stock protocol remains the general reference and
+diagnostic path.  A material-only edit rebuilds lanes for the new snapshot
+without rebuilding chain facts; an occupancy edit replaces only the changed
+chain's facts and lane.
 
 * Static stars should name static topology rows
 :PROPERTIES:
 :ID: 1D77HO
 :END:
 
-The proposal of #3IKS3Y survives the broader representation review, but no
-longer needs to be the first structural step.  For every star mask, the edge
+The prerequisite representation experiments are complete, so #3IKS3Y is now
+the next structural step.  For every star mask, the edge
 state, descriptor identity, template ID, compact contributor mask, source
 sample offset, and ambient flag are immutable.  Compile them into flat typed
 face, band, and fan row vocabularies once.  Planning then copies rows while
@@ -247,13 +258,14 @@ rather than handed onward as the ABI value.
 :END:
 
 The stage profiler remains the right microscope for one query.  Chain-derived
-state additionally needs a production-shaped cohort benchmark with three
+state additionally earned a production-shaped cohort benchmark with four
 named regimes:
 
 1. /cold cohort/: no chain facts or material fields exist;
 2. /warm cohort/: mesh the same resident chains again; and
-3. /one edit/: replace one chain and remesh its affected owners while all
-   unchanged neighbor chains retain identity.
+3. /one occupancy edit/: replace one chain and remesh its affected owners while
+   all unchanged neighbor chains retain identity; and
+4. /one material edit/: retain the chains but replace the authored snapshot.
 
 Record total cohort latency and allocation, per-chunk distributions, derived
 record builds and hits, selected-site count, relation rows, and output census.
@@ -267,6 +279,12 @@ Every step keeps the exhaustive 256-star differential, real seam and
 missing-residency cases, and material-sensitive mountain-sanctuary comparison
 against the reference.  Performance evidence never substitutes for those
 semantic checks.
+
+The committed cohort now asserts this lifecycle rather than merely printing
+it: cold builds one facts record and lane per resident chain, repeated warm
+cohorts build neither, an occupancy edit rebuilds exactly the replaced chain,
+and a material edit rebuilds lanes over untouched facts.  Every regime retains
+the same selected-site and triangle census as its reference execution.
 
 * DONE Stop constructing ignored face sites
 :PROPERTIES:

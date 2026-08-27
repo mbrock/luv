@@ -542,20 +542,25 @@ ms (19.3%), projection 3.87 ms (14.8%), halo indexing 3.78 ms (14.4%), Z-bounds
 phases sum to 95.3% of aggregate latency and essentially all allocation.  The
 selection-only profile puts the AVX2 gather on 96.6% of that stage's sampled
 stacks, while selection itself is only 2.1% of aggregate time.  This is the
-precise present meaning of “SIMD contributes about 2%”: SIMD owns its small
-operator, but the present query gives that operator too little total work to
-move end-to-end latency.  Halo indexing also exposes a new concrete target:
-2.08 MiB and 3.78 ms are spent rebuilding hash tables for three already packed
-neighbor chunks before the columnar query proper can use them.
+precise baseline meaning of “SIMD contributes about 2%”: SIMD owned its small
+operator, but the query gave that operator too little total work to move
+end-to-end latency.  #IS4S0L and #LQSV44 subsequently removed the repeated
+halo, Z-bound, occupancy, and authored-material reconstruction which this
+profile exposed.  Warm builds now take about 10.4 ms and 2.1 MiB per chunk;
+planning (5.8 ms) and projection (4.3 ms) are the remaining measured frontier.
+The same query path now serves uniform bevel widths one through three; medial
+width four retains the general reference path.
 
-* TODO Compile query-native topology dimension rows
+* NEXT Compile query-native topology dimension rows
 :PROPERTIES:
 :ID: 3IKS3Y
 :END:
 
-The current worksheet #PWUMY7 places chain-local occupancy facts and compiled
-material fields before this step; the topology-row proposal itself remains the
-same.
+The ordered prerequisites in #PWUMY7 are complete: chain-local occupancy facts
+and chain-order material lanes survive warm remeshes, and the cohort benchmark
+proves their one-edit invalidation boundaries.  Planning and projection now
+account for almost all of the 10.4 ms warm build, so topology rows are the next
+measured representation experiment rather than a speculative cleanup.
 
 The 256 star masks are already a finite dimension.  Compile each mask's face,
 oriented edge-band, and fan rows directly into query-native template IDs,
@@ -567,7 +572,7 @@ remain a material part of the now-smaller planner; the disassembly says their
 scalar loops are finally efficient enough that removing the work, rather than
 micro-optimizing it, is the honest next bet.
 
-* NEXT Implement the site-stream LUFT renderer backbone
+* DONE Implement the site-stream LUFT renderer backbone
 :PROPERTIES:
 :ID: RO2OCL
 :END:
@@ -584,22 +589,23 @@ The sharp/Arc contrast (#GT4Y9J) shows what the current sharp system's
 collapse looks like algebraically and that the Arc policy stays inside the
 26-normal integer alphabet.
 
-/Spike./ The old face-patch ABI has been removed.  The renderer now consumes
-one CPU-authored integer triangle mesh containing the three families above,
-through one =uvec4= vertex stream and one =uint32= index stream.  The retained
-atelier, temporal resolve, camera, and material shader render the isolated
-=06=, =18=, and =69= singular fixtures; exact geometric edge counts close all
-three.  The material-width pass now also evaluates widths one, two, and four
-on one canonical site field, contracts medial T-junctions exactly, and lets
-authored support geometry protect the sanctuary stair (#WSEK3C).  Terrain and
-#Z5NDTA remain the acceptance boundary for this mark.
+/Outcome./ The production mesher and renderer now retain three typed instance
+streams: inset face quads, crease-band quads, and junction-fan triangles.  One
+immutable fixed-point template vocabulary supplies their integer offsets;
+instances carry only their lattice anchor, template id, and compact material
+state.  [[lisp:luft.render::make-render-population][The render population]] preserves every source instance exactly while
+combining all resident meshes into at most one triangle draw and one quad draw.
+The playable mountain sanctuary streams these chunk products through the
+ordinary Metal and Vulkan atelier, rather than through a fixture-only path.
 
-/Done when./ A chunk of luvcraft terrain renders through the three streams
-with every emitted vertex an integer triple; a closure check verifies
-shared vertices by integer equality across stream boundaries; the wall-end
-fixture of #Z5NDTA shows the trapezoid junction instead of the collapse of
-#DJK8HW, captured with the same construction-on and construction-off
-closeups as the sharp baseline (#L7N4MO) for side-by-side review.
+Exact tests close every emitted mesh by integer edge equality, cover the
+trapezoid turn at the wall-end family, and keep the =06=, =18=, and =69=
+singular fixtures closed and nondegenerate.  Uniform widths one through three
+share the finite columnar query and differ only by their immutable template
+vocabulary; medial width four remains a separately checked realization.  The
+old face-patch and intermediate integer-triangle ABIs are both historical.
+Further mesher work belongs to the query execution marks #3IKS3Y and #GPL9Z3,
+not to rebuilding this renderer backbone.
 
 * TODO Derive the regular vertex-star table and choose singular topology
 :PROPERTIES:

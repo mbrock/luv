@@ -935,8 +935,13 @@ scene/view snapshots rather than acquiring input or UI policy.
 and renderer/application split.  #7OH71A now supplies the shared default status
 line, M-x, metabar, lobby radio and panel, capture, Tracy, live-artifact,
 lifecycle, and agent boundaries; LUFT contributes commands, settings, fields,
-and instrument attachment through thin methods.  The command-vocabulary
-surface therefore exists, while parameter prompting remains #OL2JZ1.
+and instrument attachment through thin methods.  #HXD14I added a real modal
+editing layer with semantic Edit World, Undo, and Redo commands over immutable
+scene transactions; the playable sanctuary now exercises it as its ordinary
+path.  The next application slice is not another input loop: it is a visible
+material chooser and geometric placement preview expressed through this same
+frame.  Parameter prompting remains #OL2JZ1, and no luvcraft gameplay path has
+yet crossed with its old owner removed.
 
 /Done when./ One editing tool uses presentations and a modal command layer,
 and the first luvcraft gameplay feature has crossed with its former application
@@ -1028,6 +1033,15 @@ and scaling experiments.  Until incremental light solving exists, one edit
 copies the authored material table, resolves the complete light field, and
 remeshes the resident cohort deliberately.
 
+/Measured follow-up./ The first live edit returned from the canvas in 0.42 s
+and became visible in 3.46 s.  Extending the finite query to bevel widths two
+and three and bounding torch attachment scans reduced those numbers to
+0.016--0.020 s and 0.77--0.88 s.  Renderer publication itself is only 0.008 s;
+the remaining delay is preparing every resident owner against one globally
+coupled light generation.  #WLLATM now owns the regional-light succession and
+repeatable burst-measurement experiment; weakening atomic publication is not
+the next lever.
+
 ** IDEA Compact surviving faces only when measurement earns another path
 :PROPERTIES:
 :ID: WQ611A
@@ -1070,12 +1084,13 @@ without a gap.
 
 The follow camera of [[lisp:luft.render::follow-walking-player]] frames the
 wizard from an isometric yaw family and tracks softly outside a quiet radius.
-Outdoors that is right.  The moment the player walks under authored stone —
-the castle at the head of the atelier stairs is already such a place — every
-roofed cell sits between camera and player, and the game presents a roof
-instead of a wizard.  Nothing in the stack yet has a notion of /indoors/: not
-the camera, not shading, not the world model.  This blocks ordinary play
-before caves or dungeons even exist, so it needs a first answer soon, and the
+[[lisp:luft.render::constrain-viewer-follow-camera]] already ray-casts from its
+look-at point toward the smoothed eye and shortens that eye ray before sanctuary
+geometry can hide the player.  That is a useful visibility guard, but under a
+roof it trades the stable exterior composition for a close camera without
+making the floor, near walls, and enclosing architecture jointly readable.
+Nothing in shading or the world model yet has a notion of /indoors/.  This
+blocks ordinary interior composition before caves or dungeons exist, and the
 spell work sharpens the stakes: dark interiors are where RGB4 torch light and
 the transient spell light of #MMH4S2 pay off most, and where the exposure
 policy of #POPM2I meets its hardest scene.
@@ -1102,7 +1117,7 @@ These are not exclusive: a shipped isometric game typically pairs a reveal or
 cutaway with room knowledge.  But only one of them is the smallest observable
 experiment.
 
-** NEXT A reveal that keeps the wizard visible under stone
+** NEXT A reveal that keeps the room readable under stone
 :PROPERTIES:
 :ID: 1PH7XR
 :END:
@@ -1112,11 +1127,12 @@ the cutaway as the competing bid — so that walking into the castle interior
 keeps the player, the floor underfoot, and the near walls readable without
 introducing a world-model concept of rooms.
 
-/Evidence./ The follow camera has no occlusion response today; climbing the
-atelier stairs into the castle hides the player completely.  The reveal needs
-only per-fragment facts the terrain shader already has plus the player's
-projected position; the cutaway first needs a cap policy for boundary meshes
-before its cut looks intentional.
+/Evidence./ The existing camera constraint guarantees a clear eye-to-player
+ray by moving the eye inward; it does not preserve the useful isometric view or
+reveal the floor and near enclosure together.  The reveal needs only
+per-fragment facts the terrain shader already has plus the player's projected
+position; the cutaway first needs a cap policy for boundary meshes before its
+cut looks intentional.
 
 /Done when./ A pinned pair of screenshots shows the wizard outside and inside
 the castle with the interior readable, the reveal stable under small camera
