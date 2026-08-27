@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for a requested luv wiki deployment
+
+[Path]
+PathChanged=/run/luv/deploy.request
+Unit=luv-deploy.service
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,26 @@
+[Unit]
+Description=Luv wiki blue/green slot %i
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=mbrock
+Group=www-data
+WorkingDirectory=/srv/luv-slots/%i
+Environment=HOME=/home/mbrock
+Environment=LUV_SHOWCASE_MEDIA_DIRECTORY=/var/www/luv/showcase/media
+Environment=LUV_SHOWCASE_MEDIA_PATH=/video/showcase/media
+EnvironmentFile=-/run/luv/%i.env
+ExecStartPre=-/usr/bin/unlink /run/luv/%i.sock
+ExecStart=/nix/var/nix/profiles/default/bin/nix develop --no-write-lock-file -c ./scripts/wiki serve --socket /run/luv/%i.sock
+Restart=always
+RestartSec=3
+KillSignal=SIGINT
+TimeoutStopSec=15
+UMask=0007
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

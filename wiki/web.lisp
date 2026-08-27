@@ -143,24 +143,30 @@ Redefining NAME replaces its provider without disturbing provider order."
 
 (defun website-response (path site)
   "Answer PATH, including the process-level readiness endpoint."
-  (if (string= path "/healthz")
-      `(200 (:content-type "text/plain; charset=utf-8"
-             :cache-control "no-store")
-            ("ok"))
-      (resource-response (find-resource path site))))
+  (cond ((string= path "/healthz")
+         `(200 (:content-type "text/plain; charset=utf-8"
+                :cache-control "no-store")
+               ("ok")))
+        ((string= path "/version")
+         `(200 (:content-type "text/plain; charset=utf-8"
+                :cache-control "no-store")
+               (,(or (uiop:getenv "LUV_DEPLOY_COMMIT") "development"))))
+        (t (resource-response (find-resource path site)))))
 
 (defun wiki-clack-application (site)
   (lambda (environment)
     (let ((method (getf environment :request-method))
           (path (getf environment :path-info)))
       (format t "~A ~A~%" method path)
-      (if (member method '(:get :head))
-          (let ((response (website-response path site)))
-            (if (eq method :head)
-                (list (first response) (second response) '())
-                response))
-          `(405 (:content-type "text/plain; charset=utf-8" :allow "GET, HEAD")
-                ("method not allowed\n"))))))
+      (let ((*dynamic-server-p* t))
+        (or (deployment-response method path)
+            (if (member method '(:get :head))
+                (let ((response (website-response path site)))
+                  (if (eq method :head)
+                      (list (first response) (second response) '())
+                      response))
+                `(405 (:content-type "text/plain; charset=utf-8" :allow "GET, HEAD")
+                      ("method not allowed\n"))))))))
 
 (defgeneric publish-resource (resource directory)
   (:method ((resource generated-resource) directory)
@@ -194,8 +200,10 @@ STYLESHEET is retained for compatibility with the original static renderer."
             (publish-resource resource directory)))
         directory)))
 
-(defun serve-site (site &key (host "127.0.0.1") (port 8765))
+(defun serve-site (site &key (host "127.0.0.1") (port 8765) socket)
   "Serve SITE dynamically with Clack and Woo until interrupted."
-  (clack:clackup (wiki-clack-application site)
-                 :server :woo :address host :port port :debug nil
-                 :use-thread nil :use-default-middlewares nil))
+  (apply #'clack:clackup (wiki-clack-application site)
+         :server :woo :debug nil :use-thread nil :use-default-middlewares nil
+         (if socket
+             (list :listen socket)
+             (list :address host :port port))))

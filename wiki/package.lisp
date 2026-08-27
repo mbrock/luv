@@ -138,6 +138,7 @@ and equivalent dynamic Clack hosting and static publication.")
    #:resource-response
    #:publish-site
    #:serve-site
+   #:deployment-javascript
    ;; ASDF
    #:org-file
    #:org-file-document
@@ -148,6 +149,12 @@ and equivalent dynamic Clack hosting and static publication.")
   (:use #:cl)
   (:local-nicknames (#:ps #:parenscript))
   (:export #:await #:async-defun #:async-lambda))
+
+(defpackage #:luv.wiki.deploy
+  (:use #:cl #:parenscript)
+  (:local-nicknames (#:browser #:luv.wiki.browser)
+                    (#:ps #:parenscript))
+  (:export #:javascript))
 
 (defpackage #:luv.css
   (:use #:cl)

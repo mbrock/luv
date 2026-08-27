@@ -1,0 +1,126 @@
+#!/bin/sh
+# Build the inactive wiki worktree, prove it, then atomically make it live.
+
+set -eu
+
+control_checkout=/srv/luv
+slots_directory=/srv/luv-slots
+runtime_directory=/run/luv
+request=$runtime_directory/deploy.request
+deployments=$runtime_directory/deployments
+
+as_mbrock()
+{
+    runuser -u mbrock -- env HOME=/home/mbrock "$@"
+}
+
+build_as_mbrock()
+{
+    slot=$1
+    shift
+    runuser -u mbrock -- env HOME=/home/mbrock \
+        /bin/sh -c 'cd "$1"; shift; exec /nix/var/nix/profiles/default/bin/nix develop --no-write-lock-file -c "$@"' \
+        luv-build "$slot" "$@"
+}
+
+wait_for_slot()
+{
+    slot=$1
+    expected=$2
+    attempt=0
+    while [ "$attempt" -lt 240 ]; do
+        if [ -S "$runtime_directory/$slot.sock" ] &&
+           [ "$(curl --silent --max-time 2 --unix-socket "$runtime_directory/$slot.sock" http://localhost/healthz || true)" = ok ] &&
+           [ "$(curl --silent --max-time 2 --unix-socket "$runtime_directory/$slot.sock" http://localhost/version || true)" = "$expected" ]; then
+            return 0
+        fi
+        attempt=$((attempt + 1))
+        sleep 0.25
+    done
+    return 1
+}
+
+deploy()
+{
+    id=$1
+    active_target=$(readlink "$runtime_directory/live.sock" 2>/dev/null || true)
+    case "$active_target" in
+        1.sock) active=1; inactive=2 ;;
+        2.sock) active=2; inactive=1 ;;
+        *) active=2; inactive=1 ;;
+    esac
+
+    slot=$slots_directory/$inactive
+
+    printf '\033[1;36mFetching origin/main\033[0m\n'
+    as_mbrock git -C "$control_checkout" fetch --prune origin
+    commit=$(as_mbrock git -C "$control_checkout" rev-parse origin/main)
+    printf 'Target commit: %s\n' "$commit"
+    printf 'Active slot: %s; building slot: %s\n' "$active" "$inactive"
+
+    systemctl stop "luv-wiki@$inactive.service"
+    if [ -n "$(as_mbrock git -C "$slot" status --porcelain --untracked-files=no)" ]; then
+        printf '\033[1;31mInactive slot %s has tracked changes; refusing to overwrite them.\033[0m\n' "$inactive"
+        return 1
+    fi
+    as_mbrock git -C "$slot" checkout --detach "$commit"
+
+    printf '\n\033[1;36mBuilding slot %s\033[0m\n' "$inactive"
+    build_as_mbrock "$slot" make
+    printf '\n\033[1;36mTesting slot %s\033[0m\n' "$inactive"
+    build_as_mbrock "$slot" make test
+
+    printf 'LUV_DEPLOY_COMMIT=%s\n' "$commit" >"$runtime_directory/$inactive.env"
+    chown mbrock:www-data "$runtime_directory/$inactive.env"
+    chmod 0640 "$runtime_directory/$inactive.env"
+
+    printf '\n\033[1;36mStarting slot %s\033[0m\n' "$inactive"
+    systemctl restart "luv-wiki@$inactive.service"
+    if ! wait_for_slot "$inactive" "$commit"; then
+        printf '\033[1;31mSlot %s did not become healthy at commit %s.\033[0m\n' "$inactive" "$commit"
+        systemctl status "luv-wiki@$inactive.service" --no-pager || true
+        return 1
+    fi
+    printf '\033[1;32mSlot %s is healthy at %s.\033[0m\n' "$inactive" "$commit"
+
+    ln -sfn "$inactive.sock" "$runtime_directory/live.sock.next"
+    mv -Tf "$runtime_directory/live.sock.next" "$runtime_directory/live.sock"
+    printf '\033[1;32mTraffic now enters slot %s.\033[0m\n' "$inactive"
+
+    public_commit=$(curl --silent --show-error --max-time 10 https://luv.swa.sh/version)
+    if [ "$public_commit" != "$commit" ]; then
+        printf '\033[1;31mPublic verification returned %s; restoring slot %s.\033[0m\n' "$public_commit" "$active"
+        ln -sfn "$active.sock" "$runtime_directory/live.sock.next"
+        mv -Tf "$runtime_directory/live.sock.next" "$runtime_directory/live.sock"
+        return 1
+    fi
+    printf '\033[1;32mPublic verification passed. Slot %s remains warm for rollback.\033[0m\n' "$active"
+}
+
+case "${1-}" in
+    run)
+        deploy "$2"
+        ;;
+    *)
+        mkdir -p "$deployments"
+        id=$(sed -n '1p' "$request")
+        case "$id" in
+            ''|*[!A-Za-z0-9-]*) exit 2 ;;
+        esac
+        log=$deployments/$id.log
+        done_file=$deployments/$id.done
+        : >"$log"
+        exec 9>"$runtime_directory/deploy.lock"
+        if ! flock -n 9; then
+            printf '\033[1;33mAnother deployment is already running.\033[0m\n' >"$log"
+            printf '75\n' >"$done_file"
+            exit 0
+        fi
+        set +e
+        script --quiet --flush --return --command "$0 run $id" /dev/null >"$log" 2>&1
+        status=$?
+        set -e
+        printf '%s\n' "$status" >"$done_file"
+        exit "$status"
+        ;;
+esac

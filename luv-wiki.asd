@@ -17,6 +17,7 @@ Spinneret, S-expression CSS and JavaScript, dynamic hosting, and publication."
                 :components ((:file "package")
                              (:file "css")
                              (:file "parenscript")
+                             (:file "deploy")
                              (:file "org")
                              (:file "html")
                              (:file "lisp")

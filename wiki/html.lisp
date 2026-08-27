@@ -478,7 +478,12 @@ markup) on the right, the main column, and a footer."
          (:link :rel "stylesheet"
                 :href "https://fonts.googleapis.com/css2?family=Public+Sans:ital,wght@0,100..900;1,100..900&display=swap")
          (:link :rel "stylesheet" :href (href "style.css"))
-         (:script :src (href "site.js") :defer t))
+         (:script :src (href "site.js") :defer t)
+         (when *dynamic-server-p*
+           (:link :rel "stylesheet"
+                  :href "https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css")
+           (:script :src "https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js" :defer t)
+           (:script :src "/admin/deploy.js" :defer t)))
         (:body :class body-class
          (:header.library
           (:div.library-heading
@@ -513,10 +518,12 @@ markup) on the right, the main column, and a footer."
                                          (document-name *rendering-document*) ".org")
                       (concatenate 'string (document-name *rendering-document*) ".org")))
                  ((functionp right) (funcall right))
-                 (t right))))
+                 (t right)))
+          (when *dynamic-server-p* (render-deployment-button)))
          (:main (funcall body))
          (:footer.site-footer
-          "Rendered from Org and Lisp by luv.wiki."))))))
+          "Rendered from Org and Lisp by luv.wiki.")
+         (when *dynamic-server-p* (render-deployment-dialog)))))))
 
 (defvar *page-definition-cards* nil
   "While a page renders: a hash table from DEFINITION to its card id, filled

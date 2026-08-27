@@ -1,0 +1,8 @@
+[Unit]
+Description=Build and switch the inactive luv wiki slot
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/luv-deploy
+TimeoutStartSec=30min

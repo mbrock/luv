@@ -227,6 +227,18 @@ Nothing here refers to anything.
     (true (= 200 (first head-response)))
     (true (null (third head-response)))))
 
+(define-test dynamic-site-has-version-and-deployment-presentation
+  (let* ((site (wiki:make-site (list (page *page* "index"))))
+         (application (wiki::wiki-clack-application site))
+         (version (funcall application '(:request-method :get :path-info "/version")))
+         (page (funcall application '(:request-method :get :path-info "/")))
+         (javascript
+           (funcall application '(:request-method :get :path-info "/admin/deploy.js"))))
+    (true (= 200 (first version)))
+    (true (plusp (length (first (third version)))))
+    (true (search "id=deploy-luv" (first (third page))))
+    (true (search "new EventSource" (first (third javascript))))))
+
 (define-test parenscript-async-and-await
   (let ((javascript
           (ps:ps*
@@ -235,6 +247,13 @@ Nothing here refers to anything.
                 (setf result (browser:await (fetch "/value"))))))))
     (true (search "async function loadValue()" javascript))
     (true (search "await (fetch('/value'))" javascript))))
+
+(define-test deployment-browser-program-is-parenscript
+  (let ((javascript (wiki:deployment-javascript)))
+    (true (search "document.getElementById(id)" javascript))
+    (true (search "new EventSource(description.events)" javascript))
+    (true (search "new Terminal" javascript))
+    (false (search "at(document" javascript))))
 
 (defparameter *source*
   "(in-package #:luv.example)

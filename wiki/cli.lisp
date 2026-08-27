@@ -350,9 +350,10 @@ derived layouts.  Give system names to load others instead."
           (wiki:site-output-directory (asdf:find-system :luv-wiki-site))))
 
 (define-command serve (&rest arguments)
-  "Dynamically host the complete wiki site. Options: --host HOST --port PORT."
+  "Dynamically host the site. Options: --host HOST --port PORT or --socket PATH."
   (let ((host "127.0.0.1")
-        (port 8765))
+        (port 8765)
+        socket)
     (loop while arguments
           for option = (pop arguments)
           do (cond ((string= option "--host")
@@ -361,11 +362,14 @@ derived layouts.  Give system names to load others instead."
                    ((string= option "--port")
                     (unless arguments (error "--port requires a value."))
                     (setf port (parse-integer (pop arguments) :junk-allowed nil)))
+                   ((string= option "--socket")
+                    (unless arguments (error "--socket requires a value."))
+                    (setf socket (pop arguments)))
                    (t (error "Unknown serve option ~A." option))))
     (ensure-systems)
     (asdf:load-system :luv-wiki-site)
     (setf *site* nil)
-    (wiki:serve-site (site) :host host :port port)))
+    (wiki:serve-site (site) :host host :port port :socket socket)))
 
 (defun run (arguments)
   "Run the command named by the first of ARGUMENTS."

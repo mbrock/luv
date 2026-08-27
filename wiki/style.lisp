@@ -116,6 +116,16 @@
    :font (display-font 700 1.25rem/1.1)
    :letter-spacing -0.02em
    ("a" :color inherit))
+  (".deploy-button"
+   :appearance none
+   :padding 0.25rem 0.55rem
+   :border (hairline)
+   :border-radius 5px
+   :background transparent
+   :color --muted
+   :font 600 0.72rem/1 --mono-font
+   :cursor pointer
+   ("&:hover" :color --accent :border-color --accent))
   (".doors"
    :display grid
    :grid-template-columns (repeat 'auto-fit (minmax 10rem 1fr))
@@ -194,6 +204,42 @@ readable measure."
    :border-top (hairline)
    :font (display-font 500 0.82rem/1.4)
    :color --muted))
+
+(define-style deployment-console
+  "The dynamic site's blue/green deployment terminal."
+  (".deployment-dialog"
+   :width "min(72rem, calc(100vw - 2rem))"
+   :padding 0
+   :border (hairline)
+   :border-radius 10px
+   :background "#0b0f11"
+   :color "#c2cbd0"
+   :box-shadow 0 18px 70px (rgba 0 0 0 0.5)
+   :overflow hidden
+   ("&::backdrop" :background (rgba 0 0 0 0.62) :backdrop-filter "blur(3px)")
+   ("header"
+    :display flex
+    :justify-content space-between
+    :align-items center
+    :gap 1rem
+    :padding 0.7rem 0.9rem
+    :border-bottom "1px solid #2f383d"
+    :font-family --display-font
+    ("div" :display grid :gap 0.1rem)
+    ("strong" :font-size 0.95rem)
+    ("span" :color "#8b969d" :font-size 0.78rem)
+    ("button"
+     :padding 0.3rem 0.65rem
+     :border "1px solid #465159"
+     :border-radius 5px
+     :background transparent
+     :color inherit
+     :cursor pointer
+     ("&:disabled" :opacity 0.4 :cursor default))))
+  (".deployment-terminal"
+   :height "min(36rem, 70vh)"
+   :padding 0.75rem
+   :background "#0b0f11"))
 
 (define-style type
   "Headings, paragraphs, figures and their IDs, mentions, marks."
