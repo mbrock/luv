@@ -3,13 +3,12 @@
 
 This is a deliberately provisional work page.  The geometric construction,
 proofs, and history remain on the site-sum page (#BFSI2X); this page asks how
-to execute that construction efficiently for streaming chunks.  Its first
-three experiments have settled: chain facts and chain-order material lanes
-reduced warm production-shaped builds from 26.2 to about 10.4 ms/chunk.  The
-remaining measured bet is #3IKS3Y, compiling static star translations into
-query-native topology rows.  Once that experiment settles, the durable
-conclusions can move to the general LUFT pages and this worksheet can become
-historical evidence.
+to execute that construction efficiently for streaming chunks.  Its
+representation experiments have settled: chain facts and chain-order material
+lanes reduced warm production-shaped builds from 26.2 to about 10.4 ms/chunk,
+then #3IKS3Y compiled static star translations into query-native topology rows.
+The durable conclusions can now move to the general LUFT pages and this
+worksheet can become historical evidence.
 
 * The chain is the reusable fact; the neighborhood is the query
 :PROPERTIES:
@@ -203,8 +202,8 @@ chain's facts and lane.
 :ID: 1D77HO
 :END:
 
-The prerequisite representation experiments are complete, so #3IKS3Y is now
-the next structural step.  For every star mask, the edge
+The prerequisite representation experiments made #3IKS3Y the next structural
+step.  For every star mask, the edge
 state, descriptor identity, template ID, compact contributor mask, source
 sample offset, and ambient flag are immutable.  Compile them into flat typed
 face, band, and fan row vocabularies once.  Planning then copies rows while
@@ -230,6 +229,15 @@ each compact contributor mask instead of testing all twelve slots.  Its 1.8
 MiB of stream words is mostly final renderer output, not automatically waste;
 pool it only if ownership inspection shows that it is copied or discarded
 rather than handed onward as the ABI value.
+
+/Evidence./ The production query now holds one CSR-style 256-mask dimension
+of typed face, band, and fan columns.  Interior sites copy their rows directly;
+only seam sites interpret the compiled source offsets and witness masks.  The
+complete row compiler test reconstructs every template, compact contributor
+mask, source witness, and ambient flag from the retained descriptors.  On the
+same mountain-sanctuary fixture, planning fell from 5.120 to 0.620 ms/chunk and
+the warm aggregate from 11.556 to 6.445 ms/chunk at the same 2.110 MiB and
+156,244-triangle census.
 
 * The contracts which optimization must not hide
 :PROPERTIES:

@@ -1850,6 +1850,227 @@
                        (ash z -6) (logand z 63)))
                    (format nil "star (~D ~D ~D)" x y z)))))))))))
 
+(defun %test-width-one-query-dimension ()
+  (%with-test-section ("width-one query-native topology dimension")
+    (let* ((vocabulary *width-one-query-vocabulary*)
+           (dimension
+             (width-one-query-vocabulary-dimension vocabulary))
+           (contributor-counts
+             (width-one-query-dimension-contributor-counts dimension))
+           (face-starts (width-one-query-dimension-face-starts dimension))
+           (face-templates
+             (width-one-query-dimension-face-templates dimension))
+           (face-material-slots
+             (width-one-query-dimension-face-material-slots dimension))
+           (face-source-offsets
+             (width-one-query-dimension-face-source-offsets dimension))
+           (band-starts (width-one-query-dimension-band-starts dimension))
+           (band-templates
+             (width-one-query-dimension-band-templates dimension))
+           (band-contributor-masks
+             (width-one-query-dimension-band-contributor-masks dimension))
+           (band-source-witnesses
+             (width-one-query-dimension-band-source-witnesses dimension))
+           (band-ambient-stars
+             (width-one-query-dimension-band-ambient-stars dimension))
+           (fan-starts (width-one-query-dimension-fan-starts dimension))
+           (fan-templates
+             (width-one-query-dimension-fan-templates dimension))
+           (fan-contributor-masks
+             (width-one-query-dimension-fan-contributor-masks dimension))
+           (ranges (width-one-query-vocabulary-ranges vocabulary))
+           (words
+             (aref
+              (width-one-query-vocabulary-vertex-words-by-width vocabulary) 1))
+           (face-vertices (make-array 6)))
+      (dotimes (axis-number 3)
+        (dotimes (source-bit 2)
+          (setf (aref face-vertices (+ (* 2 axis-number) source-bit))
+                (%width-one-query-face-vertices axis-number source-bit))))
+      (labels ((template-vertices (template)
+                 (let* ((start (aref ranges (* 2 template)))
+                        (count (aref ranges (1+ (* 2 template))))
+                        (vertices (make-array count :element-type 'fixnum)))
+                   (dotimes (index count vertices)
+                     (let ((word
+                             (* +mesh-template-vertex-word-count+
+                                (+ start index))))
+                       (setf (aref vertices index)
+                             (%pack-template-vertex
+                              (- (aref words word)
+                                 +mesh-template-coordinate-bias+)
+                              (- (aref words (+ word 1))
+                                 +mesh-template-coordinate-bias+)
+                              (- (aref words (+ word 2))
+                                 +mesh-template-coordinate-bias+)
+                              (aref words (+ word 3))))))))
+               (compact-contributors (pattern cube-mask)
+                 (let ((compact 0))
+                   (dotimes (index 12 compact)
+                     (when (logbitp index cube-mask)
+                       (setf compact
+                             (logior
+                              compact
+                              (ash 1 (%width-one-contributor-slot
+                                      pattern index))))))))
+               (edge-cube-contributors
+                   (transition-mask contributor-indices)
+                 (let ((cube-mask 0))
+                   (dotimes (transition 4 cube-mask)
+                     (when (logbitp transition transition-mask)
+                       (setf cube-mask
+                             (logior cube-mask
+                                     (ash 1
+                                          (aref contributor-indices
+                                                transition))))))))
+               (source-offset (pattern contributor-index)
+                 (let* ((contributor
+                          (aref
+                           (width-one-vertex-pattern-contributors pattern)
+                           contributor-index))
+                        (sample (ldb (byte 3 0) contributor)))
+                   (logior (if (logbitp 0 sample) 0 1)
+                           (if (logbitp 1 sample) 0 2))))
+               (source-witness
+                   (pattern contributor-indices transition-mask)
+                 (let ((witness 0))
+                   (dotimes (transition 4 witness)
+                     (when (logbitp transition transition-mask)
+                       (setf witness
+                             (logior
+                              witness
+                              (ash 1
+                                   (source-offset
+                                    pattern
+                                    (aref contributor-indices
+                                          transition))))))))))
+        ;; Recompute every row through the retained descriptor tables.  This
+        ;; pins the compiled dimension's order and query-native translations
+        ;; independently of the production planner which now only copies it.
+        (dotimes (mask 256)
+          (let* ((pattern (svref *width-one-vertex-pattern-table* mask))
+                 (face-row (aref face-starts mask))
+                 (face-end (aref face-starts (1+ mask)))
+                 (band-row (aref band-starts mask))
+                 (band-end (aref band-starts (1+ mask)))
+                 (fan-row (aref fan-starts mask))
+                 (fan-end (aref fan-starts (1+ mask))))
+            (%check
+             (= (aref contributor-counts mask)
+                (width-one-vertex-pattern-contributor-count pattern))
+             (format nil "contributor count ~2,'0X" mask))
+            (dotimes (axis-number 3)
+              (let* ((u (svref +axis-u+ axis-number))
+                     (v (svref +axis-v+ axis-number))
+                     (low (logior (ash 1 u) (ash 1 v)))
+                     (high (logior low (ash 1 axis-number)))
+                     (state
+                       (logior (if (logbitp low mask) 1 0)
+                               (if (logbitp high mask) 2 0)))
+                     (source-bit
+                       (svref *width-one-face-source-table* state)))
+                (unless (minusp source-bit)
+                  (let ((source-sample
+                          (if (zerop source-bit) low high)))
+                    (%check (< face-row face-end)
+                            (format nil "face row ~2,'0X/~D"
+                                    mask axis-number))
+                    (%check
+                     (equalp
+                      (template-vertices (aref face-templates face-row))
+                      (aref face-vertices
+                            (+ (* 2 axis-number) source-bit)))
+                     (format nil "face template ~2,'0X/~D"
+                             mask axis-number))
+                    (%check
+                     (= (aref face-material-slots face-row)
+                        (%width-one-contributor-slot
+                         pattern
+                         (aref *width-one-face-contributor-indices*
+                               axis-number)))
+                     (format nil "face material ~2,'0X/~D"
+                             mask axis-number))
+                    (%check
+                     (= (aref face-source-offsets face-row)
+                        (logior (if (logbitp 0 source-sample) 0 1)
+                                (if (logbitp 1 source-sample) 0 2)))
+                     (format nil "face source ~2,'0X/~D"
+                             mask axis-number))
+                    (incf face-row))))
+              (let* ((edge-state (%width-one-edge-state mask axis-number))
+                     (edge-pattern
+                       (svref *width-one-edge-pattern-table* edge-state))
+                     (indices
+                       (svref
+                        (width-one-edge-pattern-contributor-indices
+                         edge-pattern)
+                        axis-number)))
+                (loop for descriptor across
+                      (svref (width-one-edge-pattern-descriptors edge-pattern)
+                             axis-number)
+                      for transition-mask =
+                        (width-one-template-descriptor-contributor-mask
+                         descriptor)
+                      do (%check (< band-row band-end)
+                                 (format nil "band row ~2,'0X/~D"
+                                         mask axis-number))
+                         (%check
+                          (equalp
+                           (template-vertices
+                            (aref band-templates band-row))
+                           (width-one-template-descriptor-vertices descriptor))
+                          (format nil "band template ~2,'0X/~D"
+                                  mask axis-number))
+                         (%check
+                          (= (aref band-contributor-masks band-row)
+                             (compact-contributors
+                              pattern
+                              (edge-cube-contributors
+                               transition-mask indices)))
+                          (format nil "band contributors ~2,'0X/~D"
+                                  mask axis-number))
+                         (%check
+                          (= (aref band-source-witnesses band-row)
+                             (source-witness
+                              pattern indices transition-mask))
+                          (format nil "band source ~2,'0X/~D"
+                                  mask axis-number))
+                         (%check
+                          (= (aref band-ambient-stars band-row)
+                             (if
+                              (width-one-template-descriptor-ambient-star-p
+                               descriptor)
+                              1 0))
+                          (format nil "band ambient ~2,'0X/~D"
+                                  mask axis-number))
+                         (incf band-row))))
+            (%check (= face-row face-end)
+                    (format nil "face extent ~2,'0X" mask))
+            (%check (= band-row band-end)
+                    (format nil "band extent ~2,'0X" mask))
+            (loop for descriptor across
+                  (width-one-vertex-pattern-descriptors pattern)
+                  do (%check (< fan-row fan-end)
+                             (format nil "fan row ~2,'0X" mask))
+                     (%check
+                      (equalp
+                       (template-vertices (aref fan-templates fan-row))
+                       (width-one-template-descriptor-vertices descriptor))
+                      (format nil "fan template ~2,'0X" mask))
+                     (%check
+                      (= (aref fan-contributor-masks fan-row)
+                         (compact-contributors
+                          pattern
+                          (width-one-template-descriptor-contributor-mask
+                           descriptor)))
+                      (format nil "fan contributors ~2,'0X" mask))
+                     (incf fan-row))
+            (%check (= fan-row fan-end)
+                    (format nil "fan extent ~2,'0X" mask))))
+        (%check (= (aref face-starts 256) (length face-templates)))
+        (%check (= (aref band-starts 256) (length band-templates)))
+        (%check (= (aref fan-starts 256) (length fan-templates)))))))
+
 (defun %test-width-one-local-kernel ()
   (%with-test-section ("width-one finite-neighborhood production kernel")
     (let ((algebra (%make-width-one-test-chamfer-algebra))
@@ -2389,6 +2610,7 @@
     (%test-sheet-decomposition)
     (%test-surface-mesh)
     (%test-width-one-z-fibers)
+    (%test-width-one-query-dimension)
     (%test-width-one-local-kernel)
     (%test-width-one-material-lanes)
     (%test-chunked-meshing)

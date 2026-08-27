@@ -134,15 +134,47 @@
       (%empty-width-one-query-workspace)))
 
 ;;; ---------------------------------------------------------------------------
-;;; One immutable template dimension table
+;;; One immutable template and topology dimension
+
+(defstruct (width-one-query-dimension
+             (:constructor %make-width-one-query-dimension
+                 (contributor-counts
+                  face-starts face-templates face-material-slots
+                  face-source-offsets
+                  band-starts band-templates band-contributor-masks
+                  band-source-witnesses band-ambient-stars
+                  fan-starts fan-templates fan-contributor-masks)))
+  "Query-native rows for the complete 256-mask topology dimension."
+  (contributor-counts #() :type (simple-array (unsigned-byte 8) (*))
+                          :read-only t)
+  ;; STARTS is CSR-style: mask M occupies rows [STARTS[M], STARTS[M+1]).
+  (face-starts #() :type (simple-array (unsigned-byte 32) (*)) :read-only t)
+  (face-templates #() :type (simple-array (unsigned-byte 16) (*)) :read-only t)
+  (face-material-slots #() :type (simple-array (unsigned-byte 8) (*))
+                            :read-only t)
+  ;; Bits 0 and 1 are the X/Y distance from the lattice site to the source cell.
+  (face-source-offsets #() :type (simple-array (unsigned-byte 8) (*))
+                            :read-only t)
+  (band-starts #() :type (simple-array (unsigned-byte 32) (*)) :read-only t)
+  (band-templates #() :type (simple-array (unsigned-byte 16) (*)) :read-only t)
+  (band-contributor-masks #() :type (simple-array (unsigned-byte 16) (*))
+                              :read-only t)
+  ;; Four bits name source-cell offsets DX | (DY << 1).  A nonambient row is
+  ;; owned when any named source lies in the owner's half-open cell box.
+  (band-source-witnesses #() :type (simple-array (unsigned-byte 8) (*))
+                              :read-only t)
+  (band-ambient-stars #() :type (simple-array (unsigned-byte 8) (*))
+                           :read-only t)
+  (fan-starts #() :type (simple-array (unsigned-byte 32) (*)) :read-only t)
+  (fan-templates #() :type (simple-array (unsigned-byte 16) (*)) :read-only t)
+  (fan-contributor-masks #() :type (simple-array (unsigned-byte 16) (*))
+                             :read-only t))
 
 (defstruct (width-one-query-vocabulary
              (:constructor %make-width-one-query-vocabulary
-                 (face-template-ids descriptor-template-ids
-                  vertex-words-by-width ranges normal-x normal-y normal-z)))
-  (face-template-ids #() :type (simple-array (unsigned-byte 16) (*))
-                          :read-only t)
-  (descriptor-template-ids nil :type hash-table :read-only t)
+                 (dimension vertex-words-by-width ranges
+                  normal-x normal-y normal-z)))
+  (dimension nil :type width-one-query-dimension :read-only t)
   ;; Widths one through three share topology and instance rows.  Only the
   ;; canonical template offsets differ.  Width four collapses sheets and
   ;; therefore remains on the reference/variable-width repair path.
@@ -188,7 +220,39 @@
   (let ((template-index (make-hash-table :test #'equalp))
         (templates (make-array 64 :adjustable t :fill-pointer 0))
         (face-ids (make-array 6 :element-type '(unsigned-byte 16)))
-        (descriptor-ids (make-hash-table :test #'eq)))
+        (descriptor-ids (make-hash-table :test #'eq))
+        (contributor-counts
+          (make-array 256 :element-type '(unsigned-byte 8)))
+        (face-starts (make-array 257 :element-type '(unsigned-byte 32)))
+        (face-templates
+          (make-array 768 :element-type '(unsigned-byte 16)
+                          :adjustable t :fill-pointer 0))
+        (face-material-slots
+          (make-array 768 :element-type '(unsigned-byte 8)
+                          :adjustable t :fill-pointer 0))
+        (face-source-offsets
+          (make-array 768 :element-type '(unsigned-byte 8)
+                          :adjustable t :fill-pointer 0))
+        (band-starts (make-array 257 :element-type '(unsigned-byte 32)))
+        (band-templates
+          (make-array 1024 :element-type '(unsigned-byte 16)
+                           :adjustable t :fill-pointer 0))
+        (band-contributor-masks
+          (make-array 1024 :element-type '(unsigned-byte 16)
+                           :adjustable t :fill-pointer 0))
+        (band-source-witnesses
+          (make-array 1024 :element-type '(unsigned-byte 8)
+                           :adjustable t :fill-pointer 0))
+        (band-ambient-stars
+          (make-array 1024 :element-type '(unsigned-byte 8)
+                           :adjustable t :fill-pointer 0))
+        (fan-starts (make-array 257 :element-type '(unsigned-byte 32)))
+        (fan-templates
+          (make-array 1024 :element-type '(unsigned-byte 16)
+                           :adjustable t :fill-pointer 0))
+        (fan-contributor-masks
+          (make-array 1024 :element-type '(unsigned-byte 16)
+                           :adjustable t :fill-pointer 0)))
     (labels ((intern-template (vertices)
                (multiple-value-bind (id present-p)
                    (gethash vertices template-index)
@@ -203,7 +267,51 @@
              (record-descriptor (descriptor)
                (setf (gethash descriptor descriptor-ids)
                      (intern-template
-                      (width-one-template-descriptor-vertices descriptor)))))
+                      (width-one-template-descriptor-vertices descriptor))))
+             (descriptor-template-id (descriptor)
+               (multiple-value-bind (id present-p)
+                   (gethash descriptor descriptor-ids)
+                 (unless present-p
+                   (error "Width-one descriptor is absent from the query vocabulary."))
+                 id))
+             (compact-contributors (pattern cube-mask)
+               (let ((compact 0)
+                     (slots
+                       (width-one-vertex-pattern-contributor-slots pattern)))
+                 (dotimes (contributor-index 12 compact)
+                   (when (logbitp contributor-index cube-mask)
+                     (let ((slot (aref slots contributor-index)))
+                       (when (minusp slot)
+                         (error "Query primitive names absent contributor ~D."
+                                contributor-index))
+                       (setf compact (logior compact (ash 1 slot))))))))
+             (edge-cube-contributors (transition-mask contributor-indices)
+               (let ((cube-mask 0))
+                 (dotimes (transition 4 cube-mask)
+                   (when (logbitp transition transition-mask)
+                     (let ((index (aref contributor-indices transition)))
+                       (when (minusp index)
+                         (error "Query edge names absent radial transition ~D."
+                                transition))
+                       (setf cube-mask (logior cube-mask (ash 1 index))))))))
+             (source-offset (pattern contributor-index)
+               (let* ((contributor
+                        (aref (width-one-vertex-pattern-contributors pattern)
+                              contributor-index))
+                      (sample (ldb (byte 3 0) contributor)))
+                 (logior (if (logbitp 0 sample) 0 1)
+                         (if (logbitp 1 sample) 0 2))))
+             (source-witness (pattern contributor-indices transition-mask)
+               (let ((witness 0))
+                 (dotimes (transition 4 witness)
+                   (when (logbitp transition transition-mask)
+                     (let ((index (aref contributor-indices transition)))
+                       (when (minusp index)
+                         (error "Query edge names absent radial transition ~D."
+                                transition))
+                       (setf witness
+                             (logior witness
+                                     (ash 1 (source-offset pattern index))))))))))
       (dotimes (axis-number 3)
         (dotimes (source-bit 2)
           (setf (aref face-ids (+ (* axis-number 2) source-bit))
@@ -221,6 +329,90 @@
               (width-one-vertex-pattern-descriptors
                (svref *width-one-vertex-pattern-table* mask))
               do (record-descriptor descriptor)))
+      ;; Compile every topology translation while descriptor identity and
+      ;; cube-edge provenance are still explicit.  Runtime planning sees only
+      ;; typed rows indexed by the selected star mask.
+      (dotimes (mask 256)
+        (let ((pattern
+                (the width-one-vertex-pattern
+                  (svref *width-one-vertex-pattern-table* mask))))
+          (setf (aref contributor-counts mask)
+                (width-one-vertex-pattern-contributor-count pattern)
+                (aref face-starts mask) (fill-pointer face-templates)
+                (aref band-starts mask) (fill-pointer band-templates)
+                (aref fan-starts mask) (fill-pointer fan-templates))
+          (dotimes (axis-number 3)
+            (let* ((u (svref +axis-u+ axis-number))
+                   (v (svref +axis-v+ axis-number))
+                   (low-sample (logior (ash 1 u) (ash 1 v)))
+                   (high-sample
+                     (logior low-sample (ash 1 axis-number)))
+                   (face-state
+                     (logior (if (logbitp low-sample mask) 1 0)
+                             (if (logbitp high-sample mask) 2 0)))
+                   (source-bit
+                     (svref *width-one-face-source-table* face-state)))
+              (unless (minusp source-bit)
+                (let ((source-sample
+                        (if (zerop source-bit) low-sample high-sample)))
+                  (vector-push-extend
+                   (aref face-ids (+ (* axis-number 2) source-bit))
+                   face-templates)
+                  (vector-push-extend
+                   (%width-one-contributor-slot
+                    pattern (aref *width-one-face-contributor-indices*
+                                  axis-number))
+                   face-material-slots)
+                  (vector-push-extend
+                   (logior (if (logbitp 0 source-sample) 0 1)
+                           (if (logbitp 1 source-sample) 0 2))
+                   face-source-offsets)))
+              (let* ((edge-state (%width-one-edge-state mask axis-number))
+                     (edge-pattern
+                       (the width-one-edge-pattern
+                         (svref *width-one-edge-pattern-table* edge-state)))
+                     (contributor-indices
+                       (the (simple-array fixnum (*))
+                         (svref
+                          (width-one-edge-pattern-contributor-indices
+                           edge-pattern)
+                          axis-number))))
+                (loop for descriptor across
+                      (svref (width-one-edge-pattern-descriptors edge-pattern)
+                             axis-number)
+                      for transition-mask =
+                        (width-one-template-descriptor-contributor-mask
+                         descriptor)
+                      do (vector-push-extend
+                          (descriptor-template-id descriptor) band-templates)
+                         (vector-push-extend
+                          (compact-contributors
+                           pattern
+                           (edge-cube-contributors
+                            transition-mask contributor-indices))
+                          band-contributor-masks)
+                         (vector-push-extend
+                          (source-witness
+                           pattern contributor-indices transition-mask)
+                          band-source-witnesses)
+                         (vector-push-extend
+                          (if
+                           (width-one-template-descriptor-ambient-star-p
+                            descriptor)
+                           1 0)
+                          band-ambient-stars)))))
+          (loop for descriptor across
+                (width-one-vertex-pattern-descriptors pattern)
+                do (vector-push-extend
+                    (descriptor-template-id descriptor) fan-templates)
+                   (vector-push-extend
+                    (compact-contributors
+                     pattern
+                     (width-one-template-descriptor-contributor-mask descriptor))
+                    fan-contributor-masks))))
+      (setf (aref face-starts 256) (fill-pointer face-templates)
+            (aref band-starts 256) (fill-pointer band-templates)
+            (aref fan-starts 256) (fill-pointer fan-templates))
       (let* ((template-count (fill-pointer templates))
              (vertex-count
                (loop for template across templates sum (length template)))
@@ -265,20 +457,33 @@
             (setf (aref words-by-width width)
                   (%uniform-query-template-words width words)))
           (%make-width-one-query-vocabulary
-           face-ids descriptor-ids words-by-width ranges
+           (%make-width-one-query-dimension
+            contributor-counts face-starts
+            (coerce face-templates
+                    '(simple-array (unsigned-byte 16) (*)))
+            (coerce face-material-slots
+                    '(simple-array (unsigned-byte 8) (*)))
+            (coerce face-source-offsets
+                    '(simple-array (unsigned-byte 8) (*)))
+            band-starts
+            (coerce band-templates
+                    '(simple-array (unsigned-byte 16) (*)))
+            (coerce band-contributor-masks
+                    '(simple-array (unsigned-byte 16) (*)))
+            (coerce band-source-witnesses
+                    '(simple-array (unsigned-byte 8) (*)))
+            (coerce band-ambient-stars
+                    '(simple-array (unsigned-byte 8) (*)))
+            fan-starts
+            (coerce fan-templates
+                    '(simple-array (unsigned-byte 16) (*)))
+            (coerce fan-contributor-masks
+                    '(simple-array (unsigned-byte 16) (*))))
+           words-by-width ranges
            normal-x normal-y normal-z))))))
 
 (defparameter *width-one-query-vocabulary*
   (%compile-width-one-query-vocabulary))
-
-(defun %width-one-query-descriptor-template-id (descriptor)
-  (multiple-value-bind (id present-p)
-      (gethash descriptor
-               (width-one-query-vocabulary-descriptor-template-ids
-                *width-one-query-vocabulary*))
-    (unless present-p
-      (error "Width-one descriptor is absent from the query vocabulary."))
-    id))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Selection and relation materialization
@@ -416,43 +621,9 @@
           (if ambient-star-p 1 0)
           (width-one-query-patches-count relation) (1+ row))))
 
-(defun %width-one-query-compact-contributors (pattern cube-mask)
-  (declare (optimize (speed 3) (safety 1))
-           (type width-one-vertex-pattern pattern)
-           (type (unsigned-byte 12) cube-mask))
-  (let ((compact 0)
-        (slots (width-one-vertex-pattern-contributor-slots pattern)))
-    (declare (type (unsigned-byte 12) compact)
-             (type (simple-array fixnum (*)) slots))
-    (dotimes (contributor-index 12 compact)
-      (when (logbitp contributor-index cube-mask)
-        (let ((slot (aref slots contributor-index)))
-          (when (minusp slot)
-            (error "Query primitive names absent contributor ~D."
-                   contributor-index))
-          (setf compact
-                (logior compact
-                        (ash 1 (the (integer 0 11) slot)))))))))
-
-(defun %width-one-query-edge-cube-contributors
-    (transition-mask contributor-indices)
-  (declare (optimize (speed 3) (safety 1))
-           (type (unsigned-byte 4) transition-mask)
-           (type (simple-array fixnum (*)) contributor-indices))
-  (let ((cube-mask 0))
-    (declare (type (unsigned-byte 12) cube-mask))
-    (dotimes (transition 4 cube-mask)
-      (when (logbitp transition transition-mask)
-        (let ((index (aref contributor-indices transition)))
-          (when (minusp index)
-            (error "Query edge names absent radial transition ~D." transition))
-          (setf cube-mask
-                (logior cube-mask
-                        (ash 1 (the (integer 0 11) index)))))))))
-
 (defun %plan-width-one-query
     (packed-sites workspace x0 x1 y0 y1 ox1 oy1)
-  "Lower selected stars to three typed primitive relations."
+  "Copy selected stars' compiled topology rows into primitive relations."
   (declare (optimize (speed 3) (safety 1))
            (type (vector (unsigned-byte 32)) packed-sites)
            (type width-one-query-workspace workspace)
@@ -462,133 +633,108 @@
          (faces (width-one-query-workspace-faces workspace))
          (bands (width-one-query-workspace-bands workspace))
          (fans (width-one-query-workspace-fans workspace))
-         (face-template-ids
-           (width-one-query-vocabulary-face-template-ids
+         (dimension
+           (width-one-query-vocabulary-dimension
             *width-one-query-vocabulary*))
+         (contributor-counts
+           (width-one-query-dimension-contributor-counts dimension))
+         (face-starts (width-one-query-dimension-face-starts dimension))
+         (face-templates (width-one-query-dimension-face-templates dimension))
+         (face-material-slots
+           (width-one-query-dimension-face-material-slots dimension))
+         (face-source-offsets
+           (width-one-query-dimension-face-source-offsets dimension))
+         (band-starts (width-one-query-dimension-band-starts dimension))
+         (band-templates (width-one-query-dimension-band-templates dimension))
+         (band-contributor-masks
+           (width-one-query-dimension-band-contributor-masks dimension))
+         (band-source-witnesses
+           (width-one-query-dimension-band-source-witnesses dimension))
+         (band-ambient-stars
+           (width-one-query-dimension-band-ambient-stars dimension))
+         (fan-starts (width-one-query-dimension-fan-starts dimension))
+         (fan-templates (width-one-query-dimension-fan-templates dimension))
+         (fan-contributor-masks
+           (width-one-query-dimension-fan-contributor-masks dimension))
          (material-count 0)
          (singular-count 0))
     (declare (type fixnum material-count singular-count))
-    (loop for packed across packed-sites
-          for site-row fixnum from 0 do
-      (let* ((local-x
-               (ldb (byte 7 +width-one-site-x-shift+) packed))
-             (local-y
-               (ldb (byte 7 +width-one-site-y-shift+) packed))
-             (site-x (+ x0 local-x))
-             (site-y (+ y0 local-y))
-             (site-z (%width-one-site-z packed))
-             (star-mask (%width-one-site-mask packed))
-             (site-owned-p (and (< site-x ox1) (< site-y oy1)))
-             (vertex-pattern
-               (the width-one-vertex-pattern
-                 (svref *width-one-vertex-pattern-table* star-mask))))
-        (setf (aref (width-one-query-sites-x sites) site-row) local-x
-              (aref (width-one-query-sites-y sites) site-row) local-y
-              (aref (width-one-query-sites-z sites) site-row) site-z
-              (aref (width-one-query-sites-mask sites) site-row) star-mask
-              (aref (width-one-query-sites-material-base sites) site-row)
-              material-count)
-        (when (> (+ material-count
-                    (width-one-vertex-pattern-contributor-count
-                     vertex-pattern))
-                 +width-one-job-material-limit+)
-          (error "Width-one query material relation exceeds 24-bit offsets."))
-        (when (and site-owned-p
-                   (= 1 (sbit *star-singular-bits* star-mask)))
-          (incf singular-count))
-        (dotimes (axis-number 3)
-          (let* ((u (the (integer 0 2) (svref +axis-u+ axis-number)))
-                 (v (the (integer 0 2) (svref +axis-v+ axis-number)))
-                 (low-sample (logior (ash 1 u) (ash 1 v)))
-                 (high-sample (logior low-sample (ash 1 axis-number)))
-                 (face-state
-                   (logior (if (logbitp low-sample star-mask) 1 0)
-                           (if (logbitp high-sample star-mask) 2 0)))
-                 (source-bit
-                   (the fixnum
-                     (svref *width-one-face-source-table* face-state))))
-            (unless (minusp source-bit)
-              (let* ((source-sample
-                       (if (zerop source-bit) low-sample high-sample))
-                     (source-x
-                       (- site-x
-                          (if (logbitp 0 source-sample) 0 1)))
-                     (source-y
-                       (- site-y
-                          (if (logbitp 1 source-sample) 0 1))))
-                (when (and (<= x0 source-x) (< source-x x1)
-                           (<= y0 source-y) (< source-y y1))
-                  (%append-width-one-query-face
-                   faces site-row
-                   (aref face-template-ids
-                         (+ (* axis-number 2) source-bit))
-                   (+ material-count
-                      (%width-one-contributor-slot
-                       vertex-pattern
-                       (aref
-                        (the (simple-array (unsigned-byte 8) (3))
-                          *width-one-face-contributor-indices*)
-                        axis-number)))))))
-            (let* ((edge-state
-                     (%width-one-edge-state star-mask axis-number))
-                   (edge-pattern
-                     (the width-one-edge-pattern
-                       (svref *width-one-edge-pattern-table* edge-state)))
-                   (descriptors
-                     (the simple-vector
-                       (svref
-                        (width-one-edge-pattern-descriptors edge-pattern)
-                        axis-number))))
-              (when (plusp (length descriptors))
-                (let* ((contributor-indices
-                         (the (simple-array fixnum (*))
-                           (svref
-                            (width-one-edge-pattern-contributor-indices
-                             edge-pattern)
-                            axis-number)))
-                       (source-owned-mask
-                         (the (unsigned-byte 4)
-                           (%width-one-edge-source-owned-mask
-                            vertex-pattern contributor-indices site-x site-y
-                            x0 x1 y0 y1))))
-                  (loop for descriptor across descriptors
-                        for transition-mask =
-                          (the (unsigned-byte 4)
-                            (width-one-template-descriptor-contributor-mask
-                             descriptor))
-                        when
-                          (if
-                           (width-one-template-descriptor-ambient-star-p
-                            descriptor)
-                           site-owned-p
-                           (logtest transition-mask source-owned-mask))
-                          do
-                             (%append-width-one-query-patch
-                              bands site-row
-                              (the (unsigned-byte 16)
-                                (%width-one-query-descriptor-template-id
-                                 descriptor))
-                              (%width-one-query-compact-contributors
-                               vertex-pattern
-                               (%width-one-query-edge-cube-contributors
-                                transition-mask contributor-indices))
-                              (width-one-template-descriptor-ambient-star-p
-                               descriptor))))))))
-        (when site-owned-p
-          (loop with descriptors of-type simple-vector =
-                  (width-one-vertex-pattern-descriptors vertex-pattern)
-                for descriptor across descriptors
-                do (%append-width-one-query-patch
-                    fans site-row
-                    (the (unsigned-byte 16)
-                      (%width-one-query-descriptor-template-id descriptor))
-                    (%width-one-query-compact-contributors
-                     vertex-pattern
-                     (width-one-template-descriptor-contributor-mask
-                      descriptor))
-                    t)))
-        (incf material-count
-              (width-one-vertex-pattern-contributor-count vertex-pattern))))
+    (macrolet ((append-face-row (row)
+                 `(%append-width-one-query-face
+                   faces site-row (aref face-templates ,row)
+                   (+ material-count (aref face-material-slots ,row))))
+               (append-band-row (row)
+                 `(%append-width-one-query-patch
+                   bands site-row (aref band-templates ,row)
+                   (aref band-contributor-masks ,row)
+                   (not (zerop (aref band-ambient-stars ,row)))))
+               (append-fan-row (row)
+                 `(%append-width-one-query-patch
+                   fans site-row (aref fan-templates ,row)
+                   (aref fan-contributor-masks ,row) t)))
+      (loop for packed across packed-sites
+            for site-row fixnum from 0 do
+        (let* ((local-x
+                 (ldb (byte 7 +width-one-site-x-shift+) packed))
+               (local-y
+                 (ldb (byte 7 +width-one-site-y-shift+) packed))
+               (site-x (+ x0 local-x))
+               (site-y (+ y0 local-y))
+               (site-z (%width-one-site-z packed))
+               (star-mask (%width-one-site-mask packed))
+               (site-owned-p (and (< site-x ox1) (< site-y oy1)))
+               (interior-p
+                 (and (< x0 site-x x1) (< y0 site-y y1)))
+               (contributor-count (aref contributor-counts star-mask))
+               (face-start (the fixnum (aref face-starts star-mask)))
+               (face-end (the fixnum (aref face-starts (1+ star-mask))))
+               (band-start (the fixnum (aref band-starts star-mask)))
+               (band-end (the fixnum (aref band-starts (1+ star-mask))))
+               (fan-start (the fixnum (aref fan-starts star-mask)))
+               (fan-end (the fixnum (aref fan-starts (1+ star-mask)))))
+          (setf (aref (width-one-query-sites-x sites) site-row) local-x
+                (aref (width-one-query-sites-y sites) site-row) local-y
+                (aref (width-one-query-sites-z sites) site-row) site-z
+                (aref (width-one-query-sites-mask sites) site-row) star-mask
+                (aref (width-one-query-sites-material-base sites) site-row)
+                material-count)
+          (when (> (+ material-count contributor-count)
+                   +width-one-job-material-limit+)
+            (error "Width-one query material relation exceeds 24-bit offsets."))
+          (when (and site-owned-p
+                     (= 1 (sbit *star-singular-bits* star-mask)))
+            (incf singular-count))
+          (if interior-p
+              (progn
+                (loop for row fixnum from face-start below face-end
+                      do (append-face-row row))
+                (loop for row fixnum from band-start below band-end
+                      do (append-band-row row)))
+              (let ((source-owned-mask 0))
+                (declare (type (unsigned-byte 4) source-owned-mask))
+                (dotimes (offset 4)
+                  (let ((source-x (- site-x (logand offset 1)))
+                        (source-y (- site-y (ash offset -1))))
+                    (when (and (<= x0 source-x) (< source-x x1)
+                               (<= y0 source-y) (< source-y y1))
+                      (setf source-owned-mask
+                            (logior source-owned-mask (ash 1 offset))))))
+                (loop for row fixnum from face-start below face-end
+                      when (logbitp (aref face-source-offsets row)
+                                    source-owned-mask)
+                        do (append-face-row row))
+                (loop for row fixnum from band-start below band-end
+                      for ambient-star-p =
+                        (not (zerop (aref band-ambient-stars row)))
+                      when (if ambient-star-p
+                               site-owned-p
+                               (logtest (aref band-source-witnesses row)
+                                        source-owned-mask))
+                        do (append-band-row row))))
+          (when site-owned-p
+            (loop for row fixnum from fan-start below fan-end
+                  do (append-fan-row row)))
+          (incf material-count contributor-count))))
     (values material-count singular-count)))
 
 (defun %materialize-width-one-query-materials

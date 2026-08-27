@@ -551,7 +551,7 @@ planning (5.8 ms) and projection (4.3 ms) are the remaining measured frontier.
 The same query path now serves uniform bevel widths one through three; medial
 width four retains the general reference path.
 
-* NEXT Compile query-native topology dimension rows
+* DONE Compile query-native topology dimension rows
 :PROPERTIES:
 :ID: 3IKS3Y
 :END:
@@ -571,6 +571,16 @@ slots for every active site.  The statistical profile says those translations
 remain a material part of the now-smaller planner; the disassembly says their
 scalar loops are finally efficient enough that removing the work, rather than
 micro-optimizing it, is the honest next bet.
+
+/Evidence./ One immutable CSR-style dimension now holds every mask's face,
+band, and fan templates, compact material references, source witnesses, and
+ambient flags.  The planner appends these rows directly for interior sites and
+performs the half-open source-ownership test only on seam sites.  A complete
+compiler test reconstructs all rows from the retained descriptors, while the
+existing 256-star, width-one-through-three, and real-chunk seam differentials
+retain the exact reference census.  On the same mountain-sanctuary fixture,
+planning fell from 5.120 to 0.620 ms/chunk and the warm aggregate from 11.556
+to 6.445 ms/chunk with allocation unchanged at 2.110 MiB/chunk.
 
 * DONE Implement the site-stream LUFT renderer backbone
 :PROPERTIES:
