@@ -5206,6 +5206,12 @@
 (define-test material-bevel-profile-compiles-semantic-widths-once
   (let* ((profile (render:make-material-bevel-profile
                    :terrain-width 4 :architecture-width 1 :contact-width 2))
+         ;; Scene construction interns its authored contact assemblies into the
+         ;; global stock vocabulary.  Close that vocabulary before compiling
+         ;; either dense policy; otherwise this test's policy length depends on
+         ;; whether another test happened to construct the scene first.
+         (scene (render:make-material-bevel-transition-study-scene))
+         (witness (render:make-render-mesh scene :bevel-width 1))
          (widths (render:compile-material-bevel-profile profile))
          (crystal-stock
            (luft.render::surface-assembly-offset
@@ -5254,9 +5260,7 @@
       ;; A positive non-meshed sentinel keeps the packed byte policy eligible,
       ;; but necessarily falls outside the eight-entry topology width table if
       ;; an attachment stock ever leaks into a surface witness.
-      (let* ((scene (render:make-material-bevel-transition-study-scene))
-             (witness (render:make-render-mesh scene :bevel-width 1))
-             (owners (surface-mesh-tree-meshes witness))
+      (let* ((owners (surface-mesh-tree-meshes witness))
              (topology-stocks
                (loop for owner in owners append
                  (loop for words in
