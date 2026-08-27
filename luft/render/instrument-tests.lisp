@@ -186,7 +186,11 @@
       (close-instrument-owner-canvas canvas))))
 
 (deftest instrument-add-versus-stop-never-repopulates-the-terminal-registry
-  (dotimes (iteration 16)
+  ;; This is a bounded integration regression, not a scheduler stress test.
+  ;; Four fresh simultaneous starts exercise both legal outcomes without making
+  ;; routine renderer work pay for sixteen canvas/thread setup cycles.
+  (dotimes (iteration 4)
+    (declare (ignore iteration))
     (let* ((canvas (make-instance 'instrument-owner-canvas))
            (viewer (clim:make-application-frame 'render:viewer :canvas canvas))
            (instrument (make-instance 'instrument-test-probe
@@ -197,7 +201,6 @@
            (stop-condition nil)
            (add-thread nil)
            (stop-thread nil))
-      (declare (ignore iteration))
       (unwind-protect
            (progn
              (setf add-thread

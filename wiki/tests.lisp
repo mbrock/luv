@@ -163,22 +163,12 @@ Nothing here refers to anything.
     (ok (search "<source src=\"media/CAP12G-orbit.mp4\" type=\"video/mp4\">"
                 html))))
 
-(deftest the-loaded-corpus-is-consistent
-  ;; Depending on luv-wiki-site loads every page into its ORG-FILE component.
-  (let* ((system (asdf:find-system :luv-wiki-site))
-         (files (wiki::system-org-files system))
-         (site (wiki::system-site system)))
-    (ok (every #'wiki:org-file-document files))
-    (ok (find "index" files :key #'asdf:component-name :test #'string=))
-    (ok (null (wiki:dangling-mentions site)))
-    (ok (> (hash-table-count (wiki:site-figures site)) 100))
-    ;; RENDER-OP places pages in the site directory, untranslated.
-    (let ((index (find "index" files :key #'asdf:component-name :test #'string=)))
-      (multiple-value-bind (outputs untranslated-p)
-          (asdf:output-files (asdf:make-operation 'wiki:render-op) index)
-        (ok untranslated-p)
-        (ok (equal (pathname-name (first outputs)) "index"))
-        (ok (equal (pathname-type (first outputs)) "html"))))
+(deftest write-site-renders-a-small-site
+  ;; Ordinary reader and renderer tests use a complete but deliberately small
+  ;; site.  The real corpus belongs to `scripts/wiki dangling` and `make wiki`:
+  ;; rendering every wiki and source page is not a useful tax on game changes.
+  (let* ((document (page *page* "index"))
+         (site (wiki:make-site (list document))))
     (let ((directory (uiop:ensure-directory-pathname
                       (uiop:merge-pathnames* "luv-wiki-test-site/" (uiop:temporary-directory)))))
       (unwind-protect
@@ -423,17 +413,18 @@ and *features* stay text; *special* names are code.\"
     (ok (search "<code>*special*</code>" html))
     (ok (not (search "<b>" html)))))
 
-(deftest the-cli-prints-the-corpus
-  (let* ((root (asdf:system-source-directory :luv-wiki-site))
-         (luv.wiki.cli::*root* root)
-         (luv.wiki.cli::*site* nil)
-         (toc (with-output-to-string (*standard-output*) (luv.wiki.cli:run '("toc" "index"))))
-         (marks (with-output-to-string (*standard-output*) (luv.wiki.cli:run '("marks" "done"))))
-         (figure (with-output-to-string (*standard-output*) (luv.wiki.cli:run '("figure" "F2N8VX")))))
-    (ok (search "The luv workshop wiki  (index.org)" toc))
-    (ok (search "  F2N8VX  String figures" toc))
-    (ok (search "DONE" marks))
-    (ok (search "String figures" figure))
+(deftest the-cli-prints-a-small-site
+  (let* ((luv.wiki.cli::*site* (wiki:make-site (list (page))))
+         (toc (with-output-to-string (*standard-output*)
+                (luv.wiki.cli:run '("toc" "test"))))
+         (marks (with-output-to-string (*standard-output*)
+                  (luv.wiki.cli:run '("marks" "next"))))
+         (figure (with-output-to-string (*standard-output*)
+                   (luv.wiki.cli:run '("figure" "XYZ123")))))
+    (ok (search "A test page  (test.org)" toc))
+    (ok (search "  XYZ123  First figure" toc))
+    (ok (search "NEXT" marks))
+    (ok (search "First figure" figure))
     (ok (search "Mentioned in:" figure))))
 
 (deftest platform-gated-systems-remain-in-the-source-corpus
@@ -443,7 +434,7 @@ and *features* stay text; *special* names are code.\"
   ;; ASDF's active SUB-COMPONENTS, so Linux CI can render the Metal sources.
   (let* ((system (asdf:find-system :luv))
          (metal-module (asdf:find-component system '("hal" "metal")))
-         (root (asdf:system-source-directory :luv-wiki-site))
+         (root (asdf:system-source-directory :luv))
          (metal-source (merge-pathnames "hal/metal/gpu.lisp" root)))
     (ok (equal :darwin (asdf/component:component-if-feature metal-module)))
     (ok (find metal-source (wiki:code-source-files) :test #'equal))))

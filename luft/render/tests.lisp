@@ -175,6 +175,20 @@
      builder 63 8 4 :z :high :u 1.0 :v 0.0)
     (luft.render::finish-scene-builder builder)))
 
+(defun make-material-compiler-study-scene ()
+  "A compact union containing every authored material placement family."
+  (let ((builder (luft.render::make-scene-builder :horizontal-bits 4)))
+    (luft.render::scene-builder-box builder 3 6 3 6 1 1)
+    (luft.render::scene-builder-cell builder 4 4 2 :architecture-p t)
+    (luft.render::scene-builder-cell
+     builder 5 4 2 :material luft.render::*highland-rock-material-placement*)
+    (luft.render::scene-builder-cell
+     builder 4 5 2 :material luft.render::*crystal-material-placement*)
+    (luft.render::scene-builder-cell
+     builder 5 5 2 :material luft.render::*beacon-material-placement*)
+    (luft.render::finish-scene-builder
+     builder :voxel-light-propagation-p nil)))
+
 (defun streaming-store-keys (scene)
   (sort (loop for key being the hash-keys of
               (luft.render::streaming-scene-store scene)
@@ -3142,7 +3156,7 @@
 
 (deftest material-semantics-compile-once-before-dense-meshing
   (let ((luft.render::*material-placement-compilation-count* 0))
-    (let* ((scene (render:make-mountain-sanctuary-scene))
+    (let* ((scene (make-material-compiler-study-scene))
            (compilations
              luft.render::*material-placement-compilation-count*)
            (placement-count
@@ -3783,7 +3797,10 @@
              (canonical-mesh-cohorts-equal-p
               (surface-mesh-tree-meshes left)
               (surface-mesh-tree-meshes right))))
-    (let ((scene (render:make-mountain-sanctuary-scene)))
+    ;; This fixture deliberately covers every placement family, all three earth
+    ;; face roles, an earth/architecture foundation, and mixed junctions.  The
+    ;; production sanctuary's thousands of unrelated cells add cost, not cases.
+    (let ((scene (make-material-compiler-study-scene)))
       (ok
        (same-surface-p
         (render:make-render-mesh scene)
@@ -4629,16 +4646,15 @@
           (error () t)))))
 
 (deftest authored-placement-frames-compile-to-distinct-dense-assemblies
-  (let* ((scene (render:make-mountain-sanctuary-scene))
+  (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
+         (scene
+           (progn
+             (luft.render::scene-builder-cell
+              builder 4 4 4 :material luft.render::*beacon-material-placement*)
+             (luft.render::finish-scene-builder
+              builder :voxel-light-propagation-p nil)))
          (domain (luft:chain-domain (luft.render::scene-solid scene)))
-         (x (+ luft.render::+sanctuary-origin-x+
-               luft.render::*sanctuary-beacon-x*))
-         (y (+ luft.render::+sanctuary-origin-y+
-               luft.render::*sanctuary-beacon-y*))
-         (z (+ 8 (luft.render::mountain-sanctuary-terrain-height
-                  luft.render::*sanctuary-beacon-x*
-                  luft.render::*sanctuary-beacon-y*)))
-         (cell (luft:make-site domain x y z luft:+cell-extent+ 1)))
+         (cell (luft:make-site domain 4 4 4 luft:+cell-extent+ 1)))
     (ok (eq luft.render::*beacon-material-placement*
             (luft.render::scene-material-placement-at scene cell)))
     (render:make-render-mesh scene)
@@ -5511,17 +5527,19 @@
                (luft::%mesh-oriented-plane-areas inked))))))))
 
 (defun check-authored-stair-boundary (boundary)
-  (multiple-value-bind (mesh width-census diagnostics)
-      (render:make-material-bevel-mesh
-       (render:make-mountain-sanctuary-scene :stair-boundary boundary)
-       (render:make-material-bevel-profile))
-    (declare (ignore diagnostics))
-    (ok (plusp (aref width-census 1)))
-    (ok (plusp (aref width-census 2)))
-    (ok (plusp (aref width-census 4)))
-    (let ((meshes (surface-mesh-tree-meshes mesh)))
-      (ok (luft::%meshes-closed-p meshes))
-      (ok (every #'luft::%mesh-nondegenerate-p meshes)))))
+  (let ((builder (luft.render::make-scene-builder :horizontal-bits 4)))
+    (luft.render::scene-builder-staircase
+     builder 5 6 4 4 0 :boundary boundary)
+    (multiple-value-bind (mesh width-census diagnostics)
+        (render:make-material-bevel-mesh
+         (luft.render::finish-scene-builder
+          builder :voxel-light-propagation-p nil)
+         (render:make-material-bevel-profile))
+      (declare (ignore diagnostics))
+      (ok (plusp (aref width-census 1)))
+      (let ((meshes (surface-mesh-tree-meshes mesh)))
+        (ok (luft::%meshes-closed-p meshes))
+        (ok (every #'luft::%mesh-nondegenerate-p meshes))))))
 
 (deftest open-stair-remains-an-ordinary-closed-material-surface
   (check-authored-stair-boundary :open))

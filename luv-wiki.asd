@@ -28,7 +28,6 @@ component and operation that make the wiki a buildable system."
   :author "Mikael Brockman"
   :depends-on ("luv-wiki"
                "luv-wiki/cli"
-               "luv-wiki-site"
                "rove")
   :components ((:module "wiki"
                 :components ((:file "tests"))))
