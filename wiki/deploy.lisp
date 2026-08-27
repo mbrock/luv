@@ -43,39 +43,41 @@
     (lambda (respond)
       (let ((write (funcall respond
                             '(200 (:content-type "text/event-stream"
-                                   :cache-control "no-store")))))
+                                   :cache-control "no-store"))))
+            (event-loop woo.ev:*evloop*))
         (sb-thread:make-thread
          (lambda ()
-           (handler-case
-               (let ((position 0)
-                     (buffer (make-array 4096 :element-type '(unsigned-byte 8))))
-                 (loop
-                   (when (probe-file log)
-                     (with-open-file (input log :element-type '(unsigned-byte 8))
-                       (file-position input position)
-                       (loop for count = (read-sequence buffer input)
-                             while (plusp count)
-                             do (incf position count)
-                                (funcall write
-                                         (format nil "event: terminal~%data: ~A~%~%"
-                                                 (octets-hex-string buffer count))))))
-                   (when (and (probe-file done)
-                              (or (not (probe-file log))
-                                  (= position
-                                     (with-open-file (input log
-                                                           :element-type '(unsigned-byte 8))
-                                       (file-length input)))))
-                     (let ((status (string-trim '(#\Space #\Tab #\Newline #\Return)
-                                                (uiop:read-file-string done))))
-                       (funcall write (format nil "event: done~%data: ~A~%~%" status)
-                                :close t))
-                     (return))
-                   (sleep 0.1)))
-             (condition (condition)
-               (ignore-errors
-                 (funcall write
-                          (format nil "event: failed~%data: ~A~%~%" condition)
-                          :close t)))))
+           (let ((woo.ev:*evloop* event-loop))
+             (handler-case
+                 (let ((position 0)
+                       (buffer (make-array 4096 :element-type '(unsigned-byte 8))))
+                   (loop
+                     (when (probe-file log)
+                       (with-open-file (input log :element-type '(unsigned-byte 8))
+                         (file-position input position)
+                         (loop for count = (read-sequence buffer input)
+                               while (plusp count)
+                               do (incf position count)
+                                  (funcall write
+                                           (format nil "event: terminal~%data: ~A~%~%"
+                                                   (octets-hex-string buffer count))))))
+                     (when (and (probe-file done)
+                                (or (not (probe-file log))
+                                    (= position
+                                       (with-open-file (input log
+                                                             :element-type '(unsigned-byte 8))
+                                         (file-length input)))))
+                       (let ((status (string-trim '(#\Space #\Tab #\Newline #\Return)
+                                                  (uiop:read-file-string done))))
+                         (funcall write (format nil "event: done~%data: ~A~%~%" status)
+                                  :close t))
+                       (return))
+                     (sleep 0.1)))
+               (condition (condition)
+                 (ignore-errors
+                   (funcall write
+                            (format nil "event: failed~%data: ~A~%~%" condition)
+                            :close t))))))
          :name (format nil "luv deployment ~A" id))))))
 
 (in-package #:luv.wiki.deploy)
