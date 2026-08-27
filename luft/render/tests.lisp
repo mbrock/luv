@@ -317,6 +317,21 @@
     (luft.render::scene-builder-cell builder 4 4 4)
     (render:make-render-mesh (luft.render::finish-scene-builder builder))))
 
+(deftest global-torch-frames-follow-their-sparse-owner-without-padding
+  (let* ((empty (make-renderer-publication-test-mesh))
+         (torch (make-renderer-publication-test-mesh))
+         (frame
+           (render:pack-torch-flame-frame
+            0 0 0 0.25 0 0 1 0 1 0 0 1)))
+    (setf (luft:surface-mesh-attachments torch) (list frame))
+    (let ((data
+            (luft.render::mesh-slots-torch-frame-data
+             (list
+              (cons 0 (luft.render::%make-mesh-slot :mesh empty))
+              (cons 1 (luft.render::%make-mesh-slot :mesh torch))))))
+      (ok (= render:+torch-flame-instance-scalar-count+ (length data)))
+      (ok (equalp frame data)))))
+
 (defun make-renderer-target-probe (temporal-p &optional
                                                 (temporal-kind
                                                   (and temporal-p :metalfx)))
@@ -795,6 +810,148 @@
             (list before)
             (list (render:mesh-streaming-chunk
                    scene left luft:+mesh-bevel-width+))))))))
+
+(deftest streaming-cell-edits-publish-reversible-chain-material-and-light-state
+  (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
+         (x 4) (y 5) (z 3))
+    (luft.render::scene-builder-cell builder x y z)
+    (let* ((scene
+             (render:make-streaming-scene
+              (luft.render::finish-scene-builder builder)))
+           (domain (luft:chain-domain (render:scene-solid scene)))
+           (cell (luft:make-site domain x y z luft:+cell-extent+ 1))
+           (original (render:scene-solid scene))
+           (original-light-revision
+             (luft.render::scene-authored-light-revision scene)))
+      (multiple-value-bind (removal status key)
+          (luft.render::edit-streaming-scene-cell scene cell nil)
+        (ok (eq :edited status))
+        (ok (= key (luft:site-chunk-key cell)))
+        (ok (eq luft.render::*terrain-material-placement*
+                (luft.render::scene-edit-old-placement removal)))
+        (ok (null (luft.render::scene-edit-new-placement removal)))
+        (ok (zerop (luft:chain-cell-occupancy-bit
+                    (render:scene-solid scene) x y z)))
+        (ok (null (nth-value 1
+                            (gethash cell
+                                     (luft.render::scene-material-cells scene)))))
+        (ok (= 1 (luft.render::scene-content-revision scene)))
+        (ok (= (1+ original-light-revision)
+               (luft.render::scene-authored-light-revision scene)))
+        (multiple-value-bind (restoration restoration-status restored-key)
+            (luft.render::edit-streaming-scene-cell
+             scene cell (luft.render::scene-edit-old-placement removal))
+          (declare (ignore restoration))
+          (ok (eq :edited restoration-status))
+          (ok (= key restored-key))
+          (ok (luft:chain= original (render:scene-solid scene)))
+          (ok (eq luft.render::*terrain-material-placement*
+                  (luft.render::scene-material-placement-at scene cell)))
+          (ok (= 2 (luft.render::scene-content-revision scene))))))))
+
+(deftest an-authored-edit-cannot-change-an-existing-worker-snapshot
+  (let* ((scene (make-two-chunk-streaming-scene))
+         (cell
+           (luft:make-site
+            (luft:chain-domain (render:scene-solid scene))
+            63 4 4 luft:+cell-extent+ 1))
+         (left (luft:site-chunk-key cell)))
+    (setf (gethash left (luft.render::streaming-scene-loaded scene)) 2)
+    (let* ((snapshot
+             (luft.render::make-streaming-mesh-snapshot scene left 2))
+           (input (luft.render::streaming-mesh-snapshot-input-scene snapshot))
+           (request
+             (make-instance 'luft.render::streaming-mesh-request
+                            :key luft.render::+streaming-cohort-production-key+
+                            :snapshot snapshot)))
+      (multiple-value-bind (edit status key)
+          (luft.render::edit-streaming-scene-cell scene cell nil)
+        (declare (ignore edit key))
+        (ok (eq :edited status)))
+      (ok (not (luft.render::current-streaming-mesh-request-p scene request)))
+      (ok (= 1 (luft:chain-cell-occupancy-bit
+                (render:scene-solid input) 63 4 4)))
+      (ok (eq luft.render::*terrain-material-placement*
+              (luft.render::scene-material-placement-at input cell)))
+      (ok (zerop (luft:chain-cell-occupancy-bit
+                  (render:scene-solid scene) 63 4 4)))
+      ;; Executing the obsolete request remains valid and cannot observe the
+      ;; replacement material table or authored light generation.
+      (ok (prepared-owner-mesh
+           (production:perform-production-request request) left)))))
+
+(deftest placing-an-inactive-material-recloses-the-scene-material-program
+  (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
+         (x 4) (y 5) (z 3))
+    (luft.render::scene-builder-cell builder x y z)
+    (let* ((scene
+             (render:make-streaming-scene
+              (luft.render::finish-scene-builder builder)))
+           (domain (luft:chain-domain (render:scene-solid scene)))
+           (cell (luft:make-site domain (1+ x) y z luft:+cell-extent+ 1))
+           (old-program (luft.render::scene-material-program scene)))
+      (ok (= 7 (luft.render::material-program-summary-count old-program)))
+      (multiple-value-bind (edit status key)
+          (luft.render::edit-streaming-scene-cell
+           scene cell luft.render::*crystal-material-placement*)
+        (declare (ignore edit key))
+        (ok (eq :edited status)))
+      (ok (< (luft.render::material-program-summary-count old-program)
+             (luft.render::material-program-summary-count
+              (luft.render::scene-material-program scene))))
+      (ok (render:make-render-mesh scene)))))
+
+(deftest a-scheduled-cell-edit-is-one-busy-publication-cohort
+  (let* ((scene (make-two-chunk-streaming-scene))
+         (domain (luft:chain-domain (render:scene-solid scene)))
+         (left-cell
+           (luft:make-site domain 63 4 4 luft:+cell-extent+ 1))
+         (right-cell
+           (luft:make-site domain 64 4 4 luft:+cell-extent+ 1))
+         (system
+           (production:make-single-worker-production-system
+            :name "LUFT authored edit publication test")))
+    (load-all-streaming-chunks scene 2)
+    (unwind-protect
+         (multiple-value-bind (edit status key)
+             (luft.render::edit-streaming-scene-cell scene left-cell nil)
+           (declare (ignore edit))
+           (ok (eq :edited status))
+           (let ((affected
+                   (luft.render::schedule-streaming-scene-edit
+                    scene system key 2 nil)))
+             (ok affected)
+             (ok (equal affected
+                        (luft.render::streaming-scene-cohort scene)))
+             (multiple-value-bind (next next-status next-key)
+                 (luft.render::edit-streaming-scene-cell
+                  scene right-cell nil)
+               (ok (null next))
+               (ok (eq :busy next-status))
+               (ok (null next-key)))))
+      (production:stop-production-system system))))
+
+(deftest torch-attachments-protect-their-support-and-clearance-cells
+  (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
+         (x 4) (y 5) (z 3))
+    (luft.render::scene-builder-cell builder x y z :architecture-p t)
+    (luft.render::scene-builder-torch builder x y z :z :high)
+    (let* ((scene
+             (render:make-streaming-scene
+              (luft.render::finish-scene-builder builder)))
+           (domain (luft:chain-domain (render:scene-solid scene)))
+           (support (luft:make-site domain x y z luft:+cell-extent+ 1))
+           (clearance
+             (luft:make-site domain x y (1+ z) luft:+cell-extent+ 1)))
+      (dolist (edit (list (list support nil)
+                          (list clearance
+                                luft.render::*terrain-material-placement*)))
+        (multiple-value-bind (record status key)
+            (luft.render::edit-streaming-scene-cell
+             scene (first edit) (second edit))
+          (ok (null record))
+          (ok (eq :attachment status))
+          (ok (null key)))))))
 
 (deftest streaming-temporary-boundaries-use-resident-source-materials
   (labels ((make-scene (include-crystal-p)
@@ -2471,6 +2628,11 @@
                (luft.render::viewer-key-command viewer (key-press :c))))
     (ok (equal '(luft.render::com-toggle-bevel-width)
                (luft.render::viewer-key-command viewer (key-press :b))))
+    (ok (equal '(luft.render::com-rotate-view-clockwise)
+               (luft.render::viewer-key-command viewer (key-press :tab))))
+    (ok (equal '(luft.render::com-rotate-view-counterclockwise)
+               (luft.render::viewer-key-command
+                viewer (key-press :tab :modifiers '(:shift)))))
     (ok (equal '(luft.render::com-toggle-fullscreen)
                (luft.render::viewer-key-command viewer (key-press :f11))))
     (ok (equal '(luft.render::com-toggle-viewer-mode)
@@ -2485,6 +2647,67 @@
     (clim:execute-frame-command
      viewer (luft.render::viewer-key-command viewer (key-release :w)))
     (ok (not (luft.render::viewer-control-active-p viewer :forward)))))
+
+(deftest tab-orbits-the-following-camera-in-eighth-turns
+  (let* ((viewer (clim:make-application-frame 'render:viewer))
+         (camera (render:viewer-camera viewer)))
+    (setf (render:camera-yaw camera) 0.0)
+    (luft.render::rotate-viewer-eighth-turn viewer 1)
+    (ok (< (abs (- (/ pi 4) (render:camera-yaw camera))) 1.0e-6))
+    (luft.render::rotate-viewer-eighth-turn viewer -1)
+    (ok (< (abs (render:camera-yaw camera)) 1.0e-6))
+    (setf (render:viewer-mode viewer) (make-instance 'render:orbit-mode))
+    (luft.render::rotate-viewer-eighth-turn viewer 1)
+    (ok (< (abs (render:camera-yaw camera)) 1.0e-6))))
+
+(deftest world-edit-mode-enters-exits-and-protects-the-player
+  (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
+         (player
+           (render:make-walking-player
+            :position (luv.arithmetic.lisp.vec3:make-vec3 1.5 2.5 1.0))))
+    (luft.render::scene-builder-cell builder 1 2 0)
+    (let* ((scene
+             (render:make-streaming-scene
+              (luft.render::finish-scene-builder builder)))
+           (domain (luft:chain-domain (render:scene-solid scene)))
+           (player-cell
+             (luft:make-site domain 1 2 1 luft:+cell-extent+ 1))
+           (viewer
+             (clim:make-application-frame
+              'render:viewer :source scene :production-system t
+                             :player player)))
+      (let ((clim:*application-frame* viewer))
+        (luft.render::com-enter-world-edit-mode)
+        (ok (typep (render:viewer-mode viewer) 'render:world-edit-mode))
+        (ok (eq :ready (luft.render::viewer-last-edit-status viewer)))
+        (multiple-value-bind (edit status)
+            (luft.render::record-viewer-world-edit
+             viewer player-cell luft.render::*terrain-material-placement*)
+          (ok (null edit))
+          (ok (eq :player status))
+          (ok (zerop (luft:chain-cell-occupancy-bit
+                      (render:scene-solid scene) 1 2 1))))
+        (luft.render::com-release-pointer)
+        (ok (typep (render:viewer-mode viewer)
+                   'render:isometric-walk-mode))
+        (ok (not (typep (render:viewer-mode viewer)
+                        'render:world-edit-mode)))))))
+
+(deftest an-inspected-outward-face-selects-its-adjacent-empty-cell
+  (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
+         (x 4) (y 5) (z 3))
+    (luft.render::scene-builder-cell builder x y z)
+    (let* ((scene (luft.render::finish-scene-builder builder))
+           (inspection
+             (luft.render::raycast-site
+              scene
+              (luv.arithmetic.lisp.vec3:make-vec3 (+ x 0.5) (+ y 0.5) 10.0)
+              (luv.arithmetic.lisp.vec3:make-vec3 0.0 0.0 -1.0)))
+           (adjacent
+             (luft.render::site-inspection-adjacent-cell inspection)))
+      (ok (= x (luft:site-x adjacent)))
+      (ok (= y (luft:site-y adjacent)))
+      (ok (= (1+ z) (luft:site-z adjacent))))))
 
 (deftest click-to-walk-routes-around-a-character-high-wall
   (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))

@@ -82,6 +82,12 @@
            #:renderer-remove-mesh #:renderer-clear-meshes
            #:streaming-scene #:make-streaming-scene
            #:streaming-scene-light-generation
+           #:scene-edit
+           #:scene-edit-cell
+           #:scene-edit-old-placement
+           #:scene-edit-new-placement
+           #:scene-edit-content-revision
+           #:edit-streaming-scene-cell
            #:mesh-streaming-chunk
            #:make-highland-sanctuary-scene
            #:fly-camera
@@ -110,6 +116,7 @@
            #:viewer-camera
            #:viewer-mode
            #:isometric-walk-mode
+           #:world-edit-mode
            #:orbit-mode
            #:viewer-inspection
            #:site-inspection

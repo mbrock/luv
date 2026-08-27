@@ -33,25 +33,27 @@ dynamically bind a real value to reproduce the exact same flame field.")
 (defparameter *sanctuary-beacon-y* 54)
 
 (defclass scene ()
-  ((solid :initarg :solid :reader scene-solid)
+  ((solid :initarg :solid :accessor scene-solid)
    (material-vocabulary :initarg :material-vocabulary
                         :reader scene-material-vocabulary)
-   (material-cells :initarg :material-cells :reader scene-material-cells)
+   (material-cells :initarg :material-cells :accessor scene-material-cells)
    (material-program :initarg :material-program
-                     :reader scene-material-program)
+                     :accessor scene-material-program)
    (authored-light-sources
-    :initarg :authored-light-sources :reader scene-authored-light-sources)
+    :initarg :authored-light-sources :accessor scene-authored-light-sources)
    (authored-light-opacity-table
     :initarg :authored-light-opacity-table
     :reader scene-authored-light-opacity-table)
    (authored-light-revision
-    :initarg :authored-light-revision :reader scene-authored-light-revision)
+    :initarg :authored-light-revision :accessor scene-authored-light-revision)
    (authored-light-provenance
     :initarg :authored-light-provenance
     :reader scene-authored-light-provenance)
    (authored-light-generation
     :initarg :authored-light-generation
-    :reader scene-authored-light-generation)
+    :accessor scene-authored-light-generation)
+   (content-revision
+    :initarg :content-revision :initform 0 :accessor scene-content-revision)
    (torch-light-emission
     :initarg :torch-light-emission
     :reader scene-torch-light-emission)
@@ -1283,7 +1285,8 @@ diagnostic owner NIL remains a single-mesh special form."
      &key surface-context
        (attachment-source-owners nil attachment-source-owners-p)
        request-stamp reusable-light-generation
-       (realize-torch-light-p t))
+       (realize-torch-light-p t)
+       (generation-scene scene))
   "Realize immutable light and final-surface semantic frames for OWNERS.
 
 OWNERS is an alist of canonical chunk owner to a finished surface mesh.  A NIL
@@ -1342,7 +1345,7 @@ mesh light sidecars and packed body/flame frames finalized."
     (values
      owners
      (make-scene-mesh-generation-value
-      scene request-stamp light-generation :mesh-entries owners))))
+      generation-scene request-stamp light-generation :mesh-entries owners))))
 
 (defun decorate-scene-mesh (mesh scene &optional chunk-key)
   "Compatibility wrapper around cohort-aware final-surface decoration."
@@ -2102,9 +2105,10 @@ ambiguously co-owned, or retired by a population rollback."
                    entries))
          (length (reduce #'+ runs :key #'length :initial-value 0))
          (data (make-array length :element-type 'single-float)))
-    (loop for run in runs
-          for offset = 0 then (+ offset (length run))
-          do (replace data run :start1 offset))
+    (loop with offset = 0
+          for run in runs
+          do (replace data run :start1 offset)
+             (incf offset (length run)))
     data))
 
 (defclass renderer ()
@@ -4987,11 +4991,15 @@ exactly when its complete old descriptor vector is a prefix of the new one."
 
 (defstruct (streaming-mesh-snapshot
              (:constructor %make-streaming-mesh-snapshot
-                 (scene output-keys witness-keys resident-source-keys
+                 (scene input-scene output-keys witness-keys resident-source-keys
                   bevel-width bevel-profile union-neighborhood stamp
                   realize-torch-light-p reusable-light-generation)))
   "Immutable CPU input for one dependency-closed regional mesh request."
   (scene nil :read-only t)
+  ;; The owning streaming scene remains mutable on the canvas thread.  Workers
+  ;; borrow this frozen scene value so a later edit cannot mix new materials or
+  ;; light with the snapshot's old occupancy chains.
+  (input-scene nil :type scene :read-only t)
   (output-keys nil :type list :read-only t)
   (witness-keys nil :type list :read-only t)
   ;; Logical authored residency is deliberately distinct from OUTPUT-KEYS:
@@ -5043,6 +5051,7 @@ a future LoD must bring an explicit transition representation."
                     (scene-authored-light-provenance scene)
                     :authored-light-generation
                     (scene-authored-light-generation scene)
+                    :content-revision (scene-content-revision scene)
                     :torch-light-emission
                     (scene-torch-light-emission scene)
                     :voxel-light-propagation-p
@@ -5057,6 +5066,162 @@ a future LoD must bring an explicit transition representation."
        (setf (gethash key (streaming-scene-store streaming)) chain))
      (scene-solid scene))
     streaming))
+
+(defun snapshot-streaming-scene-input (scene)
+  "Freeze SCENE's replace-only authored values for a worker request."
+  (make-instance
+   'scene
+   :solid (scene-solid scene)
+   :material-vocabulary (scene-material-vocabulary scene)
+   :material-cells (scene-material-cells scene)
+   :material-program (scene-material-program scene)
+   :authored-light-sources (scene-authored-light-sources scene)
+   :authored-light-opacity-table (scene-authored-light-opacity-table scene)
+   :authored-light-revision (scene-authored-light-revision scene)
+   :authored-light-provenance (scene-authored-light-provenance scene)
+   :authored-light-generation (scene-authored-light-generation scene)
+   :content-revision (scene-content-revision scene)
+   :torch-light-emission (scene-torch-light-emission scene)
+   :voxel-light-propagation-p (scene-voxel-light-propagation-p scene)
+   :torches (scene-torches scene)
+   :player-p (scene-player-p scene)))
+
+(defstruct (scene-edit
+             (:constructor %make-scene-edit
+                 (cell old-placement new-placement content-revision))
+             (:copier nil))
+  "One reversible authored cell transition already published to a scene."
+  (cell 0 :type luft:site :read-only t)
+  (old-placement nil :type (or null material-placement) :read-only t)
+  (new-placement nil :type (or null material-placement) :read-only t)
+  (content-revision 0 :type (integer 0 *) :read-only t))
+
+(defun copy-scene-material-cells (scene)
+  "Copy SCENE's replace-only cell-to-placement-offset field."
+  (let ((copy (make-hash-table
+               :test #'eql :size (hash-table-count
+                                   (scene-material-cells scene)))))
+    (maphash (lambda (cell offset) (setf (gethash cell copy) offset))
+             (scene-material-cells scene))
+    copy))
+
+(defun scene-edit-torch-conflict-p (scene cell)
+  "Whether changing CELL would invalidate a retained torch attachment."
+  (loop for attachment across (scene-torches scene)
+        thereis (or (= cell (torch-attachment-support-cell attachment))
+                    (= cell (torch-attachment-clearance-cell attachment)))))
+
+(defun make-cell-chain-delta (domain cell polarity)
+  (let ((builder (luft:make-chain-builder domain :initial-capacity 1)))
+    (luft:chain-builder-add-site
+     builder (luft:site-with-polarity cell polarity))
+    (luft:finish-chain-builder builder)))
+
+(defun edit-streaming-scene-cell (scene cell new-placement)
+  "Publish one complete authored cell edit and return EDIT, status, and chunk.
+
+NEW-PLACEMENT fills an empty cell with an existing scene vocabulary member;
+NIL removes an occupied cell.  All successor chains, material state, and light
+are constructed before the canvas-owned scene is changed.  Active production
+is deliberately rejected; the caller may retry after its current cohort has
+published."
+  (check-type scene streaming-scene)
+  (check-type cell luft:site)
+  (when new-placement (check-type new-placement material-placement))
+  (when (or (streaming-scene-cohort scene)
+            (streaming-scene-removals scene))
+    (return-from edit-streaming-scene-cell (values nil :busy nil)))
+  (let* ((solid (scene-solid scene))
+         (domain (luft:chain-domain solid)))
+    (luft:checked-site domain cell)
+    (unless (and (= (luft:site-extent cell) luft:+cell-extent+)
+                 (luft:site-positive-p cell))
+      (error "A scene edit needs one positive cell in the scene domain, not ~S."
+             cell))
+    (when (scene-edit-torch-conflict-p scene cell)
+      (return-from edit-streaming-scene-cell (values nil :attachment nil)))
+    (multiple-value-bind (old-offset occupied-p)
+        (gethash cell (scene-material-cells scene))
+      (unless (eql occupied-p
+                   (= 1 (luft:chain-cell-occupancy-bit
+                         solid (luft:site-x cell) (luft:site-y cell)
+                         (luft:site-z cell))))
+        (error "Scene occupancy and material state disagree at ~S." cell))
+      (cond ((and new-placement occupied-p)
+             (return-from edit-streaming-scene-cell
+               (values nil :occupied nil)))
+            ((and (null new-placement) (not occupied-p))
+             (return-from edit-streaming-scene-cell
+               (values nil :empty nil))))
+      (let ((new-offset
+              (and new-placement
+                   (domains:identity-vocabulary-offset
+                    (scene-material-vocabulary scene) new-placement nil))))
+        (when (and new-placement (null new-offset))
+          (return-from edit-streaming-scene-cell
+            (values nil :unknown-material nil)))
+        (let* ((material-cells (copy-scene-material-cells scene))
+               (polarity (if new-placement 1 -1))
+               (delta (make-cell-chain-delta domain cell polarity))
+               (new-solid (luft:chain+ solid delta))
+               (key (luft:site-chunk-key cell))
+               (empty (luft:make-chain domain))
+               (old-chunk
+                 (gethash key (streaming-scene-store scene) empty))
+               (new-chunk (luft:chain+ old-chunk delta))
+               (light-revision (1+ (scene-authored-light-revision scene))))
+          (if new-placement
+              (setf (gethash cell material-cells) new-offset)
+              (remhash cell material-cells))
+          (let* ((material-program
+                   (if new-placement
+                       (make-material-program
+                        (scene-material-vocabulary scene)
+                        :active-placement-offsets
+                        (sort
+                         (remove-duplicates
+                          (loop for offset being the hash-values of material-cells
+                                collect offset)
+                          :test #'=)
+                         #'<))
+                       (scene-material-program scene)))
+                 (sources
+                   (coerce
+                    (sort
+                     (compile-material-light-sources
+                      material-cells (scene-material-vocabulary scene))
+                     #'<)
+                    '(simple-array (unsigned-byte 64) (*))))
+                 (base-generation
+                   (solve-realized-light-generation
+                    domain material-cells
+                    (scene-authored-light-opacity-table scene)
+                    (if (scene-voxel-light-propagation-p scene) sources #())
+                    (scene-authored-light-provenance scene) light-revision
+                    (make-realized-light-seeds #() #())
+                    :field-revision light-revision))
+                 (content-revision (1+ (scene-content-revision scene)))
+                 (edit
+                   (%make-scene-edit
+                    cell
+                    (and occupied-p
+                         (domains:identity-vocabulary-member
+                          (scene-material-vocabulary scene) old-offset))
+                    new-placement content-revision)))
+            ;; These values are replace-only.  Existing worker snapshots retain
+            ;; the old chains, hash table, and light generation without copying.
+            (setf (scene-solid scene) new-solid
+                  (scene-material-cells scene) material-cells
+                  (scene-material-program scene) material-program
+                  (scene-authored-light-sources scene) sources
+                  (scene-authored-light-revision scene) light-revision
+                  (scene-authored-light-generation scene) base-generation
+                  (scene-content-revision scene) content-revision
+                  (streaming-scene-light-generation scene) base-generation)
+            (if (luft:chain-empty-p new-chunk)
+                (remhash key (streaming-scene-store scene))
+                (setf (gethash key (streaming-scene-store scene)) new-chunk))
+            (values edit :edited key)))))))
 
 (defun reset-streaming-scene-publication (scene)
   "Forget renderer-specific residency while retaining SCENE's immutable store."
@@ -5322,13 +5487,14 @@ chunk is empty; excluding that owner drops real boundary triangles."
                  (torch-attachment-chart-v attachment)))))
 
 (defun streaming-scene-mesh-stamp (scene output-keys bevel-width bevel-profile)
-  "Name exact owner, width/profile, authored-light, and torch request inputs."
+  "Name exact content, owner, geometry, light, and torch request inputs."
   (let ((resident-source-keys
           (sort
            (loop for key being the hash-keys of (streaming-scene-loaded scene)
                  collect key)
            #'<)))
-    (list :scene-mesh-request-v1
+    (list :scene-mesh-request-v2
+          (scene-content-revision scene)
           (copy-list output-keys)
           bevel-width
           (material-bevel-profile-geometry-signature bevel-profile)
@@ -5374,7 +5540,8 @@ chunk is empty; excluding that owner drops real boundary triangles."
                 (gethash key store empty)
                 empty)))
     (%make-streaming-mesh-snapshot
-     scene output-keys witness-keys resident-source-keys
+     scene (snapshot-streaming-scene-input scene)
+     output-keys witness-keys resident-source-keys
      bevel-width bevel-profile
      union-neighborhood
      (streaming-scene-mesh-stamp
@@ -5397,7 +5564,8 @@ The first value is an alist of output owner to final mesh.  A material profile
 is evaluated once over all guarded width-one witnesses, so shared sites and
 medial-collapse repairs cannot diverge at chunk seams."
   (luft:with-surface-mesh-workspace ()
-    (let* ((scene (streaming-mesh-snapshot-scene snapshot))
+    (let* ((owner-scene (streaming-mesh-snapshot-scene snapshot))
+           (scene (streaming-mesh-snapshot-input-scene snapshot))
            (neighborhood (streaming-mesh-snapshot-union-neighborhood snapshot))
            (material-program (scene-material-program scene))
            (material-source (make-scene-material-source scene))
@@ -5423,6 +5591,7 @@ medial-collapse repairs cannot diverge at chunk seams."
                (decorate-owners (owners &optional surface-context)
                  (decorate-scene-meshes
                   owners scene :surface-context surface-context
+                  :generation-scene owner-scene
                   :attachment-source-owners
                   (streaming-mesh-snapshot-resident-source-keys snapshot)
                   :request-stamp (streaming-mesh-snapshot-stamp snapshot)
@@ -5640,6 +5809,43 @@ generation before publication succeeds."
     (dolist (key output-keys)
       (setf (gethash key (streaming-scene-outstanding scene)) ticket))
     request))
+
+(defun schedule-streaming-scene-edit
+    (scene production-system changed-source-key bevel-width bevel-profile)
+  "Remesh the resident scene after one already-published authored edit."
+  (check-type scene streaming-scene)
+  (when (or (streaming-scene-cohort scene)
+            (streaming-scene-removals scene))
+    (error "Cannot schedule an edit while another streaming cohort is active."))
+  (let ((loaded (streaming-scene-loaded scene)))
+    ;; Placement can create the first occupied cell in the empty chunk beside a
+    ;; rendered seam.  Admit that source until ordinary camera retargeting next
+    ;; applies the bounded residency window.
+    (unless (nth-value 1 (gethash changed-source-key loaded))
+      (when (loop for key being the hash-keys of loaded
+                  thereis (chunk-keys-neighbor-p key changed-source-key))
+        (setf (gethash changed-source-key loaded) bevel-width)))
+    (let* ((source-keys
+             (sort (loop for key being the hash-keys of loaded collect key) #'<))
+           ;; Authored voxel and torch light share one resident field.  Until an
+           ;; incremental light solver exists, every resident owner must receive
+           ;; the newly solved immutable field together.
+           (affected
+             (streaming-scene-canonical-owner-closure scene source-keys)))
+      (when affected
+        (setf (streaming-scene-cohort scene) affected
+              (streaming-scene-removals scene) nil
+              (streaming-scene-frame-counter scene) 0)
+        (schedule-streaming-scene-cohort
+         scene production-system affected bevel-width bevel-profile
+         (if (streaming-scene-focus scene)
+             (reduce #'min affected
+                     :key (lambda (key)
+                            (streaming-scene-key-distance
+                             key (streaming-scene-focus scene))))
+             0)
+         :realize-torch-light-p t))
+      affected)))
 
 (defun schedule-streaming-scene-mesh
     (scene production-system key bevel-width priority &optional bevel-profile

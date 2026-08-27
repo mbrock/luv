@@ -41,6 +41,10 @@ predict.")
   (:documentation
    "Absolute-pointer LUFT play: hover terrain, click a route, scroll zoom."))
 
+(defclass world-edit-mode (isometric-walk-mode) ()
+  (:documentation
+   "Absolute-pointer authoring: inspect terrain and edit its occupied cells."))
+
 (defclass orbit-mode (viewer-mode) ()
   (:documentation
    "The original relative-pointer atelier orbit and direct keyboard mode."))
@@ -109,6 +113,21 @@ at the atelier boundary where a person has selected one site."))
           (setf (camera-position camera)
                 (vec3:make-vec3 (+ 70.0 +sanctuary-origin-x+)
                                 (+ -18.0 +sanctuary-origin-y+) 50.0)))
+      (when (viewer-renderer viewer)
+        (setf (renderer-history-valid-p (viewer-renderer viewer)) nil))))
+  viewer)
+
+(defun rotate-viewer-eighth-turn (viewer direction)
+  "Orbit VIEWER's following isometric camera by one signed eighth-turn."
+  (check-type direction (member -1 1))
+  (when (typep (viewer-mode viewer) 'isometric-walk-mode)
+    (let ((camera (viewer-camera viewer))
+          (player (viewer-player viewer)))
+      (setf (camera-yaw camera)
+            (mod (+ (camera-yaw camera) (* direction (/ pi 4))) (* 2 pi)))
+      (when player
+        (follow-walking-player camera player)
+        (constrain-viewer-follow-camera viewer))
       (when (viewer-renderer viewer)
         (setf (renderer-history-valid-p (viewer-renderer viewer)) nil))))
   viewer)
@@ -485,6 +504,82 @@ the selector is the whole of the difference."
      (viewer-player viewer)
      (viewer-fireball-target viewer origin direction))))
 
+(defun site-inspection-adjacent-cell (inspection)
+  "Return the empty-side cell immediately outside INSPECTION's face."
+  (let* ((source (site-inspection-source inspection))
+         (domain (luft:chain-domain (inspection-source-solid source)))
+         (cell (site-inspection-cell inspection)))
+    (multiple-value-bind (dx dy dz)
+        (luft:face-oriented-normal (site-inspection-site inspection))
+      (luft:make-site
+       domain (+ (luft:site-x cell) dx) (+ (luft:site-y cell) dy)
+       (+ (luft:site-z cell) dz) luft:+cell-extent+ 1))))
+
+(defun walking-player-overlaps-cell-p (player cell)
+  "Whether PLAYER's point footprint and standing height intersect CELL."
+  (let* ((position (walking-player-position player))
+         (base-z (vec3:vec3-z position))
+         (cell-z (luft:site-z cell)))
+    (and (= (floor (vec3:vec3-x position)) (luft:site-x cell))
+         (= (floor (vec3:vec3-y position)) (luft:site-y cell))
+         (< cell-z (+ base-z +walking-player-height+))
+         (< base-z (1+ cell-z)))))
+
+(defun apply-viewer-world-edit (viewer cell placement)
+  "Apply and schedule one edit, returning its record and status."
+  (let ((scene (viewer-source viewer))
+        (production-system (viewer-production-system viewer)))
+    (cond
+      ((or (not (typep scene 'streaming-scene)) (null production-system))
+       (setf (viewer-last-edit-status viewer) :not-editable)
+       (values nil :not-editable))
+      ((and placement (viewer-player viewer)
+            (walking-player-overlaps-cell-p (viewer-player viewer) cell))
+       (setf (viewer-last-edit-status viewer) :player)
+       (values nil :player))
+      (t
+       (multiple-value-bind (edit status key)
+           (edit-streaming-scene-cell scene cell placement)
+         (when edit
+           (schedule-streaming-scene-edit
+            scene production-system key (viewer-bevel-width viewer)
+            (viewer-bevel-profile viewer))
+           (setf (viewer-inspection viewer) nil))
+         (setf (viewer-last-edit-status viewer) status)
+         (values edit status))))))
+
+(defun record-viewer-world-edit (viewer cell placement)
+  (multiple-value-bind (edit status)
+      (apply-viewer-world-edit viewer cell placement)
+    (when edit
+      (push edit (viewer-edit-undo-history viewer))
+      (setf (viewer-edit-redo-history viewer) nil))
+    (values edit status)))
+
+(defun undo-viewer-world-edit (viewer)
+  (let ((original (first (viewer-edit-undo-history viewer))))
+    (when original
+      (multiple-value-bind (inverse status)
+          (apply-viewer-world-edit
+           viewer (scene-edit-cell original) (scene-edit-old-placement original))
+        (declare (ignore inverse))
+        (when (eq status :edited)
+          (pop (viewer-edit-undo-history viewer))
+          (push original (viewer-edit-redo-history viewer)))
+        status))))
+
+(defun redo-viewer-world-edit (viewer)
+  (let ((original (first (viewer-edit-redo-history viewer))))
+    (when original
+      (multiple-value-bind (replay status)
+          (apply-viewer-world-edit
+           viewer (scene-edit-cell original) (scene-edit-new-placement original))
+        (declare (ignore replay))
+        (when (eq status :edited)
+          (pop (viewer-edit-redo-history viewer))
+          (push original (viewer-edit-undo-history viewer)))
+        status))))
+
 (defun same-inspected-site-p (left right)
   (or (eq left right)
       (and left right
@@ -785,6 +880,11 @@ before the operation boundary, or it would encode through resources which the
    (pointer-x :initform nil :accessor viewer-pointer-x)
    (pointer-y :initform nil :accessor viewer-pointer-y)
    (inspection :initform nil :accessor viewer-inspection)
+   (edit-material :initform *terrain-material-placement*
+                  :accessor viewer-edit-material)
+   (edit-undo-history :initform nil :accessor viewer-edit-undo-history)
+   (edit-redo-history :initform nil :accessor viewer-edit-redo-history)
+   (last-edit-status :initform nil :accessor viewer-last-edit-status)
    (inspector-p :initarg :inspector-p :initform nil
                 :accessor viewer-inspector-p)
    (inspector-mirror :initform nil :accessor viewer-inspector-mirror)
@@ -1035,10 +1135,13 @@ before the operation boundary, or it would encode through resources which the
     ()
   (let* ((viewer (viewer-command-viewer))
          (canvas (viewer-canvas viewer)))
-    (clear-viewer-controls viewer)
-    (when (viewer-pointer-captured-p viewer)
-      (set-canvas-relative-pointer-mode canvas nil)
-      (setf (viewer-pointer-captured-p viewer) nil))))
+    (if (typep (viewer-mode viewer) 'world-edit-mode)
+        (set-viewer-mode viewer (make-instance 'isometric-walk-mode))
+        (progn
+          (clear-viewer-controls viewer)
+          (when (viewer-pointer-captured-p viewer)
+            (set-canvas-relative-pointer-mode canvas nil)
+            (setf (viewer-pointer-captured-p viewer) nil))))))
 
 (clim:define-command (com-toggle-fullscreen :command-table luft-window
                                             :name "Toggle Fullscreen"
@@ -1046,6 +1149,47 @@ before the operation boundary, or it would encode through resources which the
     ()
   (let ((canvas (viewer-canvas (viewer-command-viewer))))
     (set-canvas-fullscreen canvas (not (canvas-fullscreen-p canvas)))))
+
+(clim:define-command (com-rotate-view-clockwise :command-table luft-atelier
+                                                :name "Rotate View Clockwise"
+                                                :keystroke (:tab))
+    ()
+  (rotate-viewer-eighth-turn (viewer-command-viewer) 1))
+
+(clim:define-command (com-rotate-view-counterclockwise
+                      :command-table luft-atelier
+                      :name "Rotate View Counterclockwise"
+                      :keystroke (:tab :shift))
+    ()
+  (rotate-viewer-eighth-turn (viewer-command-viewer) -1))
+
+(clim:define-command (com-enter-world-edit-mode :command-table luft-atelier
+                                                :name "Edit World")
+    ()
+  (let ((viewer (viewer-command-viewer)))
+    (if (and (typep (viewer-source viewer) 'streaming-scene)
+             (viewer-production-system viewer))
+        (progn
+          (set-viewer-mode viewer (make-instance 'world-edit-mode))
+          (setf (viewer-last-edit-status viewer) :ready))
+        (setf (viewer-last-edit-status viewer) :not-editable))))
+
+(clim:define-command (com-leave-world-edit-mode :command-table luft-atelier
+                                                :name "Leave World Edit Mode")
+    ()
+  (let ((viewer (viewer-command-viewer)))
+    (when (typep (viewer-mode viewer) 'world-edit-mode)
+      (set-viewer-mode viewer (make-instance 'isometric-walk-mode)))))
+
+(clim:define-command (com-undo-world-edit :command-table luft-atelier
+                                         :name "Undo World Edit")
+    ()
+  (undo-viewer-world-edit (viewer-command-viewer)))
+
+(clim:define-command (com-redo-world-edit :command-table luft-atelier
+                                         :name "Redo World Edit")
+    ()
+  (redo-viewer-world-edit (viewer-command-viewer)))
 
 (defun set-viewer-mode (viewer mode)
   "Install MODE and make its pointer ownership immediately true on screen."
@@ -1168,6 +1312,30 @@ before the operation boundary, or it would encode through resources which the
   nil)
 
 (defmethod handle-viewer-mode-pointer-press
+    ((mode world-edit-mode) viewer canvas event)
+  (declare (ignore mode canvas))
+  (let ((inspection (update-viewer-inspection viewer)))
+    (when inspection
+      (case (canvas-pointer-event-button event)
+        (:left
+         (record-viewer-world-edit
+          viewer (site-inspection-cell inspection) nil))
+        (:right
+         (handler-case
+             (record-viewer-world-edit
+              viewer (site-inspection-adjacent-cell inspection)
+              (viewer-edit-material viewer))
+           (luft:outside-domain ()
+             (setf (viewer-last-edit-status viewer) :outside-domain))))
+        (:middle
+         (let ((source (viewer-source viewer)))
+           (when (typep source 'scene)
+             (setf (viewer-edit-material viewer)
+                   (scene-material-placement-at
+                    source (site-inspection-cell inspection))
+                   (viewer-last-edit-status viewer) :selected))))))))
+
+(defmethod handle-viewer-mode-pointer-press
     ((mode isometric-walk-mode) viewer canvas event)
   (declare (ignore mode canvas))
   (let ((player (viewer-player viewer)))
@@ -1260,7 +1428,9 @@ before the operation boundary, or it would encode through resources which the
       single)))
 
 (defun start-viewer (&key
-                       (solid (make-mountain-sanctuary-scene))
+                       (solid
+                         (make-streaming-scene
+                          (make-mountain-sanctuary-scene) :frames-per-load 1))
                        (bevel-width 2)
                        bevel-profile
                        surface-mesh
@@ -1268,7 +1438,7 @@ before the operation boundary, or it would encode through resources which the
                        fixed-exposure
                        (camera (make-fly-camera))
                        (title
-                         "LUFT — click to walk · right-click fireball · scroll to zoom · M orbit")
+                         "LUFT — click walk · Tab rotate · scroll zoom · M orbit · M-x edit")
                        (width 1100) (height 800)
                        fullscreen-p
                        (inspector-p nil)

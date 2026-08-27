@@ -469,6 +469,10 @@
               :key #'mcluv:command-menu-entry-label))
     (ok (find "Toggle Lobby Panel" entries :test #'string=
               :key #'mcluv:command-menu-entry-label))
+    (dolist (label '("Edit World" "Leave World Edit Mode"
+                     "Undo World Edit" "Redo World Edit"))
+      (ok (find label entries :test #'string=
+                :key #'mcluv:command-menu-entry-label)))
     ;; The shared palette does not advertise a command it cannot yet prompt.
     (ok (null (find 'render::com-start-moving entries
                     :key #'mcluv:command-menu-entry-command-name)))))

@@ -942,46 +942,91 @@ surface therefore exists, while parameter prompting remains #OL2JZ1.
 and the first luvcraft gameplay feature has crossed with its former application
 path removed rather than maintained in parallel.
 
-** DONE Cell edits are linear boundary updates
+** DONE The retired page renderer proved linear boundary edits
 :PROPERTIES:
 :ID: 3QNZC1
 :END:
 
-/Intent./ Make a voxel edit the sparse chain delta it is, rather than a request
-to mesh the world again.  If the solid is $C$, its surface is $S=\partial C$,
-and an edit is the signed 3-chain $\Delta$, the complete update is
+/Historical intent./ Make a voxel edit the sparse chain delta it is.  If the
+solid is $C$, its surface is $S=\partial C$, and an edit is the signed 3-chain
+$\Delta$, the complete update is
 
 \[
  C' = C + \Delta, \qquad
  S' = S + \partial\Delta = \partial(C + \Delta).
 \]
 
-/Evidence./ [[lisp:luft.render:apply-scene-edit]] now performs exactly that
-addition after validating the whole edit against binary occupancy.  The
-surface is also a direct sum of 8³ chunk ledgers.  A chunk has at most
+/Historical evidence./ The retired =apply-scene-edit= page renderer performed
+exactly that addition after validating the whole edit against binary
+occupancy.  Its surface was also a direct sum of 8³ chunk ledgers.  A chunk
+had at most
 $3\cdot8^3=1536$ face geometries -- one 8³ set for each face extent -- so it
-owns one stable, exactly bounded GPU page.  Only summands met by
-$\partial\Delta$ are reordered; their page offsets never move.  Occupancy is
-updated one 32-bit word at a time, and a bounded revision history lets several
-renderers catch up incrementally or fall back honestly to a full cohort.
+owned one stable, exactly bounded GPU page.  Only summands met by
+$\partial\Delta$ were reordered; their page offsets never moved.  Occupancy
+was updated one 32-bit word at a time, and a bounded revision history let
+several renderers catch up incrementally or fall back honestly to a full
+cohort.
 
-The viewer's grid ray now removes its hit cell with left click and places into
-the preceding empty cell with right click.  Differential tests cross chunk
-boundaries and the horizontal torus through additions, removals, and eighty
-successive toggles; after every group the incremental surface, packed pages,
-dense occupancy, and fresh [[lisp:luft:surface-chain]] agree.  A Vulkan test
-observes one ordinary edit as two writes -- one face page and one occupancy
-word -- smaller than the full scene upload.
+That viewer removed its hit cell with left click and placed into the preceding
+empty cell with right click.  Differential tests crossed chunk boundaries and
+the horizontal torus through additions, removals, and eighty successive
+toggles; after every group the incremental surface, packed pages, dense
+occupancy, and fresh [[lisp:luft:surface-chain]] agreed.  A Vulkan test observed
+one ordinary edit as two writes -- one face page and one occupancy word --
+smaller than the full scene upload.
 
-[[lisp:luft.render:film-atelier-construction]] turns the proof into three
-films: the Holm rises, winds into place, or is subtracted from a sacrificial
-granite prism.  The 49,294-cell spiral uploaded 4,484,904 bytes across all of
-its incremental publications; one full reserved scene cohort was 3,801,088
-bytes by itself.
+The retired =film-atelier-construction= turned the proof into three films: the
+Holm rose, wound into place, or was subtracted from a sacrificial granite
+prism.  The 49,294-cell spiral uploaded 4,484,904 bytes across all of its
+incremental publications; one full reserved scene cohort was 3,801,088 bytes
+by itself.  The renderer which owned those fixed pages has since been removed;
+#HXD14I retains the signed-chain transaction in the current regional mesher
+instead of describing this historical implementation as live.
 
-/Done when./ Done: edits no longer call [[lisp:luft.render:refresh-scene]], the
-reference and GPU tests pass, clicks use the incremental path, and all three
-construction orders finish at the exact authored solid and boundary.
+/Done when./ Historical experiment complete: the reference and GPU tests
+passed and all three construction orders finished at the exact authored solid
+and boundary.  This is evidence for the current transaction, not current API
+documentation.
+
+** DONE Editable streaming scenes publish immutable revisions
+:PROPERTIES:
+:ID: HXD14I
+:END:
+
+/Intent./ Bring smashing and placing into the current playable atelier without
+letting a mesh worker observe half of an edit.  Keep the useful camera turn in
+ordinary play as well: =Tab= and =Shift-Tab= orbit the following camera by 45°,
+whether or not authoring mode is active.
+
+/Evidence./ [[lisp:luft.render:edit-streaming-scene-cell]] validates one signed
+cell transition, rejects occupied/empty mismatches and cells reserved by torch
+attachments, then constructs the successor solid, chunk, copy-on-write
+material field, scene-closed material program, and authored light generation
+before replacing any scene value.  The viewer separately prevents placement
+through its player.  A monotonically increasing
+content revision enters each mesh request stamp.  Every worker request borrows
+an immutable scene input containing the old chains, material table and program,
+and light generation; after an edit that old request remains executable but
+cannot be published as current.  The canvas schedules the resident canonical
+owners as one cohort, so the GPU sees the old world or the complete new world,
+never a seam assembled from both.
+
+M-x =Edit World= enters [[lisp:luft.render:world-edit-mode]].  The existing cyan
+ray reticle identifies its target; left click removes the hit cell, right click
+places the selected material on the outward side, and middle click picks the
+hit material.  Escape returns to play.  M-x undo and redo replay the same
+transaction, while the status line names the selected material and latest
+result.  The playable sanctuary now starts as a streaming scene so this path
+is the ordinary application rather than a diagnostic fixture.
+
+/Done when./ Done for the preliminary path: model tests cover reversible
+occupancy/material/light state, stale snapshot isolation, material-program
+expansion, protected attachments, player overlap, and busy cohort publication;
+the viewer exposes the mode and both camera turns.  Rapid coalesced painting,
+a visible material speedbar, and a geometric target outline remain separate UI
+and scaling experiments.  Until incremental light solving exists, one edit
+copies the authored material table, resolves the complete light field, and
+remeshes the resident cohort deliberately.
 
 ** IDEA Compact surviving faces only when measurement earns another path
 :PROPERTIES:

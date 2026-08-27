@@ -16,7 +16,8 @@
   (let ((viewer
           (clim:make-application-frame
            'render:viewer :source nil :player nil :bevel-width 2)))
-    (ok (equal '(:application :pid :fps :heap :lobby :worktree :bevel :view)
+    (ok (equal '(:application :pid :fps :heap :lobby :worktree
+                 :bevel :view :mode)
                (mcluv:status-bar-channels-for viewer)))
     (ok (string= "LUFT" (mcluv:status-bar-application-name viewer)))
     (ok (string= "1/4"
@@ -24,7 +25,13 @@
                   :bevel viewer
                   (clim:make-application-frame
                    'mcluv:status-bar :owner viewer
-                                      :logical-width 900 :worktree nil))))))
+                                      :logical-width 900 :worktree nil))))
+    (ok (string= "play"
+                 (mcluv:status-bar-channel-value :mode viewer nil)))
+    (setf (render:viewer-mode viewer) (make-instance 'render:world-edit-mode)
+          (render::viewer-last-edit-status viewer) :selected)
+    (ok (string= "edit · terrain · selected"
+                 (mcluv:status-bar-channel-value :mode viewer nil)))))
 
 (deftest luft-status-bar-is-default-visible-instrument-above-radio
   (let ((viewer (gensym "VIEWER"))
