@@ -708,23 +708,31 @@ stable ID; work marks carry their status.")
          (:h1 "Work")
          (:p.lede "The work marks of the wiki: figures whose title starts with a status word.
 They live beside the design they move; this is only a view.")
+         (:nav.work-summary :aria-label "Work statuses"
+          (loop for (status . meaning) in *work-statuses*
+                for count = (count status marks :key #'heading-keyword :test #'string=)
+                when (plusp count)
+                  do (:a :href (format nil "#~(~A~)" status)
+                         (:span :class (format nil "mark mark-~(~A~)" status) status)
+                         (:span.summary-count
+                          (format nil "~D ~:*~[marks~;mark~:;marks~]" count))
+                         (:span.summary-meaning meaning))))
          (loop for (status . meaning) in *work-statuses*
                for these = (remove status marks :key #'heading-keyword :test-not #'string=)
                when these
-                 do (:section.work-status
+                 do (:section.work-status :id (string-downcase status)
                      (:h2 (:span :class (format nil "mark mark-~(~A~)" status) status)
-                          " " (:span.status-meaning meaning))
-                     (:table.work
-                      (:tbody
-                       (dolist (mark these)
-                         (:tr
-                          (:td.work-title
+                          " " (:span.status-meaning meaning)
+                          (:span.status-count (length these)))
+                     (:ol.work
+                      (dolist (mark these)
+                        (:li.work-item
+                         (:div.work-title
                            (:a :href (figure-href (heading-id mark) :site site)
                                (render-inlines (heading-title mark)))
                            (:span.work-page (document-name (heading-document mark))))
-                          (:td.work-intent
-                           (let ((excerpt (figure-excerpt mark 260)))
-                             (when excerpt excerpt)))))))))))
+                         (let ((excerpt (figure-excerpt mark 260)))
+                           (when excerpt (:p.work-intent excerpt))))))))))
      :body-class "wide")))
 
 (defun call-with-html-output (stream thunk)

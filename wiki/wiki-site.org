@@ -649,6 +649,19 @@ and the layout rows the dexp boxes share (=flowing-row=, =stacked-rows=,
 the =--fg=/=--bg= aliases and one repeated font stack, both removed, and
 groups with equal declarations merged.
 
+* DONE Make the work view an actual mobile overview
+:PROPERTIES:
+:ID: OZWYQE
+:END:
+
+/Intent./ The generated Work page should let a reader scan what is moving,
+jump to a status, and comfortably read each mark on a phone.  A fixed-width
+table should not squeeze the intent into a column only a few characters wide.
+
+/Done./ The view now starts with status counts and jump links, then presents
+each status as a semantic list.  Its title and intent form a bounded two-column
+grid on wide screens and stack into one readable column below =52rem=.
+
 * TODO Pairs, loop tables, and layouts from arglists alone
 :PROPERTIES:
 :ID: ACX8LK

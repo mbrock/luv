@@ -855,30 +855,75 @@ table: each pair a subgrid row of its two-column box."
 
 (define-style work-table
   "The Work page: marks by status."
+  (".work-summary"
+   :display flex
+   :flex-wrap wrap
+   :gap 0.5rem
+   :max-width 72rem
+   :margin 1.5rem 0 2.25rem
+   ("a"
+    :display inline-flex
+    :align-items center
+    :gap 0.5rem
+    :padding 0.45rem 0.6rem
+    :border (hairline)
+    :border-radius 8px
+    :color --ink
+    ("&:hover" :border-color --accent :text-decoration none))
+   (".mark" :font-size 0.65rem)
+   (".summary-count" :font-weight 700 :font-size 0.85rem)
+   (".summary-meaning" :color --muted :font-size 0.82rem))
   ("section.work-status"
+   :max-width 72rem
    :margin 1.5rem 0 2rem
+   :scroll-margin-top 3rem
    ("& > h2"
+    :display flex
+    :align-items baseline
+    :gap 0.45rem
     :font-size 1rem
-    :margin 0 0 0.4rem
+    :margin 0 0 0.65rem
     (".mark" :font-size 0.75em)))
   (".status-meaning"
    :font-weight 400
    :color --muted)
-  ("table.work"
-   :width 100%
-   :font-size 0.9rem
-   ("td"
-    :padding 0.4rem 1rem 0.4rem 0
-    :border-bottom (hairline)
-    :vertical-align top))
-  ("td.work-title"
-   :width 22rem
+  (".status-count"
+   :margin-left auto
+   :color --muted
+   :font-weight 500
+   :font-size 0.8rem)
+  ("ol.work"
+   :margin 0
+   :padding 0
+   :list-style none
+   :border-top (hairline))
+  (".work-item"
+   :display grid
+   :grid-template-columns (minmax 16rem 22rem) (minmax 0 1fr)
+   :gap 1rem
+   :padding 0.75rem 0
+   :border-bottom (hairline)
+   :font-size 0.9rem)
+  (".work-title"
+   :min-width 0
    :font-weight 600
-   ("a" :color --ink ("&:hover" :color --accent :text-decoration none)))
+   ("a"
+    :color --ink
+    :overflow-wrap anywhere
+    ("&:hover" :color --accent :text-decoration none)))
   (".work-page"
    :display block
    :font-weight 400
    :font-size 0.8rem
    :color --muted)
-  ("td.work-intent"
-   :color (color-mix --ink 80% --muted)))
+  ("p.work-intent"
+   :margin 0
+   :color (color-mix --ink 80% --muted)
+   :text-align start)
+  (:media "screen and (max-width: 52rem)"
+   (".work-summary .summary-meaning" :display none)
+   (".work-item"
+    :grid-template-columns (minmax 0 1fr)
+    :gap 0.35rem
+    :padding 0.85rem 0)
+   ("p.work-intent" :font-size 0.88rem)))

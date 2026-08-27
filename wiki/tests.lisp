@@ -178,7 +178,11 @@ Nothing here refers to anything.
              (true (probe-file (merge-pathnames "index.html" directory)))
              (true (probe-file (merge-pathnames "pages.html" directory)))
              (true (probe-file (merge-pathnames "work.html" directory)))
-             (true (probe-file (merge-pathnames "style.css" directory))))
+             (true (probe-file (merge-pathnames "style.css" directory)))
+             (let ((work (uiop:read-file-string (merge-pathnames "work.html" directory))))
+               (true (search "<nav class=work-summary aria-label=\"Work statuses\">" work))
+               (true (search "<section class=work-status id=next>" work))
+               (true (search "<ol class=work><li class=work-item>" work))))
         (uiop:delete-directory-tree directory :validate t :if-does-not-exist :ignore)))))
 
 (defparameter *source*
