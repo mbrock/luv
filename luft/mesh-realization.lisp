@@ -38,10 +38,22 @@
              a b c))
     (mapcar (lambda (coordinate) (/ coordinate divisor)) cross)))
 
-(defun %map-surface-mesh-triangle-records (function mesh)
-  "Call FUNCTION with kind, stock, ambient, mask, normal, and three points."
+(defun %map-surface-mesh-triangle-records
+    (function mesh &key minimum-point maximum-point)
+  "Call FUNCTION with kind, stock, ambient, mask, normal, and three points.
+
+When MINIMUM-POINT and MAXIMUM-POINT are present, visit only instances whose
+exact template bounds intersect that inclusive world-tick box.  This is a
+conservative instance filter: every triangle intersecting the box is retained."
+  (unless (eq (null minimum-point) (null maximum-point))
+    (error "Triangle record bounds need both a minimum and maximum point."))
   (let ((templates (surface-mesh-template-vertex-words mesh))
-        (ranges (surface-mesh-template-ranges mesh)))
+        (ranges (surface-mesh-template-ranges mesh))
+        (template-bounds
+          (when minimum-point
+            (make-array
+             (* 6 (surface-mesh-template-count mesh))
+             :element-type 'fixnum :initial-element most-positive-fixnum))))
     (labels ((point (base vertex)
                (loop for axis below 3
                      collect (+ (* +mesh-cell-size+ (nth axis base))
@@ -50,6 +62,41 @@
                                                +mesh-template-vertex-word-count+)
                                             axis))
                                    +mesh-template-coordinate-bias+))))
+             (template-intersects-p (template-id base)
+               (or
+                (null template-bounds)
+                (let ((bound-base (* 6 template-id)))
+                  (when (= most-positive-fixnum
+                           (aref template-bounds bound-base))
+                    (let ((start (aref ranges (* 2 template-id)))
+                          (count (aref ranges (1+ (* 2 template-id)))))
+                      (dotimes (axis 3)
+                        (let ((minimum most-positive-fixnum)
+                              (maximum most-negative-fixnum))
+                          (loop for vertex from start below (+ start count)
+                                for coordinate =
+                                  (- (aref templates
+                                           (+ (* vertex
+                                                 +mesh-template-vertex-word-count+)
+                                              axis))
+                                     +mesh-template-coordinate-bias+)
+                                do (setf minimum (min minimum coordinate)
+                                         maximum (max maximum coordinate)))
+                          (setf (aref template-bounds (+ bound-base axis))
+                                minimum
+                                (aref template-bounds (+ bound-base 3 axis))
+                                maximum)))))
+                  (loop for axis below 3
+                        for origin = (* +mesh-cell-size+ (nth axis base))
+                        always
+                        (and
+                         (<= (+ origin
+                                (aref template-bounds (+ bound-base axis)))
+                             (elt maximum-point axis))
+                         (>= (+ origin
+                                (aref template-bounds
+                                      (+ bound-base 3 axis)))
+                             (elt minimum-point axis)))))))
              (visit (words kind)
                (loop for offset from 0 below (length words) by 4
                      for base = (list (aref words offset)
@@ -65,19 +112,20 @@
                                         meta)
                      for start = (aref ranges (* 2 template-id))
                      for count = (aref ranges (1+ (* 2 template-id)))
-                     do (loop for vertex from start below (+ start count) by 3
-                              for attributes =
-                                (aref templates
-                                      (+ (* vertex
-                                            +mesh-template-vertex-word-count+)
-                                         3))
-                              for a = (point base vertex)
-                              for b = (point base (1+ vertex))
-                              for c = (point base (+ vertex 2))
-                              for normal = (%primitive-plane-normal a b c)
-                              do (funcall function kind stock ambient
-                                          (ldb (byte 3 10) attributes)
-                                          normal a b c)))))
+                     when (template-intersects-p template-id base) do
+                       (loop for vertex from start below (+ start count) by 3
+                             for attributes =
+                               (aref templates
+                                     (+ (* vertex
+                                           +mesh-template-vertex-word-count+)
+                                        3))
+                             for a = (point base vertex)
+                             for b = (point base (1+ vertex))
+                             for c = (point base (+ vertex 2))
+                             for normal = (%primitive-plane-normal a b c)
+                             do (funcall function kind stock ambient
+                                         (ldb (byte 3 10) attributes)
+                                         normal a b c)))))
       (visit (surface-mesh-face-instance-words mesh) :face)
       (visit (surface-mesh-band-instance-words mesh) :band)
       (visit (surface-mesh-fan-instance-words mesh) :junction))))
@@ -362,7 +410,27 @@ surface normal cone."
                     point-squared-tie-epsilon))
                (maximum-radius-squared
                  (+ (* maximum-inset maximum-inset)
-                    radius-squared-tie-epsilon)))
+                    radius-squared-tie-epsilon))
+               (minimum-point
+                 (loop for coordinate in center
+                       for normal-component in authored-normal
+                       collect
+                       (- coordinate
+                          (cond
+                            ((plusp normal-component) maximum-inset)
+                            ((minusp normal-component) 0)
+                            (t (/ +mesh-cell-size+ 2)))
+                          tie-epsilon)))
+               (maximum-point
+                 (loop for coordinate in center
+                       for normal-component in authored-normal
+                       collect
+                       (+ coordinate
+                          (cond
+                            ((minusp normal-component) maximum-inset)
+                            ((plusp normal-component) 0)
+                            (t (/ +mesh-cell-size+ 2)))
+                          tie-epsilon))))
           (dolist (mesh meshes)
             (%map-surface-mesh-triangle-records
              (lambda (kind stock ambient mask primitive-normal a b c)
@@ -404,7 +472,7 @@ surface normal cone."
                            (:tie
                             (push (list kind stock primitive-normal point)
                                   hits)))))))))
-             mesh))
+             mesh :minimum-point minimum-point :maximum-point maximum-point))
           (unless hits
             (error "Face chart point (~S,~S) on ~S misses the finished surface."
                    u v face))

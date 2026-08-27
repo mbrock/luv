@@ -1910,42 +1910,45 @@
                          mask axis-number)))))))
       ;; The complete 256-star corpus checks all face states, all sixteen edge
       ;; patterns in every orientation, every singular decomposition, material
-      ;; contributor union, AO, construction-edge masks, and triangle winding.
-      (dotimes (mask 256)
-        (let* ((solid (%solid-for-star mask))
-               (fast
-                 (%mesh-test-chunk
-                  solid 0 empty-store
-                  :source-stock-function #'%width-one-test-face-stock
-                  :chamfer-stock-function #'%width-one-test-chamfer-stock
-                  :chamfer-algebra algebra :bevel-width 1))
-               (packed-reference
-                 (%mesh-test-chunk-reference
-                  solid 0 empty-store
-                  :source-stock-function #'%width-one-test-face-stock
-                  :chamfer-stock-function #'%width-one-test-chamfer-stock
-                  :chamfer-algebra algebra :bevel-width 1))
-               (oracle
-                 (%mesh-test-chunk
-                  solid 0 empty-store
-                  :source-stock-function #'%width-one-test-face-stock
-                  :chamfer-stock-function #'%width-one-test-chamfer-stock
-                  :bevel-width 1))
-               (fast-counts
-                 (%canonical-triangle-record-counts (list fast)))
-               (reference-counts
-                 (%canonical-triangle-record-counts (list packed-reference)))
-               (oracle-counts
-                 (%canonical-triangle-record-counts (list oracle))))
-          (%check
-           (%triangle-counts= fast-counts oracle-counts)
-           (format nil "star ~2,'0X" mask))
-          (%check
-           (%triangle-counts= fast-counts reference-counts)
-           (format nil "packed reference star ~2,'0X" mask))
-          (%check (= (surface-mesh-singular-star-count fast)
-                     (surface-mesh-singular-star-count oracle))
-                  (format nil "singular star ~2,'0X" mask))))
+      ;; contributor union, AO, construction-edge masks, triangle winding, and
+      ;; every non-medial uniform template vocabulary.
+      (dolist (width '(1 2 3))
+        (dotimes (mask 256)
+          (let* ((solid (%solid-for-star mask))
+                 (fast
+                   (%mesh-test-chunk
+                    solid 0 empty-store
+                    :source-stock-function #'%width-one-test-face-stock
+                    :chamfer-stock-function #'%width-one-test-chamfer-stock
+                    :chamfer-algebra algebra :bevel-width width))
+                 (packed-reference
+                   (%mesh-test-chunk-reference
+                    solid 0 empty-store
+                    :source-stock-function #'%width-one-test-face-stock
+                    :chamfer-stock-function #'%width-one-test-chamfer-stock
+                    :chamfer-algebra algebra :bevel-width width))
+                 (oracle
+                   (%mesh-test-chunk
+                    solid 0 empty-store
+                    :source-stock-function #'%width-one-test-face-stock
+                    :chamfer-stock-function #'%width-one-test-chamfer-stock
+                    :bevel-width width))
+                 (fast-counts
+                   (%canonical-triangle-record-counts (list fast)))
+                 (reference-counts
+                   (%canonical-triangle-record-counts (list packed-reference)))
+                 (oracle-counts
+                   (%canonical-triangle-record-counts (list oracle))))
+            (%check
+             (%triangle-counts= fast-counts oracle-counts)
+             (format nil "width ~D star ~2,'0X" width mask))
+            (%check
+             (%triangle-counts= fast-counts reference-counts)
+             (format nil "packed reference width ~D star ~2,'0X" width mask))
+            (%check (= (surface-mesh-singular-star-count fast)
+                       (surface-mesh-singular-star-count oracle))
+                    (format nil "singular width ~D star ~2,'0X"
+                            width mask)))))
       ;; Repeat the differential at real chunk seams, including every low-side
       ;; halo resolution used by the direct owned-star scan.
       (let* ((world (%chunk-test-world))
@@ -1953,36 +1956,38 @@
         (map-chain-chunks
          (lambda (key chain) (setf (gethash key store) chain))
          world)
-        (loop for key being the hash-keys of store using (hash-value chain)
-              do (let ((fast
-                         (%mesh-test-chunk
-                          chain key store
-                          :source-stock-function #'%width-one-test-face-stock
-                          :chamfer-stock-function #'%width-one-test-chamfer-stock
-                          :chamfer-algebra algebra :bevel-width 1))
-                       (oracle
-                         (%mesh-test-chunk
-                          chain key store
-                          :source-stock-function #'%width-one-test-face-stock
-                          :chamfer-stock-function #'%width-one-test-chamfer-stock
-                          :bevel-width 1))
-                       (packed-reference
-                         (%mesh-test-chunk-reference
-                          chain key store
-                          :source-stock-function #'%width-one-test-face-stock
-                          :chamfer-stock-function #'%width-one-test-chamfer-stock
-                          :chamfer-algebra algebra :bevel-width 1)))
-                   (%check
-                    (%triangle-counts=
-                     (%canonical-triangle-record-counts (list fast))
-                     (%canonical-triangle-record-counts (list oracle)))
-                    (format nil "chunk ~D" key))
-                   (%check
-                    (%triangle-counts=
-                     (%canonical-triangle-record-counts (list fast))
-                     (%canonical-triangle-record-counts
-                      (list packed-reference)))
-                    (format nil "packed reference chunk ~D" key))))))))
+        (dolist (width '(1 2 3))
+          (loop for key being the hash-keys of store using (hash-value chain)
+                do (let ((fast
+                           (%mesh-test-chunk
+                            chain key store
+                            :source-stock-function #'%width-one-test-face-stock
+                            :chamfer-stock-function #'%width-one-test-chamfer-stock
+                            :chamfer-algebra algebra :bevel-width width))
+                         (oracle
+                           (%mesh-test-chunk
+                            chain key store
+                            :source-stock-function #'%width-one-test-face-stock
+                            :chamfer-stock-function #'%width-one-test-chamfer-stock
+                            :bevel-width width))
+                         (packed-reference
+                           (%mesh-test-chunk-reference
+                            chain key store
+                            :source-stock-function #'%width-one-test-face-stock
+                            :chamfer-stock-function #'%width-one-test-chamfer-stock
+                            :chamfer-algebra algebra :bevel-width width)))
+                     (%check
+                      (%triangle-counts=
+                       (%canonical-triangle-record-counts (list fast))
+                       (%canonical-triangle-record-counts (list oracle)))
+                      (format nil "width ~D chunk ~D" width key))
+                     (%check
+                      (%triangle-counts=
+                       (%canonical-triangle-record-counts (list fast))
+                       (%canonical-triangle-record-counts
+                        (list packed-reference)))
+                      (format nil "packed reference width ~D chunk ~D"
+                              width key)))))))))
 
 (defun %test-width-one-material-lanes ()
   (%with-test-section ("width-one compiled material lanes")

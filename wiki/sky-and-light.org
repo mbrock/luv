@@ -963,6 +963,19 @@ Evidence to gather:
 - A repeatable edit/residency script exercises a worst-plausible visible
   burst without relying on hand timing.
 
+Preliminary 2026-08-27 sanctuary measurements isolate the first practical
+edit bottlenecks.  Removing occupied cell (60,48,13) with four resident owners
+and four torches originally returned from the canvas edit in 0.42 s and
+published in 3.46 s.  Extending the finite mesh query through uniform bevel
+widths two and three, then restricting each torch attachment search to its
+exact support-face slab, reduced warm removal to 0.016--0.020 s on the canvas
+and 0.77--0.88 s through publication.  A traced warm removal spent 0.124 s in
+mesh/decorate and 0.376 s preparing all four render meshes, but only 0.008 s in
+renderer publication.  The remaining scheduling experiment is therefore a
+regional light-generation succession and partial prepared-owner cohort, not a
+weaker publication boundary.  The repeatable burst capture and relight-cell
+counters above remain outstanding.
+
 Done when: the next scheduling decision is evidence-backed: keep owner-thread
 lighting, tune frame limits, or move captured light work into the existing
 production system.

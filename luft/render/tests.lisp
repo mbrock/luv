@@ -3855,14 +3855,13 @@
               (luft.render::surface-assembly-offset
                (luft.render::closure-surface-assembly
                 (mapcar #'luft.render::surface-assembly-at stocks)))))))
+    ;; The finite query interns one shared non-medial template vocabulary;
+    ;; the scalar oracle interns templates in encounter order.  Compare their
+    ;; canonical stock-bearing triangles rather than private template IDs.
     (ok
-     (every #'equalp
-            (list (luft:surface-mesh-face-instance-words compiled)
-                  (luft:surface-mesh-band-instance-words compiled)
-                  (luft:surface-mesh-fan-instance-words compiled))
-            (list (luft:surface-mesh-face-instance-words semantic)
-                  (luft:surface-mesh-band-instance-words semantic)
-                  (luft:surface-mesh-fan-instance-words semantic))))
+     (canonical-mesh-cohorts-equal-p
+      (surface-mesh-tree-meshes compiled)
+      (surface-mesh-tree-meshes semantic)))
     (ok
      (find-if
       (lambda (assembly)

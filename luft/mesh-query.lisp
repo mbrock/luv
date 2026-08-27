@@ -139,11 +139,14 @@
 (defstruct (width-one-query-vocabulary
              (:constructor %make-width-one-query-vocabulary
                  (face-template-ids descriptor-template-ids
-                  vertex-words ranges normal-x normal-y normal-z)))
+                  vertex-words-by-width ranges normal-x normal-y normal-z)))
   (face-template-ids #() :type (simple-array (unsigned-byte 16) (*))
                           :read-only t)
   (descriptor-template-ids nil :type hash-table :read-only t)
-  (vertex-words #() :type (simple-array (unsigned-byte 32) (*)) :read-only t)
+  ;; Widths one through three share topology and instance rows.  Only the
+  ;; canonical template offsets differ.  Width four collapses sheets and
+  ;; therefore remains on the reference/variable-width repair path.
+  (vertex-words-by-width #() :type simple-vector :read-only t)
   (ranges #() :type (simple-array (unsigned-byte 32) (*)) :read-only t)
   (normal-x #() :type (simple-array (signed-byte 8) (*)) :read-only t)
   (normal-y #() :type (simple-array (signed-byte 8) (*)) :read-only t)
@@ -160,6 +163,26 @@
         (error "Canonical width-one face produced ~D templates."
                (fill-pointer templates)))
       (copy-seq (mesh-template-vertices (aref templates 0))))))
+
+(defun %uniform-query-template-words (width width-one-words)
+  "Scale WIDTH-ONE-WORDS to one non-medial uniform bevel WIDTH."
+  (check-type width (integer 1 3))
+  (let ((words (copy-seq width-one-words)))
+    (loop for word from 0 below (length words)
+          by +mesh-template-vertex-word-count+ do
+      (dotimes (axis 3)
+        (let* ((index (+ word axis))
+               (offset (- (aref words index)
+                          +mesh-template-coordinate-bias+))
+               (scaled
+                 (ecase offset
+                   (-1 (- width))
+                   (0 0)
+                   (1 width)
+                   (7 (- +mesh-cell-size+ width)))))
+          (setf (aref words index)
+                (+ +mesh-template-coordinate-bias+ scaled)))))
+    words))
 
 (defun %compile-width-one-query-vocabulary ()
   (let ((template-index (make-hash-table :test #'equalp))
@@ -237,8 +260,13 @@
                     (%packed-template-attributes vertex))
               (incf write +mesh-template-vertex-word-count+))
             (incf vertex-start (length vertices))))
-        (%make-width-one-query-vocabulary
-         face-ids descriptor-ids words ranges normal-x normal-y normal-z)))))
+        (let ((words-by-width (make-array 4 :initial-element nil)))
+          (loop for width from 1 to 3 do
+            (setf (aref words-by-width width)
+                  (%uniform-query-template-words width words)))
+          (%make-width-one-query-vocabulary
+           face-ids descriptor-ids words-by-width ranges
+           normal-x normal-y normal-z))))))
 
 (defparameter *width-one-query-vocabulary*
   (%compile-width-one-query-vocabulary))
@@ -887,7 +915,8 @@ chain identity was recorded by the occupancy FIELD when its chunk resolved."
           (%width-one-query-draws counts starts)
         (values words draws triangles)))))
 
-(defun %finish-width-one-query (workspace domain algebra singular-count x0 y0)
+(defun %finish-width-one-query
+    (workspace domain algebra singular-count x0 y0 &optional (bevel-width 1))
   (multiple-value-bind (face-words face-draws face-triangles)
       (%project-width-one-query-faces workspace x0 y0)
     (multiple-value-bind (band-words band-draws band-triangles)
@@ -899,9 +928,11 @@ chain identity was recorded by the occupancy FIELD when its chunk resolved."
            (width-one-query-workspace-fans workspace)
            workspace algebra x0 y0)
         (%make-surface-mesh
-         domain 1
-         (width-one-query-vocabulary-vertex-words
-          *width-one-query-vocabulary*)
+         domain bevel-width
+         (aref
+          (width-one-query-vocabulary-vertex-words-by-width
+           *width-one-query-vocabulary*)
+          bevel-width)
          (width-one-query-vocabulary-ranges *width-one-query-vocabulary*)
          face-words face-draws band-words band-draws fan-words fan-draws
          face-triangles band-triangles fan-triangles singular-count)))))
@@ -911,7 +942,7 @@ chain identity was recorded by the occupancy FIELD when its chunk resolved."
 
 (defun %mesh-width-one-chunk-query
     (chunk chunk-key stock-function algebra outside-domain-policy
-     material-source)
+     material-source bevel-width)
   (let* ((domain (chain-domain chunk))
          (grid-x (chunk-key-x chunk-key))
          (grid-y (chunk-key-y chunk-key))
@@ -952,7 +983,7 @@ chain identity was recorded by the occupancy FIELD when its chunk resolved."
               (%materialize-width-one-query-materials
                workspace domain stock-function algebra x0 y0 material-count))
           (%finish-width-one-query
-           workspace domain algebra singular-count x0 y0))))))
+           workspace domain algebra singular-count x0 y0 bevel-width))))))
 
 (defun mesh-chunk
     (chunk chunk-key
@@ -965,12 +996,15 @@ chain identity was recorded by the occupancy FIELD when its chunk resolved."
           (bevel-width +mesh-bevel-width+))
   "Mesh one streaming chunk, retaining the general mesher as its oracle.
 
-Width one plus a compiled CHAMFER-ALGEBRA runs the finite columnar query.
+Widths one through three plus a compiled CHAMFER-ALGEBRA run the finite
+columnar query.  They share one topology and differ only in the immutable
+template vocabulary selected at projection.  Medial width four remains on the
+reference path because it collapses sheets and repairs the resulting topology.
 A MATERIAL-SOURCE additionally compiles the authored materials into
 chain-rank lanes, replacing per-contributor stock-function calls with dense
 array reads; the stock functions remain the reference path and the fallback.
-Other widths and callers without a closed material algebra use the retained
-surface-proportional implementation, including its boundary restart contract."
+Callers without a closed material algebra use the retained surface-proportional
+implementation, including its boundary restart contract."
   (check-type chunk chain)
   (check-type stock-function function)
   (check-type source-stock-function (or null function))
@@ -982,12 +1016,12 @@ surface-proportional implementation, including its boundary restart contract."
                (<= 1 bevel-width (/ +mesh-cell-size+ 2)))
     (error "Bevel width ~S must be an integer between one and four ticks."
            bevel-width))
-  (if (and (= bevel-width 1) chamfer-algebra)
+  (if (and (< bevel-width 4) chamfer-algebra)
       (%mesh-width-one-chunk-query
        chunk chunk-key
        (%make-face-stock-resolver
         (chain-domain chunk) stock-function source-stock-function)
-       chamfer-algebra outside-domain-policy material-source)
+       chamfer-algebra outside-domain-policy material-source bevel-width)
       (%mesh-chunk-reference
        chunk chunk-key
        :stock-function stock-function
