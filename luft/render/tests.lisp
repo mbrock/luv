@@ -2669,46 +2669,67 @@
                (luv.arithmetic.lisp.vec3:vec3-x
                 (render:walking-player-position player))))))))
 
-(deftest click-thrown-ball-has-motion-and-render-state
-  (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
-         (scene (luft.render::finish-scene-builder builder :player-p t))
-         (player (render:make-walking-player))
-         (origin (luv.arithmetic.lisp.vec3:make-vec3 2.0 2.0 4.0))
-         (direction (luv.arithmetic.lisp.vec3:make-vec3 1.0 0.0 0.0)))
-    (luft.render::throw-walking-player-ball player origin direction)
-    (ok (luvcraft:physics-body-alive-p
-         (luft.render::walking-player-physics player)
-         (luft.render::walking-player-ball-handle player)))
+(deftest casting-a-fireball-turns-the-wizard-and-launches-from-the-staff
+  (let* ((player
+           (render:make-walking-player
+            :position
+            (luv.arithmetic.lisp.vec3:make-vec3 4.0 5.0 1.0)))
+         (target (luv.arithmetic.lisp.vec3:make-vec3 14.0 5.0 2.5)))
+    (setf (render:walking-player-route player)
+          (make-instance 'render:walking-route :start nil :destination nil
+                         :cells nil :status :running))
+    (luft.render::cast-walking-player-fireball player target)
+    (ok (< (abs (- 1.0 (luft.render::walking-player-heading-x player)))
+           1.0e-6))
+    (ok (< (abs (luft.render::walking-player-heading-y player)) 1.0e-6))
+    (ok (eq :cancelled
+            (render:walking-route-status
+             (render:walking-player-route player))))
+    (ok (= 1.0 (luft.render::walking-player-spell-flash player)))
+    (ok (luft.render::walking-player-fireball-velocity player))
+    (let* ((staff (luft.render::walking-player-staff-head-position player))
+           (fireball (luft.render::walking-player-fireball-position player))
+           (dx (- (luv.arithmetic.lisp.vec3:vec3-x fireball)
+                  (luv.arithmetic.lisp.vec3:vec3-x staff)))
+           (dy (- (luv.arithmetic.lisp.vec3:vec3-y fireball)
+                  (luv.arithmetic.lisp.vec3:vec3-y staff)))
+           (dz (- (luv.arithmetic.lisp.vec3:vec3-z fireball)
+                  (luv.arithmetic.lisp.vec3:vec3-z staff)))
+           (launch-distance (sqrt (+ (* dx dx) (* dy dy) (* dz dz)))))
+      (ok (< (abs (- 0.48
+                     launch-distance))
+             1.0e-5))
+      ;; This position belongs to the wizard, not the old camera-ray origin.
+      (ok (> (luv.arithmetic.lisp.vec3:vec3-x fireball) 5.0))
+      (ok (> (luv.arithmetic.lisp.vec3:vec3-z fireball) 3.0)))
     (let ((before (luv.arithmetic.lisp.vec3:vec3-x
-                   (luft.render::walking-player-ball-position player))))
-      (luft.render::advance-walking-player-ball player scene 0.1)
-      (ok (plusp (luvcraft:physics-world-step-count
-                  (luft.render::walking-player-physics player))))
+                   (luft.render::walking-player-fireball-position player))))
+      (luft.render::advance-walking-player-fireball player 0.1)
       (ok (> (luv.arithmetic.lisp.vec3:vec3-x
-              (luft.render::walking-player-ball-position player)) before)))
-    (multiple-value-bind (character previous direction-lane ball previous-ball)
+              (luft.render::walking-player-fireball-position player)) before)))
+    (multiple-value-bind (character previous direction-lane
+                          fireball previous-fireball)
         (luft.render::walking-player-render-lanes player)
-      (declare (ignore character previous direction-lane previous-ball))
-      (ok (= luft.render::+thrown-ball-radius+ (fourth ball))))))
+      (declare (ignore character previous direction-lane previous-fireball))
+      (ok (= luft.render::+fireball-radius+ (fourth fireball))))))
 
-(deftest a-thrown-ball-bounces-off-the-finite-world-domain
-  (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
-         (scene (luft.render::finish-scene-builder builder :player-p t))
-         (player (render:make-walking-player))
+(deftest a-fireball-flies-straight-and-ends-at-its-target
+  (let* ((player (render:make-walking-player))
          (origin (luv.arithmetic.lisp.vec3:make-vec3 14.0 8.0 4.0))
          (direction (luv.arithmetic.lisp.vec3:make-vec3 1.0 0.0 0.0)))
-    (luft.render::throw-walking-player-ball player origin direction)
-    (loop repeat 12 do
-      (luft.render::advance-walking-player-ball player scene (/ 1.0 60.0)))
-    (let* ((physics (luft.render::walking-player-physics player))
-           (handle (luft.render::walking-player-ball-handle player))
-           (x (luv.arithmetic.lisp.vec3:vec3-x
-               (luft.render::walking-player-ball-position player))))
-      (multiple-value-bind (vx vy vz)
-          (luvcraft:physics-body-velocity physics handle)
-        (declare (ignore vy vz))
-        (ok (< x 16.0))
-        (ok (minusp vx))))))
+    (luft.render::launch-walking-player-fireball
+     player origin direction :distance 3.0)
+    (let* ((before (luft.render::walking-player-fireball-position player))
+           (before-x (luv.arithmetic.lisp.vec3:vec3-x before))
+           (before-y (luv.arithmetic.lisp.vec3:vec3-y before))
+           (before-z (luv.arithmetic.lisp.vec3:vec3-z before)))
+      (luft.render::advance-walking-player-fireball player 0.05)
+      (let ((after (luft.render::walking-player-fireball-position player)))
+        (ok (> (luv.arithmetic.lisp.vec3:vec3-x after) before-x))
+        (ok (= before-y (luv.arithmetic.lisp.vec3:vec3-y after)))
+        (ok (= before-z (luv.arithmetic.lisp.vec3:vec3-z after))))
+      (luft.render::advance-walking-player-fireball player 1.0)
+      (ok (null (luft.render::walking-player-fireball-position player))))))
 
 (deftest the-spike-scene-is-three-site-instance-streams
   (let* ((mesh (render:make-render-mesh

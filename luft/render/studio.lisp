@@ -379,7 +379,7 @@ the selector is the whole of the difference."
            (list (vec3:vec3-x vector) (vec3:vec3-y vector)
                  (vec3:vec3-z vector) fourth)))
     (multiple-value-bind (character previous-character character-direction
-                          ball previous-ball)
+                          fireball previous-fireball)
         (if player
             (walking-player-render-lanes player)
             (values '(0.0 0.0 0.0 0.0) '(0.0 0.0 0.0 0.0)
@@ -414,7 +414,8 @@ the selector is the whole of the difference."
                 (coerce inspection-parameters 'list)
                 character
                 (light-uniform-data *light* (frame-view-position view) exposure)
-                previous-character character-direction ball previous-ball))))))
+                previous-character character-direction
+                fireball previous-fireball))))))
 
 (defun viewer-logical-extent (viewer)
   (let ((canvas (viewer-canvas viewer)))
@@ -455,6 +456,34 @@ the selector is the whole of the difference."
               (frame-view-right view) right-scale
               (frame-view-up view) up-scale)
              (frame-view-forward view)))))))
+
+(defun viewer-fireball-target (viewer origin direction)
+  "Resolve VIEWER's pointer ray into a useful world-space spell target."
+  (let ((inspection
+          (handler-case
+              (raycast-site (viewer-source viewer) origin direction)
+            (luft:outside-domain () nil))))
+    (if inspection
+        (site-inspection-point inspection)
+        ;; Empty sky still has a stable click direction.  Intersect the ray
+        ;; with a plane through the wizard's chest when possible; otherwise
+        ;; choose a distant point along it.
+        (let* ((player (viewer-player viewer))
+               (player-position (walking-player-position player))
+               (plane-z (+ (vec3:vec3-z player-position) 1.5))
+               (direction-z (vec3:vec3-z direction))
+               (distance (if (> (abs direction-z) 1.0e-5)
+                             (/ (- plane-z (vec3:vec3-z origin)) direction-z)
+                             -1.0)))
+          (add-scaled-directions origin direction
+                                 (if (> distance 0.0) distance 32.0))))))
+
+(defun cast-viewer-fireball (viewer)
+  "Cast the demo fireball through VIEWER's current pointer position."
+  (multiple-value-bind (origin direction) (viewer-pointer-ray viewer)
+    (cast-walking-player-fireball
+     (viewer-player viewer)
+     (viewer-fireball-target viewer origin direction))))
 
 (defun same-inspected-site-p (left right)
   (or (eq left right)
@@ -1159,18 +1188,17 @@ before the operation boundary, or it would encode through resources which the
                   (luft:site-x cell) (luft:site-y cell)
                   (1+ (luft:site-z cell))))))))
         (:right
-         (multiple-value-bind (origin direction) (viewer-pointer-ray viewer)
-           (throw-walking-player-ball player origin direction)))))))
+         (cast-viewer-fireball viewer))))))
 
 (defmethod handle-viewer-mode-pointer-press
     ((mode orbit-mode) viewer canvas event)
-  (declare (ignore mode event))
+  (declare (ignore mode))
   (unless (viewer-pointer-captured-p viewer)
     (set-canvas-relative-pointer-mode canvas t)
     (setf (viewer-pointer-captured-p viewer) t))
-  (when (viewer-player viewer)
-    (multiple-value-bind (origin direction) (viewer-pointer-ray viewer)
-      (throw-walking-player-ball (viewer-player viewer) origin direction))))
+  (when (and (viewer-player viewer)
+             (eq :right (canvas-pointer-event-button event)))
+    (cast-viewer-fireball viewer)))
 
 (defmethod handle-canvas-event
     ((viewer viewer) canvas (event canvas-pointer-wheel-event))
@@ -1239,7 +1267,8 @@ before the operation boundary, or it would encode through resources which the
                        surface-generation
                        fixed-exposure
                        (camera (make-fly-camera))
-                       (title "LUFT — click to walk · scroll to zoom · M orbit")
+                       (title
+                         "LUFT — click to walk · right-click fireball · scroll to zoom · M orbit")
                        (width 1100) (height 800)
                        fullscreen-p
                        (inspector-p nil)

@@ -504,18 +504,61 @@ for completely static geometry."
 (define-shader-function player-sdf-sphere (point center radius)
   (- (player-sdf-length (- point center)) radius))
 
-(define-shader-function player-wizard-orb-distance (point)
+(define-shader-function player-fireball-distance (point center radius)
+  "A hot core with a few rising flame lobes, all inside one analytic field."
+  (let* ((offset (- point center))
+         (core (- (player-sdf-length offset) radius))
+         (upper (player-sdf-sphere offset
+                                   (vec3 0.0 0.0 (* radius 1.05))
+                                   (* radius 0.30)))
+         (lick-left (player-sdf-sphere offset
+                                       (vec3 (* radius -0.52) 0.0
+                                             (* radius 0.62))
+                                       (* radius 0.18)))
+         (lick-right (player-sdf-sphere offset
+                                        (vec3 (* radius 0.48) 0.0
+                                              (* radius 0.48))
+                                        (* radius 0.15))))
+    (min core (min upper (min lick-left lick-right)))))
+
+(define-shader-function player-staff-cast-angle (cast-envelope)
+  (* 0.68 (smoothstep 0.0 0.35 cast-envelope)))
+
+(define-shader-function player-staff-cast-point (point cast-envelope)
+  "Undo the staff's forward pivot around the gripping hand."
+  (let* ((angle (player-staff-cast-angle cast-envelope))
+         (cosine (cos angle))
+         (sine (sin angle))
+         (centered (- point (vec3 0.625 0.195 1.505))))
+    (+ (vec3 0.625 0.195 1.505)
+       (vec3 (swizzle centered :x)
+             (- (* cosine (swizzle centered :y))
+                (* sine (swizzle centered :z)))
+             (+ (* sine (swizzle centered :y))
+                (* cosine (swizzle centered :z)))))))
+
+(define-shader-function player-staff-head-center (cast-envelope)
+  "The staff gem's centre after the visible forward casting pivot."
+  (let* ((angle (player-staff-cast-angle cast-envelope))
+         (head-height 1.835))
+    (vec3 0.640
+          (+ 0.195 (* (sin angle) head-height))
+          (+ 1.505 (* (cos angle) head-height)))))
+
+(define-shader-function player-wizard-orb-distance (point cast-envelope)
   "The hermit's little captured firework: a true SDF sphere and four sparks.
 
 The staff gets a visible payoff even before a cast is in flight.  Keeping the
 sparks in the same field means they clip and shade with the body rather than
 becoming transparent billboard confetti."
-  (min (player-sdf-sphere point (vec3 0.640 0.195 3.34) 0.235)
-       (min (player-sdf-sphere point (vec3 0.640 0.195 3.69) 0.052)
-            (min (player-sdf-sphere point (vec3 0.965 0.195 3.34) 0.044)
-                 (min (player-sdf-sphere point (vec3 0.360 0.195 3.34) 0.044)
-                      (player-sdf-sphere point
-                                         (vec3 0.640 0.195 3.00) 0.040))))))
+  (let* ((posed (player-staff-cast-point point cast-envelope)))
+    (min (player-sdf-sphere posed (vec3 0.640 0.195 3.34) 0.235)
+         (min (player-sdf-sphere posed (vec3 0.640 0.195 3.69) 0.052)
+              (min (player-sdf-sphere posed (vec3 0.965 0.195 3.34) 0.044)
+                   (min (player-sdf-sphere posed
+                                           (vec3 0.360 0.195 3.34) 0.044)
+                        (player-sdf-sphere posed
+                                           (vec3 0.640 0.195 3.00) 0.040)))))))
 
 (define-shader-function player-sdf-ellipsoid (point center radii)
   (let* ((offset (/ (- point center) radii))
@@ -957,36 +1000,38 @@ sleeve cuff and a mitten: the shoulders belong to the garment."
         0.125)
        (player-sdf-sphere point (vec3 0.625 0.195 1.505) 0.128)))
 
-(define-shader-function player-staff-point (point)
+(define-shader-function player-staff-point (point cast-envelope)
   "The staff's own frame, with its head raked back over the walker."
-  (let* ((rise (clamp (/ (- (swizzle point :z) 0.10) 3.10) 0.0 1.0)))
-    (vec3 (- (swizzle point :x) (* 0.055 rise))
-          (+ (swizzle point :y) (* 0.115 rise))
-          (swizzle point :z))))
+  (let* ((posed (player-staff-cast-point point cast-envelope))
+         (rise (clamp (/ (- (swizzle posed :z) 0.10) 3.10) 0.0 1.0)))
+    (vec3 (- (swizzle posed :x) (* 0.055 rise))
+          (+ (swizzle posed :y) (* 0.115 rise))
+          (swizzle posed :z))))
 
-(define-shader-function player-staff-distance (point)
+(define-shader-function player-staff-distance (point cast-envelope)
   "A copper-shod walking staff, carried plumb while the walker bobs past it.
 
 The shaft is evaluated outside the pelvis pose on purpose: a staff that
 rose and fell with the hips would be a staff nobody was leaning on."
-  (player-sdf-capsule (player-staff-point point)
+  (player-sdf-capsule (player-staff-point point cast-envelope)
                       (vec3 0.640 0.195 0.06)
                       (vec3 0.640 0.195 3.14)
                       0.045))
 
-(define-shader-function player-staff-head-distance (point)
+(define-shader-function player-staff-head-distance (point cast-envelope)
   "The lozenge finial: a copper frame with the site's own diamond set in it."
-  (let* ((framed (player-staff-point point))
+  (let* ((framed (player-staff-point point cast-envelope))
          (frame (player-sdf-lozenge framed (vec3 0.640 0.195 3.34)
                                     (vec3 0.195 0.055 0.295)))
          (collar (player-sdf-sphere framed (vec3 0.640 0.195 3.07) 0.065)))
     (player-sdf-smooth-union frame collar 0.035)))
 
-(define-shader-function player-staff-gem-distance (point)
-  (player-sdf-lozenge (player-staff-point point) (vec3 0.640 0.195 3.34)
+(define-shader-function player-staff-gem-distance (point cast-envelope)
+  (player-sdf-lozenge (player-staff-point point cast-envelope)
+                      (vec3 0.640 0.195 3.34)
                       (vec3 0.112 0.082 0.172)))
 
-(define-shader-function player-distance (point gait direction)
+(define-shader-function player-distance (point gait direction cast-envelope)
   (let* ((posed (player-walk-pose point gait))
          (head-posed (player-head-pose posed gait))
          ;; The two garments hang from the shoulders in their own frames, so
@@ -1009,26 +1054,30 @@ rose and fell with the hips would be a staff nobody was leaning on."
                  (player-hand-distance posed gait) 0.07))
          ;; The staff is held, not grown: it meets the mitten with a hard
          ;; edge rather than a fillet, and stands outside the walk pose.
-         (staff (min (player-staff-distance point)
-                     (min (player-staff-head-distance point)
-                          (player-staff-gem-distance point)))))
+         (staff (min (player-staff-distance point cast-envelope)
+                     (min (player-staff-head-distance point cast-envelope)
+                          (player-staff-gem-distance point cast-envelope)))))
     (min (min staff boots)
          (player-sdf-smooth-union
           (player-sdf-smooth-union
            (player-sdf-smooth-union garments face 0.055) hat 0.025)
           limbs 0.075))))
 
-(define-shader-function player-normal (point gait direction)
+(define-shader-function player-normal (point gait direction cast-envelope)
   (let* ((reach 0.004)
          (a (vec3 1.0 -1.0 -1.0))
          (b (vec3 -1.0 -1.0 1.0))
          (c (vec3 -1.0 1.0 -1.0))
          (d (vec3 1.0 1.0 1.0)))
     (normalize
-     (+ (+ (* a (player-distance (+ point (* a reach)) gait direction))
-           (* b (player-distance (+ point (* b reach)) gait direction)))
-        (+ (* c (player-distance (+ point (* c reach)) gait direction))
-           (* d (player-distance (+ point (* d reach)) gait direction)))))))
+     (+ (+ (* a (player-distance (+ point (* a reach)) gait direction
+                                cast-envelope))
+           (* b (player-distance (+ point (* b reach)) gait direction
+                                cast-envelope)))
+        (+ (* c (player-distance (+ point (* c reach)) gait direction
+                                cast-envelope))
+           (* d (player-distance (+ point (* d reach)) gait direction
+                                cast-envelope)))))))
 
 (define-shader-function player-linen-tooth (point)
   "Low-contrast local-space warp, weft and irregular fibre for woven cloth."
@@ -1098,7 +1147,7 @@ should find somebody looking back."
                       (* brow (* skin-weight 0.85)))))
     browed))
 
-(define-shader-function player-albedo (point gait direction)
+(define-shader-function player-albedo (point gait direction cast-envelope)
   "The nearest part decides the colour.
 
 Cream linen, warm copper and one red stone: the walls of the sanctuary,
@@ -1119,9 +1168,9 @@ read as the same culture rather than as a doll placed on a bridge."
          (hatband (player-hatband-distance head-posed))
          (sleeves (player-arm-distance posed gait))
          (boots (player-boot-distance point gait direction))
-         (staff (min (player-staff-distance point)
-                     (player-staff-head-distance point)))
-         (gem (player-staff-gem-distance point))
+         (staff (min (player-staff-distance point cast-envelope)
+                     (player-staff-head-distance point cast-envelope)))
+         (gem (player-staff-gem-distance point cast-envelope))
          (linen (player-linen-tooth robe-posed))
          (leather (player-leather-tooth posed))
          (strand (player-beard-tooth head-posed))
@@ -1302,8 +1351,8 @@ that he is standing on something."
                             (shadow-control :vec4)
                             (previous-character-parameters :vec4)
                             (character-direction :vec4)
-                            (ball-parameters :vec4)
-                            (previous-ball-parameters :vec4)))
+                            (fireball-parameters :vec4)
+                            (previous-fireball-parameters :vec4)))
                  (shadow-map :depth-texture-2d :binding 1)
                  (shadow-sampler :sampler :binding 2)))
   (let* ((index (float vertex-index))
@@ -1319,16 +1368,16 @@ that he is standing on something."
          ;; extra room goes rather than into a square nobody looks at.
          (across (- (* right-corner 2.0) 1.0))
          (vertical (- (* bottom-corner 2.0) 1.0))
-         (ball-p (> (float instance-index) 0.5))
-         (corner (if ball-p (vec2 across vertical)
+         (fireball-p (> (float instance-index) 0.5))
+         (corner (if fireball-p (vec2 (* across 1.65) (* vertical 1.65))
                      (vec2 (* across 1.45)
                            (if (> vertical 0.0) (* vertical 1.85) vertical))))
-         (center (if ball-p (swizzle ball-parameters :xyz)
+         (center (if fireball-p (swizzle fireball-parameters :xyz)
                      (swizzle character-parameters :xyz)))
          (previous-center
-           (if ball-p (swizzle previous-ball-parameters :xyz)
+           (if fireball-p (swizzle previous-fireball-parameters :xyz)
                (swizzle previous-character-parameters :xyz)))
-         (radius (if ball-p (swizzle ball-parameters :w) 2.05))
+         (radius (if fireball-p (swizzle fireball-parameters :w) 2.05))
          (proxy-world-position
            (+ (- center (* (swizzle camera-forward :xyz) radius))
               (+ (* (swizzle camera-right :xyz)
@@ -1399,13 +1448,13 @@ that he is standing on something."
                             (shadow-control :vec4)
                             (previous-character-parameters :vec4)
                             (character-direction :vec4)
-                            (ball-parameters :vec4)
-                            (previous-ball-parameters :vec4)))
+                            (fireball-parameters :vec4)
+                            (previous-fireball-parameters :vec4)))
                  (shadow-map :depth-texture-2d :binding 1)
                  (shadow-sampler :sampler :binding 2)))
   (let* ((center (swizzle center-radius :xyz))
          (radius (swizzle center-radius :w))
-         (ball-p (< radius 1.0))
+         (fireball-p (< radius 1.0))
          (gait (swizzle character-parameters :w))
          (spell-flash (swizzle character-direction :w))
          ;; The game controller rotates world space into the traveler's local
@@ -1432,31 +1481,32 @@ that he is standing on something."
                                  (dot relative-xy heading)
                                  (+ (swizzle relative :z) 1.48)))
                     (distance
-                      (if ball-p
-                          (- (sqrt (dot (- world-point center)
-                                        (- world-point center))) radius)
-                          (min (player-distance local gait direction)
-                               (player-wizard-orb-distance local)))))
+                      (if fireball-p
+                          (player-fireball-distance world-point center radius)
+                          (min (player-distance local gait direction spell-flash)
+                               (player-wizard-orb-distance local spell-flash)))))
                (if (< distance 0.0025)
                    ray-distance
-                   (if (> ray-distance (* radius 2.0))
+                   (if (> ray-distance (* radius (if fireball-p 3.2 2.0)))
                        ray-distance
                        (+ ray-distance (max (* distance 0.82) 0.0025)))))))
          (world-point (+ origin (* ray travel)))
          (relative (- world-point center))
-         (ball-offset (- world-point center))
+         (fireball-offset (- world-point center))
          (relative-xy (swizzle relative :xy))
          (local (vec3 (dot relative-xy player-right)
                       (dot relative-xy heading)
                       (+ (swizzle relative :z) 1.48)))
          (player-surface-distance
-           (if ball-p (- (sqrt (dot ball-offset ball-offset)) radius)
-               (player-distance local gait direction)))
+           (if fireball-p
+               (player-fireball-distance world-point center radius)
+               (player-distance local gait direction spell-flash)))
          (orb-surface-distance
-           (if ball-p 1000.0 (player-wizard-orb-distance local)))
-         (orb-p (if ball-p (< radius 0.0)
+           (if fireball-p 1000.0
+               (player-wizard-orb-distance local spell-flash)))
+         (orb-p (if fireball-p (< radius 0.0)
                     (< orb-surface-distance player-surface-distance)))
-         (surface-distance (if ball-p player-surface-distance
+         (surface-distance (if fireball-p player-surface-distance
                                (min player-surface-distance
                                     orb-surface-distance)))
          (coverage (- 1.0 (step 0.006 surface-distance)))
@@ -1465,14 +1515,24 @@ that he is standing on something."
                ;; The central sphere owns the visible normal.  Its tiny
                ;; firework motes use the same radial answer, which makes the
                ;; glow read as one spell instead of pixel speckle.
-               (normalize (- local (vec3 0.640 0.195 3.34)))
-               (player-normal local gait direction)))
+               (normalize (- local (player-staff-head-center spell-flash)))
+               (player-normal local gait direction spell-flash)))
          (normal
-           (if ball-p (normalize (- world-point center))
+           (if fireball-p (normalize (- world-point center))
                (normalize (player-world-direction local-normal heading))))
-         (albedo (if ball-p (vec3 0.92 0.16 0.075)
+         (fireball-heat
+           (if fireball-p
+               (+ 0.76
+                  (* 0.24
+                     (sin (+ (* (swizzle fireball-offset :x) 19.0)
+                             (+ (* (swizzle fireball-offset :y) 27.0)
+                                (* (swizzle fireball-offset :z) 23.0))))))
+               0.0))
+         (albedo (if fireball-p
+                     (mix (vec3 1.0 0.08 0.01) (vec3 1.0 0.62 0.06)
+                          fireball-heat)
                      (if orb-p (vec3 0.42 0.88 1.0)
-                         (player-albedo local gait direction))))
+                         (player-albedo local gait direction spell-flash))))
          (sun (swizzle sun-vector :xyz))
          (sun-color (swizzle sun-color-vector :xyz))
          (sky (swizzle sky-color-vector :xyz))
@@ -1509,6 +1569,9 @@ that he is standing on something."
          (radiance
            (+ paper
               (* (vec3 0.20 0.42 0.48) (* rim 0.07))
+              (if fireball-p
+                  (* (vec3 4.8 0.72 0.055) fireball-heat)
+                  (vec3 0.0 0.0 0.0))
               ;; A real source of color: the orb is blue-white at the core,
               ;; warmed by a small peach firework halo.
               (if orb-p
@@ -1539,7 +1602,7 @@ that he is standing on something."
                   (swizzle deck-clip :z))
             (vec3 0.0 0.0 1.0) sun shadow-control))
          (contact
-           (if ball-p 0.0
+           (if fireball-p 0.0
                (* (* (player-contact-shade origin ray center sun deck-height)
                      deck-lit)
                   (- 1.0 coverage))))

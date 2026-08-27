@@ -439,7 +439,7 @@
           (x (mcluv:handle-metabar-pointer-event frame event x y))
           ((typep event 'canvas-pointer-button-press-event)
            (close-viewer-metabar viewer)))))
-    ;; Modal while open: an outside click dismisses without throwing a ball or
+    ;; Modal while open: an outside click dismisses without casting a spell or
     ;; recapturing relative pointer mode in the same event.
     t))
 

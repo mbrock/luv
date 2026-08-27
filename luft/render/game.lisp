@@ -22,8 +22,9 @@
   "Maximum standable cells considered by one click-to-walk search.")
 (defparameter *walking-route-arrival-radius* 0.09
   "Horizontal distance from a cell centre which completes one waypoint.")
-(defconstant +thrown-ball-speed+ 18.0)
-(defconstant +thrown-ball-radius+ 0.32)
+(defconstant +fireball-speed+ 23.0)
+(defconstant +fireball-radius+ 0.38)
+(defconstant +fireball-cast-angle+ 0.68)
 
 (defgeneric inspection-source-solid (source)
   (:documentation "Return SOURCE's packed solid chain for sparse queries."))
@@ -36,8 +37,7 @@
   "Read SOLID for gameplay, treating its finite horizontal boundary as wall.
 
 Meshing and other world clients retain explicit OUTSIDE-DOMAIN semantics.
-Only physical occupants choose this restart, so walkers slide along the box
-and projectile terrain publication materializes nearby boundary colliders."
+Only physical occupants choose this restart, so walkers slide along the box."
   (handler-bind
       ((luft:outside-domain
          (lambda (condition)
@@ -67,13 +67,14 @@ and projectile terrain publication materializes nearby boundary colliders."
    (jump-requested-p :initform nil
                      :accessor walking-player-jump-requested-p)
    (spell-flash :initform 0.0 :accessor walking-player-spell-flash)
-   (ball-position :initform nil :accessor walking-player-ball-position)
-   (previous-ball-position :initform nil
-                           :accessor walking-player-previous-ball-position)
-   (physics :initform (luvcraft:make-physics-world :terrain nil)
-            :reader walking-player-physics)
-   (ball-handle :initform nil :accessor walking-player-ball-handle)
-   (physics-clock :initform 0.0d0 :accessor walking-player-physics-clock))
+   (fireball-position :initform nil
+                      :accessor walking-player-fireball-position)
+   (previous-fireball-position
+    :initform nil :accessor walking-player-previous-fireball-position)
+   (fireball-velocity :initform nil
+                      :accessor walking-player-fireball-velocity)
+   (fireball-distance-remaining
+    :initform 0.0 :accessor walking-player-fireball-distance-remaining))
   (:documentation
    "The continuous, player-owned state of LUFT's walking character.
 
@@ -432,86 +433,97 @@ rather than silently becoming a straight-line collision attempt."
   (setf (walking-player-jump-requested-p player) t)
   player)
 
-(defun cast-walking-player-spell (player)
-  "Ignite the staff orb; the renderer consumes this short cast envelope."
-  (setf (walking-player-spell-flash player) 1.0)
-  player)
+(defun walking-player-staff-head-position (player)
+  "Return the world-space head of PLAYER's staff in its full casting pose."
+  (let* ((player-position (walking-player-position player))
+         (heading-x (walking-player-heading-x player))
+         (heading-y (walking-player-heading-y player))
+         (right-x heading-y)
+         (right-y (- heading-x))
+         ;; The shader pivots the staff around the gripping hand.  Mirror its
+         ;; authored head here so the fireball belongs to that visible cast.
+         (head-height (- 3.34 1.505))
+         (forward (+ 0.195 (* (sin +fireball-cast-angle+) head-height)))
+         (height (+ 1.505 (* (cos +fireball-cast-angle+) head-height))))
+    (vec3:make-vec3
+     (+ (vec3:vec3-x player-position)
+        (* right-x 0.640) (* heading-x forward))
+     (+ (vec3:vec3-y player-position)
+        (* right-y 0.640) (* heading-y forward))
+     (+ (vec3:vec3-z player-position) height))))
 
-(defun throw-walking-player-ball (player origin direction)
-  "Throw (or replace) PLAYER's ball from ORIGIN along DIRECTION."
-  (let* ((position (add-scaled-directions origin direction 1.15))
-         (physics (walking-player-physics player))
-         (old (walking-player-ball-handle player)))
-    (when (and old (luvcraft:physics-body-alive-p physics old))
-      (luvcraft:destroy-physics-body physics old))
-    (setf (walking-player-ball-position player) position
-          (walking-player-previous-ball-position player)
+(defun launch-walking-player-fireball
+    (player origin direction &key (distance 64.0))
+  "Launch (or replace) PLAYER's fireball from ORIGIN along DIRECTION."
+  (let ((position (add-scaled-directions origin direction 0.48)))
+    (setf (walking-player-fireball-position player) position
+          (walking-player-previous-fireball-position player)
           (vec3:make-vec3 (vec3:vec3-x position) (vec3:vec3-y position)
                           (vec3:vec3-z position))
-          (walking-player-ball-handle player)
-          (luvcraft:spawn-physics-body
-           physics
-           (vec3:vec3-x position) (vec3:vec3-z position)
-           (vec3:vec3-y position)
-           :radius +thrown-ball-radius+ :mass 0.85
-           :vx (* +thrown-ball-speed+ (vec3:vec3-x direction))
-           :vy (* +thrown-ball-speed+ (vec3:vec3-z direction))
-           :vz (* +thrown-ball-speed+ (vec3:vec3-y direction))
-           :restitution 0.72 :friction 0.58 :rolling-resistance 0.018
-           :damping 0.035 :lifetime 8.0)
+          (walking-player-fireball-velocity player)
+          (vec3:vec3-scale direction +fireball-speed+)
+          (walking-player-fireball-distance-remaining player)
+          (max 0.0 (- distance 0.48))
           (walking-player-spell-flash player) 1.0))
   player)
 
-(defun post-walking-player-ball-terrain (player source)
-  "Publish nearby LUFT cells to the Luvcraft solver as static boxes."
-  (let* ((physics (walking-player-physics player))
-         (position (walking-player-ball-position player))
-         (solid (inspection-source-solid source)))
-    (luvcraft:clear-physics-boxes physics)
-    (when position
-      (let ((cx (floor (vec3:vec3-x position)))
-            (cy (floor (vec3:vec3-y position)))
-            (cz (floor (vec3:vec3-z position))))
-        (loop for x from (- cx 2) to (+ cx 2) do
-          (loop for y from (- cy 2) to (+ cy 2) do
-            (loop for z from (- cz 2) to (+ cz 2)
-                  when (plusp (collision-cell-occupancy-bit solid x y z))
-                    do (luvcraft:post-physics-box
-                        physics x z y (1+ x) (1+ z) (1+ y))))))))
+(defun cast-walking-player-fireball (player target)
+  "Turn PLAYER toward TARGET and launch a fireball from the pivoted staff.
+
+This is intentionally the small semantic boundary for the tech demo.  Input,
+rendering, and the temporary kinematic transport do not need to know what a
+future spell or weapon action vocabulary will look like."
+  (let* ((position (walking-player-position player))
+         (dx (- (vec3:vec3-x target) (vec3:vec3-x position)))
+         (dy (- (vec3:vec3-y target) (vec3:vec3-y position)))
+         (horizontal-distance (sqrt (+ (* dx dx) (* dy dy)))))
+    (when (> horizontal-distance 1.0e-4)
+      (setf (walking-player-heading-x player) (/ dx horizontal-distance)
+            (walking-player-heading-y player) (/ dy horizontal-distance)))
+    (cancel-walking-player-route player "casting a fireball")
+    (let* ((origin (walking-player-staff-head-position player))
+           (direction
+             (vec3:make-vec3 (- (vec3:vec3-x target) (vec3:vec3-x origin))
+                             (- (vec3:vec3-y target) (vec3:vec3-y origin))
+                             (- (vec3:vec3-z target)
+                                (vec3:vec3-z origin))))
+           (length (vec3:vec3-length direction)))
+      ;; A click directly on the staff is still a cast, aimed along the new
+      ;; facing instead of asking VEC3-NORMALIZE to invent a direction.
+      (when (< length 1.0e-4)
+        (setf direction
+              (vec3:make-vec3 (walking-player-heading-x player)
+                              (walking-player-heading-y player) 0.0)
+              length 32.0))
+      (launch-walking-player-fireball
+       player origin (vec3:vec3-normalize direction) :distance length))))
+
+(defun clear-walking-player-fireball (player)
+  (setf (walking-player-fireball-position player) nil
+        (walking-player-previous-fireball-position player) nil
+        (walking-player-fireball-velocity player) nil
+        (walking-player-fireball-distance-remaining player) 0.0)
   player)
 
-(defun sync-walking-player-ball (player)
-  (let ((physics (walking-player-physics player))
-        (handle (walking-player-ball-handle player)))
-    (if (and handle (luvcraft:physics-body-alive-p physics handle))
-        (multiple-value-bind (x z y)
-            (luvcraft:physics-body-position physics handle)
-          (let ((position (walking-player-ball-position player)))
-            (setf (vec3:vec3-x position) x
-                  (vec3:vec3-y position) y
-                  (vec3:vec3-z position) z)))
-        (setf (walking-player-ball-handle player) nil
-              (walking-player-ball-position player) nil
-              (walking-player-previous-ball-position player) nil)))
-  player)
-
-(defun advance-walking-player-ball (player source seconds)
-  (let ((position (walking-player-ball-position player)))
+(defun advance-walking-player-fireball (player seconds)
+  "Advance PLAYER's fireball in a straight line, stopping at its cast target."
+  (let ((position (walking-player-fireball-position player)))
     (when position
-      (let ((previous (walking-player-previous-ball-position player)))
+      (let ((previous (walking-player-previous-fireball-position player)))
         (setf (vec3:vec3-x previous) (vec3:vec3-x position)
               (vec3:vec3-y previous) (vec3:vec3-y position)
               (vec3:vec3-z previous) (vec3:vec3-z position)))
-      (incf (walking-player-physics-clock player) seconds)
-      (loop repeat 3
-            while (>= (walking-player-physics-clock player) (/ 1d0 60d0))
-            do (decf (walking-player-physics-clock player) (/ 1d0 60d0))
-               (post-walking-player-ball-terrain player source)
-               (luvcraft:step-physics-world (walking-player-physics player)
-                                            (/ 1.0 60.0)))
-      (when (>= (walking-player-physics-clock player) (/ 1d0 60d0))
-        (setf (walking-player-physics-clock player) 0d0))
-      (sync-walking-player-ball player)))
+      (let* ((velocity (walking-player-fireball-velocity player))
+             (remaining
+               (walking-player-fireball-distance-remaining player))
+             (travel (min remaining (* +fireball-speed+ seconds)))
+             (time (/ travel +fireball-speed+)))
+        (incf (vec3:vec3-x position) (* (vec3:vec3-x velocity) time))
+        (incf (vec3:vec3-y position) (* (vec3:vec3-y velocity) time))
+        (incf (vec3:vec3-z position) (* (vec3:vec3-z velocity) time))
+        (decf (walking-player-fireball-distance-remaining player) travel)
+        (when (<= (walking-player-fireball-distance-remaining player) 0.0)
+          (clear-walking-player-fireball player)))))
   player)
 
 (defun advance-walking-player-vertical (player source seconds)
@@ -585,7 +597,7 @@ rather than silently becoming a straight-line collision attempt."
                 (max (- maximum-change)
                      (min maximum-change difference))))))
   (advance-walking-player-vertical player source seconds)
-  (advance-walking-player-ball player source seconds)
+  (advance-walking-player-fireball player seconds)
   (setf (walking-player-spell-flash player)
         (max 0.0 (- (walking-player-spell-flash player) (* 2.4 seconds))))
   player)
@@ -653,13 +665,13 @@ behind."
            (walking-player-heading-y player)
            (walking-player-previous-heading-x player)
            (walking-player-spell-flash player))
-     (let ((position (walking-player-ball-position player)))
+     (let ((position (walking-player-fireball-position player)))
        (if position
            (list (vec3:vec3-x position) (vec3:vec3-y position)
-                 (vec3:vec3-z position) +thrown-ball-radius+)
+                 (vec3:vec3-z position) +fireball-radius+)
            '(0.0 0.0 0.0 0.0)))
-     (let ((position (walking-player-previous-ball-position player)))
+     (let ((position (walking-player-previous-fireball-position player)))
        (if position
            (list (vec3:vec3-x position) (vec3:vec3-y position)
-                 (vec3:vec3-z position) +thrown-ball-radius+)
+                 (vec3:vec3-z position) +fireball-radius+)
            '(0.0 0.0 0.0 0.0))))))
