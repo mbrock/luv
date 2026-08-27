@@ -15,9 +15,16 @@
 (defparameter *progress-interval* 5.0)
 (defparameter *worker-mode* nil)
 (defparameter *coordinator-mailbox* nil)
+(defparameter *shardable-test-packages*
+  '(("luft/render/test" . "LUFT.RENDER.TESTS")
+    ("luvcraft/core/test" . "LUVCRAFT.TESTS")
+    ("telegram/test" . "TELEGRAM.TESTS")))
+
+(defstruct test-task
+  name system package shard-index shard-count weight)
 
 (defstruct test-worker
-  id suites pid stream thread status)
+  id tasks pid stream thread status)
 
 (defmethod asdf:perform :around ((operation asdf:compile-op)
                                  (component asdf:component))
@@ -96,7 +103,14 @@
 
 (defun suite-log-path (directory name)
   (merge-pathnames
-   (format nil "~A.log" (substitute #\- #\/ name))
+   (format nil "~A.log"
+           (map 'string
+                (lambda (character)
+                  (if (or (alphanumericp character)
+                          (find character "-_."))
+                      character
+                      #\-))
+                name))
    directory))
 
 (defun call-with-fd-output-to (path thunk)
@@ -137,10 +151,11 @@
     (terpri *standard-output*)
     (finish-output *standard-output*)))
 
-(defun run-one-suite (name directory)
-  (let ((log (suite-log-path directory name))
-        (start (get-internal-real-time))
-        (status :passed))
+(defun run-one-task (task directory)
+  (let* ((name (test-task-name task))
+         (log (suite-log-path directory name))
+         (start (get-internal-real-time))
+         (status :passed))
     (emit-worker-event (list :suite-started name))
     (handler-case
         (call-with-fd-output-to
@@ -154,7 +169,14 @@
                       (unless (suite-failure-p condition)
                         (uiop:print-condition-backtrace
                          condition :stream *standard-output* :count 30)))))
-               (asdf:test-system name)))))
+               (if (test-task-package task)
+                   (uiop:symbol-call
+                    :luv.test-support :call-with-test-shard
+                    (test-task-package task)
+                    (test-task-shard-index task)
+                    (test-task-shard-count task)
+                    (lambda () (asdf:test-system (test-task-system task))))
+                   (asdf:test-system (test-task-system task)))))))
       (error ()
         (setf status :failed)))
     (let ((seconds
@@ -164,11 +186,11 @@
        (list :suite-finished name status seconds (namestring log))))
     status))
 
-(defun run-worker (directory suites)
+(defun run-worker (directory tasks)
   (let ((*worker-mode* t)
         (failed nil))
-    (dolist (suite suites)
-      (when (eq :failed (run-one-suite suite directory))
+    (dolist (task tasks)
+      (when (eq :failed (run-one-task task directory))
         (setf failed t)))
     (if failed 1 0)))
 
@@ -207,19 +229,51 @@
 (defun suite-weight (name timings)
   (or (cdr (assoc name timings :test #'string=)) 1.0))
 
-(defun assign-suites (suites worker-count timings)
+(defun make-test-tasks (suites jobs timings)
+  (let ((target (/ (reduce #'+ suites :key (lambda (name)
+                                                  (suite-weight name timings)))
+                           jobs)))
+    (loop for system in suites
+          for package = (cdr (assoc system *shardable-test-packages*
+                                    :test #'string=))
+          for weight = (suite-weight system timings)
+          for shard-count =
+            (if package
+                (min (uiop:symbol-call :luv.test-support :test-root-count package)
+                     (max (if (> jobs 1) 2 1)
+                          (ceiling weight target)))
+                1)
+          append
+          (progn
+            (when (> shard-count 1)
+              (unless (uiop:symbol-call :luv.test-support
+                                        :shardable-test-package-p package)
+                (error "Configured test package ~A is not independently shardable."
+                       package)))
+            (loop for shard-index below shard-count
+                  for name = (if (= shard-count 1)
+                                 system
+                                 (format nil "~A [~D/~D]"
+                                         system (1+ shard-index) shard-count))
+                  collect
+                  (make-test-task
+                   :name name :system system
+                   :package (and (> shard-count 1) package)
+                   :shard-index shard-index :shard-count shard-count
+                   :weight (/ weight shard-count)))))))
+
+(defun assign-tasks (tasks worker-count)
   (let ((weights (make-array worker-count :initial-element 0.0))
         (assignments (make-array worker-count :initial-element nil)))
-    (dolist (suite (sort (copy-list suites) #'>
-                         :key (lambda (name) (suite-weight name timings))))
+    (dolist (task (sort (copy-list tasks) #'> :key #'test-task-weight))
       (let ((worker
               (loop with lightest = 0
                     for index from 1 below worker-count
                     when (< (aref weights index) (aref weights lightest))
                       do (setf lightest index)
                     finally (return lightest))))
-        (push suite (aref assignments worker))
-        (incf (aref weights worker) (suite-weight suite timings))))
+        (push task (aref assignments worker))
+        (incf (aref weights worker) (test-task-weight task))))
     (loop for assignment across assignments
           collect (nreverse assignment))))
 
@@ -229,7 +283,7 @@
            (get-universal-time) (sb-posix:getpid))
    *project-root*))
 
-(defun fork-worker (id suites directory)
+(defun fork-worker (id tasks directory)
   (multiple-value-bind (read-fd write-fd) (sb-posix:pipe)
     (finish-output *standard-output*)
     (finish-output *error-output*)
@@ -241,7 +295,7 @@
             (sb-posix:dup2 write-fd 2)
             (sb-posix:close write-fd)
             (let ((status
-                    (handler-case (run-worker directory suites)
+                    (handler-case (run-worker directory tasks)
                       (error (condition)
                         (uiop:print-condition-backtrace
                          condition :stream *standard-output* :count 30)
@@ -251,7 +305,7 @@
           (progn
             (sb-posix:close write-fd)
             (make-test-worker
-             :id id :suites suites :pid pid
+             :id id :tasks tasks :pid pid
              :stream (sb-sys:make-fd-stream
                       read-fd :input t :buffering :line :auto-close t
                       :external-format :utf-8
@@ -344,10 +398,33 @@
       (terpri)
       (finish-output))))
 
-(defun run-parallel-suites (suites jobs timings directory)
+(defun update-aggregate-timings (tasks durations results timings)
+  (dolist (system (remove-duplicates (mapcar #'test-task-system tasks)
+                                     :test #'string=))
+    (let ((system-tasks
+            (remove-if-not (lambda (task)
+                             (string= system (test-task-system task)))
+                           tasks)))
+      (when (and (> (length system-tasks) 1)
+                 (every (lambda (task)
+                          (let ((name (test-task-name task)))
+                            (and (eq :passed (gethash name results))
+                                 (assoc name durations :test #'string=))))
+                        system-tasks))
+        (setf timings
+              (update-timing
+               system
+               (reduce #'+ system-tasks
+                       :key (lambda (task)
+                              (cdr (assoc (test-task-name task) durations
+                                          :test #'string=))))
+               timings)))))
+  timings)
+
+(defun run-parallel-suites (tasks jobs timings directory)
   (let* ((*coordinator-mailbox*
            (sb-concurrency:make-mailbox :name "test coordinator"))
-         (assignments (assign-suites suites jobs timings))
+         (assignments (assign-tasks tasks jobs))
          (workers nil)
          (results (make-hash-table :test #'equal))
          (active (make-hash-table))
@@ -398,15 +475,18 @@
                                                   name worker-id))
                                         (progn
                                           (setf (gethash name results) status
-                                                timings (update-timing name seconds
-                                                                       timings))
+                                                timings
+                                                (if (eq status :passed)
+                                                    (update-timing name seconds
+                                                                   timings)
+                                                    timings))
                                           (push (cons name seconds) durations)
                                           (when (eq status :failed)
                                             (push name failures))
                                           (format t "~5,1,,,'0Fs ~2D/~D  ~6A ~A (~,1Fs, worker ~D)~%"
                                                   (elapsed-seconds parallel-start)
                                                   (hash-table-count results)
-                                                  (length suites)
+                                                  (length tasks)
                                                   (if (eq status :passed)
                                                       "PASS" "FAIL")
                                                   name seconds worker-id)
@@ -427,9 +507,10 @@
                                           (notany
                                            (lambda (name)
                                              (eq :failed (gethash name results)))
-                                           (test-worker-suites
-                                            (find worker-id workers
-                                                  :key #'test-worker-id))))
+                                           (mapcar #'test-task-name
+                                                   (test-worker-tasks
+                                                    (find worker-id workers
+                                                          :key #'test-worker-id)))))
                                  (push (format nil "worker ~D" worker-id) failures)
                                  (format t "worker ~D exited unexpectedly (status ~D).~%"
                                          worker-id status)))))
@@ -438,17 +519,18 @@
                             (report-running-suites active parallel-start)
                             (setf last-output (get-internal-real-time)))))))
       (stop-workers workers))
-    (dolist (suite suites)
-      (unless (gethash suite results)
-        (push suite failures)
-        (format t "~A: no result returned~%" suite)))
-    (values failures timings durations)))
+    (dolist (task tasks)
+      (unless (gethash (test-task-name task) results)
+        (push (test-task-name task) failures)
+        (format t "~A: no result returned~%" (test-task-name task))))
+    (values failures (update-aggregate-timings tasks durations results timings)
+            durations)))
 
 (defun report-slowest-suites (durations &optional (limit 5))
   (let ((slowest (subseq (sort (copy-list durations) #'> :key #'cdr)
                          0 (min limit (length durations)))))
     (when slowest
-      (format t ";; Slowest suites:~%")
+      (format t ";; Slowest test tasks:~%")
       (dolist (suite slowest)
         (format t ";; ~6,1Fs  ~A~%" (cdr suite) (car suite))))))
 
@@ -467,7 +549,6 @@
          (suites
            (remove-if (lambda (suite) (assoc suite skipped :test #'string=))
                       catalog))
-         (worker-count (min jobs (length suites)))
          (timings (read-timings))
          (start (get-internal-real-time))
          (run-directory (test-run-directory)))
@@ -479,26 +560,28 @@
     (finish-output)
     (unless (zerop (prepare-suites suites))
       (return-from run-coordinator 1))
-    (format t "Forking ~D prepared SBCL workers for ~D test suites...~%"
-            worker-count (length suites))
-    (finish-output)
-    (multiple-value-bind (failures new-timings durations)
-        (run-parallel-suites suites worker-count timings run-directory)
-      (write-timings new-timings)
-      (format t "~&~%;; Tested ~D suite~:P in ~,1Fs with ~D SBCL worker~:P.~%"
-              (length suites)
-              (/ (float (- (get-internal-real-time) start) 1.0)
-                 internal-time-units-per-second)
-              worker-count)
-      (when skipped
-        (format t ";; Skipped ~D unavailable suite~:P.~%" (length skipped)))
-      (report-slowest-suites durations)
-      (if failures
-          (progn
-            (format t ";; Failed: ~{~A~^, ~}.~%"
-                    (remove-duplicates failures :test #'equal))
-            1)
-          0))))
+    (let* ((tasks (make-test-tasks suites jobs timings))
+           (worker-count (min jobs (length tasks))))
+      (format t "Forking ~D prepared SBCL workers for ~D test tasks...~%"
+              worker-count (length tasks))
+      (finish-output)
+      (multiple-value-bind (failures new-timings durations)
+          (run-parallel-suites tasks worker-count timings run-directory)
+        (write-timings new-timings)
+        (format t "~&~%;; Tested ~D suite~:P in ~,1Fs with ~D SBCL worker~:P.~%"
+                (length suites)
+                (/ (float (- (get-internal-real-time) start) 1.0)
+                   internal-time-units-per-second)
+                worker-count)
+        (when skipped
+          (format t ";; Skipped ~D unavailable suite~:P.~%" (length skipped)))
+        (report-slowest-suites durations)
+        (if failures
+            (progn
+              (format t ";; Failed: ~{~A~^, ~}.~%"
+                      (remove-duplicates failures :test #'equal))
+              1)
+            0)))))
 
 (defun main ()
   (let ((arguments (uiop:command-line-arguments)))

@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := all
 
 LUVCRAFT_BENCHMARK_FRAMES ?= 120
-TEST_JOBS ?= 4
+TEST_JOBS ?= $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1)
 LUVCRAFT_BENCHMARK_CSV ?= build/luvcraft-metal-benchmark.csv
 LUVCRAFT_BENCHMARK_SCENARIO ?= steady
 LUVCRAFT_BENCHMARK_DENSITY ?= standard
