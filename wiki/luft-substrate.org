@@ -167,9 +167,12 @@ exposure, and biases distinguished only by comments.  Luft has rebuilt that
 condition at larger scale.  Its scene uniform is twenty-seven anonymous
 =vec4= members — =render-parameters=, =temporal-parameters=,
 =character-parameters=, =fireball-parameters=, and their previous-frame
-twins — and the member list is repeated textually /fourteen times/ across
-the shader definitions of =luft/render/shaders.lisp= and
-=luft/render/flame-shaders.lisp=, with no shared declaration site at all.  Meanwhile the fragment ladder runs genuine radiometry: HDR
+twins — and when this page was first written the member list was repeated
+textually /fourteen times/ across =luft/render/shaders.lisp= and
+=luft/render/flame-shaders.lisp=, with no shared declaration site at all.
+It is now the one =*scene-uniform-members*= ledger, spliced at read time,
+with every shorter stage declaring an exact prefix; the lanes remain
+anonymous, which is precisely what the mark below removes.  Meanwhile the fragment ladder runs genuine radiometry: HDR
 radiance, Rec. 709 luminance, log-luminance exposure metering, tone mapping,
 paper grading — every lane of #T1GYOH's table, every one a bare float.
 
@@ -336,12 +339,23 @@ radiance, luminance, and exposure lanes through the presentation ladder.
 Categorical words — seeds, template ids, packed site words — stay
 deliberately unannotated per #J4V8QM.
 
-/Evidence./  The member list is repeated fourteen times today with no
-shared owner; luvcraft's migration (#9P358P, #S00PRF, #9ZK7Q7) proved
+/Evidence./  Luvcraft's migration (#9P358P, #S00PRF, #9ZK7Q7) proved
 byte-identical SPIR-V throughout while surfacing real character and origin
 mistakes; =validate-torch-flame-frame= hand-implements what declared
 products generate; and the spell-effects experiment is about to multiply
 exactly these lanes.
+
+The preliminaries are in place.  =make luft-shader-validate= assembles all
+eighteen production LUFT modules through
+[[lisp:luft.render.shaders:write-production-spir-v]], runs =spirv-val= on
+each, and prints their SHA-256 hashes — the byte-identity oracle this
+migration gates on.  The fourteen repeated member lists are now one
+=*scene-uniform-members*= ledger with =scene-uniform-prefix= splices, each
+site verified as an exact prefix, and the refactor reproduced all eighteen
+module hashes exactly.  What remains before annotation begins: a
+=luft/render/quantities.lisp= vocabulary home whose definers arrive by
+=:import-from= (no =math:= prefixes in source), and the per-lane meaning
+decisions themselves.
 
 /Done when./  One declaration site owns the scene uniform's members with
 their quantities and layouts; every Luft shader splices it; the torch-flame

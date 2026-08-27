@@ -1,7 +1,9 @@
 (defpackage #:luft.render.shaders
   (:use #:cl #:luv.shader)
   (:shadowing-import-from #:luv.shader #:step)
-  (:export #:lattice-point-fragment-specification
+  (:export #:write-production-spir-v
+           #:*production-shader-specifications*
+           #:lattice-point-fragment-specification
            #:lattice-point-vertex-specification
            #:player-sdf-fragment-specification
            #:player-sdf-vertex-specification

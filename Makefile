@@ -23,7 +23,7 @@ TRACY_MCCLIM_PAINT_TRACE ?= build/mcclim-paints.tracy
 
 FASL_CACHE := $(HOME)/.cache/common-lisp
 
-.PHONY: all sly-client sly-dependency-core luvcraft luft luft-core luft-test run test capture showcase-bootstrap showcase-render showcase-deploy showcase-publish showcase-status clean-fasls parinfer-check sly-build-lock-check shader-validate msl-validate smoke vulkan-smoke metal-smoke metal-text-closeup metal-benchmark metal-streaming-benchmark metal-retina-benchmark luft-mesher-profile luft-mesher-cohort luft-z-fiber-benchmark luft-blender-oracle luft-blender-oracle-check tracy-streaming tracy-mcclim-roundrect tracy-mcclim-paints readme-screenshots mcclim-gallery wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw roundrect-proof slug-proof slug-text-proof clean
+.PHONY: all sly-client sly-dependency-core luvcraft luft luft-core luft-test run test capture showcase-bootstrap showcase-render showcase-deploy showcase-publish showcase-status clean-fasls parinfer-check sly-build-lock-check shader-validate luft-shader-validate msl-validate smoke vulkan-smoke metal-smoke metal-text-closeup metal-benchmark metal-streaming-benchmark metal-retina-benchmark luft-mesher-profile luft-mesher-cohort luft-z-fiber-benchmark luft-blender-oracle luft-blender-oracle-check tracy-streaming tracy-mcclim-roundrect tracy-mcclim-paints readme-screenshots mcclim-gallery wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw roundrect-proof slug-proof slug-text-proof clean
 
 ifeq ($(LUV_SLY_SYSTEM),luft)
 all: sly-client luft-core sly-dependency-core
@@ -147,6 +147,17 @@ shader-validate:
 	@./scripts/dev spirv-val --target-env vulkan1.0 build/player-body-sdf.vert.spv
 	@./scripts/dev spirv-val --target-env vulkan1.0 build/player-body-sdf.frag.spv
 	@echo "shader-validate: all SPIR-V shaders valid."
+
+luft-shader-validate:
+	@mkdir -p build
+	@rm -f build/luft-*.spv
+	@./scripts/dev sbcl --noinform --non-interactive \
+		--eval '(require :asdf)' \
+		--eval '(handler-bind ((warning (function muffle-warning))) (progn (asdf:load-asd (truename "luv.asd")) (asdf:load-asd (truename "luft.asd")) (asdf:load-system :luft/renderer)))' \
+		--eval '(handler-bind ((warning (function muffle-warning))) (luft.render.shaders:write-production-spir-v #p"build/"))'
+	@./scripts/dev sh -c 'status=0; for f in build/luft-*.spv; do spirv-val --target-env vulkan1.0 "$$f" || status=1; done; exit $$status'
+	@./scripts/dev sh -c 'sha256sum build/luft-*.spv'
+	@echo "luft-shader-validate: all LUFT SPIR-V modules valid."
 
 msl-validate:
 	mkdir -p build

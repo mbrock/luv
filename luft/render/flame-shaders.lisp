@@ -597,29 +597,7 @@ boundary-edge mask.  This is the scalar oracle for both body vertex shaders."
      ((torch-frames :storage-buffer :binding 0 :element :vec4)
       (torch-body-vertices :storage-buffer :binding 1 :element :vec4)
       (camera-state :uniform-block :binding 2
-       :members ((camera-position :vec4)
-                 (camera-right :vec4)
-                 (camera-up :vec4)
-                 (camera-forward :vec4)
-                 (camera-projection :vec4)
-                 (render-parameters :vec4)
-                 (previous-camera-position :vec4)
-                 (previous-camera-right :vec4)
-                 (previous-camera-up :vec4)
-                 (previous-camera-forward :vec4)
-                 (previous-camera-projection :vec4)
-                 (temporal-parameters :vec4)
-                 (inspection-parameters :vec4)
-                 (character-parameters :vec4)
-                 (sun-vector :vec4)
-                 (sun-color-vector :vec4)
-                 (sky-color-vector :vec4)
-                 (ground-color-vector :vec4)
-                 (shadow-row-x :vec4)
-                 (shadow-row-y :vec4)
-                 (shadow-row-z :vec4)
-                 (shadow-row-w :vec4)
-                 (shadow-control :vec4)))))
+       :members #.(scene-uniform-prefix 23))))
   (let* ((frame-base
            (* instance-index
               (uint #.luft.render::+torch-flame-instance-row-count+)))
@@ -712,29 +690,7 @@ boundary-edge mask.  This is the scalar oracle for both body vertex shaders."
      ((torch-frames :storage-buffer :binding 0 :element :vec4)
       (torch-body-vertices :storage-buffer :binding 1 :element :vec4)
       (camera-state :uniform-block :binding 2
-       :members ((camera-position :vec4)
-                 (camera-right :vec4)
-                 (camera-up :vec4)
-                 (camera-forward :vec4)
-                 (camera-projection :vec4)
-                 (render-parameters :vec4)
-                 (previous-camera-position :vec4)
-                 (previous-camera-right :vec4)
-                 (previous-camera-up :vec4)
-                 (previous-camera-forward :vec4)
-                 (previous-camera-projection :vec4)
-                 (temporal-parameters :vec4)
-                 (inspection-parameters :vec4)
-                 (character-parameters :vec4)
-                 (sun-vector :vec4)
-                 (sun-color-vector :vec4)
-                 (sky-color-vector :vec4)
-                 (ground-color-vector :vec4)
-                 (shadow-row-x :vec4)
-                 (shadow-row-y :vec4)
-                 (shadow-row-z :vec4)
-                 (shadow-row-w :vec4)
-                 (shadow-control :vec4)))))
+       :members #.(scene-uniform-prefix 23))))
   (let* ((frame-base
            (* instance-index
               (uint #.luft.render::+torch-flame-instance-row-count+)))
@@ -840,12 +796,7 @@ boundary-edge mask.  This is the scalar oracle for both body vertex shaders."
      :resources
      ((flame-instances :storage-buffer :binding 0 :element :vec4)
       (camera-state :uniform-block :binding 1
-       :members ((camera-position :vec4)
-                 (camera-right :vec4)
-                 (camera-up :vec4)
-                 (camera-forward :vec4)
-                 (camera-projection :vec4)
-                 (render-parameters :vec4)))))
+       :members #.(scene-uniform-prefix 6))))
   (let* ((base-row (* instance-index (uint 3.0)))
          (origin-row (buffer-element flame-instances base-row))
          (normal-row
@@ -905,19 +856,7 @@ boundary-edge mask.  This is the scalar oracle for both body vertex shaders."
      :outputs ((color-output :vec4 :location 0))
      :resources
      ((camera-state :uniform-block :binding 1
-       :members ((camera-position :vec4)
-                 (camera-right :vec4)
-                 (camera-up :vec4)
-                 (camera-forward :vec4)
-                 (camera-projection :vec4)
-                 (render-parameters :vec4)
-                 (previous-camera-position :vec4)
-                 (previous-camera-right :vec4)
-                 (previous-camera-up :vec4)
-                 (previous-camera-forward :vec4)
-                 (previous-camera-projection :vec4)
-                 (temporal-parameters :vec4)
-                 (inspection-parameters :vec4)))
+       :members #.(scene-uniform-prefix 13))
       (effect-state :uniform-block :binding 2
        :members ((flame-effect-parameters :vec4)))
       (opaque-depth :depth-texture-2d :binding 3)
@@ -1006,3 +945,40 @@ boundary-edge mask.  This is the scalar oracle for both body vertex shaders."
                  (scene-sampler :sampler :binding 1)))
   (let* ((uv (+ (* ndc 0.5) (vec2 0.5 0.5))))
     (set-output color-output (sample scene scene-sampler uv))))
+
+;;; Production module manifest ----------------------------------------------
+
+(defparameter *production-shader-specifications*
+  '(mesh-vertex-specification
+    mesh-fragment-specification
+    shadow-vertex-specification
+    player-sdf-vertex-specification
+    player-sdf-fragment-specification
+    lattice-point-vertex-specification
+    lattice-point-fragment-specification
+    present-vertex-specification
+    present-fragment-specification
+    sky-fragment-specification
+    sky-temporal-fragment-specification
+    exposure-probe-fragment-specification
+    temporal-resolve-fragment-specification
+    torch-body-vertex-specification
+    torch-body-shadow-vertex-specification
+    torch-flame-vertex-specification
+    torch-flame-fragment-specification
+    torch-flame-composite-copy-fragment-specification)
+  "Every production LUFT shader specification, in stable emission order.")
+
+(defun write-production-spir-v (&optional (directory #p"build/"))
+  "Assemble every production LUFT shader into DIRECTORY as luft-*.spv.
+
+This is the byte-identity oracle for shader-source migrations: emit before,
+emit after, and compare hashes.  Returns the written pathnames."
+  (loop for name in *production-shader-specifications*
+        for specification = (funcall name)
+        for path = (merge-pathnames
+                    (format nil "luft-~(~a~).spv" name) directory)
+        do (luv.spir-v:write-spir-v
+            (luv.spir-v:assemble-shader-specification specification)
+            path)
+        collect path))
