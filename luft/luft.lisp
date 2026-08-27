@@ -44,6 +44,8 @@
    #:chain+ #:boundary-chain #:surface-chain #:chain-cell-occupancy-bit
    ;; Stars.
    #:cell-occupancy-bit #:site-star-occupancy-mask
+   #:star-triangles #:star-face-triangles
+   #:star-band-triangles #:star-junction-triangles
    ;; Face topology.
    #:local-edge #:local-corner
    #:face-tangent-axes #:face-oriented-normal #:orient-face-outward

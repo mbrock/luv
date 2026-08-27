@@ -11,6 +11,7 @@
                (:static-file "luft/blender-arc-stars.sexp")
                (:file "luft/mesh")
                (:file "luft/mesh-query")
+               (:file "luft/star-geometry")
                (:file "luft/mesh-realization")
                (:file "luft/mesh-variation-policy")
                (:file "luft/mesh-variation-plan")
