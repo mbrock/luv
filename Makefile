@@ -1,6 +1,7 @@
 .DEFAULT_GOAL := all
 
 LUVCRAFT_BENCHMARK_FRAMES ?= 120
+TEST_JOBS ?= 4
 LUVCRAFT_BENCHMARK_CSV ?= build/luvcraft-metal-benchmark.csv
 LUVCRAFT_BENCHMARK_SCENARIO ?= steady
 LUVCRAFT_BENCHMARK_DENSITY ?= standard
@@ -76,7 +77,7 @@ test:
 	@$(MAKE) --no-print-directory -j3 parinfer-check sly-build-lock-check test-suite
 
 test-suite:
-	@./scripts/dev sbcl --noinform --non-interactive --load scripts/test.lisp
+	@./scripts/dev python3 scripts/test.py --jobs $(TEST_JOBS)
 endif
 
 luft-test:
