@@ -253,6 +253,7 @@ Nothing here refers to anything.
     (true (search "document.getElementById(id)" javascript))
     (true (search "new EventSource(description.events)" javascript))
     (true (search "new Terminal" javascript))
+    (false (search "x1b[" javascript))
     (false (search "at(document" javascript))))
 
 (define-test deployment-ids-are-safe-path-components

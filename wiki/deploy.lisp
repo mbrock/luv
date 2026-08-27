@@ -82,6 +82,8 @@
 
 (in-package #:luv.wiki.deploy)
 
+(defparameter +crlf+ (coerce (list #\Return #\Newline) 'string))
+
 (defun javascript ()
   "The deployment modal's browser program, entirely in ParenScript."
   (ps:ps*
@@ -112,7 +114,7 @@
                                 :scrollback 5000)))))
             ((@ terminal open) host)
             ((@ terminal write)
-             "\x1b[36mRequesting a blue/green deployment…\x1b[0m\r\n")
+             ,(concatenate 'string "Requesting a blue/green deployment…" +crlf+))
             (try
               (let* ((response
                        (browser:await
@@ -132,9 +134,11 @@
                      ((@ events close))
                      ((@ terminal write)
                       (if (= (@ event data) "0")
-                          "\r\n\x1b[32mDeployment complete. Reloading…\x1b[0m\r\n"
-                          (+ "\r\n\x1b[31mDeployment failed with status "
-                             (@ event data) ".\x1b[0m\r\n")))
+                          ,(concatenate 'string +crlf+
+                                        "Deployment complete. Reloading…" +crlf+)
+                          (+ ,(concatenate 'string +crlf+
+                                           "Deployment failed with status ")
+                             (@ event data) "." ,+crlf+)))
                      (setf (@ close disabled) false (@ button disabled) false)
                      (when (= (@ event data) "0")
                        (set-timeout (lambda () ((@ window location reload))) 900))))
@@ -142,11 +146,11 @@
                    (lambda (event)
                      ((@ events close))
                      ((@ terminal write)
-                      (+ "\r\n\x1b[31m" (@ event data) "\x1b[0m\r\n"))
+                      (+ ,+crlf+ (@ event data) ,+crlf+))
                      (setf (@ close disabled) false (@ button disabled) false)))))
               (:catch (error)
                 ((@ terminal write)
-                 (+ "\r\n\x1b[31m" (@ error message) "\x1b[0m\r\n"))
+                 (+ ,+crlf+ (@ error message) ,+crlf+))
                 (setf (@ close disabled) false (@ button disabled) false))))))
       ((@ document add-event-listener) "DOMContentLoaded"
        (lambda ()

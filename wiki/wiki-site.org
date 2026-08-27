@@ -336,6 +336,50 @@ reachable at the public URL.
 Done when: the workflow has succeeded once and the index page is reachable
 at the public URL.  Both hold.
 
+* DONE Switch the live wiki through two warm Unix sockets
+:PROPERTIES:
+:ID: EYJQDM
+:END:
+
+The dynamic site at =luv.swa.sh= has two detached Git worktrees,
+=/srv/luv-slots/1= and =/srv/luv-slots/2=, served by the template unit
+=luv-wiki@.service=.  Woo listens on =/run/luv/1.sock= and =2.sock=;
+Caddy always proxies =live.sock= with upstream keepalive disabled, so replacing
+that relative symlink changes the destination of each new request without a
+Caddy reload.  The previous slot stays warm and in flight requests finish on
+the server that accepted them.
+
+A deploy request wakes =luv-deploy.service= through =luv-deploy.path=.  The
+fixed host program fetches =origin/main=, refuses tracked edits in the inactive
+worktree, runs =make= and =make test= inside its Nix environment, starts that
+slot, checks both =/healthz= and its exact =/version= commit through the socket,
+then atomically renames the selector and verifies the public commit.  Any
+failure stops before the switch; a failed public check restores the old
+selector.
+
+The live-only Deploy button opens an xterm.js dialog built by Spinneret and the
+S-expression stylesheet.  Its ParenScript client requests a deployment and
+feeds hex-encoded chunks from a Clack event stream into xterm as bytes.  The
+host command runs inside a real pseudo-terminal, preserving ANSI colour and
+carriage-return progress.  Static publication contains neither the button nor
+the dialog.  Caddy's small Basic Auth boundary covers only the request and
+event routes; the ordinary wiki and its generated browser program remain
+public.
+
+/Operational evidence./ The first slot-1 to slot-2 switch kept 1,183
+continuous public requests at HTTP 200.  A subsequent complete stream carried
+8,569 bytes in 56 terminal events, exactly matching the PTY log, followed by
+one =done: 0= event.  Both slots reported the selected commit afterward.  A
+real browser capture showed the production dialog over the dimmed wiki and
+the PTY's cyan phase headings.  The deploy gate also rejected a genuinely red
+test run before cutover; closing the test's material vocabulary before policy
+compilation removed that order-dependent failure, followed by three complete
+passing test runs.
+
+/Done when./ A click builds the inactive worktree, streams the real terminal,
+switches without a failed public request, and leaves the former slot ready for
+rollback.  All four hold.
+
 * A fluid dual system: code contributes to the wiki
 :PROPERTIES:
 :ID: F6B3NI
