@@ -251,6 +251,35 @@ the page frame and stylesheet, Spinneret writes the special body, and
 ParenScript writes the browser interaction; there is no second mesher,
 handwritten JavaScript, JSON bridge, or parallel page design.
 
+* DONE Separate cube symmetry from query-row ownership
+:PROPERTIES:
+:ID: 0EEQM7
+:END:
+
+The plain lists of [[lisp:luft:star-triangles]] also make the symmetry question
+small enough to ask directly.  A signed axis transformation is just a 3×3
+list matrix acting on the same three-integer point lists.  The executable
+vocabulary now supplies [[lisp:luft:star-rotations]],
+[[lisp:luft:star-reflections]], [[lisp:luft:transform-star]], and
+[[lisp:luft:star-orbit]] rather than importing the transformation table from
+the Blender oracle.
+
+The 256 occupancy masks form 23 classes under the 24 proper rotations.  The
+two classes represented by =1b= and =1d= are a chiral pair, so admitting the
+24 reflections merges them and leaves 22 classes.  Identifying occupancy with
+its complement leaves 15 proper-rotation classes, or 14 classes under the full
+cube group.  These are properties of the eight-cell colouring itself.
+
+The production /query row/ has deliberately less symmetry.  It owns the three
+positive face and edge probes at a lattice site; a rotation that moves those
+probes moves ownership into neighboring rows.  All six unsigned permutations
+of X, Y, and Z preserve each row's face/band/fan triangle census, but even they
+need not preserve its exact coordinate lists: template diagonals and ownership
+remain explicit.  For example, =06= is fixed by swapping X and Y while its
+owned band is not.  The ownership pieces must be placed before asking about
+complete-mesh symmetry; one CSR row must not masquerade as the complete
+geometry of its vertex star.
+
 * The contracts which optimization must not hide
 :PROPERTIES:
 :ID: L38W75

@@ -2604,6 +2604,15 @@
                      (every #'integerp point)))
               triangle)))
 
+(defun %star-orbit-count (&key reflections complement)
+  (loop with unseen = (loop for star below 256 collect star)
+        while unseen
+        for orbit = (star-orbit (first unseen)
+                                :reflections reflections
+                                :complement complement)
+        do (setf unseen (set-difference unseen orbit))
+        count t))
+
 (defun %test-star-geometry ()
   (%with-test-section ("plain width-one star triangle geometry")
     (dotimes (star 256)
@@ -2625,7 +2634,50 @@
                      (list (length (getf geometry :faces))
                            (length (getf geometry :bands))
                            (length (getf geometry :junctions)))))
-            "representative star lost a face, band, or junction")))
+            "representative star lost a face, band, or junction"))
+  (%with-test-section ("cubical star symmetries")
+    (let* ((rotations (star-rotations))
+           (reflections (star-reflections))
+           (transformations (append rotations reflections))
+           (axis-permutations
+             (remove-if (lambda (transformation)
+                          (some (lambda (row) (member -1 row))
+                                transformation))
+                        transformations))
+           (swap-x-y '((0 1 0) (1 0 0) (0 0 1))))
+      (%check (= 24 (length rotations)))
+      (%check (= 24 (length reflections)))
+      (%check (= 48 (length (remove-duplicates transformations :test #'equal))))
+      (%check (= 6 (length axis-permutations)))
+      (%check (= #x80
+                 (transform-star '((-1 0 0) (0 -1 0) (0 0 -1)) #x01)))
+      (%check (= #x04 (transform-star swap-x-y #x02)))
+      (%check (= 23 (%star-orbit-count)))
+      (%check (= 22 (%star-orbit-count :reflections t)))
+      (%check (= 15 (%star-orbit-count :complement t)))
+      (%check (= 14 (%star-orbit-count :reflections t :complement t)))
+      ;; #x1b and #x1d are the one chiral pair of proper-rotation classes.
+      (%check (not (member #x1d (star-orbit #x1b))))
+      (%check (member #x1d (star-orbit #x1b :reflections t)))
+      ;; Axis names do not affect the row census, although row ownership and
+      ;; template triangulation mean that the coordinate lists themselves are
+      ;; deliberately not a representation of a complete symmetric star.
+      (dolist (transformation axis-permutations)
+        (dotimes (star 256)
+          (let ((left (star-triangles star))
+                (right
+                  (star-triangles (transform-star transformation star))))
+            (%check
+             (equal (mapcar (lambda (key) (length (getf left key)))
+                            '(:faces :bands :junctions))
+                    (mapcar (lambda (key) (length (getf right key)))
+                            '(:faces :bands :junctions)))))))
+      (%check (= #x06 (transform-star swap-x-y #x06)))
+      (%check
+       (not (equal (transform-star-triangles
+                    swap-x-y (star-band-triangles #x06))
+                   (star-band-triangles #x06)))
+       "one query row must not masquerade as a complete symmetric star"))))
 
 (defun run-luft-tests (&key (stream *standard-output*))
   "Run the retained topology and replacement manifold-sheet mesh claims."

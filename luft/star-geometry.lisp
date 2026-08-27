@@ -34,6 +34,111 @@ local mesh ticks around the star at the origin; one voxel is
   (%check-star star)
   (%triangles-of-templates (%star-junction-templates star)))
 
+;;; Cubical symmetries
+;;;
+;;; A transformation is an ordinary three-by-three list matrix.  Its rows are
+;;; signed coordinate axes, so it acts on the point lists above without a
+;;; second geometry representation.  The 24 rotations have determinant +1;
+;;; the 24 reflections have determinant -1.
+
+(defun star-rotations ()
+  "Return the 24 proper signed-axis transformations of a cubical star."
+  (%star-transformations 1))
+
+(defun star-reflections ()
+  "Return the 24 orientation-reversing transformations of a cubical star."
+  (%star-transformations -1))
+
+(defun transform-star (transformation star)
+  "Apply signed-axis TRANSFORMATION to occupancy STAR."
+  (%check-star star)
+  (loop with transformed = 0
+        for sample below 8
+        when (logbitp sample star)
+          do (setf (ldb (byte 1
+                              (%star-direction-index
+                               (%transform-star-point
+                                transformation
+                                (%star-sample-direction sample))))
+                           transformed)
+                   1)
+        finally (return transformed)))
+
+(defun transform-star-triangles (transformation triangles)
+  "Apply signed-axis TRANSFORMATION to ordinary list TRIANGLES.
+
+Vertex order is retained.  Consequently a reflection reverses the geometric
+orientation of each triangle; callers comparing outward-oriented surfaces may
+reverse the last two vertices afterward."
+  (loop for triangle in triangles
+        collect (loop for point in triangle
+                      collect (%transform-star-point transformation point))))
+
+(defun star-orbit (star &key reflections complement)
+  "Return the sorted occupancy orbit of STAR under cubical symmetry.
+
+By default only proper rotations act.  REFLECTIONS includes the other half of
+the full cube group; COMPLEMENT also identifies occupied and empty cells."
+  (%check-star star)
+  (sort
+   (remove-duplicates
+    (loop for transformation in
+          (if reflections
+              (append (star-rotations) (star-reflections))
+              (star-rotations))
+          for transformed = (transform-star transformation star)
+          append (if complement
+                     (list transformed (logxor #xff transformed))
+                     (list transformed))))
+   #'<))
+
+(defun %star-transformations (determinant)
+  (loop for permutation in '((0 1 2) (0 2 1) (1 0 2)
+                             (1 2 0) (2 0 1) (2 1 0))
+        append
+        (loop for x-sign in '(-1 1)
+              append
+              (loop for y-sign in '(-1 1)
+                    append
+                    (loop for z-sign in '(-1 1)
+                          for signs = (list x-sign y-sign z-sign)
+                          when (= determinant
+                                  (* (%permutation-sign permutation)
+                                     x-sign y-sign z-sign))
+                            collect
+                            (loop for source-axis in permutation
+                                  for sign in signs
+                                  collect
+                                  (loop for axis below 3
+                                        collect (if (= axis source-axis)
+                                                    sign
+                                                    0))))))))
+
+(defun %permutation-sign (permutation)
+  (if (oddp
+       (loop for tail on permutation
+             sum (count-if (lambda (later)
+                             (> (first tail) later))
+                           (rest tail))))
+      -1
+      1))
+
+(defun %star-sample-direction (sample)
+  (loop for axis below 3
+        collect (if (logbitp axis sample) 1 -1)))
+
+(defun %star-direction-index (direction)
+  (loop for component in direction
+        for axis from 0
+        when (plusp component)
+          sum (ash 1 axis)))
+
+(defun %transform-star-point (transformation point)
+  (loop for row in transformation
+        collect (loop for coefficient in row
+                      for coordinate in point
+                      sum (* coefficient coordinate))))
+
 (defun %check-star (star)
   (check-type star (unsigned-byte 8))
   star)
