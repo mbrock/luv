@@ -2983,51 +2983,94 @@
     (ok (zerop (mod (length templates)
                     luft:+mesh-template-vertex-word-count+)))))
 
-(deftest the-walking-player-belongs-to-the-sanctuary
-  (ok (luft.render::scene-player-p
-       (render:make-mountain-sanctuary-scene)))
-  (ok (not (luft.render::scene-player-p
-            (render:make-manifold-spike-scene))))
-  (ok (not (luft.render::scene-player-p
-            (render:make-miter-study-scene)))))
-
-(deftest the-elevated-sanctuary-rim-is-an-authored-stone-battlement
+(deftest the-mountain-sanctuary-retains-its-authored-contracts
   (let ((scene (render:make-mountain-sanctuary-scene)))
-    (multiple-value-bind (west east present-p)
-        (luft.render::mountain-sanctuary-terrain-x-bounds 47)
-      (declare (ignore west))
-      (ok present-p)
-      (let* ((height
-               (luft.render::mountain-sanctuary-terrain-height east 47))
-             (x (+ luft.render::+sanctuary-origin-x+ east))
-             (y (+ luft.render::+sanctuary-origin-y+ 47))
-             (solid (luft.render::scene-solid scene))
-             (wall-cell
-               (luft:make-site (luft:chain-domain solid) x y height
-                               luft:+cell-extent+ 1)))
-        (ok (>= height luft.render::+sanctuary-plateau-height+))
-        ;; Two continuous courses stop the one-step walker; this even
-        ;; contour column also carries the alternating crenellation.
-        (ok (= 1 (luft:chain-cell-occupancy-bit solid x y height)))
-        (ok (= 1 (luft:chain-cell-occupancy-bit solid x y (1+ height))))
-        (ok (= 1 (luft:chain-cell-occupancy-bit solid x y (+ height 2))))
-        (ok (zerop (luft:chain-cell-occupancy-bit solid (1+ x) y height)))
-        (ok (eq luft.render::*sanctuary-material-placement*
-                (luft.render::scene-material-placement-at scene wall-cell)))))
-    ;; The low southern shore remains open rather than walling in the route.
-    (multiple-value-bind (west east present-p)
-        (luft.render::mountain-sanctuary-terrain-x-bounds -15)
-      (declare (ignore west))
-      (ok present-p)
-      (let ((height
-              (luft.render::mountain-sanctuary-terrain-height east -15)))
-        (ok (< height luft.render::+sanctuary-plateau-height+))
-        (ok (zerop
-             (luft:chain-cell-occupancy-bit
-              (luft.render::scene-solid scene)
-              (+ luft.render::+sanctuary-origin-x+ east)
-              (+ luft.render::+sanctuary-origin-y+ -15)
-              height)))))))
+    (testing "the walking player belongs to the sanctuary"
+      (ok (luft.render::scene-player-p scene))
+      (ok (not (luft.render::scene-player-p
+                (render:make-manifold-spike-scene))))
+      (ok (not (luft.render::scene-player-p
+                (render:make-miter-study-scene)))))
+    (testing "the elevated rim is an authored stone battlement"
+      (multiple-value-bind (west east present-p)
+          (luft.render::mountain-sanctuary-terrain-x-bounds 47)
+        (declare (ignore west))
+        (ok present-p)
+        (let* ((height
+                 (luft.render::mountain-sanctuary-terrain-height east 47))
+               (x (+ luft.render::+sanctuary-origin-x+ east))
+               (y (+ luft.render::+sanctuary-origin-y+ 47))
+               (solid (luft.render::scene-solid scene))
+               (wall-cell
+                 (luft:make-site (luft:chain-domain solid) x y height
+                                 luft:+cell-extent+ 1)))
+          (ok (>= height luft.render::+sanctuary-plateau-height+))
+          ;; Two continuous courses stop the one-step walker; this even
+          ;; contour column also carries the alternating crenellation.
+          (ok (= 1 (luft:chain-cell-occupancy-bit solid x y height)))
+          (ok (= 1 (luft:chain-cell-occupancy-bit solid x y (1+ height))))
+          (ok (= 1 (luft:chain-cell-occupancy-bit solid x y (+ height 2))))
+          (ok (zerop (luft:chain-cell-occupancy-bit solid (1+ x) y height)))
+          (ok (eq luft.render::*sanctuary-material-placement*
+                  (luft.render::scene-material-placement-at scene wall-cell)))))
+      ;; The low southern shore remains open rather than walling in the route.
+      (multiple-value-bind (west east present-p)
+          (luft.render::mountain-sanctuary-terrain-x-bounds -15)
+        (declare (ignore west))
+        (ok present-p)
+        (let ((height
+                (luft.render::mountain-sanctuary-terrain-height east -15)))
+          (ok (< height luft.render::+sanctuary-plateau-height+))
+          (ok (zerop
+               (luft:chain-cell-occupancy-bit
+                (luft.render::scene-solid scene)
+                (+ luft.render::+sanctuary-origin-x+ east)
+                (+ luft.render::+sanctuary-origin-y+ -15)
+                height))))))
+    (testing "the curtain is bedded into the mountain"
+      (let* ((solid (luft.render::scene-solid scene))
+             (domain (luft:chain-domain solid)))
+        (flet ((occupied-p (x y z)
+                 (= 1 (luft:chain-cell-occupancy-bit solid x y z)))
+               (architecture-p (x y z)
+                 (eq :architecture
+                     (luft.render::material-placement-role
+                      (luft.render::scene-material-placement-at
+                       scene
+                       (luft:make-site
+                        domain x y z luft:+cell-extent+ 1))))))
+          ;; The front curtain and both round keeps have continuous stone shoes
+          ;; where the procedural ridge can otherwise fall below their fixed base.
+          (dolist (point '((20 45) (40 45) (15 41) (45 41)))
+            (destructuring-bind (x y) point
+              (incf x luft.render::+sanctuary-origin-x+)
+              (incf y luft.render::+sanctuary-origin-y+)
+              (ok (occupied-p x y 17))
+              (ok (occupied-p x y 18))
+              (ok (architecture-p x y 17))
+              (ok (architecture-p x y 18))))
+          ;; The stair arrives at a supported masonry threshold, while the gate
+          ;; opening itself remains clear at the sanctuary floor.
+          (let ((x (+ 30 luft.render::+sanctuary-origin-x+))
+                (y (+ 45 luft.render::+sanctuary-origin-y+)))
+            (ok (occupied-p x y 18))
+            (ok (architecture-p x y 18))
+            (ok (not (occupied-p x y 19))))
+          ;; Terrain and inhabited architecture continue to the remote beacon.
+          (ok (occupied-p (+ luft.render::*sanctuary-beacon-x*
+                             luft.render::+sanctuary-origin-x+)
+                          (+ luft.render::*sanctuary-beacon-y*
+                             luft.render::+sanctuary-origin-y+)
+                          20))
+          (ok (architecture-p
+               (+ luft.render::*sanctuary-beacon-x*
+                  luft.render::+sanctuary-origin-x+)
+               (+ luft.render::*sanctuary-beacon-y*
+                  luft.render::+sanctuary-origin-y+)
+               (+ 8
+                  (luft.render::mountain-sanctuary-terrain-height
+                   luft.render::*sanctuary-beacon-x*
+                   luft.render::*sanctuary-beacon-y*)))))))))
 
 (deftest scene-builders-translate-authored-sites-at-the-boundary
   (let* ((builder (luft.render::make-scene-builder
@@ -3038,51 +3081,6 @@
          (solid (luft.render::scene-solid scene)))
     (ok (= 1 (luft:chain-cell-occupancy-bit solid 9 14 4)))
     (ok (zerop (luft:chain-cell-occupancy-bit solid 2 3 4)))))
-
-(deftest the-sanctuary-curtain-is-bedded-into-the-mountain
-  (let* ((scene (render:make-mountain-sanctuary-scene))
-         (solid (luft.render::scene-solid scene))
-         (domain (luft:chain-domain solid)))
-    (flet ((occupied-p (x y z)
-             (= 1 (luft:chain-cell-occupancy-bit solid x y z)))
-           (architecture-p (x y z)
-             (eq :architecture
-                 (luft.render::material-placement-role
-                  (luft.render::scene-material-placement-at
-                   scene (luft:make-site domain x y z luft:+cell-extent+ 1))))))
-      ;; The front curtain and both round keeps have continuous stone shoes
-      ;; where the procedural ridge can otherwise fall below their fixed base.
-      (dolist (point '((20 45) (40 45) (15 41) (45 41)))
-        (destructuring-bind (x y) point
-          (incf x luft.render::+sanctuary-origin-x+)
-          (incf y luft.render::+sanctuary-origin-y+)
-          (ok (occupied-p x y 17))
-          (ok (occupied-p x y 18))
-          (ok (architecture-p x y 17))
-          (ok (architecture-p x y 18))))
-      ;; The stair arrives at a supported masonry threshold, while the gate
-      ;; opening itself remains clear at the sanctuary floor.
-      (let ((x (+ 30 luft.render::+sanctuary-origin-x+))
-            (y (+ 45 luft.render::+sanctuary-origin-y+)))
-        (ok (occupied-p x y 18))
-        (ok (architecture-p x y 18))
-        (ok (not (occupied-p x y 19))))
-      ;; Terrain and inhabited architecture now continue well beyond the old
-      ;; 64-cell diorama, including the remote back-ridge beacon.
-      (ok (occupied-p (+ luft.render::*sanctuary-beacon-x*
-                         luft.render::+sanctuary-origin-x+)
-                      (+ luft.render::*sanctuary-beacon-y*
-                         luft.render::+sanctuary-origin-y+)
-                      20))
-      (ok (architecture-p
-           (+ luft.render::*sanctuary-beacon-x*
-              luft.render::+sanctuary-origin-x+)
-           (+ luft.render::*sanctuary-beacon-y*
-              luft.render::+sanctuary-origin-y+)
-           (+ 8
-              (luft.render::mountain-sanctuary-terrain-height
-               luft.render::*sanctuary-beacon-x*
-               luft.render::*sanctuary-beacon-y*)))))))
 
 (deftest scene-cells-store-vocabulary-closed-material-offsets
   (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
@@ -6053,21 +6051,19 @@
                 (render:site-inspection-star-mask inspection)))))))
 
 (deftest film-cleanup-cannot-resurrect-a-shutting-down-viewer
-  (flet ((make-probe ()
-           (clim:make-application-frame
-            'render:viewer :canvas (make-instance 'luv:canvas))))
-    (let* ((viewer (make-probe))
-           (capture
-             (make-instance 'luv:application-capture
-                            :application viewer :kind :film)))
+  (let ((viewer
+          (clim:make-application-frame
+           'render:viewer :canvas (make-instance 'luv:canvas))))
+    (let ((capture
+            (make-instance 'luv:application-capture
+                           :application viewer :kind :film)))
       (setf (luv:capture-client-state capture) '(:running-p t)
             (render::viewer-running-p viewer) nil)
       (luv:cleanup-capture viewer capture)
       (ok (render::viewer-running-p viewer)))
-    (let* ((viewer (make-probe))
-           (capture
-             (make-instance 'luv:application-capture
-                            :application viewer :kind :film)))
+    (let ((capture
+            (make-instance 'luv:application-capture
+                           :application viewer :kind :film)))
       (setf (luv:capture-client-state capture) '(:running-p t)
             (render::viewer-running-p viewer) nil)
       (luv:request-application-capture-shutdown viewer)

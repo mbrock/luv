@@ -36,8 +36,9 @@
         (format t "~&luv/ghostty (libghostty-vt unavailable; skipped)~%"))
       (let* ((start (get-internal-real-time))
              (count (length systems))
+             (stage-count (1+ count))
              (counter-width
-               (+ 2 (* 2 (length (princ-to-string count)))))
+               (+ 2 (* 2 (length (princ-to-string stage-count)))))
              (timings nil))
         (loop for system in systems
               for index from 1
@@ -48,7 +49,8 @@
               do (format t "~&~5,1,,,'0Fs~V@A  ~A~%"
                          (/ (float (- system-start start) 1.0)
                             internal-time-units-per-second)
-                         counter-width (format nil "~D/~D" index count) name)
+                         counter-width
+                         (format nil "~D/~D" index stage-count) name)
                  (finish-output)
                  (asdf:test-system system)
                  (push
@@ -56,11 +58,25 @@
                         (/ (float (- (get-internal-real-time) system-start) 1.0)
                            internal-time-units-per-second))
                   timings))
+        (let ((validation-start (get-internal-real-time)))
+          (format t "~&~5,1,,,'0Fs~V@A  shader-validate~%"
+                  (/ (float (- validation-start start) 1.0)
+                     internal-time-units-per-second)
+                  counter-width (format nil "~D/~D" stage-count stage-count))
+          (finish-output)
+          (load (merge-pathnames #P"scripts/shader-validation.lisp"))
+          (uiop:symbol-call
+           :luv.shader-validation :validate-production-shaders)
+          (push
+           (cons "shader-validate"
+                 (/ (float (- (get-internal-real-time) validation-start) 1.0)
+                    internal-time-units-per-second))
+           timings))
         (let ((seconds
                 (/ (float (- (get-internal-real-time) start) 1.0)
                    internal-time-units-per-second))
               (slowest (first (sort timings #'> :key #'cdr))))
-          (format t "~&~%;; Tested ~D system~:P in ~A.~%"
+          (format t "~&~%;; Tested ~D system~:P and validated shaders in ~A.~%"
                   count
                   (uiop:symbol-call
                    :luv.test-reporter :format-seconds seconds))

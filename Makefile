@@ -23,7 +23,7 @@ TRACY_MCCLIM_PAINT_TRACE ?= build/mcclim-paints.tracy
 
 FASL_CACHE := $(HOME)/.cache/common-lisp
 
-.PHONY: all sly-client sly-dependency-core luvcraft luft luft-core luft-test run test capture showcase-bootstrap showcase-render showcase-deploy showcase-publish showcase-status clean-fasls parinfer-check sly-build-lock-check shader-validate luft-shader-validate msl-validate smoke vulkan-smoke metal-smoke metal-text-closeup metal-benchmark metal-streaming-benchmark metal-retina-benchmark luft-mesher-profile luft-mesher-cohort luft-z-fiber-benchmark luft-blender-oracle luft-blender-oracle-check tracy-streaming tracy-mcclim-roundrect tracy-mcclim-paints readme-screenshots mcclim-gallery wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw roundrect-proof slug-proof slug-text-proof clean
+.PHONY: all sly-client sly-dependency-core luvcraft luft luft-core luft-test run test test-suite capture showcase-bootstrap showcase-render showcase-deploy showcase-publish showcase-status clean-fasls parinfer-check sly-build-lock-check shader-validate luft-shader-validate msl-validate smoke vulkan-smoke metal-smoke metal-text-closeup metal-benchmark metal-streaming-benchmark metal-retina-benchmark luft-mesher-profile luft-mesher-cohort luft-z-fiber-benchmark luft-blender-oracle luft-blender-oracle-check tracy-streaming tracy-mcclim-roundrect tracy-mcclim-paints readme-screenshots mcclim-gallery wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw roundrect-proof slug-proof slug-text-proof clean
 
 ifeq ($(LUV_SLY_SYSTEM),luft)
 all: sly-client luft-core sly-dependency-core
@@ -69,9 +69,13 @@ run: luvcraft
 	./scripts/dev ./build/luvcraft
 
 ifeq ($(LUV_SLY_SYSTEM),luft)
-test: parinfer-check sly-build-lock-check luft-test
+test:
+	@$(MAKE) --no-print-directory -j3 parinfer-check sly-build-lock-check luft-test
 else
-test: parinfer-check sly-build-lock-check shader-validate
+test:
+	@$(MAKE) --no-print-directory -j3 parinfer-check sly-build-lock-check test-suite
+
+test-suite:
 	@./scripts/dev sbcl --noinform --non-interactive --load scripts/test.lisp
 endif
 
@@ -103,50 +107,11 @@ sly-build-lock-check:
 	@./scripts/dev python3 scripts/with-build-lock-tests.py
 
 shader-validate:
-	@mkdir -p build
 	@./scripts/dev sbcl --noinform --non-interactive \
 		--eval '(require :asdf)' \
 		--eval '(handler-bind ((warning (function muffle-warning))) (progn (asdf:load-asd (truename "luv.asd")) (asdf:load-asd (truename "openai.asd")) (asdf:load-asd (truename "telegram.asd")) (asdf:load-asd (truename "mqtt.asd")) (asdf:load-asd (truename "luvcraft.asd")) (asdf:load-system :luvcraft/agent)))' \
-		--eval '(handler-bind ((warning (function muffle-warning))) (progn (luv.spir-v:write-spir-v (luvcraft.shaders:block-world-vertex-shader) #p"build/block-world.vert.spv") (luv.spir-v:write-spir-v (luvcraft.shaders:block-world-fragment-shader) #p"build/block-world.frag.spv") (luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luvcraft.shaders:block-world-crosshair-vertex-specification)) #p"build/block-world-crosshair.vert.spv") (luv.spir-v:write-spir-v (luvcraft.shaders:block-world-crosshair-fragment-shader) #p"build/block-world-crosshair.frag.spv") (luv.spir-v:write-spir-v (luvcraft.shaders:block-world-sky-vertex-shader) #p"build/block-world-sky.vert.spv") (luv.spir-v:write-spir-v (luvcraft.shaders:block-world-sky-fragment-shader) #p"build/block-world-sky.frag.spv") (luv.spir-v:write-spir-v (luvcraft.shaders:block-world-shadow-vertex-shader) #p"build/block-world-shadow.vert.spv") (luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luvcraft.shaders:block-world-text-vertex-specification)) #p"build/block-world-text.vert.spv") (luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luvcraft.shaders:block-world-text-fragment-specification)) #p"build/block-world-text.frag.spv") (luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.shader:shader-specification-for :terminal-cell :vertex)) #p"build/terminal-cell.vert.spv") (luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.shader:shader-specification-for :terminal-cell :fragment)) #p"build/terminal-cell.frag.spv") (luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.shader:shader-specification-for :video-screen :vertex)) #p"build/video-screen.vert.spv") (luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.shader:shader-specification-for :video-screen :fragment)) #p"build/video-screen.frag.spv") (luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.shader:shader-specification-for :terminal-screen :vertex)) #p"build/terminal-screen.vert.spv") (luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.shader:shader-specification-for :terminal-screen :fragment)) #p"build/terminal-screen.frag.spv") (luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.shader:shader-specification-for :terminal-faceplate :fragment)) #p"build/terminal-faceplate.frag.spv") (luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.analytic:roundrect-vertex-specification)) #p"build/analytic-roundrect.vert.spv") (luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.analytic:roundrect-fragment-specification)) #p"build/analytic-roundrect.frag.spv") (luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.slug:slug-bezier-vertex-specification)) #p"build/slug-bezier.vert.spv") (luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.slug:slug-bezier-fragment-specification)) #p"build/slug-bezier.frag.spv") (luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (mcluv::gradient-roundrect-vertex-specification)) #p"build/mcluv-gradient.vert.spv") (luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (mcluv::gradient-roundrect-fragment-specification)) #p"build/mcluv-gradient.frag.spv") (luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (mcluv::relief-roundrect-vertex-specification)) #p"build/mcluv-relief.vert.spv") (luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (mcluv::relief-roundrect-fragment-specification)) #p"build/mcluv-relief.frag.spv") (luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (mcluv::direct-widget-relief-vertex-specification)) #p"build/mcluv-world-relief.vert.spv") (luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (mcluv::relief-roundrect-fragment-specification)) #p"build/mcluv-world-relief.frag.spv") (luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (mcluv::image-roundrect-vertex-specification)) #p"build/mcluv-image.vert.spv") (luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (mcluv::image-roundrect-fragment-specification)) #p"build/mcluv-image.frag.spv") (luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (mcluv::spinning-texture-vertex-specification)) #p"build/mcluv-compositor.vert.spv") (luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (mcluv::spinning-texture-fragment-specification)) #p"build/mcluv-compositor.frag.spv") (luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (mcluv::lisp-machine-chassis-vertex-specification)) #p"build/mcluv-chassis.vert.spv") (luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (mcluv::lisp-machine-chassis-fragment-specification)) #p"build/mcluv-chassis.frag.spv") (luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.shader:shader-specification-for :gnome-sdf :vertex)) #p"build/gnome-sdf.vert.spv") (luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.shader:shader-specification-for :gnome-sdf :fragment)) #p"build/gnome-sdf.frag.spv") (luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.shader:shader-specification-for :cat-sdf :vertex)) #p"build/cat-sdf.vert.spv") (luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.shader:shader-specification-for :cat-sdf :fragment)) #p"build/cat-sdf.frag.spv") (luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.shader:shader-specification-for :player-body-sdf :vertex)) #p"build/player-body-sdf.vert.spv") (luv.spir-v:write-spir-v (luv.spir-v:assemble-shader-specification (luv.shader:shader-specification-for :player-body-sdf :fragment)) #p"build/player-body-sdf.frag.spv")))'
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/block-world.vert.spv
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/block-world.frag.spv
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/block-world-crosshair.vert.spv
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/block-world-crosshair.frag.spv
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/block-world-sky.vert.spv
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/block-world-sky.frag.spv
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/block-world-shadow.vert.spv
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/block-world-text.vert.spv
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/block-world-text.frag.spv
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/terminal-cell.vert.spv
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/terminal-cell.frag.spv
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/video-screen.vert.spv
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/video-screen.frag.spv
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/terminal-screen.vert.spv
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/terminal-screen.frag.spv
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/terminal-faceplate.frag.spv
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/analytic-roundrect.vert.spv
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/analytic-roundrect.frag.spv
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/slug-bezier.vert.spv
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/slug-bezier.frag.spv
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/mcluv-gradient.vert.spv
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/mcluv-gradient.frag.spv
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/mcluv-relief.vert.spv
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/mcluv-relief.frag.spv
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/mcluv-world-relief.vert.spv
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/mcluv-world-relief.frag.spv
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/mcluv-image.vert.spv
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/mcluv-image.frag.spv
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/mcluv-compositor.vert.spv
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/mcluv-compositor.frag.spv
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/mcluv-chassis.vert.spv
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/mcluv-chassis.frag.spv
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/gnome-sdf.vert.spv
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/gnome-sdf.frag.spv
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/cat-sdf.vert.spv
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/cat-sdf.frag.spv
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/player-body-sdf.vert.spv
-	@./scripts/dev spirv-val --target-env vulkan1.0 build/player-body-sdf.frag.spv
-	@echo "shader-validate: all SPIR-V shaders valid."
+		--load scripts/shader-validation.lisp \
+		--eval '(handler-bind ((warning (function muffle-warning))) (luv.shader-validation:validate-production-shaders))'
 
 luft-shader-validate:
 	@mkdir -p build
