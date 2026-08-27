@@ -244,11 +244,16 @@ the warm aggregate from 11.556 to 6.445 ms/chunk at the same 2.110 MiB and
 :ID: APG013
 :END:
 
-[[file:luft-star-atlas.html][The 256-star atlas]] is a built-in wiki view, like Work.  It evaluates
-[[lisp:luft:star-triangles]] while the site is built, then presents those actual face,
-band, and junction triangles as a selectable isometric grid.  The wiki owns
-the page frame and stylesheet, Spinneret writes the special body, and
-ParenScript writes the browser interaction; there is no second mesher,
+[[file:luft-star-atlas.html][The symmetry atlas]] is a built-in wiki view, like Work.  It evaluates
+[[lisp:luft:star-triangles]] while the site is built, then presents those actual
+face, band, and junction triangles through the 23 proper-rotation families.
+Each family gets one isometric canvas and an expandable list of its orientations,
+so every one of the 256 production rows remains directly selectable without
+becoming 256 competing pictures.  Complementary families sit together;
+reflections remain separate so the =1b=/=1d= chiral pair stays visible.
+
+The wiki owns the page frame and stylesheet, Spinneret writes the special body,
+and ParenScript writes the browser interaction; there is no second mesher,
 handwritten JavaScript, JSON bridge, or parallel page design.
 
 * DONE Separate cube symmetry from query-row ownership

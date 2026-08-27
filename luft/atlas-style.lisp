@@ -101,26 +101,32 @@
    ("&:hover" :border-color --accent))
   (".atlas-grid"
    :display grid
-   :grid-template-columns (css:repeat 'auto-fill (css:minmax 7.7rem 1fr))
+   :grid-template-columns (css:repeat 'auto-fill (css:minmax 10.5rem 1fr))
    :gap 0.65rem)
-  (".star-card"
+  (".star-family"
    :min-width 0
-   :padding 0
-   :overflow hidden
    :border 1px solid --rule
    :border-radius 0.7rem
-   :color inherit
+   :overflow hidden
    :background --paper
-   :text-align left
-   :cursor pointer
    :transition "border-color .12s, transform .12s, background .12s"
    ("&:hover"
     :transform (css:translate 0 -1px)
     :border-color --accent)
-   ("&.selected"
+   ("&.selected-family"
     :border-color --accent
     :background --code-bg
-    :box-shadow 0 0 0 1px --accent)
+    :box-shadow 0 0 0 1px --accent))
+  (".star-card"
+   :display block
+   :width 100%
+   :min-width 0
+   :padding 0
+   :border 0
+   :color inherit
+   :background transparent
+   :text-align left
+   :cursor pointer
    ("canvas"
     :display block
     :width 100%
@@ -134,9 +140,35 @@
    :gap 0.5rem)
   (".card-mask"
    :font 720 0.78rem/1 --mono-font)
-  (".card-counts"
+  (".card-orbit"
    :color --muted
    :font 600 0.62rem/1 --mono-font)
+  (".family-orbit"
+   :border-top 1px solid --rule
+   ("summary"
+    :padding 0.42rem 0.55rem
+    :color --muted
+    :font 650 0.68rem/1 --display-font
+    :cursor pointer
+    :user-select none))
+  (".family-members"
+   :padding 0 0.5rem 0.55rem
+   :display grid
+   :grid-template-columns (css:repeat 4 1fr)
+   :gap 0.28rem)
+  (".star-member"
+   :border 1px solid --rule
+   :border-radius 0.35rem
+   :padding 0.28rem 0.2rem
+   :color --muted
+   :background transparent
+   :font 650 0.64rem/1 --mono-font
+   :cursor pointer
+   ("&:hover" :border-color --accent :color inherit)
+   ("&.selected"
+    :border-color --accent
+    :color inherit
+    :background --paper))
   ("p.atlas-note"
    :max-width none
    :margin 1rem 0 0
@@ -147,4 +179,4 @@
    (".atlas-layout" :grid-template-columns 1fr)
    (".detail" :position relative :top auto)
    (".atlas-grid"
-    :grid-template-columns (css:repeat 'auto-fill (css:minmax 6.4rem 1fr)))))
+    :grid-template-columns (css:repeat 'auto-fill (css:minmax 8.5rem 1fr)))))

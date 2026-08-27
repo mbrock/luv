@@ -1,10 +1,34 @@
 (in-package #:luft.atlas)
 
-(defun triangle-counts (mask)
-  (let ((geometry (luft:star-triangles mask)))
-    (list (length (getf geometry :faces))
-          (length (getf geometry :bands))
-          (length (getf geometry :junctions)))))
+(defun star-rotation-classes ()
+  "Partition all stars into proper-rotation orbits, paired by complement."
+  (%complement-paired-classes (%all-star-rotation-classes)))
+
+(defun %all-star-rotation-classes ()
+  (sort
+   (loop with unseen = (loop for mask below 256 collect mask)
+         while unseen
+         for class = (luft:star-orbit (first unseen))
+         do (setf unseen (set-difference unseen class))
+         collect class)
+   #'<
+   :key #'first))
+
+(defun %complement-paired-classes (classes)
+  (loop with remaining = classes
+        while remaining
+        for class = (first remaining)
+        for complement = (%complementary-rotation-class class remaining)
+        do (setf remaining
+                 (remove complement (rest remaining) :test #'eq))
+        append (if (eq class complement)
+                   (list class)
+                   (list class complement))))
+
+(defun %complementary-rotation-class (class classes)
+  (let ((representative
+          (first (luft:star-orbit (logxor #xff (first class))))))
+    (find representative classes :key #'first)))
 
 (defun render-occupancy-layer (samples label)
   (spinneret:with-html
@@ -12,16 +36,37 @@
       (dolist (sample samples)
         (:span.occupancy-cell :data-sample sample)))))
 
-(defun render-star-card (mask)
-  (destructuring-bind (faces bands junctions) (triangle-counts mask)
+(defun render-star-choice (mask representative)
+  (spinneret:with-html
+    (:button.star-choice.star-member :type "button"
+                                     :data-mask mask
+                                     :data-class representative
+                                     :aria-label (format nil "Star #x~2,'0X" mask)
+      (format nil "~2,'0X" mask))))
+
+(defun render-star-family (class)
+  (let ((representative (first class)))
     (spinneret:with-html
-      (:button.star-card :type "button" :data-mask mask
-                         :aria-label (format nil "Star #x~2,'0X" mask)
-        (:canvas)
-        (:span.card-caption
-          (:span.card-mask (format nil "#x~2,'0X" mask))
-          (:span.card-counts
-            (format nil "~D · ~D · ~D" faces bands junctions)))))))
+      (:article.star-family :data-representative representative
+                            :aria-label
+                            (format nil "Rotation family #x~2,'0X"
+                                    representative)
+        (:button.star-choice.star-card :type "button"
+                                       :data-mask representative
+                                       :data-class representative
+                                       :aria-label
+                                       (format nil "Star #x~2,'0X"
+                                               representative)
+          (:canvas)
+          (:span.card-caption
+            (:span.card-mask (format nil "#x~2,'0X" representative))
+            (:span.card-orbit
+              (format nil "~D rotation~:P" (length class)))))
+        (:details.family-orbit
+          (:summary "Choose orientation")
+          (:div.family-members
+            (dolist (mask class)
+              (render-star-choice mask representative))))))))
 
 (defun render-star-atlas (site)
   "Render the atlas as a built-in wiki view, with only its body being special."
@@ -30,12 +75,12 @@
         (luv.wiki::*page-prefix* "")
         (luv.wiki::*page-kind* "page"))
     (luv.wiki::render-page-frame
-     "The 256 stars"
+     "The stars, by symmetry"
      (lambda ()
        (spinneret:with-html
-        (:h1 "The 256 stars")
+        (:h1 "The stars, by symmetry")
         (:p.lede
-          "Every arrangement of the eight cells around a lattice point, resolved by the production mesher into face, band, and junction triangles.")
+          "The 256 arrangements of eight cells become 23 families under proper cubical rotation. Pick a family, then an orientation, to inspect its production face, band, and junction triangles.")
         (:div#luft-star-atlas.atlas-layout
           (:section.detail :aria-label "Selected star"
             (:div.detail-heading
@@ -62,16 +107,16 @@
               (:div.stepper
                 (:button#previous-star :type "button" "Previous")
                 (:button#next-star :type "button" "Next"))))
-          (:section.atlas-grid :aria-label "All 256 occupancy stars"
-            (dotimes (mask 256)
-              (render-star-card mask))))
+          (:section.atlas-grid :aria-label "23 proper-rotation families"
+            (dolist (class (star-rotation-classes))
+              (render-star-family class))))
         (:p.atlas-note
-          "Drag the large view to orbit; scroll over it to approach. Triangle coordinates come directly from "
+          "Drag the large view to orbit; scroll over it to approach. Reflections remain separate to expose the chiral pair; complements remain separate because occupancy orientation and query ownership matter. Triangle coordinates come directly from "
           (:code "LUFT:STAR-TRIANGLES") ".")
         (:script :src "luft-star-atlas.js" :defer t)))
      :body-class "wide atlas-page"
      :kind "page"
-     :crumbs '(("Pages" . "pages.html") ("The 256 stars"))
+     :crumbs '(("Pages" . "pages.html") ("The stars, by symmetry"))
      :right "star atlas")))
 
 (defun write-star-atlas (site directory)
