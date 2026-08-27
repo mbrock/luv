@@ -32,6 +32,8 @@
                 :pathname "luft/render"
                 :serial t
                 :components ((:file "package")
+                             (:file "quantities")
+                             (:file "frame-quantities")
                              (:file "materials")
                              (:file "lighting")
                              (:file "shaders")
@@ -82,6 +84,9 @@
   :depends-on ("luft/render" "rove")
   :serial t
   :components ((:file "luft/render/tests")
+               (:file "luft/render/quantity-tests")
+               (:file "luft/render/frame-quantity-tests")
+               (:file "luft/render/flame-quantity-tests")
                (:file "luft/render/instrument-tests")
                (:file "luft/render/tracy-capture-tests")
                (:file "luft/render/live-artifact-tests")

@@ -10,8 +10,50 @@
 ;;; representation.
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (defconstant +torch-flame-instance-row-count+ 3)
-  (defconstant +torch-flame-instance-scalar-count+ 12)
+  (defun %torch-flame-product-extent-from-members (members)
+    "Derive and check the dense scalar extent of product MEMBERS."
+    (let ((positions
+            (sort
+             (loop for member in members append (copy-list (second member)))
+             #'<)))
+      (unless positions
+        (error "A torch product must declare at least one lane."))
+      (let ((extent (1+ (car (last positions)))))
+        (unless (equal positions (loop for lane below extent collect lane))
+          (error "Torch product lanes are not a dense, unique interval: ~S"
+                 positions))
+        extent)))
+
+  (defun torch-flame-frame-product-members ()
+    "Return the canonical semantic and categorical frame-lane declaration."
+    '((origin (0 1 2)
+       (:quantity quantities:world-position
+        :unit quantities:cell :tensor-order 1))
+      (seed (3) nil)
+      (normal (4 5 6)
+       (:quantity quantities:world-direction :unit :one :tensor-order 1))
+      (packed-flags (7) nil)
+      (tangent (8 9 10)
+       (:quantity quantities:world-direction :unit :one :tensor-order 1))
+      (scale (11)
+       (:quantity quantities:spatial-scale :unit quantities:cell))))
+
+  (defun torch-flame-effect-product-members ()
+    "Return the canonical semantic effect-uniform lane declaration."
+    '((elapsed-time (0)
+       (:quantity quantities:elapsed-time :unit :second))
+      (radiance (1 2 3)
+       (:quantity quantities:scene-radiance :unit :one :tensor-order 1))))
+
+  (defconstant +torch-flame-instance-scalar-count+
+    (%torch-flame-product-extent-from-members
+     (torch-flame-frame-product-members)))
+  (assert (zerop (mod +torch-flame-instance-scalar-count+ 4)))
+  (defconstant +torch-flame-instance-row-count+
+    (/ +torch-flame-instance-scalar-count+ 4))
+  (defconstant +torch-flame-effect-scalar-count+
+    (%torch-flame-product-extent-from-members
+     (torch-flame-effect-product-members)))
   (defconstant +torch-flame-sample-count+ 9)
   (defconstant +torch-flame-wick-offset+ 0.5f0)
   (defconstant +torch-flame-length+ 0.42f0)
@@ -35,7 +77,131 @@
   (defconstant +torch-body-side-count+ 8))
 
 (deftype torch-flame-instance-data ()
-  '(simple-array single-float (12)))
+  `(simple-array single-float (,+torch-flame-instance-scalar-count+)))
+
+(deftype torch-flame-effect-data ()
+  `(simple-array single-float (,+torch-flame-effect-scalar-count+)))
+
+(defun make-torch-flame-frame-product-layout ()
+  "Describe one origin/normal/tangent torch frame in its twelve float lanes.
+
+SEED at lane 3 and packed FLAGS at lane 7 are categorical representations,
+not quantities.  SCALE is a non-negative spatial amount measured in cells;
+it maps the canonical torch body's dimensionless coordinates into the world."
+  (let ((members (torch-flame-frame-product-members)))
+    (luv.arithmetic:make-quantity-layout
+     (%torch-flame-product-extent-from-members members)
+     (loop for member in members
+           for positions = (second member)
+           for options = (third member)
+           when options
+             collect
+             (luv.arithmetic:make-quantity-projection
+              positions
+              (luv.arithmetic:make-declared-quantity-specification options))))))
+
+(defun make-torch-flame-effect-product-layout ()
+  "Describe elapsed seconds and relative scene-linear HDR RGB in one Vec4."
+  (let ((members (torch-flame-effect-product-members)))
+    (luv.arithmetic:make-quantity-layout
+     (%torch-flame-product-extent-from-members members)
+     (loop for member in members
+           for positions = (second member)
+           for options = (third member)
+           collect
+           (luv.arithmetic:make-quantity-projection
+            positions
+            (luv.arithmetic:make-declared-quantity-specification options))))))
+
+(defmethod luv.arithmetic:value-declaration-for
+    ((name (eql 'torch-flame-frame-data)))
+  (declare (ignore name))
+  (load-time-value
+   (let ((representation-type
+           `(simple-array single-float
+                          (,+torch-flame-instance-scalar-count+))))
+     (luv.arithmetic:make-represented-value-declaration
+      :representation-type representation-type
+      :quantity-layout (make-torch-flame-frame-product-layout)
+      :source-form
+      `(torch-flame-frame-data
+        :type ,representation-type
+        :product ,(torch-flame-frame-product-members))))))
+
+(defmethod luv.arithmetic:value-declaration-for
+    ((name (eql 'torch-flame-effect-uniform-data)))
+  (declare (ignore name))
+  (load-time-value
+   (let ((representation-type
+           `(simple-array single-float
+                          (,+torch-flame-effect-scalar-count+))))
+     (luv.arithmetic:make-represented-value-declaration
+      :representation-type representation-type
+      :quantity-layout (make-torch-flame-effect-product-layout)
+      :source-form
+      `(torch-flame-effect-uniform-data
+        :type ,representation-type
+        :product ,(torch-flame-effect-product-members))))))
+
+(defun torch-flame-frame-declaration ()
+  (or (luv.arithmetic:value-declaration-for 'torch-flame-frame-data)
+      (error "The torch-flame frame has no represented-value declaration.")))
+
+(defun torch-flame-effect-declaration ()
+  (or (luv.arithmetic:value-declaration-for
+       'torch-flame-effect-uniform-data)
+      (error "The torch-flame effect has no represented-value declaration.")))
+
+(defun torch-flame-frame-product-extent ()
+  (luv.arithmetic:quantity-layout-extent
+   (luv.arithmetic:declaration-quantity-layout
+    (torch-flame-frame-declaration))))
+
+(defun torch-flame-effect-product-extent ()
+  (luv.arithmetic:quantity-layout-extent
+   (luv.arithmetic:declaration-quantity-layout
+    (torch-flame-effect-declaration))))
+
+(defun torch-flame-effect-byte-size ()
+  "Return the byte extent owned by the declared torch effect product."
+  (* 4 (torch-flame-effect-product-extent)))
+
+(declaim (inline %torch-flame-finite-single-float-p))
+
+(defun %torch-flame-finite-single-float-p (value)
+  (and (= value value)
+       (<= (abs value) most-positive-single-float)))
+
+(defun ensure-torch-flame-effect-representation (data)
+  "Require DATA to realize the declared, finite torch-effect product."
+  (let* ((declaration (torch-flame-effect-declaration))
+         (layout (luv.arithmetic:declaration-quantity-layout declaration))
+         (extent (luv.arithmetic:quantity-layout-extent layout)))
+    (unless (typep data
+                   (luv.arithmetic:declaration-representation-type
+                    declaration))
+      (error "Torch effect data ~S does not satisfy represented type ~S."
+             (type-of data)
+             (luv.arithmetic:declaration-representation-type declaration)))
+    (unless (= (length data) extent)
+      (error "Torch effect data has ~D lanes, not its declared product extent."
+             (length data)))
+    (loop for index below extent
+          for value = (aref data index)
+          unless (%torch-flame-finite-single-float-p value)
+            do (error "Torch effect scalar ~D is not finite: ~S."
+                      index value))
+    ;; Non-negativity is semantic declaration data, not another handwritten
+    ;; copy of the elapsed-time and scene-radiance lane map.
+    (dolist (projection (luv.arithmetic:quantity-layout-projections layout))
+      (when (luv.arithmetic:quantity-specification-non-negative-p
+             (luv.arithmetic:quantity-projection-specification projection))
+        (dolist (position
+                 (luv.arithmetic:quantity-projection-positions projection))
+          (when (minusp (aref data position))
+            (error "Torch effect quantity at lane ~D is negative: ~S."
+                   position (aref data position))))))
+    data))
 
 (defun pack-torch-body-frame-flags (assembly-id packed-voxel-light)
   "Pack a 12-bit material assembly and RGB4 voxel light into frame FLAGS."
@@ -58,27 +224,34 @@
                 +torch-body-assembly-bit-count+)
           flags))))
 
-(declaim (inline %torch-flame-finite-single-float-p))
-
-(defun %torch-flame-finite-single-float-p (value)
-  (and (= value value)
-       (<= (abs value) most-positive-single-float)))
-
 (defun validate-torch-flame-frame (data &optional (offset 0))
   "Validate one three-Vec4 torch frame in DATA starting at OFFSET.
 
-The normal and tangent must already be unit length and mutually orthogonal.
-FLAGS is an exactly represented nonnegative integer in the normal row's W
-lane, SEED is in [0,1), and SCALE is strictly positive.  Return DATA."
+The represented-value declaration supplies the scalar type and product extent.
+The normal and tangent must additionally be finite, unit length, and mutually
+orthogonal.  FLAGS is an exactly represented nonnegative integer in the normal
+row's W lane, SEED is in [0,1), and SCALE is strictly positive.  Return DATA."
   (check-type data (array single-float (*)))
   (check-type offset (integer 0 *))
-  (unless (<= (+ offset +torch-flame-instance-scalar-count+) (length data))
-    (error "Torch frame at ~D exceeds a ~D-scalar array."
-           offset (length data)))
-  (loop for index from offset below (+ offset +torch-flame-instance-scalar-count+)
-        for value = (aref data index)
-        unless (%torch-flame-finite-single-float-p value)
-          do (error "Torch frame scalar ~D is not finite: ~S." index value))
+  (let ((extent (torch-flame-frame-product-extent)))
+    (unless (<= (+ offset extent) (length data))
+      (error "Torch frame at ~D exceeds a ~D-scalar array."
+             offset (length data)))
+    ;; The exact one-frame case must satisfy the declaration's physical type.
+    ;; Larger population buffers validate the same declared product by window.
+    (when (and (zerop offset) (= (length data) extent))
+      (let ((declaration (torch-flame-frame-declaration)))
+        (unless (typep data
+                       (luv.arithmetic:declaration-representation-type
+                        declaration))
+          (error "Torch frame data ~S does not satisfy represented type ~S."
+                 (type-of data)
+                 (luv.arithmetic:declaration-representation-type
+                  declaration)))))
+    (loop for index from offset below (+ offset extent)
+          for value = (aref data index)
+          unless (%torch-flame-finite-single-float-p value)
+            do (error "Torch frame scalar ~D is not finite: ~S." index value)))
   (let* ((seed (aref data (+ offset 3)))
          (nx (aref data (+ offset 4)))
          (ny (aref data (+ offset 5)))
@@ -182,10 +355,11 @@ and CPU/GPU comparisons can replay the flame effect exactly."
   (check-type time real)
   (multiple-value-bind (red green blue)
       (%torch-flame-authored-hdr-radiance)
-    (make-array 4 :element-type 'single-float
-                  :initial-contents
-                  (mapcar (lambda (value) (coerce value 'single-float))
-                          (list time red green blue)))))
+    (ensure-torch-flame-effect-representation
+     (make-array 4 :element-type 'single-float
+                   :initial-contents
+                   (mapcar (lambda (value) (coerce value 'single-float))
+                           (list time red green blue))))))
 
 (declaim (inline %torch-flame-clamp %torch-flame-smoothstep
                  %torch-flame-fract))
@@ -550,21 +724,32 @@ boundary-edge mask.  This is the scalar oracle for both body vertex shaders."
 
 (define-shader-function torch-frame-bitangent (normal tangent)
   "Derive B=NxT, so T/B/N is right-handed for every realized frame."
-  (vec3 (- (* (swizzle normal :y) (swizzle tangent :z))
-           (* (swizzle normal :z) (swizzle tangent :y)))
-        (- (* (swizzle normal :z) (swizzle tangent :x))
-           (* (swizzle normal :x) (swizzle tangent :z)))
-        (- (* (swizzle normal :x) (swizzle tangent :y))
-           (* (swizzle normal :y) (swizzle tangent :x)))))
+  (interpret
+   (vec3 (- (* (swizzle normal :y) (swizzle tangent :z))
+            (* (swizzle normal :z) (swizzle tangent :y)))
+         (- (* (swizzle normal :z) (swizzle tangent :x))
+            (* (swizzle normal :x) (swizzle tangent :z)))
+         (- (* (swizzle normal :x) (swizzle tangent :y))
+            (* (swizzle normal :y) (swizzle tangent :x))))
+   :quantity quantities:world-direction :unit :one))
 
 (define-shader-function torch-frame-world-position
     (local-position origin normal tangent scale)
-  (let* ((bitangent (torch-frame-bitangent normal tangent)))
+  (let* ((bitangent (torch-frame-bitangent normal tangent))
+         ;; SCALE names the canonical-to-world transform.  Applying it to a
+         ;; canonical coordinate realizes an ordinary world distance.
+         (world-scale
+           (assume-quantity (representation scale)
+                            :quantity quantities:world-distance
+                            :unit quantities:cell)))
     (+ origin
-       (* scale
-          (+ (* tangent (swizzle local-position :x))
-             (* bitangent (swizzle local-position :y))
-             (* normal (swizzle local-position :z)))))))
+       (interpret
+        (* world-scale
+           (+ (* tangent (swizzle local-position :x))
+              (* bitangent (swizzle local-position :y))
+              (* normal (swizzle local-position :z))))
+        :quantity quantities:world-position :unit quantities:cell
+        :character :difference))))
 
 (define-shader-function torch-frame-world-normal
     (local-normal normal tangent)
@@ -581,13 +766,19 @@ boundary-edge mask.  This is the scalar oracle for both body vertex shaders."
      ;; This interface intentionally matches MESH-FRAGMENT-SPECIFICATION
      ;; exactly, including interpolation qualifiers.
      :outputs ((clip-position :vec4 :built-in :position)
-               (world-position-output :vec3 :location 0)
-               (mesh-normal-output :vec3 :location 1 :interpolation :flat)
+               (world-position-output :vec3 :location 0
+                                      :quantity quantities:world-position
+                                      :unit quantities:cell)
+               (mesh-normal-output :vec3 :location 1 :interpolation :flat
+                                   :quantity quantities:world-orientation
+                                   :unit :one)
                (assembly-output :float :location 2 :interpolation :flat)
                (barycentric-output :vec3 :location 3)
                (current-clip-output :vec4 :location 4)
                (previous-clip-output :vec4 :location 5)
-               (shadow-sample-output :vec3 :location 6)
+               (shadow-sample-output :vec3 :location 6
+                                     :quantity quantities:shadow-coordinate
+                                     :unit :one)
                (boundary-edge-mask-output :uint :location 7
                                           :interpolation :flat)
                (ambient-occlusion-output :float :location 8
@@ -606,10 +797,23 @@ boundary-edge mask.  This is the scalar oracle for both body vertex shaders."
            (buffer-element torch-frames (+ frame-base (uint 1.0))))
          (tangent-row
            (buffer-element torch-frames (+ frame-base (uint 2.0))))
-         (origin (swizzle origin-row :xyz))
-         (normal (swizzle frame-normal-row :xyz))
-         (tangent (swizzle tangent-row :xyz))
-         (scale (swizzle tangent-row :w))
+         ;; Storage buffers deliberately expose raw Vec4 rows.  These four
+         ;; assumptions are the shader side of the host product declaration;
+         ;; categorical SEED and FLAGS stay raw.
+         (origin
+           (assume-quantity (swizzle origin-row :xyz)
+                            :quantity quantities:world-position
+                            :unit quantities:cell))
+         (normal
+           (assume-quantity (swizzle frame-normal-row :xyz)
+                            :quantity quantities:world-direction :unit :one))
+         (tangent
+           (assume-quantity (swizzle tangent-row :xyz)
+                            :quantity quantities:world-direction :unit :one))
+         (scale
+           (assume-quantity (swizzle tangent-row :w)
+                            :quantity quantities:spatial-scale
+                            :unit quantities:cell))
          (frame-flags (uint (swizzle frame-normal-row :w)))
          (assembly-id
            (float
@@ -632,13 +836,21 @@ boundary-edge mask.  This is the scalar oracle for both body vertex shaders."
          (local-normal-row
            (buffer-element torch-body-vertices
                            (+ vertex-base (uint 1.0))))
-         (local-position (swizzle local-position-row :xyz))
-         (local-normal (swizzle local-normal-row :xyz))
+         (local-position
+           (assume-quantity (swizzle local-position-row :xyz) :unit :one))
+         (local-normal
+           (assume-quantity (swizzle local-normal-row :xyz) :unit :one))
          (world-position
            (torch-frame-world-position
             local-position origin normal tangent scale))
+         ;; A unit lighting normal is also a valid member of the mesh
+         ;; interface's broader set of (possibly diagonal) orientation
+         ;; witnesses.  Reclassifying it here changes no representation.
          (world-normal
-           (torch-frame-world-normal local-normal normal tangent))
+           (assume-quantity
+            (representation
+             (torch-frame-world-normal local-normal normal tangent))
+            :quantity quantities:world-orientation :unit :one))
          (barycentric-index (uint (swizzle local-position-row :w)))
          (boundary-edge-mask (uint (swizzle local-normal-row :w)))
          (barycentric
@@ -650,16 +862,18 @@ boundary-edge mask.  This is the scalar oracle for both body vertex shaders."
          (current-clip
            (mesh-view-clip world-position camera-position camera-right
                            camera-up camera-forward camera-projection
-                           (swizzle render-parameters :z)))
+                           (swizzle (representation render-parameters) :z)))
          (previous-clip
            (mesh-view-clip world-position previous-camera-position
                            previous-camera-right previous-camera-up
                            previous-camera-forward previous-camera-projection
-                           (swizzle render-parameters :z)))
+                           (swizzle (representation render-parameters) :z)))
          (light-clip
            (light-clip-position world-position shadow-row-x shadow-row-y
                                 shadow-row-z shadow-row-w))
-         (jitter (swizzle temporal-parameters :xy)))
+         ;; Homogeneous clip coordinates are a representation-only projection
+         ;; result, so erase the checked normalized jitter at this boundary.
+         (jitter (representation (swizzle temporal-parameters :xy))))
     (set-output clip-position
                 (vec4 (+ (swizzle current-clip :x)
                          (* (swizzle jitter :x) (swizzle current-clip :w)))
@@ -674,9 +888,11 @@ boundary-edge mask.  This is the scalar oracle for both body vertex shaders."
     (set-output current-clip-output current-clip)
     (set-output previous-clip-output previous-clip)
     (set-output shadow-sample-output
-                (vec3 (+ (* (swizzle light-clip :x) 0.5) 0.5)
-                      (+ (* (swizzle light-clip :y) 0.5) 0.5)
-                      (swizzle light-clip :z)))
+                (assume-quantity
+                 (vec3 (+ (* (swizzle light-clip :x) 0.5) 0.5)
+                       (+ (* (swizzle light-clip :y) 0.5) 0.5)
+                       (swizzle light-clip :z))
+                 :quantity quantities:shadow-coordinate :unit :one))
     (set-output boundary-edge-mask-output boundary-edge-mask)
     (set-output ambient-occlusion-output 0.0)
     (set-output voxel-light-output voxel-light)))
@@ -699,10 +915,20 @@ boundary-edge mask.  This is the scalar oracle for both body vertex shaders."
            (buffer-element torch-frames (+ frame-base (uint 1.0))))
          (tangent-row
            (buffer-element torch-frames (+ frame-base (uint 2.0))))
-         (origin (swizzle origin-row :xyz))
-         (normal (swizzle frame-normal-row :xyz))
-         (tangent (swizzle tangent-row :xyz))
-         (scale (swizzle tangent-row :w))
+         (origin
+           (assume-quantity (swizzle origin-row :xyz)
+                            :quantity quantities:world-position
+                            :unit quantities:cell))
+         (normal
+           (assume-quantity (swizzle frame-normal-row :xyz)
+                            :quantity quantities:world-direction :unit :one))
+         (tangent
+           (assume-quantity (swizzle tangent-row :xyz)
+                            :quantity quantities:world-direction :unit :one))
+         (scale
+           (assume-quantity (swizzle tangent-row :w)
+                            :quantity quantities:spatial-scale
+                            :unit quantities:cell))
          (vertex-base
            (* vertex-index
               (uint #.luft.render::+torch-body-vertex-row-count+)))
@@ -710,7 +936,7 @@ boundary-edge mask.  This is the scalar oracle for both body vertex shaders."
            (buffer-element torch-body-vertices vertex-base))
          (world-position
            (torch-frame-world-position
-            (swizzle local-position-row :xyz)
+            (assume-quantity (swizzle local-position-row :xyz) :unit :one)
             origin normal tangent scale)))
     (set-output clip-position
                 (light-clip-position world-position
@@ -722,74 +948,139 @@ boundary-edge mask.  This is the scalar oracle for both body vertex shaders."
   "Return signed distance, density, heat, and radius at POINT."
   (let* ((bitangent (torch-frame-bitangent normal tangent))
          (world-up-projection
-           (- (vec3 0.0 0.0 1.0)
-              (* normal (swizzle normal :z))))
+           (- (quantity (vec3 0.0 0.0 1.0)
+                        :quantity quantities:world-direction :unit :one)
+              (interpret
+               (* normal (swizzle normal :z))
+               :quantity quantities:world-direction :unit :one)))
          (gravity-strength
-           (sqrt (max (dot world-up-projection world-up-projection) 0.0)))
+           (assume-quantity
+            (sqrt
+             (representation
+              (max (dot world-up-projection world-up-projection) 0.0)))
+            :unit :one))
          (gravity-direction
-           (if (> gravity-strength 1e-6)
-               (/ world-up-projection gravity-strength)
-               (vec3 0.0 0.0 0.0)))
-         (flame-length (* #.luft.render::+torch-flame-length+ scale))
-         (wick (+ origin
-                  (* normal
-                     (* #.luft.render::+torch-flame-wick-offset+ scale))))
+           ;; A horizontal surface has no projected gravity direction.  Keep
+           ;; the zero fallback as a dimensionless displacement coefficient,
+           ;; rather than falsely calling it a unit world direction.
+           (assume-quantity
+            (if (> gravity-strength 1e-6)
+                (representation
+                 (/ world-up-projection gravity-strength))
+                (vec3 0.0 0.0 0.0))
+            :unit :one :character :difference))
+         ;; A frame scale is a transform coefficient.  Once applied to this
+         ;; canonical effect it realizes distances in the world lattice.
+         (world-scale
+           (assume-quantity (representation scale)
+                            :quantity quantities:world-distance
+                            :unit quantities:cell))
+         (flame-length
+           (* #.luft.render::+torch-flame-length+ world-scale))
+         (wick
+           (+ origin
+              (interpret
+               (* normal
+                  (* #.luft.render::+torch-flame-wick-offset+ world-scale))
+               :quantity quantities:world-position :unit quantities:cell
+               :character :difference)))
          (offset (- point wick))
          (axial (/ (dot offset normal) flame-length))
          (height (clamp axial 0.0 1.0))
          (height-squared (* height height))
          (sway-u
-           (* scale 0.105 height-squared
-              (sin (+ (* time 5.1) (* seed 19.7) (* height 5.3)))))
+           (* world-scale 0.105 height-squared
+              (assume-quantity
+               (sin (+ (* time 5.1) (* seed 19.7)
+                       (* (representation height) 5.3)))
+               :unit :one)))
          (sway-v
-           (* scale 0.075 height-squared
-              (sin (+ (* time 6.7) (* seed 31.1) (* height 7.1)))))
+           (* world-scale 0.075 height-squared
+              (assume-quantity
+               (sin (+ (* time 6.7) (* seed 31.1)
+                       (* (representation height) 7.1)))
+               :unit :one)))
          (gravity-bend
-           (* scale #.luft.render::+torch-flame-wall-bend+
+           (* world-scale #.luft.render::+torch-flame-wall-bend+
               gravity-strength height-squared))
-         (center (+ wick
-                    (* normal (* flame-length height))
-                    (* tangent sway-u)
-                    (* bitangent sway-v)
-                    (* gravity-direction gravity-bend)))
-         (radial (sqrt (max (dot (- point center) (- point center)) 1e-12)))
+         (center
+           (+ wick
+              (interpret (* normal (* flame-length height))
+                         :quantity quantities:world-position
+                         :unit quantities:cell :character :difference)
+              (interpret (* tangent sway-u)
+                         :quantity quantities:world-position
+                         :unit quantities:cell :character :difference)
+              (interpret (* bitangent sway-v)
+                         :quantity quantities:world-position
+                         :unit quantities:cell :character :difference)
+              (interpret (* gravity-direction gravity-bend)
+                         :quantity quantities:world-position
+                         :unit quantities:cell :character :difference)))
+         (radial
+           (assume-quantity
+            (sqrt
+             (max
+              (representation
+               (dot (- point center) (- point center)))
+              1e-12))
+            :quantity quantities:world-distance :unit quantities:cell))
          (bulge (smoothstep 0.0 0.22 height))
-         (radius (* scale (- 1.0 height) (+ 0.055 (* 0.13 bulge))))
+         (radius
+           (* world-scale (- 1.0 height) (+ 0.055 (* 0.13 bulge))))
          (signed-distance (- radial radius))
          (begin (smoothstep -0.02 0.08 axial))
          (end (- 1.0 (smoothstep 0.78 1.04 axial)))
-         (inside (- 1.0 (smoothstep -0.025 0.035 signed-distance)))
+         (inside
+           (- 1.0
+              (smoothstep -0.025 0.035 (representation signed-distance))))
          (wave
            (+ 0.5
               (* 0.5
-                 (sin (+ (* (swizzle point :x) 17.1)
-                         (* (swizzle point :y) 13.7)
-                         (* (swizzle point :z) 19.3)
+                 (sin (+ (* (representation (swizzle point :x)) 17.1)
+                         (* (representation (swizzle point :y)) 13.7)
+                         (* (representation (swizzle point :z)) 19.3)
                          (* time -8.1) (* seed 23.9))))))
          (fine
            (+ 0.5
               (* 0.5
-                 (sin (+ (* (swizzle point :x) -31.7)
-                         (* (swizzle point :y) 27.3)
-                         (* (swizzle point :z) 23.1)
+                 (sin (+ (* (representation (swizzle point :x)) -31.7)
+                         (* (representation (swizzle point :y)) 27.3)
+                         (* (representation (swizzle point :z)) 23.1)
                          (* time 11.3) (* seed 7.7))))))
-         (density (* begin end inside
+         (density (* (representation begin) (representation end) inside
                      (+ 0.68 (* 0.22 wave) (* 0.10 fine))))
          (centrality
-           (clamp (/ (- signed-distance) (max radius 0.001)) 0.0 1.0))
+           (clamp
+            (/ (- signed-distance)
+               (max radius
+                    (quantity 0.001
+                              :quantity quantities:world-distance
+                              :unit quantities:cell)))
+            0.0 1.0))
          (heat (clamp (+ 0.20 (* 0.95 centrality) (* -0.32 height))
                       0.0 1.0)))
-    (vec4 signed-distance density heat radius)))
+    ;; The return Vec4 is intentionally a heterogeneous private
+    ;; representation: distance, density, heat, and radius are unpacked by
+    ;; name at the only call site.
+    (vec4 (representation signed-distance) density
+          (representation heat) (representation radius))))
 
 (define-live-shader torch-flame-vertex-specification
     (:stage :vertex
      :inputs ((vertex-index :uint :built-in :vertex-index)
               (instance-index :uint :built-in :instance-index))
      :outputs ((clip-position :vec4 :built-in :position)
-               (proxy-world-position-output :vec3 :location 0)
-               (origin-output :vec3 :location 1 :interpolation :flat)
-               (normal-output :vec3 :location 2 :interpolation :flat)
-               (tangent-output :vec3 :location 3 :interpolation :flat)
+               (proxy-world-position-output :vec3 :location 0
+                                            :quantity quantities:world-position
+                                            :unit quantities:cell)
+               (origin-output :vec3 :location 1 :interpolation :flat
+                              :quantity quantities:world-position
+                              :unit quantities:cell)
+               (normal-output :vec3 :location 2 :interpolation :flat
+                              :quantity quantities:world-direction :unit :one)
+               (tangent-output :vec3 :location 3 :interpolation :flat
+                               :quantity quantities:world-direction :unit :one)
                (frame-parameters-output :vec2 :location 4
                                         :interpolation :flat)
                (current-clip-output :vec4 :location 5))
@@ -803,18 +1094,38 @@ boundary-edge mask.  This is the scalar oracle for both body vertex shaders."
            (buffer-element flame-instances (+ base-row (uint 1.0))))
          (tangent-row
            (buffer-element flame-instances (+ base-row (uint 2.0))))
-         (origin (swizzle origin-row :xyz))
+         (origin
+           (assume-quantity (swizzle origin-row :xyz)
+                            :quantity quantities:world-position
+                            :unit quantities:cell))
          (seed (swizzle origin-row :w))
-         (normal (swizzle normal-row :xyz))
-         (tangent (swizzle tangent-row :xyz))
-         (scale (swizzle tangent-row :w))
-         (proxy-radius (* #.luft.render::+torch-flame-proxy-radius+ scale))
+         (normal
+           (assume-quantity (swizzle normal-row :xyz)
+                            :quantity quantities:world-direction :unit :one))
+         (tangent
+           (assume-quantity (swizzle tangent-row :xyz)
+                            :quantity quantities:world-direction :unit :one))
+         (scale
+           (assume-quantity (swizzle tangent-row :w)
+                            :quantity quantities:spatial-scale
+                            :unit quantities:cell))
+         (world-scale
+           (assume-quantity (representation scale)
+                            :quantity quantities:world-distance
+                            :unit quantities:cell))
+         (proxy-radius
+           (* #.luft.render::+torch-flame-proxy-radius+ world-scale))
          (volume-center
            (+ origin
-              (* normal
-                 (* scale
-                    (+ #.luft.render::+torch-flame-wick-offset+
-                       (* #.luft.render::+torch-flame-length+ 0.5))))))
+              (interpret
+               (* normal
+                  (* world-scale
+                     (assume-quantity
+                      (+ #.luft.render::+torch-flame-wick-offset+
+                         (* #.luft.render::+torch-flame-length+ 0.5))
+                      :unit :one)))
+               :quantity quantities:world-position :unit quantities:cell
+               :character :difference)))
          (index (float vertex-index))
          (right-corner (if (= index 2.0) 1.0
                            (if (= index 3.0) 1.0
@@ -826,15 +1137,26 @@ boundary-edge mask.  This is the scalar oracle for both body vertex shaders."
                        (- (* bottom-corner 2.0) 1.0)))
          (proxy-world-position
            (+ (- volume-center
-                 (* (swizzle camera-forward :xyz) proxy-radius))
-              (* (swizzle camera-right :xyz)
-                 (* (swizzle corner :x) proxy-radius))
-              (* (swizzle camera-up :xyz)
-                 (* (swizzle corner :y) proxy-radius))))
+                 (interpret
+                  (* (swizzle camera-forward :xyz) proxy-radius)
+                  :quantity quantities:world-position :unit quantities:cell
+                  :character :difference))
+              (interpret
+               (* (swizzle camera-right :xyz)
+                  (* (assume-quantity (swizzle corner :x) :unit :one)
+                     proxy-radius))
+               :quantity quantities:world-position :unit quantities:cell
+               :character :difference)
+              (interpret
+               (* (swizzle camera-up :xyz)
+                  (* (assume-quantity (swizzle corner :y) :unit :one)
+                     proxy-radius))
+               :quantity quantities:world-position :unit quantities:cell
+               :character :difference)))
          (current-clip
            (mesh-view-clip proxy-world-position camera-position camera-right
                            camera-up camera-forward camera-projection
-                           (swizzle render-parameters :z))))
+                           (swizzle (representation render-parameters) :z))))
     ;; Procedural radiance is a post-temporal composite.  Rasterize the stable,
     ;; unjittered proxy and never author a motion/history footprint for it.
     (set-output clip-position current-clip)
@@ -842,15 +1164,23 @@ boundary-edge mask.  This is the scalar oracle for both body vertex shaders."
     (set-output origin-output origin)
     (set-output normal-output normal)
     (set-output tangent-output tangent)
-    (set-output frame-parameters-output (vec2 seed scale))
+    ;; The packed varying remains heterogeneous: SEED is categorical while
+    ;; SCALE is re-assumed from its Y lane by the fragment stage.
+    (set-output frame-parameters-output (vec2 seed (representation scale)))
     (set-output current-clip-output current-clip)))
 
 (define-live-shader torch-flame-fragment-specification
     (:stage :fragment
-     :inputs ((proxy-world-position :vec3 :location 0)
-              (origin :vec3 :location 1 :interpolation :flat)
-              (normal :vec3 :location 2 :interpolation :flat)
-              (tangent :vec3 :location 3 :interpolation :flat)
+     :inputs ((proxy-world-position :vec3 :location 0
+                                    :quantity quantities:world-position
+                                    :unit quantities:cell)
+              (origin :vec3 :location 1 :interpolation :flat
+                      :quantity quantities:world-position
+                      :unit quantities:cell)
+              (normal :vec3 :location 2 :interpolation :flat
+                      :quantity quantities:world-direction :unit :one)
+              (tangent :vec3 :location 3 :interpolation :flat
+                       :quantity quantities:world-direction :unit :one)
               (frame-parameters :vec2 :location 4 :interpolation :flat)
               (current-clip :vec4 :location 5))
      :outputs ((color-output :vec4 :location 0))
@@ -858,27 +1188,45 @@ boundary-edge mask.  This is the scalar oracle for both body vertex shaders."
      ((camera-state :uniform-block :binding 1
        :members #.(scene-uniform-prefix 13))
       (effect-state :uniform-block :binding 2
-       :members ((flame-effect-parameters :vec4)))
+       :members
+       ((flame-effect-parameters :vec4
+         :components
+         ((:x :quantity quantities:elapsed-time :unit :second)
+          (:yzw :quantity quantities:scene-radiance :unit :one)))))
       (opaque-depth :depth-texture-2d :binding 3)
       (depth-sampler :sampler :binding 4)))
-  (let* ((ray (if (< (swizzle render-parameters :z) 0.5)
+  (let* ((ray (if (< (swizzle (representation render-parameters) :z) 0.5)
                   (normalize (swizzle camera-forward :xyz))
-                  (normalize (- proxy-world-position
-                                (swizzle camera-position :xyz)))))
-         (time (swizzle flame-effect-parameters :x))
+                  (assume-quantity
+                   (normalize
+                    (representation
+                     (- proxy-world-position
+                        (swizzle camera-position :xyz))))
+                   :quantity quantities:world-direction :unit :one)))
+         ;; Procedural phase constants remain representation-level numbers;
+         ;; elapsed seconds are erased only at that explicit animation seam.
+         (time (representation (swizzle flame-effect-parameters :x)))
          (authored-radiance (swizzle flame-effect-parameters :yzw))
          (seed (swizzle frame-parameters :x))
-         (scale (swizzle frame-parameters :y))
+         (scale
+           (assume-quantity (swizzle frame-parameters :y)
+                            :quantity quantities:spatial-scale
+                            :unit quantities:cell))
+         (world-scale
+           (assume-quantity (representation scale)
+                            :quantity quantities:world-distance
+                            :unit quantities:cell))
          (full-path-length
-           (* 2.0 #.luft.render::+torch-flame-proxy-radius+ scale))
+           (* 2.0 #.luft.render::+torch-flame-proxy-radius+ world-scale))
          ;; Opaque depth was rendered with the current projection jitter while
          ;; this post-temporal proxy is deliberately stable.  Four nearest
          ;; taps conservatively choose the closest covered internal pixel at an
          ;; edge, avoiding bright half-flames leaking through a bevel silhouette.
          (depth-uv
-           (+ (mesh-clip-uv current-clip)
-              (* (swizzle temporal-parameters :xy) 0.5)))
-         (half-texel (* (swizzle inspection-parameters :zw) 0.5))
+           (+ (representation (mesh-clip-uv current-clip))
+              (* (representation (swizzle temporal-parameters :xy)) 0.5)))
+         (half-texel
+           (* (representation (swizzle inspection-parameters :zw)) 0.5))
          (depth-a
            (swizzle
             (sample opaque-depth depth-sampler (+ depth-uv half-texel)) :x))
@@ -899,24 +1247,40 @@ boundary-edge mask.  This is the scalar oracle for both body vertex shaders."
                              (swizzle half-texel :y)))) :x))
          (scene-depth (min (min depth-a depth-b) (min depth-c depth-d)))
          (opaque-view-depth
-           (view-depth scene-depth camera-projection
-                       (swizzle render-parameters :z)))
+           (assume-quantity
+            (view-depth scene-depth camera-projection
+                        (swizzle (representation render-parameters) :z))
+            :unit quantities:cell))
          (proxy-view-depth
            (dot (- proxy-world-position (swizzle camera-position :xyz))
                 (swizzle camera-forward :xyz)))
          (ray-view-rate
            (max (dot ray (swizzle camera-forward :xyz)) 1e-5))
          (path-length
-           (clamp (/ (- opaque-view-depth proxy-view-depth) ray-view-rate)
-                  0.0 full-path-length))
+           (interpret
+            (clamp
+             (/ (- opaque-view-depth proxy-view-depth) ray-view-rate)
+             (quantity 0.0 :unit quantities:cell)
+             (assume-quantity (representation full-path-length)
+                              :unit quantities:cell))
+            :quantity quantities:world-distance :unit quantities:cell))
          (step-length (/ path-length
-                         (float #.luft.render::+torch-flame-sample-count+)))
+                         (assume-quantity
+                          (float #.luft.render::+torch-flame-sample-count+)
+                          :unit :one)))
          (integrated
            (counted-fold
                (sample (float #.luft.render::+torch-flame-sample-count+)
                 state (vec4 0.0 0.0 0.0 0.0))
-             (let* ((travel (* (+ sample 0.5) step-length))
-                    (point (+ proxy-world-position (* ray travel)))
+             (let* ((travel
+                      (* (assume-quantity (+ sample 0.5) :unit :one)
+                         step-length))
+                    (point
+                      (+ proxy-world-position
+                         (interpret
+                          (* ray travel)
+                          :quantity quantities:world-position
+                          :unit quantities:cell :character :difference)))
                     (field (torch-flame-field
                             point origin normal tangent seed scale time))
                     (density (swizzle field :y))
@@ -925,15 +1289,20 @@ boundary-edge mask.  This is the scalar oracle for both body vertex shaders."
                       (- 1.0
                          (exp (- (* density
                                     #.luft.render::+torch-flame-extinction+
-                                    step-length)))))
+                                    (representation step-length))))))
                     (transmittance (- 1.0 (swizzle state :w)))
                     (weight (* transmittance sample-alpha))
                     (radiance-scale
                       (+ #.luft.render::+torch-flame-cool-radiance-scale+
                          (* heat
                             #.luft.render::+torch-flame-heat-radiance-gain+)))
-                    (emission (* authored-radiance radiance-scale)))
-               (vec4 (+ (swizzle state :xyz) (* emission weight))
+                    (emission
+                      (* authored-radiance
+                         (assume-quantity radiance-scale :unit :one))))
+               ;; Fold state is the heterogeneous packed representation of
+               ;; radiance XYZ plus opacity W; erase only at that packing seam.
+               (vec4 (+ (swizzle state :xyz)
+                        (* (representation emission) weight))
                      (+ (swizzle state :w) weight))))))
     (set-output color-output integrated)))
 

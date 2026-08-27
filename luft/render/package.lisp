@@ -1,6 +1,72 @@
+(defpackage #:luft.render.quantities
+  (:use #:cl)
+  (:import-from #:luv.arithmetic
+                #:define-quantity-kind
+                #:define-unit
+                #:define-quantity)
+  (:export #:spatial-coordinate
+           #:unit-direction
+           #:orientation-vector
+           #:normalized-coordinate
+           #:relative-color-signal
+           #:control-signal
+           #:sample-count
+           #:cell
+           #:world-position
+           #:world-x-position
+           #:world-y-position
+           #:world-z-position
+           #:world-direction
+           #:world-x-direction
+           #:world-y-direction
+           #:world-z-direction
+           #:world-orientation
+           #:world-x-orientation
+           #:world-y-orientation
+           #:world-z-orientation
+           #:horizontal-direction
+           #:horizontal-x-direction
+           #:horizontal-y-direction
+           #:world-distance
+           #:spatial-scale
+           #:gait-phase
+           #:spell-flash
+           #:texture-coordinate
+           #:texture-u-coordinate
+           #:texture-v-coordinate
+           #:temporal-jitter
+           #:temporal-x-jitter
+           #:temporal-y-jitter
+           #:texel-extent
+           #:texel-width
+           #:texel-height
+           #:shadow-coordinate
+           #:shadow-u-coordinate
+           #:shadow-v-coordinate
+           #:shadow-depth-coordinate
+           #:shadow-bias
+           #:shadow-filter-radius
+           #:bevel-proportion
+           #:construction-line-strength
+           #:inspection-ink-strength
+           #:elapsed-time
+           #:scene-radiance
+           #:scene-red-radiance
+           #:scene-green-radiance
+           #:scene-blue-radiance
+           #:scene-luminance
+           #:exposure
+           #:presented-color
+           #:presented-red-color
+           #:presented-green-color
+           #:presented-blue-color)
+  (:documentation
+   "Collision-safe semantic quantity vocabulary for the LUFT renderer."))
+
 (defpackage #:luft.render.shaders
   (:use #:cl #:luv.shader)
   (:shadowing-import-from #:luv.shader #:step)
+  (:local-nicknames (#:quantities #:luft.render.quantities))
   (:export #:write-production-spir-v
            #:*production-shader-specifications*
            #:lattice-point-fragment-specification
@@ -26,6 +92,7 @@
   (:local-nicknames (#:domains #:luv.domains)
                     (#:shaders #:luft.render.shaders)
                     (#:production #:luv.production)
+                    (#:quantities #:luft.render.quantities)
                     (#:vec3 #:luv.arithmetic.lisp.vec3))
   (:export #:scene
            #:scene-solid

@@ -2254,13 +2254,15 @@ ambiguously co-owned, or retired by a population rollback."
                   (renderer-device renderer)
                   (make-buffer-descriptor
                    :label "luft presentation-slot camera state"
-                   :size 432 :usage '(:uniform :copy-dst)))
+                   :size (shaders::scene-uniform-byte-size)
+                   :usage '(:uniform :copy-dst)))
                  effect
                  (create
                   (renderer-device renderer)
                   (make-buffer-descriptor
                    :label "luft presentation-slot flame effect"
-                   :size 16 :usage '(:uniform :copy-dst))))
+                   :size (torch-flame-effect-byte-size)
+                   :usage '(:uniform :copy-dst))))
            (setf completed-p t)
            (%make-renderer-frame-state
             :camera-buffer camera :flame-effect-buffer effect))
@@ -3837,12 +3839,14 @@ exactly when its complete old descriptor vector is a prefix of the new one."
                  (create device
                          (make-buffer-descriptor
                           :label "luft frame state"
-                          :size 432 :usage '(:uniform :copy-dst)))
+                          :size (shaders::scene-uniform-byte-size)
+                          :usage '(:uniform :copy-dst)))
                  flame-effect-buffer
                  (create device
                          (make-buffer-descriptor
                           :label "luft torch flame effect"
-                          :size 16 :usage '(:uniform :copy-dst))))
+                          :size (torch-flame-effect-byte-size)
+                          :usage '(:uniform :copy-dst))))
            ;; Publish ownership to the constructor unwind list before the
            ;; first fallible upload touches this resource.
            (write-buffer flame-effect-buffer

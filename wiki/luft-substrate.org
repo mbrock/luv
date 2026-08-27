@@ -326,7 +326,7 @@ widening of the scalar family beforehand.
   substrate first grows the compaction vocabulary #34G2K8 already names —
   the mesher's streams never remove rows, so it may be the easier client.
 
-* NEXT Declare the Luft frame and effect-frame lanes
+* DONE Declare the Luft frame and effect-frame lanes
 :PROPERTIES:
 :ID: S1IABD
 :END:
@@ -345,14 +345,14 @@ mistakes; =validate-torch-flame-frame= hand-implements what declared
 products generate; and the spell-effects experiment is about to multiply
 exactly these lanes.
 
-The preliminaries are in place.  =make luft-shader-validate= assembles all
+The baseline already provided =make luft-shader-validate=, which assembles all
 eighteen production LUFT modules through
 [[lisp:luft.render.shaders:write-production-spir-v]], runs =spirv-val= on
 each, and prints their SHA-256 hashes — the byte-identity oracle this
 migration gates on.  The fourteen repeated member lists are now one
 =*scene-uniform-members*= ledger with =scene-uniform-prefix= splices, each
 site verified as an exact prefix, and the refactor reproduced all eighteen
-module hashes exactly.  What remains before annotation begins: a
+module hashes exactly.  Before annotation began, the remaining pieces were a
 =luft/render/quantities.lisp= vocabulary home whose definers arrive by
 =:import-from= (no =math:= prefixes in source), and the per-lane meaning
 decisions themselves.
@@ -366,3 +366,59 @@ SPIR-V modules are byte-identical before and after (any intentional
 divergence is its own recorded change); and the migration's list of
 surprised lanes — mislabeled, mischaracterized, or genuinely ambiguous —
 is recorded on this page as the analogue of luvcraft's audit findings.
+
+/Outcome./  =luft.render.quantities= now owns Luft's collision-safe semantic
+vocabulary.  [[lisp:luft.render.shaders::*scene-uniform-members*]] is the one
+108-float scene declaration for both the host represented value and every
+shader prefix; tests compare the flattened quantity layout of all fourteen
+compiled uniform blocks, including raw member names and offsets, with that host
+declaration.  The same declarations own both upload-buffer sizes.  The torch's
+twelve-float frame and four-float effect uniform are declared products; their
+canonical member tables generate the physical types, strides, and quantity
+layouts instead of repeating those extents at production consumers.  Effect
+validation also derives its nonnegative lane positions from that layout.  The
+frame validator retains the stricter finite, range, unit-frame, orthogonality,
+and positive-scale laws which a quantity layout does not express.
+The shader paths name world geometry and the HDR
+radiance→luminance→exposure→presented-colour ladder, with explicit
+representation boundaries at storage, projective, procedural, logarithmic,
+and tone-mapping operations.  =make luft-shader-validate= reproduced the
+pre-migration SHA-256 hash of all eighteen production modules exactly.
+
+/Audit findings./
+
+- Projection rows are genuinely mode-dependent: perspective and isometric
+  cameras put unlike meanings in the same four lanes.  The rows remain raw;
+  the projection operation owns their interpretation.
+- Several lanes are categorical or historical controls rather than spare
+  geometry: camera history validity and weight and the projection selector
+  remain raw.  Bevel, construction, and inspection strengths are proportions;
+  gait is an angular phase; and the heterogeneous character-direction row now
+  declares its horizontal heading, copied component, and spell-flash
+  proportion separately rather than pretending they form one quantity.
+- The four shadow rows are one dense projective representation, not sixteen
+  independent world or shadow coordinates.  Shadow sample varyings and the
+  texel extent, bias, and filter-radius controls do have stable meanings and
+  are declared; comparison sampling is their explicit representation seam.
+- Fireball radius is a nonnegative cell distance when present, but zero also
+  serves as the absence sentinel; the previous radius is transported even
+  though no current shader reads it.  Position and radius can still be named
+  without pretending the sentinel is a separate physical value.
+- Torch seed and packed flags are categorical and remain raw.  Origin, surface
+  frame, cell scale, elapsed seconds, and HDR radiance are the declared lanes.
+  A declaration supplies representation shape, not numerical integrity, so
+  the unit-length and orthogonality refinements remain explicit validation.
+- Storage-buffer rows, procedural noise phases, projective rows, logarithms,
+  and tone mapping are honest representation seams.  Quantities are assumed
+  after unpacking or derived arithmetic and erased only on entry to those
+  operations; the player's billboard stays checked point-plus-displacement
+  arithmetic until its private center/radius packing, and tone mapping produces
+  presented colour rather than radiance.
+- Canonical mesh normals are actually 26-way trit orientation witnesses:
+  diagonal encodings are not unit vectors.  Their shared flat varying is
+  therefore a world orientation, while the torch's normalized lighting normal
+  is explicitly widened to that interface representation.
+- The preliminary edit mode added no scene or shader lane.  Its revisions,
+  selected tool, and packed site words are categorical state; its sparse-owner
+  torch regeneration instead gives the declared flame frame another real
+  publication path to exercise.

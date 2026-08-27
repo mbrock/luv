@@ -18,43 +18,6 @@
   (defvar *highlight-glow-threshold* 1.5)
   (defvar *highlight-glow-strength* 0.22))
 
-;;; Every stage reading the scene environment declares the same uniform
-;;; block: identical member order and offsets are an ABI requirement, so
-;;; the ledger is written once and spliced at read time.  Stages that
-;;; need only an early portion declare an exact prefix of the same order.
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (defparameter *scene-uniform-members*
-    '((camera-position :vec4)
-      (camera-right :vec4)
-      (camera-up :vec4)
-      (camera-forward :vec4)
-      (camera-projection :vec4)
-      (render-parameters :vec4)
-      (previous-camera-position :vec4)
-      (previous-camera-right :vec4)
-      (previous-camera-up :vec4)
-      (previous-camera-forward :vec4)
-      (previous-camera-projection :vec4)
-      (temporal-parameters :vec4)
-      (inspection-parameters :vec4)
-      (character-parameters :vec4)
-      (sun-vector :vec4)
-      (sun-color-vector :vec4)
-      (sky-color-vector :vec4)
-      (ground-color-vector :vec4)
-      (shadow-row-x :vec4)
-      (shadow-row-y :vec4)
-      (shadow-row-z :vec4)
-      (shadow-row-w :vec4)
-      (shadow-control :vec4)
-      (previous-character-parameters :vec4)
-      (character-direction :vec4)
-      (fireball-parameters :vec4)
-      (previous-fireball-parameters :vec4)))
-  (defun scene-uniform-prefix (count)
-    "The first COUNT members of the canonical scene uniform ledger."
-    (subseq *scene-uniform-members* 0 count)))
-
 (define-shader-function paper-hash (site)
   (let* ((scattered (fract (* site 0.1031)))
          (shift (dot scattered
@@ -260,18 +223,41 @@
               (* depth -0.06))))
     (* earth-tone value)))
 
+(define-shader-function scene-relative-luminance (radiance)
+  "Reduce checked linear RGB radiance to its named relative luminance."
+  (let* ((radiance
+           (interpret radiance :quantity quantities:scene-radiance
+                                :unit :one))
+         (weights
+           (assume-quantity (vec3 0.2126 0.7152 0.0722) :unit :one)))
+    (interpret (dot radiance weights)
+               :quantity quantities:scene-luminance :unit :one)))
+
 (define-shader-function paper-tonemap (radiance)
-  (let* ((numerator
+  "Cross from scene radiance into bounded display-linear colour."
+  (let* ((radiance
+           (representation
+            (interpret radiance :quantity quantities:scene-radiance
+                                 :unit :one)))
+         (numerator
            (* radiance (+ (* radiance 2.51) (vec3 0.03 0.03 0.03))))
          (denominator
            (+ (* radiance (+ (* radiance 2.43) (vec3 0.59 0.59 0.59)))
               (vec3 0.14 0.14 0.14))))
-    (clamp (/ numerator denominator)
-           (vec3 0.0 0.0 0.0) (vec3 1.0 1.0 1.0))))
+    ;; The fitted polynomial is a transfer function, not homogeneous
+    ;; radiometric arithmetic.  Its output starts a distinct colour space.
+    (assume-quantity
+     (clamp (/ numerator denominator)
+            (vec3 0.0 0.0 0.0) (vec3 1.0 1.0 1.0))
+     :quantity quantities:presented-color :unit :one)))
 
 (define-shader-function paper-grade (color)
   "Keep cool shade and warm paper luminous after highlight compression."
-  (let* ((luminance (dot color (vec3 0.2126 0.7152 0.0722)))
+  (let* ((color
+           (representation
+            (interpret color :quantity quantities:presented-color
+                             :unit :one)))
+         (luminance (dot color (vec3 0.2126 0.7152 0.0722)))
          (temperature (smoothstep 0.30 0.78 luminance))
          (split-tone
            (mix (vec3 0.93 0.99 1.08) (vec3 1.08 1.01 0.88)
@@ -287,13 +273,22 @@
          (contrasted (mix saturated curved 0.14))
          (black (vec3 0.0 0.0 0.0))
          (white (vec3 1.0 1.0 1.0)))
-    (clamp contrasted black white)))
+    (assume-quantity
+     (clamp contrasted black white)
+     :quantity quantities:presented-color :unit :one)))
 
 (define-shader-function highlight-energy (value)
   "Keep only genuinely luminous scene-linear colour for the paper glow."
-  (let* ((color (swizzle value :xyz))
-         (luminance (dot color (vec3 0.2126 0.7152 0.0722)))
-         (gate (smoothstep #.*highlight-glow-threshold* 1.55 luminance)))
+  (let* ((color
+           (assume-quantity (swizzle value :xyz)
+                            :quantity quantities:scene-radiance :unit :one))
+         (luminance (scene-relative-luminance color))
+         (gate
+           (smoothstep
+            (quantity #.*highlight-glow-threshold*
+                      :quantity quantities:scene-luminance :unit :one)
+            (quantity 1.55 :quantity quantities:scene-luminance :unit :one)
+            luminance)))
     (* color gate)))
 
 (define-shader-function material-environment-radiance
@@ -450,9 +445,15 @@
 (define-shader-function mesh-view-clip
     (point position right up forward projection divisor)
   (let* ((relative (- point (swizzle position :xyz)))
-         (view-x (dot relative (swizzle right :xyz)))
-         (view-y (dot relative (swizzle up :xyz)))
-         (view-z (dot relative (swizzle forward :xyz))))
+         ;; The view coordinates are checked cell-valued projections.  The
+         ;; following homogeneous row is deliberately representation: its Z
+         ;; offset and W divisor change meaning with projection mode.
+         (view-x (representation
+                  (dot relative (swizzle right :xyz))))
+         (view-y (representation
+                  (dot relative (swizzle up :xyz))))
+         (view-z (representation
+                  (dot relative (swizzle forward :xyz)))))
     (vec4 (* view-x (swizzle projection :x))
           (- (* view-y (swizzle projection :y)))
           (+ (* view-z (swizzle projection :z))
@@ -460,8 +461,10 @@
           (mix 1.0 view-z divisor))))
 
 (define-shader-function mesh-clip-uv (clip)
-  (+ (* (/ (swizzle clip :xy) (swizzle clip :w)) 0.5)
-     (vec2 0.5 0.5)))
+  (assume-quantity
+   (+ (* (/ (swizzle clip :xy) (swizzle clip :w)) 0.5)
+      (vec2 0.5 0.5))
+   :quantity quantities:texture-coordinate :unit :one))
 
 (define-shader-function mesh-temporal-motion (previous-clip current-clip)
   "Return the unjittered previous-minus-current motion MetalFX expects.
@@ -470,31 +473,40 @@ The scaler receives the current sampling offset independently through
 JITTER-OFFSET-{X,Y}.  Its default contract consumes these vectors directly,
 so adding either frame's Halton offset here would invent screen-wide motion
 for completely static geometry."
-  (- (mesh-clip-uv previous-clip)
-     (mesh-clip-uv current-clip)))
+  (representation
+   (- (mesh-clip-uv previous-clip)
+      (mesh-clip-uv current-clip))))
 
 (define-shader-function mesh-world-position (instance template-vertex)
   "Decode the one world position shared by the scene and shadow passes."
-  (/ (+ (* (vec3 (float (swizzle instance :x))
-                 (float (swizzle instance :y))
-                 (float (swizzle instance :z)))
-           8.0)
-        (- (vec3 (float (swizzle template-vertex :x))
-                 (float (swizzle template-vertex :y))
-                 (float (swizzle template-vertex :z)))
-           (vec3 2048.0 2048.0 2048.0)))
-     8.0))
+  (assume-quantity
+   (/ (+ (* (vec3 (float (swizzle instance :x))
+                  (float (swizzle instance :y))
+                  (float (swizzle instance :z)))
+            8.0)
+         (- (vec3 (float (swizzle template-vertex :x))
+                  (float (swizzle template-vertex :y))
+                  (float (swizzle template-vertex :z)))
+            (vec3 2048.0 2048.0 2048.0)))
+      8.0)
+   :quantity quantities:world-position :unit quantities:cell))
 
 (define-shader-function light-clip-position
     (world-position row-x row-y row-z row-w)
-  (let* ((point (vec4 world-position 1.0)))
+  ;; A homogeneous projective row is representation, not four compatible
+  ;; spatial quantities.  Erase the checked point exactly at that boundary.
+  (let* ((point (vec4 (representation world-position) 1.0)))
     (vec4 (dot point row-x) (dot point row-y)
           (dot point row-z) (dot point row-w))))
 
 (define-shader-function soft-shadow-visibility
     (shadow-map shadow-sampler shadow-sample normal sun shadow-control)
   "Five comparison-filtered taps forming one restrained paper-soft shadow."
-  (let* ((uv (swizzle shadow-sample :xy))
+  ;; Comparison sampling combines a projective coordinate, slope bias, and
+  ;; integer filter radius.  Their interface meanings are checked; the fixed
+  ;; comparison-filter program is the explicit representation seam.
+  (let* ((shadow-sample (representation shadow-sample))
+         (uv (swizzle shadow-sample :xy))
          (depth (swizzle shadow-sample :z))
          (u (swizzle uv :x))
          (v (swizzle uv :y))
@@ -1358,7 +1370,11 @@ that he is standing on something."
      :inputs ((vertex-index :uint :built-in :vertex-index)
               (instance-index :uint :built-in :instance-index))
      :outputs ((clip-position :vec4 :built-in :position)
-               (proxy-world-position-output :vec3 :location 0)
+               (proxy-world-position-output :vec3 :location 0
+                                            :quantity quantities:world-position
+                                            :unit quantities:cell)
+               ;; Point plus radius is a deliberately heterogeneous private
+               ;; packing seam; each side unpacks its checked constituents.
                (center-radius-output :vec4 :location 1)
                (current-clip-output :vec4 :location 2)
                (previous-clip-output :vec4 :location 3))
@@ -1380,39 +1396,67 @@ that he is standing on something."
          (across (- (* right-corner 2.0) 1.0))
          (vertical (- (* bottom-corner 2.0) 1.0))
          (fireball-p (> (float instance-index) 0.5))
-         (corner (if fireball-p (vec2 (* across 1.65) (* vertical 1.65))
-                     (vec2 (* across 1.45)
-                           (if (> vertical 0.0) (* vertical 1.85) vertical))))
-         (center (if fireball-p (swizzle fireball-parameters :xyz)
-                     (swizzle character-parameters :xyz)))
+         (corner
+           (assume-quantity
+            (if fireball-p (vec2 (* across 1.65) (* vertical 1.65))
+                (vec2 (* across 1.45)
+                      (if (> vertical 0.0) (* vertical 1.85) vertical)))
+            :unit :one))
+         (center
+           (if fireball-p
+               (swizzle fireball-parameters :xyz)
+               (swizzle character-parameters :xyz)))
          (previous-center
-           (if fireball-p (swizzle previous-fireball-parameters :xyz)
+           (if fireball-p
+               (swizzle previous-fireball-parameters :xyz)
                (swizzle previous-character-parameters :xyz)))
-         (radius (if fireball-p (swizzle fireball-parameters :w) 2.05))
+         (radius
+           (if fireball-p
+               (swizzle fireball-parameters :w)
+               (quantity 2.05 :quantity quantities:world-distance
+                              :unit quantities:cell)))
          (proxy-world-position
-           (+ (- center (* (swizzle camera-forward :xyz) radius))
-              (+ (* (swizzle camera-right :xyz)
-                    (* (swizzle corner :x) radius))
-                 (* (swizzle camera-up :xyz)
-                    (* (swizzle corner :y) radius)))))
+           (+ (- center
+                 (interpret (* (swizzle camera-forward :xyz) radius)
+                            :quantity quantities:world-position
+                            :unit quantities:cell :character :difference))
+              (+ (interpret
+                  (* (swizzle camera-right :xyz)
+                     (* (swizzle corner :x) radius))
+                  :quantity quantities:world-position
+                  :unit quantities:cell :character :difference)
+                 (interpret
+                  (* (swizzle camera-up :xyz)
+                     (* (swizzle corner :y) radius))
+                  :quantity quantities:world-position
+                  :unit quantities:cell :character :difference))))
          (previous-proxy-world-position
            (+ (- previous-center
-                 (* (swizzle previous-camera-forward :xyz) radius))
-              (+ (* (swizzle previous-camera-right :xyz)
-                    (* (swizzle corner :x) radius))
-                 (* (swizzle previous-camera-up :xyz)
-                    (* (swizzle corner :y) radius)))))
+                 (interpret
+                  (* (swizzle previous-camera-forward :xyz) radius)
+                  :quantity quantities:world-position
+                  :unit quantities:cell :character :difference))
+              (+ (interpret
+                  (* (swizzle previous-camera-right :xyz)
+                     (* (swizzle corner :x) radius))
+                  :quantity quantities:world-position
+                  :unit quantities:cell :character :difference)
+                 (interpret
+                  (* (swizzle previous-camera-up :xyz)
+                     (* (swizzle corner :y) radius))
+                  :quantity quantities:world-position
+                  :unit quantities:cell :character :difference))))
          (current-clip
            (mesh-view-clip proxy-world-position camera-position camera-right
                            camera-up camera-forward camera-projection
-                           (swizzle render-parameters :z)))
+                           (swizzle (representation render-parameters) :z)))
          (previous-clip
            (mesh-view-clip previous-proxy-world-position
                            previous-camera-position previous-camera-right
                            previous-camera-up previous-camera-forward
                            previous-camera-projection
-                           (swizzle render-parameters :z)))
-         (jitter (swizzle temporal-parameters :xy)))
+                           (swizzle (representation render-parameters) :z)))
+         (jitter (representation (swizzle temporal-parameters :xy))))
     (set-output clip-position
                 (vec4 (+ (swizzle current-clip :x)
                          (* (swizzle jitter :x) (swizzle current-clip :w)))
@@ -1421,13 +1465,16 @@ that he is standing on something."
                       (swizzle current-clip :z)
                       (swizzle current-clip :w)))
     (set-output proxy-world-position-output proxy-world-position)
-    (set-output center-radius-output (vec4 center radius))
+    (set-output center-radius-output
+                (vec4 (representation center) (representation radius)))
     (set-output current-clip-output current-clip)
     (set-output previous-clip-output previous-clip)))
 
 (define-live-shader player-sdf-fragment-specification
     (:stage :fragment
-     :inputs ((proxy-world-position :vec3 :location 0)
+     :inputs ((proxy-world-position :vec3 :location 0
+                                    :quantity quantities:world-position
+                                    :unit quantities:cell)
               (center-radius :vec4 :location 1)
               (current-clip :vec4 :location 2)
               (previous-clip :vec4 :location 3))
@@ -1437,23 +1484,43 @@ that he is standing on something."
                   :members #.*scene-uniform-members*)
                  (shadow-map :depth-texture-2d :binding 1)
                  (shadow-sampler :sampler :binding 2)))
-  (let* ((center (swizzle center-radius :xyz))
-         (radius (swizzle center-radius :w))
+  (let* ((center-point
+           (assume-quantity (swizzle center-radius :xyz)
+                            :quantity quantities:world-position
+                            :unit quantities:cell))
+         (radius-distance
+           (assume-quantity (swizzle center-radius :w)
+                            :quantity quantities:world-distance
+                            :unit quantities:cell))
+         (center (representation center-point))
+         (radius (representation radius-distance))
          (fireball-p (< radius 1.0))
-         (gait (swizzle character-parameters :w))
-         (spell-flash (swizzle character-direction :w))
+         (gait (swizzle (representation character-parameters) :w))
+         (spell-flash
+           (representation (swizzle character-direction :w)))
          ;; The game controller rotates world space into the traveler's local
          ;; forward frame below, so the hermit's authored stride always runs
          ;; along local +Y.
          (direction 1.0)
-         (heading (normalize (swizzle character-direction :xy)))
+         (heading
+           (representation
+            (normalize (swizzle character-direction :xy))))
          (player-right (vec2 (swizzle heading :y)
                              (- (swizzle heading :x))))
-         (ray (if (< (swizzle render-parameters :z) 0.5)
-                  (normalize (swizzle camera-forward :xyz))
-                  (normalize (- proxy-world-position
-                                (swizzle camera-position :xyz)))))
-         (origin proxy-world-position)
+         (ray-direction
+           (if (< (swizzle (representation render-parameters) :z) 0.5)
+               (normalize (swizzle camera-forward :xyz))
+               (assume-quantity
+                (normalize
+                 (representation
+                  (- proxy-world-position
+                     (swizzle camera-position :xyz))))
+                :quantity quantities:world-direction :unit :one)))
+         (ray (representation ray-direction))
+         ;; The signed-distance program below is deliberately procedural
+         ;; representation; checked point/distance arithmetic resumes at its
+         ;; lighting and projection boundaries.
+         (origin (representation proxy-world-position))
          ;; The hermit's field is rotated into his live walking heading.  The
          ;; branch study's shortcut marched in world axes, which diverged as
          ;; soon as a player turned and left a transparent robe behind.
@@ -1518,23 +1585,30 @@ that he is standing on something."
                           fireball-heat)
                      (if orb-p (vec3 0.42 0.88 1.0)
                          (player-albedo local gait direction spell-flash))))
-         (sun (swizzle sun-vector :xyz))
-         (sun-color (swizzle sun-color-vector :xyz))
-         (sky (swizzle sky-color-vector :xyz))
-         (ground (swizzle ground-color-vector :xyz))
+         (sun-direction (swizzle sun-vector :xyz))
+         (sun (representation sun-direction))
+         (sun-color
+           (representation (swizzle sun-color-vector :xyz)))
+         (sky (representation (swizzle sky-color-vector :xyz)))
+         (ground (representation (swizzle ground-color-vector :xyz)))
          (facing (dot normal sun))
          (direct-shape (smoothstep 0.0 0.72 (max 0.0 facing)))
          (light-clip
-           (light-clip-position world-point shadow-row-x shadow-row-y
-                                shadow-row-z shadow-row-w))
+           (light-clip-position
+            (assume-quantity world-point
+                             :quantity quantities:world-position
+                             :unit quantities:cell)
+            shadow-row-x shadow-row-y shadow-row-z shadow-row-w))
          (player-shadow-sample
-           (vec3 (+ (* (swizzle light-clip :x) 0.5) 0.5)
-                 (+ (* (swizzle light-clip :y) 0.5) 0.5)
-                 (swizzle light-clip :z)))
+           (assume-quantity
+            (vec3 (+ (* (swizzle light-clip :x) 0.5) 0.5)
+                  (+ (* (swizzle light-clip :y) 0.5) 0.5)
+                  (swizzle light-clip :z))
+            :quantity quantities:shadow-coordinate :unit :one))
          (sampled-shadow
            (soft-shadow-visibility shadow-map shadow-sampler
                                    player-shadow-sample normal sun
-                                   shadow-control))
+                                   (representation shadow-control)))
          (direct-visibility
            (mix 1.0 sampled-shadow
                 (smoothstep 0.03 0.18 (max 0.0 facing))))
@@ -1576,16 +1650,21 @@ that he is standing on something."
          ;; sun's depth map at a point lying exactly on the surface that
          ;; wrote it is the textbook way to shadow a floor with itself.
          (deck-clip
-           (light-clip-position (+ deck-point (vec3 0.0 0.0 0.09))
-                                shadow-row-x shadow-row-y
-                                shadow-row-z shadow-row-w))
+           (light-clip-position
+            (assume-quantity (+ deck-point (vec3 0.0 0.0 0.09))
+                             :quantity quantities:world-position
+                             :unit quantities:cell)
+            shadow-row-x shadow-row-y shadow-row-z shadow-row-w))
          (deck-lit
            (soft-shadow-visibility
             shadow-map shadow-sampler
-            (vec3 (+ (* (swizzle deck-clip :x) 0.5) 0.5)
-                  (+ (* (swizzle deck-clip :y) 0.5) 0.5)
-                  (swizzle deck-clip :z))
-            (vec3 0.0 0.0 1.0) sun shadow-control))
+            (assume-quantity
+             (vec3 (+ (* (swizzle deck-clip :x) 0.5) 0.5)
+                   (+ (* (swizzle deck-clip :y) 0.5) 0.5)
+                   (swizzle deck-clip :z))
+             :quantity quantities:shadow-coordinate :unit :one)
+            (vec3 0.0 0.0 1.0) sun
+            (representation shadow-control)))
          (contact
            (if fireball-p 0.0
                (* (* (player-contact-shade origin ray center sun deck-height)
@@ -1609,13 +1688,19 @@ that he is standing on something."
      :inputs ((vertex-index :uint :built-in :vertex-index)
               (instance-index :uint :built-in :instance-index))
      :outputs ((clip-position :vec4 :built-in :position)
-               (world-position-output :vec3 :location 0)
-               (mesh-normal-output :vec3 :location 1 :interpolation :flat)
+               (world-position-output :vec3 :location 0
+                                      :quantity quantities:world-position
+                                      :unit quantities:cell)
+               (mesh-normal-output :vec3 :location 1 :interpolation :flat
+                                   :quantity quantities:world-orientation
+                                   :unit :one)
                (assembly-output :float :location 2 :interpolation :flat)
                (barycentric-output :vec3 :location 3)
                (current-clip-output :vec4 :location 4)
                (previous-clip-output :vec4 :location 5)
-               (shadow-sample-output :vec3 :location 6)
+               (shadow-sample-output :vec3 :location 6
+                                     :quantity quantities:shadow-coordinate
+                                     :unit :one)
                (boundary-edge-mask-output :uint :location 7
                                           :interpolation :flat)
                (ambient-occlusion-output :float :location 8
@@ -1656,9 +1741,11 @@ that he is standing on something."
          (attributes (swizzle template-vertex :w))
          (world-position (mesh-world-position instance template-vertex))
          (mesh-normal
-           (vec3 (- (float (ldb (byte 2 0) attributes)) 1.0)
-                 (- (float (ldb (byte 2 2) attributes)) 1.0)
-                 (- (float (ldb (byte 2 4) attributes)) 1.0)))
+           (assume-quantity
+            (vec3 (- (float (ldb (byte 2 0) attributes)) 1.0)
+                  (- (float (ldb (byte 2 2) attributes)) 1.0)
+                  (- (float (ldb (byte 2 4) attributes)) 1.0))
+            :quantity quantities:world-orientation :unit :one))
          (assembly-id (float (ldb (byte 12 16) (swizzle instance :w))))
          (ambient-occlusion
            (/ (float (ldb (byte 2 28) (swizzle instance :w))) 3.0))
@@ -1674,16 +1761,16 @@ that he is standing on something."
          (current-clip
            (mesh-view-clip world-position camera-position camera-right
                            camera-up camera-forward camera-projection
-                           (swizzle render-parameters :z)))
+                           (swizzle (representation render-parameters) :z)))
          (previous-clip
            (mesh-view-clip world-position previous-camera-position
                            previous-camera-right previous-camera-up
                            previous-camera-forward previous-camera-projection
-                           (swizzle render-parameters :z)))
+                           (swizzle (representation render-parameters) :z)))
          (light-clip
            (light-clip-position world-position shadow-row-x shadow-row-y
                                 shadow-row-z shadow-row-w))
-         (jitter (swizzle temporal-parameters :xy)))
+         (jitter (representation (swizzle temporal-parameters :xy))))
     ;; Do not emulate face culling by moving a vertex off screen.  The
     ;; facing test is per vertex, so a triangle crossing its threshold turns
     ;; into an enormous sliver as the camera moves.  The closed surface's
@@ -1702,9 +1789,11 @@ that he is standing on something."
     (set-output current-clip-output current-clip)
     (set-output previous-clip-output previous-clip)
     (set-output shadow-sample-output
-                (vec3 (+ (* (swizzle light-clip :x) 0.5) 0.5)
-                      (+ (* (swizzle light-clip :y) 0.5) 0.5)
-                      (swizzle light-clip :z)))
+                (assume-quantity
+                 (vec3 (+ (* (swizzle light-clip :x) 0.5) 0.5)
+                       (+ (* (swizzle light-clip :y) 0.5) 0.5)
+                       (swizzle light-clip :z))
+                 :quantity quantities:shadow-coordinate :unit :one))
     (set-output boundary-edge-mask-output boundary-edge-mask)
     (set-output ambient-occlusion-output ambient-occlusion)
     (set-output voxel-light-output voxel-light)
@@ -1712,13 +1801,17 @@ that he is standing on something."
 
 (define-live-shader mesh-fragment-specification
     (:stage :fragment
-     :inputs ((world-position :vec3 :location 0)
-              (mesh-normal :vec3 :location 1 :interpolation :flat)
+     :inputs ((world-position :vec3 :location 0
+                              :quantity quantities:world-position
+                              :unit quantities:cell)
+              (mesh-normal :vec3 :location 1 :interpolation :flat
+                           :quantity quantities:world-orientation :unit :one)
               (assembly-id :float :location 2 :interpolation :flat)
               (barycentric :vec3 :location 3)
               (current-clip :vec4 :location 4)
               (previous-clip :vec4 :location 5)
-              (shadow-sample :vec3 :location 6)
+              (shadow-sample :vec3 :location 6
+                             :quantity quantities:shadow-coordinate :unit :one)
               (boundary-edge-mask :uint :location 7 :interpolation :flat)
               (ambient-occlusion :float :location 8 :interpolation :flat)
               (voxel-light :vec3 :location 9)
@@ -1731,7 +1824,12 @@ that he is standing on something."
                   :element :vec4)
                  (shadow-map :depth-texture-2d :binding 4)
                  (shadow-sampler :sampler :binding 5)))
-  (let* ((dx (derivative-x world-position))
+  (let* ((world-point world-position)
+         ;; Procedural material derivatives and hashes intentionally consume
+         ;; lattice representation; checked spatial arithmetic resumes at
+         ;; the camera and projective boundaries below.
+         (world-position (representation world-point))
+         (dx (derivative-x world-position))
          (dy (derivative-y world-position))
          (geometric-normal
            (normalize
@@ -1741,7 +1839,7 @@ that he is standing on something."
                      (* (swizzle dx :x) (swizzle dy :z)))
                   (- (* (swizzle dx :x) (swizzle dy :y))
                      (* (swizzle dx :y) (swizzle dy :x))))))
-         (normal (if (< (dot geometric-normal mesh-normal) 0.0)
+         (normal (if (< (dot geometric-normal (representation mesh-normal)) 0.0)
                      (* geometric-normal -1.0)
                      geometric-normal))
          (descriptor-row (uint (* assembly-id 8.0)))
@@ -1811,8 +1909,11 @@ that he is standing on something."
            (if (= primitive-kind (uint 1.0)) 1.0 0.0))
          (stone-band-p (* stone-relief-p band-p))
          (view-direction
-           (normalize (- (swizzle camera-position :xyz) world-position)))
-         (sun (swizzle sun-vector :xyz))
+           (normalize
+            (representation
+             (- (swizzle camera-position :xyz) world-point))))
+         (sun-direction (swizzle sun-vector :xyz))
+         (sun (representation sun-direction))
          (shading-normal
            (normalize (mix normal relief-normal stone-relief-p)))
          (roughness
@@ -1875,9 +1976,10 @@ that he is standing on something."
          (warmth (mix (vec3 0.965 0.99 1.04) (vec3 1.04 1.01 0.96)
                       (smoothstep 0.18 0.82 mottle)))
          (base (* tone (* warmth (* value (+ 1.0 (* relief-height 0.028))))))
-         (sun-color (swizzle sun-color-vector :xyz))
-         (sky (swizzle sky-color-vector :xyz))
-         (ground (swizzle ground-color-vector :xyz))
+         (sun-color
+           (representation (swizzle sun-color-vector :xyz)))
+         (sky (representation (swizzle sky-color-vector :xyz)))
+         (ground (representation (swizzle ground-color-vector :xyz)))
          (facing (dot shading-normal sun))
          (direct-shape (smoothstep 0.0 0.72 (max 0.0 facing)))
          ;; Limestone is an aggregate of grains and pores, not one polished
@@ -1892,8 +1994,9 @@ that he is standing on something."
             (* 0.38 (smoothstep -0.18 0.90 facing))
             stone-band-p))
          (sampled-shadow
-           (soft-shadow-visibility shadow-map shadow-sampler shadow-sample
-                                   shading-normal sun shadow-control))
+           (soft-shadow-visibility
+            shadow-map shadow-sampler shadow-sample shading-normal sun
+            (representation shadow-control)))
          (direct-visibility
            (mix 1.0 sampled-shadow
                 (smoothstep 0.03 0.18 (max 0.0 facing))))
@@ -1968,7 +2071,9 @@ that he is standing on something."
          ;; Keep scene radiance linear and HDR here.  The universal
          ;; presentation pass blooms, tone maps, and grades it exactly once.
          (mapped-paper (* lit 1.08))
-         (camera-delta (- world-position (swizzle camera-position :xyz)))
+         (camera-delta
+           (representation
+            (- world-point (swizzle camera-position :xyz))))
          (distance (sqrt (dot camera-delta camera-delta)))
          (fog (smoothstep 165.0 300.0 distance))
          (paper (mix mapped-paper sky fog))
@@ -2006,15 +2111,20 @@ that he is standing on something."
          (boundary-wire
            (- 1.0 (smoothstep 0.45 1.15 boundary-edge-pixels)))
          (construction-wire
-           (* (swizzle render-parameters :y)
+           (* (representation (swizzle render-parameters :y))
               (min 1.0 (+ (* all-wire 0.18) (* boundary-wire 0.82)))))
          (fragment-uv (mesh-clip-uv current-clip))
          (pointer-delta
-           (/ (- fragment-uv (swizzle inspection-parameters :xy))
-              (max (swizzle inspection-parameters :zw)
-                   (vec2 0.000001 0.000001))))
+           (representation
+            (/ (- fragment-uv (swizzle inspection-parameters :xy))
+               (max
+                (swizzle inspection-parameters :zw)
+                (assume-quantity
+                 (vec2 0.000001 0.000001)
+                 :quantity quantities:texel-extent :unit :one)))))
          (pointer-pixels (sqrt (dot pointer-delta pointer-delta)))
-         (pointer-enabled (swizzle render-parameters :w))
+         (pointer-enabled
+           (representation (swizzle render-parameters :w)))
          (ring (* pointer-enabled
                   (- 1.0
                      (smoothstep 0.35 1.25
@@ -2103,10 +2213,12 @@ that he is standing on something."
                   :members #.(scene-uniform-prefix 14))))
   (let* ((record (buffer-element lattice-points instance-index))
          (world-position
-           (/ (vec3 (float (swizzle record :x))
-                    (float (swizzle record :y))
-                    (float (swizzle record :z)))
-              8.0))
+           (assume-quantity
+            (/ (vec3 (float (swizzle record :x))
+                     (float (swizzle record :y))
+                     (float (swizzle record :z)))
+               8.0)
+            :quantity quantities:world-position :unit quantities:cell))
          (index (float vertex-index))
          (right (if (= index 2.0) 1.0
                     (if (= index 3.0) 1.0
@@ -2120,16 +2232,17 @@ that he is standing on something."
          (current-clip
            (mesh-view-clip world-position camera-position camera-right
                            camera-up camera-forward camera-projection
-                           (swizzle render-parameters :z)))
+                           (swizzle (representation render-parameters) :z)))
          (previous-clip
            (mesh-view-clip world-position previous-camera-position
                            previous-camera-right previous-camera-up
                            previous-camera-forward previous-camera-projection
-                           (swizzle render-parameters :z)))
-         (pixel-size (swizzle inspection-parameters :zw))
+                           (swizzle (representation render-parameters) :z)))
+         (pixel-size
+           (representation (swizzle inspection-parameters :zw)))
          (radius (if (> marker-kind 1.5) 8.5
                      (if (> marker-kind 0.5) 6.5 2.6)))
-         (jitter (swizzle temporal-parameters :xy)))
+         (jitter (representation (swizzle temporal-parameters :xy))))
     (set-output
      clip-position
      (vec4 (+ (+ (swizzle current-clip :x)
@@ -2204,28 +2317,39 @@ that he is standing on something."
            (normalize
             (+ (swizzle camera-forward :xyz)
                (* (swizzle camera-right :xyz)
-                  (/ (swizzle ndc :x)
-                     (swizzle camera-projection :x)))
+                  (assume-quantity
+                   (/ (swizzle ndc :x)
+                      (swizzle camera-projection :x))
+                   :unit :one))
                (* (swizzle camera-up :xyz)
-                  (/ (- (swizzle ndc :y))
-                     (swizzle camera-projection :y))))))
+                  (assume-quantity
+                   (/ (- (swizzle ndc :y))
+                      (swizzle camera-projection :y))
+                   :unit :one)))))
          (isometric-ray
            (normalize
             (+ (swizzle camera-forward :xyz)
                (* (swizzle camera-up :xyz)
-                  (* (- (swizzle ndc :y)) 0.38))))))
-    (mix isometric-ray perspective-ray divisor)))
+                  (assume-quantity
+                   (* (- (swizzle ndc :y)) 0.38) :unit :one))))))
+    (mix isometric-ray perspective-ray
+         (assume-quantity divisor :unit :one))))
 
 (define-shader-function painted-sky-radiance
     (ndc camera-right camera-up camera-forward camera-projection divisor
      sun-vector sun-color-vector sky-color-vector)
   "Return view-stable late-afternoon HDR radiance before exposure or grading."
-  (let* ((ray (sky-view-ray ndc camera-right camera-up camera-forward
-                            camera-projection divisor))
+  (let* ((ray-direction
+           (sky-view-ray ndc camera-right camera-up camera-forward
+                         camera-projection divisor))
+         ;; Cloud and watercolor shaping are procedural image mathematics;
+         ;; the result re-enters the semantic ladder as scene radiance.
+         (ray (representation ray-direction))
          (height (swizzle ray :z))
          (upness (clamp height 0.0 1.0))
          (horizon-weight (smoothstep -0.10 0.42 height))
-         (base-sky (swizzle sky-color-vector :xyz))
+         (base-sky
+           (representation (swizzle sky-color-vector :xyz)))
          (horizon (vec3 0.58 0.78 1.06))
          (zenith (* base-sky (vec3 0.34 0.58 0.94)))
          (horizon-haze
@@ -2251,7 +2375,8 @@ that he is standing on something."
          (cloud-height
            (* (smoothstep 0.05 0.20 upness)
               (- 1.0 (smoothstep 0.58 0.90 upness))))
-         (sun (normalize (swizzle sun-vector :xyz)))
+         (sun
+           (representation (normalize (swizzle sun-vector :xyz))))
          (sun-facing (max 0.0 (dot ray sun)))
          (sun-halo (smoothstep 0.965 0.9992 sun-facing))
          (sun-disc (smoothstep 0.99925 0.99982 sun-facing))
@@ -2263,9 +2388,10 @@ that he is standing on something."
            (mix atmosphere cloud-light (* cloud-shape cloud-height 0.26)))
          (radiance
            (+ clouded
-              (* (swizzle sun-color-vector :xyz)
+              (* (representation (swizzle sun-color-vector :xyz))
                  (+ (* sun-halo 0.10) (* sun-disc 2.8))))))
-    radiance))
+    (assume-quantity radiance
+                     :quantity quantities:scene-radiance :unit :one)))
 
 (define-live-shader sky-fragment-specification
     (:stage :fragment
@@ -2276,9 +2402,10 @@ that he is standing on something."
   (let* ((radiance
            (painted-sky-radiance
             ndc camera-right camera-up camera-forward camera-projection
-            (swizzle render-parameters :z) sun-vector sun-color-vector
+            (swizzle (representation render-parameters) :z)
+            sun-vector sun-color-vector
             sky-color-vector)))
-    (set-output color-output (vec4 radiance 1.0))))
+    (set-output color-output (vec4 (representation radiance) 1.0))))
 
 (define-live-shader sky-temporal-fragment-specification
     (:stage :fragment
@@ -2287,11 +2414,13 @@ that he is standing on something."
                (motion-output :vec2 :location 1))
      :resources ((camera-state :uniform-block :binding 0
                   :members #.(scene-uniform-prefix 17))))
-  (let* ((divisor (swizzle render-parameters :z))
+  (let* ((divisor (swizzle (representation render-parameters) :z))
          ;; The fullscreen triangle itself cannot move. Reconstruct the ray at
          ;; the same jittered sample location as geometry, as the original
          ;; Vulkan resolve did, and derive motion from that unjittered address.
-         (sample-ndc (- ndc (swizzle temporal-parameters :xy)))
+         (sample-ndc
+           (- ndc
+              (representation (swizzle temporal-parameters :xy))))
          (ray (sky-view-ray sample-ndc camera-right camera-up camera-forward
                             camera-projection divisor))
          (radiance
@@ -2299,17 +2428,21 @@ that he is standing on something."
             sample-ndc camera-right camera-up camera-forward camera-projection
             divisor
             sun-vector sun-color-vector sky-color-vector))
-         (previous-z (dot ray (swizzle previous-camera-forward :xyz)))
+         (previous-z
+           (representation
+            (dot ray (swizzle previous-camera-forward :xyz))))
          (previous-clip
-           (vec4 (* (dot ray (swizzle previous-camera-right :xyz))
+           (vec4 (* (representation
+                     (dot ray (swizzle previous-camera-right :xyz)))
                     (swizzle previous-camera-projection :x))
-                 (- (* (dot ray (swizzle previous-camera-up :xyz))
+                 (- (* (representation
+                        (dot ray (swizzle previous-camera-up :xyz)))
                        (swizzle previous-camera-projection :y)))
                  0.0
                  (mix 1.0 previous-z divisor)))
          (current-clip
            (vec4 (swizzle sample-ndc :x) (swizzle sample-ndc :y) 0.0 1.0)))
-    (set-output color-output (vec4 radiance 1.0))
+    (set-output color-output (vec4 (representation radiance) 1.0))
     (set-output motion-output
                 (mesh-temporal-motion previous-clip current-clip))))
 
@@ -2317,7 +2450,10 @@ that he is standing on something."
     (:stage :fragment
      :inputs ((ndc :vec2 :location 0))
      :outputs ((color-output :vec4 :location 0))
-     :resources ((scene :texture-2d :binding 0 :sample-transfer :identity)
+     :resources ((scene :texture-2d :binding 0 :sample-transfer :identity
+                        :sample-components
+                        ((:xyz :quantity quantities:scene-radiance
+                          :unit :one)))
                  (scene-sampler :sampler :binding 1)))
   (let* ((uv (+ (* ndc 0.5) (vec2 0.5 0.5)))
          ;; Match Moppe's broad five-tap probe footprint before the 32x16
@@ -2337,8 +2473,18 @@ that he is standing on something."
                           (+ uv (vec2 (- (swizzle offset :x))
                                       (swizzle offset :y)))) :xyz))
               0.2))
-         (luminance (max (dot average (vec3 0.2126 0.7152 0.0722)) 0.0001))
-         (encoded (clamp (/ (+ (log luminance) 9.21034) 11.98293) 0.0 1.0)))
+         (luminance
+           (max
+            (scene-relative-luminance average)
+            (quantity 0.0001 :quantity quantities:scene-luminance
+                             :unit :one)))
+         ;; SCENE-LUMINANCE is relative to reference white 1.0.  LOG is the
+         ;; explicit nonlinear encoding boundary, so only its normalized
+         ;; representation enters the portable UNORM reduction.
+         (encoded
+           (clamp (/ (+ (log (representation luminance)) 9.21034)
+                     11.98293)
+                  0.0 1.0)))
     (set-output color-output (vec4 encoded encoded encoded 1.0))))
 
 (define-shader-function rgb-to-ycocg (rgb)
@@ -2374,7 +2520,8 @@ that he is standing on something."
          ;; INSPECTION-PARAMETERS.ZW is the inverse internal scene extent.
          ;; The resolve target and history are full-size, but the current
          ;; neighbourhood and integer motion lookup remain in input pixels.
-         (texel (swizzle inspection-parameters :zw))
+         (texel
+           (representation (swizzle inspection-parameters :zw)))
          (dx (vec2 (swizzle texel :x) 0.0))
          (dy (vec2 0.0 (swizzle texel :y)))
          (centre (sample current temporal-sampler uv))
@@ -2421,8 +2568,9 @@ that he is standing on something."
          ;; The otherwise-unused W components of these previous-view lanes
          ;; carry resolve validity and weight without changing the frame ABI.
          (history-weight
-           (* (* (swizzle previous-camera-position :w) inside)
-              (* (swizzle previous-camera-right :w)
+           (* (* (swizzle (representation previous-camera-position) :w)
+                 inside)
+              (* (swizzle (representation previous-camera-right) :w)
                  (- 1.0 (* speed 0.35)))))
          (resolved (ycocg-to-rgb (mix c11 clipped history-weight))))
     ;; Alpha is current-frame focus metadata, never temporal colour history.
@@ -2440,7 +2588,8 @@ that he is standing on something."
   (let* ((uv (+ (* ndc 0.5) (vec2 0.5 0.5)))
          (value (sample scene scene-sampler uv))
          (auto-exposure (swizzle sky-color-vector :w))
-         (texel (swizzle inspection-parameters :zw))
+         (texel
+           (representation (swizzle inspection-parameters :zw)))
          (near (* texel 3.0))
          (far (* texel 11.0))
          ;; One low-cost, deliberately broad gather.  Linear sampling and the
@@ -2474,9 +2623,11 @@ that he is standing on something."
          ;; Geometry depth carries the subpixel projection jitter consumed by
          ;; MetalFX; presentation UVs do not.  Sample depth at the same current
          ;; geometry location so the AO does not crawl across a resolved edge.
-         (depth-uv (+ uv (* (swizzle temporal-parameters :xy) 0.5)))
+         (depth-uv
+           (+ uv
+              (* (representation (swizzle temporal-parameters :xy)) 0.5)))
          (depth (swizzle (sample scene-depth scene-sampler depth-uv) :x))
-         (divisor (swizzle render-parameters :z))
+         (divisor (swizzle (representation render-parameters) :z))
          (centre (view-depth depth camera-projection divisor))
          (perspective-scale (if (< divisor 0.5) 1.0 (/ 1.0 centre)))
          (outer
@@ -2625,8 +2776,9 @@ that he is standing on something."
                            camera-position camera-right camera-up
                            camera-forward camera-projection divisor))
          (focus-y
-           (+ (swizzle (mesh-clip-uv player-clip) :y)
-              (* (swizzle temporal-parameters :y) 0.5)))
+           (+ (representation
+               (swizzle (mesh-clip-uv player-clip) :y))
+              (* (swizzle (representation temporal-parameters) :y) 0.5)))
          (tilt
            (smoothstep 0.16 0.52 (abs (- (swizzle uv :y) focus-y))))
          (blur-radius (* texel 2.6))
@@ -2645,17 +2797,32 @@ that he is standing on something."
                  (swizzle (sample scene scene-sampler
                                   (- uv (vec2 0.0 (swizzle blur-radius :y))))
                           :xyz))))
-         (bloomed (+ (swizzle pigmented :xyz)
-                     (* glow #.*highlight-glow-strength*)))
-         (glowing (mix bloomed blurred (* tilt 0.52)))
+         (bloomed
+           (+ (assume-quantity
+               (swizzle pigmented :xyz)
+               :quantity quantities:scene-radiance :unit :one)
+              (* glow #.*highlight-glow-strength*)))
+         (glowing
+           (mix bloomed
+                (assume-quantity blurred
+                                 :quantity quantities:scene-radiance
+                                 :unit :one)
+                (assume-quantity (* tilt 0.52) :unit :one)))
          ;; MetalFX has already reconstructed GLowing at this point.  Grade
          ;; it once, with a little exposure headroom for the sunlit grass and
          ;; the wizard's HDR spell rather than clipping both into parchment.
          ;; Sky is now HDR scene radiance, so it participates in metering and
          ;; receives exactly the same exposure and paper grade as geometry.
          ;; Keep geometry-only AO and tilt-shift out of background pixels.
-         (radiance (if (< depth 0.9999) glowing (swizzle value :xyz)))
+         (radiance
+           (if (< depth 0.9999) glowing
+               (assume-quantity
+                (swizzle value :xyz)
+                :quantity quantities:scene-radiance :unit :one)))
+         (exposed-radiance
+           (interpret (* radiance auto-exposure)
+                      :quantity quantities:scene-radiance :unit :one))
          (presented
-           (paper-grade (paper-tonemap (* radiance auto-exposure)))))
+           (paper-grade (paper-tonemap exposed-radiance))))
     (set-output color-output
-                (vec4 presented 1.0))))
+                (vec4 (representation presented) 1.0))))

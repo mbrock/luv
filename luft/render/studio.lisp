@@ -405,7 +405,7 @@ the selector is the whole of the difference."
                     '(0.0 1.0 0.0 1.0)
                     '(0.0 0.0 0.0 0.0) '(0.0 0.0 0.0 0.0)))
       (make-array
-       108 :element-type 'single-float
+       (shaders::scene-uniform-scalar-count) :element-type 'single-float
        :initial-contents
        (mapcar
         (lambda (value) (coerce value 'single-float))
