@@ -10,6 +10,8 @@ GPU buffer by vertex pulling.  This page records the vocabulary, the algebra
 that makes the surface fall out, the shader-language extensions the GPU path
 needed, and the shape of the atelier.  Its temporal frame graph now has a page
 of its own: [[file:temporal-antialiasing.org][Temporal reconstruction in the Luft atelier]].
+The first fireball has also opened a narrower visual study:
+[[file:luft-spell-effects.org][Luminous spell effects in the Luft atelier]].
 
 * A site is a lattice anchor, an extent mask, and a polarity
 :PROPERTIES:

@@ -171,6 +171,11 @@ The following are starting paths rather than a table of settled doctrine.
   face, and cell of a cubical world with one fixnum, treats a block world as a
   3-chain whose boundary is its surface, and draws that surface by vertex
   shaders pulling the packed words directly from a storage buffer.
+- [[file:luft-spell-effects.org][Luminous spell effects in the Luft atelier]] reads a scorching-ray reference
+  as a coordinated HDR core, depth-clipped procedural sheath, ribbons, sparks,
+  dynamic surface light, and multi-scale glow.  It separates transient spell
+  light from the immutable RGB4 voxel field and names a pinned reference plate
+  as the next small proof.
 - [[file:luft-miters.org][The bevel junction is an open problem]] preserves the sharp bevel's
   correct-by-construction structure, the mixed-vertex collapse, the rejected
   pinwheel transition, and the Blender Arc reference without pretending that
