@@ -241,7 +241,7 @@
    :sampler nil :layout nil :pipeline nil
    :vertex-buffer nil :instance-buffer nil :resources nil))
 
-(deftest decoded-video-second-plane-failure-rolls-back-without-publication
+(define-test decoded-video-second-plane-failure-rolls-back-without-publication
   (let* ((events (make-video-interop-test-events))
          (device (make-instance 'video-interop-test-device :events events))
          (importer
@@ -249,15 +249,15 @@
                           :device device :fail-plane 1))
          (previous (make-video-interop-test-picture events :previous 2))
          (screen (make-video-interop-test-screen importer previous)))
-    (ok (signals (luvcraft::install-hardware-video-picture screen :frame)
-                 'error))
-    (ok (eq previous (luvcraft::video-screen-picture screen)))
-    (ok (null (luvcraft::video-screen-retired-pictures screen)))
-    (ok (equal '((:destroy :candidate :view 0)
-                 (:destroy :candidate :texture 0))
-               (coerce events 'list)))))
+    (fail (luvcraft::install-hardware-video-picture screen :frame)
+          'error)
+    (true (eq previous (luvcraft::video-screen-picture screen)))
+    (true (null (luvcraft::video-screen-retired-pictures screen)))
+    (true (equal '((:destroy :candidate :view 0)
+                   (:destroy :candidate :texture 0))
+                 (coerce events 'list)))))
 
-(deftest failed-picture-construction-release-enters-a-retryable-backlog
+(define-test failed-picture-construction-release-enters-a-retryable-backlog
   (let* ((luvcraft::*decoded-video-picture-release-backlog* nil)
          (events (make-video-interop-test-events))
          (device
@@ -268,34 +268,34 @@
            (make-instance 'video-interop-test-importer
                           :device device :fail-plane 1)))
     (handler-bind ((warning #'muffle-warning))
-      (ok (signals
-           (luvcraft::adopt-decoded-video-frame importer :frame 64 32)
-           'error)))
-    (ok (= 1 (length luvcraft::*decoded-video-picture-release-backlog*)))
+      (fail
+       (luvcraft::adopt-decoded-video-frame importer :frame 64 32)
+       'error))
+    (true (= 1 (length luvcraft::*decoded-video-picture-release-backlog*)))
     (let ((picture
             (first luvcraft::*decoded-video-picture-release-backlog*)))
-      (ok (not (luvcraft::decoded-video-picture-released-p picture)))
+      (true (not (luvcraft::decoded-video-picture-released-p picture)))
       (luvcraft::retry-decoded-video-picture-release-backlog)
-      (ok (null luvcraft::*decoded-video-picture-release-backlog*))
-      (ok (luvcraft::decoded-video-picture-released-p picture)))
-    (ok (equal '((:destroy :candidate :view 0)
-                 (:destroy :candidate :view 0)
-                 (:destroy :candidate :texture 0))
-               (coerce events 'list)))))
+      (true (null luvcraft::*decoded-video-picture-release-backlog*))
+      (true (luvcraft::decoded-video-picture-released-p picture)))
+    (true (equal '((:destroy :candidate :view 0)
+                   (:destroy :candidate :view 0)
+                   (:destroy :candidate :texture 0))
+                 (coerce events 'list)))))
 
-(deftest decoded-video-picture-releases-every-view-before-any-texture
+(define-test decoded-video-picture-releases-every-view-before-any-texture
   (let* ((events (make-video-interop-test-events))
          (picture (make-video-interop-test-picture events :picture 2)))
     (luv:with-release-report
       (luvcraft::release-decoded-video-picture picture))
-    (ok (equal '((:destroy :picture :view 0)
-                 (:destroy :picture :view 1)
-                 (:destroy :picture :texture 0)
-                 (:destroy :picture :texture 1))
-               (coerce events 'list)))
-    (ok (luvcraft::decoded-video-picture-released-p picture))))
+    (true (equal '((:destroy :picture :view 0)
+                   (:destroy :picture :view 1)
+                   (:destroy :picture :texture 0)
+                   (:destroy :picture :texture 1))
+                 (coerce events 'list)))
+    (true (luvcraft::decoded-video-picture-released-p picture))))
 
-(deftest failed-published-picture-retirement-remains-screen-owned
+(define-test failed-published-picture-retirement-remains-screen-owned
   (let* ((events (make-video-interop-test-events))
          (device (make-instance 'video-interop-test-device :events events))
          (importer
@@ -306,19 +306,19 @@
          (screen (make-video-interop-test-screen importer previous)))
     (handler-bind ((warning #'muffle-warning))
       (luvcraft::install-hardware-video-picture screen :frame))
-    (ok (not (eq previous (luvcraft::video-screen-picture screen))))
-    (ok (equal (list previous)
-               (luvcraft::video-screen-retired-pictures screen)))
-    (ok (equal '((:destroy :previous :view 0))
-               (coerce events 'list)))
+    (true (not (eq previous (luvcraft::video-screen-picture screen))))
+    (true (equal (list previous)
+                 (luvcraft::video-screen-retired-pictures screen)))
+    (true (equal '((:destroy :previous :view 0))
+                 (coerce events 'list)))
     (luvcraft::retry-video-screen-retired-pictures screen)
-    (ok (null (luvcraft::video-screen-retired-pictures screen)))
-    (ok (equal '((:destroy :previous :view 0)
-                 (:destroy :previous :view 0)
-                 (:destroy :previous :texture 0))
-               (coerce events 'list)))))
+    (true (null (luvcraft::video-screen-retired-pictures screen)))
+    (true (equal '((:destroy :previous :view 0)
+                   (:destroy :previous :view 0)
+                   (:destroy :previous :texture 0))
+                 (coerce events 'list)))))
 
-(deftest terminal-film-stop-retains-a-screen-until-logical-release-succeeds
+(define-test terminal-film-stop-retains-a-screen-until-logical-release-succeeds
   (let* ((events (make-video-interop-test-events))
          (bind-group
            (make-instance
@@ -336,23 +336,23 @@
           (luvcraft::video-screen-resources screen) (list resource)
           (terminal-display-film-screen display) screen
           (luvcraft::luvcraft-session-video-screen session) screen)
-    (ok (signals (luvcraft::stop-terminal-display-film display session)
-                 'luv:release-error))
-    (ok (eq screen (terminal-display-film-screen display)))
-    (ok (eq screen (luvcraft::luvcraft-session-video-screen session)))
-    (ok (eq bind-group (luvcraft::video-screen-bind-group screen)))
-    (ok (null (luvcraft::video-screen-resources screen)))
-    (ok (not (luvcraft::video-screen-released-p screen)))
+    (fail (luvcraft::stop-terminal-display-film display session)
+          'luv:release-error)
+    (true (eq screen (terminal-display-film-screen display)))
+    (true (eq screen (luvcraft::luvcraft-session-video-screen session)))
+    (true (eq bind-group (luvcraft::video-screen-bind-group screen)))
+    (true (null (luvcraft::video-screen-resources screen)))
+    (true (not (luvcraft::video-screen-released-p screen)))
     (luvcraft::stop-terminal-display-film display session)
-    (ok (null (terminal-display-film-screen display)))
-    (ok (null (luvcraft::luvcraft-session-video-screen session)))
-    (ok (luvcraft::video-screen-released-p screen))
-    (ok (equal '((:destroy :screen :bind-group 0)
-                 (:destroy :screen :buffer 0)
-                 (:destroy :screen :bind-group 0))
-               (coerce events 'list)))))
+    (true (null (terminal-display-film-screen display)))
+    (true (null (luvcraft::luvcraft-session-video-screen session)))
+    (true (luvcraft::video-screen-released-p screen))
+    (true (equal '((:destroy :screen :bind-group 0)
+                   (:destroy :screen :buffer 0)
+                   (:destroy :screen :bind-group 0))
+                 (coerce events 'list)))))
 
-(deftest failed-startup-screen-release-enters-a-retryable-backlog
+(define-test failed-startup-screen-release-enters-a-retryable-backlog
   (let* ((luvcraft::*video-screen-release-backlog* nil)
          (events (make-video-interop-test-events))
          (resource
@@ -365,16 +365,16 @@
     (handler-bind ((warning #'muffle-warning))
       (luv:with-release-warnings
         (luvcraft::release-video-screen-or-retain screen)))
-    (ok (equal (list screen) luvcraft::*video-screen-release-backlog*))
-    (ok (not (luvcraft::video-screen-released-p screen)))
+    (true (equal (list screen) luvcraft::*video-screen-release-backlog*))
+    (true (not (luvcraft::video-screen-released-p screen)))
     (luvcraft::retry-video-screen-release-backlog)
-    (ok (null luvcraft::*video-screen-release-backlog*))
-    (ok (luvcraft::video-screen-released-p screen))
-    (ok (equal '((:destroy :startup :buffer 0)
-                 (:destroy :startup :buffer 0))
-               (coerce events 'list)))))
+    (true (null luvcraft::*video-screen-release-backlog*))
+    (true (luvcraft::video-screen-released-p screen))
+    (true (equal '((:destroy :startup :buffer 0)
+                   (:destroy :startup :buffer 0))
+                 (coerce events 'list)))))
 
-(deftest failed-native-plane-retirement-keeps-importer-until-ledger-retry
+(define-test failed-native-plane-retirement-keeps-importer-until-ledger-retry
   (let* ((events (make-video-interop-test-events))
          (device
            (make-instance
@@ -385,67 +385,67 @@
             'video-interop-retirement-test-importer
             :device device :events events :fail-plane 1)))
     (handler-bind ((warning #'muffle-warning))
-      (ok (signals
-           (luvcraft::adopt-decoded-video-frame importer :frame 64 32)
-           'error)))
+      (fail
+       (luvcraft::adopt-decoded-video-frame importer :frame 64 32)
+       'error))
     ;; The failed candidate owns no retryable wrapper.  Logical invalidation
     ;; succeeded, and the backend ledger is now the durable native owner.
-    (ok (every #'video-interop-retirement-test-resource-destroyed-p
-               (video-interop-retirement-test-device-resources device)))
-    (ok (= 2
-           (length
-            (luv::gpu-retirement-ledger-entries
-             (video-interop-retirement-test-device-ledger device)))))
-    (ok (= 1
-           (luvcraft::video-frame-importer-native-owner-retainers importer)))
+    (true (every #'video-interop-retirement-test-resource-destroyed-p
+                 (video-interop-retirement-test-device-resources device)))
+    (true (= 2
+             (length
+              (luv::gpu-retirement-ledger-entries
+               (video-interop-retirement-test-device-ledger device)))))
+    (true (= 1
+             (luvcraft::video-frame-importer-native-owner-retainers importer)))
     (luvcraft::release-video-frame-importer importer)
-    (ok (eq :requested
-            (luvcraft::video-frame-importer-release-state importer)))
+    (true (eq :requested
+              (luvcraft::video-frame-importer-release-state importer)))
     ;; View retirement succeeds; plane 0's native teardown does not.  The
     ;; texture entry and its importer retainer both survive the attempt.
     (maintain-video-interop-retirement-test-device device)
-    (ok (= 1
-           (length
-            (luv::gpu-retirement-ledger-entries
-             (video-interop-retirement-test-device-ledger device)))))
-    (ok (= 1
-           (luvcraft::video-frame-importer-native-owner-retainers importer)))
-    (ok (eq :requested
-            (luvcraft::video-frame-importer-release-state importer)))
-    (ok (not (member '(:native-owner :texture 0)
-                     (coerce events 'list) :test #'equal)))
+    (true (= 1
+             (length
+              (luv::gpu-retirement-ledger-entries
+               (video-interop-retirement-test-device-ledger device)))))
+    (true (= 1
+             (luvcraft::video-frame-importer-native-owner-retainers importer)))
+    (true (eq :requested
+              (luvcraft::video-frame-importer-release-state importer)))
+    (true (not (member '(:native-owner :texture 0)
+                       (coerce events 'list) :test #'equal)))
     ;; Maintenance retries the durable texture entry.  Its owner succeeds and
     ;; drops the final retainer, but importer retirement is deliberately a new
     ;; FIFO entry rather than part of this texture callback's success.
     (maintain-video-interop-retirement-test-device device)
-    (ok (= 1
-           (length
-            (luv::gpu-retirement-ledger-entries
-             (video-interop-retirement-test-device-ledger device)))))
-    (ok (zerop
-         (luvcraft::video-frame-importer-native-owner-retainers importer)))
-    (ok (eq :queued
-            (luvcraft::video-frame-importer-release-state importer)))
-    (ok (not (member '(:native :importer nil)
-                     (coerce events 'list) :test #'equal)))
+    (true (= 1
+             (length
+              (luv::gpu-retirement-ledger-entries
+               (video-interop-retirement-test-device-ledger device)))))
+    (true (zerop
+           (luvcraft::video-frame-importer-native-owner-retainers importer)))
+    (true (eq :queued
+              (luvcraft::video-frame-importer-release-state importer)))
+    (true (not (member '(:native :importer nil)
+                       (coerce events 'list) :test #'equal)))
     ;; The next pass owns only the importer and closes it independently.
     (maintain-video-interop-retirement-test-device device)
-    (ok (null
-         (luv::gpu-retirement-ledger-entries
-          (video-interop-retirement-test-device-ledger device))))
-    (ok (eq :released
-            (luvcraft::video-frame-importer-release-state importer)))
-    (ok (equal
-         '((:logical :view 0)
-           (:logical :texture 0)
-           (:native :view 0)
-           (:native :texture 0)
-           (:native :texture 0)
-           (:native-owner :texture 0)
-           (:native :importer nil))
-         (coerce events 'list)))))
+    (true (null
+           (luv::gpu-retirement-ledger-entries
+            (video-interop-retirement-test-device-ledger device))))
+    (true (eq :released
+              (luvcraft::video-frame-importer-release-state importer)))
+    (true (equal
+           '((:logical :view 0)
+             (:logical :texture 0)
+             (:native :view 0)
+             (:native :texture 0)
+             (:native :texture 0)
+             (:native-owner :texture 0)
+             (:native :importer nil))
+           (coerce events 'list)))))
 
-(deftest importer-native-failure-retries-without-releasing-plane-owner-twice
+(define-test importer-native-failure-retries-without-releasing-plane-owner-twice
   (let* ((events (make-video-interop-test-events))
          (device
            (make-instance
@@ -456,71 +456,71 @@
             :device device :events events :fail-plane 1
             :native-state-failures 1)))
     (handler-bind ((warning #'muffle-warning))
-      (ok (signals
-           (luvcraft::adopt-decoded-video-frame importer :frame 64 32)
-           'error)))
+      (fail
+       (luvcraft::adopt-decoded-video-frame importer :frame 64 32)
+       'error))
     (luvcraft::release-video-frame-importer importer)
     ;; The plane and its owner retire first.  The last callback enqueues a
     ;; separate importer entry with a consumed (zero) retainer; it does not run
     ;; importer-native closure recursively inside texture retirement.
     (maintain-video-interop-retirement-test-device device)
-    (ok (= 1
-           (length
-            (luv::gpu-retirement-ledger-entries
-             (video-interop-retirement-test-device-ledger device)))))
-    (ok (zerop
-         (luvcraft::video-frame-importer-native-owner-retainers importer)))
-    (ok (eq :queued
-            (luvcraft::video-frame-importer-release-state importer)))
-    (ok (= 1 (count '(:native-owner :texture 0)
-                    (coerce events 'list) :test #'equal)))
-    (ok (zerop (count '(:native :importer nil)
+    (true (= 1
+             (length
+              (luv::gpu-retirement-ledger-entries
+               (video-interop-retirement-test-device-ledger device)))))
+    (true (zerop
+           (luvcraft::video-frame-importer-native-owner-retainers importer)))
+    (true (eq :queued
+              (luvcraft::video-frame-importer-release-state importer)))
+    (true (= 1 (count '(:native-owner :texture 0)
                       (coerce events 'list) :test #'equal)))
+    (true (zerop (count '(:native :importer nil)
+                        (coerce events 'list) :test #'equal)))
     ;; The importer entry now runs by itself and fails without returning
     ;; ownership to the already successful plane callback.
     (maintain-video-interop-retirement-test-device device)
-    (ok (= 1
-           (length
-            (luv::gpu-retirement-ledger-entries
-             (video-interop-retirement-test-device-ledger device)))))
-    (ok (eq :queued
-            (luvcraft::video-frame-importer-release-state importer)))
-    (ok (= 1 (count '(:native-owner :texture 0)
-                    (coerce events 'list) :test #'equal)))
-    (ok (= 1 (count '(:native :importer nil)
-                    (coerce events 'list) :test #'equal)))
+    (true (= 1
+             (length
+              (luv::gpu-retirement-ledger-entries
+               (video-interop-retirement-test-device-ledger device)))))
+    (true (eq :queued
+              (luvcraft::video-frame-importer-release-state importer)))
+    (true (= 1 (count '(:native-owner :texture 0)
+                      (coerce events 'list) :test #'equal)))
+    (true (= 1 (count '(:native :importer nil)
+                      (coerce events 'list) :test #'equal)))
     ;; Retrying the importer entry cannot revisit plane teardown or its owner.
     (maintain-video-interop-retirement-test-device device)
-    (ok (null
-         (luv::gpu-retirement-ledger-entries
-          (video-interop-retirement-test-device-ledger device))))
-    (ok (eq :released
-            (luvcraft::video-frame-importer-release-state importer)))
-    (ok (= 1 (count '(:native-owner :texture 0)
-                    (coerce events 'list) :test #'equal)))
-    (ok (= 2 (count '(:native :importer nil)
-                    (coerce events 'list) :test #'equal)))))
+    (true (null
+           (luv::gpu-retirement-ledger-entries
+            (video-interop-retirement-test-device-ledger device))))
+    (true (eq :released
+              (luvcraft::video-frame-importer-release-state importer)))
+    (true (= 1 (count '(:native-owner :texture 0)
+                      (coerce events 'list) :test #'equal)))
+    (true (= 2 (count '(:native :importer nil)
+                      (coerce events 'list) :test #'equal)))))
 
-(deftest zero-plane-unwind-transfers-importer-before-local-ownership-drops
+(define-test zero-plane-unwind-transfers-importer-before-local-ownership-drops
   (let* ((events (make-video-interop-test-events))
          (device
            (make-instance
             'video-interop-retirement-test-device :events events)))
     ;; Model failure before the first plane is adopted.  The constructor's
     ;; unwind requests release and then drops its only lexical importer owner.
-    (ok (signals
-         (flet ((construct-and-fail-before-first-plane ()
-                  (let ((importer
-                          (make-instance
-                           'video-interop-retirement-test-importer
-                           :device device :events events
-                           :native-state-failures 1)))
-                    (unwind-protect
-                         (error "Injected zero-plane video construction failure.")
-                      (luvcraft::release-video-frame-importer importer)))))
-           (construct-and-fail-before-first-plane))
-         'error))
-    (ok (null (video-interop-retirement-test-device-resources device)))
+    (fail
+     (flet ((construct-and-fail-before-first-plane ()
+              (let ((importer
+                      (make-instance
+                       'video-interop-retirement-test-importer
+                       :device device :events events
+                       :native-state-failures 1)))
+                (unwind-protect
+                     (error "Injected zero-plane video construction failure.")
+                  (luvcraft::release-video-frame-importer importer)))))
+       (construct-and-fail-before-first-plane))
+     'error)
+    (true (null (video-interop-retirement-test-device-resources device)))
     ;; Recover IMPORTER only through the durable ledger entry.  Its immediate
     ;; native close failed after transfer, so no vanished constructor local is
     ;; needed to retry it.
@@ -529,28 +529,28 @@
               (video-interop-retirement-test-device-ledger device)))
            (importer
              (luv::gpu-retirement-entry-resource (first entries))))
-      (ok (= 1 (length entries)))
-      (ok (typep importer 'video-interop-retirement-test-importer))
-      (ok (zerop
-           (luvcraft::video-frame-importer-native-owner-retainers importer)))
-      (ok (eq :queued
-              (luvcraft::video-frame-importer-release-state importer)))
-      (ok (signals
-           (luvcraft::make-video-frame-importer-owner-release
-            importer (lambda () (values)))
-           'error))
-      (ok (= 1 (count '(:native :importer nil)
-                      (coerce events 'list) :test #'equal)))
+      (true (= 1 (length entries)))
+      (true (typep importer 'video-interop-retirement-test-importer))
+      (true (zerop
+             (luvcraft::video-frame-importer-native-owner-retainers importer)))
+      (true (eq :queued
+                (luvcraft::video-frame-importer-release-state importer)))
+      (fail
+       (luvcraft::make-video-frame-importer-owner-release
+        importer (lambda () (values)))
+       'error)
+      (true (= 1 (count '(:native :importer nil)
+                        (coerce events 'list) :test #'equal)))
       (maintain-video-interop-retirement-test-device device)
-      (ok (null
-           (luv::gpu-retirement-ledger-entries
-            (video-interop-retirement-test-device-ledger device))))
-      (ok (eq :released
-              (luvcraft::video-frame-importer-release-state importer)))
-      (ok (= 2 (count '(:native :importer nil)
-                      (coerce events 'list) :test #'equal))))))
+      (true (null
+             (luv::gpu-retirement-ledger-entries
+              (video-interop-retirement-test-device-ledger device))))
+      (true (eq :released
+                (luvcraft::video-frame-importer-release-state importer)))
+      (true (= 2 (count '(:native :importer nil)
+                        (coerce events 'list) :test #'equal))))))
 
-(deftest later-view-construction-failure-retires-both-importer-owners
+(define-test later-view-construction-failure-retires-both-importer-owners
   (let* ((events (make-video-interop-test-events))
          (device
            (make-instance
@@ -561,30 +561,30 @@
             'video-interop-retirement-test-importer
             :device device :events events)))
     (handler-bind ((warning #'muffle-warning))
-      (ok (signals
-           (luvcraft::adopt-decoded-video-frame importer :frame 64 32)
-           'error)))
-    (ok (= 2
-           (luvcraft::video-frame-importer-native-owner-retainers importer)))
+      (fail
+       (luvcraft::adopt-decoded-video-frame importer :frame 64 32)
+       'error))
+    (true (= 2
+             (luvcraft::video-frame-importer-native-owner-retainers importer)))
     (luvcraft::release-video-frame-importer importer)
     (maintain-video-interop-retirement-test-device device)
-    (ok (= 1
-           (length
-            (luv::gpu-retirement-ledger-entries
-             (video-interop-retirement-test-device-ledger device)))))
-    (ok (zerop
-         (luvcraft::video-frame-importer-native-owner-retainers importer)))
-    (ok (eq :queued
-            (luvcraft::video-frame-importer-release-state importer)))
+    (true (= 1
+             (length
+              (luv::gpu-retirement-ledger-entries
+               (video-interop-retirement-test-device-ledger device)))))
+    (true (zerop
+           (luvcraft::video-frame-importer-native-owner-retainers importer)))
+    (true (eq :queued
+              (luvcraft::video-frame-importer-release-state importer)))
     (maintain-video-interop-retirement-test-device device)
-    (ok (null
-         (luv::gpu-retirement-ledger-entries
-          (video-interop-retirement-test-device-ledger device))))
-    (ok (eq :released
-            (luvcraft::video-frame-importer-release-state importer)))
-    (ok (= 1 (count '(:native-owner :texture 0)
-                    (coerce events 'list) :test #'equal)))
-    (ok (= 1 (count '(:native-owner :texture 1)
-                    (coerce events 'list) :test #'equal)))
-    (ok (equal '(:native :importer nil)
-               (aref events (1- (length events)))))))
+    (true (null
+           (luv::gpu-retirement-ledger-entries
+            (video-interop-retirement-test-device-ledger device))))
+    (true (eq :released
+              (luvcraft::video-frame-importer-release-state importer)))
+    (true (= 1 (count '(:native-owner :texture 0)
+                      (coerce events 'list) :test #'equal)))
+    (true (= 1 (count '(:native-owner :texture 1)
+                      (coerce events 'list) :test #'equal)))
+    (true (equal '(:native :importer nil)
+                 (aref events (1- (length events)))))))

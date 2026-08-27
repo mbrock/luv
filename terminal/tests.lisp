@@ -1,5 +1,6 @@
 (defpackage #:luv.terminal.tests
-  (:use #:cl #:rove)
+  (:use #:cl)
+  (:import-from #:parachute #:define-test #:true #:false #:fail #:group #:skip)
   (:local-nicknames (#:ghostty #:luv.ghostty)
                     (#:terminal #:luv.terminal)))
 
@@ -33,7 +34,7 @@
           when (>= (get-internal-real-time) deadline) do (return nil)
           do (sleep 0.01))))
 
-(deftest pty-child-output-and-input-drive-one-terminal
+(define-test pty-child-output-and-input-drive-one-terminal
   (with-pty-test
       (device ghostty-terminal
        :program "/bin/sh"
@@ -41,35 +42,35 @@
        (list "-c"
              "printf 'term:%s\\r\\nready\\r\\n' \"$TERM\"; IFS= read -r line; printf 'got:%s\\r\\n' \"$line\""))
     (terminal:send-pty-device-text device (format nil "hello~%"))
-    (ok (eq :exited (terminal:wait-for-pty-device device :timeout 3.0)))
+    (true (eq :exited (terminal:wait-for-pty-device device :timeout 3.0)))
     (let ((text (pty-terminal-text device)))
-      (ok (search "ready" text))
-      (ok (search "term:xterm-256color" text))
-      (ok (search "got:hello" text)))
-    (ok (null (terminal:pty-device-condition device)))))
+      (true (search "ready" text))
+      (true (search "term:xterm-256color" text))
+      (true (search "got:hello" text)))
+    (true (null (terminal:pty-device-condition device)))))
 
-(deftest pty-echo-reaches-the-terminal-before-enter
+(define-test pty-echo-reaches-the-terminal-before-enter
   (with-pty-test
       (device ghostty-terminal
        :program "/bin/sh"
        :arguments (list "-c" "IFS= read -r line"))
     (terminal:send-pty-device-text device "visible-before-enter")
-    (ok (search "visible-before-enter"
-                (wait-for-terminal-text device "visible-before-enter")))
-    (ok (eq :running (terminal:pty-device-state device)))))
+    (true (search "visible-before-enter"
+                  (wait-for-terminal-text device "visible-before-enter")))
+    (true (eq :running (terminal:pty-device-state device)))))
 
-(deftest pty-child-owns-a-controlling-terminal
+(define-test pty-child-owns-a-controlling-terminal
   (with-pty-test
       (device ghostty-terminal
        :program "/bin/sh"
        :arguments
        (list "-c"
              "test -c /dev/tty && printf 'controlling-tty-ok\\r\\n' > /dev/tty"))
-    (ok (eq :exited (terminal:wait-for-pty-device device :timeout 3.0)))
-    (ok (zerop (terminal:pty-device-exit-code device)))
-    (ok (search "controlling-tty-ok" (pty-terminal-text device)))))
+    (true (eq :exited (terminal:wait-for-pty-device device :timeout 3.0)))
+    (true (zerop (terminal:pty-device-exit-code device)))
+    (true (search "controlling-tty-ok" (pty-terminal-text device)))))
 
-(deftest ghostty-query-responses-return-through-the-pty
+(define-test ghostty-query-responses-return-through-the-pty
   (let* ((python "python3")
          (script
            (format nil
@@ -77,11 +78,11 @@
     (with-pty-test
         (device ghostty-terminal
          :program python :arguments (list "-c" script))
-      (ok (eq :exited (terminal:wait-for-pty-device device :timeout 3.0)))
-      (ok (search "query-ok:1b5b313b3152" (pty-terminal-text device)))
-      (ok (null (terminal:pty-device-condition device))))))
+      (true (eq :exited (terminal:wait-for-pty-device device :timeout 3.0)))
+      (true (search "query-ok:1b5b313b3152" (pty-terminal-text device)))
+      (true (null (terminal:pty-device-condition device))))))
 
-(deftest portable-canvas-keys-reach-the-pty-child
+(define-test portable-canvas-keys-reach-the-pty-child
   (with-pty-test
       (device ghostty-terminal
        :program "/bin/sh"
@@ -91,13 +92,13 @@
     (send-canvas-key device :h #\h)
     (send-canvas-key device :i #\i)
     (send-canvas-key device :return #\Return)
-    (ok (eq :exited (terminal:wait-for-pty-device device :timeout 3.0)))
+    (true (eq :exited (terminal:wait-for-pty-device device :timeout 3.0)))
     (let ((text (pty-terminal-text device)))
-      (ok (search "key-ready" text))
-      (ok (search "key:hi" text)))
-    (ok (null (terminal:pty-device-condition device)))))
+      (true (search "key-ready" text))
+      (true (search "key:hi" text)))
+    (true (null (terminal:pty-device-condition device)))))
 
-(deftest resize-coordinates-the-kernel-pty-and-ghostty-grid
+(define-test resize-coordinates-the-kernel-pty-and-ghostty-grid
   (with-pty-test
       (device ghostty-terminal
        :program "/bin/sh"
@@ -106,26 +107,26 @@
                                 :cell-width-pixels 8
                                 :cell-height-pixels 16)
     (terminal:send-pty-device-text device (format nil "size~%"))
-    (ok (eq :exited (terminal:wait-for-pty-device device :timeout 3.0)))
+    (true (eq :exited (terminal:wait-for-pty-device device :timeout 3.0)))
     (multiple-value-bind (columns rows)
         (terminal:call-with-pty-device-terminal
          device #'ghostty:terminal-size)
-      (ok (= columns 42))
-      (ok (= rows 9)))
-    (ok (search "9 42" (pty-terminal-text device)))
-    (ok (null (terminal:pty-device-condition device)))))
+      (true (= columns 42))
+      (true (= rows 9)))
+    (true (search "9 42" (pty-terminal-text device)))
+    (true (null (terminal:pty-device-condition device)))))
 
-(deftest closing-a-running-device-releases-only-its-pty
+(define-test closing-a-running-device-releases-only-its-pty
   (with-pty-test
       (device ghostty-terminal
        :program "/bin/sh"
        :arguments (list "-c" "printf 'waiting\\r\\n'; sleep 30"))
-    (ok (eq device (terminal:close-pty-device device)))
-    (ok (eq :closed (terminal:pty-device-state device)))
-    (ok (not (sb-thread:thread-alive-p
-              (luv.terminal::pty-device-thread device))))
+    (true (eq device (terminal:close-pty-device device)))
+    (true (eq :closed (terminal:pty-device-state device)))
+    (true (not (sb-thread:thread-alive-p
+                (luv.terminal::pty-device-thread device))))
     ;; The device owns the child and descriptor, not the semantic terminal.
-    (ok (ghostty:terminal-open-p ghostty-terminal))
-    (ok (eq ghostty-terminal
-            (ghostty:write-terminal ghostty-terminal "still owned outside")))
-    (ok (eq device (terminal:close-pty-device device)))))
+    (true (ghostty:terminal-open-p ghostty-terminal))
+    (true (eq ghostty-terminal
+              (ghostty:write-terminal ghostty-terminal "still owned outside")))
+    (true (eq device (terminal:close-pty-device device)))))

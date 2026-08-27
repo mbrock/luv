@@ -39,7 +39,7 @@
                                         :session-id (mt:session-id session)))
           (mt:drain-session-outbox session)))
 
-(deftest encrypted-packets-round-trip
+(define-test encrypted-packets-round-trip
   (let* ((key (test-key))
          (packet (make-instance 'mt:encrypted-packet
                                 :salt 11 :session-id 22 :message-id 33
@@ -48,53 +48,53 @@
                                                         :entropy (constant-entropy #x55)))
          (opened (mt:decode-encrypted-packet sealed key :sender :client
                                                         :session-id 22)))
-    (ok (= 11 (mt:encrypted-packet-salt opened)))
-    (ok (= 22 (mt:encrypted-packet-session-id opened)))
-    (ok (= 33 (mt:encrypted-packet-message-id opened)))
-    (ok (= 1 (mt:encrypted-packet-sequence-number opened)))
-    (ok (equalp (ascii "pong") (mt:encrypted-packet-body opened)))
-    (testing "padding reaches a 16-byte boundary and stays inside the legal range"
-      (ok (= 28 (length (mt:encrypted-packet-padding opened))))
-      (ok (zerop (mod (+ 32 4 28) 16))))
-    (testing "and a packet addressed to another session is refused"
-      (signals (mt:decode-encrypted-packet sealed key :sender :client
-                                                      :session-id 99)
-               'mt:mtproto-protocol-error))))
+    (true (= 11 (mt:encrypted-packet-salt opened)))
+    (true (= 22 (mt:encrypted-packet-session-id opened)))
+    (true (= 33 (mt:encrypted-packet-message-id opened)))
+    (true (= 1 (mt:encrypted-packet-sequence-number opened)))
+    (true (equalp (ascii "pong") (mt:encrypted-packet-body opened)))
+    (group (context "padding reaches a 16-byte boundary and stays inside the legal range")
+      (true (= 28 (length (mt:encrypted-packet-padding opened))))
+      (true (zerop (mod (+ 32 4 28) 16))))
+    (group (context "and a packet addressed to another session is refused")
+      (fail (mt:decode-encrypted-packet sealed key :sender :client
+                                                   :session-id 99)
+            'mt:mtproto-protocol-error))))
 
-(deftest message-ids-are-monotone-and-aligned
+(define-test message-ids-are-monotone-and-aligned
   (let ((first (mt:next-message-id nil 1693436740123456789)))
-    (ok (zerop (mod first 4)))
-    (ok (= 1693436740 (ash first -32)))
-    (testing "and never repeat even when the clock does not move"
+    (true (zerop (mod first 4)))
+    (true (= 1693436740 (ash first -32)))
+    (group (context "and never repeat even when the clock does not move")
       (let ((second (mt:next-message-id first 1693436740123456789))
             (third (mt:next-message-id nil 1693436740123456789)))
-        (ok (> second first))
-        (ok (= third first))))))
+        (true (> second first))
+        (true (= third first))))))
 
-(deftest sequence-numbers-follow-the-content-policy
+(define-test sequence-numbers-follow-the-content-policy
   (let ((session (test-session)))
-    (testing "content messages are odd and advance the counter; service ones are not"
+    (group (context "content messages are odd and advance the counter; service ones are not")
       (multiple-value-bind (bytes packet) (mt:session-send session (ascii "aaaa")
                                                           :content-p t)
         (declare (ignore bytes))
-        (ok (= 1 (mt:encrypted-packet-sequence-number packet))))
+        (true (= 1 (mt:encrypted-packet-sequence-number packet))))
       (multiple-value-bind (bytes packet) (mt:session-send session (ascii "bbbb"))
         (declare (ignore bytes))
-        (ok (= 2 (mt:encrypted-packet-sequence-number packet))))
+        (true (= 2 (mt:encrypted-packet-sequence-number packet))))
       (multiple-value-bind (bytes packet) (mt:session-send session (ascii "cccc")
                                                           :content-p t)
         (declare (ignore bytes))
-        (ok (= 3 (mt:encrypted-packet-sequence-number packet))))
-      (ok (= 2 (mt:session-sent-content-messages session))))))
+        (true (= 3 (mt:encrypted-packet-sequence-number packet))))
+      (true (= 2 (mt:session-sent-content-messages session))))))
 
-(deftest rpc-results-resolve-their-request
+(define-test rpc-results-resolve-their-request
   (let* ((session (test-session))
          (result (tl:encode-tl-octets (make-instance 'mt:pong :message-id 7
                                                               :ping-id 9))))
     (multiple-value-bind (bytes request)
         (mt:session-send-request session (ascii "aaaa") :name "updates.getState")
       (declare (ignore bytes))
-      (ok (not (mt:pending-request-done-p request)))
+      (true (not (mt:pending-request-done-p request)))
       (let ((object (mt:session-receive-packet
                      session
                      (server-packet session
@@ -104,24 +104,24 @@
                                       :request-message-id
                                       (mt:pending-request-message-id request)
                                       :result result))))))
-        (ok (typep object 'mt:rpc-result))
-        (ok (mt:pending-request-done-p request))
-        (ok (equalp result (mt:pending-request-result request)))
-        (ok (null (mt:pending-request-error request)))
-        (ok (zerop (hash-table-count (mt:session-pending-requests session)))))
-      (testing "and the content message is acknowledged"
+        (true (typep object 'mt:rpc-result))
+        (true (mt:pending-request-done-p request))
+        (true (equalp result (mt:pending-request-result request)))
+        (true (null (mt:pending-request-error request)))
+        (true (zerop (hash-table-count (mt:session-pending-requests session)))))
+      (group (context "and the content message is acknowledged")
         (let ((packets (outbox-packets session)))
-          (ok (= 1 (length packets)))
+          (true (= 1 (length packets)))
           (let ((ack (tl:decode-tl-octets
                       (mt:encrypted-packet-body (first packets)))))
-            (ok (typep ack 'mt:msgs-ack))
-            (ok (equalp (vector (ash 1693436741 32))
-                        (mt:msgs-ack-message-ids ack)))
-            (testing "as a service message, so it is even and not acknowledged back"
-              (ok (evenp (mt:encrypted-packet-sequence-number
-                          (first packets)))))))))))
+            (true (typep ack 'mt:msgs-ack))
+            (true (equalp (vector (ash 1693436741 32))
+                          (mt:msgs-ack-message-ids ack)))
+            (group (context "as a service message, so it is even and not acknowledged back")
+              (true (evenp (mt:encrypted-packet-sequence-number
+                            (first packets)))))))))))
 
-(deftest rpc-errors-are-attached-to-their-request
+(define-test rpc-errors-are-attached-to-their-request
   (let ((session (test-session)))
     (multiple-value-bind (bytes request)
         (mt:session-send-request session (ascii "aaaa") :name "help.getConfig")
@@ -138,13 +138,13 @@
                                        (make-instance 'mt:rpc-error
                                                       :code 303
                                                       :message "USER_MIGRATE_4"))))))
-      (ok (mt:pending-request-done-p request))
+      (true (mt:pending-request-done-p request))
       (let ((failure (mt:pending-request-error request)))
-        (ok (typep failure 'mt:rpc-error))
-        (ok (= 303 (mt:rpc-error-code failure)))
-        (ok (equal "USER_MIGRATE_4" (mt:rpc-error-message failure)))))))
+        (true (typep failure 'mt:rpc-error))
+        (true (= 303 (mt:rpc-error-code failure)))
+        (true (equal "USER_MIGRATE_4" (mt:rpc-error-message failure)))))))
 
-(deftest containers-are-unwrapped-into-their-members
+(define-test containers-are-unwrapped-into-their-members
   (let* ((session (test-session))
          (members (list (make-instance 'mt:mtproto-message
                                        :message-id (ash 1693436742 32)
@@ -168,18 +168,18 @@
                     (tl:encode-tl-octets
                      (make-instance 'mt:msg-container :messages members))
                     :sequence-number 0))
-    (testing "each member was handled"
-      (ok (find :pong (mt:session-events session) :key #'first))
-      (ok (= 999 (mt:session-server-salt session))))
-    (testing "and only the member with an odd sequence number is acknowledged"
+    (group (context "each member was handled")
+      (true (find :pong (mt:session-events session) :key #'first))
+      (true (= 999 (mt:session-server-salt session))))
+    (group (context "and only the member with an odd sequence number is acknowledged")
       (let* ((packets (outbox-packets session))
              (ack (tl:decode-tl-octets
                    (mt:encrypted-packet-body (first packets)))))
-        (ok (= 1 (length packets)))
-        (ok (equalp (vector (ash 1693436742 32))
-                    (mt:msgs-ack-message-ids ack)))))))
+        (true (= 1 (length packets)))
+        (true (equalp (vector (ash 1693436742 32))
+                      (mt:msgs-ack-message-ids ack)))))))
 
-(deftest a-bad-salt-is-adopted-and-the-request-resent
+(define-test a-bad-salt-is-adopted-and-the-request-resent
   (let ((session (test-session)))
     (multiple-value-bind (bytes request)
         (mt:session-send-request session (ascii "aaaa") :name "help.getConfig")
@@ -195,17 +195,17 @@
                                         :error-code 48
                                         :new-server-salt 4242))
                         :sequence-number 0))
-        (ok (= 4242 (mt:session-server-salt session)))
-        (testing "the resend keeps the message id and takes the new salt"
+        (true (= 4242 (mt:session-server-salt session)))
+        (group (context "the resend keeps the message id and takes the new salt")
           (let ((packets (outbox-packets session)))
-            (ok (= 1 (length packets)))
-            (ok (= message-id (mt:encrypted-packet-message-id (first packets))))
-            (ok (= 4242 (mt:encrypted-packet-salt (first packets))))
-            (ok (= 1 (mt:encrypted-packet-sequence-number (first packets))))))
-        (testing "and the request is still outstanding"
-          (ok (not (mt:pending-request-done-p request))))))))
+            (true (= 1 (length packets)))
+            (true (= message-id (mt:encrypted-packet-message-id (first packets))))
+            (true (= 4242 (mt:encrypted-packet-salt (first packets))))
+            (true (= 1 (mt:encrypted-packet-sequence-number (first packets))))))
+        (group (context "and the request is still outstanding")
+          (true (not (mt:pending-request-done-p request))))))))
 
-(deftest unknown-service-messages-are-logged-rather-than-fatal
+(define-test unknown-service-messages-are-logged-rather-than-fatal
   (let ((session (test-session)))
     (mt:session-receive-packet
      session
@@ -215,12 +215,12 @@
                                     :answer-message-id 5 :byte-count 6
                                     :status 7))
                     :sequence-number 0))
-    (ok (find :unhandled (mt:session-events session) :key #'first))))
+    (true (find :unhandled (mt:session-events session) :key #'first))))
 
 ;;;; The data-centre table
 
-(deftest data-centres-are-addressable
-  (ok (typep (net:find-data-center 2) 'net:data-center))
-  (ok (= 2 (net:data-center-id (net:find-data-center 2))))
-  (ok (string/= (net:data-center-host (net:find-data-center 2))
-                (net:data-center-host (net:find-data-center 2 :test t)))))
+(define-test data-centres-are-addressable
+  (true (typep (net:find-data-center 2) 'net:data-center))
+  (true (= 2 (net:data-center-id (net:find-data-center 2))))
+  (true (string/= (net:data-center-host (net:find-data-center 2))
+                  (net:data-center-host (net:find-data-center 2 :test t)))))

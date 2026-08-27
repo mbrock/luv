@@ -1,15 +1,15 @@
 (in-package #:luv.tests)
 
-(deftest vulkan-temporal-motion-format-is-r16g16-sfloat
+(define-test vulkan-temporal-motion-format-is-r16g16-sfloat
   (let ((descriptor
           (luv:make-texture-descriptor
            :size '(4 4) :dimensions :2d :format :rg16-float
            :usage :render-attachment)))
-    (ok (eq :r16g16-sfloat
-            (luv::vulkan-gpu-format :rg16-float descriptor)))
-    (ok (= 83 (cffi:foreign-enum-value 'lvk::format :r16g16-sfloat)))))
+    (true (eq :r16g16-sfloat
+              (luv::vulkan-gpu-format :rg16-float descriptor)))
+    (true (= 83 (cffi:foreign-enum-value 'lvk::format :r16g16-sfloat)))))
 
-(deftest vulkan-render-pass-cache-keys-the-whole-color-cohort
+(define-test vulkan-render-pass-cache-keys-the-whole-color-cohort
   (let* ((device
            (make-instance
             'luv::vulkan-gpu-device
@@ -45,14 +45,14 @@
                    (luv::vulkan-render-pass-for-format
                     device '(:rgba16-float :rg16-float) descriptor
                     nil :discard 4 t)))
-             (ok (eq first same))
-             (ok (not (eq first reversed)))
-             (ok (not (eq first multisampled)))
-             (ok (equal '((:r16g16b16a16-sfloat :r16g16-sfloat)
-                          (:r16g16-sfloat :r16g16b16a16-sfloat)
-                          (:r16g16b16a16-sfloat :r16g16-sfloat))
-                        native-formats))
-             (ok (equal '(:4 :1 :1) native-sample-counts))))
+             (true (eq first same))
+             (true (not (eq first reversed)))
+             (true (not (eq first multisampled)))
+             (true (equal '((:r16g16b16a16-sfloat :r16g16-sfloat)
+                            (:r16g16-sfloat :r16g16b16a16-sfloat)
+                            (:r16g16b16a16-sfloat :r16g16-sfloat))
+                          native-formats))
+             (true (equal '(:4 :1 :1) native-sample-counts))))
       (setf (symbol-function create-symbol) original-create))))
 
 (defclass vulkan-retirement-probe (luv::gpu-object luv::vulkan-gpu-object)
@@ -105,7 +105,7 @@
     #+sbcl (sb-ext:cancel-finalization command-buffer)
     command-buffer))
 
-(deftest vulkan-destroy-transfers-before-invalidation-and-retries
+(define-test vulkan-destroy-transfers-before-invalidation-and-retries
   (let* ((luv::*gpu-retirement-ledger-custodians*
            (make-hash-table :test #'eq))
          (luv::*gpu-retirement-custodian-service-enabled-p* nil)
@@ -140,37 +140,40 @@
              (luv::vulkan-destroy-or-defer
               probe device
               (lambda ()
-                (ok (eq probe
-                        (luv::gpu-retirement-entry-resource
-                         (first
-                          (luv::gpu-retirement-ledger-entries
-                           (luv::vulkan-queue-retirement-ledger queue))))))
+                (true (eq probe
+                          (luv::gpu-retirement-entry-resource
+                           (first
+                            (luv::gpu-retirement-ledger-entries
+                             (luv::vulkan-queue-retirement-ledger queue))))))
                 (setf (luv::vulkan-object-destroyed-p probe) t)
                 #+sbcl (sb-ext:cancel-finalization probe))))
-           (ok (luv::vulkan-object-destroyed-p probe))
-           (ok (equal '(1 1 0) attempts))
-           (ok (= 1
-                  (length
-                   (luv::gpu-retirement-ledger-entries
-                    (luv::vulkan-queue-retirement-ledger queue)))))
-           (ok (eq queue
-                   (gethash
-                    (luv::vulkan-queue-retirement-ledger queue)
-                    luv::*gpu-retirement-ledger-custodians*)))
+           (true (luv::vulkan-object-destroyed-p probe))
+           (true (equal '(1 1 0) attempts))
+           (true (= 1
+                    (length
+                     (luv::gpu-retirement-ledger-entries
+                      (luv::vulkan-queue-retirement-ledger queue)))))
+           (true (eq queue
+                     (gethash
+                      (luv::vulkan-queue-retirement-ledger queue)
+                      luv::*gpu-retirement-ledger-custodians*)))
            (luv::maintain-vulkan-queue queue)
            ;; The cached production closure resumes at its failed native call.
-           (ok (equal '(1 2 1) attempts))
-           (ok (null
-                (luv::gpu-retirement-ledger-entries
-                 (luv::vulkan-queue-retirement-ledger queue))))
-           (ok (not (nth-value
-                     1 (gethash
-                        (luv::vulkan-queue-retirement-ledger queue)
-                        luv::*gpu-retirement-ledger-custodians*)))))
+           (true (equal '(1 2 1) attempts))
+           (true (null
+                  (luv::gpu-retirement-ledger-entries
+                   (luv::vulkan-queue-retirement-ledger queue))))
+           (true (not (nth-value
+                       1 (gethash
+                          (luv::vulkan-queue-retirement-ledger queue)
+                          luv::*gpu-retirement-ledger-custodians*)))))
       (setf (symbol-function frontier-function) original-frontier))))
 
-(deftest vulkan-device-queues-non-gpu-native-owners-through-the-generic
-  (let* ((device
+(define-test vulkan-device-queues-non-gpu-native-owners-through-the-generic
+  (let* ((luv::*gpu-retirement-ledger-custodians*
+           (make-hash-table :test #'eq))
+         (luv::*gpu-retirement-custodian-service-enabled-p* nil)
+         (device
            (make-instance
             'luv::vulkan-gpu-device
             :handle :fake-device :instance :fake-instance
@@ -200,21 +203,21 @@
                   (setf fail-p nil)
                   (error "injected importer close failure")))
               (lambda () (setf invalidated-p t))))
-           (ok invalidated-p)
-           (ok (= 1 attempts))
-           (ok (equal '(:video-importer)
-                      (mapcar
-                       #'luv::gpu-retirement-entry-resource
-                       (luv::gpu-retirement-ledger-entries
-                        (luv::vulkan-queue-retirement-ledger queue)))))
+           (true invalidated-p)
+           (true (= 1 attempts))
+           (true (equal '(:video-importer)
+                        (mapcar
+                         #'luv::gpu-retirement-entry-resource
+                         (luv::gpu-retirement-ledger-entries
+                          (luv::vulkan-queue-retirement-ledger queue)))))
            (luv::maintain-vulkan-queue queue)
-           (ok (= 2 attempts))
-           (ok (null
-                (luv::gpu-retirement-ledger-entries
-                 (luv::vulkan-queue-retirement-ledger queue)))))
+           (true (= 2 attempts))
+           (true (null
+                  (luv::gpu-retirement-ledger-entries
+                   (luv::vulkan-queue-retirement-ledger queue)))))
       (setf (symbol-function frontier-symbol) original-frontier))))
 
-(deftest vulkan-submit-rejects-destroyed-nontexture-dependencies-before-native
+(define-test vulkan-submit-rejects-destroyed-nontexture-dependencies-before-native
   (let* ((luv::*gpu-retirement-ledger-custodians*
            (make-hash-table :test #'eq))
          (luv::*gpu-retirement-custodian-service-enabled-p* nil)
@@ -260,21 +263,21 @@
             (lambda ()
               (setf (luv::vulkan-object-destroyed-p resource) t)
               #+sbcl (sb-ext:cancel-finalization resource)))
-           (ok (equal '(1 1 1) attempts))
-           (ok (signals
-                (luv:submit queue command-buffer)
-                'luv:gpu-object-destroyed-error))
-           (ok (zerop native-submits))
-           (ok (zerop (luv::vulkan-queue-submission-counter queue)))
-           (ok (eq :ready
-                   (luv::vulkan-command-buffer-state command-buffer)))
-           (ok (null (luv::vulkan-queue-live-submissions queue))))
+           (true (equal '(1 1 1) attempts))
+           (fail
+            (luv:submit queue command-buffer)
+            'luv:gpu-object-destroyed-error)
+           (true (zerop native-submits))
+           (true (zerop (luv::vulkan-queue-submission-counter queue)))
+           (true (eq :ready
+                     (luv::vulkan-command-buffer-state command-buffer)))
+           (true (null (luv::vulkan-queue-live-submissions queue))))
       (setf (symbol-function frontier-symbol) original-frontier
             (symbol-function submit-symbol) original-submit)
       #+sbcl (sb-ext:cancel-finalization device)
       #+sbcl (sb-ext:cancel-finalization queue))))
 
-(deftest vulkan-custodian-service-retires-an-unobserved-completion
+(define-test vulkan-custodian-service-retires-an-unobserved-completion
   (let* ((luv::*gpu-retirement-ledger-custodians*
            (make-hash-table :test #'eq))
          (luv::*gpu-retirement-custodian-service-failures*
@@ -321,38 +324,38 @@
                  (setf (luv::vulkan-device-queue device) queue)
                  #+sbcl (sb-ext:cancel-finalization device)
                  #+sbcl (sb-ext:cancel-finalization queue)
-                 (ok (= 1 (luv:submit queue command-buffer)))
+                 (true (= 1 (luv:submit queue command-buffer)))
                  (luv::vulkan-destroy-or-defer
                   probe device
                   (lambda ()
                     (setf (luv::vulkan-object-destroyed-p probe) t)
                     #+sbcl (sb-ext:cancel-finalization probe)))
-                 (ok (equal '(0 0 0) attempts))
+                 (true (equal '(0 0 0) attempts))
                  (let ((ledger
                          (luv::vulkan-queue-retirement-ledger queue)))
-                   (ok (eq queue
-                           (gethash
-                            ledger
-                            luv::*gpu-retirement-ledger-custodians*)))
+                   (true (eq queue
+                             (gethash
+                              ledger
+                              luv::*gpu-retirement-ledger-custodians*)))
                    ;; From here no caller retains queue/device/resource access.
                    (values #+sbcl (sb-ext:make-weak-pointer queue)
                            #-sbcl nil
                            ledger attempts)))
              #+sbcl (progn
                       (sb-ext:gc :full t)
-                      (ok (sb-ext:weak-pointer-value weak-queue)))
+                      (true (sb-ext:weak-pointer-value weak-queue)))
              (setf frontier 1)
-             (ok (luv::service-gpu-retirement-custodians-once))
-             (ok (= 1 native-submits))
-             (ok (equal '(1 1 1) attempts))
-             (ok (null (luv::gpu-retirement-ledger-entries ledger)))
-             (ok (zerop
-                  (hash-table-count
-                   luv::*gpu-retirement-ledger-custodians*)))))
+             (true (luv::service-gpu-retirement-custodians-once))
+             (true (= 1 native-submits))
+             (true (equal '(1 1 1) attempts))
+             (true (null (luv::gpu-retirement-ledger-entries ledger)))
+             (true (zerop
+                    (hash-table-count
+                     luv::*gpu-retirement-ledger-custodians*)))))
       (setf (symbol-function frontier-symbol) original-frontier
             (symbol-function submit-symbol) original-submit))))
 
-(deftest vulkan-custodian-service-does-no-ffi-after-admission-closes
+(define-test vulkan-custodian-service-does-no-ffi-after-admission-closes
   (let* ((luv::*gpu-retirement-ledger-custodians*
            (make-hash-table :test #'eq))
          (luv::*gpu-retirement-custodian-service-enabled-p* nil)
@@ -380,14 +383,14 @@
                    (declare (ignore queue))
                    (incf frontier-calls)
                    0))
-           (ok (luv::service-gpu-retirement-custodians-once))
-           (ok (zerop frontier-calls))
-           (ok (zerop
-                (hash-table-count
-                 luv::*gpu-retirement-ledger-custodians*))))
+           (true (luv::service-gpu-retirement-custodians-once))
+           (true (zerop frontier-calls))
+           (true (zerop
+                  (hash-table-count
+                   luv::*gpu-retirement-ledger-custodians*))))
       (setf (symbol-function frontier-symbol) original-frontier))))
 
-(deftest vulkan-submit-publishes-before-fallible-owner-callbacks-and-retries
+(define-test vulkan-submit-publishes-before-fallible-owner-callbacks-and-retries
   (let* ((luv::*gpu-retirement-ledger-custodians*
            (make-hash-table :test #'eq))
          (luv::*gpu-retirement-custodian-service-enabled-p* nil)
@@ -461,43 +464,43 @@
                    (incf native-submits)
                    (setf native-waits wait-semaphores
                          native-signals signal-semaphores)))
-           (ok (signals
-                (luv:submit queue command-buffer)
-                'luv::vulkan-gpu-error))
+           (fail
+            (luv:submit queue command-buffer)
+            'luv::vulkan-gpu-error)
            ;; Native work, portable state, dependencies, and the retry closure
            ;; are all queue-owned before the injected owner callback escapes.
-           (ok (= 1 native-submits))
-           (ok (= 1 (luv::vulkan-queue-submission-counter queue)))
-           (ok (eq :submitted
-                   (luv::vulkan-command-buffer-state command-buffer)))
-           (ok (= 1 (length (luv::vulkan-queue-live-submissions queue))))
-           (ok (eq queue
-                   (gethash
-                    (luv::vulkan-queue-retirement-ledger queue)
-                    luv::*gpu-retirement-ledger-custodians*)))
-           (ok (= 5 (luv::vulkan-texture-external-semaphore-value
-                     first-texture)))
-           (ok (= 5 (luv::vulkan-texture-external-semaphore-value
-                     second-texture)))
-           (ok (= 1 first-attempts))
-           (ok (= 1 second-attempts))
-           (ok (equal '(5) second-values))
-           (ok (= 4 (third (aref native-waits 0))))
-           (ok (= 5 (third (aref native-signals 0))))
+           (true (= 1 native-submits))
+           (true (= 1 (luv::vulkan-queue-submission-counter queue)))
+           (true (eq :submitted
+                     (luv::vulkan-command-buffer-state command-buffer)))
+           (true (= 1 (length (luv::vulkan-queue-live-submissions queue))))
+           (true (eq queue
+                     (gethash
+                      (luv::vulkan-queue-retirement-ledger queue)
+                      luv::*gpu-retirement-ledger-custodians*)))
+           (true (= 5 (luv::vulkan-texture-external-semaphore-value
+                       first-texture)))
+           (true (= 5 (luv::vulkan-texture-external-semaphore-value
+                       second-texture)))
+           (true (= 1 first-attempts))
+           (true (= 1 second-attempts))
+           (true (equal '(5) second-values))
+           (true (= 4 (third (aref native-waits 0))))
+           (true (= 5 (third (aref native-signals 0))))
            (setf frontier 1)
-           (ok (luv::service-gpu-retirement-custodians-once))
-           (ok (= 1 native-submits))
-           (ok (= 2 first-attempts))
-           (ok (= 1 second-attempts))
-           (ok (equal '(5) first-values))
-           (ok (null (luv::vulkan-queue-live-submissions queue)))
-           (ok (zerop
-                (hash-table-count
-                 luv::*gpu-retirement-ledger-custodians*))))
+           (true (luv::service-gpu-retirement-custodians-once))
+           (true (= 1 native-submits))
+           (true (= 2 first-attempts))
+           (true (= 1 second-attempts))
+           (true (equal '(5) first-values))
+           (true (null (luv::vulkan-queue-live-submissions queue)))
+           (true (zerop
+                  (hash-table-count
+                   luv::*gpu-retirement-ledger-custodians*))))
       (setf (symbol-function frontier-symbol) original-frontier
             (symbol-function submit-symbol) original-submit))))
 
-(deftest vulkan-shared-external-timeline-advances-across-plane-subsets
+(define-test vulkan-shared-external-timeline-advances-across-plane-subsets
   (let* ((luv::*gpu-retirement-ledger-custodians*
            (make-hash-table :test #'eq))
          (luv::*gpu-retirement-custodian-service-enabled-p* nil)
@@ -561,7 +564,7 @@
          (submit-symbol 'luv.vulkan:submit-command-buffers)
          (original-frontier (symbol-function frontier-symbol))
          (original-submit (symbol-function submit-symbol)))
-    (ok (eq state same-state))
+    (true (eq state same-state))
     (setf (luv::vulkan-device-queue device) queue)
     (unwind-protect
          (progn
@@ -577,36 +580,36 @@
                     (list (third (aref wait-semaphores 0))
                           (third (aref signal-semaphores 0)))
                     native-frontiers)))
-           (ok (= 1 (luv:submit queue both)))
-           (ok (= 2 (luv:submit queue first-only)))
-           (ok (= 3 (luv:submit queue second-only)))
+           (true (= 1 (luv:submit queue both)))
+           (true (= 2 (luv:submit queue first-only)))
+           (true (= 3 (luv:submit queue second-only)))
            ;; Both planes share one generation state.  A subset advances it for
            ;; its absent sibling, so rejoining never repeats a timeline signal.
-           (ok (equal '((10 11) (11 12) (12 13))
-                      (nreverse native-frontiers)))
-           (ok (= 13 (luv::vulkan-texture-external-semaphore-value
-                      first-texture)))
-           (ok (= 13 (luv::vulkan-texture-external-semaphore-value
-                      second-texture)))
-           (ok (equal '(12 11) first-values))
-           (ok (equal '(13 11) second-values))
+           (true (equal '((10 11) (11 12) (12 13))
+                        (nreverse native-frontiers)))
+           (true (= 13 (luv::vulkan-texture-external-semaphore-value
+                        first-texture)))
+           (true (= 13 (luv::vulkan-texture-external-semaphore-value
+                        second-texture)))
+           (true (equal '(12 11) first-values))
+           (true (equal '(13 11) second-values))
            (setf frontier 3)
-           (ok (luv::service-gpu-retirement-custodians-once))
-           (ok (null (luv::vulkan-queue-live-submissions queue)))
+           (true (luv::service-gpu-retirement-custodians-once))
+           (true (null (luv::vulkan-queue-live-submissions queue)))
            (luv::release-vulkan-external-semaphore-state queue state)
            (luv::release-vulkan-external-semaphore-state queue state)
-           (ok (null (luv::vulkan-queue-external-semaphore-states queue)))
+           (true (null (luv::vulkan-queue-external-semaphore-states queue)))
            ;; Reusing the same raw handle starts a fresh state generation.
            (let ((reused
                    (luv::retain-vulkan-external-semaphore-state
                     queue :shared-timeline 2)))
-             (ok (not (eq reused state)))
-             (ok (= 2 (luv::vulkan-external-semaphore-state-value reused)))
+             (true (not (eq reused state)))
+             (true (= 2 (luv::vulkan-external-semaphore-state-value reused)))
              (luv::release-vulkan-external-semaphore-state queue reused)))
       (setf (symbol-function frontier-symbol) original-frontier
             (symbol-function submit-symbol) original-submit))))
 
-(deftest vulkan-leak-warning-nonlocal-exit-cannot-preempt-custody
+(define-test vulkan-leak-warning-nonlocal-exit-cannot-preempt-custody
   (let ((luv::*gpu-finalizer-retirement-ledger*
           (luv::make-gpu-retirement-ledger))
         (luv::*leaked-gpu-resources* nil)
@@ -614,33 +617,33 @@
         (fail-p t))
     (handler-bind
         ((luv:gpu-native-retirement-warning #'muffle-warning))
-      (ok (signals
-           (handler-bind
-               ((luv:gpu-resource-leaked
-                  (lambda (condition)
-                    (declare (ignore condition))
-                    (error "promoted leak warning"))))
-             (luv::retire-vulkan-leaked-native-owner
-              'vulkan-gpu-texture "leaked probe" nil :leaked-owner
-              (lambda ()
-                (incf attempts)
-                (when fail-p
-                  (error "injected native close failure")))))
-           'simple-error)))
-    (ok (= 1 attempts))
-    (ok (equal '(:leaked-owner)
-               (mapcar
-                #'luv::gpu-retirement-entry-resource
-                (luv::gpu-retirement-ledger-entries
-                 luv::*gpu-finalizer-retirement-ledger*))))
+      (fail
+       (handler-bind
+           ((luv:gpu-resource-leaked
+              (lambda (condition)
+                (declare (ignore condition))
+                (error "promoted leak warning"))))
+         (luv::retire-vulkan-leaked-native-owner
+          'vulkan-gpu-texture "leaked probe" nil :leaked-owner
+          (lambda ()
+            (incf attempts)
+            (when fail-p
+              (error "injected native close failure")))))
+       'simple-error))
+    (true (= 1 attempts))
+    (true (equal '(:leaked-owner)
+                 (mapcar
+                  #'luv::gpu-retirement-entry-resource
+                  (luv::gpu-retirement-ledger-entries
+                   luv::*gpu-finalizer-retirement-ledger*))))
     (setf fail-p nil)
     (luv::maintain-gpu-finalizer-retirements)
-    (ok (= 2 attempts))
-    (ok (null
-         (luv::gpu-retirement-ledger-entries
-          luv::*gpu-finalizer-retirement-ledger*)))))
+    (true (= 2 attempts))
+    (true (null
+           (luv::gpu-retirement-ledger-entries
+            luv::*gpu-finalizer-retirement-ledger*)))))
 
-(deftest vulkan-post-device-texture-destroy-runs-device-independent-tail
+(define-test vulkan-post-device-texture-destroy-runs-device-independent-tail
   (let* ((device
            (make-instance
             'luv::vulkan-gpu-device
@@ -668,13 +671,13 @@
           (luv::vulkan-device-retiring-p device) t
           (luv::vulkan-device-native-retired-p device) t)
     (luv:destroy texture)
-    (ok (= 1 owner-releases))
-    (ok (zerop
-         (luv::vulkan-external-semaphore-state-references state)))
-    (ok (null (luv::vulkan-queue-external-semaphore-states queue)))
-    (ok (luv::vulkan-object-destroyed-p texture))))
+    (true (= 1 owner-releases))
+    (true (zerop
+           (luv::vulkan-external-semaphore-state-references state)))
+    (true (null (luv::vulkan-queue-external-semaphore-states queue)))
+    (true (luv::vulkan-object-destroyed-p texture))))
 
-(deftest vulkan-render-pass-cache-rechecks-admission-under-queue-lock
+(define-test vulkan-render-pass-cache-rechecks-admission-under-queue-lock
   (let* ((device
            (make-instance
             'luv::vulkan-gpu-device
@@ -701,17 +704,17 @@
                    (declare (ignore arguments))
                    (incf native-creates)
                    :impossible-render-pass))
-           (ok (signals
-                (luv::vulkan-render-pass-for-format
-                 device :rgba8-unorm descriptor)
-                'luv:gpu-object-destroyed-error))
-           (ok (zerop native-creates))
-           (ok (zerop
-                (hash-table-count
-                 (luv::vulkan-device-render-passes device)))))
+           (fail
+            (luv::vulkan-render-pass-for-format
+             device :rgba8-unorm descriptor)
+            'luv:gpu-object-destroyed-error)
+           (true (zerop native-creates))
+           (true (zerop
+                  (hash-table-count
+                   (luv::vulkan-device-render-passes device)))))
       (setf (symbol-function create-symbol) original-create))))
 
-(deftest vulkan-finish-retains-ended-encoder-ownership-on-wrapper-failure
+(define-test vulkan-finish-retains-ended-encoder-ownership-on-wrapper-failure
   (let* ((luv::*gpu-retirement-ledger-custodians*
            (make-hash-table :test #'eq))
          (luv::*gpu-retirement-custodian-service-enabled-p* nil)
@@ -765,25 +768,25 @@
                        (setf fail-construction-p nil)
                        (error "injected command-buffer wrapper failure"))
                      (apply original arguments))))
-           (ok (signals (luv:finish encoder) 'simple-error))
-           (ok (= 1 ends))
-           (ok (eq :ended (luv::vulkan-command-encoder-state encoder)))
-           (ok (eq :fake-command-pool
-                   (luv::vulkan-command-encoder-command-pool encoder)))
+           (fail (luv:finish encoder) 'simple-error)
+           (true (= 1 ends))
+           (true (eq :ended (luv::vulkan-command-encoder-state encoder)))
+           (true (eq :fake-command-pool
+                     (luv::vulkan-command-encoder-command-pool encoder)))
            (setf wrapper (luv:finish encoder))
-           (ok (= 1 ends))
-           (ok (eq :finished (luv::vulkan-command-encoder-state encoder)))
-           (ok (null (luv::vulkan-command-encoder-command-pool encoder)))
+           (true (= 1 ends))
+           (true (eq :finished (luv::vulkan-command-encoder-state encoder)))
+           (true (null (luv::vulkan-command-encoder-command-pool encoder)))
            (luv:destroy wrapper)
            (setf wrapper nil)
-           (ok (= 1 pool-destroys)))
+           (true (= 1 pool-destroys)))
       (when wrapper (luv:destroy wrapper))
       (luv:destroy encoder)
       (loop for symbol in symbols
             for original in originals
             do (setf (symbol-function symbol) original)))))
 
-(deftest vulkan-device-destroy-resumes-native-progress-after-ledger-barrier
+(define-test vulkan-device-destroy-resumes-native-progress-after-ledger-barrier
   (let* ((device
            (make-instance
             'luv::vulkan-gpu-device
@@ -861,35 +864,35 @@
                      (error "injected instance failure"))))
            ;; The first attempt completes the idle call but cannot close
            ;; admission while a ledger owner remains failed.
-           (ok (signals
-                (handler-bind
-                    ((luv:gpu-native-retirement-warning #'muffle-warning))
-                  (luv:destroy device))
-                'luv:gpu-native-retirement-error))
-           (ok (= 1 waits))
-           (ok (not (luv::vulkan-device-retiring-p device)))
-           (ok (zerop semaphores))
+           (fail
+            (handler-bind
+                ((luv:gpu-native-retirement-warning #'muffle-warning))
+              (luv:destroy device))
+            'luv:gpu-native-retirement-error)
+           (true (= 1 waits))
+           (true (not (luv::vulkan-device-retiring-p device)))
+           (true (zerop semaphores))
            ;; The next attempt reuses the completed wait, drains the barrier,
            ;; closes admission, and stops at one native render-pass failure.
-           (ok (signals (luv:destroy device) 'simple-error))
-           (ok (= 1 waits))
-           (ok (luv::vulkan-device-retiring-p device))
-           (ok (= 1 semaphores))
-           (ok (not (luv::vulkan-device-native-retired-p device)))
+           (fail (luv:destroy device) 'simple-error)
+           (true (= 1 waits))
+           (true (luv::vulkan-device-retiring-p device))
+           (true (= 1 semaphores))
+           (true (not (luv::vulkan-device-native-retired-p device)))
            ;; Model the wrapper being dropped here: its installed finalizer
            ;; owns the exact native progress sequence already advanced by
            ;; explicit DESTROY.  Its own idle step is safe and runs once, then
            ;; retirement resumes at the failed pass rather than at semaphore.
-           (ok (signals
-                (funcall (luv::vulkan-device-finalizer-teardown device))
-                'simple-error))
-           (ok (= 2 waits))
-           (ok (= 1 render-a))
-           (ok (= 2 render-b))
-           (ok (= 1 native-devices))
-           (ok (= 1 instances))
-           (ok (luv::vulkan-device-native-retired-p device))
-           (ok (not (luv::vulkan-object-destroyed-p device)))
+           (fail
+            (funcall (luv::vulkan-device-finalizer-teardown device))
+            'simple-error)
+           (true (= 2 waits))
+           (true (= 1 render-a))
+           (true (= 2 render-b))
+           (true (= 1 native-devices))
+           (true (= 1 instances))
+           (true (luv::vulkan-device-native-retired-p device))
+           (true (not (luv::vulkan-object-destroyed-p device)))
            ;; A texture finalized in this post-vkDestroyDevice window still
            ;; runs its non-device owner callback while guarded Vk calls skip.
            (let ((texture
@@ -901,30 +904,30 @@
                     :owned-p nil
                     :external-owner (lambda () (incf external-releases)))))
              (luv:destroy texture))
-           (ok (= 1 external-releases))
+           (true (= 1 external-releases))
            ;; Retrying that same durable finalizer closure resumes at the
            ;; failed instance call without repeating its idle or device steps.
            (funcall (luv::vulkan-device-finalizer-teardown device))
            (luv:destroy device)
-           (ok (= 2 waits))
-           (ok (= 1 semaphores))
-           (ok (= 1 render-a))
-           (ok (= 2 render-b))
-           (ok (= 1 native-devices))
-           (ok (= 2 instances))
-           (ok (luv::vulkan-object-destroyed-p device))
-           (ok (luv::vulkan-object-destroyed-p queue)))
+           (true (= 2 waits))
+           (true (= 1 semaphores))
+           (true (= 1 render-a))
+           (true (= 2 render-b))
+           (true (= 1 native-devices))
+           (true (= 2 instances))
+           (true (luv::vulkan-object-destroyed-p device))
+           (true (luv::vulkan-object-destroyed-p queue)))
       (loop for symbol in symbols
             for original in originals
             do (setf (symbol-function symbol) original)))))
 
-(deftest default-provider-prefers-the-native-apple-backend
+(define-test default-provider-prefers-the-native-apple-backend
   #+darwin
-  (ok (typep luv:*gpu-provider* 'luv:metal-gpu-provider))
+  (true (typep luv:*gpu-provider* 'luv:metal-gpu-provider))
   #-darwin
-  (ok (typep luv:*gpu-provider* 'luv:vulkan-gpu-provider)))
+  (true (typep luv:*gpu-provider* 'luv:vulkan-gpu-provider)))
 
-(deftest renderer-readbacks-use-compressed-png-output
+(define-test renderer-readbacks-use-compressed-png-output
   (let ((pixels (make-array (* 64 64 4)
                             :element-type '(unsigned-byte 8)
                             :initial-element 255)))
@@ -932,9 +935,9 @@
         (:pathname pathname :prefix "luv-readback-" :suffix ".png")
       (luv:write-rgba-png pathname pixels 64 64 :rgba8-unorm)
       (with-open-file (stream pathname :element-type '(unsigned-byte 8))
-        (ok (< (file-length stream) 1024))))))
+        (true (< (file-length stream) 1024))))))
 
-(deftest cadence-clock-wakes-before-deadlines-and-preserves-phase
+(define-test cadence-clock-wakes-before-deadlines-and-preserves-phase
   (let* ((timestamps nil)
          (clock
            (luv:make-cadence-clock
@@ -943,21 +946,21 @@
               (push timestamp timestamps))
             :frames-per-second 60)))
     (luv:service-canvas-clock clock nil 10d0)
-    (ok (equal timestamps '(10d0)))
+    (true (equal timestamps '(10d0)))
     ;; The millisecond SDL wait must wake before the fractional deadline.
-    (ok (= 16 (luv:clock-wait-timeout clock 10d0)))
+    (true (= 16 (luv:clock-wait-timeout clock 10d0)))
     ;; An ordinary late wake does not move the cadence's original phase.
     (luv:service-canvas-clock clock nil 10.017d0)
-    (ok (= 16 (luv:clock-wait-timeout clock 10.017d0)))
-    (ok (< (abs (- (luv::cadence-clock-next-frame-time clock)
-                   (+ 10d0 (/ 2d0 60d0))))
-           1d-12))
+    (true (= 16 (luv:clock-wait-timeout clock 10.017d0)))
+    (true (< (abs (- (luv::cadence-clock-next-frame-time clock)
+                     (+ 10d0 (/ 2d0 60d0))))
+             1d-12))
     ;; A long pause skips missed frames rather than replaying them.
     (luv:service-canvas-clock clock nil 10.1d0)
-    (ok (= 3 (length timestamps)))
-    (ok (> (luv::cadence-clock-next-frame-time clock) 10.1d0))))
+    (true (= 3 (length timestamps)))
+    (true (> (luv::cadence-clock-next-frame-time clock) 10.1d0))))
 
-(deftest lazy-clock-gives-one-time-to-a-whole-turn
+(define-test lazy-clock-gives-one-time-to-a-whole-turn
   (let ((samples '(10d0 20d0 30d0))
         (calls 0))
     (let ((clock
@@ -965,20 +968,20 @@
              :source (lambda ()
                        (incf calls)
                        (pop samples)))))
-      (ok (= 10d0 (luv:lazy-clock-now clock)))
-      (ok (= 10d0 (luv:lazy-clock-now clock)))
-      (ok (= 1 calls))
+      (true (= 10d0 (luv:lazy-clock-now clock)))
+      (true (= 10d0 (luv:lazy-clock-now clock)))
+      (true (= 1 calls))
       (luv:call-with-lazy-clock-time
        clock 99d0
-       (lambda () (ok (= 99d0 (luv:lazy-clock-now clock)))))
-      (ok (= 10d0 (luv:lazy-clock-now clock)))
-      (ok (= 20d0 (luv:lazy-clock-now-unadjusted clock)))
-      (ok (= 10d0 (luv:lazy-clock-now clock)))
+       (lambda () (true (= 99d0 (luv:lazy-clock-now clock)))))
+      (true (= 10d0 (luv:lazy-clock-now clock)))
+      (true (= 20d0 (luv:lazy-clock-now-unadjusted clock)))
+      (true (= 10d0 (luv:lazy-clock-now clock)))
       (luv:clear-lazy-clock clock)
-      (ok (= 30d0 (luv:lazy-clock-now clock)))
-      (ok (= 3 calls)))))
+      (true (= 30d0 (luv:lazy-clock-now clock)))
+      (true (= 3 calls)))))
 
-(deftest cadence-presentation-time-is-the-following-display-beat
+(define-test cadence-presentation-time-is-the-following-display-beat
   (let* ((clock (luv:make-lazy-clock :source (lambda () 10d0)))
          (cadence
            (luv:make-cadence-clock
@@ -987,22 +990,22 @@
             :frames-per-second 60))
          (canvas
            (luv:make-sdl-canvas :clock cadence :time clock)))
-    (ok (< (abs (- (luv:canvas-presentation-time canvas)
-                   (+ 10d0 (/ 1d0 60d0))))
-           1d-12))))
+    (true (< (abs (- (luv:canvas-presentation-time canvas)
+                     (+ 10d0 (/ 1d0 60d0))))
+             1d-12))))
 
-(deftest presentation-clock-asks-once-and-leaves-pacing-to-the-frame
+(define-test presentation-clock-asks-once-and-leaves-pacing-to-the-frame
   (let* ((timestamps nil)
         (clock
           (luv:make-presentation-clock
            (lambda (canvas timestamp)
              (declare (ignore canvas))
              (push timestamp timestamps)))))
-    (ok (= 0 (luv:clock-wait-timeout clock 4d0)))
-    (ok (luv:service-canvas-clock clock nil 4d0))
-    (ok (equal timestamps '(4d0)))))
+    (true (= 0 (luv:clock-wait-timeout clock 4d0)))
+    (true (luv:service-canvas-clock clock nil 4d0))
+    (true (equal timestamps '(4d0)))))
 
-(deftest canvas-loop-failure-preserves-the-actionable-condition
+(define-test canvas-loop-failure-preserves-the-actionable-condition
   (let* ((canvas (luv:make-sdl-canvas))
          (root-cause (make-condition 'simple-error
                                      :format-control "event dispatch failed"))
@@ -1011,40 +1014,40 @@
           (luv::sdl-canvas-requests canvas) (list request))
     (luv::fail-sdl-canvas-requests
      canvas (luv::sdl-canvas-terminal-error canvas))
-    (ok (eq root-cause (luv::sdl-canvas-request-error request)))
-    (ok (null (luv::sdl-canvas-requests canvas)))))
+    (true (eq root-cause (luv::sdl-canvas-request-error request)))
+    (true (null (luv::sdl-canvas-requests canvas)))))
 
-(deftest slug-formats-retain-the-exact-vulkan-abi-values
-  (ok (= 81 (cffi:foreign-enum-value 'lvk::format :r16g16-uint)))
-  (ok (= 97
-         (cffi:foreign-enum-value
-          'lvk::format :r16g16b16a16-sfloat))))
+(define-test slug-formats-retain-the-exact-vulkan-abi-values
+  (true (= 81 (cffi:foreign-enum-value 'lvk::format :r16g16-uint)))
+  (true (= 97
+           (cffi:foreign-enum-value
+            'lvk::format :r16g16b16a16-sfloat))))
 
-(deftest video-planes-retain-the-exact-vulkan-abi-values
-  (ok (= 9 (cffi:foreign-enum-value 'lvk::format :r8-unorm)))
-  (ok (= 16 (cffi:foreign-enum-value 'lvk::format :r8g8-unorm)))
-  (ok (= #x10
-         (cffi:foreign-bitfield-value 'lvk::image-aspect-flags '(:plane-0))))
-  (ok (= #x20
-         (cffi:foreign-bitfield-value 'lvk::image-aspect-flags '(:plane-1))))
-  (ok (= #x20
-         (cffi:foreign-bitfield-value 'lvk::queue-flags '(:video-decode)))))
+(define-test video-planes-retain-the-exact-vulkan-abi-values
+  (true (= 9 (cffi:foreign-enum-value 'lvk::format :r8-unorm)))
+  (true (= 16 (cffi:foreign-enum-value 'lvk::format :r8g8-unorm)))
+  (true (= #x10
+           (cffi:foreign-bitfield-value 'lvk::image-aspect-flags '(:plane-0))))
+  (true (= #x20
+           (cffi:foreign-bitfield-value 'lvk::image-aspect-flags '(:plane-1))))
+  (true (= #x20
+           (cffi:foreign-bitfield-value 'lvk::queue-flags '(:video-decode)))))
 
-(deftest premultiplied-alpha-retains-the-exact-vulkan-blend-factor
-  (ok (= 7
-         (cffi:foreign-enum-value
-          'lvk::blend-factor :one-minus-src-alpha))))
+(define-test premultiplied-alpha-retains-the-exact-vulkan-blend-factor
+  (true (= 7
+           (cffi:foreign-enum-value
+            'lvk::blend-factor :one-minus-src-alpha))))
 
-(deftest sampled-texture-layouts-do-not-require-a-sampler
+(define-test sampled-texture-layouts-do-not-require-a-sampler
   (let* ((entries '((:binding 0 :type :texture)
                     (:binding 1 :type :texture)
                     (:binding 2 :type :uniform-buffer)))
          (descriptor
            (luv:make-bind-group-layout-descriptor :entries entries)))
-    (ok (equal entries
-               (luv::texture-sampler-uniform-layout-entries descriptor)))))
+    (true (equal entries
+                 (luv::texture-sampler-uniform-layout-entries descriptor)))))
 
-(deftest single-uniform-layouts-retain-the-generic-stage-contract
+(define-test single-uniform-layouts-retain-the-generic-stage-contract
   (let* ((device
            (make-instance
             'luv::vulkan-gpu-device
@@ -1078,61 +1081,61 @@
                        :label "single uniform stage probe"
                        :entries entries))))
                (push layout layouts)
-               (ok (equal (getf (first
-                                 (luv::vulkan-bind-group-layout-entries
-                                  layout))
-                                :stages)
-                          (or (getf (first entries) :stages)
-                              '(:vertex :fragment))))))
-           (ok (equal '((:fake-device 3 (:vertex :fragment))
-                        (:fake-device 5 (:fragment)))
-                      (reverse native-calls))))
+               (true (equal (getf (first
+                                   (luv::vulkan-bind-group-layout-entries
+                                    layout))
+                                  :stages)
+                            (or (getf (first entries) :stages)
+                                '(:vertex :fragment))))))
+           (true (equal '((:fake-device 3 (:vertex :fragment))
+                          (:fake-device 5 (:fragment)))
+                        (reverse native-calls))))
       (dolist (layout layouts)
         #+sbcl (sb-ext:cancel-finalization layout))
       (setf (symbol-function mesh-shader-symbol) original-mesh-shader
             (symbol-function create-symbol) original-create))))
 
-(deftest definitions-retain-abi-metadata-without-call-classes
+(define-test definitions-retain-abi-metadata-without-call-classes
   (let ((description (lvk:vulkan-function-description 'vk:create-instance)))
-    (ok (equal (getf description :foreign-name) "vkCreateInstance"))
-    (ok (eq (getf description :return-type) 'lvk::checked-result))
-    (ok (equal (mapcar #'first (getf description :arguments))
-               '(lvk::create-info lvk::allocator lvk::instance)))
-    (ok (not (getf description :command-p)))
-    (ok (null (find-class 'vk:create-instance nil)))))
+    (true (equal (getf description :foreign-name) "vkCreateInstance"))
+    (true (eq (getf description :return-type) 'lvk::checked-result))
+    (true (equal (mapcar #'first (getf description :arguments))
+                 '(lvk::create-info lvk::allocator lvk::instance)))
+    (true (not (getf description :command-p)))
+    (true (null (find-class 'vk:create-instance nil)))))
 
-(deftest vulkan-device-contract-includes-shader-int64
+(define-test vulkan-device-contract-includes-shader-int64
   (let ((description
           (lvk:vulkan-function-description
            'vk:get-physical-device-features)))
-    (ok (equal (getf description :foreign-name)
-               "vkGetPhysicalDeviceFeatures"))
-    (ok (= (* 55 (cffi:foreign-type-size :uint32))
-           (cffi:foreign-type-size
-            '(:struct lvk::physical-device-features))))
-    (ok (< (cffi:foreign-slot-offset
-            '(:struct lvk::physical-device-features) 'lvk::shader-float64)
-           (cffi:foreign-slot-offset
-            '(:struct lvk::physical-device-features) 'lvk::shader-int64)))))
+    (true (equal (getf description :foreign-name)
+                 "vkGetPhysicalDeviceFeatures"))
+    (true (= (* 55 (cffi:foreign-type-size :uint32))
+             (cffi:foreign-type-size
+              '(:struct lvk::physical-device-features))))
+    (true (< (cffi:foreign-slot-offset
+              '(:struct lvk::physical-device-features) 'lvk::shader-float64)
+             (cffi:foreign-slot-offset
+              '(:struct lvk::physical-device-features) 'lvk::shader-int64)))))
 
-(deftest present-timing-abi-is-explicit-and-inspectable
+(define-test present-timing-abi-is-explicit-and-inspectable
   (let ((description
           (lvk:vulkan-function-description
            'vk:get-past-presentation-timing-ext)))
-    (ok (equal (getf description :foreign-name)
-               "vkGetPastPresentationTimingEXT"))
-    (ok (equal (mapcar #'first (getf description :arguments))
-               '(lvk::device lvk::past-presentation-timing-info
-                 lvk::past-presentation-timing-properties))))
-  (ok (= 16
-         (cffi:foreign-type-size '(:struct lvk::present-stage-time))))
-  (ok (= 32
-         (cffi:foreign-type-size
-          '(:struct lvk::swapchain-timing-properties))))
-  (ok (= #x240
-         (cffi:foreign-bitfield-value
-          'lvk::swapchain-create-flags
-          '(:present-id-2-khr :present-timing-ext)))))
+    (true (equal (getf description :foreign-name)
+                 "vkGetPastPresentationTimingEXT"))
+    (true (equal (mapcar #'first (getf description :arguments))
+                 '(lvk::device lvk::past-presentation-timing-info
+                   lvk::past-presentation-timing-properties))))
+  (true (= 16
+           (cffi:foreign-type-size '(:struct lvk::present-stage-time))))
+  (true (= 32
+           (cffi:foreign-type-size
+            '(:struct lvk::swapchain-timing-properties))))
+  (true (= #x240
+           (cffi:foreign-bitfield-value
+            'lvk::swapchain-create-flags
+            '(:present-id-2-khr :present-timing-ext)))))
 
 (cffi:defcallback test-past-presentation-timing-device-procedure :int32
     ((device :pointer)
@@ -1142,7 +1145,7 @@
                    past-presentation-timing-properties))
   0)
 
-(deftest presentation-timing-commands-use-device-procedure-dispatch
+(define-test presentation-timing-commands-use-device-procedure-dispatch
   (let ((original (symbol-function 'lvk::device-procedure))
         (lookups nil))
     (unwind-protect
@@ -1152,14 +1155,14 @@
                    (push (list device name) lookups)
                    (cffi:callback test-past-presentation-timing-device-procedure)))
            (let ((device (cffi:make-pointer 42)))
-             (ok (eq :success
-                     (vk:get-past-presentation-timing-ext
-                      device (cffi:null-pointer) (cffi:null-pointer))))
-             (ok (equal `((,device "vkGetPastPresentationTimingEXT"))
-                        lookups))))
+             (true (eq :success
+                       (vk:get-past-presentation-timing-ext
+                        device (cffi:null-pointer) (cffi:null-pointer))))
+             (true (equal `((,device "vkGetPastPresentationTimingEXT"))
+                          lookups))))
       (setf (symbol-function 'lvk::device-procedure) original))))
 
-(deftest presentation-timeline-correlates-predictions-with-display-results
+(define-test presentation-timeline-correlates-predictions-with-display-results
   (let ((timeline
           (make-instance 'luv::vulkan-presentation-timeline
                          :stage :image-first-pixel-visible)))
@@ -1175,9 +1178,9 @@
       (let ((present-id (1+ index)))
         (luv::note-vulkan-presentation-submission
          timeline present-id (+ 10d0 (/ index 60d0)) (+ 9.99d0 (/ index 60d0)))
-        (ok (luv::note-vulkan-presentation-result
-             timeline present-id (+ 1000000000 (* index 16666667))
-             :clock-monotonic 7))))
+        (true (luv::note-vulkan-presentation-result
+               timeline present-id (+ 1000000000 (* index 16666667))
+               :clock-monotonic 7))))
     (let* ((snapshot (luv::snapshot-vulkan-presentation-timeline timeline))
            (observations
              (coerce (luv:presentation-timing-snapshot-observations snapshot)
@@ -1187,17 +1190,17 @@
            (drift
              (luv::presentation-timing-phase-errors-milliseconds
               observations)))
-      (ok (eq :recording
-              (luv:presentation-timing-snapshot-status snapshot)))
-      (ok (equal '(1 2 3)
-                 (mapcar #'luv:presentation-timing-observation-present-id
-                         observations)))
-      (ok (= 2 (length intervals)))
-      (ok (every (lambda (value) (< (abs (- value 16.666667d0)) 1d-9))
-                 intervals))
-      (ok (< (abs (car (last drift))) 1d-3)))))
+      (true (eq :recording
+                (luv:presentation-timing-snapshot-status snapshot)))
+      (true (equal '(1 2 3)
+                   (mapcar #'luv:presentation-timing-observation-present-id
+                           observations)))
+      (true (= 2 (length intervals)))
+      (true (every (lambda (value) (< (abs (- value 16.666667d0)) 1d-9))
+                   intervals))
+      (true (< (abs (car (last drift))) 1d-3)))))
 
-(deftest presentation-prediction-marches-over-native-display-beats
+(define-test presentation-prediction-marches-over-native-display-beats
   (let ((timeline
           (make-instance 'luv::vulkan-presentation-timeline
                          :stage :image-first-pixel-visible
@@ -1213,34 +1216,34 @@
     ;; host animation prediction remains untouched.
     (luv::note-vulkan-presentation-submission
      timeline 7 10d0 9.99d0 1000000000)
-    (ok (luv::note-vulkan-presentation-result
-         timeline 7 1016666667 :present-stage-local-ext 7))
+    (true (luv::note-vulkan-presentation-result
+           timeline 7 1016666667 :present-stage-local-ext 7))
     (multiple-value-bind (host target)
         (luv::predict-vulkan-presentation-target timeline 99d0)
-      (ok (= host 99d0))
-      (ok (= target 1016666667)))
+      (true (= host 99d0))
+      (true (= target 1016666667)))
     (multiple-value-bind (host target)
         (luv::predict-vulkan-presentation-target timeline 100d0)
-      (ok (= host 100d0))
-      (ok (= target 1016666667))
+      (true (= host 100d0))
+      (true (= target 1016666667))
       (luv::note-vulkan-presentation-submission
        timeline 8 host 99.99d0 target))
     ;; Feedback for 7 may still be the newest result when frame 9 is queued.
     ;; The queued target, not a cross-clock lateness estimate, owns cadence.
     (multiple-value-bind (host target)
         (luv::predict-vulkan-presentation-target timeline 101d0)
-      (ok (= host 101d0))
-      (ok (= target 1033333334)))
+      (true (= host 101d0))
+      (true (= target 1033333334)))
     ;; Frame 8 then misses its target by one whole refresh.  That lateness is
     ;; diagnostic feedback; it must not turn frame 9 into another 33 ms gap.
-    (ok (luv::note-vulkan-presentation-result
-         timeline 8 1033333334 :present-stage-local-ext 7))
+    (true (luv::note-vulkan-presentation-result
+           timeline 8 1033333334 :present-stage-local-ext 7))
     (multiple-value-bind (host target)
         (luv::predict-vulkan-presentation-target timeline 102d0)
-      (ok (= host 102d0))
-      (ok (= target 1033333334)))))
+      (true (= host 102d0))
+      (true (= target 1033333334)))))
 
-(deftest presentation-timeline-ring-retains-only-its-newest-minute
+(define-test presentation-timeline-ring-retains-only-its-newest-minute
   (let ((timeline
           (make-instance 'luv::vulkan-presentation-timeline
                          :stage :image-first-pixel-out)))
@@ -1252,26 +1255,26 @@
     (let ((observations
             (luv:presentation-timing-snapshot-observations
              (luv::snapshot-vulkan-presentation-timeline timeline))))
-      (ok (= luv::+vulkan-presentation-timing-capacity+
-             (length observations)))
-      (ok (= 6
-             (luv:presentation-timing-observation-present-id
-              (aref observations 0))))
-      (ok (= (+ luv::+vulkan-presentation-timing-capacity+ 5)
-             (luv:presentation-timing-observation-present-id
-              (aref observations (1- (length observations)))))))))
+      (true (= luv::+vulkan-presentation-timing-capacity+
+               (length observations)))
+      (true (= 6
+               (luv:presentation-timing-observation-present-id
+                (aref observations 0))))
+      (true (= (+ luv::+vulkan-presentation-timing-capacity+ 5)
+               (luv:presentation-timing-observation-present-id
+                (aref observations (1- (length observations)))))))))
 
-(deftest real-loader-calls-allocate-events-only-in-an-explicit-trace
-  (ok (null (lvk:current-vulkan-trace)))
-  (ok (plusp (length (lvk:enumerate-instance-extension-names))))
+(define-test real-loader-calls-allocate-events-only-in-an-explicit-trace
+  (true (null (lvk:current-vulkan-trace)))
+  (true (plusp (length (lvk:enumerate-instance-extension-names))))
   (let (trace)
     (lvk:with-vulkan-trace (active-trace)
       (setf trace active-trace)
-      (ok (plusp (length (lvk:enumerate-instance-extension-names)))))
-    (ok (null (lvk:current-vulkan-trace)))
+      (true (plusp (length (lvk:enumerate-instance-extension-names)))))
+    (true (null (lvk:current-vulkan-trace)))
     (let ((events (lvk:vulkan-trace-events trace)))
-      (ok (= (length events) 2))
+      (true (= (length events) 2))
       (dolist (event events)
-        (ok (equal (lvk:vulkan-call-event-foreign-name event)
-                   "vkEnumerateInstanceExtensionProperties"))
-        (ok (eq (lvk:vulkan-call-event-status event) :returned))))))
+        (true (equal (lvk:vulkan-call-event-foreign-name event)
+                     "vkEnumerateInstanceExtensionProperties"))
+        (true (eq (lvk:vulkan-call-event-status event) :returned))))))

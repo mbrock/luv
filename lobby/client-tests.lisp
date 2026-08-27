@@ -1,5 +1,6 @@
 (defpackage #:luv.lobby.tests
-  (:use #:cl #:rove))
+  (:use #:cl)
+  (:import-from #:parachute #:define-test #:true #:false #:fail #:group #:skip))
 
 (in-package #:luv.lobby.tests)
 
@@ -55,7 +56,7 @@
         when (>= (get-internal-real-time) deadline) return nil
         do (sleep 1/200)))
 
-(deftest lobby-snapshot-is-semantic-and-does-not-revise-for-duplicates
+(define-test lobby-snapshot-is-semantic-and-does-not-revise-for-duplicates
   (let ((client
           (luv.lobby:make-lobby-client
            :name "Mikael" :client-id-prefix "test"
@@ -68,21 +69,21 @@
      client "luv/presence/game-2" "Daniel")
     (let* ((snapshot (luv.lobby:lobby-client-snapshot client))
            (revision (luv.lobby:lobby-snapshot-revision snapshot)))
-      (ok (eq :stopped (luv.lobby:lobby-snapshot-status snapshot)))
-      (ok (equal '("Daniel")
-                 (mapcar #'luv.lobby:lobby-peer-name
-                         (luv.lobby:lobby-snapshot-peers snapshot))))
+      (true (eq :stopped (luv.lobby:lobby-snapshot-status snapshot)))
+      (true (equal '("Daniel")
+                   (mapcar #'luv.lobby:lobby-peer-name
+                           (luv.lobby:lobby-snapshot-peers snapshot))))
       (luv.lobby:receive-lobby-publication
        client "luv/presence/game-2" "Daniel")
-      (ok (= revision
-             (luv.lobby:lobby-snapshot-revision
-              (luv.lobby:lobby-client-snapshot client)))))
+      (true (= revision
+               (luv.lobby:lobby-snapshot-revision
+                (luv.lobby:lobby-client-snapshot client)))))
     (luv.lobby:receive-lobby-publication
      client "luv/presence/game-2" luv.lobby:+lobby-offline-payload+)
-    (ok (null (luv.lobby:lobby-snapshot-peers
-               (luv.lobby:lobby-client-snapshot client))))))
+    (true (null (luv.lobby:lobby-snapshot-peers
+                 (luv.lobby:lobby-client-snapshot client))))))
 
-(deftest lobby-summary-is-a-constant-work-frame-boundary-view
+(define-test lobby-summary-is-a-constant-work-frame-boundary-view
   (let ((client
           (luv.lobby:make-lobby-client
            :client-id-prefix "summary"
@@ -91,26 +92,26 @@
      client "luv/presence/game-2" "Daniel")
     (multiple-value-bind (status peer-count last-error revision)
         (luv.lobby:lobby-client-summary client)
-      (ok (eq :stopped status))
-      (ok (= 1 peer-count))
-      (ok (null last-error))
-      (ok (plusp revision))
+      (true (eq :stopped status))
+      (true (= 1 peer-count))
+      (true (null last-error))
+      (true (plusp revision))
       ;; A duplicate publication changes neither the count nor the cheap
       ;; semantic revision.
       (luv.lobby:receive-lobby-publication
        client "luv/presence/game-2" "Daniel")
       (multiple-value-bind (later-status later-count later-error later-revision)
           (luv.lobby:lobby-client-summary client)
-        (ok (eq status later-status))
-        (ok (= peer-count later-count))
-        (ok (eq last-error later-error))
-        (ok (= revision later-revision))))
+        (true (eq status later-status))
+        (true (= peer-count later-count))
+        (true (eq last-error later-error))
+        (true (= revision later-revision))))
     (multiple-value-bind (status peer-count last-error revision)
         (luv.lobby:lobby-client-summary nil)
-      (ok (equal '(:stopped 0 nil 0)
-                 (list status peer-count last-error revision))))))
+      (true (equal '(:stopped 0 nil 0)
+                   (list status peer-count last-error revision))))))
 
-(deftest lobby-cache-is-connection-scoped
+(define-test lobby-cache-is-connection-scoped
   (let ((client
           (luv.lobby:make-lobby-client
            :client-id-prefix "test"
@@ -119,22 +120,22 @@
      client "luv/presence/game-2" "Daniel")
     (luv.lobby:receive-lobby-publication
      client "luv/store/OPENAI_API_KEY" "secret")
-    (ok (string= "secret"
-                 (luv.lobby:lobby-client-value client "OPENAI_API_KEY")))
+    (true (string= "secret"
+                   (luv.lobby:lobby-client-value client "OPENAI_API_KEY")))
     ;; A connecting transition begins a new subscription epoch.  Both peer
     ;; presence and retained values must be reconstructed by that connection.
     (luv.lobby::publish-lobby-status
      client :connecting :clear-cache-p t)
     (let ((snapshot (luv.lobby:lobby-client-snapshot client)))
-      (ok (null (luv.lobby:lobby-snapshot-peers snapshot)))
-      (ok (null (luv.lobby:lobby-client-value client "OPENAI_API_KEY"))))
+      (true (null (luv.lobby:lobby-snapshot-peers snapshot)))
+      (true (null (luv.lobby:lobby-client-value client "OPENAI_API_KEY"))))
     (luv.lobby:receive-lobby-publication
      client "luv/store/OPENAI_API_KEY" "new-secret")
     (luv.lobby:receive-lobby-publication
      client "luv/store/OPENAI_API_KEY" "")
-    (ok (null (luv.lobby:lobby-client-value client "OPENAI_API_KEY")))))
+    (true (null (luv.lobby:lobby-client-value client "OPENAI_API_KEY")))))
 
-(deftest lobby-worker-retries-stops-and-restarts
+(define-test lobby-worker-retries-stops-and-restarts
   (let* ((transport
            (make-instance 'scripted-lobby-transport :fail-opens 1))
          (client
@@ -144,33 +145,33 @@
     (unwind-protect
          (progn
            (luv.lobby:start-lobby-client client)
-           (ok (wait-for-lobby-test
-                (lambda ()
-                  (eq :online
-                      (luv.lobby:lobby-snapshot-status
-                       (luv.lobby:lobby-client-snapshot client))))))
-           (ok (= 2 (scripted-transport-opens transport)))
-           (ok (luv.lobby:lobby-client-running-p client))
+           (true (wait-for-lobby-test
+                  (lambda ()
+                    (eq :online
+                        (luv.lobby:lobby-snapshot-status
+                         (luv.lobby:lobby-client-snapshot client))))))
+           (true (= 2 (scripted-transport-opens transport)))
+           (true (luv.lobby:lobby-client-running-p client))
            (luv.lobby:stop-lobby-client client)
-           (ok (eq :stopped
-                   (luv.lobby:lobby-snapshot-status
-                    (luv.lobby:lobby-client-snapshot client))))
-           (ok (not (luv.lobby:lobby-client-running-p client)))
-           (ok (= 1 (scripted-transport-closes transport)))
-           (ok (member "Mikael" (scripted-transport-published transport)
-                       :test #'string=))
-           (ok (member "" (scripted-transport-published transport)
-                       :test #'string=))
+           (true (eq :stopped
+                     (luv.lobby:lobby-snapshot-status
+                      (luv.lobby:lobby-client-snapshot client))))
+           (true (not (luv.lobby:lobby-client-running-p client)))
+           (true (= 1 (scripted-transport-closes transport)))
+           (true (member "Mikael" (scripted-transport-published transport)
+                         :test #'string=))
+           (true (member "" (scripted-transport-published transport)
+                         :test #'string=))
            ;; Restart reuses the semantic owner but starts a fresh worker and
            ;; subscription epoch instead of retaining STOPPING-P forever.
            (luv.lobby:start-lobby-client client)
-           (ok (wait-for-lobby-test
-                (lambda () (= 3 (scripted-transport-opens transport)))))
+           (true (wait-for-lobby-test
+                  (lambda () (= 3 (scripted-transport-opens transport)))))
            (luv.lobby:stop-lobby-client client)
-           (ok (= 2 (scripted-transport-closes transport))))
+           (true (= 2 (scripted-transport-closes transport))))
       (ignore-errors (luv.lobby:stop-lobby-client client)))))
 
-(deftest lobby-stop-interrupts-backoff-without-network-work-on-caller
+(define-test lobby-stop-interrupts-backoff-without-network-work-on-caller
   (let* ((transport
            (make-instance 'scripted-lobby-transport :fail-opens 100))
          (client
@@ -179,15 +180,15 @@
     (unwind-protect
          (progn
            (luv.lobby:start-lobby-client client)
-           (ok (wait-for-lobby-test
-                (lambda ()
-                  (eq :offline
-                      (luv.lobby:lobby-snapshot-status
-                       (luv.lobby:lobby-client-snapshot client))))))
+           (true (wait-for-lobby-test
+                  (lambda ()
+                    (eq :offline
+                        (luv.lobby:lobby-snapshot-status
+                         (luv.lobby:lobby-client-snapshot client))))))
            (let ((started (get-internal-real-time)))
              (luv.lobby:stop-lobby-client client)
-             (ok (< (/ (- (get-internal-real-time) started)
-                       internal-time-units-per-second)
-                    0.25)))
-           (ok (zerop (scripted-transport-closes transport))))
+             (true (< (/ (- (get-internal-real-time) started)
+                         internal-time-units-per-second)
+                      0.25)))
+           (true (zerop (scripted-transport-closes transport))))
       (ignore-errors (luv.lobby:stop-lobby-client client)))))

@@ -128,98 +128,98 @@ so the exchange must derive a time offset of zero.")
    ;; The recording predates p_q_inner_data_dc.
    :dc-in-inner-data nil))
 
-(deftest recorded-handshake-reproduces-byte-for-byte
+(define-test recorded-handshake-reproduces-byte-for-byte
   (let ((exchange (sample-exchange)))
-    (testing "the opening request"
-      (ok (equalp +sample-req-pq-multi+
-                  (mt:begin-auth-exchange exchange :nonce +sample-nonce+)))
-      (ok (eq :awaiting-res-pq (mt:auth-exchange-phase exchange))))
-    (testing "resPQ is answered with the proof of work under RSA"
-      (ok (equalp +sample-req-dh-params+
-                  (mt:advance-auth-exchange exchange +sample-res-pq+)))
-      (ok (eq :awaiting-server-dh-params (mt:auth-exchange-phase exchange)))
-      (ok (equalp (subseq +sample-random+ 0 32)
-                  (mt:auth-exchange-new-nonce exchange))))
-    (testing "the Diffie-Hellman parameters yield our public value and the key"
-      (ok (equalp +sample-set-client-dh-params+
-                  (mt:advance-auth-exchange exchange +sample-server-dh-params+)))
-      (ok (eq :awaiting-dh-gen (mt:auth-exchange-phase exchange)))
-      (ok (= 4459407212920268508 (mt:auth-exchange-server-salt exchange)))
-      (ok (= 0 (mt:auth-exchange-time-offset exchange))))
-    (testing "and dh_gen_ok completes it"
-      (ok (null (mt:advance-auth-exchange exchange +sample-dh-gen-ok+)))
-      (ok (mt:auth-exchange-complete-p exchange))
-      (ok (equalp +sample-auth-key+
-                  (mt:auth-key-data (mt:auth-exchange-key exchange)))))
-    (testing "leaving material a session can be built on"
+    (group (context "the opening request")
+      (true (equalp +sample-req-pq-multi+
+                    (mt:begin-auth-exchange exchange :nonce +sample-nonce+)))
+      (true (eq :awaiting-res-pq (mt:auth-exchange-phase exchange))))
+    (group (context "resPQ is answered with the proof of work under RSA")
+      (true (equalp +sample-req-dh-params+
+                    (mt:advance-auth-exchange exchange +sample-res-pq+)))
+      (true (eq :awaiting-server-dh-params (mt:auth-exchange-phase exchange)))
+      (true (equalp (subseq +sample-random+ 0 32)
+                    (mt:auth-exchange-new-nonce exchange))))
+    (group (context "the Diffie-Hellman parameters yield our public value and the key")
+      (true (equalp +sample-set-client-dh-params+
+                    (mt:advance-auth-exchange exchange +sample-server-dh-params+)))
+      (true (eq :awaiting-dh-gen (mt:auth-exchange-phase exchange)))
+      (true (= 4459407212920268508 (mt:auth-exchange-server-salt exchange)))
+      (true (= 0 (mt:auth-exchange-time-offset exchange))))
+    (group (context "and dh_gen_ok completes it")
+      (true (null (mt:advance-auth-exchange exchange +sample-dh-gen-ok+)))
+      (true (mt:auth-exchange-complete-p exchange))
+      (true (equalp +sample-auth-key+
+                    (mt:auth-key-data (mt:auth-exchange-key exchange)))))
+    (group (context "leaving material a session can be built on")
       (let ((material (mt:auth-exchange-result exchange)))
-        (ok (= 4459407212920268508 (mt:auth-key-material-server-salt material)))
-        (ok (= 0 (mt:auth-key-material-time-offset material)))))))
+        (true (= 4459407212920268508 (mt:auth-key-material-server-salt material)))
+        (true (= 0 (mt:auth-key-material-time-offset material)))))))
 
-(deftest a-tampered-recording-is-rejected
-  (testing "a resPQ echoing the wrong nonce is not our exchange"
+(define-test a-tampered-recording-is-rejected
+  (group (context "a resPQ echoing the wrong nonce is not our exchange")
     (let ((exchange (sample-exchange))
           (response (copy-seq +sample-res-pq+)))
       (mt:begin-auth-exchange exchange :nonce +sample-nonce+)
       (setf (aref response 4) (logxor 1 (aref response 4)))
-      (signals (mt:advance-auth-exchange exchange response) 'mt:nonce-mismatch)))
-  (testing "and a dh_gen_ok whose hash does not match the key we derived"
+      (fail (mt:advance-auth-exchange exchange response) 'mt:nonce-mismatch)))
+  (group (context "and a dh_gen_ok whose hash does not match the key we derived")
     (let ((exchange (sample-exchange))
           (answer (copy-seq +sample-dh-gen-ok+)))
       (mt:begin-auth-exchange exchange :nonce +sample-nonce+)
       (mt:advance-auth-exchange exchange +sample-res-pq+)
       (mt:advance-auth-exchange exchange +sample-server-dh-params+)
       (setf (aref answer 40) (logxor 1 (aref answer 40)))
-      (signals (mt:advance-auth-exchange exchange answer) 'mt:nonce-mismatch)))
-  (testing "and a response arriving in the wrong phase"
+      (fail (mt:advance-auth-exchange exchange answer) 'mt:nonce-mismatch)))
+  (group (context "and a response arriving in the wrong phase")
     (let ((exchange (sample-exchange)))
       (mt:begin-auth-exchange exchange :nonce +sample-nonce+)
-      (signals (mt:advance-auth-exchange exchange +sample-dh-gen-ok+)
-               'mt:mtproto-protocol-error))))
+      (fail (mt:advance-auth-exchange exchange +sample-dh-gen-ok+)
+            'mt:mtproto-protocol-error))))
 
 ;;;; Key derivation
 ;;;;
 ;;;; Taken over an authorization key that is simply the bytes 0 through 255,
 ;;;; which is what makes them comparable across implementations.
 
-(deftest authorization-key-metadata
+(define-test authorization-key-metadata
   (let ((key (mt:make-auth-key (counting-octets 256))))
-    (ok (equal "4916d6bdb7f78e68" (unhex (mt:auth-key-aux-hash key))))
-    (ok (equal "32d1586ea457dfc8" (unhex (mt:auth-key-id key))))
-    (testing "the new_nonce_hash the server proves itself with"
-      (ok (equal "c2ced2b33e593a55d27f4a5dabee7c67"
-                 (unhex (mt:new-nonce-hash key (counting-octets 32) 1)))))
-    (testing "the per-message key"
-      (ok (equal "fbfa5fa94e2a70f3ad96dd24f7ad36b5"
-                 (unhex (mt:message-key key (counting-octets 32 16) :client)))))
-    (testing "and the AES key and IV derived from it"
+    (true (equal "4916d6bdb7f78e68" (unhex (mt:auth-key-aux-hash key))))
+    (true (equal "32d1586ea457dfc8" (unhex (mt:auth-key-id key))))
+    (group (context "the new_nonce_hash the server proves itself with")
+      (true (equal "c2ced2b33e593a55d27f4a5dabee7c67"
+                   (unhex (mt:new-nonce-hash key (counting-octets 32) 1)))))
+    (group (context "the per-message key")
+      (true (equal "fbfa5fa94e2a70f3ad96dd24f7ad36b5"
+                   (unhex (mt:message-key key (counting-octets 32 16) :client)))))
+    (group (context "and the AES key and IV derived from it")
       (multiple-value-bind (aes-key aes-iv)
           (mt:derive-aes-key-iv key (mt:message-key key (counting-octets 32 16)
                                                     :client)
                                 :client)
-        (ok (equal (concatenate 'string
-                                "36bce969c89677d9cadd87de515f83a5"
-                                "265d2f17274cb43de11122996338e5f2")
-                   (unhex aes-key)))
-        (ok (equal (concatenate 'string
-                                "4808d5e2c25ecf23d82aab1b1aae0376"
-                                "e073e9f175db200548fb5432d4980271")
-                   (unhex aes-iv)))))
-    (testing "and the two directions never derive the same key"
-      (ok (not (equalp (mt:message-key key (counting-octets 32 16) :client)
-                       (mt:message-key key (counting-octets 32 16) :server)))))))
+        (true (equal (concatenate 'string
+                                  "36bce969c89677d9cadd87de515f83a5"
+                                  "265d2f17274cb43de11122996338e5f2")
+                     (unhex aes-key)))
+        (true (equal (concatenate 'string
+                                  "4808d5e2c25ecf23d82aab1b1aae0376"
+                                  "e073e9f175db200548fb5432d4980271")
+                     (unhex aes-iv)))))
+    (group (context "and the two directions never derive the same key")
+      (true (not (equalp (mt:message-key key (counting-octets 32 16) :client)
+                         (mt:message-key key (counting-octets 32 16) :server)))))))
 
-(deftest padded-envelopes-round-trip
+(define-test padded-envelopes-round-trip
   (let ((key (mt:make-auth-key (counting-octets 256)))
         (plaintext (counting-octets 32 16)))
     (let ((sealed (mt:encrypt-padded plaintext key :client)))
-      (ok (equalp (mt:auth-key-id key) (subseq sealed 0 8)))
-      (ok (equalp plaintext (mt:decrypt-padded sealed key :client)))
-      (testing "and opening one as the wrong direction fails its hash"
-        (signals (mt:decrypt-padded sealed key :server)
-                 'mt:message-key-mismatch))
-      (testing "and a flipped bit is caught"
+      (true (equalp (mt:auth-key-id key) (subseq sealed 0 8)))
+      (true (equalp plaintext (mt:decrypt-padded sealed key :client)))
+      (group (context "and opening one as the wrong direction fails its hash")
+        (fail (mt:decrypt-padded sealed key :server)
+              'mt:message-key-mismatch))
+      (group (context "and a flipped bit is caught")
         (let ((tampered (copy-seq sealed)))
           (setf (aref tampered 30) (logxor 1 (aref tampered 30)))
-          (signals (mt:decrypt-padded tampered key :client)
-                   'mt:message-key-mismatch))))))
+          (fail (mt:decrypt-padded tampered key :client)
+                'mt:message-key-mismatch))))))

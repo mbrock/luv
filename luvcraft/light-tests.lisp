@@ -37,18 +37,18 @@
 (defun blocklight-at (world x y z)
   (nth-value 1 (world-light-at world x y z)))
 
-(deftest open-columns-see-full-sky
+(define-test open-columns-see-full-sky
   (let ((world (make-open-sky-test-world)))
     (relight-block-world world)
-    (ok (= (sky-at world 8 15 8) 15))
-    (ok (= (sky-at world 8 0 8) 15))
-    (ok (= (sky-at world 0 0 0) 15))
-    (ok (= (sky-at world 15 7 15) 15))
+    (true (= (sky-at world 8 15 8) 15))
+    (true (= (sky-at world 8 0 8) 15))
+    (true (= (sky-at world 0 0 0) 15))
+    (true (= (sky-at world 15 7 15) 15))
     ;; Lateral terrain is generatable but not resident, so the result is
     ;; honest but provisional.
-    (ok (eq (nth-value 2 (world-light-at world 8 8 8)) :provisional))))
+    (true (eq (nth-value 2 (world-light-at world 8 8 8)) :provisional))))
 
-(deftest roofs-block-light-and-shafts-transmit-it
+(define-test roofs-block-light-and-shafts-transmit-it
   (let ((world (make-open-sky-test-world)))
     (dotimes (x 16)
       (dotimes (z 16)
@@ -57,31 +57,31 @@
     (relight-block-world world)
     ;; Stone roof cells admit no sky; the open shaft carries a full beam
     ;; to the floor, and lateral spread attenuates one level per step.
-    (ok (= (sky-at world 2 15 2) 0))
-    (ok (= (sky-at world 8 15 8) 15))
-    (ok (= (sky-at world 8 0 8) 15))
-    (ok (= (sky-at world 7 14 8) 14))
-    (ok (= (sky-at world 2 14 2) 3))
-    (ok (= (sky-at world 0 0 0) 0))))
+    (true (= (sky-at world 2 15 2) 0))
+    (true (= (sky-at world 8 15 8) 15))
+    (true (= (sky-at world 8 0 8) 15))
+    (true (= (sky-at world 7 14 8) 14))
+    (true (= (sky-at world 2 14 2) 3))
+    (true (= (sky-at world 0 0 0) 0))))
 
-(deftest emitters-fall-off-and-the-brighter-source-wins
+(define-test emitters-fall-off-and-the-brighter-source-wins
   (let ((world (make-open-sky-test-world)))
     (setf (world-block-at world 8 8 8) *test-glow-block*)
     (setf (world-block-at world 12 8 8) *test-dim-glow-block*)
     (relight-block-world world)
-    (ok (= (blocklight-at world 8 8 8) 10))
-    (ok (= (blocklight-at world 8 9 8) 9))
-    (ok (= (blocklight-at world 8 8 11) 7))
-    (ok (= (blocklight-at world 8 8 2) 4))
+    (true (= (blocklight-at world 8 8 8) 10))
+    (true (= (blocklight-at world 8 9 8) 9))
+    (true (= (blocklight-at world 8 8 11) 7))
+    (true (= (blocklight-at world 8 8 2) 4))
     ;; Sixteen Manhattan steps out, the level is exhausted.
-    (ok (= (blocklight-at world 0 8 0) 0))
+    (true (= (blocklight-at world 0 8 0) 0))
     ;; Between the two emitters each cell keeps the brighter contribution.
-    (ok (= (blocklight-at world 10 8 8) 8))
-    (ok (= (blocklight-at world 11 8 8) 7))
+    (true (= (blocklight-at world 10 8 8) 8))
+    (true (= (blocklight-at world 11 8 8) 7))
     ;; Emission does not perturb the sky field.
-    (ok (= (sky-at world 8 9 8) 15))))
+    (true (= (sky-at world 8 9 8) 15))))
 
-(deftest walls-stop-blocklight
+(define-test walls-stop-blocklight
   (let ((world (make-open-sky-test-world)))
     (setf (world-block-at world 4 8 8) *test-glow-block*)
     ;; A full stone shell one step out along +X.
@@ -89,11 +89,11 @@
       (dotimes (z 16)
         (setf (world-block-at world 6 y z) luvcraft::*stone-block*)))
     (relight-block-world world)
-    (ok (= (blocklight-at world 5 8 8) 9))
-    (ok (= (blocklight-at world 6 8 8) 0))
-    (ok (= (blocklight-at world 7 8 8) 0))))
+    (true (= (blocklight-at world 5 8 8) 9))
+    (true (= (blocklight-at world 6 8 8) 0))
+    (true (= (blocklight-at world 7 8 8) 0))))
 
-(deftest sky-crosses-a-vertical-chunk-seam
+(define-test sky-crosses-a-vertical-chunk-seam
   (let ((world (make-open-sky-test-world '(0 0 0) '(0 1 0))))
     ;; Roof the upper chunk's top layer, world y = 31, with one shaft.
     (dotimes (x 16)
@@ -101,16 +101,16 @@
         (unless (and (= x 4) (= z 4))
           (setf (world-block-at world x 31 z) luvcraft::*stone-block*))))
     (relight-block-world world)
-    (ok (= (sky-at world 4 31 4) 15))
+    (true (= (sky-at world 4 31 4) 15))
     ;; The beam crosses the seam at world y = 15/16 undiminished.
-    (ok (= (sky-at world 4 16 4) 15))
-    (ok (= (sky-at world 4 15 4) 15))
-    (ok (= (sky-at world 4 0 4) 15))
+    (true (= (sky-at world 4 16 4) 15))
+    (true (= (sky-at world 4 15 4) 15))
+    (true (= (sky-at world 4 0 4) 15))
     ;; Lateral falloff below the seam still measures from the shaft.
-    (ok (= (sky-at world 0 5 0) 7))
-    (ok (= (sky-at world 15 5 15) 0))))
+    (true (= (sky-at world 0 5 0) 7))
+    (true (= (sky-at world 15 5 15) 0))))
 
-(deftest sky-crosses-a-lateral-chunk-seam
+(define-test sky-crosses-a-lateral-chunk-seam
   (let ((world (make-open-sky-test-world '(0 0 0) '(1 0 0))))
     ;; Roof the +X chunk completely; its light must arrive sideways from
     ;; the open chunk across the seam.
@@ -118,26 +118,26 @@
       (dotimes (z 16)
         (setf (world-block-at world (+ 16 x) 15 z) luvcraft::*stone-block*)))
     (relight-block-world world)
-    (ok (= (sky-at world 15 14 8) 15))
-    (ok (= (sky-at world 16 14 8) 14))
-    (ok (= (sky-at world 20 14 8) 10))
-    (ok (= (sky-at world 31 14 8) 0))))
+    (true (= (sky-at world 15 14 8) 15))
+    (true (= (sky-at world 16 14 8) 14))
+    (true (= (sky-at world 20 14 8) 10))
+    (true (= (sky-at world 31 14 8) 0))))
 
-(deftest relighting-is-a-derived-domain-with-its-own-revisions
+(define-test relighting-is-a-derived-domain-with-its-own-revisions
   (let ((world (make-open-sky-test-world)))
     (let* ((chunk (luvcraft::world-chunk-at world 0 0 0))
            (content-revision (luvcraft::block-chunk-revision chunk))
            (world-revision (block-world-revision world))
            (changed (relight-block-world world))
            (field (block-chunk-light-field chunk)))
-      (ok (= (length changed) 1))
-      (ok (= (chunk-light-field-revision field) 1))
+      (true (= (length changed) 1))
+      (true (= (chunk-light-field-revision field) 1))
       ;; Light publication does not impersonate an authored edit.
-      (ok (= (luvcraft::block-chunk-revision chunk) content-revision))
-      (ok (= (block-world-revision world) world-revision))
+      (true (= (luvcraft::block-chunk-revision chunk) content-revision))
+      (true (= (block-world-revision world) world-revision))
       ;; A second solve over unchanged content publishes nothing.
-      (ok (null (relight-block-world world)))
-      (ok (= (chunk-light-field-revision field) 1))
+      (true (null (relight-block-world world)))
+      (true (= (chunk-light-field-revision field) 1))
       ;; A content edit then changes the field and only the light revision
       ;; and changed light boundaries advance.
       (let ((top-before
@@ -145,12 +145,12 @@
             (bottom-before
               (chunk-light-field-boundary-revision field +voxel-negative-y+)))
         (setf (world-block-at world 8 15 8) luvcraft::*stone-block*)
-        (ok (relight-block-world world))
-        (ok (= (chunk-light-field-revision field) 2))
-        (ok (= (chunk-light-field-boundary-revision field +voxel-positive-y+)
-               (1+ top-before)))
-        (ok (= (chunk-light-field-boundary-revision field +voxel-negative-y+)
-               (1+ bottom-before)))))))
+        (true (relight-block-world world))
+        (true (= (chunk-light-field-revision field) 2))
+        (true (= (chunk-light-field-boundary-revision field +voxel-positive-y+)
+                 (1+ top-before)))
+        (true (= (chunk-light-field-boundary-revision field +voxel-negative-y+)
+                 (1+ bottom-before)))))))
 
 ;;; The incremental relighter is judged against the reference solver: after
 ;;; its queues settle, every resident cell must be bit-identical to a
@@ -170,20 +170,20 @@
                  (equalp (luvcraft::light-region-entry-block entry)
                          (chunk-light-field-block-levels field)))))))
 
-(deftest compiled-frontier-light-is-inspectable-and-matches-the-oracle
+(define-test compiled-frontier-light-is-inspectable-and-matches-the-oracle
   (let ((definition
           (luvcraft.frontier:frontier-program-definition-for
            'luvcraft::voxel-light-addition)))
-    (ok (typep definition 'luvcraft.frontier:frontier-program-definition))
-    (ok (eq :monotone-max-fixpoint
-            (luvcraft.frontier:frontier-program-definition-family
-             definition)))
-    (ok (eq :brightest-first-buckets
-            (luvcraft.frontier:frontier-program-definition-frontier-layout
-             definition)))
-    (ok (eq :voxel-face-relations
-            (luvcraft.frontier:frontier-program-definition-neighborhood
-             definition))))
+    (true (typep definition 'luvcraft.frontier:frontier-program-definition))
+    (true (eq :monotone-max-fixpoint
+              (luvcraft.frontier:frontier-program-definition-family
+               definition)))
+    (true (eq :brightest-first-buckets
+              (luvcraft.frontier:frontier-program-definition-frontier-layout
+               definition)))
+    (true (eq :voxel-face-relations
+              (luvcraft.frontier:frontier-program-definition-neighborhood
+               definition))))
   (let ((world
           (make-open-sky-test-world
            '(0 0 0) '(0 1 0) '(1 0 0))))
@@ -197,40 +197,40 @@
           (world-block-at world 18 8 8) *test-dim-glow-block*)
     (let ((comparison
             (luvcraft.light-reference:compare-voxel-light-solvers world)))
-      (ok (luvcraft.light-reference:voxel-light-solver-comparison-equal-p
-           comparison))
-      (ok (null
-           (luvcraft.light-reference:voxel-light-solver-comparison-mismatched-keys
-            comparison)))
-      (ok (= (luvcraft.light-reference:voxel-light-solver-comparison-legacy-visits
-              comparison)
-             (luvcraft.light-reference:voxel-light-solver-comparison-candidate-visits
+      (true (luvcraft.light-reference:voxel-light-solver-comparison-equal-p
+             comparison))
+      (true (null
+             (luvcraft.light-reference:voxel-light-solver-comparison-mismatched-keys
               comparison)))
-      (ok (plusp
-           (luvcraft.light-reference:voxel-light-solver-comparison-legacy-bytes-consed
-            comparison)))
-      (ok (plusp
-           (luvcraft.light-reference:voxel-light-solver-comparison-candidate-bytes-consed
-            comparison)))
-      (ok (>= (luvcraft.light-reference:voxel-light-solver-comparison-legacy-gc-seconds
-               comparison)
-              0d0))
-      (ok (>= (luvcraft.light-reference:voxel-light-solver-comparison-candidate-gc-seconds
-               comparison)
-              0d0))
-      (ok (= 2 (length
-                (luvcraft.light-reference:voxel-light-solver-comparison-candidate-executions
-                 comparison))))
+      (true (= (luvcraft.light-reference:voxel-light-solver-comparison-legacy-visits
+                comparison)
+               (luvcraft.light-reference:voxel-light-solver-comparison-candidate-visits
+                comparison)))
+      (true (plusp
+             (luvcraft.light-reference:voxel-light-solver-comparison-legacy-bytes-consed
+              comparison)))
+      (true (plusp
+             (luvcraft.light-reference:voxel-light-solver-comparison-candidate-bytes-consed
+              comparison)))
+      (true (>= (luvcraft.light-reference:voxel-light-solver-comparison-legacy-gc-seconds
+                 comparison)
+                0d0))
+      (true (>= (luvcraft.light-reference:voxel-light-solver-comparison-candidate-gc-seconds
+                 comparison)
+                0d0))
+      (true (= 2 (length
+                  (luvcraft.light-reference:voxel-light-solver-comparison-candidate-executions
+                   comparison))))
       (dolist (execution
                (luvcraft.light-reference:voxel-light-solver-comparison-candidate-executions
                 comparison))
-        (ok (plusp
-             (luvcraft.frontier:frontier-execution-visits execution)))
-        (ok (= (* 6
-                  (luvcraft.frontier:frontier-execution-visits execution))
-               (luvcraft.frontier:frontier-execution-relations execution)))
-        (ok (plusp
-             (luvcraft.frontier:frontier-execution-crossings execution)))))))
+        (true (plusp
+               (luvcraft.frontier:frontier-execution-visits execution)))
+        (true (= (* 6
+                    (luvcraft.frontier:frontier-execution-visits execution))
+                 (luvcraft.frontier:frontier-execution-relations execution)))
+        (true (plusp
+               (luvcraft.frontier:frontier-execution-crossings execution)))))))
 
 (defun make-compiled-light-proof-world ()
   "Three chunks with vertical and lateral seams, occlusion, a shaft, emitters."
@@ -243,71 +243,71 @@
           (world-block-at world 18 8 8) *test-dim-glow-block*)
     world))
 
-(deftest compiled-light-kernel-is-inspectable-and-matches-the-reference-oracle
+(define-test compiled-light-kernel-is-inspectable-and-matches-the-reference-oracle
   ;; The program states its law; the realization retains the checked
   ;; expressions, the emitted forms, and the compiled functions.
   (let* ((definition
            (luvcraft.frontier:frontier-program-definition-for
             'luvcraft::voxel-light-addition))
          (realization (luvcraft::compiled-light-realization :sky-light)))
-    (ok (luvcraft.frontier:frontier-program-definition-transfer definition))
-    (ok (equal '("LEVEL" "OPACITY")
-               (mapcar (lambda (role)
-                         (symbol-name
-                          (luvcraft.frontier:frontier-field-role-name role)))
-                       (luvcraft.frontier:frontier-program-definition-fields
-                        definition))))
-    (ok (luvcraft.frontier:frontier-realization-current-p realization))
-    (ok (eq 'lambda
-            (first (luvcraft.frontier:frontier-realization-drain-form
-                    realization))))
-    (ok (functionp
-         (luvcraft.frontier:frontier-realization-drain-function realization)))
-    (ok (functionp
-         (luvcraft.frontier:frontier-realization-admit-function realization)))
-    (ok (= 15 (luvcraft.frontier:frontier-realization-maximum-priority
-               realization)))
+    (true (luvcraft.frontier:frontier-program-definition-transfer definition))
+    (true (equal '("LEVEL" "OPACITY")
+                 (mapcar (lambda (role)
+                           (symbol-name
+                            (luvcraft.frontier:frontier-field-role-name role)))
+                         (luvcraft.frontier:frontier-program-definition-fields
+                          definition))))
+    (true (luvcraft.frontier:frontier-realization-current-p realization))
+    (true (eq 'lambda
+              (first (luvcraft.frontier:frontier-realization-drain-form
+                      realization))))
+    (true (functionp
+           (luvcraft.frontier:frontier-realization-drain-function realization)))
+    (true (functionp
+           (luvcraft.frontier:frontier-realization-admit-function realization)))
+    (true (= 15 (luvcraft.frontier:frontier-realization-maximum-priority
+                 realization)))
     ;; The transfer law is checked in the bound field's own quantity: sky
     ;; light stays sky light, and attenuation steps enter through an explicit
     ;; AS-FIELD-QUANTITY boundary rather than by coincidence of encoding.
-    (ok (eq :sky-propagation-level
-            (luv.arithmetic:quantity-specification-name
-             (luv.arithmetic.language:arithmetic-expression-quantity-specification
-              (luvcraft.frontier:frontier-realization-transfer realization)))))
-    (ok (eq :block-propagation-level
-            (luv.arithmetic:quantity-specification-name
-             (luv.arithmetic.language:arithmetic-expression-quantity-specification
-              (luvcraft.frontier:frontier-realization-transfer
-               (luvcraft::compiled-light-realization :block-light))))))
+    (true (eq :sky-propagation-level
+              (luv.arithmetic:quantity-specification-name
+               (luv.arithmetic.language:arithmetic-expression-quantity-specification
+                (luvcraft.frontier:frontier-realization-transfer realization)))))
+    (true (eq :block-propagation-level
+              (luv.arithmetic:quantity-specification-name
+               (luv.arithmetic.language:arithmetic-expression-quantity-specification
+                (luvcraft.frontier:frontier-realization-transfer
+                 (luvcraft::compiled-light-realization :block-light))))))
     ;; The emitted scalar loop contains no arithmetic dispatch: the law was
     ;; inlined as ordinary CL operators over declared lanes.
-    (ok (not (labels ((mentions-p (tree)
-                        (if (atom tree)
-                            (member tree '(luv.arithmetic.lisp::lisp-add
-                                           luv.arithmetic.lisp::lisp-subtract
-                                           funcall apply))
-                            (or (mentions-p (car tree))
-                                (mentions-p (cdr tree))))))
-               (mentions-p
-                (luvcraft.frontier:frontier-realization-drain-form
-                 realization))))))
+    (true (not (labels ((mentions-p (tree)
+                          (if (atom tree)
+                              (member tree '(luv.arithmetic.lisp::lisp-add
+                                             luv.arithmetic.lisp::lisp-subtract
+                                             funcall apply))
+                              (or (mentions-p (car tree))
+                                  (mentions-p (cdr tree))))))
+                 (mentions-p
+                  (luvcraft.frontier:frontier-realization-drain-form
+                   realization))))))
   (let* ((world (make-compiled-light-proof-world))
          (comparison
            (luvcraft.light-reference:compare-voxel-light-solvers world)))
-    (ok (luvcraft.light-reference:voxel-light-solver-comparison-equal-p
-         comparison))
-    (ok (= (luvcraft.light-reference:voxel-light-solver-comparison-legacy-visits
-            comparison)
-           (luvcraft.light-reference:voxel-light-solver-comparison-candidate-visits
-            comparison)))
-    (ok (eq :compiled
-            (luvcraft.light-reference:voxel-light-solver-comparison-candidate-solver
-             comparison)))
-    (ok (= 2 (length
-              (luvcraft.light-reference:voxel-light-solver-comparison-candidate-executions
-               comparison))))))
+    (true (luvcraft.light-reference:voxel-light-solver-comparison-equal-p
+           comparison))
+    (true (= (luvcraft.light-reference:voxel-light-solver-comparison-legacy-visits
+              comparison)
+             (luvcraft.light-reference:voxel-light-solver-comparison-candidate-visits
+              comparison)))
+    (true (eq :compiled
+              (luvcraft.light-reference:voxel-light-solver-comparison-candidate-solver
+               comparison)))
+    (true (= 2 (length
+                (luvcraft.light-reference:voxel-light-solver-comparison-candidate-executions
+                 comparison))))))
 
-(deftest compiled-light-seeds-are-boundary-transfers
+(define-test compiled-light-seeds-are-boundary-transfers
   ;; Open sky is a virtual source at full brightness related inward through
   ;; the program's own transfer law: straight down pays only opacity, a
   ;; lateral boundary pays one step more, and a fully opaque cell admits
@@ -323,25 +323,25 @@
                            (luvcraft::light-region-entries region)))
            (domain (luvcraft::light-region-entry-domain entry))
            (levels (luvcraft::light-region-entry-sky entry)))
-      (ok (functionp (luvcraft.frontier:frontier-realization-relate-function sky)))
+      (true (functionp (luvcraft.frontier:frontier-realization-relate-function sky)))
       (flet ((relate (x y z direction)
                (luvcraft.frontier:relate-frontier-realization-site
                 sky region frontier execution entry
                 (chunk-domain-offset-components domain x y z) direction
                 :direct-direction luvcraft.world:+voxel-negative-y+
                 :level luvcraft::+maximum-light-level+)))
-        (ok (relate 0 15 0 luvcraft.world:+voxel-negative-y+))
-        (ok (= 15 (aref levels (chunk-domain-offset-components domain 0 15 0))))
-        (ok (relate 15 15 0 luvcraft.world:+voxel-negative-x+))
-        (ok (= 14 (aref levels (chunk-domain-offset-components domain 15 15 0))))
-        (ok (not (relate 3 15 3 luvcraft.world:+voxel-negative-y+)))
-        (ok (= 0 (aref levels (chunk-domain-offset-components domain 3 15 3))))
+        (true (relate 0 15 0 luvcraft.world:+voxel-negative-y+))
+        (true (= 15 (aref levels (chunk-domain-offset-components domain 0 15 0))))
+        (true (relate 15 15 0 luvcraft.world:+voxel-negative-x+))
+        (true (= 14 (aref levels (chunk-domain-offset-components domain 15 15 0))))
+        (true (not (relate 3 15 3 luvcraft.world:+voxel-negative-y+)))
+        (true (= 0 (aref levels (chunk-domain-offset-components domain 3 15 3))))
         ;; A second, dimmer relation into the same site is not an improvement.
-        (ok (not (relate 0 15 0 luvcraft.world:+voxel-negative-x+))))
-      (ok (= 2 (luvcraft.frontier:bucket-frontier-count frontier)))
-      (ok (= 2 (luvcraft.frontier:frontier-execution-admissions execution))))))
+        (true (not (relate 0 15 0 luvcraft.world:+voxel-negative-x+))))
+      (true (= 2 (luvcraft.frontier:bucket-frontier-count frontier)))
+      (true (= 2 (luvcraft.frontier:frontier-execution-admissions execution))))))
 
-(deftest compiled-light-drain-allocates-nothing-per-relation
+(define-test compiled-light-drain-allocates-nothing-per-relation
   ;; A warmed drain over pre-grown frontier storage allocates only at chunk
   ;; crossings, where the window resolves a coordinate key (#L84JCX), never
   ;; per site or per relation.  The proof world exposes about 68,000
@@ -368,40 +368,40 @@
                            execution)
                 crossings (luvcraft.frontier:frontier-execution-crossings
                            execution)))))
-    (ok (> relations 60000))
-    (ok (< bytes (+ (* 64 1024) (* 128 crossings))))))
+    (true (> relations 60000))
+    (true (< bytes (+ (* 64 1024) (* 128 crossings))))))
 
-(deftest compiled-light-can-be-selected-for-real-publication
+(define-test compiled-light-can-be-selected-for-real-publication
   (let ((world (make-open-sky-test-world '(0 0 0) '(1 0 0))))
     (setf (world-block-at world 15 8 8) *test-glow-block*)
     (let ((*voxel-light-solver* :compiled))
-      (ok (relight-block-world world)))
-    (ok (light-matches-reference-p world))
-    (ok (= 10 (blocklight-at world 15 8 8)))
-    (ok (= 9 (blocklight-at world 16 8 8)))))
+      (true (relight-block-world world)))
+    (true (light-matches-reference-p world))
+    (true (= 10 (blocklight-at world 15 8 8)))
+    (true (= 9 (blocklight-at world 16 8 8)))))
 
-(deftest compiled-frontier-light-is-the-production-default
-  (ok (eq :compiled *voxel-light-solver*))
+(define-test compiled-frontier-light-is-the-production-default
+  (true (eq :compiled *voxel-light-solver*))
   (let ((request
           (make-instance 'luvcraft::block-light-production-request
                          :key '(:light)
                          :region nil
                          :dependency-stamp nil)))
-    (ok (eq :compiled
-            (luvcraft::block-light-production-request-solver request)))))
+    (true (eq :compiled
+              (luvcraft::block-light-production-request-solver request)))))
 
-(deftest voxel-light-solver-dispatch-rejects-retired-and-unknown-names
+(define-test voxel-light-solver-dispatch-rejects-retired-and-unknown-names
   (let* ((world (make-open-sky-test-world))
          (region (luvcraft::capture-light-region world))
          (state (luvcraft::attach-lighting-state world))
          (candidate (luvcraft::make-light-candidate world)))
     (dolist (solver '(:legacy :frontier :misspelled))
-      (ok (signals (solve-light-region-using solver region) 'error))
-      (ok (signals
-           (luvcraft::reconcile-light-region-using solver state candidate)
-           'error)))))
+      (fail (solve-light-region-using solver region) 'error)
+      (fail
+       (luvcraft::reconcile-light-region-using solver state candidate)
+       'error))))
 
-(deftest bucket-frontier-admission-does-not-construct-a-type-per-site
+(define-test bucket-frontier-admission-does-not-construct-a-type-per-site
   (let ((frontier
           (luvcraft.frontier:make-bucket-frontier
            :maximum-priority 15 :initial-capacity 8192))
@@ -416,31 +416,31 @@
         (declare (ignore offset))
         (luvcraft.frontier:bucket-frontier-pop frontier)))
     ;; The former dynamic TYPEP specifier allocated three conses per push.
-    (ok (< (runtime-observation-bytes-consed observation) 4096))))
+    (true (< (runtime-observation-bytes-consed observation) 4096))))
 
-(deftest light-solvers-expose-symmetric-nested-timing-zones
+(define-test light-solvers-expose-symmetric-nested-timing-zones
   (let ((world (make-open-sky-test-world))
         (trace (make-cpu-trace :label "voxel light solvers")))
     (with-cpu-trace (trace)
       (luvcraft.light-reference:compare-voxel-light-solvers world))
     (let ((names (mapcar #'cpu-trace-zone-name (cpu-trace-zones trace))))
-      (ok (equal
-           '(:lighting/compare
-             :lighting/legacy
-             :lighting/legacy/seed-sky
-             :lighting/legacy/propagate-sky
-             :lighting/legacy/drain-sites
-             :lighting/legacy/seed-block
-             :lighting/legacy/propagate-block
-             :lighting/legacy/drain-sites
-             :lighting/compiled
-             :lighting/compiled/seed-sky
-             :lighting/compiled/propagate-sky
-             :lighting/compiled/drain-sites
-             :lighting/compiled/seed-block
-             :lighting/compiled/propagate-block
-             :lighting/compiled/drain-sites)
-           names)))))
+      (true (equal
+             '(:lighting/compare
+               :lighting/legacy
+               :lighting/legacy/seed-sky
+               :lighting/legacy/propagate-sky
+               :lighting/legacy/drain-sites
+               :lighting/legacy/seed-block
+               :lighting/legacy/propagate-block
+               :lighting/legacy/drain-sites
+               :lighting/compiled
+               :lighting/compiled/seed-sky
+               :lighting/compiled/propagate-sky
+               :lighting/compiled/drain-sites
+               :lighting/compiled/seed-block
+               :lighting/compiled/propagate-block
+               :lighting/compiled/drain-sites)
+             names)))))
 
 (defun check-incremental-edits-converge ()
   (let* ((world (make-block-world
@@ -448,35 +448,35 @@
          (state (luvcraft::attach-lighting-state world)))
     ;; Arrival through the hook lights the fresh chunk incrementally.
     (luvcraft::ensure-world-chunk world 0 0 0)
-    (ok (luvcraft::reconcile-lighting state))
-    (ok (light-matches-reference-p world))
+    (true (luvcraft::reconcile-lighting state))
+    (true (light-matches-reference-p world))
     ;; Roofing one cell darkens its column; removing it restores the beam.
     (setf (world-block-at world 8 15 8) luvcraft::*stone-block*)
-    (ok (luvcraft::reconcile-lighting state))
-    (ok (light-matches-reference-p world))
-    (ok (= (sky-at world 8 14 8) 14))
+    (true (luvcraft::reconcile-lighting state))
+    (true (light-matches-reference-p world))
+    (true (= (sky-at world 8 14 8) 14))
     (setf (world-block-at world 8 15 8) nil)
-    (ok (luvcraft::reconcile-lighting state))
-    (ok (light-matches-reference-p world))
-    (ok (= (sky-at world 8 0 8) 15))
+    (true (luvcraft::reconcile-lighting state))
+    (true (light-matches-reference-p world))
+    (true (= (sky-at world 8 0 8) 15))
     ;; An emitter appears and disappears.
     (setf (world-block-at world 4 4 4) *test-glow-block*)
-    (ok (luvcraft::reconcile-lighting state))
-    (ok (light-matches-reference-p world))
-    (ok (= (blocklight-at world 4 5 4) 9))
+    (true (luvcraft::reconcile-lighting state))
+    (true (light-matches-reference-p world))
+    (true (= (blocklight-at world 4 5 4) 9))
     (setf (world-block-at world 4 4 4) nil)
-    (ok (luvcraft::reconcile-lighting state))
-    (ok (light-matches-reference-p world))
-    (ok (= (blocklight-at world 4 5 4) 0))
+    (true (luvcraft::reconcile-lighting state))
+    (true (light-matches-reference-p world))
+    (true (= (blocklight-at world 4 5 4) 0))
     ;; A settled state publishes nothing further.
-    (ok (null (luvcraft::reconcile-lighting state)))
-    (ok (plusp (luvcraft::lighting-state-publications state)))
-    (ok (plusp (luvcraft::lighting-state-cells-visited state)))))
+    (true (null (luvcraft::reconcile-lighting state)))
+    (true (plusp (luvcraft::lighting-state-publications state)))
+    (true (plusp (luvcraft::lighting-state-cells-visited state)))))
 
-(deftest compiled-incremental-edits-converge-to-the-reference-field
+(define-test compiled-incremental-edits-converge-to-the-reference-field
   (check-incremental-edits-converge))
 
-(deftest asynchronous-lighting-publishes-only-a-current-immutable-capture
+(define-test asynchronous-lighting-publishes-only-a-current-immutable-capture
   (let* ((world (make-open-sky-test-world '(0 0 0)))
          (chunk (luvcraft::world-chunk-at world 0 0 0))
          (state (luvcraft::attach-lighting-state world))
@@ -494,10 +494,10 @@
     (setf (world-block-at world 1 1 1) *test-glow-block*)
     (let ((payload
             (luvcraft::perform-production-request stale-request)))
-      (ok (null (luvcraft::publish-production-result
-                 session stale-request payload)))
-      (ok (null (block-chunk-light-field chunk)))
-      (ok (luvcraft::lighting-state-dirty-p state)))
+      (true (null (luvcraft::publish-production-result
+                   session stale-request payload)))
+      (true (null (block-chunk-light-field chunk)))
+      (true (luvcraft::lighting-state-dirty-p state)))
     (let* ((request
              (make-instance
               'luvcraft::block-light-production-request
@@ -507,29 +507,29 @@
               (luvcraft::block-world-light-dependency-stamp world)
               :region (luvcraft::capture-light-region world :immutable-p t)))
            (payload (luvcraft::perform-production-request request)))
-      (ok (eq :compiled
-              (luvcraft::block-light-production-request-solver request)))
-      (ok (luvcraft::publish-production-result session request payload))
-      (ok (= (blocklight-at world 1 1 1)
-             (block-light-emission *test-glow-block*)))
-      (ok (light-matches-reference-p world)))))
+      (true (eq :compiled
+                (luvcraft::block-light-production-request-solver request)))
+      (true (luvcraft::publish-production-result session request payload))
+      (true (= (blocklight-at world 1 1 1)
+               (block-light-emission *test-glow-block*)))
+      (true (light-matches-reference-p world)))))
 
-(deftest settled-cell-edits-use-the-incremental-relighter
+(define-test settled-cell-edits-use-the-incremental-relighter
   (let* ((world (make-open-sky-test-world '(0 0 0)))
          (state (luvcraft::attach-lighting-state world))
          (session (make-instance 'luvcraft-session
                                  :world world :lighting-state state)))
     ;; Initial residency is a global concern.  Settle it before modeling the
     ;; ordinary player edit path in an already visible world.
-    (ok (luvcraft::reconcile-lighting state))
+    (true (luvcraft::reconcile-lighting state))
     (setf (world-block-at world 8 15 8) luvcraft::*stone-block*)
-    (ok (not (luvcraft::lighting-state-residency-dirty-p state)))
-    (ok (luvcraft::schedule-luvcraft-lighting session))
-    (ok (not (luvcraft::lighting-state-dirty-p state)))
-    (ok (not (gethash '(:light)
-                      (luvcraft-session-outstanding-production session))))
-    (ok (= (sky-at world 8 14 8) 14))
-    (ok (light-matches-reference-p world))))
+    (true (not (luvcraft::lighting-state-residency-dirty-p state)))
+    (true (luvcraft::schedule-luvcraft-lighting session))
+    (true (not (luvcraft::lighting-state-dirty-p state)))
+    (true (not (gethash '(:light)
+                        (luvcraft-session-outstanding-production session))))
+    (true (= (sky-at world 8 14 8) 14))
+    (true (light-matches-reference-p world))))
 
 (defun check-random-edits-and-residency ()
   (let* ((world (make-block-world
@@ -559,18 +559,18 @@
         (destructuring-bind (x y z) (random-resident-cell)
           (setf (world-block-at world x y z) (random-block))))
       (luvcraft::reconcile-lighting state)
-      (ok (light-matches-reference-p world))
+      (true (light-matches-reference-p world))
       (dotimes (round 6)
         (dotimes (edit 10)
           (destructuring-bind (x y z) (random-resident-cell)
             (setf (world-block-at world x y z) (random-block))))
         (luvcraft::reconcile-lighting state)
-        (ok (light-matches-reference-p world)))
+        (true (light-matches-reference-p world)))
       ;; A departure relights the retained neighbors; a re-arrival with
       ;; fresh edits converges again.
       (luvcraft::remove-world-chunk world 1 0 0)
       (luvcraft::reconcile-lighting state)
-      (ok (light-matches-reference-p world))
+      (true (light-matches-reference-p world))
       (luvcraft::ensure-world-chunk world 1 0 0)
       (dotimes (edit 12)
         (setf (world-block-at world
@@ -579,26 +579,26 @@
                               (next-random 16))
               (random-block)))
       (luvcraft::reconcile-lighting state)
-      (ok (light-matches-reference-p world)))))
+      (true (light-matches-reference-p world)))))
 
-(deftest compiled-random-edits-and-residency-match-the-reference-solver
+(define-test compiled-random-edits-and-residency-match-the-reference-solver
   ;; The compiled removal and addition programs must reproduce the reference
   ;; field across the same edit bursts, departure, and re-arrival. #K3WRD3
   (check-random-edits-and-residency))
 
-(deftest compiled-light-removal-is-an-invalidation-program
+(define-test compiled-light-removal-is-an-invalidation-program
   (let ((definition
           (luvcraft.frontier:frontier-program-definition-for
            'luvcraft::voxel-light-removal))
         (realization (luvcraft::compiled-light-removal-realization :sky-light)))
-    (ok (eq :invalidation
-            (luvcraft.frontier:frontier-program-definition-family definition)))
-    (ok (luvcraft.frontier:frontier-program-definition-retain-admissions-p
-         definition))
-    (ok (functionp
-         (luvcraft.frontier:frontier-realization-drain-function realization)))
-    (ok (functionp
-         (luvcraft.frontier:frontier-realization-admit-function realization))))
+    (true (eq :invalidation
+              (luvcraft.frontier:frontier-program-definition-family definition)))
+    (true (luvcraft.frontier:frontier-program-definition-retain-admissions-p
+           definition))
+    (true (functionp
+           (luvcraft.frontier:frontier-realization-drain-function realization)))
+    (true (functionp
+           (luvcraft.frontier:frontier-realization-admit-function realization))))
   ;; Roofing a lit column: the sky removal clears exactly the beam beneath
   ;; the roof (its dependents), hands the beam's lit lateral neighbours to
   ;; the addition frontier as survivors, and the addition program relights
@@ -615,36 +615,36 @@
             executions
           (declare (ignore block-removal block-addition))
           ;; The edited cell plus the fifteen cells of beam beneath it.
-          (ok (= 16 (luvcraft.frontier:frontier-site-buffer-length
-                     (luvcraft.frontier:frontier-execution-admitted-sites
-                      sky-removal))))
-          (ok (= 16 (luvcraft.frontier:frontier-execution-visits sky-removal)))
-          (ok (plusp (luvcraft.frontier:frontier-execution-emissions
-                      sky-removal)))
-          (ok (plusp (luvcraft.frontier:frontier-execution-visits
-                      sky-addition)))
-          (ok (plusp visits))))
+          (true (= 16 (luvcraft.frontier:frontier-site-buffer-length
+                       (luvcraft.frontier:frontier-execution-admitted-sites
+                        sky-removal))))
+          (true (= 16 (luvcraft.frontier:frontier-execution-visits sky-removal)))
+          (true (plusp (luvcraft.frontier:frontier-execution-emissions
+                        sky-removal)))
+          (true (plusp (luvcraft.frontier:frontier-execution-visits
+                        sky-addition)))
+          (true (plusp visits))))
       (luvcraft::publish-light-region region)
       (clrhash (luvcraft::lighting-state-dirty-cells state)))
-    (ok (light-matches-reference-p world))
-    (ok (= 14 (sky-at world 8 14 8)))))
+    (true (light-matches-reference-p world))
+    (true (= 14 (sky-at world 8 14 8)))))
 
-(deftest same-key-replacement-removes-the-old-chunk-light
+(define-test same-key-replacement-removes-the-old-chunk-light
   (let* ((world (make-open-sky-test-world '(0 0 0) '(1 0 0)))
          (state (luvcraft::attach-lighting-state world)))
     (setf (world-block-at world 16 8 8) *test-glow-block*)
     (luvcraft::reconcile-lighting state)
-    (ok (= (blocklight-at world 15 8 8) 9))
+    (true (= (blocklight-at world 15 8 8) 9))
     ;; Streaming can replace a chunk at the same key before the next lighting
     ;; reconcile.  The departure still has to run, or retained neighbors keep
     ;; light propagated from the old incarnation.
     (luvcraft::remove-world-chunk world 1 0 0)
     (luvcraft::ensure-world-chunk world 1 0 0)
     (luvcraft::reconcile-lighting state)
-    (ok (light-matches-reference-p world))
-    (ok (= (blocklight-at world 15 8 8) 0))))
+    (true (light-matches-reference-p world))
+    (true (= (blocklight-at world 15 8 8) 0))))
 
-(deftest player-placeable-crystal-relights-across-chunk-boundaries
+(define-test player-placeable-crystal-relights-across-chunk-boundaries
   (let* ((world (make-open-sky-test-world '(0 0 0) '(1 0 0)))
          (state (luvcraft::attach-lighting-state world))
          (left (luvcraft::world-chunk-at world 0 0 0))
@@ -655,31 +655,31 @@
           (right-revision-before
             (chunk-light-field-revision (block-chunk-light-field right))))
       (edit-block-at *crystal-block* world 16 8 8)
-      (ok (luvcraft::reconcile-lighting state))
-      (ok (light-matches-reference-p world))
-      (ok (= (blocklight-at world 16 8 8)
-             (block-light-emission *crystal-block*)))
-      (ok (= (blocklight-at world 15 8 8)
-             (1- (block-light-emission *crystal-block*))))
-      (ok (> (chunk-light-field-revision (block-chunk-light-field left))
-             left-revision-before))
-      (ok (> (chunk-light-field-revision (block-chunk-light-field right))
-             right-revision-before)))
+      (true (luvcraft::reconcile-lighting state))
+      (true (light-matches-reference-p world))
+      (true (= (blocklight-at world 16 8 8)
+               (block-light-emission *crystal-block*)))
+      (true (= (blocklight-at world 15 8 8)
+               (1- (block-light-emission *crystal-block*))))
+      (true (> (chunk-light-field-revision (block-chunk-light-field left))
+               left-revision-before))
+      (true (> (chunk-light-field-revision (block-chunk-light-field right))
+               right-revision-before)))
     (let ((left-revision-before
             (chunk-light-field-revision (block-chunk-light-field left)))
           (right-revision-before
             (chunk-light-field-revision (block-chunk-light-field right))))
       (edit-block-at nil world 16 8 8)
-      (ok (luvcraft::reconcile-lighting state))
-      (ok (light-matches-reference-p world))
-      (ok (= (blocklight-at world 16 8 8) 0))
-      (ok (= (blocklight-at world 15 8 8) 0))
-      (ok (> (chunk-light-field-revision (block-chunk-light-field left))
-             left-revision-before))
-      (ok (> (chunk-light-field-revision (block-chunk-light-field right))
-             right-revision-before)))))
+      (true (luvcraft::reconcile-lighting state))
+      (true (light-matches-reference-p world))
+      (true (= (blocklight-at world 16 8 8) 0))
+      (true (= (blocklight-at world 15 8 8) 0))
+      (true (> (chunk-light-field-revision (block-chunk-light-field left))
+               left-revision-before))
+      (true (> (chunk-light-field-revision (block-chunk-light-field right))
+               right-revision-before)))))
 
-(deftest meshes-carry-raw-corner-light-and-material-emission
+(define-test meshes-carry-raw-corner-light-and-material-emission
   (let* ((world (make-open-sky-test-world))
          (state (luvcraft::attach-lighting-state world))
          (mesher (make-instance 'exposed-face-mesher)))
@@ -704,30 +704,30 @@
       ;; Floor tops under open sky read full skylight; the glow block's own
       ;; faces carry its surface emission, and its blocklight reaches the
       ;; floor around it.
-      (ok (find 1.0 sky-readings))
-      (ok (plusp (reduce #'max block-readings)))
+      (true (find 1.0 sky-readings))
+      (true (plusp (reduce #'max block-readings)))
       ;; Five exposed faces of the resting glow block, six vertices each.
-      (ok (= emissive-vertices 30))
+      (true (= emissive-vertices 30))
       ;; The immutable snapshot meshes bit-identically to the owner side.
       (let* ((snapshot (luvcraft::make-block-mesh-snapshot
                         world chunk
                         (luvcraft::chunk-mesh-dependency-stamp world chunk)))
              (snapshot-mesh (mesh-block-snapshot mesher snapshot)))
-        (ok (equalp (block-mesh-vertices mesh)
-                    (block-mesh-vertices snapshot-mesh)))))))
+        (true (equalp (block-mesh-vertices mesh)
+                      (block-mesh-vertices snapshot-mesh)))))))
 
-(deftest absent-neighbors-are-never-silently-open-sky
+(define-test absent-neighbors-are-never-silently-open-sky
   ;; A world with no source keeps every boundary :UNKNOWN, so nothing is
   ;; lit and the result says so instead of inventing daylight.
   (let ((world (make-block-world)))
     (luvcraft::ensure-world-chunk world 0 0 0)
     (relight-block-world world)
     (multiple-value-bind (sky block state) (world-light-at world 8 8 8)
-      (ok (= sky 0))
-      (ok (= block 0))
-      (ok (eq state :provisional)))))
+      (true (= sky 0))
+      (true (= block 0))
+      (true (eq state :provisional)))))
 
-(deftest packed-light-scheduling-preserves-the-fixed-point
+(define-test packed-light-scheduling-preserves-the-fixed-point
   (let* ((world (make-little-block-world :chunk-radius 1 :seed 121))
          (lifo (luvcraft::capture-light-region world))
          (level (luvcraft::capture-light-region world)))
@@ -737,19 +737,19 @@
       (multiple-value-bind (level-result level-visits)
           (luvcraft::solve-light-region level :scheduling :level)
         (declare (ignore level-result))
-        (ok (< level-visits lifo-visits))
+        (true (< level-visits lifo-visits))
         (maphash
          (lambda (key lifo-entry)
            (let ((level-entry
                    (gethash key (luvcraft::light-region-entries level))))
-             (ok level-entry)
-             (ok (equalp (luvcraft::light-region-entry-sky lifo-entry)
-                         (luvcraft::light-region-entry-sky level-entry)))
-             (ok (equalp (luvcraft::light-region-entry-block lifo-entry)
-                         (luvcraft::light-region-entry-block level-entry)))))
+             (true level-entry)
+             (true (equalp (luvcraft::light-region-entry-sky lifo-entry)
+                           (luvcraft::light-region-entry-sky level-entry)))
+             (true (equalp (luvcraft::light-region-entry-block lifo-entry)
+                           (luvcraft::light-region-entry-block level-entry)))))
          (luvcraft::light-region-entries lifo))))))
 
-(deftest light-hot-traversal-locates-only-at-domain-crossings
+(define-test light-hot-traversal-locates-only-at-domain-crossings
   (let ((world (make-block-world :chunk-width 3
                                  :chunk-height 3
                                  :chunk-depth 3)))
@@ -773,13 +773,13 @@
                      queue nil)
                     *light-region-window-lookups*))))
         (multiple-value-bind (visited lookups) (visit 1 1 1)
-          (ok (= visited 1))
-          (ok (zerop lookups)))
+          (true (= visited 1))
+          (true (zerop lookups)))
         (multiple-value-bind (visited lookups) (visit 0 1 1)
-          (ok (= visited 1))
-          (ok (= lookups 1)))))))
+          (true (= visited 1))
+          (true (= lookups 1)))))))
 
-(deftest light-boundary-change-comparison-uses-domain-faces
+(define-test light-boundary-change-comparison-uses-domain-faces
   (let ((world (make-block-world :chunk-width 3
                                  :chunk-height 4
                                  :chunk-depth 5)))
@@ -801,25 +801,25 @@
                     (chunk-domain-offset
                      domain (make-local-coordinate 1 1 1)))
               1)
-        (ok (null (changed-directions)))
+        (true (null (changed-directions)))
         (fill new 0)
         (setf (aref new 0) 1)
-        (ok (equal (changed-directions)
-                   (list +voxel-negative-x+
-                         +voxel-negative-y+
-                         +voxel-negative-z+)))))))
+        (true (equal (changed-directions)
+                     (list +voxel-negative-x+
+                           +voxel-negative-y+
+                           +voxel-negative-z+)))))))
 
-(deftest light-region-is-a-chunk-window-with-policy-free-availability
+(define-test light-region-is-a-chunk-window-with-policy-free-availability
   (let ((world (make-block-world)))
     (luvcraft::ensure-world-chunk world 0 0 0)
     (let ((region (luvcraft::capture-light-region world)))
       (multiple-value-bind (entry offset availability)
           (locate-chunk-window-site region 0 0 0)
-        (ok entry)
-        (ok (zerop offset))
-        (ok (eq availability :available)))
+        (true entry)
+        (true (zerop offset))
+        (true (eq availability :available)))
       (multiple-value-bind (entry offset availability)
           (locate-chunk-window-site region 16 0 0)
-        (ok (null entry))
-        (ok (null offset))
-        (ok (eq availability :unavailable))))))
+        (true (null entry))
+        (true (null offset))
+        (true (eq availability :unavailable))))))

@@ -1,5 +1,6 @@
 (defpackage #:mqtt.tests
-  (:use #:cl #:rove)
+  (:use #:cl)
+  (:import-from #:parachute #:define-test #:true #:false #:fail #:group #:skip)
   (:documentation
    "Executable claims for the MQTT core.  The wire vectors are the
 specification's own examples where it gives them; the session claims are

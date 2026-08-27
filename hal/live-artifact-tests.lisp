@@ -39,20 +39,20 @@
     ((application protocol-live-application))
   (list (protocol-live-application-artifact application)))
 
-(deftest live-artifact-protocol-adapts-whole-cohorts-without-a-base-class
+(define-test live-artifact-protocol-adapts-whole-cohorts-without-a-base-class
   (let* ((artifact (make-instance 'protocol-live-artifact))
          (application
            (make-instance 'protocol-live-application :artifact artifact)))
-    (ok (null (luv::application-live-artifacts :application-with-none)))
-    (ok (string= "protocol cohort" (luv::live-artifact-label artifact)))
-    (ok (eq :installed (luv::live-artifact-status artifact)))
-    (ok (eq application
-            (luv::refresh-application-live-artifacts application)))
-    (ok (= 1 (luv::live-artifact-installed-revision artifact)))
+    (true (null (luv::application-live-artifacts :application-with-none)))
+    (true (string= "protocol cohort" (luv::live-artifact-label artifact)))
+    (true (eq :installed (luv::live-artifact-status artifact)))
+    (true (eq application
+              (luv::refresh-application-live-artifacts application)))
+    (true (= 1 (luv::live-artifact-installed-revision artifact)))
     (luv::release-live-artifact artifact)
-    (ok (eq :released (luv::live-artifact-status artifact)))
+    (true (eq :released (luv::live-artifact-status artifact)))
     (luv::refresh-application-live-artifacts application)
-    (ok (= 1 (luv::live-artifact-installed-revision artifact)))))
+    (true (= 1 (luv::live-artifact-installed-revision artifact)))))
 
 ;;; Backend-independent live-pipeline ownership probe -------------------------
 
@@ -142,7 +142,7 @@
                (luv.shader:vec4 live-artifact-test-color ,green 0.75 1.0)))
         (luv.shader:set-output color rgba)))))
 
-(deftest live-pipeline-keeps-last-good-cleans-candidates-and-release-is-terminal
+(define-test live-pipeline-keeps-last-good-cleans-candidates-and-release-is-terminal
   (let* ((*live-artifact-test-color* 0.2f0)
          (device (make-instance 'live-artifact-test-device))
          (artifact nil))
@@ -164,47 +164,47 @@
            (let ((first-pipeline
                    (luv::live-shader-pipeline-native-pipeline artifact))
                  (first-modules (copy-list (live-artifact-test-modules device))))
-             (ok (eq :installed (luv::live-artifact-status artifact)))
-             (ok (= 0 (luv::live-artifact-installed-revision artifact)))
-             (ok (= 0.2f0 (live-artifact-test-reference-value artifact)))
+             (true (eq :installed (luv::live-artifact-status artifact)))
+             (true (= 0 (luv::live-artifact-installed-revision artifact)))
+             (true (= 0.2f0 (live-artifact-test-reference-value artifact)))
              ;; The changed live source value requests an attempt.  Pipeline
              ;; creation fails after both candidate modules exist: the old
              ;; installed cohort survives and both candidates are reclaimed.
              (setf *live-artifact-test-color* 0.8f0
                    (live-artifact-test-fail-pipeline-p device) t)
              (luv::refresh-live-artifact artifact)
-             (ok (eq :failed (luv::live-artifact-status artifact)))
-             (ok (typep (luv::live-artifact-diagnostic artifact) 'error))
-             (ok (eq first-pipeline
-                     (luv::live-shader-pipeline-native-pipeline artifact)))
-             (ok (= 0 (luv::live-artifact-installed-revision artifact)))
-             (ok (= 0.8f0 (live-artifact-test-reference-value artifact)))
-             (ok (= 4 (length (live-artifact-test-modules device))))
-             (ok (every (lambda (resource)
-                          (= 1 (live-artifact-test-destroy-count resource)))
-                        (subseq (live-artifact-test-modules device) 0 2)))
-             (ok (every (lambda (resource)
-                          (zerop (live-artifact-test-destroy-count resource)))
-                        first-modules))
-             (ok (zerop (live-artifact-test-destroy-count first-pipeline)))
+             (true (eq :failed (luv::live-artifact-status artifact)))
+             (true (typep (luv::live-artifact-diagnostic artifact) 'error))
+             (true (eq first-pipeline
+                       (luv::live-shader-pipeline-native-pipeline artifact)))
+             (true (= 0 (luv::live-artifact-installed-revision artifact)))
+             (true (= 0.8f0 (live-artifact-test-reference-value artifact)))
+             (true (= 4 (length (live-artifact-test-modules device))))
+             (true (every (lambda (resource)
+                            (= 1 (live-artifact-test-destroy-count resource)))
+                          (subseq (live-artifact-test-modules device) 0 2)))
+             (true (every (lambda (resource)
+                            (zerop (live-artifact-test-destroy-count resource)))
+                          first-modules))
+             (true (zerop (live-artifact-test-destroy-count first-pipeline)))
              ;; A second value change retries without any method edit.  The
              ;; complete candidate installs, then the old cohort retires.
              (setf *live-artifact-test-color* 0.6f0
                    (live-artifact-test-fail-pipeline-p device) nil)
              (luv::refresh-live-shader-pipeline artifact)
-             (ok (eq :installed (luv::live-artifact-status artifact)))
-             (ok (null (luv::live-artifact-diagnostic artifact)))
-             (ok (= 1 (luv::live-artifact-installed-revision artifact)))
-             (ok (= 0.6f0
-                    (cdr
-                     (assoc
-                      'live-artifact-test-color
-                      (luv::live-shader-pipeline-installed-source-values
-                       artifact)))))
-             (ok (= 1 (live-artifact-test-destroy-count first-pipeline)))
-             (ok (every (lambda (resource)
-                          (= 1 (live-artifact-test-destroy-count resource)))
-                        first-modules))
+             (true (eq :installed (luv::live-artifact-status artifact)))
+             (true (null (luv::live-artifact-diagnostic artifact)))
+             (true (= 1 (luv::live-artifact-installed-revision artifact)))
+             (true (= 0.6f0
+                      (cdr
+                       (assoc
+                        'live-artifact-test-color
+                        (luv::live-shader-pipeline-installed-source-values
+                         artifact)))))
+             (true (= 1 (live-artifact-test-destroy-count first-pipeline)))
+             (true (every (lambda (resource)
+                            (= 1 (live-artifact-test-destroy-count resource)))
+                          first-modules))
              ;; Ordinary method replacement is a narrow MOP dependency, quite
              ;; separate from live values and the global reusable-source stamp.
              (let ((value-pipeline
@@ -212,19 +212,19 @@
                    (value-modules
                      (subseq (live-artifact-test-modules device) 0 2)))
                (redefine-live-artifact-test-fragment 0.4)
-               (ok
-                (luv.shader:shader-definition-change-pending-p
-                 (luv::live-shader-pipeline-dependent artifact)))
+               (true
+                  (luv.shader:shader-definition-change-pending-p
+                   (luv::live-shader-pipeline-dependent artifact)))
                (luv::refresh-live-artifact artifact)
-               (ok (= 2 (luv::live-artifact-installed-revision artifact)))
-               (ok (not
-                    (luv.shader:shader-definition-change-pending-p
-                     (luv::live-shader-pipeline-dependent artifact))))
-               (ok (= 1 (live-artifact-test-destroy-count value-pipeline)))
-               (ok (every
-                    (lambda (resource)
-                      (= 1 (live-artifact-test-destroy-count resource)))
-                    value-modules)))
+               (true (= 2 (luv::live-artifact-installed-revision artifact)))
+               (true (not
+                      (luv.shader:shader-definition-change-pending-p
+                       (luv::live-shader-pipeline-dependent artifact))))
+               (true (= 1 (live-artifact-test-destroy-count value-pipeline)))
+               (true (every
+                      (lambda (resource)
+                        (= 1 (live-artifact-test-destroy-count resource)))
+                      value-modules)))
              ;; Reusable shader functions and abstractions carry a conservative
              ;; global revision because their call graph is deliberately late
              ;; bound.  It rebuilds the complete candidate and stamps success.
@@ -236,29 +236,29 @@
                 'live-artifact-test-abstraction)
                (let ((source-revision (luv.shader:shader-source-revision)))
                  (luv::refresh-live-artifact artifact)
-                 (ok (= 3 (luv::live-artifact-installed-revision artifact)))
-                 (ok (= source-revision
-                        (luv::live-shader-pipeline-installed-source-revision
-                         artifact))))
-               (ok (= 1 (live-artifact-test-destroy-count method-pipeline)))
-               (ok (every
-                    (lambda (resource)
-                      (= 1 (live-artifact-test-destroy-count resource)))
-                    method-modules)))
+                 (true (= 3 (luv::live-artifact-installed-revision artifact)))
+                 (true (= source-revision
+                          (luv::live-shader-pipeline-installed-source-revision
+                           artifact))))
+               (true (= 1 (live-artifact-test-destroy-count method-pipeline)))
+               (true (every
+                      (lambda (resource)
+                        (= 1 (live-artifact-test-destroy-count resource)))
+                      method-modules)))
              (let ((installed-pipeline
                      (luv::live-shader-pipeline-native-pipeline artifact))
                    (installed-modules
                      (subseq (live-artifact-test-modules device) 0 2)))
                (luv::release-live-artifact artifact)
-               (ok (eq :released (luv::live-artifact-status artifact)))
-               (ok (null
-                    (luv::live-shader-pipeline-native-pipeline artifact)))
-               (ok (= 1
-                      (live-artifact-test-destroy-count installed-pipeline)))
-               (ok (every
-                    (lambda (resource)
-                      (= 1 (live-artifact-test-destroy-count resource)))
-                    installed-modules))
+               (true (eq :released (luv::live-artifact-status artifact)))
+               (true (null
+                      (luv::live-shader-pipeline-native-pipeline artifact)))
+               (true (= 1
+                        (live-artifact-test-destroy-count installed-pipeline)))
+               (true (every
+                      (lambda (resource)
+                        (= 1 (live-artifact-test-destroy-count resource)))
+                      installed-modules))
                ;; A global reusable-source revision used to resurrect a
                ;; released pipeline.  Release is now terminal and idempotent.
                (let ((module-count
@@ -269,17 +269,17 @@
                   'released-live-artifact-test)
                  (luv::refresh-live-artifact artifact)
                  (luv::release-live-artifact artifact)
-                 (ok (= module-count
-                        (length (live-artifact-test-modules device))))
-                 (ok (= pipeline-count
-                        (length (live-artifact-test-pipelines device))))
-                 (ok (= 1
-                        (live-artifact-test-destroy-count
-                         installed-pipeline))))))))
+                 (true (= module-count
+                          (length (live-artifact-test-modules device))))
+                 (true (= pipeline-count
+                          (length (live-artifact-test-pipelines device))))
+                 (true (= 1
+                          (live-artifact-test-destroy-count
+                           installed-pipeline))))))))
       (when artifact
         (ignore-errors (luv::release-live-artifact artifact)))))
 
-(deftest live-pipeline-release-detaches-first-and-attempts-every-retirement
+(define-test live-pipeline-release-detaches-first-and-attempts-every-retirement
   (let* ((*live-artifact-test-color* 0.2f0)
          (device (make-instance 'live-artifact-test-device))
          (artifact
@@ -303,23 +303,23 @@
     (handler-case (luv:release-live-artifact artifact)
       (luv:release-error (failure)
         (setf condition failure)))
-    (ok (typep condition 'luv:release-error))
-    (ok (= 2 (length (luv:release-error-failures condition))))
-    (ok (eq :released (luv:live-artifact-status artifact)))
-    (ok (null (luv::live-shader-pipeline-dependent artifact)))
-    (ok (null (luv::live-shader-pipeline-vertex-dependent artifact)))
-    (ok (null (luv::live-shader-pipeline-native-pipeline artifact)))
-    (ok (null (luv::live-shader-pipeline-fragment-module artifact)))
-    (ok (null (luv::live-shader-pipeline-vertex-module artifact)))
-    (ok (= 1 (live-artifact-test-destroy-count pipeline)))
-    (ok (every (lambda (module)
-                 (= 1 (live-artifact-test-destroy-count module)))
-               modules))
+    (true (typep condition 'luv:release-error))
+    (true (= 2 (length (luv:release-error-failures condition))))
+    (true (eq :released (luv:live-artifact-status artifact)))
+    (true (null (luv::live-shader-pipeline-dependent artifact)))
+    (true (null (luv::live-shader-pipeline-vertex-dependent artifact)))
+    (true (null (luv::live-shader-pipeline-native-pipeline artifact)))
+    (true (null (luv::live-shader-pipeline-fragment-module artifact)))
+    (true (null (luv::live-shader-pipeline-vertex-module artifact)))
+    (true (= 1 (live-artifact-test-destroy-count pipeline)))
+    (true (every (lambda (module)
+                   (= 1 (live-artifact-test-destroy-count module)))
+                 modules))
     ;; The error is a published diagnostic, not a claim that teardown may be
     ;; replayed against wrappers the application has already relinquished.
-    (ok (eq condition (luv:live-artifact-diagnostic artifact)))
-    (ok (null (luv:release-live-artifact artifact)))
-    (ok (= 1 (live-artifact-test-destroy-count pipeline)))
-    (ok (every (lambda (module)
-                 (= 1 (live-artifact-test-destroy-count module)))
-               modules))))
+    (true (eq condition (luv:live-artifact-diagnostic artifact)))
+    (true (null (luv:release-live-artifact artifact)))
+    (true (= 1 (live-artifact-test-destroy-count pipeline)))
+    (true (every (lambda (module)
+                   (= 1 (live-artifact-test-destroy-count module)))
+                 modules))))

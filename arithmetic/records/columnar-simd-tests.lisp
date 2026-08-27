@@ -109,10 +109,10 @@
   #-(or x86-64 arm64)
   (scalar-test-position-energy buffer))
 
-(deftest generated-columnar-lanes-feed-native-simd-kernels
+(define-test generated-columnar-lanes-feed-native-simd-kernels
   (let ((buffer (make-test-position-columns :capacity 19)))
     (dotimes (index 19)
       (test-position-columns-push
        buffer (float (1+ index) 0f0) (float (mod index 7) 0f0)))
-    (ok (= (scalar-test-position-energy buffer)
-           (simd-test-position-energy buffer)))))
+    (true (= (scalar-test-position-energy buffer)
+             (simd-test-position-energy buffer)))))

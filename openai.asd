@@ -18,7 +18,7 @@ and client function tools expressed as CLOS objects."
 
 (defsystem "openai/test"
   :description "Tests for the OpenAI Responses WebSocket client."
-  :depends-on ("openai" "rove")
+  :depends-on ("openai" "luv/test-support")
   :serial t
   :components ((:module "openai/tests"
                 :serial t
@@ -26,7 +26,5 @@ and client function tools expressed as CLOS objects."
                              (:file "agent"))))
   :perform (test-op (operation component)
              (declare (ignore operation component))
-             (unless (uiop:symbol-call '#:rove '#:run-suite
-                                       (uiop:symbol-call '#:rove '#:find-suite
-                                                         '#:openai.tests))
-               (error "OpenAI tests failed"))))
+             (uiop:symbol-call '#:luv.test-support '#:test-package
+                               '#:openai.tests)))

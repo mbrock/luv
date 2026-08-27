@@ -6,22 +6,22 @@
      :outputs ((clip-position :vec4 :built-in :position)))
   (shader:set-output clip-position position))
 
-(deftest wgsl-is-a-structured-sibling-shader-target
+(define-test wgsl-is-a-structured-sibling-shader-target
   (let* ((specification (wgsl-position-probe))
          (first (wgsl:compile-wgsl specification))
          (second (wgsl:compile-wgsl specification))
          (source (wgsl:wgsl-document-source first)))
-    (ok (typep first 'wgsl:wgsl-document))
-    (ok (eq specification (wgsl:wgsl-document-specification first)))
-    (ok (string= source (wgsl:wgsl-document-source second)))
-    (ok (search "@vertex" source))
-    (ok (search "@builtin(position)" source))
+    (true (typep first 'wgsl:wgsl-document))
+    (true (eq specification (wgsl:wgsl-document-specification first)))
+    (true (string= source (wgsl:wgsl-document-source second)))
+    (true (search "@vertex" source))
+    (true (search "@builtin(position)" source))
     ;; The shared graph retains Vulkan's framebuffer-oriented clip Y. The
     ;; target ABI must undo that convention for WebGPU, as MSL does for Metal.
-    (ok (search "vec4<f32>((stage_in.position).x, -(stage_in.position).y"
-                source))))
+    (true (search "vec4<f32>((stage_in.position).x, -(stage_in.position).y"
+                  source))))
 
-(deftest native-agent-bodies-compile-to-webgpu-overrides
+(define-test native-agent-bodies-compile-to-webgpu-overrides
   (let* ((bundles (luvcraft.web:compile-body-gallery))
          (gnome (first bundles))
          (cat (second bundles))
@@ -29,43 +29,43 @@
            (luvcraft.web:body-gallery-bundle-fragment gnome))
          (cat-fragment
            (luvcraft.web:body-gallery-bundle-fragment cat)))
-    (ok (= 2 (length bundles)))
-    (ok (string= "gnome"
-                 (luvcraft.web:web-body-id
-                  (luvcraft.web:body-gallery-bundle-body gnome))))
-    (ok (string= "cat"
-                 (luvcraft.web:web-body-id
-                  (luvcraft.web:body-gallery-bundle-body cat))))
-    (ok (= 18 (length (wgsl:wgsl-document-overrides gnome-fragment))))
-    (ok (= 8 (length (wgsl:wgsl-document-overrides cat-fragment))))
-    (ok (null (wgsl:wgsl-document-overrides
-               (luvcraft.web:body-gallery-bundle-vertex gnome))))
-    (ok (search "@location(2) figure_facing: vec4<f32>"
-                (wgsl:wgsl-document-source
+    (true (= 2 (length bundles)))
+    (true (string= "gnome"
+                   (luvcraft.web:web-body-id
+                    (luvcraft.web:body-gallery-bundle-body gnome))))
+    (true (string= "cat"
+                   (luvcraft.web:web-body-id
+                    (luvcraft.web:body-gallery-bundle-body cat))))
+    (true (= 18 (length (wgsl:wgsl-document-overrides gnome-fragment))))
+    (true (= 8 (length (wgsl:wgsl-document-overrides cat-fragment))))
+    (true (null (wgsl:wgsl-document-overrides
                  (luvcraft.web:body-gallery-bundle-vertex gnome))))
-    (ok (search "override knob_gnome_stature: f32 = 0.8f;"
-                (wgsl:wgsl-document-source gnome-fragment)))
-    (ok (search "override knob_cat_stripe_strength: f32 = 0.72f;"
-                (wgsl:wgsl-document-source cat-fragment)))
+    (true (search "@location(2) figure_facing: vec4<f32>"
+                  (wgsl:wgsl-document-source
+                   (luvcraft.web:body-gallery-bundle-vertex gnome))))
+    (true (search "override knob_gnome_stature: f32 = 0.8f;"
+                  (wgsl:wgsl-document-source gnome-fragment)))
+    (true (search "override knob_cat_stripe_strength: f32 = 0.72f;"
+                  (wgsl:wgsl-document-source cat-fragment)))
     (dolist (source (list (wgsl:wgsl-document-source gnome-fragment)
                           (wgsl:wgsl-document-source cat-fragment)))
-      (ok (search "break;" source)))
+      (true (search "break;" source)))
     (flet ((shading-follows-hit-guard (source marker)
              (let ((guard (search "if ((coverage > 0.0f)) {" source))
                    (shading (search marker source)))
                (and guard shading (< guard shading)))))
-      (ok (shading-follows-hit-guard
-           (wgsl:wgsl-document-source gnome-fragment)
-           "let gnome_shaded_color"))
-      (ok (shading-follows-hit-guard
-           (wgsl:wgsl-document-source cat-fragment)
-           "let cat_shaded_color")))
+      (true (shading-follows-hit-guard
+             (wgsl:wgsl-document-source gnome-fragment)
+             "let gnome_shaded_color"))
+      (true (shading-follows-hit-guard
+             (wgsl:wgsl-document-source cat-fragment)
+             "let cat_shaded_color")))
     (let ((json (luvcraft.web:body-gallery-json bundles)))
-      (ok (char= #\{ (char json 0)))
-      (ok (search "\"statureKnob\":\"gnome-stature\"" json))
-      (ok (search "\"identifier\":\"knob_cat_tail_reach\"" json)))))
+      (true (char= #\{ (char json 0)))
+      (true (search "\"statureKnob\":\"gnome-stature\"" json))
+      (true (search "\"identifier\":\"knob_cat_tail_reach\"" json)))))
 
-(deftest luvcraft-web-mounts-its-semantic-pages
+(define-test luvcraft-web-mounts-its-semantic-pages
   (let ((directory
           (uiop:ensure-directory-pathname
            (merge-pathnames "luvcraft-showcase-test/"
@@ -115,55 +115,55 @@
                      application "/bodies/body/gnome/fragment.wgsl"))
                   (missing
                     (luvcraft.web:respond-to-web-request application "/nope")))
-             (ok (string= "200 OK"
-                          (luvcraft.web:web-response-status index)))
-             (ok (search "href=\"/bodies/\""
-                         (luvcraft.web:web-response-body index)))
-             (ok (search "href=\"/showcase/\""
-                         (luvcraft.web:web-response-body index)))
-             (ok (string= "200 OK"
-                          (luvcraft.web:web-response-status gallery)))
-             (ok (search "/bodies/gallery.js"
-                         (luvcraft.web:web-response-body gallery)))
-             (ok (search
-                  "\"vertexUrl\":\"\\/bodies\\/body\\/gnome\\/vertex.wgsl\""
-                  (luvcraft.web:web-response-body catalog)))
-             (ok (search "const FRAME_INTERVAL = 1000 / 60;"
-                         (luvcraft.web:web-response-body gallery-js)))
-             (ok (search "const RENDER_SCALE = 1;"
-                         (luvcraft.web:web-response-body gallery-js)))
-             (ok (search "if (!cameraBufferDirty) return;"
-                         (luvcraft.web:web-response-body gallery-js)))
-             (ok (search "new URLSearchParams(location.hash.slice(1))"
-                         (luvcraft.web:web-response-body gallery-js)))
-             (ok (search "parameters.set(knob.name"
-                         (luvcraft.web:web-response-body gallery-js)))
-             (ok (search
-                  "history.replaceState(null, \"\", `#${parameters}`)"
-                  (luvcraft.web:web-response-body gallery-js)))
-             (ok (search "@fragment"
-                         (luvcraft.web:web-response-body shader)))
-             (ok (search "/showcase/media/Y7X7WK-proposal-still.png"
-                         (luvcraft.web:web-response-body showcase)))
-             (ok (search "src=\"/showcase/media/Y7X7WK-proposal-still-768w.webp\""
-                         (luvcraft.web:web-response-body showcase)))
-             (ok (search "Y7X7WK-proposal-still-480w.webp 480w, /showcase/media/Y7X7WK-proposal-still-768w.webp 768w"
-                         (luvcraft.web:web-response-body showcase)))
-             (ok (search "sizes=\"(max-width: 59.5rem)"
-                         (luvcraft.web:web-response-body showcase)))
-             (ok (search "title=\"Open full-resolution image\""
-                         (luvcraft.web:web-response-body showcase)))
-             (ok (search "/showcase/media/Y7X7WK-proposal-orbit.mp4"
-                         (luvcraft.web:web-response-body showcase)))
-             (ok (search "class=portrait><div class=\"media portrait\">"
-                         (luvcraft.web:web-response-body showcase)))
-             (ok (search "preload=none poster=\"/showcase/media/Y7X7WK-proposal-orbit-poster-480w.webp\""
-                         (luvcraft.web:web-response-body showcase)))
-             (ok (search ".media.portrait img,.media.portrait video{object-fit:contain}"
-                         (luvcraft.web:web-response-body showcase)))
-             (ok (search "abc123def456"
-                         (luvcraft.web:web-response-body showcase)))
-             (ok (string= "404 Not Found"
-                          (luvcraft.web:web-response-status missing)))))
+             (true (string= "200 OK"
+                            (luvcraft.web:web-response-status index)))
+             (true (search "href=\"/bodies/\""
+                           (luvcraft.web:web-response-body index)))
+             (true (search "href=\"/showcase/\""
+                           (luvcraft.web:web-response-body index)))
+             (true (string= "200 OK"
+                            (luvcraft.web:web-response-status gallery)))
+             (true (search "/bodies/gallery.js"
+                           (luvcraft.web:web-response-body gallery)))
+             (true (search
+                    "\"vertexUrl\":\"\\/bodies\\/body\\/gnome\\/vertex.wgsl\""
+                    (luvcraft.web:web-response-body catalog)))
+             (true (search "const FRAME_INTERVAL = 1000 / 60;"
+                           (luvcraft.web:web-response-body gallery-js)))
+             (true (search "const RENDER_SCALE = 1;"
+                           (luvcraft.web:web-response-body gallery-js)))
+             (true (search "if (!cameraBufferDirty) return;"
+                           (luvcraft.web:web-response-body gallery-js)))
+             (true (search "new URLSearchParams(location.hash.slice(1))"
+                           (luvcraft.web:web-response-body gallery-js)))
+             (true (search "parameters.set(knob.name"
+                           (luvcraft.web:web-response-body gallery-js)))
+             (true (search
+                    "history.replaceState(null, \"\", `#${parameters}`)"
+                    (luvcraft.web:web-response-body gallery-js)))
+             (true (search "@fragment"
+                           (luvcraft.web:web-response-body shader)))
+             (true (search "/showcase/media/Y7X7WK-proposal-still.png"
+                           (luvcraft.web:web-response-body showcase)))
+             (true (search "src=\"/showcase/media/Y7X7WK-proposal-still-768w.webp\""
+                           (luvcraft.web:web-response-body showcase)))
+             (true (search "Y7X7WK-proposal-still-480w.webp 480w, /showcase/media/Y7X7WK-proposal-still-768w.webp 768w"
+                           (luvcraft.web:web-response-body showcase)))
+             (true (search "sizes=\"(max-width: 59.5rem)"
+                           (luvcraft.web:web-response-body showcase)))
+             (true (search "title=\"Open full-resolution image\""
+                           (luvcraft.web:web-response-body showcase)))
+             (true (search "/showcase/media/Y7X7WK-proposal-orbit.mp4"
+                           (luvcraft.web:web-response-body showcase)))
+             (true (search "class=portrait><div class=\"media portrait\">"
+                           (luvcraft.web:web-response-body showcase)))
+             (true (search "preload=none poster=\"/showcase/media/Y7X7WK-proposal-orbit-poster-480w.webp\""
+                           (luvcraft.web:web-response-body showcase)))
+             (true (search ".media.portrait img,.media.portrait video{object-fit:contain}"
+                           (luvcraft.web:web-response-body showcase)))
+             (true (search "abc123def456"
+                           (luvcraft.web:web-response-body showcase)))
+             (true (string= "404 Not Found"
+                            (luvcraft.web:web-response-status missing)))))
       (uiop:delete-directory-tree directory :validate t
                                             :if-does-not-exist :ignore))))

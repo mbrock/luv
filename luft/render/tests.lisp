@@ -1,5 +1,6 @@
 (defpackage #:luft.render.tests
-  (:use #:cl #:rove)
+  (:use #:cl)
+  (:import-from #:parachute #:define-test #:true #:false #:fail #:group #:skip)
   (:local-nicknames (#:clim #:clim)
                     (#:climi #:clim-internals)
                     (#:luv #:luv)
@@ -331,7 +332,7 @@
     (luft.render::scene-builder-cell builder 4 4 4)
     (render:make-render-mesh (luft.render::finish-scene-builder builder))))
 
-(deftest global-torch-frames-follow-their-sparse-owner-without-padding
+(define-test global-torch-frames-follow-their-sparse-owner-without-padding
   (let* ((empty (make-renderer-publication-test-mesh))
          (torch (make-renderer-publication-test-mesh))
          (frame
@@ -343,8 +344,8 @@
              (list
               (cons 0 (luft.render::%make-mesh-slot :mesh empty))
               (cons 1 (luft.render::%make-mesh-slot :mesh torch))))))
-      (ok (= render:+torch-flame-instance-scalar-count+ (length data)))
-      (ok (equalp frame data)))))
+      (true (= render:+torch-flame-instance-scalar-count+ (length data)))
+      (true (equalp frame data)))))
 
 (defun make-renderer-target-probe (temporal-p &optional
                                                 (temporal-kind
@@ -433,24 +434,24 @@
     (loop for resource in resources
           always (= 1 (count resource destroyed :test #'eq)))))
 
-(deftest flame-depth-sampling-has-one-dedicated-nearest-sampler-boundary
+(define-test flame-depth-sampling-has-one-dedicated-nearest-sampler-boundary
   (let* ((device (make-instance 'flame-resource-probe-device))
          (sampler (luft.render::make-renderer-flame-depth-sampler device))
          (descriptor (flame-resource-probe-descriptor sampler)))
-    (ok (eq :nearest (luv::sampler-descriptor-mag-filter descriptor)))
-    (ok (eq :nearest (luv::sampler-descriptor-min-filter descriptor)))
-    (ok (eq :nearest (luv::sampler-descriptor-mipmap-filter descriptor)))
+    (true (eq :nearest (luv::sampler-descriptor-mag-filter descriptor)))
+    (true (eq :nearest (luv::sampler-descriptor-min-filter descriptor)))
+    (true (eq :nearest (luv::sampler-descriptor-mipmap-filter descriptor)))
     (luv:destroy sampler)
-    (ok (every-probe-resource-destroyed-once-p (list sampler) device)))
+    (true (every-probe-resource-destroyed-once-p (list sampler) device)))
   (let ((device (make-instance 'flame-resource-probe-device)))
     (setf (flame-resource-probe-fail-create-at device) 1)
-    (ok (signals
-         (luft.render::make-renderer-flame-depth-sampler device)
-         'error))
-    (ok (null (flame-resource-probe-created-resources device)))
-    (ok (null (flame-resource-probe-destroyed-resources device)))))
+    (true (fail
+           (luft.render::make-renderer-flame-depth-sampler device)
+           'error))
+    (true (null (flame-resource-probe-created-resources device)))
+    (true (null (flame-resource-probe-destroyed-resources device)))))
 
-(deftest a-frame-target-generation-is-one-coherent-resource-identity
+(define-test a-frame-target-generation-is-one-coherent-resource-identity
   (dolist (temporal-p '(nil t))
     (multiple-value-bind (renderer device)
         (make-renderer-target-probe temporal-p)
@@ -471,93 +472,93 @@
                (if temporal-p
                    (luft.render::renderer-resolved-view renderer)
                    (luft.render::renderer-scene-view renderer))))
-        (ok (eq generation
-                (luft.render::renderer-target-generation renderer)))
-        (ok (equal requested-extent
-                   (luft.render::renderer-extent renderer)))
-        (ok (not (eq requested-extent
+        (true (eq generation
+                  (luft.render::renderer-target-generation renderer)))
+        (true (equal requested-extent
                      (luft.render::renderer-extent renderer)))
-            "the generation owns its extent value")
-        (ok (equal (luft.render::render-scale-extent requested-extent)
-                   (luft.render::renderer-render-extent renderer)))
-        (ok (eq (luft.render::renderer-depth-view renderer)
-                (probe-bind-group-resource present-group 2)))
-        (ok (eq (luft.render::renderer-depth-texture renderer)
-                (probe-texture-view-texture
-                 (luft.render::renderer-depth-view renderer))))
+        (true (not (eq requested-extent
+                       (luft.render::renderer-extent renderer)))
+              "the generation owns its extent value")
+        (true (equal (luft.render::render-scale-extent requested-extent)
+                     (luft.render::renderer-render-extent renderer)))
+        (true (eq (luft.render::renderer-depth-view renderer)
+                  (probe-bind-group-resource present-group 2)))
+        (true (eq (luft.render::renderer-depth-texture renderer)
+                  (probe-texture-view-texture
+                   (luft.render::renderer-depth-view renderer))))
         (let ((multisampled-depth
                 (luft.render::renderer-target-generation-depth-msaa-texture
                  generation)))
-          (ok (= luft.render::*scene-sample-count*
-                 (luv::texture-descriptor-sample-count
-                  (flame-resource-probe-descriptor multisampled-depth))))
-          (ok (equal '(:render-attachment)
-                     (luv::texture-descriptor-usage
-                      (flame-resource-probe-descriptor multisampled-depth)))))
-        (ok (eq (luft.render::renderer-scene-texture renderer)
-                (probe-texture-view-texture
-                 (luft.render::renderer-scene-view renderer))))
-        (ok (eq (luft.render::renderer-composite-texture renderer)
-                (probe-texture-view-texture
-                 (luft.render::renderer-composite-view renderer))))
-        (ok (eq base-source
-                (probe-bind-group-resource composite-source-group 0)))
-        (ok (eq (luft.render::renderer-composite-view renderer)
-                (probe-bind-group-resource present-group 0)))
-        (ok (eq (luft.render::renderer-composite-view renderer)
-                (probe-bind-group-resource probe-group 0)))
-        (ok (eq (luft.render::renderer-sampler renderer)
-                (probe-bind-group-resource present-group 1)))
-        (ok (eq (luft.render::renderer-camera-buffer renderer)
-                (probe-bind-group-resource present-group 3)))
-        (ok (eq (luft.render::renderer-flame-instance-buffer renderer)
-                (probe-bind-group-resource flame-group 0)))
-        (ok (eq (luft.render::renderer-camera-buffer renderer)
-                (probe-bind-group-resource flame-group 1)))
-        (ok (eq (luft.render::renderer-flame-effect-buffer renderer)
-                (probe-bind-group-resource flame-group 2)))
-        (ok (eq (luft.render::renderer-depth-view renderer)
-                (probe-bind-group-resource flame-group 3)))
-        (ok (eq (luft.render::renderer-flame-depth-sampler renderer)
-                (probe-bind-group-resource flame-group 4)))
-        (ok (eql temporal-p
-                 (not (null
-                       (luft.render::renderer-temporal-scaler renderer)))))
-        (ok (eql temporal-p
-                 (not (null
-                       (luft.render::renderer-motion-texture renderer)))))
-        (ok (eql temporal-p
-                 (not (null
-                       (luft.render::renderer-resolved-texture renderer)))))
-        (ok (= (if temporal-p 21 14) (length resources)))
-        (ok (= (length resources)
-               (length (flame-resource-probe-created-resources device))))
+          (true (= luft.render::*scene-sample-count*
+                   (luv::texture-descriptor-sample-count
+                    (flame-resource-probe-descriptor multisampled-depth))))
+          (true (equal '(:render-attachment)
+                       (luv::texture-descriptor-usage
+                        (flame-resource-probe-descriptor multisampled-depth)))))
+        (true (eq (luft.render::renderer-scene-texture renderer)
+                  (probe-texture-view-texture
+                   (luft.render::renderer-scene-view renderer))))
+        (true (eq (luft.render::renderer-composite-texture renderer)
+                  (probe-texture-view-texture
+                   (luft.render::renderer-composite-view renderer))))
+        (true (eq base-source
+                  (probe-bind-group-resource composite-source-group 0)))
+        (true (eq (luft.render::renderer-composite-view renderer)
+                  (probe-bind-group-resource present-group 0)))
+        (true (eq (luft.render::renderer-composite-view renderer)
+                  (probe-bind-group-resource probe-group 0)))
+        (true (eq (luft.render::renderer-sampler renderer)
+                  (probe-bind-group-resource present-group 1)))
+        (true (eq (luft.render::renderer-camera-buffer renderer)
+                  (probe-bind-group-resource present-group 3)))
+        (true (eq (luft.render::renderer-flame-instance-buffer renderer)
+                  (probe-bind-group-resource flame-group 0)))
+        (true (eq (luft.render::renderer-camera-buffer renderer)
+                  (probe-bind-group-resource flame-group 1)))
+        (true (eq (luft.render::renderer-flame-effect-buffer renderer)
+                  (probe-bind-group-resource flame-group 2)))
+        (true (eq (luft.render::renderer-depth-view renderer)
+                  (probe-bind-group-resource flame-group 3)))
+        (true (eq (luft.render::renderer-flame-depth-sampler renderer)
+                  (probe-bind-group-resource flame-group 4)))
+        (true (eql temporal-p
+                   (not (null
+                         (luft.render::renderer-temporal-scaler renderer)))))
+        (true (eql temporal-p
+                   (not (null
+                         (luft.render::renderer-motion-texture renderer)))))
+        (true (eql temporal-p
+                   (not (null
+                         (luft.render::renderer-resolved-texture renderer)))))
+        (true (= (if temporal-p 21 14) (length resources)))
+        (true (= (length resources)
+                 (length (flame-resource-probe-created-resources device))))
         (let ((previous-view (list :stable-previous-view))
               (create-count (flame-resource-probe-create-count device)))
           (setf (luft.render::renderer-previous-view renderer) previous-view
                 (luft.render::renderer-history-valid-p renderer) t
                 (luft.render::renderer-history-used-p renderer) t)
-          (ok (eq renderer
-                  (luft.render::ensure-renderer-extent
-                   renderer (copy-list requested-extent))))
-          (ok (eq generation
-                  (luft.render::renderer-target-generation renderer)))
-          (ok (eq previous-view
-                  (luft.render::renderer-previous-view renderer)))
-          (ok (luft.render::renderer-history-valid-p renderer))
-          (ok (luft.render::renderer-history-used-p renderer))
-          (ok (= create-count
-                 (flame-resource-probe-create-count device))
-              "an equal extent is a resource and history no-op"))
+          (true (eq renderer
+                    (luft.render::ensure-renderer-extent
+                     renderer (copy-list requested-extent))))
+          (true (eq generation
+                    (luft.render::renderer-target-generation renderer)))
+          (true (eq previous-view
+                    (luft.render::renderer-previous-view renderer)))
+          (true (luft.render::renderer-history-valid-p renderer))
+          (true (luft.render::renderer-history-used-p renderer))
+          (true (= create-count
+                   (flame-resource-probe-create-count device))
+                "an equal extent is a resource and history no-op"))
         (luft.render::destroy-renderer-targets renderer)
-        (ok (not (eq generation
+        (true (not (eq generation
+                       (luft.render::renderer-target-generation renderer))))
+        (true (null (luft.render::renderer-extent renderer)))
+        (true (null (renderer-target-generation-resources
                      (luft.render::renderer-target-generation renderer))))
-        (ok (null (luft.render::renderer-extent renderer)))
-        (ok (null (renderer-target-generation-resources
-                   (luft.render::renderer-target-generation renderer))))
-        (ok (every-probe-resource-destroyed-once-p resources device))))))
+        (true (every-probe-resource-destroyed-once-p resources device))))))
 
-(deftest initial-frame-target-staging-cleans-every-allocation-boundary
+(define-test initial-frame-target-staging-cleans-every-allocation-boundary
   (dolist (temporal-p '(nil t))
     (loop for failure-ordinal from 1 to (if temporal-p 21 14)
           do
@@ -572,27 +573,27 @@
                        (luft.render::renderer-history-used-p renderer) t
                        (flame-resource-probe-fail-create-at device)
                        failure-ordinal)
-                 (ok (signals
-                      (luft.render::create-frame-targets renderer '(640 360))
-                      'error)
-                     (format nil "~:[direct~;temporal~] create ~D fails"
-                             temporal-p failure-ordinal))
-                 (ok (eq initial
-                         (luft.render::renderer-target-generation renderer)))
-                 (ok (eq previous-view
-                         (luft.render::renderer-previous-view renderer)))
-                 (ok (luft.render::renderer-history-valid-p renderer))
-                 (ok (luft.render::renderer-history-used-p renderer))
+                 (true (fail
+                        (luft.render::create-frame-targets renderer '(640 360))
+                        'error)
+                       (format nil "~:[direct~;temporal~] create ~D fails"
+                               temporal-p failure-ordinal))
+                 (true (eq initial
+                           (luft.render::renderer-target-generation renderer)))
+                 (true (eq previous-view
+                           (luft.render::renderer-previous-view renderer)))
+                 (true (luft.render::renderer-history-valid-p renderer))
+                 (true (luft.render::renderer-history-used-p renderer))
                  (let ((created
                          (flame-resource-probe-created-resources device)))
-                   (ok (= (1- failure-ordinal) (length created)))
-                   (ok (= (length created)
-                          (length
-                           (flame-resource-probe-destroyed-resources device))))
-                   (ok (every-probe-resource-destroyed-once-p
-                        created device))))))))
+                   (true (= (1- failure-ordinal) (length created)))
+                   (true (= (length created)
+                            (length
+                             (flame-resource-probe-destroyed-resources device))))
+                   (true (every-probe-resource-destroyed-once-p
+                          created device))))))))
 
-(deftest vulkan-temporal-targets-own-an-explicit-resolve-history
+(define-test vulkan-temporal-targets-own-an-explicit-resolve-history
   (multiple-value-bind (renderer device)
       (make-renderer-target-probe t :shader)
     (let* ((generation
@@ -608,57 +609,57 @@
            (frame-group
              (luft.render::renderer-frame-temporal-bind-group
               renderer frame)))
-      (ok (null (luft.render::renderer-temporal-scaler renderer)))
-      (ok (equal '(640 360)
-                 (luft.render::renderer-render-extent renderer)))
-      (ok history)
-      (ok resolved)
-      (ok group)
-      (ok (eq (luft.render::renderer-scene-view renderer)
-              (probe-bind-group-resource group 0)))
-      (ok (eq (luft.render::renderer-motion-view renderer)
-              (probe-bind-group-resource group 1)))
-      (ok (eq (luft.render::renderer-history-view renderer)
-              (probe-bind-group-resource group 2)))
-      (ok (eq (luft.render::renderer-sampler renderer)
-              (probe-bind-group-resource group 3)))
-      (ok (eq (luft.render::renderer-camera-buffer renderer)
-              (probe-bind-group-resource group 4)))
+      (true (null (luft.render::renderer-temporal-scaler renderer)))
+      (true (equal '(640 360)
+                   (luft.render::renderer-render-extent renderer)))
+      (true history)
+      (true resolved)
+      (true group)
+      (true (eq (luft.render::renderer-scene-view renderer)
+                (probe-bind-group-resource group 0)))
+      (true (eq (luft.render::renderer-motion-view renderer)
+                (probe-bind-group-resource group 1)))
+      (true (eq (luft.render::renderer-history-view renderer)
+                (probe-bind-group-resource group 2)))
+      (true (eq (luft.render::renderer-sampler renderer)
+                (probe-bind-group-resource group 3)))
+      (true (eq (luft.render::renderer-camera-buffer renderer)
+                (probe-bind-group-resource group 4)))
       ;; The live encode uses the slot-derived group, not GENERATION's legacy
       ;; inspectable group.  Its mutable camera upload comes from the
       ;; reacquired presentation slot.
-      (ok (eq :presentation-slot-camera
-              (probe-bind-group-resource frame-group 4)))
-      (ok (equal '(640 360 1)
-                 (luv::texture-descriptor-size
-                  (flame-resource-probe-descriptor history))))
-      (ok (member :copy-dst
-                  (luv::texture-descriptor-usage
-                   (flame-resource-probe-descriptor history))))
-      (ok (member :render-attachment
-                  (luv::texture-descriptor-usage
-                   (flame-resource-probe-descriptor resolved))))
-      (ok (member :copy-src
-                  (luv::texture-descriptor-usage
-                   (flame-resource-probe-descriptor resolved))))
-      (ok (member :texture-binding
-                  (luv::texture-descriptor-usage
-                   (flame-resource-probe-descriptor
-                    (luft.render::renderer-motion-texture renderer)))))
-      (ok (= 23 (length (renderer-target-generation-resources generation))))
+      (true (eq :presentation-slot-camera
+                (probe-bind-group-resource frame-group 4)))
+      (true (equal '(640 360 1)
+                   (luv::texture-descriptor-size
+                    (flame-resource-probe-descriptor history))))
+      (true (member :copy-dst
+                    (luv::texture-descriptor-usage
+                     (flame-resource-probe-descriptor history))))
+      (true (member :render-attachment
+                    (luv::texture-descriptor-usage
+                     (flame-resource-probe-descriptor resolved))))
+      (true (member :copy-src
+                    (luv::texture-descriptor-usage
+                     (flame-resource-probe-descriptor resolved))))
+      (true (member :texture-binding
+                    (luv::texture-descriptor-usage
+                     (flame-resource-probe-descriptor
+                      (luft.render::renderer-motion-texture renderer)))))
+      (true (= 23 (length (renderer-target-generation-resources generation))))
       (luv:destroy frame-group)
       (luft.render::destroy-renderer-targets renderer)
-      (ok (every-probe-resource-destroyed-once-p
-           (flame-resource-probe-created-resources device) device)))))
+      (true (every-probe-resource-destroyed-once-p
+             (flame-resource-probe-created-resources device) device)))))
 
-(deftest ordinary-gpu-devices-select-the-inspectable-temporal-resolve
+(define-test ordinary-gpu-devices-select-the-inspectable-temporal-resolve
   (let ((device (make-instance 'flame-resource-probe-device)))
     (let ((luft.render::*temporal-upscaling-p* t))
-      (ok (eq :shader (luft.render::temporal-resolve-kind device))))
+      (true (eq :shader (luft.render::temporal-resolve-kind device))))
     (let ((luft.render::*temporal-upscaling-p* nil))
-      (ok (null (luft.render::temporal-resolve-kind device))))))
+      (true (null (luft.render::temporal-resolve-kind device))))))
 
-(deftest failed-frame-target-resize-preserves-the-exact-old-generation
+(define-test failed-frame-target-resize-preserves-the-exact-old-generation
   (dolist (temporal-p '(nil t))
     (multiple-value-bind (renderer device)
         (make-renderer-target-probe temporal-p)
@@ -679,28 +680,28 @@
               (flame-resource-probe-fail-create-at device)
               (+ (flame-resource-probe-create-count device)
                  (if temporal-p 21 14)))
-        (ok (signals
-             (luft.render::ensure-renderer-extent renderer '(800 450))
-             'error))
-        (ok (eq old-generation
-                (luft.render::renderer-target-generation renderer)))
-        (ok (eq old-previous-view
-                (luft.render::renderer-previous-view renderer)))
-        (ok (luft.render::renderer-history-valid-p renderer))
-        (ok (luft.render::renderer-history-used-p renderer))
-        (ok (every (lambda (resource)
-                     (not (member
-                           resource
-                           (flame-resource-probe-destroyed-resources device)
-                           :test #'eq)))
-                   old-resources)
-            "no old target resource is retired on failure")
+        (true (fail
+               (luft.render::ensure-renderer-extent renderer '(800 450))
+               'error))
+        (true (eq old-generation
+                  (luft.render::renderer-target-generation renderer)))
+        (true (eq old-previous-view
+                  (luft.render::renderer-previous-view renderer)))
+        (true (luft.render::renderer-history-valid-p renderer))
+        (true (luft.render::renderer-history-used-p renderer))
+        (true (every (lambda (resource)
+                       (not (member
+                             resource
+                             (flame-resource-probe-destroyed-resources device)
+                             :test #'eq)))
+                     old-resources)
+              "no old target resource is retired on failure")
         (let ((staged
                 (set-difference
                  (flame-resource-probe-created-resources device)
                  created-before :test #'eq)))
-          (ok (= (1- (if temporal-p 21 14)) (length staged)))
-          (ok (every-probe-resource-destroyed-once-p staged device)))
+          (true (= (1- (if temporal-p 21 14)) (length staged)))
+          (true (every-probe-resource-destroyed-once-p staged device)))
         (setf (flame-resource-probe-fail-create-at device) nil)
         (let ((event-count-before-success
                 (length (flame-resource-probe-events device))))
@@ -720,32 +721,32 @@
                                 :create-texture-view :create-bind-group)))
                     events :from-end t))
                  (first-destroy (position :destroy events :key #'car)))
-            (ok (< last-create first-destroy)
-                "all candidate creation precedes old-generation retirement")))
+            (true (< last-create first-destroy)
+                  "all candidate creation precedes old-generation retirement")))
         (let ((new-generation
                 (luft.render::renderer-target-generation renderer)))
-          (ok (not (eq old-generation new-generation)))
-          (ok (not (eq
-                    (luft.render::renderer-target-generation-resources
-                     old-generation)
-                    (luft.render::renderer-target-generation-resources
-                     new-generation)))
-              "resize owns a distinct complete target cohort")
-          (ok (equal '(800 450) (luft.render::renderer-extent renderer)))
-          (ok (null (luft.render::renderer-previous-view renderer)))
-          (ok (null (luft.render::renderer-history-valid-p renderer)))
-          (ok (null (luft.render::renderer-history-used-p renderer)))
-          (ok (every-probe-resource-destroyed-once-p old-resources device))
-          (ok (every (lambda (resource)
-                       (not (member
-                             resource
-                             (flame-resource-probe-destroyed-resources device)
-                             :test #'eq)))
-                     (renderer-target-generation-resources new-generation))
-              "the installed generation remains live")
+          (true (not (eq old-generation new-generation)))
+          (true (not (eq
+                      (luft.render::renderer-target-generation-resources
+                       old-generation)
+                      (luft.render::renderer-target-generation-resources
+                       new-generation)))
+                "resize owns a distinct complete target cohort")
+          (true (equal '(800 450) (luft.render::renderer-extent renderer)))
+          (true (null (luft.render::renderer-previous-view renderer)))
+          (true (null (luft.render::renderer-history-valid-p renderer)))
+          (true (null (luft.render::renderer-history-used-p renderer)))
+          (true (every-probe-resource-destroyed-once-p old-resources device))
+          (true (every (lambda (resource)
+                         (not (member
+                               resource
+                               (flame-resource-probe-destroyed-resources device)
+                               :test #'eq)))
+                       (renderer-target-generation-resources new-generation))
+                "the installed generation remains live")
           (luft.render::destroy-renderer-targets renderer))))))
 
-(deftest frame-target-precommit-failure-retires-only-the-candidate
+(define-test frame-target-precommit-failure-retires-only-the-candidate
   (multiple-value-bind (renderer device) (make-renderer-target-probe t)
     (luft.render::create-frame-targets renderer '(640 360))
     (let* ((old-generation
@@ -761,40 +762,40 @@
             (luft.render::renderer-history-used-p renderer) t)
       (let ((luft.render::*renderer-target-generation-precommit-hook*
               (lambda (owner candidate)
-                (ok (eq renderer owner))
-                (ok (eq old-generation
-                        (luft.render::renderer-target-generation owner))
-                    "the old generation is still published at precommit")
+                (true (eq renderer owner))
+                (true (eq old-generation
+                          (luft.render::renderer-target-generation owner))
+                      "the old generation is still published at precommit")
                 (setf observed-candidate candidate)
-                (ok (= 21 (length
-                           (renderer-target-generation-resources candidate))))
+                (true (= 21 (length
+                             (renderer-target-generation-resources candidate))))
                 (error "Injected target-generation precommit failure."))))
-        (ok (signals
-             (luft.render::ensure-renderer-extent renderer '(800 450))
-             'error)))
-      (ok observed-candidate)
-      (ok (eq old-generation
-              (luft.render::renderer-target-generation renderer)))
-      (ok (eq old-previous-view
-              (luft.render::renderer-previous-view renderer)))
-      (ok (luft.render::renderer-history-valid-p renderer))
-      (ok (luft.render::renderer-history-used-p renderer))
-      (ok (every-probe-resource-destroyed-once-p
-           (renderer-target-generation-resources observed-candidate) device))
-      (ok (every (lambda (resource)
-                   (not (member
-                         resource
-                         (flame-resource-probe-destroyed-resources device)
-                         :test #'eq)))
-                 old-resources))
-      (ok (= 21
-             (length
-              (set-difference
-               (flame-resource-probe-created-resources device)
-               created-before :test #'eq))))
+        (true (fail
+               (luft.render::ensure-renderer-extent renderer '(800 450))
+               'error)))
+      (true observed-candidate)
+      (true (eq old-generation
+                (luft.render::renderer-target-generation renderer)))
+      (true (eq old-previous-view
+                (luft.render::renderer-previous-view renderer)))
+      (true (luft.render::renderer-history-valid-p renderer))
+      (true (luft.render::renderer-history-used-p renderer))
+      (true (every-probe-resource-destroyed-once-p
+             (renderer-target-generation-resources observed-candidate) device))
+      (true (every (lambda (resource)
+                     (not (member
+                           resource
+                           (flame-resource-probe-destroyed-resources device)
+                           :test #'eq)))
+                   old-resources))
+      (true (= 21
+               (length
+                (set-difference
+                 (flame-resource-probe-created-resources device)
+                 created-before :test #'eq))))
       (luft.render::destroy-renderer-targets renderer))))
 
-(deftest a-streaming-mesh-request-owns-an-immutable-residency-snapshot
+(define-test a-streaming-mesh-request-owns-an-immutable-residency-snapshot
   (let* ((scene (make-two-chunk-streaming-scene))
          (left (luft:chunk-key-at 63 4))
          (right (luft:chunk-key-at 64 4)))
@@ -809,23 +810,23 @@
            (before
              (prepared-owner-mesh
               (production:perform-production-request request) left)))
-      (ok before)
-      (ok (luft.render::current-streaming-mesh-request-p scene request))
+      (true before)
+      (true (luft.render::current-streaming-mesh-request-p scene request))
       (setf (gethash right (luft.render::streaming-scene-loaded scene)) t)
-      (ok (not (luft.render::current-streaming-mesh-request-p scene request)))
+      (true (not (luft.render::current-streaming-mesh-request-p scene request)))
       ;; The old request remains independently executable, while a current
       ;; oracle observes and closes the newly resident cross-chunk seam.
-      (ok (luft::%same-surface-mesh-representation-p
-           before
-           (prepared-owner-mesh
-            (production:perform-production-request request) left)))
-      (ok (not
-           (canonical-mesh-cohorts-equal-p
-            (list before)
-            (list (render:mesh-streaming-chunk
-                   scene left luft:+mesh-bevel-width+))))))))
+      (true (luft::%same-surface-mesh-representation-p
+             before
+             (prepared-owner-mesh
+              (production:perform-production-request request) left)))
+      (true (not
+             (canonical-mesh-cohorts-equal-p
+              (list before)
+              (list (render:mesh-streaming-chunk
+                     scene left luft:+mesh-bevel-width+))))))))
 
-(deftest streaming-cell-edits-publish-reversible-chain-material-and-light-state
+(define-test streaming-cell-edits-publish-reversible-chain-material-and-light-state
   (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
          (x 4) (y 5) (z 3))
     (luft.render::scene-builder-cell builder x y z)
@@ -839,31 +840,31 @@
              (luft.render::scene-authored-light-revision scene)))
       (multiple-value-bind (removal status key)
           (luft.render::edit-streaming-scene-cell scene cell nil)
-        (ok (eq :edited status))
-        (ok (= key (luft:site-chunk-key cell)))
-        (ok (eq luft.render::*terrain-material-placement*
-                (luft.render::scene-edit-old-placement removal)))
-        (ok (null (luft.render::scene-edit-new-placement removal)))
-        (ok (zerop (luft:chain-cell-occupancy-bit
-                    (render:scene-solid scene) x y z)))
-        (ok (null (nth-value 1
-                            (gethash cell
-                                     (luft.render::scene-material-cells scene)))))
-        (ok (= 1 (luft.render::scene-content-revision scene)))
-        (ok (= (1+ original-light-revision)
-               (luft.render::scene-authored-light-revision scene)))
+        (true (eq :edited status))
+        (true (= key (luft:site-chunk-key cell)))
+        (true (eq luft.render::*terrain-material-placement*
+                  (luft.render::scene-edit-old-placement removal)))
+        (true (null (luft.render::scene-edit-new-placement removal)))
+        (true (zerop (luft:chain-cell-occupancy-bit
+                      (render:scene-solid scene) x y z)))
+        (true (null (nth-value 1
+                              (gethash cell
+                                       (luft.render::scene-material-cells scene)))))
+        (true (= 1 (luft.render::scene-content-revision scene)))
+        (true (= (1+ original-light-revision)
+                 (luft.render::scene-authored-light-revision scene)))
         (multiple-value-bind (restoration restoration-status restored-key)
             (luft.render::edit-streaming-scene-cell
              scene cell (luft.render::scene-edit-old-placement removal))
           (declare (ignore restoration))
-          (ok (eq :edited restoration-status))
-          (ok (= key restored-key))
-          (ok (luft:chain= original (render:scene-solid scene)))
-          (ok (eq luft.render::*terrain-material-placement*
-                  (luft.render::scene-material-placement-at scene cell)))
-          (ok (= 2 (luft.render::scene-content-revision scene))))))))
+          (true (eq :edited restoration-status))
+          (true (= key restored-key))
+          (true (luft:chain= original (render:scene-solid scene)))
+          (true (eq luft.render::*terrain-material-placement*
+                    (luft.render::scene-material-placement-at scene cell)))
+          (true (= 2 (luft.render::scene-content-revision scene))))))))
 
-(deftest an-authored-edit-cannot-change-an-existing-worker-snapshot
+(define-test an-authored-edit-cannot-change-an-existing-worker-snapshot
   (let* ((scene (make-two-chunk-streaming-scene))
          (cell
            (luft:make-site
@@ -881,20 +882,20 @@
       (multiple-value-bind (edit status key)
           (luft.render::edit-streaming-scene-cell scene cell nil)
         (declare (ignore edit key))
-        (ok (eq :edited status)))
-      (ok (not (luft.render::current-streaming-mesh-request-p scene request)))
-      (ok (= 1 (luft:chain-cell-occupancy-bit
-                (render:scene-solid input) 63 4 4)))
-      (ok (eq luft.render::*terrain-material-placement*
-              (luft.render::scene-material-placement-at input cell)))
-      (ok (zerop (luft:chain-cell-occupancy-bit
-                  (render:scene-solid scene) 63 4 4)))
+        (true (eq :edited status)))
+      (true (not (luft.render::current-streaming-mesh-request-p scene request)))
+      (true (= 1 (luft:chain-cell-occupancy-bit
+                  (render:scene-solid input) 63 4 4)))
+      (true (eq luft.render::*terrain-material-placement*
+                (luft.render::scene-material-placement-at input cell)))
+      (true (zerop (luft:chain-cell-occupancy-bit
+                    (render:scene-solid scene) 63 4 4)))
       ;; Executing the obsolete request remains valid and cannot observe the
       ;; replacement material table or authored light generation.
-      (ok (prepared-owner-mesh
-           (production:perform-production-request request) left)))))
+      (true (prepared-owner-mesh
+             (production:perform-production-request request) left)))))
 
-(deftest placing-an-inactive-material-recloses-the-scene-material-program
+(define-test placing-an-inactive-material-recloses-the-scene-material-program
   (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
          (x 4) (y 5) (z 3))
     (luft.render::scene-builder-cell builder x y z)
@@ -904,18 +905,18 @@
            (domain (luft:chain-domain (render:scene-solid scene)))
            (cell (luft:make-site domain (1+ x) y z luft:+cell-extent+ 1))
            (old-program (luft.render::scene-material-program scene)))
-      (ok (= 7 (luft.render::material-program-summary-count old-program)))
+      (true (= 7 (luft.render::material-program-summary-count old-program)))
       (multiple-value-bind (edit status key)
           (luft.render::edit-streaming-scene-cell
            scene cell luft.render::*crystal-material-placement*)
         (declare (ignore edit key))
-        (ok (eq :edited status)))
-      (ok (< (luft.render::material-program-summary-count old-program)
-             (luft.render::material-program-summary-count
-              (luft.render::scene-material-program scene))))
-      (ok (render:make-render-mesh scene)))))
+        (true (eq :edited status)))
+      (true (< (luft.render::material-program-summary-count old-program)
+               (luft.render::material-program-summary-count
+                (luft.render::scene-material-program scene))))
+      (true (render:make-render-mesh scene)))))
 
-(deftest a-scheduled-cell-edit-is-one-busy-publication-cohort
+(define-test a-scheduled-cell-edit-is-one-busy-publication-cohort
   (let* ((scene (make-two-chunk-streaming-scene))
          (domain (luft:chain-domain (render:scene-solid scene)))
          (left-cell
@@ -930,22 +931,22 @@
          (multiple-value-bind (edit status key)
              (luft.render::edit-streaming-scene-cell scene left-cell nil)
            (declare (ignore edit))
-           (ok (eq :edited status))
+           (true (eq :edited status))
            (let ((affected
                    (luft.render::schedule-streaming-scene-edit
                     scene system key 2 nil)))
-             (ok affected)
-             (ok (equal affected
-                        (luft.render::streaming-scene-cohort scene)))
+             (true affected)
+             (true (equal affected
+                          (luft.render::streaming-scene-cohort scene)))
              (multiple-value-bind (next next-status next-key)
                  (luft.render::edit-streaming-scene-cell
                   scene right-cell nil)
-               (ok (null next))
-               (ok (eq :busy next-status))
-               (ok (null next-key)))))
+               (true (null next))
+               (true (eq :busy next-status))
+               (true (null next-key)))))
       (production:stop-production-system system))))
 
-(deftest torch-attachments-protect-their-support-and-clearance-cells
+(define-test torch-attachments-protect-their-support-and-clearance-cells
   (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
          (x 4) (y 5) (z 3))
     (luft.render::scene-builder-cell builder x y z :architecture-p t)
@@ -963,11 +964,11 @@
         (multiple-value-bind (record status key)
             (luft.render::edit-streaming-scene-cell
              scene (first edit) (second edit))
-          (ok (null record))
-          (ok (eq :attachment status))
-          (ok (null key)))))))
+          (true (null record))
+          (true (eq :attachment status))
+          (true (null key)))))))
 
-(deftest streaming-temporary-boundaries-use-resident-source-materials
+(define-test streaming-temporary-boundaries-use-resident-source-materials
   (labels ((make-scene (include-crystal-p)
              (let ((builder
                      (luft.render::make-scene-builder :horizontal-bits 7)))
@@ -996,10 +997,10 @@
                  streaming output-keys 2)))
              (oracle
                (render:make-render-mesh left-only-scene :bevel-width 2)))
-        (ok (equal output-keys (mapcar #'car streamed)))
-        (ok (canonical-mesh-cohorts-equal-p
-             (mapcar #'cdr streamed)
-             (surface-mesh-tree-meshes oracle))))
+        (true (equal output-keys (mapcar #'car streamed)))
+        (true (canonical-mesh-cohorts-equal-p
+               (mapcar #'cdr streamed)
+               (surface-mesh-tree-meshes oracle))))
       ;; Once both source chunks are resident, that temporary face disappears
       ;; and the same producer matches the fully authored occupied union.
       (setf (gethash right (luft.render::streaming-scene-loaded streaming)) 2)
@@ -1011,12 +1012,12 @@
                 (luft.render::make-streaming-region-snapshot
                  streaming output-keys 2)))
              (oracle (render:make-render-mesh full-scene :bevel-width 2)))
-        (ok (equal output-keys (mapcar #'car streamed)))
-        (ok (canonical-mesh-cohorts-equal-p
-             (mapcar #'cdr streamed)
-             (surface-mesh-tree-meshes oracle)))))))
+        (true (equal output-keys (mapcar #'car streamed)))
+        (true (canonical-mesh-cohorts-equal-p
+               (mapcar #'cdr streamed)
+               (surface-mesh-tree-meshes oracle)))))))
 
-(deftest a-streaming-residency-cohort-is-staged-atomically
+(define-test a-streaming-residency-cohort-is-staged-atomically
   (let* ((scene (make-two-chunk-streaming-scene))
          (left (luft:chunk-key-at 63 4))
          (right (luft:chunk-key-at 64 4))
@@ -1046,27 +1047,27 @@
             ;; cohort may enter staging.
             (gethash (second keys)
                      (luft.render::streaming-scene-outstanding scene)) 18)
-      (ok (null (luft.render::accept-streaming-mesh-result
-                 scene request result)))
-      (ok (zerop (hash-table-count
+      (true (null (luft.render::accept-streaming-mesh-result
+                   scene request result)))
+      (true (zerop (hash-table-count
+                    (luft.render::streaming-scene-staged scene))))
+      (multiple-value-bind (ready ready-generation ready-p)
+          (luft.render::ready-streaming-scene-meshes scene)
+        (true (null ready-generation))
+        (true (null ready))
+        (true (null ready-p)))
+      (setf (gethash (second keys)
+                     (luft.render::streaming-scene-outstanding scene)) 17)
+      (true (luft.render::accept-streaming-mesh-result scene request result))
+      (true (= 2 (hash-table-count
                   (luft.render::streaming-scene-staged scene))))
       (multiple-value-bind (ready ready-generation ready-p)
           (luft.render::ready-streaming-scene-meshes scene)
-        (ok (null ready-generation))
-        (ok (null ready))
-        (ok (null ready-p)))
-      (setf (gethash (second keys)
-                     (luft.render::streaming-scene-outstanding scene)) 17)
-      (ok (luft.render::accept-streaming-mesh-result scene request result))
-      (ok (= 2 (hash-table-count
-                (luft.render::streaming-scene-staged scene))))
-      (multiple-value-bind (ready ready-generation ready-p)
-          (luft.render::ready-streaming-scene-meshes scene)
-        (ok ready-p)
-        (ok (eq generation ready-generation))
-        (ok (equal meshes ready))))))
+        (true ready-p)
+        (true (eq generation ready-generation))
+        (true (equal meshes ready))))))
 
-(deftest renderer-publication-invalidates-only-real-temporal-history-changes
+(define-test renderer-publication-invalidates-only-real-temporal-history-changes
   (let* ((mesh (make-renderer-publication-test-mesh))
          (cohort (list (cons 7 mesh))))
     (multiple-value-bind (renderer device) (make-renderer-publication-probe)
@@ -1081,22 +1082,22 @@
              (old-flame-group
                (luft.render::renderer-flame-bind-group renderer)))
         (luft.render::renderer-update-meshes renderer cohort nil)
-        (ok (not (eq old-targets
-                     (luft.render::renderer-target-generation renderer))))
-        (ok (eq target-resources
-                (luft.render::renderer-target-generation-resources
-                 (luft.render::renderer-target-generation renderer)))
-            "publication retains the exact target cohort, not a clone")
-        (ok (= 1 (count old-flame-group
-                        (flame-resource-probe-destroyed-resources device)
-                        :test #'eq))
-            "publication retires only the old cross-product join"))
-      (ok (null (luft.render::renderer-history-valid-p renderer)))
-      (ok (luft.render::renderer-history-used-p renderer))
+        (true (not (eq old-targets
+                       (luft.render::renderer-target-generation renderer))))
+        (true (eq target-resources
+                  (luft.render::renderer-target-generation-resources
+                   (luft.render::renderer-target-generation renderer)))
+              "publication retains the exact target cohort, not a clone")
+        (true (= 1 (count old-flame-group
+                          (flame-resource-probe-destroyed-resources device)
+                          :test #'eq))
+              "publication retires only the old cross-product join"))
+      (true (null (luft.render::renderer-history-valid-p renderer)))
+      (true (luft.render::renderer-history-used-p renderer))
       ;; Replacing an already resident owner is still a real publication.
       (setf (luft.render::renderer-history-valid-p renderer) t)
       (luft.render::renderer-update-meshes renderer cohort nil)
-      (ok (null (luft.render::renderer-history-valid-p renderer)))
+      (true (null (luft.render::renderer-history-valid-p renderer)))
       ;; Asking to remove an owner that is not resident is a true no-op.  It
       ;; does not merely preserve equivalent values: every installed mesh and
       ;; torch-frame resource remains the exact object visible beforehand.
@@ -1114,25 +1115,25 @@
               (luft.render::renderer-torch-body-shadow-bind-group renderer))
             (events (copy-tree (flame-resource-probe-events device))))
         (luft.render::renderer-update-meshes renderer nil (list 99))
-        (ok (luft.render::renderer-history-valid-p renderer))
-        (ok (luft.render::renderer-history-used-p renderer))
-        (ok (eq table (luft.render::renderer-mesh-slots renderer)))
-        (ok (eq slot (gethash 7 (luft.render::renderer-mesh-slots renderer))))
-        (ok (eq order (luft.render::renderer-slot-order renderer)))
-        (ok (equal '(7) (luft.render::renderer-slot-order renderer)))
-        (ok (eq frame-data
-                (luft.render::renderer-torch-frame-data renderer)))
-        (ok (eq flame-buffer
-                (luft.render::renderer-flame-instance-buffer renderer)))
-        (ok (eq flame-group
-                (luft.render::renderer-flame-bind-group renderer)))
-        (ok (eq body-group
-                (luft.render::renderer-torch-body-bind-group renderer)))
-        (ok (eq body-shadow-group
-                (luft.render::renderer-torch-body-shadow-bind-group renderer)))
-        (ok (equal events (flame-resource-probe-events device)))))))
+        (true (luft.render::renderer-history-valid-p renderer))
+        (true (luft.render::renderer-history-used-p renderer))
+        (true (eq table (luft.render::renderer-mesh-slots renderer)))
+        (true (eq slot (gethash 7 (luft.render::renderer-mesh-slots renderer))))
+        (true (eq order (luft.render::renderer-slot-order renderer)))
+        (true (equal '(7) (luft.render::renderer-slot-order renderer)))
+        (true (eq frame-data
+                  (luft.render::renderer-torch-frame-data renderer)))
+        (true (eq flame-buffer
+                  (luft.render::renderer-flame-instance-buffer renderer)))
+        (true (eq flame-group
+                  (luft.render::renderer-flame-bind-group renderer)))
+        (true (eq body-group
+                  (luft.render::renderer-torch-body-bind-group renderer)))
+        (true (eq body-shadow-group
+                  (luft.render::renderer-torch-body-shadow-bind-group renderer)))
+        (true (equal events (flame-resource-probe-events device)))))))
 
-(deftest renderer-rejects-malformed-updates-before-publication-or-allocation
+(define-test renderer-rejects-malformed-updates-before-publication-or-allocation
   (let* ((mesh (make-renderer-publication-test-mesh))
          (cohort (list (cons 7 mesh))))
     (multiple-value-bind (renderer device) (make-renderer-publication-probe)
@@ -1172,24 +1173,24 @@
                                         (eq before-slot after-slot)))))
                (assert-preserved (before name)
                  (let ((after (snapshot)))
-                   (ok (equal (getf before :events) (getf after :events))
-                       (format nil "~A allocates no GPU resources" name))
-                   (ok (eq (getf before :table) (getf after :table))
-                       (format nil "~A preserves the slot table" name))
-                   (ok (same-entry-identities-p
-                        (getf before :entries) (getf after :entries))
-                       (format nil "~A preserves installed slot identities" name))
-                   (ok (eq (getf before :order) (getf after :order))
-                       (format nil "~A preserves slot order identity" name))
-                   (ok (every #'eq
-                              (getf before :resources)
-                              (getf after :resources))
-                       (format nil "~A preserves torch resource identities" name))
-                   (ok (eql (getf before :flame-count)
-                            (getf after :flame-count))
-                       (format nil "~A preserves the torch population" name))
-                   (ok (equal (getf before :history) (getf after :history))
-                       (format nil "~A preserves temporal history" name)))))
+                   (true (equal (getf before :events) (getf after :events))
+                         (format nil "~A allocates no GPU resources" name))
+                   (true (eq (getf before :table) (getf after :table))
+                         (format nil "~A preserves the slot table" name))
+                   (true (same-entry-identities-p
+                          (getf before :entries) (getf after :entries))
+                         (format nil "~A preserves installed slot identities" name))
+                   (true (eq (getf before :order) (getf after :order))
+                         (format nil "~A preserves slot order identity" name))
+                   (true (every #'eq
+                                (getf before :resources)
+                                (getf after :resources))
+                         (format nil "~A preserves torch resource identities" name))
+                   (true (eql (getf before :flame-count)
+                              (getf after :flame-count))
+                         (format nil "~A preserves the torch population" name))
+                   (true (equal (getf before :history) (getf after :history))
+                         (format nil "~A preserves temporal history" name)))))
         (dolist (case
                   (list
                    (list :duplicate-candidates
@@ -1205,14 +1206,14 @@
                          (list (cons 7 mesh)) (list 7))))
           (destructuring-bind (name candidates removals) case
             (let ((before (snapshot)))
-              (ok (signals
-                   (luft.render::renderer-update-meshes
-                    renderer candidates removals)
-                   'error)
-                  (format nil "~A is rejected" name))
+              (true (fail
+                     (luft.render::renderer-update-meshes
+                      renderer candidates removals)
+                     'error)
+                    (format nil "~A is rejected" name))
               (assert-preserved before name))))))))
 
-(deftest renderer-publication-rolls-back-after-complete-resource-staging
+(define-test renderer-publication-rolls-back-after-complete-resource-staging
   (let* ((mesh (make-renderer-publication-test-mesh))
          (first (list (cons 7 mesh))))
     (multiple-value-bind (renderer device) (make-renderer-publication-probe)
@@ -1242,41 +1243,41 @@
                 (lambda (owner candidate)
                   (declare (ignore owner candidate))
                   (error "Injected renderer precommit failure."))))
-          (ok (signals
-               (luft.render::renderer-update-meshes
-                renderer (list (cons 8 mesh)) nil)
-               'error)))
-        (ok (eq publication (luft.render::renderer-publication renderer)))
-        (ok (eq target-generation
-                (luft.render::renderer-target-generation renderer)))
-        (ok (eq table (luft.render::renderer-mesh-slots renderer)))
-        (ok (eq order (luft.render::renderer-slot-order renderer)))
-        (ok (eq frame-data
-                (luft.render::renderer-torch-frame-data renderer)))
-        (ok (eq flame-buffer
-                (luft.render::renderer-flame-instance-buffer renderer)))
-        (ok (eq flame-group
-                (luft.render::renderer-flame-bind-group renderer)))
-        (ok (eq body-group
-                (luft.render::renderer-torch-body-bind-group renderer)))
-        (ok (eq body-shadow-group
-                (luft.render::renderer-torch-body-shadow-bind-group renderer)))
-        (ok (equal '(7) (luft.render::renderer-slot-order renderer)))
-        (ok (null (gethash 8 (luft.render::renderer-mesh-slots renderer))))
-        (ok (luft.render::renderer-history-valid-p renderer))
-        (ok (luft.render::renderer-history-used-p renderer))
+          (true (fail
+                 (luft.render::renderer-update-meshes
+                  renderer (list (cons 8 mesh)) nil)
+                 'error)))
+        (true (eq publication (luft.render::renderer-publication renderer)))
+        (true (eq target-generation
+                  (luft.render::renderer-target-generation renderer)))
+        (true (eq table (luft.render::renderer-mesh-slots renderer)))
+        (true (eq order (luft.render::renderer-slot-order renderer)))
+        (true (eq frame-data
+                  (luft.render::renderer-torch-frame-data renderer)))
+        (true (eq flame-buffer
+                  (luft.render::renderer-flame-instance-buffer renderer)))
+        (true (eq flame-group
+                  (luft.render::renderer-flame-bind-group renderer)))
+        (true (eq body-group
+                  (luft.render::renderer-torch-body-bind-group renderer)))
+        (true (eq body-shadow-group
+                  (luft.render::renderer-torch-body-shadow-bind-group renderer)))
+        (true (equal '(7) (luft.render::renderer-slot-order renderer)))
+        (true (null (gethash 8 (luft.render::renderer-mesh-slots renderer))))
+        (true (luft.render::renderer-history-valid-p renderer))
+        (true (luft.render::renderer-history-used-p renderer))
         (let* ((events-after (flame-resource-probe-events device))
                (new-event-count (- (length events-after)
                                    (length events-before)))
                (events (subseq events-after 0 new-event-count)))
-          (ok (= (count :create-buffer events :key #'car)
-                 (count '(:destroy :buffer) events :test #'equal))
-              "every staged buffer is retired")
-          (ok (= (count :create-bind-group events :key #'car)
-                 (count '(:destroy :bind-group) events :test #'equal))
-              "every staged bind group is retired"))))))
+          (true (= (count :create-buffer events :key #'car)
+                   (count '(:destroy :buffer) events :test #'equal))
+                "every staged buffer is retired")
+          (true (= (count :create-bind-group events :key #'car)
+                   (count '(:destroy :bind-group) events :test #'equal))
+                "every staged bind group is retired"))))))
 
-(deftest renderer-publication-never-retains-stale-scene-generation
+(define-test renderer-publication-never-retains-stale-scene-generation
   (multiple-value-bind (mesh generation)
       (make-renderer-publication-test-mesh)
     (multiple-value-bind (renderer device) (make-renderer-publication-probe)
@@ -1285,42 +1286,42 @@
       (let ((published
               (luft.render::renderer-publication-scene-generation
                (luft.render::renderer-publication renderer))))
-        (ok (luft.render::scene-mesh-generation-result-stamp=
-             generation published))
-        (ok (= 1
-               (length
-                (luft.render::scene-mesh-generation-mesh-manifest
-                 published)))))
+        (true (luft.render::scene-mesh-generation-result-stamp=
+               generation published))
+        (true (= 1
+                 (length
+                  (luft.render::scene-mesh-generation-mesh-manifest
+                   published)))))
       ;; Any visible cohort change without exact generation evidence clears
       ;; provenance instead of retaining the old mesh/light claim.
       (render:renderer-set-mesh renderer 1 mesh)
-      (ok (null
-           (luft.render::renderer-publication-scene-generation
-            (luft.render::renderer-publication renderer))))
+      (true (null
+             (luft.render::renderer-publication-scene-generation
+              (luft.render::renderer-publication renderer))))
       ;; Once a publication has honestly discarded its provenance, a partial
       ;; generation cannot retroactively certify an unprovenanced retained
       ;; slot.  Remove the diagnostic cohort, then publish from exact evidence.
       (render:renderer-clear-meshes renderer)
       (render:renderer-set-mesh renderer 0 mesh :scene-generation generation)
-      (ok (luft.render::scene-mesh-generation-result-stamp=
-           generation
-           (luft.render::renderer-publication-scene-generation
-            (luft.render::renderer-publication renderer))))
+      (true (luft.render::scene-mesh-generation-result-stamp=
+             generation
+             (luft.render::renderer-publication-scene-generation
+              (luft.render::renderer-publication renderer))))
       (render:renderer-clear-meshes renderer)
-      (ok (null
-           (luft.render::renderer-publication-scene-generation
-            (luft.render::renderer-publication renderer)))))))
+      (true (null
+             (luft.render::renderer-publication-scene-generation
+              (luft.render::renderer-publication renderer)))))))
 
-(deftest renderer-rejects-foreign-or-mutated-geometry-provenance-preallocation
+(define-test renderer-rejects-foreign-or-mutated-geometry-provenance-preallocation
   (labels ((rejected-before-allocation (renderer device mesh generation)
              (let ((events
                      (copy-list (flame-resource-probe-events device))))
-               (ok (signals
-                    (render:renderer-set-mesh
-                     renderer 0 mesh :scene-generation generation)
-                    'error))
-               (ok (equal events (flame-resource-probe-events device)))
-               (ok (null (luft.render::renderer-slot-order renderer))))))
+               (true (fail
+                      (render:renderer-set-mesh
+                       renderer 0 mesh :scene-generation generation)
+                      'error))
+               (true (equal events (flame-resource-probe-events device)))
+               (true (null (luft.render::renderer-slot-order renderer))))))
     ;; With no torch, all widths intentionally share the exact base light
     ;; field. Geometry identity must independently reject width four and a
     ;; separately compiled same-width whole-domain topology.
@@ -1338,9 +1339,9 @@
               (declare (ignore foreign-generation))
               (multiple-value-bind (renderer device)
                   (make-renderer-publication-probe)
-                (ok (eq
-                     (luft:surface-mesh-voxel-light width-one)
-                     (luft:surface-mesh-voxel-light width-four)))
+                (true (eq
+                       (luft:surface-mesh-voxel-light width-one)
+                       (luft:surface-mesh-voxel-light width-four)))
                 (rejected-before-allocation
                  renderer device width-four width-one-generation)
                 (rejected-before-allocation
@@ -1381,7 +1382,7 @@
                     renderer device mesh generation))
               (setf (aref frame 0) origin-x))))))))
 
-(deftest renderer-publication-merges-exact-partial-slot-provenance
+(define-test renderer-publication-merges-exact-partial-slot-provenance
   (let* ((scene (make-two-chunk-streaming-scene))
          (source-keys (streaming-store-keys scene)))
     (load-all-streaming-chunks scene 2)
@@ -1406,12 +1407,12 @@
                  (events
                    (copy-list
                     (flame-resource-probe-events swap-device))))
-            (ok (signals
-                 (render:renderer-set-meshes
-                  swap-renderer swapped :scene-generation all-generation)
-                 'error))
-            (ok (equal events
-                       (flame-resource-probe-events swap-device)))))
+            (true (fail
+                   (render:renderer-set-meshes
+                    swap-renderer swapped :scene-generation all-generation)
+                   'error))
+            (true (equal events
+                         (flame-resource-probe-events swap-device)))))
         (multiple-value-bind (renderer device)
             (make-renderer-publication-probe)
           (declare (ignore device))
@@ -1439,22 +1440,22 @@
                      (merged
                        (luft.render::renderer-publication-scene-generation
                         publication)))
-                (ok (not (eq old-publication publication)))
-                (ok (not (eq partial-generation merged)))
-                (ok (luft.render::scene-mesh-generation-result-stamp=
-                     partial-generation merged))
-                (ok (= (length all-output-keys)
-                       (length
-                        (luft.render::scene-mesh-generation-mesh-manifest
-                         merged))))
-                (ok (= (length all-output-keys)
-                       (length
-                        (luft.render::scene-mesh-generation-slot-provenances
-                         merged))))
-                (ok (eq retained-slot
-                        (gethash
-                         retained-key
-                         (luft.render::renderer-mesh-slots renderer))))
+                (true (not (eq old-publication publication)))
+                (true (not (eq partial-generation merged)))
+                (true (luft.render::scene-mesh-generation-result-stamp=
+                       partial-generation merged))
+                (true (= (length all-output-keys)
+                         (length
+                          (luft.render::scene-mesh-generation-mesh-manifest
+                           merged))))
+                (true (= (length all-output-keys)
+                         (length
+                          (luft.render::scene-mesh-generation-slot-provenances
+                           merged))))
+                (true (eq retained-slot
+                          (gethash
+                           retained-key
+                           (luft.render::renderer-mesh-slots renderer))))
                 ;; A live renderer reconstruction consumes the aggregate's
                 ;; exact keyed trees and retains that aggregate object itself.
                 (multiple-value-bind (rebuilt rebuilt-device)
@@ -1471,11 +1472,11 @@
                          key (luft.render::renderer-mesh-slots renderer)))))
                     (luft.render::renderer-slot-order renderer))
                    :scene-generation merged)
-                  (ok (eq merged
-                          (luft.render::renderer-publication-scene-generation
-                           (luft.render::renderer-publication rebuilt)))))))))))))
+                  (true (eq merged
+                            (luft.render::renderer-publication-scene-generation
+                             (luft.render::renderer-publication rebuilt)))))))))))))
 
-(deftest streaming-publication-failure-preserves-both-generations-and-retry
+(define-test streaming-publication-failure-preserves-both-generations-and-retry
   (multiple-value-bind (scene support near far)
       (make-streaming-retarget-light-test-scene)
     (declare (ignore near far))
@@ -1530,34 +1531,34 @@
                           (lambda (owner publication)
                             (declare (ignore owner publication))
                             (error "Injected streaming publication failure."))))
-                    (ok (signals
-                         (luft.render::publish-ready-streaming-scene
-                          scene renderer)
-                         'error)))
-                  (ok (eq old-publication
-                          (luft.render::renderer-publication renderer)))
-                  (ok (eq old-light
-                          (luft.render::streaming-scene-light-generation
-                           scene)))
-                  (ok (equal keys
-                             (luft.render::streaming-scene-cohort scene)))
-                  (ok (eq new-generation
-                          (luft.render::streaming-scene-staged-generation
-                           scene)))
-                  (ok (= (length keys)
+                    (true (fail
+                           (luft.render::publish-ready-streaming-scene
+                            scene renderer)
+                           'error)))
+                  (true (eq old-publication
+                            (luft.render::renderer-publication renderer)))
+                  (true (eq old-light
+                            (luft.render::streaming-scene-light-generation
+                             scene)))
+                  (true (equal keys
+                               (luft.render::streaming-scene-cohort scene)))
+                  (true (eq new-generation
+                            (luft.render::streaming-scene-staged-generation
+                             scene)))
+                  (true (= (length keys)
+                           (hash-table-count
+                            (luft.render::streaming-scene-staged scene))))
+                  (true (= (length keys)
+                           (luft.render::publish-ready-streaming-scene
+                            scene renderer)))
+                  (true (null (luft.render::streaming-scene-cohort scene)))
+                  (true (zerop
                          (hash-table-count
                           (luft.render::streaming-scene-staged scene))))
-                  (ok (= (length keys)
-                         (luft.render::publish-ready-streaming-scene
-                          scene renderer)))
-                  (ok (null (luft.render::streaming-scene-cohort scene)))
-                  (ok (zerop
-                       (hash-table-count
-                        (luft.render::streaming-scene-staged scene))))
-                  (ok (eq
-                       (render:scene-mesh-generation-light-generation
-                        new-generation)
-                       (luft.render::streaming-scene-light-generation scene)))
+                  (true (eq
+                         (render:scene-mesh-generation-light-generation
+                          new-generation)
+                         (luft.render::streaming-scene-light-generation scene)))
                   (let* ((published
                            (luft.render::renderer-publication-scene-generation
                             (luft.render::renderer-publication renderer)))
@@ -1565,19 +1566,19 @@
                            (luft.render::realized-light-generation-field
                             (render:scene-mesh-generation-light-generation
                              published))))
-                    (ok (luft.render::scene-mesh-generation-result-stamp=
-                         new-generation published))
-                    (ok (loop for key in
-                              (luft.render::renderer-slot-order renderer)
-                              always
-                              (luft.render::surface-mesh-tree-uses-light-field-p
-                               (luft.render::mesh-slot-mesh
-                                (gethash
-                                 key
-                                 (luft.render::renderer-mesh-slots renderer)))
-                               field)))))))))))))
+                    (true (luft.render::scene-mesh-generation-result-stamp=
+                           new-generation published))
+                    (true (loop for key in
+                                (luft.render::renderer-slot-order renderer)
+                                always
+                                (luft.render::surface-mesh-tree-uses-light-field-p
+                                 (luft.render::mesh-slot-mesh
+                                  (gethash
+                                   key
+                                   (luft.render::renderer-mesh-slots renderer)))
+                                 field)))))))))))))
 
-(deftest failed-population-depth-join-preserves-both-installed-generations
+(define-test failed-population-depth-join-preserves-both-installed-generations
   (let ((mesh (make-renderer-publication-test-mesh)))
     (multiple-value-bind (renderer device) (make-renderer-publication-probe)
       (luft.render::renderer-update-meshes
@@ -1590,36 +1591,36 @@
         (setf (luft.render::renderer-history-valid-p renderer) t
               (flame-resource-probe-fail-bind-group-label device)
               "luft post-temporal torch flames")
-        (ok (signals
-             (luft.render::renderer-update-meshes
-              renderer (list (cons 8 mesh)) nil)
-             'error))
-        (ok (eq publication (luft.render::renderer-publication renderer)))
-        (ok (eq targets
-                (luft.render::renderer-target-generation renderer)))
-        (ok (eq flame-group (luft.render::renderer-flame-bind-group renderer)))
-        (ok (luft.render::renderer-history-valid-p renderer))
-        (ok (not (member
-                  flame-group
-                  (flame-resource-probe-destroyed-resources device)
-                  :test #'eq)))
-        (ok (every
-             (lambda (resource)
-               (or (eq resource flame-group)
-                   (not (member
-                         resource
-                         (flame-resource-probe-destroyed-resources device)
-                         :test #'eq))))
-             (renderer-target-generation-resources targets))
-            "join rollback cannot retire borrowed target resources")
+        (true (fail
+               (luft.render::renderer-update-meshes
+                renderer (list (cons 8 mesh)) nil)
+               'error))
+        (true (eq publication (luft.render::renderer-publication renderer)))
+        (true (eq targets
+                  (luft.render::renderer-target-generation renderer)))
+        (true (eq flame-group (luft.render::renderer-flame-bind-group renderer)))
+        (true (luft.render::renderer-history-valid-p renderer))
+        (true (not (member
+                    flame-group
+                    (flame-resource-probe-destroyed-resources device)
+                    :test #'eq)))
+        (true (every
+               (lambda (resource)
+                 (or (eq resource flame-group)
+                     (not (member
+                           resource
+                           (flame-resource-probe-destroyed-resources device)
+                           :test #'eq))))
+               (renderer-target-generation-resources targets))
+              "join rollback cannot retire borrowed target resources")
         (let ((staged
                 (set-difference
                  (flame-resource-probe-created-resources device)
                  created-before :test #'eq)))
-          (ok staged)
-          (ok (every-probe-resource-destroyed-once-p staged device)))))))
+          (true staged)
+          (true (every-probe-resource-destroyed-once-p staged device)))))))
 
-(deftest renderer-grows-an-append-compatible-material-abi-atomically
+(define-test renderer-grows-an-append-compatible-material-abi-atomically
   (let* ((members
            (copy-seq
             (luv.domains:identity-vocabulary-members
@@ -1674,12 +1675,12 @@
                        collect
                        (ldb (byte luft:+mesh-instance-stock-bit-count+ 16)
                             (aref words offset)))))
-          (ok (= old-count new-stock))
-          (ok packed-stocks)
-          (ok (= old-count (reduce #'max packed-stocks)))
-          (ok (> (luft.render::render-population-material-descriptor-count
-                  population)
-                 old-count))
+          (true (= old-count new-stock))
+          (true packed-stocks)
+          (true (= old-count (reduce #'max packed-stocks)))
+          (true (> (luft.render::render-population-material-descriptor-count
+                    population)
+                   old-count))
           ;; Fail after the candidate material buffer, retained/replacement
           ;; slots, table/order, and torch resources all exist.  The renderer
           ;; must retain the old complete generation and retire every staged
@@ -1690,42 +1691,42 @@
                    (lambda (owner candidate)
                      (declare (ignore owner candidate))
                      (error "Injected material ABI publication failure."))))
-            (ok (signals
-                 (luft.render::renderer-update-meshes
-                  renderer (list (cons 8 prepared)) nil)
-                 'error))
-            (ok (eq old-publication
-                    (luft.render::renderer-publication renderer)))
-            (ok (eq old-material-buffer
-                    (luft.render::renderer-material-buffer renderer)))
-            (ok (eq old-slot
-                    (gethash 7 (luft.render::renderer-mesh-slots renderer))))
-            (ok (null (gethash 8 (luft.render::renderer-mesh-slots renderer))))
+            (true (fail
+                   (luft.render::renderer-update-meshes
+                    renderer (list (cons 8 prepared)) nil)
+                   'error))
+            (true (eq old-publication
+                      (luft.render::renderer-publication renderer)))
+            (true (eq old-material-buffer
+                      (luft.render::renderer-material-buffer renderer)))
+            (true (eq old-slot
+                      (gethash 7 (luft.render::renderer-mesh-slots renderer))))
+            (true (null (gethash 8 (luft.render::renderer-mesh-slots renderer))))
             (let* ((events-after (flame-resource-probe-events device))
                    (new-event-count
                      (- (length events-after) (length events-before)))
                    (events (subseq events-after 0 new-event-count)))
-              (ok (= (count :create-buffer events :key #'car)
-                     (count '(:destroy :buffer) events :test #'equal)))
-              (ok (= (count :create-bind-group events :key #'car)
-                     (count '(:destroy :bind-group) events :test #'equal)))))
+              (true (= (count :create-buffer events :key #'car)
+                       (count '(:destroy :buffer) events :test #'equal)))
+              (true (= (count :create-bind-group events :key #'car)
+                       (count '(:destroy :bind-group) events :test #'equal)))))
           (let ((requested
                   (luft.render::renderer-update-meshes
                    renderer (list (cons 8 prepared)) nil)))
-            (ok (equal '(8) (mapcar #'car requested))))
-          (ok (not (eq old-publication
-                       (luft.render::renderer-publication renderer))))
-          (ok (not (eq old-material-buffer
-                       (luft.render::renderer-material-buffer renderer))))
-          (ok (> (luft.render::renderer-material-descriptor-count renderer)
-                 old-count))
-          (ok (= 2 (hash-table-count
-                    (luft.render::renderer-mesh-slots renderer))))
+            (true (equal '(8) (mapcar #'car requested))))
+          (true (not (eq old-publication
+                         (luft.render::renderer-publication renderer))))
+          (true (not (eq old-material-buffer
+                         (luft.render::renderer-material-buffer renderer))))
+          (true (> (luft.render::renderer-material-descriptor-count renderer)
+                   old-count))
+          (true (= 2 (hash-table-count
+                      (luft.render::renderer-mesh-slots renderer))))
           ;; Retained slots have bind groups over a concrete material buffer;
           ;; growth therefore re-realizes them in the candidate generation.
-          (ok (not (eq old-slot
-                       (gethash 7
-                                (luft.render::renderer-mesh-slots renderer)))))
+          (true (not (eq old-slot
+                         (gethash 7
+                                  (luft.render::renderer-mesh-slots renderer)))))
           (let ((material-buffer
                   (luft.render::renderer-material-buffer renderer)))
             (dolist (key '(7 8))
@@ -1735,10 +1736,10 @@
                      (resident (luft.render::mesh-slot-resident slot))
                      (bind-group
                        (luft.render::resident-population-bind-group resident)))
-                (ok (eq material-buffer
-                        (probe-bind-group-resource bind-group 3))))))
-          (ok (member '(:destroy :material-buffer)
-                      (flame-resource-probe-events device) :test #'equal)))))
+                (true (eq material-buffer
+                          (probe-bind-group-resource bind-group 3))))))
+          (true (member '(:destroy :material-buffer)
+                        (flame-resource-probe-events device) :test #'equal)))))
     ;; A renderer frozen after an append owns a strict descriptor superset and
     ;; may safely accept an older prepared prefix: append-only offsets did not
     ;; move, and no descriptor-buffer replacement is necessary.
@@ -1746,15 +1747,15 @@
       (let ((material-buffer (luft.render::renderer-material-buffer renderer)))
         (luft.render::renderer-update-meshes
          renderer (list (cons 7 prefix-prepared)) nil)
-        (ok (= 1 (hash-table-count
-                  (luft.render::renderer-mesh-slots renderer))))
-        (ok (eq material-buffer
-                (luft.render::renderer-material-buffer renderer)))
-        (ok (not (member '(:destroy :material-buffer)
-                         (flame-resource-probe-events device)
-                         :test #'equal)))))))
+        (true (= 1 (hash-table-count
+                    (luft.render::renderer-mesh-slots renderer))))
+        (true (eq material-buffer
+                  (luft.render::renderer-material-buffer renderer)))
+        (true (not (member '(:destroy :material-buffer)
+                           (flame-resource-probe-events device)
+                           :test #'equal)))))))
 
-(deftest renderer-rejects-a-divergent-material-abi-before-gpu-allocation
+(define-test renderer-rejects-a-divergent-material-abi-before-gpu-allocation
   (let* ((baseline-members
            (copy-seq
             (luv.domains:identity-vocabulary-members
@@ -1777,17 +1778,17 @@
           (setf prepared (luft.render::prepare-render-mesh mesh)))
         (let ((publication (luft.render::renderer-publication renderer))
               (events (copy-list (flame-resource-probe-events device))))
-          (ok (signals
-               (luft.render::renderer-update-meshes
-                renderer (list (cons 7 prepared)) nil)
-               'error))
-          (ok (eq publication (luft.render::renderer-publication renderer)))
-          (ok (zerop (hash-table-count
-                      (luft.render::renderer-mesh-slots renderer))))
-          (ok (equal events (flame-resource-probe-events device))
-              "a non-prefix material ABI allocates no GPU resource"))))))
+          (true (fail
+                 (luft.render::renderer-update-meshes
+                  renderer (list (cons 7 prepared)) nil)
+                 'error))
+          (true (eq publication (luft.render::renderer-publication renderer)))
+          (true (zerop (hash-table-count
+                        (luft.render::renderer-mesh-slots renderer))))
+          (true (equal events (flame-resource-probe-events device))
+                "a non-prefix material ABI allocates no GPU resource"))))))
 
-(deftest a-streaming-window-is-bounded-around-its-focus
+(define-test a-streaming-window-is-bounded-around-its-focus
   (let ((builder (luft.render::make-scene-builder :horizontal-bits 8)))
     (dotimes (chunk-x 3)
       (dotimes (chunk-y 3)
@@ -1798,12 +1799,12 @@
             (render:make-streaming-scene
              (luft.render::finish-scene-builder builder)
              :residency-radius 1)))
-      (ok (= 4 (length (luft.render::streaming-scene-keys-near scene 0 0))))
-      (ok (= 9 (length (luft.render::streaming-scene-keys-near scene 1 1))))
-      (ok (zerop (hash-table-count
-                  (luft.render::streaming-scene-loaded scene)))))))
+      (true (= 4 (length (luft.render::streaming-scene-keys-near scene 0 0))))
+      (true (= 9 (length (luft.render::streaming-scene-keys-near scene 1 1))))
+      (true (zerop (hash-table-count
+                    (luft.render::streaming-scene-loaded scene)))))))
 
-(deftest a-streaming-camera-outside-the-world-retains-the-boundary-window
+(define-test a-streaming-camera-outside-the-world-retains-the-boundary-window
   (let* ((scene
            (render:make-streaming-scene
             (make-streaming-material-seam-test-scene)
@@ -1816,22 +1817,22 @@
            ;; The camera is just below the finite world while looking at the
            ;; X=64 seam.  Chunk keys are unsigned, so using Y=-1 directly
            ;; would wrap the focus to chunk-grid Y=4095 and load nothing.
-           (ok (luft.render::retarget-streaming-scene
-                scene system 2 72.5d0 -1.0d0))
-           (ok (equal '(1 . 0) (luft.render::streaming-scene-focus scene)))
-           (ok (equal
-                (streaming-store-keys scene)
-                (sort
-                 (loop for key being the hash-keys of
-                       (luft.render::streaming-scene-loaded scene)
-                       collect key)
-                 #'<)))
-           (ok (plusp
-                (hash-table-count
-                 (luft.render::streaming-scene-outstanding scene)))))
+           (true (luft.render::retarget-streaming-scene
+                  scene system 2 72.5d0 -1.0d0))
+           (true (equal '(1 . 0) (luft.render::streaming-scene-focus scene)))
+           (true (equal
+                  (streaming-store-keys scene)
+                  (sort
+                   (loop for key being the hash-keys of
+                         (luft.render::streaming-scene-loaded scene)
+                         collect key)
+                   #'<)))
+           (true (plusp
+                  (hash-table-count
+                   (luft.render::streaming-scene-outstanding scene)))))
       (production:stop-production-system system))))
 
-(deftest a-streaming-residency-window-has-one-geometric-width
+(define-test a-streaming-residency-window-has-one-geometric-width
   (let ((builder (luft.render::make-scene-builder :horizontal-bits 8)))
     (dotimes (chunk-x 3)
       (dotimes (chunk-y 3)
@@ -1847,16 +1848,16 @@
               :name "LUFT uniform streaming width test")))
       (unwind-protect
            (progn
-             (ok (luft.render::retarget-streaming-scene
-                  scene system 2 64 64))
-             (ok (= 9 (hash-table-count
-                        (luft.render::streaming-scene-loaded scene))))
-             (ok (loop for width being the hash-values of
-                       (luft.render::streaming-scene-loaded scene)
-                       always (= width 2))))
+             (true (luft.render::retarget-streaming-scene
+                    scene system 2 64 64))
+             (true (= 9 (hash-table-count
+                          (luft.render::streaming-scene-loaded scene))))
+             (true (loop for width being the hash-values of
+                         (luft.render::streaming-scene-loaded scene)
+                         always (= width 2))))
         (production:stop-production-system system)))))
 
-(deftest static-and-streaming-uniform-meshes-have-the-same-triangle-multiset
+(define-test static-and-streaming-uniform-meshes-have-the-same-triangle-multiset
   (let ((scene (make-streaming-material-seam-test-scene)))
     (dolist (width '(1 2 3 4))
       (let* ((streaming (render:make-streaming-scene scene))
@@ -1880,22 +1881,22 @@
             (let ((static-meshes (surface-mesh-tree-meshes static))
                   (regional-meshes (mapcar #'cdr regional))
                   (streamed-meshes (mapcar #'cdr streamed)))
-              (ok (equal
-                   (luft.render::streaming-scene-canonical-owner-closure
-                    streaming keys)
-                   (mapcar #'car regional)))
-              (ok (equal keys (mapcar #'car streamed)))
-              (ok (luft::%mesh-closed-p whole))
-              (ok (luft::%meshes-closed-p regional-meshes))
-              (ok (luft::%meshes-closed-p streamed-meshes))
-              (ok (canonical-mesh-cohorts-equal-p
-                   (list whole) static-meshes))
-              (ok (canonical-mesh-cohorts-equal-p
-                   (list whole) regional-meshes))
-              (ok (canonical-mesh-cohorts-equal-p
-                   (list whole) streamed-meshes)))))))))
+              (true (equal
+                     (luft.render::streaming-scene-canonical-owner-closure
+                      streaming keys)
+                     (mapcar #'car regional)))
+              (true (equal keys (mapcar #'car streamed)))
+              (true (luft::%mesh-closed-p whole))
+              (true (luft::%meshes-closed-p regional-meshes))
+              (true (luft::%meshes-closed-p streamed-meshes))
+              (true (canonical-mesh-cohorts-equal-p
+                     (list whole) static-meshes))
+              (true (canonical-mesh-cohorts-equal-p
+                     (list whole) regional-meshes))
+              (true (canonical-mesh-cohorts-equal-p
+                     (list whole) streamed-meshes)))))))))
 
-(deftest streaming-torch-frames-see-nonpublished-seam-context
+(define-test streaming-torch-frames-see-nonpublished-seam-context
   (let* ((scene (make-streaming-torch-seam-test-scene))
          (attachment (aref (render:scene-torches scene) 0))
          (support-key
@@ -1955,30 +1956,30 @@
                                static)))
                   ;; Context realization may inform the result but must never
                   ;; expand the worker's output/publication owner set.
-                  (ok (equal (list support-key) (mapcar #'car streamed)))
-                  (ok (= 2 (length keys)))
-                  (ok (= 1 (length streamed-frames)))
-                  (ok (= 1 (length static-frames)))
-                  (ok (loop for entry in static
-                            always
-                            (or (= support-key (car entry))
-                                (null (luft:surface-mesh-attachments
-                                       (cdr entry))))))
+                  (true (equal (list support-key) (mapcar #'car streamed)))
+                  (true (= 2 (length keys)))
+                  (true (= 1 (length streamed-frames)))
+                  (true (= 1 (length static-frames)))
+                  (true (loop for entry in static
+                              always
+                              (or (= support-key (car entry))
+                                  (null (luft:surface-mesh-attachments
+                                         (cdr entry))))))
                   ;; The top-edge chart point is carried by a band/fan whose
                   ;; canonical anchor, and therefore primitive owner, is the
                   ;; neighboring X chunk.  That owner remains context-only.
-                  (ok context-frame)
-                  (ok (edge-primitive-p whole-frame))
-                  (ok (equalp (first streamed-frames)
-                              (first static-frames)))
-                  (ok (equalp (subseq (first streamed-frames) 4 7)
-                              (luft:surface-attachment-frame-normal
-                               whole-frame)))
-                  (ok (equalp (subseq (first streamed-frames) 8 11)
-                              (luft:surface-attachment-frame-tangent
-                               whole-frame))))))))))))
+                  (true context-frame)
+                  (true (edge-primitive-p whole-frame))
+                  (true (equalp (first streamed-frames)
+                                (first static-frames)))
+                  (true (equalp (subseq (first streamed-frames) 4 7)
+                                (luft:surface-attachment-frame-normal
+                                 whole-frame)))
+                  (true (equalp (subseq (first streamed-frames) 8 11)
+                                (luft:surface-attachment-frame-tangent
+                                 whole-frame))))))))))))
 
-(deftest virtual-owner-closure-does-not-admit-unloaded-torches
+(define-test virtual-owner-closure-does-not-admit-unloaded-torches
   (let* ((builder (luft.render::make-scene-builder :horizontal-bits 7))
          (scene
            (progn
@@ -2005,11 +2006,11 @@
              (luft.render::make-streaming-region-snapshot
               streaming output-keys 2))
            (owners (luft.render::mesh-streaming-snapshot snapshot)))
-      (ok (member right-key output-keys :test #'eql))
-      (ok (equal (list left-key)
-                 (luft.render::streaming-mesh-snapshot-resident-source-keys
-                  snapshot)))
-      (ok (zerop (funcall frame-count owners))))
+      (true (member right-key output-keys :test #'eql))
+      (true (equal (list left-key)
+                   (luft.render::streaming-mesh-snapshot-resident-source-keys
+                    snapshot)))
+      (true (zerop (funcall frame-count owners))))
     ;; Once the support source is logically resident, exactly one shared
     ;; body/flame frame is attached to its own canonical owner.
     (setf (gethash right-key (luft.render::streaming-scene-loaded streaming)) 2)
@@ -2018,14 +2019,14 @@
               streaming output-keys 2))
            (owners (luft.render::mesh-streaming-snapshot snapshot))
            (support (assoc right-key owners :test #'eql)))
-      (ok (member right-key
-                  (luft.render::streaming-mesh-snapshot-resident-source-keys
-                   snapshot)
-                  :test #'eql))
-      (ok (= 1 (funcall frame-count owners)))
-      (ok (= 1 (length (luft:surface-mesh-attachments (cdr support))))))))
+      (true (member right-key
+                    (luft.render::streaming-mesh-snapshot-resident-source-keys
+                     snapshot)
+                    :test #'eql))
+      (true (= 1 (funcall frame-count owners)))
+      (true (= 1 (length (luft:surface-mesh-attachments (cdr support))))))))
 
-(deftest coplanar-compression-keeps-the-medial-chunk-surface-exact
+(define-test coplanar-compression-keeps-the-medial-chunk-surface-exact
   (let ((builder (luft.render::make-scene-builder :horizontal-bits 6)))
     (loop for x from 4 below 12 do
       (loop for y from 4 below 12 do
@@ -2049,14 +2050,14 @@
                (invoke-restart 'luft:treat-as-air))))
         (let* ((medial (luft:mesh-chunk chunk key :bevel-width 4))
                (merged (luft:coplanar-compressed-surface-mesh medial)))
-          (ok (< (luft:surface-mesh-triangle-count merged)
-                 (luft:surface-mesh-triangle-count medial)))
-          (ok (luft::%mesh-closed-p merged))
-          (ok (luft::%same-plane-areas-p
-               (luft::%mesh-oriented-plane-areas medial)
-               (luft::%mesh-oriented-plane-areas merged))))))))
+          (true (< (luft:surface-mesh-triangle-count merged)
+                   (luft:surface-mesh-triangle-count medial)))
+          (true (luft::%mesh-closed-p merged))
+          (true (luft::%same-plane-areas-p
+                 (luft::%mesh-oriented-plane-areas medial)
+                 (luft::%mesh-oriented-plane-areas merged))))))))
 
-(deftest changing-the-uniform-width-remeshes-the-whole-resident-window
+(define-test changing-the-uniform-width-remeshes-the-whole-resident-window
   (let ((builder (luft.render::make-scene-builder :horizontal-bits 8)))
     (dotimes (chunk-x 3)
       (dotimes (chunk-y 3)
@@ -2072,43 +2073,43 @@
               :name "LUFT uniform width change test")))
       (unwind-protect
            (progn
-             (ok (luft.render::retarget-streaming-scene
-                  scene system 2 64 64))
-             (ok (null (luft.render::retarget-streaming-scene
-                        scene system 4 64 64)))
+             (true (luft.render::retarget-streaming-scene
+                    scene system 2 64 64))
+             (true (null (luft.render::retarget-streaming-scene
+                          scene system 4 64 64)))
              ;; Model completion of the initial cohort; tickets already in the
              ;; worker are harmless because the second scheduling supersedes
              ;; the one cohort production key with a newer ticket.
              (setf (luft.render::streaming-scene-cohort scene) nil
                    (luft.render::streaming-scene-removals scene) nil)
              (clrhash (luft.render::streaming-scene-outstanding scene))
-             (ok (luft.render::retarget-streaming-scene
-                  scene system 4 64 64))
+             (true (luft.render::retarget-streaming-scene
+                    scene system 4 64 64))
              ;; The authored 3x3 source window realizes its directional
              ;; canonical owner closure, including the +X/+Y/+XY boundary
              ;; owners needed to publish a closed surface.
-             (ok (= 16 (length
-                       (luft.render::streaming-scene-cohort scene))))
-             (ok (= 16
-                    (hash-table-count
-                     (luft.render::streaming-scene-outstanding scene))))
-             (ok (loop for width being the hash-values of
-                       (luft.render::streaming-scene-loaded scene)
-                       always (= width 4)))
-             (ok (= 1
-                    (length
-                     (remove-duplicates
-                      (loop for ticket being the hash-values of
-                            (luft.render::streaming-scene-outstanding scene)
-                            collect ticket)))))
+             (true (= 16 (length
+                         (luft.render::streaming-scene-cohort scene))))
+             (true (= 16
+                      (hash-table-count
+                       (luft.render::streaming-scene-outstanding scene))))
+             (true (loop for width being the hash-values of
+                         (luft.render::streaming-scene-loaded scene)
+                         always (= width 4)))
+             (true (= 1
+                      (length
+                       (remove-duplicates
+                        (loop for ticket being the hash-values of
+                              (luft.render::streaming-scene-outstanding scene)
+                              collect ticket)))))
              (setf (luft.render::streaming-scene-cohort scene) nil
                    (luft.render::streaming-scene-removals scene) nil)
              (clrhash (luft.render::streaming-scene-outstanding scene))
-             (ok (null (luft.render::retarget-streaming-scene
-                        scene system 4 64 64))))
+             (true (null (luft.render::retarget-streaming-scene
+                          scene system 4 64 64))))
         (production:stop-production-system system)))))
 
-(deftest retargeting-remeshes-all-owners-for-profile-policy-changes
+(define-test retargeting-remeshes-all-owners-for-profile-policy-changes
   (let* ((scene (make-two-chunk-streaming-scene))
          (system
            (production:make-single-worker-production-system
@@ -2139,67 +2140,67 @@
                (let ((owners
                        (luft.render::streaming-scene-canonical-owner-closure
                         scene source-keys)))
-                 (ok (equal source-keys (loaded-keys)))
-                 (ok (equal owners
-                            (luft.render::streaming-scene-cohort scene)))
-                 (ok (null (luft.render::streaming-scene-removals scene)))
-                 (ok (= (length owners)
-                        (hash-table-count
-                         (luft.render::streaming-scene-outstanding scene)))))))
+                 (true (equal source-keys (loaded-keys)))
+                 (true (equal owners
+                              (luft.render::streaming-scene-cohort scene)))
+                 (true (null (luft.render::streaming-scene-removals scene)))
+                 (true (= (length owners)
+                          (hash-table-count
+                           (luft.render::streaming-scene-outstanding scene)))))))
       (unwind-protect
            (progn
-             (ok (not (eq profile equal-profile)))
-             (ok (equalp
-                  (luft.render::material-bevel-profile-geometry-signature
-                   profile)
-                  (luft.render::material-bevel-profile-geometry-signature
-                   equal-profile)))
-             (ok (not (equalp
-                       (luft.render::material-bevel-profile-geometry-signature
-                        profile)
-                       (luft.render::material-bevel-profile-geometry-signature
-                        changed-profile))))
-             (ok (luft.render::retarget-streaming-scene
-                  scene system 2 64 4 profile))
+             (true (not (eq profile equal-profile)))
+             (true (equalp
+                    (luft.render::material-bevel-profile-geometry-signature
+                     profile)
+                    (luft.render::material-bevel-profile-geometry-signature
+                     equal-profile)))
+             (true (not (equalp
+                         (luft.render::material-bevel-profile-geometry-signature
+                          profile)
+                         (luft.render::material-bevel-profile-geometry-signature
+                          changed-profile))))
+             (true (luft.render::retarget-streaming-scene
+                    scene system 2 64 4 profile))
              (let ((source-keys (loaded-keys)))
                (assert-complete-owner-cohort source-keys)
                (finish-publication)
                ;; Equal compiled signatures are semantic equality; allocating
                ;; another profile object must not churn residency or workers.
-               (ok (null (luft.render::retarget-streaming-scene
-                          scene system 2 64 4 equal-profile)))
-               (ok (equal source-keys (loaded-keys)))
-               (ok (null (luft.render::streaming-scene-cohort scene)))
-               (ok (zerop
-                    (hash-table-count
-                     (luft.render::streaming-scene-outstanding scene))))
+               (true (null (luft.render::retarget-streaming-scene
+                            scene system 2 64 4 equal-profile)))
+               (true (equal source-keys (loaded-keys)))
+               (true (null (luft.render::streaming-scene-cohort scene)))
+               (true (zerop
+                      (hash-table-count
+                       (luft.render::streaming-scene-outstanding scene))))
                ;; A real geometry-policy change remeshes every canonical owner
                ;; even though neither focus nor source residency moved.
-               (ok (luft.render::retarget-streaming-scene
-                    scene system 2 64 4 changed-profile))
+               (true (luft.render::retarget-streaming-scene
+                      scene system 2 64 4 changed-profile))
                (assert-complete-owner-cohort source-keys)
                (finish-publication)))
         (production:stop-production-system system)))))
 
-(deftest torch-light-retargeting-has-one-exact-residency-and-policy-matrix
+(define-test torch-light-retargeting-has-one-exact-residency-and-policy-matrix
   (labels ((realize-flag (snapshot)
              (luft.render::streaming-mesh-snapshot-realize-torch-light-p
               snapshot))
            (assert-full-torch-closure (scene support snapshot)
              (declare (ignore support))
-             (ok (eq t (realize-flag snapshot)))
-             (ok (typep (realize-flag snapshot) 'boolean))
+             (true (eq t (realize-flag snapshot)))
+             (true (typep (realize-flag snapshot) 'boolean))
              (let ((loaded
                      (sort
                       (loop for key being the hash-keys of
                             (luft.render::streaming-scene-loaded scene)
                             collect key)
                       #'<)))
-               (ok (equal
-                    (luft.render::streaming-scene-canonical-owner-closure
-                     scene loaded)
-                    (luft.render::streaming-mesh-snapshot-output-keys
-                     snapshot))))))
+               (true (equal
+                      (luft.render::streaming-scene-canonical-owner-closure
+                       scene loaded)
+                      (luft.render::streaming-mesh-snapshot-output-keys
+                       snapshot))))))
     ;; First torch arrival realizes light and every desired output owner.
     (multiple-value-bind (scene support near far)
         (make-streaming-retarget-light-test-scene)
@@ -2207,7 +2208,7 @@
       (install-streaming-retarget-light-test-residency scene (list far) 2)
       (multiple-value-bind (changed-p snapshot)
           (capture-streaming-retarget-snapshot scene 2 160 80)
-        (ok changed-p)
+        (true changed-p)
         (assert-full-torch-closure scene support snapshot)))
     ;; A neighboring support chunk entering or leaving changes the resolved
     ;; final surface and therefore takes the same full torch closure.
@@ -2221,7 +2222,7 @@
           (setf (luft.render::streaming-scene-residency-radius scene) 1))
         (multiple-value-bind (changed-p snapshot)
             (capture-streaming-retarget-snapshot scene 2 160 80)
-          (ok changed-p)
+          (true changed-p)
           (assert-full-torch-closure scene support snapshot))))
     ;; A far inert owner may enter without re-solving torch light.  Its partial
     ;; request retains the exact installed immutable generation and a literal
@@ -2236,17 +2237,17 @@
             (capture-streaming-retarget-snapshot scene 2 160 80)
           ;; Radius zero is unchanged; widen the immutable scene policy and
           ;; retarget again in a fresh state below for the actual far arrival.
-          (ok (null changed-p))
-          (ok (null snapshot)))
+          (true (null changed-p))
+          (true (null snapshot)))
         (setf (luft.render::streaming-scene-residency-radius scene) 2)
         (multiple-value-bind (changed-p snapshot)
             (capture-streaming-retarget-snapshot scene 2 160 80)
-          (ok changed-p)
-          (ok (null (realize-flag snapshot)))
-          (ok (typep (realize-flag snapshot) 'boolean))
-          (ok (eq installed
-                  (luft.render::streaming-mesh-snapshot-reusable-light-generation
-                   snapshot))))))
+          (true changed-p)
+          (true (null (realize-flag snapshot)))
+          (true (typep (realize-flag snapshot) 'boolean))
+          (true (eq installed
+                    (luft.render::streaming-mesh-snapshot-reusable-light-generation
+                     snapshot))))))
     ;; A far inert departure with no affected desired output stages removal
     ;; under the exact installed realized-light pointer.
     (multiple-value-bind (scene support near far)
@@ -2258,11 +2259,11 @@
               (luft.render::streaming-scene-light-generation scene)))
         (multiple-value-bind (changed-p snapshot)
             (capture-streaming-retarget-snapshot scene 2 160 80)
-          (ok changed-p)
-          (ok (null snapshot))
-          (ok (eq installed
-                  (render:scene-mesh-generation-light-generation
-                   (luft.render::streaming-scene-staged-generation scene)))))))
+          (true changed-p)
+          (true (null snapshot))
+          (true (eq installed
+                    (render:scene-mesh-generation-light-generation
+                     (luft.render::streaming-scene-staged-generation scene)))))))
     ;; When the final torch departs and there are no desired outputs, the
     ;; staged generation is the scene's exact authored/base light object.
     (multiple-value-bind (scene support near far)
@@ -2271,12 +2272,12 @@
       (install-streaming-retarget-light-test-residency scene (list support) 2)
       (multiple-value-bind (changed-p snapshot)
           (capture-streaming-retarget-snapshot scene 2 480 480)
-        (ok changed-p)
-        (ok (null snapshot))
-        (ok (eq
-             (luft.render::scene-authored-light-generation scene)
-             (render:scene-mesh-generation-light-generation
-              (luft.render::streaming-scene-staged-generation scene))))))
+        (true changed-p)
+        (true (null snapshot))
+        (true (eq
+               (luft.render::scene-authored-light-generation scene)
+               (render:scene-mesh-generation-light-generation
+                (luft.render::streaming-scene-staged-generation scene))))))
     ;; Width 1 -> 2/3/4 and a profile policy change all carry a literal T,
     ;; remesh the complete resident torch closure, and intentionally reuse the
     ;; exact light object when the quantized realized wick seeds are unchanged.
@@ -2290,14 +2291,14 @@
           (multiple-value-bind (changed-p snapshot)
               (capture-streaming-retarget-snapshot
                scene target-width 160 80)
-            (ok changed-p)
+            (true changed-p)
             (assert-full-torch-closure scene support snapshot)
             (multiple-value-bind (owners census diagnostics generation)
                 (luft.render::mesh-streaming-snapshot snapshot)
               (declare (ignore owners census diagnostics))
-              (ok (eq installed
-                      (render:scene-mesh-generation-light-generation
-                       generation))))))))
+              (true (eq installed
+                        (render:scene-mesh-generation-light-generation
+                         generation))))))))
     (multiple-value-bind (scene support near far)
         (make-streaming-retarget-light-test-scene)
       (declare (ignore near far))
@@ -2317,10 +2318,10 @@
         (multiple-value-bind (changed-p snapshot)
             (capture-streaming-retarget-snapshot
              scene 2 160 80 changed-profile)
-          (ok changed-p)
+          (true changed-p)
           (assert-full-torch-closure scene support snapshot))))))
 
-(deftest authored-light-revision-is-exact-static-generation-input
+(define-test authored-light-revision-is-exact-static-generation-input
   (labels ((make-scene (repeat-p)
              (let ((builder
                      (luft.render::make-scene-builder :horizontal-bits 7)))
@@ -2339,23 +2340,23 @@
         (multiple-value-bind (second-mesh second-generation)
             (render:make-render-mesh second-scene)
           (declare (ignore second-mesh))
-          (ok (/= (luft.render::scene-authored-light-revision first-scene)
-                  (luft.render::scene-authored-light-revision second-scene)))
-          (ok (not (equalp
-                    (render:scene-mesh-generation-request-stamp
-                     first-generation)
-                    (render:scene-mesh-generation-request-stamp
-                     second-generation))))
-          (ok (not
-               (luft.render::realized-light-stamp=
-                (luft.render::realized-light-generation-stamp
-                 (render:scene-mesh-generation-light-generation
-                  first-generation))
-                (luft.render::realized-light-generation-stamp
-                 (render:scene-mesh-generation-light-generation
-                  second-generation))))))))))
+          (true (/= (luft.render::scene-authored-light-revision first-scene)
+                    (luft.render::scene-authored-light-revision second-scene)))
+          (true (not (equalp
+                      (render:scene-mesh-generation-request-stamp
+                       first-generation)
+                      (render:scene-mesh-generation-request-stamp
+                       second-generation))))
+          (true (not
+                 (luft.render::realized-light-stamp=
+                  (luft.render::realized-light-generation-stamp
+                   (render:scene-mesh-generation-light-generation
+                    first-generation))
+                  (luft.render::realized-light-generation-stamp
+                   (render:scene-mesh-generation-light-generation
+                    second-generation))))))))))
 
-(deftest finishing-a-scene-copies-every-builder-owned-material-input
+(define-test finishing-a-scene-copies-every-builder-owned-material-input
   (labels ((same-mesh-tree-p (left right)
              (let ((left (surface-mesh-tree-meshes left))
                    (right (surface-mesh-tree-meshes right)))
@@ -2405,45 +2406,45 @@
                   (render:make-render-mesh scene-a)
                 (multiple-value-bind (mesh-b generation-b)
                     (render:make-render-mesh scene-b)
-                  (ok (eq reading-a
-                          (luft.render::scene-face-reading scene-a face)))
-                  (ok (equalp vocabulary-a
-                              (luv.domains:identity-vocabulary-members
-                               (luft.render::scene-material-vocabulary
-                                scene-a))))
-                  (ok (equalp program-a
-                              (luft.render::material-program-placement-face-stocks
-                               (luft.render::scene-material-program scene-a))))
-                  (ok (eq field-a (render:scene-authored-voxel-light scene-a)))
-                  (ok (zerop (luft:voxel-light-at-site field-a cell)))
-                  (ok (eq
-                       (render:scene-mesh-generation-light-generation
-                        generation-a)
-                       (render:scene-mesh-generation-light-generation
-                        generation-a-again)))
-                  (ok (equalp
-                       (render:scene-mesh-generation-result-stamp generation-a)
-                       (render:scene-mesh-generation-result-stamp
-                        generation-a-again)))
-                  (ok (same-mesh-tree-p mesh-a mesh-a-again))
-                  (ok (plusp
-                       (luft:voxel-light-at-site
-                        (render:scene-authored-voxel-light scene-b) cell)))
-                  (ok (> (length
-                          (luv.domains:identity-vocabulary-members
-                           (luft.render::scene-material-vocabulary scene-b)))
-                         (length vocabulary-a)))
-                  (ok (not
-                       (luft.render::realized-light-stamp=
-                        (luft.render::realized-light-generation-stamp
+                  (true (eq reading-a
+                            (luft.render::scene-face-reading scene-a face)))
+                  (true (equalp vocabulary-a
+                                (luv.domains:identity-vocabulary-members
+                                 (luft.render::scene-material-vocabulary
+                                  scene-a))))
+                  (true (equalp program-a
+                                (luft.render::material-program-placement-face-stocks
+                                 (luft.render::scene-material-program scene-a))))
+                  (true (eq field-a (render:scene-authored-voxel-light scene-a)))
+                  (true (zerop (luft:voxel-light-at-site field-a cell)))
+                  (true (eq
                          (render:scene-mesh-generation-light-generation
-                          generation-a))
-                        (luft.render::realized-light-generation-stamp
+                          generation-a)
                          (render:scene-mesh-generation-light-generation
-                          generation-b)))))
-                  (ok (not (same-mesh-tree-p mesh-a mesh-b))))))))))))
+                          generation-a-again)))
+                  (true (equalp
+                         (render:scene-mesh-generation-result-stamp generation-a)
+                         (render:scene-mesh-generation-result-stamp
+                          generation-a-again)))
+                  (true (same-mesh-tree-p mesh-a mesh-a-again))
+                  (true (plusp
+                         (luft:voxel-light-at-site
+                          (render:scene-authored-voxel-light scene-b) cell)))
+                  (true (> (length
+                            (luv.domains:identity-vocabulary-members
+                             (luft.render::scene-material-vocabulary scene-b)))
+                           (length vocabulary-a)))
+                  (true (not
+                         (luft.render::realized-light-stamp=
+                          (luft.render::realized-light-generation-stamp
+                           (render:scene-mesh-generation-light-generation
+                            generation-a))
+                          (luft.render::realized-light-generation-stamp
+                           (render:scene-mesh-generation-light-generation
+                            generation-b)))))
+                  (true (not (same-mesh-tree-p mesh-a mesh-b))))))))))))
 
-(deftest static-generation-reuse-is-scene-owned-and-provenance-exact
+(define-test static-generation-reuse-is-scene-owned-and-provenance-exact
   (labels ((make-scene (distant-material)
              (let ((builder
                      (luft.render::make-scene-builder :horizontal-bits 6)))
@@ -2457,49 +2458,49 @@
             (make-scene luft.render::*crystal-material-placement*))
           (terrain-scene
             (make-scene luft.render::*terrain-material-placement*)))
-      (ok (= (luft.render::scene-authored-light-revision crystal-scene)
-             (luft.render::scene-authored-light-revision terrain-scene)))
+      (true (= (luft.render::scene-authored-light-revision crystal-scene)
+               (luft.render::scene-authored-light-revision terrain-scene)))
       (multiple-value-bind (first-mesh first-generation)
           (render:make-render-mesh crystal-scene :bevel-width 2)
         (declare (ignore first-mesh))
-        (ok (eq crystal-scene
-                (luft.render::scene-mesh-generation-scene first-generation)))
+        (true (eq crystal-scene
+                  (luft.render::scene-mesh-generation-scene first-generation)))
         (multiple-value-bind (second-mesh second-generation)
             (render:make-render-mesh
              crystal-scene :bevel-width 2
              :reusable-light-generation first-generation)
-          (ok (eq crystal-scene
-                  (luft.render::scene-mesh-generation-scene
-                   second-generation)))
-          (ok (eq (render:scene-mesh-generation-light-generation
-                   first-generation)
-                  (render:scene-mesh-generation-light-generation
-                   second-generation)))
+          (true (eq crystal-scene
+                    (luft.render::scene-mesh-generation-scene
+                     second-generation)))
+          (true (eq (render:scene-mesh-generation-light-generation
+                     first-generation)
+                    (render:scene-mesh-generation-light-generation
+                     second-generation)))
           (let ((field
                   (luft.render::realized-light-generation-field
                    (render:scene-mesh-generation-light-generation
                     second-generation))))
-            (ok (every (lambda (mesh)
-                         (eq field (luft:surface-mesh-voxel-light mesh)))
-                       (surface-mesh-tree-meshes second-mesh)))))
+            (true (every (lambda (mesh)
+                           (eq field (luft:surface-mesh-voxel-light mesh)))
+                         (surface-mesh-tree-meshes second-mesh)))))
         (multiple-value-bind (terrain-mesh terrain-generation)
             (render:make-render-mesh terrain-scene :bevel-width 2)
           (declare (ignore terrain-mesh))
-          (ok (not
-               (luft.render::realized-light-stamp=
-                (luft.render::realized-light-generation-stamp
-                 (render:scene-mesh-generation-light-generation
-                  first-generation))
-                (luft.render::realized-light-generation-stamp
-                 (render:scene-mesh-generation-light-generation
-                  terrain-generation)))))
-          (ok (signals
-               (render:make-render-mesh
-                terrain-scene :bevel-width 2
-                :reusable-light-generation first-generation)
-               'error)))))))
+          (true (not
+                 (luft.render::realized-light-stamp=
+                  (luft.render::realized-light-generation-stamp
+                   (render:scene-mesh-generation-light-generation
+                    first-generation))
+                  (luft.render::realized-light-generation-stamp
+                   (render:scene-mesh-generation-light-generation
+                    terrain-generation)))))
+          (true (fail
+                 (render:make-render-mesh
+                  terrain-scene :bevel-width 2
+                  :reusable-light-generation first-generation)
+                 'error)))))))
 
-(deftest distant-owners-cannot-enter-a-torch-attachment-resolution
+(define-test distant-owners-cannot-enter-a-torch-attachment-resolution
   (labels ((make-scene (distant-p)
              (let ((builder
                      (luft.render::make-scene-builder :horizontal-bits 7)))
@@ -2517,10 +2518,10 @@
            (distant (render:make-render-mesh (make-scene t)))
            (local-frames (frames local))
            (distant-frames (frames distant)))
-      (ok (= 1 (length local-frames) (length distant-frames)))
-      (ok (equalp (first local-frames) (first distant-frames))))))
+      (true (= 1 (length local-frames) (length distant-frames)))
+      (true (equalp (first local-frames) (first distant-frames))))))
 
-(deftest highland-landscape-is-deterministic-and-regionally-varied
+(define-test highland-landscape-is-deterministic-and-regionally-varied
   (let* ((size 256)
          (heights
            (loop for x below size by 8 append
@@ -2534,25 +2535,25 @@
                    collect
                    (luft.render::highland-landscape-height
                     x y size :seed 121)))))
-    (ok (equal heights again))
-    (ok (>= (- (reduce #'max heights) (reduce #'min heights)) 24))
-    (ok (>= (length (remove-duplicates heights)) 20))
-    (ok (not (equal heights
-                    (loop for x below size by 8 append
-                      (loop for y below size by 8
-                            collect
-                            (luft.render::highland-landscape-height
-                             x y size :seed 913))))))))
+    (true (equal heights again))
+    (true (>= (- (reduce #'max heights) (reduce #'min heights)) 24))
+    (true (>= (length (remove-duplicates heights)) 20))
+    (true (not (equal heights
+                      (loop for x below size by 8 append
+                        (loop for y below size by 8
+                              collect
+                              (luft.render::highland-landscape-height
+                               x y size :seed 913))))))))
 
-(deftest highland-landscape-streams-by-default
+(define-test highland-landscape-streams-by-default
   (let ((scene
           (render:make-highland-sanctuary-scene :horizontal-bits 6)))
-    (ok (typep scene 'render:streaming-scene))
-    (ok (= 3 (luft.render::streaming-scene-residency-radius scene)))
-    (ok (= 1 (hash-table-count
-              (luft.render::streaming-scene-store scene))))))
+    (true (typep scene 'render:streaming-scene))
+    (true (= 3 (luft.render::streaming-scene-residency-radius scene)))
+    (true (= 1 (hash-table-count
+                (luft.render::streaming-scene-store scene))))))
 
-(deftest retargeting-replaces-one-complete-residency-window
+(define-test retargeting-replaces-one-complete-residency-window
   (let* ((scene (make-two-chunk-streaming-scene))
          (left (luft:chunk-key-at 63 4))
          (right (luft:chunk-key-at 64 4))
@@ -2563,11 +2564,11 @@
           (gethash left (luft.render::streaming-scene-loaded scene)) 2)
     (unwind-protect
          (progn
-           (ok (luft.render::retarget-streaming-scene
-                scene system luft:+mesh-bevel-width+ 64 4))
-           (ok (null (gethash left
-                              (luft.render::streaming-scene-loaded scene))))
-           (ok (gethash right (luft.render::streaming-scene-loaded scene)))
+           (true (luft.render::retarget-streaming-scene
+                  scene system luft:+mesh-bevel-width+ 64 4))
+           (true (null (gethash left
+                                (luft.render::streaming-scene-loaded scene))))
+           (true (gethash right (luft.render::streaming-scene-loaded scene)))
            (let* ((old-owner-closure
                     (luft.render::streaming-scene-canonical-owner-closure
                      scene (list left)))
@@ -2580,13 +2581,13 @@
              ;; Publication follows the exact directional geometry-owner
              ;; closure.  Retargeting onto the high-X boundary retains the
              ;; shared seam owners and retires only the old low-side owners.
-             (ok (equal owner-closure
-                        (luft.render::streaming-scene-cohort scene)))
-             (ok (equal departed-owners
-                        (luft.render::streaming-scene-removals scene)))
-             (ok (= (length owner-closure)
-                    (hash-table-count
-                     (luft.render::streaming-scene-outstanding scene))))))
+             (true (equal owner-closure
+                          (luft.render::streaming-scene-cohort scene)))
+             (true (equal departed-owners
+                          (luft.render::streaming-scene-removals scene)))
+             (true (= (length owner-closure)
+                      (hash-table-count
+                       (luft.render::streaming-scene-outstanding scene))))))
       (production:stop-production-system system))))
 
 (defun key-event (class key-name &key character modifiers repeat-p)
@@ -2606,75 +2607,75 @@
   (key-event 'luv:canvas-key-release-event key-name
              :character character :modifiers modifiers))
 
-(deftest the-viewer-is-the-mcclim-application
-  (ok (= 2 luft:+mesh-bevel-width+))
-  (ok (string= "1/8" (luft.render::bevel-width-label 1)))
-  (ok (string= "1/4" (luft.render::bevel-width-label 2)))
-  (ok (string= "1/2" (luft.render::bevel-width-label 4)))
-  (ok (= 2 (luft.render::next-bevel-width 1)))
-  (ok (= 4 (luft.render::next-bevel-width 2)))
-  (ok (= 1 (luft.render::next-bevel-width 4)))
+(define-test the-viewer-is-the-mcclim-application
+  (true (= 2 luft:+mesh-bevel-width+))
+  (true (string= "1/8" (luft.render::bevel-width-label 1)))
+  (true (string= "1/4" (luft.render::bevel-width-label 2)))
+  (true (string= "1/2" (luft.render::bevel-width-label 4)))
+  (true (= 2 (luft.render::next-bevel-width 1)))
+  (true (= 4 (luft.render::next-bevel-width 2)))
+  (true (= 1 (luft.render::next-bevel-width 4)))
   (let ((viewer (clim:make-application-frame 'render:viewer)))
-    (ok (typep viewer 'clim:application-frame))
-    (ok (null (climi::frame-process viewer)))
-    (ok (not (luft.render::viewer-inspector-p viewer)))
-    (ok (luft.render::viewer-inspector-p
-         (clim:make-application-frame 'render:viewer :inspector-p t)))
-    (ok (typep (render:viewer-mode viewer) 'render:isometric-walk-mode))
-    (ok (equal '(luft.render::com-start-moving :forward)
-               (luft.render::viewer-key-command viewer (key-press :w))))
+    (true (typep viewer 'clim:application-frame))
+    (true (null (climi::frame-process viewer)))
+    (true (not (luft.render::viewer-inspector-p viewer)))
+    (true (luft.render::viewer-inspector-p
+           (clim:make-application-frame 'render:viewer :inspector-p t)))
+    (true (typep (render:viewer-mode viewer) 'render:isometric-walk-mode))
+    (true (equal '(luft.render::com-start-moving :forward)
+                 (luft.render::viewer-key-command viewer (key-press :w))))
     (setf (render:viewer-mode viewer) (make-instance 'render:orbit-mode))
-    (ok (null (luft.render::viewer-key-command viewer (key-press :w))))
-    (ok (equal '(luft.render::com-toggle-fullscreen)
-               (luft.render::viewer-key-command
-                viewer (key-press :f11))))
-    (ok (equal '(luft.render::com-release-pointer)
-               (luft.render::viewer-key-command
-                viewer (key-press :escape))))
+    (true (null (luft.render::viewer-key-command viewer (key-press :w))))
+    (true (equal '(luft.render::com-toggle-fullscreen)
+                 (luft.render::viewer-key-command
+                  viewer (key-press :f11))))
+    (true (equal '(luft.render::com-release-pointer)
+                 (luft.render::viewer-key-command
+                  viewer (key-press :escape))))
     (setf (luft.render::viewer-pointer-captured-p viewer) t)
-    (ok (equal '(luft.render::com-start-moving :forward)
-               (luft.render::viewer-key-command viewer (key-press :w))))
-    (ok (equal '(luft.render::com-stop-moving :forward)
-               (luft.render::viewer-key-command viewer (key-release :w))))
-    (ok (equal '(luft.render::com-reset-view)
-               (luft.render::viewer-key-command viewer (key-press :r))))
-    (ok (equal '(luft.render::com-toggle-construction-lines)
-               (luft.render::viewer-key-command viewer (key-press :c))))
-    (ok (equal '(luft.render::com-toggle-bevel-width)
-               (luft.render::viewer-key-command viewer (key-press :b))))
-    (ok (equal '(luft.render::com-rotate-view-clockwise)
-               (luft.render::viewer-key-command viewer (key-press :tab))))
-    (ok (equal '(luft.render::com-rotate-view-counterclockwise)
-               (luft.render::viewer-key-command
-                viewer (key-press :tab :modifiers '(:shift)))))
-    (ok (equal '(luft.render::com-toggle-fullscreen)
-               (luft.render::viewer-key-command viewer (key-press :f11))))
-    (ok (equal '(luft.render::com-toggle-viewer-mode)
-               (luft.render::viewer-key-command viewer (key-press :m))))
-    (ok (equal '(luft.render::com-quit)
-               (luft.render::viewer-key-command
-                viewer (key-press :q :character #\q
-                                     :modifiers '(:control)))))
+    (true (equal '(luft.render::com-start-moving :forward)
+                 (luft.render::viewer-key-command viewer (key-press :w))))
+    (true (equal '(luft.render::com-stop-moving :forward)
+                 (luft.render::viewer-key-command viewer (key-release :w))))
+    (true (equal '(luft.render::com-reset-view)
+                 (luft.render::viewer-key-command viewer (key-press :r))))
+    (true (equal '(luft.render::com-toggle-construction-lines)
+                 (luft.render::viewer-key-command viewer (key-press :c))))
+    (true (equal '(luft.render::com-toggle-bevel-width)
+                 (luft.render::viewer-key-command viewer (key-press :b))))
+    (true (equal '(luft.render::com-rotate-view-clockwise)
+                 (luft.render::viewer-key-command viewer (key-press :tab))))
+    (true (equal '(luft.render::com-rotate-view-counterclockwise)
+                 (luft.render::viewer-key-command
+                  viewer (key-press :tab :modifiers '(:shift)))))
+    (true (equal '(luft.render::com-toggle-fullscreen)
+                 (luft.render::viewer-key-command viewer (key-press :f11))))
+    (true (equal '(luft.render::com-toggle-viewer-mode)
+                 (luft.render::viewer-key-command viewer (key-press :m))))
+    (true (equal '(luft.render::com-quit)
+                 (luft.render::viewer-key-command
+                  viewer (key-press :q :character #\q
+                                       :modifiers '(:control)))))
     (clim:execute-frame-command
      viewer (luft.render::viewer-key-command viewer (key-press :w)))
-    (ok (luft.render::viewer-control-active-p viewer :forward))
+    (true (luft.render::viewer-control-active-p viewer :forward))
     (clim:execute-frame-command
      viewer (luft.render::viewer-key-command viewer (key-release :w)))
-    (ok (not (luft.render::viewer-control-active-p viewer :forward)))))
+    (true (not (luft.render::viewer-control-active-p viewer :forward)))))
 
-(deftest tab-orbits-the-following-camera-in-eighth-turns
+(define-test tab-orbits-the-following-camera-in-eighth-turns
   (let* ((viewer (clim:make-application-frame 'render:viewer))
          (camera (render:viewer-camera viewer)))
     (setf (render:camera-yaw camera) 0.0)
     (luft.render::rotate-viewer-eighth-turn viewer 1)
-    (ok (< (abs (- (/ pi 4) (render:camera-yaw camera))) 1.0e-6))
+    (true (< (abs (- (/ pi 4) (render:camera-yaw camera))) 1.0e-6))
     (luft.render::rotate-viewer-eighth-turn viewer -1)
-    (ok (< (abs (render:camera-yaw camera)) 1.0e-6))
+    (true (< (abs (render:camera-yaw camera)) 1.0e-6))
     (setf (render:viewer-mode viewer) (make-instance 'render:orbit-mode))
     (luft.render::rotate-viewer-eighth-turn viewer 1)
-    (ok (< (abs (render:camera-yaw camera)) 1.0e-6))))
+    (true (< (abs (render:camera-yaw camera)) 1.0e-6))))
 
-(deftest world-edit-mode-enters-exits-and-protects-the-player
+(define-test world-edit-mode-enters-exits-and-protects-the-player
   (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
          (player
            (render:make-walking-player
@@ -2692,22 +2693,22 @@
                              :player player)))
       (let ((clim:*application-frame* viewer))
         (luft.render::com-enter-world-edit-mode)
-        (ok (typep (render:viewer-mode viewer) 'render:world-edit-mode))
-        (ok (eq :ready (luft.render::viewer-last-edit-status viewer)))
+        (true (typep (render:viewer-mode viewer) 'render:world-edit-mode))
+        (true (eq :ready (luft.render::viewer-last-edit-status viewer)))
         (multiple-value-bind (edit status)
             (luft.render::record-viewer-world-edit
              viewer player-cell luft.render::*terrain-material-placement*)
-          (ok (null edit))
-          (ok (eq :player status))
-          (ok (zerop (luft:chain-cell-occupancy-bit
-                      (render:scene-solid scene) 1 2 1))))
+          (true (null edit))
+          (true (eq :player status))
+          (true (zerop (luft:chain-cell-occupancy-bit
+                        (render:scene-solid scene) 1 2 1))))
         (luft.render::com-release-pointer)
-        (ok (typep (render:viewer-mode viewer)
-                   'render:isometric-walk-mode))
-        (ok (not (typep (render:viewer-mode viewer)
-                        'render:world-edit-mode)))))))
+        (true (typep (render:viewer-mode viewer)
+                     'render:isometric-walk-mode))
+        (true (not (typep (render:viewer-mode viewer)
+                          'render:world-edit-mode)))))))
 
-(deftest an-inspected-outward-face-selects-its-adjacent-empty-cell
+(define-test an-inspected-outward-face-selects-its-adjacent-empty-cell
   (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
          (x 4) (y 5) (z 3))
     (luft.render::scene-builder-cell builder x y z)
@@ -2719,11 +2720,11 @@
               (luv.arithmetic.lisp.vec3:make-vec3 0.0 0.0 -1.0)))
            (adjacent
              (luft.render::site-inspection-adjacent-cell inspection)))
-      (ok (= x (luft:site-x adjacent)))
-      (ok (= y (luft:site-y adjacent)))
-      (ok (= (1+ z) (luft:site-z adjacent))))))
+      (true (= x (luft:site-x adjacent)))
+      (true (= y (luft:site-y adjacent)))
+      (true (= (1+ z) (luft:site-z adjacent))))))
 
-(deftest click-to-walk-routes-around-a-character-high-wall
+(define-test click-to-walk-routes-around-a-character-high-wall
   (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
          (player
            (render:make-walking-player
@@ -2737,11 +2738,11 @@
     (let* ((scene (luft.render::finish-scene-builder builder :player-p t))
            (route
              (render:start-walking-player-route player scene 5 2 1)))
-      (ok (eq :running (render:walking-route-status route)))
-      (ok (find 5 (render:walking-route-cells route)
-                :key #'luft:site-y))
-      (ok (> (length (render:walking-route-cells route)) 4))
-      (ok (plusp (render:walking-route-visits route)))
+      (true (eq :running (render:walking-route-status route)))
+      (true (find 5 (render:walking-route-cells route)
+                  :key #'luft:site-y))
+      (true (> (length (render:walking-route-cells route)) 4))
+      (true (plusp (render:walking-route-visits route)))
       (loop repeat 1200
             while (eq :running (render:walking-route-status route))
             do (multiple-value-bind (forward right maximum-distance)
@@ -2752,17 +2753,17 @@
                   (or forward 0.0) (or right 0.0) (/ 1.0 120.0)
                   :maximum-distance maximum-distance)
                  (luft.render::trim-walking-player-route player)))
-      (ok (eq :arrived (render:walking-route-status route)))
-      (ok (< (abs (- 5.5
-                     (luv.arithmetic.lisp.vec3:vec3-x
-                      (render:walking-player-position player))))
-             0.12))
-      (ok (< (abs (- 2.5
-                     (luv.arithmetic.lisp.vec3:vec3-y
-                      (render:walking-player-position player))))
-             0.12)))))
+      (true (eq :arrived (render:walking-route-status route)))
+      (true (< (abs (- 5.5
+                       (luv.arithmetic.lisp.vec3:vec3-x
+                        (render:walking-player-position player))))
+               0.12))
+      (true (< (abs (- 2.5
+                       (luv.arithmetic.lisp.vec3:vec3-y
+                        (render:walking-player-position player))))
+               0.12)))))
 
-(deftest click-to-walk-authors-straight-diagonal-waypoints
+(define-test click-to-walk-authors-straight-diagonal-waypoints
   (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
          (player
            (render:make-walking-player
@@ -2771,12 +2772,12 @@
     (let* ((scene (luft.render::finish-scene-builder builder :player-p t))
            (route (render:start-walking-player-route player scene 6 6 1))
            (cells (render:walking-route-cells route)))
-      (ok (= 5 (length cells)))
+      (true (= 5 (length cells)))
       (loop for cell in cells
             for coordinate from 2
-            do (ok (= coordinate (luft:site-x cell) (luft:site-y cell)))))))
+            do (true (= coordinate (luft:site-x cell) (luft:site-y cell)))))))
 
-(deftest orthographic-walk-moves-on-the-ground-without-zooming
+(define-test orthographic-walk-moves-on-the-ground-without-zooming
   (let* ((viewer (clim:make-application-frame 'render:viewer))
          (camera (render:viewer-camera viewer))
          (player (render:viewer-player viewer))
@@ -2795,18 +2796,18 @@
       (luft.render::set-viewer-control viewer :forward t)
       (luft.render::advance-viewer-camera viewer 1.1)
       (let ((after (render:walking-player-position player)))
-        (ok (or (/= before-player-x
-                    (luv.arithmetic.lisp.vec3:vec3-x after))
-                (/= before-player-y
-                    (luv.arithmetic.lisp.vec3:vec3-y after))))
+        (true (or (/= before-player-x
+                      (luv.arithmetic.lisp.vec3:vec3-x after))
+                  (/= before-player-y
+                      (luv.arithmetic.lisp.vec3:vec3-y after))))
         ;; A same-height walking step translates the following camera without
         ;; changing its orbit height.
-        (ok (= before-camera-z
-               (luv.arithmetic.lisp.vec3:vec3-z
-                (render:camera-position camera))))
-        (ok (= 18.0 render:*isometric-height*))))))
+        (true (= before-camera-z
+                 (luv.arithmetic.lisp.vec3:vec3-z
+                  (render:camera-position camera))))
+        (true (= 18.0 render:*isometric-height*))))))
 
-(deftest following-camera-ignores-small-relief-and-catches-large-jumps
+(define-test following-camera-ignores-small-relief-and-catches-large-jumps
   (let* ((camera (render:make-fly-camera :yaw 0.0 :pitch -0.5))
          (player (render:make-walking-player)))
     (luft.render::follow-walking-player camera player)
@@ -2818,8 +2819,8 @@
              (render:walking-player-position player))
             0.75)
       (luft.render::follow-walking-player camera player :seconds 0.1)
-      (ok (= settled-z
-             (luv.arithmetic.lisp.vec3:vec3-z camera-position)))
+      (true (= settled-z
+               (luv.arithmetic.lisp.vec3:vec3-z camera-position)))
       ;; A fall or teleport is well outside that zone and closes most of its
       ;; error promptly instead of inheriting the gentle local response.
       (incf (luv.arithmetic.lisp.vec3:vec3-z
@@ -2838,9 +2839,9 @@
                               1.45)
                            (* 18.0 (sin -0.5)))
                         (luv.arithmetic.lisp.vec3:vec3-z camera-position)))))
-          (ok (< after-error (* 0.45 before-error))))))))
+          (true (< after-error (* 0.45 before-error))))))))
 
-(deftest walking-player-climbs-one-step-but-not-a-character-high-wall
+(define-test walking-player-climbs-one-step-but-not-a-character-high-wall
   (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
          (camera (render:make-fly-camera
                   :position
@@ -2853,15 +2854,15 @@
     (luft.render::scene-builder-cell builder 3 2 1)
     (let ((scene (luft.render::finish-scene-builder builder :player-p t)))
       (luft.render::advance-walking-player player scene camera 1 0 0.2)
-      (ok (= 2.0 (luv.arithmetic.lisp.vec3:vec3-z
-                  (render:walking-player-position player))))
-      (ok (> (luft.render::walking-player-gait player) 0.0))
+      (true (= 2.0 (luv.arithmetic.lisp.vec3:vec3-z
+                    (render:walking-player-position player))))
+      (true (> (luft.render::walking-player-gait player) 0.0))
       (loop repeat 60 do
         (luft.render::advance-walking-player
          player scene camera 0 0 (/ 1.0 60.0)))
       (let ((step-coordinate
               (/ (luft.render::walking-player-gait player) pi)))
-        (ok (< (abs (- step-coordinate (round step-coordinate))) 1e-5)))
+        (true (< (abs (- step-coordinate (round step-coordinate))) 1e-5)))
       ;; The next column is filled through the character's head.  Axis
       ;; separation leaves the player at the near edge instead of climbing or
       ;; teleporting to its remote roof.
@@ -2874,11 +2875,11 @@
                 (render:walking-player-position player))))
         (luft.render::advance-walking-player
          player blocked-scene camera 1 0 0.2)
-        (ok (= before-x
-               (luv.arithmetic.lisp.vec3:vec3-x
-                (render:walking-player-position player))))))))
+        (true (= before-x
+                 (luv.arithmetic.lisp.vec3:vec3-x
+                  (render:walking-player-position player))))))))
 
-(deftest gameplay-treats-the-finite-world-domain-as-a-wall
+(define-test gameplay-treats-the-finite-world-domain-as-a-wall
   (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
          (camera
            (render:make-fly-camera
@@ -2890,23 +2891,23 @@
             (luv.arithmetic.lisp.vec3:make-vec3 15.5 8.5 1.0))))
     (luft.render::scene-builder-box builder 0 15 0 15 0 0)
     (let ((scene (luft.render::finish-scene-builder builder :player-p t)))
-      (ok (= 1 (luft.render::collision-cell-occupancy-bit
-                (luft.render::scene-solid scene) 16 8 1)))
+      (true (= 1 (luft.render::collision-cell-occupancy-bit
+                  (luft.render::scene-solid scene) 16 8 1)))
       (let ((before
               (luv.arithmetic.lisp.vec3:vec3-x
                (render:walking-player-position player))))
         (luft.render::advance-walking-player player scene camera 1 0 0.2)
-        (ok (= before
-               (luv.arithmetic.lisp.vec3:vec3-x
-                (render:walking-player-position player))))
+        (true (= before
+                 (luv.arithmetic.lisp.vec3:vec3-x
+                  (render:walking-player-position player))))
         (setf (luft.render::walking-player-grounded-p player) nil)
-        (ok (null (luft.render::try-walking-player-air-axis
-                   player scene :x 1.0)))
-        (ok (= before
-               (luv.arithmetic.lisp.vec3:vec3-x
-                (render:walking-player-position player))))))))
+        (true (null (luft.render::try-walking-player-air-axis
+                     player scene :x 1.0)))
+        (true (= before
+                 (luv.arithmetic.lisp.vec3:vec3-x
+                  (render:walking-player-position player))))))))
 
-(deftest casting-a-fireball-turns-the-wizard-and-launches-from-the-staff
+(define-test casting-a-fireball-turns-the-wizard-and-launches-from-the-staff
   (let* ((player
            (render:make-walking-player
             :position
@@ -2916,14 +2917,14 @@
           (make-instance 'render:walking-route :start nil :destination nil
                          :cells nil :status :running))
     (luft.render::cast-walking-player-fireball player target)
-    (ok (< (abs (- 1.0 (luft.render::walking-player-heading-x player)))
-           1.0e-6))
-    (ok (< (abs (luft.render::walking-player-heading-y player)) 1.0e-6))
-    (ok (eq :cancelled
-            (render:walking-route-status
-             (render:walking-player-route player))))
-    (ok (= 1.0 (luft.render::walking-player-spell-flash player)))
-    (ok (luft.render::walking-player-fireball-velocity player))
+    (true (< (abs (- 1.0 (luft.render::walking-player-heading-x player)))
+             1.0e-6))
+    (true (< (abs (luft.render::walking-player-heading-y player)) 1.0e-6))
+    (true (eq :cancelled
+              (render:walking-route-status
+               (render:walking-player-route player))))
+    (true (= 1.0 (luft.render::walking-player-spell-flash player)))
+    (true (luft.render::walking-player-fireball-velocity player))
     (let* ((staff (luft.render::walking-player-staff-head-position player))
            (fireball (luft.render::walking-player-fireball-position player))
            (dx (- (luv.arithmetic.lisp.vec3:vec3-x fireball)
@@ -2933,24 +2934,24 @@
            (dz (- (luv.arithmetic.lisp.vec3:vec3-z fireball)
                   (luv.arithmetic.lisp.vec3:vec3-z staff)))
            (launch-distance (sqrt (+ (* dx dx) (* dy dy) (* dz dz)))))
-      (ok (< (abs (- 0.48
-                     launch-distance))
-             1.0e-5))
+      (true (< (abs (- 0.48
+                       launch-distance))
+               1.0e-5))
       ;; This position belongs to the wizard, not the old camera-ray origin.
-      (ok (> (luv.arithmetic.lisp.vec3:vec3-x fireball) 5.0))
-      (ok (> (luv.arithmetic.lisp.vec3:vec3-z fireball) 3.0)))
+      (true (> (luv.arithmetic.lisp.vec3:vec3-x fireball) 5.0))
+      (true (> (luv.arithmetic.lisp.vec3:vec3-z fireball) 3.0)))
     (let ((before (luv.arithmetic.lisp.vec3:vec3-x
                    (luft.render::walking-player-fireball-position player))))
       (luft.render::advance-walking-player-fireball player 0.1)
-      (ok (> (luv.arithmetic.lisp.vec3:vec3-x
-              (luft.render::walking-player-fireball-position player)) before)))
+      (true (> (luv.arithmetic.lisp.vec3:vec3-x
+                (luft.render::walking-player-fireball-position player)) before)))
     (multiple-value-bind (character previous direction-lane
                           fireball previous-fireball)
         (luft.render::walking-player-render-lanes player)
       (declare (ignore character previous direction-lane previous-fireball))
-      (ok (= luft.render::+fireball-radius+ (fourth fireball))))))
+      (true (= luft.render::+fireball-radius+ (fourth fireball))))))
 
-(deftest a-fireball-flies-straight-and-ends-at-its-target
+(define-test a-fireball-flies-straight-and-ends-at-its-target
   (let* ((player (render:make-walking-player))
          (origin (luv.arithmetic.lisp.vec3:make-vec3 14.0 8.0 4.0))
          (direction (luv.arithmetic.lisp.vec3:make-vec3 1.0 0.0 0.0)))
@@ -2962,40 +2963,40 @@
            (before-z (luv.arithmetic.lisp.vec3:vec3-z before)))
       (luft.render::advance-walking-player-fireball player 0.05)
       (let ((after (luft.render::walking-player-fireball-position player)))
-        (ok (> (luv.arithmetic.lisp.vec3:vec3-x after) before-x))
-        (ok (= before-y (luv.arithmetic.lisp.vec3:vec3-y after)))
-        (ok (= before-z (luv.arithmetic.lisp.vec3:vec3-z after))))
+        (true (> (luv.arithmetic.lisp.vec3:vec3-x after) before-x))
+        (true (= before-y (luv.arithmetic.lisp.vec3:vec3-y after)))
+        (true (= before-z (luv.arithmetic.lisp.vec3:vec3-z after))))
       (luft.render::advance-walking-player-fireball player 1.0)
-      (ok (null (luft.render::walking-player-fireball-position player))))))
+      (true (null (luft.render::walking-player-fireball-position player))))))
 
-(deftest the-spike-scene-is-three-site-instance-streams
+(define-test the-spike-scene-is-three-site-instance-streams
   (let* ((mesh (render:make-render-mesh
                 (render:make-manifold-spike-scene)))
          (templates (luft:surface-mesh-template-vertex-words mesh)))
-    (ok (plusp (luft:surface-mesh-face-triangle-count mesh)))
-    (ok (plusp (luft:surface-mesh-band-triangle-count mesh)))
-    (ok (plusp (luft:surface-mesh-fan-triangle-count mesh)))
-    (ok (plusp (luft:surface-mesh-singular-star-count mesh)))
-    (ok (plusp (luft:surface-mesh-face-instance-count mesh)))
-    (ok (plusp (luft:surface-mesh-band-instance-count mesh)))
-    (ok (plusp (luft:surface-mesh-fan-instance-count mesh)))
-    (ok (plusp (luft:surface-mesh-template-count mesh)))
-    (ok (zerop (mod (length templates)
-                    luft:+mesh-template-vertex-word-count+)))))
+    (true (plusp (luft:surface-mesh-face-triangle-count mesh)))
+    (true (plusp (luft:surface-mesh-band-triangle-count mesh)))
+    (true (plusp (luft:surface-mesh-fan-triangle-count mesh)))
+    (true (plusp (luft:surface-mesh-singular-star-count mesh)))
+    (true (plusp (luft:surface-mesh-face-instance-count mesh)))
+    (true (plusp (luft:surface-mesh-band-instance-count mesh)))
+    (true (plusp (luft:surface-mesh-fan-instance-count mesh)))
+    (true (plusp (luft:surface-mesh-template-count mesh)))
+    (true (zerop (mod (length templates)
+                      luft:+mesh-template-vertex-word-count+)))))
 
-(deftest the-mountain-sanctuary-retains-its-authored-contracts
+(define-test the-mountain-sanctuary-retains-its-authored-contracts
   (let ((scene (render:make-mountain-sanctuary-scene)))
-    (testing "the walking player belongs to the sanctuary"
-      (ok (luft.render::scene-player-p scene))
-      (ok (not (luft.render::scene-player-p
-                (render:make-manifold-spike-scene))))
-      (ok (not (luft.render::scene-player-p
-                (render:make-miter-study-scene)))))
-    (testing "the elevated rim is an authored stone battlement"
+    (group (context "the walking player belongs to the sanctuary")
+      (true (luft.render::scene-player-p scene))
+      (true (not (luft.render::scene-player-p
+                  (render:make-manifold-spike-scene))))
+      (true (not (luft.render::scene-player-p
+                  (render:make-miter-study-scene)))))
+    (group (context "the elevated rim is an authored stone battlement")
       (multiple-value-bind (west east present-p)
           (luft.render::mountain-sanctuary-terrain-x-bounds 47)
         (declare (ignore west))
-        (ok present-p)
+        (true present-p)
         (let* ((height
                  (luft.render::mountain-sanctuary-terrain-height east 47))
                (x (+ luft.render::+sanctuary-origin-x+ east))
@@ -3004,30 +3005,30 @@
                (wall-cell
                  (luft:make-site (luft:chain-domain solid) x y height
                                  luft:+cell-extent+ 1)))
-          (ok (>= height luft.render::+sanctuary-plateau-height+))
+          (true (>= height luft.render::+sanctuary-plateau-height+))
           ;; Two continuous courses stop the one-step walker; this even
           ;; contour column also carries the alternating crenellation.
-          (ok (= 1 (luft:chain-cell-occupancy-bit solid x y height)))
-          (ok (= 1 (luft:chain-cell-occupancy-bit solid x y (1+ height))))
-          (ok (= 1 (luft:chain-cell-occupancy-bit solid x y (+ height 2))))
-          (ok (zerop (luft:chain-cell-occupancy-bit solid (1+ x) y height)))
-          (ok (eq luft.render::*sanctuary-material-placement*
-                  (luft.render::scene-material-placement-at scene wall-cell)))))
+          (true (= 1 (luft:chain-cell-occupancy-bit solid x y height)))
+          (true (= 1 (luft:chain-cell-occupancy-bit solid x y (1+ height))))
+          (true (= 1 (luft:chain-cell-occupancy-bit solid x y (+ height 2))))
+          (true (zerop (luft:chain-cell-occupancy-bit solid (1+ x) y height)))
+          (true (eq luft.render::*sanctuary-material-placement*
+                    (luft.render::scene-material-placement-at scene wall-cell)))))
       ;; The low southern shore remains open rather than walling in the route.
       (multiple-value-bind (west east present-p)
           (luft.render::mountain-sanctuary-terrain-x-bounds -15)
         (declare (ignore west))
-        (ok present-p)
+        (true present-p)
         (let ((height
                 (luft.render::mountain-sanctuary-terrain-height east -15)))
-          (ok (< height luft.render::+sanctuary-plateau-height+))
-          (ok (zerop
-               (luft:chain-cell-occupancy-bit
-                (luft.render::scene-solid scene)
-                (+ luft.render::+sanctuary-origin-x+ east)
-                (+ luft.render::+sanctuary-origin-y+ -15)
-                height))))))
-    (testing "the curtain is bedded into the mountain"
+          (true (< height luft.render::+sanctuary-plateau-height+))
+          (true (zerop
+                 (luft:chain-cell-occupancy-bit
+                  (luft.render::scene-solid scene)
+                  (+ luft.render::+sanctuary-origin-x+ east)
+                  (+ luft.render::+sanctuary-origin-y+ -15)
+                  height))))))
+    (group (context "the curtain is bedded into the mountain")
       (let* ((solid (luft.render::scene-solid scene))
              (domain (luft:chain-domain solid)))
         (flet ((occupied-p (x y z)
@@ -3045,44 +3046,44 @@
             (destructuring-bind (x y) point
               (incf x luft.render::+sanctuary-origin-x+)
               (incf y luft.render::+sanctuary-origin-y+)
-              (ok (occupied-p x y 17))
-              (ok (occupied-p x y 18))
-              (ok (architecture-p x y 17))
-              (ok (architecture-p x y 18))))
+              (true (occupied-p x y 17))
+              (true (occupied-p x y 18))
+              (true (architecture-p x y 17))
+              (true (architecture-p x y 18))))
           ;; The stair arrives at a supported masonry threshold, while the gate
           ;; opening itself remains clear at the sanctuary floor.
           (let ((x (+ 30 luft.render::+sanctuary-origin-x+))
                 (y (+ 45 luft.render::+sanctuary-origin-y+)))
-            (ok (occupied-p x y 18))
-            (ok (architecture-p x y 18))
-            (ok (not (occupied-p x y 19))))
+            (true (occupied-p x y 18))
+            (true (architecture-p x y 18))
+            (true (not (occupied-p x y 19))))
           ;; Terrain and inhabited architecture continue to the remote beacon.
-          (ok (occupied-p (+ luft.render::*sanctuary-beacon-x*
-                             luft.render::+sanctuary-origin-x+)
-                          (+ luft.render::*sanctuary-beacon-y*
-                             luft.render::+sanctuary-origin-y+)
-                          20))
-          (ok (architecture-p
-               (+ luft.render::*sanctuary-beacon-x*
-                  luft.render::+sanctuary-origin-x+)
-               (+ luft.render::*sanctuary-beacon-y*
-                  luft.render::+sanctuary-origin-y+)
-               (+ 8
-                  (luft.render::mountain-sanctuary-terrain-height
-                   luft.render::*sanctuary-beacon-x*
-                   luft.render::*sanctuary-beacon-y*)))))))))
+          (true (occupied-p (+ luft.render::*sanctuary-beacon-x*
+                               luft.render::+sanctuary-origin-x+)
+                            (+ luft.render::*sanctuary-beacon-y*
+                               luft.render::+sanctuary-origin-y+)
+                            20))
+          (true (architecture-p
+                 (+ luft.render::*sanctuary-beacon-x*
+                    luft.render::+sanctuary-origin-x+)
+                 (+ luft.render::*sanctuary-beacon-y*
+                    luft.render::+sanctuary-origin-y+)
+                 (+ 8
+                    (luft.render::mountain-sanctuary-terrain-height
+                     luft.render::*sanctuary-beacon-x*
+                     luft.render::*sanctuary-beacon-y*)))))))))
 
-(deftest scene-builders-translate-authored-sites-at-the-boundary
+(define-test scene-builders-translate-authored-sites-at-the-boundary
   (let* ((builder (luft.render::make-scene-builder
                    :horizontal-bits 5 :origin-x 7 :origin-y 11))
          (scene (progn
                   (luft.render::scene-builder-cell builder 2 3 4)
                   (luft.render::finish-scene-builder builder)))
          (solid (luft.render::scene-solid scene)))
-    (ok (= 1 (luft:chain-cell-occupancy-bit solid 9 14 4)))
-    (ok (zerop (luft:chain-cell-occupancy-bit solid 2 3 4)))))
+    (true (= 1 (luft:chain-cell-occupancy-bit solid 9 14 4)))
+    (true (zerop (luft:chain-cell-occupancy-bit solid 2 3 4)))))
 
-(deftest scene-cells-store-vocabulary-closed-material-offsets
+(define-test scene-cells-store-vocabulary-closed-material-offsets
   (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
          (scene (progn
                   (luft.render::scene-builder-cell builder 2 2 2)
@@ -3092,39 +3093,39 @@
          (domain (luft:chain-domain (luft.render::scene-solid scene)))
          (earth-site (luft:make-site domain 2 2 2 luft:+cell-extent+ 1))
          (stone-site (luft:make-site domain 2 2 3 luft:+cell-extent+ 1)))
-    (ok (every (lambda (offset) (typep offset '(unsigned-byte 16)))
-               (loop for offset being the hash-values
-                       of (luft.render::scene-material-cells scene)
-                     collect offset)))
-    (ok (eq luft.render::*terrain-material-placement*
-            (luft.render::scene-material-placement-at scene earth-site)))
-    (ok (eq luft.render::*sanctuary-material-placement*
-            (luft.render::scene-material-placement-at scene stone-site)))
-    (ok (eq luft.render::*sanctuary-material-frame*
-            (luft.render::material-placement-frame
-             (luft.render::scene-material-placement-at scene stone-site))))))
+    (true (every (lambda (offset) (typep offset '(unsigned-byte 16)))
+                 (loop for offset being the hash-values
+                         of (luft.render::scene-material-cells scene)
+                       collect offset)))
+    (true (eq luft.render::*terrain-material-placement*
+              (luft.render::scene-material-placement-at scene earth-site)))
+    (true (eq luft.render::*sanctuary-material-placement*
+              (luft.render::scene-material-placement-at scene stone-site)))
+    (true (eq luft.render::*sanctuary-material-frame*
+              (luft.render::material-placement-frame
+               (luft.render::scene-material-placement-at scene stone-site))))))
 
-(deftest semantic-surface-assemblies-retain-the-named-built-in-abi
-  (ok (equal
-       (subseq
-        (loop for assembly across
-                (luv.domains:identity-vocabulary-members
-                 luft.render::*surface-assembly-vocabulary*)
-              collect (luft.render::surface-assembly-name assembly))
-        0 9)
-       '(:grass :soil :subsoil :limestone :turf-set-limestone
-         :soil-set-limestone :deep-set-limestone :turf-edge
-         :foundation-limestone)))
-  (ok (equal (loop for offset below 9 collect offset)
-             (list luft.render::+grass-stock+ luft.render::+soil-stock+
-                   luft.render::+subsoil-stock+ luft.render::+stone-stock+
-                   luft.render::+turf-set-stone-stock+
-                   luft.render::+soil-set-stone-stock+
-                   luft.render::+deep-set-stone-stock+
-                   luft.render::+turf-edge-stock+
-                   luft.render::+foundation-stone-stock+))))
+(define-test semantic-surface-assemblies-retain-the-named-built-in-abi
+  (true (equal
+         (subseq
+          (loop for assembly across
+                  (luv.domains:identity-vocabulary-members
+                   luft.render::*surface-assembly-vocabulary*)
+                collect (luft.render::surface-assembly-name assembly))
+          0 9)
+         '(:grass :soil :subsoil :limestone :turf-set-limestone
+           :soil-set-limestone :deep-set-limestone :turf-edge
+           :foundation-limestone)))
+  (true (equal (loop for offset below 9 collect offset)
+               (list luft.render::+grass-stock+ luft.render::+soil-stock+
+                     luft.render::+subsoil-stock+ luft.render::+stone-stock+
+                     luft.render::+turf-set-stone-stock+
+                     luft.render::+soil-set-stone-stock+
+                     luft.render::+deep-set-stone-stock+
+                     luft.render::+turf-edge-stock+
+                     luft.render::+foundation-stone-stock+))))
 
-(deftest semantic-closure-selects-earth-and-stone-appearances-by-meaning
+(define-test semantic-closure-selects-earth-and-stone-appearances-by-meaning
   (let* ((program
            (luft.render::make-material-program
             (luft.render::make-scene-material-vocabulary)))
@@ -3132,27 +3133,27 @@
            (luft.render::make-compiled-material-chamfer-stock-function program)))
     (flet ((assembly (&rest stocks)
              (luft.render::surface-assembly-at (funcall resolve stocks))))
-      (ok (eq :earth-set-stone
-              (luft.render::surface-assembly-kernel
-               (assembly luft.render::+stone-stock+
-                         luft.render::+grass-stock+))))
-      (ok (eq :exposed-top
-              (luft.render::surface-reading-role
-               (luft.render::surface-assembly-secondary
-                (assembly luft.render::+stone-stock+
-                          luft.render::+grass-stock+)))))
-      (ok (eq :underside
-              (luft.render::surface-reading-role
-               (luft.render::surface-assembly-secondary
-                (assembly luft.render::+stone-stock+
-                          luft.render::+grass-stock+
-                          luft.render::+subsoil-stock+)))))
-      (ok (eq :turf-edge
-              (luft.render::surface-assembly-kernel
-               (assembly luft.render::+grass-stock+
-                         luft.render::+soil-stock+)))))))
+      (true (eq :earth-set-stone
+                (luft.render::surface-assembly-kernel
+                 (assembly luft.render::+stone-stock+
+                           luft.render::+grass-stock+))))
+      (true (eq :exposed-top
+                (luft.render::surface-reading-role
+                 (luft.render::surface-assembly-secondary
+                  (assembly luft.render::+stone-stock+
+                            luft.render::+grass-stock+)))))
+      (true (eq :underside
+                (luft.render::surface-reading-role
+                 (luft.render::surface-assembly-secondary
+                  (assembly luft.render::+stone-stock+
+                            luft.render::+grass-stock+
+                            luft.render::+subsoil-stock+)))))
+      (true (eq :turf-edge
+                (luft.render::surface-assembly-kernel
+                 (assembly luft.render::+grass-stock+
+                           luft.render::+soil-stock+)))))))
 
-(deftest material-semantics-compile-once-before-dense-meshing
+(define-test material-semantics-compile-once-before-dense-meshing
   (let ((luft.render::*material-placement-compilation-count* 0))
     (let* ((scene (make-material-compiler-study-scene))
            (compilations
@@ -3162,17 +3163,17 @@
               (luv.domains:identity-vocabulary-members
                (luft.render::scene-material-vocabulary scene))))
            (program (luft.render::scene-material-program scene)))
-      (ok (= placement-count compilations))
-      (ok (typep
-           (luft.render::material-program-placement-face-stocks program)
-           '(simple-array (unsigned-byte 16) (*))))
-      (ok (typep (luft.render::material-program-placement-flags program)
-                 '(simple-array (unsigned-byte 8) (*))))
+      (true (= placement-count compilations))
+      (true (typep
+             (luft.render::material-program-placement-face-stocks program)
+             '(simple-array (unsigned-byte 16) (*))))
+      (true (typep (luft.render::material-program-placement-flags program)
+                   '(simple-array (unsigned-byte 8) (*))))
       (render:make-render-mesh scene)
-      (ok (= compilations
-             luft.render::*material-placement-compilation-count*)))))
+      (true (= compilations
+               luft.render::*material-placement-compilation-count*)))))
 
-(deftest equivalent-custom-placements-reuse-canonical-material-semantics
+(define-test equivalent-custom-placements-reuse-canonical-material-semantics
   (labels ((make-placement ()
              (make-instance
               'luft.render::material-placement
@@ -3241,48 +3242,48 @@
            (foundation-assemblies
              (mapcar #'luft.render::face-reading-assembly
                      foundation-readings)))
-      (ok first-program)
-      (ok second-program)
-      (ok (not (eq (first first-placements)
-                   (second first-placements))))
-      (ok (not (eq
-                (luft.render::material-placement-kind
-                 (first first-placements))
-                (luft.render::material-placement-kind
-                 (second first-placements)))))
-      (ok (not (eq
-                (luft.render::material-placement-frame
-                 (first first-placements))
-                (luft.render::material-placement-frame
-                 (second first-placements)))))
+      (true first-program)
+      (true second-program)
+      (true (not (eq (first first-placements)
+                     (second first-placements))))
+      (true (not (eq
+                  (luft.render::material-placement-kind
+                   (first first-placements))
+                  (luft.render::material-placement-kind
+                   (second first-placements)))))
+      (true (not (eq
+                  (luft.render::material-placement-frame
+                   (first first-placements))
+                  (luft.render::material-placement-frame
+                   (second first-placements)))))
       ;; Reconstructing and recompiling the same semantics may not extend the
       ;; renderer-global ABI or its canonical reading table.
-      (ok (= first-assembly-count (assembly-count)))
-      (ok (= first-reading-count
-             (hash-table-count
-              luft.render::*surface-reading-intern-table*)))
-      (ok (= (length
-              (luv.domains:identity-vocabulary-members first-vocabulary))
-             (length
-              (luv.domains:identity-vocabulary-members second-vocabulary))))
+      (true (= first-assembly-count (assembly-count)))
+      (true (= first-reading-count
+               (hash-table-count
+                luft.render::*surface-reading-intern-table*)))
+      (true (= (length
+                (luv.domains:identity-vocabulary-members first-vocabulary))
+               (length
+                (luv.domains:identity-vocabulary-members second-vocabulary))))
       ;; Authored reading objects remain placement-local, while the cold
       ;; semantic boundary maps every equivalent reconstruction to one EQ
       ;; reading and one EQ face assembly for each distinct role.
-      (ok (not (all-eq-p architecture-readings)))
-      (ok (not (all-eq-p foundation-readings)))
-      (ok (all-eq-p canonical-architecture))
-      (ok (all-eq-p canonical-foundation))
-      (ok (not (eq (first canonical-architecture)
-                   (first canonical-foundation))))
-      (ok (all-eq-p architecture-assemblies))
-      (ok (all-eq-p foundation-assemblies))
+      (true (not (all-eq-p architecture-readings)))
+      (true (not (all-eq-p foundation-readings)))
+      (true (all-eq-p canonical-architecture))
+      (true (all-eq-p canonical-foundation))
+      (true (not (eq (first canonical-architecture)
+                     (first canonical-foundation))))
+      (true (all-eq-p architecture-assemblies))
+      (true (all-eq-p foundation-assemblies))
       ;; The historically failing equal-key comparison now collapses before
       ;; ranking, and contact assembly interning is likewise order-independent
       ;; and stable across both compilation rounds.
-      (ok (eq (first architecture-assemblies)
-              (luft.render::reading-contact-surface-assembly
-               (first architecture-readings)
-               (second architecture-readings))))
+      (true (eq (first architecture-assemblies)
+                (luft.render::reading-contact-surface-assembly
+                 (first architecture-readings)
+                 (second architecture-readings))))
       (let ((contacts
               (loop for reading in architecture-readings append
                 (list
@@ -3290,18 +3291,18 @@
                   reading luft.render::*grass-reading*)
                  (luft.render::reading-contact-surface-assembly
                   luft.render::*grass-reading* reading)))))
-        (ok (all-eq-p contacts)))
-      (ok (= (luft.render::material-program-summary-count first-program)
-             (luft.render::material-program-summary-count second-program)))
-      (ok (equalp
-           (luft.render::material-program-placement-face-stocks first-program)
-           (luft.render::material-program-placement-face-stocks
-            second-program))))))
+        (true (all-eq-p contacts)))
+      (true (= (luft.render::material-program-summary-count first-program)
+               (luft.render::material-program-summary-count second-program)))
+      (true (equalp
+             (luft.render::material-program-placement-face-stocks first-program)
+             (luft.render::material-program-placement-face-stocks
+              second-program))))))
 
 (defclass unsupported-contact-material-kind
     (luft.render::material-kind) ())
 
-(deftest semantic-contacts-are-host-owned-commutative-and-densely-compiled
+(define-test semantic-contacts-are-host-owned-commutative-and-densely-compiled
   (let* ((program
            (luft.render::make-material-program
             (luft.render::make-scene-material-vocabulary)))
@@ -3332,28 +3333,28 @@
            (luft.render::material-program-summary-count program)))
     ;; The terrain or architecture host owns the rendered contact, while the
     ;; crystal reading remains explicit context rather than becoming soil.
-    (ok (= grass-crystal crystal-grass))
-    (ok (eq luft.render::*grass-reading*
-            (luft.render::surface-assembly-primary grass-contact)))
-    (ok (eq luft.render::*crystal-reading*
-            (luft.render::surface-assembly-secondary grass-contact)))
-    (ok (= stone-crystal crystal-stone))
-    (ok (eq luft.render::*stone-reading*
-            (luft.render::surface-assembly-primary stone-contact)))
-    (ok (eq luft.render::*crystal-reading*
-            (luft.render::surface-assembly-secondary stone-contact)))
+    (true (= grass-crystal crystal-grass))
+    (true (eq luft.render::*grass-reading*
+              (luft.render::surface-assembly-primary grass-contact)))
+    (true (eq luft.render::*crystal-reading*
+              (luft.render::surface-assembly-secondary grass-contact)))
+    (true (= stone-crystal crystal-stone))
+    (true (eq luft.render::*stone-reading*
+              (luft.render::surface-assembly-primary stone-contact)))
+    (true (eq luft.render::*crystal-reading*
+              (luft.render::surface-assembly-secondary stone-contact)))
     ;; Every reachable stock round-trips through simple dense summary lanes.
     ;; The mask itself is the ACI join state; there are no identity flags or
     ;; ordered-pair special cases in the hot resolver.
-    (ok (typep summary-masks '(simple-array (unsigned-byte 16) (*))))
-    (ok (typep summary-stocks '(simple-array (unsigned-byte 16) (*))))
-    (ok (= (1+ summary-count) (length summary-stocks)))
-    (ok
-     (loop for stock below (length summary-masks)
-           for mask = (aref summary-masks stock)
-           always (or (= mask luft.render::+material-program-no-summary+)
-                      (and (<= 1 mask summary-count)
-                           (= stock (aref summary-stocks mask))))))
+    (true (typep summary-masks '(simple-array (unsigned-byte 16) (*))))
+    (true (typep summary-stocks '(simple-array (unsigned-byte 16) (*))))
+    (true (= (1+ summary-count) (length summary-stocks)))
+    (true
+       (loop for stock below (length summary-masks)
+             for mask = (aref summary-masks stock)
+             always (or (= mask luft.render::+material-program-no-summary+)
+                        (and (<= 1 mask summary-count)
+                             (= stock (aref summary-stocks mask))))))
     ;; An unmodelled material family fails at the cold protocol boundary.  It
     ;; cannot silently inherit the historical soil result.
     (let* ((kind
@@ -3366,13 +3367,13 @@
               'luft.render::surface-reading :name :unsupported
               :kind kind :tone '(0.0 0.0 0.0) :finish :none
               :frame luft.render::*world-material-frame* :role :unsupported)))
-      (ok
-       (signals
-        (luft.render::material-contact-surface-assembly
-         kind kind reading reading)
-        'error)))))
+      (true
+         (fail
+          (luft.render::material-contact-surface-assembly
+           kind kind reading reading)
+          'error)))))
 
-(deftest unsupported-face-roles-fail-before-dense-material-compilation
+(define-test unsupported-face-roles-fail-before-dense-material-compilation
   (let* ((kind
            (make-instance
             'luft.render::earth-material-kind
@@ -3385,12 +3386,12 @@
             :tone '(0.13 0.17 0.19) :finish :raw
             :frame luft.render::*world-material-frame*
             :role :unsupported-face-role)))
-    (ok (signals (luft.render::face-reading-assembly reading) 'error))
-    (ok (signals
-         (luft.render::surface-reading-material-bevel-mask reading)
-         'error))))
+    (true (fail (luft.render::face-reading-assembly reading) 'error))
+    (true (fail
+           (luft.render::surface-reading-material-bevel-mask reading)
+           'error))))
 
-(deftest distinct-same-family-contacts-have-exact-canonical-pair-summaries
+(define-test distinct-same-family-contacts-have-exact-canonical-pair-summaries
   (let* ((crystal-kind-a
            (make-instance
             'luft.render::crystal-material-kind
@@ -3430,15 +3431,15 @@
                   (list left right)))
                (actual
                  (luft.render::surface-assembly-closure-summary forward)))
-          (ok (not (eq (luft.render::canonical-surface-reading left)
-                       (luft.render::canonical-surface-reading right))))
-          (ok (eq forward reverse))
-          (ok (eq expected actual))
-          (ok (= 2
-                 (length
-                  (luft.render::surface-closure-summary-readings actual)))))))))
+          (true (not (eq (luft.render::canonical-surface-reading left)
+                         (luft.render::canonical-surface-reading right))))
+          (true (eq forward reverse))
+          (true (eq expected actual))
+          (true (= 2
+                   (length
+                    (luft.render::surface-closure-summary-readings actual)))))))))
 
-(deftest custom-material-readings-and-descriptors-have-only-authored-lineage
+(define-test custom-material-readings-and-descriptors-have-only-authored-lineage
   (let* ((earth-top '(0.17 0.63 0.24))
          (earth-side '(0.31 0.22 0.11))
          (earth-under '(0.09 0.07 0.04))
@@ -3533,9 +3534,9 @@
            (luft.render::surface-assembly-descriptor-words vocabulary))
          (stride (* luft.render::+surface-assembly-descriptor-row-count+ 4)))
     (labels ((assert-reading (reading tone frame finish)
-               (ok (equalp tone (luft.render::surface-reading-tone reading)))
-               (ok (eq frame (luft.render::surface-reading-frame reading)))
-               (ok (eq finish (luft.render::surface-reading-finish reading))))
+               (true (equalp tone (luft.render::surface-reading-tone reading)))
+               (true (eq frame (luft.render::surface-reading-frame reading)))
+               (true (eq finish (luft.render::surface-reading-finish reading))))
              (row (assembly row-index)
                (let* ((assembly-index
                         (luv.domains:identity-vocabulary-offset
@@ -3543,41 +3544,41 @@
                       (start (+ (* assembly-index stride) (* row-index 4))))
                  (subseq words start (+ start 4))))
              (tone-row (assembly row-index tone)
-               (ok (equalp (coerce tone 'vector)
-                           (subseq (row assembly row-index) 0 3))))
+               (true (equalp (coerce tone 'vector)
+                             (subseq (row assembly row-index) 0 3))))
              (frame-rows (assembly frame)
-               (ok (equalp (coerce
-                            (luft.render::material-frame-origin frame) 'vector)
-                           (subseq (row assembly 4) 0 3)))
+               (true (equalp (coerce
+                              (luft.render::material-frame-origin frame) 'vector)
+                             (subseq (row assembly 4) 0 3)))
                (loop for axis in (luft.render::material-frame-axes frame)
                      for row-index from 5
-                     do (ok (equalp (coerce axis 'vector)
-                                    (subseq (row assembly row-index)
-                                            0 3))))))
+                     do (true (equalp (coerce axis 'vector)
+                                      (subseq (row assembly row-index)
+                                              0 3))))))
       (assert-reading earth-top-reading earth-top earth-frame :hand-cut)
       (assert-reading earth-side-reading earth-side earth-frame :hand-cut)
       (assert-reading earth-under-reading earth-under earth-frame :hand-cut)
       (loop for index in '(0 4 5)
-            do (ok (equalp '(0.44 0.12 0.38)
-                           (luft.render::surface-reading-tone
-                            (aref default-earth-readings index)))))
+            do (true (equalp '(0.44 0.12 0.38)
+                             (luft.render::surface-reading-tone
+                              (aref default-earth-readings index)))))
       (assert-reading stone-reading stone-tone stone-frame :dressed)
       (assert-reading foundation-reading stone-tone stone-frame :dressed)
       (assert-reading crystal-reading crystal-tone crystal-frame :faceted)
       ;; A foundation singleton contains no invented global soil/subsoil
       ;; context; descriptor fallback repeats its own authored primary.
-      (ok (null (luft.render::surface-assembly-secondary foundation-face)))
-      (ok (null (luft.render::surface-assembly-tertiary foundation-face)))
+      (true (null (luft.render::surface-assembly-secondary foundation-face)))
+      (true (null (luft.render::surface-assembly-tertiary foundation-face)))
       (dotimes (row-index 3)
         (tone-row foundation-face row-index stone-tone))
       (frame-rows foundation-face stone-frame)
       ;; Contact lanes name only the two actual placements.  Row two falls
       ;; back to the incident earth secondary rather than a global palette.
-      (ok (eq (luft.render::canonical-surface-reading stone-reading)
-              (luft.render::surface-assembly-primary contact)))
-      (ok (eq (luft.render::canonical-surface-reading earth-side-reading)
-              (luft.render::surface-assembly-secondary contact)))
-      (ok (null (luft.render::surface-assembly-tertiary contact)))
+      (true (eq (luft.render::canonical-surface-reading stone-reading)
+                (luft.render::surface-assembly-primary contact)))
+      (true (eq (luft.render::canonical-surface-reading earth-side-reading)
+                (luft.render::surface-assembly-secondary contact)))
+      (true (null (luft.render::surface-assembly-tertiary contact)))
       (tone-row contact 0 stone-tone)
       (tone-row contact 1 earth-side)
       (tone-row contact 2 earth-side)
@@ -3590,7 +3591,7 @@
 ;;; ---------------------------------------------------------------------------
 ;;; Closure-summary algebra
 
-(deftest closure-summary-hot-algebra-is-aci-and-retains-derived-provenance
+(define-test closure-summary-hot-algebra-is-aci-and-retains-derived-provenance
   (let* ((program
            (luft.render::make-material-program
             (luft.render::make-scene-material-vocabulary)))
@@ -3607,22 +3608,22 @@
       ;; Exhaust the ACI laws over the five material readings which matter at
       ;; terrain, masonry, and crystal junctions.  Parenthesized joins feed
       ;; derived stocks back through the same hot resolver used by vertex fans.
-      (ok (loop for left in basis
-                always (= (join left) (join left left))))
-      (ok (loop for left in basis
-                always
-                (loop for right in basis
-                      always (= (join left right) (join right left)))))
-      (ok (loop for left in basis
-                always
-                (loop for right in basis
-                      always
-                      (loop for third in basis
-                            for direct = (join left right third)
-                            always
-                            (and (= direct (join (join left right) third))
-                                 (= direct
-                                    (join left (join right third))))))))
+      (true (loop for left in basis
+                  always (= (join left) (join left left))))
+      (true (loop for left in basis
+                  always
+                  (loop for right in basis
+                        always (= (join left right) (join right left)))))
+      (true (loop for left in basis
+                  always
+                  (loop for right in basis
+                        always
+                        (loop for third in basis
+                              for direct = (join left right third)
+                              always
+                              (and (= direct (join (join left right) third))
+                                   (= direct
+                                      (join left (join right third))))))))
       ;; Soil+subsoil renders as the same soil face appearance as soil alone,
       ;; but it is a distinct stock because its provenance must survive a later
       ;; fan join.
@@ -3632,16 +3633,16 @@
              (soil-appearance (luft.render::surface-assembly-at soil))
              (derived-appearance
                (luft.render::surface-assembly-at soil-subsoil)))
-        (ok (/= soil soil-subsoil))
-        (ok (eq (luft.render::surface-assembly-primary soil-appearance)
-                (luft.render::surface-assembly-primary derived-appearance)))
-        (ok (eq (luft.render::surface-assembly-kernel soil-appearance)
-                (luft.render::surface-assembly-kernel derived-appearance)))
-        (ok (= 2
-               (length
-                (luft.render::surface-closure-summary-readings
-                 (luft.render::surface-assembly-closure-summary
-                  derived-appearance))))))
+        (true (/= soil soil-subsoil))
+        (true (eq (luft.render::surface-assembly-primary soil-appearance)
+                  (luft.render::surface-assembly-primary derived-appearance)))
+        (true (eq (luft.render::surface-assembly-kernel soil-appearance)
+                  (luft.render::surface-assembly-kernel derived-appearance)))
+        (true (= 2
+                 (length
+                  (luft.render::surface-closure-summary-readings
+                   (luft.render::surface-assembly-closure-summary
+                    derived-appearance))))))
       ;; Crystal remains explicit visible context at the three-way closure;
       ;; every permutation and parenthesization resolves to this same stock.
       (let* ((triple
@@ -3658,19 +3659,19 @@
                           (permutations
                            (remove item items :count 1 :test #'=)))))))
           (dolist (permutation (permutations triple))
-            (ok (= expected (apply #'join permutation)))))
-        (ok (eq luft.render::*stone-reading*
-                (luft.render::surface-assembly-primary assembly)))
-        (ok (eq luft.render::*crystal-reading*
-                (luft.render::surface-assembly-secondary assembly)))
-        (ok (= 3
-               (length
-                (luft.render::surface-closure-summary-readings
-                 (luft.render::surface-assembly-closure-summary assembly)))))
-        (ok (= luft.render::+material-bevel-three-way-mask+
-               (luft.render::surface-assembly-material-bevel-mask assembly)))))))
+            (true (= expected (apply #'join permutation)))))
+        (true (eq luft.render::*stone-reading*
+                  (luft.render::surface-assembly-primary assembly)))
+        (true (eq luft.render::*crystal-reading*
+                  (luft.render::surface-assembly-secondary assembly)))
+        (true (= 3
+                 (length
+                  (luft.render::surface-closure-summary-readings
+                   (luft.render::surface-assembly-closure-summary assembly)))))
+        (true (= luft.render::+material-bevel-three-way-mask+
+                 (luft.render::surface-assembly-material-bevel-mask assembly)))))))
 
-(deftest custom-placement-closure-compiles-frames-tones-and-complete-summary
+(define-test custom-placement-closure-compiles-frames-tones-and-complete-summary
   (let* ((earth-kind
            (make-instance
             'luft.render::earth-material-kind
@@ -3712,25 +3713,25 @@
          (assembly (luft.render::surface-assembly-at stock))
          (primary (luft.render::surface-assembly-primary assembly))
          (secondary (luft.render::surface-assembly-secondary assembly)))
-    (ok (= 31 (luft.render::material-program-summary-count program)))
-    (ok (equalp '(0.61 0.57 0.51)
-                (luft.render::material-kind-base-tone
-                 (luft.render::surface-reading-kind primary))))
-    (ok (equalp '(0.31 0.27 0.19)
-                (luft.render::material-kind-base-tone
-                 (luft.render::surface-reading-kind secondary))))
-    (ok (equalp (luft.render::material-frame-origin stone-frame)
-                (luft.render::material-frame-origin
-                 (luft.render::surface-reading-frame primary))))
-    (ok (equalp (luft.render::material-frame-axes earth-frame)
-                (luft.render::material-frame-axes
-                 (luft.render::surface-reading-frame secondary))))
-    (ok (= 2
-           (length
-            (luft.render::surface-closure-summary-readings
-             (luft.render::surface-assembly-closure-summary assembly)))))))
+    (true (= 31 (luft.render::material-program-summary-count program)))
+    (true (equalp '(0.61 0.57 0.51)
+                  (luft.render::material-kind-base-tone
+                   (luft.render::surface-reading-kind primary))))
+    (true (equalp '(0.31 0.27 0.19)
+                  (luft.render::material-kind-base-tone
+                   (luft.render::surface-reading-kind secondary))))
+    (true (equalp (luft.render::material-frame-origin stone-frame)
+                  (luft.render::material-frame-origin
+                   (luft.render::surface-reading-frame primary))))
+    (true (equalp (luft.render::material-frame-axes earth-frame)
+                  (luft.render::material-frame-axes
+                   (luft.render::surface-reading-frame secondary))))
+    (true (= 2
+             (length
+              (luft.render::surface-closure-summary-readings
+               (luft.render::surface-assembly-closure-summary assembly)))))))
 
-(deftest unrelated-global-assemblies-do-not-expand-a-scene-closure-automaton
+(define-test unrelated-global-assemblies-do-not-expand-a-scene-closure-automaton
   (let* ((vocabulary (luft.render::make-scene-material-vocabulary))
          (before (luft.render::make-material-program vocabulary))
          (before-count (luft.render::material-program-summary-count before))
@@ -3751,46 +3752,46 @@
     (luft.render::intern-surface-assembly
      :face unrelated :kernel :stone :closure-readings (list unrelated))
     (let ((after (luft.render::make-material-program vocabulary)))
-      (ok (= before-count
-             (luft.render::material-program-summary-count after)))
-      (ok (= before-lane-length
-             (length
-              (luft.render::material-program-assembly-summary-masks after)))))))
+      (true (= before-count
+               (luft.render::material-program-summary-count after)))
+      (true (= before-lane-length
+               (length
+                (luft.render::material-program-assembly-summary-masks after)))))))
 
-(deftest scene-local-material-program-seeds-only-active-placements
+(define-test scene-local-material-program-seeds-only-active-placements
   (let ((vocabulary (luft.render::make-scene-material-vocabulary)))
     ;; Terrain has three face readings, sanctuary masonry two, and crystal one.
-    (ok (= 7
-           (luft.render::material-program-summary-count
-            (luft.render::make-material-program
-             vocabulary :active-placement-offsets (list 0)))))
-    (ok (= 3
-           (luft.render::material-program-summary-count
-            (luft.render::make-material-program
-             vocabulary :active-placement-offsets (list 2)))))
-    (ok (= 1
-           (luft.render::material-program-summary-count
-            (luft.render::make-material-program
-             vocabulary :active-placement-offsets (list 3)))))
-    (ok (= 127
-           (luft.render::material-program-summary-count
-            (luft.render::make-material-program vocabulary))))
+    (true (= 7
+             (luft.render::material-program-summary-count
+              (luft.render::make-material-program
+               vocabulary :active-placement-offsets (list 0)))))
+    (true (= 3
+             (luft.render::material-program-summary-count
+              (luft.render::make-material-program
+               vocabulary :active-placement-offsets (list 2)))))
+    (true (= 1
+             (luft.render::material-program-summary-count
+              (luft.render::make-material-program
+               vocabulary :active-placement-offsets (list 3)))))
+    (true (= 127
+             (luft.render::material-program-summary-count
+              (luft.render::make-material-program vocabulary))))
     ;; An empty scene deliberately retains the terrain singleton algebra so its
     ;; resolver remains callable; malformed active sets fail at the cold API.
-    (ok (= 7
-           (luft.render::material-program-summary-count
-            (luft.render::make-material-program
-             vocabulary :active-placement-offsets nil))))
-    (ok (signals
-         (luft.render::make-material-program
-          vocabulary :active-placement-offsets (list 0 0))
-         'error))
-    (ok (signals
-         (luft.render::make-material-program
-          vocabulary :active-placement-offsets (list 99))
-         'error))))
+    (true (= 7
+             (luft.render::material-program-summary-count
+              (luft.render::make-material-program
+               vocabulary :active-placement-offsets nil))))
+    (true (fail
+           (luft.render::make-material-program
+            vocabulary :active-placement-offsets (list 0 0))
+           'error))
+    (true (fail
+           (luft.render::make-material-program
+            vocabulary :active-placement-offsets (list 99))
+           'error))))
 
-(deftest compiled-placement-local-materials-match-the-semantic-oracle
+(define-test compiled-placement-local-materials-match-the-semantic-oracle
   (labels ((same-surface-p (left right)
              (canonical-mesh-cohorts-equal-p
               (surface-mesh-tree-meshes left)
@@ -3799,23 +3800,23 @@
     ;; face roles, an earth/architecture foundation, and mixed junctions.  The
     ;; production sanctuary's thousands of unrelated cells add cost, not cases.
     (let ((scene (make-material-compiler-study-scene)))
-      (ok
-       (same-surface-p
-        (render:make-render-mesh scene)
-        (render:make-whole-domain-diagnostic-mesh
-         scene
-         :stock-function
-         (lambda (face)
-           (luft.render::surface-assembly-offset
-            (luft.render::face-reading-assembly
-             (luft.render::scene-face-reading scene face))))
-         :chamfer-stock-function
-         (lambda (stocks)
-           (luft.render::surface-assembly-offset
-            (luft.render::closure-surface-assembly
-             (mapcar #'luft.render::surface-assembly-at stocks))))))))))
+      (true
+         (same-surface-p
+          (render:make-render-mesh scene)
+          (render:make-whole-domain-diagnostic-mesh
+           scene
+           :stock-function
+           (lambda (face)
+             (luft.render::surface-assembly-offset
+              (luft.render::face-reading-assembly
+               (luft.render::scene-face-reading scene face))))
+           :chamfer-stock-function
+           (lambda (stocks)
+             (luft.render::surface-assembly-offset
+              (luft.render::closure-surface-assembly
+               (mapcar #'luft.render::surface-assembly-at stocks))))))))))
 
-(deftest compiled-contacts-retain-both-authored-placement-frames
+(define-test compiled-contacts-retain-both-authored-placement-frames
   (let* ((earth-frame
            (make-instance 'luft.render::material-frame
                           :name :test-earth :origin '(4 4 2)
@@ -3858,11 +3859,11 @@
     ;; The finite query interns one shared non-medial template vocabulary;
     ;; the scalar oracle interns templates in encounter order.  Compare their
     ;; canonical stock-bearing triangles rather than private template IDs.
-    (ok
+    (true
      (canonical-mesh-cohorts-equal-p
       (surface-mesh-tree-meshes compiled)
       (surface-mesh-tree-meshes semantic)))
-    (ok
+    (true
      (find-if
       (lambda (assembly)
         (and (eq :contact
@@ -3888,45 +3889,45 @@
       (luv.domains:identity-vocabulary-members
        luft.render::*surface-assembly-vocabulary*)))))
 
-(deftest surface-assembly-descriptors-compile-semantic-material-data
+(define-test surface-assembly-descriptors-compile-semantic-material-data
   (let* ((words (luft.render::surface-assembly-descriptor-words))
          (stride (* luft.render::+surface-assembly-descriptor-row-count+ 4))
          (body-stock
            (luft.render::surface-assembly-offset
             luft.render::*torch-body-surface*))
          (body-row (* body-stock stride)))
-    (ok (= 8 luft.render::+surface-assembly-descriptor-row-count+))
-    (ok (<= (* 9 luft.render::+surface-assembly-descriptor-row-count+ 4)
-            (length words)))
-    (ok (equalp #(0.18 0.31 0.105 7.0) (subseq words 0 4)))
-    (ok (equalp #(0.0 0.0 0.0 0.0) (subseq words 12 16)))
+    (true (= 8 luft.render::+surface-assembly-descriptor-row-count+))
+    (true (<= (* 9 luft.render::+surface-assembly-descriptor-row-count+ 4)
+              (length words)))
+    (true (equalp #(0.18 0.31 0.105 7.0) (subseq words 0 4)))
+    (true (equalp #(0.0 0.0 0.0 0.0) (subseq words 12 16)))
     (let ((contact (* luft.render::+turf-set-stone-stock+
                       luft.render::+surface-assembly-descriptor-row-count+ 4)))
-      (ok (equalp #(0.53 0.49 0.39 1.0)
-                  (subseq words contact (+ contact 4))))
-      (ok (equalp #(0.18 0.31 0.105 0.0)
-                  (subseq words (+ contact 4) (+ contact 8)))))
-    (ok (typep luft.render::*torch-body-material*
-               'luft.render::metal-material-kind))
-    (ok (not (typep luft.render::*torch-body-material*
-                    'luft.render::stone-material-kind)))
-    (ok (eq :forged-metal
-            (luft.render::material-kind-relief
-             luft.render::*torch-body-material*)))
-    (ok (equalp #(0.88 0.0 0.0 0.0)
-                (subseq words (+ body-row 12) (+ body-row 16))))
-    (ok (signals
-         (make-instance
-          'luft.render::material-kind :name :invalid-negative-metalness
-          :base-tone '(0 0 0) :roughness 1.0 :metalness -0.01
-          :relief :granular)
-         'error))
-    (ok (signals
-         (make-instance
-          'luft.render::material-kind :name :invalid-high-metalness
-          :base-tone '(0 0 0) :roughness 1.0 :metalness 1.01
-          :relief :granular)
-         'error))
+      (true (equalp #(0.53 0.49 0.39 1.0)
+                    (subseq words contact (+ contact 4))))
+      (true (equalp #(0.18 0.31 0.105 0.0)
+                    (subseq words (+ contact 4) (+ contact 8)))))
+    (true (typep luft.render::*torch-body-material*
+                 'luft.render::metal-material-kind))
+    (true (not (typep luft.render::*torch-body-material*
+                      'luft.render::stone-material-kind)))
+    (true (eq :forged-metal
+              (luft.render::material-kind-relief
+               luft.render::*torch-body-material*)))
+    (true (equalp #(0.88 0.0 0.0 0.0)
+                  (subseq words (+ body-row 12) (+ body-row 16))))
+    (true (fail
+           (make-instance
+            'luft.render::material-kind :name :invalid-negative-metalness
+            :base-tone '(0 0 0) :roughness 1.0 :metalness -0.01
+            :relief :granular)
+           'error))
+    (true (fail
+           (make-instance
+            'luft.render::material-kind :name :invalid-high-metalness
+            :base-tone '(0 0 0) :roughness 1.0 :metalness 1.01
+            :relief :granular)
+           'error))
     (let* ((low-kind
              (make-instance
               'luft.render::metal-material-kind
@@ -3947,12 +3948,12 @@
               'luft.render::surface-reading :name :test-metalness-reading
               :kind high-kind :tone '(0.4 0.2 0.1) :finish :forged
               :frame luft.render::*world-material-frame* :role :attachment)))
-      (ok (not (equalp (luft.render::surface-reading-semantic-key low)
-                       (luft.render::surface-reading-semantic-key high))))
-      (ok (not (eq (luft.render::canonical-surface-reading low)
-                   (luft.render::canonical-surface-reading high)))))))
+      (true (not (equalp (luft.render::surface-reading-semantic-key low)
+                         (luft.render::surface-reading-semantic-key high))))
+      (true (not (eq (luft.render::canonical-surface-reading low)
+                     (luft.render::canonical-surface-reading high)))))))
 
-(deftest crystal-optics-compile-as-independent-render-and-light-facts
+(define-test crystal-optics-compile-as-independent-render-and-light-facts
   (let* ((words (luft.render::surface-assembly-descriptor-words))
          (stride (* luft.render::+surface-assembly-descriptor-row-count+ 4))
          (crystal (* (luft.render::surface-assembly-offset
@@ -3965,49 +3966,49 @@
            (luv.domains:identity-vocabulary-offset
             vocabulary luft.render::*crystal-material-placement*)))
     ;; Crystal-only secondary/tertiary tone lanes are a compact optical ABI.
-    (ok (equalp #(1.62 0.48 0.58 0.42)
-                (subseq words (+ crystal 4) (+ crystal 8))))
-    (ok (equalp #(18.0 0.30 0.88 0.14)
-                (subseq words (+ crystal 8) (+ crystal 12))))
+    (true (equalp #(1.62 0.48 0.58 0.42)
+                  (subseq words (+ crystal 4) (+ crystal 8))))
+    (true (equalp #(18.0 0.30 0.88 0.14)
+                  (subseq words (+ crystal 8) (+ crystal 12))))
     ;; Descriptor Y.w is visual opacity and Z.w is visible HDR emission.  The
     ;; explicit physical row shifts the authored frame to rows four through
     ;; seven without conflating either optical fact with metalness.
-    (ok (< (abs (- 0.48 (aref words (+ crystal 27)))) 1.0e-6))
-    (ok (< (abs (- 0.30 (aref words (+ crystal 31)))) 1.0e-6))
+    (true (< (abs (- 0.48 (aref words (+ crystal 27)))) 1.0e-6))
+    (true (< (abs (- 0.30 (aref words (+ crystal 31)))) 1.0e-6))
     ;; Flame is a volume/effect material, not a fake surface assembly.  Its
     ;; authored facts feed voxel light and the HDR effect uniform directly.
-    (ok (typep luft.render::*torch-flame-material*
-               'luft.render::luminous-material-kind))
-    (ok (= 1.0
-           (luft.render::material-kind-opacity
-            luft.render::*torch-flame-material*)))
-    (ok (= 1.8
-           (luft.render::material-kind-surface-emission
-            luft.render::*torch-flame-material*)))
-    (ok (= (luft:pack-voxel-light 15 9 3)
-           (luft.render::material-kind-packed-light-emission
-            luft.render::*torch-flame-material*)))
-    (ok (not (boundp 'luft.render::*torch-flame-reading*)))
-    (ok (not (boundp 'luft.render::*torch-flame-surface*)))
-    (ok
-     (notany
-      (lambda (assembly)
-        (eq luft.render::*torch-flame-material*
-            (luft.render::surface-reading-kind
-             (luft.render::surface-assembly-primary assembly))))
-      (coerce
-       (luv.domains:identity-vocabulary-members
-        luft.render::*surface-assembly-vocabulary*)
-       'list)))
+    (true (typep luft.render::*torch-flame-material*
+                 'luft.render::luminous-material-kind))
+    (true (= 1.0
+             (luft.render::material-kind-opacity
+              luft.render::*torch-flame-material*)))
+    (true (= 1.8
+             (luft.render::material-kind-surface-emission
+              luft.render::*torch-flame-material*)))
+    (true (= (luft:pack-voxel-light 15 9 3)
+             (luft.render::material-kind-packed-light-emission
+              luft.render::*torch-flame-material*)))
+    (true (not (boundp 'luft.render::*torch-flame-reading*)))
+    (true (not (boundp 'luft.render::*torch-flame-surface*)))
+    (true
+       (notany
+        (lambda (assembly)
+          (eq luft.render::*torch-flame-material*
+              (luft.render::surface-reading-kind
+               (luft.render::surface-assembly-primary assembly))))
+        (coerce
+         (luv.domains:identity-vocabulary-members
+          luft.render::*surface-assembly-vocabulary*)
+         'list)))
     ;; Propagation is a separate CPU lane: crystal transmits with entered
     ;; opacity one while ordinary authored solids remain fully blocking.
-    (ok (= 1 (aref opacities crystal-placement)))
-    (ok (= 15 (aref opacities 0)))
-    (ok (= (luft:pack-voxel-light 3 11 15)
-           (luft.render::material-kind-packed-light-emission
-            luft.render::*crystal-material*)))))
+    (true (= 1 (aref opacities crystal-placement)))
+    (true (= 15 (aref opacities 0)))
+    (true (= (luft:pack-voxel-light 3 11 15)
+             (luft.render::material-kind-packed-light-emission
+              luft.render::*crystal-material*)))))
 
-(deftest realized-torch-seeds-preserve-the-six-flat-face-center-source
+(define-test realized-torch-seeds-preserve-the-six-flat-face-center-source
   (let* ((domain (luft:make-world-domain :horizontal-bits 4))
          (provenance (gensym "FLAT-LIGHT-"))
          (emission (luft:pack-voxel-light 15 9 3))
@@ -4034,27 +4035,27 @@
                     provenance 7 seeds))
                  (packed
                    (luft.render::%realized-light-voxel-sources #() stamp)))
-            (ok (= 1 (luft.render::realized-light-seeds-count seeds)))
-            (ok (equalp (vector site)
-                        (luft.render::realized-light-seeds-sites seeds)))
-            (ok (equalp (vector emission)
-                        (luft.render::realized-light-seeds-lights seeds)))
+            (true (= 1 (luft.render::realized-light-seeds-count seeds)))
+            (true (equalp (vector site)
+                          (luft.render::realized-light-seeds-sites seeds)))
+            (true (equalp (vector emission)
+                          (luft.render::realized-light-seeds-lights seeds)))
             ;; This is byte-for-byte the former adjacent cell-center source,
             ;; now derived uniformly from the final surface normal.
-            (ok (equalp
-                 (vector (luft:make-voxel-light-source site emission))
-                 packed))))))))
+            (true (equalp
+                   (vector (luft:make-voxel-light-source site emission))
+                   packed))))))))
 
-(deftest realized-light-seeds-reproduce-the-quantized-l1-cone
+(define-test realized-light-seeds-reproduce-the-quantized-l1-cone
   (let ((domain (luft:make-world-domain :horizontal-bits 3))
         (provenance (gensym "L1-LIGHT-"))
         (emission (luft:pack-voxel-light 15 11 7))
         (material-cells (make-hash-table :test #'eql))
         (opacity (make-array 0 :element-type '(unsigned-byte 8)))
         (authored (make-array 0 :element-type '(unsigned-byte 64))))
-    (ok (= 10 (luft.render::%quantize-max-plus-light-lane 10 0.4999d0)))
-    (ok (= 10 (luft.render::%quantize-max-plus-light-lane 10 0.5d0)))
-    (ok (= 9 (luft.render::%quantize-max-plus-light-lane 10 0.5001d0)))
+    (true (= 10 (luft.render::%quantize-max-plus-light-lane 10 0.4999d0)))
+    (true (= 10 (luft.render::%quantize-max-plus-light-lane 10 0.5d0)))
+    (true (= 9 (luft.render::%quantize-max-plus-light-lane 10 0.5001d0)))
     (flet ((distance-to-center (point axis cell-coordinate)
              (abs
               (- (coerce (aref point axis) 'double-float)
@@ -4091,10 +4092,10 @@
                      (expected
                        (luft.render::%attenuate-realized-light
                         emission distance)))
-                (ok (= expected
-                       (luft:voxel-light-at-site field site)))))))))))
+                (true (= expected
+                         (luft:voxel-light-at-site field site)))))))))))
 
-(deftest realized-light-seeds-exclude-authored-occupied-brackets
+(define-test realized-light-seeds-exclude-authored-occupied-brackets
   (let* ((domain (luft:make-world-domain :horizontal-bits 3))
          (point #(3.0f0 3.0f0 3.0f0))
          (emission (luft:pack-voxel-light 15 9 3))
@@ -4102,15 +4103,15 @@
          (seeds
            (luft.render::realized-torch-light-seeds
             domain (lambda (cell) (= cell excluded)) point emission)))
-    (ok (= 7 (luft.render::realized-light-seeds-count seeds)))
-    (ok (not (find excluded
-                   (luft.render::realized-light-seeds-sites seeds))))
-    (ok (signals
-         (luft.render::realized-torch-light-seeds
-          domain (constantly t) point emission)
-         'luft.render::unrealizable-torch-light-source))))
+    (true (= 7 (luft.render::realized-light-seeds-count seeds)))
+    (true (not (find excluded
+                     (luft.render::realized-light-seeds-sites seeds))))
+    (true (fail
+           (luft.render::realized-torch-light-seeds
+            domain (constantly t) point emission)
+           'luft.render::unrealizable-torch-light-source))))
 
-(deftest realized-light-duplicates-and-competing-colors-meet-by-component-max
+(define-test realized-light-duplicates-and-competing-colors-meet-by-component-max
   (let* ((domain (luft:make-world-domain :horizontal-bits 3))
          (provenance (gensym "COLOR-LIGHT-"))
          (site (luft:make-site domain 3 3 3 luft:+cell-extent+ 1))
@@ -4131,15 +4132,15 @@
             authored provenance 0
             (luft.render::make-realized-light-seeds
              (vector site) (vector cool)))))
-    (ok (= 1 (luft.render::realized-light-seeds-count seeds)))
-    (ok (equalp (vector joined)
-                (luft.render::realized-light-seeds-lights seeds)))
-    (ok (= joined
-           (luft:voxel-light-at-site
-            (luft.render::realized-light-generation-field generation)
-            site)))))
+    (true (= 1 (luft.render::realized-light-seeds-count seeds)))
+    (true (equalp (vector joined)
+                  (luft.render::realized-light-seeds-lights seeds)))
+    (true (= joined
+             (luft:voxel-light-at-site
+              (luft.render::realized-light-generation-field generation)
+              site)))))
 
-(deftest realized-light-seeds-and-stamps-own-exact-copies
+(define-test realized-light-seeds-and-stamps-own-exact-copies
   (let* ((domain (luft:make-world-domain :horizontal-bits 3))
          (provenance (gensym "COPY-LIGHT-"))
          (first (luft:make-site domain 2 2 2 luft:+cell-extent+ 1))
@@ -4161,16 +4162,16 @@
           (aref lights 0) 0
           (aref site-copy 0) second
           (aref light-copy 0) 0)
-    (ok (equalp (vector first second)
-                (luft.render::realized-light-stamp-seed-sites stamp)))
-    (ok (equalp
-         (vector (luft:pack-voxel-light 9 8 7)
-                 (luft:pack-voxel-light 2 3 4))
-         (luft.render::realized-light-stamp-seed-lights stamp)))
-    (ok (luft.render::realized-light-stamp= stamp same-stamp))
-    (ok (not (luft.render::realized-light-stamp= stamp foreign-stamp)))))
+    (true (equalp (vector first second)
+                  (luft.render::realized-light-stamp-seed-sites stamp)))
+    (true (equalp
+           (vector (luft:pack-voxel-light 9 8 7)
+                   (luft:pack-voxel-light 2 3 4))
+           (luft.render::realized-light-stamp-seed-lights stamp)))
+    (true (luft.render::realized-light-stamp= stamp same-stamp))
+    (true (not (luft.render::realized-light-stamp= stamp foreign-stamp)))))
 
-(deftest voxel-light-shrine-separates-authored-base-from-realized-torches
+(define-test voxel-light-shrine-separates-authored-base-from-realized-torches
   (let* ((scene (render:make-voxel-light-shrine-scene))
          (solid (render:scene-solid scene))
          (domain (luft:chain-domain solid))
@@ -4178,26 +4179,26 @@
          (crystal (luft:make-site domain 12 13 5 luft:+cell-extent+ 1))
          (backing (luft:make-site domain 12 13 4 luft:+cell-extent+ 1))
          (crystal-light (luft:voxel-light-at-site base-field crystal)))
-    (ok (= 4 (length (render:scene-torches scene))))
-    (ok (render:scene-voxel-light-propagation-p scene))
-    (ok (eq base-field (render:scene-voxel-light scene)))
+    (true (= 4 (length (render:scene-torches scene))))
+    (true (render:scene-voxel-light-propagation-p scene))
+    (true (eq base-field (render:scene-voxel-light scene)))
     ;; Collision and meshing retain one occupied union.  The immutable scene
     ;; owns only its material-source solve; no authored axis-adjacent torch
     ;; source is smuggled into that base generation.
-    (ok (luft:chain-site-p solid crystal))
-    (ok (luft:chain-site-p solid backing))
-    (ok (eq luft.render::*crystal-material-placement*
-            (luft.render::scene-material-placement-at scene crystal)))
-    (ok (eq luft.render::*sanctuary-material-placement*
-            (luft.render::scene-material-placement-at scene backing)))
-    (ok (>= (luft:voxel-light-red crystal-light) 3))
-    (ok (>= (luft:voxel-light-green crystal-light) 11))
-    (ok (= (luft:voxel-light-blue crystal-light) 15))
-    (ok (zerop
-         (length
-          (luft.render::realized-light-stamp-seed-sites
-           (luft.render::realized-light-generation-stamp
-            (luft.render::scene-authored-light-generation scene))))))
+    (true (luft:chain-site-p solid crystal))
+    (true (luft:chain-site-p solid backing))
+    (true (eq luft.render::*crystal-material-placement*
+              (luft.render::scene-material-placement-at scene crystal)))
+    (true (eq luft.render::*sanctuary-material-placement*
+              (luft.render::scene-material-placement-at scene backing)))
+    (true (>= (luft:voxel-light-red crystal-light) 3))
+    (true (>= (luft:voxel-light-green crystal-light) 11))
+    (true (= (luft:voxel-light-blue crystal-light) 15))
+    (true (zerop
+           (length
+            (luft.render::realized-light-stamp-seed-sites
+             (luft.render::realized-light-generation-stamp
+              (luft.render::scene-authored-light-generation scene))))))
     (multiple-value-bind (mesh generation) (render:make-render-mesh scene)
       (let* ((light-generation
                (render:scene-mesh-generation-light-generation generation))
@@ -4207,9 +4208,9 @@
              (frames
                (loop for owner in (surface-mesh-tree-meshes mesh)
                      append (luft:surface-mesh-attachments owner))))
-        (ok (not (eq field base-field)))
-        (ok (plusp (luft:voxel-light-field-visits field)))
-        (ok (= 4 (length frames)))
+        (true (not (eq field base-field)))
+        (true (plusp (luft:voxel-light-field-visits field)))
+        (true (= 4 (length frames)))
         (loop for attachment across (render:scene-torches scene)
               for support =
                 (luft.render::torch-attachment-support-cell attachment)
@@ -4217,12 +4218,12 @@
                 (luft.render::torch-attachment-clearance-cell attachment)
               for base-light = (luft:voxel-light-at-site base-field clearance)
               for realized-light = (luft:voxel-light-at-site field clearance)
-              do (ok (luft:chain-site-p solid support))
-                 (ok (not (luft:chain-site-p solid clearance)))
-                 (ok (<= (luft:voxel-light-red base-light) 3))
-                 (ok (= 15 (luft:voxel-light-red realized-light)))
-                 (ok (>= (luft:voxel-light-green realized-light) 9))
-                 (ok (>= (luft:voxel-light-blue realized-light) 3)))))))
+              do (true (luft:chain-site-p solid support))
+                 (true (not (luft:chain-site-p solid clearance)))
+                 (true (<= (luft:voxel-light-red base-light) 3))
+                 (true (= 15 (luft:voxel-light-red realized-light)))
+                 (true (>= (luft:voxel-light-green realized-light) 9))
+                 (true (>= (luft:voxel-light-blue realized-light) 3)))))))
 
 (defun realized-torch-test-frame (mesh face)
   (let* ((surface (luft:resolve-surface-attachment-frame mesh face))
@@ -4235,7 +4236,7 @@
      (aref normal 0) (aref normal 1) (aref normal 2) 0
      (aref tangent 0) (aref tangent 1) (aref tangent 2) 1.0)))
 
-(deftest realized-face-torch-frames-are-right-handed
+(define-test realized-face-torch-frames-are-right-handed
   (let* ((domain (luft:make-world-domain :horizontal-bits 4))
          (cell (luft:make-site domain 7 7 7 luft:+cell-extent+ 1))
          (builder (luft:make-chain-builder domain))
@@ -4255,13 +4256,13 @@
              (mapcar (lambda (channel) (* channel strength))
                      (luft.render::material-kind-base-tone
                       luft.render::*torch-flame-material*)))))
-    (ok (= 3 render:+torch-flame-instance-row-count+))
-    (ok (= 12 render:+torch-flame-instance-scalar-count+))
-    (ok (equalp (coerce (cons 4.25 expected-radiance) 'vector) clock))
+    (true (= 3 render:+torch-flame-instance-row-count+))
+    (true (= 12 render:+torch-flame-instance-scalar-count+))
+    (true (equalp (coerce (cons 4.25 expected-radiance) 'vector) clock))
     (dolist (face faces)
       (let ((frame (realized-torch-test-frame mesh face)))
-        (ok (typep frame '(simple-array single-float (12))))
-        (ok (eq frame (render:validate-torch-flame-frame frame)))
+        (true (typep frame '(simple-array single-float (12))))
+        (true (eq frame (render:validate-torch-flame-frame frame)))
         (multiple-value-bind
               (origin-x origin-y origin-z seed
                normal-x normal-y normal-z flags
@@ -4270,13 +4271,13 @@
           (declare (ignore origin-x origin-y origin-z))
           (multiple-value-bind (expected-x expected-y expected-z)
               (luft:face-oriented-normal face)
-            (ok (= expected-x normal-x))
-            (ok (= expected-y normal-y))
-            (ok (= expected-z normal-z)))
-          (ok (<= 0.0 seed))
-          (ok (< seed 1.0))
-          (ok (= 0.0 flags))
-          (ok (= 1.0 scale))
+            (true (= expected-x normal-x))
+            (true (= expected-y normal-y))
+            (true (= expected-z normal-z)))
+          (true (<= 0.0 seed))
+          (true (< seed 1.0))
+          (true (= 0.0 flags))
+          (true (= 1.0 scale))
           ;; B=NxT and therefore TxB=N for every polarity, not merely +Z.
           (let* ((tangent-length-squared
                    (+ (* tangent-x tangent-x)
@@ -4298,28 +4299,28 @@
                    (- (* tangent-z bitangent-x) (* tangent-x bitangent-z)))
                  (handed-z
                    (- (* tangent-x bitangent-y) (* tangent-y bitangent-x))))
-            (ok (< (abs (- 1.0 tangent-length-squared)) 1.0e-6))
-            (ok (< (abs normal-tangent-dot) 1.0e-6))
-            (ok (> (+ (* handed-x normal-x)
-                      (* handed-y normal-y)
-                      (* handed-z normal-z))
-                   0.999))))))
+            (true (< (abs (- 1.0 tangent-length-squared)) 1.0e-6))
+            (true (< (abs normal-tangent-dot) 1.0e-6))
+            (true (> (+ (* handed-x normal-x)
+                        (* handed-y normal-y)
+                        (* handed-z normal-z))
+                     0.999))))))
     (let ((top (realized-torch-test-frame
                 mesh (luft:site-boundary-high domain cell :z))))
       (let ((density
               (render:torch-flame-reference-density
                top 7.5 7.5 8.62 1.25)))
-        (ok (plusp density))
-        (ok (= density
-               (render:torch-flame-reference-density
-                top 7.5 7.5 8.62 1.25))))
+        (true (plusp density))
+        (true (= density
+                 (render:torch-flame-reference-density
+                  top 7.5 7.5 8.62 1.25))))
       (multiple-value-bind (red green blue alpha)
           (render:torch-flame-reference-integrate-ray
            top 7.5 7.5 7.83 0.0 0.0 1.0 1.25)
-        (ok (> red green blue 0.0))
-        (ok (< 0.0 alpha 1.0))))))
+        (true (> red green blue 0.0))
+        (true (< 0.0 alpha 1.0))))))
 
-(deftest oblique-torch-frames-pack-validate-and-drive-the-cpu-flame
+(define-test oblique-torch-frames-pack-validate-and-drive-the-cpu-flame
   (let* ((root-five (sqrt 5.0f0))
          (normal-x (/ 1.0f0 3.0f0))
          (normal-y (/ 2.0f0 3.0f0))
@@ -4340,22 +4341,22 @@
          (point-x (+ 2.25f0 (* normal-x centre-distance)))
          (point-y (+ 3.5f0 (* normal-y centre-distance)))
          (point-z (+ 4.75f0 (* normal-z centre-distance))))
-    (ok (equalp frame copy))
-    (ok (= 12 (length frame)))
+    (true (equalp frame copy))
+    (true (= 12 (length frame)))
     (let ((values (multiple-value-list
                    (render:unpack-torch-flame-frame frame))))
-      (ok (= 12 (length values)))
-      (ok (= 2.25f0 (first values)))
-      (ok (= 0.375f0 (fourth values)))
-      (ok (= 13.0f0 (eighth values)))
-      (ok (= scale (nth 11 values))))
+      (true (= 12 (length values)))
+      (true (= 2.25f0 (first values)))
+      (true (= 0.375f0 (fourth values)))
+      (true (= 13.0f0 (eighth values)))
+      (true (= scale (nth 11 values))))
     (let ((density
             (render:torch-flame-reference-density
              frame point-x point-y point-z 1.25f0)))
-      (ok (plusp density))
-      (ok (= density
-             (render:torch-flame-reference-density
-              frame point-x point-y point-z 1.25f0))))
+      (true (plusp density))
+      (true (= density
+               (render:torch-flame-reference-density
+                frame point-x point-y point-z 1.25f0))))
     (let* ((proxy-distance
              (* scale luft.render::+torch-flame-proxy-radius+))
            (ray-origin-distance
@@ -4368,22 +4369,22 @@
            (+ 3.5f0 (* normal-y ray-origin-distance))
            (+ 4.75f0 (* normal-z ray-origin-distance))
            normal-x normal-y normal-z 1.25f0)
-        (ok (> red green blue 0.0))
-        (ok (< 0.0 alpha 1.0))))
-    (ok (signals
-         (render:pack-torch-flame-frame
-          0 0 0 0.5 1 1 0 0 0 0 1 1)
-         'error))
-    (ok (signals
-         (render:pack-torch-flame-frame
-          0 0 0 0.5 1 0 0 0 1 0 0 1)
-         'error))
-    (ok (signals
-         (render:pack-torch-flame-frame
-          0 0 0 0.5 1 0 0 0 0 1 0 0)
-         'error))))
+        (true (> red green blue 0.0))
+        (true (< 0.0 alpha 1.0))))
+    (true (fail
+           (render:pack-torch-flame-frame
+            0 0 0 0.5 1 1 0 0 0 0 1 1)
+           'error))
+    (true (fail
+           (render:pack-torch-flame-frame
+            0 0 0 0.5 1 0 0 0 1 0 0 1)
+           'error))
+    (true (fail
+           (render:pack-torch-flame-frame
+            0 0 0 0.5 1 0 0 0 0 1 0 0)
+           'error))))
 
-(deftest opaque-depth-clips-the-reference-flame-integral-not-its-proxy
+(define-test opaque-depth-clips-the-reference-flame-integral-not-its-proxy
   (let* ((frame
            (render:pack-torch-flame-frame
             0 0 0 0.25 0 0 1 0 1 0 0 1))
@@ -4399,13 +4400,13 @@
            (multiple-value-list
             (apply #'render:torch-flame-reference-integrate-ray
                    (append arguments '(:maximum-path-length 0.0))))))
-    (ok (some #'plusp full))
-    (ok (equal full unbounded)
-        "depth behind the proxy reproduces the canonical full chord")
-    (ok (equal '(0.0 0.0 0.0 0.0) occluded)
-        "opaque depth at the proxy front yields no hidden radiance")))
+    (true (some #'plusp full))
+    (true (equal full unbounded)
+          "depth behind the proxy reproduces the canonical full chord")
+    (true (equal '(0.0 0.0 0.0 0.0) occluded)
+          "opaque depth at the proxy front yields no hidden radiance")))
 
-(deftest canonical-torch-body-is-closed-framed-and-light-bearing
+(define-test canonical-torch-body-is-closed-framed-and-light-bearing
   (let* ((data (render:torch-body-vertex-data))
          (second-copy (render:torch-body-vertex-data))
          (count (render:torch-body-vertex-count))
@@ -4458,61 +4459,61 @@
                (if (point< right left)
                    (list right left)
                    (list left right))))
-      (ok (= 2 render:+torch-body-vertex-row-count+))
-      (ok (= 8 render:+torch-body-vertex-scalar-count+))
+      (true (= 2 render:+torch-body-vertex-row-count+))
+      (true (= 8 render:+torch-body-vertex-scalar-count+))
       ;; Eight-sided bottom/top caps and two eight-sided frusta: 48 triangles.
-      (ok (= 144 count))
-      (ok (= (* count render:+torch-body-vertex-scalar-count+)
-             (length data)))
-      (ok (typep data '(simple-array single-float (*))))
-      (ok (not (eq data second-copy)))
-      (ok (equalp data second-copy))
+      (true (= 144 count))
+      (true (= (* count render:+torch-body-vertex-scalar-count+)
+               (length data)))
+      (true (typep data '(simple-array single-float (*))))
+      (true (not (eq data second-copy)))
+      (true (equalp data second-copy))
       (multiple-value-bind (assembly-id decoded-light)
           (render:unpack-torch-body-frame-flags flags)
-        (ok (= 37 assembly-id))
-        (ok (= packed-light decoded-light)))
-      (ok (signals (render:pack-torch-body-frame-flags 4096 0) 'type-error))
-      (ok (signals (render:pack-torch-body-frame-flags 0 4096) 'type-error))
-      (ok (signals (render:unpack-torch-body-frame-flags 0.5) 'error))
+        (true (= 37 assembly-id))
+        (true (= packed-light decoded-light)))
+      (true (fail (render:pack-torch-body-frame-flags 4096 0) 'type-error))
+      (true (fail (render:pack-torch-body-frame-flags 0 4096) 'type-error))
+      (true (fail (render:unpack-torch-body-frame-flags 0.5) 'error))
       ;; Every expanded triangle carries unit flat normals agreeing with its
       ;; actual winding.  Barycentrics are structural, but construction ink is
       ;; suppressed on the artificial triangulation diagonals.
-      (ok
-       (loop for vertex below count
-             for normal-length
-               = (sqrt (+ (* (lane vertex 4) (lane vertex 4))
-                          (* (lane vertex 5) (lane vertex 5))
-                          (* (lane vertex 6) (lane vertex 6))))
-             always
-             (and (= (mod vertex 3) (round (lane vertex 3)))
-                  (= 0 (round (lane vertex 7)))
-                  (near 1.0 normal-length)
-                  (<= 0.0 (lane vertex 2) 0.5))))
-      (ok
-       (loop for vertex from 0 below count by 3
-             for ab-x = (- (lane (+ vertex 1) 0) (lane vertex 0))
-             for ab-y = (- (lane (+ vertex 1) 1) (lane vertex 1))
-             for ab-z = (- (lane (+ vertex 1) 2) (lane vertex 2))
-             for ac-x = (- (lane (+ vertex 2) 0) (lane vertex 0))
-             for ac-y = (- (lane (+ vertex 2) 1) (lane vertex 1))
-             for ac-z = (- (lane (+ vertex 2) 2) (lane vertex 2))
-             for cross-x = (- (* ab-y ac-z) (* ab-z ac-y))
-             for cross-y = (- (* ab-z ac-x) (* ab-x ac-z))
-             for cross-z = (- (* ab-x ac-y) (* ab-y ac-x))
-             for cross-length
-               = (sqrt (+ (* cross-x cross-x)
-                          (* cross-y cross-y)
-                          (* cross-z cross-z)))
-             for agreement
-               = (/ (+ (* cross-x (lane vertex 4))
-                       (* cross-y (lane vertex 5))
-                       (* cross-z (lane vertex 6)))
-                    cross-length)
-             always
-             (and (> agreement 0.9999)
-                  (near (lane vertex 4) (lane (+ vertex 1) 4))
-                  (near (lane vertex 5) (lane (+ vertex 1) 5))
-                  (near (lane vertex 6) (lane (+ vertex 1) 6)))))
+      (true
+         (loop for vertex below count
+               for normal-length
+                 = (sqrt (+ (* (lane vertex 4) (lane vertex 4))
+                            (* (lane vertex 5) (lane vertex 5))
+                            (* (lane vertex 6) (lane vertex 6))))
+               always
+               (and (= (mod vertex 3) (round (lane vertex 3)))
+                    (= 0 (round (lane vertex 7)))
+                    (near 1.0 normal-length)
+                    (<= 0.0 (lane vertex 2) 0.5))))
+      (true
+         (loop for vertex from 0 below count by 3
+               for ab-x = (- (lane (+ vertex 1) 0) (lane vertex 0))
+               for ab-y = (- (lane (+ vertex 1) 1) (lane vertex 1))
+               for ab-z = (- (lane (+ vertex 1) 2) (lane vertex 2))
+               for ac-x = (- (lane (+ vertex 2) 0) (lane vertex 0))
+               for ac-y = (- (lane (+ vertex 2) 1) (lane vertex 1))
+               for ac-z = (- (lane (+ vertex 2) 2) (lane vertex 2))
+               for cross-x = (- (* ab-y ac-z) (* ab-z ac-y))
+               for cross-y = (- (* ab-z ac-x) (* ab-x ac-z))
+               for cross-z = (- (* ab-x ac-y) (* ab-y ac-x))
+               for cross-length
+                 = (sqrt (+ (* cross-x cross-x)
+                            (* cross-y cross-y)
+                            (* cross-z cross-z)))
+               for agreement
+                 = (/ (+ (* cross-x (lane vertex 4))
+                         (* cross-y (lane vertex 5))
+                         (* cross-z (lane vertex 6)))
+                      cross-length)
+               always
+               (and (> agreement 0.9999)
+                    (near (lane vertex 4) (lane (+ vertex 1) 4))
+                    (near (lane vertex 5) (lane (+ vertex 1) 5))
+                    (near (lane vertex 6) (lane (+ vertex 1) 6)))))
       ;; Position-identical undirected edges occur exactly twice, including
       ;; both ring seams.  This is the closed-solid oracle, not a screenshot
       ;; inference from a conveniently hidden back side.
@@ -4524,57 +4525,57 @@
                      (edge-key (point (+ vertex (first pair)))
                                (point (+ vertex (second pair))))
                      edges 0))))
-        (ok (= 72 (hash-table-count edges)))
-        (ok (loop for incidence being the hash-values of edges
-                  always (= 2 incidence))))
+        (true (= 72 (hash-table-count edges)))
+        (true (loop for incidence being the hash-values of edges
+                    always (= 2 incidence))))
       ;; The axis frame is the transparent case: local XYZ becomes world XYZ,
       ;; uniformly scaled about the exact realized surface origin.
-      (ok
-       (loop for vertex in '(0 1 24 57 96 143)
-             always
-             (multiple-value-bind
-                   (world-x world-y world-z normal-x normal-y normal-z
-                    barycentric-index boundary-edge-mask)
-                 (render:torch-body-reference-vertex axis-frame vertex)
-               (and (near world-x (+ 1.0 (* 2.0 (lane vertex 0))))
-                    (near world-y (+ 2.0 (* 2.0 (lane vertex 1))))
-                    (near world-z (+ 3.0 (* 2.0 (lane vertex 2))))
-                    (near normal-x (lane vertex 4))
-                    (near normal-y (lane vertex 5))
-                    (near normal-z (lane vertex 6))
-                    (= barycentric-index (round (lane vertex 3)))
-                    (= boundary-edge-mask (round (lane vertex 7)))))))
+      (true
+         (loop for vertex in '(0 1 24 57 96 143)
+               always
+               (multiple-value-bind
+                     (world-x world-y world-z normal-x normal-y normal-z
+                      barycentric-index boundary-edge-mask)
+                   (render:torch-body-reference-vertex axis-frame vertex)
+                 (and (near world-x (+ 1.0 (* 2.0 (lane vertex 0))))
+                      (near world-y (+ 2.0 (* 2.0 (lane vertex 1))))
+                      (near world-z (+ 3.0 (* 2.0 (lane vertex 2))))
+                      (near normal-x (lane vertex 4))
+                      (near normal-y (lane vertex 5))
+                      (near normal-z (lane vertex 6))
+                      (= barycentric-index (round (lane vertex 3)))
+                      (= boundary-edge-mask (round (lane vertex 7)))))))
       ;; An oblique frame preserves all local coordinates and normals under
       ;; projection onto T, B=NxT, and N.  In particular the bottom cap stays
       ;; on the realized tangent plane instead of snapping to a cubical axis.
-      (ok
-       (loop for vertex below count
-             always
-             (multiple-value-bind
-                   (world-x world-y world-z normal-x normal-y normal-z)
-                 (render:torch-body-reference-vertex oblique-frame vertex)
-               (let ((delta-x (- world-x 4.0f0))
-                     (delta-y (- world-y 5.0f0))
-                     (delta-z (- world-z 6.0f0)))
-                 (and
-                  (near (lane vertex 0)
-                        (/ (dot3 delta-x delta-y delta-z tangent) 1.25f0))
-                  (near (lane vertex 1)
-                        (/ (dot3 delta-x delta-y delta-z bitangent) 1.25f0))
-                  (near (lane vertex 2)
-                        (/ (dot3 delta-x delta-y delta-z normal) 1.25f0))
-                  (near (lane vertex 4)
-                        (dot3 normal-x normal-y normal-z tangent))
-                  (near (lane vertex 5)
-                        (dot3 normal-x normal-y normal-z bitangent))
-                  (near (lane vertex 6)
-                        (dot3 normal-x normal-y normal-z normal))
-                  (near 1.0
-                        (sqrt (+ (* normal-x normal-x)
-                                 (* normal-y normal-y)
-                                 (* normal-z normal-z))))))))))))
+      (true
+         (loop for vertex below count
+               always
+               (multiple-value-bind
+                     (world-x world-y world-z normal-x normal-y normal-z)
+                   (render:torch-body-reference-vertex oblique-frame vertex)
+                 (let ((delta-x (- world-x 4.0f0))
+                       (delta-y (- world-y 5.0f0))
+                       (delta-z (- world-z 6.0f0)))
+                   (and
+                    (near (lane vertex 0)
+                          (/ (dot3 delta-x delta-y delta-z tangent) 1.25f0))
+                    (near (lane vertex 1)
+                          (/ (dot3 delta-x delta-y delta-z bitangent) 1.25f0))
+                    (near (lane vertex 2)
+                          (/ (dot3 delta-x delta-y delta-z normal) 1.25f0))
+                    (near (lane vertex 4)
+                          (dot3 normal-x normal-y normal-z tangent))
+                    (near (lane vertex 5)
+                          (dot3 normal-x normal-y normal-z bitangent))
+                    (near (lane vertex 6)
+                          (dot3 normal-x normal-y normal-z normal))
+                    (near 1.0
+                          (sqrt (+ (* normal-x normal-x)
+                                   (* normal-y normal-y)
+                                   (* normal-z normal-z))))))))))))
 
-(deftest renderer-torch-frame-resources-are-owned-and-transactional
+(define-test renderer-torch-frame-resources-are-owned-and-transactional
   (let* ((device (make-instance 'flame-resource-probe-device))
          (camera
            (make-instance 'flame-resource-probe :kind :camera :device device))
@@ -4618,31 +4619,31 @@
              8 7 7 0.625 1 0 0 0 0 1 0 1))))
     (multiple-value-bind (data count buffer body-group shadow-group)
         (luft.render::%make-renderer-flame-resources renderer source)
-      (ok (= 2 count))
-      (ok (equalp source data))
-      (ok (equalp source (flame-resource-probe-data buffer)))
+      (true (= 2 count))
+      (true (equalp source data))
+      (true (equalp source (flame-resource-probe-data buffer)))
       (setf (aref source 0) 0.0f0)
-      (ok (= 7.0f0 (aref data 0)))
+      (true (= 7.0f0 (aref data 0)))
       (dolist (resource (list shadow-group body-group buffer))
         (luv:destroy resource)))
     ;; Failure after candidate-buffer creation retires that unpublished
     ;; candidate.  Renderer publication owns this helper's complete result or
     ;; none of it; no authored or partial frame population can leak through.
     (setf (flame-resource-probe-fail-bind-group-p device) t)
-    (ok (handler-case
-            (progn
-              (luft.render::%make-renderer-flame-resources renderer source)
-              nil)
-          (error () t)))
-    (ok (member '(:destroy :buffer)
-                (flame-resource-probe-events device) :test #'equal))
-    (ok (handler-case
-            (progn
-              (luft.render::%copy-torch-frame-data #(1 2 3))
-              nil)
-          (error () t)))))
+    (true (handler-case
+              (progn
+                (luft.render::%make-renderer-flame-resources renderer source)
+                nil)
+            (error () t)))
+    (true (member '(:destroy :buffer)
+                  (flame-resource-probe-events device) :test #'equal))
+    (true (handler-case
+              (progn
+                (luft.render::%copy-torch-frame-data #(1 2 3))
+                nil)
+            (error () t)))))
 
-(deftest authored-placement-frames-compile-to-distinct-dense-assemblies
+(define-test authored-placement-frames-compile-to-distinct-dense-assemblies
   (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
          (scene
            (progn
@@ -4652,8 +4653,8 @@
               builder :voxel-light-propagation-p nil)))
          (domain (luft:chain-domain (luft.render::scene-solid scene)))
          (cell (luft:make-site domain 4 4 4 luft:+cell-extent+ 1)))
-    (ok (eq luft.render::*beacon-material-placement*
-            (luft.render::scene-material-placement-at scene cell)))
+    (true (eq luft.render::*beacon-material-placement*
+              (luft.render::scene-material-placement-at scene cell)))
     (render:make-render-mesh scene)
     (let* ((assembly
              (find luft.render::*beacon-material-frame*
@@ -4666,13 +4667,13 @@
            (row (* offset
                    luft.render::+surface-assembly-descriptor-row-count+ 4))
            (words (luft.render::surface-assembly-descriptor-words)))
-      (ok assembly)
-      (ok (equalp #(90.0 78.0 0.0 2.0)
-                  (subseq words (+ row 16) (+ row 20))))
-      (ok (equalp #(0.70710677 0.70710677 0.0 0.024)
-                  (subseq words (+ row 20) (+ row 24)))))))
+      (true assembly)
+      (true (equalp #(90.0 78.0 0.0 2.0)
+                    (subseq words (+ row 16) (+ row 20))))
+      (true (equalp #(0.70710677 0.70710677 0.0 0.024)
+                    (subseq words (+ row 20) (+ row 24)))))))
 
-(deftest surface-assembly-ids-use-the-widened-instance-field
+(define-test surface-assembly-ids-use-the-widened-instance-field
   (let* ((assembly-id #xabc)
          (mesh
            (render:make-whole-domain-diagnostic-mesh
@@ -4683,16 +4684,16 @@
     (dolist (words (list (luft:surface-mesh-face-instance-words mesh)
                          (luft:surface-mesh-band-instance-words mesh)
                          (luft:surface-mesh-fan-instance-words mesh)))
-      (ok (plusp (length words)))
-      (ok (loop for offset from 3 below (length words) by 4
-                always (= assembly-id
-                          (ldb (byte luft:+mesh-instance-stock-bit-count+ 16)
-                               (aref words offset))))))
-    (ok (handler-case
-            (progn (luft.render::make-render-population (list mesh)) nil)
-          (error () t)))))
+      (true (plusp (length words)))
+      (true (loop for offset from 3 below (length words) by 4
+                  always (= assembly-id
+                            (ldb (byte luft:+mesh-instance-stock-bit-count+ 16)
+                                 (aref words offset))))))
+    (true (handler-case
+              (progn (luft.render::make-render-population (list mesh)) nil)
+            (error () t)))))
 
-(deftest player-gait-anchors-stance-feet-and-rises-over-support
+(define-test player-gait-anchors-stance-feet-and-rises-over-support
   (let ((step-length 0.75)
         (leg-length 1.07737)
         (hip-height 1.01))
@@ -4720,24 +4721,24 @@
       ;; coordinate while the root advances by a complete half-step.
       (multiple-value-bind (left-a left-a-lift) (foot-sample 0.1 0.0)
         (multiple-value-bind (left-b left-b-lift) (foot-sample 0.9 0.0)
-          (ok (= left-a left-b (* step-length 0.5)))
-          (ok (zerop left-a-lift))
-          (ok (zerop left-b-lift))))
+          (true (= left-a left-b (* step-length 0.5)))
+          (true (zerop left-a-lift))
+          (true (zerop left-b-lift))))
       (multiple-value-bind (right-a right-a-lift) (foot-sample 1.1 1.0)
         (multiple-value-bind (right-b right-b-lift) (foot-sample 1.9 1.0)
-          (ok (= right-a right-b (* step-length 1.5)))
-          (ok (zerop right-a-lift))
-          (ok (zerop right-b-lift))))
+          (true (= right-a right-b (* step-length 1.5)))
+          (true (zerop right-a-lift))
+          (true (zerop right-b-lift))))
       ;; The other foot clears the deck during transfer and lands at zero
       ;; height; fourteen half-steps span the bridge's 10.5-cell half-route.
       (multiple-value-bind (mid-swing mid-lift) (foot-sample 0.5 1.0)
         (declare (ignore mid-swing))
-        (ok (> mid-lift 0.18)))
-      (ok (= 10.5 (* 14 step-length)))
+        (true (> mid-lift 0.18)))
+      (true (= 10.5 (* 14 step-length)))
       ;; A fixed leg is shortest at double support and tallest over the
       ;; planted foot at mid-stance, giving the body its non-arbitrary bob.
-      (ok (= (pelvis-height 0.0) (pelvis-height 1.0)))
-      (ok (> (pelvis-height 0.5) (pelvis-height 0.0)))
+      (true (= (pelvis-height 0.0) (pelvis-height 1.0)))
+      (true (> (pelvis-height 0.5) (pelvis-height 0.0)))
       ;; The height equation now uses the same hip and ankle centres as the
       ;; rendered SDF.  Its stance-leg reach is constant at the endpoints and
       ;; over the support contact, rather than only looking approximately so.
@@ -4747,11 +4748,11 @@
              (stance-reach
                (sqrt (+ (* contact-height contact-height)
                         (* half-step half-step)))))
-        (ok (< (abs (- contact-height hip-height)) 1e-4))
-        (ok (< (abs (- stance-reach leg-length)) 1e-6))
-        (ok (< (abs (- mid-height leg-length)) 1e-6))))))
+        (true (< (abs (- contact-height hip-height)) 1e-4))
+        (true (< (abs (- stance-reach leg-length)) 1e-6))
+        (true (< (abs (- mid-height leg-length)) 1e-6))))))
 
-(deftest player-motion-channels-preserve-key-poses-and-foot-rockers
+(define-test player-motion-channels-preserve-key-poses-and-foot-rockers
   (labels ((ease (amount)
              (let ((time (min 1.0 (max 0.0 amount))))
                (* time time time
@@ -4782,20 +4783,20 @@
                          ((< swing-time 0.78) 0.10)
                          (t (segment swing-time 0.78 1.0 0.10 0.17)))))))
     ;; Authored values survive exactly at semantic pose boundaries.
-    (ok (= 0.20 (channel 0.0 0.20 -0.10 0.30 0.40 0.50)))
-    (ok (= -0.10 (channel 0.16 0.20 -0.10 0.30 0.40 0.50)))
-    (ok (= 0.30 (channel 0.50 0.20 -0.10 0.30 0.40 0.50)))
-    (ok (= 0.40 (channel 0.72 0.20 -0.10 0.30 0.40 0.50)))
-    (ok (= 0.50 (channel 1.0 0.20 -0.10 0.30 0.40 0.50)))
+    (true (= 0.20 (channel 0.0 0.20 -0.10 0.30 0.40 0.50)))
+    (true (= -0.10 (channel 0.16 0.20 -0.10 0.30 0.40 0.50)))
+    (true (= 0.30 (channel 0.50 0.20 -0.10 0.30 0.40 0.50)))
+    (true (= 0.40 (channel 0.72 0.20 -0.10 0.30 0.40 0.50)))
+    (true (= 0.50 (channel 1.0 0.20 -0.10 0.30 0.40 0.50)))
     ;; The planted boot accepts weight from heel to flat, stays flat through
     ;; the ankle rocker, then rolls over its toe.  Swing dorsiflexion clears
     ;; the ground and returns continuously to the next heel contact.
-    (ok (> (rocker 0.0) 0.16))
-    (ok (zerop (rocker 0.15)))
-    (ok (< (rocker 0.48) -0.25))
-    (ok (< (abs (- (rocker 0.49999) (rocker 0.5))) 1e-4))
-    (ok (> (rocker 0.70) 0.09))
-    (ok (< (abs (- (rocker 0.99999) (rocker 0.0))) 1e-4))))
+    (true (> (rocker 0.0) 0.16))
+    (true (zerop (rocker 0.15)))
+    (true (< (rocker 0.48) -0.25))
+    (true (< (abs (- (rocker 0.49999) (rocker 0.5))) 1e-4))
+    (true (> (rocker 0.70) 0.09))
+    (true (< (abs (- (rocker 0.99999) (rocker 0.0))) 1e-4))))
 
 (defun instance-signature (base-x base-y base-z packed vertices start count)
   (let ((signature
@@ -4855,7 +4856,7 @@
                    signatures))
     signatures))
 
-(deftest resident-meshes-form-one-exact-two-draw-population
+(define-test resident-meshes-form-one-exact-two-draw-population
   (let* ((miter (render:make-render-mesh (render:make-miter-study-scene)))
          (spike (render:make-render-mesh (render:make-manifold-spike-scene)))
          (meshes (list miter spike))
@@ -4868,31 +4869,31 @@
            (luft.render::render-population-triangle-instance-count population))
          (quad-count
            (luft.render::render-population-quad-instance-count population)))
-    (ok (equalp (sort source-signatures #'word-vector<)
-                (sort population-signatures #'word-vector<)))
-    (ok (= (+ triangle-count quad-count)
-           (+ (luft:surface-mesh-face-instance-count miter)
-              (luft:surface-mesh-band-instance-count miter)
-              (luft:surface-mesh-fan-instance-count miter)
-              (luft:surface-mesh-face-instance-count spike)
-              (luft:surface-mesh-band-instance-count spike)
-              (luft:surface-mesh-fan-instance-count spike))))
-    (ok (<= (+ (if (plusp triangle-count) 1 0)
-               (if (plusp quad-count) 1 0))
-            2))))
+    (true (equalp (sort source-signatures #'word-vector<)
+                  (sort population-signatures #'word-vector<)))
+    (true (= (+ triangle-count quad-count)
+             (+ (luft:surface-mesh-face-instance-count miter)
+                (luft:surface-mesh-band-instance-count miter)
+                (luft:surface-mesh-fan-instance-count miter)
+                (luft:surface-mesh-face-instance-count spike)
+                (luft:surface-mesh-band-instance-count spike)
+                (luft:surface-mesh-fan-instance-count spike))))
+    (true (<= (+ (if (plusp triangle-count) 1 0)
+                 (if (plusp quad-count) 1 0))
+              2))))
 
-(deftest canonical-templates-are-shared-between-resident-meshes
+(define-test canonical-templates-are-shared-between-resident-meshes
   (let* ((mesh (render:make-render-mesh (render:make-miter-study-scene)))
          (single (luft.render::make-render-population (list mesh)))
          (double (luft.render::make-render-population (list mesh mesh)))
          (stride (* luft.render::+render-template-vertex-count+
                     luft:+mesh-template-vertex-word-count+)))
-    (ok (= (/ (length (luft.render::render-population-template-words single))
-              stride)
-           (/ (length (luft.render::render-population-template-words double))
-              stride)))
-    (ok (= (* 2 (length (luft.render::render-population-instance-words single)))
-           (length (luft.render::render-population-instance-words double))))))
+    (true (= (/ (length (luft.render::render-population-template-words single))
+                stride)
+             (/ (length (luft.render::render-population-template-words double))
+                stride)))
+    (true (= (* 2 (length (luft.render::render-population-instance-words single)))
+             (length (luft.render::render-population-instance-words double))))))
 
 (defun mesh-open-edges (mesh)
   (let ((records (luft::%mesh-geometric-edge-records mesh)))
@@ -4922,7 +4923,7 @@
       (luft:vary-surface-mesh-bevel-widths-from-stock-masks
        witness stock-masks site-widths))))
 
-(deftest static-crystal-meshes-are-the-direct-union-at-widths-one-through-four
+(define-test static-crystal-meshes-are-the-direct-union-at-widths-one-through-four
   (let ((scene (make-centred-crystal-bezel-test-scene)))
     (dolist (width '(1 2 3 4))
       (let* ((profile
@@ -4938,14 +4939,14 @@
                 scene (render:scene-solid scene) width nil
                 (luft.render::make-compiled-material-chamfer-stock-function
                  (luft.render::scene-material-program scene)))))
-        (ok (canonical-mesh-cohorts-equal-p
-             (list material-oracle)
-             (surface-mesh-tree-meshes material-mesh)))
-        (ok (canonical-mesh-cohorts-equal-p
-             (list uniform-oracle)
-             (surface-mesh-tree-meshes uniform-mesh)))
-        (ok (luft::%mesh-closed-p material-mesh))
-        (ok (luft::%mesh-nondegenerate-p material-mesh))))))
+        (true (canonical-mesh-cohorts-equal-p
+               (list material-oracle)
+               (surface-mesh-tree-meshes material-mesh)))
+        (true (canonical-mesh-cohorts-equal-p
+               (list uniform-oracle)
+               (surface-mesh-tree-meshes uniform-mesh)))
+        (true (luft::%mesh-closed-p material-mesh))
+        (true (luft::%mesh-nondegenerate-p material-mesh))))))
 
 (defun make-gallery-support-crystal-test-scene (position)
   "The reduced gallery plinth with one crystal on an edge or corner."
@@ -4961,7 +4962,7 @@
        :material luft.render::*crystal-material-placement*))
     (luft.render::finish-scene-builder builder)))
 
-(deftest gallery-support-edge-and-corner-crystals-build-as-one-closed-union
+(define-test gallery-support-edge-and-corner-crystals-build-as-one-closed-union
   (dolist (position '(:edge :corner))
     (let* ((scene (make-gallery-support-crystal-test-scene position))
            (mesh
@@ -4971,17 +4972,17 @@
                :terrain-width 2 :architecture-width 2
                :crystal-width 4 :contact-width 2)))
            (population (luft.render::make-render-population (list mesh))))
-      (ok (null (luft:surface-mesh-companions mesh)))
-      (ok (luft::%mesh-closed-p mesh))
-      (ok (luft::%mesh-nondegenerate-p mesh))
-      (ok (plusp
-           (luft.render::render-population-opaque-triangle-instance-count
-            population)))
-      (ok (plusp
-           (luft.render::render-population-translucent-triangle-instance-count
-            population))))))
+      (true (null (luft:surface-mesh-companions mesh)))
+      (true (luft::%mesh-closed-p mesh))
+      (true (luft::%mesh-nondegenerate-p mesh))
+      (true (plusp
+             (luft.render::render-population-opaque-triangle-instance-count
+              population)))
+      (true (plusp
+             (luft.render::render-population-translucent-triangle-instance-count
+              population))))))
 
-(deftest contiguous-crystal-row-has-one-original-perimeter-without-cell-teeth
+(define-test contiguous-crystal-row-has-one-original-perimeter-without-cell-teeth
   (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
          (scene
            (progn
@@ -5011,18 +5012,18 @@
             #'luft::%point-order<)))
     ;; Canonical-site subdivisions remain along the long sides, but all points
     ;; lie on one chamfered outer collar; no host tooth rises between crystals.
-    (ok
-     (equal
-      '((32 34 34) (32 38 34) (34 32 34) (34 40 34)
-        (38 32 34) (38 40 34) (40 32 34) (40 40 34)
-        (42 32 34) (42 40 34) (46 32 34) (46 40 34)
-        (48 32 34) (48 40 34) (50 32 34) (50 40 34)
-        (54 32 34) (54 40 34) (56 34 34) (56 38 34))
-      points))
-    (ok (= 20 (length edges)))
-    (ok (luft::%mesh-closed-p mesh))))
+    (true
+       (equal
+        '((32 34 34) (32 38 34) (34 32 34) (34 40 34)
+          (38 32 34) (38 40 34) (40 32 34) (40 40 34)
+          (42 32 34) (42 40 34) (46 32 34) (46 40 34)
+          (48 32 34) (48 40 34) (50 32 34) (50 40 34)
+          (54 32 34) (54 40 34) (56 34 34) (56 38 34))
+        points))
+    (true (= 20 (length edges)))
+    (true (luft::%mesh-closed-p mesh))))
 
-(deftest shrine-population-keeps-light-parallel-and-translucency-separate
+(define-test shrine-population-keeps-light-parallel-and-translucency-separate
   (let ((scene (render:make-voxel-light-shrine-scene)))
     (multiple-value-bind (mesh census diagnostics generation)
         (render:make-material-bevel-mesh
@@ -5041,42 +5042,42 @@
              (frames
                (loop for owner in meshes
                      append (luft:surface-mesh-attachments owner))))
-        (ok (luft::%meshes-closed-p meshes))
-        (ok (every #'luft::%mesh-nondegenerate-p meshes))
-        (ok (not (eq field (render:scene-authored-voxel-light scene))))
-        (ok (every (lambda (owner)
-                     (eq field (luft:surface-mesh-voxel-light owner)))
-                   meshes))
-        (ok (= (* 4 instances)
-               (length
-                (luft.render::render-population-instance-words population))))
-        (ok (= (* 2 instances)
-               (length
-                (luft.render::render-population-light-words population))))
-        (ok (plusp
-             (luft.render::render-population-opaque-triangle-instance-count
-              population)))
-        (ok (plusp
-             (luft.render::render-population-translucent-triangle-instance-count
-              population)))
+        (true (luft::%meshes-closed-p meshes))
+        (true (every #'luft::%mesh-nondegenerate-p meshes))
+        (true (not (eq field (render:scene-authored-voxel-light scene))))
+        (true (every (lambda (owner)
+                       (eq field (luft:surface-mesh-voxel-light owner)))
+                     meshes))
+        (true (= (* 4 instances)
+                 (length
+                  (luft.render::render-population-instance-words population))))
+        (true (= (* 2 instances)
+                 (length
+                  (luft.render::render-population-light-words population))))
+        (true (plusp
+               (luft.render::render-population-opaque-triangle-instance-count
+                population)))
+        (true (plusp
+               (luft.render::render-population-translucent-triangle-instance-count
+                population)))
         ;; Sparse torches are no longer companion surface meshes.  Each resident
         ;; support owner carries one immutable realized frame, and that exact frame
         ;; drives both the canonical opaque body and animated flame pipelines.
-        (ok (= (length (render:scene-torches scene)) (length frames)))
+        (true (= (length (render:scene-torches scene)) (length frames)))
         (let ((body-stock (luft.render::surface-assembly-offset
                            luft.render::*torch-body-surface*)))
           (dolist (frame frames)
-            (ok (eq frame (render:validate-torch-flame-frame frame)))
+            (true (eq frame (render:validate-torch-flame-frame frame)))
             (multiple-value-bind (assembly packed-light)
                 (render:unpack-torch-body-frame-flags (aref frame 7))
-              (ok (= body-stock assembly))
-              (ok (plusp packed-light)))))
-        (ok (some #'plusp
-                  (coerce
-                   (luft.render::render-population-light-words population)
-                   'list)))))))
+              (true (= body-stock assembly))
+              (true (plusp packed-light)))))
+        (true (some #'plusp
+                    (coerce
+                     (luft.render::render-population-light-words population)
+                     'list)))))))
 
-(deftest a-stone-crystal-chunk-seam-is-one-union-before-opacity-classification
+(define-test a-stone-crystal-chunk-seam-is-one-union-before-opacity-classification
   (let* ((scene (make-streaming-material-seam-test-scene))
          (profile
            (render:make-material-bevel-profile
@@ -5112,41 +5113,41 @@
                           (setf found t)))
                       mesh)
                      found)))
-            (ok (equal
-                 (luft.render::streaming-scene-canonical-owner-closure
-                  streaming keys)
-                 (mapcar #'car regional)))
-            (ok (equal keys (mapcar #'car streamed)))
-            (ok (equalp regional-census streamed-census))
-            (ok (equal regional-diagnostics streamed-diagnostics))
-            (ok (zerop (getf streamed-diagnostics :residual-edge-count)))
-            (ok (luft::%mesh-closed-p whole))
-            (ok (luft::%meshes-closed-p static-meshes))
-            (ok (luft::%meshes-closed-p regional-meshes))
-            (ok (luft::%meshes-closed-p streamed-meshes))
-            (ok (every #'luft::%mesh-nondegenerate-p streamed-meshes))
-            (ok (canonical-mesh-cohorts-equal-p
-                 (list whole) static-meshes))
-            (ok (canonical-mesh-cohorts-equal-p
-                 (list whole) regional-meshes))
-            (ok (canonical-mesh-cohorts-equal-p
-                 (list whole) streamed-meshes))
+            (true (equal
+                   (luft.render::streaming-scene-canonical-owner-closure
+                    streaming keys)
+                   (mapcar #'car regional)))
+            (true (equal keys (mapcar #'car streamed)))
+            (true (equalp regional-census streamed-census))
+            (true (equal regional-diagnostics streamed-diagnostics))
+            (true (zerop (getf streamed-diagnostics :residual-edge-count)))
+            (true (luft::%mesh-closed-p whole))
+            (true (luft::%meshes-closed-p static-meshes))
+            (true (luft::%meshes-closed-p regional-meshes))
+            (true (luft::%meshes-closed-p streamed-meshes))
+            (true (every #'luft::%mesh-nondegenerate-p streamed-meshes))
+            (true (canonical-mesh-cohorts-equal-p
+                   (list whole) static-meshes))
+            (true (canonical-mesh-cohorts-equal-p
+                   (list whole) regional-meshes))
+            (true (canonical-mesh-cohorts-equal-p
+                   (list whole) streamed-meshes))
             ;; There is no material-phase interface at X=64.  The finished
             ;; union is split into opaque and translucent draw runs only here,
             ;; while compiling its render population.
-            (ok (notany #'interface-face-p streamed-meshes))
-            (ok (plusp
-                 (+ (luft.render::render-population-opaque-triangle-instance-count
-                     population)
-                    (luft.render::render-population-opaque-quad-instance-count
-                     population))))
-            (ok (plusp
-                 (+ (luft.render::render-population-translucent-triangle-instance-count
-                     population)
-                    (luft.render::render-population-translucent-quad-instance-count
-                     population))))))))))
+            (true (notany #'interface-face-p streamed-meshes))
+            (true (plusp
+                   (+ (luft.render::render-population-opaque-triangle-instance-count
+                       population)
+                      (luft.render::render-population-opaque-quad-instance-count
+                       population))))
+            (true (plusp
+                   (+ (luft.render::render-population-translucent-triangle-instance-count
+                       population)
+                      (luft.render::render-population-translucent-quad-instance-count
+                       population))))))))))
 
-(deftest an-empty-region-has-no-owners-but-a-requested-slot-is-an-empty-root
+(define-test an-empty-region-has-no-owners-but-a-requested-slot-is-an-empty-root
   (let* ((scene
            (luft.render::finish-scene-builder
             (luft.render::make-scene-builder :horizontal-bits 7)))
@@ -5157,52 +5158,52 @@
     (multiple-value-bind (owners census diagnostics)
         (luft.render::make-scene-regional-meshes
          scene 1 (render:make-material-bevel-profile))
-      (ok (null owners))
-      (ok (equalp #(0 0 0 0 0) census))
-      (ok (zerop (getf diagnostics :collapsed-triangle-count)))
-      (ok (zerop (getf diagnostics :residual-edge-count))))
+      (true (null owners))
+      (true (equalp #(0 0 0 0 0) census))
+      (true (zerop (getf diagnostics :collapsed-triangle-count)))
+      (true (zerop (getf diagnostics :residual-edge-count))))
     (let ((mesh (render:mesh-streaming-chunk streaming key 2)))
-      (ok (zerop (luft:surface-mesh-triangle-count static)))
-      (ok (zerop (luft:surface-mesh-triangle-count mesh)))
-      (ok (null (luft:surface-mesh-companions mesh)))
-      (ok (eq (render:scene-voxel-light scene)
-              (luft:surface-mesh-voxel-light mesh))))))
+      (true (zerop (luft:surface-mesh-triangle-count static)))
+      (true (zerop (luft:surface-mesh-triangle-count mesh)))
+      (true (null (luft:surface-mesh-companions mesh)))
+      (true (eq (render:scene-voxel-light scene)
+                (luft:surface-mesh-voxel-light mesh))))))
 
-(deftest the-connected-miter-study-uses-the-site-stream-abi
+(define-test the-connected-miter-study-uses-the-site-stream-abi
   (dolist (bevel-width '(1 2 3 4))
     (let ((mesh (render:make-render-mesh
                  (render:make-miter-study-scene)
                  :bevel-width bevel-width)))
-      (ok (= bevel-width (luft:surface-mesh-bevel-width mesh)))
+      (true (= bevel-width (luft:surface-mesh-bevel-width mesh)))
       (if (= bevel-width 4)
           (progn
-            (ok (zerop (luft:surface-mesh-face-triangle-count mesh)))
-            (ok (zerop (luft:surface-mesh-band-triangle-count mesh))))
+            (true (zerop (luft:surface-mesh-face-triangle-count mesh)))
+            (true (zerop (luft:surface-mesh-band-triangle-count mesh))))
           (progn
-            (ok (plusp (luft:surface-mesh-face-triangle-count mesh)))
-            (ok (plusp (luft:surface-mesh-band-triangle-count mesh)))))
-      (ok (plusp (luft:surface-mesh-fan-triangle-count mesh)))
-      (ok (zerop (luft:surface-mesh-singular-star-count mesh)))
-      (ok (luft::%mesh-closed-p mesh))
+            (true (plusp (luft:surface-mesh-face-triangle-count mesh)))
+            (true (plusp (luft:surface-mesh-band-triangle-count mesh)))))
+      (true (plusp (luft:surface-mesh-fan-triangle-count mesh)))
+      (true (zerop (luft:surface-mesh-singular-star-count mesh)))
+      (true (luft::%mesh-closed-p mesh))
       (let ((lattice (luft.render::mesh-lattice-point-words mesh)))
-        (ok (loop for offset from 3 below (length lattice) by 4
-                  thereis (zerop (aref lattice offset))))
-        (ok (loop for offset from 3 below (length lattice) by 4
-                  thereis (= 1 (aref lattice offset))))
-        (ok (loop for offset from 3 below (length lattice) by 4
-                  thereis (= 2 (aref lattice offset))))
-        (ok (loop for offset from 0 below (length lattice) by 4
-                  always
-                  (or (/= 2 (aref lattice (+ offset 3)))
-                      (and
-                       (zerop (mod (aref lattice offset)
-                                   luft:+mesh-cell-size+))
-                       (zerop (mod (aref lattice (+ offset 1))
-                                   luft:+mesh-cell-size+))
-                       (zerop (mod (aref lattice (+ offset 2))
-                                   luft:+mesh-cell-size+))))))))))
+        (true (loop for offset from 3 below (length lattice) by 4
+                    thereis (zerop (aref lattice offset))))
+        (true (loop for offset from 3 below (length lattice) by 4
+                    thereis (= 1 (aref lattice offset))))
+        (true (loop for offset from 3 below (length lattice) by 4
+                    thereis (= 2 (aref lattice offset))))
+        (true (loop for offset from 0 below (length lattice) by 4
+                    always
+                    (or (/= 2 (aref lattice (+ offset 3)))
+                        (and
+                         (zerop (mod (aref lattice offset)
+                                     luft:+mesh-cell-size+))
+                         (zerop (mod (aref lattice (+ offset 1))
+                                     luft:+mesh-cell-size+))
+                         (zerop (mod (aref lattice (+ offset 2))
+                                     luft:+mesh-cell-size+))))))))))
 
-(deftest material-bevel-profile-compiles-semantic-widths-once
+(define-test material-bevel-profile-compiles-semantic-widths-once
   (let* ((profile (render:make-material-bevel-profile
                    :terrain-width 4 :architecture-width 1 :contact-width 2))
          (widths (render:compile-material-bevel-profile profile))
@@ -5212,44 +5213,44 @@
          (body-stock
            (luft.render::surface-assembly-offset
             luft.render::*torch-body-surface*)))
-    (ok (= 4 (aref widths luft.render::+grass-stock+)))
-    (ok (= 4 (aref widths luft.render::+soil-stock+)))
-    (ok (= 4 (aref widths luft.render::+turf-edge-stock+)))
-    (ok (= 1 (aref widths luft.render::+stone-stock+)))
-    (ok (= 1 (aref widths luft.render::+foundation-stone-stock+)))
-    (ok (= 2 (aref widths luft.render::+turf-set-stone-stock+)))
-    (ok (= 2 (aref widths luft.render::+soil-set-stone-stock+)))
-    (ok (= 2 (aref widths luft.render::+deep-set-stone-stock+)))
-    (ok (= 4 (aref widths crystal-stock)))
-    (ok (zerop (aref widths body-stock)))
+    (true (= 4 (aref widths luft.render::+grass-stock+)))
+    (true (= 4 (aref widths luft.render::+soil-stock+)))
+    (true (= 4 (aref widths luft.render::+turf-edge-stock+)))
+    (true (= 1 (aref widths luft.render::+stone-stock+)))
+    (true (= 1 (aref widths luft.render::+foundation-stone-stock+)))
+    (true (= 2 (aref widths luft.render::+turf-set-stone-stock+)))
+    (true (= 2 (aref widths luft.render::+soil-set-stone-stock+)))
+    (true (= 2 (aref widths luft.render::+deep-set-stone-stock+)))
+    (true (= 4 (aref widths crystal-stock)))
+    (true (zerop (aref widths body-stock)))
     (multiple-value-bind (stock-masks site-widths)
         (luft.render::compile-material-bevel-site-policy profile)
-      (ok (= luft.render::+material-bevel-terrain-mask+
-             (aref stock-masks luft.render::+grass-stock+)))
-      (ok (= luft.render::+material-bevel-architecture-mask+
-             (aref stock-masks luft.render::+stone-stock+)))
-      (ok (= luft.render::+material-bevel-crystal-mask+
-             (aref stock-masks crystal-stock)))
-      (ok (= luft.render::+material-bevel-non-meshed-mask+
-             (aref stock-masks body-stock)))
-      (ok (= (logior luft.render::+material-bevel-terrain-mask+
-                     luft.render::+material-bevel-architecture-mask+)
-             (aref stock-masks luft.render::+turf-set-stone-stock+)))
-      (ok (= 4 (aref site-widths
-                     luft.render::+material-bevel-terrain-mask+)))
-      (ok (= 1 (aref site-widths
-                     luft.render::+material-bevel-architecture-mask+)))
-      (ok (= 4 (aref site-widths
-                     luft.render::+material-bevel-crystal-mask+)))
-      (ok (= 2 (aref site-widths
-                     (logior luft.render::+material-bevel-terrain-mask+
-                             luft.render::+material-bevel-architecture-mask+))))
-      (ok (= 2 (aref site-widths
-                     luft.render::+material-bevel-terrain-crystal-mask+)))
-      (ok (= 2 (aref site-widths
-                     luft.render::+material-bevel-architecture-crystal-mask+)))
-      (ok (= 2 (aref site-widths
-                     luft.render::+material-bevel-three-way-mask+)))
+      (true (= luft.render::+material-bevel-terrain-mask+
+               (aref stock-masks luft.render::+grass-stock+)))
+      (true (= luft.render::+material-bevel-architecture-mask+
+               (aref stock-masks luft.render::+stone-stock+)))
+      (true (= luft.render::+material-bevel-crystal-mask+
+               (aref stock-masks crystal-stock)))
+      (true (= luft.render::+material-bevel-non-meshed-mask+
+               (aref stock-masks body-stock)))
+      (true (= (logior luft.render::+material-bevel-terrain-mask+
+                       luft.render::+material-bevel-architecture-mask+)
+               (aref stock-masks luft.render::+turf-set-stone-stock+)))
+      (true (= 4 (aref site-widths
+                       luft.render::+material-bevel-terrain-mask+)))
+      (true (= 1 (aref site-widths
+                       luft.render::+material-bevel-architecture-mask+)))
+      (true (= 4 (aref site-widths
+                       luft.render::+material-bevel-crystal-mask+)))
+      (true (= 2 (aref site-widths
+                       (logior luft.render::+material-bevel-terrain-mask+
+                               luft.render::+material-bevel-architecture-mask+))))
+      (true (= 2 (aref site-widths
+                       luft.render::+material-bevel-terrain-crystal-mask+)))
+      (true (= 2 (aref site-widths
+                       luft.render::+material-bevel-architecture-crystal-mask+)))
+      (true (= 2 (aref site-widths
+                       luft.render::+material-bevel-three-way-mask+)))
       ;; A positive non-meshed sentinel keeps the packed byte policy eligible,
       ;; but necessarily falls outside the eight-entry topology width table if
       ;; an attachment stock ever leaks into a surface witness.
@@ -5268,12 +5269,12 @@
                              (ldb (byte luft:+mesh-instance-stock-bit-count+
                                         16)
                                   (aref words offset)))))))
-        (ok (luft::%paged-byte-stock-mask-policy-p
-             (luft:surface-mesh-domain witness) stock-masks site-widths))
-        (ok (plusp (length topology-stocks)))
-        (ok (every (lambda (stock)
-                     (<= 1 (aref stock-masks stock) 7))
-                   topology-stocks))
+        (true (luft::%paged-byte-stock-mask-policy-p
+               (luft:surface-mesh-domain witness) stock-masks site-widths))
+        (true (plusp (length topology-stocks)))
+        (true (every (lambda (stock)
+                       (<= 1 (aref stock-masks stock) 7))
+                     topology-stocks))
         (let ((invalid-witness
                 (render:make-whole-domain-diagnostic-mesh
                  scene :bevel-width 1
@@ -5284,10 +5285,10 @@
                  (lambda (stocks)
                    (declare (ignore stocks))
                    body-stock))))
-          (ok (signals
-               (luft:vary-surface-mesh-bevel-widths-from-stock-masks
-                invalid-witness stock-masks site-widths)
-               'error))))
+          (true (fail
+                 (luft:vary-surface-mesh-bevel-widths-from-stock-masks
+                  invalid-witness stock-masks site-widths)
+                 'error))))
       ;; Width three is a first-class legal profile value, not an accidental
       ;; escape from a declaration inferred from the old 1/2/4 defaults.
       (let* ((all-three
@@ -5296,16 +5297,16 @@
                 :contact-width 3))
              (three-widths
                (render:compile-material-bevel-profile all-three)))
-        (ok
-         (loop for stock below (length three-widths)
-               for mask = (aref stock-masks stock)
-               always (= (aref three-widths stock)
-                         (if (= mask
-                                luft.render::+material-bevel-non-meshed-mask+)
-                             0
-                             3))))))))
+        (true
+           (loop for stock below (length three-widths)
+                 for mask = (aref stock-masks stock)
+                 always (= (aref three-widths stock)
+                           (if (= mask
+                                  luft.render::+material-bevel-non-meshed-mask+)
+                               0
+                               3))))))))
 
-(deftest crystal-contact-widths-do-not-move-terrain-architecture-sites
+(define-test crystal-contact-widths-do-not-move-terrain-architecture-sites
   (let ((baseline
           (render:make-material-bevel-profile
            :contact-width 2
@@ -5327,26 +5328,26 @@
           (luft.render::compile-material-bevel-site-policy
            changed-crystal-contacts)
         (declare (ignore changed-masks))
-        (ok (= 3 (aref baseline-widths
+        (true (= 3 (aref baseline-widths
+                         luft.render::+material-bevel-terrain-architecture-mask+)))
+        (true (= (aref baseline-widths
+                       luft.render::+material-bevel-terrain-architecture-mask+)
+                 (aref changed-widths
                        luft.render::+material-bevel-terrain-architecture-mask+)))
-        (ok (= (aref baseline-widths
-                     luft.render::+material-bevel-terrain-architecture-mask+)
-               (aref changed-widths
-                     luft.render::+material-bevel-terrain-architecture-mask+)))
-        (ok (/= (aref baseline-widths
-                      luft.render::+material-bevel-terrain-crystal-mask+)
-                (aref changed-widths
-                      luft.render::+material-bevel-terrain-crystal-mask+)))
-        (ok (/= (aref baseline-widths
-                      luft.render::+material-bevel-architecture-crystal-mask+)
-                (aref changed-widths
-                      luft.render::+material-bevel-architecture-crystal-mask+)))
-        (ok (/= (aref baseline-widths
-                      luft.render::+material-bevel-three-way-mask+)
-                (aref changed-widths
-                      luft.render::+material-bevel-three-way-mask+)))))))
+        (true (/= (aref baseline-widths
+                        luft.render::+material-bevel-terrain-crystal-mask+)
+                  (aref changed-widths
+                        luft.render::+material-bevel-terrain-crystal-mask+)))
+        (true (/= (aref baseline-widths
+                        luft.render::+material-bevel-architecture-crystal-mask+)
+                  (aref changed-widths
+                        luft.render::+material-bevel-architecture-crystal-mask+)))
+        (true (/= (aref baseline-widths
+                        luft.render::+material-bevel-three-way-mask+)
+                  (aref changed-widths
+                        luft.render::+material-bevel-three-way-mask+)))))))
 
-(deftest material-bevel-policy-builds-one-closed-site-local-surface
+(define-test material-bevel-policy-builds-one-closed-site-local-surface
   (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
          (scene
            (progn
@@ -5358,16 +5359,16 @@
          (meshes (render:make-material-bevel-meshes scene profile)))
     (multiple-value-bind (mesh width-census)
         (render:make-material-bevel-mesh scene profile)
-      (ok (= 4 (luft:surface-mesh-bevel-width mesh)))
-      (ok (luft::%mesh-closed-p mesh))
-      (ok (luft::%mesh-nondegenerate-p mesh))
-      (ok (plusp (aref width-census 1)))
-      (ok (plusp (aref width-census 2)))
-      (ok (zerop (aref width-census 3)))
-      (ok (plusp (aref width-census 4)))
-      (ok (= 1 (length meshes)))
-      (ok (= 0 (caar meshes)))
-      (ok (luft::%mesh-closed-p (cdar meshes))))))
+      (true (= 4 (luft:surface-mesh-bevel-width mesh)))
+      (true (luft::%mesh-closed-p mesh))
+      (true (luft::%mesh-nondegenerate-p mesh))
+      (true (plusp (aref width-census 1)))
+      (true (plusp (aref width-census 2)))
+      (true (zerop (aref width-census 3)))
+      (true (plusp (aref width-census 4)))
+      (true (= 1 (length meshes)))
+      (true (= 0 (caar meshes)))
+      (true (luft::%mesh-closed-p (cdar meshes))))))
 
 (defun mesh-triangle-quality (mesh)
   "Return minimum angle, maximum longest-edge/altitude ratio, and sliver count."
@@ -5414,25 +5415,25 @@
        mesh))
     (values minimum-angle maximum-aspect aspect-over-five)))
 
-(deftest material-bevel-transition-contracts-the-medial-t-junction
+(define-test material-bevel-transition-contracts-the-medial-t-junction
   (let* ((scene (render:make-material-bevel-transition-study-scene))
          (width-one (render:make-render-mesh scene :bevel-width 1)))
     (multiple-value-bind (mesh width-census diagnostics)
         (render:make-material-bevel-mesh
          scene (render:make-material-bevel-profile))
-      (ok (plusp (aref width-census 1)))
-      (ok (plusp (aref width-census 2)))
-      (ok (plusp (aref width-census 4)))
-      (ok (equalp #(0 11 5 0 7) width-census))
-      (ok (= 31 (getf diagnostics :collapsed-triangle-count)))
-      (ok (= 3 (getf diagnostics :unmatched-edge-count)))
-      (ok (= 1 (getf diagnostics :repaired-edge-count)))
-      (ok (zerop (getf diagnostics :residual-edge-count)))
-      (ok (equal '(((48 34 26) (48 36 28) (48 38 30)))
-                 (getf diagnostics :candidate-splits)))
-      (ok (= 190 (luft:surface-mesh-triangle-count mesh)))
-      (ok (luft::%mesh-closed-p mesh))
-      (ok (luft::%mesh-nondegenerate-p mesh))
+      (true (plusp (aref width-census 1)))
+      (true (plusp (aref width-census 2)))
+      (true (plusp (aref width-census 4)))
+      (true (equalp #(0 11 5 0 7) width-census))
+      (true (= 31 (getf diagnostics :collapsed-triangle-count)))
+      (true (= 3 (getf diagnostics :unmatched-edge-count)))
+      (true (= 1 (getf diagnostics :repaired-edge-count)))
+      (true (zerop (getf diagnostics :residual-edge-count)))
+      (true (equal '(((48 34 26) (48 36 28) (48 38 30)))
+                   (getf diagnostics :candidate-splits)))
+      (true (= 190 (luft:surface-mesh-triangle-count mesh)))
+      (true (luft::%mesh-closed-p mesh))
+      (true (luft::%mesh-nondegenerate-p mesh))
       ;; Contracting the medial T-junction may subdivide a neighbour, but it
       ;; must not make triangle quality worse than the width-one topology
       ;; witness from which the mixed surface was evaluated.
@@ -5442,11 +5443,11 @@
               (witness-minimum-angle witness-maximum-aspect
                witness-sliver-count)
             (mesh-triangle-quality width-one)
-          (ok (>= minimum-angle (- witness-minimum-angle 1.0d-9)))
-          (ok (<= maximum-aspect (+ witness-maximum-aspect 1.0d-9)))
-          (ok (<= sliver-count witness-sliver-count)))))))
+          (true (>= minimum-angle (- witness-minimum-angle 1.0d-9)))
+          (true (<= maximum-aspect (+ witness-maximum-aspect 1.0d-9)))
+          (true (<= sliver-count witness-sliver-count)))))))
 
-(deftest compiled-material-site-field-matches-its-generic-repair-oracle
+(define-test compiled-material-site-field-matches-its-generic-repair-oracle
   (let* ((scene (render:make-material-bevel-transition-study-scene))
          ;; Compile the material vocabulary only after witness construction;
          ;; chamfer assembly can intern stocks while building that witness.
@@ -5454,8 +5455,8 @@
          (profile (render:make-material-bevel-profile)))
     (multiple-value-bind (stock-masks site-widths)
         (luft.render::compile-material-bevel-site-policy profile)
-      (ok (luft::%paged-byte-stock-mask-policy-p
-           (luft:surface-mesh-domain witness) stock-masks site-widths))
+      (true (luft::%paged-byte-stock-mask-policy-p
+             (luft:surface-mesh-domain witness) stock-masks site-widths))
       (flet ((generic-width (x y z stocks)
                (declare (ignore x y z))
                (let ((site-mask 0))
@@ -5478,27 +5479,27 @@
                      #'luft:vary-surface-mesh-bevel-widths-from-stock-masks
                      #'luft:vary-uncontracted-surface-mesh-bevel-widths-from-stock-masks-diagnostic)
                  witness stock-masks site-widths)
-              (ok (luft::%same-surface-mesh-representation-p
-                   generic compiled))
-              (ok (equalp generic-census compiled-census))
-              (ok (equal generic-diagnostics compiled-diagnostics)))))))))
+              (true (luft::%same-surface-mesh-representation-p
+                     generic compiled))
+              (true (equalp generic-census compiled-census))
+              (true (equal generic-diagnostics compiled-diagnostics)))))))))
 
-(deftest material-bevel-transition-can-exhibit-the-uncontracted-t-junction
+(define-test material-bevel-transition-can-exhibit-the-uncontracted-t-junction
   (multiple-value-bind (mesh width-census diagnostics)
       (render:make-uncontracted-material-bevel-diagnostic-mesh
        (render:make-material-bevel-transition-study-scene)
        (render:make-material-bevel-profile))
     (declare (ignore width-census))
-    (ok (= 3 (getf diagnostics :unmatched-edge-count)))
-    (ok (zerop (getf diagnostics :repaired-edge-count)))
-    (ok (= 3 (getf diagnostics :residual-edge-count)))
-    (ok (not (luft::%mesh-closed-p mesh)))
+    (true (= 3 (getf diagnostics :unmatched-edge-count)))
+    (true (zerop (getf diagnostics :repaired-edge-count)))
+    (true (= 3 (getf diagnostics :residual-edge-count)))
+    (true (not (luft::%mesh-closed-p mesh)))
     ;; The diagnostic mesh omits zero-area triangles.  Its defect is solely
     ;; the long-edge/short-edge connectivity mismatch exposed by construction
     ;; ink, not a retained degenerate primitive.
-    (ok (luft::%mesh-nondegenerate-p mesh))))
+    (true (luft::%mesh-nondegenerate-p mesh))))
 
-(deftest material-bevel-transition-isolates-the-exact-split-neighborhood
+(define-test material-bevel-transition-isolates-the-exact-split-neighborhood
   (let ((scene (render:make-material-bevel-transition-study-scene))
         (profile (render:make-material-bevel-profile)))
     (flet ((neighborhood (contract-p)
@@ -5512,16 +5513,16 @@
                 mesh (first (getf diagnostics :candidate-splits))))))
       (let ((uncontracted (neighborhood nil))
             (contracted (neighborhood t)))
-        (ok (= 3 (luft:surface-mesh-triangle-count uncontracted)))
-        (ok (= 4 (luft:surface-mesh-triangle-count contracted)))
-        (ok (luft::%mesh-nondegenerate-p uncontracted))
-        (ok (luft::%mesh-nondegenerate-p contracted))
+        (true (= 3 (luft:surface-mesh-triangle-count uncontracted)))
+        (true (= 4 (luft:surface-mesh-triangle-count contracted)))
+        (true (luft::%mesh-nondegenerate-p uncontracted))
+        (true (luft::%mesh-nondegenerate-p contracted))
         (let ((inked (luft:surface-mesh-with-triangle-ink contracted)))
-          (ok (= (luft:surface-mesh-triangle-count contracted)
-                 (luft:surface-mesh-triangle-count inked)))
-          (ok (luft::%same-plane-areas-p
-               (luft::%mesh-oriented-plane-areas contracted)
-               (luft::%mesh-oriented-plane-areas inked))))))))
+          (true (= (luft:surface-mesh-triangle-count contracted)
+                   (luft:surface-mesh-triangle-count inked)))
+          (true (luft::%same-plane-areas-p
+                 (luft::%mesh-oriented-plane-areas contracted)
+                 (luft::%mesh-oriented-plane-areas inked))))))))
 
 (defun check-authored-stair-boundary (boundary)
   (let ((builder (luft.render::make-scene-builder :horizontal-bits 4)))
@@ -5533,21 +5534,21 @@
           builder :voxel-light-propagation-p nil)
          (render:make-material-bevel-profile))
       (declare (ignore diagnostics))
-      (ok (plusp (aref width-census 1)))
+      (true (plusp (aref width-census 1)))
       (let ((meshes (surface-mesh-tree-meshes mesh)))
-        (ok (luft::%meshes-closed-p meshes))
-        (ok (every #'luft::%mesh-nondegenerate-p meshes))))))
+        (true (luft::%meshes-closed-p meshes))
+        (true (every #'luft::%mesh-nondegenerate-p meshes))))))
 
-(deftest open-stair-remains-an-ordinary-closed-material-surface
+(define-test open-stair-remains-an-ordinary-closed-material-surface
   (check-authored-stair-boundary :open))
 
-(deftest bordered-stair-remains-an-ordinary-closed-material-surface
+(define-test bordered-stair-remains-an-ordinary-closed-material-surface
   (check-authored-stair-boundary :border))
 
-(deftest low-wall-stair-remains-an-ordinary-closed-material-surface
+(define-test low-wall-stair-remains-an-ordinary-closed-material-surface
   (check-authored-stair-boundary :low-wall))
 
-(deftest terrain-chamfers-distinguish-the-living-top-edge
+(define-test terrain-chamfers-distinguish-the-living-top-edge
   (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
          (scene (progn
                   (luft.render::scene-builder-cell builder 4 4 4)
@@ -5561,11 +5562,11 @@
               (mapcan #'instance-stocks
                       (list (luft:surface-mesh-band-instance-words mesh)
                             (luft:surface-mesh-fan-instance-words mesh)))))
-        (ok (plusp (length stocks)))
-        (ok (member luft.render::+turf-edge-stock+ stocks))
-        (ok (member luft.render::+soil-stock+ stocks))))))
+        (true (plusp (length stocks)))
+        (true (member luft.render::+turf-edge-stock+ stocks))
+        (true (member luft.render::+soil-stock+ stocks))))))
 
-(deftest flat-terrain-closures-retain-a-living-edge-reading
+(define-test flat-terrain-closures-retain-a-living-edge-reading
   (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
          (scene (progn
                   (luft.render::scene-builder-box builder 4 5 4 5 4 4)
@@ -5576,30 +5577,30 @@
                    thereis (= luft.render::+turf-edge-stock+
                               (ldb (byte luft:+mesh-instance-stock-bit-count+ 16)
                                    (aref words offset))))))
-      (ok (contains-turf-edge-p
-           (luft:surface-mesh-band-instance-words mesh)))
-      (ok (contains-turf-edge-p
-           (luft:surface-mesh-fan-instance-words mesh))))))
+      (true (contains-turf-edge-p
+             (luft:surface-mesh-band-instance-words mesh)))
+      (true (contains-turf-edge-p
+             (luft:surface-mesh-fan-instance-words mesh))))))
 
-(deftest miter-study-chamfers-do-not-use-the-terrain-top-stock
+(define-test miter-study-chamfers-do-not-use-the-terrain-top-stock
   (let ((mesh (render:make-render-mesh (render:make-miter-study-scene))))
     (dolist (words (list (luft:surface-mesh-band-instance-words mesh)
                          (luft:surface-mesh-fan-instance-words mesh)))
-      (ok (notany (lambda (stock) (zerop stock))
-                  (loop for offset from 3 below (length words) by 4
-                        collect (ldb (byte luft:+mesh-instance-stock-bit-count+ 16)
-                                     (aref words offset))))))))
+      (true (notany (lambda (stock) (zerop stock))
+                    (loop for offset from 3 below (length words) by 4
+                          collect (ldb (byte luft:+mesh-instance-stock-bit-count+ 16)
+                                       (aref words offset))))))))
 
-(deftest stone-terrain-chamfers-have-an-earth-set-reading
-  (ok (= luft.render::+stone-stock+
-         (luft.render::scene-chamfer-stock
-          (list luft.render::+stone-stock+))))
-  (ok (= luft.render::+turf-set-stone-stock+
-         (luft.render::scene-chamfer-stock
-          (list luft.render::+stone-stock+ luft.render::+grass-stock+))))
-  (ok (= luft.render::+soil-set-stone-stock+
-         (luft.render::scene-chamfer-stock
-          (list luft.render::+soil-stock+ luft.render::+stone-stock+))))
+(define-test stone-terrain-chamfers-have-an-earth-set-reading
+  (true (= luft.render::+stone-stock+
+           (luft.render::scene-chamfer-stock
+            (list luft.render::+stone-stock+))))
+  (true (= luft.render::+turf-set-stone-stock+
+           (luft.render::scene-chamfer-stock
+            (list luft.render::+stone-stock+ luft.render::+grass-stock+))))
+  (true (= luft.render::+soil-set-stone-stock+
+           (luft.render::scene-chamfer-stock
+            (list luft.render::+soil-stock+ luft.render::+stone-stock+))))
   (let* ((stock
            (luft.render::scene-chamfer-stock
             (list luft.render::+stone-stock+ luft.render::+grass-stock+
@@ -5607,21 +5608,21 @@
          (assembly (luft.render::surface-assembly-at stock)))
     ;; The three-reading closure is visually deep-set but owns a distinct
     ;; provenance stock from the two-reading built-in deep-set assembly.
-    (ok (/= luft.render::+deep-set-stone-stock+ stock))
-    (ok (eq :earth-set-stone
-            (luft.render::surface-assembly-kernel assembly)))
-    (ok (eq :underside
-            (luft.render::surface-reading-role
-             (luft.render::surface-assembly-secondary assembly))))
-    (ok (= 3
-           (length
-            (luft.render::surface-closure-summary-readings
-             (luft.render::surface-assembly-closure-summary assembly))))))
-  (ok (= luft.render::+turf-edge-stock+
-         (luft.render::scene-chamfer-stock
-          (list luft.render::+grass-stock+ luft.render::+soil-stock+)))))
+    (true (/= luft.render::+deep-set-stone-stock+ stock))
+    (true (eq :earth-set-stone
+              (luft.render::surface-assembly-kernel assembly)))
+    (true (eq :underside
+              (luft.render::surface-reading-role
+               (luft.render::surface-assembly-secondary assembly))))
+    (true (= 3
+             (length
+              (luft.render::surface-closure-summary-readings
+               (luft.render::surface-assembly-closure-summary assembly))))))
+  (true (= luft.render::+turf-edge-stock+
+           (luft.render::scene-chamfer-stock
+            (list luft.render::+grass-stock+ luft.render::+soil-stock+)))))
 
-(deftest earth-set-readings-are-confined-to-stone-terrain-chamfers
+(define-test earth-set-readings-are-confined-to-stone-terrain-chamfers
   (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
          (scene (progn
                   (luft.render::scene-builder-box builder 4 6 4 6 2 2)
@@ -5637,14 +5638,14 @@
              (eq :earth-set-stone
                  (luft.render::surface-assembly-kernel
                   (luft.render::surface-assembly-at stock)))))
-      (ok (notany #'earth-set-p
-                  (stocks (luft:surface-mesh-face-instance-words mesh))))
-      (ok (some #'earth-set-p
-                (append
-                 (stocks (luft:surface-mesh-band-instance-words mesh))
-                 (stocks (luft:surface-mesh-fan-instance-words mesh))))))))
+      (true (notany #'earth-set-p
+                    (stocks (luft:surface-mesh-face-instance-words mesh))))
+      (true (some #'earth-set-p
+                  (append
+                   (stocks (luft:surface-mesh-band-instance-words mesh))
+                   (stocks (luft:surface-mesh-fan-instance-words mesh))))))))
 
-(deftest terrain-borne-architecture-marks-only-its-lowest-face-course
+(define-test terrain-borne-architecture-marks-only-its-lowest-face-course
   (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
          (scene (progn
                   (luft.render::scene-builder-box builder 4 6 4 6 2 2)
@@ -5657,32 +5658,32 @@
                  for offset from 3 below (length words) by 4
                  collect (ldb (byte luft:+mesh-instance-stock-bit-count+ 16)
                               (aref words offset)))))
-    (ok (member luft.render::+foundation-stone-stock+ face-stocks))
-    (ok (member luft.render::+stone-stock+ face-stocks))
-    (ok (every
-         (lambda (stock)
-           (eq :face
-               (luft.render::surface-assembly-relation
-                (luft.render::surface-assembly-at stock))))
-         face-stocks))))
+    (true (member luft.render::+foundation-stone-stock+ face-stocks))
+    (true (member luft.render::+stone-stock+ face-stocks))
+    (true (every
+           (lambda (stock)
+             (eq :face
+                 (luft.render::surface-assembly-relation
+                  (luft.render::surface-assembly-at stock))))
+           face-stocks))))
 
-(deftest directional-star-ambient-occlusion-measures-the-outward-hemisphere
-  (ok (= 0 (luft::%directional-star-ambient-occlusion #b00000000 '(0 0 1))))
-  (ok (= 1 (luft::%directional-star-ambient-occlusion #b00010000 '(0 0 1))))
-  (ok (= 3 (luft::%directional-star-ambient-occlusion #b11110000 '(0 0 1))))
-  (ok (= 3 (luft::%directional-star-ambient-occlusion #b10001000 '(1 1 0)))))
+(define-test directional-star-ambient-occlusion-measures-the-outward-hemisphere
+  (true (= 0 (luft::%directional-star-ambient-occlusion #b00000000 '(0 0 1))))
+  (true (= 1 (luft::%directional-star-ambient-occlusion #b00010000 '(0 0 1))))
+  (true (= 3 (luft::%directional-star-ambient-occlusion #b11110000 '(0 0 1))))
+  (true (= 3 (luft::%directional-star-ambient-occlusion #b10001000 '(1 1 0)))))
 
-(deftest topology-ao-is-confined-to-bevels-and-junctions
+(define-test topology-ao-is-confined-to-bevels-and-junctions
   (let ((mesh (render:make-render-mesh (render:make-miter-study-scene))))
     (flet ((levels (words)
              (loop for offset from 3 below (length words) by 4
                    collect (ldb (byte 2 28) (aref words offset)))))
-      (ok (every #'zerop (levels (luft:surface-mesh-face-instance-words mesh))))
-      (ok (some #'plusp
-                (append (levels (luft:surface-mesh-band-instance-words mesh))
-                        (levels (luft:surface-mesh-fan-instance-words mesh))))))))
+      (true (every #'zerop (levels (luft:surface-mesh-face-instance-words mesh))))
+      (true (some #'plusp
+                  (append (levels (luft:surface-mesh-band-instance-words mesh))
+                          (levels (luft:surface-mesh-fan-instance-words mesh))))))))
 
-(deftest mesh-and-presentation-shaders-lower-through-both-conventional-backends
+(define-test mesh-and-presentation-shaders-lower-through-both-conventional-backends
   (let* ((vertex (luft.render.shaders:mesh-vertex-specification))
          (fragment (luft.render.shaders:mesh-fragment-specification))
          (shadow-vertex
@@ -5737,94 +5738,94 @@
          (present-fragment-msl
            (luv.msl:msl-document-source
             (luv.msl:compile-msl present-fragment))))
-    (ok (search "[[vertex_id]]" vertex-msl))
-    (ok (search "[[instance_id]]" vertex-msl))
-    (ok (search "const device uint4* instances" vertex-msl))
-    (ok (search "const device uint4* template_vertices" vertex-msl))
-    (ok (search "primitive_kind" vertex-msl))
-    (ok (search "const device float4* material_descriptors" fragment-msl))
-    (ok (search "assembly_id * 8.0f" fragment-msl))
-    (ok (search "descriptor_row + uint(3.0f)" fragment-msl))
-    (ok (search "metalness" fragment-msl))
-    (ok (search "if (metalness > 0.0f)" fragment-msl))
-    (ok (search "float3 f0 = mix(float3(0.04f" fragment-msl))
-    (ok (search "clamp(base, float3(0.0f" fragment-msl))
-    (ok (search "1.0f - metalness" fragment-msl))
-    (ok (search "metal_environment_reflection" fragment-msl))
-    (ok (search "forged_metal" fragment-msl))
-    (ok (not (search "kernel_code - 9.0f" fragment-msl)))
-    (ok (search "depth2d<float> shadow_map" fragment-msl))
-    (ok (search "sampler shadow_sampler" fragment-msl))
-    (ok (search "barycentric" fragment-msl))
-    (ok (search "primitive_kind" fragment-msl))
-    (ok (search "primitive_feature_pixels" fragment-msl))
-    (ok (search "motion_output" fragment-msl))
-    (ok (search "gemstone_radiance" fragment-msl))
-    (ok (search "[[instance_id]]" flame-vertex-msl))
-    (ok (search "const device float4* flame_instances" flame-vertex-msl))
-    (ok (search "instance_index * uint(3.0f)" flame-vertex-msl))
-    (ok (search "world_up_projection" flame-fragment-msl))
-    (ok (search "bitangent" flame-fragment-msl))
-    (ok (not (search "orientation" flame-vertex-msl)))
-    (ok (not (search "previous_clip" flame-vertex-msl)))
-    (ok (not (search "motion_output" flame-fragment-msl)))
-    (ok (search "depth2d<float> opaque_depth" flame-fragment-msl))
-    (ok (search "sampler depth_sampler" flame-fragment-msl))
-    (ok (search "scene_depth" flame-fragment-msl))
-    (ok (search "opaque_view_depth" flame-fragment-msl))
-    (ok (search "proxy_view_depth" flame-fragment-msl))
-    (ok (search "ray_view_rate" flame-fragment-msl))
-    (ok (search "flame_effect_parameters" flame-fragment-msl))
-    (ok (search "texture2d<float> scene" flame-composite-copy-msl))
-    (ok (search "const device float4* torch_frames" torch-body-vertex-msl))
-    (ok (search "const device float4* torch_body_vertices"
-                torch-body-vertex-msl))
-    (ok (search "vertex_index * uint(2.0f)" torch-body-vertex-msl))
-    (ok (search "frame_flags" torch-body-vertex-msl))
-    (ok (search "packed_light" torch-body-vertex-msl))
-    (ok (search "torch_frame_world_position" torch-body-vertex-msl))
-    (ok (search "torch_frame_world_normal" torch-body-vertex-msl))
-    (ok (search "const device float4* torch_frames"
-                torch-body-shadow-vertex-msl))
-    (ok (search "torch_frame_world_position" torch-body-shadow-vertex-msl))
+    (true (search "[[vertex_id]]" vertex-msl))
+    (true (search "[[instance_id]]" vertex-msl))
+    (true (search "const device uint4* instances" vertex-msl))
+    (true (search "const device uint4* template_vertices" vertex-msl))
+    (true (search "primitive_kind" vertex-msl))
+    (true (search "const device float4* material_descriptors" fragment-msl))
+    (true (search "assembly_id * 8.0f" fragment-msl))
+    (true (search "descriptor_row + uint(3.0f)" fragment-msl))
+    (true (search "metalness" fragment-msl))
+    (true (search "if (metalness > 0.0f)" fragment-msl))
+    (true (search "float3 f0 = mix(float3(0.04f" fragment-msl))
+    (true (search "clamp(base, float3(0.0f" fragment-msl))
+    (true (search "1.0f - metalness" fragment-msl))
+    (true (search "metal_environment_reflection" fragment-msl))
+    (true (search "forged_metal" fragment-msl))
+    (true (not (search "kernel_code - 9.0f" fragment-msl)))
+    (true (search "depth2d<float> shadow_map" fragment-msl))
+    (true (search "sampler shadow_sampler" fragment-msl))
+    (true (search "barycentric" fragment-msl))
+    (true (search "primitive_kind" fragment-msl))
+    (true (search "primitive_feature_pixels" fragment-msl))
+    (true (search "motion_output" fragment-msl))
+    (true (search "gemstone_radiance" fragment-msl))
+    (true (search "[[instance_id]]" flame-vertex-msl))
+    (true (search "const device float4* flame_instances" flame-vertex-msl))
+    (true (search "instance_index * uint(3.0f)" flame-vertex-msl))
+    (true (search "world_up_projection" flame-fragment-msl))
+    (true (search "bitangent" flame-fragment-msl))
+    (true (not (search "orientation" flame-vertex-msl)))
+    (true (not (search "previous_clip" flame-vertex-msl)))
+    (true (not (search "motion_output" flame-fragment-msl)))
+    (true (search "depth2d<float> opaque_depth" flame-fragment-msl))
+    (true (search "sampler depth_sampler" flame-fragment-msl))
+    (true (search "scene_depth" flame-fragment-msl))
+    (true (search "opaque_view_depth" flame-fragment-msl))
+    (true (search "proxy_view_depth" flame-fragment-msl))
+    (true (search "ray_view_rate" flame-fragment-msl))
+    (true (search "flame_effect_parameters" flame-fragment-msl))
+    (true (search "texture2d<float> scene" flame-composite-copy-msl))
+    (true (search "const device float4* torch_frames" torch-body-vertex-msl))
+    (true (search "const device float4* torch_body_vertices"
+                  torch-body-vertex-msl))
+    (true (search "vertex_index * uint(2.0f)" torch-body-vertex-msl))
+    (true (search "frame_flags" torch-body-vertex-msl))
+    (true (search "packed_light" torch-body-vertex-msl))
+    (true (search "torch_frame_world_position" torch-body-vertex-msl))
+    (true (search "torch_frame_world_normal" torch-body-vertex-msl))
+    (true (search "const device float4* torch_frames"
+                  torch-body-shadow-vertex-msl))
+    (true (search "torch_frame_world_position" torch-body-shadow-vertex-msl))
     ;; The expensive dielectric response must remain structured control flow,
     ;; not an eager select paid by every ordinary terrain fragment.
-    (ok (search "if (abs((kernel_code - 8.0f)) < 0.5f)" fragment-msl))
-    (ok (search "depth2d<float> scene_depth" present-fragment-msl))
-    (ok (search "highlight_energy" present-fragment-msl))
-    (ok (search "paper_grade" present-fragment-msl))
-    (ok (search "[[instance_id]]"
-                (luv.msl:msl-document-source
-                 (luv.msl:compile-msl lattice-vertex))))
-    (ok (luv.msl:compile-msl lattice-fragment))
-    (ok (luv.spir-v:compile-shader-specification vertex))
-    (ok (luv.spir-v:compile-shader-specification fragment))
-    (ok (luv.msl:compile-msl shadow-vertex))
-    (ok (luv.spir-v:compile-shader-specification shadow-vertex))
-    (ok (luv.spir-v:compile-shader-specification lattice-vertex))
-    (ok (luv.spir-v:compile-shader-specification lattice-fragment))
-    (ok (luv.msl:compile-msl player-vertex))
-    (ok (luv.msl:compile-msl player-fragment))
-    (ok (luv.spir-v:compile-shader-specification player-vertex))
-    (ok (luv.spir-v:compile-shader-specification player-fragment))
-    (ok (luv.spir-v:compile-shader-specification flame-vertex))
-    (ok (luv.spir-v:compile-shader-specification flame-fragment))
-    (ok (luv.spir-v:compile-shader-specification flame-composite-copy))
-    (ok (luv.spir-v:compile-shader-specification torch-body-vertex))
-    (ok (luv.spir-v:compile-shader-specification torch-body-shadow-vertex))
-    (ok (luv.msl:compile-msl sky-fragment))
-    (ok (luv.msl:compile-msl sky-temporal-fragment))
-    (ok (luv.msl:compile-msl temporal-resolve-fragment))
-    (ok (luv.msl:compile-msl exposure-probe-fragment))
-    (ok (luv.spir-v:compile-shader-specification sky-fragment))
-    (ok (luv.spir-v:compile-shader-specification sky-temporal-fragment))
-    (ok (luv.spir-v:compile-shader-specification
-         temporal-resolve-fragment))
-    (ok (luv.spir-v:compile-shader-specification exposure-probe-fragment))
-    (ok (luv.spir-v:compile-shader-specification present-vertex))
-    (ok (luv.spir-v:compile-shader-specification present-fragment))))
+    (true (search "if (abs((kernel_code - 8.0f)) < 0.5f)" fragment-msl))
+    (true (search "depth2d<float> scene_depth" present-fragment-msl))
+    (true (search "highlight_energy" present-fragment-msl))
+    (true (search "paper_grade" present-fragment-msl))
+    (true (search "[[instance_id]]"
+                  (luv.msl:msl-document-source
+                   (luv.msl:compile-msl lattice-vertex))))
+    (true (luv.msl:compile-msl lattice-fragment))
+    (true (luv.spir-v:compile-shader-specification vertex))
+    (true (luv.spir-v:compile-shader-specification fragment))
+    (true (luv.msl:compile-msl shadow-vertex))
+    (true (luv.spir-v:compile-shader-specification shadow-vertex))
+    (true (luv.spir-v:compile-shader-specification lattice-vertex))
+    (true (luv.spir-v:compile-shader-specification lattice-fragment))
+    (true (luv.msl:compile-msl player-vertex))
+    (true (luv.msl:compile-msl player-fragment))
+    (true (luv.spir-v:compile-shader-specification player-vertex))
+    (true (luv.spir-v:compile-shader-specification player-fragment))
+    (true (luv.spir-v:compile-shader-specification flame-vertex))
+    (true (luv.spir-v:compile-shader-specification flame-fragment))
+    (true (luv.spir-v:compile-shader-specification flame-composite-copy))
+    (true (luv.spir-v:compile-shader-specification torch-body-vertex))
+    (true (luv.spir-v:compile-shader-specification torch-body-shadow-vertex))
+    (true (luv.msl:compile-msl sky-fragment))
+    (true (luv.msl:compile-msl sky-temporal-fragment))
+    (true (luv.msl:compile-msl temporal-resolve-fragment))
+    (true (luv.msl:compile-msl exposure-probe-fragment))
+    (true (luv.spir-v:compile-shader-specification sky-fragment))
+    (true (luv.spir-v:compile-shader-specification sky-temporal-fragment))
+    (true (luv.spir-v:compile-shader-specification
+           temporal-resolve-fragment))
+    (true (luv.spir-v:compile-shader-specification exposure-probe-fragment))
+    (true (luv.spir-v:compile-shader-specification present-vertex))
+    (true (luv.spir-v:compile-shader-specification present-fragment))))
 
-(deftest exposure-probes-decode-and-adapt-with-moppes-asymmetric-rates
+(define-test exposure-probes-decode-and-adapt-with-moppes-asymmetric-rates
   (let* ((luminance 0.16d0)
          (encoded
            (round
@@ -5836,21 +5837,21 @@
                        :initial-element 0)))
     (loop for index from 0 below (length bytes) by 4
           do (setf (aref bytes index) encoded))
-    (ok (< (abs (- luminance
-                   (render::exposure-probe-average-luminance bytes)))
-           0.01d0))
+    (true (< (abs (- luminance
+                     (render::exposure-probe-average-luminance bytes)))
+             0.01d0))
     ;; Looking into more light closes down quickly; opening into darkness is
     ;; deliberately slower, matching Moppe's eye-adaptation architecture.
-    (ok (< (abs (- 0.955f0
-                   (render::adapted-exposure 1.0f0 0.32f0)))
-           1.0e-6))
-    (ok (< (abs (- 1.036f0
-                   (render::adapted-exposure 1.0f0 0.08f0)))
-           1.0e-6))
-    (ok (< (render::adapted-exposure 1.9f0 1000.0f0) 1.9f0))
-    (ok (> (render::adapted-exposure 0.55f0 0.00001f0) 0.55f0))))
+    (true (< (abs (- 0.955f0
+                     (render::adapted-exposure 1.0f0 0.32f0)))
+             1.0e-6))
+    (true (< (abs (- 1.036f0
+                     (render::adapted-exposure 1.0f0 0.08f0)))
+             1.0e-6))
+    (true (< (render::adapted-exposure 1.9f0 1000.0f0) 1.9f0))
+    (true (> (render::adapted-exposure 0.55f0 0.00001f0) 0.55f0))))
 
-(deftest the-camera-block-packs-both-projections
+(define-test the-camera-block-packs-both-projections
   (let ((camera (render:make-fly-camera))
         (player (render:make-walking-player)))
     (flet ((lane (projection)
@@ -5869,43 +5870,43 @@
                          camera 1100 800 #(0.0 0.0))))
                   (luft.render::camera-uniform-data
                    view view #(0.5 0.5 0.001 0.001) 1.0 player 1)))))
-        (ok (= 108 (length perspective)))
-        (ok (typep perspective '(simple-array single-float (108))))
-        (ok (= 1.0 (aref perspective 22)))
-        (ok (= 0.0 (aref isometric 22)))
+        (true (= 108 (length perspective)))
+        (true (typep perspective '(simple-array single-float (108))))
+        (true (= 1.0 (aref perspective 22)))
+        (true (= 0.0 (aref isometric 22)))
         (flet ((depth (data view-z)
                  (let ((clip (+ (* view-z (aref data 18)) (aref data 19))))
                    (if (zerop (aref data 22)) clip (/ clip view-z)))))
-          (ok (< (abs (depth perspective 0.1)) 1d-4))
-          (ok (< (abs (- (depth perspective 600.0) 1.0)) 1d-4))
-          (ok (< (abs (depth isometric
-                            luft.render::+orthographic-near+)) 1d-4))
-          (ok (< (abs (- (depth isometric
-                               luft.render::+orthographic-far+) 1.0))
-                 1d-4)))
-        (ok (= (aref perspective 20) 0.25))
-        (ok (= (aref eighth 20) 0.125))
-        (ok (= (aref perspective 21) render:*wireframe*))
-        (ok (equalp #(0.5 0.5 0.001 0.001)
-                    (subseq perspective 48 52)))
-        (ok (equalp #(61.5 48.5 15.48 0.0)
-                    (subseq perspective 52 56)))
-        (ok (equalp (luft.render::light-sun-color luft.render:*light*)
-                    (subseq perspective 60 64)))
-        (ok (equalp (luft.render::light-sky-color luft.render:*light*)
-                    (subseq perspective 64 68)))
-        (ok (equalp (luft.render::light-ground-color luft.render:*light*)
-                    (subseq perspective 68 72)))
-        (ok (= (/ luft.render::+shadow-map-size+)
-               (aref perspective 88)))
-        (ok (= (luft.render::light-shadow-filter-radius luft.render:*light*)
-               (aref perspective 91)))
-        (ok (equalp #(61.5 48.5 15.48 0.0)
-                    (subseq perspective 92 96)))
-        (ok (equalp #(0.0 1.0 0.0 0.0)
-                    (subseq perspective 96 100)))))))
+          (true (< (abs (depth perspective 0.1)) 1d-4))
+          (true (< (abs (- (depth perspective 600.0) 1.0)) 1d-4))
+          (true (< (abs (depth isometric
+                              luft.render::+orthographic-near+)) 1d-4))
+          (true (< (abs (- (depth isometric
+                                 luft.render::+orthographic-far+) 1.0))
+                   1d-4)))
+        (true (= (aref perspective 20) 0.25))
+        (true (= (aref eighth 20) 0.125))
+        (true (= (aref perspective 21) render:*wireframe*))
+        (true (equalp #(0.5 0.5 0.001 0.001)
+                      (subseq perspective 48 52)))
+        (true (equalp #(61.5 48.5 15.48 0.0)
+                      (subseq perspective 52 56)))
+        (true (equalp (luft.render::light-sun-color luft.render:*light*)
+                      (subseq perspective 60 64)))
+        (true (equalp (luft.render::light-sky-color luft.render:*light*)
+                      (subseq perspective 64 68)))
+        (true (equalp (luft.render::light-ground-color luft.render:*light*)
+                      (subseq perspective 68 72)))
+        (true (= (/ luft.render::+shadow-map-size+)
+                 (aref perspective 88)))
+        (true (= (luft.render::light-shadow-filter-radius luft.render:*light*)
+                 (aref perspective 91)))
+        (true (equalp #(61.5 48.5 15.48 0.0)
+                      (subseq perspective 92 96)))
+        (true (equalp #(0.0 1.0 0.0 0.0)
+                      (subseq perspective 96 100)))))))
 
-(deftest an-off-centre-pointer-ray-inverts-the-rendered-projection
+(define-test an-off-centre-pointer-ray-inverts-the-rendered-projection
   (let* ((canvas (make-instance 'luv:sdl-canvas :width 1000 :height 800))
          (camera
            (render:make-fly-camera
@@ -5923,14 +5924,14 @@
           (luft.render::viewer-pointer-y viewer) 600.0)
     (multiple-value-bind (origin direction)
         (luft.render::viewer-pointer-ray viewer)
-      (ok (< (abs (- 5.0
-                     (luv.arithmetic.lisp.vec3:vec3-z origin)))
-             1.0e-6))
-      (ok (< (abs (- 1.0
-                     (luv.arithmetic.lisp.vec3:vec3-x direction)))
-             1.0e-6)))))
+      (true (< (abs (- 5.0
+                       (luv.arithmetic.lisp.vec3:vec3-z origin)))
+               1.0e-6))
+      (true (< (abs (- 1.0
+                       (luv.arithmetic.lisp.vec3:vec3-x direction)))
+               1.0e-6)))))
 
-(deftest the-light-frame-is-texel-stable-under-subtexel-camera-motion
+(define-test the-light-frame-is-texel-stable-under-subtexel-camera-motion
   (let* ((light luft.render:*light*)
          (center (luv.arithmetic.lisp.vec3:make-vec3 31.0 47.0 13.0))
          (rows (luft.render::light-shadow-rows light center))
@@ -5942,13 +5943,13 @@
             (luv.arithmetic.lisp.vec3:vec3-y center)
             (luv.arithmetic.lisp.vec3:vec3-z center)))
          (nearby-rows (luft.render::light-shadow-rows light nearby)))
-    (ok (= 16 (length rows)))
+    (true (= 16 (length rows)))
     ;; Snapping is in the light plane: a tiny arbitrary world translation may
     ;; cross no light-space texel boundary, and therefore leaves X/Y rows exact.
-    (ok (equalp (subseq rows 0 8) (subseq nearby-rows 0 8)))
-    (ok (= 36 (length (luft.render::light-uniform-data light center))))))
+    (true (equalp (subseq rows 0 8) (subseq nearby-rows 0 8)))
+    (true (= 36 (length (luft.render::light-uniform-data light center))))))
 
-(deftest bright-frame-discontinuities-tolerate-local-motion
+(define-test bright-frame-discontinuities-tolerate-local-motion
   (let* ((width 9)
          (height 7)
          (bytes (* width height 4))
@@ -5973,11 +5974,11 @@
           (luft.render::%bright-frame-discontinuity
            current previous width height
            :top 0 :threshold 230 :jump 40 :radius 1 :border 0)
-        (ok (= 1 count))
-        (ok (= 245 largest))
-        (ok (equal '((7 4 245 0 245)) samples))))))
+        (true (= 1 count))
+        (true (= 245 largest))
+        (true (equal '((7 4 245 0 245)) samples))))))
 
-(deftest bright-frame-transients-must-vanish-on-both-sides
+(define-test bright-frame-transients-must-vanish-on-both-sides
   (let* ((width 9)
          (height 7)
          (bytes (* width height 4))
@@ -6010,21 +6011,21 @@
            current previous width height
            :top 0 :threshold 230 :jump 40 :radius 1 :border 0
            :following following)
-        (ok (= 1 count))
-        (ok (= 240 largest))
-        (ok (equal '((7 4 240 0 0 240)) samples))))))
+        (true (= 1 count))
+        (true (= 240 largest))
+        (true (equal '((7 4 240 0 0 240)) samples))))))
 
-(deftest a-live-frame-ring-keeps-only-its-final-time-window
+(define-test a-live-frame-ring-keeps-only-its-final-time-window
   (let ((recorder
           (luft.render::make-viewer-frame-recorder-state
            :seconds 2.0d0 :capacity 5
            :frames (vector :zero :one :two :three :four)
            :times (vector 0.0d0 1.0d0 2.0d0 3.0d0 4.0d0)
            :frame-numbers (vector 0 1 2 3 4))))
-    (ok (equal '((2 2.0d0 :two) (3 3.0d0 :three) (4 4.0d0 :four))
-               (luft.render::%viewer-frame-recorder-entries recorder)))))
+    (true (equal '((2 2.0d0 :two) (3 3.0d0 :three) (4 4.0d0 :four))
+                 (luft.render::%viewer-frame-recorder-entries recorder)))))
 
-(deftest a-pointer-ray-retains-the-semantic-boundary-site
+(define-test a-pointer-ray-retains-the-semantic-boundary-site
   (let* ((domain (luft:make-world-domain :horizontal-bits 4))
          (builder (luft:make-chain-builder domain)))
     (luft:chain-builder-add-site
@@ -6037,19 +6038,19 @@
               (luv.arithmetic.lisp.vec3:make-vec3 0.0 0.0 -1.0)))
            (site (luft.render::site-inspection-site inspection))
            (cell (luft.render::site-inspection-cell inspection)))
-      (ok inspection)
-      (ok (= 3.0 (luft.render::site-inspection-distance inspection)))
-      (ok (= luft:+xy-face-extent+ (luft:site-extent site)))
-      (ok (luft:site-positive-p site))
-      (ok (= 4 (luft:site-x site) (luft:site-x cell)))
-      (ok (= 4 (luft:site-y site) (luft:site-y cell)))
-      (ok (= 5 (luft:site-z site)))
-      (ok (= 4 (luft:site-z cell)))
-      (ok (= #x80 (render:site-inspection-star-mask inspection)))
-      (ok (not (luft:star-singular-p
-                (render:site-inspection-star-mask inspection)))))))
+      (true inspection)
+      (true (= 3.0 (luft.render::site-inspection-distance inspection)))
+      (true (= luft:+xy-face-extent+ (luft:site-extent site)))
+      (true (luft:site-positive-p site))
+      (true (= 4 (luft:site-x site) (luft:site-x cell)))
+      (true (= 4 (luft:site-y site) (luft:site-y cell)))
+      (true (= 5 (luft:site-z site)))
+      (true (= 4 (luft:site-z cell)))
+      (true (= #x80 (render:site-inspection-star-mask inspection)))
+      (true (not (luft:star-singular-p
+                  (render:site-inspection-star-mask inspection)))))))
 
-(deftest film-cleanup-cannot-resurrect-a-shutting-down-viewer
+(define-test film-cleanup-cannot-resurrect-a-shutting-down-viewer
   (let ((viewer
           (clim:make-application-frame
            'render:viewer :canvas (make-instance 'luv:canvas))))
@@ -6059,7 +6060,7 @@
       (setf (luv:capture-client-state capture) '(:running-p t)
             (render::viewer-running-p viewer) nil)
       (luv:cleanup-capture viewer capture)
-      (ok (render::viewer-running-p viewer)))
+      (true (render::viewer-running-p viewer)))
     (let ((capture
             (make-instance 'luv:application-capture
                            :application viewer :kind :film)))
@@ -6067,4 +6068,4 @@
             (render::viewer-running-p viewer) nil)
       (luv:request-application-capture-shutdown viewer)
       (luv:cleanup-capture viewer capture)
-      (ok (not (render::viewer-running-p viewer))))))
+      (true (not (render::viewer-running-p viewer))))))

@@ -24,7 +24,7 @@
   (declare (ignore session))
   (world-panel-order-probe-depth probe))
 
-(deftest native-density-world-panels-order-back-to-front
+(define-test native-density-world-panels-order-back-to-front
   (let* ((near (make-instance 'world-panel-order-probe :depth 1.0))
          (middle (make-instance 'world-panel-order-probe :depth 2.0))
          (far (make-instance 'world-panel-order-probe :depth 3.0))
@@ -32,10 +32,10 @@
          (session (make-instance 'luvcraft-session)))
     (setf (luvcraft-session-overlays session)
           (list near scene far middle))
-    (ok (equal (list far middle near)
-               (luvcraft::luvcraft-world-panels-back-to-front session)))))
+    (true (equal (list far middle near)
+                 (luvcraft::luvcraft-world-panels-back-to-front session)))))
 
-(deftest session-coordinates-one-renderer-owner
+(define-test session-coordinates-one-renderer-owner
   (let* ((pipeline (gensym "PIPELINE"))
          (resource (gensym "RESOURCE"))
          (replacement (gensym "REPLACEMENT"))
@@ -44,17 +44,17 @@
                           :block-pipeline pipeline
                           :resources (list resource)))
          (session (make-instance 'luvcraft-session :renderer renderer)))
-    (ok (eq renderer (luvcraft-session-renderer session)))
-    (ok (equal (list pipeline)
-               (luvcraft::luvcraft-renderer-pipelines renderer)))
-    (ok (equal (list resource)
-               (luvcraft::luvcraft-renderer-resources renderer)))
+    (true (eq renderer (luvcraft-session-renderer session)))
+    (true (equal (list pipeline)
+                 (luvcraft::luvcraft-renderer-pipelines renderer)))
+    (true (equal (list resource)
+                 (luvcraft::luvcraft-renderer-resources renderer)))
     (setf (luvcraft::luvcraft-renderer-resources renderer)
           (list replacement))
-    (ok (equal (list replacement)
-               (luvcraft::luvcraft-renderer-resources renderer)))))
+    (true (equal (list replacement)
+                 (luvcraft::luvcraft-renderer-resources renderer)))))
 
-(deftest frame-attachments-publish-as-one-session-facing-cohort
+(define-test frame-attachments-publish-as-one-session-facing-cohort
   (let* ((old-color (gensym "OLD-COLOR"))
          (old-depth (gensym "OLD-DEPTH"))
          (old-panel-color (gensym "OLD-PANEL-COLOR"))
@@ -83,28 +83,28 @@
                           :resources (list old-color old-depth
                                            old-panel-color old-panel-depth)))
          (session (make-instance 'luvcraft-session :renderer renderer)))
-    (ok (eq old-attachments
-            (luvcraft::luvcraft-renderer-frame-attachments renderer)))
-    (ok (eq old-color (luvcraft::luvcraft-session-color-texture session)))
-    (ok (eq old-depth (luvcraft::luvcraft-session-depth-texture session)))
+    (true (eq old-attachments
+              (luvcraft::luvcraft-renderer-frame-attachments renderer)))
+    (true (eq old-color (luvcraft::luvcraft-session-color-texture session)))
+    (true (eq old-depth (luvcraft::luvcraft-session-depth-texture session)))
     (luvcraft::install-luvcraft-frame-attachments renderer new-attachments)
-    (ok (eq new-attachments
-            (luvcraft::luvcraft-renderer-frame-attachments renderer)))
-    (ok (equal '(1280 720)
-               (luvcraft::luvcraft-session-render-extent session)))
-    (ok (equal '(2560 1440)
-               (luvcraft::luvcraft-session-presentation-extent session)))
-    (ok (eq new-color (luvcraft::luvcraft-session-color-texture session)))
-    (ok (eq new-depth (luvcraft::luvcraft-session-depth-texture session)))
-    (ok (eq new-panel-color
-            (luvcraft::luvcraft-session-world-panel-color-texture session)))
-    (ok (eq new-panel-depth
-            (luvcraft::luvcraft-session-world-panel-depth-texture session)))
-    (ok (equal (list new-color new-depth new-panel-color new-panel-depth
-                     old-color old-depth old-panel-color old-panel-depth)
-               (luvcraft::luvcraft-renderer-resources renderer)))))
+    (true (eq new-attachments
+              (luvcraft::luvcraft-renderer-frame-attachments renderer)))
+    (true (equal '(1280 720)
+                 (luvcraft::luvcraft-session-render-extent session)))
+    (true (equal '(2560 1440)
+                 (luvcraft::luvcraft-session-presentation-extent session)))
+    (true (eq new-color (luvcraft::luvcraft-session-color-texture session)))
+    (true (eq new-depth (luvcraft::luvcraft-session-depth-texture session)))
+    (true (eq new-panel-color
+              (luvcraft::luvcraft-session-world-panel-color-texture session)))
+    (true (eq new-panel-depth
+              (luvcraft::luvcraft-session-world-panel-depth-texture session)))
+    (true (equal (list new-color new-depth new-panel-color new-panel-depth
+                       old-color old-depth old-panel-color old-panel-depth)
+                 (luvcraft::luvcraft-renderer-resources renderer)))))
 
-(deftest presentation-depth-composes-native-density-world-panels
+(define-test presentation-depth-composes-native-density-world-panels
   (let* ((specification
            (luvcraft.shaders:focus-post-fragment-specification))
          (resources (shader:shader-specification-resources specification))
@@ -114,16 +114,16 @@
          (panel-depth
            (find 'world-panel-depth resources
                  :key #'shader:shader-object-name :test #'string-equal)))
-    (ok panel-color)
-    (ok panel-depth)
-    (ok (= 7 (shader:shader-resource-binding panel-color)))
-    (ok (= 8 (shader:shader-resource-binding panel-depth)))
-    (ok (find 'panel-visible
-              (shader:shader-specification-bindings specification)
-              :key #'shader:shader-object-name :test #'string-equal))
-    (ok (> (length (spv:assemble-shader-specification specification)) 5))))
+    (true panel-color)
+    (true panel-depth)
+    (true (= 7 (shader:shader-resource-binding panel-color)))
+    (true (= 8 (shader:shader-resource-binding panel-depth)))
+    (true (find 'panel-visible
+                (shader:shader-specification-bindings specification)
+                :key #'shader:shader-object-name :test #'string-equal))
+    (true (> (length (spv:assemble-shader-specification specification)) 5))))
 
-(deftest live-session-migration-adopts-the-old-render-inventory
+(define-test live-session-migration-adopts-the-old-render-inventory
   (let* ((atlas (gensym "ATLAS"))
          (color (gensym "COLOR"))
          (depth (gensym "DEPTH"))
@@ -141,40 +141,40 @@
                   'luvcraft::block-pipeline pipeline
                   'luvcraft::frame-states states
                   'luvcraft::resources (list resource)))))
-    (ok (eq atlas (luvcraft::luvcraft-renderer-atlas-texture renderer)))
-    (ok (equal '(1024 768)
-               (luvcraft::luvcraft-renderer-render-extent renderer)))
-    (ok (eq color (luvcraft::luvcraft-renderer-color-texture renderer)))
-    (ok (eq depth (luvcraft::luvcraft-renderer-depth-texture renderer)))
-    (ok (equal (list pipeline)
-               (luvcraft::luvcraft-renderer-pipelines renderer)))
-    (ok (eq states (luvcraft::luvcraft-renderer-frame-states renderer)))
-    (ok (equal (list resource)
-               (luvcraft::luvcraft-renderer-resources renderer)))))
+    (true (eq atlas (luvcraft::luvcraft-renderer-atlas-texture renderer)))
+    (true (equal '(1024 768)
+                 (luvcraft::luvcraft-renderer-render-extent renderer)))
+    (true (eq color (luvcraft::luvcraft-renderer-color-texture renderer)))
+    (true (eq depth (luvcraft::luvcraft-renderer-depth-texture renderer)))
+    (true (equal (list pipeline)
+                 (luvcraft::luvcraft-renderer-pipelines renderer)))
+    (true (eq states (luvcraft::luvcraft-renderer-frame-states renderer)))
+    (true (equal (list resource)
+                 (luvcraft::luvcraft-renderer-resources renderer)))))
 
-(deftest renderer-resource-release-retains-a-failed-handle-for-retry
+(define-test renderer-resource-release-retains-a-failed-handle-for-retry
   (let* ((resource
            (make-instance 'renderer-release-probe :failures-remaining 1))
          (renderer
            (make-instance 'luvcraft-renderer :resources (list resource))))
-    (ok (signals (release-luvcraft-component renderer)
-                 'luv:release-error))
-    (ok (= 1 (renderer-release-probe-attempts resource)))
-    (ok (equal (list resource)
-               (luvcraft::luvcraft-renderer-resources renderer)))
+    (fail (release-luvcraft-component renderer)
+          'luv:release-error)
+    (true (= 1 (renderer-release-probe-attempts resource)))
+    (true (equal (list resource)
+                 (luvcraft::luvcraft-renderer-resources renderer)))
     (release-luvcraft-component renderer)
-    (ok (= 2 (renderer-release-probe-attempts resource)))
-    (ok (null (luvcraft::luvcraft-renderer-resources renderer)))
+    (true (= 2 (renderer-release-probe-attempts resource)))
+    (true (null (luvcraft::luvcraft-renderer-resources renderer)))
     ;; Once the owner has forgotten a successful release, repeating teardown
     ;; cannot destroy the same native handle again.
     (release-luvcraft-component renderer)
-    (ok (= 2 (renderer-release-probe-attempts resource)))))
+    (true (= 2 (renderer-release-probe-attempts resource)))))
 
-(deftest renderer-release-deduplicates-its-resource-inventory
+(define-test renderer-release-deduplicates-its-resource-inventory
   (let* ((resource (make-instance 'renderer-release-probe))
          (renderer
            (make-instance 'luvcraft-renderer
                           :resources (list resource resource))))
     (release-luvcraft-component renderer)
-    (ok (= 1 (renderer-release-probe-attempts resource)))
-    (ok (null (luvcraft::luvcraft-renderer-resources renderer)))))
+    (true (= 1 (renderer-release-probe-attempts resource)))
+    (true (null (luvcraft::luvcraft-renderer-resources renderer)))))

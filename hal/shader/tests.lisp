@@ -1,5 +1,6 @@
 (defpackage #:luvcraft.tests
-  (:use #:cl #:rove #:luv #:luvcraft #:luvcraft.world)
+  (:use #:cl #:luv #:luvcraft #:luvcraft.world)
+  (:import-from #:parachute #:define-test #:true #:false #:fail #:group #:skip)
   (:local-nicknames (#:shader #:luv.shader)
                     (#:spv #:luv.spir-v)
                     (#:shaders #:luvcraft.shaders)
@@ -42,41 +43,41 @@
 (math:define-quantity :test-position :kind :dimensionless
   :components (:test-position-x :test-position-y :test-position-z))
 
-(deftest portable-operator-symbols-retain-shader-identity
-  (ok (eq 'shader:dot 'math:dot))
-  (ok (eq 'shader:clamp 'math:clamp))
-  (ok (eq 'shader:mix 'math:mix))
-  (ok (eq 'shader:smoothstep 'math:smoothstep))
-  (ok (eq 'shader:step 'math:step))
-  (ok (eq 'shader:normalize 'math:normalize))
-  (ok (eq 'shader:quantity 'lang:quantity))
-  (ok (eq 'shader:assume-quantity 'lang:assume-quantity))
-  (ok (eq 'shader:interpret 'lang:interpret))
-  (ok (eq 'shader:representation 'lang:representation))
-  (ok (eq 'shader:convert-unit 'lang:convert-unit)))
+(define-test portable-operator-symbols-retain-shader-identity
+  (true (eq 'shader:dot 'math:dot))
+  (true (eq 'shader:clamp 'math:clamp))
+  (true (eq 'shader:mix 'math:mix))
+  (true (eq 'shader:smoothstep 'math:smoothstep))
+  (true (eq 'shader:step 'math:step))
+  (true (eq 'shader:normalize 'math:normalize))
+  (true (eq 'shader:quantity 'lang:quantity))
+  (true (eq 'shader:assume-quantity 'lang:assume-quantity))
+  (true (eq 'shader:interpret 'lang:interpret))
+  (true (eq 'shader:representation 'lang:representation))
+  (true (eq 'shader:convert-unit 'lang:convert-unit)))
 
-(deftest shared-shader-vocabulary-has-neutral-symbol-homes
+(define-test shared-shader-vocabulary-has-neutral-symbol-homes
   (dolist (symbol (list 'shader:shader-specification
                         'shader:shader-source-revision
                         'shader:lower-shader-call
                         'shader:lower-shader-specification))
-    (ok (eq (find-package '#:luv.shader) (symbol-package symbol)))
+    (true (eq (find-package '#:luv.shader) (symbol-package symbol)))
     (multiple-value-bind (found status)
         (find-symbol (symbol-name symbol) '#:luv.spir-v)
-      (ok (eq symbol found))
-      (ok (eq :inherited status))))
-  (ok (eq (find-package '#:luv.spir-v)
-          (symbol-package 'spv:shader-lowering)))
-  (ok (null (find-symbol "SHADER-LOWERING" '#:luv.shader)))
+      (true (eq symbol found))
+      (true (eq :inherited status))))
+  (true (eq (find-package '#:luv.spir-v)
+            (symbol-package 'spv:shader-lowering)))
+  (true (null (find-symbol "SHADER-LOWERING" '#:luv.shader)))
   (multiple-value-bind (instruction-dot status)
       (find-symbol "DOT" '#:luv.spir-v)
-    (ok (eq :internal status))
-    (ok (eq (find-package '#:luv.spir-v)
-            (symbol-package instruction-dot)))
-    (ok (not (eq instruction-dot 'shader:dot)))
-    (ok (typep (find-class instruction-dot)
-               'spv:instruction-class)))
-  (ok (null (find-class 'shader:dot nil)))
+    (true (eq :internal status))
+    (true (eq (find-package '#:luv.spir-v)
+              (symbol-package instruction-dot)))
+    (true (not (eq instruction-dot 'shader:dot)))
+    (true (typep (find-class instruction-dot)
+                 'spv:instruction-class)))
+  (true (null (find-class 'shader:dot nil)))
   (let ((foreign-instruction-names nil)
         (spir-v-package (find-package '#:luv.spir-v)))
     (do-symbols (symbol spir-v-package)
@@ -84,7 +85,7 @@
         (when (and (typep class 'spv:instruction-class)
                    (not (eq spir-v-package (symbol-package symbol))))
           (push symbol foreign-instruction-names))))
-    (ok (null foreign-instruction-names))))
+    (true (null foreign-instruction-names))))
 
 (defun binding-named (name specification)
   (find name (shader:shader-specification-bindings specification)
@@ -209,14 +210,14 @@
   (let* ((visible (test-shadow-rewrite receiver depth bias)))
     (set-output visibility visible)))
 
-(deftest shader-method-redefinition-is-observable-and-coalesced
+(define-test shader-method-redefinition-is-observable-and-coalesced
   (let* ((generic-function (fdefinition 'shader-method-probe))
          (dependent
            (shader:make-shader-definition-dependent
             generic-function '(:probe :fragment))))
     (unwind-protect
          (progn
-           (ok (not (shader:shader-definition-change-pending-p dependent)))
+           (true (not (shader:shader-definition-change-pending-p dependent)))
            (eval
             '(shader:define-shader-method
                  shader-method-probe shader-method-probe
@@ -224,28 +225,28 @@
                  (:stage :fragment
                   :outputs ((color :vec4 :location 0)))
                (set-output color (vec4 0.8 0.4 0.2 1.0))))
-           (ok (= 1 (length (closer-mop:generic-function-methods
-                             generic-function))))
-           (ok (shader:shader-definition-change-pending-p dependent))
+           (true (= 1 (length (closer-mop:generic-function-methods
+                               generic-function))))
+           (true (shader:shader-definition-change-pending-p dependent))
            (multiple-value-bind (revision event)
                (shader:shader-definition-change-snapshot dependent)
              ;; Replacement emits REMOVE-METHOD and ADD-METHOD on the pinned
              ;; SBCL/Closer-MOP stack.  Consumers see their coalesced revision.
-             (ok (>= revision 2))
-             (ok (eq (first event) 'add-method))
-             (ok (equal
-                  (form-names
-                   (shader:shader-expression-form
-                    (shader:shader-assignment-value
-                     (first
-                      (shader:shader-specification-statements
-                       (shader-method-probe :probe :fragment))))))
-                  '("vec4" 0.8 0.4 0.2 1.0)))
+             (true (>= revision 2))
+             (true (eq (first event) 'add-method))
+             (true (equal
+                    (form-names
+                     (shader:shader-expression-form
+                      (shader:shader-assignment-value
+                       (first
+                        (shader:shader-specification-statements
+                         (shader-method-probe :probe :fragment))))))
+                    '("vec4" 0.8 0.4 0.2 1.0)))
              (shader:acknowledge-shader-definition-change dependent revision)
-             (ok (not (shader:shader-definition-change-pending-p dependent)))))
+             (true (not (shader:shader-definition-change-pending-p dependent)))))
       (shader:release-shader-definition-dependent dependent))))
 
-(deftest shader-functions-are-typed-calls-with-lexical-bindings
+(define-test shader-functions-are-typed-calls-with-lexical-bindings
   (let* ((definition
            (shader:shader-function-definition-for 'typed-shader-function-probe))
          (specification
@@ -261,26 +262,26 @@
            (shader:shader-assignment-value
             (first (shader:shader-specification-statements specification))))
          (lowering (spv:compile-shader-specification specification)))
-    (ok (typep definition 'shader:shader-function-definition))
-    (ok (equal '(value scale) (shader:shader-function-parameters definition)))
-    (ok (search "without source-form construction"
-                (documentation 'typed-shader-function-probe
-                               'shader:shader-function)))
-    (ok (typep call 'shader:shader-function-call))
-    (ok (eq definition (shader:shader-function-call-definition call)))
-    (ok (= 2 (length (shader:shader-function-call-arguments call))))
+    (true (typep definition 'shader:shader-function-definition))
+    (true (equal '(value scale) (shader:shader-function-parameters definition)))
+    (true (search "without source-form construction"
+                  (documentation 'typed-shader-function-probe
+                                 'shader:shader-function)))
+    (true (typep call 'shader:shader-function-call))
+    (true (eq definition (shader:shader-function-call-definition call)))
+    (true (= 2 (length (shader:shader-function-call-arguments call))))
     ;; Two parameter aliases and two lexical LET* bindings remain typed
     ;; objects.  Only computed locals need entry-block declarations.
-    (ok (= 4 (length (shader:shader-function-call-bindings call))))
-    (ok (= 2 (length (shader:shader-specification-bindings specification))))
-    (ok (equal '(typed-shader-function-probe value scale)
-               (shader:shader-expression-form call)))
-    (ok (gethash call
-                 (spv:shader-lowering-expression-instructions lowering)))
-    (ok (= #x07230203
-           (aref (spv:assemble-shader-specification specification) 0)))))
+    (true (= 4 (length (shader:shader-function-call-bindings call))))
+    (true (= 2 (length (shader:shader-specification-bindings specification))))
+    (true (equal '(typed-shader-function-probe value scale)
+                 (shader:shader-expression-form call)))
+    (true (gethash call
+                   (spv:shader-lowering-expression-instructions lowering)))
+    (true (= #x07230203
+             (aref (spv:assemble-shader-specification specification) 0)))))
 
-(deftest shader-function-redefinition-affects-only-fresh-parses
+(define-test shader-function-redefinition-affects-only-fresh-parses
   (labels ((install-addition ()
              (eval
               '(shader:define-shader-function redefinable-shader-function
@@ -312,19 +313,19 @@
           (revision (shader:shader-source-revision)))
       (install-subtraction)
       (let ((subtraction (parse-probe)))
-        (ok (> (shader:shader-source-revision) revision))
-        (ok (eq '+ (result-operator addition)))
-        (ok (eq '- (result-operator subtraction)))
-        (ok (signals
-             (shader:parse-shader-specification
-              'bad-shader-function-arity
-              '(:stage :fragment
-                :inputs ((left :float :location 0))
-                :outputs ((result :float :location 0)))
-              '((set-output result (redefinable-shader-function left))))
-             'shader:shader-language-error))))))
+        (true (> (shader:shader-source-revision) revision))
+        (true (eq '+ (result-operator addition)))
+        (true (eq '- (result-operator subtraction)))
+        (fail
+         (shader:parse-shader-specification
+          'bad-shader-function-arity
+          '(:stage :fragment
+            :inputs ((left :float :location 0))
+            :outputs ((result :float :location 0)))
+          '((set-output result (redefinable-shader-function left))))
+         'shader:shader-language-error)))))
 
-(deftest top-level-shader-redefinition-advances-the-live-source-revision
+(define-test top-level-shader-redefinition-advances-the-live-source-revision
   (flet ((definition (macro name red)
            `(,macro ,name
                 (:stage :fragment
@@ -338,20 +339,20 @@
         (let ((before (shader:shader-source-revision)))
           (eval (definition macro name 0.25))
           (let ((first (shader:shader-source-revision)))
-            (ok (> first before))
+            (true (> first before))
             (eval (definition macro name 0.75))
-            (ok (> (shader:shader-source-revision) first))))))))
+            (true (> (shader:shader-source-revision) first))))))))
 
-(deftest shader-source-name-can-migrate-from-rewriter-to-typed-function
+(define-test shader-source-name-can-migrate-from-rewriter-to-typed-function
   (eval
    '(shader:define-shader-abstraction source-kind-migration-probe (value)
       `(+ ,value 1.0)))
-  (ok (shader:shader-abstraction-p 'source-kind-migration-probe))
+  (true (shader:shader-abstraction-p 'source-kind-migration-probe))
   (eval
    '(shader:define-shader-function source-kind-migration-probe (value)
       (+ value 1.0)))
-  (ok (not (shader:shader-abstraction-p 'source-kind-migration-probe)))
-  (ok (shader:shader-function-definition-for 'source-kind-migration-probe))
+  (true (not (shader:shader-abstraction-p 'source-kind-migration-probe)))
+  (true (shader:shader-function-definition-for 'source-kind-migration-probe))
   (let* ((specification
            (shader:parse-shader-specification
             'source-kind-migration-specification
@@ -362,9 +363,9 @@
          (call
            (shader:shader-assignment-value
             (first (shader:shader-specification-statements specification)))))
-    (ok (typep call 'shader:shader-function-call))))
+    (true (typep call 'shader:shader-function-call))))
 
-(deftest shader-source-is-a-typed-clos-graph
+(define-test shader-source-is-a-typed-clos-graph
   (let* ((specification (shaders:block-world-fragment-specification))
          (sun-direction (binding-named 'sun-direction specification))
          (sun-visibility (binding-named 'sun-visibility specification))
@@ -373,79 +374,79 @@
          (reflected (binding-named 'reflected specification))
          (radiance (binding-named 'radiance specification))
          (fogged (binding-named 'fogged specification)))
-    (ok (typep specification 'shader:shader-specification))
-    (ok (eq (shader:shader-specification-stage specification) :fragment))
-    (ok (= (length (shader:shader-specification-inputs specification)) 9))
-    (ok (= (length (shader:shader-specification-resources specification)) 7))
-    (ok (typep (shader:shader-binding-expression sun-direction)
-               'shader:shader-call))
-    (ok (typep (shader:shader-binding-expression sun-direction)
-               'lang:arithmetic-call))
-    (ok (equal
-         (shader:shader-expression-form
-          (shader:shader-binding-expression sun-direction))
-         (lang:arithmetic-expression-form
-          (shader:shader-binding-expression sun-direction))))
-    (ok (eq :world-direction
-            (math:quantity-specification-name
-             (shader:shader-expression-quantity-specification
-              (shader:shader-binding-expression sun-direction)))))
-    (ok (shader:shader-type=
-         (shader:shader-expression-type
-          (shader:shader-binding-expression sun-direction))
-         :vec3))
-    (ok (equal
-         (form-names
-          (shader:shader-expression-form
-           (shader:shader-binding-expression sun-visibility)))
-         '("smoothstep"
-           ("quantity" 0.9 "quantity" "sky-light-level" "unit" "one")
-           ("quantity" 1.0 "quantity" "sky-light-level" "unit" "one")
-           "sky-input")))
+    (true (typep specification 'shader:shader-specification))
+    (true (eq (shader:shader-specification-stage specification) :fragment))
+    (true (= (length (shader:shader-specification-inputs specification)) 9))
+    (true (= (length (shader:shader-specification-resources specification)) 7))
+    (true (typep (shader:shader-binding-expression sun-direction)
+                 'shader:shader-call))
+    (true (typep (shader:shader-binding-expression sun-direction)
+                 'lang:arithmetic-call))
+    (true (equal
+           (shader:shader-expression-form
+            (shader:shader-binding-expression sun-direction))
+           (lang:arithmetic-expression-form
+            (shader:shader-binding-expression sun-direction))))
+    (true (eq :world-direction
+              (math:quantity-specification-name
+               (shader:shader-expression-quantity-specification
+                (shader:shader-binding-expression sun-direction)))))
+    (true (shader:shader-type=
+           (shader:shader-expression-type
+            (shader:shader-binding-expression sun-direction))
+           :vec3))
+    (true (equal
+           (form-names
+            (shader:shader-expression-form
+             (shader:shader-binding-expression sun-visibility)))
+           '("smoothstep"
+             ("quantity" 0.9 "quantity" "sky-light-level" "unit" "one")
+             ("quantity" 1.0 "quantity" "sky-light-level" "unit" "one")
+             "sky-input")))
     ;; The map's answer is taken only where the surface faces the light; a
     ;; surface turned away is lit by nothing, so it is also shadowed by
     ;; nothing.  #0604PY
-    (ok (equal
-         (form-names
-          (shader:shader-expression-form
-           (shader:shader-binding-expression
-            (binding-named 'sampled-shadow specification))))
-         '("mix" 1.0 "shadow-sample" "shadow-in-bounds")))
-    (ok (equal
-         (form-names
-          (shader:shader-expression-form
-           (shader:shader-binding-expression direct-shadow)))
-         '("mix" 1.0 "sampled-shadow" "shadow-relevance")))
-    (ok (shader:shader-type=
-         (shader:shader-expression-type
-          (shader:shader-binding-expression sky-light))
-         :vec3))
-    (ok (equal (form-names
-                (shader:shader-expression-form
-                 (shader:shader-binding-expression reflected)))
-               '("interpret"
-                 ("*" "albedo"
-                  ("+" "sky-light" "sun-light" "local-light"))
-                 "quantity" "linear-rgb" "unit" "one")))
-    (ok (equal (form-names
-                (shader:shader-expression-form
-                 (shader:shader-binding-expression radiance)))
-               '("+" "reflected" "specular"
-                 ("interpret" ("*" "albedo" "emission-input")
-                  "quantity" "linear-rgb" "unit" "one"))))
-    (ok (equal (form-names
-                (shader:shader-expression-form
-                 (shader:shader-binding-expression fogged)))
-               '("mix" "radiance" "fog-color" "fog-amount")))
+    (true (equal
+           (form-names
+            (shader:shader-expression-form
+             (shader:shader-binding-expression
+              (binding-named 'sampled-shadow specification))))
+           '("mix" 1.0 "shadow-sample" "shadow-in-bounds")))
+    (true (equal
+           (form-names
+            (shader:shader-expression-form
+             (shader:shader-binding-expression direct-shadow)))
+           '("mix" 1.0 "sampled-shadow" "shadow-relevance")))
+    (true (shader:shader-type=
+           (shader:shader-expression-type
+            (shader:shader-binding-expression sky-light))
+           :vec3))
+    (true (equal (form-names
+                  (shader:shader-expression-form
+                   (shader:shader-binding-expression reflected)))
+                 '("interpret"
+                   ("*" "albedo"
+                    ("+" "sky-light" "sun-light" "local-light"))
+                   "quantity" "linear-rgb" "unit" "one")))
+    (true (equal (form-names
+                  (shader:shader-expression-form
+                   (shader:shader-binding-expression radiance)))
+                 '("+" "reflected" "specular"
+                   ("interpret" ("*" "albedo" "emission-input")
+                    "quantity" "linear-rgb" "unit" "one"))))
+    (true (equal (form-names
+                  (shader:shader-expression-form
+                   (shader:shader-binding-expression fogged)))
+                 '("mix" "radiance" "fog-color" "fog-amount")))
     (dolist (binding (list sky-light reflected radiance fogged))
-      (ok (eq :absolute
-              (math:quantity-specification-character
-               (shader:shader-expression-quantity-specification
-                (shader:shader-binding-expression binding))))))
-    (ok (> (length (shader:shader-specification-expressions specification))
-           (length (shader:shader-specification-bindings specification))))))
+      (true (eq :absolute
+                (math:quantity-specification-character
+                 (shader:shader-expression-quantity-specification
+                  (shader:shader-binding-expression binding))))))
+    (true (> (length (shader:shader-specification-expressions specification))
+             (length (shader:shader-specification-bindings specification))))))
 
-(deftest block-vertex-source-is-a-typed-clos-graph-with-an-explicit-abi
+(define-test block-vertex-source-is-a-typed-clos-graph-with-an-explicit-abi
   (let* ((specification (shaders:block-world-vertex-specification))
          (resource (first (shader:shader-specification-resources specification)))
          (clip-position
@@ -460,59 +461,59 @@
          (view-z (binding-named 'view-z specification))
          (shadow-projection
            (binding-named 'shadow-projection specification)))
-    (ok (typep specification 'shader:shader-specification))
-    (ok (eq (shader:shader-specification-stage specification) :vertex))
-    (ok (= (length (shader:shader-specification-inputs specification)) 5))
-    (ok (= (length (shader:shader-specification-outputs specification)) 10))
-    (ok (eq (shader:shader-interface-built-in clip-position) :position))
-    (ok (typep resource 'shader:shader-uniform-block))
-    (ok (= (shader:shader-resource-binding resource) 2))
-    (ok (equal (mapcar (lambda (member)
-                         (string-downcase
-                          (symbol-name (shader:shader-object-name member))))
-                       (shader:shader-uniform-block-members resource))
-               '("camera-vector" "right-vector" "up-vector" "forward-vector"
-                 "projection-vector" "fog-vector"
-                 "sun-vector" "sun-color-vector" "zenith-vector"
-                 "horizon-vector" "ambient-vector" "fog-color-vector"
-                 "shadow-control-vector" "shadow-filter-vector"
-                 "atlas-vector"
-                 "shadow-row-x" "shadow-row-y"
-                 "shadow-row-z" "shadow-row-w")))
-    (ok (equal (mapcar #'shader:shader-uniform-member-offset
-                       (shader:shader-uniform-block-members resource))
-               '(0 16 32 48 64 80 96 112 128 144 160 176
-                 192 208 224 240 256 272 288)))
-    (ok (= (shader:shader-uniform-block-byte-size resource) 304))
+    (true (typep specification 'shader:shader-specification))
+    (true (eq (shader:shader-specification-stage specification) :vertex))
+    (true (= (length (shader:shader-specification-inputs specification)) 5))
+    (true (= (length (shader:shader-specification-outputs specification)) 10))
+    (true (eq (shader:shader-interface-built-in clip-position) :position))
+    (true (typep resource 'shader:shader-uniform-block))
+    (true (= (shader:shader-resource-binding resource) 2))
+    (true (equal (mapcar (lambda (member)
+                           (string-downcase
+                            (symbol-name (shader:shader-object-name member))))
+                         (shader:shader-uniform-block-members resource))
+                 '("camera-vector" "right-vector" "up-vector" "forward-vector"
+                   "projection-vector" "fog-vector"
+                   "sun-vector" "sun-color-vector" "zenith-vector"
+                   "horizon-vector" "ambient-vector" "fog-color-vector"
+                   "shadow-control-vector" "shadow-filter-vector"
+                   "atlas-vector"
+                   "shadow-row-x" "shadow-row-y"
+                   "shadow-row-z" "shadow-row-w")))
+    (true (equal (mapcar #'shader:shader-uniform-member-offset
+                         (shader:shader-uniform-block-members resource))
+                 '(0 16 32 48 64 80 96 112 128 144 160 176
+                   192 208 224 240 256 272 288)))
+    (true (= (shader:shader-uniform-block-byte-size resource) 304))
     (let ((fog-call (shader:shader-binding-expression fog-amount)))
-      (ok (typep fog-call 'shader:shader-function-call))
-      (ok (eq
-           (lang:arithmetic-function-definition-for
-            'luvcraft.arithmetic:fog-amount-at-view-distance)
-           (shader:shader-function-call-definition fog-call)))
-      (ok (equal
-           (form-names (shader:shader-expression-form fog-call))
-           '("fog-amount-at-view-distance"
-             "view-z" "fog-near" "fog-far"))))
+      (true (typep fog-call 'shader:shader-function-call))
+      (true (eq
+             (lang:arithmetic-function-definition-for
+              'luvcraft.arithmetic:fog-amount-at-view-distance)
+             (shader:shader-function-call-definition fog-call)))
+      (true (equal
+             (form-names (shader:shader-expression-form fog-call))
+             '("fog-amount-at-view-distance"
+               "view-z" "fog-near" "fog-far"))))
     (let ((relative-quantity
             (shader:shader-expression-quantity-specification
              (shader:shader-binding-expression relative)))
           (view-z-quantity
             (shader:shader-expression-quantity-specification
              (shader:shader-binding-expression view-z))))
-      (ok (eq :world-position
-              (math:quantity-specification-name relative-quantity)))
-      (ok (not (math:quantity-specification-affine-p relative-quantity)))
-      (ok (math:unit-expression=
-           :cell (math:quantity-specification-unit relative-quantity)))
-      (ok (eq :view-distance
-              (math:quantity-specification-name view-z-quantity)))
-      (ok (math:unit-expression=
-           :cell (math:quantity-specification-unit view-z-quantity))))
-    (ok (typep (shader:shader-binding-expression shadow-projection)
-               'shader:shader-map-projection))))
+      (true (eq :world-position
+                (math:quantity-specification-name relative-quantity)))
+      (true (not (math:quantity-specification-affine-p relative-quantity)))
+      (true (math:unit-expression=
+             :cell (math:quantity-specification-unit relative-quantity)))
+      (true (eq :view-distance
+                (math:quantity-specification-name view-z-quantity)))
+      (true (math:unit-expression=
+             :cell (math:quantity-specification-unit view-z-quantity))))
+    (true (typep (shader:shader-binding-expression shadow-projection)
+                 'shader:shader-map-projection))))
 
-(deftest projective-maps-are-semantic-objects-with-packed-products
+(define-test projective-maps-are-semantic-objects-with-packed-products
   (let* ((specification (shaders:block-world-vertex-specification))
          (projection-binding
            (binding-named 'shadow-projection specification))
@@ -525,44 +526,44 @@
            (shader:shader-projective-map-sample-quantity-layout definition))
          (uv (math:project-quantity-layout layout '(0 1)))
          (depth (math:project-quantity-layout layout '(2))))
-    (ok (typep definition 'shader:shader-projective-map-definition))
-    (ok (eq definition (shader:shader-map-application-definition application)))
-    (ok (eq application
-            (shader:shader-map-projection-application projection)))
-    (ok (shader:shader-type= :vec3 (shader:shader-map-domain-type definition)))
-    (ok (shader:shader-type=
-         :vec4 (shader:shader-projective-map-homogeneous-type definition)))
-    (ok (shader:shader-type=
-         :vec3 (shader:shader-projective-map-sample-type definition)))
-    (ok (eq :world-position
-            (math:quantity-specification-name domain)))
-    (ok (math:quantity-specification-affine-p domain))
-    (ok (math:unit-expression=
-         :cell (math:quantity-specification-unit domain)))
-    (ok (eq :shadow-uv (math:quantity-specification-name uv)))
-    (ok (math:quantity-specification-affine-p uv))
-    (ok (eq :shadow-depth (math:quantity-specification-name depth)))
-    (ok (math:quantity-specification-affine-p depth))
-    (ok (math:quantity-layout=
-         layout (shader:shader-expression-quantity-layout projection)))
-    (ok (null (shader:shader-expression-quantity-layout application)))
-    (ok (equal '(1/2 1/2 1)
-               (shader:shader-projective-map-coordinate-scale definition)))
-    (ok (equal '(1/2 1/2 0)
-               (shader:shader-projective-map-coordinate-offset definition)))
-    (ok (= 4 (length (shader:shader-map-application-rows application))))
-    (ok (every (lambda (row)
-                 (not (shader:shader-expression-quantity-checked-p row)))
-               (shader:shader-map-application-rows application)))
-    (ok (shader:shader-expression-materialized-p application))
-    (ok (not (shader:shader-expression-materialized-p projection)))
+    (true (typep definition 'shader:shader-projective-map-definition))
+    (true (eq definition (shader:shader-map-application-definition application)))
+    (true (eq application
+              (shader:shader-map-projection-application projection)))
+    (true (shader:shader-type= :vec3 (shader:shader-map-domain-type definition)))
+    (true (shader:shader-type=
+           :vec4 (shader:shader-projective-map-homogeneous-type definition)))
+    (true (shader:shader-type=
+           :vec3 (shader:shader-projective-map-sample-type definition)))
+    (true (eq :world-position
+              (math:quantity-specification-name domain)))
+    (true (math:quantity-specification-affine-p domain))
+    (true (math:unit-expression=
+           :cell (math:quantity-specification-unit domain)))
+    (true (eq :shadow-uv (math:quantity-specification-name uv)))
+    (true (math:quantity-specification-affine-p uv))
+    (true (eq :shadow-depth (math:quantity-specification-name depth)))
+    (true (math:quantity-specification-affine-p depth))
+    (true (math:quantity-layout=
+           layout (shader:shader-expression-quantity-layout projection)))
+    (true (null (shader:shader-expression-quantity-layout application)))
+    (true (equal '(1/2 1/2 1)
+                 (shader:shader-projective-map-coordinate-scale definition)))
+    (true (equal '(1/2 1/2 0)
+                 (shader:shader-projective-map-coordinate-offset definition)))
+    (true (= 4 (length (shader:shader-map-application-rows application))))
+    (true (every (lambda (row)
+                   (not (shader:shader-expression-quantity-checked-p row)))
+                 (shader:shader-map-application-rows application)))
+    (true (shader:shader-expression-materialized-p application))
+    (true (not (shader:shader-expression-materialized-p projection)))
     (labels ((contains-representation-p (expression)
                (or (typep expression 'shader:shader-representation)
                    (some #'contains-representation-p
                          (shader:shader-expression-children expression)))))
-      (ok (not (contains-representation-p application))))))
+      (true (not (contains-representation-p application))))))
 
-(deftest projective-map-applications-reject-undefined-or-wrong-semantics
+(define-test projective-map-applications-reject-undefined-or-wrong-semantics
   (flet ((reason-for (point-declaration form &optional annotated-row-p)
            (handler-case
                (progn
@@ -591,49 +592,49 @@
           (direction
             '(position :vec3 :location 0
               :quantity :world-direction :unit :one)))
-      (ok (eq :undefined-shader-map
-              (reason-for
-               world
-               '(project-point :missing-map position
-                 row-x row-y row-z row-w))))
-      (ok (eq :projective-map-domain-mismatch
-              (reason-for
-               raw
-               '(project-point :world-to-light position
-                 row-x row-y row-z row-w))))
-      (ok (eq :projective-map-domain-mismatch
-              (reason-for
-               direction
-               '(project-point :world-to-light position
-                 row-x row-y row-z row-w))))
-      (ok (eq :projective-map-row-count
-              (reason-for
-               world
-               '(project-point :world-to-light position
-                 row-x row-y row-z))))
-      (ok (eq :invalid-projective-map-rows
-              (reason-for
-               world
-               '(project-point :world-to-light position
-                 row-x row-y row-z row-w)
-               t)))
-      (ok (eq :sampling-projection-requires-map-application
-              (handler-case
-                  (progn
-                    (shader:parse-shader-specification
-                     'invalid-sampling-projection-probe
-                     '(:stage :vertex
-                       :inputs ((raw-clip :vec4 :location 0))
-                       :outputs
-                       ((result :vec2 :location 0
-                                :quantity :shadow-uv :unit :one)))
-                     '((set-output
-                        result (swizzle (project-sample raw-clip) :xy))))
-                    nil)
-                (shader:shader-language-error (condition)
-                  (shader:shader-language-error-reason condition))))))))
+      (true (eq :undefined-shader-map
+                (reason-for
+                 world
+                 '(project-point :missing-map position
+                   row-x row-y row-z row-w))))
+      (true (eq :projective-map-domain-mismatch
+                (reason-for
+                 raw
+                 '(project-point :world-to-light position
+                   row-x row-y row-z row-w))))
+      (true (eq :projective-map-domain-mismatch
+                (reason-for
+                 direction
+                 '(project-point :world-to-light position
+                   row-x row-y row-z row-w))))
+      (true (eq :projective-map-row-count
+                (reason-for
+                 world
+                 '(project-point :world-to-light position
+                   row-x row-y row-z))))
+      (true (eq :invalid-projective-map-rows
+                (reason-for
+                 world
+                 '(project-point :world-to-light position
+                   row-x row-y row-z row-w)
+                 t)))
+      (true (eq :sampling-projection-requires-map-application
+                (handler-case
+                    (progn
+                      (shader:parse-shader-specification
+                       'invalid-sampling-projection-probe
+                       '(:stage :vertex
+                         :inputs ((raw-clip :vec4 :location 0))
+                         :outputs
+                         ((result :vec2 :location 0
+                                  :quantity :shadow-uv :unit :one)))
+                       '((set-output
+                          result (swizzle (project-sample raw-clip) :xy))))
+                      nil)
+                  (shader:shader-language-error (condition)
+                    (shader:shader-language-error-reason condition))))))))
 
-(deftest block-vertex-uniform-members-retain-access-chain-provenance
+(define-test block-vertex-uniform-members-retain-access-chain-provenance
   (let* ((lowering (shaders:block-world-vertex-lowering))
          (specification (spv:shader-lowering-specification lowering))
          (camera (binding-named 'camera specification))
@@ -646,44 +647,44 @@
          (names (mapcar (lambda (instruction)
                           (symbol-name (spv:instruction-name instruction)))
                         instructions)))
-    (ok (find "ACCESS-CHAIN" names :test #'string=))
-    (ok (find "LOAD" names :test #'string=))))
+    (true (find "ACCESS-CHAIN" names :test #'string=))
+    (true (find "LOAD" names :test #'string=))))
 
-(deftest block-shadow-vertex-is-a-light-space-depth-shader
+(define-test block-shadow-vertex-is-a-light-space-depth-shader
   (let* ((specification (shaders:block-world-shadow-vertex-specification))
          (resource (first (shader:shader-specification-resources specification)))
          (clip (binding-named 'clip specification))
          (clip-position
            (first (shader:shader-specification-statements specification))))
-    (ok (eq (shader:shader-specification-stage specification) :vertex))
-    (ok (= (length (shader:shader-specification-inputs specification)) 1))
-    (ok (= (length (shader:shader-specification-outputs specification)) 1))
-    (ok (typep resource 'shader:shader-uniform-block))
-    (ok (= (shader:shader-resource-binding resource) 2))
+    (true (eq (shader:shader-specification-stage specification) :vertex))
+    (true (= (length (shader:shader-specification-inputs specification)) 1))
+    (true (= (length (shader:shader-specification-outputs specification)) 1))
+    (true (typep resource 'shader:shader-uniform-block))
+    (true (= (shader:shader-resource-binding resource) 2))
     (let ((application (shader:shader-binding-expression clip)))
-      (ok (typep application 'shader:shader-map-application))
-      (ok (eq (shader:shader-map-definition-for :world-to-light)
-              (shader:shader-map-application-definition application)))
-      (ok (shader:shader-type=
-           (shader:shader-expression-type application) :vec4)))
-    (ok (shader:shader-type=
-         (shader:shader-expression-type
-          (shader:shader-assignment-value clip-position))
-         :vec4))
-    (ok (> (length (shaders:block-world-shadow-vertex-shader)) 5))))
+      (true (typep application 'shader:shader-map-application))
+      (true (eq (shader:shader-map-definition-for :world-to-light)
+                (shader:shader-map-application-definition application)))
+      (true (shader:shader-type=
+             (shader:shader-expression-type application) :vec4)))
+    (true (shader:shader-type=
+           (shader:shader-expression-type
+            (shader:shader-assignment-value clip-position))
+           :vec4))
+    (true (> (length (shaders:block-world-shadow-vertex-shader)) 5))))
 
-(deftest uniform-blocks-do-not-pretend-to-implement-general-packing
-  (ok (signals
-       (shader:parse-shader-specification
-        'test-uniform-layout
-        '(:stage :vertex
-          :resources ((state :uniform-block :binding 0
-                       :members ((unsupported :float))))
-          :outputs ((position :vec4 :built-in :position)))
-        '((set-output position (vec4 0.0 0.0 0.0 1.0))))
-       'shader:shader-language-error)))
+(define-test uniform-blocks-do-not-pretend-to-implement-general-packing
+  (fail
+   (shader:parse-shader-specification
+    'test-uniform-layout
+    '(:stage :vertex
+      :resources ((state :uniform-block :binding 0
+                   :members ((unsupported :float))))
+      :outputs ((position :vec4 :built-in :position)))
+    '((set-output position (vec4 0.0 0.0 0.0 1.0))))
+   'shader:shader-language-error))
 
-(deftest lowering-retains-expression-to-ssa-provenance
+(define-test lowering-retains-expression-to-ssa-provenance
   (let* ((lowering (shaders:block-world-fragment-lowering))
          (specification (spv:shader-lowering-specification lowering))
          (reflected-expression
@@ -692,23 +693,23 @@
          (instructions
            (gethash reflected-expression
                     (spv:shader-lowering-expression-instructions lowering))))
-    (ok (typep (spv:shader-lowering-module lowering) 'spv:spir-v-module))
-    (ok instructions)
-    (ok (every (lambda (instruction) (typep instruction 'spv:instruction))
-               instructions))
-    (ok (find "F-MUL" instructions
-              :key (lambda (instruction)
-                     (symbol-name (spv:instruction-name instruction)))
-              :test #'string=))
-    (ok (some (lambda (instruction)
-                (member reflected-expression
-                        (gethash instruction
-                                 (spv:shader-lowering-instruction-expressions
-                                  lowering))
-                        :test #'eq))
-              instructions))))
+    (true (typep (spv:shader-lowering-module lowering) 'spv:spir-v-module))
+    (true instructions)
+    (true (every (lambda (instruction) (typep instruction 'spv:instruction))
+                 instructions))
+    (true (find "F-MUL" instructions
+                :key (lambda (instruction)
+                       (symbol-name (spv:instruction-name instruction)))
+                :test #'string=))
+    (true (some (lambda (instruction)
+                  (member reflected-expression
+                          (gethash instruction
+                                   (spv:shader-lowering-instruction-expressions
+                                    lowering))
+                          :test #'eq))
+                instructions))))
 
-(deftest constants-and-reused-loads-retain-occurrence-provenance
+(define-test constants-and-reused-loads-retain-occurrence-provenance
   (let* ((specification
            (shader:parse-shader-specification
             'reuse-input
@@ -740,15 +741,15 @@
            (gethash literal
                     (spv:shader-lowering-expression-instructions
                      block-lowering))))
-    (ok (= (length left-instructions) 1))
-    (ok (eq (first left-instructions) (first right-instructions)))
-    (ok (= (length constant-instructions) 1))
-    (ok (string-equal
-         (symbol-name
-          (spv:instruction-name (first constant-instructions)))
-         "constant"))))
+    (true (= (length left-instructions) 1))
+    (true (eq (first left-instructions) (first right-instructions)))
+    (true (= (length constant-instructions) 1))
+    (true (string-equal
+           (symbol-name
+            (spv:instruction-name (first constant-instructions)))
+           "constant"))))
 
-(deftest vector-scalar-division-lowers-through-a-reciprocal
+(define-test vector-scalar-division-lowers-through-a-reciprocal
   (let* ((specification
            (shader:parse-shader-specification
             'vector-division
@@ -765,11 +766,11 @@
          (names (mapcar (lambda (instruction)
                           (symbol-name (spv:instruction-name instruction)))
                         instructions)))
-    (ok (find "F-DIV" names :test #'string=))
-    (ok (find "VECTOR-TIMES-SCALAR" names :test #'string=))
-    (ok (> (length (spv:assemble-shader-specification specification)) 5))))
+    (true (find "F-DIV" names :test #'string=))
+    (true (find "VECTOR-TIMES-SCALAR" names :test #'string=))
+    (true (> (length (spv:assemble-shader-specification specification)) 5))))
 
-(deftest a-first-use-vector-constructor-cannot-claim-its-type-id
+(define-test a-first-use-vector-constructor-cannot-claim-its-type-id
   (let ((specification
           (shader:parse-shader-specification
            'first-use-vector-constructor
@@ -780,18 +781,18 @@
     ;; VEC3 has no interface declaration to predeclare its type.  Assembly is
     ;; therefore the direct proof that the type and its first value received
     ;; distinct result IDs.
-    (ok (= #x07230203
-           (aref (spv:assemble-shader-specification specification) 0)))))
+    (true (= #x07230203
+             (aref (spv:assemble-shader-specification specification) 0)))))
 
-(deftest canonical-shader-id-reservations-never-reuse-a-claimed-id
+(define-test canonical-shader-id-reservations-never-reuse-a-claimed-id
   (let* ((context (make-instance 'spv::shader-lowering-context))
          (first (spv::reserve-shader-id context 'probe))
          (second (spv::reserve-shader-id context 'probe)))
-    (ok (not (eq first second)))
-    (ok (string= "%PROBE" (symbol-name first)))
-    (ok (string= "%PROBE-2" (symbol-name second)))))
+    (true (not (eq first second)))
+    (true (string= "%PROBE" (symbol-name first)))
+    (true (string= "%PROBE-2" (symbol-name second)))))
 
-(deftest depth-texture-sampling-feeds-ordinary-float-math
+(define-test depth-texture-sampling-feeds-ordinary-float-math
   (let* ((specification
            (shader:parse-shader-specification
             'depth-sample
@@ -814,23 +815,23 @@
          (names (mapcar (lambda (instruction)
                           (symbol-name (spv:instruction-name instruction)))
                         instructions)))
-    (ok (shader:shader-type=
-         (shader:shader-expression-type
-          (shader:shader-binding-expression stored-depth))
-         :vec4))
-    (ok (shader:shader-type=
-         (shader:shader-expression-type
-          (shader:shader-binding-expression depth-lane))
-         :float))
-    (ok (shader:shader-type=
-         (shader:shader-expression-type
-          (shader:shader-binding-expression visible))
-         :float))
-    (ok (find "IMAGE-SAMPLE-IMPLICIT-LOD" names :test #'string=))
-    (ok (find "EXT-INST" names :test #'string=))
-    (ok (> (length (spv:assemble-shader-specification specification)) 5))))
+    (true (shader:shader-type=
+           (shader:shader-expression-type
+            (shader:shader-binding-expression stored-depth))
+           :vec4))
+    (true (shader:shader-type=
+           (shader:shader-expression-type
+            (shader:shader-binding-expression depth-lane))
+           :float))
+    (true (shader:shader-type=
+           (shader:shader-expression-type
+            (shader:shader-binding-expression visible))
+           :float))
+    (true (find "IMAGE-SAMPLE-IMPLICIT-LOD" names :test #'string=))
+    (true (find "EXT-INST" names :test #'string=))
+    (true (> (length (spv:assemble-shader-specification specification)) 5))))
 
-(deftest shader-arithmetic-carries-backend-neutral-quantity-specifications
+(define-test shader-arithmetic-carries-backend-neutral-quantity-specifications
   (flet ((parse-depth-probe (annotated-p)
            (shader:parse-shader-specification
             'semantic-depth-probe
@@ -859,16 +860,16 @@
            (biased-specification
              (shader:shader-expression-quantity-specification
               (shader:shader-binding-expression biased))))
-      (ok (eq :shadow-depth
-              (math:quantity-specification-name receiver-specification)))
-      (ok (math:quantity-specification-affine-p receiver-specification))
-      (ok (math:quantity-specification-affine-p biased-specification))
+      (true (eq :shadow-depth
+                (math:quantity-specification-name receiver-specification)))
+      (true (math:quantity-specification-affine-p receiver-specification))
+      (true (math:quantity-specification-affine-p biased-specification))
       ;; Semantic checking is a source concern; it does not perturb the SPIR-V
       ;; representation or the deterministic lowering of valid arithmetic.
-      (ok (equalp (spv:assemble-shader-specification annotated)
-                  (spv:assemble-shader-specification plain))))))
+      (true (equalp (spv:assemble-shader-specification annotated)
+                    (spv:assemble-shader-specification plain))))))
 
-(deftest shader-arithmetic-rejects-dimensionally-or-affinely-invalid-forms
+(define-test shader-arithmetic-rejects-dimensionally-or-affinely-invalid-forms
   (labels ((reason-for (options body)
              (handler-case
                  (progn
@@ -878,31 +879,31 @@
                (shader:shader-language-error (condition)
                  (list (shader:shader-language-error-reason condition)
                        (shader:shader-language-error-details condition))))))
-    (ok (equal
-         '(:invalid-quantity-operation :cannot-add-points)
-         (reason-for
-          '(:stage :fragment
-            :inputs ((left :float :location 0
-                           :quantity :shadow-depth :affine-p t)
-                     (right :float :location 1
-                            :quantity :shadow-depth :affine-p t))
-            :outputs ((result :float :location 0)))
-          '((let* ((sum (+ left right)))
-              (set-output result sum))))))
-    (ok (equal
-         '(:invalid-quantity-operation :different-quantity-spaces)
-         (reason-for
-          '(:stage :fragment
-            :inputs ((depth :float :location 0
-                            :quantity :shadow-depth)
-                     (distance :float :location 1
-                               :quantity :distance
-                               :dimension :length))
-            :outputs ((result :float :location 0)))
-          '((let* ((sum (+ depth distance)))
-              (set-output result sum))))))))
+    (true (equal
+           '(:invalid-quantity-operation :cannot-add-points)
+           (reason-for
+            '(:stage :fragment
+              :inputs ((left :float :location 0
+                             :quantity :shadow-depth :affine-p t)
+                       (right :float :location 1
+                              :quantity :shadow-depth :affine-p t))
+              :outputs ((result :float :location 0)))
+            '((let* ((sum (+ left right)))
+                (set-output result sum))))))
+    (true (equal
+           '(:invalid-quantity-operation :different-quantity-spaces)
+           (reason-for
+            '(:stage :fragment
+              :inputs ((depth :float :location 0
+                              :quantity :shadow-depth)
+                       (distance :float :location 1
+                                 :quantity :distance
+                                 :dimension :length))
+              :outputs ((result :float :location 0)))
+            '((let* ((sum (+ depth distance)))
+                (set-output result sum))))))))
 
-(deftest annotated-shader-arithmetic-is-total-and-unit-exact
+(define-test annotated-shader-arithmetic-is-total-and-unit-exact
   (labels ((reason-for (inputs expression)
              (handler-case
                  (progn
@@ -931,34 +932,34 @@
               '((let* ((value (max left right)))
                   (set-output result value)))))
            (value (binding-named 'value specification)))
-      (ok (math:unit-expression=
-           :metre
-           (math:quantity-specification-unit
-            (shader:shader-expression-quantity-specification
-             (shader:shader-binding-expression value))))))
-    (ok (equal
-         '(:invalid-quantity-operation :different-units)
-         (reason-for
-          '((left :float :location 0 :quantity :distance
-                  :dimension :length :unit :metre)
-            (right :float :location 1 :quantity :distance
-                   :dimension :length :unit :kilometre))
-          '(max left right))))
-    (ok (equal
-         '(:invalid-quantity-operation :unknown-operator)
-         (reason-for
-          '((value :float :location 0 :quantity :distance
-                   :dimension :length :unit :metre))
-          '(abs value))))
-    (ok (equal
-         '(:missing-quantity-specification (RIGHT))
-         (reason-for
-          '((left :float :location 0 :quantity :distance
-                  :dimension :length :unit :metre)
-            (right :float :location 1))
-          '(+ left right))))))
+      (true (math:unit-expression=
+             :metre
+             (math:quantity-specification-unit
+              (shader:shader-expression-quantity-specification
+               (shader:shader-binding-expression value))))))
+    (true (equal
+           '(:invalid-quantity-operation :different-units)
+           (reason-for
+            '((left :float :location 0 :quantity :distance
+                    :dimension :length :unit :metre)
+              (right :float :location 1 :quantity :distance
+                     :dimension :length :unit :kilometre))
+            '(max left right))))
+    (true (equal
+           '(:invalid-quantity-operation :unknown-operator)
+           (reason-for
+            '((value :float :location 0 :quantity :distance
+                     :dimension :length :unit :metre))
+            '(abs value))))
+    (true (equal
+           '(:missing-quantity-specification (RIGHT))
+           (reason-for
+            '((left :float :location 0 :quantity :distance
+                    :dimension :length :unit :metre)
+              (right :float :location 1))
+            '(+ left right))))))
 
-(deftest packed-gpu-vectors-project-as-semantic-products
+(define-test packed-gpu-vectors-project-as-semantic-products
   (let* ((specification
            (shader:parse-shader-specification
             'semantic-product-probe
@@ -978,16 +979,16 @@
          (layout (shader:shader-declaration-quantity-layout packed))
          (position (binding-named 'position specification))
          (sample-value (binding-named 'sample-value specification)))
-    (ok (null (shader:shader-declaration-quantity-specification packed)))
-    (ok (= 3 (math:quantity-layout-extent layout)))
-    (ok (eq :sample-position
-            (math:quantity-specification-name
-             (shader:shader-expression-quantity-specification
-              (shader:shader-binding-expression position)))))
-    (ok (eq :sample-value
-            (math:quantity-specification-name
-             (shader:shader-expression-quantity-specification
-              (shader:shader-binding-expression sample-value))))))
+    (true (null (shader:shader-declaration-quantity-specification packed)))
+    (true (= 3 (math:quantity-layout-extent layout)))
+    (true (eq :sample-position
+              (math:quantity-specification-name
+               (shader:shader-expression-quantity-specification
+                (shader:shader-binding-expression position)))))
+    (true (eq :sample-value
+              (math:quantity-specification-name
+               (shader:shader-expression-quantity-specification
+                (shader:shader-binding-expression sample-value))))))
   (labels ((reason-for (expression)
              (handler-case
                  (progn
@@ -1004,10 +1005,10 @@
                    nil)
                (shader:shader-language-error (condition)
                  (shader:shader-language-error-reason condition)))))
-    (ok (eq :undeclared-quantity-projection
-            (reason-for '(swizzle packed :yz))))
-    (ok (eq :missing-quantity-specification
-            (reason-for '(+ packed packed)))))
+    (true (eq :undeclared-quantity-projection
+              (reason-for '(swizzle packed :yz))))
+    (true (eq :missing-quantity-specification
+              (reason-for '(+ packed packed)))))
   (let* ((specification
            (shader:parse-shader-specification
             'homogeneous-component-probe
@@ -1019,11 +1020,11 @@
             '((set-output x-output (swizzle position :x)))))
          (x (shader:shader-assignment-value
              (first (shader:shader-specification-statements specification)))))
-    (ok (eq :test-position-x
-            (math:quantity-specification-name
-             (shader:shader-expression-quantity-specification x))))))
+    (true (eq :test-position-x
+              (math:quantity-specification-name
+               (shader:shader-expression-quantity-specification x))))))
 
-(deftest texture-samples-can-publish-semantic-channel-layouts
+(define-test texture-samples-can-publish-semantic-channel-layouts
   (let* ((specification
            (shader:parse-shader-specification
             'semantic-sample-probe
@@ -1046,22 +1047,22 @@
          (texel (binding-named 'texel specification))
          (rgb (binding-named 'rgb specification))
          (alpha (binding-named 'alpha specification)))
-    (ok (eq :srgb-to-linear
-            (shader:shader-resource-sample-transfer image)))
-    (ok (math:quantity-layout=
-         (shader:shader-resource-sample-quantity-layout image)
-         (shader:shader-expression-quantity-layout
-          (shader:shader-binding-expression texel))))
-    (ok (eq :linear-rgb
-            (math:quantity-specification-name
-             (shader:shader-expression-quantity-specification
-              (shader:shader-binding-expression rgb)))))
-    (ok (eq :opacity
-            (math:quantity-specification-name
-             (shader:shader-expression-quantity-specification
-              (shader:shader-binding-expression alpha)))))))
+    (true (eq :srgb-to-linear
+              (shader:shader-resource-sample-transfer image)))
+    (true (math:quantity-layout=
+           (shader:shader-resource-sample-quantity-layout image)
+           (shader:shader-expression-quantity-layout
+            (shader:shader-binding-expression texel))))
+    (true (eq :linear-rgb
+              (math:quantity-specification-name
+               (shader:shader-expression-quantity-specification
+                (shader:shader-binding-expression rgb)))))
+    (true (eq :opacity
+              (math:quantity-specification-name
+               (shader:shader-expression-quantity-specification
+                (shader:shader-binding-expression alpha)))))))
 
-(deftest sample-transfer-metadata-is-texture-only
+(define-test sample-transfer-metadata-is-texture-only
   (flet ((reason-for (resource)
            (handler-case
                (progn
@@ -1074,16 +1075,16 @@
                  nil)
              (shader:shader-language-error (condition)
                (shader:shader-language-error-reason condition)))))
-    (ok (eq :invalid-sample-transfer
-            (reason-for
-             '(image :texture-2d :binding 0
-                     :sample-transfer :mystery-transfer))))
-    (ok (eq :sample-semantics-on-non-texture
-            (reason-for
-             '(sampler :sampler :binding 0
-                       :sample-transfer :srgb-to-linear))))))
+    (true (eq :invalid-sample-transfer
+              (reason-for
+               '(image :texture-2d :binding 0
+                       :sample-transfer :mystery-transfer))))
+    (true (eq :sample-semantics-on-non-texture
+              (reason-for
+               '(sampler :sampler :binding 0
+                         :sample-transfer :srgb-to-linear))))))
 
-(deftest semantic-boundaries-are-distinct-checked-and-have-no-codegen-effect
+(define-test semantic-boundaries-are-distinct-checked-and-have-no-codegen-effect
   (flet ((probe (annotated-p)
            (shader:parse-shader-specification
             'semantic-boundary-probe
@@ -1112,24 +1113,24 @@
            (sum (binding-named 'sum annotated))
            (represented (binding-named 'represented annotated))
            (recovered (binding-named 'recovered annotated)))
-      (ok (typep (shader:shader-binding-expression typed-left)
-                 'shader:shader-quantity-assumption))
-      (ok (typep (shader:shader-binding-expression sum)
-                 'shader:shader-interpretation))
-      (ok (eq :combined-factor
-              (math:quantity-specification-name
-               (shader:shader-expression-quantity-specification
-                (shader:shader-binding-expression sum)))))
-      (ok (typep (shader:shader-binding-expression represented)
-                 'shader:shader-representation))
-      (ok (not (shader:shader-expression-quantity-checked-p
-                (shader:shader-binding-expression represented))))
-      (ok (null (shader:shader-expression-quantity-specification
-                 (shader:shader-binding-expression represented))))
-      (ok (typep (shader:shader-binding-expression recovered)
-                 'shader:shader-quantity-assumption))
-      (ok (equalp (spv:assemble-shader-specification annotated)
-                  (spv:assemble-shader-specification plain)))))
+      (true (typep (shader:shader-binding-expression typed-left)
+                   'shader:shader-quantity-assumption))
+      (true (typep (shader:shader-binding-expression sum)
+                   'shader:shader-interpretation))
+      (true (eq :combined-factor
+                (math:quantity-specification-name
+                 (shader:shader-expression-quantity-specification
+                  (shader:shader-binding-expression sum)))))
+      (true (typep (shader:shader-binding-expression represented)
+                   'shader:shader-representation))
+      (true (not (shader:shader-expression-quantity-checked-p
+                  (shader:shader-binding-expression represented))))
+      (true (null (shader:shader-expression-quantity-specification
+                   (shader:shader-binding-expression represented))))
+      (true (typep (shader:shader-binding-expression recovered)
+                   'shader:shader-quantity-assumption))
+      (true (equalp (spv:assemble-shader-specification annotated)
+                    (spv:assemble-shader-specification plain)))))
   (flet ((probe (constructed-p)
            (shader:parse-shader-specification
             'quantity-construction-probe
@@ -1144,9 +1145,9 @@
            (expression
              (shader:shader-assignment-value
               (first (shader:shader-specification-statements constructed)))))
-      (ok (typep expression 'shader:shader-quantity-construction))
-      (ok (equalp (spv:assemble-shader-specification constructed)
-                  (spv:assemble-shader-specification plain)))))
+      (true (typep expression 'shader:shader-quantity-construction))
+      (true (equalp (spv:assemble-shader-specification constructed)
+                    (spv:assemble-shader-specification plain)))))
   (flet ((reason-for (form)
            (handler-case
                (progn
@@ -1161,28 +1162,28 @@
                (shader:shader-language-error-reason condition)))))
     ;; INTERPRET can name checked arithmetic, but cannot smuggle meaning onto
     ;; a raw input.  ASSUME-QUANTITY is the deliberately loud boundary for it.
-    (ok (eq :representation-requires-quantity
-            (reason-for '(representation value))))
-    (ok (eq :invalid-quantity-interpretation
-            (reason-for
-             '(interpret value :quantity :distance
-                         :dimension :length :unit :metre))))
-    (ok (eq :invalid-quantity-interpretation
-            (reason-for
-             '(interpret
-               (assume-quantity value :quantity :distance
-                                :dimension :length :unit :metre)
-               :quantity :distance
-               :dimension :length :unit :kilometre))))
-    (ok (eq :invalid-quantity-interpretation
-            (reason-for
-             '(interpret
-               (assume-quantity value :quantity :height
-                                :dimension :length :unit :metre)
-               :quantity :width
-               :dimension :length :unit :metre))))))
+    (true (eq :representation-requires-quantity
+              (reason-for '(representation value))))
+    (true (eq :invalid-quantity-interpretation
+              (reason-for
+               '(interpret value :quantity :distance
+                           :dimension :length :unit :metre))))
+    (true (eq :invalid-quantity-interpretation
+              (reason-for
+               '(interpret
+                 (assume-quantity value :quantity :distance
+                                  :dimension :length :unit :metre)
+                 :quantity :distance
+                 :dimension :length :unit :kilometre))))
+    (true (eq :invalid-quantity-interpretation
+              (reason-for
+               '(interpret
+                 (assume-quantity value :quantity :height
+                                  :dimension :length :unit :metre)
+                 :quantity :width
+                 :dimension :length :unit :metre))))))
 
-(deftest production-vertex-interfaces-carry-quantities-end-to-end
+(define-test production-vertex-interfaces-carry-quantities-end-to-end
   (let* ((specification (shaders:block-world-vertex-specification))
          (inputs (shader:shader-specification-inputs specification))
          (outputs (shader:shader-specification-outputs specification))
@@ -1196,48 +1197,48 @@
          (tile-offset (tenth outputs))
          (position-quantity
            (shader:shader-declaration-quantity-specification position)))
-    (ok (shader:shader-type=
-         :vec3 (math:declaration-representation-type position)))
-    (ok (eq position-quantity
-            (math:declaration-quantity-specification position)))
-    (ok (math:declaration-quantity-checked-p position))
-    (ok (eq :world-position
-            (math:quantity-specification-name position-quantity)))
-    (ok (math:quantity-specification-affine-p position-quantity))
-    (ok (math:unit-expression=
-         :cell (math:quantity-specification-unit position-quantity)))
-    (ok (shader:shader-declaration-quantity-layout uv-shade))
-    (ok (eq :world-direction
-            (math:quantity-specification-name
-             (shader:shader-declaration-quantity-specification normal))))
-    (ok (shader:shader-declaration-quantity-layout light))
-    (ok (eq :fog-amount
-            (math:quantity-specification-name
-             (shader:shader-declaration-quantity-specification fog))))
-    (ok (eq :shadow-uv
-            (math:quantity-specification-name
-             (shader:shader-declaration-quantity-specification shadow-uv))))
-    (ok (eq :shadow-depth
-            (math:quantity-specification-name
-             (shader:shader-declaration-quantity-specification shadow-depth))))
-    (ok (eq :flat (shader:shader-interface-interpolation tile-offset)))
-    (ok (eq :atlas-tile-offset
-            (math:quantity-specification-name
-             (shader:shader-declaration-quantity-specification tile-offset))))
-    (ok (signals
-         (shader:parse-shader-specification
-          'invalid-production-unit-mix
-          '(:stage :vertex
-            :inputs
-            ((position :vec3 :location 0
-                       :quantity :world-position :unit :cell :affine-p t)
-             (direction :vec3 :location 1
-                        :quantity :world-direction :unit :one))
-            :outputs ((result :vec3 :location 0)))
-         '((set-output result (+ position direction))))
-         'shader:shader-language-error))))
+    (true (shader:shader-type=
+           :vec3 (math:declaration-representation-type position)))
+    (true (eq position-quantity
+              (math:declaration-quantity-specification position)))
+    (true (math:declaration-quantity-checked-p position))
+    (true (eq :world-position
+              (math:quantity-specification-name position-quantity)))
+    (true (math:quantity-specification-affine-p position-quantity))
+    (true (math:unit-expression=
+           :cell (math:quantity-specification-unit position-quantity)))
+    (true (shader:shader-declaration-quantity-layout uv-shade))
+    (true (eq :world-direction
+              (math:quantity-specification-name
+               (shader:shader-declaration-quantity-specification normal))))
+    (true (shader:shader-declaration-quantity-layout light))
+    (true (eq :fog-amount
+              (math:quantity-specification-name
+               (shader:shader-declaration-quantity-specification fog))))
+    (true (eq :shadow-uv
+              (math:quantity-specification-name
+               (shader:shader-declaration-quantity-specification shadow-uv))))
+    (true (eq :shadow-depth
+              (math:quantity-specification-name
+               (shader:shader-declaration-quantity-specification shadow-depth))))
+    (true (eq :flat (shader:shader-interface-interpolation tile-offset)))
+    (true (eq :atlas-tile-offset
+              (math:quantity-specification-name
+               (shader:shader-declaration-quantity-specification tile-offset))))
+    (fail
+     (shader:parse-shader-specification
+      'invalid-production-unit-mix
+      '(:stage :vertex
+        :inputs
+        ((position :vec3 :location 0
+                   :quantity :world-position :unit :cell :affine-p t)
+         (direction :vec3 :location 1
+                    :quantity :world-direction :unit :one))
+        :outputs ((result :vec3 :location 0)))
+     '((set-output result (+ position direction))))
+     'shader:shader-language-error)))
 
-(deftest explicit-unit-conversion-preserves-meaning-and-scales-values
+(define-test explicit-unit-conversion-preserves-meaning-and-scales-values
   (let* ((specification
            (shader:parse-shader-specification
             'unit-conversion-probe
@@ -1258,12 +1259,12 @@
          (names (mapcar (lambda (instruction)
                           (symbol-name (spv:instruction-name instruction)))
                         instructions)))
-    (ok (typep expression 'shader:shader-unit-conversion))
-    (ok (= 1/100 (shader:shader-unit-conversion-factor expression)))
-    (ok (eq :opacity (math:quantity-specification-name quantity)))
-    (ok (math:unitless-p (math:quantity-specification-unit quantity)))
-    (ok (find "F-MUL" names :test #'string=))
-    (ok (> (length (spv:assemble-shader-specification specification)) 5)))
+    (true (typep expression 'shader:shader-unit-conversion))
+    (true (= 1/100 (shader:shader-unit-conversion-factor expression)))
+    (true (eq :opacity (math:quantity-specification-name quantity)))
+    (true (math:unitless-p (math:quantity-specification-unit quantity)))
+    (true (find "F-MUL" names :test #'string=))
+    (true (> (length (spv:assemble-shader-specification specification)) 5)))
   (flet ((reason-for (form)
            (handler-case
                (progn
@@ -1276,27 +1277,27 @@
                  nil)
              (shader:shader-language-error (condition)
                (shader:shader-language-error-reason condition)))))
-    (ok (eq :unit-conversion-requires-quantity
-            (reason-for '(convert-unit value :unit :metre))))
-    (ok (eq :invalid-quantity-declaration
-            (reason-for
-             '(quantity 1.0 :quantity :opacity :unit :radian))))
-    (ok (eq :invalid-quantity-declaration
-            (reason-for
-             '(quantity 1.0 :quantity :unregistered-distance
-                            :unit :metre))))
-    (ok (eq :invalid-unit-conversion
-            (reason-for
-             '(convert-unit
-               (quantity 1.0 :quantity :duration :unit :second)
-               :unit :metre))))
-    (ok (eq :undefined-unit
-            (reason-for
-             '(convert-unit
-               (quantity 1.0 :quantity :distance :unit :metre)
-               :unit :furlong))))))
+    (true (eq :unit-conversion-requires-quantity
+              (reason-for '(convert-unit value :unit :metre))))
+    (true (eq :invalid-quantity-declaration
+              (reason-for
+               '(quantity 1.0 :quantity :opacity :unit :radian))))
+    (true (eq :invalid-quantity-declaration
+              (reason-for
+               '(quantity 1.0 :quantity :unregistered-distance
+                              :unit :metre))))
+    (true (eq :invalid-unit-conversion
+              (reason-for
+               '(convert-unit
+                 (quantity 1.0 :quantity :duration :unit :second)
+                 :unit :metre))))
+    (true (eq :undefined-unit
+              (reason-for
+               '(convert-unit
+                 (quantity 1.0 :quantity :distance :unit :metre)
+                 :unit :furlong))))))
 
-(deftest production-shadow-material-carries-semantic-quantities
+(define-test production-shadow-material-carries-semantic-quantities
   (let ((specification (shaders:block-world-fragment-specification)))
     (flet ((quantity (name)
              (shader:shader-expression-quantity-specification
@@ -1310,38 +1311,38 @@
             (blocker-separation (quantity 'shadow-blocker-separation))
             (filter-radius (quantity 'shadow-filter-radius))
             (rgba (quantity 'rgba)))
-        (ok (eq :shadow-uv
-                (math:quantity-specification-name coordinate)))
-        (ok (eq :normalized-coordinate
-                (math:quantity-specification-kind coordinate)))
-        (ok (math:quantity-specification-affine-p coordinate))
-        (ok (eq :shadow-depth
-                (math:quantity-specification-name receiver-depth)))
-        (ok (math:quantity-specification-affine-p receiver-depth))
-        (ok (not (math:quantity-specification-affine-p bias)))
-        (ok (math:unit-expression=
-             :cell (math:quantity-specification-unit world-span)))
-        (ok (eq :shadow-depth-gradient
-                (math:quantity-specification-name gradient)))
-        (ok (eq :shadow-depth
-                (math:quantity-specification-name blocker-separation)))
-        (ok (math:quantity-specification-absolute-p blocker-separation))
-        (ok (eq :shadow-filter-radius
-                (math:quantity-specification-name filter-radius)))
-        (ok (eq :sample-count
-                (math:quantity-specification-kind filter-radius)))
-        (ok (eq :linear-rgba
-                (math:quantity-specification-name rgba)))
-        (ok (eq :relative-color-signal
-                (math:quantity-specification-kind rgba)))))))
+        (true (eq :shadow-uv
+                  (math:quantity-specification-name coordinate)))
+        (true (eq :normalized-coordinate
+                  (math:quantity-specification-kind coordinate)))
+        (true (math:quantity-specification-affine-p coordinate))
+        (true (eq :shadow-depth
+                  (math:quantity-specification-name receiver-depth)))
+        (true (math:quantity-specification-affine-p receiver-depth))
+        (true (not (math:quantity-specification-affine-p bias)))
+        (true (math:unit-expression=
+               :cell (math:quantity-specification-unit world-span)))
+        (true (eq :shadow-depth-gradient
+                  (math:quantity-specification-name gradient)))
+        (true (eq :shadow-depth
+                  (math:quantity-specification-name blocker-separation)))
+        (true (math:quantity-specification-absolute-p blocker-separation))
+        (true (eq :shadow-filter-radius
+                  (math:quantity-specification-name filter-radius)))
+        (true (eq :sample-count
+                  (math:quantity-specification-kind filter-radius)))
+        (true (eq :linear-rgba
+                  (math:quantity-specification-name rgba)))
+        (true (eq :relative-color-signal
+                  (math:quantity-specification-kind rgba)))))))
 
-(deftest production-quantity-vocabulary-supplies-character-defaults
+(define-test production-quantity-vocabulary-supplies-character-defaults
   (flet ((specification (name &optional (unit :one))
            (math:make-quantity-specification name :unit unit)))
     (dolist (name '(:world-position :texture-uv :shadow-uv :shadow-depth
                     :clip-coordinate))
-      (ok (math:quantity-specification-affine-p
-           (specification name (if (eq name :world-position) :cell :one)))))
+      (true (math:quantity-specification-affine-p
+             (specification name (if (eq name :world-position) :cell :one)))))
     (dolist (name '(:world-distance :linear-rgb :linear-rgba :opacity
                     :ambient-occlusion :fog-amount :day-factor
                     :sky-light-level :block-light-level :material-emission
@@ -1351,10 +1352,10 @@
                              (if (member name '(:world-distance :view-distance))
                                  :cell
                                  :one))))
-        (ok (math:quantity-specification-absolute-p quantity))
-        (ok (math:quantity-specification-non-negative-p quantity))))))
+        (true (math:quantity-specification-absolute-p quantity))
+        (true (math:quantity-specification-non-negative-p quantity))))))
 
-(deftest production-points-and-amounts-reject-invalid-arithmetic
+(define-test production-points-and-amounts-reject-invalid-arithmetic
   (labels ((failure-for (form)
              (handler-case
                  (progn
@@ -1372,19 +1373,19 @@
                  (quantity 1.0 :quantity :world-x-position :unit :cell)))
            (negation-error (failure-for negation))
            (point-error (failure-for point-addition)))
-      (ok (eq :invalid-quantity-operation
-              (shader:shader-language-error-reason negation-error)))
-      (ok (eq :cannot-negate-amount
-              (shader:shader-language-error-details negation-error)))
-      (ok (equal negation (shader:shader-language-error-form negation-error)))
-      (ok (eq :invalid-quantity-operation
-              (shader:shader-language-error-reason point-error)))
-      (ok (eq :cannot-add-points
-              (shader:shader-language-error-details point-error)))
-      (ok (equal point-addition
-                 (shader:shader-language-error-form point-error))))))
+      (true (eq :invalid-quantity-operation
+                (shader:shader-language-error-reason negation-error)))
+      (true (eq :cannot-negate-amount
+                (shader:shader-language-error-details negation-error)))
+      (true (equal negation (shader:shader-language-error-form negation-error)))
+      (true (eq :invalid-quantity-operation
+                (shader:shader-language-error-reason point-error)))
+      (true (eq :cannot-add-points
+                (shader:shader-language-error-details point-error)))
+      (true (equal point-addition
+                   (shader:shader-language-error-form point-error))))))
 
-(deftest production-crosshair-composes-linear-rgb-with-opacity
+(define-test production-crosshair-composes-linear-rgb-with-opacity
   (let* ((specification (shaders:block-world-crosshair-fragment-specification))
          (ink (first (shader:shader-specification-inputs specification)))
          (rgba (binding-named 'rgba specification))
@@ -1404,17 +1405,17 @@
          (rgba-quantity
            (shader:shader-expression-quantity-specification
             (shader:shader-binding-expression rgba))))
-    (ok (eq :linear-rgb
-            (math:quantity-specification-name ink-quantity)))
-    (ok (eq :opacity
-            (math:quantity-specification-name opaque-quantity)))
-    (ok (eq :linear-rgba
-            (math:quantity-specification-name rgba-quantity)))
-    (ok (math:quantity-specification-non-negative-p rgba-quantity))))
+    (true (eq :linear-rgb
+              (math:quantity-specification-name ink-quantity)))
+    (true (eq :opacity
+              (math:quantity-specification-name opaque-quantity)))
+    (true (eq :linear-rgba
+              (math:quantity-specification-name rgba-quantity)))
+    (true (math:quantity-specification-non-negative-p rgba-quantity))))
 
-(deftest shadow-visibility-is-a-source-abstraction-over-core-math
-  (ok (shader:shader-abstraction-p 'shader:shadow-visibility))
-  (ok (not (shader:shader-operator-p 'shader:shadow-visibility)))
+(define-test shadow-visibility-is-a-source-abstraction-over-core-math
+  (true (shader:shader-abstraction-p 'shader:shadow-visibility))
+  (true (not (shader:shader-operator-p 'shader:shadow-visibility)))
   (let* ((specification
            (shader:parse-shader-specification
             'shadow-visibility-probe
@@ -1453,13 +1454,13 @@
          (names (mapcar (lambda (instruction)
                           (symbol-name (spv:instruction-name instruction)))
                         instructions)))
-    (ok (typep expression 'shader:shader-call))
-    (ok (eq (shader:shader-call-operator expression) '/))
-    (ok (= 17 (count "IMAGE-SAMPLE-DREF-IMPLICIT-LOD" names :test #'string=)))
-    (ok (= 17 (count "DOT" names :test #'string=)))
-    (ok (> (length (spv:assemble-shader-specification specification)) 5))))
+    (true (typep expression 'shader:shader-call))
+    (true (eq (shader:shader-call-operator expression) '/))
+    (true (= 17 (count "IMAGE-SAMPLE-DREF-IMPLICIT-LOD" names :test #'string=)))
+    (true (= 17 (count "DOT" names :test #'string=)))
+    (true (> (length (spv:assemble-shader-specification specification)) 5))))
 
-(deftest shader-abstraction-redefinition-affects-fresh-parses
+(define-test shader-abstraction-redefinition-affects-fresh-parses
   (labels ((install-subtraction ()
              (eval
               '(shader:define-shader-abstraction test-shadow-rewrite
@@ -1504,62 +1505,62 @@
                    (method-added
                      (shader-abstraction-method-probe
                       :abstraction-probe :fragment)))
-               (ok (> (shader:shader-source-revision) revision))
-               (ok (equal (form-names subtracted-form)
-                          '("step" ("-" "receiver" "bias") "depth")))
-               (ok (equal (form-names (visible-form added))
-                          '("step" ("+" "receiver" "bias") "depth")))
-               (ok (equal (form-names method-subtracted-form)
-                          '("step" ("-" "receiver" "bias") "depth")))
-               (ok (equal (form-names (visible-form method-added))
-                          '("step" ("+" "receiver" "bias") "depth")))
+               (true (> (shader:shader-source-revision) revision))
+               (true (equal (form-names subtracted-form)
+                            '("step" ("-" "receiver" "bias") "depth")))
+               (true (equal (form-names (visible-form added))
+                            '("step" ("+" "receiver" "bias") "depth")))
+               (true (equal (form-names method-subtracted-form)
+                            '("step" ("-" "receiver" "bias") "depth")))
+               (true (equal (form-names (visible-form method-added))
+                            '("step" ("+" "receiver" "bias") "depth")))
                (install-bad-expansion)
-               (ok (signals (parse-probe) 'shader:shader-language-error))
-               (ok (equal (form-names subtracted-form)
-                          '("step" ("-" "receiver" "bias") "depth"))))))
+               (fail (parse-probe) 'shader:shader-language-error)
+               (true (equal (form-names subtracted-form)
+                            '("step" ("-" "receiver" "bias") "depth"))))))
       (install-subtraction))))
 
-(deftest shader-lowering-is-deterministic-and-assemblable
+(define-test shader-lowering-is-deterministic-and-assemblable
   (flet ((forms ()
            (mapcar #'spv:instruction-form
                    (spv:lower-spir-v
                     (shaders:block-world-fragment-module)))))
-    (ok (equal (forms) (forms)))
+    (true (equal (forms) (forms)))
     (let ((words (shaders:block-world-fragment-shader)))
-      (ok (> (length words) 5))
-      (ok (= (aref words 0) #x07230203)))
+      (true (> (length words) 5))
+      (true (= (aref words 0) #x07230203)))
     (let ((vertex
             (spv:assemble-shader-specification
              (shaders:block-world-crosshair-vertex-specification)))
           (fragment (shaders:block-world-crosshair-fragment-shader)))
-      (ok (> (length vertex) 5))
-      (ok (> (length fragment) 5))
-      (ok (= (aref vertex 0) #x07230203))
-      (ok (= (aref fragment 0) #x07230203)))
+      (true (> (length vertex) 5))
+      (true (> (length fragment) 5))
+      (true (= (aref vertex 0) #x07230203))
+      (true (= (aref fragment 0) #x07230203)))
     (let ((vertex (shaders:block-world-vertex-shader)))
-      (ok (> (length vertex) 5))
-      (ok (= (aref vertex 0) #x07230203)))
+      (true (> (length vertex) 5))
+      (true (= (aref vertex 0) #x07230203)))
     (let ((vertex (shaders:block-world-sky-vertex-shader))
           (fragment (shaders:block-world-sky-fragment-shader)))
-      (ok (> (length vertex) 5))
-      (ok (> (length fragment) 5))
-      (ok (= (aref vertex 0) #x07230203))
-      (ok (= (aref fragment 0) #x07230203)))
+      (true (> (length vertex) 5))
+      (true (> (length fragment) 5))
+      (true (= (aref vertex 0) #x07230203))
+      (true (= (aref fragment 0) #x07230203)))
     (let ((vertex (shaders:block-world-shadow-vertex-shader)))
-      (ok (> (length vertex) 5))
-      (ok (= (aref vertex 0) #x07230203)))
+      (true (> (length vertex) 5))
+      (true (= (aref vertex 0) #x07230203)))
     (let ((vertex
             (spv:assemble-shader-specification
              (shaders:block-world-text-vertex-specification)))
           (fragment
             (spv:assemble-shader-specification
              (shaders:block-world-text-fragment-specification))))
-      (ok (> (length vertex) 5))
-      (ok (> (length fragment) 5))
-      (ok (= (aref vertex 0) #x07230203))
-      (ok (= (aref fragment 0) #x07230203)))))
+      (true (> (length vertex) 5))
+      (true (> (length fragment) 5))
+      (true (= (aref vertex 0) #x07230203))
+      (true (= (aref fragment 0) #x07230203)))))
 
-(deftest every-scene-stage-declares-the-same-frame-uniform-block
+(define-test every-scene-stage-declares-the-same-frame-uniform-block
   ;; Identical member order and offsets at binding 2 are the ABI contract
   ;; which lets one buffer feed the vertex and fragment halves of both the
   ;; block material and the sky.
@@ -1582,19 +1583,19 @@
                    (shaders:block-world-text-vertex-specification)))
            (blocks (mapcar #'frame-block specifications))
            (reference (member-layout (first blocks))))
-      (ok (every (lambda (block) (typep block 'shader:shader-uniform-block))
-                 blocks))
-      (ok (every (lambda (block)
-                   (= (shader:shader-resource-binding block) 2))
-                 blocks))
-      (ok (every (lambda (block)
-                   (equal (member-layout block) reference))
-                 (rest blocks)))
-      (ok (every (lambda (block)
-                   (= (shader:shader-uniform-block-byte-size block) 304))
-                 blocks)))))
+      (true (every (lambda (block) (typep block 'shader:shader-uniform-block))
+                   blocks))
+      (true (every (lambda (block)
+                     (= (shader:shader-resource-binding block) 2))
+                   blocks))
+      (true (every (lambda (block)
+                     (equal (member-layout block) reference))
+                   (rest blocks)))
+      (true (every (lambda (block)
+                     (= (shader:shader-uniform-block-byte-size block) 304))
+                   blocks)))))
 
-(deftest the-sky-material-is-image-mathematics-over-environment-lanes
+(define-test the-sky-material-is-image-mathematics-over-environment-lanes
   (let* ((vertex (shaders:block-world-sky-vertex-specification))
          (fragment (shaders:block-world-sky-fragment-specification))
          (fragment-module (shaders:block-world-sky-fragment-module))
@@ -1602,44 +1603,44 @@
          (direction (binding-named 'direction fragment))
          (cloud-density (binding-named 'cloud-density fragment))
          (disc (binding-named 'disc fragment)))
-    (ok (eq (shader:shader-specification-stage vertex) :vertex))
-    (ok (eq (shader:shader-specification-stage fragment) :fragment))
-    (ok (shader:shader-type=
-         (shader:shader-expression-type (shader:shader-binding-expression ray))
-         :vec3))
+    (true (eq (shader:shader-specification-stage vertex) :vertex))
+    (true (eq (shader:shader-specification-stage fragment) :fragment))
+    (true (shader:shader-type=
+           (shader:shader-expression-type (shader:shader-binding-expression ray))
+           :vec3))
     ;; The sky drops out of the checked-quantity world once, deliberately,
     ;; and is ordinary image mathematics over a unit view ray thereafter.
-    (ok (equal (form-names
-                (shader:shader-expression-form
-                 (shader:shader-binding-expression direction)))
-               '("normalize" ("representation" "ray-input"))))
+    (true (equal (form-names
+                  (shader:shader-expression-form
+                   (shader:shader-binding-expression direction)))
+                 '("normalize" ("representation" "ray-input"))))
     ;; A deck is a coverage threshold over one noise field, and the width of
     ;; that threshold is the only thing that softens toward the horizon.
-    (ok (equal (form-names
-                (shader:shader-expression-form
-                 (shader:shader-binding-expression cloud-density)))
-               '("*" "deck-mask"
-                 ("smoothstep" "coverage"
-                  ("+" "coverage" "softness") "cloud-field"))))
+    (true (equal (form-names
+                  (shader:shader-expression-form
+                   (shader:shader-binding-expression cloud-density)))
+                 '("*" "deck-mask"
+                   ("smoothstep" "coverage"
+                    ("+" "coverage" "softness") "cloud-field"))))
     ;; The deck's own shadow is the same field sampled along the deck toward
     ;; the sun, against the same threshold: a lit face and a dark underside
     ;; from one extra tap.
-    (ok (equal (form-names
-                (shader:shader-expression-form
-                 (shader:shader-binding-expression
-                  (binding-named 'shadow-density fragment))))
-               '("smoothstep" "coverage" ("+" "coverage" "softness")
-                 "shadow-field")))
-    (ok (equal (form-names
-                (shader:shader-expression-form
-                 (shader:shader-binding-expression disc)))
-               '("smoothstep" ("-" 1.0 "disc-limb")
-                 ("-" 1.0 ("*" 0.56 "disc-limb")) "alignment")))
+    (true (equal (form-names
+                  (shader:shader-expression-form
+                   (shader:shader-binding-expression
+                    (binding-named 'shadow-density fragment))))
+                 '("smoothstep" "coverage" ("+" "coverage" "softness")
+                   "shadow-field")))
+    (true (equal (form-names
+                  (shader:shader-expression-form
+                   (shader:shader-binding-expression disc)))
+                 '("smoothstep" ("-" 1.0 "disc-limb")
+                   ("-" 1.0 ("*" 0.56 "disc-limb")) "alignment")))
     ;; All the fragment's extended mathematics shares one import.
-    (ok (= 1 (length (spv:spir-v-module-extended-instruction-imports
-                      fragment-module))))))
+    (true (= 1 (length (spv:spir-v-module-extended-instruction-imports
+                        fragment-module))))))
 
-(deftest the-sky-and-the-block-surface-agree-on-what-distance-looks-like
+(define-test the-sky-and-the-block-surface-agree-on-what-distance-looks-like
   ;; Below the horizon the sky stands in for terrain too far off to be
   ;; resident, so the two stages have to arrive at the same colour or the
   ;; edge of the resident world draws itself as a line.  They agree by
@@ -1651,32 +1652,32 @@
          (fog-color (binding-named 'fog-color surface)))
     (flet ((operator (expression)
              (first (form-names (shader:shader-expression-form expression)))))
-      (ok (string= "aerial-perspective-color"
-                   (operator (shader:shader-binding-expression aerial))))
-      (ok (string= "assume-quantity"
-                   (operator (shader:shader-binding-expression fog-color))))
-      (ok (equal (form-names
-                  (shader:shader-expression-form
-                   (shader:shader-binding-expression fog-color)))
-                 '("assume-quantity"
-                   ("aerial-perspective-color"
-                    ("representation" ("swizzle" "fog-color-vector" "xyz"))
-                    "look-direction" ("representation" "sun-direction")
-                    "low-sun" ("representation" "day-factor"))
-                   "quantity" "linear-rgb" "unit" "one")))
+      (true (string= "aerial-perspective-color"
+                     (operator (shader:shader-binding-expression aerial))))
+      (true (string= "assume-quantity"
+                     (operator (shader:shader-binding-expression fog-color))))
+      (true (equal (form-names
+                    (shader:shader-expression-form
+                     (shader:shader-binding-expression fog-color)))
+                   '("assume-quantity"
+                     ("aerial-perspective-color"
+                      ("representation" ("swizzle" "fog-color-vector" "xyz"))
+                      "look-direction" ("representation" "sun-direction")
+                      "low-sun" ("representation" "day-factor"))
+                     "quantity" "linear-rgb" "unit" "one")))
       ;; And the fog it feeds is still an absolute colour, mixed by the same
       ;; amount the vertex stage measured.
-      (ok (equal (form-names
-                  (shader:shader-expression-form
-                   (shader:shader-binding-expression
-                    (binding-named 'fogged surface))))
-                 '("mix" "radiance" "fog-color" "fog-amount")))
-      (ok (eq :absolute
-              (math:quantity-specification-character
-               (shader:shader-expression-quantity-specification
-                (shader:shader-binding-expression fog-color))))))))
+      (true (equal (form-names
+                    (shader:shader-expression-form
+                     (shader:shader-binding-expression
+                      (binding-named 'fogged surface))))
+                   '("mix" "radiance" "fog-color" "fog-amount")))
+      (true (eq :absolute
+                (math:quantity-specification-character
+                 (shader:shader-expression-quantity-specification
+                  (shader:shader-binding-expression fog-color))))))))
 
-(deftest extended-math-lowers-through-one-shared-import-in-layout-order
+(define-test extended-math-lowers-through-one-shared-import-in-layout-order
   (let* ((specification
            (shader:parse-shader-specification
             'extended-math
@@ -1699,25 +1700,25 @@
                         instructions)))
     ;; Every extended operator in one module shares a single import, which
     ;; sits in SPIR-V logical layout between capability and memory model.
-    (ok (= 1 (length
-              (spv:spir-v-module-extended-instruction-imports module))))
-    (ok (= 1 (count "EXT-INST-IMPORT" names :test #'string=)))
-    (ok (< (position "CAPABILITY" names :test #'string=)
-           (position "EXT-INST-IMPORT" names :test #'string=)
-           (position "MEMORY-MODEL" names :test #'string=)))
-    (ok (= 8 (count "EXT-INST" names :test #'string=)))
-    (ok (> (length (spv:assemble-shader-specification specification)) 5))
+    (true (= 1 (length
+                (spv:spir-v-module-extended-instruction-imports module))))
+    (true (= 1 (count "EXT-INST-IMPORT" names :test #'string=)))
+    (true (< (position "CAPABILITY" names :test #'string=)
+             (position "EXT-INST-IMPORT" names :test #'string=)
+             (position "MEMORY-MODEL" names :test #'string=)))
+    (true (= 8 (count "EXT-INST" names :test #'string=)))
+    (true (> (length (spv:assemble-shader-specification specification)) 5))
     ;; Deterministic lowering, and no import where no extended math occurs.
     (flet ((forms ()
              (mapcar #'spv:instruction-form
                      (spv:lower-spir-v
                       (spv:shader-lowering-module
                        (spv:compile-shader-specification specification))))))
-      (ok (equal (forms) (forms))))
-    (ok (null (spv:spir-v-module-extended-instruction-imports
-               (shaders:block-world-crosshair-fragment-module))))))
+      (true (equal (forms) (forms))))
+    (true (null (spv:spir-v-module-extended-instruction-imports
+                 (shaders:block-world-crosshair-fragment-module))))))
 
-(deftest slug-root-eligibility-is-the-eight-class-table
+(define-test slug-root-eligibility-is-the-eight-class-table
   (let ((expected '((0 0) (1 0) (1 1) (1 0)
                     (0 1) (1 1) (0 1) (0 0))))
     (loop for code below 8
@@ -1725,13 +1726,13 @@
           for y1 = (if (logbitp 0 code) 1.0 -1.0)
           for y2 = (if (logbitp 1 code) 1.0 -1.0)
           for y3 = (if (logbitp 2 code) 1.0 -1.0)
-          do (ok (equal pair
-                        (multiple-value-list
-                         (slug:slug-root-eligibility y1 y2 y3))))))
+          do (true (equal pair
+                          (multiple-value-list
+                           (slug:slug-root-eligibility y1 y2 y3))))))
   ;; Zero is deliberately in the non-positive class.
-  (ok (equal '(0 0)
-             (multiple-value-list
-              (slug:slug-root-eligibility 0.0 0.0 0.0)))))
+  (true (equal '(0 0)
+               (multiple-value-list
+                (slug:slug-root-eligibility 0.0 0.0 0.0)))))
 
 (defun slug-test-point (x y)
   (slug:make-slug-point :x x :y y))
@@ -1779,7 +1780,7 @@
   (= (slug-test-curve-min curve axis)
      (slug-test-curve-max curve axis)))
 
-(deftest arbitrary-quadratic-contours-pack-into-sorted-slug-bands
+(define-test arbitrary-quadratic-contours-pack-into-sorted-slug-bands
   (let* ((outer (slug-test-square 0 0 4 4))
          (inner (slug-test-square 1 1 3 3 :clockwise-p t))
          (outline (slug:make-slug-outline :contours (list outer inner)))
@@ -1787,58 +1788,58 @@
            (slug:pack-slug-outline
             outline :horizontal-band-count 2 :vertical-band-count 2))
          (curves (slug:slug-packed-outline-curves packed)))
-    (ok (eq :counterclockwise (slug:slug-contour-orientation outer)))
-    (ok (eq :clockwise (slug:slug-contour-orientation inner)))
-    (ok (= 8 (length curves)))
-    (ok (= 0 (slug:slug-packed-outline-min-x packed)))
-    (ok (= 4 (slug:slug-packed-outline-max-y packed)))
-    (ok (every
-         (lambda (band)
-           (let ((indices (slug:slug-band-curve-indices band)))
-             (and
-              ;; Horizontal ray bands omit horizontal curves.
-              (every (lambda (index)
-                       (let ((curve (aref curves index)))
-                         (not (= (slug:slug-point-y
-                                  (slug:slug-quadratic-start curve))
-                                 (slug:slug-point-y
-                                  (slug:slug-quadratic-control curve))
-                                 (slug:slug-point-y
-                                  (slug:slug-quadratic-end curve))))))
-                     indices)
-              ;; Descending maximum x supports the shader's early exit.
-              (apply #'>=
-                     (mapcar
-                      (lambda (index)
-                        (slug-test-curve-max (aref curves index) :x))
-                      indices)))))
-         (slug:slug-packed-outline-horizontal-bands packed)))
-    (ok (every
-         (lambda (band)
-           (let ((descending (slug:slug-band-curve-indices band))
-                 (ascending
-                   (slug:slug-band-ascending-curve-indices band)))
-             (and
-              (every (lambda (index)
-                       (not (slug-test-curve-axis-parallel-p
-                             (aref curves index) :x)))
-                     descending)
-              (apply #'>=
-                     (mapcar (lambda (index)
-                               (slug-test-curve-max
-                                (aref curves index) :y))
-                             descending))
-              (apply #'<=
-                     (mapcar (lambda (index)
-                               (slug-test-curve-min
-                                (aref curves index) :y))
-                             ascending)))))
-         (slug:slug-packed-outline-vertical-bands packed)))
+    (true (eq :counterclockwise (slug:slug-contour-orientation outer)))
+    (true (eq :clockwise (slug:slug-contour-orientation inner)))
+    (true (= 8 (length curves)))
+    (true (= 0 (slug:slug-packed-outline-min-x packed)))
+    (true (= 4 (slug:slug-packed-outline-max-y packed)))
+    (true (every
+           (lambda (band)
+             (let ((indices (slug:slug-band-curve-indices band)))
+               (and
+                ;; Horizontal ray bands omit horizontal curves.
+                (every (lambda (index)
+                         (let ((curve (aref curves index)))
+                           (not (= (slug:slug-point-y
+                                    (slug:slug-quadratic-start curve))
+                                   (slug:slug-point-y
+                                    (slug:slug-quadratic-control curve))
+                                   (slug:slug-point-y
+                                    (slug:slug-quadratic-end curve))))))
+                       indices)
+                ;; Descending maximum x supports the shader's early exit.
+                (apply #'>=
+                       (mapcar
+                        (lambda (index)
+                          (slug-test-curve-max (aref curves index) :x))
+                        indices)))))
+           (slug:slug-packed-outline-horizontal-bands packed)))
+    (true (every
+           (lambda (band)
+             (let ((descending (slug:slug-band-curve-indices band))
+                   (ascending
+                     (slug:slug-band-ascending-curve-indices band)))
+               (and
+                (every (lambda (index)
+                         (not (slug-test-curve-axis-parallel-p
+                               (aref curves index) :x)))
+                       descending)
+                (apply #'>=
+                       (mapcar (lambda (index)
+                                 (slug-test-curve-max
+                                  (aref curves index) :y))
+                               descending))
+                (apply #'<=
+                       (mapcar (lambda (index)
+                                 (slug-test-curve-min
+                                  (aref curves index) :y))
+                               ascending)))))
+           (slug:slug-packed-outline-vertical-bands packed)))
     (let ((line (first outer)))
-      (ok (equalp (slug:slug-quadratic-control line)
-                  (slug:slug-quadratic-end line))))))
+      (true (equalp (slug:slug-quadratic-control line)
+                    (slug:slug-quadratic-end line))))))
 
-(deftest malformed-slug-contours-report-the-broken-junction
+(define-test malformed-slug-contours-report-the-broken-junction
   (let* ((first (slug-test-line 0 0 1 0))
          (second (slug-test-line 2 0 0 0))
          (outline (slug:make-slug-outline
@@ -1846,14 +1847,14 @@
     (handler-case
         (progn
           (slug:slug-outline-curves outline)
-          (ok nil))
+          (true nil))
       (slug:slug-outline-error (condition)
-        (ok (eq :disconnected-contour
-                (slug:slug-outline-error-reason condition)))
-        (ok (equal '(0 0)
-                   (slug:slug-outline-error-details condition)))))))
+        (true (eq :disconnected-contour
+                  (slug:slug-outline-error-reason condition)))
+        (true (equal '(0 0)
+                     (slug:slug-outline-error-details condition)))))))
 
-(deftest slug-texture-serialization-repacks-the-actual-half-values
+(define-test slug-texture-serialization-repacks-the-actual-half-values
   (let* ((contour (slug-test-square 0 0 1/3 1))
          (serialized
            (slug:serialize-slug-outline
@@ -1868,50 +1869,50 @@
            (slug:slug-serialized-outline-curve-upload-data serialized))
          (band-upload
            (slug:slug-serialized-outline-band-upload-data serialized)))
-    (ok (= 4096 (slug:slug-serialized-outline-curve-width serialized)))
-    (ok (= 4096 (slug:slug-serialized-outline-band-width serialized)))
-    (ok (= 5 (slug:slug-serialized-outline-curve-texel-count serialized)))
-    (ok (= 20 (length curve-words)))
+    (true (= 4096 (slug:slug-serialized-outline-curve-width serialized)))
+    (true (= 4096 (slug:slug-serialized-outline-band-width serialized)))
+    (true (= 5 (slug:slug-serialized-outline-curve-texel-count serialized)))
+    (true (= 20 (length curve-words)))
     ;; The first curve's p3 is the following curve texel's p1.
-    (ok (equalp (subseq curve-words 2 4) (subseq curve-words 4 6)))
+    (true (equalp (subseq curve-words 2 4) (subseq curve-words 4 6)))
     ;; Four headers, then the two vertical sides once (both horizontal bands
     ;; hold exactly them, so the second points at the first's list) and the
     ;; two horizontal sides once, likewise shared.
-    (ok (= 8 (slug:slug-serialized-outline-band-texel-count serialized)))
-    (ok (equal '(4096 1)
-               (slug:slug-serialized-outline-curve-texture-size serialized)))
-    (ok (equal '(4096 1)
-               (slug:slug-serialized-outline-band-texture-size serialized)))
-    (ok (nth-value 0
-          (subtypep (array-element-type curve-upload) '(unsigned-byte 64))))
-    (ok (nth-value 0
-          (subtypep (array-element-type band-upload) '(unsigned-byte 32))))
-    (ok (= (row-major-aref curve-upload 0)
-           (loop for index below 4
-                 sum (ash (aref curve-words index) (* index 16)))))
-    (ok (= #x00040002 (row-major-aref band-upload 0)))
-    (ok (equalp #(2 4 2 4 2 6 2 6) (subseq band-words 0 8)))
-    (ok (equalp #(1 0 3 0) (subseq band-words 8 12)))
-    (ok (equalp #(2 0 0 0) (subseq band-words 12 16)))
+    (true (= 8 (slug:slug-serialized-outline-band-texel-count serialized)))
+    (true (equal '(4096 1)
+                 (slug:slug-serialized-outline-curve-texture-size serialized)))
+    (true (equal '(4096 1)
+                 (slug:slug-serialized-outline-band-texture-size serialized)))
+    (true (nth-value 0
+            (subtypep (array-element-type curve-upload) '(unsigned-byte 64))))
+    (true (nth-value 0
+            (subtypep (array-element-type band-upload) '(unsigned-byte 32))))
+    (true (= (row-major-aref curve-upload 0)
+             (loop for index below 4
+                   sum (ash (aref curve-words index) (* index 16)))))
+    (true (= #x00040002 (row-major-aref band-upload 0)))
+    (true (equalp #(2 4 2 4 2 6 2 6) (subseq band-words 0 8)))
+    (true (equalp #(1 0 3 0) (subseq band-words 8 12)))
+    (true (equalp #(2 0 0 0) (subseq band-words 12 16)))
     (let ((slug:*slug-share-band-lists* nil))
-      (ok (= 12 (slug:slug-serialized-outline-band-texel-count
-                 (slug:serialize-slug-outline
-                  (slug:make-slug-outline :contours (list contour))
-                  :horizontal-band-count 2 :vertical-band-count 2)))))
-    (ok (not (= 1/3 (slug:slug-packed-outline-max-x packed))))
-    (ok (< (abs (- 1/3 (slug:slug-packed-outline-max-x packed)))
-           1/1000))))
+      (true (= 12 (slug:slug-serialized-outline-band-texel-count
+                   (slug:serialize-slug-outline
+                    (slug:make-slug-outline :contours (list contour))
+                    :horizontal-band-count 2 :vertical-band-count 2)))))
+    (true (not (= 1/3 (slug:slug-packed-outline-max-x packed))))
+    (true (< (abs (- 1/3 (slug:slug-packed-outline-max-x packed)))
+             1/1000))))
 
-(deftest slug-serialization-chooses-band-counts-by-load
+(define-test slug-serialization-chooses-band-counts-by-load
   ;; A square's two vertical sides fall in every horizontal band however
   ;; many there are, so one band per axis is as good as any and cheapest.
   (let ((serialized
           (slug:serialize-slug-outline
            (slug:make-slug-outline
             :contours (list (slug-test-square 0 0 1 1))))))
-    (ok (= 1 (slug:slug-serialized-outline-horizontal-band-count serialized)))
-    (ok (= 1 (slug:slug-serialized-outline-vertical-band-count serialized)))
-    (ok (= 6 (slug:slug-serialized-outline-band-texel-count serialized))))
+    (true (= 1 (slug:slug-serialized-outline-horizontal-band-count serialized)))
+    (true (= 1 (slug:slug-serialized-outline-vertical-band-count serialized)))
+    (true (= 6 (slug:slug-serialized-outline-band-texel-count serialized))))
   ;; Two squares stacked with a gap: two horizontal bands each hold one
   ;; square's sides (a load of two) where one band would hold four.
   (let* ((lower (slug-test-square 0 0 1 1))
@@ -1919,15 +1920,15 @@
          (outline (slug:make-slug-outline :contours (list lower upper)))
          (packed (slug:pack-slug-outline outline))
          (curves (slug:slug-packed-outline-curves packed)))
-    (ok (= 2 (slug:choose-slug-band-count curves :y 0 3)))
-    (ok (= 2 (length (slug:slug-packed-outline-horizontal-bands packed))))
-    (ok (every (lambda (band)
-                 (= 2 (length (slug:slug-band-curve-indices band))))
-               (slug:slug-packed-outline-horizontal-bands packed)))
+    (true (= 2 (slug:choose-slug-band-count curves :y 0 3)))
+    (true (= 2 (length (slug:slug-packed-outline-horizontal-bands packed))))
+    (true (every (lambda (band)
+                   (= 2 (length (slug:slug-band-curve-indices band))))
+                 (slug:slug-packed-outline-horizontal-bands packed)))
     (let ((slug:*slug-maximum-band-count* 1))
-      (ok (= 1 (slug:choose-slug-band-count curves :y 0 3))))))
+      (true (= 1 (slug:choose-slug-band-count curves :y 0 3))))))
 
-(deftest zpb-ttf-glyphs-enter-slug-before-software-rasterization
+(define-test zpb-ttf-glyphs-enter-slug-before-software-rasterization
   (zpb-ttf:with-font-loader
       (font-loader (cl-dejavu:font-pathname "DejaVuSans.ttf"))
     (let* ((glyph (slug:load-slug-glyph #\O font-loader))
@@ -1936,32 +1937,32 @@
            (packed (slug:pack-slug-outline outline))
            (orientations
              (mapcar #'slug:slug-contour-orientation contours)))
-      (ok (char= #\O (slug:slug-glyph-character glyph)))
-      (ok (= 2048 (slug:slug-glyph-units-per-em glyph)))
-      (ok (= 1612 (slug:slug-glyph-advance-width glyph)))
-      (ok (= 2 (length contours)))
-      (ok (= 16 (length (slug:slug-packed-outline-curves packed))))
-      (ok (member :clockwise orientations))
-      (ok (member :counterclockwise orientations))
+      (true (char= #\O (slug:slug-glyph-character glyph)))
+      (true (= 2048 (slug:slug-glyph-units-per-em glyph)))
+      (true (= 1612 (slug:slug-glyph-advance-width glyph)))
+      (true (= 2 (length contours)))
+      (true (= 16 (length (slug:slug-packed-outline-curves packed))))
+      (true (member :clockwise orientations))
+      (true (member :counterclockwise orientations))
       (let* ((normalized (slug:normalize-slug-glyph-outline glyph))
              (normalized-packed (slug:pack-slug-outline normalized)))
-        (ok (= (slug:slug-packed-outline-min-x normalized-packed)
-               (/ (slug:slug-packed-outline-min-x packed) 2048)))
-        (ok (= (slug:slug-packed-outline-max-x normalized-packed)
-               (/ (slug:slug-packed-outline-max-x packed) 2048)))
-        (ok (= (slug:slug-packed-outline-min-y normalized-packed)
-               (/ (slug:slug-packed-outline-min-y packed) 2048)))
-        (ok (= (slug:slug-packed-outline-max-y normalized-packed)
-               (/ (slug:slug-packed-outline-max-y packed) 2048))))
-      (ok (every (lambda (contour)
-                   (every (lambda (curve)
-                            (not (equalp
-                                  (slug:slug-quadratic-control curve)
-                                  (slug:slug-quadratic-end curve))))
-                          contour))
-                 contours)))))
+        (true (= (slug:slug-packed-outline-min-x normalized-packed)
+                 (/ (slug:slug-packed-outline-min-x packed) 2048)))
+        (true (= (slug:slug-packed-outline-max-x normalized-packed)
+                 (/ (slug:slug-packed-outline-max-x packed) 2048)))
+        (true (= (slug:slug-packed-outline-min-y normalized-packed)
+                 (/ (slug:slug-packed-outline-min-y packed) 2048)))
+        (true (= (slug:slug-packed-outline-max-y normalized-packed)
+                 (/ (slug:slug-packed-outline-max-y packed) 2048))))
+      (true (every (lambda (contour)
+                     (every (lambda (curve)
+                              (not (equalp
+                                    (slug:slug-quadratic-control curve)
+                                    (slug:slug-quadratic-end curve))))
+                            contour))
+                   contours)))))
 
-(deftest shaders-consume-shared-arithmetic-functions-directly
+(define-test shaders-consume-shared-arithmetic-functions-directly
   (let* ((before (shader:shader-source-revision))
          (specification
            (shader:parse-shader-specification
@@ -1974,30 +1975,30 @@
          (call
            (shader:shader-assignment-value
             (first (shader:shader-specification-statements specification)))))
-    (ok (typep call 'shader:shader-function-call))
-    (ok (typep call 'lang:arithmetic-function-call))
-    (ok (typep (shader:shader-function-call-definition call)
-               'lang:arithmetic-function-definition))
-    (ok (= #x07230203
-           (aref (spv:assemble-shader-specification specification) 0)))
+    (true (typep call 'shader:shader-function-call))
+    (true (typep call 'lang:arithmetic-function-call))
+    (true (typep (shader:shader-function-call-definition call)
+                 'lang:arithmetic-function-definition))
+    (true (= #x07230203
+             (aref (spv:assemble-shader-specification specification) 0)))
     (lang:note-arithmetic-function-redefinition
      'shared-shader-function-probe)
-    (ok (> (shader:shader-source-revision) before))))
+    (true (> (shader:shader-source-revision) before))))
 
-(deftest shared-source-retires-an-older-shader-only-definition
+(define-test shared-source-retires-an-older-shader-only-definition
   (eval '(shader:define-shader-function shared-source-migration-probe (value)
            (+ value 1.0)))
-  (ok (shader:shader-function-definition-for
-       'shared-source-migration-probe))
+  (true (shader:shader-function-definition-for
+         'shared-source-migration-probe))
   (eval '(lang:define-arithmetic-function
              shared-source-migration-probe ((value))
            (+ value 2.0)))
-  (ok (null (shader:shader-function-definition-for
-             'shared-source-migration-probe)))
-  (ok (lang:arithmetic-function-definition-for
-       'shared-source-migration-probe)))
+  (true (null (shader:shader-function-definition-for
+               'shared-source-migration-probe)))
+  (true (lang:arithmetic-function-definition-for
+         'shared-source-migration-probe)))
 
-(deftest task-and-mesh-lower-to-validated-vulkan-shaped-spir-v
+(define-test task-and-mesh-lower-to-validated-vulkan-shaped-spir-v
   (let* ((task-specification (vulkan-task-probe))
          (mesh-specification (vulkan-mesh-probe))
          (task-lowering
@@ -2020,47 +2021,47 @@
                     (shader:shader-specification-expressions
                      mesh-specification))))
     (dolist (module (list task-module mesh-module))
-      (ok (= #x00010400 (spv:spir-v-module-version module)))
-      (ok (member 'spv::mesh-shading-ext
-                  (spv:spir-v-module-capabilities module)))
-      (ok (member 'spv::int64
-                  (spv:spir-v-module-capabilities module)))
-      (ok (equal '("SPV_EXT_mesh_shader")
-                 (spv:spir-v-module-extensions module))))
-    (ok (eq 'spv::task-ext
-            (spv:spir-v-entry-point-execution-model
-             (first (spv:spir-v-module-entry-points task-module)))))
-    (ok (eq 'spv::mesh-ext
-            (spv:spir-v-entry-point-execution-model
-             (first (spv:spir-v-module-entry-points mesh-module)))))
-    (ok (equal '(spv::local-size)
-               (mapcar #'spv:spir-v-execution-mode-name
-                       (spv:spir-v-module-execution-modes task-module))))
-    (ok (equal '(spv::local-size spv::output-triangles-ext
-                 spv::output-vertices spv::output-primitives-ext)
-               (mapcar #'spv:spir-v-execution-mode-name
-                       (spv:spir-v-module-execution-modes mesh-module))))
+      (true (= #x00010400 (spv:spir-v-module-version module)))
+      (true (member 'spv::mesh-shading-ext
+                    (spv:spir-v-module-capabilities module)))
+      (true (member 'spv::int64
+                    (spv:spir-v-module-capabilities module)))
+      (true (equal '("SPV_EXT_mesh_shader")
+                   (spv:spir-v-module-extensions module))))
+    (true (eq 'spv::task-ext
+              (spv:spir-v-entry-point-execution-model
+               (first (spv:spir-v-module-entry-points task-module)))))
+    (true (eq 'spv::mesh-ext
+              (spv:spir-v-entry-point-execution-model
+               (first (spv:spir-v-module-entry-points mesh-module)))))
+    (true (equal '(spv::local-size)
+                 (mapcar #'spv:spir-v-execution-mode-name
+                         (spv:spir-v-module-execution-modes task-module))))
+    (true (equal '(spv::local-size spv::output-triangles-ext
+                   spv::output-vertices spv::output-primitives-ext)
+                 (mapcar #'spv:spir-v-execution-mode-name
+                         (spv:spir-v-module-execution-modes mesh-module))))
     (dolist (name '(spv::selection-merge spv::emit-mesh-tasks-ext))
-      (ok (find name task-names)))
+      (true (find name task-names)))
     (dolist (name '(spv::set-mesh-outputs-ext spv::selection-merge
                     spv::access-chain spv::store spv::u-convert))
-      (ok (find name mesh-names)))
-    (ng (find 'spv::return task-names))
-    (ok (find 'spv::return mesh-names))
-    (ok (search "TASK-PAYLOAD-WORKGROUP-EXT" task-forms))
-    (ok (search "TASK-PAYLOAD-WORKGROUP-EXT" mesh-forms))
-    (ok (search "PER-PRIMITIVE-EXT" mesh-forms))
-    (ok (search "PRIMITIVE-TRIANGLE-INDICES-EXT" mesh-forms))
-    (ok payload-expression)
-    (ok (gethash payload-expression
-                 (spv:shader-lowering-expression-instructions
-                  mesh-lowering)))
+      (true (find name mesh-names)))
+    (false (find 'spv::return task-names))
+    (true (find 'spv::return mesh-names))
+    (true (search "TASK-PAYLOAD-WORKGROUP-EXT" task-forms))
+    (true (search "TASK-PAYLOAD-WORKGROUP-EXT" mesh-forms))
+    (true (search "PER-PRIMITIVE-EXT" mesh-forms))
+    (true (search "PRIMITIVE-TRIANGLE-INDICES-EXT" mesh-forms))
+    (true payload-expression)
+    (true (gethash payload-expression
+                   (spv:shader-lowering-expression-instructions
+                    mesh-lowering)))
     (dolist (specification (list task-specification mesh-specification))
       (let ((words (spv:assemble-shader-specification specification)))
-        (ok (= #x07230203 (aref words 0)))
-        (ok (= #x00010400 (aref words 1)))))))
+        (true (= #x07230203 (aref words 0)))
+        (true (= #x00010400 (aref words 1)))))))
 
-(deftest shared-counted-fold-lowers-to-structured-spir-v
+(define-test shared-counted-fold-lowers-to-structured-spir-v
   (let* ((specification
            (shader:parse-shader-specification
             'fold-fragment
@@ -2072,14 +2073,14 @@
            (mapcar #'spv:instruction-name
                    (spv:lower-spir-v
                     (spv:shader-module specification)))))
-    (ok (find "PHI" names :key #'symbol-name :test #'string=))
-    (ok (find "LOOP-MERGE" names :key #'symbol-name :test #'string=))
-    (ok (find "BRANCH-CONDITIONAL" names
-              :key #'symbol-name :test #'string=))
-    (ok (= #x07230203
-           (aref (spv:assemble-shader-specification specification) 0)))))
+    (true (find "PHI" names :key #'symbol-name :test #'string=))
+    (true (find "LOOP-MERGE" names :key #'symbol-name :test #'string=))
+    (true (find "BRANCH-CONDITIONAL" names
+                :key #'symbol-name :test #'string=))
+    (true (= #x07230203
+             (aref (spv:assemble-shader-specification specification) 0)))))
 
-(deftest counted-fold-until-guards-the-spir-v-loop-header
+(define-test counted-fold-until-guards-the-spir-v-loop-header
   (let* ((specification
            (shader:parse-shader-specification
             'until-fold-fragment
@@ -2094,24 +2095,24 @@
            (mapcar #'spv:instruction-name
                    (spv:lower-spir-v
                     (spv:shader-module specification)))))
-    (ok (find "LOGICAL-NOT" names :key #'symbol-name :test #'string=))
-    (ok (find "LOGICAL-AND" names :key #'symbol-name :test #'string=))
-    (ok (find "LOOP-MERGE" names :key #'symbol-name :test #'string=))
-    (ok (= #x07230203
-           (aref (spv:assemble-shader-specification specification) 0)))
+    (true (find "LOGICAL-NOT" names :key #'symbol-name :test #'string=))
+    (true (find "LOGICAL-AND" names :key #'symbol-name :test #'string=))
+    (true (find "LOOP-MERGE" names :key #'symbol-name :test #'string=))
+    (true (= #x07230203
+             (aref (spv:assemble-shader-specification specification) 0)))
     ;; The test must be a boolean.
-    (ok (signals
-         (shader:parse-shader-specification
-          'bad-until-fold-fragment
-          '(:stage :fragment
-            :inputs ((count :float :location 0))
-            :outputs ((result :float :location 0)))
-          '((set-output result
-                        (counted-fold (index count sum 0.0 :until sum)
-                          (+ sum index)))))
-         'shader:shader-language-error))))
+    (fail
+     (shader:parse-shader-specification
+      'bad-until-fold-fragment
+      '(:stage :fragment
+        :inputs ((count :float :location 0))
+        :outputs ((result :float :location 0)))
+      '((set-output result
+                    (counted-fold (index count sum 0.0 :until sum)
+                      (+ sum index)))))
+     'shader:shader-language-error)))
 
-(deftest exact-unsigned-texel-loads-flow-through-shared-folds
+(define-test exact-unsigned-texel-loads-flow-through-shared-folds
   (let* ((specification (unsigned-texel-fold-probe))
          (module
            (spv:shader-lowering-module
@@ -2123,17 +2124,17 @@
                        append (mapcar #'spv:instruction-name
                                       (spv:spir-v-basic-block-instructions
                                        block))))))
-    (ok (shader:shader-type=
-         :uvec4
-         (shader:shader-expression-type
-          (shader:shader-binding-expression
-           (binding-named 'header specification)))))
+    (true (shader:shader-type=
+           :uvec4
+           (shader:shader-expression-type
+            (shader:shader-binding-expression
+             (binding-named 'header specification)))))
     (dolist (name '(image-fetch u-mod u-div i-add u-less-than convert-u-to-f))
-      (ok (find name names :test #'string-equal)))
-    (ok (= #x07230203
-           (aref (spv:assemble-shader-specification specification) 0)))))
+      (true (find name names :test #'string-equal)))
+    (true (= #x07230203
+             (aref (spv:assemble-shader-specification specification) 0)))))
 
-(deftest slug-atlas-uses-fragment-derivatives-and-selected-bands
+(define-test slug-atlas-uses-fragment-derivatives-and-selected-bands
   (let* ((specification (slug:slug-atlas-fragment-specification))
          (module
            (spv:shader-lowering-module
@@ -2146,11 +2147,11 @@
                                       (spv:spir-v-basic-block-instructions
                                        block))))))
     (dolist (name '(d-pdx d-pdy select image-fetch))
-      (ok (find name names :test #'string-equal)))
-    (ok (= #x07230203
-           (aref (spv:assemble-shader-specification specification) 0)))))
+      (true (find name names :test #'string-equal)))
+    (true (= #x07230203
+             (aref (spv:assemble-shader-specification specification) 0)))))
 
-(deftest shared-conditionals-lower-inside-structured-spir-v-folds
+(define-test shared-conditionals-lower-inside-structured-spir-v-folds
   (let* ((specification
            (shader:parse-shader-specification
             'conditional-fold-fragment
@@ -2164,33 +2165,33 @@
            (mapcar #'spv:instruction-name
                    (spv:lower-spir-v
                     (spv:shader-module specification)))))
-    (ok (find "F-ORD-LESS-THAN" names
-              :key #'symbol-name :test #'string=))
-    (ok (find "SELECT" names :key #'symbol-name :test #'string=))
-    (ok (= #x07230203
-           (aref (spv:assemble-shader-specification specification) 0)))))
+    (true (find "F-ORD-LESS-THAN" names
+                :key #'symbol-name :test #'string=))
+    (true (find "SELECT" names :key #'symbol-name :test #'string=))
+    (true (= #x07230203
+             (aref (spv:assemble-shader-specification specification) 0)))))
 
-(deftest analytic-roundrect-distance-covers-the-fixed-shape-family
+(define-test analytic-roundrect-distance-covers-the-fixed-shape-family
   (flet ((near (left right)
            (< (abs (- left right)) 1.0e-5)))
     ;; A two-by-one roundrect is one unit inside at its centre and exactly on
     ;; its straight right edge.
-    (ok (near -1.0
-              (analytic:roundrect-signed-distance 0.0 0.0 2.0 1.0 0.25)))
-    (ok (near 0.0
-              (analytic:roundrect-signed-distance 2.0 0.0 2.0 1.0 0.25)))
+    (true (near -1.0
+                (analytic:roundrect-signed-distance 0.0 0.0 2.0 1.0 0.25)))
+    (true (near 0.0
+                (analytic:roundrect-signed-distance 2.0 0.0 2.0 1.0 0.25)))
     ;; Radius equal to both half-extents is the ordinary circle distance.
-    (ok (near 0.0
-              (analytic:roundrect-signed-distance 0.6 0.8 1.0 1.0 1.0)))
-    (ok (near 1.0
-              (analytic:roundrect-signed-distance 2.0 0.0 1.0 1.0 1.0)))
+    (true (near 0.0
+                (analytic:roundrect-signed-distance 0.6 0.8 1.0 1.0 1.0)))
+    (true (near 1.0
+                (analytic:roundrect-signed-distance 2.0 0.0 1.0 1.0 1.0)))
     ;; Excessive and negative radii are normalized at the semantic boundary.
-    (ok (near 0.0
-              (analytic:roundrect-signed-distance 1.0 0.0 1.0 0.5 8.0)))
-    (ok (near 0.0
-              (analytic:roundrect-signed-distance 1.0 0.0 1.0 0.5 -1.0)))))
+    (true (near 0.0
+                (analytic:roundrect-signed-distance 1.0 0.0 1.0 0.5 8.0)))
+    (true (near 0.0
+                (analytic:roundrect-signed-distance 1.0 0.0 1.0 0.5 -1.0)))))
 
-(deftest analytic-roundrect-proof-shares-distance-and-derivative-coverage
+(define-test analytic-roundrect-proof-shares-distance-and-derivative-coverage
   (let* ((vertex (analytic:roundrect-vertex-specification))
          (fragment (analytic:roundrect-fragment-specification))
          (coverage (binding-named 'coverage fragment))
@@ -2199,27 +2200,27 @@
             (mapcar #'spv:instruction-form
                     (spv:lower-spir-v
                      (spv:shader-module fragment))))))
-    (ok (eq :vertex (shader:shader-specification-stage vertex)))
-    (ok (eq :fragment (shader:shader-specification-stage fragment)))
-    (ok (= 4 (length (shader:shader-specification-inputs vertex))))
-    (ok (= 3 (length (shader:shader-specification-inputs fragment))))
-    (ok (typep (shader:shader-binding-expression coverage)
-               'shader:shader-function-call))
-    (ok (eq 'analytic:roundrect-coverage
-            (shader:shader-object-name
-             (shader:shader-function-call-definition
-              (shader:shader-binding-expression coverage)))))
-    (ok (lang:arithmetic-function-definition-for
-         'analytic:roundrect-signed-distance))
-    (ok (search "D-PDX" forms))
-    (ok (search "D-PDY" forms))
-    (ok (search "SQRT" forms))
-    (ok (= #x07230203
-           (aref (spv:assemble-shader-specification vertex) 0)))
-    (ok (= #x07230203
-           (aref (spv:assemble-shader-specification fragment) 0)))))
+    (true (eq :vertex (shader:shader-specification-stage vertex)))
+    (true (eq :fragment (shader:shader-specification-stage fragment)))
+    (true (= 4 (length (shader:shader-specification-inputs vertex))))
+    (true (= 3 (length (shader:shader-specification-inputs fragment))))
+    (true (typep (shader:shader-binding-expression coverage)
+                 'shader:shader-function-call))
+    (true (eq 'analytic:roundrect-coverage
+              (shader:shader-object-name
+               (shader:shader-function-call-definition
+                (shader:shader-binding-expression coverage)))))
+    (true (lang:arithmetic-function-definition-for
+           'analytic:roundrect-signed-distance))
+    (true (search "D-PDX" forms))
+    (true (search "D-PDY" forms))
+    (true (search "SQRT" forms))
+    (true (= #x07230203
+             (aref (spv:assemble-shader-specification vertex) 0)))
+    (true (= #x07230203
+             (aref (spv:assemble-shader-specification fragment) 0)))))
 
-(deftest slug-proof-is-a-pixel-shader-over-quadratic-roots
+(define-test slug-proof-is-a-pixel-shader-over-quadratic-roots
   (let* ((vertex (slug:slug-bezier-vertex-specification))
          (fragment (slug:slug-bezier-fragment-specification))
          (fragment-value
@@ -2231,58 +2232,58 @@
                    (spv:lower-spir-v
                     (spv:shader-lowering-module lowering))))
          (printed (write-to-string forms)))
-    (ok (eq :vertex (shader:shader-specification-stage vertex)))
-    (ok (eq :fragment (shader:shader-specification-stage fragment)))
-    (ok (= 3 (length (shader:shader-specification-inputs vertex))))
-    (ok (= 2 (length (shader:shader-specification-inputs fragment))))
-    (ok (typep fragment-value 'shader:shader-function-call))
-    (ok (eq 'slug:slug-quadratic-outline
-            (shader:shader-object-name
-             (shader:shader-function-call-definition fragment-value))))
-    (ok (not (shader:shader-abstraction-p 'slug:slug-quadratic-outline)))
-    (ok (shader:shader-function-definition-for
-         'slug:slug-quadratic-outline))
-    (ok (some (lambda (expression)
-                (typep expression 'shader:shader-function-call))
-              (shader:shader-specification-expressions fragment)))
-    (ok (search "F-SIGN" printed))
-    (ok (search "SQRT" printed))
-    (ok (= #x07230203
-           (aref (spv:assemble-shader-specification vertex) 0)))
-    (ok (= #x07230203
-           (aref (spv:assemble-shader-specification fragment) 0)))))
+    (true (eq :vertex (shader:shader-specification-stage vertex)))
+    (true (eq :fragment (shader:shader-specification-stage fragment)))
+    (true (= 3 (length (shader:shader-specification-inputs vertex))))
+    (true (= 2 (length (shader:shader-specification-inputs fragment))))
+    (true (typep fragment-value 'shader:shader-function-call))
+    (true (eq 'slug:slug-quadratic-outline
+              (shader:shader-object-name
+               (shader:shader-function-call-definition fragment-value))))
+    (true (not (shader:shader-abstraction-p 'slug:slug-quadratic-outline)))
+    (true (shader:shader-function-definition-for
+           'slug:slug-quadratic-outline))
+    (true (some (lambda (expression)
+                  (typep expression 'shader:shader-function-call))
+                (shader:shader-specification-expressions fragment)))
+    (true (search "F-SIGN" printed))
+    (true (search "SQRT" printed))
+    (true (= #x07230203
+             (aref (spv:assemble-shader-specification vertex) 0)))
+    (true (= #x07230203
+             (aref (spv:assemble-shader-specification fragment) 0)))))
 
-(deftest slug-bands-are-two-data-driven-structured-traversals
+(define-test slug-bands-are-two-data-driven-structured-traversals
   (let* ((specification (slug:slug-banded-fragment-specification))
          (instructions
            (spv:lower-spir-v (spv:shader-module specification)))
          (names (mapcar #'spv:instruction-name instructions)))
-    (ok (= 2 (count "LOOP-MERGE" names
-                    :key #'symbol-name :test #'string=)))
-    (ok (>= (count "IMAGE-FETCH" names
-                   :key #'symbol-name :test #'string=)
-            6))
-    (ok (find "U-MOD" names :key #'symbol-name :test #'string=))
-    (ok (find "U-DIV" names :key #'symbol-name :test #'string=))
-    (ok (= #x07230203
-           (aref (spv:assemble-shader-specification specification) 0)))))
+    (true (= 2 (count "LOOP-MERGE" names
+                      :key #'symbol-name :test #'string=)))
+    (true (>= (count "IMAGE-FETCH" names
+                     :key #'symbol-name :test #'string=)
+              6))
+    (true (find "U-MOD" names :key #'symbol-name :test #'string=))
+    (true (find "U-DIV" names :key #'symbol-name :test #'string=))
+    (true (= #x07230203
+             (aref (spv:assemble-shader-specification specification) 0)))))
 
-(deftest harfbuzz-shaping-selects-ligatures-and-preserves-clusters
+(define-test harfbuzz-shaping-selects-ligatures-and-preserves-clusters
   (let* ((font (cl-dejavu:font-pathname "DejaVuSans.ttf"))
          (shaped (slug:shape-slug-text "office" font))
          (glyphs (slug:slug-shaped-text-glyphs shaped)))
-    (ok (= 2048 (slug:slug-shaped-text-units-per-em shaped)))
+    (true (= 2048 (slug:slug-shaped-text-units-per-em shaped)))
     ;; o, ffi, c, e: the three source characters at byte cluster 1 become one
     ;; glyph selected by HarfBuzz rather than three cmap lookups.
-    (ok (= 4 (length glyphs)))
-    (ok (equal '(0 1 4 5)
-               (loop for glyph across glyphs
-                     collect (slug:slug-shaped-glyph-cluster glyph))))
-    (ok (= (slug:slug-shaped-text-x-advance shaped)
-           (loop for glyph across glyphs
-                 sum (slug:slug-shaped-glyph-x-advance glyph))))))
+    (true (= 4 (length glyphs)))
+    (true (equal '(0 1 4 5)
+                 (loop for glyph across glyphs
+                       collect (slug:slug-shaped-glyph-cluster glyph))))
+    (true (= (slug:slug-shaped-text-x-advance shaped)
+             (loop for glyph across glyphs
+                   sum (slug:slug-shaped-glyph-x-advance glyph))))))
 
-(deftest extended-math-signatures-are-explicit-contracts
+(define-test extended-math-signatures-are-explicit-contracts
   (flet ((failure-reason (body)
            (handler-case
                (progn
@@ -2299,28 +2300,28 @@
              (shader:shader-language-error (condition)
                (shader:shader-language-error-reason condition)))))
     ;; Vector values with scalar bounds are not silently splatted.
-    (ok (eq (failure-reason '((set-output color (clamp value 0.0 1.0))))
-            :incompatible-arithmetic-types))
-    (ok (eq (failure-reason '((let* ((unit (normalize scale)))
-                                (set-output color (* value unit)))))
-            :invalid-normalize))
-    (ok (eq (failure-reason '((set-output color (min value))))
-            :wrong-operand-count))
-    (ok (eq (failure-reason '((set-output color (expt value))))
-            :wrong-operand-count))
+    (true (eq (failure-reason '((set-output color (clamp value 0.0 1.0))))
+              :incompatible-arithmetic-types))
+    (true (eq (failure-reason '((let* ((unit (normalize scale)))
+                                  (set-output color (* value unit)))))
+              :invalid-normalize))
+    (true (eq (failure-reason '((set-output color (min value))))
+              :wrong-operand-count))
+    (true (eq (failure-reason '((set-output color (expt value))))
+              :wrong-operand-count))
     ;; Unsigned traversal values do not leak into float-only operations.
-    (ok (eq (failure-reason '((set-output color (* uvalue scale))))
-            :incompatible-product-types))
-    (ok (eq (failure-reason '((set-output color (dot uvalue uvalue))))
-            :invalid-dot-product))
-    (ok (eq (failure-reason '((set-output color (mix word word scale))))
-            :invalid-mix))
-    (ok (eq (failure-reason '((set-output color (normalize uvalue))))
-            :invalid-normalize))
-    (ok (eq (failure-reason '((set-output color (min word word))))
-            :invalid-extended-math-type))))
+    (true (eq (failure-reason '((set-output color (* uvalue scale))))
+              :incompatible-product-types))
+    (true (eq (failure-reason '((set-output color (dot uvalue uvalue))))
+              :invalid-dot-product))
+    (true (eq (failure-reason '((set-output color (mix word word scale))))
+              :invalid-mix))
+    (true (eq (failure-reason '((set-output color (normalize uvalue))))
+              :invalid-normalize))
+    (true (eq (failure-reason '((set-output color (min word word))))
+              :invalid-extended-math-type))))
 
-(deftest extended-operations-retain-expression-provenance
+(define-test extended-operations-retain-expression-provenance
   (let* ((specification
            (shader:parse-shader-specification
             'clamped-level
@@ -2335,20 +2336,20 @@
          (instructions
            (gethash call
                     (spv:shader-lowering-expression-instructions lowering))))
-    (ok instructions)
-    (ok (find "EXT-INST" instructions
-              :key (lambda (instruction)
-                     (symbol-name (spv:instruction-name instruction)))
-              :test #'string=))
-    (ok (some (lambda (instruction)
-                (member call
-                        (gethash instruction
-                                 (spv:shader-lowering-instruction-expressions
-                                  lowering))
-                        :test #'eq))
-              instructions))))
+    (true instructions)
+    (true (find "EXT-INST" instructions
+                :key (lambda (instruction)
+                       (symbol-name (spv:instruction-name instruction)))
+                :test #'string=))
+    (true (some (lambda (instruction)
+                  (member call
+                          (gethash instruction
+                                   (spv:shader-lowering-instruction-expressions
+                                    lowering))
+                          :test #'eq))
+                instructions))))
 
-(deftest shader-diagnostics-name-the-source-failure
+(define-test shader-diagnostics-name-the-source-failure
   (let ((unknown-reason
           (handler-case
               (progn
@@ -2372,8 +2373,8 @@
                 nil)
             (shader:shader-language-error (condition)
               (shader:shader-language-error-reason condition)))))
-    (ok (eq unknown-reason :unknown-name))
-    (ok (eq type-reason :output-type-mismatch))))
+    (true (eq unknown-reason :unknown-name))
+    (true (eq type-reason :output-type-mismatch))))
 
 ;;; Storage buffers and bit fields: the path a packed 64-bit site takes from a
 ;;; host array into a shader.
@@ -2406,82 +2407,82 @@
     (shader:shader-language-error (condition)
       (shader:shader-language-error-reason condition))))
 
-(deftest storage-buffers-declare-typed-elements-and-index-them
+(define-test storage-buffers-declare-typed-elements-and-index-them
   (let* ((specification (storage-site-fragment-probe))
          (sites (find 'sites (shader:shader-specification-resources specification)
                       :key #'shader:shader-object-name :test #'string-equal))
          (words (find 'words (shader:shader-specification-resources specification)
                       :key #'shader:shader-object-name :test #'string-equal))
          (term (binding-named 'term specification)))
-    (ok (typep sites 'shader:shader-storage-buffer))
-    (ok (eq (shader:find-shader-type :uint64)
-            (shader:shader-storage-buffer-element-type sites)))
-    (ok (= 8 (shader:shader-storage-buffer-element-stride sites)))
-    (ok (= 16 (shader:shader-storage-buffer-element-stride words)))
-    (ok (typep (shader:shader-binding-expression term) 'shader:shader-buffer-element))
-    (ok (eq (shader:find-shader-type :uint64)
-            (shader:shader-expression-type (shader:shader-binding-expression term))))
-    (ok (typep (shader:shader-binding-expression (binding-named 'extent specification))
-               'shader:shader-call))))
+    (true (typep sites 'shader:shader-storage-buffer))
+    (true (eq (shader:find-shader-type :uint64)
+              (shader:shader-storage-buffer-element-type sites)))
+    (true (= 8 (shader:shader-storage-buffer-element-stride sites)))
+    (true (= 16 (shader:shader-storage-buffer-element-stride words)))
+    (true (typep (shader:shader-binding-expression term) 'shader:shader-buffer-element))
+    (true (eq (shader:find-shader-type :uint64)
+              (shader:shader-expression-type (shader:shader-binding-expression term))))
+    (true (typep (shader:shader-binding-expression (binding-named 'extent specification))
+                 'shader:shader-call))))
 
-(deftest storage-buffers-and-bit-fields-reject-ill-typed-source
-  (ok (eq :invalid-storage-buffer-element
-          (storage-probe-error-reason
-           '((sites :storage-buffer :binding 1))
-           '((set-output color (vec4 1.0 1.0 1.0 1.0))))))
-  (ok (eq :invalid-storage-buffer-element
-          (storage-probe-error-reason
-           '((sites :storage-buffer :binding 1 :element :uvec3))
-           '((set-output color (vec4 1.0 1.0 1.0 1.0))))))
-  (ok (eq :element-on-non-storage-buffer
-          (storage-probe-error-reason
-           '((sites :texture-2d :binding 1 :element :uint))
-           '((set-output color (vec4 1.0 1.0 1.0 1.0))))))
-  (ok (eq :storage-buffer-requires-element
-          (storage-probe-error-reason
-           '((sites :storage-buffer :binding 1 :element :vec4))
-           '((set-output color sites)))))
-  (ok (eq :buffer-index-type
-          (storage-probe-error-reason
-           '((sites :storage-buffer :binding 1 :element :vec4))
-           '((set-output color (shader:buffer-element sites 1.0))))))
-  (ok (eq :byte-specifier-exceeds-width
-          (storage-probe-error-reason
-           '((sites :storage-buffer :binding 1 :element :uint))
-           '((let* ((word (shader:buffer-element sites (uint 0.0)))
-                    (field (float (ldb (byte 8 28) word))))
-               (set-output color (vec4 field field field 1.0)))))))
-  (ok (eq :invalid-byte-specifier
-          (storage-probe-error-reason
-           '((sites :storage-buffer :binding 1 :element :uint))
-           '((let* ((word (shader:buffer-element sites (uint 0.0)))
-                    (field (float (ldb (byte 0 4) word))))
-               (set-output color (vec4 field field field 1.0)))))))
-  (ok (eq :invalid-bit-field-operand
-          (storage-probe-error-reason
-           '((sites :storage-buffer :binding 1 :element :float))
-           '((let* ((word (shader:buffer-element sites (uint 0.0)))
-                    (field (ldb (byte 8 4) word)))
-               (set-output color (vec4 field field field 1.0))))))))
+(define-test storage-buffers-and-bit-fields-reject-ill-typed-source
+  (true (eq :invalid-storage-buffer-element
+            (storage-probe-error-reason
+             '((sites :storage-buffer :binding 1))
+             '((set-output color (vec4 1.0 1.0 1.0 1.0))))))
+  (true (eq :invalid-storage-buffer-element
+            (storage-probe-error-reason
+             '((sites :storage-buffer :binding 1 :element :uvec3))
+             '((set-output color (vec4 1.0 1.0 1.0 1.0))))))
+  (true (eq :element-on-non-storage-buffer
+            (storage-probe-error-reason
+             '((sites :texture-2d :binding 1 :element :uint))
+             '((set-output color (vec4 1.0 1.0 1.0 1.0))))))
+  (true (eq :storage-buffer-requires-element
+            (storage-probe-error-reason
+             '((sites :storage-buffer :binding 1 :element :vec4))
+             '((set-output color sites)))))
+  (true (eq :buffer-index-type
+            (storage-probe-error-reason
+             '((sites :storage-buffer :binding 1 :element :vec4))
+             '((set-output color (shader:buffer-element sites 1.0))))))
+  (true (eq :byte-specifier-exceeds-width
+            (storage-probe-error-reason
+             '((sites :storage-buffer :binding 1 :element :uint))
+             '((let* ((word (shader:buffer-element sites (uint 0.0)))
+                      (field (float (ldb (byte 8 28) word))))
+                 (set-output color (vec4 field field field 1.0)))))))
+  (true (eq :invalid-byte-specifier
+            (storage-probe-error-reason
+             '((sites :storage-buffer :binding 1 :element :uint))
+             '((let* ((word (shader:buffer-element sites (uint 0.0)))
+                      (field (float (ldb (byte 0 4) word))))
+                 (set-output color (vec4 field field field 1.0)))))))
+  (true (eq :invalid-bit-field-operand
+            (storage-probe-error-reason
+             '((sites :storage-buffer :binding 1 :element :float))
+             '((let* ((word (shader:buffer-element sites (uint 0.0)))
+                      (field (ldb (byte 8 4) word)))
+                 (set-output color (vec4 field field field 1.0))))))))
 
-(deftest storage-buffers-lower-to-storage-class-runtime-arrays
+(define-test storage-buffers-lower-to-storage-class-runtime-arrays
   (let* ((specification (storage-site-fragment-probe))
          (module (spv:shader-module specification))
          (instructions (spv:lower-spir-v module))
          (names (mapcar #'spv:instruction-name instructions))
          (forms (write-to-string (mapcar #'spv:instruction-form instructions)))
          (words (spv:assemble-shader-specification specification)))
-    (ok (equal '("SPV_KHR_storage_buffer_storage_class")
-               (spv:spir-v-module-extensions module)))
-    (ok (member 'spv::int64 (spv:spir-v-module-capabilities module)))
+    (true (equal '("SPV_KHR_storage_buffer_storage_class")
+                 (spv:spir-v-module-extensions module)))
+    (true (member 'spv::int64 (spv:spir-v-module-capabilities module)))
     (dolist (name '(spv::type-runtime-array spv::access-chain spv::load
                     spv::shift-left-logical spv::shift-right-logical))
-      (ok (find name names)))
+      (true (find name names)))
     ;; Bit fields never lower to bit-field instructions, which Vulkan limits
     ;; to 32-bit operands, nor to 64-bit mask constants.
-    (ng (find 'spv::bitwise-and names))
-    (ok (search "STORAGE-BUFFER" forms))
-    (ok (search "ARRAY-STRIDE 8" forms))
-    (ok (search "ARRAY-STRIDE 16" forms))
-    (ok (search "NON-WRITABLE" forms))
-    (ok (= #x07230203 (aref words 0)))))
+    (false (find 'spv::bitwise-and names))
+    (true (search "STORAGE-BUFFER" forms))
+    (true (search "ARRAY-STRIDE 8" forms))
+    (true (search "ARRAY-STRIDE 16" forms))
+    (true (search "NON-WRITABLE" forms))
+    (true (= #x07230203 (aref words 0)))))

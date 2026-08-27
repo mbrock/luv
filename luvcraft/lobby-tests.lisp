@@ -72,23 +72,23 @@
           (luvcraft:luvcraft-session-overlays session) (list overlay))
     (values session client transport overlay)))
 
-(deftest luvcraft-lobby-adapter-start-stop-and-restart-are-idempotent
+(define-test luvcraft-lobby-adapter-start-stop-and-restart-are-idempotent
   (multiple-value-bind (session client transport overlay)
       (make-test-luvcraft-lobby-session 'test-luvcraft-lobby-overlay)
     (unwind-protect
          (progn
-           (ok (eq client (luvcraft:start-luvcraft-lobby session)))
-           (ok (eq client (luvcraft:start-luvcraft-lobby session)))
-           (ok (wait-for-luvcraft-lobby-test
-                (lambda ()
-                  (eq :online
-                      (luv.lobby:lobby-snapshot-status
-                       (luv.lobby:lobby-client-snapshot client))))))
-           (ok (null (luvcraft:stop-luvcraft-lobby session)))
-           (ok (test-lobby-overlay-released-p overlay))
-           (ok (null (luvcraft:luvcraft-session-overlays session)))
-           (ok (null (luvcraft:luvcraft-session-lobby-client session)))
-           (ok (not (luv.lobby:lobby-client-running-p client)))
+           (true (eq client (luvcraft:start-luvcraft-lobby session)))
+           (true (eq client (luvcraft:start-luvcraft-lobby session)))
+           (true (wait-for-luvcraft-lobby-test
+                  (lambda ()
+                    (eq :online
+                        (luv.lobby:lobby-snapshot-status
+                         (luv.lobby:lobby-client-snapshot client))))))
+           (true (null (luvcraft:stop-luvcraft-lobby session)))
+           (true (test-lobby-overlay-released-p overlay))
+           (true (null (luvcraft:luvcraft-session-overlays session)))
+           (true (null (luvcraft:luvcraft-session-lobby-client session)))
+           (true (not (luv.lobby:lobby-client-running-p client)))
            ;; Reinstalling the same stopped client exercises the adapter's
            ;; durable-image restart path without opening a real MQTT socket.
            (let ((fresh-overlay
@@ -97,17 +97,17 @@
              (setf (luvcraft:luvcraft-session-lobby-client session) client
                    (luvcraft:luvcraft-session-overlays session)
                    (list fresh-overlay))
-             (ok (eq client (luvcraft:start-luvcraft-lobby session)))
-             (ok (wait-for-luvcraft-lobby-test
-                  (lambda ()
-                    (>= (luvcraft-lobby-test-opens transport) 2))))
-             (ok (null (luvcraft:stop-luvcraft-lobby session)))
-             (ok (test-lobby-overlay-released-p fresh-overlay)))
-           (ok (>= (luvcraft-lobby-test-closes transport) 2))
-           (ok (null (luvcraft:stop-luvcraft-lobby session))))
+             (true (eq client (luvcraft:start-luvcraft-lobby session)))
+             (true (wait-for-luvcraft-lobby-test
+                    (lambda ()
+                      (>= (luvcraft-lobby-test-opens transport) 2))))
+             (true (null (luvcraft:stop-luvcraft-lobby session)))
+             (true (test-lobby-overlay-released-p fresh-overlay)))
+           (true (>= (luvcraft-lobby-test-closes transport) 2))
+           (true (null (luvcraft:stop-luvcraft-lobby session))))
       (ignore-errors (luv.lobby:stop-lobby-client client)))))
 
-(deftest luvcraft-lobby-radio-starts-without-the-detailed-panel
+(define-test luvcraft-lobby-radio-starts-without-the-detailed-panel
   (let* ((session (make-instance 'luvcraft:luvcraft-session))
          (transport (make-instance 'luvcraft-lobby-test-transport))
          (client
@@ -116,14 +116,14 @@
     (setf (luvcraft:luvcraft-session-lobby-client session) client)
     (unwind-protect
          (progn
-           (ok (eq client (luvcraft:start-luvcraft-lobby session)))
-           (ok (wait-for-luvcraft-lobby-test
-                (lambda () (plusp (luvcraft-lobby-test-opens transport)))))
-           (ok (null (mcluv:luvcraft-lobby-hud-overlay session)))
-           (ok (null (luvcraft:luvcraft-session-overlays session))))
+           (true (eq client (luvcraft:start-luvcraft-lobby session)))
+           (true (wait-for-luvcraft-lobby-test
+                  (lambda () (plusp (luvcraft-lobby-test-opens transport)))))
+           (true (null (mcluv:luvcraft-lobby-hud-overlay session)))
+           (true (null (luvcraft:luvcraft-session-overlays session))))
       (ignore-errors (luvcraft:stop-luvcraft-lobby session)))))
 
-(deftest luvcraft-status-bar-is-the-default-shared-hud-without-a-lobby-panel
+(define-test luvcraft-status-bar-is-the-default-shared-hud-without-a-lobby-panel
   (let* ((canvas (make-instance 'luvcraft-status-boundary-test-canvas))
          (session (make-instance 'luvcraft:luvcraft-session :canvas canvas))
          (overlay
@@ -132,57 +132,57 @@
     (setf (luvcraft:luvcraft-session-overlays session) (list overlay))
     ;; Inventory's AROUND lifecycle and Status's AFTER lifecycle occupy
     ;; distinct coordinates instead of silently replacing one another.
-    (ok (find-method
-         #'luvcraft:attach-luvcraft-hud '(:around)
-         (list (find-class 'luvcraft:luvcraft-session)) nil))
-    (ok (find-method
-         #'luvcraft:attach-luvcraft-hud '(:after)
-         (list (find-class 'luvcraft:luvcraft-session)) nil))
-    (ok (eq overlay (mcluv:open-luvcraft-status-bar session)))
-    (ok (= 1 (luvcraft-status-boundary-test-requests canvas)))
-    (ok (eq :hud (luvcraft:luvcraft-overlay-stage overlay)))
-    (ok (eq overlay (mcluv:find-luvcraft-status-bar session)))
-    (ok (null (mcluv:luvcraft-lobby-hud-overlay session)))
-    (ok (equal '(:application :pid :fps :heap :lobby :worktree :chunks)
-               (mcluv:status-bar-channels-for session)))
-    (ok (string= "luvcraft"
-                 (mcluv:status-bar-application-name session)))
-    (ok (null
-         (luvcraft:handle-luvcraft-overlay-event
-          overlay session canvas
-          (make-instance 'luv:canvas-pointer-button-press-event
-                         :timestamp 0 :x 12.0 :y 12.0
-                         :button :left :clicks 1))))
-    (ok (null (luvcraft:luvcraft-session-modal-focus session)))
+    (true (find-method
+           #'luvcraft:attach-luvcraft-hud '(:around)
+           (list (find-class 'luvcraft:luvcraft-session)) nil))
+    (true (find-method
+           #'luvcraft:attach-luvcraft-hud '(:after)
+           (list (find-class 'luvcraft:luvcraft-session)) nil))
+    (true (eq overlay (mcluv:open-luvcraft-status-bar session)))
+    (true (= 1 (luvcraft-status-boundary-test-requests canvas)))
+    (true (eq :hud (luvcraft:luvcraft-overlay-stage overlay)))
+    (true (eq overlay (mcluv:find-luvcraft-status-bar session)))
+    (true (null (mcluv:luvcraft-lobby-hud-overlay session)))
+    (true (equal '(:application :pid :fps :heap :lobby :worktree :chunks)
+                 (mcluv:status-bar-channels-for session)))
+    (true (string= "luvcraft"
+                   (mcluv:status-bar-application-name session)))
+    (true (null
+           (luvcraft:handle-luvcraft-overlay-event
+            overlay session canvas
+            (make-instance 'luv:canvas-pointer-button-press-event
+                           :timestamp 0 :x 12.0 :y 12.0
+                           :button :left :clicks 1))))
+    (true (null (luvcraft:luvcraft-session-modal-focus session)))
     (multiple-value-bind (left top right bottom)
         (luvcraft:luvcraft-overlay-focus-insets overlay session)
-      (ok (equal '(0.0 28 0.0 0.0) (list left top right bottom))))
+      (true (equal '(0.0 28 0.0 0.0) (list left top right bottom))))
     (setf (luvcraft:luvcraft-session-overlays session) nil)))
 
-(deftest luvcraft-lobby-panel-close-crosses-the-canvas-boundary
+(define-test luvcraft-lobby-panel-close-crosses-the-canvas-boundary
   (let* ((canvas (make-instance 'luvcraft-status-boundary-test-canvas))
          (session (make-instance 'luvcraft:luvcraft-session :canvas canvas)))
-    (ok (null (mcluv:close-luvcraft-lobby-hud session)))
-    (ok (= 1 (luvcraft-status-boundary-test-requests canvas)))))
+    (true (null (mcluv:close-luvcraft-lobby-hud session)))
+    (true (= 1 (luvcraft-status-boundary-test-requests canvas)))))
 
-(deftest luvcraft-lobby-stop-attempts-radio-after-a-hud-release-error
+(define-test luvcraft-lobby-stop-attempts-radio-after-a-hud-release-error
   (multiple-value-bind (session client transport overlay)
       (make-test-luvcraft-lobby-session 'failing-luvcraft-lobby-overlay)
     (declare (ignore overlay))
     (unwind-protect
          (progn
            (luvcraft:start-luvcraft-lobby session)
-           (ok (wait-for-luvcraft-lobby-test
-                (lambda () (plusp (luvcraft-lobby-test-opens transport)))))
-           (ok (signals (luvcraft:stop-luvcraft-lobby session)
-                        'luv:release-error))
-           (ok (null (luvcraft:luvcraft-session-overlays session)))
-           (ok (null (luvcraft:luvcraft-session-lobby-client session)))
-           (ok (not (luv.lobby:lobby-client-running-p client)))
-           (ok (plusp (luvcraft-lobby-test-closes transport))))
+           (true (wait-for-luvcraft-lobby-test
+                  (lambda () (plusp (luvcraft-lobby-test-opens transport)))))
+           (fail (luvcraft:stop-luvcraft-lobby session)
+                 'luv:release-error)
+           (true (null (luvcraft:luvcraft-session-overlays session)))
+           (true (null (luvcraft:luvcraft-session-lobby-client session)))
+           (true (not (luv.lobby:lobby-client-running-p client)))
+           (true (plusp (luvcraft-lobby-test-closes transport))))
       (ignore-errors (luv.lobby:stop-lobby-client client)))))
 
-(deftest telegram-credentials-resolve-from-the-playing-session-cache
+(define-test telegram-credentials-resolve-from-the-playing-session-cache
   (let* ((client
            (luv.lobby:make-lobby-client
             :client-id-prefix "test"
@@ -192,11 +192,11 @@
     (setf (luvcraft:luvcraft-session-lobby-client session) client)
     (luv.lobby:receive-lobby-publication
      client "luv/store/TELEGRAM_API_ID" "12345")
-    (ok (string= "12345"
-                 (luvcraft::lobby-telegram-credential "TELEGRAM_API_ID")))
-    (ok (null (luvcraft::lobby-telegram-credential "SOMETHING_ELSE")))))
+    (true (string= "12345"
+                   (luvcraft::lobby-telegram-credential "TELEGRAM_API_ID")))
+    (true (null (luvcraft::lobby-telegram-credential "SOMETHING_ELSE")))))
 
-(deftest telegram-console-recovers-when-radio-credentials-arrive-late
+(define-test telegram-console-recovers-when-radio-credentials-arrive-late
   (let ((console (make-instance 'mcluv::telegram-console))
         (telegram.client:*credential-files* nil)
         (telegram.client:*credential-fallbacks*
@@ -204,5 +204,5 @@
                   (cond ((string= name "TELEGRAM_API_ID") "12345")
                         ((string= name "TELEGRAM_API_HASH") "deadbeef"))))))
     (setf (mcluv::console-login-stage console) :api-id)
-    (ok (mcluv::adopt-late-console-credentials console))
-    (ok (null (mcluv::console-login-stage console)))))
+    (true (mcluv::adopt-late-console-credentials console))
+    (true (null (mcluv::console-login-stage console)))))

@@ -14,13 +14,10 @@
 
 (asdf:defsystem "sly-client/test"
   :description "Lifecycle-selection tests for the managed Sly client."
-  :depends-on ("sly-client" "rove")
+  :depends-on ("sly-client" "luv/test-support")
   :serial t
   :components ((:file "scripts/sly-client-tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
-             (unless (uiop:symbol-call '#:rove '#:run-suite
-                                       (uiop:symbol-call '#:rove '#:find-suite
-                                                         '#:sly-client.tests)
-                                       :style :spec)
-               (error "Sly client tests failed"))))
+             (uiop:symbol-call '#:luv.test-support '#:test-package
+                               '#:sly-client.tests)))

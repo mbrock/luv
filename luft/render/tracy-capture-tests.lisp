@@ -1,23 +1,23 @@
 (in-package #:luft.render.tests)
 
-(deftest luft-tracy-capture-commands-join-the-shared-m-x-vocabulary
+(define-test luft-tracy-capture-commands-join-the-shared-m-x-vocabulary
   (let* ((viewer (clim:make-application-frame 'render:viewer))
          (entries
            (mcluv:command-menu-entries-for-tables
             (mcluv:command-menu-tables-for viewer)
             :owner-frame viewer))
          (labels (mapcar #'mcluv:command-menu-entry-label entries)))
-    (ok (equal '(render::com-toggle-tracy-capture)
-               (render::viewer-key-command
-                viewer (key-press :f9))))
+    (true (equal '(render::com-toggle-tracy-capture)
+                 (render::viewer-key-command
+                  viewer (key-press :f9))))
     (dolist (label '("Toggle Tracy Capture"
                      "Start Tracy Capture"
                      "Stop Tracy Capture"
                      "Open Last Tracy Capture"
                      "Reveal Last Tracy Capture"))
-      (ok (find label labels :test #'string=)))))
+      (true (find label labels :test #'string=)))))
 
-(deftest idle-tracy-lifecycle-attachment-does-not-open-an-overlay-pass
+(define-test idle-tracy-lifecycle-attachment-does-not-open-an-overlay-pass
   (let* ((controller
            (luv.tracy.capture:make-tracy-capture-controller
             :application-name "LUFT test"
@@ -27,8 +27,8 @@
            (make-instance 'render::viewer-tracy-capture-instrument
                           :controller controller)))
     (unwind-protect
-         (ok (null
-              (render::viewer-instrument-present-p instrument nil)))
+         (true (null
+                (render::viewer-instrument-present-p instrument nil)))
       (render::release-viewer-instrument instrument nil))
-    (ok (luv.tracy.capture:tracy-capture-controller-released-p
-         controller))))
+    (true (luv.tracy.capture:tracy-capture-controller-released-p
+           controller))))

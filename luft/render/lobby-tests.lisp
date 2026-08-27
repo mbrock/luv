@@ -29,7 +29,7 @@
   (declare (ignore connection client))
   (setf (viewer-lobby-test-closed-p transport) t))
 
-(deftest viewer-lobby-is-a-low-priority-lifecycle-owned-instrument
+(define-test viewer-lobby-is-a-low-priority-lifecycle-owned-instrument
   (let* ((viewer (gensym "VIEWER"))
          (transport (make-instance 'viewer-lobby-test-transport))
          (client
@@ -41,19 +41,19 @@
                           :client client :frame nil :compositor nil)))
     (unwind-protect
          (progn
-           (ok (loop repeat 200
-                     when (eq :online
-                              (luv.lobby:lobby-snapshot-status
-                               (luv.lobby:lobby-client-snapshot client)))
-                       return t
-                     do (sleep 1/200)))
+           (true (loop repeat 200
+                       when (eq :online
+                                (luv.lobby:lobby-snapshot-status
+                                 (luv.lobby:lobby-client-snapshot client)))
+                         return t
+                       do (sleep 1/200)))
            (render:add-viewer-instrument viewer instrument)
-           (ok (eq instrument (render::viewer-lobby-attachment viewer)))
-           (ok (= 10 (render:viewer-instrument-priority instrument)))
-           (ok (not (render:viewer-instrument-present-p instrument viewer)))
-           (ok (render:remove-viewer-instrument viewer instrument))
-           (ok (null (render::viewer-lobby-attachment viewer)))
-           (ok (not (luv.lobby:lobby-client-running-p client)))
-           (ok (viewer-lobby-test-closed-p transport)))
+           (true (eq instrument (render::viewer-lobby-attachment viewer)))
+           (true (= 10 (render:viewer-instrument-priority instrument)))
+           (true (not (render:viewer-instrument-present-p instrument viewer)))
+           (true (render:remove-viewer-instrument viewer instrument))
+           (true (null (render::viewer-lobby-attachment viewer)))
+           (true (not (luv.lobby:lobby-client-running-p client)))
+           (true (viewer-lobby-test-closed-p transport)))
       (ignore-errors (luv.lobby:stop-lobby-client client))
       (render::release-viewer-instruments viewer))))

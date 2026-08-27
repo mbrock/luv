@@ -174,17 +174,14 @@
 (defsystem "luvcraft/mcclim/test"
   :description "Executable claims for McCLIM instruments embedded in luvcraft."
   :version "0.0.1"
-  :depends-on ("luvcraft/mcclim" "rove")
+  :depends-on ("luvcraft/mcclim" "luv/test-support")
   :serial t
   :components ((:file "mcclim/surveyor-tests")
                (:file "mcclim/luvcraft-metabar-tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
-             (unless (uiop:symbol-call '#:rove '#:run-suite
-                                       (uiop:symbol-call '#:rove '#:find-suite
-                                                         '#:mcluv.surveyor-tests)
-                                       :style :luv)
-               (error "luvcraft/mcclim tests failed"))))
+             (uiop:symbol-call '#:luv.test-support '#:test-package
+                               '#:mcluv.surveyor-tests)))
 
 (defsystem "luvcraft/lobby/mcclim"
   :description "The shared lobby HUD placed in Luvcraft's final HUD pass."
@@ -270,7 +267,7 @@
 
 (defsystem "luvcraft/agent/test"
   :description "Tests for embodied agent observations and tools."
-  :depends-on ("luvcraft/agent" "rove")
+  :depends-on ("luvcraft/agent" "luv/test-support")
   :serial t
   :components ((:module "luvcraft/agent/tests"
                 :serial t
@@ -280,10 +277,8 @@
                              (:file "opening"))))
   :perform (test-op (operation component)
              (declare (ignore operation component))
-             (unless (uiop:symbol-call '#:rove '#:run-suite
-                                       (uiop:symbol-call '#:rove '#:find-suite
-                                                         '#:luvcraft.agent.tests))
-               (error "Luvcraft agent tests failed"))))
+             (uiop:symbol-call '#:luv.test-support '#:test-package
+                               '#:luvcraft.agent.tests)))
 
 (defsystem "luvcraft/birthday"
   :description "A birthday party in the little world: meadow, gazebo, balloons, gnomes, fireworks."
@@ -317,7 +312,7 @@
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on ("luvcraft/core" "luvcraft/light-reference"
-               "luvcraft/web" "cl-dejavu" "rove")
+               "luvcraft/web" "cl-dejavu" "luv/test-support")
   :serial t
   :components ((:file "hal/shader/tests")
                (:file "luvcraft/world-tests")
@@ -331,23 +326,17 @@
                (:file "hal/metal/tests" :if-feature :darwin))
   :perform (test-op (operation component)
              (declare (ignore operation component))
-             (unless (uiop:symbol-call '#:rove '#:run-suite
-                                       (uiop:symbol-call '#:rove '#:find-suite
-                                                         '#:luvcraft.tests)
-                                       :style :luv)
-               (error "luvcraft tests failed"))))
+             (uiop:symbol-call '#:luv.test-support '#:test-package
+                               '#:luvcraft.tests)))
 
 (defsystem "luvcraft/test"
   :description "Executable claims for the complete game's CLIM command vocabulary."
   :version "0.0.1"
-  :depends-on ("luvcraft" "rove")
+  :depends-on ("luvcraft" "luv/test-support")
   :serial t
   :components ((:file "luvcraft/clim/tests")
                (:file "luvcraft/lobby-tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
-             (unless (uiop:symbol-call '#:rove '#:run-suite
-                                       (uiop:symbol-call '#:rove '#:find-suite
-                                                         '#:luvcraft.clim.tests)
-                                       :style :luv)
-               (error "luvcraft tests failed"))))
+             (uiop:symbol-call '#:luv.test-support '#:test-package
+                               '#:luvcraft.clim.tests)))

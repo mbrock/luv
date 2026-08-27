@@ -20,7 +20,7 @@ for interactive debugging."
 
 (defsystem "chrome-cdp/test"
   :description "Tests for the Chrome DevTools Protocol workbench."
-  :depends-on ("chrome-cdp" "rove")
+  :depends-on ("chrome-cdp" "luv/test-support")
   :serial t
   :components ((:module "chrome-cdp/tests"
                 :serial t
@@ -28,7 +28,5 @@ for interactive debugging."
                              (:file "client"))))
   :perform (test-op (operation component)
              (declare (ignore operation component))
-             (unless (uiop:symbol-call '#:rove '#:run-suite
-                                       (uiop:symbol-call '#:rove '#:find-suite
-                                                         '#:chrome-cdp.tests))
-               (error "Chrome CDP tests failed"))))
+             (uiop:symbol-call '#:luv.test-support '#:test-package
+                               '#:chrome-cdp.tests)))

@@ -274,7 +274,7 @@
                     :canvas (capture-probe-application-canvas application))
      device context)))
 
-(deftest application-capture-shutdown-closes-admission-terminally
+(define-test application-capture-shutdown-closes-admission-terminally
   (multiple-value-bind (application device)
       (make-capture-probe-application)
     (let* ((requested
@@ -283,9 +283,9 @@
                             :label "late screenshot"))
            (published-p nil)
            (condition nil))
-      (ok (luv:request-application-capture-shutdown application))
-      (ok (luv:application-capture-shutdown-p application))
-      (ok (not (luv:request-application-capture-shutdown application)))
+      (true (luv:request-application-capture-shutdown application))
+      (true (luv:application-capture-shutdown-p application))
+      (true (not (luv:request-application-capture-shutdown application)))
       (handler-case
           (luv::call-with-capture-target
            (lambda (capture)
@@ -294,19 +294,19 @@
            requested)
         (luv:application-capture-shutting-down (failure)
           (setf condition failure)))
-      (ok condition)
-      (ok (eq application
-              (luv:application-capture-shutting-down-application condition)))
-      (ok (eq requested
-              (luv:application-capture-shutting-down-requested-capture
-               condition)))
-      (ok (not (luv:call-if-application-captures-open
-                application (lambda () (setf published-p t)))))
-      (ok (not published-p))
-      (ok (null (capture-probe-application-events application)))
-      (ok (null (capture-probe-device-resources device))))))
+      (true condition)
+      (true (eq application
+                (luv:application-capture-shutting-down-application condition)))
+      (true (eq requested
+                (luv:application-capture-shutting-down-requested-capture
+                 condition)))
+      (true (not (luv:call-if-application-captures-open
+                  application (lambda () (setf published-p t)))))
+      (true (not published-p))
+      (true (null (capture-probe-application-events application)))
+      (true (null (capture-probe-device-resources device))))))
 
-(deftest capture-shutdown-waits-off-canvas-and-rejects-late-captures
+(define-test capture-shutdown-waits-off-canvas-and-rejects-late-captures
   (multiple-value-bind (application device)
       (make-blocking-capture-probe-application)
     (let* ((active
@@ -333,14 +333,14 @@
                   (error (condition)
                     (setf active-condition condition))))
               :name "capture active during shutdown test")))
-      (ok (sb-thread:wait-on-semaphore
-           (blocking-capture-prepare-entered application) :timeout 1.0))
-      (ok (luv:request-application-capture-shutdown application))
-      (ok (signals
-           (luv::call-with-capture-target
-            (lambda (capture) (declare (ignore capture)) :wrong)
-            late)
-           'luv:application-capture-shutting-down))
+      (true (sb-thread:wait-on-semaphore
+             (blocking-capture-prepare-entered application) :timeout 1.0))
+      (true (luv:request-application-capture-shutdown application))
+      (true (fail
+             (luv::call-with-capture-target
+              (lambda (capture) (declare (ignore capture)) :wrong)
+              late)
+             'luv:application-capture-shutting-down))
       (let ((drainer
               (sb-thread:make-thread
                (lambda ()
@@ -352,20 +352,20 @@
                :name "application capture shutdown test")))
         ;; The stop owner has closed admission but cannot pass the active
         ;; capture until its preparation and cleanup have both left.
-        (ok (not (sb-thread:wait-on-semaphore drained :timeout 0.05)))
+        (true (not (sb-thread:wait-on-semaphore drained :timeout 0.05)))
         (sb-thread:signal-semaphore
          (blocking-capture-prepare-release application))
         (sb-thread:join-thread active-thread)
-        (ok (sb-thread:wait-on-semaphore drained :timeout 1.0))
+        (true (sb-thread:wait-on-semaphore drained :timeout 1.0))
         (sb-thread:join-thread drainer))
-      (ok (null active-condition))
-      (ok (null drain-condition))
-      (ok (equal '(:prepare :cleanup)
-                 (capture-probe-application-events application)))
-      (ok (every #'capture-probe-destroyed-p
-                 (capture-probe-device-resources device))))))
+      (true (null active-condition))
+      (true (null drain-condition))
+      (true (equal '(:prepare :cleanup)
+                   (capture-probe-application-events application)))
+      (true (every #'capture-probe-destroyed-p
+                   (capture-probe-device-resources device))))))
 
-(deftest canvas-thread-cannot-wait-for-an-active-capture
+(define-test canvas-thread-cannot-wait-for-an-active-capture
   (multiple-value-bind (application device)
       (make-blocking-capture-probe-application
        :native-thread sb-thread:*current-thread*)
@@ -387,8 +387,8 @@
                   (error (condition)
                     (setf active-condition condition))))
               :name "canvas-blocking capture test")))
-      (ok (sb-thread:wait-on-semaphore
-           (blocking-capture-prepare-entered application) :timeout 1.0))
+      (true (sb-thread:wait-on-semaphore
+             (blocking-capture-prepare-entered application) :timeout 1.0))
       (let ((condition
               (handler-case
                   (progn
@@ -397,22 +397,22 @@
                 (luv:application-capture-shutdown-blocking-thread-error
                     (failure)
                   failure))))
-        (ok condition)
-        (ok (eq application
-                (luv:application-capture-shutdown-blocking-application
-                 condition)))
-        (ok (eq active
-                (luv:application-capture-shutdown-blocking-active-capture
-                 condition))))
+        (true condition)
+        (true (eq application
+                  (luv:application-capture-shutdown-blocking-application
+                   condition)))
+        (true (eq active
+                  (luv:application-capture-shutdown-blocking-active-capture
+                   condition))))
       (sb-thread:signal-semaphore
        (blocking-capture-prepare-release application))
       (sb-thread:join-thread thread)
-      (ok (null active-condition))
+      (true (null active-condition))
       ;; Once the owner has left, quiescence is immediate even on this thread.
-      (ok (null (multiple-value-list
-                 (luv:quiesce-application-captures application)))))))
+      (true (null (multiple-value-list
+                   (luv:quiesce-application-captures application)))))))
 
-(deftest overlapping-application-captures-fail-before-preparation
+(define-test overlapping-application-captures-fail-before-preparation
   (multiple-value-bind (application device)
       (make-blocking-capture-probe-application)
     (let* ((active
@@ -438,8 +438,8 @@
                   (error (condition)
                     (setf active-condition condition))))
               :name "active application capture test")))
-      (ok (sb-thread:wait-on-semaphore
-           (blocking-capture-prepare-entered application) :timeout 1.0))
+      (true (sb-thread:wait-on-semaphore
+             (blocking-capture-prepare-entered application) :timeout 1.0))
       (let ((condition
               (handler-case
                   (progn
@@ -450,29 +450,29 @@
                      requested)
                     nil)
                 (luv:application-capture-busy (condition) condition))))
-        (ok condition)
-        (ok (eq application
-                (luv:application-capture-busy-application condition)))
-        (ok (eq active
-                (luv:application-capture-busy-active-capture condition)))
-        (ok (eq requested
-                (luv:application-capture-busy-requested-capture condition))))
+        (true condition)
+        (true (eq application
+                  (luv:application-capture-busy-application condition)))
+        (true (eq active
+                  (luv:application-capture-busy-active-capture condition)))
+        (true (eq requested
+                  (luv:application-capture-busy-requested-capture condition))))
       ;; The rejected capture performed no preparation and allocated no GPU
       ;; resource.  Let the exact active owner finish and release its claim.
-      (ok (equal '(:prepare)
-                 (capture-probe-application-events application)))
-      (ok (null (capture-probe-device-resources device)))
+      (true (equal '(:prepare)
+                   (capture-probe-application-events application)))
+      (true (null (capture-probe-device-resources device)))
       (sb-thread:signal-semaphore
        (blocking-capture-prepare-release application))
       (sb-thread:join-thread thread)
-      (ok (null active-condition))
-      (ok (eq :finished active-result))
-      (ok (equal '(:prepare :cleanup)
-                 (capture-probe-application-events application)))
-      (ok (every #'capture-probe-destroyed-p
-                 (capture-probe-device-resources device))))))
+      (true (null active-condition))
+      (true (eq :finished active-result))
+      (true (equal '(:prepare :cleanup)
+                   (capture-probe-application-events application)))
+      (true (every #'capture-probe-destroyed-p
+                   (capture-probe-device-resources device))))))
 
-(deftest failed-capture-body-does-not-strand-the-application-reservation
+(define-test failed-capture-body-does-not-strand-the-application-reservation
   (multiple-value-bind (application device)
       (make-capture-probe-application)
     (let ((first
@@ -481,25 +481,25 @@
           (second
             (make-instance 'luv:application-capture
                            :application application :kind :screenshot)))
-      (ok (signals
-           (luv::call-with-capture-target
-            (lambda (capture)
-              (declare (ignore capture))
-              (error "Injected reserved capture body failure."))
-            first)
-           'error))
-      (ok (eq :recovered
-              (luv::call-with-capture-target
-               (lambda (capture)
-                 (declare (ignore capture))
-                 :recovered)
-               second)))
-      (ok (equal '(:prepare :cleanup :prepare :cleanup)
-                 (capture-probe-application-events application)))
-      (ok (every #'capture-probe-destroyed-p
-                 (capture-probe-device-resources device))))))
+      (true (fail
+             (luv::call-with-capture-target
+              (lambda (capture)
+                (declare (ignore capture))
+                (error "Injected reserved capture body failure."))
+              first)
+             'error))
+      (true (eq :recovered
+                (luv::call-with-capture-target
+                 (lambda (capture)
+                   (declare (ignore capture))
+                   :recovered)
+                 second)))
+      (true (equal '(:prepare :cleanup :prepare :cleanup)
+                   (capture-probe-application-events application)))
+      (true (every #'capture-probe-destroyed-p
+                   (capture-probe-device-resources device))))))
 
-(deftest application-screenshot-is-one-owned-offscreen-transaction
+(define-test application-screenshot-is-one-owned-offscreen-transaction
   (multiple-value-bind (application device)
       (make-capture-probe-application)
     (let* ((directory
@@ -516,22 +516,22 @@
                 application pathname
                 :options '(:pixel-value 37 :metadata :frame-metadata)
                 :label "capture probe screenshot")
-             (ok (equal pathname written))
-             (ok (probe-file pathname))
-             (ok (= 2 width))
-             (ok (= 1 height))
-             (ok (eq :rgba8-unorm format))
-             (ok (eq :frame-metadata metadata))
-             (ok (equalp #(37 37 37 255 37 37 37 255) pixels))
-             (ok (equal '(:prepare (:encode 0) :cleanup)
-                        (capture-probe-application-events application)))
-             (ok (capture-probe-cleanup-saw-live-target-p application))
-             (ok (every #'capture-probe-destroyed-p
-                        (capture-probe-device-resources device))))
+             (true (equal pathname written))
+             (true (probe-file pathname))
+             (true (= 2 width))
+             (true (= 1 height))
+             (true (eq :rgba8-unorm format))
+             (true (eq :frame-metadata metadata))
+             (true (equalp #(37 37 37 255 37 37 37 255) pixels))
+             (true (equal '(:prepare (:encode 0) :cleanup)
+                          (capture-probe-application-events application)))
+             (true (capture-probe-cleanup-saw-live-target-p application))
+             (true (every #'capture-probe-destroyed-p
+                          (capture-probe-device-resources device))))
         (uiop:delete-directory-tree directory :validate t
                                               :if-does-not-exist :ignore)))))
 
-(deftest failed-frame-encoding-still-cleans-up-application-and-gpu-resources
+(define-test failed-frame-encoding-still-cleans-up-application-and-gpu-resources
   (multiple-value-bind (application device)
       (make-capture-probe-application :fail-encode-p t)
     (let* ((capture
@@ -544,15 +544,15 @@
                     #'luv::render-capture-frame capture)
                    nil)
                (error (error) error))))
-      (ok condition)
-      (ok (search "Deliberate capture probe" (princ-to-string condition)))
-      (ok (equal '(:prepare (:encode 0) :cleanup)
-                 (capture-probe-application-events application)))
-      (ok (capture-probe-cleanup-saw-live-target-p application))
-      (ok (every #'capture-probe-destroyed-p
-                 (capture-probe-device-resources device))))))
+      (true condition)
+      (true (search "Deliberate capture probe" (princ-to-string condition)))
+      (true (equal '(:prepare (:encode 0) :cleanup)
+                   (capture-probe-application-events application)))
+      (true (capture-probe-cleanup-saw-live-target-p application))
+      (true (every #'capture-probe-destroyed-p
+                   (capture-probe-device-resources device))))))
 
-(deftest capture-cleanup-failures-cannot-mask-the-frame-failure
+(define-test capture-cleanup-failures-cannot-mask-the-frame-failure
   (multiple-value-bind (application device)
       (make-capture-probe-application
        :fail-encode-p t :fail-cleanup-p t)
@@ -575,23 +575,23 @@
                       #'luv::render-capture-frame capture)
                      nil)
                  (error (error) error)))))
-      (ok condition)
-      (ok (search "Deliberate capture probe encoding failure"
-                  (princ-to-string condition)))
-      (ok (equal '(:prepare (:encode 0) :cleanup)
-                 (capture-probe-application-events application)))
-      (ok (equal '(:encoder :readback :target)
-                 *capture-probe-destroy-events*))
-      (ok (equal '(:capture-frame-encoder
-                   :capture-application-cleanup
-                   :capture-readback-buffer
-                   :capture-target)
-                 (loop for warning in warnings
-                       append
-                       (mapcar #'luv:release-failure-name
-                               (luv:release-warning-failures warning))))))))
+      (true condition)
+      (true (search "Deliberate capture probe encoding failure"
+                    (princ-to-string condition)))
+      (true (equal '(:prepare (:encode 0) :cleanup)
+                   (capture-probe-application-events application)))
+      (true (equal '(:encoder :readback :target)
+                   *capture-probe-destroy-events*))
+      (true (equal '(:capture-frame-encoder
+                     :capture-application-cleanup
+                     :capture-readback-buffer
+                     :capture-target)
+                   (loop for warning in warnings
+                         append
+                         (mapcar #'luv:release-failure-name
+                                 (luv:release-warning-failures warning))))))))
 
-(deftest film-frames-preserve-hook-order-and-use-absolute-deadlines
+(define-test film-frames-preserve-hook-order-and-use-absolute-deadlines
   (multiple-value-bind (application device)
       (make-capture-probe-application)
     (declare (ignore device))
@@ -620,29 +620,29 @@
           :clock-function (lambda () (pop clock-values))
           :sleep-function (lambda (seconds) (push seconds waits))))
        capture)
-      (ok (equal
-           '(:prepare
-             (:before 0) (:advance 0) (:encode 0) (:write 0 40)
-             (:progress 0 3)
-             (:before 1) (:advance 1) (:encode 1) (:write 1 41)
-             (:progress 1 3)
-             (:before 2) (:advance 2) (:encode 2) (:write 2 42)
-             (:progress 2 3)
-             :cleanup)
-           (capture-probe-application-events application)))
+      (true (equal
+             '(:prepare
+               (:before 0) (:advance 0) (:encode 0) (:write 0 40)
+               (:progress 0 3)
+               (:before 1) (:advance 1) (:encode 1) (:write 1 41)
+               (:progress 1 3)
+               (:before 2) (:advance 2) (:encode 2) (:write 2 42)
+               (:progress 2 3)
+               :cleanup)
+             (capture-probe-application-events application)))
       ;; Advancement and encoding share one serialized native-frame request.
       ;; An off-thread advance has NIL here; separate requests have distinct
       ;; serials, so this deterministically guards both sides of the contract.
-      (ok (equal
-           '((:advance 0 1) (:encode 0 1)
-             (:advance 1 2) (:encode 1 2)
-             (:advance 2 3) (:encode 2 3))
-           (capture-probe-application-frame-phases application)))
-      (ok (= 2 (length waits)))
-      (ok (< (abs (- 0.4d0 (second waits))) 1.0d-9))
-      (ok (< (abs (- 0.3d0 (first waits))) 1.0d-9)))))
+      (true (equal
+             '((:advance 0 1) (:encode 0 1)
+               (:advance 1 2) (:encode 1 2)
+               (:advance 2 3) (:encode 2 3))
+             (capture-probe-application-frame-phases application)))
+      (true (= 2 (length waits)))
+      (true (< (abs (- 0.4d0 (second waits))) 1.0d-9))
+      (true (< (abs (- 0.3d0 (first waits))) 1.0d-9)))))
 
-(deftest shutdown-cooperatively-shortens-an-active-film
+(define-test shutdown-cooperatively-shortens-an-active-film
   (multiple-value-bind (application device)
       (make-capture-probe-application)
     (declare (ignore device))
@@ -662,47 +662,47 @@
           :clock-function (lambda () (pop clock-values))
           :sleep-function (lambda (seconds) (push seconds waits))))
        capture)
-      (ok (equal '(:prepare (:advance 0) (:encode 0) :write :cleanup)
-                 (capture-probe-application-events application)))
-      (ok (null waits))
-      (ok (null clock-values)))))
+      (true (equal '(:prepare (:advance 0) (:encode 0) :write :cleanup)
+                   (capture-probe-application-events application)))
+      (true (null waits))
+      (true (null clock-values)))))
 
-(deftest capture-rejects-an-extent-change-before-encoding
+(define-test capture-rejects-an-extent-change-before-encoding
   (multiple-value-bind (application device context)
       (make-capture-probe-application)
     (let ((capture
             (make-instance 'luv:application-capture
                            :application application :kind :screenshot)))
-      (ok
-       (signals
-        (luv::call-with-capture-target
-         (lambda (capture)
-           (setf (capture-probe-context-extent context) '(3 1))
-           (luv::render-capture-frame capture))
-         capture)
-        'error))
-      (ok (equal '(:prepare :cleanup)
-                 (capture-probe-application-events application)))
-      (ok (capture-probe-cleanup-saw-live-target-p application))
-      (ok (every #'capture-probe-destroyed-p
-                 (capture-probe-device-resources device))))))
+      (true
+         (fail
+          (luv::call-with-capture-target
+           (lambda (capture)
+             (setf (capture-probe-context-extent context) '(3 1))
+             (luv::render-capture-frame capture))
+           capture)
+          'error))
+      (true (equal '(:prepare :cleanup)
+                   (capture-probe-application-events application)))
+      (true (capture-probe-cleanup-saw-live-target-p application))
+      (true (every #'capture-probe-destroyed-p
+                   (capture-probe-device-resources device))))))
 
-(deftest capture-rejects-a-format-change-before-encoding
+(define-test capture-rejects-a-format-change-before-encoding
   (multiple-value-bind (application device context)
       (make-capture-probe-application)
     (let ((capture
             (make-instance 'luv:application-capture
                            :application application :kind :screenshot)))
-      (ok
-       (signals
-        (luv::call-with-capture-target
-         (lambda (capture)
-           (setf (capture-probe-context-format context) :bgra8-unorm)
-           (luv::render-capture-frame capture))
-         capture)
-        'error))
-      (ok (equal '(:prepare :cleanup)
-                 (capture-probe-application-events application)))
-      (ok (capture-probe-cleanup-saw-live-target-p application))
-      (ok (every #'capture-probe-destroyed-p
-                 (capture-probe-device-resources device))))))
+      (true
+         (fail
+          (luv::call-with-capture-target
+           (lambda (capture)
+             (setf (capture-probe-context-format context) :bgra8-unorm)
+             (luv::render-capture-frame capture))
+           capture)
+          'error))
+      (true (equal '(:prepare :cleanup)
+                   (capture-probe-application-events application)))
+      (true (capture-probe-cleanup-saw-live-target-p application))
+      (true (every #'capture-probe-destroyed-p
+                   (capture-probe-device-resources device))))))

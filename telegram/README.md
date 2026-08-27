@@ -13,7 +13,7 @@ Six ASDF systems:
 | `telegram/api`    | Telegram's published schema, loaded as a table                 |
 | `telegram/net`    | the one file that owns a socket                                |
 | `telegram/client` | application identity, layer negotiation, `invoke`              |
-| `telegram/test`   | the rove suite                                                 |
+| `telegram/test`   | the Parachute suite                                            |
 | `telegram/live`   | opt-in checks against a real data centre                       |
 
 It is deliberately separate from `luv`; nothing here depends on it, and

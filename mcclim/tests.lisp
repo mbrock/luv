@@ -1,5 +1,6 @@
 (defpackage #:mcluv.tests
-  (:use #:cl #:rove)
+  (:use #:cl)
+  (:import-from #:parachute #:define-test #:true #:false #:fail #:group #:skip)
   (:local-nicknames (#:luv #:luv)
                     (#:shader #:luv.shader)))
 
@@ -13,21 +14,21 @@
                  :unshifted-character character
                  :modifiers modifiers))
 
-(deftest portable-canvas-keys-are-mcclim-gestures
-  (ok (mcluv:canvas-key-event-matches-gesture-p
-       (key-press :i :character #\i) '(#\i)))
-  (ok (mcluv:canvas-key-event-matches-gesture-p
-       (key-press :tab) '(:tab)))
+(define-test portable-canvas-keys-are-mcclim-gestures
+  (true (mcluv:canvas-key-event-matches-gesture-p
+         (key-press :i :character #\i) '(#\i)))
+  (true (mcluv:canvas-key-event-matches-gesture-p
+         (key-press :tab) '(:tab)))
   ;; Locks do not stop an application command from being an application
   ;; command, while an ordinary modifier still denotes another gesture.
-  (ok (mcluv:canvas-key-event-matches-gesture-p
-       (key-press :i :character #\i :modifiers '(:caps-lock)) '(#\i)))
-  (ok (not (mcluv:canvas-key-event-matches-gesture-p
-            (key-press :i :character #\i :modifiers '(:control)) '(#\i))))
-  (ok (mcluv:canvas-key-event-matches-gesture-p
-       (key-press :w :modifiers '(:shift)) '(:w :any)))
-  (ok (string= "Ctrl-Q" (mcluv:format-gesture '(#\q :control))))
-  (ok (string= "↑" (mcluv:format-gesture '(:up)))))
+  (true (mcluv:canvas-key-event-matches-gesture-p
+         (key-press :i :character #\i :modifiers '(:caps-lock)) '(#\i)))
+  (true (not (mcluv:canvas-key-event-matches-gesture-p
+              (key-press :i :character #\i :modifiers '(:control)) '(#\i))))
+  (true (mcluv:canvas-key-event-matches-gesture-p
+         (key-press :w :modifiers '(:shift)) '(:w :any)))
+  (true (string= "Ctrl-Q" (mcluv:format-gesture '(#\q :control))))
+  (true (string= "↑" (mcluv:format-gesture '(:up)))))
 
 (defun fresh-gpu-medium ()
   (make-instance 'mcluv:luv-gpu-medium))
@@ -39,7 +40,7 @@
   (declare (ignore context surface-texture))
   :same-native-drawable)
 
-(deftest direct-compositor-uses-bounded-backend-frame-keys
+(define-test direct-compositor-uses-bounded-backend-frame-keys
   (let* ((context (make-instance 'stable-frame-key-context))
          (mirror
            (make-instance 'mcluv::luv-gpu-mirror
@@ -49,34 +50,34 @@
                           :mirror mirror)))
     ;; Fresh borrowed texture wrappers for one native drawable must address
     ;; the same per-frame uniform state.
-    (ok (eq :same-native-drawable
-            (mcluv::direct-gpu-mirror-frame-resource-key
-             compositor (list :wrapper 1))))
-    (ok (eq :same-native-drawable
-            (mcluv::direct-gpu-mirror-frame-resource-key
-             compositor (list :wrapper 2))))
-    (ok (not (mcluv::gpu-command-rasterized-p compositor :anything)))))
+    (true (eq :same-native-drawable
+              (mcluv::direct-gpu-mirror-frame-resource-key
+               compositor (list :wrapper 1))))
+    (true (eq :same-native-drawable
+              (mcluv::direct-gpu-mirror-frame-resource-key
+               compositor (list :wrapper 2))))
+    (true (not (mcluv::gpu-command-rasterized-p compositor :anything)))))
 
-(deftest solid-vertices-carry-premultiplied-color
+(define-test solid-vertices-carry-premultiplied-color
   (let* ((medium (fresh-gpu-medium))
          (vertices (mcluv::gpu-medium-vertices medium)))
     (mcluv::gpu-medium-push-vertex medium 0.5 0.5 '(0.8 0.4 0.2 0.25))
-    (ok (= 0.25 (aref vertices 2)))
-    (ok (= 0.20 (aref vertices 3)))
-    (ok (= 0.10 (aref vertices 4)))
-    (ok (= 0.05 (aref vertices 5)))))
+    (true (= 0.25 (aref vertices 2)))
+    (true (= 0.20 (aref vertices 3)))
+    (true (= 0.10 (aref vertices 4)))
+    (true (= 0.05 (aref vertices 5)))))
 
-(deftest slug-vertices-carry-premultiplied-color
+(define-test slug-vertices-carry-premultiplied-color
   (let ((vertices
           (make-array 0 :element-type 'single-float
                         :adjustable t :fill-pointer 0)))
     (mcluv::append-gpu-text-vertex
      vertices 100 100 10 20 0.25 0 0 1 2 3 4 -1 -1 1 1
      '(0.8 0.4 0.2 0.25))
-    (ok (= 0.25 (aref vertices 2)))
-    (ok (= 0.20 (aref vertices 15)))
-    (ok (= 0.10 (aref vertices 16)))
-    (ok (= 0.05 (aref vertices 17)))))
+    (true (= 0.25 (aref vertices 2)))
+    (true (= 0.20 (aref vertices 15)))
+    (true (= 0.10 (aref vertices 16)))
+    (true (= 0.05 (aref vertices 17)))))
 
 (defun shader-output-source-value (specification output)
   (third
@@ -85,18 +86,18 @@
                  (shader:shader-specification-statements specification))
          :key #'second)))
 
-(deftest solid-and-slug-shaders-do-not-premultiply-twice
-  (ok (equal '(shader:vec4 mcluv::color-input mcluv::alpha)
-             (shader-output-source-value
-              (mcluv::direct-widget-solid-vertex-specification)
-              'mcluv::color-output)))
+(define-test solid-and-slug-shaders-do-not-premultiply-twice
+  (true (equal '(shader:vec4 mcluv::color-input mcluv::alpha)
+               (shader-output-source-value
+                (mcluv::direct-widget-solid-vertex-specification)
+                'mcluv::color-output)))
   (dolist (specification
             (list (shader:shader-specification-for :mcluv-slug :vertex)
                   (mcluv::direct-mirror-slug-vertex-specification)))
-    (ok (equal
-         '(shader:vec4 mcluv::color-input
-           (shader:swizzle mcluv::position-alpha :z))
-         (shader-output-source-value specification 'mcluv::render-color))))
+    (true (equal
+           '(shader:vec4 mcluv::color-input
+             (shader:swizzle mcluv::position-alpha :z))
+           (shader-output-source-value specification 'mcluv::render-color))))
   ;; The standalone solid stage names its VEC4 binding COLOR.  Its RGB operand
   ;; is a direct input reference, not another multiplication by opacity.
   (let* ((specification
@@ -106,11 +107,11 @@
                  (shader:shader-specification-bindings specification)
                  :key #'shader:shader-object-name))
          (expression (shader:shader-binding-expression binding)))
-    (ok (eq 'shader:vec4 (shader:shader-call-operator expression)))
-    (ok (not (typep (first (shader:shader-call-operands expression))
-                    'shader:shader-call)))))
+    (true (eq 'shader:vec4 (shader:shader-call-operator expression)))
+    (true (not (typep (first (shader:shader-call-operands expression))
+                      'shader:shader-call)))))
 
-(deftest prepared-gpu-revisions-copy-and-publish-one-cohort
+(define-test prepared-gpu-revisions-copy-and-publish-one-cohort
   (let* ((mirror
            (make-instance 'mcluv::luv-gpu-mirror
                           :sheet nil :target nil :context nil))
@@ -120,9 +121,9 @@
            (mcluv::make-gpu-mirror-prepared-revision
             mirror (list command) source #() #() #() #() #())))
     (setf (aref source 0) 99.0f0)
-    (ok (= 1.0f0 (aref (mcluv::gpu-prepared-frame-vertices first) 0)))
-    (ok (equal '(:solid)
-               (mcluv::gpu-prepared-frame-pipeline-families first)))
+    (true (= 1.0f0 (aref (mcluv::gpu-prepared-frame-vertices first) 0)))
+    (true (equal '(:solid)
+                 (mcluv::gpu-prepared-frame-pipeline-families first)))
     (mcluv::publish-gpu-mirror-prepared-revision mirror first)
     (let ((second
             (mcluv::make-gpu-mirror-prepared-revision
@@ -132,9 +133,9 @@
       (mcluv::publish-gpu-mirror-prepared-revision mirror second)
       ;; A delayed older repaint cannot replace the newer publication.
       (mcluv::publish-gpu-mirror-prepared-revision mirror first)
-      (ok (eq second (mcluv::gpu-mirror-prepared-revision mirror)))
-      (ok (equal '(:text)
-                 (mcluv::gpu-prepared-frame-pipeline-families second))))))
+      (true (eq second (mcluv::gpu-mirror-prepared-revision mirror)))
+      (true (equal '(:text)
+                   (mcluv::gpu-prepared-frame-pipeline-families second))))))
 
 (defclass current-revision-preparation-probe ()
   ((revisions :initform nil
@@ -146,7 +147,7 @@
   (declare (ignore mirror))
   (push revision (current-revision-preparation-probe-revisions probe)))
 
-(deftest static-gpu-mirror-prepares-its-current-revision
+(define-test static-gpu-mirror-prepares-its-current-revision
   (let* ((mirror
            (make-instance 'mcluv:luv-gpu-mirror
                           :sheet nil :target nil :context nil))
@@ -159,9 +160,9 @@
     ;; Publication already prepared the semantic revision.  Clear that
     ;; observation to model a later frame whose McCLIM stream stayed static.
     (setf (current-revision-preparation-probe-revisions probe) nil)
-    (ok (eq mirror (mcluv:prepare-gpu-mirror-compositor mirror)))
-    (ok (equal (list revision)
-               (current-revision-preparation-probe-revisions probe)))))
+    (true (eq mirror (mcluv:prepare-gpu-mirror-compositor mirror)))
+    (true (equal (list revision)
+                 (current-revision-preparation-probe-revisions probe)))))
 
 (defun mount-static-direct-preparation-probe (frame)
   "Give unrealized test FRAME one immutable direct-GPU revision and a probe."
@@ -186,7 +187,7 @@
     (setf (mcluv:mirror-compositor mirror) probe)
     (values probe revision)))
 
-(deftest concurrent-prepared-revisions-never-cross-commands-and-bytes
+(define-test concurrent-prepared-revisions-never-cross-commands-and-bytes
   (let* ((mirror
            (make-instance 'mcluv::luv-gpu-mirror
                           :sheet nil :target nil :context nil))
@@ -210,12 +211,12 @@
     (mapc #'sb-thread:join-thread threads)
     (let* ((revision (mcluv::gpu-mirror-prepared-revision mirror))
            (command (first (mcluv::gpu-prepared-frame-commands revision))))
-      (ok (= (mcluv::gpu-mirror-prepared-revision-counter mirror)
-             (mcluv::gpu-prepared-frame-number revision)))
-      (ok (= (mcluv::gpu-solid-command-first-vertex command)
-             (aref (mcluv::gpu-prepared-frame-vertices revision) 0))))))
+      (true (= (mcluv::gpu-mirror-prepared-revision-counter mirror)
+               (mcluv::gpu-prepared-frame-number revision)))
+      (true (= (mcluv::gpu-solid-command-first-vertex command)
+               (aref (mcluv::gpu-prepared-frame-vertices revision) 0))))))
 
-(deftest destination-frame-slots-materialize-revisions-independently
+(define-test destination-frame-slots-materialize-revisions-independently
   (let* ((mirror
            (make-instance 'mcluv::luv-gpu-mirror
                           :sheet nil :target nil :context nil))
@@ -240,23 +241,23 @@
     (mcluv::materialize-direct-widget-frame-revision compositor slot-a first)
     (mcluv::materialize-direct-widget-frame-revision compositor slot-b first)
     (mcluv::materialize-direct-widget-frame-revision compositor slot-a second)
-    (ok (eq second (mcluv::direct-widget-frame-prepared-revision slot-a)))
-    (ok (eq first (mcluv::direct-widget-frame-prepared-revision slot-b)))
-    (ok (not (eq (mcluv::direct-widget-frame-source-state slot-a)
-                 (mcluv::direct-widget-frame-source-state slot-b))))))
+    (true (eq second (mcluv::direct-widget-frame-prepared-revision slot-a)))
+    (true (eq first (mcluv::direct-widget-frame-prepared-revision slot-b)))
+    (true (not (eq (mcluv::direct-widget-frame-source-state slot-a)
+                   (mcluv::direct-widget-frame-source-state slot-b))))))
 
-(deftest late-direct-pipeline-families-are-guarded-not-compiled
+(define-test late-direct-pipeline-families-are-guarded-not-compiled
   (let* ((mirror
            (make-instance 'mcluv::luv-gpu-mirror
                           :sheet nil :target nil :context nil))
          (compositor
            (make-instance 'mcluv:direct-gpu-mirror-compositor :mirror mirror)))
-    (ok (signals
-         (mcluv::require-direct-gpu-mirror-pipelines
-          compositor :bgra8unorm nil '(:solid))
-         'mcluv::direct-mirror-pipelines-not-prepared))
-    (ok (zerop (hash-table-count
-                (mcluv::direct-widget-pipelines compositor))))))
+    (fail
+     (mcluv::require-direct-gpu-mirror-pipelines
+      compositor :bgra8unorm nil '(:solid))
+     'mcluv::direct-mirror-pipelines-not-prepared)
+    (true (zerop (hash-table-count
+                  (mcluv::direct-widget-pipelines compositor))))))
 
 (defclass direct-release-probe ()
   ((name :initarg :name :reader direct-release-probe-name)
@@ -285,7 +286,7 @@
                     :failp fail-shape-p)
      :source-state source-state)))
 
-(deftest direct-frame-key-eviction-is-complete-and-bounded
+(define-test direct-frame-key-eviction-is-complete-and-bounded
   (let* ((events (make-array 0 :adjustable t :fill-pointer 0))
          (mirror
            (make-instance 'mcluv::luv-gpu-mirror
@@ -315,20 +316,20 @@
                        (make-instance
                         'direct-release-probe
                         :name (list frame-key kind) :events events)))
-        (ok (eq compositor
-                (mcluv:evict-direct-gpu-mirror-frame-key
-                 compositor frame-key)))
-        (ok (= 1 (hash-table-count
-                  (mcluv::direct-widget-frame-states compositor))))
+        (true (eq compositor
+                  (mcluv:evict-direct-gpu-mirror-frame-key
+                   compositor frame-key)))
+        (true (= 1 (hash-table-count
+                    (mcluv::direct-widget-frame-states compositor))))
         (dolist (table
                   (list (mcluv::direct-widget-text-bind-groups compositor)
                         (mcluv::direct-widget-image-bind-groups compositor)
                         (mcluv::direct-widget-lattice-bind-groups compositor)))
-          (ok (zerop (hash-table-count table))))
+          (true (zerop (hash-table-count table))))
         ;; Retrying cleanup cannot release wrappers a second time.
         (let ((release-count (length events)))
           (mcluv:evict-direct-gpu-mirror-frame-key compositor frame-key)
-          (ok (= release-count (length events))))))
+          (true (= release-count (length events))))))
     ;; A failing native wrapper must not strand the state or prevent sibling
     ;; resources from being released, and a retry remains a no-op.
     (let* ((frame-key '(:capture :failing))
@@ -344,24 +345,24 @@
             (gethash (list :image frame-state)
                      (mcluv::direct-widget-image-bind-groups compositor))
             image-group)
-      (ok (signals
-           (mcluv:evict-direct-gpu-mirror-frame-key compositor frame-key)
-           'mcluv::direct-mirror-release-error))
-      (ok (= 1 (hash-table-count
-                (mcluv::direct-widget-frame-states compositor))))
-      (ok (zerop (hash-table-count
-                  (mcluv::direct-widget-image-bind-groups compositor))))
+      (fail
+       (mcluv:evict-direct-gpu-mirror-frame-key compositor frame-key)
+       'mcluv::direct-mirror-release-error)
+      (true (= 1 (hash-table-count
+                  (mcluv::direct-widget-frame-states compositor))))
+      (true (zerop (hash-table-count
+                    (mcluv::direct-widget-image-bind-groups compositor))))
       (let ((release-count (length events)))
         (mcluv:evict-direct-gpu-mirror-frame-key compositor frame-key)
-        (ok (= release-count (length events)))))
-    (ok (eq drawable-state
-            (gethash :drawable
-                     (mcluv::direct-widget-frame-states compositor))))
+        (true (= release-count (length events)))))
+    (true (eq drawable-state
+              (gethash :drawable
+                       (mcluv::direct-widget-frame-states compositor))))
     ;; The two complete capture cohorts contribute six releases each; the
     ;; deliberately failing cohort still attempts all four of its resources.
-    (ok (= 16 (length events)))))
+    (true (= 16 (length events)))))
 
-(deftest direct-compositor-release-is-exhaustive-and-idempotent
+(define-test direct-compositor-release-is-exhaustive-and-idempotent
   (let* ((events (make-array 0 :adjustable t :fill-pointer 0))
          (mirror
            (make-instance 'mcluv::luv-gpu-mirror
@@ -375,24 +376,24 @@
                                :name :failing :events events :failp t)
                 (make-instance 'direct-release-probe
                                :name :last :events events)))
-    (ok (signals (mcluv::release-direct-gpu-mirror-resources compositor)
-                 'mcluv::direct-mirror-release-error))
-    (ok (= 3 (length events)))
-    (ok (find :first events))
-    (ok (find :failing events))
-    (ok (find :last events))
-    (ok (null (mcluv::direct-widget-resources compositor)))
+    (fail (mcluv::release-direct-gpu-mirror-resources compositor)
+          'mcluv::direct-mirror-release-error)
+    (true (= 3 (length events)))
+    (true (find :first events))
+    (true (find :failing events))
+    (true (find :last events))
+    (true (null (mcluv::direct-widget-resources compositor)))
     ;; Logical ownership was detached before the error; retry is a no-op.
     (mcluv::release-direct-gpu-mirror-resources compositor)
-    (ok (= 3 (length events)))))
+    (true (= 3 (length events)))))
 
-(deftest the-unqualified-luv-port-is-direct-gpu
+(define-test the-unqualified-luv-port-is-direct-gpu
   (multiple-value-bind (class transform) (climi::find-port-type :luv)
-    (ok (eq 'mcluv:luv-gpu-port class))
-    (ok (eq 'identity transform)))
+    (true (eq 'mcluv:luv-gpu-port class))
+    (true (eq 'identity transform)))
   (multiple-value-bind (class transform) (climi::find-port-type :luv-raster)
-    (ok (eq 'mcluv:luv-raster-port class))
-    (ok (eq 'identity transform))))
+    (true (eq 'mcluv:luv-raster-port class))
+    (true (eq 'identity transform))))
 
 (defstruct protocol-test-gpu-command clip)
 
@@ -420,20 +421,20 @@
   (push command (gpu-command-spy-commands encoder))
   encoder)
 
-(deftest gpu-command-phases-are-an-open-command-grain-protocol
+(define-test gpu-command-phases-are-an-open-command-grain-protocol
   (dolist (name '(mcluv::rebase-gpu-command
                   mcluv::prepare-gpu-command
                   mcluv::gpu-command-clip
                   mcluv::encode-gpu-command))
-    (ok (typep (fdefinition name) 'generic-function)))
+    (true (typep (fdefinition name) 'generic-function)))
   (let ((command (make-protocol-test-gpu-command :clip '(1 2 3 4))))
-    (ok (eq command (mcluv::rebase-gpu-command command nil)))
-    (ok (eq command (mcluv::prepare-gpu-command command nil nil)))
-    (ok (equal '(1 2 3 4) (mcluv::gpu-command-clip command)))
-    (ok (equal (list command :pass :frame-state)
-               (mcluv::encode-gpu-command command :pass :frame-state)))))
+    (true (eq command (mcluv::rebase-gpu-command command nil)))
+    (true (eq command (mcluv::prepare-gpu-command command nil nil)))
+    (true (equal '(1 2 3 4) (mcluv::gpu-command-clip command)))
+    (true (equal (list command :pass :frame-state)
+                 (mcluv::encode-gpu-command command :pass :frame-state)))))
 
-(deftest built-in-gpu-commands-rebase-their-own-dense-stream
+(define-test built-in-gpu-commands-rebase-their-own-dense-stream
   (let* ((offsets
            (mcluv::make-gpu-command-offsets
             :vertex 10 :analytic 20 :relief 30 :gradient 40 :image 50))
@@ -466,19 +467,19 @@
              :design design :first-vertex 6)
             offsets))
          (text (mcluv::make-gpu-text-command)))
-    (ok (= 11 (mcluv::gpu-solid-command-first-vertex solid)))
-    (ok (= 6 (mcluv::gpu-solid-command-vertex-count solid)))
-    (ok (equal '(1 2 3 4) (mcluv::gpu-command-clip solid)))
-    (ok (= 22 (mcluv::gpu-analytic-command-first-vertex analytic)))
-    (ok (= 23 (mcluv::gpu-lattice-command-first-vertex lattice)))
-    (ok (eq :modules (mcluv::gpu-lattice-command-modules lattice)))
-    (ok (= 34 (mcluv::gpu-relief-analytic-command-first-vertex relief)))
-    (ok (= 45 (mcluv::gpu-gradient-analytic-command-first-vertex gradient)))
-    (ok (= 56 (mcluv::gpu-image-command-first-vertex image)))
-    (ok (eq design (mcluv::gpu-image-command-design image)))
-    (ok (eq text (mcluv::rebase-gpu-command text offsets)))))
+    (true (= 11 (mcluv::gpu-solid-command-first-vertex solid)))
+    (true (= 6 (mcluv::gpu-solid-command-vertex-count solid)))
+    (true (equal '(1 2 3 4) (mcluv::gpu-command-clip solid)))
+    (true (= 22 (mcluv::gpu-analytic-command-first-vertex analytic)))
+    (true (= 23 (mcluv::gpu-lattice-command-first-vertex lattice)))
+    (true (eq :modules (mcluv::gpu-lattice-command-modules lattice)))
+    (true (= 34 (mcluv::gpu-relief-analytic-command-first-vertex relief)))
+    (true (= 45 (mcluv::gpu-gradient-analytic-command-first-vertex gradient)))
+    (true (= 56 (mcluv::gpu-image-command-first-vertex image)))
+    (true (eq design (mcluv::gpu-image-command-design image)))
+    (true (eq text (mcluv::rebase-gpu-command text offsets)))))
 
-(deftest every-built-in-command-has-its-required-phase-methods
+(define-test every-built-in-command-has-its-required-phase-methods
   (let ((prepare (fdefinition 'mcluv::prepare-gpu-command)))
     (dolist (command
               (list (mcluv::make-gpu-solid-command)
@@ -488,7 +489,7 @@
                     (mcluv::make-gpu-lattice-command)
                     (mcluv::make-gpu-image-command)
                     (mcluv::make-gpu-text-command)))
-      (ok (compute-applicable-methods prepare (list command nil nil)))))
+      (true (compute-applicable-methods prepare (list command nil nil)))))
   (let ((clip (fdefinition 'mcluv::gpu-command-clip))
         (encode (fdefinition 'mcluv::encode-gpu-command))
         (state (make-instance 'mcluv::gpu-mirror-frame-state :mirror nil)))
@@ -500,10 +501,10 @@
                     (mcluv::make-gpu-prepared-lattice-command)
                     (mcluv::make-gpu-prepared-image-command)
                     (mcluv::make-gpu-prepared-text-command)))
-      (ok (compute-applicable-methods clip (list command)))
-      (ok (compute-applicable-methods encode (list command nil state))))))
+      (true (compute-applicable-methods clip (list command)))
+      (true (compute-applicable-methods encode (list command nil state))))))
 
-(deftest native-command-encoders-map-to-their-dense-gpu-resources
+(define-test native-command-encoders-map-to-their-dense-gpu-resources
   (let* ((mirror
            (make-instance 'mcluv:luv-gpu-mirror :sheet nil :target nil))
          (state
@@ -574,145 +575,145 @@
         (let ((encoder (make-instance 'gpu-command-spy-encoder)))
           (mcluv::encode-gpu-command command encoder state)
           (let ((commands (reverse (gpu-command-spy-commands encoder))))
-            (ok (= 4 (length commands)))
+            (true (= 4 (length commands)))
             (destructuring-bind
                 (pipeline-command bind-group-command vertex-buffer-command
                  draw-command)
                 commands
-              (ok (typep pipeline-command 'luv:gpu-set-pipeline-command))
-              (ok (eq expected-pipeline
-                      (luv::gpu-set-pipeline-command-pipeline
-                       pipeline-command)))
-              (ok (typep bind-group-command
-                         'luv:gpu-set-bind-group-command))
-              (ok (zerop
-                   (luv::gpu-set-bind-group-command-index
-                    bind-group-command)))
-              (ok (eq expected-bind-group
-                      (luv::gpu-set-bind-group-command-bind-group
-                       bind-group-command)))
-              (ok (typep vertex-buffer-command
-                         'luv:gpu-set-vertex-buffer-command))
-              (ok (zerop
-                   (luv::gpu-set-vertex-buffer-command-slot
-                    vertex-buffer-command)))
-              (ok (eq expected-buffer
-                      (luv::gpu-set-vertex-buffer-command-buffer
-                       vertex-buffer-command)))
-              (ok (zerop
-                   (luv::gpu-set-vertex-buffer-command-offset
-                    vertex-buffer-command)))
-              (ok (typep draw-command 'luv:gpu-draw-command))
-              (ok (= expected-vertex-count
-                     (luv::gpu-draw-command-vertex-count draw-command)))
-              (ok (= 1 (luv::gpu-draw-command-instance-count draw-command)))
-              (ok (= expected-first-vertex
-                     (luv::gpu-draw-command-first-vertex draw-command)))
-              (ok (zerop
-                   (luv::gpu-draw-command-first-instance draw-command))))))))))
+              (true (typep pipeline-command 'luv:gpu-set-pipeline-command))
+              (true (eq expected-pipeline
+                        (luv::gpu-set-pipeline-command-pipeline
+                         pipeline-command)))
+              (true (typep bind-group-command
+                           'luv:gpu-set-bind-group-command))
+              (true (zerop
+                     (luv::gpu-set-bind-group-command-index
+                      bind-group-command)))
+              (true (eq expected-bind-group
+                        (luv::gpu-set-bind-group-command-bind-group
+                         bind-group-command)))
+              (true (typep vertex-buffer-command
+                           'luv:gpu-set-vertex-buffer-command))
+              (true (zerop
+                     (luv::gpu-set-vertex-buffer-command-slot
+                      vertex-buffer-command)))
+              (true (eq expected-buffer
+                        (luv::gpu-set-vertex-buffer-command-buffer
+                         vertex-buffer-command)))
+              (true (zerop
+                     (luv::gpu-set-vertex-buffer-command-offset
+                      vertex-buffer-command)))
+              (true (typep draw-command 'luv:gpu-draw-command))
+              (true (= expected-vertex-count
+                       (luv::gpu-draw-command-vertex-count draw-command)))
+              (true (= 1 (luv::gpu-draw-command-instance-count draw-command)))
+              (true (= expected-first-vertex
+                       (luv::gpu-draw-command-first-vertex draw-command)))
+              (true (zerop
+                     (luv::gpu-draw-command-first-instance draw-command))))))))))
 
-(deftest compositor-shaders-are-shared-mathematical-specifications
+(define-test compositor-shaders-are-shared-mathematical-specifications
   (dolist (specification
             (list (mcluv::spinning-texture-vertex-specification)
                   (mcluv::spinning-texture-fragment-specification)
                   (mcluv::lisp-machine-chassis-vertex-specification)
                   (mcluv::lisp-machine-chassis-fragment-specification)))
-    (ok (typep specification 'shader:shader-specification))
-    (ok (> (length (spv:assemble-shader-specification specification)) 5))
-    (ok (search "using namespace metal"
-                (luv.msl:msl-document-source
-                 (luv.msl:compile-msl specification))))))
+    (true (typep specification 'shader:shader-specification))
+    (true (> (length (spv:assemble-shader-specification specification)) 5))
+    (true (search "using namespace metal"
+                  (luv.msl:msl-document-source
+                   (luv.msl:compile-msl specification))))))
 
-(deftest filled-rectangles-become-one-analytic-command
+(define-test filled-rectangles-become-one-analytic-command
   (let ((medium (fresh-gpu-medium)))
     (clim:medium-draw-rectangle* medium 10 20 110 60 t)
-    (ok (= 1 (length (mcluv::gpu-medium-commands medium))))
-    (ok (typep (aref (mcluv::gpu-medium-commands medium) 0)
-               'mcluv::gpu-analytic-command))
-    (ok (= 72 (length (mcluv::gpu-medium-analytic-vertices medium))))
-    (ok (null (mcluv:gpu-medium-fallback-report medium)))))
+    (true (= 1 (length (mcluv::gpu-medium-commands medium))))
+    (true (typep (aref (mcluv::gpu-medium-commands medium) 0)
+                 'mcluv::gpu-analytic-command))
+    (true (= 72 (length (mcluv::gpu-medium-analytic-vertices medium))))
+    (true (null (mcluv:gpu-medium-fallback-report medium)))))
 
-(deftest full-ellipses-are-analytic-while-arcs-retain-the-fallback
+(define-test full-ellipses-are-analytic-while-arcs-retain-the-fallback
   (let ((medium (fresh-gpu-medium)))
     (clim:medium-draw-ellipse*
      medium 80 60 35 8 -5 20 0 (* 2 pi) t)
-    (ok (typep (aref (mcluv::gpu-medium-commands medium) 0)
-               'mcluv::gpu-analytic-command))
-    (ok (null (mcluv:gpu-medium-fallback-report medium)))
+    (true (typep (aref (mcluv::gpu-medium-commands medium) 0)
+                 'mcluv::gpu-analytic-command))
+    (true (null (mcluv:gpu-medium-fallback-report medium)))
     (clim:medium-draw-ellipse*
      medium 80 60 35 8 -5 20 0 pi t)
-    (ok (find :ellipse (mcluv:gpu-medium-fallback-report medium)
-              :key (lambda (entry) (getf entry :primitive))))))
+    (true (find :ellipse (mcluv:gpu-medium-fallback-report medium)
+                :key (lambda (entry) (getf entry :primitive))))))
 
-(deftest roundrect-command-carries-the-semantic-radius
+(define-test roundrect-command-carries-the-semantic-radius
   (let ((medium (fresh-gpu-medium)))
     (mcluv::medium-draw-analytic-rounded-rectangle*
      medium 10 20 110 60 12 t)
     (let ((vertices (mcluv::gpu-medium-analytic-vertices medium)))
       ;; Each vertex is position, local coordinate, half-size/radius, color.
-      (ok (= 50.0 (aref vertices 6)))
-      (ok (= 20.0 (aref vertices 7)))
-      (ok (= 12.0 (aref vertices 8))))
-    (ok (= 1 (length (mcluv::gpu-medium-commands medium))))
-    (ok (null (mcluv:gpu-medium-fallback-report medium)))))
+      (true (= 50.0 (aref vertices 6)))
+      (true (= 20.0 (aref vertices 7)))
+      (true (= 12.0 (aref vertices 8))))
+    (true (= 1 (length (mcluv::gpu-medium-commands medium))))
+    (true (null (mcluv:gpu-medium-fallback-report medium)))))
 
-(deftest roundrect-has-a-native-mcclim-output-record
-  (ok (find-class 'mcluv::draw-analytic-rounded-rectangle-output-record nil))
-  (ok (typep (fdefinition 'mcluv::medium-draw-analytic-rounded-rectangle*)
-             'generic-function)))
+(define-test roundrect-has-a-native-mcclim-output-record
+  (true (find-class 'mcluv::draw-analytic-rounded-rectangle-output-record nil))
+  (true (typep (fdefinition 'mcluv::medium-draw-analytic-rounded-rectangle*)
+               'generic-function)))
 
-(deftest linear-gradient-coordinates-and-colors
+(define-test linear-gradient-coordinates-and-colors
   (let ((gradient
           (mcluv:make-linear-gradient
            10 20 110 20 clim:+black+ clim:+white+)))
-    (ok (= 0.0 (mcluv::gradient-coordinate gradient 10 20)))
-    (ok (= 0.5 (mcluv::gradient-coordinate gradient 60 20)))
-    (ok (= 1.0 (mcluv::gradient-coordinate gradient 110 20)))
+    (true (= 0.0 (mcluv::gradient-coordinate gradient 10 20)))
+    (true (= 0.5 (mcluv::gradient-coordinate gradient 60 20)))
+    (true (= 1.0 (mcluv::gradient-coordinate gradient 110 20)))
     (multiple-value-bind (red green blue alpha)
         (mcluv::color-rgba (mcluv::design-ink gradient 60 20))
-      (ok (= 0.5 red))
-      (ok (= 0.5 green))
-      (ok (= 0.5 blue))
-      (ok (= 1.0 alpha)))))
+      (true (= 0.5 red))
+      (true (= 0.5 green))
+      (true (= 0.5 blue))
+      (true (= 1.0 alpha)))))
 
-(deftest radial-gradient-coordinates
+(define-test radial-gradient-coordinates
   (let ((gradient
           (mcluv:make-radial-gradient
            50 60 25 clim:+white+ clim:+black+)))
-    (ok (= 0.0 (mcluv::gradient-coordinate gradient 50 60)))
-    (ok (= 0.5 (mcluv::gradient-coordinate gradient 62.5 60)))
-    (ok (= 1.0 (mcluv::gradient-coordinate gradient 50 85)))))
+    (true (= 0.0 (mcluv::gradient-coordinate gradient 50 60)))
+    (true (= 0.5 (mcluv::gradient-coordinate gradient 62.5 60)))
+    (true (= 1.0 (mcluv::gradient-coordinate gradient 50 85)))))
 
-(deftest relief-design-is-a-semantic-height-bearing-ink
+(define-test relief-design-is-a-semantic-height-bearing-ink
   (let* ((albedo (clim:make-rgb-color 0.2 0.4 0.7))
          (relief (mcluv:make-relief-design albedo 6.5))
          (transformed
            (clim:transform-region
             (clim:make-translation-transformation 10 20) relief)))
-    (ok (eq albedo (mcluv::design-ink relief 12 14)))
-    (ok (= 6.5 (mcluv:design-height relief)))
-    (ok (= 0 (mcluv:design-height albedo)))
-    (ok (= 6.5 (mcluv:design-height transformed)))
-    (ok (eq albedo (mcluv:relief-albedo transformed)))))
+    (true (eq albedo (mcluv::design-ink relief 12 14)))
+    (true (= 6.5 (mcluv:design-height relief)))
+    (true (= 0 (mcluv:design-height albedo)))
+    (true (= 6.5 (mcluv:design-height transformed)))
+    (true (eq albedo (mcluv:relief-albedo transformed)))))
 
-(deftest relief-roundrect-is-one-dense-analytic-command
+(define-test relief-roundrect-is-one-dense-analytic-command
   (let ((medium (fresh-gpu-medium)))
     (setf (clim:medium-ink medium)
           (mcluv:make-relief-design
            (clim:make-rgb-color 0.2 0.4 0.7) 7.0))
     (mcluv::medium-draw-analytic-rounded-rectangle*
      medium 10 20 110 60 12 t)
-    (ok (= 1 (length (mcluv::gpu-medium-commands medium))))
-    (ok (typep (aref (mcluv::gpu-medium-commands medium) 0)
-               'mcluv::gpu-relief-analytic-command))
+    (true (= 1 (length (mcluv::gpu-medium-commands medium))))
+    (true (typep (aref (mcluv::gpu-medium-commands medium) 0)
+                 'mcluv::gpu-relief-analytic-command))
     ;; Six vertices, each containing five packed float32x3 attributes.
-    (ok (= 90 (length (mcluv::gpu-medium-relief-vertices medium))))
-    (ok (= 7.0 (aref (mcluv::gpu-medium-relief-vertices medium) 12)))
-    (ok (zerop (length (mcluv::gpu-medium-vertices medium))))
-    (ok (zerop (length (mcluv::gpu-medium-analytic-vertices medium))))
-    (ok (null (mcluv:gpu-medium-fallback-report medium)))))
+    (true (= 90 (length (mcluv::gpu-medium-relief-vertices medium))))
+    (true (= 7.0 (aref (mcluv::gpu-medium-relief-vertices medium) 12)))
+    (true (zerop (length (mcluv::gpu-medium-vertices medium))))
+    (true (zerop (length (mcluv::gpu-medium-analytic-vertices medium))))
+    (true (null (mcluv:gpu-medium-fallback-report medium)))))
 
-(deftest gradient-roundrect-is-one-dense-analytic-command
+(define-test gradient-roundrect-is-one-dense-analytic-command
   (let* ((medium (fresh-gpu-medium))
          (gradient
            (mcluv:make-linear-gradient
@@ -720,14 +721,14 @@
     (setf (clim:medium-ink medium) gradient)
     (mcluv::medium-draw-analytic-rounded-rectangle*
      medium 10 20 110 60 12 t)
-    (ok (= 1 (length (mcluv::gpu-medium-commands medium))))
-    (ok (typep (aref (mcluv::gpu-medium-commands medium) 0)
-               'mcluv::gpu-gradient-analytic-command))
+    (true (= 1 (length (mcluv::gpu-medium-commands medium))))
+    (true (typep (aref (mcluv::gpu-medium-commands medium) 0)
+                 'mcluv::gpu-gradient-analytic-command))
     ;; Six vertices, each containing seven packed float32x3 attributes.
-    (ok (= 126 (length (mcluv::gpu-medium-gradient-vertices medium))))
-    (ok (zerop (length (mcluv::gpu-medium-vertices medium))))
-    (ok (zerop (length (mcluv::gpu-medium-analytic-vertices medium))))
-    (ok (null (mcluv:gpu-medium-fallback-report medium)))))
+    (true (= 126 (length (mcluv::gpu-medium-gradient-vertices medium))))
+    (true (zerop (length (mcluv::gpu-medium-vertices medium))))
+    (true (zerop (length (mcluv::gpu-medium-analytic-vertices medium))))
+    (true (null (mcluv:gpu-medium-fallback-report medium)))))
 
 (defun tiny-image-pattern ()
   (clim:make-pattern
@@ -735,32 +736,32 @@
                        :initial-element #xff3366cc)
    nil))
 
-(deftest draw-pattern-is-one-cached-image-command
+(define-test draw-pattern-is-one-cached-image-command
   (let ((medium (fresh-gpu-medium))
         (pattern (tiny-image-pattern)))
     (climi::medium-draw-pattern* medium pattern 10 20)
-    (ok (= 1 (length (mcluv::gpu-medium-commands medium))))
+    (true (= 1 (length (mcluv::gpu-medium-commands medium))))
     (let ((command (aref (mcluv::gpu-medium-commands medium) 0)))
-      (ok (typep command 'mcluv::gpu-image-command))
-      (ok (eq pattern
-              (mcluv::gpu-image-paint-source
-               (mcluv::gpu-image-command-design command)))))
-    (ok (= 72 (length (mcluv::gpu-medium-image-vertices medium))))
-    (ok (null (mcluv:gpu-medium-fallback-report medium)))))
+      (true (typep command 'mcluv::gpu-image-command))
+      (true (eq pattern
+                (mcluv::gpu-image-paint-source
+                 (mcluv::gpu-image-command-design command)))))
+    (true (= 72 (length (mcluv::gpu-medium-image-vertices medium))))
+    (true (null (mcluv:gpu-medium-fallback-report medium)))))
 
-(deftest transformed-image-paint-keeps-source-and-affine-coordinates
+(define-test transformed-image-paint-keeps-source-and-affine-coordinates
   (let* ((pattern (tiny-image-pattern))
          (transformation (clim:make-transformation 2 0.5 -0.25 3 40 60))
          (paint (clim:transform-region transformation pattern)))
-    (ok (eq pattern (mcluv::gpu-image-paint-source paint)))
+    (true (eq pattern (mcluv::gpu-image-paint-source paint)))
     (multiple-value-bind (x y)
         (clim:transform-position transformation 2 3)
       (multiple-value-bind (u v)
           (mcluv::gpu-image-paint-coordinate paint x y)
-        (ok (< (abs (- u 0.5)) 1.0e-6))
-        (ok (< (abs (- v 0.75)) 1.0e-6))))))
+        (true (< (abs (- u 0.5)) 1.0e-6))
+        (true (< (abs (- v 0.75)) 1.0e-6))))))
 
-(deftest polygons-use-native-gradient-and-image-paints
+(define-test polygons-use-native-gradient-and-image-paints
   (dolist (paint
             (list (mcluv:make-linear-gradient
                    0 0 100 0 clim:+black+ clim:+white+)
@@ -769,13 +770,13 @@
       (setf (clim:medium-ink medium) paint)
       (clim:medium-draw-polygon*
        medium #(10 10 90 20 70 80 20 70) t t)
-      (ok (= 1 (length (mcluv::gpu-medium-commands medium))))
-      (ok (typep (aref (mcluv::gpu-medium-commands medium) 0)
-                 (if (typep paint 'mcluv:linear-gradient)
-                     'mcluv::gpu-gradient-analytic-command
-                     'mcluv::gpu-image-command))))))
+      (true (= 1 (length (mcluv::gpu-medium-commands medium))))
+      (true (typep (aref (mcluv::gpu-medium-commands medium) 0)
+                   (if (typep paint 'mcluv:linear-gradient)
+                       'mcluv::gpu-gradient-analytic-command
+                       'mcluv::gpu-image-command))))))
 
-(deftest commands-retain-mcclim-clipping-for-native-scissors
+(define-test commands-retain-mcclim-clipping-for-native-scissors
   (let ((medium (fresh-gpu-medium)))
     (setf (clim:medium-clipping-region medium)
           (clim:make-rectangle* 0.1 0.2 0.8 0.9))
@@ -783,5 +784,5 @@
     (let ((clip
             (mcluv::gpu-analytic-command-clip
              (aref (mcluv::gpu-medium-commands medium) 0))))
-      (ok clip)
-      (ok (equal '(0.1 0.2 0.8 0.9) clip)))))
+      (true clip)
+      (true (equal '(0.1 0.2 0.8 0.9) clip)))))

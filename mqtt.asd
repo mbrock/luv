@@ -32,7 +32,7 @@ lives in MQTT/NET."
   :description "Executable claims for the MQTT core, against the specification's own examples."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("mqtt" "rove")
+  :depends-on ("mqtt" "luv/test-support")
   :serial t
   :components
   ((:module "mqtt/tests"
@@ -42,7 +42,5 @@ lives in MQTT/NET."
                  (:file "session"))))
   :perform (test-op (operation component)
              (declare (ignore operation component))
-             (unless (uiop:symbol-call '#:rove '#:run-suite
-                                       (uiop:symbol-call '#:rove '#:find-suite
-                                                         '#:mqtt.tests))
-               (error "mqtt tests failed"))))
+             (uiop:symbol-call '#:luv.test-support '#:test-package
+                               '#:mqtt.tests)))

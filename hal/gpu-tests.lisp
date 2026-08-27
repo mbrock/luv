@@ -1,7 +1,7 @@
 (in-package #:luv.tests)
 
-(deftest temporal-motion-format-has-two-half-float-lanes
-  (ok (= 4 (luv:texture-format-bytes-per-texel :rg16-float))))
+(define-test temporal-motion-format-has-two-half-float-lanes
+  (true (= 4 (luv:texture-format-bytes-per-texel :rg16-float))))
 
 (defclass frame-resource-key-context (luv:canvas-context) ())
 
@@ -10,7 +10,7 @@
   (declare (ignore context))
   (car surface))
 
-(deftest canvas-frame-resources-follow-stable-presentation-slots
+(define-test canvas-frame-resources-follow-stable-presentation-slots
   (let ((cache (luv:make-canvas-frame-resource-cache))
         (context (make-instance 'frame-resource-key-context))
         (constructions 0))
@@ -19,18 +19,18 @@
              (list key (cdr surface))))
       (multiple-value-bind (first created-p key)
           (luv:canvas-frame-resource cache context '(7 . :first) #'construct)
-        (ok created-p)
-        (ok (= 7 key))
-        (ok (equal '(7 :first) first))
+        (true created-p)
+        (true (= 7 key))
+        (true (equal '(7 :first) first))
         (multiple-value-bind (again created-again-p)
             (luv:canvas-frame-resource cache context '(7 . :new-wrapper)
                                        #'construct)
-          (ok (eq first again))
-          (ok (not created-again-p))))
-      (ok (= 1 constructions))
-      (ok (= 1 (luv:canvas-frame-resource-count cache))))))
+          (true (eq first again))
+          (true (not created-again-p))))
+      (true (= 1 constructions))
+      (true (= 1 (luv:canvas-frame-resource-count cache))))))
 
-(deftest canvas-frame-resource-release-is-retryable
+(define-test canvas-frame-resource-release-is-retryable
   (let* ((entries (make-hash-table :test #'eql))
          (cache (luv:make-canvas-frame-resource-cache :entries entries))
          (context (make-instance 'frame-resource-key-context))
@@ -41,28 +41,28 @@
                                     (declare (ignore key surface))
                                     :owned))
     (flet ((release (value)
-             (ok (eq :owned value))
+             (true (eq :owned value))
              (incf releases)
              (when fail-p (error "injected frame resource release failure"))))
-      (ok (signals (luv:evict-canvas-frame-resource-key cache 3 #'release)
-                   'simple-error))
-      (ok (= 1 (luv:canvas-frame-resource-count cache)))
+      (fail (luv:evict-canvas-frame-resource-key cache 3 #'release)
+            'simple-error)
+      (true (= 1 (luv:canvas-frame-resource-count cache)))
       (setf fail-p nil)
       (luv:destroy-canvas-frame-resource-cache cache #'release)
-      (ok (= 2 releases))
-      (ok (zerop (luv:canvas-frame-resource-count cache)))
-      (ok (signals
-           (luv:canvas-frame-resource cache context '(3 . :surface)
-                                      (lambda (&rest arguments)
-                                        (declare (ignore arguments)) :new))
-           'simple-error)))))
+      (true (= 2 releases))
+      (true (zerop (luv:canvas-frame-resource-count cache)))
+      (fail
+       (luv:canvas-frame-resource cache context '(3 . :surface)
+                                  (lambda (&rest arguments)
+                                    (declare (ignore arguments)) :new))
+       'simple-error))))
 
-(deftest buffer-uploads-preserve-sixteen-bit-storage
+(define-test buffer-uploads-preserve-sixteen-bit-storage
   (multiple-value-bind (foreign-type element-size)
       (luv::buffer-data-foreign-type
        (make-array 3 :element-type '(unsigned-byte 16)))
-    (ok (eq :uint16 foreign-type))
-    (ok (= 2 element-size))))
+    (true (eq :uint16 foreign-type))
+    (true (= 2 element-size))))
 
 (defclass descriptor-probe-device (luv:gpu-device)
   ((operation :initform nil :accessor descriptor-probe-operation)
@@ -102,22 +102,22 @@
       (progn (funcall thunk) nil)
     (luv:gpu-request-error (condition) condition)))
 
-(deftest portable-buffer-descriptors-reach-devices-in-one-canonical-shape
+(define-test portable-buffer-descriptors-reach-devices-in-one-canonical-shape
   (let* ((device (make-instance 'descriptor-probe-device))
          (usage (vector :vertex :index :copy-dst :vertex))
          (source
            (luv:make-buffer-descriptor
             :label "probe buffer" :size 64 :usage usage))
          (canonical (luv:create device source)))
-    (ok (not (eq source canonical)))
-    (ok (eq :create-buffer (descriptor-probe-operation device)))
-    (ok (= 64 (luv::buffer-descriptor-size canonical)))
-    (ok (equal '(:vertex :index :copy-dst)
-               (luv::buffer-descriptor-usage canonical)))
-    (ok (eq usage (luv::buffer-descriptor-usage source)))
-    (ok (string= "probe buffer" (luv::gpu-descriptor-label canonical)))))
+    (true (not (eq source canonical)))
+    (true (eq :create-buffer (descriptor-probe-operation device)))
+    (true (= 64 (luv::buffer-descriptor-size canonical)))
+    (true (equal '(:vertex :index :copy-dst)
+                 (luv::buffer-descriptor-usage canonical)))
+    (true (eq usage (luv::buffer-descriptor-usage source)))
+    (true (string= "probe buffer" (luv::gpu-descriptor-label canonical)))))
 
-(deftest portable-texture-descriptors-canonicalize-create-and-adoption
+(define-test portable-texture-descriptors-canonicalize-create-and-adoption
   (dolist (size '((32 16) (32 16 1) #(32 16) #(32 16 1)))
     (let* ((device (make-instance 'descriptor-probe-device))
            (source
@@ -126,11 +126,11 @@
               :format :rgba8-unorm :usage :texture-binding
               :sample-count 1))
            (canonical (luv:create device source)))
-      (ok (equal '(32 16 1) (luv::texture-descriptor-size canonical)))
-      (ok (equal '(:texture-binding)
-                 (luv::texture-descriptor-usage canonical)))
-      (ok (= 1 (luv::texture-descriptor-sample-count canonical)))
-      (ok (eq size (luv::texture-descriptor-size source)))))
+      (true (equal '(32 16 1) (luv::texture-descriptor-size canonical)))
+      (true (equal '(:texture-binding)
+                   (luv::texture-descriptor-usage canonical)))
+      (true (= 1 (luv::texture-descriptor-sample-count canonical)))
+      (true (eq size (luv::texture-descriptor-size source)))))
   (let* ((device (make-instance 'descriptor-probe-device))
          (native (list :native))
          (owner (list :owner))
@@ -140,14 +140,14 @@
             :usage #(:texture-binding :storage-binding :texture-binding)))
          (canonical
            (luv:adopt-native-texture device native owner source)))
-    (ok (eq :adopt-texture (descriptor-probe-operation device)))
-    (ok (eq native (descriptor-probe-native device)))
-    (ok (eq owner (descriptor-probe-owner device)))
-    (ok (equal '(20 10 1) (luv::texture-descriptor-size canonical)))
-    (ok (equal '(:texture-binding :storage-binding)
-               (luv::texture-descriptor-usage canonical)))))
+    (true (eq :adopt-texture (descriptor-probe-operation device)))
+    (true (eq native (descriptor-probe-native device)))
+    (true (eq owner (descriptor-probe-owner device)))
+    (true (equal '(20 10 1) (luv::texture-descriptor-size canonical)))
+    (true (equal '(:texture-binding :storage-binding)
+                 (luv::texture-descriptor-usage canonical)))))
 
-(deftest multisample-textures-are-render-only-and-use-portable-counts
+(define-test multisample-textures-are-render-only-and-use-portable-counts
   (let ((device (make-instance 'descriptor-probe-device)))
     (dolist (sample-count '(2 4 8))
       (let ((canonical
@@ -157,98 +157,98 @@
                 :size '(32 16) :format :rgba8-unorm
                 :dimensions :2d :usage :render-attachment
                 :sample-count sample-count))))
-        (ok (= sample-count
-               (luv::texture-descriptor-sample-count canonical)))))
+        (true (= sample-count
+                 (luv::texture-descriptor-sample-count canonical)))))
     (dolist (sample-count '(0 3 16))
-      (ok (eq :invalid-texture-sample-count
+      (true (eq :invalid-texture-sample-count
+                (gpu-request-reason
+                 (lambda ()
+                   (luv:create
+                    device
+                    (luv:make-texture-descriptor
+                     :size '(32 16) :format :rgba8-unorm
+                     :dimensions :2d :usage :render-attachment
+                     :sample-count sample-count)))))))
+    (true (eq :invalid-multisample-texture-usage
               (gpu-request-reason
                (lambda ()
                  (luv:create
                   device
                   (luv:make-texture-descriptor
                    :size '(32 16) :format :rgba8-unorm
-                   :dimensions :2d :usage :render-attachment
-                   :sample-count sample-count)))))))
-    (ok (eq :invalid-multisample-texture-usage
-            (gpu-request-reason
-             (lambda ()
-               (luv:create
-                device
-                (luv:make-texture-descriptor
-                 :size '(32 16) :format :rgba8-unorm
-                 :dimensions :2d
-                 :usage '(:render-attachment :texture-binding)
-                 :sample-count 4))))))))
+                   :dimensions :2d
+                   :usage '(:render-attachment :texture-binding)
+                   :sample-count 4))))))))
 
-(deftest portable-descriptor-errors-do-not-depend-on-a-backend
+(define-test portable-descriptor-errors-do-not-depend-on-a-backend
   (let ((device (make-instance 'descriptor-probe-device)))
     (dolist (size '(nil 0 -1 #.(1+ (expt 2 64))))
-      (ok (eq :invalid-buffer-size
-              (gpu-request-reason
-               (lambda ()
-                 (luv:create
-                  device (luv:make-buffer-descriptor
-                          :size size :usage :vertex)))))))
+      (true (eq :invalid-buffer-size
+                (gpu-request-reason
+                 (lambda ()
+                   (luv:create
+                    device (luv:make-buffer-descriptor
+                            :size size :usage :vertex)))))))
     (dolist (usage '(nil :indirect (:vertex :indirect)
                      #(:copy-dst :map-read)))
-      (ok (eq :invalid-buffer-usage
-              (gpu-request-reason
-               (lambda ()
-                 (luv:create
-                  device (luv:make-buffer-descriptor
-                          :size 4 :usage usage)))))))
+      (true (eq :invalid-buffer-usage
+                (gpu-request-reason
+                 (lambda ()
+                   (luv:create
+                    device (luv:make-buffer-descriptor
+                            :size 4 :usage usage)))))))
     (dolist (size '(nil (16) (16 8 2) (16 0) #(16 -1)))
-      (ok (eq :invalid-texture-size
-              (gpu-request-reason
-               (lambda ()
-                 (luv:create
-                  device (luv:make-texture-descriptor
-                          :size size :dimensions :2d :format :r8-unorm
-                          :usage :texture-binding)))))))
+      (true (eq :invalid-texture-size
+                (gpu-request-reason
+                 (lambda ()
+                   (luv:create
+                    device (luv:make-texture-descriptor
+                            :size size :dimensions :2d :format :r8-unorm
+                            :usage :texture-binding)))))))
     (dolist (usage '(nil :present (:copy-dst :present) #(present)))
-      (ok (eq :invalid-texture-usage
+      (true (eq :invalid-texture-usage
+                (gpu-request-reason
+                 (lambda ()
+                   (luv:create
+                    device (luv:make-texture-descriptor
+                            :size '(16 8) :dimensions :2d :format :r8-unorm
+                            :usage usage)))))))
+    (true (eq :invalid-texture-dimensions
               (gpu-request-reason
                (lambda ()
                  (luv:create
                   device (luv:make-texture-descriptor
-                          :size '(16 8) :dimensions :2d :format :r8-unorm
-                          :usage usage)))))))
-    (ok (eq :invalid-texture-dimensions
-            (gpu-request-reason
-             (lambda ()
-               (luv:create
-                device (luv:make-texture-descriptor
-                        :size '(16 8) :dimensions :3d :format :r8-unorm
-                        :usage :texture-binding))))))))
+                          :size '(16 8) :dimensions :3d :format :r8-unorm
+                          :usage :texture-binding))))))))
 
-(deftest portable-descriptor-errors-retain-source-and-operation
+(define-test portable-descriptor-errors-retain-source-and-operation
   (let* ((device (make-instance 'descriptor-probe-device))
          (source
            (luv:make-buffer-descriptor :size 0 :usage :vertex))
          (condition
            (gpu-request-condition (lambda () (luv:create device source)))))
-    (ok (eq :create (luv:gpu-error-operation condition)))
-    (ok (eq source (luv:gpu-request-error-descriptor condition)))
-    (ok (eql 0 (luv:gpu-request-error-details condition))))
+    (true (eq :create (luv:gpu-error-operation condition)))
+    (true (eq source (luv:gpu-request-error-descriptor condition)))
+    (true (eql 0 (luv:gpu-request-error-details condition))))
   (let ((device (make-instance 'descriptor-probe-device))
         (dotted-usage (cons :vertex :copy-dst))
         (circular-size (list 16 8)))
     (setf (cddr circular-size) circular-size)
-    (ok (eq :invalid-buffer-usage
-            (gpu-request-reason
-             (lambda ()
-               (luv:create
-                device (luv:make-buffer-descriptor
-                        :size 4 :usage dotted-usage))))))
-    (ok (eq :invalid-texture-size
-            (gpu-request-reason
-             (lambda ()
-               (luv:create
-                device (luv:make-texture-descriptor
-                        :size circular-size :dimensions :2d :format :r8-unorm
-                        :usage :texture-binding))))))))
+    (true (eq :invalid-buffer-usage
+              (gpu-request-reason
+               (lambda ()
+                 (luv:create
+                  device (luv:make-buffer-descriptor
+                          :size 4 :usage dotted-usage))))))
+    (true (eq :invalid-texture-size
+              (gpu-request-reason
+               (lambda ()
+                 (luv:create
+                  device (luv:make-texture-descriptor
+                          :size circular-size :dimensions :2d :format :r8-unorm
+                          :usage :texture-binding))))))))
 
-(deftest native-retirement-preserves-a-strict-fifo-retry-barrier
+(define-test native-retirement-preserves-a-strict-fifo-retry-barrier
   (let ((ledger (luv::make-gpu-retirement-ledger))
         (events '())
         (fail-view-p t)
@@ -276,37 +276,37 @@
       (luv::maintain-gpu-retirement-ledger ledger 0 :operation :test))
     ;; The failed view is an ownership barrier: its texture and every later
     ;; entry remain untouched until the view succeeds.
-    (ok (equal '(:view) events))
-    (ok (typep warning 'luv:gpu-native-retirement-warning))
-    (ok (typep warning 'luv:gpu-native-retirement-condition))
-    (ok (eq :test (luv:gpu-native-retirement-operation warning)))
-    (ok (= 1 (length (luv:gpu-native-retirement-failures warning))))
-    (ok (eq :view
-            (luv:gpu-native-retirement-failure-resource
-             (first (luv:gpu-native-retirement-failures warning)))))
-    (ok (= 1
-           (luv:gpu-native-retirement-failure-attempts
-            (first (luv:gpu-native-retirement-failures warning)))))
-    (ok (search "view retirement failed"
-                (princ-to-string
-                 (luv:gpu-native-retirement-failure-cause
-                  (first (luv:gpu-native-retirement-failures warning))))))
-    (ok (search "retained the failed resource and its FIFO successors"
-                (princ-to-string warning)))
-    (ok (equal '(:view :texture :future)
-               (mapcar #'luv::gpu-retirement-entry-resource
-                       (luv::gpu-retirement-ledger-entries ledger))))
-    (ok (signals
-         (luv::ensure-gpu-retirement-ledger-empty
-          ledger :operation :test-device-destroy)
-         'luv::gpu-native-retirement-error))
+    (true (equal '(:view) events))
+    (true (typep warning 'luv:gpu-native-retirement-warning))
+    (true (typep warning 'luv:gpu-native-retirement-condition))
+    (true (eq :test (luv:gpu-native-retirement-operation warning)))
+    (true (= 1 (length (luv:gpu-native-retirement-failures warning))))
+    (true (eq :view
+              (luv:gpu-native-retirement-failure-resource
+               (first (luv:gpu-native-retirement-failures warning)))))
+    (true (= 1
+             (luv:gpu-native-retirement-failure-attempts
+              (first (luv:gpu-native-retirement-failures warning)))))
+    (true (search "view retirement failed"
+                  (princ-to-string
+                   (luv:gpu-native-retirement-failure-cause
+                    (first (luv:gpu-native-retirement-failures warning))))))
+    (true (search "retained the failed resource and its FIFO successors"
+                  (princ-to-string warning)))
+    (true (equal '(:view :texture :future)
+                 (mapcar #'luv::gpu-retirement-entry-resource
+                         (luv::gpu-retirement-ledger-entries ledger))))
+    (fail
+     (luv::ensure-gpu-retirement-ledger-empty
+      ledger :operation :test-device-destroy)
+     'luv::gpu-native-retirement-error)
     (setf events nil)
     (luv::maintain-gpu-retirement-ledger ledger 2 :operation :test-retry)
-    (ok (equal '(:view :texture :future) events))
-    (ok (null (luv::gpu-retirement-ledger-entries ledger)))
-    (ok (eq ledger (luv::ensure-gpu-retirement-ledger-empty ledger)))))
+    (true (equal '(:view :texture :future) events))
+    (true (null (luv::gpu-retirement-ledger-entries ledger)))
+    (true (eq ledger (luv::ensure-gpu-retirement-ledger-empty ledger)))))
 
-(deftest native-retirement-detaches-callback-enqueues-without-losing-order
+(define-test native-retirement-detaches-callback-enqueues-without-losing-order
   (let ((ledger (luv::make-gpu-retirement-ledger))
         (events '())
         (fail-second-p t))
@@ -321,9 +321,9 @@
        ;; Recursive maintenance cannot overtake the outer detached batch, and
        ;; device teardown cannot mistake that detached batch for emptiness.
        (luv::maintain-gpu-retirement-ledger ledger 0)
-       (ok (signals
-            (luv::ensure-gpu-retirement-ledger-empty ledger)
-            'luv:gpu-native-retirement-error))))
+       (fail
+        (luv::ensure-gpu-retirement-ledger-empty ledger)
+        'luv:gpu-native-retirement-error)))
     (luv::enqueue-gpu-retirement
      ledger :second 0
      (lambda ()
@@ -334,18 +334,18 @@
     (handler-bind
         ((luv::gpu-native-retirement-warning #'muffle-warning))
       (luv::maintain-gpu-retirement-ledger ledger 0))
-    (ok (equal '(:second :first) events))
+    (true (equal '(:second :first) events))
     ;; The older failure stays before work enqueued by a callback, and the
     ;; callback child is deliberately not visited in the same maintenance pass.
-    (ok (equal '(:second :callback-child)
-               (mapcar #'luv::gpu-retirement-entry-resource
-                       (luv::gpu-retirement-ledger-entries ledger))))
+    (true (equal '(:second :callback-child)
+                 (mapcar #'luv::gpu-retirement-entry-resource
+                         (luv::gpu-retirement-ledger-entries ledger))))
     (setf events nil)
     (luv::maintain-gpu-retirement-ledger ledger 0)
-    (ok (equal '(:callback-child :second) events))
-    (ok (null (luv::gpu-retirement-ledger-entries ledger)))))
+    (true (equal '(:callback-child :second) events))
+    (true (null (luv::gpu-retirement-ledger-entries ledger)))))
 
-(deftest native-retirement-sequences-resume-after-the-last-successful-step
+(define-test native-retirement-sequences-resume-after-the-last-successful-step
   (let ((ledger (luv::make-gpu-retirement-ledger))
         (first-attempts 0)
         (second-attempts 0)
@@ -367,20 +367,20 @@
     (handler-bind
         ((luv:gpu-native-retirement-warning #'muffle-warning))
       (luv::maintain-gpu-retirement-ledger ledger 0))
-    (ok (= 1 first-attempts))
-    (ok (= 1 second-attempts))
-    (ok (zerop third-attempts))
-    (ok (zerop follower-attempts))
+    (true (= 1 first-attempts))
+    (true (= 1 second-attempts))
+    (true (zerop third-attempts))
+    (true (zerop follower-attempts))
     (luv::maintain-gpu-retirement-ledger ledger 0)
     ;; Retry resumes at step two; the successful destructive step is not run
     ;; twice, and the follower runs only after the whole owner retires.
-    (ok (= 1 first-attempts))
-    (ok (= 2 second-attempts))
-    (ok (= 1 third-attempts))
-    (ok (= 1 follower-attempts))
-    (ok (null (luv::gpu-retirement-ledger-entries ledger)))))
+    (true (= 1 first-attempts))
+    (true (= 2 second-attempts))
+    (true (= 1 third-attempts))
+    (true (= 1 follower-attempts))
+    (true (null (luv::gpu-retirement-ledger-entries ledger)))))
 
-(deftest finalizer-native-retirement-remains-durably-retryable
+(define-test finalizer-native-retirement-remains-durably-retryable
   (let ((luv::*gpu-finalizer-retirement-ledger*
           (luv::make-gpu-retirement-ledger))
         (attempts 0)
@@ -394,28 +394,28 @@
          (when fail-p
            (setf fail-p nil)
            (error "injected finalizer teardown failure")))))
-    (ok (= 1 attempts))
-    (ok (equal '(:leaked-owner)
-               (mapcar #'luv::gpu-retirement-entry-resource
-                       (luv::gpu-retirement-ledger-entries
-                        luv::*gpu-finalizer-retirement-ledger*))))
+    (true (= 1 attempts))
+    (true (equal '(:leaked-owner)
+                 (mapcar #'luv::gpu-retirement-entry-resource
+                         (luv::gpu-retirement-ledger-entries
+                          luv::*gpu-finalizer-retirement-ledger*))))
     (luv::maintain-gpu-finalizer-retirements)
-    (ok (= 2 attempts))
-    (ok (null
-         (luv::gpu-retirement-ledger-entries
-          luv::*gpu-finalizer-retirement-ledger*)))))
+    (true (= 2 attempts))
+    (true (null
+           (luv::gpu-retirement-ledger-entries
+            luv::*gpu-finalizer-retirement-ledger*)))))
 
-(deftest native-retirement-transfer-precedes-invalidation
+(define-test native-retirement-transfer-precedes-invalidation
   (let ((ledger (luv::make-gpu-retirement-ledger))
         (invalidated-p nil))
     (luv::transfer-gpu-retirement
      ledger :resource 0 (lambda () nil)
      (lambda ()
-       (ok (eq :resource
-               (luv::gpu-retirement-entry-resource
-                (first (luv::gpu-retirement-ledger-entries ledger)))))
+       (true (eq :resource
+                 (luv::gpu-retirement-entry-resource
+                  (first (luv::gpu-retirement-ledger-entries ledger)))))
        (setf invalidated-p t)))
-    (ok invalidated-p))
+    (true invalidated-p))
   (let ((invalidated-p nil)
         (condition nil))
     (handler-case
@@ -425,13 +425,13 @@
          (lambda () (setf invalidated-p t)))
       (luv:gpu-native-retirement-error (error)
         (setf condition error)))
-    (ok (typep condition 'luv:gpu-native-retirement-error))
-    (ok (eq :destroy (luv:gpu-native-retirement-operation condition)))
-    (ok (= 1 (length (luv:gpu-native-retirement-failures condition))))
-    (ok (search "native teardown failed" (princ-to-string condition)))
-    (ok (not invalidated-p))))
+    (true (typep condition 'luv:gpu-native-retirement-error))
+    (true (eq :destroy (luv:gpu-native-retirement-operation condition)))
+    (true (= 1 (length (luv:gpu-native-retirement-failures condition))))
+    (true (search "native teardown failed" (princ-to-string condition)))
+    (true (not invalidated-p))))
 
-(deftest native-retirement-worker-start-failure-cannot-split-custody
+(define-test native-retirement-worker-start-failure-cannot-split-custody
   (let* ((luv::*gpu-retirement-ledger-custodians*
            (make-hash-table :test #'eq))
          (luv::*gpu-retirement-custodian-service-thread* nil)
@@ -449,23 +449,23 @@
            (luv::transfer-gpu-retirement
             ledger :owner 0 (lambda () nil)
             (lambda () (setf invalidated-p t)) custodian)
-           (ok invalidated-p)
-           (ok (= 1 (length
-                     (luv::gpu-retirement-ledger-entries ledger))))
-           (ok (eq custodian
-                   (gethash
-                    ledger luv::*gpu-retirement-ledger-custodians*)))
-           (ok (search
-                "injected worker creation failure"
-                (princ-to-string
-                 luv::*gpu-retirement-custodian-service-start-error*))))
+           (true invalidated-p)
+           (true (= 1 (length
+                       (luv::gpu-retirement-ledger-entries ledger))))
+           (true (eq custodian
+                     (gethash
+                      ledger luv::*gpu-retirement-ledger-custodians*)))
+           (true (search
+                  "injected worker creation failure"
+                  (princ-to-string
+                   luv::*gpu-retirement-custodian-service-start-error*))))
       (setf (symbol-function spawn-symbol) original-spawn)
       (luv::release-gpu-retirement-ledger-custodian
        ledger custodian))))
 
-(deftest native-retirement-service-worker-is-ephemeral
+(define-test native-retirement-service-worker-is-ephemeral
   (let ((thread (luv::spawn-gpu-retirement-custodian-service-thread)))
-    (ok (sb-thread:thread-ephemeral-p thread))
+    (true (sb-thread:thread-ephemeral-p thread))
     (sb-thread:join-thread thread))
   (let ((creators
           (loop repeat 4
@@ -479,5 +479,5 @@
                            (prog1
                                (sb-thread:thread-ephemeral-p thread)
                              (sb-thread:join-thread thread)))))))))
-    (ok (every #'identity
-               (mapcar #'sb-thread:join-thread creators)))))
+    (true (every #'identity
+                 (mapcar #'sb-thread:join-thread creators)))))

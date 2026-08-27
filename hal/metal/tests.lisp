@@ -1,23 +1,23 @@
 (in-package #:luvcraft.tests)
 
-(deftest slug-formats-have-exact-portable-and-metal-storage
-  (ok (= 4 (texture-format-bytes-per-texel :rg16-uint)))
-  (ok (= 4 (texture-format-bytes-per-texel :rg16-float)))
-  (ok (= 8 (texture-format-bytes-per-texel :rgba16-float)))
-  (ok (= metal:+pixel-format-rg16-uint+
-         (luv::metal-resource-pixel-format
-          :rg16-uint
-          (make-texture-descriptor :format :rg16-uint))))
-  (ok (= metal:+pixel-format-rg16-float+
-         (luv::metal-resource-pixel-format
-          :rg16-float
-          (make-texture-descriptor :format :rg16-float))))
-  (ok (= metal:+pixel-format-rgba16-float+
-         (luv::metal-resource-pixel-format
-          :rgba16-float
-          (make-texture-descriptor :format :rgba16-float)))))
+(define-test slug-formats-have-exact-portable-and-metal-storage
+  (true (= 4 (texture-format-bytes-per-texel :rg16-uint)))
+  (true (= 4 (texture-format-bytes-per-texel :rg16-float)))
+  (true (= 8 (texture-format-bytes-per-texel :rgba16-float)))
+  (true (= metal:+pixel-format-rg16-uint+
+           (luv::metal-resource-pixel-format
+            :rg16-uint
+            (make-texture-descriptor :format :rg16-uint))))
+  (true (= metal:+pixel-format-rg16-float+
+           (luv::metal-resource-pixel-format
+            :rg16-float
+            (make-texture-descriptor :format :rg16-float))))
+  (true (= metal:+pixel-format-rgba16-float+
+           (luv::metal-resource-pixel-format
+            :rgba16-float
+            (make-texture-descriptor :format :rgba16-float)))))
 
-(deftest metal-slug-textures-accept-their-exact-packed-words
+(define-test metal-slug-textures-accept-their-exact-packed-words
   (let* ((device
            (request-gpu-device (make-instance 'metal-gpu-provider)))
          (queue (device-queue device))
@@ -37,8 +37,8 @@
                  (make-texture-descriptor
                    :size '(2 1) :dimensions :2d :format :rgba16-float
                    :usage '(:texture-binding :copy-dst))))
-           (ok (equal '(2 1 1) (gpu-texture-size band-texture)))
-           (ok (equal '(2 1 1) (gpu-texture-size curve-texture)))
+           (true (equal '(2 1 1) (gpu-texture-size band-texture)))
+           (true (equal '(2 1 1) (gpu-texture-size curve-texture)))
            (write-texture
             queue (make-texture-copy :texture band-texture)
             (make-array '(1 2) :element-type '(unsigned-byte 32)
@@ -53,8 +53,8 @@
                     '((#x3c00380034003000 #x40003c0038003400)))
             (make-texture-data-layout :bytes-per-row 16 :rows-per-image 1)
            '(2 1))
-           (ok (typep band-texture 'luv::metal-gpu-texture))
-           (ok (typep curve-texture 'luv::metal-gpu-texture))
+           (true (typep band-texture 'luv::metal-gpu-texture))
+           (true (typep curve-texture 'luv::metal-gpu-texture))
            (let ((unexpected nil))
              (unwind-protect
                   (progn
@@ -65,15 +65,15 @@
                             :size '(1 1) :dimensions :2d
                             :format :rgba8-unorm
                             :usage :storage-binding)))
-                    (ok (typep unexpected 'luv::metal-gpu-texture))
-                    (ok (member :storage-binding
-                                (gpu-texture-usage unexpected))))
+                    (true (typep unexpected 'luv::metal-gpu-texture))
+                    (true (member :storage-binding
+                                  (gpu-texture-usage unexpected))))
                (when unexpected (destroy unexpected)))))
       (when curve-texture (destroy curve-texture))
       (when band-texture (destroy band-texture))
       (destroy device))))
 
-(deftest adopted-metal-textures-enter-explicit-residency
+(define-test adopted-metal-textures-enter-explicit-residency
   (let* ((device
            (request-gpu-device (make-instance 'metal-gpu-provider)))
          (native nil)
@@ -96,19 +96,19 @@
                     (make-texture-descriptor
                      :size '(8 8) :dimensions :2d :format :r8-unorm
                      :usage '(:texture-binding)))))
-           (ok (luv::metal-texture-resident-p texture))
-           (ok (equal '(8 8 1) (gpu-texture-size texture)))
-           (ok (not (luv::metal-texture-owned-p texture)))
+           (true (luv::metal-texture-resident-p texture))
+           (true (equal '(8 8 1) (gpu-texture-size texture)))
+           (true (not (luv::metal-texture-owned-p texture)))
            (destroy texture)
            (setf texture nil)
            ;; The external-owner retain was consumed, but this original
            ;; native retain remains independently owned by the test.
-           (ok (not (objc:objective-c-object-released-p native))))
+           (true (not (objc:objective-c-object-released-p native))))
       (when texture (destroy texture))
       (when native (objc:release-objective-c-object native))
       (destroy device))))
 
-(deftest metal-coalesces-multiple-sampled-texture-preparations
+(define-test metal-coalesces-multiple-sampled-texture-preparations
   (let* ((device
            (request-gpu-device (make-instance 'metal-gpu-provider)))
          (encoder nil)
@@ -129,15 +129,15 @@
                           :usage '(:render-attachment :texture-binding))))
            (prepare-texture encoder color :texture-binding)
            (prepare-texture encoder depth :texture-binding)
-           (ok (luv::metal-encoder-pending-consumer-barrier encoder))
-           (ok (gethash color (luv::metal-encoder-resources encoder)))
-           (ok (gethash depth (luv::metal-encoder-resources encoder))))
+           (true (luv::metal-encoder-pending-consumer-barrier encoder))
+           (true (gethash color (luv::metal-encoder-resources encoder)))
+           (true (gethash depth (luv::metal-encoder-resources encoder))))
       (when encoder (destroy encoder))
       (when depth (destroy depth))
       (when color (destroy color))
       (destroy device))))
 
-(deftest metal-chained-blits-observe-the-prior-blit-write
+(define-test metal-chained-blits-observe-the-prior-blit-write
   (let* ((width 641)
          (height 359)
          (device
@@ -150,10 +150,10 @@
          (command-buffer nil))
     (unwind-protect
          (progn
-           (ok (logtest metal:+stage-fragment+
-                        luv::+metal-blit-read-producer-stages+))
-           (ok (logtest metal:+stage-blit+
-                        luv::+metal-blit-read-producer-stages+))
+           (true (logtest metal:+stage-fragment+
+                          luv::+metal-blit-read-producer-stages+))
+           (true (logtest metal:+stage-blit+
+                          luv::+metal-blit-read-producer-stages+))
            (setf source
                  (create
                   device
@@ -199,12 +199,12 @@
            (setf command-buffer (finish encoder))
            (submit queue command-buffer)
            (let ((pixels (read-buffer readback)))
-             (ok (= (* width height 4) (length pixels)))
-             (ok (loop for index below (length pixels) by 4
-                       always (and (= 255 (aref pixels index))
-                                   (zerop (aref pixels (+ index 1)))
-                                   (= 255 (aref pixels (+ index 2)))
-                                   (= 255 (aref pixels (+ index 3))))))))
+             (true (= (* width height 4) (length pixels)))
+             (true (loop for index below (length pixels) by 4
+                         always (and (= 255 (aref pixels index))
+                                     (zerop (aref pixels (+ index 1)))
+                                     (= 255 (aref pixels (+ index 2)))
+                                     (= 255 (aref pixels (+ index 3))))))))
       (when command-buffer (destroy command-buffer))
       (when encoder (destroy encoder))
       (when readback (destroy readback))
@@ -212,7 +212,7 @@
       (when source (destroy source))
       (destroy device))))
 
-(deftest world-text-cache-reuses-shaping-and-device-glyphs
+(define-test world-text-cache-reuses-shaping-and-device-glyphs
   (let* ((device
            (request-gpu-device (make-instance 'metal-gpu-provider)))
          (cache (luv.slug:make-slug-glyph-cache device))
@@ -232,18 +232,18 @@
                  (second-glyphs (luvcraft::world-text-run-glyphs second))
                  (resources-by-glyph (make-hash-table))
                  (saw-repeated-glyph-p nil))
-             (ok (eq (luvcraft::world-text-run-shaped-text first)
-                     (luvcraft::world-text-run-shaped-text second)))
-             (ok (eq (luvcraft::world-text-run-atlas first)
-                     (luvcraft::world-text-run-atlas second)))
-             (ok (< (luv.slug:slug-glyph-atlas-band-texel-count
-                     (luvcraft::world-text-run-atlas first))
-                    4096))
-             (ok (< (luv.slug:slug-glyph-atlas-curve-texel-count
-                     (luvcraft::world-text-run-atlas first))
-                    4096))
-             (ok (< (luv.slug:slug-glyph-cache-resource-count cache)
-                    (length first-glyphs)))
+             (true (eq (luvcraft::world-text-run-shaped-text first)
+                       (luvcraft::world-text-run-shaped-text second)))
+             (true (eq (luvcraft::world-text-run-atlas first)
+                       (luvcraft::world-text-run-atlas second)))
+             (true (< (luv.slug:slug-glyph-atlas-band-texel-count
+                       (luvcraft::world-text-run-atlas first))
+                      4096))
+             (true (< (luv.slug:slug-glyph-atlas-curve-texel-count
+                       (luvcraft::world-text-run-atlas first))
+                      4096))
+             (true (< (luv.slug:slug-glyph-cache-resource-count cache)
+                      (length first-glyphs)))
              (dolist (glyph first-glyphs)
                (let ((glyph-id (luv.slug:slug-glyph-placement-glyph-id glyph)))
                  (multiple-value-bind (resource present-p)
@@ -251,16 +251,16 @@
                    (if present-p
                        (progn
                          (setf saw-repeated-glyph-p t)
-                         (ok (eq resource
-                                 (luv.slug:slug-glyph-placement-resource glyph))))
+                         (true (eq resource
+                                   (luv.slug:slug-glyph-placement-resource glyph))))
                        (setf (gethash glyph-id resources-by-glyph)
                              (luv.slug:slug-glyph-placement-resource glyph))))))
-             (ok saw-repeated-glyph-p)
+             (true saw-repeated-glyph-p)
              (loop for first-glyph in first-glyphs
                    for second-glyph in second-glyphs
-                   do (ok (eq (luv.slug:slug-glyph-placement-resource first-glyph)
-                              (luv.slug:slug-glyph-placement-resource
-                               second-glyph))))))
+                   do (true (eq (luv.slug:slug-glyph-placement-resource first-glyph)
+                                (luv.slug:slug-glyph-placement-resource
+                                 second-glyph))))))
       (when second (luvcraft::release-world-text-run second))
       (when first (luvcraft::release-world-text-run first))
       (luv.slug:release-slug-glyph-cache cache)
@@ -292,7 +292,7 @@
       (let* ((rgba (luv.shader:vec4 ,red 0.25 0.75 1.0)))
         (luv.shader:set-output color rgba)))))
 
-(deftest metal-messages-retain-structure-abi
+(define-test metal-messages-retain-structure-abi
   (let ((size
           (objc:objective-c-message-description
            'metal::%set-layer-drawable-size))
@@ -311,27 +311,27 @@
         (draw-mesh
           (objc:objective-c-message-description
            'metal:draw-metal-mesh-threadgroups)))
-    (ok (equal (getf size :selector) "setDrawableSize:"))
-    (ok (equal (second (second (getf size :argument-types)))
-               '(:struct metal::cg-size)))
-    (ok (equal (getf clear :selector) "setClearColor:"))
-    (ok (equal (second (second (getf clear :argument-types)))
-               '(:struct metal::mtl-clear-color)))
-    (ok (equal (getf argument-buffer :selector)
-               "setAddress:attributeStride:atIndex:"))
-    (ok (equal (getf draw :selector)
-               "drawPrimitives:vertexStart:vertexCount:instanceCount:baseInstance:"))
-    (ok (equal
-         (getf draw-indexed :selector)
-         "drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferLength:instanceCount:baseVertex:baseInstance:"))
-    (ok (equal
-         (getf draw-mesh :selector)
-         "drawMeshThreadgroups:threadsPerObjectThreadgroup:threadsPerMeshThreadgroup:"))
-    (ok (every (lambda (argument)
-                 (equal (second argument) '(:struct metal::mtl-size)))
-               (rest (getf draw-mesh :argument-types))))))
+    (true (equal (getf size :selector) "setDrawableSize:"))
+    (true (equal (second (second (getf size :argument-types)))
+                 '(:struct metal::cg-size)))
+    (true (equal (getf clear :selector) "setClearColor:"))
+    (true (equal (second (second (getf clear :argument-types)))
+                 '(:struct metal::mtl-clear-color)))
+    (true (equal (getf argument-buffer :selector)
+                 "setAddress:attributeStride:atIndex:"))
+    (true (equal (getf draw :selector)
+                 "drawPrimitives:vertexStart:vertexCount:instanceCount:baseInstance:"))
+    (true (equal
+           (getf draw-indexed :selector)
+           "drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferLength:instanceCount:baseVertex:baseInstance:"))
+    (true (equal
+           (getf draw-mesh :selector)
+           "drawMeshThreadgroups:threadsPerObjectThreadgroup:threadsPerMeshThreadgroup:"))
+    (true (every (lambda (argument)
+                   (equal (second argument) '(:struct metal::mtl-size)))
+                 (rest (getf draw-mesh :argument-types))))))
 
-(deftest unchecked-messages-preserve-by-value-structure-abi
+(define-test unchecked-messages-preserve-by-value-structure-abi
   (objc:with-autorelease-pool ()
     (objc:with-owned-objective-c-object
         (layer
@@ -340,26 +340,26 @@
         (metal:set-layer-drawable-size layer 641 359)
         (multiple-value-bind (width height)
             (metal:layer-drawable-size layer)
-          (ok (= width 641.0d0))
-          (ok (= height 359.0d0)))))))
+          (true (= width 641.0d0))
+          (true (= height 359.0d0)))))))
 
-(deftest canvas-presentation-policy-is-explicit-and-provider-specific
-  (ok (equal (luv::sdl-presentation-window-flags :vulkan)
-             '(:vulkan :resizable :hidden)))
-  (ok (equal (luv::sdl-presentation-window-flags :metal)
-             '(:metal :resizable :hidden)))
-  (ok (eq :vulkan
-          (luv::sdl-presentation-api-for
-           (make-instance 'vulkan-gpu-provider))))
-  (ok (eq :metal
-          (luv::sdl-presentation-api-for
-           (make-instance 'metal-gpu-provider))))
+(define-test canvas-presentation-policy-is-explicit-and-provider-specific
+  (true (equal (luv::sdl-presentation-window-flags :vulkan)
+               '(:vulkan :resizable :hidden)))
+  (true (equal (luv::sdl-presentation-window-flags :metal)
+               '(:metal :resizable :hidden)))
+  (true (eq :vulkan
+            (luv::sdl-presentation-api-for
+             (make-instance 'vulkan-gpu-provider))))
+  (true (eq :metal
+            (luv::sdl-presentation-api-for
+             (make-instance 'metal-gpu-provider))))
   (let ((canvas (make-sdl-canvas :presentation-api :vulkan)))
-    (ok (signals
-         (make-canvas-context canvas (make-instance 'metal-gpu-provider))
-         'canvas-error))))
+    (fail
+     (make-canvas-context canvas (make-instance 'metal-gpu-provider))
+     'canvas-error)))
 
-(deftest native-close-can-be-deferred-for-application-teardown
+(define-test native-close-can-be-deferred-for-application-teardown
   (let ((canvas (make-sdl-canvas))
         (timestamps nil))
     (setf (canvas-event-handler canvas)
@@ -368,7 +368,7 @@
             (push (canvas-event-timestamp event) timestamps)
             :defer-canvas-close))
     (luv::dispatch-sdl-canvas-close-request canvas 0)
-    (ok (not (luv::sdl-canvas-close-requested-p canvas)))
+    (true (not (luv::sdl-canvas-close-requested-p canvas)))
     ;; This is the SDL event macOS emits for Command-Q, distinct from clicking
     ;; one window's close button.
     (cffi:with-foreign-object (event '(:struct sdl3:common-event))
@@ -378,44 +378,44 @@
       (luv::handle-sdl-canvas-event
        canvas event
        (cffi:foreign-enum-value 'sdl3::event-type :quit)))
-    (ok (equal '(17 0) timestamps))
-    (ok (not (luv::sdl-canvas-close-requested-p canvas)))
+    (true (equal '(17 0) timestamps))
+    (true (not (luv::sdl-canvas-close-requested-p canvas)))
     (setf (canvas-event-handler canvas) nil)
     (luv::dispatch-sdl-canvas-close-request canvas 1)
-    (ok (luv::sdl-canvas-close-requested-p canvas))))
+    (true (luv::sdl-canvas-close-requested-p canvas))))
 
-(deftest metal-provider-owns-a-real-metal-4-queue
+(define-test metal-provider-owns-a-real-metal-4-queue
   (let ((device
           (request-gpu-device (make-instance 'metal-gpu-provider))))
     (unwind-protect
          (progn
-           (ok (typep device 'metal-gpu-device))
-           (ok (typep (device-queue device) 'metal-gpu-queue))
-           (ok (equal
-                (objc:objective-c-object-protocol-name
-                 (luv::metal-native-object (device-queue device)))
-                "MTL4CommandQueue"))
-           (ok (equal
-                (objc:objective-c-object-protocol-name
-                 (luv::metal-device-residency-set device))
-                "MTLResidencySet"))
-           (ok (equal
-                (objc:objective-c-object-protocol-name
-                 (luv::metal-queue-completion-event (device-queue device)))
-                "MTLSharedEvent")))
+           (true (typep device 'metal-gpu-device))
+           (true (typep (device-queue device) 'metal-gpu-queue))
+           (true (equal
+                  (objc:objective-c-object-protocol-name
+                   (luv::metal-native-object (device-queue device)))
+                  "MTL4CommandQueue"))
+           (true (equal
+                  (objc:objective-c-object-protocol-name
+                   (luv::metal-device-residency-set device))
+                  "MTLResidencySet"))
+           (true (equal
+                  (objc:objective-c-object-protocol-name
+                   (luv::metal-queue-completion-event (device-queue device)))
+                  "MTLSharedEvent")))
       (destroy device))))
 
-(deftest metal-device-owns-a-real-metal-4-compiler
+(define-test metal-device-owns-a-real-metal-4-compiler
   (let ((device
           (request-gpu-device (make-instance 'metal-gpu-provider))))
     (unwind-protect
-         (ok (equal
-              (objc:objective-c-object-protocol-name
-               (metal-device-compiler device))
-              "MTL4Compiler"))
+         (true (equal
+                (objc:objective-c-object-protocol-name
+                 (metal-device-compiler device))
+                "MTL4Compiler"))
       (destroy device))))
 
-(deftest luvcraft-shader-compiles-in-memory-on-the-metal-device
+(define-test luvcraft-shader-compiles-in-memory-on-the-metal-device
   (let ((specification
           (luvcraft.shaders:block-world-fragment-specification))
         (device
@@ -430,23 +430,23 @@
                    :label "block fragment Metal library"
                    :language :mathematical
                    :code specification)))
-           (ok (typep module 'metal-gpu-shader-module))
-           (ok (eq
-                specification
-                (luv.msl:msl-document-specification
-                 (metal-shader-module-document module))))
-           (ok (string= (metal-shader-module-entry-point module)
-                        "block_world_fragment_specification"))
-           (ok (= (metal-shader-module-function-type module)
-                  metal:+function-type-fragment+))
-           (ok (equal
-                (objc:objective-c-object-protocol-name
-                 (luv::metal-native-object module))
-                "MTLLibrary")))
+           (true (typep module 'metal-gpu-shader-module))
+           (true (eq
+                  specification
+                  (luv.msl:msl-document-specification
+                   (metal-shader-module-document module))))
+           (true (string= (metal-shader-module-entry-point module)
+                          "block_world_fragment_specification"))
+           (true (= (metal-shader-module-function-type module)
+                    metal:+function-type-fragment+))
+           (true (equal
+                  (objc:objective-c-object-protocol-name
+                   (luv::metal-native-object module))
+                  "MTLLibrary")))
       (when module (destroy module))
       (destroy device))))
 
-(deftest luvcraft-vertex-and-fragment-link-as-a-metal-4-render-pipeline
+(define-test luvcraft-vertex-and-fragment-link-as-a-metal-4-render-pipeline
   (let ((device
           (request-gpu-device (make-instance 'metal-gpu-provider)))
         (vertex-module nil)
@@ -494,23 +494,23 @@
                    '(:format :depth32-float
                      :depth-write-enabled t
                      :depth-compare :less))))
-           (ok (typep pipeline 'metal-gpu-render-pipeline))
-           (ok (equal
-                (objc:objective-c-object-protocol-name
-                 (luv::metal-native-object pipeline))
-                "MTLRenderPipelineState"))
-           (ok (equal
-                (objc:objective-c-object-protocol-name
-                 (metal-render-pipeline-depth-stencil-state pipeline))
-                "MTLDepthStencilState"))
-           (ok (= 1 (length
-                     (metal-render-pipeline-vertex-buffers pipeline)))))
+           (true (typep pipeline 'metal-gpu-render-pipeline))
+           (true (equal
+                  (objc:objective-c-object-protocol-name
+                   (luv::metal-native-object pipeline))
+                  "MTLRenderPipelineState"))
+           (true (equal
+                  (objc:objective-c-object-protocol-name
+                   (metal-render-pipeline-depth-stencil-state pipeline))
+                  "MTLDepthStencilState"))
+           (true (= 1 (length
+                       (metal-render-pipeline-vertex-buffers pipeline)))))
       (when pipeline (destroy pipeline))
       (when fragment-module (destroy fragment-module))
       (when vertex-module (destroy vertex-module))
       (destroy device))))
 
-(deftest task-mesh-pipeline-carries-uint64-and-draws-on-metal-4
+(define-test task-mesh-pipeline-carries-uint64-and-draws-on-metal-4
   (let ((device
           (request-gpu-device (make-instance 'metal-gpu-provider)))
         (task-module nil)
@@ -572,11 +572,11 @@
                   device
                   (make-command-encoder-descriptor
                    :label "task mesh proof commands")))
-           (ok (= (metal-shader-module-function-type task-module)
-                  metal:+function-type-object+))
-           (ok (= (metal-shader-module-function-type mesh-module)
-                  metal:+function-type-mesh+))
-           (ok (typep pipeline 'metal-gpu-mesh-render-pipeline))
+           (true (= (metal-shader-module-function-type task-module)
+                    metal:+function-type-object+))
+           (true (= (metal-shader-module-function-type mesh-module)
+                    metal:+function-type-mesh+))
+           (true (typep pipeline 'metal-gpu-mesh-render-pipeline))
            (let ((pass
                    (begin-render-pass
                     encoder
@@ -594,8 +594,8 @@
            (setf command-buffer (finish encoder))
            (submit (device-queue device) command-buffer)
            (let ((pixels (read-buffer readback)))
-             (ok (loop for index below (length pixels) by 4
-                       thereis (plusp (aref pixels index))))))
+             (true (loop for index below (length pixels) by 4
+                         thereis (plusp (aref pixels index))))))
       (when command-buffer (destroy command-buffer))
       (when encoder (destroy encoder))
       (when readback (destroy readback))
@@ -606,7 +606,7 @@
       (when task-module (destroy task-module))
       (destroy device))))
 
-(deftest failed-metal-library-keeps-the-device-compiler-usable
+(define-test failed-metal-library-keeps-the-device-compiler-usable
   (let* ((device
            (request-gpu-device (make-instance 'metal-gpu-provider)))
          (specification
@@ -625,21 +625,21 @@
                  :language :msl :code bad-document))
              (luv::metal-gpu-error (condition)
                (setf failure condition)))
-           (ok failure)
-           (ok (eq (luv::metal-gpu-error-reason failure)
-                   :library-compilation-failed))
-           (ok (stringp
-                (getf (luv::metal-gpu-error-details failure) :diagnostic)))
+           (true failure)
+           (true (eq (luv::metal-gpu-error-reason failure)
+                     :library-compilation-failed))
+           (true (stringp
+                  (getf (luv::metal-gpu-error-details failure) :diagnostic)))
            (setf module
                  (create
                   device
                   (make-shader-module-descriptor
                    :language :mathematical :code specification)))
-           (ok (typep module 'metal-gpu-shader-module)))
+           (true (typep module 'metal-gpu-shader-module)))
       (when module (destroy module))
       (destroy device))))
 
-(deftest live-metal-pipeline-retains-last-good-and-recovers
+(define-test live-metal-pipeline-retains-last-good-and-recovers
   (install-metal-live-probe-vertex)
   (install-metal-live-probe-fragment 0.25)
   (let ((device
@@ -662,29 +662,29 @@
                   :depth-stencil nil))
            (let ((first-pipeline
                    (luvcraft::live-shader-pipeline-native-pipeline artifact)))
-             (ok (typep first-pipeline 'metal-gpu-render-pipeline))
-             (ok (eq :installed (live-shader-pipeline-status artifact)))
+             (true (typep first-pipeline 'metal-gpu-render-pipeline))
+             (true (eq :installed (live-shader-pipeline-status artifact)))
              (install-metal-live-probe-fragment 0.5 :invalid-p t)
              (luvcraft::refresh-live-shader-pipeline artifact)
-             (ok (eq :failed (live-shader-pipeline-status artifact)))
-             (ok (eq first-pipeline
-                     (luvcraft::live-shader-pipeline-native-pipeline artifact)))
-             (ok (not (luv::metal-object-destroyed-p first-pipeline)))
+             (true (eq :failed (live-shader-pipeline-status artifact)))
+             (true (eq first-pipeline
+                       (luvcraft::live-shader-pipeline-native-pipeline artifact)))
+             (true (not (luv::metal-object-destroyed-p first-pipeline)))
              (install-metal-live-probe-fragment 0.75)
              (luvcraft::refresh-live-shader-pipeline artifact)
              (let ((replacement
                      (luvcraft::live-shader-pipeline-native-pipeline artifact)))
-               (ok (eq :installed (live-shader-pipeline-status artifact)))
-               (ok (= 1 (live-shader-pipeline-installed-revision artifact)))
-               (ok (not (eq first-pipeline replacement)))
-               (ok (luv::metal-object-destroyed-p first-pipeline))
-               (ok (typep replacement 'metal-gpu-render-pipeline)))))
+               (true (eq :installed (live-shader-pipeline-status artifact)))
+               (true (= 1 (live-shader-pipeline-installed-revision artifact)))
+               (true (not (eq first-pipeline replacement)))
+               (true (luv::metal-object-destroyed-p first-pipeline))
+               (true (typep replacement 'metal-gpu-render-pipeline)))))
       (install-metal-live-probe-fragment 0.25)
       (when artifact
         (luvcraft::release-live-shader-pipeline artifact))
       (destroy device))))
 
-(deftest live-metal-pipeline-replacement-retires-after-its-in-flight-draw
+(define-test live-metal-pipeline-replacement-retires-after-its-in-flight-draw
   (install-metal-live-probe-vertex)
   (install-metal-live-probe-fragment 0.25)
   (let* ((device
@@ -750,11 +750,11 @@
              (submit queue commands)
              (install-metal-live-probe-fragment 0.75)
              (luvcraft::refresh-live-shader-pipeline artifact)
-             (ok (luv::metal-object-destroyed-p old-pipeline))
-             (ok (not (eq old-pipeline
-                          (luvcraft::live-shader-pipeline-native-pipeline artifact))))
+             (true (luv::metal-object-destroyed-p old-pipeline))
+             (true (not (eq old-pipeline
+                            (luvcraft::live-shader-pipeline-native-pipeline artifact))))
              (submitted-work-done queue)
-             (ok (objc:objective-c-object-released-p old-native-pipeline))))
+             (true (objc:objective-c-object-released-p old-native-pipeline))))
       (install-metal-live-probe-fragment 0.25)
       (when commands (destroy commands))
       (when encoder (destroy encoder))
@@ -763,7 +763,7 @@
       (when artifact (luvcraft::release-live-shader-pipeline artifact))
       (destroy device))))
 
-(deftest metal-buffer-populates-a-native-metal-4-argument-table
+(define-test metal-buffer-populates-a-native-metal-4-argument-table
   (let ((device
           (request-gpu-device (make-instance 'metal-gpu-provider)))
         (buffer nil)
@@ -788,27 +788,27 @@
                (metal:new-metal-4-argument-table
                 (luv::metal-native-object device) 1
                 :label "argument table probe" :attribute-strides-p t)
-             (ok (null diagnostic))
+             (true (null diagnostic))
              (setf argument-table table))
            (metal:set-metal-argument-table-buffer
             argument-table
             (metal:metal-buffer-gpu-address
              (luv::metal-native-object buffer))
             12 0)
-           (ok (typep buffer 'metal-gpu-buffer))
-           (ok (plusp
-                (metal:metal-buffer-gpu-address
-                 (luv::metal-native-object buffer))))
-           (ok (equal
-                (objc:objective-c-object-protocol-name argument-table)
-                "MTL4ArgumentTable"))
-           (ok (= 36 (length (read-buffer buffer)))))
+           (true (typep buffer 'metal-gpu-buffer))
+           (true (plusp
+                  (metal:metal-buffer-gpu-address
+                   (luv::metal-native-object buffer))))
+           (true (equal
+                  (objc:objective-c-object-protocol-name argument-table)
+                  "MTL4ArgumentTable"))
+           (true (= 36 (length (read-buffer buffer)))))
       (when argument-table
         (objc:release-objective-c-object argument-table))
       (when buffer (destroy buffer))
       (destroy device))))
 
-(deftest metal-finish-produces-one-shot-portable-work-with-dependencies
+(define-test metal-finish-produces-one-shot-portable-work-with-dependencies
   (let* ((device
            (request-gpu-device (make-instance 'metal-gpu-provider)))
          (queue (device-queue device))
@@ -839,17 +839,17 @@
                  (luv::metal-native-object command-buffer)
                  allocator
                  (luv::metal-command-buffer-allocator command-buffer))
-           (ok (typep encoder 'metal-gpu-command-encoder))
-           (ok (typep command-buffer 'metal-gpu-command-buffer))
-           (ok (member texture
-                       (luv::metal-command-buffer-resources command-buffer)))
-           (ok (= 1 (submit queue command-buffer)))
-           (ok (eq :submitted
-                   (luv::metal-command-buffer-state command-buffer)))
-           (ok (= 1 (luv::metal-object-last-submission texture)))
-           (ok (signals (submit queue command-buffer)
-                        'gpu-invalid-state-error))
-           (ok (= 1 (length (luv::metal-queue-pending-submissions queue))))
+           (true (typep encoder 'metal-gpu-command-encoder))
+           (true (typep command-buffer 'metal-gpu-command-buffer))
+           (true (member texture
+                         (luv::metal-command-buffer-resources command-buffer)))
+           (true (= 1 (submit queue command-buffer)))
+           (true (eq :submitted
+                     (luv::metal-command-buffer-state command-buffer)))
+           (true (= 1 (luv::metal-object-last-submission texture)))
+           (fail (submit queue command-buffer)
+                 'gpu-invalid-state-error)
+           (true (= 1 (length (luv::metal-queue-pending-submissions queue))))
            ;; Logical invalidation is immediate. Native retirement follows the
            ;; shared-event completion frontier without blocking DESTROY.
            (destroy command-buffer)
@@ -857,16 +857,16 @@
            (destroy texture)
            (setf texture nil)
            (submitted-work-done queue)
-           (ok (null (luv::metal-queue-pending-submissions queue)))
-           (ok (objc:objective-c-object-released-p native-command-buffer))
-           (ok (objc:objective-c-object-released-p allocator))
-           (ok (objc:objective-c-object-released-p native-texture)))
+           (true (null (luv::metal-queue-pending-submissions queue)))
+           (true (objc:objective-c-object-released-p native-command-buffer))
+           (true (objc:objective-c-object-released-p allocator))
+           (true (objc:objective-c-object-released-p native-texture)))
       (when command-buffer (destroy command-buffer))
       (when encoder (destroy encoder))
       (when texture (destroy texture))
       (destroy device))))
 
-(deftest metal-submission-signals-its-frontier-when-presentation-raises
+(define-test metal-submission-signals-its-frontier-when-presentation-raises
   (let* ((device
            (request-gpu-device (make-instance 'metal-gpu-provider)))
          (queue (device-queue device))
@@ -883,23 +883,23 @@
                  (luv::metal-native-object command-buffer)
                  allocator
                  (luv::metal-command-buffer-allocator command-buffer))
-           (ok (signals
-                (luv::submit-metal-command-buffers
-                 queue (vector command-buffer)
-                 :after-commit (lambda () (error "presentation probe")))
-                'simple-error))
-           (ok (= 1 (length (luv::metal-queue-pending-submissions queue))))
+           (fail
+            (luv::submit-metal-command-buffers
+             queue (vector command-buffer)
+             :after-commit (lambda () (error "presentation probe")))
+            'simple-error)
+           (true (= 1 (length (luv::metal-queue-pending-submissions queue))))
            (destroy command-buffer)
            (setf command-buffer nil)
            (submitted-work-done queue)
-           (ok (null (luv::metal-queue-pending-submissions queue)))
-           (ok (objc:objective-c-object-released-p native-command-buffer))
-           (ok (objc:objective-c-object-released-p allocator)))
+           (true (null (luv::metal-queue-pending-submissions queue)))
+           (true (objc:objective-c-object-released-p native-command-buffer))
+           (true (objc:objective-c-object-released-p allocator)))
       (when command-buffer (destroy command-buffer))
       (when encoder (destroy encoder))
       (destroy device))))
 
-(deftest metal-completion-signal-failure-is-a-rooted-retry-obligation
+(define-test metal-completion-signal-failure-is-a-rooted-retry-obligation
   (let* ((luv::*gpu-retirement-ledger-custodians*
            (make-hash-table :test #'eq))
          (luv::*gpu-retirement-custodian-service-enabled-p* nil)
@@ -913,7 +913,7 @@
          (original-commit (symbol-function commit-symbol))
          (original-signal (symbol-function signal-symbol))
          (commits 0)
-         (signals 0)
+         (fail 0)
          (fail-signal-p t))
     (unwind-protect
          (progn
@@ -926,47 +926,47 @@
                    (apply original-commit arguments))
                  (symbol-function signal-symbol)
                  (lambda (&rest arguments)
-                   (incf signals)
+                   (incf fail)
                    (when fail-signal-p
                      (setf fail-signal-p nil)
                      (error "injected Metal completion signal failure"))
                    (apply original-signal arguments)))
-           (ok (signals
-                (submit queue command-buffer)
-                'simple-error))
-           (ok (= 1 commits))
-           (ok (= 1 signals))
-           (ok (eq :submitted
-                   (luv::metal-command-buffer-state command-buffer)))
-           (ok (= 1 (length
-                     (luv::metal-queue-pending-submissions queue))))
-           (ok (= 1
-                  (luv::metal-queue-completion-signal-ready-value queue)))
-           (ok (zerop
-                (luv::metal-queue-completion-signal-enqueued-value queue)))
-           (ok (eq queue
-                   (gethash
-                    (luv::metal-queue-retirement-ledger queue)
-                    luv::*gpu-retirement-ledger-custodians*)))
+           (fail
+            (submit queue command-buffer)
+            'simple-error)
+           (true (= 1 commits))
+           (true (= 1 fail))
+           (true (eq :submitted
+                     (luv::metal-command-buffer-state command-buffer)))
+           (true (= 1 (length
+                       (luv::metal-queue-pending-submissions queue))))
+           (true (= 1
+                    (luv::metal-queue-completion-signal-ready-value queue)))
+           (true (zerop
+                  (luv::metal-queue-completion-signal-enqueued-value queue)))
+           (true (eq queue
+                     (gethash
+                      (luv::metal-queue-retirement-ledger queue)
+                      luv::*gpu-retirement-ledger-custodians*)))
            ;; The deterministic service pass retries only the published signal,
            ;; never recommitting the native command buffers.
            (luv::service-gpu-retirement-custodians-once)
-           (ok (= 1 commits))
-           (ok (= 2 signals))
-           (ok (= 1
-                  (luv::metal-queue-completion-signal-enqueued-value queue)))
+           (true (= 1 commits))
+           (true (= 2 fail))
+           (true (= 1
+                    (luv::metal-queue-completion-signal-enqueued-value queue)))
            (submitted-work-done queue)
-           (ok (null (luv::metal-queue-pending-submissions queue)))
-           (ok (zerop
-                (hash-table-count
-                 luv::*gpu-retirement-ledger-custodians*))))
+           (true (null (luv::metal-queue-pending-submissions queue)))
+           (true (zerop
+                  (hash-table-count
+                   luv::*gpu-retirement-ledger-custodians*))))
       (setf (symbol-function commit-symbol) original-commit
             (symbol-function signal-symbol) original-signal)
       (when command-buffer (destroy command-buffer))
       (when encoder (destroy encoder))
       (destroy device))))
 
-(deftest metal-finish-retains-ended-encoder-ownership-on-wrapper-failure
+(define-test metal-finish-retains-ended-encoder-ownership-on-wrapper-failure
   (let* ((device
            (request-gpu-device (make-instance 'metal-gpu-provider)))
          (encoder
@@ -991,23 +991,23 @@
                      (setf fail-construction-p nil)
                      (error "injected Metal command-buffer wrapper failure"))
                    (apply original-constructor arguments)))
-           (ok (signals (finish encoder) 'simple-error))
-           (ok (= 1 ends))
-           (ok (eq :ended (luv::metal-encoder-state encoder)))
-           (ok (luv::metal-encoder-command-buffer encoder))
-           (ok (luv::metal-encoder-allocator encoder))
+           (fail (finish encoder) 'simple-error)
+           (true (= 1 ends))
+           (true (eq :ended (luv::metal-encoder-state encoder)))
+           (true (luv::metal-encoder-command-buffer encoder))
+           (true (luv::metal-encoder-allocator encoder))
            (setf wrapper (finish encoder))
-           (ok (= 1 ends))
-           (ok (eq :finished (luv::metal-encoder-state encoder)))
-           (ok (null (luv::metal-encoder-command-buffer encoder)))
-           (ok (null (luv::metal-encoder-allocator encoder))))
+           (true (= 1 ends))
+           (true (eq :finished (luv::metal-encoder-state encoder)))
+           (true (null (luv::metal-encoder-command-buffer encoder)))
+           (true (null (luv::metal-encoder-allocator encoder))))
       (setf (symbol-function end-symbol) original-end
             (symbol-function constructor-symbol) original-constructor)
       (when wrapper (destroy wrapper))
       (destroy encoder)
       (destroy device))))
 
-(deftest luvcraft-metal-frame-resources-follow-the-drawable-pool
+(define-test luvcraft-metal-frame-resources-follow-the-drawable-pool
   (call-with-sdl-main-thread
    (lambda ()
      (let ((session nil))
@@ -1049,15 +1049,15 @@
                                (length
                                 (luvcraft::luvcraft-frame-state-resources
                                  state)))))
-                  (ok (<= 1 state-count 3))
-                  (ok (= (length
-                          (luvcraft::luvcraft-renderer-resources
-                           (luvcraft:luvcraft-session-renderer session)))
-                         (+ non-frame-resources frame-resource-count))))))
+                  (true (<= 1 state-count 3))
+                  (true (= (length
+                            (luvcraft::luvcraft-renderer-resources
+                             (luvcraft:luvcraft-session-renderer session)))
+                           (+ non-frame-resources frame-resource-count))))))
          (when session
            (stop-luvcraft session)))))))
 
-(deftest metal-storage-buffers-carry-packed-words-to-mesh-pipelines
+(define-test metal-storage-buffers-carry-packed-words-to-mesh-pipelines
   (let ((device
           (request-gpu-device (make-instance 'metal-gpu-provider)))
         (terms nil)
@@ -1084,23 +1084,23 @@
                                        '(1 #x123456789abcdef0
                                          #xffffffffffffffff 0)))
            (let ((bytes (read-buffer terms)))
-             (ok (= 32 (length bytes)))
-             (ok (= 1 (aref bytes 0)))
-             (ok (= #xf0 (aref bytes 8)))
-             (ok (= #x12 (aref bytes 15)))
-             (ok (= #xff (aref bytes 23))))
+             (true (= 32 (length bytes)))
+             (true (= 1 (aref bytes 0)))
+             (true (= #xf0 (aref bytes 8)))
+             (true (= #x12 (aref bytes 15)))
+             (true (= #xff (aref bytes 23))))
            ;; A one-word offset is legal for a 64-bit array; a half word is not.
            (write-buffer terms
                          (make-array 1 :element-type '(unsigned-byte 64)
                                        :initial-contents '(7))
                          :offset 8)
-           (ok (= 7 (aref (read-buffer terms) 8)))
-           (ok (signals
-                (write-buffer terms
-                              (make-array 1 :element-type '(unsigned-byte 64)
-                                            :initial-contents '(7))
-                              :offset 4)
-                'gpu-error))
+           (true (= 7 (aref (read-buffer terms) 8)))
+           (fail
+            (write-buffer terms
+                          (make-array 1 :element-type '(unsigned-byte 64)
+                                        :initial-contents '(7))
+                          :offset 4)
+            'gpu-error)
            ;; Storage buffers bind beside uniform buffers, by usage.
            (setf layout
                  (create
@@ -1108,14 +1108,14 @@
                   (make-bind-group-layout-descriptor
                    :entries '((:binding 0 :type :uniform-buffer)
                               (:binding 1 :type :storage-buffer)))))
-           (ok (signals
-                (create
-                 device
-                 (make-bind-group-descriptor
-                  :layout layout
-                  :entries `((:binding 0 :resource ,uniform)
-                             (:binding 1 :resource ,uniform))))
-                'gpu-error))
+           (fail
+            (create
+             device
+             (make-bind-group-descriptor
+              :layout layout
+              :entries `((:binding 0 :resource ,uniform)
+                         (:binding 1 :resource ,uniform))))
+            'gpu-error)
            (setf bind-group
                  (create
                   device
@@ -1123,14 +1123,14 @@
                    :layout layout
                    :entries `((:binding 0 :resource ,uniform)
                               (:binding 1 :resource ,terms)))))
-           (ok (typep bind-group 'luv::metal-gpu-bind-group)))
+           (true (typep bind-group 'luv::metal-gpu-bind-group)))
       (when bind-group (destroy bind-group))
       (when layout (destroy layout))
       (when uniform (destroy uniform))
       (when terms (destroy terms))
       (destroy device))))
 
-(deftest iosurface-round-trips-by-id-and-takes-a-metal-clear
+(define-test iosurface-round-trips-by-id-and-takes-a-metal-clear
   ;; The parent creates a surface and hands out its integer ID; a "child"
   ;; (here, the same process) looks the ID up, wraps it as a Metal texture,
   ;; and clears it.  The parent's original reference sees the pixels.
@@ -1141,8 +1141,8 @@
          (native nil) (texture nil) (encoder nil) (command-buffer nil))
     (unwind-protect
          (progn
-           (ok twin)
-           (ok (= 16 (metal:iosurface-width twin)))
+           (true twin)
+           (true (= 16 (metal:iosurface-width twin)))
            (setf native
                  (metal:new-metal-texture-for-iosurface
                   (luv::metal-native-object device) twin
@@ -1171,8 +1171,8 @@
            (setf command-buffer (finish encoder))
            (submit (device-queue device) command-buffer)
            (submitted-work-done (device-queue device))
-           (ok (equal '(0 128 255 255) (metal:read-iosurface-pixel surface 3 3)))
-           (ok (equal '(0 128 255 255) (metal:read-iosurface-pixel twin 15 15))))
+           (true (equal '(0 128 255 255) (metal:read-iosurface-pixel surface 3 3)))
+           (true (equal '(0 128 255 255) (metal:read-iosurface-pixel twin 15 15))))
       (when command-buffer (destroy command-buffer))
       (when encoder (destroy encoder))
       (when texture (destroy texture))

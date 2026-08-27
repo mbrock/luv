@@ -1,5 +1,6 @@
 (defpackage #:telegram.tests
-  (:use #:cl #:rove)
+  (:use #:cl)
+  (:import-from #:parachute #:define-test #:true #:false #:fail #:group #:skip)
   (:local-nicknames (#:octets #:telegram.octets)
                     (#:tl #:telegram.tl)
                     (#:crypto #:telegram.crypto)

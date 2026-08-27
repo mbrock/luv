@@ -13,50 +13,50 @@
 (objc:define-objective-c-message malformed-exception-test-array-count
     ("count" :uint32))
 
-(deftest objective-c-dispatch-entry-is-resolved-once
-  (ok (boundp 'objc::*objective-c-message-send-pointer*))
-  (ok (cffi:pointerp objc::*objective-c-message-send-pointer*))
-  (ok (not (cffi:null-pointer-p objc::*objective-c-message-send-pointer*)))
-  (ok (not (fboundp 'objc::objective-c-message-send-pointer))))
+(define-test objective-c-dispatch-entry-is-resolved-once
+  (true (boundp 'objc::*objective-c-message-send-pointer*))
+  (true (cffi:pointerp objc::*objective-c-message-send-pointer*))
+  (true (not (cffi:null-pointer-p objc::*objective-c-message-send-pointer*)))
+  (true (not (fboundp 'objc::objective-c-message-send-pointer))))
 
-(deftest message-definitions-retain-selector-abi-and-ownership
+(define-test message-definitions-retain-selector-abi-and-ownership
   (let ((description
           (objc:objective-c-message-description 'metal:device-name)))
-    (ok (equal (getf description :selector) "name"))
-    (ok (eq (getf description :result-type) :object))
-    (ok (eq (getf description :result-ownership) :borrowed))
-    (ok (equal (getf description :result-class) "NSString"))
-    (ok (equal (getf description :argument-types)
-               '((objc::receiver :object))))))
+    (true (equal (getf description :selector) "name"))
+    (true (eq (getf description :result-type) :object))
+    (true (eq (getf description :result-ownership) :borrowed))
+    (true (equal (getf description :result-class) "NSString"))
+    (true (equal (getf description :argument-types)
+                 '((objc::receiver :object))))))
 
-(deftest classes-and-objects-preserve-native-identity-and-ownership
+(define-test classes-and-objects-preserve-native-identity-and-ownership
   (objc:with-autorelease-pool ()
     (objc:with-owned-objective-c-object
         (device (metal:make-system-default-device))
-      (ok (typep device 'objc:objective-c-object))
-      (ok (eq (objc:objective-c-object-ownership device) :owned))
-      (ok (equal (objc:objective-c-object-protocol-name device) "MTLDevice"))
+      (true (typep device 'objc:objective-c-object))
+      (true (eq (objc:objective-c-object-ownership device) :owned))
+      (true (equal (objc:objective-c-object-protocol-name device) "MTLDevice"))
       (let* ((borrowed-name (metal:device-name device))
              (owned-name (objc:retain-objective-c-object borrowed-name)))
-        (ok (eq (objc:objective-c-object-ownership borrowed-name) :borrowed))
-        (ok (objc:objective-c-object= borrowed-name owned-name))
-        (ok (signals (objc:release-objective-c-object borrowed-name)
-                     'objc:objective-c-ownership-error))
+        (true (eq (objc:objective-c-object-ownership borrowed-name) :borrowed))
+        (true (objc:objective-c-object= borrowed-name owned-name))
+        (fail (objc:release-objective-c-object borrowed-name)
+              'objc:objective-c-ownership-error)
         (objc:release-objective-c-object owned-name)
-        (ok (objc:objective-c-object-released-p owned-name))
-        (ok (signals (objc:objective-c-pointer owned-name)
-                     'objc:released-objective-c-object))))))
+        (true (objc:objective-c-object-released-p owned-name))
+        (fail (objc:objective-c-pointer owned-name)
+              'objc:released-objective-c-object)))))
 
-(deftest declared-messages-have-opt-in-backend-local-tracing
+(define-test declared-messages-have-opt-in-backend-local-tracing
   (let (trace)
     (objc:with-autorelease-pool ()
       (objc:with-owned-objective-c-object
           (device (metal:make-system-default-device))
         (objc:with-objective-c-trace (active-trace)
           (setf trace active-trace)
-          (ok (plusp (metal:device-registry-id device)))
-          (ok (stringp
-               (objc:objective-c-string (metal:device-name device)))))))
+          (true (plusp (metal:device-registry-id device)))
+          (true (stringp
+                 (objc:objective-c-string (metal:device-name device)))))))
     (let* ((events (objc:objective-c-trace-events trace))
            (descriptions
              (mapcar #'objc:objective-c-message-event-description events))
@@ -64,15 +64,15 @@
              (find "registryID" descriptions :test #'equal
                    :key (lambda (description)
                           (getf description :selector)))))
-      (ok (= (length events) 3))
-      (ok registry)
-      (ok (eq (getf registry :status) :returned))
-      (ok (eq (getf registry :result-type) :uint64))
-      (ok (eq (first (second (first (getf registry :arguments))))
-              :objective-c-object)))))
+      (true (= (length events) 3))
+      (true registry)
+      (true (eq (getf registry :status) :returned))
+      (true (eq (getf registry :result-type) :uint64))
+      (true (eq (first (second (first (getf registry :arguments))))
+                :objective-c-object)))))
 
-(deftest exception-policy-is-dynamic-and-tracing-is-orthogonal
-  (ok (eq objc:*objective-c-exception-policy* :unchecked))
+(define-test exception-policy-is-dynamic-and-tracing-is-orthogonal
+  (true (eq objc:*objective-c-exception-policy* :unchecked))
   (let (trace)
     (objc:with-autorelease-pool ()
       (objc:with-owned-objective-c-object
@@ -80,27 +80,27 @@
         (objc:with-objective-c-trace (active-trace)
           (setf trace active-trace)
           (objc:with-unchecked-objective-c-messages ()
-            (ok (eq objc:*objective-c-exception-policy* :unchecked))
-            (ok (plusp (metal:device-registry-id device)))
+            (true (eq objc:*objective-c-exception-policy* :unchecked))
+            (true (plusp (metal:device-registry-id device)))
             (objc:with-objective-c-exception-handling ()
-              (ok (eq objc:*objective-c-exception-policy* :catch))
-              (ok (stringp
-                   (objc:objective-c-string (metal:device-name device)))))
-            (ok (eq objc:*objective-c-exception-policy* :unchecked))))))
-    (ok (eq objc:*objective-c-exception-policy* :unchecked))
+              (true (eq objc:*objective-c-exception-policy* :catch))
+              (true (stringp
+                     (objc:objective-c-string (metal:device-name device)))))
+            (true (eq objc:*objective-c-exception-policy* :unchecked))))))
+    (true (eq objc:*objective-c-exception-policy* :unchecked))
     (let ((events (objc:objective-c-trace-events trace)))
-      (ok (= (length events) 3))
+      (true (= (length events) 3))
       (dolist (event events)
-        (ok (eq (objc:objective-c-message-event-status event) :returned))))))
+        (true (eq (objc:objective-c-message-event-status event) :returned))))))
 
-(deftest fresh-device-probe-is-bounded-and-printable
+(define-test fresh-device-probe-is-bounded-and-printable
   (let ((description (metal:probe-system-default-device)))
-    (ok (stringp (getf description :class)))
-    (ok (equal (getf description :protocol) "MTLDevice"))
-    (ok (plusp (length (getf description :name))))
-    (ok (plusp (getf description :registry-id)))))
+    (true (stringp (getf description :class)))
+    (true (equal (getf description :protocol) "MTLDevice"))
+    (true (plusp (length (getf description :name))))
+    (true (plusp (getf description :registry-id)))))
 
-(deftest native-exceptions-become-conditions-and-leave-the-image-live
+(define-test native-exceptions-become-conditions-and-leave-the-image-live
   (objc:with-autorelease-pool ()
     (objc:with-owned-objective-c-object
         (array
@@ -114,30 +114,30 @@
                 (exception-test-array-object-at-index array 0))
             (objc:objective-c-exception (signaled)
               (setf condition signaled)))
-          (ok (zerop (exception-test-array-count array))))
-        (ok (typep condition 'objc:objective-c-exception))
-        (ok (equal (objc:objective-c-exception-name condition)
-                   "NSRangeException"))
-        (ok (equal (objc:objective-c-exception-selector condition)
-                   "objectAtIndex:"))
-        (ok (eq (objc:objective-c-exception-receiver condition) array))
-        (ok (eq (objc:objective-c-exception-message condition)
-                'exception-test-array-object-at-index))
-        (ok (plusp (length (objc:objective-c-exception-reason condition))))
-        (ok (plusp
-             (length (objc:objective-c-exception-call-stack condition))))
+          (true (zerop (exception-test-array-count array))))
+        (true (typep condition 'objc:objective-c-exception))
+        (true (equal (objc:objective-c-exception-name condition)
+                     "NSRangeException"))
+        (true (equal (objc:objective-c-exception-selector condition)
+                     "objectAtIndex:"))
+        (true (eq (objc:objective-c-exception-receiver condition) array))
+        (true (eq (objc:objective-c-exception-message condition)
+                  'exception-test-array-object-at-index))
+        (true (plusp (length (objc:objective-c-exception-reason condition))))
+        (true (plusp
+               (length (objc:objective-c-exception-call-stack condition))))
         (let ((events (objc:objective-c-trace-events trace)))
-          (ok (= (length events) 2))
-          (ok (eq (objc:objective-c-message-event-status (first events))
-                  :signaled))
-          (ok (eq (getf (objc:objective-c-message-event-condition
-                          (first events))
-                        :type)
-                  'objc:objective-c-exception))
-          (ok (eq (objc:objective-c-message-event-status (second events))
-                  :returned)))))))
+          (true (= (length events) 2))
+          (true (eq (objc:objective-c-message-event-status (first events))
+                    :signaled))
+          (true (eq (getf (objc:objective-c-message-event-condition
+                            (first events))
+                          :type)
+                    'objc:objective-c-exception))
+          (true (eq (objc:objective-c-message-event-status (second events))
+                    :returned)))))))
 
-(deftest declaration-abi-mismatches-stop-before-the-message-send
+(define-test declaration-abi-mismatches-stop-before-the-message-send
   (objc:with-autorelease-pool ()
     (objc:with-owned-objective-c-object
         (array
@@ -148,7 +148,7 @@
             (malformed-exception-test-array-count array)
             (fail "The malformed declaration returned."))
         (objc:objective-c-bridge-error (condition)
-          (ok (search "8-byte result"
-                      (objc:objective-c-exception-reason condition)))
-          (ok (not (typep condition 'objc:objective-c-exception)))))
-      (ok (zerop (exception-test-array-count array))))))
+          (true (search "8-byte result"
+                        (objc:objective-c-exception-reason condition)))
+          (true (not (typep condition 'objc:objective-c-exception)))))
+      (true (zerop (exception-test-array-count array))))))

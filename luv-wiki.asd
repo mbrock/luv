@@ -28,16 +28,13 @@ component and operation that make the wiki a buildable system."
   :author "Mikael Brockman"
   :depends-on ("luv-wiki"
                "luv-wiki/cli"
-               "rove")
+               "luv/test-support")
   :components ((:module "wiki"
                 :components ((:file "tests"))))
   :perform (asdf:test-op (operation component)
              (declare (ignore operation component))
-             (unless (uiop:symbol-call '#:rove '#:run-suite
-                                       (uiop:symbol-call '#:rove '#:find-suite
-                                                         '#:luv.wiki.tests)
-                                       :style :luv)
-               (error "luv wiki tests failed"))))
+             (uiop:symbol-call '#:luv.test-support '#:test-package
+                               '#:luv.wiki.tests)))
 
 (defsystem "luv-wiki/cli"
   :description "The ./wiki command: table of contents, work marks, figures,

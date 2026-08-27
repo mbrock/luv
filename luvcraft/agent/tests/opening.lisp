@@ -20,13 +20,13 @@
 (defclass opening-test-gnome (scripted-opening-mixin agent:gnome) ())
 (defclass opening-test-cat (scripted-opening-mixin agent:cat) ())
 
-(deftest agent-hud-respects-the-global-top-status-inset
+(define-test agent-hud-respects-the-global-top-status-inset
   (let* ((session (make-instance 'luvcraft:luvcraft-session))
          (status
            (make-instance 'mcluv:luvcraft-status-bar-overlay
                           :session session :frame nil :mirror nil)))
     (setf (luvcraft:luvcraft-session-overlays session) (list status))
-    (ok (= 48.0 (agent::agent-hud-top-margin session)))))
+    (true (= 48.0 (agent::agent-hud-top-margin session)))))
 
 (defun make-opening-test-presence (class &rest initargs)
   (apply #'make-instance class
@@ -85,7 +85,7 @@
   (dolist (turn (agent:world-agent-turns provider))
     (luv.application-agent:wait-for-turn turn :timeout 1.0)))
 
-(deftest first-contact-is-one-named-opening-and-never-blocks-the-canvas
+(define-test first-contact-is-one-named-opening-and-never-blocks-the-canvas
   (dolist (class '(opening-test-gnome opening-test-cat))
     (let ((presence (make-opening-test-presence class)))
       (unwind-protect
@@ -94,30 +94,30 @@
                   (elapsed
                     (/ (- (get-internal-real-time) before)
                        (float internal-time-units-per-second 1.0))))
-             (ok (eq presence answer))
-             (ok (< elapsed 0.1) "first contact only starts a worker")
-             (ok (sb-thread:wait-on-semaphore
-                  (opening-started presence) :timeout 1.0))
+             (true (eq presence answer))
+             (true (< elapsed 0.1) "first contact only starts a worker")
+             (true (sb-thread:wait-on-semaphore
+                    (opening-started presence) :timeout 1.0))
              (let ((worker (agent::embodied-agent-agent-opening-thread
                             presence)))
-               (ok (search "agent opening" (opened-thread-name presence)
-                           :test #'char-equal))
-               (ok (search (if (eq class 'opening-test-cat) "cat" "gnome")
-                           (opened-thread-name presence)
-                           :test #'char-equal))
-               (ok (eq presence (agent::gnome-ask presence "second")))
-               (ok (= 1 (opening-count presence)))
+               (true (search "agent opening" (opened-thread-name presence)
+                             :test #'char-equal))
+               (true (search (if (eq class 'opening-test-cat) "cat" "gnome")
+                             (opened-thread-name presence)
+                             :test #'char-equal))
+               (true (eq presence (agent::gnome-ask presence "second")))
+               (true (= 1 (opening-count presence)))
                (sb-thread:signal-semaphore (opening-finish presence))
-               (ok (not (eq :timeout (join-opening-thread presence worker))))
-               (ok (sb-thread:wait-on-semaphore
-                    (scripted-turn-finished presence) :timeout 1.0))
-               (ok (sb-thread:wait-on-semaphore
-                    (scripted-turn-finished presence) :timeout 1.0))
+               (true (not (eq :timeout (join-opening-thread presence worker))))
+               (true (sb-thread:wait-on-semaphore
+                      (scripted-turn-finished presence) :timeout 1.0))
+               (true (sb-thread:wait-on-semaphore
+                      (scripted-turn-finished presence) :timeout 1.0))
                (let ((provider (agent:gnome-agent presence)))
-                 (ok (typep provider 'agent:world-agent))
+                 (true (typep provider 'agent:world-agent))
                  (join-agent-turns provider)
-                 (ok (equal '("first" "second")
-                            (nreverse (received-prompts presence)))))))
+                 (true (equal '("first" "second")
+                              (nreverse (received-prompts presence)))))))
         (sb-thread:signal-semaphore (opening-finish presence))
         (let ((provider (agent:gnome-agent presence)))
           (agent::release-embodied-agent-harness presence)
@@ -125,47 +125,47 @@
             (luv.application-agent:wait-for-application-agent-release
              provider :timeout 1.0)))))))
 
-(deftest opening-failure-is-published-only-through-the-canvas-mailbox
+(define-test opening-failure-is-published-only-through-the-canvas-mailbox
   (let ((presence (make-opening-test-presence
                    'opening-test-gnome :opening-failure-p t)))
     (unwind-protect
          (progn
-           (ok (eq presence (agent::gnome-ask presence "hello")))
-           (ok (sb-thread:wait-on-semaphore
-                (opening-started presence) :timeout 1.0))
+           (true (eq presence (agent::gnome-ask presence "hello")))
+           (true (sb-thread:wait-on-semaphore
+                  (opening-started presence) :timeout 1.0))
            (let ((worker (agent::embodied-agent-agent-opening-thread
                           presence)))
              (sb-thread:signal-semaphore (opening-finish presence))
-             (ok (not (eq :timeout (join-opening-thread presence worker)))))
+             (true (not (eq :timeout (join-opening-thread presence worker)))))
            (multiple-value-bind (note received-p)
                (sb-concurrency:receive-message
                 (agent::gnome-notes presence) :timeout 1.0)
-             (ok received-p)
-             (ok (eq :agent-failed (first note)))
-             (ok (search "scripted provider opening failure" (second note)))
-             (ok (null (agent::gnome-said presence))
-                 "the provider worker never mutates canvas presentation")))
+             (true received-p)
+             (true (eq :agent-failed (first note)))
+             (true (search "scripted provider opening failure" (second note)))
+             (true (null (agent::gnome-said presence))
+                   "the provider worker never mutates canvas presentation")))
       (agent::release-embodied-agent-harness presence))))
 
-(deftest release-during-opening-detaches-now-and-closes-the-late-candidate
+(define-test release-during-opening-detaches-now-and-closes-the-late-candidate
   (let ((presence (make-opening-test-presence 'opening-test-cat)))
-    (ok (eq presence (agent::gnome-ask presence "too late")))
-    (ok (sb-thread:wait-on-semaphore
-         (opening-started presence) :timeout 1.0))
+    (true (eq presence (agent::gnome-ask presence "too late")))
+    (true (sb-thread:wait-on-semaphore
+           (opening-started presence) :timeout 1.0))
     (let ((worker (agent::embodied-agent-agent-opening-thread presence)))
-      (ok (agent::release-embodied-agent-harness presence))
-      (ok (null (agent:gnome-agent presence)))
-      (ok (null (agent::release-embodied-agent-harness presence)))
+      (true (agent::release-embodied-agent-harness presence))
+      (true (null (agent:gnome-agent presence)))
+      (true (null (agent::release-embodied-agent-harness presence)))
       (sb-thread:signal-semaphore (opening-finish presence))
-      (ok (not (eq :timeout (join-opening-thread presence worker))))
-      (ok (typep (opened-candidate presence) 'agent:world-agent))
-      (ok (luv.application-agent:wait-for-application-agent-release
-           (opened-candidate presence) :timeout 1.0))
-      (ok (= 1 (close-count presence)))
-      (ok (eq :released
-              (luv.application-agent:application-agent-state
-               (opened-candidate presence))))
+      (true (not (eq :timeout (join-opening-thread presence worker))))
+      (true (typep (opened-candidate presence) 'agent:world-agent))
+      (true (luv.application-agent:wait-for-application-agent-release
+             (opened-candidate presence) :timeout 1.0))
+      (true (= 1 (close-count presence)))
+      (true (eq :released
+                (luv.application-agent:application-agent-state
+                 (opened-candidate presence))))
       (multiple-value-bind (note received-p)
           (sb-concurrency:receive-message-no-hang (agent::gnome-notes presence))
         (declare (ignore note))
-        (ng received-p "teardown suppresses stale opening failures")))))
+        (false received-p "teardown suppresses stale opening failures")))))

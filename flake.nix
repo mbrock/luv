@@ -11,6 +11,10 @@
     url = "git+https://github.com/aiffc/cl-sdl3.git?rev=47c90b54715aba23752b70d382a3eb310172cd34";
     flake = false;
   };
+  inputs.parachute = {
+    url = "github:Shinmera/parachute/9a6679e611925dfb59067393c5b7996f69501aa6";
+    flake = false;
+  };
   inputs.swash = {
     url = "github:lessrest/swash/37355e2ab4009e047e14eac21bfbbd22b9931151";
     flake = false;
@@ -31,7 +35,7 @@
   # a shared cache ahead of the work that will use it.
   inputs.nix-wpe-webkit.url = "github:eval-exec/nix-wpe-webkit";
 
-  outputs = { nixpkgs, ghostty, mcclim, cl-sdl3, swash, tracy, nix-wpe-webkit, ... }:
+  outputs = { nixpkgs, ghostty, mcclim, cl-sdl3, parachute, swash, tracy, nix-wpe-webkit, ... }:
     let
       systems = [
         "x86_64-linux"
@@ -65,6 +69,16 @@
             flags = [
               "--dynamic-space-size"
               "3000"
+            ];
+          };
+          parachutePackage = sbcl.buildASDFSystem {
+            pname = "parachute";
+            version = "1.5.0";
+            src = parachute;
+            lispLibs = with sbcl.pkgs; [
+              documentation-utils
+              form-fiddle
+              trivial-custom-debugger
             ];
           };
           # Tracy ships its whole client as one translation unit, so the profiled
@@ -266,7 +280,7 @@
               lispPackages.flexi-streams
               lispPackages.lorem-ipsum
               lispPackages.named-readtables
-              lispPackages.rove
+              parachutePackage
               lispPackages.spinneret
               lispPackages.zpng
               # websocket-driver-client is the blocking, TLS-capable client

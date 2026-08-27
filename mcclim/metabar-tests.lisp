@@ -127,7 +127,7 @@
          :timestamp 0 :x x :y y
          (when button (list :button button :clicks 1))))
 
-(deftest metabar-is-an-open-owner-and-control-protocol
+(define-test metabar-is-an-open-owner-and-control-protocol
   (dolist (name '(mcluv::metabar-groups-for
                   mcluv::metabar-group-label
                   mcluv::metabar-controls-for
@@ -138,60 +138,60 @@
                   mcluv::perform-metabar-control-set-fraction
                   mcluv::perform-metabar-control-toggle
                   mcluv::perform-metabar-action))
-    (ok (typep (fdefinition name) 'generic-function)))
+    (true (typep (fdefinition name) 'generic-function)))
   (let* ((owner (make-instance 'metabar-test-owner))
          (frame (make-metabar-test-frame owner)))
-    (ok (equal '(:tuning)
-               (mcluv::metabar-vocabulary-groups
-                (mcluv::metabar-vocabulary frame))))
-    (ok (equal '(:group :control :control :action)
-               (mapcar #'mcluv::metabar-row-kind
-                       (mcluv::metabar-rows frame))))
-    (ok (= 240 (mcluv::metabar-logical-height frame)))))
+    (true (equal '(:tuning)
+                 (mcluv::metabar-vocabulary-groups
+                  (mcluv::metabar-vocabulary frame))))
+    (true (equal '(:group :control :control :action)
+                 (mapcar #'mcluv::metabar-row-kind
+                         (mcluv::metabar-rows frame))))
+    (true (= 240 (mcluv::metabar-logical-height frame)))))
 
-(deftest static-metabar-prepares-live-shader-revisions
+(define-test static-metabar-prepares-live-shader-revisions
   (let ((frame (make-metabar-test-frame)))
     (setf (mcluv::metabar-dirty-p frame) nil)
     (multiple-value-bind (probe revision)
         (mount-static-direct-preparation-probe frame)
       (mcluv:prepare-metabar frame)
-      (ok (equal (list revision)
-                 (current-revision-preparation-probe-revisions probe))))))
+      (true (equal (list revision)
+                   (current-revision-preparation-probe-revisions probe))))))
 
-(deftest metabar-input-queues-and-frame-refresh-publishes-semantic-change
+(define-test metabar-input-queues-and-frame-refresh-publishes-semantic-change
   (let* ((owner (make-instance 'metabar-test-owner))
          (frame (make-metabar-test-frame owner)))
     (mcluv::select-metabar-row frame 1)
-    (ok (eq :continue
-            (mcluv::handle-metabar-key-event
-             frame (metabar-test-key :right))))
+    (true (eq :continue
+              (mcluv::handle-metabar-key-event
+               frame (metabar-test-key :right))))
     ;; Input has changed only retained UI state; the application is untouched.
-    (ok (= 0.5 (metabar-test-gain owner)))
-    (ok (= 1 (length (mcluv::metabar-pending-operations frame))))
+    (true (= 0.5 (metabar-test-gain owner)))
+    (true (= 1 (length (mcluv::metabar-pending-operations frame))))
     (mcluv::drain-metabar-operations frame)
-    (ok (< (abs (- 0.6 (metabar-test-gain owner))) 1.0e-6))
+    (true (< (abs (- 0.6 (metabar-test-gain owner))) 1.0e-6))
     (setf (mcluv::metabar-dirty-p frame) nil)
     (mcluv::refresh-metabar-state frame)
-    (ok (not (mcluv::metabar-dirty-p frame)))
+    (true (not (mcluv::metabar-dirty-p frame)))
     (setf (metabar-test-gain owner) 0.7)
     (mcluv::refresh-metabar-state frame)
-    (ok (mcluv::metabar-dirty-p frame))
+    (true (mcluv::metabar-dirty-p frame))
     (mcluv::select-metabar-row frame 2)
     (mcluv::handle-metabar-key-event frame (metabar-test-key :space))
-    (ok (not (metabar-test-enabled-p owner)))
+    (true (not (metabar-test-enabled-p owner)))
     (mcluv::drain-metabar-operations frame)
-    (ok (metabar-test-enabled-p owner))
+    (true (metabar-test-enabled-p owner))
     (mcluv::select-metabar-row frame 3)
     (mcluv::handle-metabar-key-event frame (metabar-test-key :space))
-    (ok (zerop (metabar-test-actions owner)))
+    (true (zerop (metabar-test-actions owner)))
     (mcluv::drain-metabar-operations frame)
-    (ok (= 1 (metabar-test-actions owner)))
+    (true (= 1 (metabar-test-actions owner)))
     (mcluv::select-metabar-row frame 1)
     (mcluv::handle-metabar-key-event frame (metabar-test-key :right))
     (mcluv::handle-metabar-key-event frame (metabar-test-key :left))
-    (ok (null (mcluv::metabar-pending-operations frame)))))
+    (true (null (mcluv::metabar-pending-operations frame)))))
 
-(deftest commit-controls-preview-and-coalesce-until-pointer-release
+(define-test commit-controls-preview-and-coalesce-until-pointer-release
   (let* ((owner (make-instance 'metabar-test-owner))
          (frame (make-metabar-test-frame owner))
          (row-top (mcluv::metabar-row-top frame 1))
@@ -206,28 +206,28 @@
                    :button :left)))
     (mcluv::handle-metabar-pointer-event frame press 330.0 track-y)
     (mcluv::handle-metabar-pointer-event frame motion 365.8 track-y)
-    (ok (= 1 (length (mcluv::metabar-pending-operations frame))))
-    (ok (mcluv::metabar-preview-fraction frame :gain))
+    (true (= 1 (length (mcluv::metabar-pending-operations frame))))
+    (true (mcluv::metabar-preview-fraction frame :gain))
     (mcluv::drain-metabar-operations frame)
-    (ok (= 0.5 (metabar-test-gain owner)))
-    (ok (= 1 (length (mcluv::metabar-pending-operations frame))))
+    (true (= 0.5 (metabar-test-gain owner)))
+    (true (= 1 (length (mcluv::metabar-pending-operations frame))))
     (mcluv::handle-metabar-pointer-event frame release nil nil)
     (mcluv::drain-metabar-operations frame)
-    (ok (< (abs (- 0.9 (metabar-test-gain owner))) 0.01))
-    (ok (null (mcluv::metabar-pending-operations frame)))
-    (ok (null (mcluv::metabar-preview-fraction frame :gain)))))
+    (true (< (abs (- 0.9 (metabar-test-gain owner))) 0.01))
+    (true (null (mcluv::metabar-pending-operations frame)))
+    (true (null (mcluv::metabar-preview-fraction frame :gain)))))
 
-(deftest clearing-a-quantized-preview-is-a-semantic-revision
+(define-test clearing-a-quantized-preview-is-a-semantic-revision
   (let ((frame (make-metabar-test-frame)))
     (setf (mcluv::metabar-preview-fraction frame :gain) 0.5
           (mcluv::metabar-dirty-p frame) nil)
     ;; An application may quantize a committed preview back to the value the
     ;; row already cached.  Removing that preview still changes the picture.
     (mcluv::clear-metabar-preview-fraction frame :gain)
-    (ok (mcluv::metabar-dirty-p frame))
-    (ok (null (mcluv::metabar-preview-fraction frame :gain)))))
+    (true (mcluv::metabar-dirty-p frame))
+    (true (null (mcluv::metabar-preview-fraction frame :gain)))))
 
-(deftest a-failed-commit-clears-its-optimistic-preview
+(define-test a-failed-commit-clears-its-optimistic-preview
   (let* ((owner (make-instance 'metabar-test-owner))
          (frame (make-metabar-test-frame owner)))
     (setf (metabar-test-fail-set-p owner) t
@@ -236,12 +236,12 @@
           (list (mcluv::make-metabar-operation
                  :kind :set-fraction :subject :gain :argument 0.9)))
     (mcluv::drain-metabar-operations frame)
-    (ok (= 0.5 (metabar-test-gain owner)))
-    (ok (null (mcluv::metabar-preview-fraction frame :gain)))
-    (ok (search "scripted metabar commit failure"
-                (princ-to-string (mcluv::metabar-diagnostic frame))))))
+    (true (= 0.5 (metabar-test-gain owner)))
+    (true (null (mcluv::metabar-preview-fraction frame :gain)))
+    (true (search "scripted metabar commit failure"
+                  (princ-to-string (mcluv::metabar-diagnostic frame))))))
 
-(deftest metabar-layout-is-logical-and-native-destination-resolution
+(define-test metabar-layout-is-logical-and-native-destination-resolution
   (let* ((owner (make-instance 'metabar-test-owner))
          (frame (make-metabar-test-frame owner))
          (logical '(1344 840))
@@ -249,29 +249,29 @@
          (state (mcluv::metabar-screen-state frame logical 1.0))
          (half-width (aref state 4))
          (half-height (aref state 9)))
-    (ok (< (abs (- 460.0 (* half-width (first logical)))) 1.0e-4))
-    (ok (< (abs (- 240.0 (* half-height (second logical)))) 1.0e-4))
+    (true (< (abs (- 460.0 (* half-width (first logical)))) 1.0e-4))
+    (true (< (abs (- 240.0 (* half-height (second logical)))) 1.0e-4))
     ;; The same logical transform receives twice the native samples on a 2x
     ;; drawable; no intermediate panel raster is resized.
-    (ok (< (abs (- 920.0 (* half-width (first drawable)))) 1.0e-4))
-    (ok (< (abs (- 480.0 (* half-height (second drawable)))) 1.0e-4))
+    (true (< (abs (- 920.0 (* half-width (first drawable)))) 1.0e-4))
+    (true (< (abs (- 480.0 (* half-height (second drawable)))) 1.0e-4))
     (multiple-value-bind (x y)
         (mcluv::metabar-local-coordinate frame 230.0 420.0 logical 1.0)
-      (ok (< (abs (- 230.0 x)) 1.0e-4))
-      (ok (< (abs (- 120.0 y)) 1.0e-4)))))
+      (true (< (abs (- 230.0 x)) 1.0e-4))
+      (true (< (abs (- 120.0 y)) 1.0e-4)))))
 
-(deftest metabar-panel-is-translucent-analytic-and-prepares-no-image
+(define-test metabar-panel-is-translucent-analytic-and-prepares-no-image
   (let ((medium (fresh-gpu-medium)))
     (setf (clim:medium-ink medium) mcluv::*metabar-panel-ink*)
     (mcluv::medium-draw-analytic-rounded-rectangle*
      medium 0 0 460 240 15 t)
     (let ((vertices (mcluv::gpu-medium-analytic-vertices medium))
           (semantic-commands (mcluv::gpu-medium-commands medium)))
-      (ok (< (abs (- 0.90 (aref vertices 2))) 1.0e-5))
-      (ok (= 1 (length semantic-commands)))
-      (ok (typep (aref semantic-commands 0)
-                 'mcluv::gpu-analytic-command))
-      (ok (null (mcluv:gpu-medium-fallback-report medium)))
+      (true (< (abs (- 0.90 (aref vertices 2))) 1.0e-5))
+      (true (= 1 (length semantic-commands)))
+      (true (typep (aref semantic-commands 0)
+                   'mcluv::gpu-analytic-command))
+      (true (null (mcluv:gpu-medium-fallback-report medium)))
       (let* ((sheet
                (make-instance 'mcluv::metabar-pane
                               :region
@@ -282,10 +282,10 @@
         (multiple-value-bind (prepared text-data)
             (mcluv::prepare-gpu-frame-commands mirror semantic-commands)
           (declare (ignore text-data))
-          (ok (= 1 (length prepared)))
-          (ok (typep (first prepared) 'mcluv::gpu-analytic-command))
-          (ok (null
-               (find-if
-                (lambda (command)
-                  (typep command 'mcluv::gpu-prepared-image-command))
-                prepared))))))))
+          (true (= 1 (length prepared)))
+          (true (typep (first prepared) 'mcluv::gpu-analytic-command))
+          (true (null
+                 (find-if
+                  (lambda (command)
+                    (typep command 'mcluv::gpu-prepared-image-command))
+                  prepared))))))))

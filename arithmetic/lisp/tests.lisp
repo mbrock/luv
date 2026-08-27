@@ -67,104 +67,104 @@
          (or (tree-contains-any-object-p (car tree) objects)
              (tree-contains-any-object-p (cdr tree) objects)))))
 
-(deftest checked-definitions-compile-to-ordinary-lisp-functions
+(define-test checked-definitions-compile-to-ordinary-lisp-functions
   (let* ((lambda-expression
            (lisp:lower-arithmetic-function 'cpu-fog-shape))
          (function (lisp:compile-arithmetic-function 'cpu-fog-shape))
          (result (cpu-fog-shape 5.0d0 0.0d0 10.0d0)))
-    (ok (compiled-function-p #'cpu-fog-shape))
-    (ok (compiled-function-p function))
-    (ok (typep result 'double-float))
-    (ok (< (abs (- result 0.25d0)) 1.0d-12))
-    (ok (not
-         (tree-contains-any-object-p
-          lambda-expression
-          (list 'lang:quantity 'lang:interpret 'lang:convert-unit))))))
+    (true (compiled-function-p #'cpu-fog-shape))
+    (true (compiled-function-p function))
+    (true (typep result 'double-float))
+    (true (< (abs (- result 0.25d0)) 1.0d-12))
+    (true (not
+           (tree-contains-any-object-p
+            lambda-expression
+            (list 'lang:quantity 'lang:interpret 'lang:convert-unit))))))
 
-(deftest shared-function-calls-lower-and-execute-as-ordinary-lisp
+(define-test shared-function-calls-lower-and-execute-as-ordinary-lisp
   (let ((lambda-expression
           (lisp:lower-arithmetic-function 'twice-offset-square)))
-    (ok (= 18.0d0 (twice-offset-square 2.0d0)))
-    (ok (= 18.0d0
-           (funcall (lisp:compile-arithmetic-function
-                     'twice-offset-square)
-                    2.0d0)))
-    (ok (tree-contains-any-object-p lambda-expression '(let*)))
-    (ok (not (tree-contains-any-object-p
-              lambda-expression '(offset-square))))))
+    (true (= 18.0d0 (twice-offset-square 2.0d0)))
+    (true (= 18.0d0
+             (funcall (lisp:compile-arithmetic-function
+                       'twice-offset-square)
+                      2.0d0)))
+    (true (tree-contains-any-object-p lambda-expression '(let*)))
+    (true (not (tree-contains-any-object-p
+                lambda-expression '(offset-square))))))
 
-(deftest counted-fold-lowers-to-an-ordinary-lisp-loop
+(define-test counted-fold-lowers-to-an-ordinary-lisp-loop
   (let ((lambda-expression
           (lisp:lower-arithmetic-function 'cpu-triangular-number)))
-    (ok (= 10 (cpu-triangular-number 5)))
-    (ok (= 45 (funcall (lisp:compile-arithmetic-function
-                        'cpu-triangular-number)
-                       10)))
-    (ok (tree-contains-any-object-p lambda-expression '(dotimes)))))
+    (true (= 10 (cpu-triangular-number 5)))
+    (true (= 45 (funcall (lisp:compile-arithmetic-function
+                          'cpu-triangular-number)
+                         10)))
+    (true (tree-contains-any-object-p lambda-expression '(dotimes)))))
 
-(deftest counted-fold-until-leaves-the-ordinary-loop-early
+(define-test counted-fold-until-leaves-the-ordinary-loop-early
   (let ((lambda-expression
           (lisp:lower-arithmetic-function 'cpu-capped-triangular-number)))
     ;; 0+1+2+3+4 = 10 passes the cap of 8 after index 4; index 5 is never
     ;; added, so the fold stops with 10 rather than running on to 45.
-    (ok (= 10 (cpu-capped-triangular-number 10 8)))
-    (ok (= 45 (cpu-capped-triangular-number 10 100)))
-    (ok (tree-contains-any-object-p lambda-expression '(return)))))
+    (true (= 10 (cpu-capped-triangular-number 10 8)))
+    (true (= 45 (cpu-capped-triangular-number 10 100)))
+    (true (tree-contains-any-object-p lambda-expression '(return)))))
 
-(deftest counted-fold-lexicals-lower-inside-the-ordinary-loop
+(define-test counted-fold-lexicals-lower-inside-the-ordinary-loop
   (let ((lambda-expression
           (lisp:lower-arithmetic-function 'cpu-folded-remainders)))
-    (ok (= 6 (cpu-folded-remainders 5)))
-    (ok (tree-contains-any-object-p lambda-expression '(let*)))
-    (ok (tree-contains-any-object-p lambda-expression '(mod)))))
+    (true (= 6 (cpu-folded-remainders 5)))
+    (true (tree-contains-any-object-p lambda-expression '(let*)))
+    (true (tree-contains-any-object-p lambda-expression '(mod)))))
 
-(deftest shared-conditionals-retain-ordinary-lisp-branching
+(define-test shared-conditionals-retain-ordinary-lisp-branching
   (let ((lambda-expression
           (lisp:lower-arithmetic-function 'cpu-bounded-triangular-number)))
-    (ok (= 10 (cpu-bounded-triangular-number 10 5)))
-    (ok (tree-contains-any-object-p lambda-expression '(if)))
-    (ok (tree-contains-any-object-p lambda-expression '(<)))))
+    (true (= 10 (cpu-bounded-triangular-number 10 5)))
+    (true (tree-contains-any-object-p lambda-expression '(if)))
+    (true (tree-contains-any-object-p lambda-expression '(<)))))
 
-(deftest ordinary-vectors-execute-without-semantic-wrappers
+(define-test ordinary-vectors-execute-without-semantic-wrappers
   (let ((add (lisp:compile-arithmetic-function 'add-vectors))
         (dot (lisp:compile-arithmetic-function 'vector-inner-product))
         (left #(1.0d0 2.0d0 3.0d0))
         (right #(4.0d0 5.0d0 6.0d0)))
-    (ok (equalp #(5.0d0 7.0d0 9.0d0)
-                (funcall add left right)))
-    (ok (= 32.0d0 (funcall dot left right)))))
+    (true (equalp #(5.0d0 7.0d0 9.0d0)
+                  (funcall add left right)))
+    (true (= 32.0d0 (funcall dot left right)))))
 
-(deftest raw-unary-operators-execute-componentwise
-  (ok (= 2.0d0 (absolute-square-root -4.0d0)))
-  (ok (equalp #(2.0d0 3.0d0)
-              (absolute-square-root #(-4.0d0 9.0d0)))))
+(define-test raw-unary-operators-execute-componentwise
+  (true (= 2.0d0 (absolute-square-root -4.0d0)))
+  (true (equalp #(2.0d0 3.0d0)
+                (absolute-square-root #(-4.0d0 9.0d0)))))
 
-(deftest vec3-is-owned-and-realized-by-the-lisp-arithmetic-backend
+(define-test vec3-is-owned-and-realized-by-the-lisp-arithmetic-backend
   (let* ((vector (vec:make-vec3 3d0 4d0 0d0))
          (add (lisp:compile-arithmetic-function 'add-vectors))
          (dot (lisp:compile-arithmetic-function 'vector-inner-product)))
-    (ok (= (vec:vec3-length vector) 5d0))
-    (ok (= 6d0
-           (vec:vec3-dot vector (vec:make-vec3 2d0 0d0 1d0))))
-    (ok (equalp (vec:make-vec3 6d0 8d0 0d0)
-                (vec:vec3-scale vector 2d0)))
-    (ok (equalp (vec:make-vec3 0d0 0d0 1d0)
-                (vec:vec3-cross (vec:make-vec3 1d0 0d0 0d0)
-                                (vec:make-vec3 0d0 1d0 0d0))))
+    (true (= (vec:vec3-length vector) 5d0))
+    (true (= 6d0
+             (vec:vec3-dot vector (vec:make-vec3 2d0 0d0 1d0))))
+    (true (equalp (vec:make-vec3 6d0 8d0 0d0)
+                  (vec:vec3-scale vector 2d0)))
+    (true (equalp (vec:make-vec3 0d0 0d0 1d0)
+                  (vec:vec3-cross (vec:make-vec3 1d0 0d0 0d0)
+                                  (vec:make-vec3 0d0 1d0 0d0))))
     (let ((normalized (vec:vec3-normalize vector)))
-      (ok (< (abs (- (vec:vec3-x normalized) 0.6d0)) 1d-12))
-      (ok (< (abs (- (vec:vec3-y normalized) 0.8d0)) 1d-12))
-      (ok (zerop (vec:vec3-z normalized))))
+      (true (< (abs (- (vec:vec3-x normalized) 0.6d0)) 1d-12))
+      (true (< (abs (- (vec:vec3-y normalized) 0.8d0)) 1d-12))
+      (true (zerop (vec:vec3-z normalized))))
     (setf (vec:vec3-component vector :z) 5d0)
-    (ok (equal '(3d0 4d0 5d0) (vec:vec3-list vector)))
-    (ok (equalp (vec:make-vec3 4d0 6d0 8d0)
-                (funcall add vector (vec:make-vec3 1d0 2d0 3d0))))
-    (ok (= 14d0
-           (funcall dot (vec:make-vec3 1d0 2d0 3d0)
-                        (vec:make-vec3 1d0 2d0 3d0))))
-    (ok (null (find-package "LUVCRAFT.WORLD")))))
+    (true (equal '(3d0 4d0 5d0) (vec:vec3-list vector)))
+    (true (equalp (vec:make-vec3 4d0 6d0 8d0)
+                  (funcall add vector (vec:make-vec3 1d0 2d0 3d0))))
+    (true (= 14d0
+             (funcall dot (vec:make-vec3 1d0 2d0 3d0)
+                          (vec:make-vec3 1d0 2d0 3d0))))
+    (true (null (find-package "LUVCRAFT.WORLD")))))
 
-(deftest lisp-realizations-bind-storage-contracts-once
+(define-test lisp-realizations-bind-storage-contracts-once
   (let* ((realization
            (lisp:make-lisp-arithmetic-realization
             'add-vectors
@@ -175,54 +175,54 @@
             realization))
          (function
            (lisp:bind-lisp-arithmetic-realization realization expected)))
-    (ok (compiled-function-p function))
-    (ok (equalp #(4d0 6d0)
-                (funcall function #(1d0 2d0) #(3d0 4d0))))
-    (ok (signals
-         (lisp:bind-lisp-arithmetic-realization
-          realization
-          (list
-           (math:make-represented-value-declaration
-            :representation-type 'real
-            :quantity-specification
-            (math:declaration-quantity-specification (first expected))
-            :source-form '(bad-scalar-slot))
-           (second expected)))
-         'math:declaration-compatibility-error))))
+    (true (compiled-function-p function))
+    (true (equalp #(4d0 6d0)
+                  (funcall function #(1d0 2d0) #(3d0 4d0))))
+    (fail
+     (lisp:bind-lisp-arithmetic-realization
+      realization
+      (list
+       (math:make-represented-value-declaration
+        :representation-type 'real
+        :quantity-specification
+        (math:declaration-quantity-specification (first expected))
+        :source-form '(bad-scalar-slot))
+       (second expected)))
+     'math:declaration-compatibility-error)))
 
-(deftest affine-arithmetic-is-checked-once-and-executes-numerically
+(define-test affine-arithmetic-is-checked-once-and-executes-numerically
   (let* ((definition
            (lang:arithmetic-function-definition-for 'move-distance-point))
          (result (lang:arithmetic-function-result definition))
          (specification
            (lang:arithmetic-expression-quantity-specification result))
          (function (lisp:compile-arithmetic-function definition)))
-    (ok (math:quantity-specification-affine-p specification))
-    (ok (= 12.5d0 (funcall function 10.0d0 2.5d0))))
-  (ok (signals
-       (lang:parse-arithmetic-function-definition
-        'add-points
-        '((left :quantity :distance :unit :metre :affine-p t)
-          (right :quantity :distance :unit :metre :affine-p t))
-        '((+ left right)))
-       'lang:arithmetic-language-error)))
+    (true (math:quantity-specification-affine-p specification))
+    (true (= 12.5d0 (funcall function 10.0d0 2.5d0))))
+  (fail
+   (lang:parse-arithmetic-function-definition
+    'add-points
+    '((left :quantity :distance :unit :metre :affine-p t)
+      (right :quantity :distance :unit :metre :affine-p t))
+    '((+ left right)))
+   'lang:arithmetic-language-error))
 
-(deftest explicit-unit-conversion-becomes-an-exact-numeric-scale
+(define-test explicit-unit-conversion-becomes-an-exact-numeric-scale
   (let* ((lambda-expression
            (lisp:lower-arithmetic-function 'kilometres-to-metres))
          (function
            (lisp:compile-arithmetic-function 'kilometres-to-metres)))
-    (ok (= 1500.0d0 (funcall function 1.5d0)))
-    (ok (tree-contains-any-object-p lambda-expression '(1000)))
-    (ok (not (tree-contains-any-object-p
-              lambda-expression (list 'lang:convert-unit))))))
+    (true (= 1500.0d0 (funcall function 1.5d0)))
+    (true (tree-contains-any-object-p lambda-expression '(1000)))
+    (true (not (tree-contains-any-object-p
+                lambda-expression (list 'lang:convert-unit))))))
 
-(deftest dimensional-errors-prevent-lisp-compilation
-  (ok (signals
-       (lisp:compile-arithmetic-function
-        (lang:parse-arithmetic-function-definition
-         'bad-addition
-         '((distance :quantity :distance :unit :metre)
-           (height :quantity :height :unit :metre))
-         '((+ distance height))))
-       'lang:arithmetic-language-error)))
+(define-test dimensional-errors-prevent-lisp-compilation
+  (fail
+   (lisp:compile-arithmetic-function
+    (lang:parse-arithmetic-function-definition
+     'bad-addition
+     '((distance :quantity :distance :unit :metre)
+       (height :quantity :height :unit :metre))
+     '((+ distance height))))
+   'lang:arithmetic-language-error))

@@ -20,11 +20,7 @@
     (asdf:load-asd (truename "luv-wiki.asd"))
     (asdf:load-asd (truename "luft.asd"))
     (asdf:load-asd (truename "sly-client.asd"))
-    (asdf:load-system :rove)
-    (load (merge-pathnames #P"luv/test-reporter.lisp"))
-    (uiop:symbol-call :luv.test-reporter :register-luv-reporter)
-    (setf (symbol-value (uiop:find-symbol* :*default-reporter* :rove)) :luv)
-    (uiop:symbol-call :rove :use-reporter :luv)
+    (asdf:load-system :luv/test-support)
     (let ((systems '(:luv :luv/tracy-capture :luv/application-agent
                      :luv/ghostty :luv/libav :luvcraft :luvcraft/agent
                      :mqtt :openai :chrome-cdp
@@ -79,9 +75,9 @@
           (format t "~&~%;; Tested ~D system~:P and validated shaders in ~A.~%"
                   count
                   (uiop:symbol-call
-                   :luv.test-reporter :format-seconds seconds))
+                   :luv.test-support :format-seconds seconds))
           (when slowest
             (format t ";; Slowest was ~A at ~A.~%"
                     (car slowest)
                     (uiop:symbol-call
-                     :luv.test-reporter :format-seconds (cdr slowest)))))))))
+                     :luv.test-support :format-seconds (cdr slowest)))))))))

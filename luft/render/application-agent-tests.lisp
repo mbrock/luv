@@ -1,6 +1,6 @@
 (in-package #:luft.render.tests)
 
-(deftest luft-agent-vocabulary-is-application-level-and-parameterized
+(define-test luft-agent-vocabulary-is-application-level-and-parameterized
   (let* ((tool
            (luv.application-agent:make-command-tool
             'render::com-set-projection))
@@ -8,16 +8,16 @@
          (properties (cdr (assoc "properties" parameters :test #'string=)))
          (projection
            (cdr (assoc "projection" properties :test #'string=))))
-    (ok (equal '("perspective" "isometric")
-               (cdr (assoc "enum" projection :test #'string=))))
-    (ok (equal '(render::com-set-projection :perspective)
-               (luv.application-agent:command-tool-parse
-                tool '(("projection" . "perspective")))))
-    (ok (every (lambda (command)
-                 (eq (symbol-package command) (find-package '#:luft.render)))
-               render::*viewer-agent-commands*))))
+    (true (equal '("perspective" "isometric")
+                 (cdr (assoc "enum" projection :test #'string=))))
+    (true (equal '(render::com-set-projection :perspective)
+                 (luv.application-agent:command-tool-parse
+                  tool '(("projection" . "perspective")))))
+    (true (every (lambda (command)
+                   (eq (symbol-package command) (find-package '#:luft.render)))
+                 render::*viewer-agent-commands*))))
 
-(deftest luft-agent-participates-in-viewer-instrument-release
+(define-test luft-agent-participates-in-viewer-instrument-release
   (let* ((viewer (clim:make-application-frame 'render:viewer))
          (close-count 0)
          (agent
@@ -31,13 +31,13 @@
                             (declare (ignore agent))
                             (incf close-count)))))
     (render::attach-viewer-agent viewer agent)
-    (ok (eq agent (render::viewer-agent viewer)))
-    (ok (find-if (lambda (instrument)
-                   (typep instrument 'render::viewer-agent-instrument))
-                 (render::viewer-instruments viewer)))
+    (true (eq agent (render::viewer-agent viewer)))
+    (true (find-if (lambda (instrument)
+                     (typep instrument 'render::viewer-agent-instrument))
+                   (render::viewer-instruments viewer)))
     (render::release-viewer-instruments viewer)
-    (ok (luv.application-agent:wait-for-application-agent-release
-         agent :timeout 1.0))
-    (ok (= 1 close-count))
-    (ok (null (render::viewer-agent viewer)))
-    (ok (null (luv.application-agent:release-application-agent agent)))))
+    (true (luv.application-agent:wait-for-application-agent-release
+           agent :timeout 1.0))
+    (true (= 1 close-count))
+    (true (null (render::viewer-agent viewer)))
+    (true (null (luv.application-agent:release-application-agent agent)))))

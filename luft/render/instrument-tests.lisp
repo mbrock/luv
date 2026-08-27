@@ -147,7 +147,7 @@
   (when (instrument-test-fail-release-p instrument)
     (error "Deliberate instrument release failure.")))
 
-(deftest stopped-viewers-consume-and-reject-late-instruments
+(define-test stopped-viewers-consume-and-reject-late-instruments
   (let* ((canvas (make-instance 'instrument-owner-canvas))
          (viewer (clim:make-application-frame 'render:viewer :canvas canvas))
          (owned (make-instance 'instrument-test-probe
@@ -160,32 +160,32 @@
          (progn
            (render::add-viewer-instrument viewer owned)
            (render::add-viewer-instrument viewer owned)
-           (ok (= 1 (length (render::viewer-instruments viewer))))
+           (true (= 1 (length (render::viewer-instruments viewer))))
            (luv:call-with-stop-controller
             (render::viewer-stop-controller viewer) (lambda () nil))
            (setf (instrument-owner-canvas-reject-requests-p canvas) t)
-           (ok (eq owned (render::add-viewer-instrument viewer owned)))
-           (ok (zerop (instrument-test-release-count owned)))
-           (ok (= 1 (length (render::viewer-instruments viewer))))
+           (true (eq owned (render::add-viewer-instrument viewer owned)))
+           (true (zerop (instrument-test-release-count owned)))
+           (true (= 1 (length (render::viewer-instruments viewer))))
            (setf (instrument-owner-canvas-reject-requests-p canvas) nil)
-           (ok (render::remove-viewer-instrument viewer owned))
+           (true (render::remove-viewer-instrument viewer owned))
            (handler-bind ((luv:release-warning #'muffle-warning))
              (handler-case (render::add-viewer-instrument viewer late)
                (luv:application-attachment-closed (failure)
                  (setf condition failure))))
-           (ok (typep condition 'luv:application-attachment-closed))
-           (ok (eq late
-                   (luv:application-attachment-closed-attachment condition)))
-           (ok (eq :stopped
-                   (luv:application-attachment-closed-state condition)))
-           (ok (= 1 (instrument-test-release-count owned)))
-           (ok (= 1 (instrument-test-release-count late)))
-           (ok (instrument-test-released-on-owner-p late))
-           (ok (null (render::viewer-instruments viewer))))
+           (true (typep condition 'luv:application-attachment-closed))
+           (true (eq late
+                     (luv:application-attachment-closed-attachment condition)))
+           (true (eq :stopped
+                     (luv:application-attachment-closed-state condition)))
+           (true (= 1 (instrument-test-release-count owned)))
+           (true (= 1 (instrument-test-release-count late)))
+           (true (instrument-test-released-on-owner-p late))
+           (true (null (render::viewer-instruments viewer))))
       (ignore-errors (render::release-viewer-instruments viewer))
       (close-instrument-owner-canvas canvas))))
 
-(deftest instrument-add-versus-stop-never-repopulates-the-terminal-registry
+(define-test instrument-add-versus-stop-never-repopulates-the-terminal-registry
   ;; This is a bounded integration regression, not a scheduler stress test.
   ;; Four fresh simultaneous starts exercise both legal outcomes without making
   ;; routine renderer work pay for sixteen canvas/thread setup cycles.
@@ -240,16 +240,16 @@
              (setf add-thread nil)
              (sb-thread:join-thread stop-thread)
              (setf stop-thread nil)
-             (ok (null stop-condition))
-             (ok (or (null add-condition)
-                     (typep add-condition
-                            'luv:application-attachment-closed)))
-             (ok (eq :stopped
-                     (luv:stop-controller-state
-                      (render::viewer-stop-controller viewer))))
-             (ok (null (render::viewer-instruments viewer)))
-             (ok (= 1 (instrument-test-release-count instrument)))
-             (ok (instrument-test-released-on-owner-p instrument)))
+             (true (null stop-condition))
+             (true (or (null add-condition)
+                       (typep add-condition
+                              'luv:application-attachment-closed)))
+             (true (eq :stopped
+                       (luv:stop-controller-state
+                        (render::viewer-stop-controller viewer))))
+             (true (null (render::viewer-instruments viewer)))
+             (true (= 1 (instrument-test-release-count instrument)))
+             (true (instrument-test-released-on-owner-p instrument)))
         (sb-thread:signal-semaphore start)
         (sb-thread:signal-semaphore start)
         (when add-thread (sb-thread:join-thread add-thread))
@@ -279,7 +279,7 @@
   (declare (ignore mirror))
   (push revision (inspector-preparation-probe-revisions probe)))
 
-(deftest a-static-inspector-prepares-before-the-renderer-is-borrowed
+(define-test a-static-inspector-prepares-before-the-renderer-is-borrowed
   (let* ((viewer
            (clim:make-application-frame
             'render:viewer :renderer :installed-cohort :inspector-p t))
@@ -295,13 +295,13 @@
            (mcluv::publish-gpu-mirror-prepared-revision mirror revision)
            (setf (mcluv:mirror-compositor mirror) probe
                  (render::viewer-inspector-mirror viewer) mirror)
-           (ok (eq :installed-cohort
-                   (render::prepare-viewer-frame-renderer viewer)))
-           (ok (equal (list revision)
-                      (inspector-preparation-probe-revisions probe))))
+           (true (eq :installed-cohort
+                     (render::prepare-viewer-frame-renderer viewer)))
+           (true (equal (list revision)
+                        (inspector-preparation-probe-revisions probe))))
       (render::release-viewer-instruments viewer))))
 
-(deftest a-frame-borrows-the-renderer-after-instrument-publication
+(define-test a-frame-borrows-the-renderer-after-instrument-publication
   (let* ((viewer
            (clim:make-application-frame
             'render:viewer :renderer :retired-cohort))
@@ -311,12 +311,12 @@
     (unwind-protect
          (progn
            (render::add-viewer-instrument viewer instrument)
-           (ok (eq :installed-cohort
-                   (render::prepare-viewer-frame-renderer viewer)))
-           (ok (eq :installed-cohort (render::viewer-renderer viewer))))
+           (true (eq :installed-cohort
+                     (render::prepare-viewer-frame-renderer viewer)))
+           (true (eq :installed-cohort (render::viewer-renderer viewer))))
       (render::release-viewer-instruments viewer))))
 
-(deftest viewer-instruments-have-explicit-input-paint-and-release-order
+(define-test viewer-instruments-have-explicit-input-paint-and-release-order
   (let* ((viewer (gensym "VIEWER"))
          (low (make-instance 'instrument-test-probe
                              :name :low :priority 10))
@@ -328,32 +328,32 @@
            (render::add-viewer-instrument viewer low)
            (render::add-viewer-instrument viewer modal)
            (render::add-viewer-instrument viewer modal)
-           (ok (equal '(:modal :low)
-                      (mapcar #'instrument-test-name
-                              (render::viewer-instruments viewer))))
+           (true (equal '(:modal :low)
+                        (mapcar #'instrument-test-name
+                                (render::viewer-instruments viewer))))
            (render::refresh-viewer-instruments viewer)
-           (ok (equal '((:refresh :modal) (:refresh :low))
-                      (nreverse *instrument-test-events*)))
+           (true (equal '((:refresh :modal) (:refresh :low))
+                        (nreverse *instrument-test-events*)))
            (setf *instrument-test-events* nil)
            (render::encode-viewer-instruments
             viewer :pass :surface '(2200 1600))
-           (ok (equal '((:encode :low (2200 1600))
-                        (:encode :modal (2200 1600)))
-                      (nreverse *instrument-test-events*)))
+           (true (equal '((:encode :low (2200 1600))
+                          (:encode :modal (2200 1600)))
+                        (nreverse *instrument-test-events*)))
            (setf *instrument-test-events* nil)
-           (ok (render::dispatch-viewer-instrument-event
-                viewer nil (make-instance 'luv:canvas-event :timestamp 0)))
-           (ok (equal '((:event :modal)) *instrument-test-events*))
+           (true (render::dispatch-viewer-instrument-event
+                  viewer nil (make-instance 'luv:canvas-event :timestamp 0)))
+           (true (equal '((:event :modal)) *instrument-test-events*))
            (setf *instrument-test-events* nil)
-           (ok (render::remove-viewer-instrument viewer modal))
-           (ok (equal '((:release :modal)) *instrument-test-events*))
-           (ok (equal (list low) (render::viewer-instruments viewer))))
+           (true (render::remove-viewer-instrument viewer modal))
+           (true (equal '((:release :modal)) *instrument-test-events*))
+           (true (equal (list low) (render::viewer-instruments viewer))))
       (render::release-viewer-instruments viewer))
-    (ok (equal '((:release :low) (:release :modal))
-               *instrument-test-events*))
-    (ok (null (render::viewer-instruments viewer)))))
+    (true (equal '((:release :low) (:release :modal))
+                 *instrument-test-events*))
+    (true (null (render::viewer-instruments viewer)))))
 
-(deftest off-thread-instrument-removal-waits-for-the-borrowing-frame
+(define-test off-thread-instrument-removal-waits-for-the-borrowing-frame
   (let* ((canvas (make-instance 'instrument-owner-canvas))
          (viewer (clim:make-application-frame 'render:viewer :canvas canvas))
          (instrument (make-instance 'instrument-test-probe
@@ -407,11 +407,11 @@
                     (sb-thread:signal-semaphore remove-finished))
                   :name "LUFT off-thread instrument removal"))
            (wait-for-instrument-owner-request canvas)
-           (ok (not (sb-thread:wait-on-semaphore
-                     remove-finished :timeout 0.02))
-               "remove remains synchronous while the frame owns its snapshot")
-           (ok (zerop (instrument-test-release-count instrument))
-               "the borrowed instrument has not been released")
+           (true (not (sb-thread:wait-on-semaphore
+                       remove-finished :timeout 0.02))
+                 "remove remains synchronous while the frame owns its snapshot")
+           (true (zerop (instrument-test-release-count instrument))
+                 "the borrowed instrument has not been released")
            (sb-thread:signal-semaphore continue)
            (unless (sb-thread:wait-on-semaphore frame-finished :timeout 1.0)
              (error "The borrowing frame did not finish."))
@@ -421,20 +421,20 @@
            (setf frame-thread nil)
            (sb-thread:join-thread remove-thread)
            (setf remove-thread nil)
-           (ok (null frame-condition))
-           (ok (null remove-condition))
-           (ok snapshot-kept-p)
-           (ok remove-result)
-           (ok (= 1 (instrument-test-release-count instrument)))
-           (ok (instrument-test-released-on-owner-p instrument))
-           (ok (null (render::viewer-instruments viewer))))
+           (true (null frame-condition))
+           (true (null remove-condition))
+           (true snapshot-kept-p)
+           (true remove-result)
+           (true (= 1 (instrument-test-release-count instrument)))
+           (true (instrument-test-released-on-owner-p instrument))
+           (true (null (render::viewer-instruments viewer))))
       (sb-thread:signal-semaphore continue)
       (when frame-thread (sb-thread:join-thread frame-thread))
       (when remove-thread (sb-thread:join-thread remove-thread))
       (ignore-errors (render::release-viewer-instruments viewer))
       (close-instrument-owner-canvas canvas))))
 
-(deftest instrument-release-errors-return-through-the-frame-boundary
+(define-test instrument-release-errors-return-through-the-frame-boundary
   (let* ((canvas (make-instance 'instrument-owner-canvas))
          (viewer (clim:make-application-frame 'render:viewer :canvas canvas))
          (instrument (make-instance 'instrument-test-probe
@@ -450,32 +450,32 @@
              (error (failure)
                (setf condition failure)))
            (wait-for-instrument-owner-request canvas)
-           (ok (typep condition 'error))
-           (ok (= 1 (instrument-test-release-count instrument)))
-           (ok (instrument-test-released-on-owner-p instrument))
-           (ok (null (render::viewer-instruments viewer))))
+           (true (typep condition 'error))
+           (true (= 1 (instrument-test-release-count instrument)))
+           (true (instrument-test-released-on-owner-p instrument))
+           (true (null (render::viewer-instruments viewer))))
       (ignore-errors (render::release-viewer-instruments viewer))
       (close-instrument-owner-canvas canvas))))
 
-(deftest luft-m-x-is-an-application-command-available-with-pointer-released
+(define-test luft-m-x-is-an-application-command-available-with-pointer-released
   (let* ((viewer (clim:make-application-frame 'render:viewer))
          (entries
            (mcluv:command-menu-entries-for-tables
             (mcluv:command-menu-tables-for viewer)
             :owner-frame viewer)))
-    (ok (equal '(render::com-execute-command)
-               (render::viewer-key-command
-                viewer (key-press :x :character #\x :modifiers '(:meta)))))
-    (ok (= 1 (count 'render::com-execute-command entries
-                    :key #'mcluv:command-menu-entry-command-name)))
-    (ok (find "Execute Command" entries :test #'string=
-              :key #'mcluv:command-menu-entry-label))
-    (ok (find "Toggle Lobby Panel" entries :test #'string=
-              :key #'mcluv:command-menu-entry-label))
+    (true (equal '(render::com-execute-command)
+                 (render::viewer-key-command
+                  viewer (key-press :x :character #\x :modifiers '(:meta)))))
+    (true (= 1 (count 'render::com-execute-command entries
+                      :key #'mcluv:command-menu-entry-command-name)))
+    (true (find "Execute Command" entries :test #'string=
+                :key #'mcluv:command-menu-entry-label))
+    (true (find "Toggle Lobby Panel" entries :test #'string=
+                :key #'mcluv:command-menu-entry-label))
     (dolist (label '("Edit World" "Leave World Edit Mode"
                      "Undo World Edit" "Redo World Edit"))
-      (ok (find label entries :test #'string=
-                :key #'mcluv:command-menu-entry-label)))
+      (true (find label entries :test #'string=
+                  :key #'mcluv:command-menu-entry-label)))
     ;; The shared palette does not advertise a command it cannot yet prompt.
-    (ok (null (find 'render::com-start-moving entries
-                    :key #'mcluv:command-menu-entry-command-name)))))
+    (true (null (find 'render::com-start-moving entries
+                      :key #'mcluv:command-menu-entry-command-name)))))

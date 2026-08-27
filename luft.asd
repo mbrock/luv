@@ -81,7 +81,7 @@
   :description "Executable claims for the indexed integer-mesh renderer."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luft/render" "rove")
+  :depends-on ("luft/render" "luv/test-support")
   :serial t
   :components ((:file "luft/render/tests")
                (:file "luft/render/quantity-tests")
@@ -96,10 +96,8 @@
                (:file "luft/render/application-agent-tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
-             (unless (uiop:symbol-call '#:rove '#:run-suite
-                                       (uiop:symbol-call '#:rove '#:find-suite
-                                                         '#:luft.render.tests))
-               (error "LUFT render tests failed"))))
+             (uiop:symbol-call '#:luv.test-support '#:test-package
+                               '#:luft.render.tests)))
 
 (defsystem "luft/mesh-query-profile"
   :description "Stage-isolated statistical profiles of the LUFT mesh query."
@@ -120,11 +118,9 @@
   :description "Differential checks for LUFT Z-fiber benchmark kernels."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luft/z-fiber-benchmark" "rove")
+  :depends-on ("luft/z-fiber-benchmark" "luv/test-support")
   :components ((:file "luft/z-fiber-benchmark-tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
-             (unless (uiop:symbol-call '#:rove '#:run-suite
-                                       (uiop:symbol-call '#:rove '#:find-suite
-                                                         '#:luft.z-fiber-benchmark.tests))
-               (error "LUFT Z-fiber benchmark tests failed"))))
+             (uiop:symbol-call '#:luv.test-support '#:test-package
+                               '#:luft.z-fiber-benchmark.tests)))

@@ -20,20 +20,20 @@
     (step-physics-world physics))
   physics)
 
-(deftest a-dropped-ball-comes-to-rest-on-the-floor-and-sleeps
+(define-test a-dropped-ball-comes-to-rest-on-the-floor-and-sleeps
   (let* ((world (make-physics-test-world))
          (physics (make-physics-world :terrain world :kernels :scalar))
          (ball (spawn-physics-body physics 8.5 5.0 8.5 :radius 0.25 :restitution 0.3)))
     (step-physics physics 240)
     (multiple-value-bind (x y z) (physics-body-position physics ball)
       ;; Resting on the grass top at y=2, a slop under its radius.
-      (ok (< (abs (- x 8.5)) 1e-3))
-      (ok (< (abs (- z 8.5)) 1e-3))
-      (ok (< (abs (- y (- 2.25 luvcraft::*physics-linear-slop*))) 0.01)))
-    (ok (physics-body-sleeping-p physics ball))
-    (ok (validate-physics-world physics))))
+      (true (< (abs (- x 8.5)) 1e-3))
+      (true (< (abs (- z 8.5)) 1e-3))
+      (true (< (abs (- y (- 2.25 luvcraft::*physics-linear-slop*))) 0.01)))
+    (true (physics-body-sleeping-p physics ball))
+    (true (validate-physics-world physics))))
 
-(deftest a-bouncy-ball-bounces-and-a-dead-one-does-not
+(define-test a-bouncy-ball-bounces-and-a-dead-one-does-not
   (let* ((world (make-physics-test-world))
          (physics (make-physics-world :terrain world :kernels :scalar))
          (bouncy (spawn-physics-body physics 4.5 4.0 4.5 :radius 0.25 :restitution 0.8))
@@ -56,10 +56,10 @@
           (when (and (plusp vy) (> (physics-world-step-count physics) 40))
             (setf dead-peak (max dead-peak y))))))
     ;; The bouncy ball rose again after landing; the dead one never did.
-    (ok (> bouncy-peak 2.6))
-    (ok (< dead-peak 2.3))))
+    (true (> bouncy-peak 2.6))
+    (true (< dead-peak 2.3))))
 
-(deftest a-rolling-ball-crosses-cell-seams-without-catching
+(define-test a-rolling-ball-crosses-cell-seams-without-catching
   (let* ((world (make-physics-test-world))
          (physics (make-physics-world :terrain world :kernels :scalar))
          (ball (spawn-physics-body physics 2.5 2.245 8.5 :radius 0.25 :vx 4.0
@@ -77,28 +77,28 @@
     (multiple-value-bind (x y z) (physics-body-position physics ball)
       (declare (ignore y z))
       ;; It got somewhere: rolling friction is off, so it barely slowed.
-      (ok (> x 12.0))
+      (true (> x 12.0))
       ;; And it never hopped at a seam.
-      (ok (< max-rise 0.02))
-      (ok (< max-vy 0.3)))))
+      (true (< max-rise 0.02))
+      (true (< max-vy 0.3)))))
 
-(deftest a-pile-sleeps-and-a-thrown-ball-wakes-it
+(define-test a-pile-sleeps-and-a-thrown-ball-wakes-it
   (let* ((world (make-physics-test-world))
          (physics (make-physics-world :terrain world :kernels :scalar))
          (pile (loop for i below 6
                      collect (spawn-physics-body physics 8.5 (+ 2.3 (* 0.6 i)) 8.5
                                                  :radius 0.25 :restitution 0.1))))
     (step-physics physics 400)
-    (ok (every (lambda (handle) (physics-body-sleeping-p physics handle)) pile))
-    (ok (zerop (luvcraft::physics-body-columns-length (physics-world-awake physics))))
+    (true (every (lambda (handle) (physics-body-sleeping-p physics handle)) pile))
+    (true (zerop (luvcraft::physics-body-columns-length (physics-world-awake physics))))
     ;; A ball thrown into the pile wakes what it hits, and they wake others.
     (let ((thrown (spawn-physics-body physics 4.5 2.5 8.5 :radius 0.25 :vx 8.0)))
       (step-physics physics 60)
-      (ok (physics-body-alive-p physics thrown))
-      (ok (some (lambda (handle) (not (physics-body-sleeping-p physics handle))) pile))
-      (ok (validate-physics-world physics)))))
+      (true (physics-body-alive-p physics thrown))
+      (true (some (lambda (handle) (not (physics-body-sleeping-p physics handle))) pile))
+      (true (validate-physics-world physics)))))
 
-(deftest a-moving-box-pushes-balls-out-of-its-way
+(define-test a-moving-box-pushes-balls-out-of-its-way
   (let* ((world (make-physics-test-world))
          (physics (make-physics-world :terrain world :kernels :scalar))
          (ball (spawn-physics-body physics 8.5 2.5 8.5 :radius 0.25)))
@@ -114,9 +114,9 @@
                (step-physics-world physics))
       (multiple-value-bind (x1 y1 z1) (physics-body-position physics ball)
         (declare (ignore y1 z1))
-        (ok (> x1 (+ x0 0.5)))))))
+        (true (> x1 (+ x0 0.5)))))))
 
-(deftest contacts-begin-and-end-and-mortal-bodies-expire
+(define-test contacts-begin-and-end-and-mortal-bodies-expire
   (let* ((world (make-physics-test-world))
          (physics (make-physics-world :terrain world :kernels :scalar))
          (ball (spawn-physics-body physics 8.5 3.0 8.5 :radius 0.25 :lifetime 1.0))
@@ -125,29 +125,29 @@
       (step-physics-world physics)
       (dolist (event (physics-events physics))
         (pushnew (getf event :kind) kinds)))
-    (ok (member :begin kinds))
-    (ok (member :expired kinds))
-    (ok (not (physics-body-alive-p physics ball)))
+    (true (member :begin kinds))
+    (true (member :expired kinds))
+    (true (not (physics-body-alive-p physics ball)))
     ;; The slot is reused with a new generation, so the old handle stays dead.
     (let ((next (spawn-physics-body physics 8.5 3.0 8.5)))
-      (ok (= (luvcraft::physics-handle-index next) (luvcraft::physics-handle-index ball)))
-      (ok (/= next ball))
-      (ok (physics-body-alive-p physics next))
-      (ok (not (physics-body-alive-p physics ball))))))
+      (true (= (luvcraft::physics-handle-index next) (luvcraft::physics-handle-index ball)))
+      (true (/= next ball))
+      (true (physics-body-alive-p physics next))
+      (true (not (physics-body-alive-p physics ball))))))
 
-(deftest a-terrain-edit-wakes-the-sleepers-above-it
+(define-test a-terrain-edit-wakes-the-sleepers-above-it
   (let* ((world (make-physics-test-world))
          (physics (make-physics-world :terrain world :kernels :scalar))
          (ball (spawn-physics-body physics 8.5 2.5 8.5 :radius 0.25)))
     (step-physics physics 200)
-    (ok (physics-body-sleeping-p physics ball))
+    (true (physics-body-sleeping-p physics ball))
     (setf (world-block-at world 8 1 8) nil)
-    (ok (plusp (luvcraft::wake-physics-bodies-near physics 8.5 1.5 8.5 2.0)))
+    (true (plusp (luvcraft::wake-physics-bodies-near physics 8.5 1.5 8.5 2.0)))
     (step-physics physics 120)
     (multiple-value-bind (x y z) (physics-body-position physics ball)
       (declare (ignore x z))
       ;; It fell into the hole.
-      (ok (< y 1.9)))))
+      (true (< y 1.9)))))
 
 (defun physics-hash-after (kernels steps)
   (let* ((world (make-physics-test-world))
@@ -162,18 +162,18 @@
     (step-physics physics steps)
     (values (physics-world-state-hash physics) physics)))
 
-(deftest the-wide-kernels-are-the-scalar-kernels-bit-for-bit
+(define-test the-wide-kernels-are-the-scalar-kernels-bit-for-bit
   (let ((wide (remove :scalar (luvcraft::available-physics-kernel-families))))
     (if (null wide)
-        (skip "no wide kernel family on this machine")
+        (skip "no wide kernel family on this machine" (true nil))
         (multiple-value-bind (scalar-hash scalar-world) (physics-hash-after :scalar 120)
           (dolist (family wide)
             (multiple-value-bind (wide-hash wide-world) (physics-hash-after family 120)
-              (ok (= scalar-hash wide-hash))
-              (ok (= (luvcraft::physics-body-columns-length (physics-world-awake scalar-world))
-                     (luvcraft::physics-body-columns-length (physics-world-awake wide-world))))))))))
+              (true (= scalar-hash wide-hash))
+              (true (= (luvcraft::physics-body-columns-length (physics-world-awake scalar-world))
+                       (luvcraft::physics-body-columns-length (physics-world-awake wide-world))))))))))
 
-(deftest a-hard-arrival-on-a-box-reports-a-hit-with-its-owner
+(define-test a-hard-arrival-on-a-box-reports-a-hit-with-its-owner
   (let* ((world (make-physics-test-world))
          (physics (make-physics-world :terrain world :kernels :scalar))
          (hits nil))
@@ -186,6 +186,6 @@
       (dolist (event (physics-events physics))
         (when (eq (getf event :kind) :hit)
           (push event hits))))
-    (ok (plusp (length hits)))
-    (ok (every (lambda (event) (eq :turtle (getf event :owner))) hits))
-    (ok (> (getf (first hits) :speed) luvcraft::*physics-hit-speed*))))
+    (true (plusp (length hits)))
+    (true (every (lambda (event) (eq :turtle (getf event :owner))) hits))
+    (true (> (getf (first hits) :speed) luvcraft::*physics-hit-speed*))))

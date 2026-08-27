@@ -1,5 +1,11 @@
 (in-package #:asdf-user)
 
+(defsystem "luv/test-support"
+  :description "The repository's Parachute test runner."
+  :version "0.0.1"
+  :depends-on ("parachute")
+  :components ((:file "luv/test-support")))
+
 (defsystem "luv/lobby"
   :description "A restartable application lobby radio with semantic snapshots."
   :version "0.0.1"
@@ -15,15 +21,12 @@
 (defsystem "luv/lobby/test"
   :description "Executable lifecycle and snapshot claims for the lobby radio."
   :version "0.0.1"
-  :depends-on ("luv/lobby" "rove")
+  :depends-on ("luv/lobby" "luv/test-support")
   :components ((:file "lobby/client-tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
-             (unless (uiop:symbol-call '#:rove '#:run-suite
-                                       (uiop:symbol-call '#:rove '#:find-suite
-                                                         '#:luv.lobby.tests)
-                                       :style :spec)
-               (error "Luv lobby tests failed"))))
+             (uiop:symbol-call '#:luv.test-support '#:test-package
+                               '#:luv.lobby.tests)))
 
 (defsystem "luv/domains"
   :description "Minimal shared protocols for finite domains."
@@ -137,15 +140,12 @@
   :description "Proof-of-concept integration tests for libghostty-vt."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luv/ghostty" "rove")
+  :depends-on ("luv/ghostty" "luv/test-support")
   :components ((:file "ghostty/tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
-             (unless (uiop:symbol-call '#:rove '#:run-suite
-                                       (uiop:symbol-call '#:rove '#:find-suite
-                                                         '#:luv.ghostty.tests)
-                                       :style :luv)
-               (error "luv/ghostty tests failed"))))
+             (uiop:symbol-call '#:luv.test-support '#:test-package
+                               '#:luv.ghostty.tests)))
 
 (defsystem "luv/mupdf"
   :description "A narrow CFFI binding to MuPDF: pages as pixels or as text."
@@ -193,15 +193,12 @@ offsets and of headers."
   :description "Executable claims for FFmpeg's version agreement and AVFrame layout."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luv/libav" "rove")
+  :depends-on ("luv/libav" "luv/test-support")
   :components ((:file "libav/tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
-             (unless (uiop:symbol-call '#:rove '#:run-suite
-                                       (uiop:symbol-call '#:rove '#:find-suite
-                                                         '#:luv.libav.tests)
-                                       :style :luv)
-               (error "luv/libav tests failed"))))
+             (uiop:symbol-call '#:luv.test-support '#:test-package
+                               '#:luv.libav.tests)))
 
 (defsystem "luv/terminal"
   :description "Owned terminal devices for luv's libghostty-vt terminal."
@@ -227,15 +224,12 @@ offsets and of headers."
   :description "Executable PTY ownership and terminal-driving claims."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luv/terminal/canvas" "rove" "uiop")
+  :depends-on ("luv/terminal/canvas" "luv/test-support" "uiop")
   :components ((:file "terminal/tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
-             (unless (uiop:symbol-call '#:rove '#:run-suite
-                                       (uiop:symbol-call '#:rove '#:find-suite
-                                                         '#:luv.terminal.tests)
-                                       :style :luv)
-               (error "luv/terminal tests failed"))))
+             (uiop:symbol-call '#:luv.test-support '#:test-package
+                               '#:luv.terminal.tests)))
 
 (defsystem "luv/parinfer"
   :description "The connection-free indentation and parenthesis checker."
@@ -342,15 +336,12 @@ offsets and of headers."
 (defsystem "luv/tracy-capture/test"
   :description "Executable concurrency and subprocess claims for Tracy capture."
   :version "0.0.1"
-  :depends-on ("luv/tracy-capture" "rove")
+  :depends-on ("luv/tracy-capture" "luv/test-support")
   :components ((:file "hal/tracy-capture-tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
-             (unless (uiop:symbol-call '#:rove '#:run-suite
-                                       (uiop:symbol-call '#:rove '#:find-suite
-                                                         '#:luv.tracy.capture.tests)
-                                       :style :spec)
-               (error "Luv Tracy capture tests failed"))))
+             (uiop:symbol-call '#:luv.test-support '#:test-package
+                               '#:luv.tracy.capture.tests)))
 
 (defsystem "luv/production"
   :description "A bounded latest-value owner/worker production boundary."
@@ -365,7 +356,7 @@ offsets and of headers."
   :description "Executable claims for luv's arithmetic, native bindings, and HAL."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luv" "luv/parinfer" "rove"
+  :depends-on ("luv" "luv/parinfer" "luv/test-support"
                #+sbcl (:require #:sb-simd))
   :serial t
   :components
@@ -386,11 +377,8 @@ offsets and of headers."
    (:file "parinfer/tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
-             (unless (uiop:symbol-call '#:rove '#:run-suite
-                                       (uiop:symbol-call '#:rove '#:find-suite
-                                                         '#:luv.tests)
-                                       :style :spec)
-               (error "luv tests failed"))))
+             (uiop:symbol-call '#:luv.test-support '#:test-package
+                               '#:luv.tests)))
 
 (defsystem "luv/showcase"
   :description "Reproducible wiki screenshots and films rendered from named capture recipes."
@@ -437,7 +425,7 @@ offsets and of headers."
 (defsystem "luv/mcclim/test"
   :description "Executable claims for luv's direct McCLIM GPU backend."
   :version "0.0.1"
-  :depends-on ("luv/mcclim" "rove")
+  :depends-on ("luv/mcclim" "luv/test-support")
   :serial t
   :components ((:file "mcclim/tests")
                (:file "mcclim/command-menu-tests")
@@ -445,11 +433,8 @@ offsets and of headers."
                (:file "mcclim/status-bar-tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
-             (unless (uiop:symbol-call '#:rove '#:run-suite
-                                       (uiop:symbol-call '#:rove '#:find-suite
-                                                         '#:mcluv.tests)
-                                       :style :spec)
-               (error "luv/mcclim tests failed"))))
+             (uiop:symbol-call '#:luv.test-support '#:test-package
+                               '#:mcluv.tests)))
 
 (defsystem "luv/application-agent"
   :description "Application-neutral asynchronous language-agent harness."
@@ -467,17 +452,14 @@ offsets and of headers."
 (defsystem "luv/application-agent/test"
   :description "Executable lifecycle, transcript, and command-tool claims."
   :version "0.0.1"
-  :depends-on ("luv/application-agent" "rove")
+  :depends-on ("luv/application-agent" "luv/test-support")
   :serial t
   :components ((:file "application-agent/tests-package")
                (:file "application-agent/tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
-             (unless (uiop:symbol-call '#:rove '#:run-suite
-                                       (uiop:symbol-call '#:rove '#:find-suite
-                                                         '#:luv.application-agent.tests)
-                                       :style :spec)
-               (error "Luv application-agent tests failed"))))
+             (uiop:symbol-call '#:luv.test-support '#:test-package
+                               '#:luv.application-agent.tests)))
 
 (defsystem "luv/lobby/mcclim"
   :description "A textureless retained-GPU HUD for the shared lobby radio."
@@ -492,15 +474,12 @@ offsets and of headers."
 (defsystem "luv/lobby/mcclim/test"
   :description "GPU-media and native-resolution claims for the lobby HUD."
   :version "0.0.1"
-  :depends-on ("luv/lobby/mcclim" "rove")
+  :depends-on ("luv/lobby/mcclim" "luv/test-support")
   :components ((:file "lobby/mcclim-tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
-             (unless (uiop:symbol-call '#:rove '#:run-suite
-                                       (uiop:symbol-call '#:rove '#:find-suite
-                                                         '#:luv.lobby.mcclim.tests)
-                                       :style :spec)
-               (error "Luv lobby McCLIM tests failed"))))
+             (uiop:symbol-call '#:luv.test-support '#:test-package
+                               '#:luv.lobby.mcclim.tests)))
 
 (defsystem "luv/mcclim/gallery"
   :description "A screenshot gallery and primitive-fallback audit for McCLIM."

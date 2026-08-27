@@ -157,6 +157,23 @@
         "type": "github"
       }
     },
+    "parachute": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1755082176,
+        "narHash": "sha256-AIlvN+97nHJKkjsZGP0S7HU4siVwDmG3Pg9cBLuJqv8=",
+        "owner": "Shinmera",
+        "repo": "parachute",
+        "rev": "9a6679e611925dfb59067393c5b7996f69501aa6",
+        "type": "github"
+      },
+      "original": {
+        "owner": "Shinmera",
+        "repo": "parachute",
+        "rev": "9a6679e611925dfb59067393c5b7996f69501aa6",
+        "type": "github"
+      }
+    },
     "root": {
       "inputs": {
         "cl-sdl3": "cl-sdl3",
@@ -164,6 +181,7 @@
         "mcclim": "mcclim",
         "nix-wpe-webkit": "nix-wpe-webkit",
         "nixpkgs": "nixpkgs_3",
+        "parachute": "parachute",
         "swash": "swash",
         "tracy": "tracy"
       }

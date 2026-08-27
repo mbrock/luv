@@ -1,5 +1,6 @@
 (defpackage #:sly-client.tests
-  (:use #:cl #:rove))
+  (:use #:cl)
+  (:import-from #:parachute #:define-test #:true #:false #:fail #:group #:skip))
 
 (in-package #:sly-client.tests)
 
@@ -16,7 +17,7 @@
       ((equal filters '("--event" "exited")) exited-events)
       (t (error "Unexpected test journal query: ~S" filters)))))
 
-(deftest stale-ready-lisps-are-not-running
+(define-test stale-ready-lisps-are-not-running
   (let* ((endpoint-probed-p nil)
          (instance
            (sly-client::make-lisp-instance
@@ -28,11 +29,11 @@
              (declare (ignore port))
              (setf endpoint-probed-p t))))
     (sly-client::reconcile-lisp-instance instance)
-    (ok (eq :stale (sly-client::lisp-instance-state instance)))
-    (ng (sly-client::running-lisp-p instance))
-    (ng endpoint-probed-p)))
+    (true (eq :stale (sly-client::lisp-instance-state instance)))
+    (false (sly-client::running-lisp-p instance))
+    (false endpoint-probed-p)))
 
-(deftest live-ready-lisps-pass-both-probes
+(define-test live-ready-lisps-pass-both-probes
   (let* ((instance
            (sly-client::make-lisp-instance
             :id "LIVE123" :name "live" :root "/tmp/luv/"
@@ -40,10 +41,10 @@
          (sly-client::*process-alive-probe* (constantly t))
          (sly-client::*endpoint-alive-probe* (constantly t)))
     (sly-client::reconcile-lisp-instance instance)
-    (ok (eq :ready (sly-client::lisp-instance-state instance)))
-    (ok (sly-client::running-lisp-p instance))))
+    (true (eq :ready (sly-client::lisp-instance-state instance)))
+    (true (sly-client::running-lisp-p instance))))
 
-(deftest starting-lisps-expire-at-the-startup-timeout
+(define-test starting-lisps-expire-at-the-startup-timeout
   (let ((sly-client::*universal-time-provider* (constantly 1000)))
     (let ((current
             (sly-client::make-lisp-instance
@@ -56,11 +57,11 @@
       (sly-client::reconcile-lisp-instance current)
       (sly-client::reconcile-lisp-instance expired)
       (sly-client::reconcile-lisp-instance legacy)
-      (ok (eq :starting (sly-client::lisp-instance-state current)))
-      (ok (eq :stale (sly-client::lisp-instance-state expired)))
-      (ok (eq :stale (sly-client::lisp-instance-state legacy))))))
+      (true (eq :starting (sly-client::lisp-instance-state current)))
+      (true (eq :stale (sly-client::lisp-instance-state expired)))
+      (true (eq :stale (sly-client::lisp-instance-state legacy))))))
 
-(deftest status-does-not-present-another-checkouts-lisp
+(define-test status-does-not-present-another-checkouts-lisp
   (let* ((sly-client::*project-root* #P"/tmp/luv/")
          (other
            (sly-client::make-lisp-instance
@@ -70,11 +71,11 @@
          (output
            (with-output-to-string (*standard-output*)
              (sly-client::report-managed-server-status selected))))
-    (ok (null selected))
-    (ok (string= (format nil "This checkout has no running Lisp.~%")
-                 output))))
+    (true (null selected))
+    (true (string= (format nil "This checkout has no running Lisp.~%")
+                   output))))
 
-(deftest tagged-ready-event-discovers-an-orphaned-start
+(define-test tagged-ready-event-discovers-an-orphaned-start
   (let* ((ready
            (journal-event
             "slynk-ready"
@@ -91,37 +92,37 @@
          (sly-client::*endpoint-alive-probe* (constantly t))
          (instances (sly-client::lisp-instances))
          (instance (first instances)))
-    (ok (= 1 (length instances)))
-    (ok (string= "ORP123" (sly-client::lisp-instance-id instance)))
-    (ok (string= "/tmp/luv/" (sly-client::lisp-instance-root instance)))
-    (ok (eq :ready (sly-client::lisp-instance-state instance)))))
+    (true (= 1 (length instances)))
+    (true (string= "ORP123" (sly-client::lisp-instance-id instance)))
+    (true (string= "/tmp/luv/" (sly-client::lisp-instance-root instance)))
+    (true (eq :ready (sly-client::lisp-instance-state instance)))))
 
-(deftest stale-lisps-require-explicit-lifecycle-selection
+(define-test stale-lisps-require-explicit-lifecycle-selection
   (let* ((sly-client::*project-root* #P"/tmp/luv/")
          (stale
            (sly-client::make-lisp-instance
             :id "STA123" :name "stale" :root "/tmp/luv/"
             :state :stale :pid 12345 :port 4005)))
     (let ((sly-client::*lisp-selector* nil))
-      (ng (sly-client::choose-lisp :instances (list stale)))
-      (ok (signals
-           (sly-client::choose-lisp
-            :instances (list stale) :start-if-missing t)
-           'error)))
+      (false (sly-client::choose-lisp :instances (list stale)))
+      (fail
+       (sly-client::choose-lisp
+        :instances (list stale) :start-if-missing t)
+       'error))
     (let ((sly-client::*lisp-selector* "STA123"))
-      (ok (eq stale
-              (sly-client::choose-lisp
-               :instances (list stale) :allow-explicit-stale t)))
-      (ok (signals
-           (sly-client::choose-lisp :instances (list stale))
-           'error)))
+      (true (eq stale
+                (sly-client::choose-lisp
+                 :instances (list stale) :allow-explicit-stale t)))
+      (fail
+       (sly-client::choose-lisp :instances (list stale))
+       'error))
     (let ((sly-client::*lisp-selector* "STA"))
-      (ok (signals
-           (sly-client::choose-lisp
-            :instances (list stale) :allow-explicit-stale t)
-           'error)))))
+      (fail
+       (sly-client::choose-lisp
+        :instances (list stale) :allow-explicit-stale t)
+       'error))))
 
-(deftest dead-stale-lisp-retires-without-signalling-a-reused-process
+(define-test dead-stale-lisp-retires-without-signalling-a-reused-process
   (let* ((instance
            (sly-client::make-lisp-instance
             :id "DED123" :name "dead" :root "/tmp/luv/"
@@ -140,11 +141,11 @@
            (lambda (candidate event message &rest fields)
              (declare (ignore candidate message fields))
              (setf retired-event event))))
-    (ok (sly-client::stop-managed-lisp instance))
-    (ng stop-called-p)
-    (ok (string= "lisp-retired" retired-event))))
+    (true (sly-client::stop-managed-lisp instance))
+    (false stop-called-p)
+    (true (string= "lisp-retired" retired-event))))
 
-(deftest live-stale-lisp-stops-through-swash-before-retirement
+(define-test live-stale-lisp-stops-through-swash-before-retirement
   (let* ((instance
            (sly-client::make-lisp-instance
             :id "BAD123" :name "unhealthy" :root "/tmp/luv/"
@@ -162,29 +163,29 @@
            (lambda (candidate event message &rest fields)
              (declare (ignore candidate event message fields))
              (push :retire actions))))
-    (ok (sly-client::stop-managed-lisp instance))
-    (ok (equal '(:stop :retire) (nreverse actions)))))
+    (true (sly-client::stop-managed-lisp instance))
+    (true (equal '(:stop :retire) (nreverse actions)))))
 
-(deftest empty-lisp-selector-never-selects-globally
+(define-test empty-lisp-selector-never-selects-globally
   (let* ((sly-client::*lisp-selector* "")
          (other
            (sly-client::make-lisp-instance
             :id "OTH123" :name "other" :root "/tmp/luv2/"
             :state :ready :pid 12345 :port 4005)))
-    (ng (sly-client::matching-lisps "" (list other)))
-    (ok (signals
-         (sly-client::choose-lisp
-          :instances (list other) :allow-explicit-stale t)
-         'error))))
+    (false (sly-client::matching-lisps "" (list other)))
+    (fail
+     (sly-client::choose-lisp
+      :instances (list other) :allow-explicit-stale t)
+     'error)))
 
-(deftest activity-events-carry-registry-identity
+(define-test activity-events-carry-registry-identity
   (let* ((sly-client::*current-command* "eval")
          (instance
            (sly-client::make-lisp-instance
             :id "ACT123" :name "active" :root "/tmp/luv/"
             :state :ready :pid 12345 :port 4005))
          (fields (sly-client::lisp-activity-fields instance)))
-    (ok (member "LUV_KIND=LISP" fields :test #'string=))
-    (ok (member "LUV_ROOT=/tmp/luv/" fields :test #'string=))
-    (ok (member "LUV_NAME=active" fields :test #'string=))
-    (ok (member "LUV_COMMAND=eval" fields :test #'string=))))
+    (true (member "LUV_KIND=LISP" fields :test #'string=))
+    (true (member "LUV_ROOT=/tmp/luv/" fields :test #'string=))
+    (true (member "LUV_NAME=active" fields :test #'string=))
+    (true (member "LUV_COMMAND=eval" fields :test #'string=))))

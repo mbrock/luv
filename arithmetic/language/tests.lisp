@@ -33,154 +33,154 @@
            (remainder (mod next 3)))
       (+ sum remainder))))
 
-(deftest arithmetic-functions-retain-checked-source-graphs
+(define-test arithmetic-functions-retain-checked-source-graphs
   (let* ((definition (lang:arithmetic-function-definition-for 'fog-shape))
          (bindings (lang:arithmetic-function-bindings definition))
          (result (lang:arithmetic-function-result definition))
          (specification
            (lang:arithmetic-expression-quantity-specification result)))
-    (ok (typep definition 'lang:arithmetic-function-definition))
-    (ok (= 3 (length (lang:arithmetic-function-parameters definition))))
-    (ok (equal '(fog-span fog-progress)
-               (mapcar #'lang:arithmetic-object-name bindings)))
-    (ok (eq :proportion
-            (math:quantity-specification-name specification)))
-    (ok (math:unitless-p
-         (math:quantity-specification-unit specification)))
-    (ok (equal '(interpret (* fog-progress fog-progress)
-                           :quantity :proportion :unit :one)
-               (lang:arithmetic-expression-form result)))
-    (ok (> (length (lang:arithmetic-function-expressions definition))
-           (length bindings)))
-    (ok (eq definition
-            (lang:arithmetic-function-definition-for 'fog-shape)))))
+    (true (typep definition 'lang:arithmetic-function-definition))
+    (true (= 3 (length (lang:arithmetic-function-parameters definition))))
+    (true (equal '(fog-span fog-progress)
+                 (mapcar #'lang:arithmetic-object-name bindings)))
+    (true (eq :proportion
+              (math:quantity-specification-name specification)))
+    (true (math:unitless-p
+           (math:quantity-specification-unit specification)))
+    (true (equal '(interpret (* fog-progress fog-progress)
+                             :quantity :proportion :unit :one)
+                 (lang:arithmetic-expression-form result)))
+    (true (> (length (lang:arithmetic-function-expressions definition))
+             (length bindings)))
+    (true (eq definition
+              (lang:arithmetic-function-definition-for 'fog-shape)))))
 
-(deftest reusable-functions-are-part-of-the-common-expression-graph
+(define-test reusable-functions-are-part-of-the-common-expression-graph
   (let* ((definition
            (lang:arithmetic-function-definition-for 'composed-arithmetic))
          (call
            (first (lang:arithmetic-call-operands
                    (lang:arithmetic-function-result definition)))))
-    (ok (typep call 'lang:arithmetic-function-call))
-    (ok (eq 'square-offset
-            (lang:arithmetic-object-name
-             (lang:arithmetic-function-call-definition call))))
-    (ok (= 1 (length (lang:arithmetic-function-call-arguments call))))
-    (ok (= 2 (length (lang:arithmetic-function-call-bindings call))))
-    (ok (typep (first (lang:arithmetic-function-call-bindings call))
-               'lang:arithmetic-function-parameter-binding))
-    (ok (equal '(square-offset value)
-               (lang:arithmetic-expression-form call)))))
+    (true (typep call 'lang:arithmetic-function-call))
+    (true (eq 'square-offset
+              (lang:arithmetic-object-name
+               (lang:arithmetic-function-call-definition call))))
+    (true (= 1 (length (lang:arithmetic-function-call-arguments call))))
+    (true (= 2 (length (lang:arithmetic-function-call-bindings call))))
+    (true (typep (first (lang:arithmetic-function-call-bindings call))
+                 'lang:arithmetic-function-parameter-binding))
+    (true (equal '(square-offset value)
+                 (lang:arithmetic-expression-form call)))))
 
-(deftest common-functions-reject-bad-applications
-  (ok (signals
-       (lang:parse-arithmetic-function-definition
-        'bad-arity '((value)) '((square-offset value value)))
-       'lang:arithmetic-language-error))
-  (ok (eq :arithmetic-function-arity
-          (handler-case
-              (progn
-                (lang:parse-arithmetic-function-definition
-                 'bad-arity '((value)) '((square-offset value value)))
-                nil)
-            (lang:arithmetic-language-error (condition)
-              (lang:arithmetic-language-error-reason condition)))))
+(define-test common-functions-reject-bad-applications
+  (fail
+   (lang:parse-arithmetic-function-definition
+    'bad-arity '((value)) '((square-offset value value)))
+   'lang:arithmetic-language-error)
+  (true (eq :arithmetic-function-arity
+            (handler-case
+                (progn
+                  (lang:parse-arithmetic-function-definition
+                   'bad-arity '((value)) '((square-offset value value)))
+                  nil)
+              (lang:arithmetic-language-error (condition)
+                (lang:arithmetic-language-error-reason condition)))))
   (lang:define-arithmetic-function recursion-probe ((value))
     (+ value 1.0))
-  (ok (eq :recursive-arithmetic-function
-          (handler-case
-              (progn
-                (lang:parse-arithmetic-function-definition
-                 'recursion-probe '((value)) '((recursion-probe value)))
-                nil)
-            (lang:arithmetic-language-error (condition)
-              (lang:arithmetic-language-error-reason condition))))))
+  (true (eq :recursive-arithmetic-function
+            (handler-case
+                (progn
+                  (lang:parse-arithmetic-function-definition
+                   'recursion-probe '((value)) '((recursion-probe value)))
+                  nil)
+              (lang:arithmetic-language-error (condition)
+                (lang:arithmetic-language-error-reason condition))))))
 
-(deftest counted-fold-is-shared-inspectable-control-flow
+(define-test counted-fold-is-shared-inspectable-control-flow
   (let ((fold
           (lang:arithmetic-function-result
            (lang:arithmetic-function-definition-for 'triangular-number))))
-    (ok (typep fold 'lang:arithmetic-counted-fold))
-    (ok (eq 'index
-            (lang:arithmetic-object-name
-             (lang:arithmetic-counted-fold-index-binding fold))))
-    (ok (eq 'sum
-            (lang:arithmetic-object-name
-             (lang:arithmetic-counted-fold-state-binding fold))))
-    (ok (equal '(counted-fold (index count sum 0) (+ sum index))
-               (lang:arithmetic-expression-form fold)))))
+    (true (typep fold 'lang:arithmetic-counted-fold))
+    (true (eq 'index
+              (lang:arithmetic-object-name
+               (lang:arithmetic-counted-fold-index-binding fold))))
+    (true (eq 'sum
+              (lang:arithmetic-object-name
+               (lang:arithmetic-counted-fold-state-binding fold))))
+    (true (equal '(counted-fold (index count sum 0) (+ sum index))
+                 (lang:arithmetic-expression-form fold)))))
 
-(deftest counted-fold-updates-own-shared-lexical-bindings
+(define-test counted-fold-updates-own-shared-lexical-bindings
   (let* ((fold
            (lang:arithmetic-function-result
             (lang:arithmetic-function-definition-for 'folded-remainders)))
          (bindings (lang:arithmetic-counted-fold-bindings fold)))
-    (ok (equal '(next remainder)
-               (mapcar #'lang:arithmetic-object-name bindings)))
-    (ok (eq 'mod
-            (lang:arithmetic-call-operator
-             (lang:arithmetic-binding-expression (second bindings)))))))
+    (true (equal '(next remainder)
+                 (mapcar #'lang:arithmetic-object-name bindings)))
+    (true (eq 'mod
+              (lang:arithmetic-call-operator
+               (lang:arithmetic-binding-expression (second bindings)))))))
 
-(deftest conditionals-and-comparisons-are-shared-expression-nodes
+(define-test conditionals-and-comparisons-are-shared-expression-nodes
   (let* ((fold
            (lang:arithmetic-function-result
             (lang:arithmetic-function-definition-for
              'bounded-triangular-number)))
          (conditional (lang:arithmetic-counted-fold-update fold)))
-    (ok (typep conditional 'lang:arithmetic-conditional))
-    (ok (equal '(if (< index limit) (+ sum index) sum)
-               (lang:arithmetic-expression-form conditional)))
-    (ok (typep (lang:arithmetic-conditional-condition conditional)
-               'lang:arithmetic-call))))
+    (true (typep conditional 'lang:arithmetic-conditional))
+    (true (equal '(if (< index limit) (+ sum index) sum)
+                 (lang:arithmetic-expression-form conditional)))
+    (true (typep (lang:arithmetic-conditional-condition conditional)
+                 'lang:arithmetic-call))))
 
-(deftest arithmetic-parameters-implement-the-common-declaration-protocol
+(define-test arithmetic-parameters-implement-the-common-declaration-protocol
   (let* ((definition (lang:arithmetic-function-definition-for 'fog-shape))
          (parameter (first (lang:arithmetic-function-parameters definition))))
-    (ok (null (math:declaration-representation-type parameter)))
-    (ok (eq :distance
-            (math:quantity-specification-name
-             (math:declaration-quantity-specification parameter))))
-    (ok (math:declaration-quantity-checked-p parameter))))
+    (true (null (math:declaration-representation-type parameter)))
+    (true (eq :distance
+              (math:quantity-specification-name
+               (math:declaration-quantity-specification parameter))))
+    (true (math:declaration-quantity-checked-p parameter))))
 
-(deftest arithmetic-functions-reject-semantic-mistakes-before-a-backend
-  (ok (signals
-       (lang:parse-arithmetic-function-definition
-        'bad-addition
-        '((distance :quantity :distance :unit :metre)
-          (height :quantity :height :unit :metre))
-        '((+ distance height)))
-       'lang:arithmetic-language-error))
-  (ok (eq :different-quantity-spaces
-          (handler-case
-              (progn
-                (lang:parse-arithmetic-function-definition
-                 'bad-addition
-                 '((distance :quantity :distance :unit :metre)
-                   (height :quantity :height :unit :metre))
-                 '((+ distance height)))
-                nil)
-            (lang:arithmetic-language-error (condition)
-              (lang:arithmetic-language-error-details condition))))))
+(define-test arithmetic-functions-reject-semantic-mistakes-before-a-backend
+  (fail
+   (lang:parse-arithmetic-function-definition
+    'bad-addition
+    '((distance :quantity :distance :unit :metre)
+      (height :quantity :height :unit :metre))
+    '((+ distance height)))
+   'lang:arithmetic-language-error)
+  (true (eq :different-quantity-spaces
+            (handler-case
+                (progn
+                  (lang:parse-arithmetic-function-definition
+                   'bad-addition
+                   '((distance :quantity :distance :unit :metre)
+                     (height :quantity :height :unit :metre))
+                   '((+ distance height)))
+                  nil)
+              (lang:arithmetic-language-error (condition)
+                (lang:arithmetic-language-error-details condition))))))
 
-(deftest unit-conversion-is-an-inspectable-common-expression
+(define-test unit-conversion-is-an-inspectable-common-expression
   (let* ((definition
            (lang:parse-arithmetic-function-definition
             'kilometres-to-metres
             '((distance :quantity :distance :unit :kilometre))
             '((convert-unit distance :unit :metre))))
          (result (lang:arithmetic-function-result definition)))
-    (ok (typep result 'lang:arithmetic-unit-conversion))
-    (ok (= 1000 (lang:arithmetic-unit-conversion-factor result)))
-    (ok (math:unit-expression=
-         :metre
-         (math:quantity-specification-unit
-          (lang:arithmetic-expression-quantity-specification result))))))
+    (true (typep result 'lang:arithmetic-unit-conversion))
+    (true (= 1000 (lang:arithmetic-unit-conversion-factor result)))
+    (true (math:unit-expression=
+           :metre
+           (math:quantity-specification-unit
+            (lang:arithmetic-expression-quantity-specification result))))))
 
-(deftest common-literals-preserve-source-representation
+(define-test common-literals-preserve-source-representation
   (let* ((definition
            (lang:parse-arithmetic-function-definition
             'double-literal nil '(1.0d0)))
          (result (lang:arithmetic-function-result definition)))
-    (ok (typep result 'lang:arithmetic-literal))
-    (ok (typep (lang:arithmetic-literal-value result) 'double-float))
-    (ok (eql 1.0d0 (lang:arithmetic-expression-form result)))))
+    (true (typep result 'lang:arithmetic-literal))
+    (true (typep (lang:arithmetic-literal-value result) 'double-float))
+    (true (eql 1.0d0 (lang:arithmetic-expression-form result)))))

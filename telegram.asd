@@ -83,7 +83,8 @@ into news."
   :description "Executable claims for the MTProto core, against published vectors."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("telegram" "telegram/api" "telegram/net" "telegram/client" "rove")
+  :depends-on ("telegram" "telegram/api" "telegram/net" "telegram/client"
+               "luv/test-support")
   :serial t
   :components
   ((:module "telegram/tests"
@@ -96,10 +97,8 @@ into news."
                  (:file "login"))))
   :perform (test-op (operation component)
              (declare (ignore operation component))
-             (unless (uiop:symbol-call '#:rove '#:run-suite
-                                       (uiop:symbol-call '#:rove '#:find-suite
-                                                         '#:telegram.tests))
-               (error "telegram tests failed"))))
+             (uiop:symbol-call '#:luv.test-support '#:test-package
+                               '#:telegram.tests)))
 
 (defsystem "telegram/live"
   :description "An opt-in check that talks to a real Telegram data centre."

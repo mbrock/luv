@@ -36,7 +36,7 @@ LUFT: 22348 checks passed.
 ```
 
 This makes the following Sly start mostly a load of already-compiled systems.
-Test output is failure-focused: successful Rove systems print one count;
+Test output is failure-focused: successful Parachute systems print one summary;
 failures retain their descriptions and source locations.
 
 Ordinary work happens in a durable SBCL image supervised by Swash. `./sly`
