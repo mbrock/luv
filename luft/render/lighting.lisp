@@ -30,10 +30,10 @@
       (ensure-semantic-instance
        *light* 'light
        :name :dusk
-       :sun-direction (vec3:vec3-normalize (vec3:make-vec3 -0.82 0.30 0.22))
-       :sun-color #(2.60 0.88 0.26 0.92)
-       :sky-color #(0.055 0.085 0.26 1.0)
-       :ground-color #(0.26 0.10 0.17 1.0)
+       :sun-direction (vec3:vec3-normalize (vec3:make-vec3 -0.72 0.43 0.22))
+       :sun-color #(1.85 0.82 0.38 0.92)
+       :sky-color #(0.065 0.095 0.23 1.0)
+       :ground-color #(0.23 0.115 0.16 1.0)
        :shadow-half-extent 96.0
        :shadow-depth-radius 160.0
        :shadow-base-bias 0.00075

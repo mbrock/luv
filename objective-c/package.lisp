@@ -56,6 +56,7 @@
   (:export #:make-system-default-device
            #:device-name
            #:device-registry-id
+           #:metal-device-supports-texture-sample-count-p
            #:probe-system-default-device
            #:new-metal-4-command-queue
            #:new-metal-shared-event

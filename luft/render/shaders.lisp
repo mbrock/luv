@@ -191,51 +191,15 @@
            (if (< profile 3.5) weathered-stone forged-metal))
        0.5)))
 
-(define-shader-function dressed-stone-tone (point normal stone-tone)
-  "Suggest laid courses and hand-dressed blocks without texture coordinates."
-  (let* ((x (swizzle point :x))
-         (y (swizzle point :y))
-         (z (swizzle point :z))
-         (course-coordinate (* z 2.0))
-         (course (floor course-coordinate))
-         (jitter
-           (- (paper-noise (+ (* point 1.7) (vec3 17.1 4.3 9.7))) 0.5))
-         (tangent
-           (if (> (abs (swizzle normal :x))
-                  (abs (swizzle normal :y)))
-               y x))
-         (stagger (* 0.5 (fract (* course 0.5))))
-         (course-phase
-           (fract (+ course-coordinate (* jitter 0.085))))
-         (joint-phase
-           (fract (+ (/ tangent 1.35) stagger (* jitter 0.11))))
-         (course-distance (min course-phase (- 1.0 course-phase)))
-         (joint-distance (min joint-phase (- 1.0 joint-phase)))
-         (vertical-face
-           (- 1.0 (smoothstep 0.55 0.85 (abs (swizzle normal :z)))))
-         (horizontal-mortar
-           (- 1.0 (smoothstep 0.018 0.052 course-distance)))
-         (vertical-mortar
-           (* vertical-face
-              (- 1.0 (smoothstep 0.016 0.046 joint-distance))))
-         (broken-joint
-           (smoothstep 0.46 0.78
-                       (paper-noise
-                        (+ (vec3 (floor (+ x stagger))
-                                 (floor (+ y stagger)) course)
-                           (vec3 5.3 21.7 11.9)))))
-         (mortar
-           (clamp (+ horizontal-mortar (* vertical-mortar broken-joint))
-                  0.0 1.0))
-         (block-value
+(define-shader-function stone-macro-relief (point)
+  "Broad material-space undulation for dressed and weathered stone normals."
+  (let* ((mass
            (paper-noise
-            (+ (* (floor (+ point (vec3 stagger stagger 0.0))) 0.73)
-               (vec3 29.1 7.7 3.1))))
-         (dressed
-           (* stone-tone (+ 0.90 (* 0.20 block-value)
-                            (* 0.05 jitter))))
-         (mortar-tone (* stone-tone 0.78)))
-    (mix dressed mortar-tone (* mortar 0.58))))
+            (+ (* point 0.28) (vec3 17.3 5.1 29.7))))
+         (weather
+           (paper-noise
+            (+ (* (paper-space point) 0.83) (vec3 3.7 31.1 11.9)))))
+    (- (+ (* mass 0.78) (* weather 0.22)) 0.5)))
 
 (define-shader-function natural-earth-tone
     (point normal earth-tone depth)
@@ -1608,7 +1572,9 @@ that he is standing on something."
                                           :interpolation :flat)
                (ambient-occlusion-output :float :location 8
                                           :interpolation :flat)
-               (voxel-light-output :vec3 :location 9))
+               (voxel-light-output :vec3 :location 9)
+               (primitive-kind-output :uint :location 10
+                                      :interpolation :flat))
      :resources ((instances :storage-buffer :binding 0 :element :uvec4)
                  (template-vertices :storage-buffer :binding 1 :element :uvec4)
                  (light-sidecars :storage-buffer :binding 6 :element :uvec2)
@@ -1671,6 +1637,7 @@ that he is standing on something."
          (ambient-occlusion
            (/ (float (ldb (byte 2 28) (swizzle instance :w))) 3.0))
          (barycentric-index (uint (ldb (byte 2 6) attributes)))
+         (primitive-kind (uint (ldb (byte 2 8) attributes)))
          (boundary-edge-mask (uint (ldb (byte 3 10) attributes)))
          (barycentric
            (if (= barycentric-index (uint 0.0))
@@ -1714,7 +1681,8 @@ that he is standing on something."
                       (swizzle light-clip :z)))
     (set-output boundary-edge-mask-output boundary-edge-mask)
     (set-output ambient-occlusion-output ambient-occlusion)
-    (set-output voxel-light-output voxel-light)))
+    (set-output voxel-light-output voxel-light)
+    (set-output primitive-kind-output primitive-kind)))
 
 (define-live-shader mesh-fragment-specification
     (:stage :fragment
@@ -1727,7 +1695,8 @@ that he is standing on something."
               (shadow-sample :vec3 :location 6)
               (boundary-edge-mask :uint :location 7 :interpolation :flat)
               (ambient-occlusion :float :location 8 :interpolation :flat)
-              (voxel-light :vec3 :location 9))
+              (voxel-light :vec3 :location 9)
+              (primitive-kind :uint :location 10 :interpolation :flat))
      :outputs ((color-output :vec4 :location 0)
                (motion-output :vec2 :location 1))
      :resources ((camera-state :uniform-block :binding 2
@@ -1805,7 +1774,43 @@ that he is standing on something."
             (swizzle frame-z :xyz)))
          (relief-profile (swizzle frame-origin :w))
          (relief-height (material-relief material-point relief-profile))
-         (shading-normal normal)
+         (stone-macro-height (stone-macro-relief material-point))
+         (relief-amplitude (swizzle frame-x :w))
+         (relief-dx (derivative-x stone-macro-height))
+         (relief-dy (derivative-y stone-macro-height))
+         (relief-tangent-x
+           (+ dx (* normal (* 6.0 (* relief-amplitude relief-dx)))))
+         (relief-tangent-y
+           (+ dy (* normal (* 6.0 (* relief-amplitude relief-dy)))))
+         (relief-normal
+           (normalize
+            (vec3
+             (- (* (swizzle relief-tangent-x :y)
+                   (swizzle relief-tangent-y :z))
+                (* (swizzle relief-tangent-x :z)
+                   (swizzle relief-tangent-y :y)))
+             (- (* (swizzle relief-tangent-x :z)
+                   (swizzle relief-tangent-y :x))
+                (* (swizzle relief-tangent-x :x)
+                   (swizzle relief-tangent-y :z)))
+             (- (* (swizzle relief-tangent-x :x)
+                   (swizzle relief-tangent-y :y))
+                (* (swizzle relief-tangent-x :y)
+                   (swizzle relief-tangent-y :x))))))
+         (relief-normal
+           (if (< (dot relief-normal normal) 0.0)
+               (* relief-normal -1.0)
+               relief-normal))
+         (stone-relief-p
+           (if (< (abs (- relief-profile 2.0)) 0.5) 1.0 0.0))
+         (band-p
+           (if (= primitive-kind (uint 1.0)) 1.0 0.0))
+         (stone-band-p (* stone-relief-p band-p))
+         (view-direction
+           (normalize (- (swizzle camera-position :xyz) world-position)))
+         (sun (swizzle sun-vector :xyz))
+         (shading-normal
+           (normalize (mix normal relief-normal stone-relief-p)))
          (roughness
            (clamp (+ (swizzle tertiary :w)
                      (* 0.06 (abs relief-height)))
@@ -1835,8 +1840,7 @@ that he is standing on something."
                             material-point primary-tone secondary-tone
                             tertiary-tone)
                            (if (< kernel-code 4.5)
-                               (dressed-stone-tone
-                                material-point normal primary-tone)
+                               primary-tone
                                (if (< kernel-code 5.5)
                                    (natural-earth-tone
                                     material-point normal primary-tone 0.0)
@@ -1867,12 +1871,22 @@ that he is standing on something."
          (warmth (mix (vec3 0.965 0.99 1.04) (vec3 1.04 1.01 0.96)
                       (smoothstep 0.18 0.82 mottle)))
          (base (* tone (* warmth (* value (+ 1.0 (* relief-height 0.028))))))
-         (sun (swizzle sun-vector :xyz))
          (sun-color (swizzle sun-color-vector :xyz))
          (sky (swizzle sky-color-vector :xyz))
          (ground (swizzle ground-color-vector :xyz))
          (facing (dot shading-normal sun))
          (direct-shape (smoothstep 0.0 0.72 (max 0.0 facing)))
+         ;; Limestone is an aggregate of grains and pores, not one polished
+         ;; mathematical plane.  Its unresolved microfacets spread direct
+         ;; energy beyond the geometric normal and keep a chamfer from acting
+         ;; like a one-direction signal flare.
+         (stone-direct-shape
+           (mix
+            (mix direct-shape
+                 (* 0.58 (smoothstep -0.12 0.85 facing))
+                 stone-relief-p)
+            (* 0.38 (smoothstep -0.18 0.90 facing))
+            stone-band-p))
          (sampled-shadow
            (soft-shadow-visibility shadow-map shadow-sampler shadow-sample
                                    shading-normal sun shadow-control))
@@ -1897,17 +1911,16 @@ that he is standing on something."
          ;; without turning north-facing planes orange.
          (warm-return
            (* sun-color
-              (* 0.085 direct-shape (- 1.0 direct-visibility))))
+              (* 0.085 stone-direct-shape (- 1.0 direct-visibility))))
          ;; RGB4 is deliberately exposed as raw normalized light.  The square
          ;; response keeps the old luvcraft falloff character, while the gain
          ;; leaves headroom for overlapping warm and cyan sources instead of
          ;; turning their frontier shells into clipped color bands.
          (local-light (* 0.45 (* voxel-light voxel-light)))
-         (light (+ (* sun-color (* direct-shape direct-visibility))
+         (light (+ (* sun-color (* stone-direct-shape direct-visibility))
                    (* indirect-light ambient-accessibility)
-                   warm-return local-light))
-         (view-direction
-           (normalize (- (swizzle camera-position :xyz) world-position)))
+                   warm-return local-light
+                   (* sun-color (* stone-relief-p 0.055))))
          (half-vector (normalize (+ view-direction sun)))
          (n-dot-v (max 0.0 (dot shading-normal view-direction)))
          (n-dot-h (max 0.0 (dot shading-normal half-vector)))
@@ -1939,7 +1952,7 @@ that he is standing on something."
          (fresnel (material-schlick-fresnel f0 v-dot-h))
          (specular
            (* sun-color
-              (* (* 0.34 direct-visibility)
+              (* (* (mix 0.34 0.16 stone-relief-p) direct-visibility)
                  (* distribution
                     (* visibility (* fresnel n-dot-l))))))
          (diffuse
@@ -1958,6 +1971,19 @@ that he is standing on something."
          (barycentric-dx (derivative-x barycentric))
          (barycentric-dy (derivative-y barycentric))
          (barycentric-width (+ (abs barycentric-dx) (abs barycentric-dy)))
+         ;; A realized mixed-bevel primitive may span locally varied site
+         ;; widths, so the renderer-global authored width is not its feature
+         ;; scale.  The inverse barycentric gradients are the three actual
+         ;; projected triangle altitudes; their minimum is the conservative
+         ;; screen-space width available to temporal coverage policy.
+         (barycentric-gradient
+           (sqrt (+ (* barycentric-dx barycentric-dx)
+                    (* barycentric-dy barycentric-dy))))
+         (primitive-feature-pixels
+           (min
+            (min (/ 1.0 (max 0.000001 (swizzle barycentric-gradient :x)))
+                 (/ 1.0 (max 0.000001 (swizzle barycentric-gradient :y))))
+            (/ 1.0 (max 0.000001 (swizzle barycentric-gradient :z)))))
          (edge-x (/ (swizzle barycentric :x)
                     (max (swizzle barycentric-width :x) 0.000001)))
          (edge-y (/ (swizzle barycentric :y)

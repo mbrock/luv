@@ -63,6 +63,7 @@
 (defconstant +pixel-format-rgba16-float+ 115)
 (defconstant +pixel-format-depth32-float+ 252)
 (defconstant +texture-type-2d+ 2)
+(defconstant +texture-type-2d-multisample+ 4)
 (defconstant +texture-usage-shader-read+ (ash 1 0))
 (defconstant +texture-usage-shader-write+ (ash 1 1))
 (defconstant +texture-usage-render-target+ (ash 1 2))
@@ -72,6 +73,8 @@
 (defconstant +load-action-clear+ 2)
 (defconstant +store-action-dont-care+ 0)
 (defconstant +store-action-store+ 1)
+(defconstant +store-action-multisample-resolve+ 2)
+(defconstant +multisample-depth-resolve-filter-sample-zero+ 0)
 (defconstant +language-version-4-0+ (ash 4 16))
 (defconstant +function-type-vertex+ 1)
 (defconstant +function-type-fragment+ 2)
@@ -112,6 +115,10 @@
 (defconstant +sampler-address-mode-repeat+ 2)
 
 ;;; Device and Metal 4 submission.
+
+(objc:define-objective-c-message metal-device-supports-texture-sample-count-p
+    ("supportsTextureSampleCount:" :uint8)
+  (count :uint64))
 
 (objc:define-objective-c-message new-metal-4-command-queue
     ("newMTL4CommandQueue" :object :ownership :owned
@@ -165,6 +172,10 @@
 (objc:define-objective-c-message %set-metal-texture-height
     ("setHeight:" :void)
   (height :uint64))
+
+(objc:define-objective-c-message %set-metal-texture-sample-count
+    ("setSampleCount:" :void)
+  (count :uint64))
 
 (objc:define-objective-c-message %set-metal-texture-storage-mode
     ("setStorageMode:" :void)
@@ -237,17 +248,21 @@
 
 (defun new-metal-texture
     (device width height pixel-format usage &key (storage-mode +storage-mode-private+)
-                                                label)
+                                                (sample-count 1) label)
   "Create one owned two-dimensional Metal texture."
   (objc:with-autorelease-pool ()
     (objc:with-owned-objective-c-object
         (descriptor
           (%new-metal-texture-descriptor
            (objc:find-objective-c-class "MTLTextureDescriptor")))
-      (%set-metal-texture-type descriptor +texture-type-2d+)
+      (%set-metal-texture-type
+       descriptor (if (= sample-count 1)
+                      +texture-type-2d+
+                      +texture-type-2d-multisample+))
       (%set-metal-texture-pixel-format descriptor pixel-format)
       (%set-metal-texture-width descriptor width)
       (%set-metal-texture-height descriptor height)
+      (%set-metal-texture-sample-count descriptor sample-count)
       (%set-metal-texture-storage-mode descriptor storage-mode)
       (%set-metal-texture-usage descriptor usage)
       (let ((texture (%new-metal-texture device descriptor)))
@@ -769,6 +784,10 @@ rejection.  Source and names cross only as in-memory NSString objects."
     ("setVertexDescriptor:" :void)
   (descriptor :object))
 
+(objc:define-objective-c-message %set-pipeline-raster-sample-count
+    ("setRasterSampleCount:" :void)
+  (count :uint64))
+
 (objc:define-objective-c-message %set-input-primitive-topology
     ("setInputPrimitiveTopology:" :void)
   (topology :uint64))
@@ -904,7 +923,8 @@ rejection.  Source and names cross only as in-memory NSString objects."
 
 (defun compile-metal-4-render-pipeline
     (compiler vertex-library vertex-name fragment-library fragment-name
-     vertex-buffers color-formats topology &key depth-format blends label)
+     vertex-buffers color-formats topology
+     &key depth-format blends (sample-count 1) label)
   "Synchronously link Metal libraries into an owned Metal 4 pipeline state."
   (declare (ignore depth-format))
   (objc:with-autorelease-pool ()
@@ -948,6 +968,8 @@ rejection.  Source and names cross only as in-memory NSString objects."
                    (%set-pipeline-vertex-descriptor
                     descriptor vertex-descriptor)
                    (%set-input-primitive-topology descriptor topology)
+                   (%set-pipeline-raster-sample-count
+                    descriptor sample-count)
                    (loop with attachments =
                            (%render-pipeline-color-attachments descriptor)
                          for color-format in color-formats
@@ -988,7 +1010,7 @@ rejection.  Source and names cross only as in-memory NSString objects."
     (compiler object-library object-name object-workgroup-size
      mesh-library mesh-name mesh-workgroup-size
      fragment-library fragment-name color-format max-mesh-workgroups
-     &key blend label)
+     &key blend (sample-count 1) label)
   "Synchronously link object, mesh, and fragment libraries into Metal 4."
   (objc:with-autorelease-pool ()
     (let ((object-function nil)
@@ -1036,6 +1058,7 @@ rejection.  Source and names cross only as in-memory NSString objects."
                (%set-max-mesh-threads
                 descriptor (reduce #'* mesh-workgroup-size))
                (%set-max-mesh-workgroups descriptor max-mesh-workgroups)
+               (%set-pipeline-raster-sample-count descriptor sample-count)
                (when fragment-function
                  (%set-fragment-function-descriptor descriptor fragment-function))
                (when color-format
@@ -1288,6 +1311,10 @@ rejection.  Source and names cross only as in-memory NSString objects."
     ("setTexture:" :void)
   (texture :object))
 
+(objc:define-objective-c-message %set-color-attachment-resolve-texture
+    ("setResolveTexture:" :void)
+  (texture :object))
+
 (objc:define-objective-c-message %set-color-attachment-load-action
     ("setLoadAction:" :void)
   (action :uint64))
@@ -1308,17 +1335,25 @@ rejection.  Source and names cross only as in-memory NSString objects."
     ("setClearDepth:" :void)
   (depth :double))
 
+(objc:define-objective-c-message %set-depth-resolve-filter
+    ("setDepthResolveFilter:" :void)
+  (filter :uint64))
+
 (defun configure-metal-pass-color-attachment
-    (descriptor index texture color clear-p store-p)
+    (descriptor index texture color clear-p store-p &optional resolve-texture)
   (when texture
     (let* ((attachments (%render-pass-color-attachments descriptor))
            (attachment (%color-attachment-at attachments index)))
       (%set-color-attachment-texture attachment texture)
+      (when resolve-texture
+        (%set-color-attachment-resolve-texture attachment resolve-texture))
       (%set-color-attachment-load-action
        attachment (if clear-p +load-action-clear+ +load-action-load+))
       (%set-color-attachment-store-action
-       attachment (if store-p +store-action-store+
-                      +store-action-dont-care+))
+       attachment (cond (resolve-texture
+                         +store-action-multisample-resolve+)
+                        (store-p +store-action-store+)
+                        (t +store-action-dont-care+)))
       (when clear-p
         (destructuring-bind (red green blue alpha) (coerce color 'list)
           (%set-color-attachment-clear-color
@@ -1329,15 +1364,21 @@ rejection.  Source and names cross only as in-memory NSString objects."
                  'alpha (coerce alpha 'double-float))))))))
 
 (defun configure-metal-pass-depth-attachment
-    (descriptor texture clear-depth clear-p store-p)
+    (descriptor texture clear-depth clear-p store-p &optional resolve-texture)
   (when texture
     (let ((attachment (%render-pass-depth-attachment descriptor)))
       (%set-color-attachment-texture attachment texture)
+      (when resolve-texture
+        (%set-color-attachment-resolve-texture attachment resolve-texture)
+        (%set-depth-resolve-filter
+         attachment +multisample-depth-resolve-filter-sample-zero+))
       (%set-color-attachment-load-action
        attachment (if clear-p +load-action-clear+ +load-action-load+))
       (%set-color-attachment-store-action
-       attachment (if store-p +store-action-store+
-                      +store-action-dont-care+))
+       attachment (cond (resolve-texture
+                         +store-action-multisample-resolve+)
+                        (store-p +store-action-store+)
+                        (t +store-action-dont-care+)))
       (when clear-p
         (%set-depth-attachment-clear-depth
          attachment (coerce clear-depth 'double-float))))))
@@ -1347,22 +1388,26 @@ rejection.  Source and names cross only as in-memory NSString objects."
                           (color #(0.0 0.0 0.0 1.0))
                           (color-clear-p t) (color-store-p t)
                           depth-texture (clear-depth 1.0)
-                          (depth-clear-p t) (depth-store-p nil))
+                          (depth-clear-p t) (depth-store-p nil)
+                          depth-resolve-texture)
   "Begin one Metal 4 render pass with optional color and depth attachments."
   (objc:with-owned-objective-c-object
       (descriptor
         (%new-render-pass-descriptor
          (objc:find-objective-c-class "MTL4RenderPassDescriptor")))
     (if color-attachments
-        (loop for (texture attachment-color clear-p store-p)
+        (loop for (texture attachment-color clear-p store-p
+                           &optional resolve-texture)
                 in color-attachments
               for index from 0
               do (configure-metal-pass-color-attachment
-                  descriptor index texture attachment-color clear-p store-p))
+                  descriptor index texture attachment-color clear-p store-p
+                  resolve-texture))
         (configure-metal-pass-color-attachment
          descriptor 0 color-texture color color-clear-p color-store-p))
     (configure-metal-pass-depth-attachment
-     descriptor depth-texture clear-depth depth-clear-p depth-store-p)
+     descriptor depth-texture clear-depth depth-clear-p depth-store-p
+     depth-resolve-texture)
     (render-command-encoder command-buffer descriptor)))
 
 (defun new-color-render-command-encoder

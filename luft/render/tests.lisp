@@ -308,8 +308,7 @@
       (setf (luft.render::renderer-target-generation renderer)
             (luft.render::%make-renderer-target-generation
              (luft.render::%make-renderer-target-resources
-              '(1 1) '(1 1) nil nil resource nil nil nil nil nil nil nil nil nil
-              nil nil nil nil nil)
+              :extent '(1 1) :render-extent '(1 1) :depth-view resource)
              (luft.render::%make-renderer-flame-target-join old-flame-group)))
       (values renderer device))))
 
@@ -363,10 +362,16 @@
    nil
    (list
     (luft.render::renderer-target-generation-temporal-scaler generation)
+    (luft.render::renderer-target-generation-depth-msaa-texture generation)
+    (luft.render::renderer-target-generation-depth-msaa-view generation)
     (luft.render::renderer-target-generation-depth-texture generation)
     (luft.render::renderer-target-generation-depth-view generation)
+    (luft.render::renderer-target-generation-scene-msaa-texture generation)
+    (luft.render::renderer-target-generation-scene-msaa-view generation)
     (luft.render::renderer-target-generation-scene-texture generation)
     (luft.render::renderer-target-generation-scene-view generation)
+    (luft.render::renderer-target-generation-motion-msaa-texture generation)
+    (luft.render::renderer-target-generation-motion-msaa-view generation)
     (luft.render::renderer-target-generation-motion-texture generation)
     (luft.render::renderer-target-generation-motion-view generation)
     (luft.render::renderer-target-generation-resolved-texture generation)
@@ -451,6 +456,15 @@
         (ok (eq (luft.render::renderer-depth-texture renderer)
                 (probe-texture-view-texture
                  (luft.render::renderer-depth-view renderer))))
+        (let ((multisampled-depth
+                (luft.render::renderer-target-generation-depth-msaa-texture
+                 generation)))
+          (ok (= luft.render::*scene-sample-count*
+                 (luv::texture-descriptor-sample-count
+                  (flame-resource-probe-descriptor multisampled-depth))))
+          (ok (equal '(:render-attachment)
+                     (luv::texture-descriptor-usage
+                      (flame-resource-probe-descriptor multisampled-depth)))))
         (ok (eq (luft.render::renderer-scene-texture renderer)
                 (probe-texture-view-texture
                  (luft.render::renderer-scene-view renderer))))
@@ -486,7 +500,7 @@
         (ok (eql temporal-p
                  (not (null
                        (luft.render::renderer-resolved-texture renderer)))))
-        (ok (= (if temporal-p 15 10) (length resources)))
+        (ok (= (if temporal-p 21 14) (length resources)))
         (ok (= (length resources)
                (length (flame-resource-probe-created-resources device))))
         (let ((previous-view (list :stable-previous-view))
@@ -516,7 +530,7 @@
 
 (deftest initial-frame-target-staging-cleans-every-allocation-boundary
   (dolist (temporal-p '(nil t))
-    (loop for failure-ordinal from 1 to (if temporal-p 15 10)
+    (loop for failure-ordinal from 1 to (if temporal-p 21 14)
           do
              (multiple-value-bind (renderer device)
                  (make-renderer-target-probe temporal-p)
@@ -602,7 +616,7 @@
                   (luv::texture-descriptor-usage
                    (flame-resource-probe-descriptor
                     (luft.render::renderer-motion-texture renderer)))))
-      (ok (= 17 (length (renderer-target-generation-resources generation))))
+      (ok (= 23 (length (renderer-target-generation-resources generation))))
       (luv:destroy frame-group)
       (luft.render::destroy-renderer-targets renderer)
       (ok (every-probe-resource-destroyed-once-p
@@ -635,7 +649,7 @@
               ;; staged cohort whose cleanup is observable.
               (flame-resource-probe-fail-create-at device)
               (+ (flame-resource-probe-create-count device)
-                 (if temporal-p 15 10)))
+                 (if temporal-p 21 14)))
         (ok (signals
              (luft.render::ensure-renderer-extent renderer '(800 450))
              'error))
@@ -656,7 +670,7 @@
                 (set-difference
                  (flame-resource-probe-created-resources device)
                  created-before :test #'eq)))
-          (ok (= (1- (if temporal-p 15 10)) (length staged)))
+          (ok (= (1- (if temporal-p 21 14)) (length staged)))
           (ok (every-probe-resource-destroyed-once-p staged device)))
         (setf (flame-resource-probe-fail-create-at device) nil)
         (let ((event-count-before-success
@@ -723,7 +737,7 @@
                         (luft.render::renderer-target-generation owner))
                     "the old generation is still published at precommit")
                 (setf observed-candidate candidate)
-                (ok (= 15 (length
+                (ok (= 21 (length
                            (renderer-target-generation-resources candidate))))
                 (error "Injected target-generation precommit failure."))))
         (ok (signals
@@ -744,7 +758,7 @@
                          (flame-resource-probe-destroyed-resources device)
                          :test #'eq)))
                  old-resources))
-      (ok (= 15
+      (ok (= 21
              (length
               (set-difference
                (flame-resource-probe-created-resources device)
@@ -4398,7 +4412,7 @@
       (ok assembly)
       (ok (equalp #(90.0 78.0 0.0 2.0)
                   (subseq words (+ row 16) (+ row 20))))
-      (ok (equalp #(0.70710677 0.70710677 0.0 0.02)
+      (ok (equalp #(0.70710677 0.70710677 0.0 0.024)
                   (subseq words (+ row 20) (+ row 24)))))))
 
 (deftest surface-assembly-ids-use-the-widened-instance-field
@@ -5468,6 +5482,7 @@
     (ok (search "[[instance_id]]" vertex-msl))
     (ok (search "const device uint4* instances" vertex-msl))
     (ok (search "const device uint4* template_vertices" vertex-msl))
+    (ok (search "primitive_kind" vertex-msl))
     (ok (search "const device float4* material_descriptors" fragment-msl))
     (ok (search "assembly_id * 8.0f" fragment-msl))
     (ok (search "descriptor_row + uint(3.0f)" fragment-msl))
@@ -5482,6 +5497,8 @@
     (ok (search "depth2d<float> shadow_map" fragment-msl))
     (ok (search "sampler shadow_sampler" fragment-msl))
     (ok (search "barycentric" fragment-msl))
+    (ok (search "primitive_kind" fragment-msl))
+    (ok (search "primitive_feature_pixels" fragment-msl))
     (ok (search "motion_output" fragment-msl))
     (ok (search "gemstone_radiance" fragment-msl))
     (ok (search "[[instance_id]]" flame-vertex-msl))

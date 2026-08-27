@@ -67,6 +67,11 @@
   (:command-buffer-begin-info 42)
   (:render-pass-begin-info 43)
   (:image-memory-barrier 45)
+  (:attachment-description-2 1000109000)
+  (:attachment-reference-2 1000109001)
+  (:subpass-description-2 1000109002)
+  (:render-pass-create-info-2 1000109004)
+  (:subpass-description-depth-stencil-resolve 1000199001)
   (:physical-device-features-2 1000059000)
   (:physical-device-timeline-semaphore-features 1000207000)
   (:semaphore-type-create-info 1000207002)
@@ -138,7 +143,16 @@
   (:present-src-khr 1000001002))
 
 (cffi:defcenum (sample-count :uint32)
-  (:1 1))
+  (:1 1)
+  (:2 2)
+  (:4 4)
+  (:8 8))
+
+(cffi:defbitfield (resolve-mode-flags :uint32)
+  (:sample-zero 1)
+  (:average 2)
+  (:min 4)
+  (:max 8))
 
 (cffi:defcenum (image-view-type :uint32)
   (:1d 0)
@@ -889,6 +903,22 @@
   (attachment :uint32)
   (layout image-layout))
 
+(defvkstruct attachment-description-2 (:s-type :attachment-description-2)
+  (flags :uint32)
+  (format format)
+  (samples sample-count)
+  (load-op attachment-load-op)
+  (store-op attachment-store-op)
+  (stencil-load-op attachment-load-op)
+  (stencil-store-op attachment-store-op)
+  (initial-layout image-layout)
+  (final-layout image-layout))
+
+(defvkstruct attachment-reference-2 (:s-type :attachment-reference-2)
+  (attachment :uint32)
+  (layout image-layout)
+  (aspect-mask image-aspect-flags))
+
 (defvkstruct subpass-description ()
   (flags :uint32)
   (pipeline-bind-point pipeline-bind-point)
@@ -901,6 +931,25 @@
   (preserve-attachment-count :uint32)
   (p-preserve-attachments :pointer))
 
+(defvkstruct subpass-description-2 (:s-type :subpass-description-2)
+  (flags :uint32)
+  (pipeline-bind-point pipeline-bind-point)
+  (view-mask :uint32)
+  (input-attachment-count :uint32)
+  (p-input-attachments :pointer)
+  (color-attachment-count :uint32)
+  (p-color-attachments :pointer)
+  (p-resolve-attachments :pointer)
+  (p-depth-stencil-attachment :pointer)
+  (preserve-attachment-count :uint32)
+  (p-preserve-attachments :pointer))
+
+(defvkstruct subpass-description-depth-stencil-resolve
+    (:s-type :subpass-description-depth-stencil-resolve)
+  (depth-resolve-mode resolve-mode-flags)
+  (stencil-resolve-mode resolve-mode-flags)
+  (p-depth-stencil-resolve-attachment :pointer))
+
 (defvkstruct render-pass-create-info (:s-type :render-pass-create-info)
   (flags :uint32)
   (attachment-count :uint32)
@@ -909,6 +958,17 @@
   (p-subpasses :pointer)
   (dependency-count :uint32)
   (p-dependencies :pointer))
+
+(defvkstruct render-pass-create-info-2 (:s-type :render-pass-create-info-2)
+  (flags :uint32)
+  (attachment-count :uint32)
+  (p-attachments :pointer)
+  (subpass-count :uint32)
+  (p-subpasses :pointer)
+  (dependency-count :uint32)
+  (p-dependencies :pointer)
+  (correlated-view-mask-count :uint32)
+  (p-correlated-view-masks :pointer))
 
 (defvkstruct framebuffer-create-info (:s-type :framebuffer-create-info)
   (flags :uint32)
@@ -1417,6 +1477,11 @@
   (device :pointer) (sampler :pointer) (allocator :pointer))
 
 (defvkfun "vkCreateRenderPass"
+    checked-result
+  (device :pointer) (create-info :pointer) (allocator :pointer)
+  (render-pass :pointer))
+
+(defvkfun "vkCreateRenderPass2"
     checked-result
   (device :pointer) (create-info :pointer) (allocator :pointer)
   (render-pass :pointer))

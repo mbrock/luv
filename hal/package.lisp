@@ -376,6 +376,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))))
            #:gpu-texture-usage
            #:gpu-texture-dimensions
            #:gpu-texture-format
+           #:gpu-texture-sample-count
            #:gpu-texture-view
            #:gpu-texture-view-texture
            #:gpu-sampler

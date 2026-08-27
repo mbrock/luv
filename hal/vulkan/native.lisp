@@ -145,6 +145,11 @@
   :checked t
   :operation :create-render-pass)
 
+(define-creator create-render-pass-2-handle (device create-info)
+  (vk:create-render-pass2 device create-info (cffi:null-pointer))
+  :checked t
+  :operation :create-render-pass-2)
+
 (define-creator create-framebuffer-handle (device create-info)
   (vk:create-framebuffer device create-info (cffi:null-pointer))
   :checked t
@@ -859,33 +864,175 @@ advertised is never placed in the query chain and is returned as NIL."
     (:store :store)
     (:discard :dont-care)))
 
+(defun create-resolving-render-pass-2
+    (device formats depth-format depth-store-op samples)
+  "Create a RenderPass2 color/depth pass with single-sample resolves."
+  (let* ((formats (coerce formats 'vector))
+         (color-count (length formats))
+         (depth-p (not (null depth-format)))
+         (depth-index (* 2 color-count))
+         (depth-resolve-index (and depth-p (1+ depth-index)))
+         (attachment-count (+ (* 2 color-count) (if depth-p 2 0))))
+    (cffi:with-foreign-object
+        (attachments '(:struct attachment-description-2) attachment-count)
+      (flet ((attachment (index format sample-count load-op store-op layout)
+               (fill-vk
+                (cffi:mem-aptr
+                 attachments '(:struct attachment-description-2) index)
+                'attachment-description-2
+                :flags 0 :format format :samples sample-count
+                :load-op load-op :store-op store-op
+                :stencil-load-op :dont-care :stencil-store-op :dont-care
+                :initial-layout layout :final-layout layout)))
+        (loop for format across formats
+              for index from 0
+              do (attachment index format samples :clear :dont-care
+                             :color-attachment-optimal)
+                 (attachment (+ color-count index) format :1 :dont-care :store
+                             :color-attachment-optimal))
+        (when depth-p
+          (attachment depth-index depth-format samples :clear :dont-care
+                      :depth-stencil-attachment-optimal)
+          (attachment depth-resolve-index depth-format :1 :dont-care
+                      (vulkan-attachment-store-op depth-store-op)
+                      :depth-stencil-attachment-optimal)))
+      (labels
+          ((create-with-color-references
+               (color-references resolve-references)
+             (labels
+                 ((create-with-depth-references
+                      (depth-reference depth-resolve-reference)
+                    (with-vk
+                        (subpass subpass-description-2
+                         :flags 0 :pipeline-bind-point :graphics :view-mask 0
+                         :input-attachment-count 0
+                         :p-input-attachments (cffi:null-pointer)
+                         :color-attachment-count color-count
+                         :p-color-attachments color-references
+                         :p-resolve-attachments resolve-references
+                         :p-depth-stencil-attachment depth-reference
+                         :preserve-attachment-count 0
+                         :p-preserve-attachments (cffi:null-pointer))
+                      (labels
+                          ((create-pass ()
+                             (with-vk
+                                 (create-info render-pass-create-info-2
+                                  :flags 0
+                                  :attachment-count attachment-count
+                                  :p-attachments attachments
+                                  :subpass-count 1 :p-subpasses subpass
+                                  :dependency-count 0
+                                  :p-dependencies (cffi:null-pointer)
+                                  :correlated-view-mask-count 0
+                                  :p-correlated-view-masks
+                                  (cffi:null-pointer))
+                               (create-render-pass-2-handle
+                                device create-info))))
+                        (if depth-resolve-reference
+                            (with-vk
+                                (depth-resolve
+                                 subpass-description-depth-stencil-resolve
+                                 :depth-resolve-mode '(:sample-zero)
+                                 :stencil-resolve-mode nil
+                                 :p-depth-stencil-resolve-attachment
+                                 depth-resolve-reference)
+                              (setf (cffi:foreign-slot-value
+                                     subpass
+                                     '(:struct subpass-description-2)
+                                     'p-next)
+                                    depth-resolve)
+                              (create-pass))
+                            (create-pass))))))
+               (if depth-p
+                   (with-vk
+                       (depth-reference attachment-reference-2
+                        :attachment depth-index
+                        :layout :depth-stencil-attachment-optimal
+                        :aspect-mask '(:depth))
+                     (with-vk
+                         (depth-resolve-reference attachment-reference-2
+                          :attachment depth-resolve-index
+                          :layout :depth-stencil-attachment-optimal
+                          :aspect-mask '(:depth))
+                       (create-with-depth-references
+                        depth-reference depth-resolve-reference)))
+                   (create-with-depth-references
+                    (cffi:null-pointer) nil)))))
+        (if (plusp color-count)
+            (cffi:with-foreign-object
+                (color-references '(:struct attachment-reference-2)
+                                  color-count)
+              (cffi:with-foreign-object
+                  (resolve-references '(:struct attachment-reference-2)
+                                      color-count)
+                (dotimes (index color-count)
+                  (fill-vk
+                   (cffi:mem-aptr color-references
+                                  '(:struct attachment-reference-2) index)
+                   'attachment-reference-2
+                   :attachment index :layout :color-attachment-optimal
+                   :aspect-mask '(:color))
+                  (fill-vk
+                   (cffi:mem-aptr resolve-references
+                                  '(:struct attachment-reference-2) index)
+                   'attachment-reference-2
+                   :attachment (+ color-count index)
+                   :layout :color-attachment-optimal
+                   :aspect-mask '(:color)))
+                (create-with-color-references
+                 color-references resolve-references)))
+            (create-with-color-references
+             (cffi:null-pointer) (cffi:null-pointer)))))))
+
 (defun create-color-render-pass
-    (device formats &key depth-format (depth-store-op :discard))
-  "Create a pass whose color attachments have FORMATS in location order."
+    (device formats &key depth-format (depth-store-op :discard)
+                         (samples :1) resolve-p)
+  "Create a pass whose color attachments have FORMATS in location order.
+
+When RESOLVE-P is true, multisampled attachments are followed by single-sample
+resolves.  A depth resolve selects sample zero through the RenderPass2 path."
+  (when (and resolve-p depth-format)
+    (return-from create-color-render-pass
+      (create-resolving-render-pass-2
+       device formats depth-format depth-store-op samples)))
   (let* ((formats (cond ((vectorp formats) formats)
                         ((listp formats) (coerce formats 'vector))
                         (t (vector formats))))
          (color-count (length formats))
-         (attachment-count (+ color-count (if depth-format 1 0))))
+         (resolve-count (if resolve-p color-count 0))
+         (depth-index (+ color-count resolve-count))
+         (attachment-count (+ color-count resolve-count
+                              (if depth-format 1 0))))
     (cffi:with-foreign-object
         (attachments '(:struct attachment-description) attachment-count)
       (loop for format across formats
             for index from 0
             do (fill-vk
                 (cffi:mem-aptr
-                 attachments '(:struct attachment-description) index)
+                attachments '(:struct attachment-description) index)
                 'attachment-description
-                :flags 0 :format format :samples :1
-                :load-op :clear :store-op :store
+                :flags 0 :format format :samples samples
+                :load-op :clear :store-op (if resolve-p :dont-care :store)
                 :stencil-load-op :dont-care :stencil-store-op :dont-care
                 :initial-layout :color-attachment-optimal
                 :final-layout :color-attachment-optimal))
+      (when resolve-p
+        (loop for format across formats
+              for index from color-count
+              do (fill-vk
+                  (cffi:mem-aptr
+                   attachments '(:struct attachment-description) index)
+                  'attachment-description
+                  :flags 0 :format format :samples :1
+                  :load-op :dont-care :store-op :store
+                  :stencil-load-op :dont-care :stencil-store-op :dont-care
+                  :initial-layout :color-attachment-optimal
+                  :final-layout :color-attachment-optimal)))
       (when depth-format
         (fill-vk
          (cffi:mem-aptr
-          attachments '(:struct attachment-description) color-count)
-         'attachment-description
-         :flags 0 :format depth-format :samples :1
+          attachments '(:struct attachment-description) depth-index)
+         'attachment-description :flags 0 :format depth-format :samples samples
          :load-op :clear
          :store-op (vulkan-attachment-store-op depth-store-op)
          :stencil-load-op :dont-care :stencil-store-op :dont-care
@@ -899,38 +1046,59 @@ advertised is never placed in the query chain and is returned as NIL."
             color-references '(:struct attachment-reference) index)
            'attachment-reference
            :attachment index :layout :color-attachment-optimal))
-        (labels ((create-with-depth-reference (depth-reference)
-                   (with-vk (subpass subpass-description
-                             :flags 0 :pipeline-bind-point :graphics
-                             :input-attachment-count 0
-                             :p-input-attachments (cffi:null-pointer)
-                             :color-attachment-count color-count
-                             :p-color-attachments color-references
-                             :p-resolve-attachments (cffi:null-pointer)
-                             :p-depth-stencil-attachment depth-reference
-                             :preserve-attachment-count 0
-                             :p-preserve-attachments (cffi:null-pointer))
-                     (with-vk (create-info render-pass-create-info
-                               :flags 0 :attachment-count attachment-count
-                               :p-attachments attachments
-                               :subpass-count 1 :p-subpasses subpass
-                               :dependency-count 0
-                               :p-dependencies (cffi:null-pointer))
-                       (create-render-pass-handle device create-info)))))
-          (if depth-format
-              (with-vk (depth-reference attachment-reference
-                        :attachment color-count
-                        :layout :depth-stencil-attachment-optimal)
-                (create-with-depth-reference depth-reference))
-              (create-with-depth-reference (cffi:null-pointer))))))))
+        (labels
+            ((create-with-references (resolve-references depth-reference)
+               (with-vk (subpass subpass-description
+                         :flags 0 :pipeline-bind-point :graphics
+                         :input-attachment-count 0
+                         :p-input-attachments (cffi:null-pointer)
+                         :color-attachment-count color-count
+                         :p-color-attachments color-references
+                         :p-resolve-attachments resolve-references
+                         :p-depth-stencil-attachment depth-reference
+                         :preserve-attachment-count 0
+                         :p-preserve-attachments (cffi:null-pointer))
+                 (with-vk (create-info render-pass-create-info
+                           :flags 0 :attachment-count attachment-count
+                           :p-attachments attachments
+                           :subpass-count 1 :p-subpasses subpass
+                           :dependency-count 0
+                           :p-dependencies (cffi:null-pointer))
+                   (create-render-pass-handle device create-info)))))
+          (flet ((with-depth (resolve-references)
+                   (if depth-format
+                       (with-vk (depth-reference attachment-reference
+                                 :attachment depth-index
+                                 :layout :depth-stencil-attachment-optimal)
+                         (create-with-references
+                          resolve-references depth-reference))
+                       (create-with-references
+                        resolve-references (cffi:null-pointer)))))
+            (if resolve-p
+                (cffi:with-foreign-object
+                    (resolve-references '(:struct attachment-reference)
+                                        color-count)
+                  (dotimes (index color-count)
+                    (fill-vk
+                     (cffi:mem-aptr
+                      resolve-references '(:struct attachment-reference) index)
+                     'attachment-reference
+                     :attachment (+ color-count index)
+                     :layout :color-attachment-optimal))
+                  (with-depth resolve-references))
+                (with-depth (cffi:null-pointer)))))))))
 
 (defun create-depth-render-pass
-    (device depth-format &key (depth-store-op :store))
+    (device depth-format &key (depth-store-op :store) (samples :1) resolve-p)
+  (when resolve-p
+    (return-from create-depth-render-pass
+      (create-resolving-render-pass-2
+       device nil depth-format depth-store-op samples)))
   (cffi:with-foreign-object
       (attachments '(:struct attachment-description) 1)
     (fill-vk
      attachments 'attachment-description
-     :flags 0 :format depth-format :samples :1
+     :flags 0 :format depth-format :samples samples
      :load-op :clear
      :store-op (vulkan-attachment-store-op depth-store-op)
      :stencil-load-op :dont-care :stencil-store-op :dont-care
@@ -939,33 +1107,39 @@ advertised is never placed in the query chain and is returned as NIL."
     (with-vk (depth-reference attachment-reference
               :attachment 0 :layout :depth-stencil-attachment-optimal)
       (with-vk (subpass subpass-description
-                :flags 0 :pipeline-bind-point :graphics
-                :input-attachment-count 0
-                :p-input-attachments (cffi:null-pointer)
-                :color-attachment-count 0
-                :p-color-attachments (cffi:null-pointer)
-                :p-resolve-attachments (cffi:null-pointer)
-                :p-depth-stencil-attachment depth-reference
-                :preserve-attachment-count 0
-                :p-preserve-attachments (cffi:null-pointer))
-        (with-vk (create-info render-pass-create-info
-                  :flags 0 :attachment-count 1 :p-attachments attachments
-                  :subpass-count 1 :p-subpasses subpass
-                  :dependency-count 0 :p-dependencies (cffi:null-pointer))
-          (create-render-pass-handle device create-info))))))
+                           :flags 0 :pipeline-bind-point :graphics
+                           :input-attachment-count 0
+                           :p-input-attachments (cffi:null-pointer)
+                           :color-attachment-count 0
+                           :p-color-attachments (cffi:null-pointer)
+                           :p-resolve-attachments (cffi:null-pointer)
+                           :p-depth-stencil-attachment depth-reference
+                           :preserve-attachment-count 0
+                           :p-preserve-attachments (cffi:null-pointer))
+                   (with-vk (create-info render-pass-create-info
+                             :flags 0
+                             :attachment-count 1
+                             :p-attachments attachments
+                             :subpass-count 1 :p-subpasses subpass
+                             :dependency-count 0
+                             :p-dependencies (cffi:null-pointer))
+                     (create-render-pass-handle device create-info))))))
 
 (defun destroy-render-pass (device render-pass)
   (vk:destroy-render-pass device render-pass (cffi:null-pointer))
   (values))
 
 (defun create-framebuffer
-    (device render-pass image-views width height &key depth-view)
+    (device render-pass image-views width height
+     &key resolve-views depth-view depth-resolve-view)
   (let* ((image-views (cond ((null image-views) nil)
                             ((listp image-views) image-views)
                             ((vectorp image-views) (coerce image-views 'list))
                             (t (list image-views))))
          (attachment-vector
-           (coerce (append image-views (and depth-view (list depth-view)))
+           (coerce (append image-views resolve-views
+                           (and depth-view (list depth-view))
+                           (and depth-resolve-view (list depth-resolve-view)))
                    'vector)))
     (when (zerop (length attachment-vector))
       (error "A framebuffer needs at least one attachment."))
@@ -1065,7 +1239,7 @@ advertised is never placed in the query chain and is returned as NIL."
     (device vertex-module fragment-module layout render-pass
      &key (vertex-entry-point "main") (fragment-entry-point "main")
           (topology :triangle-strip) vertex-buffers
-          depth-compare depth-write-enabled blends blend)
+          depth-compare depth-write-enabled blends blend (samples :1))
   (labels
       ((create-with-shader-names (vertex-name fragment-name)
          (let ((stage-count (if fragment-module 2 1)))
@@ -1121,7 +1295,7 @@ advertised is never placed in the query chain and is returned as NIL."
                                 :line-width 1.0)
                         (with-vk (multisample
                                   pipeline-multisample-state-create-info
-                                  :flags 0 :rasterization-samples :1
+                                  :flags 0 :rasterization-samples samples
                                   :sample-shading-enable 0
                                   :min-sample-shading 0.0
                                   :p-sample-mask (cffi:null-pointer)
@@ -1198,7 +1372,7 @@ advertised is never placed in the query chain and is returned as NIL."
     (device mesh-module fragment-module layout render-pass
      &key task-module (task-entry-point "main") (mesh-entry-point "main")
           (fragment-entry-point "main")
-          depth-compare depth-write-enabled blends blend)
+          depth-compare depth-write-enabled blends blend (samples :1))
   "Link a task, mesh, and fragment stage into one VK_EXT_mesh_shader pipeline.
 
 A mesh pipeline draws no vertices, so it carries neither a vertex input nor
@@ -1245,7 +1419,7 @@ output topology."
                          :line-width 1.0)
                  (with-vk (multisample
                            pipeline-multisample-state-create-info
-                           :flags 0 :rasterization-samples :1
+                           :flags 0 :rasterization-samples samples
                            :sample-shading-enable 0
                            :min-sample-shading 0.0
                            :p-sample-mask (cffi:null-pointer)
@@ -1712,14 +1886,15 @@ output topology."
 
 (defun cmd-begin-color-render-pass
     (command-buffer render-pass framebuffer width height clear-colors
-     &key depth-clear-value)
+     &key depth-clear-value resolve-p)
   (let* ((clear-colors
            (if (and (vectorp clear-colors)
                     (every #'realp clear-colors))
                (list clear-colors)
                (coerce clear-colors 'list)))
          (color-count (length clear-colors))
-         (clear-count (+ color-count (if depth-clear-value 1 0))))
+         (depth-index (if resolve-p (* 2 color-count) color-count))
+         (clear-count (+ depth-index (if depth-clear-value 1 0))))
     (cffi:with-foreign-object (clears '(:union clear-value) clear-count)
       (clear-foreign-object clears '(:union clear-value) clear-count)
       (loop for clear-color in clear-colors
@@ -1739,7 +1914,7 @@ output topology."
       (when depth-clear-value
         (fill-vk
          (cffi:foreign-slot-pointer
-          (cffi:mem-aptr clears '(:union clear-value) color-count)
+          (cffi:mem-aptr clears '(:union clear-value) depth-index)
           '(:union clear-value) 'depth-stencil)
          'clear-depth-stencil-value
          :depth (coerce depth-clear-value 'single-float)

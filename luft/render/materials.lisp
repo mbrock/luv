@@ -179,7 +179,7 @@ surrounding bands."))
       (ensure-semantic-instance
        *limestone-material* 'stone-material-kind
        :name :limestone :base-tone '(0.53 0.49 0.39)
-       :roughness 0.78 :relief :weathered-stone)
+       :roughness 0.92 :relief :weathered-stone)
       *highland-rock-material*
       (ensure-semantic-instance
        *highland-rock-material* 'stone-material-kind
@@ -528,7 +528,7 @@ substance's literals."))
        *torch-body-surface* :torch-bronze :attachment *torch-body-reading*
        :kernel :torch-body))
 
-(defparameter *surface-assembly-vocabulary*
+(defvar *surface-assembly-vocabulary*
   (domains:make-identity-vocabulary-domain
    :members (list *grass-surface* *soil-surface* *subsoil-surface*
                   *stone-surface* *turf-set-stone-surface*
@@ -536,7 +536,11 @@ substance's literals."))
                   *turf-edge-surface* *foundation-stone-surface*
                   *crystal-surface* *torch-body-surface*)
    :limit #x1000)
-  "The renderer-global assembly ABI; scene programs close their own subsets.")
+  "The append-only renderer-global assembly ABI.
+
+Its object identity and dense prefix deliberately survive live material reloads:
+resident scenes and renderers retain those offsets while semantic assemblies are
+reinitialized in place.  Scene programs close their own reachable subsets.")
 
 (defun surface-assembly-offset (assembly)
   (domains:identity-vocabulary-offset *surface-assembly-vocabulary* assembly))
@@ -823,7 +827,7 @@ width; CONTACT-WIDTH is constructor shorthand for all four mixed relations."
 (defun material-relief-amplitude (relief)
   (ecase relief
     (:granular 0.028)
-    (:weathered-stone 0.020)
+    (:weathered-stone 0.024)
     (:crystal 0.012)
     (:forged-metal 0.010)))
 

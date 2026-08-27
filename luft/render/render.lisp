@@ -6,6 +6,9 @@
 (defparameter *render-scale* 0.75
   "Linear internal resolution of the LUFT scene before temporal upscaling.")
 
+(defparameter *scene-sample-count* 4
+  "Raster samples used by Luft's geometry, motion, and depth scene pass.")
+
 (defparameter *temporal-upscaling-p* t
   "Whether LUFT uses temporal reconstruction on supported GPU devices.")
 
@@ -1956,11 +1959,13 @@ attachment resource describe exactly this table."
 
 (defstruct (renderer-target-resources
              (:constructor %make-renderer-target-resources
-                 (extent render-extent temporal-scaler
-                  depth-texture depth-view scene-texture scene-view
-                  motion-texture motion-view resolved-texture resolved-view
-                  history-texture history-view temporal-bind-group
-                  composite-texture composite-view
+                 (&key extent render-extent temporal-scaler
+                  depth-msaa-texture depth-msaa-view depth-texture depth-view
+                  scene-msaa-texture scene-msaa-view scene-texture scene-view
+                  motion-msaa-texture motion-msaa-view
+                  motion-texture motion-view
+                  resolved-texture resolved-view history-texture history-view
+                  temporal-bind-group composite-texture composite-view
                   composite-source-bind-group present-bind-group
                   exposure-probe-bind-group))
              (:copier nil))
@@ -1968,10 +1973,16 @@ attachment resource describe exactly this table."
   (extent nil :type list :read-only t)
   (render-extent nil :type list :read-only t)
   (temporal-scaler nil :read-only t)
+  (depth-msaa-texture nil :read-only t)
+  (depth-msaa-view nil :read-only t)
   (depth-texture nil :read-only t)
   (depth-view nil :read-only t)
+  (scene-msaa-texture nil :read-only t)
+  (scene-msaa-view nil :read-only t)
   (scene-texture nil :read-only t)
   (scene-view nil :read-only t)
+  (motion-msaa-texture nil :read-only t)
+  (motion-msaa-view nil :read-only t)
   (motion-texture nil :read-only t)
   (motion-view nil :read-only t)
   (resolved-texture nil :read-only t)
@@ -2007,7 +2018,7 @@ ambiguously co-owned, or retired by a population rollback."
 (defun %make-empty-renderer-target-generation ()
   (%make-renderer-target-generation
    (%make-renderer-target-resources
-    nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil nil)
+    :extent nil :render-extent nil)
    (%make-renderer-flame-target-join nil)))
 
 (defmacro define-renderer-target-resource-reader (name)
@@ -2019,10 +2030,16 @@ ambiguously co-owned, or retired by a population rollback."
 (define-renderer-target-resource-reader extent)
 (define-renderer-target-resource-reader render-extent)
 (define-renderer-target-resource-reader temporal-scaler)
+(define-renderer-target-resource-reader depth-msaa-texture)
+(define-renderer-target-resource-reader depth-msaa-view)
 (define-renderer-target-resource-reader depth-texture)
 (define-renderer-target-resource-reader depth-view)
+(define-renderer-target-resource-reader scene-msaa-texture)
+(define-renderer-target-resource-reader scene-msaa-view)
 (define-renderer-target-resource-reader scene-texture)
 (define-renderer-target-resource-reader scene-view)
+(define-renderer-target-resource-reader motion-msaa-texture)
+(define-renderer-target-resource-reader motion-msaa-view)
 (define-renderer-target-resource-reader motion-texture)
 (define-renderer-target-resource-reader motion-view)
 (define-renderer-target-resource-reader resolved-texture)
@@ -2422,6 +2439,10 @@ ambiguously co-owned, or retired by a population rollback."
   (renderer-target-generation-depth-texture
    (renderer-target-generation renderer)))
 
+(defun renderer-depth-msaa-view (renderer)
+  (renderer-target-generation-depth-msaa-view
+   (renderer-target-generation renderer)))
+
 (defun renderer-depth-view (renderer)
   (renderer-target-generation-depth-view
    (renderer-target-generation renderer)))
@@ -2430,12 +2451,20 @@ ambiguously co-owned, or retired by a population rollback."
   (renderer-target-generation-scene-texture
    (renderer-target-generation renderer)))
 
+(defun renderer-scene-msaa-view (renderer)
+  (renderer-target-generation-scene-msaa-view
+   (renderer-target-generation renderer)))
+
 (defun renderer-scene-view (renderer)
   (renderer-target-generation-scene-view
    (renderer-target-generation renderer)))
 
 (defun renderer-motion-texture (renderer)
   (renderer-target-generation-motion-texture
+   (renderer-target-generation renderer)))
+
+(defun renderer-motion-msaa-view (renderer)
+  (renderer-target-generation-motion-msaa-view
    (renderer-target-generation renderer)))
 
 (defun renderer-motion-view (renderer)
@@ -2679,14 +2708,20 @@ on rollback.  No target texture is duplicated for an ordinary residency edit."
              (renderer-target-resources-history-view resources)
              (renderer-target-resources-resolved-view resources)
              (renderer-target-resources-motion-view resources)
+             (renderer-target-resources-motion-msaa-view resources)
              (renderer-target-resources-scene-view resources)
+             (renderer-target-resources-scene-msaa-view resources)
              (renderer-target-resources-depth-view resources)
+             (renderer-target-resources-depth-msaa-view resources)
              (renderer-target-resources-composite-texture resources)
              (renderer-target-resources-history-texture resources)
              (renderer-target-resources-resolved-texture resources)
              (renderer-target-resources-motion-texture resources)
+             (renderer-target-resources-motion-msaa-texture resources)
              (renderer-target-resources-scene-texture resources)
-             (renderer-target-resources-depth-texture resources)))
+             (renderer-target-resources-scene-msaa-texture resources)
+             (renderer-target-resources-depth-texture resources)
+             (renderer-target-resources-depth-msaa-texture resources)))
     (when resource (ignore-errors (destroy resource))))
   (values))
 
@@ -2732,7 +2767,9 @@ subpixel samples but does not claim a stable reconstruction-upscaling filter."
          ;; Validate/list-copy before the first GPU allocation.
          (extent (copy-list extent))
          (render-extent (renderer-render-scale-extent renderer extent))
-         scaler depth depth-view scene scene-view motion motion-view
+         scaler depth-msaa depth-msaa-view depth depth-view
+         scene-msaa scene-msaa-view scene scene-view
+         motion-msaa motion-msaa-view motion motion-view
          resolved resolved-view history history-view temporal-group
          composite composite-view
          composite-source-group flame-group present-group exposure-probe-group
@@ -2745,8 +2782,11 @@ subpixel samples but does not claim a stable reconstruction-upscaling filter."
                          (list present-group exposure-probe-group flame-group
                                composite-source-group temporal-group scaler
                                composite-view history-view resolved-view
-                               motion-view scene-view depth-view composite
-                               history resolved motion scene depth))
+                               motion-view motion-msaa-view
+                               scene-view scene-msaa-view
+                               depth-view depth-msaa-view composite
+                               history resolved motion motion-msaa
+                               scene scene-msaa depth depth-msaa))
                  (when resource (ignore-errors (destroy resource))))))
       (unwind-protect
            (progn
@@ -2770,6 +2810,18 @@ subpixel samples but does not claim a stable reconstruction-upscaling filter."
                    depth-view
                    (create
                     device (make-texture-view-descriptor :texture depth))
+                   depth-msaa
+                   (create
+                    device
+                    (make-texture-descriptor
+                     :label "luft multisampled depth" :size render-extent
+                     :dimensions :2d :format :depth32-float
+                     :usage :render-attachment
+                     :sample-count *scene-sample-count*))
+                   depth-msaa-view
+                   (create
+                    device
+                    (make-texture-view-descriptor :texture depth-msaa))
                    scene
                    (create
                     device
@@ -2782,7 +2834,19 @@ subpixel samples but does not claim a stable reconstruction-upscaling filter."
                                  (gpu-temporal-scaler-color-usage scaler)))))
                    scene-view
                    (create
-                    device (make-texture-view-descriptor :texture scene)))
+                    device (make-texture-view-descriptor :texture scene))
+                   scene-msaa
+                   (create
+                    device
+                    (make-texture-descriptor
+                     :label "luft multisampled HDR color" :size render-extent
+                     :dimensions :2d :format :rgba16-float
+                     :usage :render-attachment
+                     :sample-count *scene-sample-count*))
+                   scene-msaa-view
+                   (create
+                    device
+                    (make-texture-view-descriptor :texture scene-msaa)))
              (when temporal-p
                (setf motion
                      (create
@@ -2799,6 +2863,18 @@ subpixel samples but does not claim a stable reconstruction-upscaling filter."
                      motion-view
                      (create
                       device (make-texture-view-descriptor :texture motion))
+                     motion-msaa
+                     (create
+                      device
+                      (make-texture-descriptor
+                       :label "luft multisampled temporal motion"
+                       :size render-extent :dimensions :2d
+                       :format :rg16-float :usage :render-attachment
+                       :sample-count *scene-sample-count*))
+                     motion-msaa-view
+                     (create
+                      device
+                      (make-texture-view-descriptor :texture motion-msaa))
                      resolved
                      (create
                       device
@@ -2887,11 +2963,24 @@ subpixel samples but does not claim a stable reconstruction-upscaling filter."
                           :resource ,(renderer-sampler renderer)))))))
              (setf resource-cohort
                    (%make-renderer-target-resources
-                    extent render-extent scaler depth depth-view scene scene-view
-                    motion motion-view resolved resolved-view history history-view
-                    temporal-group composite
-                    composite-view composite-source-group present-group
-                    exposure-probe-group)
+                    :extent extent :render-extent render-extent
+                    :temporal-scaler scaler
+                    :depth-msaa-texture depth-msaa
+                    :depth-msaa-view depth-msaa-view
+                    :depth-texture depth :depth-view depth-view
+                    :scene-msaa-texture scene-msaa
+                    :scene-msaa-view scene-msaa-view
+                    :scene-texture scene :scene-view scene-view
+                    :motion-msaa-texture motion-msaa
+                    :motion-msaa-view motion-msaa-view
+                    :motion-texture motion :motion-view motion-view
+                    :resolved-texture resolved :resolved-view resolved-view
+                    :history-texture history :history-view history-view
+                    :temporal-bind-group temporal-group
+                    :composite-texture composite :composite-view composite-view
+                    :composite-source-bind-group composite-source-group
+                    :present-bind-group present-group
+                    :exposure-probe-bind-group exposure-probe-group)
                    flame-join
                    (%make-renderer-flame-target-join flame-group)
                    generation
@@ -3826,6 +3915,7 @@ exactly when its complete old descriptor vector is a prefix of the new one."
                                                  `(:format ,format))
                                                target-formats))
                           :primitive '(:topology :triangle-list)
+                          :sample-count *scene-sample-count*
                           :depth-stencil
                           '(:format :depth32-float :depth-write-enabled t
                             :depth-compare :less)))
@@ -3845,6 +3935,7 @@ exactly when its complete old descriptor vector is a prefix of the new one."
                                                  '(:blend
                                                    :premultiplied-alpha)))))
                           :primitive '(:topology :triangle-list)
+                          :sample-count *scene-sample-count*
                           :depth-stencil
                           '(:format :depth32-float :depth-write-enabled nil
                             :depth-compare :less)))
@@ -3900,6 +3991,7 @@ exactly when its complete old descriptor vector is a prefix of the new one."
                             ,(mapcar (lambda (format) `(:format ,format))
                                      target-formats))
                           :primitive '(:topology :triangle-list)
+                          :sample-count *scene-sample-count*
                           :depth-stencil
                           '(:format :depth32-float :depth-write-enabled t
                             :depth-compare :less)))
@@ -3968,6 +4060,7 @@ exactly when its complete old descriptor vector is a prefix of the new one."
                                              ,@(when first
                                                  '(:blend :premultiplied-alpha)))))
                           :primitive '(:topology :triangle-list)
+                          :sample-count *scene-sample-count*
                           :depth-stencil
                           '(:format :depth32-float :depth-write-enabled nil
                             :depth-compare :less)))
@@ -4046,6 +4139,7 @@ exactly when its complete old descriptor vector is a prefix of the new one."
                                              ,@(when first
                                                  '(:blend :premultiplied-alpha)))))
                           :primitive '(:topology :triangle-list)
+                          :sample-count *scene-sample-count*
                           :depth-stencil
                           '(:format :depth32-float :depth-write-enabled nil
                             :depth-compare :less))))
@@ -4166,6 +4260,7 @@ exactly when its complete old descriptor vector is a prefix of the new one."
                                                  `(:format ,format))
                                                target-formats))
                           :primitive '(:topology :triangle-list)
+                          :sample-count *scene-sample-count*
                           ;; The sky is drawn inside the scene pass, whose
                           ;; depth attachment geometry subsequently owns.
                           ;; Match that pass without touching its depth.
@@ -4530,15 +4625,20 @@ exactly when its complete old descriptor vector is a prefix of the new one."
   (prepare-texture encoder (renderer-shadow-texture renderer)
                    :texture-binding)
   (let* ((temporal-p (renderer-temporal-p renderer))
-         (color-view (renderer-scene-view renderer))
+         (color-view (renderer-scene-msaa-view renderer))
          (color-attachments
            (if temporal-p
-               `((:view ,color-view :load-op :clear :store-op :store
+               `((:view ,color-view
+                  :resolve-view ,(renderer-scene-view renderer)
+                  :load-op :clear :store-op :store
                   :clear-value #(0.0 0.0 0.0 1.0))
-                 (:view ,(renderer-motion-view renderer)
+                 (:view ,(renderer-motion-msaa-view renderer)
+                  :resolve-view ,(renderer-motion-view renderer)
                   :load-op :clear :store-op :store
                   :clear-value #(0.0 0.0 0.0 0.0)))
-               `((:view ,color-view :load-op :clear :store-op :store
+               `((:view ,color-view
+                  :resolve-view ,(renderer-scene-view renderer)
+                  :load-op :clear :store-op :store
                   :clear-value #(0.0 0.0 0.0 1.0)))))
          (pass
            (begin-render-pass
@@ -4547,7 +4647,8 @@ exactly when its complete old descriptor vector is a prefix of the new one."
              :label "luft site streams"
              :color-attachments color-attachments
              :depth-stencil-attachment
-             `(:view ,(renderer-depth-view renderer)
+             `(:view ,(renderer-depth-msaa-view renderer)
+               :resolve-view ,(renderer-depth-view renderer)
                :depth-load-op :clear
                :depth-store-op :store
                :depth-clear-value 1.0)))))

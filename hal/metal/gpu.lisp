@@ -134,6 +134,8 @@
                    :reader metal-render-pipeline-vertex-buffers)
    (depth-format :initarg :depth-format
                  :reader metal-render-pipeline-depth-format)
+   (sample-count :initarg :sample-count :initform 1
+                 :reader metal-render-pipeline-sample-count)
    (primitive-topology :initarg :primitive-topology
                        :reader metal-render-pipeline-primitive-topology)
    (fragment-p :initarg :fragment-p
@@ -188,6 +190,8 @@
    (vertex-bindings :initform (make-hash-table)
                     :reader metal-render-pass-vertex-bindings)
    (bind-group :initform nil :accessor metal-render-pass-bind-group)
+   (sample-count :initarg :sample-count :initform 1
+                 :reader metal-render-pass-sample-count)
    (state :initform :encoding :accessor metal-render-pass-state))
   (:documentation
    "A Metal 4 render encoder whose resources arrive through argument tables.
@@ -958,17 +962,27 @@ aligned to the element size."
   (ensure-live-metal-object device :create-texture)
   (let* ((size (texture-descriptor-size descriptor))
          (usage (texture-descriptor-usage descriptor))
+         (sample-count (texture-descriptor-sample-count descriptor))
+         (sample-count-supported-p
+           (plusp
+            (luv.metal:metal-device-supports-texture-sample-count-p
+             (metal-native-object device) sample-count)))
          (native
-           (luv.metal:new-metal-texture
-              (metal-native-object device) (first size) (second size)
-              (metal-resource-pixel-format
-               (texture-descriptor-format descriptor) descriptor)
-              (metal-native-texture-usage usage)
-              :storage-mode
-              (if (member :copy-dst usage)
-                  luv.metal:+storage-mode-shared+
-                  luv.metal:+storage-mode-private+)
-              :label (gpu-descriptor-label descriptor))))
+           (and sample-count-supported-p
+                (luv.metal:new-metal-texture
+                 (metal-native-object device) (first size) (second size)
+                 (metal-resource-pixel-format
+                  (texture-descriptor-format descriptor) descriptor)
+                 (metal-native-texture-usage usage)
+                 :storage-mode
+                 (if (member :copy-dst usage)
+                     luv.metal:+storage-mode-shared+
+                     luv.metal:+storage-mode-private+)
+                 :sample-count sample-count
+                 :label (gpu-descriptor-label descriptor)))))
+    (unless sample-count-supported-p
+      (reject-metal-gpu-request
+       descriptor :unsupported-texture-sample-count sample-count))
     (unless native
       (error 'metal-gpu-error :operation :create-texture
              :reason :texture-creation-failed :details descriptor))
@@ -987,7 +1001,8 @@ aligned to the element size."
                       :device device :native-object native :owned-p t
                       :resident-p t
                       :size size :usage usage :dimensions :2d
-                      :format (texture-descriptor-format descriptor))))
+                      :format (texture-descriptor-format descriptor)
+                      :sample-count sample-count)))
                (setf completed-p t)
                texture))
         (unless completed-p
@@ -1136,7 +1151,9 @@ construct its temporal surface cohort.  #NL5J0J"
                       :device device :native-object native :owned-p nil
                       :resident-p t :external-owner owner
                       :size size :usage usage :dimensions :2d
-                      :format (texture-descriptor-format descriptor))))
+                      :format (texture-descriptor-format descriptor)
+                      :sample-count
+                      (texture-descriptor-sample-count descriptor))))
                (setf completed-p t)
                texture))
         (when (and resident-p (not completed-p))
@@ -1642,9 +1659,15 @@ compiler boundary of #58IDSR."
          (depth-compare
            (and depth-stencil (getf depth-stencil :depth-compare)))
          (depth-write-enabled
-           (and depth-stencil (getf depth-stencil :depth-write-enabled))))
+           (and depth-stencil (getf depth-stencil :depth-write-enabled)))
+         (sample-count
+           (render-pipeline-descriptor-sample-count descriptor)))
     (unless (and (or (null layout)
                      (typep layout 'metal-gpu-bind-group-layout))
+                 (member sample-count '(1 2 4 8))
+                 (plusp
+                  (luv.metal:metal-device-supports-texture-sample-count-p
+                   (metal-native-object device) sample-count))
                  (typep vertex-module 'metal-gpu-shader-module)
                  (= (metal-shader-module-function-type vertex-module)
                     luv.metal:+function-type-vertex+)
@@ -1701,6 +1724,7 @@ compiler boundary of #58IDSR."
                   (and depth-format
                        (metal-resource-pixel-format depth-format descriptor))
                   :blends blends
+                  :sample-count sample-count
                   :label (gpu-descriptor-label descriptor))
                (unless pipeline
                  (error 'metal-gpu-error
@@ -1730,6 +1754,7 @@ compiler boundary of #58IDSR."
                       :primitive-topology topology
                       :fragment-p (not (null fragment-module))
                       :depth-format depth-format
+                      :sample-count sample-count
                       :depth-stencil-state depth-state)))
                (setf completed-p t)
                pipeline))
@@ -1779,9 +1804,15 @@ compiler boundary of #58IDSR."
          (depth-compare
            (and depth-stencil (getf depth-stencil :depth-compare)))
          (depth-write-enabled
-           (and depth-stencil (getf depth-stencil :depth-write-enabled))))
+           (and depth-stencil (getf depth-stencil :depth-write-enabled)))
+         (sample-count
+           (mesh-render-pipeline-descriptor-sample-count descriptor)))
     (unless (and (or (null layout)
                      (typep layout 'metal-gpu-bind-group-layout))
+                 (member sample-count '(1 2 4 8))
+                 (plusp
+                  (luv.metal:metal-device-supports-texture-sample-count-p
+                   (metal-native-object device) sample-count))
                  (or (null task-module)
                      (and (typep task-module 'metal-gpu-shader-module)
                           (= (metal-shader-module-function-type task-module)
@@ -1841,7 +1872,8 @@ compiler boundary of #58IDSR."
                   (metal-native-object fragment-module) fragment-entry-point
                   (metal-render-pipeline-pixel-format format descriptor)
                   max-mesh-workgroups
-                  :blend blend :label (gpu-descriptor-label descriptor))
+                  :blend blend :sample-count sample-count
+                  :label (gpu-descriptor-label descriptor))
                (unless pipeline
                  (error 'metal-gpu-error
                         :operation :create-mesh-render-pipeline
@@ -1868,6 +1900,7 @@ compiler boundary of #58IDSR."
                       :native-object pipeline-state :device device :layout layout
                       :vertex-buffers nil :primitive-topology :triangle-list
                       :fragment-p t :depth-format depth-format
+                      :sample-count sample-count
                       :depth-stencil-state depth-state
                       :task-workgroup-size task-workgroup-size
                       :mesh-workgroup-size mesh-workgroup-size)))
@@ -2015,6 +2048,11 @@ compiler boundary of #58IDSR."
            (texture (and (typep view '(or metal-gpu-texture
                                           metal-gpu-texture-view))
                          (metal-attachment-texture view)))
+           (resolve-view (getf attachment :resolve-view))
+           (resolve-texture
+             (and (typep resolve-view '(or metal-gpu-texture
+                                           metal-gpu-texture-view))
+                  (metal-attachment-texture resolve-view)))
            (load-op (or (getf attachment :load-op) :clear))
            (store-op (or (getf attachment :store-op) :store))
            (clear-value
@@ -2023,13 +2061,25 @@ compiler boundary of #58IDSR."
                    (member :render-attachment (gpu-texture-usage texture))
                    (member load-op '(:clear :load))
                    (member store-op '(:store :discard))
+                   (if (= 1 (gpu-texture-sample-count texture))
+                       (null resolve-view)
+                       (and resolve-texture
+                            (= 1 (gpu-texture-sample-count resolve-texture))
+                            (eq (gpu-texture-format texture)
+                                (gpu-texture-format resolve-texture))
+                            (equal (gpu-texture-size texture)
+                                   (gpu-texture-size resolve-texture))))
                    (= 4 (length clear-value))
                    (every #'realp clear-value))
         (reject-metal-gpu-request
          descriptor :unsupported-metal-color-attachment attachment))
       (ensure-metal-object-device
        texture (metal-texture-device texture) device :begin-render-pass)
-      (list texture load-op store-op clear-value))))
+      (when resolve-texture
+        (ensure-metal-object-device
+         resolve-texture (metal-texture-device resolve-texture)
+         device :begin-render-pass))
+      (list texture load-op store-op clear-value resolve-texture))))
 
 (defun normalize-metal-depth-attachment (device descriptor attachment)
   (when attachment
@@ -2037,6 +2087,11 @@ compiler boundary of #58IDSR."
            (texture (and (typep view '(or metal-gpu-texture
                                           metal-gpu-texture-view))
                          (metal-attachment-texture view)))
+           (resolve-view (getf attachment :resolve-view))
+           (resolve-texture
+             (and (typep resolve-view '(or metal-gpu-texture
+                                           metal-gpu-texture-view))
+                  (metal-attachment-texture resolve-view)))
            (load-op (or (getf attachment :depth-load-op) :clear))
            (store-op (or (getf attachment :depth-store-op) :discard))
            (clear-depth (or (getf attachment :depth-clear-value) 1.0)))
@@ -2045,12 +2100,24 @@ compiler boundary of #58IDSR."
                    (member :render-attachment (gpu-texture-usage texture))
                    (member load-op '(:clear :load))
                    (member store-op '(:store :discard))
+                   (if (= 1 (gpu-texture-sample-count texture))
+                       (null resolve-view)
+                       (and resolve-texture
+                            (= 1 (gpu-texture-sample-count resolve-texture))
+                            (eq :depth32-float
+                                (gpu-texture-format resolve-texture))
+                            (equal (gpu-texture-size texture)
+                                   (gpu-texture-size resolve-texture))))
                    (realp clear-depth) (<= 0 clear-depth 1))
         (reject-metal-gpu-request
          descriptor :unsupported-metal-depth-attachment attachment))
       (ensure-metal-object-device
        texture (metal-texture-device texture) device :begin-render-pass)
-      (list texture load-op store-op clear-depth))))
+      (when resolve-texture
+        (ensure-metal-object-device
+         resolve-texture (metal-texture-device resolve-texture)
+         device :begin-render-pass))
+      (list texture load-op store-op clear-depth resolve-texture))))
 
 (defmethod begin-render-pass
     ((encoder metal-gpu-command-encoder) descriptor)
@@ -2079,12 +2146,22 @@ compiler boundary of #58IDSR."
             do (retain-metal-resource encoder (first color))
                (let ((view (getf attachment :view)))
                  (when (typep view 'metal-gpu-texture-view)
-                   (retain-metal-resource encoder view))))
+                   (retain-metal-resource encoder view)))
+               (when (fifth color)
+                 (retain-metal-resource encoder (fifth color))
+                 (let ((resolve-view (getf attachment :resolve-view)))
+                   (when (typep resolve-view 'metal-gpu-texture-view)
+                     (retain-metal-resource encoder resolve-view)))))
       (when depth
         (retain-metal-resource encoder (first depth))
         (let ((view (getf depth-attachment :view)))
           (when (typep view 'metal-gpu-texture-view)
-            (retain-metal-resource encoder view))))
+            (retain-metal-resource encoder view)))
+        (when (fifth depth)
+          (retain-metal-resource encoder (fifth depth))
+          (let ((resolve-view (getf depth-attachment :resolve-view)))
+            (when (typep resolve-view 'metal-gpu-texture-view)
+              (retain-metal-resource encoder resolve-view)))))
       (let ((sizes (append (mapcar (lambda (color)
                                      (gpu-texture-size (first color)))
                                    colors)
@@ -2093,6 +2170,17 @@ compiler boundary of #58IDSR."
         (unless (every (lambda (size) (equal size (first sizes))) (rest sizes))
           (reject-metal-gpu-request descriptor :mismatched-attachment-size
                                     sizes)))
+      (let ((sample-count
+              (gpu-texture-sample-count
+               (or (first (first colors)) (first depth)))))
+        (unless (and (every (lambda (color)
+                              (= sample-count
+                                 (gpu-texture-sample-count (first color))))
+                            colors)
+                     (or (null depth)
+                         (= sample-count
+                            (gpu-texture-sample-count (first depth)))))
+          (reject-metal-gpu-request descriptor :mismatched-sample-count)))
       (let ((native-encoder
               (luv.metal:new-render-command-encoder
                (metal-encoder-command-buffer encoder)
@@ -2102,13 +2190,18 @@ compiler boundary of #58IDSR."
                   (list (metal-native-object (first color))
                         (fourth color)
                         (eq :clear (second color))
-                        (eq :store (third color))))
+                        (eq :store (third color))
+                        (and (fifth color)
+                             (metal-native-object (fifth color)))))
                 colors)
                :depth-texture
                (and depth (metal-native-object (first depth)))
                :clear-depth (and depth (fourth depth))
                :depth-clear-p (and depth (eq :clear (second depth)))
-               :depth-store-p (and depth (eq :store (third depth))))))
+               :depth-store-p (and depth (eq :store (third depth)))
+               :depth-resolve-texture
+               (and depth (fifth depth)
+                    (metal-native-object (fifth depth))))))
         (unless native-encoder
           (error 'metal-gpu-error :operation :begin-render-pass
                  :reason :render-encoder-creation-failed))
@@ -2125,6 +2218,7 @@ compiler boundary of #58IDSR."
                 (make-instance
                  'metal-render-pass-encoder
                  :owner encoder :native-encoder native-encoder
+                 :sample-count sample-count
                  :label (gpu-descriptor-label descriptor))))
           (setf (metal-encoder-active-pass encoder) pass)
           pass)))))
@@ -2336,6 +2430,12 @@ compiler boundary of #58IDSR."
       (reject-metal-gpu-request command :incompatible-pipeline pipeline))
     (ensure-metal-object-device
      pipeline (metal-render-pipeline-device pipeline) device :set-pipeline)
+    (unless (= (metal-render-pipeline-sample-count pipeline)
+               (metal-render-pass-sample-count pass))
+      (reject-metal-gpu-request
+       command :incompatible-sample-count
+       (list :pipeline (metal-render-pipeline-sample-count pipeline)
+             :render-pass (metal-render-pass-sample-count pass))))
     (retain-metal-resource owner pipeline)
     (release-metal-render-pass-argument-table pass)
     (clrhash (metal-render-pass-vertex-bindings pass))

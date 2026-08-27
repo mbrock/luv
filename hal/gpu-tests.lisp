@@ -123,11 +123,13 @@
            (source
              (luv:make-texture-descriptor
               :label "probe texture" :size size :dimensions :2d
-              :format :rgba8-unorm :usage :texture-binding))
+              :format :rgba8-unorm :usage :texture-binding
+              :sample-count 1))
            (canonical (luv:create device source)))
       (ok (equal '(32 16 1) (luv::texture-descriptor-size canonical)))
       (ok (equal '(:texture-binding)
                  (luv::texture-descriptor-usage canonical)))
+      (ok (= 1 (luv::texture-descriptor-sample-count canonical)))
       (ok (eq size (luv::texture-descriptor-size source)))))
   (let* ((device (make-instance 'descriptor-probe-device))
          (native (list :native))
@@ -144,6 +146,39 @@
     (ok (equal '(20 10 1) (luv::texture-descriptor-size canonical)))
     (ok (equal '(:texture-binding :storage-binding)
                (luv::texture-descriptor-usage canonical)))))
+
+(deftest multisample-textures-are-render-only-and-use-portable-counts
+  (let ((device (make-instance 'descriptor-probe-device)))
+    (dolist (sample-count '(2 4 8))
+      (let ((canonical
+              (luv:create
+               device
+               (luv:make-texture-descriptor
+                :size '(32 16) :format :rgba8-unorm
+                :dimensions :2d :usage :render-attachment
+                :sample-count sample-count))))
+        (ok (= sample-count
+               (luv::texture-descriptor-sample-count canonical)))))
+    (dolist (sample-count '(0 3 16))
+      (ok (eq :invalid-texture-sample-count
+              (gpu-request-reason
+               (lambda ()
+                 (luv:create
+                  device
+                  (luv:make-texture-descriptor
+                   :size '(32 16) :format :rgba8-unorm
+                   :dimensions :2d :usage :render-attachment
+                   :sample-count sample-count)))))))
+    (ok (eq :invalid-multisample-texture-usage
+            (gpu-request-reason
+             (lambda ()
+               (luv:create
+                device
+                (luv:make-texture-descriptor
+                 :size '(32 16) :format :rgba8-unorm
+                 :dimensions :2d
+                 :usage '(:render-attachment :texture-binding)
+                 :sample-count 4))))))))
 
 (deftest portable-descriptor-errors-do-not-depend-on-a-backend
   (let ((device (make-instance 'descriptor-probe-device)))

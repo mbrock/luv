@@ -622,7 +622,11 @@ factories for requesting GPU-DEVICE instances."))
     :reader gpu-texture-dimensions)
    (format
     :initarg :format
-    :reader gpu-texture-format)))
+    :reader gpu-texture-format)
+   (sample-count
+    :initarg :sample-count
+    :initform 1
+    :reader gpu-texture-sample-count)))
 (defclass gpu-texture-view (gpu-object)
   ((texture
     :initarg :texture
@@ -790,7 +794,7 @@ has completed."))
   size usage)
 
 (defstruct (texture-descriptor (:include gpu-descriptor))
-  size usage dimensions format)
+  size usage dimensions format (sample-count 1))
 
 (defparameter +portable-buffer-usages+
   '(:uniform :storage :vertex :index :copy-dst))
@@ -868,16 +872,26 @@ has completed."))
     (reject-portable-gpu-descriptor
      operation descriptor :invalid-texture-dimensions
      (texture-descriptor-dimensions descriptor)))
-  (let ((canonical (copy-texture-descriptor descriptor)))
-    (setf (texture-descriptor-size canonical)
-          (canonical-texture-extent
-           (texture-descriptor-size descriptor) descriptor operation)
-          (texture-descriptor-usage canonical)
-          (canonical-gpu-usage-list
-           (texture-descriptor-usage descriptor)
-           +portable-texture-usages+ descriptor :invalid-texture-usage
-           operation))
-    canonical))
+  (let ((sample-count (texture-descriptor-sample-count descriptor)))
+    (unless (member sample-count '(1 2 4 8))
+      (reject-portable-gpu-descriptor
+       operation descriptor :invalid-texture-sample-count sample-count))
+    (let ((canonical (copy-texture-descriptor descriptor)))
+      (setf (texture-descriptor-size canonical)
+            (canonical-texture-extent
+             (texture-descriptor-size descriptor) descriptor operation)
+            (texture-descriptor-usage canonical)
+            (canonical-gpu-usage-list
+             (texture-descriptor-usage descriptor)
+             +portable-texture-usages+ descriptor :invalid-texture-usage
+             operation))
+      (when (and (> sample-count 1)
+                 (not (equal (texture-descriptor-usage canonical)
+                             '(:render-attachment))))
+        (reject-portable-gpu-descriptor
+         operation descriptor :invalid-multisample-texture-usage
+         (texture-descriptor-usage canonical)))
+      canonical)))
 
 (defmethod create :around
     ((device gpu-device) (descriptor buffer-descriptor))
@@ -974,17 +988,23 @@ linear for the sRGB formats; the transfer names their RGB-channel behavior."
 
 (defstruct (render-pipeline-descriptor (:include gpu-descriptor))
   "A render pipeline.  Each fragment target may name :BLEND
-:PREMULTIPLIED-ALPHA; omitted blending retains opaque replacement semantics."
-  layout vertex fragment (primitive '(:topology :triangle-list)) depth-stencil)
+:PREMULTIPLIED-ALPHA; omitted blending retains opaque replacement semantics.
+SAMPLE-COUNT must match every attachment in the render pass."
+  layout vertex fragment (primitive '(:topology :triangle-list)) depth-stencil
+  (sample-count 1))
 
 (defstruct (mesh-render-pipeline-descriptor (:include gpu-descriptor))
   "A task/mesh render pipeline.
 
 TASK may be NIL for a direct mesh dispatch.  MAX-MESH-WORKGROUPS states the
 largest task-to-mesh amplification admitted by one task workgroup."
-  layout task mesh fragment (max-mesh-workgroups 1) depth-stencil)
+  layout task mesh fragment (max-mesh-workgroups 1) depth-stencil
+  (sample-count 1))
 
 (defstruct (render-pass-descriptor (:include gpu-descriptor))
+  "A render pass.  Each multisampled color or depth attachment names its
+mandatory single-sample destination as :RESOLVE-VIEW; the multisample storage
+itself is discarded after resolve.  Depth resolves select sample zero."
   color-attachments depth-stencil-attachment)
 
 (defstruct (compute-pipeline-descriptor (:include gpu-descriptor))

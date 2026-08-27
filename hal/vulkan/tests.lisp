@@ -18,15 +18,19 @@
          (create-symbol 'luv.vulkan:create-color-render-pass)
          (original-create (symbol-function create-symbol))
          (native-formats '())
+         (native-sample-counts '())
          (descriptor
            (luv:make-render-pass-descriptor :label "MRT cache probe")))
     (unwind-protect
          (progn
            (setf (symbol-function create-symbol)
                  (lambda (native-device formats &key depth-format
-                                                   depth-store-op)
-                   (declare (ignore native-device depth-format depth-store-op))
+                                                   depth-store-op samples
+                                                   resolve-p)
+                   (declare (ignore native-device depth-format depth-store-op
+                                    resolve-p))
                    (push (coerce formats 'list) native-formats)
+                   (push samples native-sample-counts)
                    (list :render-pass (length native-formats))))
            (let ((first
                    (luv::vulkan-render-pass-for-format
@@ -36,12 +40,19 @@
                     device '(:rgba16-float :rg16-float) descriptor))
                  (reversed
                    (luv::vulkan-render-pass-for-format
-                    device '(:rg16-float :rgba16-float) descriptor)))
+                    device '(:rg16-float :rgba16-float) descriptor))
+                 (multisampled
+                   (luv::vulkan-render-pass-for-format
+                    device '(:rgba16-float :rg16-float) descriptor
+                    nil :discard 4 t)))
              (ok (eq first same))
              (ok (not (eq first reversed)))
-             (ok (equal '((:r16g16-sfloat :r16g16b16a16-sfloat)
+             (ok (not (eq first multisampled)))
+             (ok (equal '((:r16g16b16a16-sfloat :r16g16-sfloat)
+                          (:r16g16-sfloat :r16g16b16a16-sfloat)
                           (:r16g16b16a16-sfloat :r16g16-sfloat))
-                        native-formats))))
+                        native-formats))
+             (ok (equal '(:4 :1 :1) native-sample-counts))))
       (setf (symbol-function create-symbol) original-create))))
 
 (defclass vulkan-retirement-probe (luv::gpu-object luv::vulkan-gpu-object)
