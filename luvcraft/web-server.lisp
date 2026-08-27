@@ -1,26 +1,17 @@
 ;;;; The deliberately small HTTP and page protocol for the luvcraft web site.
 ;;;;
 ;;;; A WEB-PAGE owns one URL subtree.  Adding a page means adding an object and
-;;;; a RESPOND-TO-WEB-REQUEST method, rather than growing the socket server's
+;;;; a RESPOND-TO-WEB-REQUEST method, rather than growing the Clack adapter's
 ;;;; knowledge of gallery assets, shader URLs, or future instruments.
 
 (in-package #:luvcraft.web)
 
-(defclass web-response ()
-  ((status :initarg :status :reader web-response-status)
-   (content-type :initarg :content-type :reader web-response-content-type)
-   (body :initarg :body :reader web-response-body)))
-
-(defun make-web-response (status content-type body)
-  (make-instance 'web-response
-                 :status status :content-type content-type :body body))
-
 (defun ok-response (content-type body)
-  (make-web-response "200 OK" content-type body))
+  `(200 (:content-type ,content-type :cache-control "no-store") (,body)))
 
 (defun not-found-response ()
-  (make-web-response "404 Not Found" "text/plain; charset=utf-8"
-                     (format nil "not found~%")))
+  `(404 (:content-type "text/plain; charset=utf-8" :cache-control "no-store")
+        (,(format nil "not found~%"))))
 
 (defclass web-page ()
   ((path :initarg :path :reader web-page-path)
@@ -36,7 +27,7 @@
 
 (defgeneric respond-to-web-request (receiver path)
   (:documentation
-   "Return a WEB-RESPONSE for PATH from a web application or mounted page."))
+   "Return a Lack response for PATH from a web application or mounted page."))
 
 (defmethod respond-to-web-request ((page web-page) path)
   (declare (ignore path))
@@ -92,91 +83,24 @@
                  return (respond-to-web-request page relative-path)
                finally (return (not-found-response))))))
 
-(defun response-octet-length (string)
-  (length (sb-ext:string-to-octets string :external-format :utf-8)))
-
-(defun write-http-response (stream response)
-  (format stream "HTTP/1.1 ~A~C~C"
-          (web-response-status response) #\Return #\Linefeed)
-  (format stream "Content-Type: ~A~C~C"
-          (web-response-content-type response) #\Return #\Linefeed)
-  (format stream "Content-Length: ~D~C~C"
-          (response-octet-length (web-response-body response))
-          #\Return #\Linefeed)
-  (format stream "Cache-Control: no-store~C~C" #\Return #\Linefeed)
-  (format stream "Connection: close~C~C~C~C" #\Return #\Linefeed
-          #\Return #\Linefeed)
-  (write-string (web-response-body response) stream)
-  (finish-output stream))
-
-(defun bounded-read-line (stream limit)
-  (let ((line (read-line stream nil nil)))
-    (when (and line (> (length line) limit))
-      (error "HTTP line exceeds ~D characters." limit))
-    line))
-
-(defun discard-http-headers (stream)
-  (loop repeat 64
-        for line = (bounded-read-line stream 8192)
-        until (or (null line) (string= line "") (string= line (string #\Return)))
-        finally (unless (or (null line) (string= line "")
-                            (string= line (string #\Return)))
-                  (error "Too many HTTP headers."))))
-
-(defun request-path (request-line)
-  (let ((first-space (and request-line (position #\Space request-line)))
-        (second-space nil))
-    (when first-space
-      (setf second-space (position #\Space request-line :start (1+ first-space))))
-    (unless (and first-space second-space
-                 (string= "GET" request-line :end2 first-space))
-      (error "Only a well-formed GET request is supported."))
-    (let* ((target (subseq request-line (1+ first-space) second-space))
-           (query (position #\? target)))
-      (subseq target 0 query))))
-
-(defun serve-web-request (client application)
-  (let ((stream (sb-bsd-sockets:socket-make-stream
-                 client :input t :output t :element-type 'character
-                 :buffering :full :external-format :utf-8)))
-    (unwind-protect
-         (handler-case
-             (let* ((line (bounded-read-line stream 8192))
-                    (path (request-path line)))
-               (discard-http-headers stream)
-               (format t "GET ~A~%" path)
-               (write-http-response
-                stream (respond-to-web-request application path)))
-           (error (condition)
-             (format *error-output* "luvcraft web request failed: ~A~%" condition)
-             (ignore-errors
-              (write-http-response
-               stream
-               (make-web-response "400 Bad Request"
-                                  "text/plain; charset=utf-8"
-                                  (format nil "bad request~%"))))))
-      (ignore-errors (close stream))
-      (ignore-errors (sb-bsd-sockets:socket-close client)))))
-
-(defun ipv4-address (host)
-  (sb-bsd-sockets:host-ent-address
-   (sb-bsd-sockets:get-host-by-name host)))
+(defun clack-application (application)
+  (lambda (environment)
+    (let ((method (getf environment :request-method))
+          (path (getf environment :path-info)))
+      (format t "~A ~A~%" method path)
+      (if (eq method :get)
+          (respond-to-web-request application path)
+          `(405 (:content-type "text/plain; charset=utf-8"
+                 :allow "GET"
+                 :cache-control "no-store")
+                (,(format nil "method not allowed~%")))))))
 
 (defun serve-web-application (application &key (host "127.0.0.1") (port 8765))
-  "Serve APPLICATION on a small blocking HTTP/1.1 loop until interrupted."
-  (let ((socket (make-instance 'sb-bsd-sockets:inet-socket
-                               :type :stream :protocol :tcp)))
-    (unwind-protect
-         (progn
-           (setf (sb-bsd-sockets:sockopt-reuse-address socket) t)
-           (sb-bsd-sockets:socket-bind socket (ipv4-address host) port)
-           (sb-bsd-sockets:socket-listen socket 16)
-           (format t "luvcraft web: http://~A:~D/~%" host port)
-           (finish-output)
-           (handler-case
-               (loop
-                 for client = (sb-bsd-sockets:socket-accept socket)
-                 do (serve-web-request client application))
-             (sb-sys:interactive-interrupt ()
-               (format t "Stopping luvcraft web.~%"))))
-      (ignore-errors (sb-bsd-sockets:socket-close socket)))))
+  "Serve APPLICATION with Clack and Woo until interrupted."
+  (clack:clackup (clack-application application)
+                 :server :woo
+                 :address host
+                 :port port
+                 :debug nil
+                 :use-thread nil
+                 :use-default-middlewares nil))

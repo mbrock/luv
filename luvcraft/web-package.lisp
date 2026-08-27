@@ -2,11 +2,7 @@
   (:use #:cl)
   (:local-nicknames (#:shader #:luv.shader)
                     (#:wgsl #:luv.wgsl))
-  (:export #:web-response
-           #:web-response-status
-           #:web-response-content-type
-           #:web-response-body
-           #:web-page
+  (:export #:web-page
            #:web-page-path
            #:web-page-label
            #:web-page-description

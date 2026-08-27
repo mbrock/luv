@@ -119,8 +119,8 @@
   :description "The luvcraft web application and its WebGPU agent-body page."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luvcraft/agent-bodies" "luv/wgsl" "cl-json" "uiop"
-               (:require #:sb-bsd-sockets))
+  :depends-on ("luvcraft/agent-bodies" "luv/wgsl" "cl-json" "clack"
+               "clack-handler-woo" "uiop")
   :serial t
   :components ((:file "luvcraft/web-package")
                (:file "luvcraft/web-server")

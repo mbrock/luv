@@ -271,6 +271,8 @@
               lispPackages.cffi-libffi
               lispPackages.cl-base64
               lispPackages.cl-json
+              lispPackages.clack
+              lispPackages.clack-handler-woo
               lispPackages.cl-fad
               lispPackages.cl-who
               lispPackages.closer-mop

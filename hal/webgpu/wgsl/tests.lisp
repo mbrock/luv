@@ -115,55 +115,52 @@
                      application "/bodies/body/gnome/fragment.wgsl"))
                   (missing
                     (luvcraft.web:respond-to-web-request application "/nope")))
-             (true (string= "200 OK"
-                            (luvcraft.web:web-response-status index)))
+             (true (= 200 (first index)))
              (true (search "href=\"/bodies/\""
-                           (luvcraft.web:web-response-body index)))
+                           (first (third index))))
              (true (search "href=\"/showcase/\""
-                           (luvcraft.web:web-response-body index)))
-             (true (string= "200 OK"
-                            (luvcraft.web:web-response-status gallery)))
+                           (first (third index))))
+             (true (= 200 (first gallery)))
              (true (search "/bodies/gallery.js"
-                           (luvcraft.web:web-response-body gallery)))
+                           (first (third gallery))))
              (true (search
                     "\"vertexUrl\":\"\\/bodies\\/body\\/gnome\\/vertex.wgsl\""
-                    (luvcraft.web:web-response-body catalog)))
+                    (first (third catalog))))
              (true (search "const FRAME_INTERVAL = 1000 / 60;"
-                           (luvcraft.web:web-response-body gallery-js)))
+                           (first (third gallery-js))))
              (true (search "const RENDER_SCALE = 1;"
-                           (luvcraft.web:web-response-body gallery-js)))
+                           (first (third gallery-js))))
              (true (search "if (!cameraBufferDirty) return;"
-                           (luvcraft.web:web-response-body gallery-js)))
+                           (first (third gallery-js))))
              (true (search "new URLSearchParams(location.hash.slice(1))"
-                           (luvcraft.web:web-response-body gallery-js)))
+                           (first (third gallery-js))))
              (true (search "parameters.set(knob.name"
-                           (luvcraft.web:web-response-body gallery-js)))
+                           (first (third gallery-js))))
              (true (search
                     "history.replaceState(null, \"\", `#${parameters}`)"
-                    (luvcraft.web:web-response-body gallery-js)))
+                    (first (third gallery-js))))
              (true (search "@fragment"
-                           (luvcraft.web:web-response-body shader)))
+                           (first (third shader))))
              (true (search "/showcase/media/Y7X7WK-proposal-still.png"
-                           (luvcraft.web:web-response-body showcase)))
+                           (first (third showcase))))
              (true (search "src=\"/showcase/media/Y7X7WK-proposal-still-768w.webp\""
-                           (luvcraft.web:web-response-body showcase)))
+                           (first (third showcase))))
              (true (search "Y7X7WK-proposal-still-480w.webp 480w, /showcase/media/Y7X7WK-proposal-still-768w.webp 768w"
-                           (luvcraft.web:web-response-body showcase)))
+                           (first (third showcase))))
              (true (search "sizes=\"(max-width: 59.5rem)"
-                           (luvcraft.web:web-response-body showcase)))
+                           (first (third showcase))))
              (true (search "title=\"Open full-resolution image\""
-                           (luvcraft.web:web-response-body showcase)))
+                           (first (third showcase))))
              (true (search "/showcase/media/Y7X7WK-proposal-orbit.mp4"
-                           (luvcraft.web:web-response-body showcase)))
+                           (first (third showcase))))
              (true (search "class=portrait><div class=\"media portrait\">"
-                           (luvcraft.web:web-response-body showcase)))
+                           (first (third showcase))))
              (true (search "preload=none poster=\"/showcase/media/Y7X7WK-proposal-orbit-poster-480w.webp\""
-                           (luvcraft.web:web-response-body showcase)))
+                           (first (third showcase))))
              (true (search ".media.portrait img,.media.portrait video{object-fit:contain}"
-                           (luvcraft.web:web-response-body showcase)))
+                           (first (third showcase))))
              (true (search "abc123def456"
-                           (luvcraft.web:web-response-body showcase)))
-             (true (string= "404 Not Found"
-                            (luvcraft.web:web-response-status missing)))))
+                           (first (third showcase))))
+             (true (= 404 (first missing)))))
       (uiop:delete-directory-tree directory :validate t
                                             :if-does-not-exist :ignore))))
