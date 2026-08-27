@@ -213,6 +213,20 @@ Nothing here refers to anything.
       (uiop:delete-directory-tree directory :validate t
                                             :if-does-not-exist :ignore))))
 
+(define-test dynamic-site-has-a-readiness-endpoint
+  (let* ((site (wiki:make-site (list (page *page* "index"))))
+         (application (wiki::wiki-clack-application site))
+         (get-response
+           (funcall application
+                    '(:request-method :get :path-info "/healthz")))
+         (head-response
+           (funcall application
+                    '(:request-method :head :path-info "/healthz"))))
+    (true (= 200 (first get-response)))
+    (true (equal '("ok\n") (third get-response)))
+    (true (= 200 (first head-response)))
+    (true (null (third head-response)))))
+
 (define-test parenscript-async-and-await
   (let ((javascript
           (ps:ps*

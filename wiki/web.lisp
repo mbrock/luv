@@ -141,13 +141,21 @@ Redefining NAME replaces its provider without disturbing provider order."
               ,(if (pathnamep body) body (list body))))
       `(404 (:content-type "text/plain; charset=utf-8") ("not found\n"))))
 
+(defun website-response (path site)
+  "Answer PATH, including the process-level readiness endpoint."
+  (if (string= path "/healthz")
+      `(200 (:content-type "text/plain; charset=utf-8"
+             :cache-control "no-store")
+            ("ok\n"))
+      (resource-response (find-resource path site))))
+
 (defun wiki-clack-application (site)
   (lambda (environment)
     (let ((method (getf environment :request-method))
           (path (getf environment :path-info)))
       (format t "~A ~A~%" method path)
       (if (member method '(:get :head))
-          (let ((response (resource-response (find-resource path site))))
+          (let ((response (website-response path site)))
             (if (eq method :head)
                 (list (first response) (second response) '())
                 response))
