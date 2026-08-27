@@ -239,6 +239,18 @@ same mountain-sanctuary fixture, planning fell from 5.120 to 0.620 ms/chunk and
 the warm aggregate from 11.556 to 6.445 ms/chunk at the same 2.110 MiB and
 156,244-triangle census.
 
+* DONE The static star rows become a browsable atlas
+:PROPERTIES:
+:ID: APG013
+:END:
+
+[[file:luft-star-atlas.html][The 256-star atlas]] is a built-in wiki view, like Work.  It evaluates
+[[lisp:luft:star-triangles]] while the site is built, then presents those actual face,
+band, and junction triangles as a selectable isometric grid.  The wiki owns
+the page frame and stylesheet, Spinneret writes the special body, and
+ParenScript writes the browser interaction; there is no second mesher,
+handwritten JavaScript, JSON bridge, or parallel page design.
+
 * The contracts which optimization must not hide
 :PROPERTIES:
 :ID: L38W75

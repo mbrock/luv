@@ -27,6 +27,29 @@
   :depends-on ("luft")
   :components ((:file "luft/tests")))
 
+(defsystem "luft/atlas"
+  :description "A static browser atlas of LUFT's 256 width-one occupancy stars."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luft" "luv-wiki" "spinneret" "parenscript")
+  :serial t
+  :components ((:file "luft/atlas-package")
+               (:file "luft/atlas-style")
+               (:file "luft/atlas-script")
+               (:file "luft/atlas"))
+  :in-order-to ((test-op (test-op "luft/atlas/test"))))
+
+(defsystem "luft/atlas/test"
+  :description "Executable claims for the static width-one star atlas."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luft/atlas" "luv/test-support")
+  :components ((:file "luft/atlas-tests"))
+  :perform (test-op (operation component)
+             (declare (ignore operation component))
+             (uiop:symbol-call '#:luv.test-support '#:test-package
+                               '#:luft.atlas.tests)))
+
 (defsystem "luft/test"
   :description "Executable claims for LUFT topology and manifold-sheet meshing."
   :version "0.0.1"

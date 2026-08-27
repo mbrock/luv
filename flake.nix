@@ -279,6 +279,7 @@
               lispPackages.flexi-streams
               lispPackages.lorem-ipsum
               lispPackages.named-readtables
+              lispPackages.parenscript
               parachutePackage
               lispPackages.spinneret
               lispPackages.zpng

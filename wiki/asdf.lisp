@@ -245,6 +245,8 @@ source file."
                    (merge-pathnames "pages.html" directory)
                    (merge-pathnames "work.html" directory)
                    (merge-pathnames "source.html" directory)
+                   (merge-pathnames "luft-star-atlas.html" directory)
+                   (merge-pathnames "luft-star-atlas.js" directory)
                    (loop for pathname in (code-source-files)
                          collect (merge-pathnames
                                   (concatenate 'string "source/"
@@ -264,6 +266,7 @@ source file."
                        (lambda () (render-work-page site)))
       (write-html-file (merge-pathnames "source.html" directory)
                        (lambda () (render-source-index site)))
+      (uiop:symbol-call '#:luft.atlas '#:write-star-atlas site directory)
       (dolist (file (site-source-files site))
         (write-html-file (merge-pathnames (source-page-name file) directory)
                          (lambda () (render-source-page file)))))
