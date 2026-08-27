@@ -12,6 +12,9 @@ needed, and the shape of the atelier.  Its temporal frame graph now has a page
 of its own: [[file:temporal-antialiasing.org][Temporal reconstruction in the Luft atelier]].
 The first fireball has also opened a narrower visual study:
 [[file:luft-spell-effects.org][Luminous spell effects in the Luft atelier]].
+The relation to luvcraft's semantic substrate — quantities, columnar
+records, finite domains, and frontier programs — is read in
+[[file:luft-substrate.org][Luft meets the luvcraft substrate]].
 
 * A site is a lattice anchor, an extent mask, and a polarity
 :PROPERTIES:

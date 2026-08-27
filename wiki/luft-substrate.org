@@ -1,0 +1,309 @@
+#+title: Luft meets the luvcraft substrate
+#+startup: overview
+
+Luvcraft grew a semantic substrate: dimensional quantities checked through
+one arithmetic medium with CPU and GPU realizations, columnar storage bound
+to finite domains, and frontier programs compiled from declarations.  Luft
+grew a topological substrate: packed sites, normalized chains, integer
+manifold-sheet meshes, and a sparse colored light fixpoint.  The two were
+deliberately developed apart, and that separation did its job — neither
+paradigm distorted the other while it was being discovered.  This page reads
+each side against the other and begins asking what Luft should adopt, in
+which order, and with what evidence.
+
+* Two substrates grew toward each other
+:PROPERTIES:
+:ID: 3LS8TE
+:END:
+
+The luvcraft pages record a progression: quantities and units as inspectable
+semantics erased before hot loops (#9P358P, #FTQEQD), one arithmetic language
+with the shader compiler as merely its first client (#5N6SOQ), columnar
+layout separated from materialization and policy (#Y0TPND), fixed
+materializations bound to finite domains (#LC5ULQ), and finally frontier
+programs whose transfer laws are quantity-checked arithmetic compiled into
+closed scalar loops (#53Q1II, #T2G95K).
+
+Luft's pages record a different progression: fixnum sites owning topology
+(#KE4P5F), surfaces as boundaries of 3-chains (#9HLYEE), storage buffers and
+bit fields entering the shader language so the GPU reads packed sites
+directly (#AGVXGM, #HFX2LI), and an RGB4 light field solved by a packed
+brightest-first frontier (#MMH4S2 uses it for spells).
+
+The claim of this page is that these are not two paradigms but one paradigm
+discovered twice at different altitudes.  Luvcraft found the /names/ —
+domain, materialization, field, layout, program, family — and built checked
+machinery for them.  Luft found the /instances/ — harder, more exact ones
+than luvcraft ever had — while naming almost none of them.  Adoption
+therefore does not mean importing a foreign framework; it means recognizing
+convergent structure and deciding where the named, checked form pays for
+itself.
+
+* The substrate in four layers, and where each lives
+:PROPERTIES:
+:ID: IPA7ON
+:END:
+
+What "the luvcraft systems" actually are, by ownership:
+
+1. /Quantity algebra and the arithmetic language/ — =luv/arithmetic=,
+   =luv/arithmetic/language=, =luv/arithmetic/lisp=.  Dimensions, semantic
+   kinds, units with admissibility, point/absolute/difference character,
+   heterogeneous quantity layouts, semantic maps; checked definitions
+   lowered to ordinary Lisp functions and to SPIR-V/MSL.  Backend-neutral
+   already; nothing luvcraft-specific remains in it.
+2. /Columnar records/ — =luv.arithmetic.records=
+   ([[file:../arithmetic/records/columnar.lisp][=arithmetic/records/columnar.lisp=]]).  =define-columnar-buffer= for
+   dynamic ordinal domains and =define-columnar-materialization= for fixed
+   finite domains, both retaining quantity-aware row declarations while
+   generating specialized lanes and raw borrow macros (#327W2B, #LDP5UR).
+   Also neutral.
+3. /Finite-domain vocabulary/ — =luv.domains=.  Small: cardinality plus
+   identity/keyword vocabulary domains.  Neutral.
+4. /The frontier language/ — =luvcraft.frontier=.  Program definitions,
+   families (#FE0O5R), bindings (#716UN6), and the compiler to closed
+   scalar loops.  This layer is /not/ neutral: its package uses
+   =luvcraft.world=, and its neighborhood and window machinery are
+   luvcraft's chunk vocabulary.  Its semantic surface is portable; its
+   execution plans are not yet.
+
+The ownership map matters because Luft's core system deliberately depends
+only on =sb-simd=, while =luft/renderer= already depends on =luv=.  Layers 1–3
+are pure Common Lisp and could enter Luft's core as dependencies; layer 4
+would first need either extraction or a second realization.
+
+* Luft already speaks the vocabulary without the names
+:PROPERTIES:
+:ID: SZC1FC
+:END:
+
+Reading Luft's code with luvcraft's glossary open is striking.
+
+- [[lisp:luft:make-world-domain]] with [[lisp:luft:make-site]] and
+  [[lisp:luft:checked-site]] is a finite domain in exactly the #B8R3KF sense:
+  cardinality, an index type, checked index/offset conversion — the site
+  packing /is/ the offset map, chosen so numeric order is chunk-contiguous.
+  The =OUTSIDE-DOMAIN= and =MISSING-CHUNK= conditions with their
+  =TREAT-AS-AIR= / =TREAT-AS-SOLID= / =USE-CHUNK= restarts are #H2W9DJ's
+  boundary-environment separation, realized through the condition system:
+  the domain owns local meaning, the caller's handler owns what lies beyond.
+- [[lisp:luft:solve-voxel-light]] is a hand-written frontier program of the
+  =:monotone-max-fixpoint= family: sixteen brightest-first buckets, admission
+  only on a join that strictly improves, stale-pop detection, and retained
+  =visits= / =pushes= / =stale-pops= counters that mirror luvcraft's frontier
+  execution evidence almost line for line.  Compare its =admit= /
+  =drain-neighbor= locals with the emitted drain of #PJY6E1.
+- The mesher's instance, template, and light streams are hand-rolled
+  columnar buffers: parallel adjustable =(unsigned-byte 32)= vectors with
+  shared logical length, appended in lockstep, borrowed raw by the GPU
+  upload.  That is #Y0TPND's storage contract minus the checked row meaning
+  and minus the generated growth/retention discipline.
+- The render population already uses =luv.domains= identity vocabularies:
+  =*surface-assembly-vocabulary*= supplies members, offsets, and a revision
+  that the population snapshots at its ownership boundary.  The stocks are
+  a vocabulary domain in production today — the palette-domain
+  materialization of #1RF48O is one step away.
+- [[lisp:luft.render::pack-torch-flame-frame]] and its validator are a
+  hand-written represented-value product: fixed lanes, finite-float checks,
+  pack/unpack pairs — what a declared quantity product (#F8U2LA) generates
+  and checks mechanically.
+
+None of this is coincidence.  Both codebases were pushed by the same
+pressures — exactness, inspectability, allocation-free hot loops — toward
+the same shapes.  Luft's versions are leaner and more exact; luvcraft's are
+named, checked, and reusable.
+
+* The differences are design input, not friction
+:PROPERTIES:
+:ID: ASGG7Q
+:END:
+
+Four places where Luft is not a fourth client waiting to be plugged in, but
+evidence that the substrate itself must grow.
+
+/RGB4 light is a lattice, not a scalar./  Luvcraft's monotone family relaxes
+one scalar field; its join is =max= and its priority is the value.  Luft's
+join is [[lisp:luft:voxel-light-componentwise-max]] — a product-lattice join —
+and its priority is a projection, the brightest lane.  The solver's own
+comment records the consequence: an RGB join can retain a bright lane while
+improving a dim one, so a site can be re-admitted /brighter/ than the bucket
+currently draining, and =current-priority= must be dynamic rather than a
+one-way scan.  That is a family law, not an implementation detail.  Adopting
+the frontier language here means generalizing =:monotone-max-fixpoint= to a
+declared join operation plus a priority projection, with Luft's dynamic
+bucket behavior derived from the declaration.  The existing solver becomes
+the differential oracle, exactly as luvcraft's legacy solver did.
+
+/Execution plans differ; the semantic layer transfers./  Luft's hot
+representations are Z-fiber occupancy words and sparse 8³ light pages, not
+luvcraft's chunk windows.  #53Q1II already argues that layout is one part of
+an execution plan and that the compiler may select different physical
+realizations for the same program.  Luft is the first out-of-luvcraft test
+of that claim — the test of whether the frontier language deserves a
+neutral home or was secretly luvcraft's private idiom all along.
+
+/The dependency posture is a real decision./  Quantity work in shaders costs
+Luft nothing: =luft/renderer= already depends on =luv=.  Field definitions on
+the light field and columnar materializations in the mesher would add
+=luv/arithmetic= and =luv/domains= to Luft's core — pure-CL, slim-profile
+compatible, but a deliberate departure from "depends on sb-simd only" that
+should be made consciously, not absorbed.
+
+/The mesher is not a frontier program./  It is a deterministic sweep: derive
+chunk facts, radix-cancel sheet edges, emit sorted streams.  Forcing it into
+frontier vocabulary would be the callback-protocol mistake #DURBKN warns
+against.  Where frontier shapes may genuinely appear later is incremental
+mesh invalidation and any gameplay reachability/aftermath propagation — the
+#ZEENY3 dynamics, not the emission sweep.
+
+* The shader lanes are an unlabeled ledger again
+:PROPERTIES:
+:ID: T5IRYG
+:END:
+
+Luvcraft's #P6DF7B recorded the motivating condition for quantity layouts: a
+frame uniform whose vec4 lanes carried direction, proportion, radiance,
+exposure, and biases distinguished only by comments.  Luft has rebuilt that
+condition at larger scale.  Its scene uniform is twenty-seven anonymous
+=vec4= members — =render-parameters=, =temporal-parameters=,
+=character-parameters=, =fireball-parameters=, and their previous-frame
+twins — and the member list is repeated textually /fourteen times/ across
+the shader definitions of =luft/render/shaders.lisp= and
+=luft/render/flame-shaders.lisp=, with no shared declaration site at all.  Meanwhile the fragment ladder runs genuine radiometry: HDR
+radiance, Rec. 709 luminance, log-luminance exposure metering, tone mapping,
+paper grading — every lane of #T1GYOH's table, every one a bare float.
+
+This is the adoption with the highest immediate value and the lowest risk,
+because luvcraft has already proven the migration property that matters:
+declaring quantities on shader interfaces and uniform members changes no
+generated code.  Byte-identical SPIR-V was the acceptance test through the
+whole luvcraft migration, and it found real bugs anyway — the sky-colour
+character mismatch of #N6S2CX, the clip-origin confusion of #9ZK7Q7.
+
+The spell-effects work makes this concrete rather than hygienic.  The effect
+frame of #TM41II is a new packed product about to be born; the exposure
+policies of #POPM2I are decisions /about/ specific HDR lanes; and #K8MOXW
+asks the effect frame to carry a composition class.  A frame that is born as
+a declared quantity product — HDR radiance lanes named as radiance, ages and
+lifetimes as durations, seeds as categorical words, spine endpoints as
+world-position points with their previous-frame twins — gets its
+=validate-torch-flame-frame= for free and gives the CPU writer and shader
+reader one checked contract, which is precisely #TZHN8G's promise that both
+sides of the bridge are Lisp.
+
+* Light and stocks are fields over finite domains
+:PROPERTIES:
+:ID: GSPSG4
+:END:
+
+Two readings of existing Luft code through #FKAV5Y's identity /
+meaning / representation split.
+
+The voxel light field: its identity is "local colored light"; its value
+meaning is RGB4, three 0..15 non-negative absolutes packed in twelve bits;
+its representations are already plural — sparse u16 pages on the CPU, a
+u32-packed two-word sidecar per instance in the render population, a
+=uvec2= storage buffer decoded with =ldb= in the vertex shader, normalized
+floats after decode.  Nothing ties these four representations to one
+declared meaning today; a field definition would.  The open semantic
+question #WEE8P5 raised for luvcraft — is a light level an encoding of a
+proportion, or a meaningful scaled unit with "lose one per step" as its
+law? — lands harder in Luft, where the mesh-point sampler interpolates in
+level space and rounds.  The first field experiment should force that
+decision and record it.
+
+The material side: =solve-voxel-light= currently takes a hash table from
+cell sites to material indices plus an opacity vector — a row-shaped probe
+inside the hottest loop, the #J7A2KD smell.  The named shape exists and is
+half-adopted already: =*surface-assembly-vocabulary*= is an identity
+vocabulary domain, and #1RF48O's palette-domain materialization — u8
+opacity and emission lanes over the vocabulary, CLOS dispatch once per
+member, dense lookup in the loop — is exactly what the solver's
+=opacity-table= wants to grow into, with the difference that Luft's would
+be checked against the vocabulary's revision.  Occupancy and material
+should eventually be sibling materializations over the same cell domain
+(#A6X2RT, #HAUW7L), which is also what a future absorbing-media
+integration (#UYECJA) will want to sample.
+
+* What compiled frontier programs would buy Luft
+:PROPERTIES:
+:ID: CRO1IF
+:END:
+
+The near-term candidates, in order of evidence strength:
+
+1. /Voxel light addition./  The program declaration writes itself — fields
+   =(light :relaxed :join componentwise-max :priority brightest-lane)= and
+   =opacity=, transfer as attenuation through the checked palette lanes —
+   and the current solver is a ready-made oracle with retained counters for
+   exact A/B comparison.  The generalized family of #ASGG7Q is the price;
+   the reward is that spell aftermath (#MMH4S2's persistent handoff)
+   arrives as =admit= / =relate= entries on a realization instead of ad hoc
+   solver variants.
+2. /Incremental relight./  Luft currently re-solves from scratch per scene.
+   The moment gameplay edits light-bearing cells at interactive rates —
+   burning cells, placed crystals, the #YRDFFH aftermath — Luft needs
+   exactly the =:invalidation= family with a companion frontier (#ZEENY3),
+   and writing it by hand twice would be the signal that the language
+   should have been shared.
+3. /Discovery clients./  Room detection for the indoors work (#75OOSW
+   option three) is a textbook =:discover-once= program over cell
+   adjacency with a roofed-predicate admission — the same shape as
+   terminal walls (#55IRJO).
+
+The evidence standard carries over unchanged: exact field and visit
+equality against the retained oracle, allocation ceilings, Tracy zones at
+the same semantic boundaries.  Luft's determinism culture makes this easier,
+not harder.
+
+* What this page does not decide
+:PROPERTIES:
+:ID: RI26G7
+:END:
+
+- Whether the frontier language moves to a neutral =luv/frontiers= home with
+  domain and neighborhood protocols, or Luft grows a sibling realization
+  and the extraction happens on the third client.  The smallest honest
+  extraction is not yet scoped.
+- Whether Luft's core accepts =luv/arithmetic= and =luv/domains= as
+  dependencies, or the field and columnar adoptions stay renderer-side
+  until the core earns them.
+- Whether RGB4 light is one lattice-valued field or three scalar fields
+  under one product join — the solver's dynamic-priority behavior argues
+  for the lattice reading, but the family design should decide with both
+  candidates written down.
+- The level-versus-proportion semantics of a light step (#WEE8P5's open
+  question, Luft edition).
+- Whether mesh instance streams migrate to =define-columnar-buffer= or the
+  substrate first grows the compaction vocabulary #34G2K8 already names —
+  the mesher's streams never remove rows, so it may be the easier client.
+
+* NEXT Declare the Luft frame and effect-frame lanes
+:PROPERTIES:
+:ID: S1IABD
+:END:
+
+/Intent./  Adopt the quantity paradigm where it costs no dependency and no
+codegen: give Luft's scene uniform one shared, quantity-declared member
+list, declare the torch-flame frame (and the spell-effect frame of #TM41II
+when it lands) as checked represented-value products, and name the HDR
+radiance, luminance, and exposure lanes through the presentation ladder.
+Categorical words — seeds, template ids, packed site words — stay
+deliberately unannotated per #J4V8QM.
+
+/Evidence./  The member list is repeated fourteen times today with no
+shared owner; luvcraft's migration (#9P358P, #S00PRF, #9ZK7Q7) proved
+byte-identical SPIR-V throughout while surfacing real character and origin
+mistakes; =validate-torch-flame-frame= hand-implements what declared
+products generate; and the spell-effects experiment is about to multiply
+exactly these lanes.
+
+/Done when./  One declaration site owns the scene uniform's members with
+their quantities and layouts; every Luft shader splices it; the torch-flame
+frame is a declared product whose validator is derived rather than
+hand-written; at least the radiance→luminance→exposure→tonemap chain
+carries named quantities through checked arithmetic; all production Luft
+SPIR-V modules are byte-identical before and after (any intentional
+divergence is its own recorded change); and the migration's list of
+surprised lanes — mislabeled, mischaracterized, or genuinely ambiguous —
+is recorded on this page as the analogue of luvcraft's audit findings.
