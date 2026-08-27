@@ -13,17 +13,19 @@
                  items)))
 
 (defun star-atlas-data-form ()
-  "A ParenScript array literal containing the production geometry of 256 stars."
+  "A ParenScript array literal containing owned and local geometry of 256 stars."
   `(array
     ,@(loop for mask below 256
-            for geometry = (luft:star-triangles mask)
+            for owned = (luft:star-triangles mask)
+            for surface = (luft:star-local-surface-triangles mask)
             collect `(create :mask ,mask
-                             :faces ,(parenscript-array-form
-                                      (getf geometry :faces))
-                             :bands ,(parenscript-array-form
-                                      (getf geometry :bands))
-                             :junctions ,(parenscript-array-form
-                                          (getf geometry :junctions))))))
+                             :owned ,(star-geometry-data-form owned)
+                             :surface ,(star-geometry-data-form surface)))))
+
+(defun star-geometry-data-form (geometry)
+  `(create :faces ,(parenscript-array-form (getf geometry :faces))
+           :bands ,(parenscript-array-form (getf geometry :bands))
+           :junctions ,(parenscript-array-form (getf geometry :junctions))))
 
 (defun star-atlas-javascript ()
   (ps:ps*
@@ -39,6 +41,7 @@
     (defvar show-faces true)
     (defvar show-bands true)
     (defvar show-junctions true)
+    (defvar view-mode "surface")
 
     (defun element (id)
       ((@ document get-element-by-id) id))
@@ -119,13 +122,30 @@
                                   "#79908a" 0.075 "#647873")))))
         polygons))
 
-    (defun triangle-polygons (triangles width height scale color)
+    (defun triangle-polygons (triangles width height scale color alpha stroke)
       (let ((polygons (array)))
         (dolist (triangle triangles)
           ((@ polygons push)
            (projected-polygon triangle width height scale
-                              color 0.88 "#35413f")))
+                              color alpha stroke)))
         polygons))
+
+    (defun add-geometry-polygons (mesh geometry width height scale alpha stroke)
+      (when show-faces
+        (dolist (polygon
+                  (triangle-polygons (@ geometry faces) width height scale
+                                     "#2d8fbd" alpha stroke))
+          ((@ mesh push) polygon)))
+      (when show-bands
+        (dolist (polygon
+                  (triangle-polygons (@ geometry bands) width height scale
+                                     "#e6aa35" alpha stroke))
+          ((@ mesh push) polygon)))
+      (when show-junctions
+        (dolist (polygon
+                  (triangle-polygons (@ geometry junctions) width height scale
+                                     "#db6555" alpha stroke))
+          ((@ mesh push) polygon))))
 
     (defun draw-polygon (context polygon)
       (let ((points (@ polygon points)))
@@ -183,7 +203,7 @@
           ((@ context set-transform) ratio 0 0 ratio 0 0)
           (array context width height))))
 
-    (defun draw-star (canvas star detailed-p)
+    (defun draw-star (canvas star geometry detailed-p)
       (let* ((prepared (canvas-context canvas))
              (context (aref prepared 0))
              (width (aref prepared 1))
@@ -199,21 +219,11 @@
          (lambda (left right) (- (@ left depth) (@ right depth))))
         (dolist (polygon occupancy)
           (draw-polygon context polygon))
-        (when show-faces
-          (dolist (polygon
-                    (triangle-polygons (@ star faces) width height scale
-                                       "#2d8fbd"))
-            ((@ mesh push) polygon)))
-        (when show-bands
-          (dolist (polygon
-                    (triangle-polygons (@ star bands) width height scale
-                                       "#e6aa35"))
-            ((@ mesh push) polygon)))
-        (when show-junctions
-          (dolist (polygon
-                    (triangle-polygons (@ star junctions) width height scale
-                                       "#db6555"))
-            ((@ mesh push) polygon)))
+        (when (and detailed-p (= view-mode "owned"))
+          (add-geometry-polygons mesh (@ star surface) width height scale
+                                 0.14 "#53615e"))
+        (add-geometry-polygons mesh geometry width height scale
+                               0.88 "#35413f")
         ((@ mesh sort)
          (lambda (left right) (- (@ left depth) (@ right depth))))
         (dolist (polygon mesh)
@@ -235,7 +245,7 @@
          (lambda (card)
            (let ((mask (parse-int (@ card dataset mask) 10)))
              (draw-star ((@ card query-selector) "canvas")
-                        (star-at mask) false))))))
+                        (star-at mask) (@ (star-at mask) surface) false))))))
 
     (defun set-text (id value)
       (setf (@ (element id) text-content) value))
@@ -257,24 +267,37 @@
                                           (occupied-p mask sample)))))))
 
     (defun render-selected ()
-      (let ((star (star-at selected-mask)))
+      (let* ((star (star-at selected-mask))
+             (geometry (if (= view-mode "owned")
+                           (@ star owned)
+                           (@ star surface))))
         (set-text "selected-mask" (hexadecimal-label selected-mask))
         (set-text "selected-bits" (bit-label selected-mask))
-        (set-text "face-count" (@ (@ star faces) length))
-        (set-text "band-count" (@ (@ star bands) length))
-        (set-text "junction-count" (@ (@ star junctions) length))
+        (set-text "selected-view"
+                  (if (= view-mode "owned")
+                      "Owned orientation"
+                      "Whole local patch"))
+        (set-text "view-explanation"
+                  (if (= view-mode "owned")
+                      "Bright triangles belong to this orientation; the whole patch remains faintly visible."
+                      "Every face and band touching the center, with ownership forgotten."))
+        (set-text "face-count" (@ (@ geometry faces) length))
+        (set-text "band-count" (@ (@ geometry bands) length))
+        (set-text "junction-count" (@ (@ geometry junctions) length))
         (render-occupancy selected-mask)
         (render-selected-family)
-        (draw-star (element "selected-canvas") star true)))
+        (draw-star (element "selected-canvas") star geometry true)))
 
     (defun render-selected-family ()
       (let ((choices ((@ document query-selector-all) ".star-choice"))
             (selected-class -1))
         ((@ choices for-each)
          (lambda (choice)
-           (let ((choice-mask (parse-int (@ choice dataset mask) 10)))
+           (let ((choice-mask (parse-int (@ choice dataset mask) 10))
+                 (choice-view (@ choice dataset view)))
              ((@ choice class-list toggle)
-              "selected" (= choice-mask selected-mask))
+              "selected" (and (= choice-mask selected-mask)
+                              (= choice-view view-mode)))
              (when (= choice-mask selected-mask)
                (setf selected-class
                      (parse-int (@ choice dataset class) 10))))))
@@ -288,9 +311,15 @@
                (setf (@ ((@ family query-selector) ".family-orbit") open)
                      selected-p)))))))
 
-    (defun select-star (mask)
+    (defun select-star (mask mode)
       (setf selected-mask (mod (+ mask 256) 256)
-            (@ window location hash) (hexadecimal-label selected-mask))
+            view-mode mode
+            (@ window location hash)
+            (+ (hexadecimal-label selected-mask)
+               (if (= view-mode "owned") "-owned" "")))
+      (setf (@ (element (if (= view-mode "owned")
+                            "view-owned"
+                            "view-surface")) checked) true)
       (render-selected))
 
     (defun mask-from-hash ()
@@ -301,6 +330,11 @@
             mask
             8)))
 
+    (defun mode-from-hash ()
+      (if (/= -1 ((@ (@ window location hash) index-of) "owned"))
+          "owned"
+          "surface"))
+
     (defun install-card-events ()
       (let ((choices ((@ document query-selector-all) ".star-choice")))
         ((@ choices for-each)
@@ -308,7 +342,22 @@
            ((@ choice add-event-listener)
             "click"
             (lambda ()
-              (select-star (parse-int (@ choice dataset mask) 10))))))))
+              (select-star (parse-int (@ choice dataset mask) 10)
+                           (@ choice dataset view))))))))
+
+    (defun install-view-mode-events ()
+      (let ((controls ((@ document query-selector-all) "input[name=mesh-view]")))
+        ((@ controls for-each)
+         (lambda (control)
+           ((@ control add-event-listener)
+            "change"
+            (lambda ()
+              (when (@ control checked)
+                (setf view-mode (@ control value)
+                      (@ window location hash)
+                      (+ (hexadecimal-label selected-mask)
+                         (if (= view-mode "owned") "-owned" "")))
+                (render-selected))))))))
 
     (defun install-layer-toggle (id variable-name)
       (let ((control (element id)))
@@ -358,15 +407,20 @@
            (render-selected))
          (create :passive false))))
 
-    (setf selected-mask (mask-from-hash))
+    (setf selected-mask (mask-from-hash)
+          view-mode (mode-from-hash)
+          (@ (element (if (= view-mode "owned")
+                          "view-owned"
+                          "view-surface")) checked) true)
     (install-card-events)
     (install-layer-toggle "show-faces" "faces")
     (install-layer-toggle "show-bands" "bands")
     (install-layer-toggle "show-junctions" "junctions")
+    (install-view-mode-events)
     ((@ (element "previous-star") add-event-listener)
-     "click" (lambda () (select-star (1- selected-mask))))
+     "click" (lambda () (select-star (1- selected-mask) view-mode)))
     ((@ (element "next-star") add-event-listener)
-     "click" (lambda () (select-star (1+ selected-mask))))
+     "click" (lambda () (select-star (1+ selected-mask) view-mode)))
     (install-detail-events)
     ((@ window add-event-listener)
      "resize"

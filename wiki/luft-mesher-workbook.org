@@ -256,6 +256,14 @@ The wiki owns the page frame and stylesheet, Spinneret writes the special body,
 and ParenScript writes the browser interaction; there is no second mesher,
 handwritten JavaScript, JSON bridge, or parallel page design.
 
+Each family card shows [[lisp:luft:star-local-surface-triangles]]: the geometric
+union of the production face and band packets seen through all 24 owner frames,
+returned to the representative star's coordinates.  The junction already
+belongs wholly to the central lattice point, so the selected production
+triangulation is retained.  Choosing a family orientation switches the detail
+to its actual [[lisp:luft:star-triangles]] packet while leaving the whole patch
+faintly visible, making the otherwise invisible ownership assignment legible.
+
 * DONE Separate cube symmetry from query-row ownership
 :PROPERTIES:
 :ID: 0EEQM7

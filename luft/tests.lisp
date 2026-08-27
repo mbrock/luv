@@ -2613,18 +2613,53 @@
         do (setf unseen (set-difference unseen orbit))
         count t))
 
+(defun %same-geometric-triangle-p (left right)
+  (equal (%unoriented-triangle-key left)
+         (%unoriented-triangle-key right)))
+
+(defun %geometric-triangle-subset-p (subset set)
+  (every (lambda (triangle)
+           (member triangle set :test #'%same-geometric-triangle-p))
+         subset))
+
+(defun %same-geometric-triangle-set-p (left right)
+  (and (%geometric-triangle-subset-p left right)
+       (%geometric-triangle-subset-p right left)))
+
+(defun %star-face-corner-count (star)
+  "Count solid/air cell adjacencies among the eight cells of STAR."
+  (loop for sample below 8
+        sum
+        (loop for axis below 3
+              unless (logbitp axis sample)
+                count (not (eql (logbitp sample star)
+                                (logbitp (logxor sample (ash 1 axis))
+                                         star))))))
+
 (defun %test-star-geometry ()
   (%with-test-section ("plain width-one star triangle geometry")
     (dotimes (star 256)
       (let* ((geometry (star-triangles star))
+             (local-surface (star-local-surface-triangles star))
              (faces (getf geometry :faces))
              (bands (getf geometry :bands))
-             (junctions (getf geometry :junctions)))
+             (junctions (getf geometry :junctions))
+             (local-faces (getf local-surface :faces))
+             (local-bands (getf local-surface :bands))
+             (local-junctions (getf local-surface :junctions)))
         (%check (equal faces (star-face-triangles star)))
         (%check (equal bands (star-band-triangles star)))
         (%check (equal junctions (star-junction-triangles star)))
         (%check (every #'%star-triangle-p
-                       (append faces bands junctions)))))
+                       (append faces bands junctions)))
+        (%check (every #'%star-triangle-p
+                       (append local-faces local-bands local-junctions)))
+        (%check (%geometric-triangle-subset-p faces local-faces))
+        (%check (%geometric-triangle-subset-p bands local-bands))
+        (%check (equal junctions local-junctions))
+        ;; Every solid/air cell adjacency contributes one inset quadrilateral.
+        (%check (= (length local-faces)
+                   (* 2 (%star-face-corner-count star))))))
     (%check (equal '(:faces nil :bands nil :junctions nil)
                    (star-triangles #x00)))
     (%check (equal '(:faces nil :bands nil :junctions nil)
@@ -2634,7 +2669,13 @@
                      (list (length (getf geometry :faces))
                            (length (getf geometry :bands))
                            (length (getf geometry :junctions)))))
-            "representative star lost a face, band, or junction"))
+            "representative star lost a face, band, or junction")
+    (%check (equal '(6 12 1)
+                   (let ((geometry (star-local-surface-triangles #x08)))
+                     (list (length (getf geometry :faces))
+                           (length (getf geometry :bands))
+                           (length (getf geometry :junctions)))))
+            "one occupied octant should expose its three complete corners"))
   (%with-test-section ("cubical star symmetries")
     (let* ((rotations (star-rotations))
            (reflections (star-reflections))
@@ -2677,7 +2718,20 @@
        (not (equal (transform-star-triangles
                     swap-x-y (star-band-triangles #x06))
                    (star-band-triangles #x06)))
-       "one query row must not masquerade as a complete symmetric star"))))
+       "one query row must not masquerade as a complete symmetric star")
+      ;; Forgetting ownership restores proper rotational symmetry to the
+      ;; incident faces and bands, even though no individual query row has it.
+      (dolist (star '(#x08 #x1f #x1b))
+        (let ((surface (star-local-surface-triangles star)))
+          (dolist (rotation rotations)
+            (let ((rotated-surface
+                    (star-local-surface-triangles
+                     (transform-star rotation star))))
+              (dolist (key '(:faces :bands))
+                (%check
+                 (%same-geometric-triangle-set-p
+                  (transform-star-triangles rotation (getf surface key))
+                  (getf rotated-surface key)))))))))))
 
 (defun run-luft-tests (&key (stream *standard-output*))
   "Run the retained topology and replacement manifold-sheet mesh claims."

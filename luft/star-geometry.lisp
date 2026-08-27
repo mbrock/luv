@@ -46,6 +46,47 @@ local mesh ticks around the star at the origin; one voxel is
   (%check-star star)
   (%triangles-of-templates (%star-junction-templates star)))
 
+(defun star-local-surface-triangles (star)
+  "Resolve the complete local surface patch implied by occupancy STAR.
+
+Unlike STAR-TRIANGLES, this forgets which neighboring lattice point owns each
+face and band.  It asks the production query about every proper cubical
+orientation, brings each answer back into STAR's coordinates, and takes the
+geometric union.  The central junction is already wholly owned at this point,
+so its selected triangulation is retained rather than collecting equivalent
+rotated triangulations of the same patch."
+  (%check-star star)
+  (list :faces (%star-owned-triangle-rotation-union
+                star #'star-face-triangles)
+        :bands (%star-owned-triangle-rotation-union
+                star #'star-band-triangles)
+        :junctions (star-junction-triangles star)))
+
+(defun %star-owned-triangle-rotation-union (star owned-triangles)
+  (%distinct-geometric-triangles
+   (loop for rotation in (star-rotations)
+         for rotated-star = (transform-star rotation star)
+         append
+         (transform-star-triangles
+          (%inverse-star-transformation rotation)
+          (funcall owned-triangles rotated-star)))))
+
+(defun %distinct-geometric-triangles (triangles)
+  "Keep one triangle for each distinct set of three vertex positions."
+  (remove-duplicates triangles
+                     :test #'equal
+                     :key #'%unoriented-triangle-key))
+
+(defun %unoriented-triangle-key (triangle)
+  (sort (copy-list triangle) #'%star-point<))
+
+(defun %star-point< (left right)
+  (loop for left-coordinate in left
+        for right-coordinate in right
+        when (/= left-coordinate right-coordinate)
+          do (return (< left-coordinate right-coordinate))
+        finally (return nil)))
+
 ;;; Cubical symmetries
 ;;;
 ;;; A transformation is an ordinary three-by-three list matrix.  Its rows are
@@ -95,6 +136,10 @@ the full cube group; COMPLEMENT also identifies occupied and empty cells."
 (defun %transform-star-triangle (transformation triangle)
   (loop for point in triangle
         collect (%transform-star-point transformation point)))
+
+(defun %inverse-star-transformation (transformation)
+  "Invert a signed-axis transformation by transposing it."
+  (apply #'mapcar #'list transformation))
 
 (defun %star-orbit-transformations (include-reflections-p)
   (if include-reflections-p

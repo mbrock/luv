@@ -32,6 +32,12 @@
    :color --muted
    :font 500 0.8rem/1 --mono-font
    :letter-spacing 0.12em)
+  (".view-label"
+   :display block
+   :margin-top 0.35rem
+   :color --muted
+   :font 650 0.68rem/1 --display-font
+   :letter-spacing 0.04em)
   ("#selected-canvas"
    :display block
    :width 100%
@@ -45,6 +51,41 @@
    :border-top 1px solid --rule
    :display grid
    :gap 0.85rem)
+  (".view-modes"
+   :margin 0
+   :padding 0
+   :border 0
+   :display flex
+   :gap 0.35rem
+   ("legend"
+    :position absolute
+    :width 1px
+    :height 1px
+    :overflow hidden
+    :clip-path "inset(50%)")
+   ("label"
+    :position relative
+    :cursor pointer)
+   ("input"
+    :position absolute
+    :opacity 0)
+   ("span"
+    :display block
+    :padding 0.42rem 0.65rem
+    :border 1px solid --rule
+    :border-radius 0.45rem
+    :color --muted
+    :font 680 0.7rem/1 --display-font)
+   ("input:checked + span"
+    :border-color --accent
+    :color inherit
+    :background --code-bg))
+  (".view-explanation"
+   :max-width none
+   :margin 0
+   :color --muted
+   :font-size 0.72rem
+   :line-height 1.35)
   (".layers"
    :display flex
    :flex-wrap wrap

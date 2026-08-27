@@ -41,6 +41,7 @@
     (:button.star-choice.star-member :type "button"
                                      :data-mask mask
                                      :data-class representative
+                                     :data-view "owned"
                                      :aria-label (format nil "Star #x~2,'0X" mask)
       (format nil "~2,'0X" mask))))
 
@@ -54,6 +55,7 @@
         (:button.star-choice.star-card :type "button"
                                        :data-mask representative
                                        :data-class representative
+                                       :data-view "surface"
                                        :aria-label
                                        (format nil "Star #x~2,'0X"
                                                representative)
@@ -80,15 +82,29 @@
        (spinneret:with-html
         (:h1 "The stars, by symmetry")
         (:p.lede
-          "The 256 arrangements of eight cells become 23 families under proper cubical rotation. Pick a family, then an orientation, to inspect its production face, band, and junction triangles.")
+          "The 256 arrangements of eight cells become 23 families under proper cubical rotation. Each family shows the complete local surface; choose an orientation to see which triangles that lattice point actually owns.")
         (:div#luft-star-atlas.atlas-layout
           (:section.detail :aria-label "Selected star"
             (:div.detail-heading
-              (:p.mask (:span#selected-mask "#x08"))
+              (:div
+                (:p.mask (:span#selected-mask "#x08"))
+                (:span#selected-view.view-label "Whole local patch"))
               (:span#selected-bits.bits "00001000"))
             (:canvas#selected-canvas
               :aria-label "Rotatable triangle geometry of the selected star")
             (:div.detail-controls
+              (:fieldset.view-modes
+                (:legend "Mesh view")
+                (:label
+                  (:input#view-surface :type "radio" :name "mesh-view"
+                                       :value "surface" :checked t)
+                  (:span "Whole patch"))
+                (:label
+                  (:input#view-owned :type "radio" :name "mesh-view"
+                                     :value "owned")
+                  (:span "Owned orientation")))
+              (:p#view-explanation.view-explanation
+                "Every face and band touching the center, with ownership forgotten.")
               (:div.layers
                 (:label (:input#show-faces :type "checkbox" :checked t)
                         (:span.swatch.face-swatch) "Faces")
@@ -111,7 +127,9 @@
             (dolist (class (star-rotation-classes))
               (render-star-family class))))
         (:p.atlas-note
-          "Drag the large view to orbit; scroll over it to approach. Reflections remain separate to expose the chiral pair; complements remain separate because occupancy orientation and query ownership matter. Triangle coordinates come directly from "
+          "Drag the large view to orbit; scroll over it to approach. Family meshes are the rotational ownership closure from "
+          (:code "LUFT:STAR-LOCAL-SURFACE-TRIANGLES")
+          "; orientation buttons reveal the corresponding production packet from "
           (:code "LUFT:STAR-TRIANGLES") ".")
         (:script :src "luft-star-atlas.js" :defer t)))
      :body-class "wide atlas-page"

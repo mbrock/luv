@@ -46,6 +46,7 @@
    #:cell-occupancy-bit #:site-star-occupancy-mask
    #:star-triangles #:star-face-triangles
    #:star-band-triangles #:star-junction-triangles
+   #:star-local-surface-triangles
    #:star-rotations #:star-reflections #:transform-star
    #:transform-star-triangles #:star-orbit
    ;; Face topology.

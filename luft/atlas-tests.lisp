@@ -9,15 +9,20 @@
   (let* ((form (atlas::star-atlas-data-form))
          (stars (rest form))
          (empty-star (rest (first stars)))
-         (full-star (rest (car (last stars)))))
+         (full-star (rest (car (last stars))))
+         (empty-owned (rest (getf empty-star :owned)))
+         (empty-surface (rest (getf empty-star :surface))))
     (true (eq 'parenscript:array (first form)))
     (true (= 256 (length stars)))
     (true (zerop (getf empty-star :mask)))
     (true (= 255 (getf full-star :mask)))
     ;; Empty families are still ParenScript array literals rather than NIL.
-    (true (equal '(parenscript:array) (getf empty-star :faces)))
-    (true (equal '(parenscript:array) (getf empty-star :bands)))
-    (true (equal '(parenscript:array) (getf empty-star :junctions)))))
+    (true (equal '(parenscript:array) (getf empty-owned :faces)))
+    (true (equal '(parenscript:array) (getf empty-owned :bands)))
+    (true (equal '(parenscript:array) (getf empty-owned :junctions)))
+    (true (equal '(parenscript:array) (getf empty-surface :faces)))
+    (true (equal '(parenscript:array) (getf empty-surface :bands)))
+    (true (equal '(parenscript:array) (getf empty-surface :junctions)))))
 
 (define-test atlas-condenses-stars-into-rotation-families
   (let* ((classes (atlas::star-rotation-classes))
@@ -40,6 +45,8 @@
   (let ((javascript (atlas:star-atlas-javascript)))
     (true (plusp (length javascript)))
     (true (search "document.getElementById" javascript))
+    (true (search "star.surface" javascript))
+    (true (search "star.owned" javascript))
     (false (search "JSON.parse" javascript))
     (false (search "luft-star-data" javascript))))
 
@@ -51,6 +58,7 @@
                   stylesheet))
     (true (search ".star-family {" stylesheet))
     (true (search ".family-members {" stylesheet))
+    (true (search ".view-modes {" stylesheet))
     (true (search "@media screen and (max-width: 52rem)" stylesheet))))
 
 (define-test atlas-is-a-wiki-view
@@ -70,6 +78,8 @@
     (true (search "aria-label=\"23 proper-rotation families\"" html))
     (true (search "<article class=star-family" html))
     (true (search "<details class=family-orbit>" html))
+    (true (search "name=mesh-view" html))
+    (true (search "data-view=owned" html))
     (true (search "<footer class=site-footer>" html))
     (false (search "<style" html))
     (false (search "application/json" html))))
