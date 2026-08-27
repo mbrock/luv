@@ -146,7 +146,7 @@ Redefining NAME replaces its provider without disturbing provider order."
   (if (string= path "/healthz")
       `(200 (:content-type "text/plain; charset=utf-8"
              :cache-control "no-store")
-            ("ok\n"))
+            ("ok"))
       (resource-response (find-resource path site))))
 
 (defun wiki-clack-application (site)

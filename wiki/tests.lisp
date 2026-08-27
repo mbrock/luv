@@ -223,7 +223,7 @@ Nothing here refers to anything.
            (funcall application
                     '(:request-method :head :path-info "/healthz"))))
     (true (= 200 (first get-response)))
-    (true (equal '("ok\n") (third get-response)))
+    (true (equal '("ok") (third get-response)))
     (true (= 200 (first head-response)))
     (true (null (third head-response)))))
 
