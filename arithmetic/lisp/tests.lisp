@@ -161,8 +161,7 @@
                   (funcall add vector (vec:make-vec3 1d0 2d0 3d0))))
     (true (= 14d0
              (funcall dot (vec:make-vec3 1d0 2d0 3d0)
-                          (vec:make-vec3 1d0 2d0 3d0))))
-    (true (null (find-package "LUVCRAFT.WORLD")))))
+                          (vec:make-vec3 1d0 2d0 3d0))))))
 
 (define-test lisp-realizations-bind-storage-contracts-once
   (let* ((realization

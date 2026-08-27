@@ -76,16 +76,21 @@
   (append (list "sbcl" "--script" (uiop:native-namestring *test-script*))
           arguments))
 
-(defun run-preparation (suites)
+(defun core-worker-command (core &rest arguments)
+  (append (list "sbcl" "--core" (uiop:native-namestring core) "--noinform"
+                "--end-runtime-options")
+          arguments))
+
+(defun run-preparation (core suites)
   (let ((process
           (uiop:launch-program
-           (apply #'sbcl-command "--prepare" suites)
+           (apply #'sbcl-command "--prepare" (namestring core) suites)
            :directory *project-root*
            :output :interactive
            :error-output :interactive)))
     (uiop:wait-process process)))
 
-(defun prepare-suites (suites)
+(defun prepare-suites (core suites)
   (load (merge-pathnames #P"luvcraft/build-progress.lisp" *project-root*))
   (asdf/session:with-asdf-session ()
     (asdf/forcing:make-forcing :performable-p t :system (first suites))
@@ -99,14 +104,22 @@
                         :system :test-suites
                         :plan plan
                         :invocation "make test prepares")
-      (handler-case
-          (progn
-            (asdf/plan:perform-plan plan)
-            (if (uiop:symbol-call :luv-build :finish :done) 1 0))
-        (error (condition)
-          (uiop:symbol-call :luv-build :failed (princ-to-string condition))
-          (uiop:symbol-call :luv-build :finish :error)
-          1)))))
+      (let ((status
+              (handler-case
+                  (progn
+                    (asdf/plan:perform-plan plan)
+                    (if (uiop:symbol-call :luv-build :finish :done) 1 0))
+                (error (condition)
+                  (uiop:symbol-call :luv-build :failed (princ-to-string condition))
+                  (uiop:symbol-call :luv-build :finish :error)
+                  1))))
+        (when (zerop status)
+          (format t "Saving prepared test worker core...~%")
+          (finish-output)
+          (when (probe-file core)
+            (delete-file core))
+          (sb-ext:save-lisp-and-die core :toplevel #'main :purify t))
+        status))))
 
 (defun suite-log-path (directory name)
   (merge-pathnames
@@ -243,11 +256,12 @@
            (get-universal-time) (sb-posix:getpid))
    *project-root*))
 
-(defun launch-worker (id suites directory)
+(defun launch-worker (id suites directory core)
   (let* ((mailbox *coordinator-mailbox*)
          (process
            (uiop:launch-program
-            (apply #'sbcl-command "--worker" (namestring directory) suites)
+            (apply #'core-worker-command core "--worker"
+                   (namestring directory) suites)
             :directory *project-root*
             :output :stream
             :error-output :output))
@@ -327,7 +341,7 @@
       (terpri)
       (finish-output))))
 
-(defun run-parallel-suites (suites jobs timings directory)
+(defun run-parallel-suites (suites jobs timings directory core)
   (let* ((*coordinator-mailbox*
            (sb-concurrency:make-mailbox :name "test coordinator"))
          (assignments (assign-suites suites jobs timings))
@@ -344,7 +358,7 @@
          (progn
            (loop for assignment in assignments
                  for id from 1
-                 do (push (launch-worker id assignment directory) workers))
+                 do (push (launch-worker id assignment directory core) workers))
            (loop until (= finished-workers (length workers))
                  do (multiple-value-bind (message received-p)
                         (sb-concurrency:receive-message
@@ -448,52 +462,65 @@
                       catalog))
          (worker-count (min jobs (length suites)))
          (timings (read-timings))
-         (start (get-internal-real-time)))
+         (start (get-internal-real-time))
+         (run-directory (test-run-directory))
+         (core (merge-pathnames #P"worker.core" run-directory)))
     (validate-test-catalog catalog)
-    (dolist (skip skipped)
-      (format t "~A (~A; skipped)~%" (car skip) (cdr skip)))
-    (format t "Preparing ~D test suites for parallel execution...~%"
-            (length suites))
-    (finish-output)
-    (unless (zerop (run-preparation suites))
-      (return-from run-coordinator 1))
-    (format t "Running ~D test suites in ~D SBCL workers...~%"
-            (length suites) worker-count)
-    (finish-output)
-    (multiple-value-bind (failures new-timings durations)
-        (run-parallel-suites suites worker-count timings (test-run-directory))
-      (write-timings new-timings)
-      (format t "~&~%;; Tested ~D suite~:P in ~,1Fs with ~D SBCL worker~:P.~%"
-              (length suites)
-              (/ (float (- (get-internal-real-time) start) 1.0)
-                 internal-time-units-per-second)
-              worker-count)
-      (when skipped
-        (format t ";; Skipped ~D unavailable suite~:P.~%" (length skipped)))
-      (report-slowest-suites durations)
-      (if failures
-          (progn
-            (format t ";; Failed: ~{~A~^, ~}.~%" (remove-duplicates failures
-                                                                   :test #'equal))
-            1)
-          0))))
+    (ensure-directories-exist core)
+    (unwind-protect
+         (progn
+           (dolist (skip skipped)
+             (format t "~A (~A; skipped)~%" (car skip) (cdr skip)))
+           (format t "Preparing ~D test suites for parallel execution...~%"
+                   (length suites))
+           (finish-output)
+           (unless (zerop (run-preparation core suites))
+             (return-from run-coordinator 1))
+           (format t "Running ~D test suites in ~D prepared SBCL workers...~%"
+                   (length suites) worker-count)
+           (finish-output)
+           (multiple-value-bind (failures new-timings durations)
+               (run-parallel-suites suites worker-count timings run-directory core)
+             (write-timings new-timings)
+             (format t "~&~%;; Tested ~D suite~:P in ~,1Fs with ~D SBCL worker~:P.~%"
+                     (length suites)
+                     (/ (float (- (get-internal-real-time) start) 1.0)
+                        internal-time-units-per-second)
+                     worker-count)
+             (when skipped
+               (format t ";; Skipped ~D unavailable suite~:P.~%" (length skipped)))
+             (report-slowest-suites durations)
+             (if failures
+                 (progn
+                   (format t ";; Failed: ~{~A~^, ~}.~%"
+                           (remove-duplicates failures :test #'equal))
+                   1)
+                 0)))
+      (when (probe-file core)
+        (delete-file core)))))
 
-(let ((arguments (uiop:command-line-arguments)))
-  (handler-bind ((warning #'muffle-warning)
-                 (sb-ext:compiler-note #'muffle-warning))
-    (load-project-definitions))
-  (let ((status
-          (cond ((and arguments (string= (first arguments) "--prepare"))
-                 (prepare-suites (rest arguments)))
-                ((and arguments (string= (first arguments) "--worker"))
-                 (unless (third arguments)
-                   (error "--worker requires a log directory and test suites."))
-                 (run-worker (uiop:ensure-directory-pathname (second arguments))
-                             (cddr arguments)))
-                ((and (= (length arguments) 2)
-                      (string= (first arguments) "--jobs"))
-                 (run-coordinator
-                  (parse-positive-integer (second arguments) "--jobs")))
-                (t
-                 (error "Expected --jobs N, --prepare SUITES, or --worker DIRECTORY SUITES.")))))
-    (uiop:quit status)))
+(defun main ()
+  (let ((arguments (uiop:command-line-arguments)))
+    (let ((status
+            (cond ((and arguments (string= (first arguments) "--prepare"))
+                   (unless (third arguments)
+                     (error "--prepare requires a core path and test suites."))
+                   (prepare-suites (pathname (second arguments)) (cddr arguments)))
+                  ((and arguments (string= (first arguments) "--worker"))
+                   (unless (third arguments)
+                     (error "--worker requires a log directory and test suites."))
+                   (run-worker (uiop:ensure-directory-pathname (second arguments))
+                               (cddr arguments)))
+                  ((and (= (length arguments) 2)
+                        (string= (first arguments) "--jobs"))
+                   (run-coordinator
+                    (parse-positive-integer (second arguments) "--jobs")))
+                  (t
+                   (error "Expected --jobs N, --prepare CORE SUITES, or --worker DIRECTORY SUITES.")))))
+      (uiop:quit status))))
+
+(handler-bind ((warning #'muffle-warning)
+               (sb-ext:compiler-note #'muffle-warning))
+  (load-project-definitions))
+
+(main)
