@@ -10,7 +10,6 @@
    (merge-pathnames #P"../"
                     (uiop:pathname-directory-pathname *load-truename*))))
 
-(defparameter *test-script* (truename *load-truename*))
 (defparameter *timings-path* (merge-pathnames #P"build/test-timings.sexp"
                                                *project-root*))
 (defparameter *progress-interval* 5.0)
@@ -18,7 +17,7 @@
 (defparameter *coordinator-mailbox* nil)
 
 (defstruct test-worker
-  id suites process thread)
+  id suites pid stream thread status)
 
 (defmethod asdf:perform :around ((operation asdf:compile-op)
                                  (component asdf:component))
@@ -72,25 +71,7 @@
         (error "Test system ~A is not a leaf; it delegates to ~{~A~^, ~}."
                name dependencies)))))
 
-(defun sbcl-command (&rest arguments)
-  (append (list "sbcl" "--script" (uiop:native-namestring *test-script*))
-          arguments))
-
-(defun core-worker-command (core &rest arguments)
-  (append (list "sbcl" "--core" (uiop:native-namestring core) "--noinform"
-                "--end-runtime-options")
-          arguments))
-
-(defun run-preparation (core suites)
-  (let ((process
-          (uiop:launch-program
-           (apply #'sbcl-command "--prepare" (namestring core) suites)
-           :directory *project-root*
-           :output :interactive
-           :error-output :interactive)))
-    (uiop:wait-process process)))
-
-(defun prepare-suites (core suites)
+(defun prepare-suites (suites)
   (load (merge-pathnames #P"luvcraft/build-progress.lisp" *project-root*))
   (asdf/session:with-asdf-session ()
     (asdf/forcing:make-forcing :performable-p t :system (first suites))
@@ -104,22 +85,14 @@
                         :system :test-suites
                         :plan plan
                         :invocation "make test prepares")
-      (let ((status
-              (handler-case
-                  (progn
-                    (asdf/plan:perform-plan plan)
-                    (if (uiop:symbol-call :luv-build :finish :done) 1 0))
-                (error (condition)
-                  (uiop:symbol-call :luv-build :failed (princ-to-string condition))
-                  (uiop:symbol-call :luv-build :finish :error)
-                  1))))
-        (when (zerop status)
-          (format t "Saving prepared test worker core...~%")
-          (finish-output)
-          (when (probe-file core)
-            (delete-file core))
-          (sb-ext:save-lisp-and-die core :toplevel #'main :purify t))
-        status))))
+      (handler-case
+          (progn
+            (asdf/plan:perform-plan plan)
+            (if (uiop:symbol-call :luv-build :finish :done) 1 0))
+        (error (condition)
+          (uiop:symbol-call :luv-build :failed (princ-to-string condition))
+          (uiop:symbol-call :luv-build :finish :error)
+          1)))))
 
 (defun suite-log-path (directory name)
   (merge-pathnames
@@ -256,24 +229,52 @@
            (get-universal-time) (sb-posix:getpid))
    *project-root*))
 
-(defun launch-worker (id suites directory core)
-  (let* ((mailbox *coordinator-mailbox*)
-         (process
-           (uiop:launch-program
-            (apply #'core-worker-command core "--worker"
-                   (namestring directory) suites)
-            :directory *project-root*
-            :output :stream
-            :error-output :output))
-         (worker (make-test-worker :id id :suites suites :process process)))
-    (setf (test-worker-thread worker)
-          (sb-thread:make-thread
-           (lambda () (read-worker-events worker mailbox))
-           :name (format nil "test worker ~D output" id)))
-    worker))
+(defun fork-worker (id suites directory)
+  (multiple-value-bind (read-fd write-fd) (sb-posix:pipe)
+    (finish-output *standard-output*)
+    (finish-output *error-output*)
+    (let ((pid (sb-posix:fork)))
+      (if (zerop pid)
+          (progn
+            (sb-posix:close read-fd)
+            (sb-posix:dup2 write-fd 1)
+            (sb-posix:dup2 write-fd 2)
+            (sb-posix:close write-fd)
+            (let ((status
+                    (handler-case (run-worker directory suites)
+                      (error (condition)
+                        (uiop:print-condition-backtrace
+                         condition :stream *standard-output* :count 30)
+                        2))))
+              (finish-output *standard-output*)
+              (sb-posix:_exit status)))
+          (progn
+            (sb-posix:close write-fd)
+            (make-test-worker
+             :id id :suites suites :pid pid
+             :stream (sb-sys:make-fd-stream
+                      read-fd :input t :buffering :line :auto-close t
+                      :external-format :utf-8
+                      :name (format nil "test worker ~D output" id))))))))
+
+(defun start-worker-reader (worker mailbox)
+  (setf (test-worker-thread worker)
+        (sb-thread:make-thread
+         (lambda () (read-worker-events worker mailbox))
+         :name (format nil "test worker ~D output" (test-worker-id worker))))
+  worker)
+
+(defun wait-worker (worker)
+  (multiple-value-bind (pid status) (sb-posix:waitpid (test-worker-pid worker) 0)
+    (declare (ignore pid))
+    (setf (test-worker-status worker)
+          (cond ((sb-posix:wifexited status) (sb-posix:wexitstatus status))
+                ((sb-posix:wifsignaled status)
+                 (+ 128 (sb-posix:wtermsig status)))
+                (t status)))))
 
 (defun read-worker-events (worker mailbox)
-  (let ((stream (uiop:process-info-output (test-worker-process worker))))
+  (let ((stream (test-worker-stream worker)))
     (unwind-protect
          (loop for line = (read-line stream nil nil)
                while line
@@ -296,7 +297,7 @@
       (sb-concurrency:send-message
        mailbox
        (list :worker-done (test-worker-id worker)
-             (uiop:wait-process (test-worker-process worker)))))))
+             (wait-worker worker))))))
 
 (defun copy-log-to-console (path)
   (handler-case
@@ -315,11 +316,13 @@
 
 (defun stop-workers (workers)
   (dolist (worker workers)
-    (when (uiop:process-alive-p (test-worker-process worker))
-      (ignore-errors (uiop:terminate-process (test-worker-process worker)))))
+    (unless (test-worker-status worker)
+      (ignore-errors (sb-posix:kill (test-worker-pid worker) sb-posix:sigterm))))
   (dolist (worker workers)
-    (ignore-errors (sb-thread:join-thread (test-worker-thread worker)
-                                          :timeout 10))))
+    (if (test-worker-thread worker)
+        (ignore-errors (sb-thread:join-thread (test-worker-thread worker)
+                                              :timeout 10))
+        (ignore-errors (wait-worker worker)))))
 
 (defun elapsed-seconds (start)
   (/ (float (- (get-internal-real-time) start) 1.0)
@@ -341,7 +344,7 @@
       (terpri)
       (finish-output))))
 
-(defun run-parallel-suites (suites jobs timings directory core)
+(defun run-parallel-suites (suites jobs timings directory)
   (let* ((*coordinator-mailbox*
            (sb-concurrency:make-mailbox :name "test coordinator"))
          (assignments (assign-suites suites jobs timings))
@@ -358,7 +361,11 @@
          (progn
            (loop for assignment in assignments
                  for id from 1
-                 do (push (launch-worker id assignment directory core) workers))
+                 do (push (fork-worker id assignment directory) workers))
+           ;; SB-POSIX:FORK requires a single Lisp thread. Start readers only
+           ;; after every worker has inherited the quiescent prepared image.
+           (dolist (worker workers)
+             (start-worker-reader worker *coordinator-mailbox*))
            (loop until (= finished-workers (length workers))
                  do (multiple-value-bind (message received-p)
                         (sb-concurrency:receive-message
@@ -463,61 +470,43 @@
          (worker-count (min jobs (length suites)))
          (timings (read-timings))
          (start (get-internal-real-time))
-         (run-directory (test-run-directory))
-         (core (merge-pathnames #P"worker.core" run-directory)))
+         (run-directory (test-run-directory)))
     (validate-test-catalog catalog)
-    (ensure-directories-exist core)
-    (unwind-protect
-         (progn
-           (dolist (skip skipped)
-             (format t "~A (~A; skipped)~%" (car skip) (cdr skip)))
-           (format t "Preparing ~D test suites for parallel execution...~%"
-                   (length suites))
-           (finish-output)
-           (unless (zerop (run-preparation core suites))
-             (return-from run-coordinator 1))
-           (format t "Running ~D test suites in ~D prepared SBCL workers...~%"
-                   (length suites) worker-count)
-           (finish-output)
-           (multiple-value-bind (failures new-timings durations)
-               (run-parallel-suites suites worker-count timings run-directory core)
-             (write-timings new-timings)
-             (format t "~&~%;; Tested ~D suite~:P in ~,1Fs with ~D SBCL worker~:P.~%"
-                     (length suites)
-                     (/ (float (- (get-internal-real-time) start) 1.0)
-                        internal-time-units-per-second)
-                     worker-count)
-             (when skipped
-               (format t ";; Skipped ~D unavailable suite~:P.~%" (length skipped)))
-             (report-slowest-suites durations)
-             (if failures
-                 (progn
-                   (format t ";; Failed: ~{~A~^, ~}.~%"
-                           (remove-duplicates failures :test #'equal))
-                   1)
-                 0)))
-      (when (probe-file core)
-        (delete-file core)))))
+    (dolist (skip skipped)
+      (format t "~A (~A; skipped)~%" (car skip) (cdr skip)))
+    (format t "Preparing ~D test suites for parallel execution...~%"
+            (length suites))
+    (finish-output)
+    (unless (zerop (prepare-suites suites))
+      (return-from run-coordinator 1))
+    (format t "Forking ~D prepared SBCL workers for ~D test suites...~%"
+            worker-count (length suites))
+    (finish-output)
+    (multiple-value-bind (failures new-timings durations)
+        (run-parallel-suites suites worker-count timings run-directory)
+      (write-timings new-timings)
+      (format t "~&~%;; Tested ~D suite~:P in ~,1Fs with ~D SBCL worker~:P.~%"
+              (length suites)
+              (/ (float (- (get-internal-real-time) start) 1.0)
+                 internal-time-units-per-second)
+              worker-count)
+      (when skipped
+        (format t ";; Skipped ~D unavailable suite~:P.~%" (length skipped)))
+      (report-slowest-suites durations)
+      (if failures
+          (progn
+            (format t ";; Failed: ~{~A~^, ~}.~%"
+                    (remove-duplicates failures :test #'equal))
+            1)
+          0))))
 
 (defun main ()
   (let ((arguments (uiop:command-line-arguments)))
-    (let ((status
-            (cond ((and arguments (string= (first arguments) "--prepare"))
-                   (unless (third arguments)
-                     (error "--prepare requires a core path and test suites."))
-                   (prepare-suites (pathname (second arguments)) (cddr arguments)))
-                  ((and arguments (string= (first arguments) "--worker"))
-                   (unless (third arguments)
-                     (error "--worker requires a log directory and test suites."))
-                   (run-worker (uiop:ensure-directory-pathname (second arguments))
-                               (cddr arguments)))
-                  ((and (= (length arguments) 2)
-                        (string= (first arguments) "--jobs"))
-                   (run-coordinator
-                    (parse-positive-integer (second arguments) "--jobs")))
-                  (t
-                   (error "Expected --jobs N, --prepare CORE SUITES, or --worker DIRECTORY SUITES.")))))
-      (uiop:quit status))))
+    (unless (and (= (length arguments) 2)
+                 (string= (first arguments) "--jobs"))
+      (error "Expected --jobs N."))
+    (uiop:quit
+     (run-coordinator (parse-positive-integer (second arguments) "--jobs")))))
 
 (handler-bind ((warning #'muffle-warning)
                (sb-ext:compiler-note #'muffle-warning))

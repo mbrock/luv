@@ -77,7 +77,9 @@ test: sly-client
 	@$(MAKE) --no-print-directory -j3 parinfer-check sly-build-lock-check test-suite
 
 test-suite:
-	@./scripts/dev sbcl --script scripts/test.lisp --jobs $(TEST_JOBS)
+	@./scripts/build-sly-dependency-core
+	@./scripts/dev sbcl --core build/sly-dependencies.core --noinform \
+		--script scripts/test.lisp --jobs $(TEST_JOBS)
 endif
 
 luft-test:
