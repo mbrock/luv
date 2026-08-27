@@ -336,6 +336,7 @@
          (active (make-hash-table))
          (finished-workers 0)
          (failures nil)
+         (durations nil)
          (parallel-start (get-internal-real-time))
          (last-output parallel-start))
     (ensure-directories-exist directory)
@@ -378,6 +379,7 @@
                                           (setf (gethash name results) status
                                                 timings (update-timing name seconds
                                                                        timings))
+                                          (push (cons name seconds) durations)
                                           (when (eq status :failed)
                                             (push name failures))
                                           (format t "~5,1,,,'0Fs ~2D/~D  ~6A ~A (~,1Fs, worker ~D)~%"
@@ -419,7 +421,15 @@
       (unless (gethash suite results)
         (push suite failures)
         (format t "~A: no result returned~%" suite)))
-    (values failures timings)))
+    (values failures timings durations)))
+
+(defun report-slowest-suites (durations &optional (limit 5))
+  (let ((slowest (subseq (sort (copy-list durations) #'> :key #'cdr)
+                         0 (min limit (length durations)))))
+    (when slowest
+      (format t ";; Slowest suites:~%")
+      (dolist (suite slowest)
+        (format t ";; ~6,1Fs  ~A~%" (cdr suite) (car suite))))))
 
 (defun parse-positive-integer (value option)
   (let ((integer (ignore-errors (parse-integer value :junk-allowed nil))))
@@ -450,7 +460,7 @@
     (format t "Running ~D test suites in ~D SBCL workers...~%"
             (length suites) worker-count)
     (finish-output)
-    (multiple-value-bind (failures new-timings)
+    (multiple-value-bind (failures new-timings durations)
         (run-parallel-suites suites worker-count timings (test-run-directory))
       (write-timings new-timings)
       (format t "~&~%;; Tested ~D suite~:P in ~,1Fs with ~D SBCL worker~:P.~%"
@@ -460,6 +470,7 @@
               worker-count)
       (when skipped
         (format t ";; Skipped ~D unavailable suite~:P.~%" (length skipped)))
+      (report-slowest-suites durations)
       (if failures
           (progn
             (format t ";; Failed: ~{~A~^, ~}.~%" (remove-duplicates failures
