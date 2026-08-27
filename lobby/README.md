@@ -4,10 +4,12 @@
 with `tsnet` and gives that node's `svc:luv-lobby` TCP listener to Mochi MQTT.
 There is no host-wide `tailscaled`, TUN interface, or open local TCP port.
 
-Its durable Tailscale node state belongs in `~/.local/state/luv/lobby/tsnet`
-(or `$XDG_STATE_HOME/luv/lobby/tsnet`), not in this checkout. On its first run,
-set `TS_AUTHKEY` to a tagged auth key carrying `tag:luv`; later runs reuse the
-saved node state and do not need the key.
+Its durable state lives outside the checkout: the Tailscale node identity in
+`~/.local/state/luv/lobby/tsnet` and the Pebble MQTT store in
+`~/.local/state/luv/lobby/mqtt` (both under `$XDG_STATE_HOME` when set). Retained
+messages have no broker-imposed expiry and survive service restarts. On the
+first run, set `TS_AUTHKEY` to a tagged auth key carrying `tag:luv`; later runs
+reuse the saved node state and do not need the key.
 
 ```sh
 export TS_AUTHKEY=tskey-auth-...

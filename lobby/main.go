@@ -17,6 +17,7 @@ import (
 	"syscall"
 
 	mqtt "github.com/mochi-mqtt/server/v2"
+	"github.com/mochi-mqtt/server/v2/hooks/storage/pebble"
 	"github.com/mochi-mqtt/server/v2/listeners"
 	"tailscale.com/tsnet"
 )
@@ -27,15 +28,42 @@ const (
 	defaultPort    = 1883
 )
 
-func defaultStateDir() string {
+func defaultStateRoot() string {
 	if stateHome := os.Getenv("XDG_STATE_HOME"); stateHome != "" {
-		return filepath.Join(stateHome, "luv", "lobby", "tsnet")
+		return filepath.Join(stateHome, "luv", "lobby")
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "./state/tsnet"
+		return "./state"
 	}
-	return filepath.Join(home, ".local", "state", "luv", "lobby", "tsnet")
+	return filepath.Join(home, ".local", "state", "luv", "lobby")
+}
+
+func defaultStateDir() string {
+	return filepath.Join(defaultStateRoot(), "tsnet")
+}
+
+func defaultStoreDir() string {
+	return filepath.Join(defaultStateRoot(), "mqtt")
+}
+
+func newLobbyBroker(logger *slog.Logger, storeDir string, inlineClient bool) (*mqtt.Server, error) {
+	capabilities := mqtt.NewDefaultServerCapabilities()
+	// The lobby store uses retained messages as durable values. Mochi otherwise
+	// expires every message after 24 hours, even without an MQTT expiry property.
+	capabilities.MaximumMessageExpiryInterval = 0
+	broker := mqtt.New(&mqtt.Options{
+		Logger:       logger.With("component", "mqtt"),
+		Capabilities: capabilities,
+		InlineClient: inlineClient,
+	})
+	if err := broker.AddHook(new(pebble.Hook), &pebble.Options{
+		Path: storeDir,
+		Mode: pebble.Sync,
+	}); err != nil {
+		return nil, err
+	}
+	return broker, nil
 }
 
 // notifySystemd sends a service-manager notification when this process was
@@ -65,6 +93,7 @@ func notifySystemd(message string) error {
 func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil)).With("service", "luv-lobby")
 	stateDir := flag.String("state", defaultStateDir(), "durable tsnet state directory")
+	storeDir := flag.String("store", defaultStoreDir(), "durable MQTT store directory")
 	hostname := flag.String("hostname", "luv-lobby", "Tailscale node hostname")
 	service := flag.String("service", defaultService, "Tailscale Service name")
 	port := flag.Int("port", defaultPort, "MQTT TCP port advertised by the Service")
@@ -78,7 +107,16 @@ func main() {
 		logger.Error("create tsnet state directory", "path", *stateDir, "error", err)
 		os.Exit(1)
 	}
-	logger.Info("starting", "state_dir", *stateDir, "hostname", *hostname, "service_name", *service, "port", *port)
+	if err := os.MkdirAll(*storeDir, 0700); err != nil {
+		logger.Error("create MQTT store directory", "path", *storeDir, "error", err)
+		os.Exit(1)
+	}
+	if err := os.Chmod(*storeDir, 0700); err != nil {
+		logger.Error("secure MQTT store directory", "path", *storeDir, "error", err)
+		os.Exit(1)
+	}
+	logger.Info("starting", "state_dir", *stateDir, "store_dir", *storeDir,
+		"hostname", *hostname, "service_name", *service, "port", *port)
 
 	authKey := os.Getenv("TS_AUTHKEY")
 	tailnet := &tsnet.Server{
@@ -107,7 +145,11 @@ func main() {
 	}
 	defer listener.Close()
 
-	broker := mqtt.New(&mqtt.Options{Logger: logger.With("component", "mqtt")})
+	broker, err := newLobbyBroker(logger, *storeDir, false)
+	if err != nil {
+		logger.Error("open durable MQTT store", "path", *storeDir, "error", err)
+		os.Exit(1)
+	}
 	localClient, err := tailnet.LocalClient()
 	if err != nil {
 		logger.Error("open tsnet LocalAPI", "error", err)
