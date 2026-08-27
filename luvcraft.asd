@@ -116,25 +116,23 @@
                (:file "luvcraft/agent/cat-shaders")))
 
 (defsystem "luvcraft/web"
-  :description "The luvcraft web application and its WebGPU agent-body page."
+  :description "Luvcraft's showcase and WebGPU body pages in the workshop wiki."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luvcraft/agent-bodies" "luv/wgsl" "cl-json" "clack"
-               "clack-handler-woo" "uiop")
+  :depends-on ("luvcraft/agent-bodies" "luv/wgsl" "luv-wiki" "cl-json"
+               "spinneret" "parenscript" "uiop")
   :serial t
   :components ((:file "luvcraft/web-package")
-               (:file "luvcraft/web-server")
+               (:file "luvcraft/wiki-style")
                (:file "luvcraft/showcase")
-               (:file "luvcraft/body-gallery")
-               (:static-file "luvcraft/web/body-gallery.html")
-               (:static-file "luvcraft/web/body-gallery.css")
-               (:static-file "luvcraft/web/body-gallery.js")))
+               (:file "luvcraft/body-gallery-script")
+               (:file "luvcraft/body-gallery")))
 
 (defsystem "luvcraft/tools"
   :description "One-shot command-line tools for luvcraft development."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luvcraft/core" "luvcraft/web" "mqtt/net" "uiop")
+  :depends-on ("luvcraft/core" "mqtt/net" "uiop")
   :build-operation "program-op"
   :build-pathname "build/luv"
   :entry-point "luvcraft.tools:main"
@@ -146,7 +144,6 @@
                  (:file "runner")
                  (:file "block-world")
                  (:file "gazetteer")
-                 (:file "web")
                  (:file "lobby")))))
 
 (defsystem "luvcraft/lobby"

@@ -130,8 +130,6 @@
      (command-block-world arguments))
     ((string= command "gazetteer")
      (command-gazetteer arguments))
-    ((string= command "web")
-     (command-web arguments))
     ((string= command "eval")
      (command-eval arguments))
     ((string= command "lobby")
@@ -154,11 +152,9 @@
 (defun main (&optional (arguments (uiop:command-line-arguments)))
   (handler-case
       (progn
-        (if (string= (or (first arguments) "") "web")
-            (dispatch-main arguments)
-            (luv:call-with-sdl-main-thread
-             (lambda ()
-               (dispatch-main arguments))))
+        (luv:call-with-sdl-main-thread
+         (lambda ()
+           (dispatch-main arguments)))
         (finish-output *standard-output*)
         (finish-output *error-output*))
     (error (condition)

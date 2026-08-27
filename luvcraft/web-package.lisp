@@ -1,17 +1,10 @@
 (defpackage #:luvcraft.web
-  (:use #:cl)
+  (:use #:cl #:parenscript)
   (:local-nicknames (#:shader #:luv.shader)
-                    (#:wgsl #:luv.wgsl))
-  (:export #:web-page
-           #:web-page-path
-           #:web-page-label
-           #:web-page-description
-           #:web-application
-           #:web-application-pages
-           #:make-web-application
-           #:respond-to-web-request
-           #:serve-web-application
-           #:web-body-type
+                    (#:wgsl #:luv.wgsl)
+                    (#:ps #:parenscript)
+                    (#:css #:luv.css))
+  (:export #:web-body-type
            #:web-body-id
            #:web-body-label
            #:web-body-role
@@ -25,8 +18,7 @@
            #:body-gallery-bundle-fragment
            #:compile-body-gallery
            #:body-gallery-json
+           #:body-gallery-javascript
            #:showcase-page
            #:showcase-page-directory
-           #:make-showcase-page
-           #:make-luvcraft-web-application
-           #:serve-luvcraft-web))
+           #:make-showcase-page))

@@ -237,39 +237,17 @@ re-renders the site."
           (style-source-files)))
 
 (defmethod asdf:output-files ((o render-op) (s asdf:system))
-  "The stylesheet, the figures index, the source index, and one page per
-source file."
-  (let ((directory (site-output-directory s))
-        (root (asdf:system-source-directory s)))
-    (values (list* (merge-pathnames "style.css" directory)
-                   (merge-pathnames "pages.html" directory)
-                   (merge-pathnames "work.html" directory)
-                   (merge-pathnames "source.html" directory)
-                   (merge-pathnames "luft-star-atlas.html" directory)
-                   (merge-pathnames "luft-star-atlas.js" directory)
-                   (loop for pathname in (code-source-files)
-                         collect (merge-pathnames
-                                  (concatenate 'string "source/"
-                                               (namestring (uiop:enough-pathname pathname root))
-                                               ".html")
-                                  directory)))
+  "Every dynamically routable resource has the same static output path."
+  (let ((directory (site-output-directory s)))
+    (values (loop for resource in (website-resources (system-site s))
+                  collect (merge-pathnames (resource-output-path resource)
+                                           directory))
             t)))
 
 (defmethod asdf:perform ((o render-op) (s asdf:system))
   (let ((site (system-site s))
         (directory (site-output-directory s)))
-    (write-stylesheet directory)
-    (let ((*site* site))
-      (write-html-file (merge-pathnames "pages.html" directory)
-                       (lambda () (render-pages-page site)))
-      (write-html-file (merge-pathnames "work.html" directory)
-                       (lambda () (render-work-page site)))
-      (write-html-file (merge-pathnames "source.html" directory)
-                       (lambda () (render-source-index site)))
-      (uiop:symbol-call '#:luft.atlas '#:write-star-atlas site directory)
-      (dolist (file (site-source-files site))
-        (write-html-file (merge-pathnames (source-page-name file) directory)
-                         (lambda () (render-source-page file)))))
+    (publish-site site directory)
     (let ((dangling (dangling-mentions site)))
       (when dangling
         (warn "Dangling figure mentions:~{~%  ~A: ~{~A~^ ~}~}"

@@ -1,11 +1,11 @@
 (in-package #:asdf-user)
 
 (defsystem "luv-wiki-site"
-  :description "The Org corpus and rendered static site for the luv workshop wiki."
+  :description "The complete dynamic and publishable luv workshop website."
   :version "0.0.1"
   :author "Mikael Brockman"
   :defsystem-depends-on ("luv-wiki")
-  :depends-on ("luv-wiki" "luft/atlas")
+  :depends-on ("luv-wiki" "luft/atlas" "luvcraft/web")
   :build-operation "luv.wiki:render-op"
   :components
   ((:module "wiki"

@@ -119,13 +119,20 @@
      :crumbs '(("Pages" . "pages.html") ("The stars, by symmetry"))
      :right "star atlas")))
 
-(defun write-star-atlas (site directory)
-  "Write the wiki-framed atlas and its ParenScript program into DIRECTORY."
-  (let* ((directory (uiop:ensure-directory-pathname directory))
-         (html (merge-pathnames "luft-star-atlas.html" directory))
-         (javascript (merge-pathnames "luft-star-atlas.js" directory)))
-    (luv.wiki::write-html-file html (lambda () (render-star-atlas site)))
-    (with-open-file (stream javascript :direction :output :if-exists :supersede
-                                       :external-format :utf-8)
-      (write-string (star-atlas-javascript) stream))
-    (list html javascript)))
+(defun star-atlas-resources (site)
+  "The atlas page and browser program in the wiki's common resource model."
+  (list
+   (luv.wiki:make-generated-resource
+    "/luft-star-atlas.html" "luft-star-atlas.html" "text/html; charset=utf-8"
+    (lambda ()
+      (with-output-to-string (stream)
+        (luv.wiki::call-with-html-output
+         stream (lambda () (render-star-atlas site)))))
+    :label "Stars"
+    :description "23 rotation families of 256 stars"
+    :kind "atlas")
+   (luv.wiki:make-generated-resource
+    "/luft-star-atlas.js" "luft-star-atlas.js"
+    "text/javascript; charset=utf-8" #'star-atlas-javascript)))
+
+(luv.wiki:register-resource-provider 'star-atlas #'star-atlas-resources)

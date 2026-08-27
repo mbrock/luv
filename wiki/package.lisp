@@ -1,10 +1,9 @@
 (defpackage #:luv.wiki
   (:use #:cl)
   (:documentation
-   "The luv workshop wiki as Lisp objects: an Org-subset reader that turns
-wiki pages into element trees, a figure index over the whole corpus, a
-Spinneret renderer that writes the static site, and the ASDF component and
-operation that make the wiki a buildable system.")
+   "The opinionated luv web framework: Org and Lisp-source pages as objects,
+Spinneret rendering, S-expression CSS and JavaScript, shared web resources,
+and equivalent dynamic Clack hosting and static publication.")
   (:export
    ;; Element model
    #:element
@@ -114,16 +113,41 @@ operation that make the wiki a buildable system.")
    #:read-source-file
    #:source-page-name
    #:site-source-files
+   #:site-resources
    #:find-named-definition
    #:definition-page-href
    #:render-source-page
    #:render-source-index
    #:*code-systems*
+   ;; Web resources
+   #:resource
+   #:resource-path
+   #:resource-output-path
+   #:resource-content-type
+   #:resource-label
+   #:resource-description
+   #:resource-kind
+   #:generated-resource
+   #:file-resource
+   #:make-generated-resource
+   #:make-file-resource
+   #:register-resource-provider
+   #:website-resources
+   #:website-navigation
+   #:find-resource
+   #:resource-response
+   #:publish-site
+   #:serve-site
    ;; ASDF
    #:org-file
    #:org-file-document
    #:render-op
    #:site-output-directory))
+
+(defpackage #:luv.wiki.browser
+  (:use #:cl)
+  (:local-nicknames (#:ps #:parenscript))
+  (:export #:await #:async-defun #:async-lambda))
 
 (defpackage #:luv.css
   (:use #:cl)

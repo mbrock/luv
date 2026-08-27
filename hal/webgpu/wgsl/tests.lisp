@@ -65,7 +65,7 @@
       (true (search "\"statureKnob\":\"gnome-stature\"" json))
       (true (search "\"identifier\":\"knob_cat_tail_reach\"" json)))))
 
-(define-test luvcraft-web-mounts-its-semantic-pages
+(define-test luvcraft-contributes-semantic-pages-to-the-wiki
   (let ((directory
           (uiop:ensure-directory-pathname
            (merge-pathnames "luvcraft-showcase-test/"
@@ -92,75 +92,76 @@
                         (:file "Y7X7WK-proposal-orbit-poster-480w.webp"
                          :type "image/webp" :width 480 :height 854))))
                     :stream stream))
-           (let* ((bundles (luvcraft.web:compile-body-gallery))
-                  (application
-                    (luvcraft.web:make-luvcraft-web-application
-                     :bundles bundles :showcase-directory directory))
-                  (index
-                    (luvcraft.web:respond-to-web-request application "/"))
-                  (gallery
-                    (luvcraft.web:respond-to-web-request
-                     application "/bodies/"))
+           (let* ((document
+                    (luv.wiki:read-org-string "#+title: Workshop\n" :name "index"))
+                  (site (luv.wiki:make-site (list document)))
+                  (response
+                    (lambda (path)
+                      (luv.wiki:resource-response
+                       (luv.wiki:find-resource path site))))
+                  (body (lambda (response) (first (third response))))
+                  (index (funcall response "/"))
+                  (gallery (funcall response "/bodies/"))
+                  (catalog (funcall response "/bodies/bodies.json"))
+                  (gallery-js (funcall response "/bodies/gallery.js"))
+                  (shader (funcall response "/bodies/body/gnome/fragment.wgsl"))
+                  (style (funcall response "/style.css"))
+                  (missing (funcall response "/nope"))
                   (showcase
-                    (luvcraft.web:respond-to-web-request
-                     application "/showcase/"))
-                  (catalog
-                    (luvcraft.web:respond-to-web-request
-                     application "/bodies/bodies.json"))
-                  (gallery-js
-                    (luvcraft.web:respond-to-web-request
-                     application "/bodies/gallery.js"))
-                  (shader
-                    (luvcraft.web:respond-to-web-request
-                     application "/bodies/body/gnome/fragment.wgsl"))
-                  (missing
-                    (luvcraft.web:respond-to-web-request application "/nope")))
+                    (with-output-to-string (stream)
+                      (luv.wiki::call-with-html-output
+                       stream
+                       (lambda ()
+                         (luvcraft.web::render-showcase-page
+                          (luvcraft.web:make-showcase-page :directory directory)
+                          site))))))
              (true (= 200 (first index)))
              (true (search "href=\"/bodies/\""
-                           (first (third index))))
+                           (funcall body index)))
              (true (search "href=\"/showcase/\""
-                           (first (third index))))
+                           (funcall body index)))
              (true (= 200 (first gallery)))
+             (true (search "<header class=library>" (funcall body gallery)))
              (true (search "/bodies/gallery.js"
-                           (first (third gallery))))
+                           (funcall body gallery)))
              (true (search
                     "\"vertexUrl\":\"\\/bodies\\/body\\/gnome\\/vertex.wgsl\""
-                    (first (third catalog))))
-             (true (search "const FRAME_INTERVAL = 1000 / 60;"
-                           (first (third gallery-js))))
-             (true (search "const RENDER_SCALE = 1;"
-                           (first (third gallery-js))))
-             (true (search "if (!cameraBufferDirty) return;"
-                           (first (third gallery-js))))
+                    (funcall body catalog)))
+             (true (search "var frameInterval = 1000 / 60;"
+                           (funcall body gallery-js)))
+             (true (search "async function start()"
+                           (funcall body gallery-js)))
+             (true (search "await (navigator.gpu.requestAdapter())"
+                           (funcall body gallery-js)))
              (true (search "new URLSearchParams(location.hash.slice(1))"
-                           (first (third gallery-js))))
+                           (funcall body gallery-js)))
              (true (search "parameters.set(knob.name"
-                           (first (third gallery-js))))
-             (true (search
-                    "history.replaceState(null, \"\", `#${parameters}`)"
-                    (first (third gallery-js))))
+                           (funcall body gallery-js)))
+             (true (search "history.replaceState(null, '', '#' + parameters)"
+                           (funcall body gallery-js)))
              (true (search "@fragment"
-                           (first (third shader))))
+                           (funcall body shader)))
+             (true (search "<header class=library>" showcase))
              (true (search "/showcase/media/Y7X7WK-proposal-still.png"
-                           (first (third showcase))))
+                           showcase))
              (true (search "src=\"/showcase/media/Y7X7WK-proposal-still-768w.webp\""
-                           (first (third showcase))))
+                           showcase))
              (true (search "Y7X7WK-proposal-still-480w.webp 480w, /showcase/media/Y7X7WK-proposal-still-768w.webp 768w"
-                           (first (third showcase))))
+                           showcase))
              (true (search "sizes=\"(max-width: 59.5rem)"
-                           (first (third showcase))))
+                           showcase))
              (true (search "title=\"Open full-resolution image\""
-                           (first (third showcase))))
+                           showcase))
              (true (search "/showcase/media/Y7X7WK-proposal-orbit.mp4"
-                           (first (third showcase))))
-             (true (search "class=portrait><div class=\"media portrait\">"
-                           (first (third showcase))))
+                           showcase))
+             (true (search "class=portrait><div class=\"showcase-media portrait\">"
+                           showcase))
              (true (search "preload=none poster=\"/showcase/media/Y7X7WK-proposal-orbit-poster-480w.webp\""
-                           (first (third showcase))))
-             (true (search ".media.portrait img,.media.portrait video{object-fit:contain}"
-                           (first (third showcase))))
+                           showcase))
+             (true (search ".showcase-media.portrait img, .showcase-media.portrait video"
+                           (funcall body style)))
              (true (search "abc123def456"
-                           (first (third showcase))))
+                           showcase))
              (true (= 404 (first missing)))))
       (uiop:delete-directory-tree directory :validate t
                                             :if-does-not-exist :ignore))))

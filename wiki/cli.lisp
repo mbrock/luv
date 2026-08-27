@@ -349,6 +349,24 @@ derived layouts.  Give system names to load others instead."
   (format t "~&~A~%"
           (wiki:site-output-directory (asdf:find-system :luv-wiki-site))))
 
+(define-command serve (&rest arguments)
+  "Dynamically host the complete wiki site. Options: --host HOST --port PORT."
+  (let ((host "127.0.0.1")
+        (port 8765))
+    (loop while arguments
+          for option = (pop arguments)
+          do (cond ((string= option "--host")
+                    (unless arguments (error "--host requires a value."))
+                    (setf host (pop arguments)))
+                   ((string= option "--port")
+                    (unless arguments (error "--port requires a value."))
+                    (setf port (parse-integer (pop arguments) :junk-allowed nil)))
+                   (t (error "Unknown serve option ~A." option))))
+    (ensure-systems)
+    (asdf:load-system :luv-wiki-site)
+    (setf *site* nil)
+    (wiki:serve-site (site) :host host :port port)))
+
 (defun run (arguments)
   "Run the command named by the first of ARGUMENTS."
   (let* ((name (or (first arguments) "help"))

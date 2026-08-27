@@ -9,8 +9,10 @@ project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 . "$project_root/scripts/require-dev-environment"
 
 exe="$project_root/build/wiki-cli"
-stale=$(find "$project_root/wiki" "$project_root/luv-wiki.asd" \
-  "$project_root/luv.asd" -newer "$exe" 2>/dev/null || true)
+stale=$(find "$project_root/wiki" "$project_root/luft" "$project_root/luvcraft" \
+  "$project_root/luv-wiki.asd" "$project_root/luv-wiki-site.asd" \
+  "$project_root/luft.asd" "$project_root/luv.asd" "$project_root/luvcraft.asd" \
+  -newer "$exe" 2>/dev/null || true)
 if [ ! -x "$exe" ] || [ -n "$stale" ]; then
   echo "wiki: building $exe" >&2
   # PROGRAM-OP otherwise considers its existing output current even though

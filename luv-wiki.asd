@@ -1,24 +1,29 @@
 (in-package #:asdf-user)
 
 (defsystem "luv-wiki"
-  :description "An Org-subset reader, Spinneret site renderer, and the ASDF
-component and operation that make the wiki a buildable system."
+  :description "The opinionated luv web framework: Org and Lisp source pages,
+Spinneret, S-expression CSS and JavaScript, dynamic hosting, and publication."
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on (#:spinneret
                #:eclector
-               #:named-readtables)
+               #:named-readtables
+               #:parenscript
+               #:clack
+               #:clack-handler-woo)
   :serial t
   :components ((:module "wiki"
                 :serial t
                 :components ((:file "package")
                              (:file "css")
+                             (:file "parenscript")
                              (:file "org")
                              (:file "html")
                              (:file "lisp")
                              (:file "dexp")
                              (:file "style")
                              (:file "source")
+                             (:file "web")
                              (:file "asdf"))))
   :in-order-to ((test-op (test-op "luv-wiki/test"))))
 

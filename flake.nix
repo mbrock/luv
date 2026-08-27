@@ -217,6 +217,7 @@
             [
               ffmpeg
               mupdf.out
+              pkgs.libev
               pkgs.libffi
               pkgs.harfbuzz
               pkgs.openssl
@@ -233,6 +234,7 @@
           slimNativeLibraryPackages =
             [
               ffmpeg
+              pkgs.libev
               pkgs.libffi
               pkgs.harfbuzz
               pkgs.openssl

@@ -1,4 +1,4 @@
-;;;; Rendering the wiki corpus as a static HTML site with Spinneret.
+;;;; Rendering the wiki corpus as HTML pages with Spinneret.
 ;;;;
 ;;;; A SITE holds every document of the corpus together with the figure
 ;;;; index derived from their headings: which page owns each ID, and which
@@ -27,7 +27,10 @@
                :accessor site-source-url
                :documentation "Base URL for file: links into the repository.")
    (source-directory :initarg :source-directory :initform nil :accessor site-source-directory
-                     :documentation "The repository root that SOURCE-URL corresponds to."))
+                     :documentation "The repository root that SOURCE-URL corresponds to.")
+   (resources :initarg :resources :initform '() :accessor site-resources
+              :documentation "The website resources, realized on first use.")
+   (resources-realized-p :initform nil :accessor site-resources-realized-p))
   (:documentation "The whole wiki corpus and its disposable derived indexes."))
 
 (defvar *site* nil
@@ -496,7 +499,12 @@ markup) on the right, the main column, and a footer."
                  (:span.door-title "Source")
                  (:span.door-meta (format nil "~D systems, ~D files"
                                           (length (site-systems *site*))
-                                          (length (site-source-files *site*))))))))
+                                          (length (site-source-files *site*))))))
+           (dolist (resource (website-navigation *site*))
+             (:a :class (if (equal kind (resource-kind resource)) "door selected" "door")
+                 :href (resource-path resource)
+                 (:span.door-title (resource-label resource))
+                 (:span.door-meta (resource-description resource))))))
          (:div.status
           (:span.status-left (render-crumbs crumbs))
           (:span.status-right
@@ -757,34 +765,3 @@ spacing, so both are turned off."
                                 :external-format :utf-8)
     (call-with-html-output out thunk))
   pathname)
-
-(defun write-stylesheet (directory)
-  "Compile the style definitions and write them as style.css in DIRECTORY."
-  (let ((pathname (merge-pathnames "style.css" directory)))
-    (ensure-directories-exist pathname)
-    (with-open-file (out pathname :direction :output :if-exists :supersede
-                                  :external-format :utf-8)
-      (write-string (luv.css:stylesheet-text) out))
-    pathname))
-
-(defun write-site (site directory &key (stylesheet t))
-  "Write every page of SITE, the figures index, and, unless STYLESHEET is
-NIL, the compiled stylesheet into DIRECTORY."
-  (let ((*site* site)
-        (directory (uiop:ensure-directory-pathname directory)))
-    (dolist (document (site-documents site))
-      (write-html-file (merge-pathnames (site-page-name document) directory)
-                       (lambda () (render-page document))))
-    (write-html-file (merge-pathnames "pages.html" directory)
-                     (lambda () (render-pages-page site)))
-    (write-html-file (merge-pathnames "work.html" directory)
-                     (lambda () (render-work-page site)))
-    (when (site-source-files site)
-      (write-html-file (merge-pathnames "source.html" directory)
-                       (lambda () (render-source-index site)))
-      (dolist (file (site-source-files site))
-        (write-html-file (merge-pathnames (source-page-name file) directory)
-                         (lambda () (render-source-page file)))))
-    (when stylesheet
-      (write-stylesheet directory))
-    directory))

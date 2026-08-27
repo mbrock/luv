@@ -55,10 +55,14 @@
 
 (define-test atlas-is-a-wiki-view
   (let* ((site (luv.wiki:make-site nil))
+         (page (luv.wiki:find-resource "/luft-star-atlas.html" site))
+         (program (luv.wiki:find-resource "/luft-star-atlas.js" site))
          (html
-           (with-output-to-string (stream)
-             (luv.wiki::call-with-html-output
-              stream (lambda () (atlas::render-star-atlas site))))))
+           (first (third (luv.wiki:resource-response page)))))
+    (true page)
+    (true program)
+    (true (string= "luft-star-atlas.html"
+                   (luv.wiki:resource-output-path page)))
     (true (search "<header class=library>" html))
     (true (search "<div class=status>" html))
     (true (search "<link rel=stylesheet href=style.css>" html))

@@ -114,70 +114,75 @@
                              (bundle-json-object bundle base-path))
                            bundles)))))
 
-(defun gallery-asset (name)
-  (uiop:read-file-string
-   (asdf:system-relative-pathname
-    "luvcraft/web" (format nil "luvcraft/web/~A" name))))
+(defun render-body-gallery (site)
+  "Render the SDF playground inside the wiki's common page frame."
+  (let ((luv.wiki::*site* site)
+        (luv.wiki::*rendering-document* nil)
+        (luv.wiki::*page-prefix* "../")
+        (luv.wiki::*page-kind* "bodies"))
+    (luv.wiki::render-page-frame
+     "Agent bodies"
+     (lambda ()
+       (spinneret:with-html
+         (:div.body-layout
+           (:section.body-stage :aria-label "Agent body viewer"
+             (:canvas#body-canvas)
+             (:div.body-stage-copy
+               (:p.eyebrow "Luvcraft field notes")
+               (:h1#body-title "Agent bodies")
+               (:p#status "Waking WebGPU…"))
+             (:p.orbit-hint "drag to orbit · scroll to approach"))
+           (:aside.body-workbench
+             (:header
+               (:p.eyebrow "Body cabinet")
+               (:nav#body-picker :aria-label "Choose an agent body"))
+             (:div#knobs.knobs)
+             (:footer
+               (:button#reset :type "button" "Reset this creature")
+               (:span "WGSL compiled by luv"))))
+         (:script :type "module" :src "/bodies/gallery.js")))
+     :body-class "wide body-playground"
+     :kind "bodies"
+     :crumbs '(("Agent bodies"))
+     :right "SDF playground")))
 
-(defun find-bundle (id bundles)
-  (find id bundles :test #'string=
-        :key (lambda (bundle)
-               (web-body-id (body-gallery-bundle-body bundle)))))
+(defun shader-resources (bundles)
+  (loop for bundle in bundles
+        for body = (body-gallery-bundle-body bundle)
+        for id = (web-body-id body)
+        append
+        (loop for (stage document)
+                in `(("vertex" ,(body-gallery-bundle-vertex bundle))
+                     ("fragment" ,(body-gallery-bundle-fragment bundle)))
+              for source = (wgsl:wgsl-document-source document)
+              for path = (format nil "/bodies/body/~A/~A.wgsl" id stage)
+              for output = (format nil "bodies/body/~A/~A.wgsl" id stage)
+              collect (let ((source source))
+                        (luv.wiki:make-generated-resource
+                         path output "text/wgsl; charset=utf-8"
+                         (lambda () source))))))
 
-(defun body-shader-response (path bundles)
-  (let* ((parts (uiop:split-string path :separator '(#\/)))
-         (id (third parts))
-         (file (fourth parts))
-         (bundle (and (= 4 (length parts)) (find-bundle id bundles))))
-    (when bundle
-      (cond ((string= file "vertex.wgsl")
-             (wgsl:wgsl-document-source
-              (body-gallery-bundle-vertex bundle)))
-            ((string= file "fragment.wgsl")
-             (wgsl:wgsl-document-source
-              (body-gallery-bundle-fragment bundle)))))))
+(defun body-gallery-resources (site)
+  "Compile the gallery once and expose its page, data, program, and shaders."
+  (let* ((bundles (compile-body-gallery))
+         (catalog (body-gallery-json bundles)))
+    (append
+     (list
+      (luv.wiki:make-generated-resource
+       "/bodies/" "bodies/index.html" "text/html; charset=utf-8"
+       (lambda ()
+         (with-output-to-string (stream)
+           (luv.wiki::call-with-html-output
+            stream (lambda () (render-body-gallery site)))))
+       :label "Bodies"
+       :description "live analytic SDF creatures"
+       :kind "bodies")
+      (luv.wiki:make-generated-resource
+       "/bodies/gallery.js" "bodies/gallery.js"
+       "text/javascript; charset=utf-8" #'body-gallery-javascript)
+      (luv.wiki:make-generated-resource
+       "/bodies/bodies.json" "bodies/bodies.json"
+       "application/json; charset=utf-8" (lambda () catalog)))
+     (shader-resources bundles))))
 
-(defclass body-gallery-page (web-page)
-  ((bundles :initarg :bundles :reader body-gallery-page-bundles)
-   (catalog-json :initarg :catalog-json :reader body-gallery-page-catalog-json)))
-
-(defun make-body-gallery-page (&optional (bundles (compile-body-gallery)))
-  (make-instance 'body-gallery-page
-                 :path "/bodies"
-                 :label "Agent bodies"
-                 :description "Gnomes and cats, compiled from luv shaders to live WebGPU."
-                 :bundles bundles
-                 :catalog-json (body-gallery-json bundles)))
-
-(defmethod respond-to-web-request ((page body-gallery-page) path)
-  (cond ((or (string= path "/") (string= path "/index.html"))
-         (ok-response "text/html; charset=utf-8"
-                      (gallery-asset "body-gallery.html")))
-        ((string= path "/gallery.js")
-         (ok-response "text/javascript; charset=utf-8"
-                      (gallery-asset "body-gallery.js")))
-        ((string= path "/gallery.css")
-         (ok-response "text/css; charset=utf-8"
-                      (gallery-asset "body-gallery.css")))
-        ((string= path "/bodies.json")
-         (ok-response "application/json; charset=utf-8"
-                      (body-gallery-page-catalog-json page)))
-        (t
-         (let ((source (body-shader-response
-                        path (body-gallery-page-bundles page))))
-           (if source
-               (ok-response "text/wgsl; charset=utf-8" source)
-               (call-next-method))))))
-
-(defun make-luvcraft-web-application (&key bundles showcase-directory)
-  "Build the luvcraft web application and its currently installed pages."
-  (make-web-application
-   (if bundles
-       (make-body-gallery-page bundles)
-       (make-body-gallery-page))
-   (make-showcase-page :directory showcase-directory)))
-
-(defun serve-luvcraft-web (&key (host "127.0.0.1") (port 8765))
-  "Compile the web-facing artifacts once, then serve luvcraft until stopped."
-  (serve-web-application (make-luvcraft-web-application)
-                         :host host :port port))
+(luv.wiki:register-resource-provider 'body-gallery #'body-gallery-resources)

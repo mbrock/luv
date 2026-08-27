@@ -2,7 +2,9 @@
   (:use #:cl)
   (:import-from #:parachute #:define-test #:true #:false #:fail #:group #:skip)
   (:local-nicknames (#:wiki #:luv.wiki)
-                    (#:css #:luv.css)))
+                    (#:browser #:luv.wiki.browser)
+                    (#:css #:luv.css)
+                    (#:ps #:parenscript)))
 
 (in-package #:luv.wiki.tests)
 (named-readtables:in-readtable luv.css:syntax)
@@ -184,6 +186,41 @@ Nothing here refers to anything.
                (true (search "<section class=work-status id=next>" work))
                (true (search "<ol class=work><li class=work-item>" work))))
         (uiop:delete-directory-tree directory :validate t :if-does-not-exist :ignore)))))
+
+(define-test dynamic-and-static-sites-use-the-same-resources
+  (let* ((document (page *page* "index"))
+         (extra (wiki:make-generated-resource
+                 "/hello.txt" "nested/hello.txt" "text/plain; charset=utf-8"
+                 (lambda () "hello from Lisp\n")))
+         (site (wiki:make-site (list document) :resources (list extra)))
+         (directory
+           (uiop:ensure-directory-pathname
+            (uiop:merge-pathnames* "luv-wiki-resource-test/"
+                                   (uiop:temporary-directory)))))
+    (unwind-protect
+         (progn
+           (wiki:publish-site site directory)
+           (dolist (pair '(("/" . "index.html")
+                           ("/hello.txt" . "nested/hello.txt")))
+             (let* ((response
+                      (wiki:resource-response
+                       (wiki:find-resource (car pair) site)))
+                    (dynamic-body (first (third response)))
+                    (static-body
+                      (uiop:read-file-string (merge-pathnames (cdr pair) directory))))
+               (true (= 200 (first response)))
+               (true (string= dynamic-body static-body)))))
+      (uiop:delete-directory-tree directory :validate t
+                                            :if-does-not-exist :ignore))))
+
+(define-test parenscript-async-and-await
+  (let ((javascript
+          (ps:ps*
+           `(progn
+              (browser:async-defun load-value ()
+                (setf result (browser:await (fetch "/value"))))))))
+    (true (search "async function loadValue()" javascript))
+    (true (search "await (fetch('/value'))" javascript))))
 
 (defparameter *source*
   "(in-package #:luv.example)

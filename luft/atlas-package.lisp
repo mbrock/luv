@@ -2,7 +2,6 @@
   (:use #:cl #:parenscript)
   (:local-nicknames (#:css #:luv.css)
                     (#:ps #:parenscript))
-  (:export #:star-atlas-javascript
-           #:write-star-atlas))
+  (:export #:star-atlas-javascript))
 
 (in-package #:luft.atlas)

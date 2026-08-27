@@ -118,7 +118,7 @@
    ("a" :color inherit))
   (".doors"
    :display grid
-   :grid-template-columns (repeat 3 (minmax 0 1fr))
+   :grid-template-columns (repeat 'auto-fit (minmax 10rem 1fr))
    :gap 0.65rem)
   (".door"
    :display grid
