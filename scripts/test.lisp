@@ -13,6 +13,7 @@
 (defparameter *test-script* (truename *load-truename*))
 (defparameter *timings-path* (merge-pathnames #P"build/test-timings.sexp"
                                                *project-root*))
+(defparameter *progress-interval* 5.0)
 (defparameter *worker-mode* nil)
 (defparameter *coordinator-mailbox* nil)
 
@@ -306,15 +307,37 @@
     (ignore-errors (sb-thread:join-thread (test-worker-thread worker)
                                           :timeout 10))))
 
+(defun elapsed-seconds (start)
+  (/ (float (- (get-internal-real-time) start) 1.0)
+     internal-time-units-per-second))
+
+(defun report-running-suites (active start)
+  (let ((entries
+          (sort (loop for worker-id being the hash-keys of active
+                      using (hash-value suite)
+                      collect (list worker-id (car suite)
+                                    (elapsed-seconds (cdr suite))))
+                #'< :key #'first)))
+    (when entries
+      (format t "~5,1,,,'0Fs       RUN    " (elapsed-seconds start))
+      (loop for (worker-id name seconds) in entries
+            for first = t then nil
+            unless first do (write-string ", ")
+            do (format t "~A (~,1Fs, worker ~D)" name seconds worker-id))
+      (terpri)
+      (finish-output))))
+
 (defun run-parallel-suites (suites jobs timings directory)
   (let* ((*coordinator-mailbox*
            (sb-concurrency:make-mailbox :name "test coordinator"))
          (assignments (assign-suites suites jobs timings))
          (workers nil)
          (results (make-hash-table :test #'equal))
+         (active (make-hash-table))
          (finished-workers 0)
          (failures nil)
-         (parallel-start (get-internal-real-time)))
+         (parallel-start (get-internal-real-time))
+         (last-output parallel-start))
     (ensure-directories-exist directory)
     (unwind-protect
          (progn
@@ -322,56 +345,75 @@
                  for id from 1
                  do (push (launch-worker id assignment directory) workers))
            (loop until (= finished-workers (length workers))
-                 for message = (sb-concurrency:receive-message
-                                *coordinator-mailbox*)
-                 do (case (first message)
-                      (:event
-                       (destructuring-bind (kind worker-id event) message
-                         (declare (ignore kind))
-                         (case (first event)
-                           (:suite-started)
-                           (:suite-finished
-                            (destructuring-bind
-                                (event-kind name status seconds log) event
-                              (declare (ignore event-kind))
-                              (if (gethash name results)
-                                  (progn
-                                    (push name failures)
-                                    (format t "Duplicate result for ~A from worker ~D.~%"
-                                            name worker-id))
-                                  (progn
-                                    (setf (gethash name results) status
-                                          timings (update-timing name seconds timings))
-                                    (when (eq status :failed)
-                                      (push name failures))
-                                    (format t "~5,1,,,'0Fs ~2D/~D  ~A (~,1Fs, worker ~D)~%"
-                                            (/ (float
-                                                (- (get-internal-real-time)
-                                                   parallel-start)
-                                                1.0)
-                                               internal-time-units-per-second)
-                                            (hash-table-count results)
-                                            (length suites) name seconds worker-id)
-                                    (copy-log-to-console log)
-                                    (finish-output))))))))
-                      (:worker-output
-                       (destructuring-bind (kind worker-id line) message
-                         (declare (ignore kind))
-                         (format t "worker ~D: ~A~%" worker-id line)))
-                      (:worker-done
-                       (destructuring-bind (kind worker-id status) message
-                         (declare (ignore kind))
-                         (incf finished-workers)
-                         (when (and (not (zerop status))
-                                    (notany
-                                     (lambda (name)
-                                       (eq :failed (gethash name results)))
-                                     (test-worker-suites
-                                      (find worker-id workers
-                                            :key #'test-worker-id))))
-                           (push (format nil "worker ~D" worker-id) failures)
-                           (format t "worker ~D exited unexpectedly (status ~D).~%"
-                                   worker-id status)))))))
+                 do (multiple-value-bind (message received-p)
+                        (sb-concurrency:receive-message
+                         *coordinator-mailbox* :timeout 1)
+                      (if received-p
+                          (case (first message)
+                            (:event
+                             (destructuring-bind (kind worker-id event) message
+                               (declare (ignore kind))
+                               (case (first event)
+                                 (:suite-started
+                                  (let ((name (second event)))
+                                    (setf (gethash worker-id active)
+                                          (cons name (get-internal-real-time))
+                                          last-output (get-internal-real-time))
+                                    (format t "~5,1,,,'0Fs       START  ~A (worker ~D)~%"
+                                            (elapsed-seconds parallel-start)
+                                            name worker-id)
+                                    (finish-output)))
+                                 (:suite-finished
+                                  (destructuring-bind
+                                      (event-kind name status seconds log) event
+                                    (declare (ignore event-kind))
+                                    (remhash worker-id active)
+                                    (setf last-output (get-internal-real-time))
+                                    (if (gethash name results)
+                                        (progn
+                                          (push name failures)
+                                          (format t "Duplicate result for ~A from worker ~D.~%"
+                                                  name worker-id))
+                                        (progn
+                                          (setf (gethash name results) status
+                                                timings (update-timing name seconds
+                                                                       timings))
+                                          (when (eq status :failed)
+                                            (push name failures))
+                                          (format t "~5,1,,,'0Fs ~2D/~D  ~6A ~A (~,1Fs, worker ~D)~%"
+                                                  (elapsed-seconds parallel-start)
+                                                  (hash-table-count results)
+                                                  (length suites)
+                                                  (if (eq status :passed)
+                                                      "PASS" "FAIL")
+                                                  name seconds worker-id)
+                                          (when (eq status :failed)
+                                            (copy-log-to-console log))
+                                          (finish-output))))))))
+                            (:worker-output
+                             (destructuring-bind (kind worker-id line) message
+                               (declare (ignore kind))
+                               (setf last-output (get-internal-real-time))
+                               (format t "worker ~D: ~A~%" worker-id line)))
+                            (:worker-done
+                             (destructuring-bind (kind worker-id status) message
+                               (declare (ignore kind))
+                               (incf finished-workers)
+                               (remhash worker-id active)
+                               (when (and (not (zerop status))
+                                          (notany
+                                           (lambda (name)
+                                             (eq :failed (gethash name results)))
+                                           (test-worker-suites
+                                            (find worker-id workers
+                                                  :key #'test-worker-id))))
+                                 (push (format nil "worker ~D" worker-id) failures)
+                                 (format t "worker ~D exited unexpectedly (status ~D).~%"
+                                         worker-id status)))))
+                          (when (>= (elapsed-seconds last-output)
+                                    *progress-interval*)
+                            (report-running-suites active parallel-start)
+                            (setf last-output (get-internal-real-time)))))))
       (stop-workers workers))
     (dolist (suite suites)
       (unless (gethash suite results)
