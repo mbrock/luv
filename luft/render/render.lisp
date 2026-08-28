@@ -4342,18 +4342,213 @@ cohort untouched. No frame can interleave with the owner-thread publication."
 ;;; ---------------------------------------------------------------------------
 ;;; Streaming chunk scenes
 ;;;
-;;; A streaming scene is an ordinary authored scene whose solid is split into
-;;; chunk chains. A bounded square window follows the camera. Each focus change
-;;; installs the final desired residency first, then remeshes exactly the chunks
-;;; whose 3 by 3 dependency neighborhoods changed. MESH-CHUNK's probes into
-;;; non-resident neighbors signal MISSING-CHUNK; immutable worker snapshots
-;;; answer USE-CHUNK for the captured neighborhood and TREAT-AS-AIR otherwise.
+;;; A finite fixture may still split an ordinary authored scene into chunks.
+;;; Ordinary play instead retains a deterministic source and a sparse overlay;
+;;; immutable resident values are produced on the worker and may be discarded.
+;;; A bounded square window follows the camera. Each focus change installs the
+;;; final desired residency first, then remeshes exactly the chunks whose 3 by 3
+;;; dependency neighborhoods changed. MESH-CHUNK's probes into non-resident
+;;; neighbors signal MISSING-CHUNK. Demand worlds capture a complete guard and
+;;; reject an unknown probe rather than silently turning nonresidency into air.
 ;;; The canvas owner publishes replacements and departures as one complete
 ;;; cohort, so no frame observes a mixed seam generation.
 
+(defconstant +large-world-horizontal-bits+ 11)
+(defconstant +large-world-seed+ 121)
+(defconstant +streaming-source-guard-radius+ 3)
+
+(defclass authored-world-source ()
+  ((domain :initarg :domain :reader authored-world-source-domain)
+   (seed :initarg :seed :initform +large-world-seed+
+         :reader authored-world-source-seed)
+   ;; Presence is meaningful: NIL is an authored removal, while absence means
+   ;; that the deterministic source still owns the cell.
+   (edits :initform (make-hash-table :test #'eql)
+          :reader authored-world-source-edits))
+  (:documentation
+   "The canonical large-world description and its sparse semantic edits."))
+
+(defstruct (resident-cell-chunk
+             (:constructor %make-resident-cell-chunk
+                 (key incarnation chain material-cells))
+             (:copier nil))
+  "One immutable, evictable materialization of an authored source chunk."
+  (key 0 :type luft:chunk-key :read-only t)
+  (incarnation 0 :type (integer 1 *) :read-only t)
+  (chain nil :type luft:chain :read-only t)
+  (material-cells nil :type hash-table :read-only t))
+
+(defun large-world-road-centre-y (x)
+  "Authored west-to-east route from the old sanctuary spawn to the citadel."
+  (+ 48.0d0 (* 0.418d0 (- x 64))
+     (* 18.0d0 (sin (/ (- x 64) 173.0d0)))))
+
+(defun large-world-river-centre-x (y)
+  "Authored north-to-south river course, independent of chunk partitioning."
+  (+ 612.0d0 (* 58.0d0 (sin (/ y 149.0d0)))
+     (* 17.0d0 (sin (/ y 43.0d0)))))
+
+(defun large-world-road-height (x)
+  (+ 15 (round (* 0.004d0 x))))
+
+(defun large-world-terrain-height (source x y)
+  "Deterministic composed terrain under the route, river, pass, and citadel."
+  (let* ((seed (authored-world-source-seed source))
+         (detail (+ (* 3.2d0 (landscape-value-noise x y 97 seed 2))
+                    (* 1.5d0 (landscape-value-noise x y 31 seed 3))))
+         (road-y (large-world-road-centre-y x))
+         (road-distance (abs (- y road-y)))
+         (river-x (large-world-river-centre-x y))
+         (river-distance (abs (- x river-x)))
+         (ridge-distance (abs (- x 970.0d0)))
+         (pass-distance (abs (- y (large-world-road-centre-y 970))))
+         (ridge (* 31.0d0
+                   (max 0.0d0 (- 1.0d0 (/ ridge-distance 260.0d0)))
+                   (min 1.0d0 (/ pass-distance 95.0d0))))
+         (highlands (* 9.0d0
+                       (max 0.0d0
+                            (landscape-value-noise x y 311 seed 11))))
+         (natural (+ 17.0d0 detail ridge highlands))
+         (river-bed (- natural
+                       (* 12.0d0
+                          (expt (max 0.0d0
+                                     (- 1.0d0 (/ river-distance 18.0d0)))
+                                2))))
+         (road-height (large-world-road-height x))
+         (road-blend (max 0.0d0 (- 1.0d0 (/ road-distance 7.0d0))))
+         (routed (interpolate-landscape-reading
+                  river-bed road-height road-blend))
+         (citadel-distance
+           (max (abs (- x 1500.0d0)) (abs (- y 650.0d0))))
+         (citadel-blend (max 0.0d0 (- 1.0d0 (/ citadel-distance 52.0d0)))))
+    (max 3 (min 92
+                (round (interpolate-landscape-reading
+                        routed 23.0d0 citadel-blend))))))
+
+(defun large-world-citadel-cell-p (x y z)
+  "Whether X/Y/Z is authored limestone in the eastern destination."
+  (let* ((dx (- x 1500))
+         (dy (- y 650))
+         (square-distance (max (abs dx) (abs dy)))
+         (corner-distance
+           (min (sqrt (+ (expt (- dx 34) 2) (expt (- dy 34) 2)))
+                (sqrt (+ (expt (+ dx 34) 2) (expt (- dy 34) 2)))
+                (sqrt (+ (expt (- dx 34) 2) (expt (+ dy 34) 2)))
+                (sqrt (+ (expt (+ dx 34) 2) (expt (+ dy 34) 2)))))
+         (gate-p (and (< dx -32) (<= (abs dy) 3) (<= z 29))))
+    (or
+     ;; Long curtain walls, with an open road gate on the west.
+     (and (<= 34 square-distance 38) (<= 24 z 34) (not gate-p))
+     ;; Four round towers break the square silhouette.
+     (and (<= corner-distance 8.0d0) (<= 24 z 40))
+     ;; A keep and stair-stepped beacon at the destination.
+     (and (<= 8 dx 26) (<= (abs dy) 13) (<= 24 z 38)
+          (or (<= (abs dy) 9) (<= z 31)))
+     (and (<= 13 dx 21) (<= (abs dy) 5) (<= 39 z 47))
+     ;; Sparse crenels remain ordinary cells.
+     (and (<= 34 square-distance 38) (= z 36)
+          (evenp (+ x y))))))
+
+(defun large-world-base-placement
+    (source x y z &key (height (large-world-terrain-height source x y)))
+  "Return the source-owned placement at one cell, or NIL for authored air."
+  (let* ((top (1- height))
+         (road-p (<= (abs (- y (large-world-road-centre-y x))) 3.0d0))
+         (river-p
+           (<= (abs (- x (large-world-river-centre-x y))) 8.0d0)))
+    (cond
+      ((large-world-citadel-cell-p x y z)
+       *sanctuary-material-placement*)
+      ((>= z height) nil)
+      ((and (= z top) road-p) *sanctuary-material-placement*)
+      ((and (= z top) river-p) *highland-rock-material-placement*)
+      ((and (>= z (- top 3))
+            (or (> height 31)
+                (>= (abs (- height
+                            (large-world-terrain-height source (1+ x) y)))
+                    2)))
+       *highland-rock-material-placement*)
+      (t *terrain-material-placement*))))
+
+(defun authored-world-edit-at (source cell)
+  "Return a sparse edited placement and whether SOURCE owns an edit at CELL."
+  (gethash cell (authored-world-source-edits source)))
+
+(defun capture-authored-world-chunk-edits (source key)
+  "Copy the sparse edits belonging to KEY for immutable worker use."
+  (let ((edits nil))
+    (maphash
+     (lambda (cell placement)
+       (when (= key (luft:site-chunk-key cell))
+         (push (cons cell placement) edits)))
+     (authored-world-source-edits source))
+    edits))
+
+(defun materialize-authored-world-chunk (source key incarnation &key edits)
+  "Build KEY bit-identically from SOURCE and an immutable sparse edit capture."
+  (check-type source authored-world-source)
+  (let* ((domain (authored-world-source-domain source))
+         (x0 (luft:chunk-origin-x key))
+         (y0 (luft:chunk-origin-y key))
+         (x1 (min (+ x0 luft:+chunk-size+)
+                  (luft:world-domain-x-limit domain)))
+         (y1 (min (+ y0 luft:+chunk-size+)
+                  (luft:world-domain-y-limit domain)))
+         (builder (luft:make-chain-builder domain :initial-capacity 100000))
+         (vocabulary (make-scene-material-vocabulary))
+         (materials (make-hash-table :test #'eql))
+         (captured (make-hash-table :test #'eql)))
+    (dolist (edit edits)
+      (setf (gethash (car edit) captured) (cdr edit)))
+    (loop for x from x0 below x1 do
+      (loop for y from y0 below y1 do
+        (let ((height (large-world-terrain-height source x y)))
+          (loop for z below (max height 48)
+              for cell = (luft:make-site
+                          domain x y z luft:+cell-extent+ 1)
+              do (multiple-value-bind (edited edited-p) (gethash cell captured)
+                   (let ((placement
+                           (if edited-p edited
+                               (large-world-base-placement
+                                source x y z :height height))))
+                     (when placement
+                       (luft:chain-builder-add-site builder cell)
+                       (setf (gethash cell materials)
+                             (domains:identity-vocabulary-offset
+                              vocabulary placement)))))))))
+    (%make-resident-cell-chunk
+     key incarnation (luft:finish-chain-builder builder) materials)))
+
+(defclass authored-chunk-load-request (production:production-request)
+  ((scene :initarg :scene :reader authored-chunk-load-request-scene)
+   (source :initarg :source :reader authored-chunk-load-request-source)
+   (chunk-key :initarg :chunk-key :reader authored-chunk-load-request-chunk-key)
+   (demand-token :initarg :demand-token
+                 :reader authored-chunk-load-request-demand-token)
+   (incarnation :initarg :incarnation
+                :reader authored-chunk-load-request-incarnation)
+   (edits :initarg :edits :reader authored-chunk-load-request-edits)))
+
+(defmethod production:perform-production-request
+    ((request authored-chunk-load-request))
+  (materialize-authored-world-chunk
+   (authored-chunk-load-request-source request)
+   (authored-chunk-load-request-chunk-key request)
+   (authored-chunk-load-request-incarnation request)
+   :edits (authored-chunk-load-request-edits request)))
+
 (defclass streaming-scene (scene)
-  ((store :initform (make-hash-table :test #'eql)
+  ((source :initarg :source :initform nil :reader streaming-scene-source)
+   (store :initform (make-hash-table :test #'eql)
           :reader streaming-scene-store)
+   (desired :initform (make-hash-table :test #'eql)
+            :reader streaming-scene-desired)
+   (load-outstanding :initform (make-hash-table :test #'eql)
+                     :reader streaming-scene-load-outstanding)
+   (next-demand-token :initform 0
+                      :accessor streaming-scene-next-demand-token)
+   (next-incarnation :initform 0
+                     :accessor streaming-scene-next-incarnation)
    (loaded :initform (make-hash-table :test #'eql)
            :reader streaming-scene-loaded)
    (outstanding :initform (make-hash-table :test #'eql)
@@ -4451,6 +4646,71 @@ a future LoD must bring an explicit transition representation."
        (setf (gethash key (streaming-scene-store streaming)) chain))
      (scene-solid scene))
     streaming))
+
+(defun make-authored-world-streaming-scene
+    (&key (horizontal-bits +large-world-horizontal-bits+)
+      (seed +large-world-seed+) (frames-per-load 1) (residency-radius 1))
+  "Make the canonical large demand world without materializing any chunk."
+  (let* ((domain (luft:make-world-domain
+                  :x-bits horizontal-bits :y-bits horizontal-bits))
+         (source (make-instance 'authored-world-source
+                                :domain domain :seed seed))
+         (builder (make-scene-builder :horizontal-bits horizontal-bits))
+         ;; Regional voxel light is deliberately not begun by this stage.
+         (empty (finish-scene-builder
+                 builder :player-p t :voxel-light-propagation-p nil)))
+    (make-instance
+     'streaming-scene
+     :source source
+     :solid (luft:make-chain domain)
+     :material-vocabulary (scene-material-vocabulary empty)
+     :material-cells (make-hash-table :test #'eql)
+     :authored-light-sources #()
+     :authored-light-opacity-table
+     (scene-authored-light-opacity-table empty)
+     :authored-light-revision 0
+     :authored-light-provenance (scene-authored-light-provenance empty)
+     :authored-light-generation (scene-authored-light-generation empty)
+     :content-revision 0
+     :torch-light-emission (scene-torch-light-emission empty)
+     :voxel-light-propagation-p nil
+     :light-generation (scene-authored-light-generation empty)
+     :torches #()
+     :player-p t
+     :frames-per-load frames-per-load
+     :residency-radius residency-radius)))
+
+(defun streaming-store-chain (scene key &optional default)
+  "Return KEY's chain from either a finite fixture or resident source value."
+  (multiple-value-bind (value present-p)
+      (gethash key (streaming-scene-store scene))
+    (values
+     (if present-p
+         (etypecase value
+           (luft:chain value)
+           (resident-cell-chunk (resident-cell-chunk-chain value)))
+         default)
+     present-p)))
+
+(defun streaming-store-incarnation (scene key)
+  (let ((value (gethash key (streaming-scene-store scene))))
+    (and (resident-cell-chunk-p value)
+         (resident-cell-chunk-incarnation value))))
+
+(defun streaming-scene-cell-state (scene x y z)
+  "Classify a cell without conflating sky, finite boundary, and nonresidency."
+  (let ((domain (luft:chain-domain (scene-solid scene))))
+    (if (or (< x 0) (>= x (luft:world-domain-x-limit domain))
+            (< y 0) (>= y (luft:world-domain-y-limit domain))
+            (< z 0) (> z 254))
+        :closed-boundary
+        (let ((key (luft:chunk-key-at x y)))
+          (multiple-value-bind (chain resident-p)
+              (streaming-store-chain scene key)
+            (cond
+              ((not resident-p) :unknown-nonresident)
+              ((= 1 (luft:chain-cell-occupancy-bit chain x y z)) :solid)
+              (t :open-sky)))))))
 
 (defun snapshot-streaming-scene-input (scene)
   "Freeze SCENE's replace-only authored values for a worker request."
@@ -4550,8 +4810,7 @@ published."
                (new-solid (luft:chain+ solid delta))
                (key (luft:site-chunk-key cell))
                (empty (luft:make-chain domain))
-               (old-chunk
-                 (gethash key (streaming-scene-store scene) empty))
+               (old-chunk (streaming-store-chain scene key empty))
                (new-chunk (luft:chain+ old-chunk delta))
                (light-revision (1+ (scene-authored-light-revision scene))))
           (if new-placement
@@ -4589,13 +4848,30 @@ published."
                   (scene-authored-light-generation scene) base-generation
                   (scene-content-revision scene) content-revision
                   (streaming-scene-light-generation scene) base-generation)
-            (if (luft:chain-empty-p new-chunk)
-                (remhash key (streaming-scene-store scene))
-                (setf (gethash key (streaming-scene-store scene)) new-chunk))
+            (if (streaming-scene-source scene)
+                (let ((local-materials (make-hash-table :test #'eql)))
+                  (maphash
+                   (lambda (material-cell offset)
+                     (when (= key (luft:site-chunk-key material-cell))
+                       (setf (gethash material-cell local-materials) offset)))
+                   material-cells)
+                  (setf (gethash cell
+                                 (authored-world-source-edits
+                                  (streaming-scene-source scene)))
+                        new-placement
+                        (gethash key (streaming-scene-store scene))
+                        (%make-resident-cell-chunk
+                         key
+                         (incf (streaming-scene-next-incarnation scene))
+                         new-chunk local-materials)))
+                (if (luft:chain-empty-p new-chunk)
+                    (remhash key (streaming-scene-store scene))
+                    (setf (gethash key (streaming-scene-store scene))
+                          new-chunk)))
             (values edit :edited key)))))))
 
 (defun reset-streaming-scene-publication (scene)
-  "Forget renderer-specific residency while retaining SCENE's immutable store."
+  "Forget renderer publication while retaining source-owned resident values."
   (check-type scene streaming-scene)
   (dolist (table (list (streaming-scene-loaded scene)
                        (streaming-scene-outstanding scene)
@@ -4612,7 +4888,7 @@ published."
   scene)
 
 (defun streaming-scene-keys-near (scene focus-x focus-y)
-  "Stored chunk keys inside SCENE's square residency window."
+  "Resident chunk keys inside SCENE's visible square window."
   (let ((radius (streaming-scene-residency-radius scene))
         (keys nil))
     (loop for key being the hash-keys of (streaming-scene-store scene)
@@ -4659,7 +4935,7 @@ published."
                   changes))
           support-keys)))
 
-(defun retarget-streaming-scene
+(defun %retarget-resident-streaming-scene
     (scene production-system bevel-width world-x world-y)
   "Batch SCENE's desired window around a camera position and mesh it once.
 
@@ -4669,7 +4945,7 @@ an unsigned chunk key, so a low-side coordinate cannot wrap to chunk 4095 and
 silently empty the desired residency window."
   (when (or (streaming-scene-cohort scene)
             (streaming-scene-removals scene))
-    (return-from retarget-streaming-scene nil))
+    (return-from %retarget-resident-streaming-scene nil))
   (let* ((domain (luft:chain-domain (scene-solid scene)))
          (focus-key
            (luft:chunk-key-at
@@ -4764,6 +5040,148 @@ silently empty the desired residency window."
                           (scene-authored-light-generation scene))))))
             t))))))
 
+(defun streaming-scene-focus-key (scene world-x world-y)
+  (let ((domain (luft:chain-domain (scene-solid scene))))
+    (luft:chunk-key-at
+     (max 0 (min (1- (luft:world-domain-x-limit domain)) (floor world-x)))
+     (max 0 (min (1- (luft:world-domain-y-limit domain)) (floor world-y))))))
+
+(defun streaming-domain-keys-near (scene focus radius)
+  "Return every in-domain key in the square RADIUS around FOCUS."
+  (let* ((domain (luft:chain-domain (scene-solid scene)))
+         (maximum-x
+           (1- (ceiling (luft:world-domain-x-limit domain) luft:+chunk-size+)))
+         (maximum-y
+           (1- (ceiling (luft:world-domain-y-limit domain) luft:+chunk-size+)))
+         (focus-x (luft:chunk-key-x focus))
+         (focus-y (luft:chunk-key-y focus)))
+    (sort
+     (loop for x from (max 0 (- focus-x radius))
+             to (min maximum-x (+ focus-x radius)) append
+       (loop for y from (max 0 (- focus-y radius))
+               to (min maximum-y (+ focus-y radius))
+             collect (luft:chunk-key-at (* x luft:+chunk-size+)
+                                        (* y luft:+chunk-size+))))
+     #'<)))
+
+(defun rebuild-authored-world-resident-values (scene)
+  "Publish the exact union/material views derived from SCENE's resident store."
+  (let* ((source (streaming-scene-source scene))
+         (domain (authored-world-source-domain source))
+         (solid (luft:make-chain domain))
+         (materials (make-hash-table :test #'eql)))
+    (maphash
+     (lambda (key resident)
+       (declare (ignore key))
+       (setf solid (luft:chain+ solid (resident-cell-chunk-chain resident)))
+       (maphash (lambda (cell offset) (setf (gethash cell materials) offset))
+                (resident-cell-chunk-material-cells resident)))
+     (streaming-scene-store scene))
+    (setf (scene-solid scene) solid
+          (scene-material-cells scene) materials
+          (scene-content-revision scene) (1+ (scene-content-revision scene)))
+    scene))
+
+(defun schedule-authored-world-chunk-load
+    (scene production-system key demand-token priority)
+  (let* ((source (streaming-scene-source scene))
+         (incarnation (incf (streaming-scene-next-incarnation scene)))
+         (request
+           (make-instance
+            'authored-chunk-load-request
+            :key (list :luft-authored-load key demand-token)
+            :priority priority :scene scene :source source :chunk-key key
+            :demand-token demand-token :incarnation incarnation
+            :edits (capture-authored-world-chunk-edits source key)))
+         (ticket
+           (production:schedule-production-request production-system request)))
+    (setf (gethash key (streaming-scene-load-outstanding scene)) ticket)
+    request))
+
+(defun authored-world-residency-ready-p (scene)
+  (loop for key being the hash-keys of (streaming-scene-desired scene)
+        always (nth-value 1 (gethash key (streaming-scene-store scene)))))
+
+(defun evict-undesired-authored-world-residents (scene)
+  "Evict every derived CPU value outside SCENE's canonical desired set."
+  (let ((departures nil)
+        (desired (streaming-scene-desired scene)))
+    (maphash (lambda (key value)
+               (declare (ignore value))
+               (unless (gethash key desired) (push key departures)))
+             (streaming-scene-store scene))
+    (dolist (key departures) (remhash key (streaming-scene-store scene)))
+    departures))
+
+(defun accept-authored-chunk-load-result (scene request resident)
+  "Install RESIDENT only if REQUEST still owns KEY's exact demand incarnation."
+  (let* ((key (authored-chunk-load-request-chunk-key request))
+         (token (authored-chunk-load-request-demand-token request))
+         (ticket (production:production-request-ticket request)))
+    (when (and (eq scene (authored-chunk-load-request-scene request))
+               (eql token (gethash key (streaming-scene-desired scene)))
+               (eql ticket
+                    (gethash key (streaming-scene-load-outstanding scene)))
+               (= key (resident-cell-chunk-key resident))
+               (= (authored-chunk-load-request-incarnation request)
+                  (resident-cell-chunk-incarnation resident)))
+      (setf (gethash key (streaming-scene-store scene)) resident)
+      (remhash key (streaming-scene-load-outstanding scene))
+      t)))
+
+(defun retarget-authored-world
+    (scene production-system bevel-width world-x world-y)
+  "Demand, asynchronously materialize, and activate one bounded source window."
+  (let* ((focus-key (streaming-scene-focus-key scene world-x world-y))
+         (focus (cons (luft:chunk-key-x focus-key)
+                      (luft:chunk-key-y focus-key)))
+         (radius (+ (streaming-scene-residency-radius scene)
+                    +streaming-source-guard-radius+))
+         (desired-keys (streaming-domain-keys-near scene focus-key radius))
+         (desired (streaming-scene-desired scene)))
+    (unless (equal focus (streaming-scene-focus scene))
+      (let ((next (make-hash-table :test #'eql)))
+        (dolist (key desired-keys)
+          (setf (gethash key next)
+                (or (gethash key desired)
+                    (incf (streaming-scene-next-demand-token scene)))))
+        (maphash
+         (lambda (key token)
+           (unless (gethash key next)
+             (when (production:cancel-production-request
+                    production-system
+                    (list :luft-authored-load key token))
+               (remhash key (streaming-scene-load-outstanding scene)))))
+         desired)
+        (clrhash desired)
+        (maphash (lambda (key token) (setf (gethash key desired) token)) next))
+      ;; Resident values are a cache. Unknown is never copied into the next
+      ;; immutable mesh capture, and eviction remains bounded by DESIRED.
+      (evict-undesired-authored-world-residents scene)
+      (dolist (key desired-keys)
+        (unless (nth-value 1 (gethash key (streaming-scene-store scene)))
+          (schedule-authored-world-chunk-load
+           scene production-system key (gethash key desired)
+           (streaming-scene-key-distance key focus))))
+      (setf (streaming-scene-focus scene) focus))
+    (when (and (null (streaming-scene-cohort scene))
+               (null (streaming-scene-removals scene))
+               (authored-world-residency-ready-p scene))
+      ;; Let the established cohort path observe the old published LOADED set;
+      ;; it computes exact owner removals before replacing it with this focus.
+      (setf (streaming-scene-focus scene) nil)
+      (rebuild-authored-world-resident-values scene)
+      (%retarget-resident-streaming-scene
+       scene production-system bevel-width world-x world-y))))
+
+(defun retarget-streaming-scene
+    (scene production-system bevel-width world-x world-y)
+  (if (streaming-scene-source scene)
+      (retarget-authored-world
+       scene production-system bevel-width world-x world-y)
+      (%retarget-resident-streaming-scene
+       scene production-system bevel-width world-x world-y)))
+
 (defconstant +streaming-owner-dependency-radius+ 1)
 
 (defun streaming-scene-canonical-owner-closure (scene source-keys)
@@ -4854,8 +5272,9 @@ chunk is empty; excluding that owner drops real boundary triangles."
           (scene-voxel-light-propagation-p scene)
           (scene-torch-semantics-signature scene resident-source-keys)
           (loop for key in resident-source-keys
-                collect (cons key (gethash key
-                                          (streaming-scene-loaded scene)))))))
+                collect (list key
+                              (gethash key (streaming-scene-loaded scene))
+                              (streaming-store-incarnation scene key))))))
 
 (defun make-streaming-region-snapshot
     (scene output-keys bevel-width &key (realize-torch-light-p t))
@@ -4873,7 +5292,6 @@ chunk is empty; excluding that owner drops real boundary triangles."
          (captured-keys
            (streaming-scene-dependency-guard-keys scene witness-keys))
          (union-neighborhood (make-hash-table :test #'eql))
-         (store (streaming-scene-store scene))
          (loaded (streaming-scene-loaded scene))
          (resident-source-keys
            (sort (loop for key being the hash-keys of loaded collect key) #'<))
@@ -4885,10 +5303,15 @@ chunk is empty; excluding that owner drops real boundary triangles."
     (dolist (key captured-keys)
       ;; Presence records residency.  An empty union chain is still a captured
       ;; answer and must not be confused with an unknown/out-of-window chunk.
-      (setf (gethash key union-neighborhood)
-            (if (nth-value 1 (gethash key loaded))
-                (gethash key store empty)
-                empty)))
+      (multiple-value-bind (chain present-p)
+          (streaming-store-chain scene key empty)
+        (cond
+          (present-p
+           (setf (gethash key union-neighborhood) chain))
+          ((streaming-scene-source scene)
+           (error "Demand snapshot crossed unknown nonresident chunk ~D." key))
+          (t
+           (setf (gethash key union-neighborhood) empty)))))
     (%make-streaming-mesh-snapshot
      scene (snapshot-streaming-scene-input scene)
      output-keys witness-keys resident-source-keys
@@ -5234,27 +5657,55 @@ generation before publication succeeds."
         do (multiple-value-bind (result present-p)
                (production:receive-production-result-no-hang production-system)
              (unless present-p (return))
-             (let* ((request (production:production-result-request result))
-                    (snapshot (streaming-mesh-request-snapshot request))
-                    (keys (streaming-mesh-snapshot-output-keys snapshot))
-                    (ticket (production:production-request-ticket request)))
-               (when (every (lambda (key)
-                              (eql ticket
-                                   (gethash key
-                                            (streaming-scene-outstanding scene))))
-                            keys)
-                 (if (production:production-result-condition result)
-                     (progn
-                       (dolist (key keys)
-                         (remhash key (streaming-scene-outstanding scene)))
-                       (push result
-                             (streaming-scene-production-errors scene))
-                       (error "LUFT mesh production for cohort ~S failed: ~A"
-                              keys
-                              (production:production-result-condition result)))
-                     (accept-streaming-mesh-result
-                      scene request
-                      (production:production-result-value result)))))))
+             (let ((request (production:production-result-request result)))
+               (etypecase request
+                 (authored-chunk-load-request
+                  (let* ((key (authored-chunk-load-request-chunk-key request))
+                         (ticket (production:production-request-ticket request)))
+                    (when (eql ticket
+                               (gethash key
+                                        (streaming-scene-load-outstanding scene)))
+                      (if (production:production-result-condition result)
+                          (progn
+                            (remhash key
+                                     (streaming-scene-load-outstanding scene))
+                            (push result
+                                  (streaming-scene-production-errors scene))
+                            (error "LUFT source production for chunk ~D failed: ~A"
+                                   key
+                                   (production:production-result-condition
+                                    result)))
+                          (unless
+                              (accept-authored-chunk-load-result
+                               scene request
+                               (production:production-result-value result))
+                            (remhash
+                             key
+                             (streaming-scene-load-outstanding scene)))))))
+                 (streaming-mesh-request
+                  (let* ((snapshot (streaming-mesh-request-snapshot request))
+                         (keys (streaming-mesh-snapshot-output-keys snapshot))
+                         (ticket (production:production-request-ticket request)))
+                    (when (every (lambda (key)
+                                   (eql ticket
+                                        (gethash
+                                         key
+                                         (streaming-scene-outstanding scene))))
+                                 keys)
+                      (if (production:production-result-condition result)
+                          (progn
+                            (dolist (key keys)
+                              (remhash key
+                                       (streaming-scene-outstanding scene)))
+                            (push result
+                                  (streaming-scene-production-errors scene))
+                            (error "LUFT mesh production for cohort ~S failed: ~A"
+                                   keys
+                                   (production:production-result-condition
+                                    result)))
+                          (accept-streaming-mesh-result
+                           scene request
+                           (production:production-result-value result))))))))))
   (publish-ready-streaming-scene scene renderer))
 
 (defun landscape-hash-reading (x y seed salt)

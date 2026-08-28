@@ -143,6 +143,7 @@
            #:renderer-set-mesh #:renderer-set-meshes
            #:renderer-remove-mesh #:renderer-clear-meshes
            #:streaming-scene #:make-streaming-scene
+           #:make-authored-world-streaming-scene
            #:streaming-scene-light-generation
            #:scene-edit
            #:scene-edit-cell

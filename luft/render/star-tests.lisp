@@ -134,6 +134,129 @@
                      (luft:star-atlas-owned-appearance-masks star))))
          "one emitted band or junction reduces both material samples")))))
 
+(defun same-material-cell-table-p (left right)
+  (and (= (hash-table-count left) (hash-table-count right))
+       (loop for cell being the hash-keys of left using (hash-value offset)
+             always (eql offset (gethash cell right)))))
+
+(define-test authored-world-source-is-deterministic-and-seam-independent
+  (let* ((domain (luft:make-world-domain :x-bits 8 :y-bits 8))
+         (source (make-instance 'luft.render::authored-world-source
+                                :domain domain :seed 121))
+         (left-key (luft:chunk-key-at 0 0))
+         (right-key (luft:chunk-key-at 64 0))
+         (left-a
+           (luft.render::materialize-authored-world-chunk
+            source left-key 1))
+         (left-b
+           (luft.render::materialize-authored-world-chunk
+            source left-key 2))
+         (right
+           (luft.render::materialize-authored-world-chunk
+            source right-key 3)))
+    (true (luft:chain=
+           (luft.render::resident-cell-chunk-chain left-a)
+           (luft.render::resident-cell-chunk-chain left-b))
+          "incarnation does not enter deterministic source content")
+    (true (same-material-cell-table-p
+           (luft.render::resident-cell-chunk-material-cells left-a)
+           (luft.render::resident-cell-chunk-material-cells left-b)))
+    ;; The authored road crosses this exact chunk seam. Both independently
+    ;; generated columns expose its continuous limestone surface.
+    (loop for x in '(63 64)
+          for resident in (list left-a right)
+          for y = (round (luft.render::large-world-road-centre-y x))
+          for z = (1- (luft.render::large-world-terrain-height source x y))
+          for cell = (luft:make-site domain x y z luft:+cell-extent+ 1)
+          do (true (= 1 (luft:chain-cell-occupancy-bit
+                         (luft.render::resident-cell-chunk-chain resident)
+                         x y z)))
+             (true (= 2 (gethash
+                         cell
+                         (luft.render::resident-cell-chunk-material-cells
+                          resident)))
+                   "the cross-seam road is authored limestone"))
+    (true (<= (abs
+               (- (luft.render::large-world-river-centre-x 255)
+                  (luft.render::large-world-river-centre-x 256)))
+              2.0d0)
+          "the authored river has no chunk-coordinate discontinuity")
+    (true (luft.render::large-world-citadel-cell-p 1464 640 31)
+          "the masonry destination spans its western chunk seam")))
+
+(define-test authored-world-sparse-edits-survive-rematerialization
+  (let* ((domain (luft:make-world-domain :x-bits 8 :y-bits 8))
+         (source (make-instance 'luft.render::authored-world-source
+                                :domain domain :seed 121))
+         (key (luft:chunk-key-at 64 0))
+         (x 70) (y (round (luft.render::large-world-road-centre-y x)))
+         (z (1- (luft.render::large-world-terrain-height source x y)))
+         (cell (luft:make-site domain x y z luft:+cell-extent+ 1)))
+    (setf (gethash cell (luft.render::authored-world-source-edits source)) nil)
+    (let ((resident
+            (luft.render::materialize-authored-world-chunk
+             source key 1
+             :edits (luft.render::capture-authored-world-chunk-edits
+                     source key))))
+      (true (zerop (luft:chain-cell-occupancy-bit
+                    (luft.render::resident-cell-chunk-chain resident) x y z))
+            "an explicit-air edit overrides regenerated road content")
+      (true (not (nth-value
+                  1 (gethash
+                     cell
+                     (luft.render::resident-cell-chunk-material-cells
+                      resident))))))))
+
+(define-test authored-world-demand-rejects-stale-incarnations
+  (let* ((scene (luft.render:make-authored-world-streaming-scene
+                 :horizontal-bits 8 :residency-radius 0))
+         (source (luft.render::streaming-scene-source scene))
+         (key (luft:chunk-key-at 64 64))
+         (request
+           (make-instance
+            'luft.render::authored-chunk-load-request
+            :key '(:test-load) :priority 0 :scene scene :source source
+            :chunk-key key :demand-token 7 :incarnation 12 :edits nil))
+         (resident
+           (luft.render::%make-resident-cell-chunk
+            key 12 (luft:make-chain (luft:chain-domain
+                                     (luft.render:scene-solid scene)))
+            (make-hash-table :test #'eql))))
+    (setf (luv.production:production-request-ticket request) 3
+          (gethash key (luft.render::streaming-scene-load-outstanding scene)) 3
+          (gethash key (luft.render::streaming-scene-desired scene)) 8)
+    (true (not (luft.render::accept-authored-chunk-load-result
+                scene request resident))
+          "a result from the old demand token cannot install")
+    (setf (gethash key (luft.render::streaming-scene-desired scene)) 7)
+    (true (luft.render::accept-authored-chunk-load-result
+           scene request resident)
+          "the exact token, ticket, key, and incarnation install once")))
+
+(define-test authored-world-residency-is-bounded-and-absence-is-explicit
+  (let* ((scene (luft.render:make-authored-world-streaming-scene
+                 :horizontal-bits 8 :residency-radius 1))
+         (domain (luft:chain-domain (luft.render:scene-solid scene)))
+         (empty (luft:make-chain domain))
+         (materials (make-hash-table :test #'eql))
+         (keep (luft:chunk-key-at 64 64))
+         (evict (luft:chunk-key-at 192 192)))
+    (setf (gethash keep (luft.render::streaming-scene-desired scene)) 1
+          (gethash keep (luft.render::streaming-scene-store scene))
+          (luft.render::%make-resident-cell-chunk keep 1 empty materials)
+          (gethash evict (luft.render::streaming-scene-store scene))
+          (luft.render::%make-resident-cell-chunk evict 2 empty materials))
+    (true (equal (list evict)
+                 (luft.render::evict-undesired-authored-world-residents scene)))
+    (true (= 1 (hash-table-count
+                (luft.render::streaming-scene-store scene))))
+    (true (eq :open-sky
+              (luft.render::streaming-scene-cell-state scene 64 64 60)))
+    (true (eq :unknown-nonresident
+              (luft.render::streaming-scene-cell-state scene 0 0 60)))
+    (true (eq :closed-boundary
+              (luft.render::streaming-scene-cell-state scene -1 0 60)))))
+
 (define-test camera-yaw-follows-intent-smoothly
   (let ((camera (luft.render:make-fly-camera :yaw 0.0)))
     (luft.render::target-camera-yaw camera (/ pi 2))
