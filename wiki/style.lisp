@@ -102,7 +102,7 @@
    :grid-template-columns (minmax 10rem 0.5fr) (minmax 0 1.5fr)
    :gap 1rem
    :align-items center
-   :padding 0.85rem (gutter)
+   :padding 0.6rem (gutter)
    :border-bottom (hairline)
    :background (color-mix --paper 94% --accent))
   (".eyebrow"
@@ -127,33 +127,24 @@
    :cursor pointer
    ("&:hover" :color --accent :border-color --accent))
   (".doors"
-   :display grid
-   :grid-template-columns (repeat 'auto-fit (minmax 8rem 1fr))
-   :gap 0.65rem)
+   :display flex
+   :flex-wrap wrap
+   :justify-content flex-end
+   :gap 0.15rem)
   (".door"
-   :display grid
-   :gap 0.1rem
-   :min-width 0
-   :padding 0.65rem 0.75rem
+   :display block
+   :padding 0.4rem 0.65rem
    :color inherit
    :text-decoration none
-   :border (hairline)
-   :border-radius 8px
-   :background --paper
+   :border-bottom 2px solid transparent
    (("&:hover" "&:focus-visible")
-    :border-color (color-mix --accent 70% --rule)
+    :border-bottom-color (color-mix --accent 60% --rule)
     :text-decoration none
     :outline none)
    ("&.selected"
-    :border-color --accent
-    :box-shadow inset 0 0 0 1px --accent))
+    :border-bottom-color --accent))
   (".door-title"
-   :font (display-font 700 0.95rem/1.2))
-  (".door-meta"
-   :color --muted
-   :font (display-font 500 0.82rem/1.2)
-   :min-width 0
-   :overflow-wrap break-word))
+   :font (display-font 700 0.9rem/1.2)))
 
 (define-style status-bar
   "The status bar, as a Glk grid window: black, monospace, bold."
@@ -764,7 +755,7 @@ table: each pair a subgrid row of its two-column box."
   "Narrow screens: one column, smaller title, ragged prose."
   (:media "screen and (max-width: 90ch)"
    (".library" :grid-template-columns (minmax 0 1fr))
-   (".doors" :grid-template-columns (repeat 2 (minmax 0 1fr)))
+   (".doors" :justify-content flex-start)
    ("h1" :font-size 1.65rem)
    ("p" :text-align start)
    ("body.source-page main" :display block)
@@ -775,9 +766,9 @@ table: each pair a subgrid row of its two-column box."
     :display none)
    (".status:has(.crumb-sep) .status-right" :display none))
   (:media "screen and (max-width: 34rem)"
-   (".doors" :display flex :overflow-x auto :scrollbar-width thin)
-   (".door" :flex 0 0 auto :min-width 5.5rem :padding 0.5rem 0.6rem)
-   (".door-meta" :display none)))
+   (".doors" :display grid :grid-template-columns (repeat 3 (minmax 0 1fr))
+             :width 100%)
+   (".door" :padding 0.35rem 0.45rem :text-align center)))
 
 (define-style figure-cards
   "Figure and definition cards shown beside mentions."
@@ -885,65 +876,77 @@ table: each pair a subgrid row of its two-column box."
 
 (define-style source-activity
   "Recent commits, system cards, and live commit patches."
-  (("section.activity" "section.source-catalogue")
-   :margin 2.5rem 0
+  (".activity"
+   :margin 0 0 2rem
    :scroll-margin-top 3rem)
-  (".section-heading"
-   :display flex
-   :align-items baseline
-   :justify-content space-between
-   :gap 1rem
-   :border-bottom (hairline)
-   :margin-bottom 1rem
-   ("h2" :margin 0 0 0.35rem)
-   ("p" :margin 0 :color --muted :font-size 0.85rem))
+  (".source-catalogue"
+   :margin 2.2rem 0 1rem
+   :padding-top 1.2rem
+   :border-top (hairline)
+   :scroll-margin-top 3rem)
+  (("p.activity-range" "p.catalogue-summary")
+   :margin 0 0 0.7rem
+   :color (color-mix --ink 65% --muted)
+   :font-size 0.8rem)
   (".hot-paths"
-   :padding 0.8rem 1rem
+   :display grid
+   :grid-template-columns max-content (minmax 0 1fr)
+   :gap 0.4rem 1rem
    :margin 0 0 1rem
-   :border (hairline)
-   :border-radius 8px
-   :background (color-mix --paper 96% --accent)
-   ("h3" :margin 0 0 0.5rem :font-size 0.85rem :text-transform uppercase
-         :letter-spacing 0.05em :color --muted)
-   ("ol" :display grid :grid-template-columns (repeat 'auto-fit (minmax 18rem 1fr))
-         :gap 0.25rem 1.5rem :margin 0 :padding 0 :list-style none)
+   :padding-bottom 0.8rem
+   :border-bottom (hairline)
+   (".hot-label" :color (color-mix --ink 65% --muted)
+                 :font-size 0.78rem :font-weight 650)
+   ("ol" :display grid :grid-template-columns (repeat 'auto-fit (minmax 14rem 1fr))
+         :gap 0.15rem 1.25rem :margin 0 :padding 0 :list-style none)
    ("li" :display flex :justify-content space-between :gap 0.7rem
-         :min-width 0 :font 500 0.82rem/1.4 --mono-font)
+         :min-width 0 :font (display-font 500 0.8rem/1.35))
    ("li a" :display block :max-width 100% :overflow-wrap anywhere)
    ("li span" :color --muted :white-space nowrap))
   ("ol.commit-feed"
    :margin 0
    :padding 0
-   :list-style none
-   :border-top (hairline))
+   :list-style none)
+  ("li.activity-day"
+   :margin 0.9rem 0 0.15rem
+   :padding-bottom 0.2rem
+   :border-bottom (hairline)
+   :color (color-mix --ink 65% --muted)
+   :font-size 0.75rem
+   :font-weight 650)
   ("li.commit"
-   :padding 0.7rem 0
+   :margin 0
    :border-bottom (hairline))
   (".commit-heading"
-   :display flex
-   :align-items baseline
-   :justify-content space-between
-   :gap 1rem)
+   :display block)
   (".commit-subject" :color --ink :font-weight 650 :overflow-wrap anywhere)
-  (".commit-id" :font 600 0.78rem/1.4 --mono-font :white-space nowrap)
+  (".commit-id" :font (display-font 600 0.76rem/1.4) :white-space nowrap)
   (".commit-meta"
-   :margin 0.18rem 0 0
+   :display block
+   :margin 0.1rem 0 0
    :color --muted
    :font-size 0.8rem)
   ("details.commit-files"
-   :margin-top 0.3rem
    :font-size 0.8rem
-   ("summary" :color --muted :cursor pointer)
-   ("ul" :margin 0.35rem 0 0 :padding 0 :list-style none)
+   ("& > summary"
+    :position relative
+    :padding 0.45rem 0 0.45rem 1rem
+    :cursor pointer
+    :list-style none
+    ("&::-webkit-details-marker" :display none)
+    ("&::before" :content (quoted "›") :position absolute :left 0 :top 0.3rem
+                  :color --accent :font-size 1.15rem :font-weight 700))
+   ("&[open] > summary::before" :transform (rotate 90deg))
+   ("ul" :margin 0 0 0.5rem 1rem :padding 0 0 0 0.7rem
+         :border-left (hairline) :list-style none)
    ("li" :display flex :justify-content space-between :gap 1rem
-         :padding 0.12rem 0 :font-family --mono-font)
+         :padding 0.1rem 0 :font-family --display-font)
    ("li > :first-child" :min-width 0 :overflow-wrap anywhere))
-  (".change-stat" :color --muted :white-space nowrap :font-family --mono-font)
+  (".change-stat" :color --muted :white-space nowrap)
   (".scope-note"
    :max-width 68rem
-   :padding 0.75rem 1rem
-   :border-left 3px solid --accent
-   :background (color-mix --paper 96% --accent)
+   :margin-bottom 1rem
+   :color (color-mix --ink 80% --muted)
    :font-size 0.88rem)
   (".system-cards"
    :display grid
@@ -957,9 +960,7 @@ table: each pair a subgrid row of its two-column box."
    :scroll-margin-top 3rem
    ("&:target" :border-color --accent :box-shadow inset 0 0 0 1px --accent))
   (".system-heading"
-   :display flex :justify-content space-between :align-items baseline :gap 1rem
-   ("h3" :margin 0 :font-size 1rem :overflow-wrap anywhere)
-   ("span" :color --muted :font-size 0.78rem :white-space nowrap))
+   ("h3" :margin 0 :font-size 1rem :overflow-wrap anywhere))
   ((".system-description" ".system-relations")
    :margin 0.4rem 0
    :font-size 0.84rem)
@@ -982,16 +983,15 @@ table: each pair a subgrid row of its two-column box."
    :border-radius 8px
    ("summary" :cursor pointer :font-size 0.85rem)
    ("ul" :list-style none :padding 0.5rem 0 0 :margin 0)
-   ("li" :padding 0.15rem 0 :font 500 0.82rem/1.4 --mono-font)
+   ("li" :padding 0.15rem 0 :font (display-font 500 0.82rem/1.4))
    ("li.current" :font-weight 700)
    (".directory" :color --muted))
   (".commit-page" :max-width 88rem)
-  (".commit-kicker" :margin-bottom 0 :color --muted :font-size 0.85rem)
   (".commit-byline" :color --muted)
   (".commit-page-files"
    :padding-left 0 :list-style none
    ("li" :display flex :justify-content space-between :gap 1rem
-         :padding 0.2rem 0 :font-family --mono-font))
+         :padding 0.2rem 0 :font-family --display-font))
   ("pre.commit-patch"
    :max-width 100%
    :overflow auto
@@ -1004,10 +1004,9 @@ table: each pair a subgrid row of its two-column box."
   (".patch-note" :padding 0.7rem 1rem :border-left 3px solid --accent
                  :background (color-mix --paper 96% --accent))
   (:media "screen and (max-width: 52rem)"
-   (".section-heading" :display block)
+   (".hot-paths" :grid-template-columns (minmax 0 1fr))
    (".hot-paths ol" :grid-template-columns (repeat 2 (minmax 0 1fr)))
    (".hot-paths li" :display block)
-   (".hot-paths li a" :overflow hidden :text-overflow ellipsis :white-space nowrap)
    (".hot-paths li span" :display block :margin-top 0.1rem)
    (".system-cards" :grid-template-columns (minmax 0 1fr))
    (".commit-diffstat" :display none)

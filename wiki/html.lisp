@@ -494,24 +494,17 @@ markup) on the right, the main column, and a footer."
           (:nav.doors
            (:a :class (if (member kind '("page" "pages" "design") :test #'equal) "door selected" "door")
                :href (href "index.html")
-               (:span.door-title "Design")
-               (:span.door-meta (format nil "~D pages of workshop memory"
-                                        (length (site-documents *site*)))))
+               (:span.door-title "Design"))
            (:a :class (if (equal kind "work") "door selected" "door") :href (href "work.html")
-               (:span.door-title "Work")
-               (:span.door-meta "work marks by status"))
+               (:span.door-title "Work"))
            (when (site-source-files *site*)
              (:a :class (if (member kind '("source" "source-file") :test #'equal) "door selected" "door")
                  :href (href "source.html")
-                 (:span.door-title "Source")
-                 (:span.door-meta (format nil "~D systems, ~D files"
-                                          (length (site-systems *site*))
-                                          (length (site-source-files *site*))))))
+                 (:span.door-title "Source")))
            (dolist (resource (website-navigation *site*))
              (:a :class (if (equal kind (resource-kind resource)) "door selected" "door")
                  :href (resource-path resource)
-                 (:span.door-title (resource-label resource))
-                 (:span.door-meta (resource-description resource))))))
+                 (:span.door-title (resource-label resource)))))
          (:div.status
           (:span.status-left (render-crumbs crumbs))
           (:span.status-right
@@ -525,7 +518,7 @@ markup) on the right, the main column, and a footer."
          (:main (funcall body))
          (:footer.site-footer
           "Rendered from Org and Lisp by luv.wiki.")
-         (when *dynamic-server-p* (render-deployment-dialog)))))))
+         (when *dynamic-server-p* (render-deployment-dialog))))))))
 
 (defvar *page-definition-cards* nil
   "While a page renders: a hash table from DEFINITION to its card id, filled
@@ -687,9 +680,6 @@ figure, work marks flagged; a dense table."
      "Pages"
      (lambda ()
        (spinneret:with-html
-         (:h1 "All pages")
-         (:p.lede "The complete catalogue of design memory. Open a page to see its figures;
-work marks remain flagged by status.")
          (:div.pages
           (dolist (document (site-documents site))
             (let* ((figures (document-figures document))
@@ -701,12 +691,11 @@ work marks remain flagged by status.")
               (:article.page-entry
                (:h2 (:a :href (site-page-name document)
                         (or (document-title document) (document-name document))))
-               (:p.page-meta
-                (format nil "~D figure~:P · ~D active work mark~:P"
-                        (length figures) active))
                (when figures
                  (:details.page-headings
-                  (:summary "Browse figures")
+                  (:summary
+                   (format nil "~D figure~:P · ~D active"
+                           (length figures) active))
                   (:div
                    (dolist (figure figures)
                      (:a :class (format nil "heading level-~D~@[ marked~]"
@@ -737,9 +726,6 @@ work marks remain flagged by status.")
      "Work"
      (lambda ()
        (spinneret:with-html
-         (:h1 "Work")
-         (:p.lede "The work marks of the wiki: figures whose title starts with a status word.
-They live beside the design they move; this is only a view.")
          (:nav.work-summary :aria-label "Work statuses"
           (loop for (status . meaning) in *work-statuses*
                 for count = (count status marks :key #'heading-keyword :test #'string=)
@@ -747,8 +733,7 @@ They live beside the design they move; this is only a view.")
                   do (:a :href (format nil "#~(~A~)" status)
                          (:span :class (format nil "mark mark-~(~A~)" status) status)
                          (:span.summary-count
-                          (format nil "~D ~:*~[marks~;mark~:;marks~]" count))
-                         (:span.summary-meaning meaning))))
+                          count))))
          (loop for (status . meaning) in *work-statuses*
                for these = (remove status marks :key #'heading-keyword :test-not #'string=)
                when these

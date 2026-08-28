@@ -203,7 +203,7 @@ files beside it on wide screens."
           (:p.source-meta
            (when system-name
              (spinneret:html "system ")
-             (:code system-name)
+             (:span.source-system system-name)
              (spinneret:html " · "))
            (format nil "~D definition~:P · " (length (source-file-definitions file)))
            (:a :href (concatenate 'string (site-source-url *site*) (source-file-relative-path file))
@@ -363,51 +363,54 @@ fundamentals at the top."
   (let ((commits (site-commits site)))
     (when commits
       (spinneret:with-html
-        (:section.activity :id "activity"
-         (:div.section-heading
-          (:h2 "Recent activity")
-          (:p (format nil "~D commit~:P available in this checkout, ~A through ~A."
-                      (length commits)
-                      (subseq (repository-commit-date (car (last commits))) 0 10)
-                      (subseq (repository-commit-date (first commits)) 0 10))))
+        (:div.activity :id "activity"
+         (:p.activity-range
+          (format nil "~D changes · ~A–~A"
+                  (length commits)
+                  (subseq (repository-commit-date (car (last commits))) 0 10)
+                  (subseq (repository-commit-date (first commits)) 0 10)))
          (:div.hot-paths
-          (:h3 "Most active paths")
+          (:span.hot-label "Most touched")
           (:ol
            (dolist (entry (hot-commit-paths commits))
              (let ((change (make-instance 'commit-change :path (car entry)
                                           :additions nil :deletions nil)))
                (:li (render-change-path change)
-                    (:span (format nil "~D commit~:P" (cdr entry))))))))
+                    (:span (format nil "~D×" (cdr entry))))))))
          (:ol.commit-feed
-          (dolist (commit commits)
-            (multiple-value-bind (additions deletions) (commit-totals commit)
-              (:li.commit
-               (:div.commit-heading
-                (:a.commit-subject
-                 :href (concatenate 'string *page-prefix* (commit-page-name commit))
-                 (repository-commit-subject commit))
-                (:a.commit-id :href (commit-github-url commit)
-                              (repository-commit-short-id commit)))
-               (:p.commit-meta
-                (:time :datetime (repository-commit-date commit)
-                       (format nil "~A ~A"
-                               (subseq (repository-commit-date commit) 0 10)
-                               (subseq (repository-commit-date commit) 11 16)))
-                " · " (repository-commit-author commit)
-                (:span.commit-diffstat
-                 (format nil " · +~D −~D · ~D file~:P"
-                         additions deletions
-                         (length (repository-commit-changes commit)))))
-               (:details.commit-files
-                (:summary "Changed paths")
-                (:ul
-                 (dolist (change (repository-commit-changes commit))
-                   (:li (render-change-path change)
-                        (when (commit-change-additions change)
-                          (:span.change-stat
-                           (format nil "+~D −~D"
-                                   (commit-change-additions change)
-                                   (commit-change-deletions change)))))))))))))))))
+          (loop with previous-date = nil
+                for commit in commits
+                for date = (subseq (repository-commit-date commit) 0 10)
+                do (unless (equal date previous-date)
+                     (:li.activity-day (:time :datetime date date))
+                     (setf previous-date date))
+                   (multiple-value-bind (additions deletions) (commit-totals commit)
+                     (:li.commit
+                      (:details.commit-files
+                       (:summary
+                        (:span.commit-heading
+                         (:a.commit-subject
+                          :href (concatenate 'string *page-prefix* (commit-page-name commit))
+                          (repository-commit-subject commit)))
+                        (:span.commit-meta
+                         (:time :datetime (repository-commit-date commit)
+                                (subseq (repository-commit-date commit) 11 16))
+                         " · " (repository-commit-author commit)
+                         (:span.commit-diffstat
+                          (format nil " · +~D −~D · ~D"
+                                  additions deletions
+                                  (length (repository-commit-changes commit))))
+                         " · "
+                         (:a.commit-id :href (commit-github-url commit)
+                                       (repository-commit-short-id commit)))
+                       (:ul
+                        (dolist (change (repository-commit-changes commit))
+                          (:li (render-change-path change)
+                               (when (commit-change-additions change)
+                                 (:span.change-stat
+                                  (format nil "+~D −~D"
+                                          (commit-change-additions change)
+                                          (commit-change-deletions change))))))))))))))))))
 
 (defun render-commit-page (commit site)
   "A commit's metadata everywhere, and its patch when rendered by live Clack."
@@ -419,14 +422,12 @@ fundamentals at the top."
      (lambda ()
        (spinneret:with-html
          (:article.commit-page
-          (:p.commit-kicker "Commit " (:code (repository-commit-short-id commit)))
           (:h1 (repository-commit-subject commit))
           (:p.commit-byline
            (repository-commit-author commit) " · "
            (:time :datetime (repository-commit-date commit)
                   (repository-commit-date commit))
            " · " (:a :href (commit-github-url commit) "on GitHub"))
-          (:h2 "Changed paths")
           (:ul.commit-page-files
            (dolist (change (repository-commit-changes commit))
              (:li (render-change-path change)
@@ -438,7 +439,7 @@ fundamentals at the top."
           (if *dynamic-server-p*
               (let ((patch (commit-patch commit (site-source-directory site))))
                 (if patch
-                    (progn (:h2 "Patch") (:pre.commit-patch (:code patch)))
+                    (:pre.commit-patch (:code patch))
                     (:p.patch-note "This patch is unavailable or too large; use GitHub for the full diff.")))
               (:p.patch-note "The live wiki renders this patch from its checkout; this static build links to GitHub instead.")))))
      :body-class "wide commit-view"
@@ -455,8 +456,7 @@ fundamentals at the top."
     (spinneret:with-html
       (:article.system-card :id (system-anchor (system-entry-name entry))
        (:div.system-heading
-        (:h3 (system-entry-name entry))
-        (:span (format nil "~D file~:P" (length (system-entry-files entry)))))
+        (:h3 (system-entry-name entry)))
        (when (system-entry-description entry)
          (:p.system-description (system-entry-description entry)))
        (when (system-entry-depends-on entry)
@@ -475,7 +475,7 @@ fundamentals at the top."
                        (system-entry-name dependent)))))
        (when (system-entry-files entry)
          (:details.system-file-list
-          (:summary "Browse files")
+          (:summary (format nil "~D file~:P" (length (system-entry-files entry))))
           (:div
            (dolist (file (system-entry-files entry))
              (render-file-entry file)))))))))
@@ -490,28 +490,21 @@ fundamentals at the top."
      "Source"
      (lambda ()
        (spinneret:with-html
-         (:h1 "Source")
-         (:p.lede "Implementation evidence: what has changed recently, and the Lisp source
-that the wiki can read structurally rather than merely print.")
          (render-recent-activity site)
-         (:section.source-catalogue :id "catalogue"
-          (:div.section-heading
-           (:h2 "Source catalogue")
-           (:p (format nil "~D files in ~D ASDF systems, ordered prerequisites first."
-                       (length (site-source-files site)) (length (site-systems site)))))
-          (:p.scope-note "Included: Common Lisp components registered under the "
-                         (:code "luv") ", " (:code "luvcraft") ", " (:code "mcluv") ", "
-                         (:code "luft") ", " (:code "luv-wiki") ", and "
-                         (:code "luv-wiki-site") " families. Test systems appear beside the
-rest; scripts, Nix/deployment files, assets, native sources, and other systems do not.")
+         (:div.source-catalogue :id "catalogue"
+          (:p.catalogue-summary
+           (format nil "~D files · ~D systems · prerequisites first"
+                   (length (site-source-files site)) (length (site-systems site))))
+          (:p.scope-note "Common Lisp components registered under the luv, luvcraft,
+mcluv, luft, luv-wiki, and luv-wiki-site families. Test systems appear beside the rest;
+scripts, Nix/deployment files, assets, native sources, and other systems do not.")
           (:div.system-cards
            (dolist (entry (site-systems site))
              (render-system-card entry site))))
          (:details.dependency-diagnostic
           (:summary "Dependency diagnostic")
-          (:p.graph-note "Essential ASDF edges only. Test systems and the aggregate "
-                         (:code "luv") " root are omitted; labels drop the "
-                         (:code "luv/") " prefix.")
+          (:p.graph-note "Essential ASDF edges only. Test systems and the aggregate luv root
+are omitted; labels drop the luv/ prefix.")
           (render-system-graph site))
          (render-file-cards)))
      :body-class "wide source-index")))
