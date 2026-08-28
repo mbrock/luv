@@ -121,6 +121,27 @@
   (".occupancy-cell.occupied"
    :background --accent
    :border-color --accent)
+  (".cell-key"
+   :display flex
+   :flex-wrap wrap
+   :gap 0.25rem 0.55rem
+   :color --muted
+   :font 650 0.62rem/1 --display-font
+   :text-transform uppercase
+   :letter-spacing 0.05em)
+  (".cell-key span"
+   :display inline-flex
+   :align-items center
+   :gap 0.25rem)
+  (".cell-key i"
+   :display inline-block
+   :width 0.65rem
+   :height 0.65rem
+   :border 1px solid --muted)
+  (".cell-key .solid-cell"
+   :border-color --accent
+   :background --accent)
+  (".cell-key .air-cell" :background transparent)
   (".fact"
    :text-align center
    :font 700 0.85rem/1 --mono-font)

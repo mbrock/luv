@@ -22,7 +22,15 @@
     (true (equal '(parenscript:array) (getf empty-owned :junctions)))
     (true (equal '(parenscript:array) (getf empty-surface :faces)))
     (true (equal '(parenscript:array) (getf empty-surface :bands)))
-    (true (equal '(parenscript:array) (getf empty-surface :junctions)))))
+    (true (equal '(parenscript:array) (getf empty-surface :junctions)))
+    (dolist (star stars)
+      (dolist (view (list (rest (getf (rest star) :owned))
+                          (rest (getf (rest star) :surface))))
+        (true (every (lambda (polygon) (= 5 (length polygon)))
+                     (append (rest (getf view :faces))
+                             (rest (getf view :bands)))))
+        (true (every (lambda (polygon) (= 4 (length polygon)))
+                     (rest (getf view :junctions))))))))
 
 (define-test atlas-condenses-stars-into-symmetry-families
   (let* ((classes (atlas::star-symmetry-classes))
@@ -79,6 +87,9 @@
     (true (search "star.owned" javascript))
     (true (search "star.representative" javascript))
     (true (search "drawOrientationAxes" javascript))
+    (true (search "polygon.backface" javascript))
+    (true (search "shadeColor" javascript))
+    (false (search "drawStarFrame" javascript))
     (true (search "var families" javascript))
     (true (search "stepOrientation(-1)" javascript))
     (true (search "stepOrientation(1)" javascript))
@@ -94,6 +105,7 @@
     (true (search ".star-family {" stylesheet))
     (true (search ".family-members {" stylesheet))
     (true (search ".view-modes {" stylesheet))
+    (true (search ".cell-key {" stylesheet))
     (true (search "@media screen and (max-width: 52rem)" stylesheet))))
 
 (define-test atlas-is-a-wiki-view
@@ -115,6 +127,8 @@
     (true (search "<details class=family-orbit>" html))
     (true (search "name=mesh-view" html))
     (true (search "data-view=owned" html))
+    (true (search "<i class=solid-cell></i>solid" html))
+    (true (search "<i class=air-cell></i>air" html))
     (true (search ">Previous orientation</button>" html))
     (true (search ">Next orientation</button>" html))
     (true (search "<footer class=site-footer>" html))

@@ -130,12 +130,62 @@
   (loop for kind in '(:faces :bands :junctions)
         append
         (list kind
-              (luft:transform-star-triangles
-               transformation (getf geometry kind)))))
+              (let ((triangles
+                      (luft:transform-star-triangles
+                       transformation (getf geometry kind))))
+                (if (minusp (transformation-determinant transformation))
+                    (mapcar (lambda (triangle)
+                              (list (first triangle)
+                                    (third triangle)
+                                    (second triangle)))
+                            triangles)
+                    triangles)))))
+
+(defun transformation-determinant (matrix)
+  (destructuring-bind ((a b c) (d e f) (g h i)) matrix
+    (+ (* a (- (* e i) (* f h)))
+       (- (* b (- (* d i) (* f g))))
+       (* c (- (* d h) (* e g))))))
+
+(defun triangle-pairs-as-quads (triangles)
+  (loop for (first second) on triangles by #'cddr
+        when (null second)
+          do (error "Unpaired atlas quad triangle")
+        collect (triangle-pair-quad first second)))
+
+(defun triangle-pair-quad (first second)
+  (let ((boundary '()))
+    (dolist (triangle (list first second))
+      (loop for start in triangle
+            for end in (append (rest triangle) (list (first triangle)))
+            for reverse =
+              (find-if (lambda (edge)
+                         (and (equal (first edge) end)
+                              (equal (second edge) start)))
+                       boundary)
+            do (if reverse
+                   (setf boundary (remove reverse boundary :test #'eq))
+                   (push (list start end) boundary))))
+    (unless (= 4 (length boundary))
+      (error "Atlas triangle pair does not form a quad"))
+    (let* ((edge (pop boundary))
+           (points (list (first edge) (second edge))))
+      (loop while (< (length points) 4)
+            for next =
+              (find (car (last points)) boundary :key #'first :test #'equal)
+            do (unless next
+                 (error "Atlas quad boundary is not connected"))
+               (setf boundary (remove next boundary :test #'eq)
+                     points (append points (list (second next)))))
+      points)))
 
 (defun star-geometry-data-form (geometry)
-  `(create :faces ,(parenscript-array-form (getf geometry :faces))
-           :bands ,(parenscript-array-form (getf geometry :bands))
+  `(create :faces
+           ,(parenscript-array-form
+             (triangle-pairs-as-quads (getf geometry :faces)))
+           :bands
+           ,(parenscript-array-form
+             (triangle-pairs-as-quads (getf geometry :bands)))
            :junctions ,(parenscript-array-form (getf geometry :junctions))))
 
 (defun star-atlas-javascript ()
@@ -169,6 +219,40 @@
         (dolist (point points)
           (incf total (aref point 2)))
         (/ total (@ points length))))
+
+    (defun polygon-normal (points)
+      (let* ((a (aref points 0))
+             (b (aref points 1))
+             (c (aref points 2))
+             (ab (array (- (aref b 0) (aref a 0))
+                        (- (aref b 1) (aref a 1))
+                        (- (aref b 2) (aref a 2))))
+             (ac (array (- (aref c 0) (aref a 0))
+                        (- (aref c 1) (aref a 1))
+                        (- (aref c 2) (aref a 2))))
+             (normal
+               (array (- (* (aref ab 1) (aref ac 2))
+                         (* (aref ab 2) (aref ac 1)))
+                      (- (* (aref ab 2) (aref ac 0))
+                         (* (aref ab 0) (aref ac 2)))
+                      (- (* (aref ab 0) (aref ac 1))
+                         (* (aref ab 1) (aref ac 0)))))
+             (length
+               (sqrt (+ (* (aref normal 0) (aref normal 0))
+                        (* (aref normal 1) (aref normal 1))
+                        (* (aref normal 2) (aref normal 2))))))
+        (array (/ (aref normal 0) length)
+               (/ (aref normal 1) length)
+               (/ (aref normal 2) length))))
+
+    (defun signed-area (points)
+      (let ((area 0))
+        (dotimes (index (@ points length))
+          (let ((point (aref points index))
+                (next (aref points (mod (1+ index) (@ points length)))))
+            (incf area (- (* (aref point 0) (aref next 1))
+                          (* (aref next 0) (aref point 1))))))
+        (/ area 2)))
 
     (defun project-point (point width height scale)
       (let* ((x (- (aref point 0) 0.5))
@@ -215,52 +299,80 @@
                 (aref corners 6) (aref corners 5)))))
 
     (defun projected-polygon (points width height scale color alpha stroke)
-      (let ((projected (array)))
+      (let ((projected (array))
+            (normal (polygon-normal points)))
         (dolist (point points)
           ((@ projected push) (project-point point width height scale)))
         (create :points projected
                 :depth (average-depth projected)
                 :color color
                 :alpha alpha
-                :stroke stroke)))
+                :stroke stroke
+                :backface (< (signed-area projected) 0)
+                :light
+                (+ 0.72
+                   (* 0.28
+                      (max 0 (+ (* -0.35 (aref normal 0))
+                                (* -0.45 (aref normal 1))
+                                (* 0.82 (aref normal 2)))))))))
+
+    (defun internal-occupancy-face-p (mask sample face)
+      (let ((axis (aref (array 2 2 1 1 0 0) face))
+            (negative-face-p (= 0 (mod face 2))))
+        (and (= negative-face-p (occupied-p sample axis))
+             (occupied-p mask (logxor sample (ash 1 axis))))))
 
     (defun occupancy-polygons (star width height scale)
       (let ((polygons (array)))
         (dotimes (sample 8)
           (when (occupied-p (@ star representative) sample)
-            (dolist (face (cube-faces sample))
-              ((@ polygons push)
-               (projected-polygon face width height scale
-                                  "#79908a" 0.075 "#647873")))))
+            (let ((faces (cube-faces sample)))
+              (dotimes (face 6)
+                (unless (internal-occupancy-face-p
+                         (@ star representative) sample face)
+                  ((@ polygons push)
+                   (projected-polygon (aref faces face) width height scale
+                                      "#b85d70" 0.34 "#8f4052")))))))
         polygons))
 
-    (defun triangle-polygons (triangles width height scale color alpha stroke)
+    (defun geometry-polygons (geometry width height scale color alpha stroke)
       (let ((polygons (array)))
-        (dolist (triangle triangles)
+        (dolist (polygon geometry)
           ((@ polygons push)
-           (projected-polygon triangle width height scale
+           (projected-polygon polygon width height scale
                               color alpha stroke)))
         polygons))
 
     (defun add-geometry-polygons (mesh geometry width height scale alpha stroke)
       (when show-faces
         (dolist (polygon
-                  (triangle-polygons (@ geometry faces) width height scale
-                                     "#2d8fbd" alpha stroke))
+                  (geometry-polygons (@ geometry faces) width height scale
+                                     "#438fb7" alpha stroke))
           ((@ mesh push) polygon)))
       (when show-bands
         (dolist (polygon
-                  (triangle-polygons (@ geometry bands) width height scale
-                                     "#e6aa35" alpha stroke))
+                  (geometry-polygons (@ geometry bands) width height scale
+                                     "#d9a43b" alpha stroke))
           ((@ mesh push) polygon)))
       (when show-junctions
         (dolist (polygon
-                  (triangle-polygons (@ geometry junctions) width height scale
-                                     "#db6555" alpha stroke))
+                  (geometry-polygons (@ geometry junctions) width height scale
+                                     "#cf6558" alpha stroke))
           ((@ mesh push) polygon))))
 
+    (defun shade-color (color factor)
+      (let ((red (parse-int ((@ color slice) 1 3) 16))
+            (green (parse-int ((@ color slice) 3 5) 16))
+            (blue (parse-int ((@ color slice) 5 7) 16)))
+        (+ "rgb(" (round (* red factor)) ","
+           (round (* green factor)) ","
+           (round (* blue factor)) ")")))
+
     (defun draw-polygon (context polygon)
-      (let ((points (@ polygon points)))
+      (let ((points (@ polygon points))
+            (shade (if (@ polygon backface)
+                       0.48
+                       (@ polygon light))))
         ((@ context begin-path))
         ((@ context move-to) (aref (aref points 0) 0)
                              (aref (aref points 0) 1))
@@ -269,41 +381,17 @@
                                (aref (aref points index) 1)))
         ((@ context close-path))
         (setf (@ context global-alpha) (@ polygon alpha)
-              (@ context fill-style) (@ polygon color))
+              (@ context fill-style)
+              (shade-color (@ polygon color) shade))
         ((@ context fill))
-        (setf (@ context global-alpha) (min 1 (+ (@ polygon alpha) 0.28))
-              (@ context stroke-style) (@ polygon stroke)
+        (setf (@ context global-alpha)
+              (if (= (@ polygon alpha) 0)
+                  0.3
+                  (min 1 (+ (@ polygon alpha) 0.38)))
+              (@ context stroke-style)
+              (shade-color (@ polygon stroke) shade)
               (@ context line-width) 0.85)
         ((@ context stroke))))
-
-    (defun draw-line (context a b width height scale color dash)
-      (let ((pa (project-point a width height scale))
-            (pb (project-point b width height scale)))
-        ((@ context begin-path))
-        ((@ context set-line-dash) dash)
-        ((@ context move-to) (aref pa 0) (aref pa 1))
-        ((@ context line-to) (aref pb 0) (aref pb 1))
-        (setf (@ context global-alpha) 0.55
-              (@ context stroke-style) color
-              (@ context line-width) 1)
-        ((@ context stroke))
-        ((@ context set-line-dash) (array))))
-
-    (defun draw-star-frame (context width height scale)
-      (let ((corners
-              (array (array -8 -8 -8) (array 8 -8 -8)
-                     (array 8 8 -8) (array -8 8 -8)
-                     (array -8 -8 8) (array 8 -8 8)
-                     (array 8 8 8) (array -8 8 8)))
-            (edges
-              (array (array 0 1) (array 1 2) (array 2 3) (array 3 0)
-                     (array 4 5) (array 5 6) (array 6 7) (array 7 4)
-                     (array 0 4) (array 1 5) (array 2 6) (array 3 7))))
-        (dolist (edge edges)
-          (draw-line context
-                     (aref corners (aref edge 0))
-                     (aref corners (aref edge 1))
-                     width height scale "#8d9894" (array 4 4)))))
 
     (defun transform-direction (transformation direction)
       (let ((result (array)))
@@ -369,17 +457,15 @@
              (occupancy (occupancy-polygons star width height scale))
              (mesh (array)))
         ((@ context clear-rect) 0 0 width height)
-        (when detailed-p
-          (draw-star-frame context width height scale))
         ((@ occupancy sort)
          (lambda (left right) (- (@ left depth) (@ right depth))))
         (dolist (polygon occupancy)
           (draw-polygon context polygon))
         (when (and detailed-p (= view-mode "owned"))
           (add-geometry-polygons mesh (@ star surface) width height scale
-                                 0.14 "#53615e"))
+                                 0 "#6f7976"))
         (add-geometry-polygons mesh geometry width height scale
-                               0.88 "#35413f")
+                               1 "#35413f")
         ((@ mesh sort)
          (lambda (left right) (- (@ left depth) (@ right depth))))
         (dolist (polygon mesh)
@@ -438,8 +524,8 @@
                       "Whole local patch"))
         (set-text "view-explanation"
                   (if (= view-mode "owned")
-                      "Bright triangles belong to this orientation in the fixed family frame; XYZ shows how its axes map into that frame."
-                      "Every face and band touching the center, with ownership forgotten."))
+                      "Opaque quads belong to this orientation in the fixed family frame; XYZ shows how its axes map into that frame. Rose volumes are solid; unshaded cells are air."
+                      "Every face and band touching the center, with ownership forgotten. Rose volumes are solid; unshaded cells are air."))
         (set-text "face-count" (@ (@ geometry faces) length))
         (set-text "band-count" (@ (@ geometry bands) length))
         (set-text "junction-count" (@ (@ geometry junctions) length))

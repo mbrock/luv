@@ -275,6 +275,10 @@ The family grid proceeds by occupied-cell count with complementary families
 adjacent.  Within a family, orientations follow a cube-group Gray walk: one
 quarter-turn per step through the proper rotations, one mirror step, then
 quarter-turns through the reflected half, with duplicate occupancies omitted.
+The browser presentation joins each production triangle pair back into one
+opaque face or band quad, leaving ownership boundaries but no internal diagonal
+to alias.  Occupied cells form a rose boundary volume with internal shared
+faces removed; backfaces darken and a restrained normal light separates depth.
 
 * DONE Separate cube symmetry from query-row ownership
 :PROPERTIES:

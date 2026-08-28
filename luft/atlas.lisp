@@ -126,7 +126,9 @@
                 (:div.occupancy
                   (render-occupancy-layer '(0 1 2 3) "Low Z cells")
                   (render-occupancy-layer '(4 5 6 7) "High Z cells"))
-                (:div)
+                (:div.cell-key
+                  (:span (:i.solid-cell) "solid")
+                  (:span (:i.air-cell) "air"))
                 (:span#face-count.fact "0" (:small "faces"))
                 (:span#band-count.fact "0" (:small "bands"))
                 (:span#junction-count.fact "0" (:small "junctions")))
