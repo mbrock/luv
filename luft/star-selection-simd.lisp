@@ -22,17 +22,12 @@
            (aref above (+ northeast word))))))
 
 (defmacro define-star-active-simd-kernel (name package lanes)
-  "Define NAME by changing only scalar load/logic/store spellings."
+  "Define NAME with SB-SIMD's public multi-element array operations."
   (flet ((sym (name) (intern name package)))
-    (let* ((aref-wide (sym (format nil "U64.~D-AREF" lanes)))
+    (let* ((aref-wide (sym (format nil "U64.~D-ROW-MAJOR-AREF" lanes)))
            (and-wide (sym (format nil "U64.~D-AND" lanes)))
            (or-wide (sym (format nil "U64.~D-OR" lanes)))
-           (not-wide (sym (format nil "U64.~D-NOT" lanes)))
-           ;; Loads and stores belong to the base ISA package (AVX for AVX2
-           ;; arithmetic), which is the home package of its public AREF.
-           (vop-package (symbol-package aref-wide))
-           (load-wide (intern (format nil "%U64.~D-LOAD" lanes) vop-package))
-           (store-wide (intern (format nil "%U64.~D-STORE" lanes) vop-package)))
+           (not-wide (sym (format nil "U64.~D-NOT" lanes))))
       `(defun ,name
            (below above southwest southeast northwest northeast active)
          (declare (optimize (speed 3) (safety 0))
@@ -40,20 +35,21 @@
                   (type fixnum southwest southeast northwest northeast))
          (loop for word fixnum from 0 below +star-fiber-word-count+
                by ,lanes do
-           (let ((below-southwest (,load-wide below (+ southwest word) 0))
-                 (below-southeast (,load-wide below (+ southeast word) 0))
-                 (below-northwest (,load-wide below (+ northwest word) 0))
-                 (below-northeast (,load-wide below (+ northeast word) 0))
-                 (above-southwest (,load-wide above (+ southwest word) 0))
-                 (above-southeast (,load-wide above (+ southeast word) 0))
-                 (above-northwest (,load-wide above (+ northwest word) 0))
-                 (above-northeast (,load-wide above (+ northeast word) 0)))
-             (,store-wide
-              (%mixed-occupancy-form
-                  (,and-wide ,or-wide ,not-wide)
-                below-southwest below-southeast below-northwest below-northeast
-                above-southwest above-southeast above-northwest above-northeast)
-              active word 0)))
+           (let ((below-southwest (,aref-wide below (+ southwest word)))
+                 (below-southeast (,aref-wide below (+ southeast word)))
+                 (below-northwest (,aref-wide below (+ northwest word)))
+                 (below-northeast (,aref-wide below (+ northeast word)))
+                 (above-southwest (,aref-wide above (+ southwest word)))
+                 (above-southeast (,aref-wide above (+ southeast word)))
+                 (above-northwest (,aref-wide above (+ northwest word)))
+                 (above-northeast (,aref-wide above (+ northeast word))))
+             (setf (,aref-wide active word)
+                   (%mixed-occupancy-form
+                       (,and-wide ,or-wide ,not-wide)
+                     below-southwest below-southeast
+                     below-northwest below-northeast
+                     above-southwest above-southeast
+                     above-northwest above-northeast))))
          active))))
 
 #+x86-64
