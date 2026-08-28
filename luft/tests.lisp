@@ -180,6 +180,94 @@ triangles and all 48 signed-axis symmetries."
       (%check (find (list star triangle '(0 7) nil) obstructions
                     :test #'equal)))))
 
+(defun %transform-sample-mask (transformation mask)
+  (loop for sample below 8
+        when (logbitp sample mask)
+          sum (ash 1 (%transform-star-sample transformation sample))))
+
+(defun %mean-masked-values (values mask)
+  (let ((sum 0)
+        (count 0))
+    (dotimes (sample 8 (/ sum count))
+      (when (logbitp sample mask)
+        (incf sum (aref values sample))
+        (incf count)))))
+
+(defun %maximum-masked-values (values mask)
+  (loop for sample below 8
+        when (logbitp sample mask)
+          maximize (aref values sample)))
+
+(defun %transform-sample-values (transformation values)
+  (let ((transformed (make-array 8)))
+    (dotimes (sample 8 transformed)
+      (setf (aref transformed (%transform-star-sample transformation sample))
+            (aref values sample)))))
+
+(defun %check-appearance-mask-equivariance
+    (star transformed-star transformation source-function target-function)
+  (multiple-value-bind (material light) (funcall source-function star)
+    (multiple-value-bind (transformed-material transformed-light)
+        (funcall target-function transformed-star)
+      (%check (= (%transform-sample-mask transformation material)
+                 transformed-material))
+      (%check (= (%transform-sample-mask transformation light)
+                 transformed-light))
+      ;; Material is the equal-weight mean over the solid set; illumination is
+      ;; the componentwise maximum over the air set.  Scalar lanes suffice to
+      ;; prove each component because both policies act componentwise.
+      (let* ((material-values #(3 5 11 17 23 29 37 41))
+             (light-values #(1 8 2 7 3 6 4 5))
+             (transformed-material-values
+               (%transform-sample-values transformation material-values))
+             (transformed-light-values
+               (%transform-sample-values transformation light-values)))
+        (%check (= (%mean-masked-values material-values material)
+                   (%mean-masked-values transformed-material-values
+                                        transformed-material)))
+        (%check (= (%maximum-masked-values light-values light)
+                   (%maximum-masked-values transformed-light-values
+                                           transformed-light)))))))
+
+(defun %test-atlas-appearance-sample-set-policy ()
+  "Prove face/band/junction sets and commutative reductions over all 48 symmetries."
+  (let ((transformations (append (star-rotations) (star-reflections))))
+    (dotimes (star 256)
+      (%check (= (length (star-atlas-owned-triangles star))
+                 (length (star-atlas-owned-appearance-masks star))))
+      (let ((parts (star-atlas-parts star)))
+        (dolist (transformation transformations)
+          (let ((transformed-star (transform-star transformation star)))
+            (dolist (face (remove-if (lambda (part) (null (second part)))
+                                     (getf parts :faces)))
+              (let* ((pair (first face))
+                     (transformed-pair
+                       (%transform-face-pair transformation pair)))
+                (%check-appearance-mask-equivariance
+                 star transformed-star transformation
+                 (lambda (source-star)
+                   (%face-appearance-sample-masks source-star pair))
+                 (lambda (target-star)
+                   (%face-appearance-sample-masks
+                    target-star transformed-pair)))))
+            (dolist (band (remove-if (lambda (part) (null (second part)))
+                                     (getf parts :bands)))
+              (let* ((key (first band))
+                     (transformed-key
+                       (%transform-band-direction transformation key)))
+                (%check-appearance-mask-equivariance
+                 star transformed-star transformation
+                 (lambda (source-star)
+                   (%band-appearance-sample-masks source-star key))
+                 (lambda (target-star)
+                   (%band-appearance-sample-masks
+                    target-star transformed-key)))))
+            (when (getf parts :junction)
+              (%check-appearance-mask-equivariance
+               star transformed-star transformation
+               #'%junction-appearance-sample-masks
+               #'%junction-appearance-sample-masks))))))))
+
 (defun %test-atlas ()
   (%check (= 256 (length *star-atlas-owned-triangles*)))
   (dotimes (star 256)
@@ -202,6 +290,7 @@ triangles and all 48 signed-axis symmetries."
   (%test-star-selection-instruction-kernel)
   (%test-atlas)
   (%test-atlas-appearance-selector-hypothesis)
+  (%test-atlas-appearance-sample-set-policy)
   (%test-cubical-addressing)
   (format stream "LUFT: ~D star checks passed.~%" *luft-test-count*)
   (values t *luft-test-count*))

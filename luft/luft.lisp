@@ -50,6 +50,7 @@
    #:star-rotations #:star-reflections #:transform-star
    #:transform-star-triangles #:star-orbit #:star-canonical-form
    #:star-atlas-parts #:star-atlas-owned-triangles
+   #:star-atlas-owned-appearance-masks
    #:star-surface-sites #:star-surface-triangles
    ;; Face topology.
    #:local-edge #:local-corner
@@ -83,6 +84,8 @@
    #:surface-mesh-band-triangle-count #:surface-mesh-fan-triangle-count
    #:surface-mesh-singular-star-count
    #:surface-mesh-star-site-words
+   #:surface-mesh-appearance-codes
+   #:surface-mesh-appearance-descriptor-words
    #:surface-mesh-voxel-light #:surface-mesh-companions
    #:surface-mesh-attachments
    #:surface-attachment-frame #:surface-attachment-frame-origin

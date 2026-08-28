@@ -165,6 +165,22 @@
             (aref words (+ offset 3)) (%packed-star-mask record)))
     words))
 
+(defun %occupancy-appearance-codes (records)
+  "Return the initial air/solid u8 sidecar parallel to RECORDS.
+
+Semantic scene decoration replaces solid code one with vocabulary codes, but
+even a bare diagnostic mesh retains all eight neighboring occupancy values."
+  (let ((codes (make-array (* 8 (length records))
+                           :element-type '(unsigned-byte 8)
+                           :initial-element 0)))
+    (loop for record across records
+          for offset fixnum from 0 by 8
+          for star = (%packed-star-mask record)
+          do (dotimes (sample 8)
+               (when (logbitp sample star)
+                 (setf (aref codes (+ offset sample)) 1))))
+    codes))
+
 (defun mesh-star-chunk (chunk chunk-key &key outside-domain-policy)
   "Turn one resident chunk neighborhood into the complete mesh-shader ABI."
   (check-type chunk chain)
@@ -185,4 +201,8 @@
       (let ((records
               (%gather-star-sites
                (%mesh-star-neighborhood chunk chunk-key) x0 x1 y0 y1)))
-        (make-surface-mesh domain (%star-site-words records x0 y0))))))
+        (let ((mesh
+                (make-surface-mesh domain (%star-site-words records x0 y0))))
+          (setf (surface-mesh-appearance-codes mesh)
+                (%occupancy-appearance-codes records))
+          mesh)))))

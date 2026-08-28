@@ -7,6 +7,10 @@
 (defclass material-kind ()
   ((name :initarg :name :reader material-kind-name)
    (base-tone :initarg :base-tone :reader material-kind-base-tone)
+   (top-tone :initarg :top-tone :initform nil :reader material-kind-top-tone)
+   (side-tone :initarg :side-tone :initform nil :reader material-kind-side-tone)
+   (bottom-tone :initarg :bottom-tone :initform nil
+                :reader material-kind-bottom-tone)
    (light-opacity :initarg :light-opacity :initform 15
                   :reader material-kind-light-opacity)
    (light-emission :initarg :light-emission :initform '(0 0 0)
@@ -42,7 +46,10 @@
 (setf *earth-material*
       (ensure-semantic-instance
        *earth-material* 'material-kind
-       :name :earth :base-tone '(0.42 0.32 0.21))
+       :name :earth :base-tone '(0.42 0.32 0.21)
+       :top-tone '(0.18 0.31 0.105)
+       :side-tone '(0.42 0.32 0.21)
+       :bottom-tone '(0.24 0.18 0.13))
       *limestone-material*
       (ensure-semantic-instance
        *limestone-material* 'material-kind
@@ -90,7 +97,78 @@
                   *highland-rock-material-placement*
                   *sanctuary-material-placement*
                   *crystal-material-placement*)
-   :limit #x10000))
+   :limit #xff))
+
+(defun material-kind-oriented-tones (kind)
+  "Return KIND's top, side, and underside terrain tones."
+  (let ((base (material-kind-base-tone kind)))
+    (values (or (material-kind-top-tone kind) base)
+            (or (material-kind-side-tone kind) base)
+            (or (material-kind-bottom-tone kind) base))))
+
+(defun pack-terrain-tone (tone)
+  "Pack one scene-linear RGB tone into an inspectable RGB8 descriptor word."
+  (destructuring-bind (red green blue) tone
+    (flet ((lane (value)
+             (round (* 255 (max 0.0 (min 1.0 value))))))
+      (logior (lane red) (ash (lane green) 8) (ash (lane blue) 16)))))
+
+(defun compile-terrain-material-descriptors (placement-vocabulary)
+  "Compile AIR plus the scene's u8 placements to top/side/bottom RGB8 rows."
+  (let* ((placements
+           (domains:identity-vocabulary-members placement-vocabulary))
+         (words
+           (make-array (* 4 (1+ (length placements)))
+                       :element-type '(unsigned-byte 32)
+                       :initial-element 0)))
+    (loop for placement across placements
+          for code from 1
+          for kind = (material-placement-kind placement)
+          do (multiple-value-bind (top side bottom)
+                 (material-kind-oriented-tones kind)
+               (let ((row (* code 4)))
+                 (setf (aref words row) (pack-terrain-tone top)
+                       (aref words (+ row 1)) (pack-terrain-tone side)
+                       (aref words (+ row 2)) (pack-terrain-tone bottom)))))
+    words))
+
+(defun compile-surface-mesh-appearance (mesh material-cells descriptors)
+  "Compile one eight-u8 material record per active star in MESH.
+
+Code zero is authored air; occupied samples carry one plus their stable scene
+vocabulary offset.  The active (X Y Z STAR) words are only read and therefore
+remain byte-identical under repainting."
+  (let* ((domain (luft:surface-mesh-domain mesh))
+         (sites (luft:surface-mesh-star-site-words mesh))
+         (codes (make-array (* 2 (length sites))
+                            :element-type '(unsigned-byte 8)
+                            :initial-element 0)))
+    (loop for site-offset from 0 below (length sites) by 4
+          for appearance-offset from 0 by 8
+          for x = (aref sites site-offset)
+          for y = (aref sites (+ site-offset 1))
+          for z = (aref sites (+ site-offset 2))
+          for star = (aref sites (+ site-offset 3))
+          do (dotimes (sample 8)
+               (when (logbitp sample star)
+                 (let* ((cell-x (- x (if (logbitp 0 sample) 0 1)))
+                        (cell-y (- y (if (logbitp 1 sample) 0 1)))
+                        (cell-z (- z (if (logbitp 2 sample) 0 1)))
+                        (cell (luft:make-site domain cell-x cell-y cell-z
+                                              luft:+cell-extent+ 1)))
+                   (multiple-value-bind (offset present-p)
+                       (gethash cell material-cells)
+                     (unless present-p
+                       (error "Occupied star sample ~D at (~D ~D ~D) has no material."
+                              sample x y z))
+                     (unless (typep offset '(integer 0 254))
+                       (error "Material offset ~S does not fit the u8 terrain palette."
+                              offset))
+                     (setf (aref codes (+ appearance-offset sample))
+                           (1+ offset)))))))
+    (setf (luft:surface-mesh-appearance-codes mesh) codes
+          (luft:surface-mesh-appearance-descriptor-words mesh) descriptors)
+    mesh))
 
 (defun compile-material-light-opacity-table (placement-vocabulary)
   "Compile authored placement optics to one entered-cell u8 loss lane."

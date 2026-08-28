@@ -15,6 +15,14 @@
     #.(make-array 0 :element-type '(unsigned-byte 32))
     :type (simple-array (unsigned-byte 32) (*))
     :read-only t)
+  ;; Appearance is a parallel derived product: eight u8 material codes for
+  ;; each active star, in sample-bit order.  It never participates in star
+  ;; selection, atlas geometry, or triangle ownership.
+  (appearance-codes #.(make-array 0 :element-type '(unsigned-byte 8))
+                    :type (simple-array (unsigned-byte 8) (*)))
+  (appearance-descriptor-words
+    #.(make-array 0 :element-type '(unsigned-byte 32))
+    :type (simple-array (unsigned-byte 32) (*)))
   ;; Renderer publication metadata.  None of these participate in geometry.
   (voxel-light nil)
   (companions nil :type list)
