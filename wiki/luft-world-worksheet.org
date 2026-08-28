@@ -110,10 +110,10 @@ evidence rather than a restoration source.
 :ID: M6MATV
 :END:
 
-1. Can every triangle in every star atlas entry select one incident occupied
-   cell for material and one outward empty cell for illumination by a stable,
-   symmetry-preserving rule?  Junction and checkerboard stars are the decisive
-   cases.
+1. /Answered by #33UIQ6: no./  Star =#x81='s positive junction triangle is
+   fixed by a proper three-axis cycle that moves every empty sample.  A
+   symmetry-stable sample /set/ plus a commutative appearance policy must
+   replace the proposed distinguished occupied/empty selectors.
 2. Is one appearance record per active star the right first ABI, containing
    the eight neighboring material codes and light values while leaving the
    active-site stream byte-identical?  Measure alignment and upload cost before
@@ -147,15 +147,15 @@ writes a prose completion update, and identifies rather than begins the next
 stage.  The architectural parent thread reviews the evidence before admitting
 the next gate.
 
-** NEXT Prove static atlas appearance selectors
+** DONE Prove static atlas appearance selectors
 :PROPERTIES:
 :ID: 33UIQ6
 :END:
 
-/Intent./ Give every triangle in all 256 immutable star entries a purely static
-selector for the incident occupied cell that supplies material and the
-outward empty cell that supplies voxel illumination.  Keep generated geometry
-and the active-site ABI unchanged.
+/Intent./ Determine whether every triangle in all 256 immutable star entries
+can have a purely static selector for the incident occupied cell that supplies
+material and the outward empty cell that supplies voxel illumination.  Keep
+generated geometry and the active-site ABI unchanged.
 
 /Evidence./ The new atlas already derives all geometry from eight-cell stars
 and symmetry transforms.  A selector stored in unused atlas metadata would let
@@ -163,11 +163,15 @@ the shader interpret parallel cell fields without rebuilding faces, stocks,
 material junction policy, or mixed bevel machinery.  This attractive design
 must be proved over the complete atlas rather than assumed from ordinary faces.
 
-/Done when./ Executable tests cover all atlas triangles, validate occupied and
-empty selector semantics, validate transformation stability, and assert the
-existing triangle census and site stream are unchanged.  The implementation
-is reviewable and unpushed; findings update #FQ5007 and #3UTRKA; the completion
-note names #FTZ8FD without beginning it.
+/Result./ Complete-atlas executable evidence disproves the single-selector
+hypothesis.  Forty-eight of 4,200 emitted triangle primitives have a cubical
+stabilizer with no fixed occupied or empty sample of the required kind.  In
+the smallest counterexample, star =#x81='s positive junction triangle is fixed
+by a proper 120-degree axis cycle while all six empty samples move.  No
+selector metadata was added.  Tests preserve the 4,200-triangle census and the
+exact four-word one-cell active-site stream.  The next stage is #FTZ8FD, which
+must use symmetry-stable sample sets and a commutative junction policy rather
+than pretending that one distinguished voxel exists.
 
 ** TODO Add the palette-coded terrain appearance product
 :PROPERTIES:
@@ -185,7 +189,9 @@ Material-only changes should rebuild and upload appearance while preserving
 geometry exactly.
 
 /Done when./ The sanctuary visibly distinguishes basic materials under current
-sun and shadows; faces, bands, and junctions obey the proved selectors; tests
+sun and shadows; faces, bands, and junctions use symmetry-stable sample sets
+with one explicit commutative material/light reduction policy where needed;
+tests prove that policy equivariant over all 48 cubical transformations and
 show repainting changes no geometry bytes or triangle counts; the shadow pass
 does not bind appearance; and the completion note names #H1ASQU.
 
@@ -257,13 +263,29 @@ assuming transparency, LoD, vertical streaming, or simulation.
 :ID: 3UTRKA
 :END:
 
+** 2026-08-28 — Reject distinguished triangle selectors at symmetric junctions
+
+A single occupied-material and outward-empty-light sample per atlas triangle
+cannot respect cubical symmetry.  Star =#x81='s positive junction triangle is
+fixed by a proper three-axis cycle, but that cycle fixes none of its six empty
+samples; the complete 256-star enumeration finds 48 obstructed emitted
+triangles under the full 48-element cubical group.  Do not encode arbitrary
+canonical-frame choices or checkerboard exceptions as appearance truth.
+
+Keep all eight neighboring cell values in the proposed active-star appearance
+record.  Atlas appearance metadata may name symmetry-stable sample /sets/;
+#FTZ8FD must choose and prove a commutative reduction policy for tied junction
+orbits.  This preserves geometry and lets ordinary faces remain direct without
+claiming a geometrically distinguished voxel where none exists.
+
 ** 2026-08-28 — Preserve geometry and add a parallel appearance product
 
 The simplified four-word star stream and fixed one-width atlas remain the
 entire terrain geometry contract.  Material identity and voxel light travel in
-a one-for-one active-star sidecar interpreted by static atlas selectors.  Do
-not restore face stocks, material-dependent topology, mixed widths, repair
-passes, or one draw/atlas per material.
+a one-for-one active-star sidecar interpreted by static atlas sample sets and
+symmetry-preserving reductions.  Do not restore face stocks,
+material-dependent topology, mixed widths, repair passes, or one draw/atlas
+per material.
 
 ** 2026-08-28 — Reuse substrate laws, not Luvcraft world classes
 
@@ -297,6 +319,37 @@ commands or live actions, observed result, interpretation, and resulting
 decision.  Failed experiments belong here when they eliminate an architectural
 path.  Do not paste complete test transcripts.
 
+** 2026-08-28 — Complete-atlas selector stabilizer proof
+
+- /Thread./ =T-01a04a5e-dd2c-73dd-959d-1f8204688a14=
+- /Revision./ =771c7dbee1577f4971f56663db99ba8a9696c831=, exactly the
+  synchronized =origin/main= base requested for #33UIQ6, on dedicated branch
+  =stage/luft-atlas-appearance-selectors=.
+- /Question./ Can every one of the 4,200 emitted triangles across all 256
+  width-one stars select one occupied material sample and one outward empty
+  illumination sample equivariantly under cubical symmetry?
+- /Commands./ Loaded =luft= in slim SBCL and enumerated all atlas triangles,
+  all 24 proper rotations, and then all 48 signed-axis transformations; ran
+  =./sly parinfer --strict --check luft/tests.lisp=,
+  =./env --slim sbcl --non-interactive --eval '(require :asdf)' --eval
+  '(asdf:test-system "luft/test")'=, and =make test=.
+- /Observation./ A selector must be fixed by the stabilizer of its star and
+  geometric triangle.  Full-group enumeration finds 48 triangle primitives
+  whose stabilizer has no fixed sample of at least one required occupancy (24
+  already fail under proper rotations).  For star =#x81= and triangle
+  =((0 1 1) (1 1 0) (1 0 1))=, cyclic axis permutation fixes the star and
+  triangle but moves every empty sample.  This rules out every empty selector,
+  and therefore every stricter outward-empty selector.  The exhaustive test
+  retains 4,200 triangles; the one-cell mesh retains its exact 32 words and 44
+  triangles.  No production atlas, renderer resource, or shader changed.
+- /Interpretation./ This is a group stabilizer obstruction, not a missing tie
+  breaker.  Selecting by canonical orientation would hide an arbitrary frame
+  choice and make appearance rotate or reflect inconsistently.
+- /Decision./ Add no single-selector metadata and no special case.  Preserve
+  all eight appearance inputs and let #FTZ8FD prove symmetry-stable sample sets
+  plus an explicit commutative reduction policy before rendering materials or
+  voxel light.
+
 ** 2026-08-28 — Architecture survey and Oracle consultation
 
 - /Thread./ =T-01a04a2e-fab5-7206-90bd-94d965339cb9=
@@ -328,6 +381,19 @@ path.  Do not paste complete test transcripts.
 :ID: 3OE183
 :END:
 
+** 2026-08-28 — The static selector hypothesis failed constructively
+
+- #33UIQ6 now closes with an exhaustive executable stabilizer proof rather
+  than metadata that would encode arbitrary orientation choices.
+- The proof checks all 4,200 emitted triangle primitives under the full
+  48-element cubical group and preserves both the atlas census and exact
+  four-word active-site fixture.
+- #3UTRKA revises the appearance decision from distinguished samples to
+  symmetry-stable sample sets with a commutative junction reduction; #FQ5007
+  records the counterexample and commands.
+- No geometry, active-site production, renderer resource, shader, material,
+  world, or voxel-light rendering work began.  #FTZ8FD is next.
+
 ** 2026-08-28 — The large-world effort gained a durable execution spine
 
 - #59ZKO4 separates the intended authored journey from terrain noise and from
@@ -344,17 +410,13 @@ path.  Do not paste complete test transcripts.
 :ID: MTAAPI
 :END:
 
-After review of this worksheet, create one fresh execution thread for #33UIQ6.
-Its complete scope is the static atlas appearance-selector proof: read this
-page and the current star-atlas derivation; identify a symmetry-stable occupied
-material cell and outward empty light cell for every emitted triangle; add the
-smallest metadata and exhaustive executable checks without changing triangle
-geometry, census, active-site records, renderer resources, or shaders; record
-the exact revision, commands, observations, and decision in #FQ5007 and
-#3UTRKA; update #33UIQ6 and #3OE183; leave reviewable unpushed changes; and name
-#FTZ8FD without beginning it.
+The architectural parent thread reviews #33UIQ6's counterexample, exhaustive
+stabilizer check, and revised sample-set recommendation.  If accepted, create
+one fresh execution thread for #FTZ8FD: define the smallest eight-cell
+appearance sidecar and prove symmetry-stable face, band, and junction sample
+sets with one explicit commutative reduction policy before connecting basic
+opaque materials to the terrain shader.
 
-The architectural parent thread reviews that result and decides whether the
-selector proof warrants the appearance-product stage.  It does not accumulate
-later world, shader, or lighting implementation merely because those
-dependencies are visible.
+Do not reopen single-selector metadata through canonical-frame tie breaking,
+and do not begin demand-world, regional-light, or persistence work merely
+because their eventual appearance inputs are now visible.

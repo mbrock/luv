@@ -25,6 +25,10 @@
                               :outside-domain-policy :air)))
          (words (surface-mesh-star-site-words mesh)))
     (%check (= 32 (length words)))
+    (%check
+     (equalp words
+             #(4 4 4 128 4 4 5 8 5 4 4 64 5 4 5 4
+               4 5 4 32 4 5 5 2 5 5 4 16 5 5 5 1)))
     (loop for offset from 3 below (length words) by 4
           for star = (aref words offset)
           do (%check (plusp star))
@@ -109,6 +113,73 @@
       (%check (equalp scalar (subseq native 0 4)))
       (%check (equalp second (subseq native 4 8))))))
 
+(defun %same-triangle-p (first second)
+  "Whether FIRST and SECOND are the same unoriented geometric triangle."
+  (and (subsetp first second :test #'equal)
+       (subsetp second first :test #'equal)))
+
+(defun %triangle-stabilizer (star triangle transformations)
+  "The cubical symmetries fixing STAR and TRIANGLE as a primitive."
+  (loop for transformation in transformations
+        when (and (= star (transform-star transformation star))
+                  (%same-triangle-p
+                   triangle
+                   (first (transform-star-triangles
+                           transformation (list triangle)))))
+          collect transformation))
+
+(defun %sample-fixed-by-transformations-p (sample transformations)
+  (every (lambda (transformation)
+           (= sample (%transform-star-sample transformation sample)))
+         transformations))
+
+(defun %stable-star-samples (star occupied-p stabilizer)
+  "Samples of the requested occupancy fixed by all of STABILIZER."
+  (loop for sample below 8
+        when (and (eq occupied-p (logbitp sample star))
+                  (%sample-fixed-by-transformations-p sample stabilizer))
+          collect sample))
+
+(defun %test-atlas-appearance-selector-hypothesis ()
+  "Disprove one symmetry-stable occupied/empty selector per triangle.
+
+A selector equivariant under cubical symmetry must be fixed by every symmetry
+that fixes both its star and geometric triangle.  We exhaust all emitted
+triangles and all 48 signed-axis symmetries."
+  (let ((transformations (append (star-rotations) (star-reflections)))
+        (triangle-count 0)
+        (obstructions nil))
+    (dotimes (star 256)
+      (dolist (triangle (star-atlas-owned-triangles star))
+        (incf triangle-count)
+        (let* ((stabilizer
+                 (%triangle-stabilizer star triangle transformations))
+               (occupied (%stable-star-samples star t stabilizer))
+               (empty (%stable-star-samples star nil stabilizer)))
+          (unless (and occupied empty)
+            (push (list star triangle occupied empty) obstructions)))))
+    ;; Preserve the complete per-star triangle census while recording that the
+    ;; proposed selector contract fails on 48 emitted triangle primitives.
+    (%check (= 4200 triangle-count))
+    (%check (= 48 (length obstructions)))
+    ;; #x81's positive junction triangle is fixed by cyclic axis permutation.
+    ;; Its two occupied samples are fixed, but all six empty samples move, so
+    ;; no symmetry-equivariant single empty selector exists.  Since this holds
+    ;; for every empty sample, adding an "outward" restriction cannot help.
+    (let* ((star #x81)
+           (triangle '((0 1 1) (1 1 0) (1 0 1)))
+           (cycle '((0 1 0) (0 0 1) (1 0 0))))
+      (%check (= star (transform-star cycle star)))
+      (%check (%same-triangle-p
+               triangle
+               (first (transform-star-triangles cycle (list triangle)))))
+      (%check (every (lambda (sample)
+                       (or (logbitp sample star)
+                           (/= sample (%transform-star-sample cycle sample))))
+                     '(0 1 2 3 4 5 6 7)))
+      (%check (find (list star triangle '(0 7) nil) obstructions
+                    :test #'equal)))))
+
 (defun %test-atlas ()
   (%check (= 256 (length *star-atlas-owned-triangles*)))
   (dotimes (star 256)
@@ -130,6 +201,7 @@
   (%test-word-parallel-star-selection)
   (%test-star-selection-instruction-kernel)
   (%test-atlas)
+  (%test-atlas-appearance-selector-hypothesis)
   (%test-cubical-addressing)
   (format stream "LUFT: ~D star checks passed.~%" *luft-test-count*)
   (values t *luft-test-count*))
