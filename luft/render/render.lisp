@@ -4744,11 +4744,28 @@ a future LoD must bring an explicit transition representation."
 
 (defun snapshot-streaming-scene-input (scene)
   "Freeze SCENE's replace-only authored values for a worker request."
-  (make-instance
-   'scene
-   :solid (scene-solid scene)
-   :material-vocabulary (scene-material-vocabulary scene)
-   :material-cells (scene-material-cells scene)
+  (let* ((residents
+           (and (streaming-scene-source scene)
+                (loop for resident being the hash-values of
+                        (streaming-scene-store scene)
+                      collect resident)))
+         (material-cells
+           (if residents
+               (lambda (cell)
+                 (let* ((key (luft:site-chunk-key cell))
+                        (resident
+                          (find key residents
+                                :key #'resident-cell-chunk-key :test #'eql)))
+                   (if resident
+                       (gethash
+                        cell (resident-cell-chunk-material-cells resident))
+                       (values nil nil))))
+               (scene-material-cells scene))))
+    (make-instance
+     'scene
+     :solid (scene-solid scene)
+     :material-vocabulary (scene-material-vocabulary scene)
+     :material-cells material-cells
    :authored-light-sources (scene-authored-light-sources scene)
    :authored-light-opacity-table (scene-authored-light-opacity-table scene)
    :authored-light-revision (scene-authored-light-revision scene)
@@ -4757,8 +4774,8 @@ a future LoD must bring an explicit transition representation."
    :content-revision (scene-content-revision scene)
    :torch-light-emission (scene-torch-light-emission scene)
    :voxel-light-propagation-p (scene-voxel-light-propagation-p scene)
-   :torches (scene-torches scene)
-   :player-p (scene-player-p scene)))
+     :torches (scene-torches scene)
+     :player-p (scene-player-p scene))))
 
 (defstruct (scene-edit
              (:constructor %make-scene-edit
@@ -5094,25 +5111,24 @@ silently empty the desired residency window."
                                         (* y luft:+chunk-size+))))
      #'<)))
 
-(defun rebuild-authored-world-resident-values (scene)
-  "Publish the exact union/material views derived from SCENE's resident store."
+(defun rebuild-authored-world-resident-values (scene source-keys)
+  "Publish gameplay views for visible SOURCE-KEYS from the resident store."
   (let* ((source (streaming-scene-source scene))
          (domain (authored-world-source-domain source))
          (cell-count
-           (loop for resident being the hash-values of
-                   (streaming-scene-store scene)
+           (loop for key in source-keys
+                 for resident = (gethash key (streaming-scene-store scene))
                  sum (hash-table-count
                       (resident-cell-chunk-material-cells resident))))
          (builder (luft:make-chain-builder domain :initial-capacity cell-count))
          (materials (make-hash-table :test #'eql :size cell-count)))
-    (maphash
-     (lambda (key resident)
-       (declare (ignore key))
-       (luft:chain-builder-add-chain
-        builder (resident-cell-chunk-chain resident))
-       (maphash (lambda (cell offset) (setf (gethash cell materials) offset))
-                (resident-cell-chunk-material-cells resident)))
-     (streaming-scene-store scene))
+    (dolist (key source-keys)
+      (let ((resident (gethash key (streaming-scene-store scene))))
+        (luft:chain-builder-add-chain
+         builder (resident-cell-chunk-chain resident))
+        (maphash (lambda (cell offset)
+                   (setf (gethash cell materials) offset))
+                 (resident-cell-chunk-material-cells resident))))
     (setf (scene-solid scene) (luft:finish-chain-builder builder)
           (scene-material-cells scene) materials
           (scene-content-revision scene) (1+ (scene-content-revision scene)))
@@ -5216,7 +5232,7 @@ silently empty the desired residency window."
       ;; Let the established cohort path observe the old published LOADED set;
       ;; it computes exact owner removals before replacing it with this focus.
       (setf (streaming-scene-focus scene) nil)
-      (rebuild-authored-world-resident-values scene)
+      (rebuild-authored-world-resident-values scene visible-keys)
       (%retarget-resident-streaming-scene
        scene production-system bevel-width world-x world-y))))
 

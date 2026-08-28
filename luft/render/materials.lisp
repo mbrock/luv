@@ -157,7 +157,9 @@ remain byte-identical under repainting."
                         (cell (luft:make-site domain cell-x cell-y cell-z
                                               luft:+cell-extent+ 1)))
                    (multiple-value-bind (offset present-p)
-                       (gethash cell material-cells)
+                       (etypecase material-cells
+                         (hash-table (gethash cell material-cells))
+                         (function (funcall material-cells cell)))
                      (unless present-p
                        (error "Occupied star sample ~D at (~D ~D ~D) has no material."
                               sample x y z))
