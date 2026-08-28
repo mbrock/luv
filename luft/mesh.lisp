@@ -3070,17 +3070,17 @@ every owned site's bevel domain, and DROP-NONLOCAL-P discards it."
                     always (zerop (+ (* nx px) (* ny py) (* nz pz)))))))))
 
 (defun %vertex-fan-uses-center-p (cycle star-mask)
+  (declare (ignore star-mask))
+  ;; Every junction boundary vertex sits at distance sqrt(2)*w from the
+  ;; site, so a non-planar (saddle) cycle forces an interior apex, and the
+  ;; only apex equidistant from the whole cycle is the lattice point
+  ;; itself.  Stripping a saddle instead lets two adjacent saddles pick
+  ;; coincident interior diagonals when the bevel reaches medial width,
+  ;; welding the checkerboard neck into doubled zero-thickness walls.  A
+  ;; planar cycle needs no interior vertex; coning one that misses the
+  ;; site would raise an ornament, and one through the site (the ordinary
+  ;; five-cell concave corner, its three-cell complement) fans flat.
   (or (%cycle-planar-through-site-p cycle)
-      ;; The ordinary five-cell concave corner and its upside-down three-cell
-      ;; complement both pass through the site.  The six- and seven-cell
-      ;; chamfer/fillet runs do not; coning those creates the ornaments.
-      (member (logcount star-mask) '(3 5))
-      ;; Every junction boundary vertex sits at distance sqrt(2)*w from the
-      ;; site, so a non-planar (saddle) cycle forces an interior apex, and
-      ;; the only apex equidistant from the whole cycle is the lattice point
-      ;; itself.  Stripping a saddle instead lets two adjacent saddles pick
-      ;; coincident interior diagonals when the bevel reaches medial width,
-      ;; welding the checkerboard neck into doubled zero-thickness walls.
       (not (%cycle-planar-p cycle))))
 
 (defun %emit-triangular-boundary-cap

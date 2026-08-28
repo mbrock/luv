@@ -361,10 +361,14 @@ the 18-connectivity reading, and the two junction cycles at the edge's end
 sites merge into one skew hexagon each.
 
 Those hexagons are exactly the saddle cycles of #SAMH68, and the dichotomy
-there is now the implementation: [[lisp:luft::%vertex-fan-uses-center-p]]
+there is now the whole implementation: [[lisp:luft::%vertex-fan-uses-center-p]]
 sends every non-planar boundary cycle through
 [[lisp:luft::%emit-centered-boundary-fan]], apex at the lattice point, while
-planar cycles keep their apex-free strips.  The medial width made this
+planar cycles keep their apex-free strips.  The old three-or-five-cell
+logcount proxy is gone; it coned by census rather than by shape, and once
+the empty-quadrant pairing split =3d= into disjoint sheets it raised an
+ornament over that star's planar long crease while four-cell =3c= stripped
+the same crease correctly.  The medial width made this
 forced.  At $2m$ equal to the cell size the fillet neck has zero height, the
 two hexagons meet in an equatorial square, and independent strip
 triangulations picked the same interior diagonals — coincident

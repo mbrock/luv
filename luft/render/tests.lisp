@@ -5435,7 +5435,7 @@
       (true (zerop (getf diagnostics :residual-edge-count)))
       (true (equal '(((48 34 26) (48 36 28) (48 38 30)))
                    (getf diagnostics :candidate-splits)))
-      (true (= 192 (luft:surface-mesh-triangle-count mesh)))
+      (true (= 190 (luft:surface-mesh-triangle-count mesh)))
       (true (luft::%mesh-closed-p mesh))
       (true (luft::%mesh-nondegenerate-p mesh))
       ;; Contracting the medial T-junction may subdivide a neighbour, but it
