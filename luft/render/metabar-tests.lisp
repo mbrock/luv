@@ -25,7 +25,7 @@
               (mcluv:metabar-control-change-kind :bevel-width viewer)))
     (true (eq :commit-on-release
               (mcluv:metabar-control-update-policy :bevel-width viewer)))
-    (true (string= "1/4"
+    (true (string= "1/8"
                    (mcluv:metabar-control-value-label
                     :bevel-width viewer
                     (mcluv:metabar-control-value :bevel-width viewer))))

@@ -1306,9 +1306,14 @@ mesh light sidecars and packed body/flame frames finalized."
   (check-type owners list)
   (check-type surface-context list)
   (let* ((frames
-           (resolve-unlit-scene-torch-frames
-            owners scene surface-context attachment-source-owners
-            attachment-source-owners-p))
+           (unless
+               (every (lambda (entry)
+                        (not (null (luft:surface-mesh-star-site-words
+                                    (cdr entry)))))
+                      owners)
+             (resolve-unlit-scene-torch-frames
+              owners scene surface-context attachment-source-owners
+              attachment-source-owners-p)))
          (light-generation
            (if realize-torch-light-p
                (scene-realized-light-generation
@@ -1611,9 +1616,49 @@ consequence of its own occupancy star and can be read on its own."
 
 (defconstant +render-template-vertex-count+ 6)
 
+(defconstant +star-meshlet-triangle-capacity+ 25)
+(defconstant +star-meshlet-vertex-capacity+
+  (* 3 +star-meshlet-triangle-capacity+))
+(defconstant +star-meshlet-record-count+
+  (1+ +star-meshlet-vertex-capacity+))
+(defconstant +star-meshlet-coordinate-bias+ 8)
+
+(defun star-meshlet-template-words ()
+  "Return the fixed 256-record triangle-soup atlas consumed by mesh shaders.
+
+Each star owns one fixed-size block (#0UAD9N).  Its first uvec4 contains the triangle
+count; the remaining records are the three vertices of each triangle in
+outward order.  Coordinates are biased only to keep this first ABI unsigned."
+  (let ((words
+          (make-array (* 256 +star-meshlet-record-count+ 4)
+                      :element-type '(unsigned-byte 32)
+                      :initial-element 0)))
+    (dotimes (star 256 words)
+      (let* ((triangles (luft:star-atlas-owned-triangles star))
+             (triangle-count (length triangles))
+             (block (* star +star-meshlet-record-count+ 4)))
+        (when (> triangle-count +star-meshlet-triangle-capacity+)
+          (error "Star #x~2,'0X owns ~D triangles; the meshlet ABI admits ~D."
+                 star triangle-count +star-meshlet-triangle-capacity+))
+        (setf (aref words block) triangle-count)
+        (loop for triangle in triangles
+              for triangle-index from 0
+              do (loop for point in triangle
+                       for corner from 0
+                       for record = (+ 1 (* 3 triangle-index) corner)
+                       for offset = (+ block (* 4 record))
+                       do (destructuring-bind (x y z) point
+                            (setf (aref words offset)
+                                  (+ x +star-meshlet-coordinate-bias+)
+                                  (aref words (+ offset 1))
+                                  (+ y +star-meshlet-coordinate-bias+)
+                                  (aref words (+ offset 2))
+                                  (+ z +star-meshlet-coordinate-bias+)))))))))
+
 (defstruct (render-population
              (:constructor %make-render-population
                  (template-words instance-words light-words
+                  mesh-workgroup-count
                   opaque-triangle-instance-count opaque-quad-instance-count
                   translucent-triangle-instance-count
                   translucent-quad-instance-count material-vocabulary
@@ -1632,6 +1677,7 @@ grow an append-compatible GPU descriptor population."
   ;; Two packed u32 words parallel every four-word instance.  Triangles carry
   ;; three RGB4 samples; quads carry their four unique corner samples.
   (light-words #() :type (simple-array (unsigned-byte 32) (*)) :read-only t)
+  (mesh-workgroup-count 0 :type (integer 0 *) :read-only t)
   (opaque-triangle-instance-count 0 :type (integer 0 *) :read-only t)
   (opaque-quad-instance-count 0 :type (integer 0 *) :read-only t)
   (translucent-triangle-instance-count 0 :type (integer 0 *) :read-only t)
@@ -1722,7 +1768,7 @@ grow an append-compatible GPU descriptor population."
               (values (logior sample-0 (ash sample-1 16))
                       (logior sample-2 (ash sample-3 16)))))))))
 
-(defun make-render-population (meshes)
+(defun %make-legacy-render-population (meshes)
   "Canonicalize MESHES into geometry, colored-light, and render-class runs.
 
 Templates remain interned and padded to six vertices.  Instances and their
@@ -1892,9 +1938,35 @@ same cached trilinear voxel-light sample across bevel primitives."
      (concatenate '(simple-array (unsigned-byte 32) (*))
                   (aref light-runs 0) (aref light-runs 1)
                   (aref light-runs 2) (aref light-runs 3))
+     0
      (aref counts 0) (aref counts 1) (aref counts 2) (aref counts 3)
      material-vocabulary material-vocabulary-revision (length assemblies)
      material-descriptor-words)))
+
+(defun %make-star-render-population (meshes)
+  "Flatten active lattice sites; geometry and appearance policy stay static."
+  (let* ((empty (make-array 0 :element-type '(unsigned-byte 32)))
+         (site-words
+           (apply #'concatenate '(simple-array (unsigned-byte 32) (*))
+                  (mapcar #'luft:surface-mesh-star-site-words meshes)))
+         (vocabulary *surface-assembly-vocabulary*)
+         (revision (domains:identity-vocabulary-revision vocabulary))
+         (assemblies
+           (copy-seq (domains:identity-vocabulary-members vocabulary)))
+         (descriptor-words (surface-assembly-descriptor-words vocabulary)))
+    (unless (plusp (length assemblies))
+      (error "The star renderer needs material assembly zero."))
+    (%make-render-population
+     empty site-words empty (/ (length site-words) 4)
+     0 0 0 0 vocabulary revision (length assemblies) descriptor-words)))
+
+(defun make-render-population (meshes)
+  "Prepare the star-site ABI, retaining the previous path as a diagnostic oracle."
+  (if (every (lambda (mesh)
+               (not (null (luft:surface-mesh-star-site-words mesh))))
+             meshes)
+      (%make-star-render-population meshes)
+      (%make-legacy-render-population meshes)))
 
 (defstruct (renderer-slot-provenance
              (:constructor %make-renderer-slot-provenance
@@ -2118,15 +2190,19 @@ ambiguously co-owned, or retired by a population rollback."
    ;; with another generation's order or attachment buffers.
    (publication :initarg :publication :accessor renderer-publication)
    (camera-buffer :initarg :camera-buffer :accessor renderer-camera-buffer)
+   (star-template-buffer :initarg :star-template-buffer :initform nil
+                         :accessor renderer-star-template-buffer)
    (frame-resources
     :initform (make-canvas-frame-resource-cache)
     :reader renderer-frame-resources)
    (layout :initarg :layout :accessor renderer-layout)
    (vertex-module :initarg :vertex-module :accessor renderer-vertex-module)
    (fragment-module :initarg :fragment-module :accessor renderer-fragment-module)
+   (torch-body-fragment-module
+    :initarg :torch-body-fragment-module
+    :initform nil
+    :accessor renderer-torch-body-fragment-module)
    (pipeline :initarg :pipeline :accessor renderer-pipeline)
-   (translucent-pipeline :initarg :translucent-pipeline
-                         :accessor renderer-translucent-pipeline)
    (flame-effect-buffer :initarg :flame-effect-buffer
                         :accessor renderer-flame-effect-buffer)
    (flame-layout :initarg :flame-layout :accessor renderer-flame-layout)
@@ -2332,17 +2408,14 @@ ambiguously co-owned, or retired by a population rollback."
            (:binding 2 :resource ,camera)))
         (renderer-frame-bind-group
          renderer frame (list :resident-scene resident
-                              (renderer-material-buffer renderer)
                               (renderer-shadow-view renderer))
          "luft frame-local resident site population"
          (renderer-layout renderer)
          `((:binding 0 :resource ,(resident-population-instance-buffer resident))
            (:binding 1 :resource ,(resident-population-template-buffer resident))
            (:binding 2 :resource ,camera)
-           (:binding 3 :resource ,(renderer-material-buffer renderer))
            (:binding 4 :resource ,(renderer-shadow-view renderer))
-           (:binding 5 :resource ,(renderer-shadow-sampler renderer))
-           (:binding 6 :resource ,(resident-population-light-buffer resident)))))))
+           (:binding 5 :resource ,(renderer-shadow-sampler renderer)))))))
 
 (defun renderer-frame-torch-body-bind-group (renderer frame shadow-p)
   (let ((camera (renderer-frame-state-camera-buffer frame))
@@ -3218,7 +3291,6 @@ overlay data is deliberately absent until construction mode asks for it."
     (dolist (resource (list (resident-population-bind-group resident)
                             (resident-population-shadow-bind-group resident)
                             (resident-population-light-buffer resident)
-                            (resident-population-template-buffer resident)
                             (resident-population-instance-buffer resident)))
       (when resource (ignore-errors (destroy resource)))))
   (values))
@@ -3227,10 +3299,9 @@ overlay data is deliberately absent until construction mode asks for it."
     (renderer population &optional (material-buffer
                                      (renderer-material-buffer renderer)))
   "Build and upload one candidate population without changing RENDERER."
+  (declare (ignore material-buffer))
   (let* ((device (renderer-device renderer))
          (instance-words (render-population-instance-words population))
-         (template-words (render-population-template-words population))
-         (light-words (render-population-light-words population))
          instance-buffer template-buffer light-buffer bind-group
          shadow-bind-group
          (completed-p nil))
@@ -3249,9 +3320,9 @@ overlay data is deliberately absent until construction mode asks for it."
              (setf instance-buffer
                    (stream-buffer "luft resident site instances" instance-words)
                    template-buffer
-                   (stream-buffer "luft canonical site templates" template-words)
+                   (renderer-star-template-buffer renderer)
                    light-buffer
-                   (stream-buffer "luft resident voxel-light sidecars" light-words)
+                   nil
                    bind-group
                    (create device
                            (make-bind-group-descriptor
@@ -3262,12 +3333,10 @@ overlay data is deliberately absent until construction mode asks for it."
                               (:binding 1 :resource ,template-buffer)
                               (:binding 2
                                :resource ,(renderer-camera-buffer renderer))
-                              (:binding 3 :resource ,material-buffer)
                               (:binding 4
                                :resource ,(renderer-shadow-view renderer))
                               (:binding 5
-                               :resource ,(renderer-shadow-sampler renderer))
-                              (:binding 6 :resource ,light-buffer))))
+                               :resource ,(renderer-shadow-sampler renderer)))))
                    shadow-bind-group
                    (create device
                            (make-bind-group-descriptor
@@ -3287,7 +3356,7 @@ overlay data is deliberately absent until construction mode asks for it."
         (unless completed-p
           (dolist (resource
                     (list shadow-bind-group bind-group light-buffer
-                          template-buffer instance-buffer))
+                          instance-buffer))
             (when resource (ignore-errors (destroy resource)))))))))
 
 (defun renderer-set-mesh (renderer key mesh &key scene-generation)
@@ -3800,11 +3869,12 @@ exactly when its complete old descriptor vector is a prefix of the new one."
          (target-formats (if temporal-p
                              '(:rgba16-float :rg16-float)
                              '(:rgba16-float)))
-         camera-buffer material-buffer material-descriptor-words
+         camera-buffer star-template-buffer material-buffer
+         material-descriptor-words
          material-vocabulary material-vocabulary-revision
          material-descriptor-count
          layout
-         vertex-module fragment-module pipeline translucent-pipeline
+         vertex-module fragment-module pipeline
          shadow-texture shadow-view shadow-sampler shadow-layout
          shadow-vertex-module shadow-pipeline
          player-sdf-layout player-sdf-bind-group player-sdf-vertex-module
@@ -3815,7 +3885,8 @@ exactly when its complete old descriptor vector is a prefix of the new one."
          composite-pipeline
          torch-body-layout torch-body-vertex-buffer torch-body-bind-group
          torch-body-shadow-bind-group torch-body-vertex-module
-         torch-body-shadow-vertex-module torch-body-pipeline
+         torch-body-shadow-vertex-module torch-body-fragment-module
+         torch-body-pipeline
          torch-body-shadow-pipeline
          lattice-point-layout lattice-point-vertex-module
          lattice-point-fragment-module lattice-point-pipeline
@@ -3859,6 +3930,12 @@ exactly when its complete old descriptor vector is a prefix of the new one."
                  material-buffer
                  (make-renderer-material-buffer
                   device material-descriptor-words)
+                 star-template-buffer
+                 (create device
+                         (make-buffer-descriptor
+                          :label "luft 256 star meshlets"
+                          :size (* 4 256 +star-meshlet-record-count+ 4)
+                          :usage '(:storage :copy-dst)))
                  shadow-texture
                  (create device
                          (make-texture-descriptor
@@ -3875,6 +3952,7 @@ exactly when its complete old descriptor vector is a prefix of the new one."
                           :label "luft soft shadow comparison sampler"
                           :mag-filter :linear :min-filter :linear
                           :mipmap-filter :nearest :compare :less-or-equal)))
+           (write-buffer star-template-buffer (star-meshlet-template-words))
            (let ((body-vertices (torch-body-vertex-data)))
              (setf torch-body-vertex-buffer
                    (create device
@@ -3890,10 +3968,8 @@ exactly when its complete old descriptor vector is a prefix of the new one."
                           :entries '((:binding 0 :type :storage-buffer)
                                      (:binding 1 :type :storage-buffer)
                                      (:binding 2 :type :uniform-buffer)
-                                     (:binding 3 :type :storage-buffer)
                                      (:binding 4 :type :texture)
-                                     (:binding 5 :type :sampler)
-                                     (:binding 6 :type :storage-buffer))))
+                                     (:binding 5 :type :sampler))))
                  shadow-layout
                  (create device
                          (make-bind-group-layout-descriptor
@@ -3911,41 +3987,20 @@ exactly when its complete old descriptor vector is a prefix of the new one."
                  (create device
                          (make-shader-module-descriptor
                           :label "luft mesh fragment" :language :mathematical
-                          :code (shaders:mesh-fragment-specification)))
+                          :code (shaders:star-fragment-specification)))
                  pipeline
                  (create device
-                         (make-render-pipeline-descriptor
+                         (make-mesh-render-pipeline-descriptor
                           :label "luft site stream pipeline" :layout layout
-                          :vertex `(:module ,vertex-module)
+                          :task nil :mesh `(:module ,vertex-module)
                           :fragment `(:module ,fragment-module
                                       :targets
                                       ,(mapcar (lambda (format)
                                                  `(:format ,format))
                                                target-formats))
-                          :primitive '(:topology :triangle-list)
                           :sample-count *scene-sample-count*
                           :depth-stencil
                           '(:format :depth32-float :depth-write-enabled t
-                            :depth-compare :less)))
-                 translucent-pipeline
-                 (create device
-                         (make-render-pipeline-descriptor
-                          :label "luft translucent site stream pipeline"
-                          :layout layout
-                          :vertex `(:module ,vertex-module)
-                          :fragment
-                          `(:module ,fragment-module
-                            :targets
-                            ,(loop for format in target-formats
-                                   for first = t then nil
-                                   collect `(:format ,format
-                                             ,@(when first
-                                                 '(:blend
-                                                   :premultiplied-alpha)))))
-                          :primitive '(:topology :triangle-list)
-                          :sample-count *scene-sample-count*
-                          :depth-stencil
-                          '(:format :depth32-float :depth-write-enabled nil
                             :depth-compare :less)))
                  shadow-vertex-module
                  (create device
@@ -3955,11 +4010,10 @@ exactly when its complete old descriptor vector is a prefix of the new one."
                           :code (shaders:shadow-vertex-specification)))
                  shadow-pipeline
                  (create device
-                         (make-render-pipeline-descriptor
+                         (make-mesh-render-pipeline-descriptor
                           :label "luft sun shadow pipeline"
                           :layout shadow-layout
-                          :vertex `(:module ,shadow-vertex-module)
-                          :primitive '(:topology :triangle-list)
+                          :task nil :mesh `(:module ,shadow-vertex-module)
                           :depth-stencil
                           '(:format :depth32-float :depth-write-enabled t
                             :depth-compare :less))))
@@ -3987,6 +4041,12 @@ exactly when its complete old descriptor vector is a prefix of the new one."
                           :language :mathematical
                           :code
                           (shaders:torch-body-shadow-vertex-specification)))
+                 torch-body-fragment-module
+                 (create device
+                         (make-shader-module-descriptor
+                          :label "luft framed torch-body fragment"
+                          :language :mathematical
+                          :code (shaders:mesh-fragment-specification)))
                  torch-body-pipeline
                  (create device
                          (make-render-pipeline-descriptor
@@ -3994,7 +4054,7 @@ exactly when its complete old descriptor vector is a prefix of the new one."
                           :layout torch-body-layout
                           :vertex `(:module ,torch-body-vertex-module)
                           :fragment
-                          `(:module ,fragment-module
+                          `(:module ,torch-body-fragment-module
                             :targets
                             ,(mapcar (lambda (format) `(:format ,format))
                                      target-formats))
@@ -4327,6 +4387,7 @@ exactly when its complete old descriptor vector is a prefix of the new one."
                                 :temporal-p temporal-p
                                 :temporal-resolve-kind temporal-kind
                                 :camera-buffer camera-buffer
+                                :star-template-buffer star-template-buffer
                                 :publication
                                 (%make-empty-renderer-publication
                                  :flame-instance-buffer flame-instance-buffer
@@ -4345,7 +4406,6 @@ exactly when its complete old descriptor vector is a prefix of the new one."
                                 :vertex-module vertex-module
                                 :fragment-module fragment-module
                                 :pipeline pipeline
-                                :translucent-pipeline translucent-pipeline
                                 :flame-effect-buffer flame-effect-buffer
                                 :flame-layout flame-layout
                                 :flame-vertex-module flame-vertex-module
@@ -4363,6 +4423,8 @@ exactly when its complete old descriptor vector is a prefix of the new one."
                                 torch-body-vertex-module
                                 :torch-body-shadow-vertex-module
                                 torch-body-shadow-vertex-module
+                                :torch-body-fragment-module
+                                torch-body-fragment-module
                                 :torch-body-pipeline torch-body-pipeline
                                 :torch-body-shadow-pipeline
                                 torch-body-shadow-pipeline
@@ -4452,6 +4514,7 @@ exactly when its complete old descriptor vector is a prefix of the new one."
                                         torch-body-bind-group
                                         torch-body-shadow-pipeline
                                         torch-body-pipeline
+                                        torch-body-fragment-module
                                         torch-body-shadow-vertex-module
                                         torch-body-vertex-module
                                         torch-body-layout
@@ -4462,42 +4525,21 @@ exactly when its complete old descriptor vector is a prefix of the new one."
                                         flame-instance-buffer
                                         shadow-pipeline shadow-vertex-module
                                         shadow-layout shadow-sampler shadow-view
-                                        shadow-texture translucent-pipeline
+                                        shadow-texture
                                         pipeline fragment-module
-                                        vertex-module layout material-buffer
+                                        vertex-module layout star-template-buffer
+                                        material-buffer
                                         camera-buffer)))
               (when resource (ignore-errors (destroy resource)))))))))
 
 (defun draw-resident-opaque-population (pass resident bind-group)
-  "Draw only depth-writing, shadow-casting instances from RESIDENT."
+  "Dispatch one direct mesh workgroup per active lattice site."
   (let* ((population (resident-population-population resident))
-         (triangle-count
-           (render-population-opaque-triangle-instance-count population))
-         (quad-count
-           (render-population-opaque-quad-instance-count population)))
-    (when (plusp (+ triangle-count quad-count))
+         (workgroup-count
+           (render-population-mesh-workgroup-count population)))
+    (when (plusp workgroup-count)
       (set-bind-group pass 0 bind-group)
-      (when (plusp triangle-count)
-        (draw pass 3 triangle-count))
-      (when (plusp quad-count)
-        (draw pass 6 quad-count 0 triangle-count)))))
-
-(defun draw-resident-translucent-population (pass resident bind-group)
-  "Draw alpha-blended instances after the complete opaque scene."
-  (let* ((population (resident-population-population resident))
-         (opaque-offset
-           (+ (render-population-opaque-triangle-instance-count population)
-              (render-population-opaque-quad-instance-count population)))
-         (triangle-count
-           (render-population-translucent-triangle-instance-count population))
-         (quad-count
-           (render-population-translucent-quad-instance-count population)))
-    (when (plusp (+ triangle-count quad-count))
-      (set-bind-group pass 0 bind-group)
-      (when (plusp triangle-count)
-        (draw pass 3 triangle-count 0 opaque-offset))
-      (when (plusp quad-count)
-        (draw pass 6 quad-count 0 (+ opaque-offset triangle-count))))))
+      (draw-mesh-workgroups pass workgroup-count))))
 
 (defun exposure-probe-average-luminance (bytes)
   "Decode the geometric-mean luminance encoded by the 32x16 GPU probe."
@@ -4680,14 +4722,6 @@ exactly when its complete old descriptor vector is a prefix of the new one."
                       (renderer-frame-torch-body-bind-group renderer frame nil))
       (draw pass (torch-body-vertex-count)
             (renderer-flame-instance-count renderer)))
-    (set-pipeline pass (renderer-translucent-pipeline renderer))
-    (dolist (key (renderer-slot-order renderer))
-      (let ((resident
-              (mesh-slot-resident
-               (gethash key (renderer-mesh-slots renderer)))))
-        (draw-resident-translucent-population
-         pass resident
-         (renderer-frame-resident-bind-group renderer frame resident nil))))
     (when player-p
       (set-pipeline pass (renderer-player-sdf-pipeline renderer))
       (set-bind-group pass 0 (renderer-frame-player-bind-group renderer frame))
@@ -4866,6 +4900,7 @@ exactly when its complete old descriptor vector is a prefix of the new one."
                   (renderer-lattice-point-layout renderer)
                   (renderer-torch-body-shadow-pipeline renderer)
                   (renderer-torch-body-pipeline renderer)
+                  (renderer-torch-body-fragment-module renderer)
                   (renderer-torch-body-shadow-vertex-module renderer)
                   (renderer-torch-body-vertex-module renderer)
                   (renderer-torch-body-layout renderer)
@@ -4886,7 +4921,7 @@ exactly when its complete old descriptor vector is a prefix of the new one."
                   (renderer-shadow-sampler renderer)
                   (renderer-shadow-view renderer)
                   (renderer-shadow-texture renderer)
-                  (renderer-translucent-pipeline renderer)
+                  (renderer-star-template-buffer renderer)
                   (renderer-pipeline renderer) (renderer-fragment-module renderer)
                   (renderer-vertex-module renderer)
                   (renderer-layout renderer)
@@ -4925,6 +4960,7 @@ exactly when its complete old descriptor vector is a prefix of the new one."
         (renderer-publication renderer) (%make-empty-renderer-publication)
         (renderer-torch-body-shadow-pipeline renderer) nil
         (renderer-torch-body-pipeline renderer) nil
+        (renderer-torch-body-fragment-module renderer) nil
         (renderer-torch-body-shadow-vertex-module renderer) nil
         (renderer-torch-body-vertex-module renderer) nil
         (renderer-torch-body-layout renderer) nil
@@ -4945,7 +4981,7 @@ exactly when its complete old descriptor vector is a prefix of the new one."
         (renderer-shadow-sampler renderer) nil
         (renderer-shadow-view renderer) nil
         (renderer-shadow-texture renderer) nil
-        (renderer-translucent-pipeline renderer) nil
+        (renderer-star-template-buffer renderer) nil
         (renderer-pipeline renderer) nil
         (renderer-fragment-module renderer) nil
         (renderer-vertex-module renderer) nil
@@ -5564,34 +5600,21 @@ chunk is empty; excluding that owner drops real boundary triangles."
 (defun mesh-streaming-snapshot (snapshot)
   "Mesh one worker-owned regional snapshot without reading owner state.
 
-The first value is an alist of output owner to final mesh.  A material profile
-is evaluated once over all guarded width-one witnesses, so shared sites and
-medial-collapse repairs cannot diverge at chunk seams."
+The first value is an alist of output owner to final mesh.  Every guarded
+owner uses the same width-one star selector; context owners are retained only
+while scene decoration establishes cross-chunk light provenance."
   (luft:with-surface-mesh-workspace ()
     (let* ((owner-scene (streaming-mesh-snapshot-scene snapshot))
            (scene (streaming-mesh-snapshot-input-scene snapshot))
-           (neighborhood (streaming-mesh-snapshot-union-neighborhood snapshot))
-           (material-program (scene-material-program scene))
-           (material-source (make-scene-material-source scene))
-           (chamfer-stock-function
-             (make-compiled-material-chamfer-stock-function
-              material-program)))
-      (labels ((mesh-owner (key width)
+           (neighborhood (streaming-mesh-snapshot-union-neighborhood snapshot)))
+      (labels ((mesh-owner (key)
                  (let ((chain (gethash key neighborhood)))
                    (unless chain
                      (error "Chunk ~D was not captured by this regional snapshot."
                             key))
                    (zone (:luft/rematerialize :value (luft:chain-count chain))
-                     (luft:mesh-chunk
-                      chain key
-                      :source-stock-function
-                      (make-scene-face-stock-function scene)
-                      :chamfer-stock-function chamfer-stock-function
-                      :chamfer-algebra
-                      (material-program-chamfer-algebra material-program)
-                      :outside-domain-policy :air
-                      :material-source material-source
-                      :bevel-width width))))
+                     (luft:mesh-star-chunk
+                      chain key :outside-domain-policy :air))))
                (decorate-owners (owners &optional surface-context)
                  (decorate-scene-meshes
                   owners scene :surface-context surface-context
@@ -5615,53 +5638,24 @@ medial-collapse repairs cannot diverge at chunk seams."
                (lambda (condition)
                  (declare (ignore condition))
                  (invoke-restart 'luft:treat-as-air))))
-          (let ((profile (streaming-mesh-snapshot-bevel-profile snapshot)))
-            (if profile
-                (let ((witnesses
-                        (mapcar (lambda (key) (cons key (mesh-owner key 1)))
-                                (streaming-mesh-snapshot-witness-keys snapshot)))
-                      (output-keys
-                        (streaming-mesh-snapshot-output-keys snapshot))
-                      (context-keys
-                        (set-difference
-                         (streaming-mesh-snapshot-witness-keys snapshot)
-                         (streaming-mesh-snapshot-output-keys snapshot)
-                         :test #'eql)))
-                  (multiple-value-bind (stock-masks site-widths)
-                      (compile-material-bevel-site-policy profile)
-                    (multiple-value-bind
-                          (owners census diagnostics surface-context)
-                        (luft:vary-surface-mesh-cohort-bevel-widths-from-stock-masks
-                         witnesses stock-masks site-widths
-                         :output-owners output-keys
-                         :realize-context-owners context-keys)
-                      (multiple-value-bind (decorated generation)
-                          (decorate-owners owners surface-context)
-                        (values decorated census diagnostics generation)))))
-                (let* ((output-keys
-                         (streaming-mesh-snapshot-output-keys snapshot))
-                       (all-owners
-                         (mapcar
-                          (lambda (key)
-                            (cons key
-                                  (mesh-owner
-                                   key
-                                   (streaming-mesh-snapshot-bevel-width
-                                    snapshot))))
-                          (streaming-mesh-snapshot-witness-keys snapshot)))
-                       (owners
-                         (remove-if-not
-                          (lambda (entry)
-                            (member (car entry) output-keys :test #'eql))
-                          all-owners))
-                       (surface-context
-                         (remove-if
-                          (lambda (entry)
-                            (member (car entry) output-keys :test #'eql))
-                          all-owners)))
-                  (multiple-value-bind (decorated generation)
-                      (decorate-owners owners surface-context)
-                    (values decorated nil nil generation))))))))))
+          (let* ((output-keys
+                   (streaming-mesh-snapshot-output-keys snapshot))
+                 (all-owners
+                   (mapcar (lambda (key) (cons key (mesh-owner key)))
+                           (streaming-mesh-snapshot-witness-keys snapshot)))
+                 (owners
+                   (remove-if-not
+                    (lambda (entry)
+                      (member (car entry) output-keys :test #'eql))
+                    all-owners))
+                 (surface-context
+                   (remove-if
+                    (lambda (entry)
+                      (member (car entry) output-keys :test #'eql))
+                    all-owners)))
+            (multiple-value-bind (decorated generation)
+                (decorate-owners owners surface-context)
+              (values decorated nil nil generation))))))))
 
 (defun make-scene-regional-meshes
     (scene bevel-width &optional bevel-profile

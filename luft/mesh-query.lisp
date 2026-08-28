@@ -1083,8 +1083,66 @@ chain identity was recorded by the occupancy FIELD when its chunk resolved."
          face-words face-draws band-words band-draws fan-words fan-draws
          face-triangles band-triangles fan-triangles singular-count)))))
 
+(defun %width-one-star-site-words (packed-sites x0 y0)
+  "Expand the chunk-relative selector stream into the mesh-shader ABI."
+  (let ((words
+          (make-array (* 4 (length packed-sites))
+                      :element-type '(unsigned-byte 32))))
+    (loop for packed across packed-sites
+          for offset fixnum from 0 by 4
+          do (setf (aref words offset) (%width-one-site-x packed x0)
+                   (aref words (+ offset 1)) (%width-one-site-y packed y0)
+                   (aref words (+ offset 2)) (%width-one-site-z packed)
+                   (aref words (+ offset 3)) (%width-one-site-mask packed)))
+    words))
+
+(defun %finish-star-site-query (domain packed-sites x0 y0)
+  "Make the deliberately small CPU half of the 256-star renderer ABI."
+  (let* ((empty (make-array 0 :element-type '(unsigned-byte 32)))
+         (mesh
+           (%make-surface-mesh
+            domain 1 empty empty empty nil empty nil empty nil 0 0 0 0)))
+    (setf (surface-mesh-star-site-words mesh)
+          (%width-one-star-site-words packed-sites x0 y0))
+    mesh))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Chunk-only entry point
+
+(defun %mesh-star-chunk-query
+    (chunk chunk-key stock-function algebra outside-domain-policy
+     material-source bevel-width)
+  (declare (ignore stock-function algebra material-source bevel-width))
+  (let* ((domain (chain-domain chunk))
+         (grid-x (chunk-key-x chunk-key))
+         (grid-y (chunk-key-y chunk-key))
+         (x0 (chunk-origin-x chunk-key))
+         (y0 (chunk-origin-y chunk-key))
+         (x1 (min (+ x0 +chunk-size+) (world-domain-x-limit domain)))
+         (y1 (min (+ y0 +chunk-size+) (world-domain-y-limit domain)))
+         (facts (%chain-chunk-facts chunk))
+         (field (%chain-facts-occupancy-field facts domain x0 x1 y0 y1)))
+    ;; The derived facts already validated the chain as a single chunk's
+    ;; positive cells, so membership is one key comparison, not a scan.
+    (unless (or (minusp (chain-chunk-facts-chunk-key facts))
+                (= (chain-chunk-facts-chunk-key facts) chunk-key))
+      (error "Chunk chain with key ~D does not belong to chunk ~D."
+             (chain-chunk-facts-chunk-key facts) chunk-key))
+    (multiple-value-bind (z0 z1)
+        (%width-one-chunk-star-z-bounds chunk field grid-x grid-y)
+      (let* ((packed-sites
+               (%borrow-width-one-sites (max 16 (* 8 (chain-count chunk))))))
+        (when z0
+          (%gather-width-one-query-sites
+           field domain x0 x1 y0 y1 outside-domain-policy z0 z1 packed-sites))
+        (%finish-star-site-query domain packed-sites x0 y0)))))
+
+(defun mesh-star-chunk (chunk chunk-key &key outside-domain-policy)
+  "Select one chunk's active lattice sites for the 256-star mesh shader (#0UAD9N)."
+  (check-type chunk chain)
+  (check-type outside-domain-policy (member nil :air :solid))
+  (%mesh-star-chunk-query
+   chunk chunk-key nil nil outside-domain-policy nil 1))
 
 (defun %mesh-width-one-chunk-query
     (chunk chunk-key stock-function algebra outside-domain-policy
@@ -1104,8 +1162,6 @@ chain identity was recorded by the occupancy FIELD when its chunk resolved."
                   (+ y0 +chunk-size+)))
          (facts (%chain-chunk-facts chunk))
          (field (%chain-facts-occupancy-field facts domain x0 x1 y0 y1)))
-    ;; The derived facts already validated the chain as a single chunk's
-    ;; positive cells, so membership is one key comparison, not a scan.
     (unless (or (minusp (chain-chunk-facts-chunk-key facts))
                 (= (chain-chunk-facts-chunk-key facts) chunk-key))
       (error "Chunk chain with key ~D does not belong to chunk ~D."
@@ -1140,17 +1196,7 @@ chain identity was recorded by the occupancy FIELD when its chunk resolved."
           outside-domain-policy
           material-source
           (bevel-width +mesh-bevel-width+))
-  "Mesh one streaming chunk, retaining the general mesher as its oracle.
-
-Widths one through three plus a compiled CHAMFER-ALGEBRA run the finite
-columnar query.  They share one topology and differ only in the immutable
-template vocabulary selected at projection.  Medial width four remains on the
-reference path because it collapses sheets and repairs the resulting topology.
-A MATERIAL-SOURCE additionally compiles the authored materials into
-chain-rank lanes, replacing per-contributor stock-function calls with dense
-array reads; the stock functions remain the reference path and the fallback.
-Callers without a closed material algebra use the retained surface-proportional
-implementation, including its boundary restart contract."
+  "Mesh one streaming chunk through the retained diagnostic/reference path."
   (check-type chunk chain)
   (check-type stock-function function)
   (check-type source-stock-function (or null function))

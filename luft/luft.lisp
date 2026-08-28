@@ -82,6 +82,7 @@
    #:surface-mesh-triangle-count #:surface-mesh-face-triangle-count
    #:surface-mesh-band-triangle-count #:surface-mesh-fan-triangle-count
    #:surface-mesh-singular-star-count
+   #:surface-mesh-star-site-words
    #:surface-mesh-voxel-light #:surface-mesh-companions
    #:surface-mesh-attachments
    #:surface-attachment-frame #:surface-attachment-frame-origin
@@ -94,6 +95,7 @@
    #:width-one-material-source #:make-width-one-material-source
    #:map-chain-facts-cells-ranked
    #:with-surface-mesh-workspace #:make-surface-mesh #:mesh-chunk
+   #:mesh-star-chunk
    #:coplanar-compressed-surface-mesh
            #:select-surface-mesh-stocks
            #:surface-mesh-with-triangle-ink

@@ -118,7 +118,7 @@ refuses to mix.  The Metal HAL gained the matching =:storage= buffer usage,
 Those facilities now serve both backends and outlived the mesh experiment that
 first forced them.
 
-* The mesh-shader experiment found a budget, then ended
+* The first mesh-shader experiment found a budget, then ended
 :PROPERTIES:
 :ID: VAABY9
 :END:
@@ -158,6 +158,33 @@ draws headlessly, and [[lisp:luft.render:start-viewer]] opens a window with a
 fly camera.  Its test turns the camera straight up and expects only sky,
 which is the frustum test doing real work.
 
+* DONE The 256 stars make the mesh shader small again
+:PROPERTIES:
+:ID: 0UAD9N
+:END:
+
+The width-one atlas changes the old mesh-shader tradeoff.  Geometry is already
+a complete table over all 256 occupancy stars, so there is no brick expansion,
+task payload, runtime bevel construction, AO reconstruction, or material rule
+at a junction.  One direct 32-lane mesh workgroup owns one active lattice site.
+It reads =(X Y Z STAR)=, indexes the immutable atlas, and emits that star's
+outward triangle soup.  The largest star owns 25 triangles, within a fixed
+75-vertex and 25-primitive declaration.
+
+The renderer uploads the atlas once as 256 fixed blocks of 76 =uvec4= records:
+one triangle-count header and room for 75 biased local points.  Streaming
+chunks retain their fiber selector and upload only four unsigned words per
+active site.  The sun-shadow pass consumes the same two buffers through a
+smaller mesh stage.  There is deliberately no task shader or runtime fallback;
+the direct dispatch is the foundation until a concrete device failure earns a
+different path.
+
+The first scene fragment ABI is similarly narrow: world point, flat triangle
+normal, current and previous clip positions, and shadow coordinate.  It uses
+one textureless top/side/bottom treatment.  Materials, colored voxel light,
+attachment frames, alpha cohorts, and variable bevel policy are outside this
+new terrain path rather than dormant branches inside its dense loop.
+
 The standalone atelier still permits semantic reduction.
 =LUFT_RENDER_MODE=clear= submits a clear and copy with no shader pipeline;
 =sky= adds only the background; each style name creates only its own surface
@@ -166,12 +193,12 @@ graph of #DOEDL3.  Thus a driver failure can be localized by increasing one
 semantic layer at a time rather than constructing the entire atelier before
 the first frame.
 
-* Vertex shaders are the one terrain path
+* The retired vertex-pulling path drew every terrain style
 :PROPERTIES:
 :ID: NV25VM
 :END:
 
-The renderer draws $K$ vertices per site with no vertex buffer at all.
+The later renderer drew $K$ vertices per site with no vertex buffer at all.
 Each vertex shader invocation divides its built-in index by $K$ to find its
 site in the very same =(unsigned-byte 64)= buffer, takes the remainder to
 learn which corner of which triangle it is, and unpacks anchor, extent, and

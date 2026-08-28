@@ -140,7 +140,10 @@
 (define-test canonical-and-torch-meshes-share-quantity-carrying-varyings
   (let* ((mesh (luft.render.shaders:mesh-vertex-specification))
          (torch (luft.render.shaders:torch-body-vertex-specification))
-         (fragment (luft.render.shaders:mesh-fragment-specification)))
+         (fragment (luft.render.shaders:star-fragment-specification))
+         (mesh-outputs
+           (luv.shader:shader-mesh-output-vertex-outputs
+            (luv.shader:shader-specification-mesh-output mesh))))
     (dolist (claim
              '((luft.render.shaders::world-position-output
                 luft.render.shaders::world-position)
@@ -151,7 +154,7 @@
       (destructuring-bind (output-name input-name) claim
         (let* ((mesh-output
                  (shader-declaration-named
-                  output-name (luv.shader:shader-specification-outputs mesh)))
+                  output-name mesh-outputs))
                (torch-output
                  (shader-declaration-named
                   output-name (luv.shader:shader-specification-outputs torch)))

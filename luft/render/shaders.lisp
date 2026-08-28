@@ -477,20 +477,6 @@ for completely static geometry."
    (- (mesh-clip-uv previous-clip)
       (mesh-clip-uv current-clip))))
 
-(define-shader-function mesh-world-position (instance template-vertex)
-  "Decode the one world position shared by the scene and shadow passes."
-  (assume-quantity
-   (/ (+ (* (vec3 (float (swizzle instance :x))
-                  (float (swizzle instance :y))
-                  (float (swizzle instance :z)))
-            8.0)
-         (- (vec3 (float (swizzle template-vertex :x))
-                  (float (swizzle template-vertex :y))
-                  (float (swizzle template-vertex :z)))
-            (vec3 2048.0 2048.0 2048.0)))
-      8.0)
-   :quantity quantities:world-position :unit quantities:cell))
-
 (define-shader-function light-clip-position
     (world-position row-x row-y row-z row-w)
   ;; A homogeneous projective row is representation, not four compatible
@@ -1684,120 +1670,220 @@ that he is standing on something."
                 (mesh-temporal-motion previous-clip current-clip))))
 
 (define-live-shader mesh-vertex-specification
-    (:stage :vertex
-     :inputs ((vertex-index :uint :built-in :vertex-index)
-              (instance-index :uint :built-in :instance-index))
-     :outputs ((clip-position :vec4 :built-in :position)
-               (world-position-output :vec3 :location 0
-                                      :quantity quantities:world-position
-                                      :unit quantities:cell)
-               (mesh-normal-output :vec3 :location 1 :interpolation :flat
-                                   :quantity quantities:world-orientation
-                                   :unit :one)
-               (assembly-output :float :location 2 :interpolation :flat)
-               (barycentric-output :vec3 :location 3)
-               (current-clip-output :vec4 :location 4)
-               (previous-clip-output :vec4 :location 5)
-               (shadow-sample-output :vec3 :location 6
-                                     :quantity quantities:shadow-coordinate
-                                     :unit :one)
-               (boundary-edge-mask-output :uint :location 7
-                                          :interpolation :flat)
-               (ambient-occlusion-output :float :location 8
-                                          :interpolation :flat)
-               (voxel-light-output :vec3 :location 9)
-               (primitive-kind-output :uint :location 10
-                                      :interpolation :flat))
-     :resources ((instances :storage-buffer :binding 0 :element :uvec4)
-                 (template-vertices :storage-buffer :binding 1 :element :uvec4)
-                 (light-sidecars :storage-buffer :binding 6 :element :uvec2)
+    (:stage :mesh
+     :workgroup-size (32 1 1)
+     :inputs ((lane :uint :built-in :local-invocation-index)
+              (group :uvec3 :built-in :workgroup-id))
+     :resources ((sites :storage-buffer :binding 0 :element :uvec4)
+                 (star-templates :storage-buffer :binding 1 :element :uvec4)
                  (camera-state :uniform-block :binding 2
-                  :members #.(scene-uniform-prefix 23))))
-  (let* ((instance (buffer-element instances instance-index))
-         (template-id
-           (uint (ldb (byte 16 0) (swizzle instance :w))))
-         (template-index
-           (+ (* template-id (uint 6.0)) vertex-index))
-         (template-vertex (buffer-element template-vertices template-index))
-         (light-sidecar (buffer-element light-sidecars instance-index))
-         (packed-light
-           (if (= vertex-index (uint 0.0))
-               (ldb (byte 16 0) (swizzle light-sidecar :x))
-               (if (= vertex-index (uint 1.0))
-                   (ldb (byte 16 16) (swizzle light-sidecar :x))
-                   (if (= vertex-index (uint 2.0))
-                       (ldb (byte 16 0) (swizzle light-sidecar :y))
-                       (if (= vertex-index (uint 3.0))
-                           (ldb (byte 16 0) (swizzle light-sidecar :x))
-                           (if (= vertex-index (uint 4.0))
-                               (ldb (byte 16 0) (swizzle light-sidecar :y))
-                               (ldb (byte 16 16)
-                                    (swizzle light-sidecar :y))))))))
-         (voxel-light
-           (/ (vec3 (float (ldb (byte 4 0) packed-light))
-                    (float (ldb (byte 4 4) packed-light))
-                    (float (ldb (byte 4 8) packed-light)))
-              15.0))
-         (attributes (swizzle template-vertex :w))
-         (world-position (mesh-world-position instance template-vertex))
-         (mesh-normal
+                  :members #.(scene-uniform-prefix 23)))
+     :mesh-output
+     (:topology :triangles
+      :max-vertices 75
+      :max-primitives 25
+      :vertex
+      ((clip-position :vec4 :built-in :position)
+       (world-position-output :vec3 :location 0
+                              :quantity quantities:world-position
+                              :unit quantities:cell)
+       (mesh-normal-output :vec3 :location 1 :interpolation :flat
+                           :quantity quantities:world-orientation :unit :one)
+       (current-clip-output :vec4 :location 2)
+       (previous-clip-output :vec4 :location 3)
+       (shadow-sample-output :vec3 :location 4
+                             :quantity quantities:shadow-coordinate :unit :one))))
+  (let* ((site (buffer-element sites (swizzle group :x)))
+         (block (* (swizzle site :w) (uint 76.0)))
+         (triangle-count
+           (swizzle (buffer-element star-templates block) :x))
+         (vertex-count (* triangle-count (uint 3.0)))
+         (safe-lane (if (< lane (uint 25.0)) lane (uint 24.0)))
+         (first-record (+ block (uint 1.0) (* safe-lane (uint 3.0))))
+         (record-0 (buffer-element star-templates first-record))
+         (record-1
+           (buffer-element star-templates (+ first-record (uint 1.0))))
+         (record-2
+           (buffer-element star-templates (+ first-record (uint 2.0))))
+         (site-origin
+           (vec3 (float (swizzle site :x))
+                 (float (swizzle site :y))
+                 (float (swizzle site :z))))
+         (world-0
            (assume-quantity
-            (vec3 (- (float (ldb (byte 2 0) attributes)) 1.0)
-                  (- (float (ldb (byte 2 2) attributes)) 1.0)
-                  (- (float (ldb (byte 2 4) attributes)) 1.0))
+            (+ site-origin
+               (/ (- (vec3 (float (swizzle record-0 :x))
+                           (float (swizzle record-0 :y))
+                           (float (swizzle record-0 :z)))
+                     (vec3 8.0 8.0 8.0))
+                  8.0))
+            :quantity quantities:world-position :unit quantities:cell))
+         (world-1
+           (assume-quantity
+            (+ site-origin
+               (/ (- (vec3 (float (swizzle record-1 :x))
+                           (float (swizzle record-1 :y))
+                           (float (swizzle record-1 :z)))
+                     (vec3 8.0 8.0 8.0))
+                  8.0))
+            :quantity quantities:world-position :unit quantities:cell))
+         (world-2
+           (assume-quantity
+            (+ site-origin
+               (/ (- (vec3 (float (swizzle record-2 :x))
+                           (float (swizzle record-2 :y))
+                           (float (swizzle record-2 :z)))
+                     (vec3 8.0 8.0 8.0))
+                  8.0))
+            :quantity quantities:world-position :unit quantities:cell))
+         (edge-a (- (representation world-1) (representation world-0)))
+         (edge-b (- (representation world-2) (representation world-0)))
+         (normal
+           (assume-quantity
+            (normalize
+             (vec3 (- (* (swizzle edge-a :y) (swizzle edge-b :z))
+                      (* (swizzle edge-a :z) (swizzle edge-b :y)))
+                   (- (* (swizzle edge-a :z) (swizzle edge-b :x))
+                      (* (swizzle edge-a :x) (swizzle edge-b :z)))
+                   (- (* (swizzle edge-a :x) (swizzle edge-b :y))
+                      (* (swizzle edge-a :y) (swizzle edge-b :x)))))
             :quantity quantities:world-orientation :unit :one))
-         (assembly-id (float (ldb (byte 12 16) (swizzle instance :w))))
-         (ambient-occlusion
-           (/ (float (ldb (byte 2 28) (swizzle instance :w))) 3.0))
-         (barycentric-index (uint (ldb (byte 2 6) attributes)))
-         (primitive-kind (uint (ldb (byte 2 8) attributes)))
-         (boundary-edge-mask (uint (ldb (byte 3 10) attributes)))
-         (barycentric
-           (if (= barycentric-index (uint 0.0))
-               (vec3 1.0 0.0 0.0)
-               (if (= barycentric-index (uint 1.0))
-                   (vec3 0.0 1.0 0.0)
-                   (vec3 0.0 0.0 1.0))))
-         (current-clip
-           (mesh-view-clip world-position camera-position camera-right
-                           camera-up camera-forward camera-projection
+         (clip-0
+           (mesh-view-clip world-0 camera-position camera-right camera-up
+                           camera-forward camera-projection
                            (swizzle (representation render-parameters) :z)))
-         (previous-clip
-           (mesh-view-clip world-position previous-camera-position
+         (clip-1
+           (mesh-view-clip world-1 camera-position camera-right camera-up
+                           camera-forward camera-projection
+                           (swizzle (representation render-parameters) :z)))
+         (clip-2
+           (mesh-view-clip world-2 camera-position camera-right camera-up
+                           camera-forward camera-projection
+                           (swizzle (representation render-parameters) :z)))
+         (previous-0
+           (mesh-view-clip world-0 previous-camera-position
                            previous-camera-right previous-camera-up
                            previous-camera-forward previous-camera-projection
                            (swizzle (representation render-parameters) :z)))
-         (light-clip
-           (light-clip-position world-position shadow-row-x shadow-row-y
-                                shadow-row-z shadow-row-w))
-         (jitter (representation (swizzle temporal-parameters :xy))))
-    ;; Do not emulate face culling by moving a vertex off screen.  The
-    ;; facing test is per vertex, so a triangle crossing its threshold turns
-    ;; into an enormous sliver as the camera moves.  The closed surface's
-    ;; normal depth test already hides its far side coherently.
-    (set-output clip-position
-                (vec4 (+ (swizzle current-clip :x)
-                         (* (swizzle jitter :x) (swizzle current-clip :w)))
-                      (+ (swizzle current-clip :y)
-                         (* (swizzle jitter :y) (swizzle current-clip :w)))
-                      (swizzle current-clip :z)
-                      (swizzle current-clip :w)))
-    (set-output world-position-output world-position)
-    (set-output mesh-normal-output mesh-normal)
-    (set-output assembly-output assembly-id)
-    (set-output barycentric-output barycentric)
-    (set-output current-clip-output current-clip)
-    (set-output previous-clip-output previous-clip)
-    (set-output shadow-sample-output
-                (assume-quantity
-                 (vec3 (+ (* (swizzle light-clip :x) 0.5) 0.5)
-                       (+ (* (swizzle light-clip :y) 0.5) 0.5)
-                       (swizzle light-clip :z))
-                 :quantity quantities:shadow-coordinate :unit :one))
-    (set-output boundary-edge-mask-output boundary-edge-mask)
-    (set-output ambient-occlusion-output ambient-occlusion)
-    (set-output voxel-light-output voxel-light)
-    (set-output primitive-kind-output primitive-kind)))
+         (previous-1
+           (mesh-view-clip world-1 previous-camera-position
+                           previous-camera-right previous-camera-up
+                           previous-camera-forward previous-camera-projection
+                           (swizzle (representation render-parameters) :z)))
+         (previous-2
+           (mesh-view-clip world-2 previous-camera-position
+                           previous-camera-right previous-camera-up
+                           previous-camera-forward previous-camera-projection
+                           (swizzle (representation render-parameters) :z)))
+         (light-0 (light-clip-position world-0 shadow-row-x shadow-row-y
+                                       shadow-row-z shadow-row-w))
+         (light-1 (light-clip-position world-1 shadow-row-x shadow-row-y
+                                       shadow-row-z shadow-row-w))
+         (light-2 (light-clip-position world-2 shadow-row-x shadow-row-y
+                                       shadow-row-z shadow-row-w))
+         (jitter (representation (swizzle temporal-parameters :xy)))
+         (vertex-0 (* lane (uint 3.0)))
+         (vertex-1 (+ vertex-0 (uint 1.0)))
+         (vertex-2 (+ vertex-0 (uint 2.0))))
+    (set-mesh-output-counts vertex-count triangle-count)
+    (when (< lane triangle-count)
+        (set-mesh-vertex
+         vertex-0
+         (clip-position
+          (vec4 (+ (swizzle clip-0 :x)
+                   (* (swizzle jitter :x) (swizzle clip-0 :w)))
+                (+ (swizzle clip-0 :y)
+                   (* (swizzle jitter :y) (swizzle clip-0 :w)))
+                (swizzle clip-0 :z) (swizzle clip-0 :w)))
+         (world-position-output world-0) (mesh-normal-output normal)
+         (current-clip-output clip-0) (previous-clip-output previous-0)
+         (shadow-sample-output
+          (assume-quantity
+           (vec3 (+ (* (swizzle light-0 :x) 0.5) 0.5)
+                 (+ (* (swizzle light-0 :y) 0.5) 0.5)
+                 (swizzle light-0 :z))
+           :quantity quantities:shadow-coordinate :unit :one)))
+        (set-mesh-vertex
+         vertex-1
+         (clip-position
+          (vec4 (+ (swizzle clip-1 :x)
+                   (* (swizzle jitter :x) (swizzle clip-1 :w)))
+                (+ (swizzle clip-1 :y)
+                   (* (swizzle jitter :y) (swizzle clip-1 :w)))
+                (swizzle clip-1 :z) (swizzle clip-1 :w)))
+         (world-position-output world-1) (mesh-normal-output normal)
+         (current-clip-output clip-1) (previous-clip-output previous-1)
+         (shadow-sample-output
+          (assume-quantity
+           (vec3 (+ (* (swizzle light-1 :x) 0.5) 0.5)
+                 (+ (* (swizzle light-1 :y) 0.5) 0.5)
+                 (swizzle light-1 :z))
+           :quantity quantities:shadow-coordinate :unit :one)))
+        (set-mesh-vertex
+         vertex-2
+         (clip-position
+          (vec4 (+ (swizzle clip-2 :x)
+                   (* (swizzle jitter :x) (swizzle clip-2 :w)))
+                (+ (swizzle clip-2 :y)
+                   (* (swizzle jitter :y) (swizzle clip-2 :w)))
+                (swizzle clip-2 :z) (swizzle clip-2 :w)))
+         (world-position-output world-2) (mesh-normal-output normal)
+         (current-clip-output clip-2) (previous-clip-output previous-2)
+         (shadow-sample-output
+          (assume-quantity
+           (vec3 (+ (* (swizzle light-2 :x) 0.5) 0.5)
+                 (+ (* (swizzle light-2 :y) 0.5) 0.5)
+                 (swizzle light-2 :z))
+           :quantity quantities:shadow-coordinate :unit :one)))
+        (set-mesh-primitive lane (uvec3 vertex-0 vertex-1 vertex-2)))))
+
+(define-live-shader star-fragment-specification
+    (:stage :fragment
+     :inputs ((world-position :vec3 :location 0
+                              :quantity quantities:world-position
+                              :unit quantities:cell)
+              (mesh-normal :vec3 :location 1 :interpolation :flat
+                           :quantity quantities:world-orientation :unit :one)
+              (current-clip :vec4 :location 2)
+              (previous-clip :vec4 :location 3)
+              (shadow-sample :vec3 :location 4
+                             :quantity quantities:shadow-coordinate :unit :one))
+     :outputs ((color-output :vec4 :location 0)
+               (motion-output :vec2 :location 1))
+     :resources ((camera-state :uniform-block :binding 2
+                  :members #.(scene-uniform-prefix 23))
+                 (shadow-map :depth-texture-2d :binding 4)
+                 (shadow-sampler :sampler :binding 5)))
+  (let* ((normal (normalize (representation mesh-normal)))
+         (sun (representation (swizzle sun-vector :xyz)))
+         (sun-color (representation (swizzle sun-color-vector :xyz)))
+         (sky (representation (swizzle sky-color-vector :xyz)))
+         (ground (representation (swizzle ground-color-vector :xyz)))
+         (upness (swizzle normal :z))
+         (top (vec3 0.50 0.52 0.24))
+         (side (vec3 0.25 0.34 0.23))
+         (bottom (vec3 0.19 0.22 0.20))
+         (base (if (> upness 0.35) top
+                   (if (< upness -0.35) bottom side)))
+         (facing (max 0.0 (dot normal sun)))
+         (visibility
+           (soft-shadow-visibility
+            shadow-map shadow-sampler shadow-sample normal sun
+            (representation shadow-control)))
+         (sky-weight (+ 0.5 (* 0.5 upness)))
+         (ambient (+ (* ground (- 1.0 sky-weight)) (* sky sky-weight)))
+         (radiance
+           (* base (+ (* ambient 0.72)
+                      (* sun-color (* visibility facing)))))
+         (camera-delta
+           (representation
+            (- world-position (swizzle camera-position :xyz))))
+         (distance (sqrt (dot camera-delta camera-delta)))
+         (fog (smoothstep 165.0 300.0 distance))
+         (final (mix radiance sky fog)))
+    (set-output color-output (vec4 final 1.0))
+    (set-output motion-output
+                (mesh-temporal-motion previous-clip current-clip))))
 
 (define-live-shader mesh-fragment-specification
     (:stage :fragment
@@ -2180,23 +2266,71 @@ that he is standing on something."
         opacity)))))
 
 (define-live-shader shadow-vertex-specification
-    (:stage :vertex
-     :inputs ((vertex-index :uint :built-in :vertex-index)
-              (instance-index :uint :built-in :instance-index))
-     :outputs ((clip-position :vec4 :built-in :position))
-     :resources ((instances :storage-buffer :binding 0 :element :uvec4)
-                 (template-vertices :storage-buffer :binding 1 :element :uvec4)
+    (:stage :mesh
+     :workgroup-size (32 1 1)
+     :inputs ((lane :uint :built-in :local-invocation-index)
+              (group :uvec3 :built-in :workgroup-id))
+     :resources ((sites :storage-buffer :binding 0 :element :uvec4)
+                 (star-templates :storage-buffer :binding 1 :element :uvec4)
                  (camera-state :uniform-block :binding 2
-                  :members #.(scene-uniform-prefix 23))))
-  (let* ((instance (buffer-element instances instance-index))
-         (template-id (uint (ldb (byte 16 0) (swizzle instance :w))))
-         (template-index (+ (* template-id (uint 6.0)) vertex-index))
-         (template-vertex (buffer-element template-vertices template-index))
-         (world-position (mesh-world-position instance template-vertex)))
-    (set-output clip-position
-                (light-clip-position world-position
-                                     shadow-row-x shadow-row-y
-                                     shadow-row-z shadow-row-w))))
+                  :members #.(scene-uniform-prefix 23)))
+     :mesh-output
+     (:topology :triangles :max-vertices 75 :max-primitives 25
+      :vertex ((clip-position :vec4 :built-in :position))))
+  (let* ((site (buffer-element sites (swizzle group :x)))
+         (block (* (swizzle site :w) (uint 76.0)))
+         (triangle-count
+           (swizzle (buffer-element star-templates block) :x))
+         (safe-lane (if (< lane (uint 25.0)) lane (uint 24.0)))
+         (first-record (+ block (uint 1.0) (* safe-lane (uint 3.0))))
+         (record-0 (buffer-element star-templates first-record))
+         (record-1
+           (buffer-element star-templates (+ first-record (uint 1.0))))
+         (record-2
+           (buffer-element star-templates (+ first-record (uint 2.0))))
+         (origin
+           (vec3 (float (swizzle site :x))
+                 (float (swizzle site :y))
+                 (float (swizzle site :z))))
+         (world-0
+           (assume-quantity
+            (+ origin (/ (- (vec3 (float (swizzle record-0 :x))
+                                  (float (swizzle record-0 :y))
+                                  (float (swizzle record-0 :z)))
+                            (vec3 8.0 8.0 8.0)) 8.0))
+            :quantity quantities:world-position :unit quantities:cell))
+         (world-1
+           (assume-quantity
+            (+ origin (/ (- (vec3 (float (swizzle record-1 :x))
+                                  (float (swizzle record-1 :y))
+                                  (float (swizzle record-1 :z)))
+                            (vec3 8.0 8.0 8.0)) 8.0))
+            :quantity quantities:world-position :unit quantities:cell))
+         (world-2
+           (assume-quantity
+            (+ origin (/ (- (vec3 (float (swizzle record-2 :x))
+                                  (float (swizzle record-2 :y))
+                                  (float (swizzle record-2 :z)))
+                            (vec3 8.0 8.0 8.0)) 8.0))
+            :quantity quantities:world-position :unit quantities:cell))
+         (vertex-0 (* lane (uint 3.0)))
+         (vertex-1 (+ vertex-0 (uint 1.0)))
+         (vertex-2 (+ vertex-0 (uint 2.0))))
+    (set-mesh-output-counts (* triangle-count (uint 3.0)) triangle-count)
+    (when (< lane triangle-count)
+        (set-mesh-vertex
+         vertex-0
+         (clip-position (light-clip-position world-0 shadow-row-x shadow-row-y
+                                             shadow-row-z shadow-row-w)))
+        (set-mesh-vertex
+         vertex-1
+         (clip-position (light-clip-position world-1 shadow-row-x shadow-row-y
+                                             shadow-row-z shadow-row-w)))
+        (set-mesh-vertex
+         vertex-2
+         (clip-position (light-clip-position world-2 shadow-row-x shadow-row-y
+                                             shadow-row-z shadow-row-w)))
+        (set-mesh-primitive lane (uvec3 vertex-0 vertex-1 vertex-2)))))
 
 (define-live-shader lattice-point-vertex-specification
     (:stage :vertex

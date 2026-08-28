@@ -748,10 +748,8 @@ before the operation boundary, or it would encode through resources which the
       (bevel-width-label (viewer-bevel-width viewer))))
 
 (defun next-bevel-width (bevel-width)
-  (case bevel-width
-    (1 2)
-    (2 4)
-    (otherwise 1)))
+  (declare (ignore bevel-width))
+  1)
 
 (defun display-site-inspector (viewer stream)
   "Draw VIEWER's current sparse ray hit as McCLIM presentations."
@@ -861,7 +859,7 @@ before the operation boundary, or it would encode through resources which the
    (renderer :initarg :renderer :initform nil :accessor viewer-renderer)
    (production-system :initarg :production-system :initform nil
                       :accessor viewer-production-system)
-   (bevel-width :initarg :bevel-width :initform 2
+   (bevel-width :initarg :bevel-width :initform 1
                 :accessor viewer-bevel-width)
    (bevel-profile :initarg :bevel-profile :initform nil
                   :accessor viewer-bevel-profile)
@@ -1111,22 +1109,11 @@ before the operation boundary, or it would encode through resources which the
                       :keystroke (:b))
     ()
   (let* ((viewer (viewer-command-viewer))
-         (profile (viewer-bevel-profile viewer))
          (bevel-width (viewer-bevel-width viewer)))
-    (cond
-      (profile
-       (refresh-viewer-renderer
-        viewer :solid (viewer-source viewer) :bevel-width 1
-               :bevel-profile nil))
-      ((= bevel-width 4)
-       (refresh-viewer-renderer
-        viewer :solid (viewer-source viewer) :bevel-width 4
-               :bevel-profile (make-material-bevel-profile)))
-      (t
-       (refresh-viewer-renderer
-        viewer :solid (viewer-source viewer)
-               :bevel-width (next-bevel-width bevel-width)
-               :bevel-profile nil)))
+    (declare (ignore bevel-width))
+    (refresh-viewer-renderer
+     viewer :solid (viewer-source viewer) :bevel-width 1
+            :bevel-profile nil)
     (refresh-viewer-inspector viewer)))
 
 (clim:define-command (com-release-pointer :command-table luft-window
@@ -1431,7 +1418,7 @@ before the operation boundary, or it would encode through resources which the
                        (solid
                          (make-streaming-scene
                           (make-mountain-sanctuary-scene) :frames-per-load 1))
-                       (bevel-width 2)
+                       (bevel-width 1)
                        bevel-profile
                        surface-mesh
                        surface-generation

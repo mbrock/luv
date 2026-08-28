@@ -34,7 +34,7 @@
 
 (defconstant +mesh-cell-size+ 8)
 (defconstant +mesh-bevel-width+ 2
-  "Default bevel width in eighth-cell integer ticks (one quarter cell).")
+  "Default diagnostic-oracle bevel width in eighth-cell integer ticks.")
 (defconstant +mesh-instance-word-count+ 4)
 (defconstant +mesh-template-vertex-word-count+ 4)
 (defconstant +mesh-template-coordinate-bit-count+ 12)
@@ -79,6 +79,13 @@
   (band-triangle-count 0 :type (integer 0 *) :read-only t)
   (fan-triangle-count 0 :type (integer 0 *) :read-only t)
   (singular-star-count 0 :type (integer 0 *) :read-only t)
+  ;; The renderer's width-one ABI is one uvec4 per active lattice site:
+  ;; global X, Y, Z, and the complete eight-bit occupancy star.  Geometry is
+  ;; selected from the immutable 256-star atlas by the mesh shader; none of
+  ;; the template/instance decomposition above crosses that boundary.
+  (star-site-words nil
+                   :type (or null
+                             (simple-array (unsigned-byte 32) (*))))
   ;; Derived render products stay beside the compact topology instead of
   ;; consuming its already-full four-word instance ABI.
   (voxel-light nil :type (or null voxel-light-field))

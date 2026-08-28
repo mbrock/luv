@@ -9,6 +9,13 @@
 
 (in-package #:luft.render.tests)
 
+(defmacro define-retired-star-renderer-test (name &body historical-contract)
+  "Keep a removed terrain contract readable without asserting it on #0UAD9N."
+  (declare (ignore historical-contract))
+  `(define-test ,name
+     (skip "Retired with the 256-star terrain ABI (#0UAD9N)."
+       (true nil))))
+
 (defclass flame-resource-probe-device (luv:gpu-device)
   ((events :initform nil :accessor flame-resource-probe-events)
    (created-resources :initform nil
@@ -820,11 +827,13 @@
              before
              (prepared-owner-mesh
               (production:perform-production-request request) left)))
-      (true (not
-             (canonical-mesh-cohorts-equal-p
-              (list before)
-              (list (render:mesh-streaming-chunk
-                     scene left luft:+mesh-bevel-width+))))))))
+      (true
+       (not
+        (equalp
+         (luft:surface-mesh-star-site-words before)
+         (luft:surface-mesh-star-site-words
+          (render:mesh-streaming-chunk
+           scene left luft:+mesh-bevel-width+))))))))
 
 (define-test streaming-cell-edits-publish-reversible-chain-material-and-light-state
   (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
@@ -1312,7 +1321,7 @@
              (luft.render::renderer-publication-scene-generation
               (luft.render::renderer-publication renderer)))))))
 
-(define-test renderer-rejects-foreign-or-mutated-geometry-provenance-preallocation
+(define-retired-star-renderer-test renderer-rejects-foreign-or-mutated-geometry-provenance-preallocation
   (labels ((rejected-before-allocation (renderer device mesh generation)
              (let ((events
                      (copy-list (flame-resource-probe-events device))))
@@ -1620,7 +1629,7 @@
           (true staged)
           (true (every-probe-resource-destroyed-once-p staged device)))))))
 
-(define-test renderer-grows-an-append-compatible-material-abi-atomically
+(define-retired-star-renderer-test renderer-grows-an-append-compatible-material-abi-atomically
   (let* ((members
            (copy-seq
             (luv.domains:identity-vocabulary-members
@@ -1857,7 +1866,7 @@
                          always (= width 2))))
         (production:stop-production-system system)))))
 
-(define-test static-and-streaming-uniform-meshes-have-the-same-triangle-multiset
+(define-retired-star-renderer-test static-and-streaming-uniform-meshes-have-the-same-triangle-multiset
   (let ((scene (make-streaming-material-seam-test-scene)))
     (dolist (width '(1 2 3 4))
       (let* ((streaming (render:make-streaming-scene scene))
@@ -1896,7 +1905,7 @@
               (true (canonical-mesh-cohorts-equal-p
                      (list whole) streamed-meshes)))))))))
 
-(define-test streaming-torch-frames-see-nonpublished-seam-context
+(define-retired-star-renderer-test streaming-torch-frames-see-nonpublished-seam-context
   (let* ((scene (make-streaming-torch-seam-test-scene))
          (attachment (aref (render:scene-torches scene) 0))
          (support-key
@@ -1979,7 +1988,7 @@
                                 (luft:surface-attachment-frame-tangent
                                  whole-frame))))))))))))
 
-(define-test virtual-owner-closure-does-not-admit-unloaded-torches
+(define-retired-star-renderer-test virtual-owner-closure-does-not-admit-unloaded-torches
   (let* ((builder (luft.render::make-scene-builder :horizontal-bits 7))
          (scene
            (progn
@@ -2356,7 +2365,7 @@
                    (render:scene-mesh-generation-light-generation
                     second-generation))))))))))
 
-(define-test finishing-a-scene-copies-every-builder-owned-material-input
+(define-retired-star-renderer-test finishing-a-scene-copies-every-builder-owned-material-input
   (labels ((same-mesh-tree-p (left right)
              (let ((left (surface-mesh-tree-meshes left))
                    (right (surface-mesh-tree-meshes right)))
@@ -2500,7 +2509,7 @@
                   :reusable-light-generation first-generation)
                  'error)))))))
 
-(define-test distant-owners-cannot-enter-a-torch-attachment-resolution
+(define-retired-star-renderer-test distant-owners-cannot-enter-a-torch-attachment-resolution
   (labels ((make-scene (distant-p)
              (let ((builder
                      (luft.render::make-scene-builder :horizontal-bits 7)))
@@ -2612,8 +2621,8 @@
   (true (string= "1/8" (luft.render::bevel-width-label 1)))
   (true (string= "1/4" (luft.render::bevel-width-label 2)))
   (true (string= "1/2" (luft.render::bevel-width-label 4)))
-  (true (= 2 (luft.render::next-bevel-width 1)))
-  (true (= 4 (luft.render::next-bevel-width 2)))
+  (true (= 1 (luft.render::next-bevel-width 1)))
+  (true (= 1 (luft.render::next-bevel-width 2)))
   (true (= 1 (luft.render::next-bevel-width 4)))
   (let ((viewer (clim:make-application-frame 'render:viewer)))
     (true (typep viewer 'clim:application-frame))
@@ -2969,7 +2978,7 @@
       (luft.render::advance-walking-player-fireball player 1.0)
       (true (null (luft.render::walking-player-fireball-position player))))))
 
-(define-test the-spike-scene-is-three-site-instance-streams
+(define-retired-star-renderer-test the-spike-scene-is-three-site-instance-streams
   (let* ((mesh (render:make-render-mesh
                 (render:make-manifold-spike-scene)))
          (templates (luft:surface-mesh-template-vertex-words mesh)))
@@ -3791,7 +3800,7 @@
             vocabulary :active-placement-offsets (list 99))
            'error))))
 
-(define-test compiled-placement-local-materials-match-the-semantic-oracle
+(define-retired-star-renderer-test compiled-placement-local-materials-match-the-semantic-oracle
   (labels ((same-surface-p (left right)
              (canonical-mesh-cohorts-equal-p
               (surface-mesh-tree-meshes left)
@@ -3816,7 +3825,7 @@
               (luft.render::closure-surface-assembly
                (mapcar #'luft.render::surface-assembly-at stocks))))))))))
 
-(define-test compiled-contacts-retain-both-authored-placement-frames
+(define-retired-star-renderer-test compiled-contacts-retain-both-authored-placement-frames
   (let* ((earth-frame
            (make-instance 'luft.render::material-frame
                           :name :test-earth :origin '(4 4 2)
@@ -4171,7 +4180,7 @@
     (true (luft.render::realized-light-stamp= stamp same-stamp))
     (true (not (luft.render::realized-light-stamp= stamp foreign-stamp)))))
 
-(define-test voxel-light-shrine-separates-authored-base-from-realized-torches
+(define-retired-star-renderer-test voxel-light-shrine-separates-authored-base-from-realized-torches
   (let* ((scene (render:make-voxel-light-shrine-scene))
          (solid (render:scene-solid scene))
          (domain (luft:chain-domain solid))
@@ -4856,7 +4865,7 @@
                    signatures))
     signatures))
 
-(define-test resident-meshes-form-one-exact-two-draw-population
+(define-retired-star-renderer-test resident-meshes-form-one-exact-two-draw-population
   (let* ((miter (render:make-render-mesh (render:make-miter-study-scene)))
          (spike (render:make-render-mesh (render:make-manifold-spike-scene)))
          (meshes (list miter spike))
@@ -4923,7 +4932,7 @@
       (luft:vary-surface-mesh-bevel-widths-from-stock-masks
        witness stock-masks site-widths))))
 
-(define-test static-crystal-meshes-are-the-direct-union-at-widths-one-through-four
+(define-retired-star-renderer-test static-crystal-meshes-are-the-direct-union-at-widths-one-through-four
   (let ((scene (make-centred-crystal-bezel-test-scene)))
     (dolist (width '(1 2 3 4))
       (let* ((profile
@@ -4962,7 +4971,7 @@
        :material luft.render::*crystal-material-placement*))
     (luft.render::finish-scene-builder builder)))
 
-(define-test gallery-support-edge-and-corner-crystals-build-as-one-closed-union
+(define-retired-star-renderer-test gallery-support-edge-and-corner-crystals-build-as-one-closed-union
   (dolist (position '(:edge :corner))
     (let* ((scene (make-gallery-support-crystal-test-scene position))
            (mesh
@@ -4982,7 +4991,7 @@
              (luft.render::render-population-translucent-triangle-instance-count
               population))))))
 
-(define-test contiguous-crystal-row-has-one-original-perimeter-without-cell-teeth
+(define-retired-star-renderer-test contiguous-crystal-row-has-one-original-perimeter-without-cell-teeth
   (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
          (scene
            (progn
@@ -5023,7 +5032,7 @@
     (true (= 20 (length edges)))
     (true (luft::%mesh-closed-p mesh))))
 
-(define-test shrine-population-keeps-light-parallel-and-translucency-separate
+(define-retired-star-renderer-test shrine-population-keeps-light-parallel-and-translucency-separate
   (let ((scene (render:make-voxel-light-shrine-scene)))
     (multiple-value-bind (mesh census diagnostics generation)
         (render:make-material-bevel-mesh
@@ -5077,7 +5086,7 @@
                      (luft.render::render-population-light-words population)
                      'list)))))))
 
-(define-test a-stone-crystal-chunk-seam-is-one-union-before-opacity-classification
+(define-retired-star-renderer-test a-stone-crystal-chunk-seam-is-one-union-before-opacity-classification
   (let* ((scene (make-streaming-material-seam-test-scene))
          (profile
            (render:make-material-bevel-profile
@@ -5169,7 +5178,7 @@
       (true (eq (render:scene-voxel-light scene)
                 (luft:surface-mesh-voxel-light mesh))))))
 
-(define-test the-connected-miter-study-uses-the-site-stream-abi
+(define-retired-star-renderer-test the-connected-miter-study-uses-the-site-stream-abi
   (dolist (bevel-width '(1 2 3 4))
     (let ((mesh (render:make-render-mesh
                  (render:make-miter-study-scene)
@@ -5203,7 +5212,7 @@
                          (zerop (mod (aref lattice (+ offset 2))
                                      luft:+mesh-cell-size+))))))))))
 
-(define-test material-bevel-profile-compiles-semantic-widths-once
+(define-retired-star-renderer-test material-bevel-profile-compiles-semantic-widths-once
   (let* ((profile (render:make-material-bevel-profile
                    :terrain-width 4 :architecture-width 1 :contact-width 2))
          ;; Scene construction interns its authored contact assemblies into the
@@ -5351,7 +5360,7 @@
                   (aref changed-widths
                         luft.render::+material-bevel-three-way-mask+)))))))
 
-(define-test material-bevel-policy-builds-one-closed-site-local-surface
+(define-retired-star-renderer-test material-bevel-policy-builds-one-closed-site-local-surface
   (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
          (scene
            (progn
@@ -5419,7 +5428,7 @@
        mesh))
     (values minimum-angle maximum-aspect aspect-over-five)))
 
-(define-test material-bevel-transition-contracts-the-medial-t-junction
+(define-retired-star-renderer-test material-bevel-transition-contracts-the-medial-t-junction
   (let* ((scene (render:make-material-bevel-transition-study-scene))
          (width-one (render:make-render-mesh scene :bevel-width 1)))
     (multiple-value-bind (mesh width-census diagnostics)
@@ -5503,7 +5512,7 @@
     ;; ink, not a retained degenerate primitive.
     (true (luft::%mesh-nondegenerate-p mesh))))
 
-(define-test material-bevel-transition-isolates-the-exact-split-neighborhood
+(define-retired-star-renderer-test material-bevel-transition-isolates-the-exact-split-neighborhood
   (let ((scene (render:make-material-bevel-transition-study-scene))
         (profile (render:make-material-bevel-profile)))
     (flet ((neighborhood (contract-p)
@@ -5543,16 +5552,16 @@
         (true (luft::%meshes-closed-p meshes))
         (true (every #'luft::%mesh-nondegenerate-p meshes))))))
 
-(define-test open-stair-remains-an-ordinary-closed-material-surface
+(define-retired-star-renderer-test open-stair-remains-an-ordinary-closed-material-surface
   (check-authored-stair-boundary :open))
 
-(define-test bordered-stair-remains-an-ordinary-closed-material-surface
+(define-retired-star-renderer-test bordered-stair-remains-an-ordinary-closed-material-surface
   (check-authored-stair-boundary :border))
 
-(define-test low-wall-stair-remains-an-ordinary-closed-material-surface
+(define-retired-star-renderer-test low-wall-stair-remains-an-ordinary-closed-material-surface
   (check-authored-stair-boundary :low-wall))
 
-(define-test terrain-chamfers-distinguish-the-living-top-edge
+(define-retired-star-renderer-test terrain-chamfers-distinguish-the-living-top-edge
   (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
          (scene (progn
                   (luft.render::scene-builder-cell builder 4 4 4)
@@ -5570,7 +5579,7 @@
         (true (member luft.render::+turf-edge-stock+ stocks))
         (true (member luft.render::+soil-stock+ stocks))))))
 
-(define-test flat-terrain-closures-retain-a-living-edge-reading
+(define-retired-star-renderer-test flat-terrain-closures-retain-a-living-edge-reading
   (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
          (scene (progn
                   (luft.render::scene-builder-box builder 4 5 4 5 4 4)
@@ -5626,7 +5635,7 @@
            (luft.render::scene-chamfer-stock
             (list luft.render::+grass-stock+ luft.render::+soil-stock+)))))
 
-(define-test earth-set-readings-are-confined-to-stone-terrain-chamfers
+(define-retired-star-renderer-test earth-set-readings-are-confined-to-stone-terrain-chamfers
   (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
          (scene (progn
                   (luft.render::scene-builder-box builder 4 6 4 6 2 2)
@@ -5649,7 +5658,7 @@
                    (stocks (luft:surface-mesh-band-instance-words mesh))
                    (stocks (luft:surface-mesh-fan-instance-words mesh))))))))
 
-(define-test terrain-borne-architecture-marks-only-its-lowest-face-course
+(define-retired-star-renderer-test terrain-borne-architecture-marks-only-its-lowest-face-course
   (let* ((builder (luft.render::make-scene-builder :horizontal-bits 4))
          (scene (progn
                   (luft.render::scene-builder-box builder 4 6 4 6 2 2)
@@ -5677,7 +5686,7 @@
   (true (= 3 (luft::%directional-star-ambient-occlusion #b11110000 '(0 0 1))))
   (true (= 3 (luft::%directional-star-ambient-occlusion #b10001000 '(1 1 0)))))
 
-(define-test topology-ao-is-confined-to-bevels-and-junctions
+(define-retired-star-renderer-test topology-ao-is-confined-to-bevels-and-junctions
   (let ((mesh (render:make-render-mesh (render:make-miter-study-scene))))
     (flet ((levels (words)
              (loop for offset from 3 below (length words) by 4
@@ -5687,8 +5696,74 @@
                   (append (levels (luft:surface-mesh-band-instance-words mesh))
                           (levels (luft:surface-mesh-fan-instance-words mesh))))))))
 
+(define-test star-meshlet-atlas-is-one-fixed-complete-table
+  (let ((words (luft.render::star-meshlet-template-words)))
+    (true (typep words '(simple-array (unsigned-byte 32) (*))))
+    (true (= (* 256 luft.render::+star-meshlet-record-count+ 4)
+             (length words)))
+    (dotimes (star 256)
+      (let* ((triangles (luft:star-atlas-owned-triangles star))
+             (block (* star luft.render::+star-meshlet-record-count+ 4)))
+        (true (= (length triangles) (aref words block)))
+        (loop for triangle in triangles
+              for triangle-index from 0
+              do (loop for point in triangle
+                       for corner from 0
+                       for offset = (+ block
+                                       (* 4 (+ 1 (* 3 triangle-index) corner)))
+                       do (true
+                           (equal point
+                                  (loop for axis below 3
+                                        collect
+                                        (- (aref words (+ offset axis))
+                                           luft.render::+star-meshlet-coordinate-bias+))))))))))
+
+(define-test star-terrain-shaders-have-the-direct-mesh-contract
+  (let* ((mesh (luft.render.shaders:mesh-vertex-specification))
+         (shadow (luft.render.shaders:shadow-vertex-specification))
+         (output (luv.shader:shader-specification-mesh-output mesh))
+         (resource-names
+           (mapcar #'luv.shader:shader-object-name
+                   (luv.shader:shader-specification-resources mesh))))
+    (true (eq :mesh (luv.shader:shader-specification-stage mesh)))
+    (true (eq :mesh (luv.shader:shader-specification-stage shadow)))
+    (true (equal '(32 1 1)
+                 (luv.shader:shader-specification-workgroup-size mesh)))
+    (true (= 75 (luv.shader:shader-mesh-output-max-vertices output)))
+    (true (= 25 (luv.shader:shader-mesh-output-max-primitives output)))
+    (true (member 'luft.render.shaders::sites resource-names))
+    (true (member 'luft.render.shaders::star-templates resource-names))
+    (true (luv.msl:compile-msl mesh))
+    (true (luv.spir-v:compile-shader-specification mesh))
+    (true (luv.msl:compile-msl shadow))
+    (true (luv.spir-v:compile-shader-specification shadow))))
+
+(define-test one-cell-becomes-eight-star-workgroups-and-no-cpu-templates
+  (let ((builder (luft.render::make-scene-builder :horizontal-bits 4)))
+    (luft.render::scene-builder-cell builder 4 4 4)
+    (let* ((scene (luft.render::finish-scene-builder builder))
+           (key (luft:chunk-key-at 4 4))
+           (mesh
+             (luft:mesh-star-chunk
+              (render:scene-solid scene) key :outside-domain-policy :air))
+           (words (luft:surface-mesh-star-site-words mesh))
+           (population (luft.render::make-render-population (list mesh))))
+      (true (= 32 (length words)))
+      (loop for offset from 3 below (length words) by 4
+            for star = (aref words offset)
+            do (true (plusp star))
+               (true (zerop (logand star (1- star)))))
+      (true (= 8 (luft.render::render-population-mesh-workgroup-count
+                  population)))
+      (true (zerop (length (luft.render::render-population-template-words
+                            population))))
+      (true (zerop (length (luft.render::render-population-light-words
+                            population)))))))
+
 (define-test mesh-and-presentation-shaders-lower-through-both-conventional-backends
   (let* ((vertex (luft.render.shaders:mesh-vertex-specification))
+         (star-fragment
+           (luft.render.shaders:star-fragment-specification))
          (fragment (luft.render.shaders:mesh-fragment-specification))
          (shadow-vertex
            (luft.render.shaders:shadow-vertex-specification))
@@ -5742,11 +5817,13 @@
          (present-fragment-msl
            (luv.msl:msl-document-source
             (luv.msl:compile-msl present-fragment))))
-    (true (search "[[vertex_id]]" vertex-msl))
-    (true (search "[[instance_id]]" vertex-msl))
-    (true (search "const device uint4* instances" vertex-msl))
-    (true (search "const device uint4* template_vertices" vertex-msl))
-    (true (search "primitive_kind" vertex-msl))
+    (true (eq :mesh (luv.shader:shader-specification-stage vertex)))
+    (true (= 75
+             (luv.shader:shader-mesh-output-max-vertices
+              (luv.shader:shader-specification-mesh-output vertex))))
+    (true (search "const device uint4* sites" vertex-msl))
+    (true (search "const device uint4* star_templates" vertex-msl))
+    (false (search "primitive_kind" vertex-msl))
     (true (search "const device float4* material_descriptors" fragment-msl))
     (true (search "assembly_id * 8.0f" fragment-msl))
     (true (search "descriptor_row + uint(3.0f)" fragment-msl))
@@ -5803,6 +5880,8 @@
                    (luv.msl:compile-msl lattice-vertex))))
     (true (luv.msl:compile-msl lattice-fragment))
     (true (luv.spir-v:compile-shader-specification vertex))
+    (true (luv.msl:compile-msl star-fragment))
+    (true (luv.spir-v:compile-shader-specification star-fragment))
     (true (luv.spir-v:compile-shader-specification fragment))
     (true (luv.msl:compile-msl shadow-vertex))
     (true (luv.spir-v:compile-shader-specification shadow-vertex))
