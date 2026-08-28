@@ -104,8 +104,13 @@ The following are starting paths rather than a table of settled doctrine.
 - [[file:application-workbench.org][The shared Lisp application workbench]] records the application-neutral
   status line, M-x, metabar, lobby, capture, profiling, live-artifact,
   lifecycle, and language-agent boundaries now reused by Luvcraft and LUFT.
-  It keeps game-specific semantics in thin adapters and makes direct retained
-  GPU presentation the contract for application panels.
+  It now distinguishes the Luv-owned screen-space substrate from authored
+  game UI and records why the current adapter matrix is migration evidence,
+  not the destination.
+- [[file:workbench-worksheet.org][The Luv workbench substrate worksheet]] is the durable spine between that
+  architecture and bounded execution threads.  It fixes the invariants and
+  stage gates, records experiments and decisions, and names one exact next
+  backend proof without beginning later migration stages.
 - [[file:technical-debt.org][Technical debt that multiplies truths]] ranks the current architectural debt
   by the number of places that must agree.  It names concrete deletion cuts,
   protocol extractions, and ownership boundaries rather than treating file

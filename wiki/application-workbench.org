@@ -29,6 +29,41 @@ This is an extraction of mechanisms, not a common game engine.  LUFT's packed
 site renderer and Luvcraft's block world remain deliberately different.  The
 larger crossing of gameplay features tracked by #WO50UR is still open.
 
+* The workbench is substrate, not an application extension registry
+:PROPERTIES:
+:ID: M9MI6Y
+:END:
+
+The first extraction made the tool mechanisms shared but left each game to
+construct, place, route input to, and release a separate frame and compositor
+for every tool.  LUFT's viewer-instrument registry consequently became a small
+window manager and a general lifecycle registry at once.  Invisible Tracy and
+agent attachments use the same abstraction as modal M-x and source-review
+panels.  Luvcraft repeats the visual host choreography through its unrelated
+spatial-overlay and world-focus machinery.
+
+That adapter matrix is current implementation, not the desired application
+protocol.  Status, lobby, metabar, M-x, source review, and later global prompts
+are a Luv-owned screen-space substrate: closer to browser developer tools or a
+system overlay than authored game UI.  A conforming application supplies one
+canvas/presentation relationship, command vocabulary, semantic values, input
+suspension, and lifecycle boundary.  It does not integrate every global pane
+through a game-specific extension object.
+
+The intended shell is one transparent full-viewport McCLIM workbench frame
+with passive, modeless, transient, and modal layers; one technical visual
+language; shell-first native input; and one retained presentation over the
+completed application frame.  McCLIM sheet geometry should own pane layout,
+clipping, painter order, hit testing, and focus inside the shell.  Luv still
+does not own an application's renderer, world, authored inspector, or resource
+release order.
+
+LUFT is the first conforming atelier.  Luvcraft migration is deliberately
+deferred, and its scene, world-panel, viewmodel, and world-focus systems are
+not the substrate's design template.  The sequenced experiments, decisions,
+and exact next action live in [[file:workbench-worksheet.org][the workbench substrate worksheet]] rather
+than turning this architecture record into an execution log.
+
 * One quiet line is the default global surface
 :PROPERTIES:
 :ID: MVIIU6

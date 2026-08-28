@@ -1,0 +1,304 @@
+#+title: Luv workbench substrate worksheet
+#+startup: overview
+
+* Intent and non-goals
+:PROPERTIES:
+:ID: Z96DF9
+:END:
+
+This is the living worksheet for the screen-space application substrate
+described by #M9MI6Y.  The architecture record says why the substrate exists
+and which decisions constrain it; this page sequences experiments, records
+what they teach, and names exactly one next action.  Execution threads are
+replaceable working sessions.  They read and update this worksheet rather than
+becoming the only place where an architectural decision survives.
+
+The intended result is one Luv-owned workbench over any conforming graphical
+application: compact status, lobby, metabar, M-x, source review, and later
+presentation-typed prompts share one technical visual language and one model
+of panes, focus, modality, input, rendering, and release.  Their value comes
+from being available without an atelier inventing a host adapter for every
+tool.  Luft is the first conforming atelier.
+
+This work does /not/ define a common game engine, absorb Luft's site inspector
+or authored tools into global chrome, generalize Luvcraft's spatial overlays,
+or preserve arbitrary third-party extension registration.  Luvcraft migration
+is deferred until Luft proves the substrate.  Its scene, world-panel,
+viewmodel, and world-focus machinery may remain independent even when a later
+fixed-screen workbench supersedes it temporarily.
+
+* Established invariants
+:PROPERTIES:
+:ID: H51JQ0
+:END:
+
+- Workbench state and GPU-resource mutation cross the native frame boundary.
+- Asynchronous work quiesces before a terminal canvas fence.  A source fetch
+  may be cancelled; a checkout mutation and live ASDF assimilation complete
+  before release.
+- Native input reaches the shell before application input.  Passive,
+  modeless, transient, and modal panes have explicit behavior rather than
+  numeric event priority.
+- Opening interactive shell UI clears held application input before swallowing
+  corresponding release events and suspends relative pointer capture through
+  an explicit application token.
+- McCLIM authors retained semantic commands.  The shell does not rasterize a
+  pane texture, acquire a drawable, submit a queue, or own an application
+  renderer.
+- Shell resources and workers are released while the context and GPU device
+  remain live; application renderer resources, canvas, and device retain their
+  existing terminal order.
+- Application stop closes shell admission atomically.  Startup or publication
+  which loses that race consumes and releases its own resources.
+- The application supplies semantic values and commands, not per-pane
+  compositors, placement matrices, inverse pointer transforms, or open/close
+  adapters.
+
+* Current architecture
+:PROPERTIES:
+:ID: 8VVBDJ
+:END:
+
+The current implementation is the evidence and migration source, not the
+desired boundary.
+
+- [[file:../hal/canvas.lisp][hal/canvas.lisp]] owns the portable presentation transaction.
+  =PRESENT-CANVAS-FRAME= acquires a surface and encoder, invokes the
+  application, then completes presentation.  A shell postlude here could
+  composite after an application without entering its renderer.
+- [[file:../hal/sdl/canvas.lisp][hal/sdl/canvas.lisp]] owns the native SDL event and frame loop.  It is the
+  natural outer boundary for shell-first input and frame-boundary requests.
+- [[file:../mcclim/direct-compositor.lisp][mcclim/direct-compositor.lisp]] already replays retained McCLIM commands into
+  a caller-owned render pass.
+- [[file:../mcclim/gpu.lisp][mcclim/gpu.lisp]] already combines descendant sheet streams in painter order.
+  The first proof must establish that overlapping child panes preserve clips,
+  transforms, and native-density text in one embedded frame.
+- [[file:../mcclim/mirror.lisp][mcclim/mirror.lisp]] translates native events through sheets, but embedded
+  top-level mirrors do not yet expose ordinary viewport resize and direct
+  canvas-event dispatch as a clean public protocol.
+- [[file:../luft/render/instruments.lisp][luft/render/instruments.lisp]] is a small window manager and lifecycle registry:
+  numeric visual/input order, refresh, encoding, event interception,
+  quiescence, and release.  Status, lobby, metabar, M-x, and source review use
+  it visually; Tracy and the application agent use it invisibly.
+- [[file:../luft/render/studio.lisp][luft/render/studio.lisp]] owns the first conforming application, its renderer,
+  ordinary atelier commands, site inspector, input state, and terminal release
+  order.  Those application concerns remain Luft's.
+
+The applications-by-tools adapter matrix and the focused-pointer routing bug
+in the current Luvcraft M-x/source panels are deletion pressure, not contracts
+to reproduce.
+
+* Open technical questions
+:PROPERTIES:
+:ID: PMDM1O
+:END:
+
+1. Can one transparent full-viewport embedded McCLIM frame retain and replay
+   overlapping child panes with correct logical resize, clipping, painter
+   order, and native-density rendering?
+2. What is the smallest public operation for resizing an embedded top-level
+   mirror and laying out its children after an SDL logical-size change?
+3. Can canvas events enter that mirror's normal sheet dispatch without making
+   it the canvas's sole native handler?
+4. Should the portable presentation transaction own exactly one
+   =APPLICATION-SHELL= postlude, or does backend behavior require the
+   application to call the shell inside its final pass?  Prefer the postlude;
+   decide from the backend proof rather than aesthetics.
+5. Is shell chrome included in application screenshots and films, excluded
+   like browser devtools, or selectable?  Do not let this choice complicate
+   the first on-screen proof.
+6. Which application-input suspension token is sufficient for Luft without
+   importing Luvcraft camera/world-focus semantics?
+7. How will incremental presentation-typed prompting replace blocking CLIM
+   =ACCEPT= on the canvas thread?  This is downstream of basic modal routing.
+
+* Ordered stages
+:PROPERTIES:
+:ID: CEIG07
+:END:
+
+The stages are gates, not a backlog to execute speculatively.  An execution
+thread owns one stage, records discoveries and decisions here, leaves
+reviewable unpushed changes, writes a prose completion update, and identifies
+rather than begins the next stage.
+
+** NEXT Prove the embedded workbench backend
+:PROPERTIES:
+:ID: BY51K0
+:END:
+
+/Intent./ Build the smallest transparent full-viewport embedded frame with two
+overlapping child panes.  Exercise resize, child layout, clipping, painter
+order, native-density retained drawing, pointer hit testing, keyboard focus,
+and dispatch from portable canvas events.
+
+/Evidence./ Descendant retained-stream composition and direct replay already
+exist, while embedded mirror resize and public event entry are unresolved.
+No production shell or migrated tool is needed to answer those questions.
+
+/Done when./ Focused executable checks and one inspected live Luft proof show
+the required behavior, backend changes are reviewable and unpushed, findings
+and decisions are recorded below, and the completion note names #5H9AKZ
+without beginning it.
+
+** TODO Build =luv/workbench= as the shell substrate
+:PROPERTIES:
+:ID: 5H9AKZ
+:END:
+
+/Intent./ Introduce one Luv-owned full-viewport workbench frame, layered pane
+layout, shell-first event router, explicit passive/modeless/transient/modal
+state, application input suspension, presentation composition, and lifecycle.
+
+/Evidence./ This stage depends on #BY51K0 selecting proven resize, event, and
+rendering seams.  Initially the shell may host compatibility content internally
+if that keeps behavior stable while establishing one owner.
+
+/Done when./ A small application protocol supplies identity, command frame,
+semantic hooks, input suspension, and stop/lifecycle boundaries; shell tests
+cover routing and teardown; no application-specific tool migration is hidden
+inside this stage.
+
+** TODO Make Luft conform with status only
+:PROPERTIES:
+:ID: TEFU1T
+:END:
+
+/Intent./ Attach the shell once to Luft and render only the shared status pane
+through it.  Keep the other current instruments temporarily so the first
+application cutover remains observable and reversible.
+
+/Evidence./ Status is passive, always visible, and the least demanding proof
+of resize, semantic sampling, render order, startup, and teardown.
+
+/Done when./ Luft supplies no status-specific frame, compositor, placement, or
+event adapter; live resize and shutdown remain healthy; and the old status
+instrument is deleted.
+
+** TODO Migrate M-x and source update
+:PROPERTIES:
+:ID: ZNLZQU
+:END:
+
+/Intent./ Move the first transient/modal workflows into shell panes and one
+focus policy.  Preserve source review's pinned fast-forward, live ASDF load,
+cancellation, quiescence, and partial-assimilation reporting.
+
+/Evidence./ These tools currently duplicate frame construction, coordinate
+inversion, event forwarding, modality, and cleanup.  Together they prove both
+synchronous command execution and asynchronous modal work.
+
+/Done when./ Luft has no M-x or source-update instrument adapter, pointer and
+keyboard use the shell's sheet geometry and focus model, and teardown cannot
+deadlock against live-load canvas fences.
+
+** TODO Migrate metabar and lobby
+:PROPERTIES:
+:ID: C9US2D
+:END:
+
+/Intent./ Move the transient control drawer and modeless detailed lobby into
+their workbench layers while keeping the lobby radio's lifetime independent
+of panel visibility.
+
+/Evidence./ This stage exercises queued semantic operations, animation,
+inside/outside pointer policy, modeless visibility, and a background service
+with more than one view.
+
+/Done when./ Neither component has a Luft-specific frame/compositor/input
+adapter and the compact status summary remains independent of the detailed
+lobby pane.
+
+** TODO Move services and delete the instrument system
+:PROPERTIES:
+:ID: RYHYDG
+:END:
+
+/Intent./ Give Tracy, the application agent, and any remaining nonvisual owner
+explicit service lifecycle coordinates; then remove the Luft weak registry,
+numeric priority, generic refresh/encode/event protocol, and around-method
+interception.
+
+/Evidence./ Invisible instruments demonstrate that lifecycle ownership was
+conflated with visual panes.  Preserve the stop-controller and frame-boundary
+guarantees, not the registry shape.
+
+/Done when./ =luft/render/instruments.lisp= and all instrument adapters are
+deleted, the shell owns global panes, services have named owners, full tests
+pass, and a running Luft application opens, uses, and closes every migrated
+surface cleanly.
+
+* Decision log
+:PROPERTIES:
+:ID: 3LH9F7
+:END:
+
+** 2026-08-28 — The workbench is substrate, not an extension registry
+
+Status, lobby, metabar, M-x, and source review are known screen-space
+affordances supplied by Luv.  Their usefulness comes from not requiring an
+atelier to author a host integration for each one.  Do not hoist Luft's
+instrument protocol or invent another arbitrary registration API.
+
+** 2026-08-28 — Screen-space shell and application atelier remain distinct
+
+The shell owns global panes, focus, modality, technical visual language, and
+service views.  Luft owns its renderer, world, site inspector, authored tools,
+commands, semantic field values, and resource release order.
+
+** 2026-08-28 — Luft proves the protocol before Luvcraft migrates
+
+Luft is small enough to expose the right application boundary.  Luvcraft's
+spatial overlays and world focus are neither the design template nor immediate
+cleanup scope.
+
+** 2026-08-28 — Prefer one workbench frame and one presentation postlude
+
+One layered frame lets McCLIM sheet geometry own rendering placement and input
+hit testing.  One shell postlude in the portable presentation transaction is
+more substrate-like than an application renderer callback.  Both remain
+hypotheses until #BY51K0 proves backend behavior.
+
+* Experiment notes
+:PROPERTIES:
+:ID: WTODNV
+:END:
+
+Record each experiment with date, execution thread, exact revision, question,
+commands or live actions, observed result, interpretation, and resulting
+decision.  Failed experiments belong here when they eliminate an architectural
+path.  Do not paste complete test transcripts.
+
+No backend experiment has yet been run.
+
+* Completed prose updates
+:PROPERTIES:
+:ID: QF07KG
+:END:
+
+** 2026-08-28 — Architecture and worksheet separated
+
+- #M9MI6Y records why the Luv workbench is a transcendental substrate and why
+  the current application-by-tool adapter matrix is not the desired boundary.
+- This worksheet records invariants, current evidence, open questions, ordered
+  stage gates, decisions, experiments, and the exact next action.
+- The earlier extraction account #7OH71A remains historical evidence: shared
+  mechanisms were successfully moved below both games, but the adapters it
+  accepted are now the migration source rather than the destination.
+
+* Exact next action
+:PROPERTIES:
+:ID: 53WN6F
+:END:
+
+After review of this worksheet, create one fresh execution thread for
+#BY51K0.  Its complete scope is the backend proof: read #M9MI6Y and this page;
+inspect embedded mirror layout, descendant direct composition, and event
+translation; implement and verify the smallest two-overlapping-pane proof;
+record findings and decisions in #WTODNV and #3LH9F7; update #BY51K0 and
+#QF07KG; leave reviewable unpushed changes; and identify #5H9AKZ without
+starting it.
+
+The architectural parent thread should review that result and decide whether
+the proof warrants the shell stage.  It should not accumulate implementation
+from later stages merely because their dependencies are now visible.

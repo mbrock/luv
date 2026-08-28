@@ -20,6 +20,7 @@
                  (:file "agent-in-the-world")
                  (:file "clim-in-the-world")
                  (:file "application-workbench")
+                 (:file "workbench-worksheet")
                  (:file "box3d-architecture")
                  (:file "domains-and-bundles")
                  (:file "world-archives")
