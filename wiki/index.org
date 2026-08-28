@@ -202,6 +202,11 @@ The following are starting paths rather than a table of settled doctrine.
 - [[file:domains-and-bundles.org][Domains, bundles, and materialized worlds]] studies why CLOS and
   structure-of-arrays storage are compatible, and what chunking, level of
   detail, procedural generation, and streaming ask of the object model.
+- [[file:world-archives.org][A world that remembers]] treats fine-grained history as part of a shared
+  world's meaning: typed change pages, content-addressed snapshots, Arrow
+  quantity bundles, Parquet chapters, spatial catch-up, rollback, publication,
+  and forks become one immutable archive rather than a directory of latest
+  states.
 - [[file:voxel-fields-and-windows.org][Voxel fields and chunk windows]] takes the working light and meshing systems as
   the first concrete domain/bundle clients.  It separates local domain
   traversal, cross-chunk windows, semantic field products, provenance, and

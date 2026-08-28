@@ -1,0 +1,306 @@
+#+title: A world that remembers: snapshots, chronicles, and columnar archives
+#+startup: overview
+
+A saved world is usually presented as the latest mutable state plus enough
+implementation detail to load it again.  Family worlds make the loss in that
+description obvious.  A house, tunnel, bridge, or empty foundation can remain
+for years after everyone has forgotten who made it, when it changed, and what
+stood there before.  The missing history is not only a recovery mechanism.  It
+is part of what the shared place means.
+
+This page sketches a different contract: immutable snapshots correlated with
+fine-grained change pages, both expressed as domain-indexed columnar data.
+Arrow is the live and interchange vocabulary; Parquet is a plausible sealed
+archive and query form; content hashes and manifests make publication, sync,
+rollback, and forks ordinary consequences.  These are design propositions,
+not claims about the current Luft or Luvcraft persistence code.  Moppe's built
+Arrow bundle storage and nxt's Arrow-to-Parquet trace archive are source
+evidence for two important parts of the sketch (#E4N7PX, #7FFNVT).
+
+* Fine history is part of the world
+:PROPERTIES:
+:ID: OVEP9A
+:END:
+
+An edit log can answer more than "how do we recover after a crash?"  If its
+events retain actor, time, target, prior value, resulting value, and cause, the
+game can derive views which make age and authorship visible:
+
+- an inspector can say who placed the selected block and in which visit;
+- an age lens can colour old foundations and new additions differently;
+- a time control can watch a building assemble or expose demolished geometry;
+- a query can find the oldest surviving authored site in a settlement;
+- a selective rollback can remove one accident without rewinding unrelated
+  work; and
+- an empty site can still remember the person who excavated it.
+
+That last case prevents a tempting but insufficient implementation.  Current
+blocks may cache their creation event, but provenance cannot live only on
+present values.  A tunnel is substantially made of absent cells, and a
+demolished house remains part of the chronicle after none of its blocks remain.
+The event pages are the authority; current provenance fields are disposable
+materializations for interactive queries.
+
+Imported worlds begin honestly.  Their first snapshot says "present when
+imported" and attributes no earlier action unless the source format provides
+evidence.  Every later event can be exact without fabricating a past for the
+older material.
+
+* Generated terrain is a baseline; inhabitation is sparse
+:PROPERTIES:
+:ID: ZU0A5J
+:END:
+
+Fine history sounds expensive if every generated cell is imagined as one
+event.  That is not the ordinary shape.  A world can begin from a generator
+recipe or imported snapshot, while human inhabitation is a sparse sequence of
+changes.  Running around for an hour, mining a room, and building a bridge
+touches little of the world's possible domain and repeats actor, operation,
+material, chunk, and time locality heavily.
+
+One canonical cell-change page might carry:
+
+| field | role | likely physical character |
+|-
+| =sequence= | total replay order | monotone, delta-encoded |
+| =world=, =branch= | history identity | dictionary or page constant |
+| =time=, =tick= | civil and simulation points | monotone deltas |
+| =transaction= | atomic multi-site action | repeated identifier |
+| =actor= | accountable principal | dictionary |
+| =chunk-key= | coarse spatial address | repeated Morton key |
+| =site= | exact target | packed local or world site |
+| =operation= | set, remove, attach, and so on | small enumeration |
+| =before=, =after= | checked transition | palette/dictionary values |
+| =cause= | tool, command, simulation, import | optional semantic data |
+
+Keeping both =before= and =after= makes reverse replay cheap, but more
+importantly lets replay reject the wrong base rather than silently applying an
+event to a state it did not follow.  A transaction groups all cells of one
+atomic action so no snapshot or client sees half a door, explosion, paste, or
+structure edit.
+
+Not every source needs the same retention policy.  Authored actions are worth
+keeping indefinitely.  Deterministic generated terrain is often better named
+by recipe and version.  High-volume reversible simulation may be grouped,
+summarized, or compacted between checkpoints while retaining its cause and
+visible result.  Those policies should be explicit event classes, not an
+accidental consequence of one serializer becoming too large.
+
+* A snapshot is a manifest at one event watermark
+:PROPERTIES:
+:ID: 4D3QFJ
+:END:
+
+A snapshot need not duplicate every chunk.  It can be an immutable manifest:
+
+#+begin_example
+snapshot
+  world and branch identity
+  parent snapshot
+  applied-through sequence N
+  world recipe, schema, and importer versions
+  chunk key -> content hash
+  entity and other domain roots
+#+end_example
+
+The content objects are immutable bundles.  Twenty snapshots can point to the
+same untouched home chunk; a new tower creates only the changed chunk object
+and a new manifest.  A complete state is then
+
+#+begin_example
+state(snapshot S, target sequence M)
+  = materialize(S.content roots)
+  + replay(S.N + 1 through M)
+#+end_example
+
+Publication writes every referenced object first and the root manifest last.
+A reader either resolves the complete root or does not observe it.  A fork is
+a child manifest initially sharing all parents' content and pages.  Sync is an
+exchange of roots followed by the hashes one side lacks.  Rollback chooses an
+earlier root or watermark rather than mutating history in place.
+
+Original imports deserve their own immutable provenance.  A Minecraft zip,
+its hash, data version, and raw NBT should remain available beside normalized
+columns.  Unknown or modded tags can then be reinterpreted by a better future
+importer rather than being lost because today's schema did not understand
+them.
+
+* Replay order and spatial interest are two projections
+:PROPERTIES:
+:ID: 8DQ18B
+:END:
+
+The canonical sequence answers "what happened next?"  Multiplayer and world
+inspection also ask "what happened here?"  One physical ordering cannot
+perfectly serve both.  The temporal pages should remain the replay authority;
+a disposable spatial projection can map Morton ranges and sequence intervals
+to event files, row groups, and rows.
+
+A client acquiring interest in an old region can therefore:
+
+1. resolve the branch head and a chunk snapshot applied through sequence =N=;
+2. fetch the content object named by that snapshot;
+3. query only events touching the interest volume after =N=;
+4. replay them to the head watermark;
+5. receive the resulting bundle and watermark; and
+6. subscribe to the live tail strictly after that watermark.
+
+The handoff makes catch-up and subscription one checked protocol.  It neither
+drops an event arriving during materialization nor applies one twice.  A
+server can cache the resulting chunk without changing the authority of the
+snapshot and pages from which it came.
+
+Structure identity need not be solved first.  Transactions, actors, temporal
+proximity, and spatial connectedness already let later queries infer a
+building episode.  Explicit names and structure markers can become additional
+events when the game earns them.
+
+* Moppe stores meaning in bundles and projects it into Arrow
+:PROPERTIES:
+:ID: DNK3N9
+:END:
+
+Moppe's
+[[https://github.com/mbrock/moppe/blob/main/moppe/spatial/bundle.hh][=spatial::Bundle=]]
+is the closest built precedent in this code family's history.  Its authority
+is not an Arrow table.  It is a finite domain and one native vector for each
+unique quantity specification.  Every vector has exactly one value per domain
+site; a column is selected by semantic quantity rather than an incidental lane
+number; and bundles compose only when their domains agree.  #E4N7PX records
+the same lesson for luv's current columnar materializations.
+
+[[https://github.com/mbrock/moppe/blob/main/moppe/spatial/bundle_storage.hh][=bundle_storage.hh=]]
+then projects exactly one bundle into one Arrow IPC stream containing one
+record batch.  Scalars become Arrow numeric arrays, vector representations
+become fixed-size lists, and unusual trivial representations have a
+fixed-size-binary cache fallback.  Quantity points are stored as offsets from
+their declared origin; ordinary quantities store their numerical value in the
+declared unit.
+
+The decisive part is metadata.  Every field records:
+
+#+begin_example
+moppe.quantity.kind       point or quantity
+moppe.quantity.unit
+moppe.quantity.dimension
+moppe.quantity.spec
+moppe.quantity.storage    scalar, vector[N], or opaque[N]
+#+end_example
+
+The schema also records bundle version, domain type, and a serialized exact
+domain identity.  Loading reconstructs the requested typed schema and rejects
+wrong field order, specification, kind, unit, dimension, representation,
+version, or domain.  A =float32= is not accepted merely because the requested
+meaning also happens to use =float32=.  A row offset cannot float free of the
+domain which says what site it names.
+
+Moppe's finished-world cache keeps several lifecycle-distinct bundles in
+separate =.arrows= files -- surface geometry, flood, drainage, water, derived
+readings, and trail use -- even where they share a terrain domain.  Rendering
+does not read Arrow directly; it borrows the restored typed bundles and owns
+any lossy GPU packing.  These are strong archival rules:
+
+- native runtime structures own computation;
+- Arrow owns a portable, inspectable projection;
+- quantity and domain metadata are part of compatibility;
+- distinct domains and lifecycles remain distinct files or tables; and
+- a finished root is published only after every mandatory component validates.
+
+Opaque native bytes are suitable for a disposable cache, not the durable
+chronicle.  Long-lived world values should prefer Arrow numeric, dictionary,
+list, struct, and binary encodings whose interpretation does not depend on one
+compiler's object layout.
+
+* Arrow pages can become Parquet chapters
+:PROPERTIES:
+:ID: GOIG9B
+:END:
+
+Arrow and Parquet need not compete for one role.  An active world host can
+accumulate typed events in native columns or Arrow record batches.  When a
+batch reaches a time or size boundary, it becomes immutable and can be sealed
+as a compressed Parquet page.  Periodic snapshot bundles can use Arrow IPC
+directly, Parquet rows, or both, provided the manifest names their exact schema
+and domain contracts.
+
+Arrow's equal-length rule encourages a useful discipline: one record batch has
+one row domain.  Cell changes, chunk fibers, entity populations, material
+vocabularies, and sparse attachments are different batches rather than one
+ragged universal table.  Quantity metadata can follow Moppe's convention; a
+future =luv.quantity= Arrow extension could standardize the same meaning while
+retaining ordinary Arrow storage underneath.
+
+Parquet contributes per-column dictionary and run/bit-pack encodings,
+compression pages, row-group statistics, and a footer which an object-store
+reader can fetch with a range request before choosing column chunks.  Hive
+paths provide a coarse first index:
+
+#+begin_example
+s3://worlds/events/world=holm/year=2028/month=07/part-....parquet
+s3://worlds/snapshots/world=holm/year=2028/month=07/part-....parquet
+s3://worlds/chunks/hash-prefix=9a/part-....parquet
+#+end_example
+
+This is not literally a B-tree lookup.  Path partition pruning removes whole
+objects; sorted row-group min/max statistics remove broad ranges; optional
+page indexes and selected column reads narrow the rest.  Files should remain
+large enough to amortize their metadata.  Partitioning every individual chunk
+or snapshot into its own tiny file would throw away Parquet's advantage.
+
+The same archive can be ordinary SQL data.  A query can compare chunk hashes
+between visits, find every surviving block attributed to one player, recover
+all events in a region, or render a time-lapse without first importing the
+world into a continuously running database.  Nxt's measured trace path
+already demonstrates the smaller pattern: append Arrow, compact to zstd
+Parquet, query with DuckDB, and derive a human chronicle (#7FFNVT).
+
+* The current head stays warm while history grows cold
+:PROPERTIES:
+:ID: W6Z98A
+:END:
+
+An object archive permits storage tiers, but a playable branch head has a
+different latency contract from its history:
+
+| material | likely residence |
+|-
+| branch heads, manifests, spatial indexes | memory, CDN, or hot object store |
+| current compressed chunk objects | hot or infrequent-access object store |
+| recent event tail | local and hot object store |
+| old event pages and superseded snapshots | infrequent or archive tiers |
+| original imports | deep archive with explicit restoration |
+
+A client flying toward a forgotten region still needs its current chunk in
+interactive time.  Keeping the latest content object warm is usually much
+cheaper than keeping every historical version warm.  Deep archive services do
+not turn a range request into low-latency gameplay; an archived-only region
+needs an honest =restoring= state, predictive retrieval, or a deliberate
+temporary boundary rather than silently becoming air.
+
+The cold history can nevertheless remain queryable at archive timescales.  A
+world host can prefetch along motion, retain popular roots at an edge cache,
+and publish a small warm spatial inventory which tells it exactly which cold
+objects a request would restore.
+
+* IDEA Archive one imported world as bundles, events, and a manifest
+:PROPERTIES:
+:ID: ZKKGT1
+:END:
+
+/Intent./ Test the archive shape on one real zipped block world without first
+building a game server.  Preserve the source archive, decode its chunk and
+section identities, publish one content-addressed snapshot manifest, and
+express a small synthetic sequence of later cell changes as a typed event
+page.  Keep normalized values and raw source payloads beside one another.
+
+/Evidence sought./ The experiment should show whether domain and quantity
+metadata remain readable in Arrow, whether Parquet row groups prune useful
+spatial/time queries through DuckDB, what one snapshot and one event page cost,
+and whether reconstructing an exact selected chunk is simpler than reading the
+original zip.  It should report file and row-group sizes rather than assuming
+that columnar compression wins on small pages.
+
+/Done when./ One command can inspect the manifest, ask who changed a selected
+site, materialize that chunk at two event watermarks, and verify both results
+against independently computed hashes.  The experiment is disposable; the
+page records what its measurements overturn.

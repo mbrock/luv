@@ -22,6 +22,7 @@
                  (:file "application-workbench")
                  (:file "box3d-architecture")
                  (:file "domains-and-bundles")
+                 (:file "world-archives")
                  (:file "field-notes-measures")
                  (:file "field-notes-mp-units")
                  (:file "gpu-architecture")
