@@ -539,7 +539,7 @@ one-argument stock callback.
 
 /Evidence./ Material resolution is 34.2% of aggregate time.  Its flat profile
 contains the complete checked-site construction chain, while
-[[lisp:luft.render::make-scene-face-stock-function][the production closure]] ignores =face=.
+the former production closure ignored =face=.
 
 /Done when./ All material and full-mesh differentials remain exact, the
 material-stage report no longer attributes samples to constructing the ignored

@@ -77,7 +77,7 @@
            #:torch-flame-vertex-specification
            #:torch-body-vertex-specification
            #:torch-body-shadow-vertex-specification
-           #:mesh-fragment-specification
+           #:torch-body-fragment-specification
            #:star-fragment-specification
            #:mesh-vertex-specification
            #:shadow-vertex-specification
@@ -128,7 +128,6 @@
            #:make-bevel-limit-study-scene
            #:make-manifold-spike-scene
            #:make-mountain-sanctuary-scene
-           #:make-material-bevel-transition-study-scene
            #:make-miter-study-scene
            #:make-traveler-study-scene
            #:make-voxel-light-shrine-scene
@@ -140,11 +139,6 @@
            #:make-render-mesh
            #:make-whole-domain-diagnostic-mesh
            #:scene-builder-torch
-           #:material-bevel-profile #:make-material-bevel-profile
-           #:material-bevel-width #:compile-material-bevel-profile
-           #:make-material-bevel-mesh
-           #:make-uncontracted-material-bevel-diagnostic-mesh
-           #:make-material-bevel-meshes
            #:renderer
            #:renderer-set-mesh #:renderer-set-meshes
            #:renderer-remove-mesh #:renderer-clear-meshes

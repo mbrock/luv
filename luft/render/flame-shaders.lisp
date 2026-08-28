@@ -66,11 +66,8 @@
   (defconstant +torch-flame-heat-radiance-gain+ 2.0f0)
   (defconstant +torch-flame-frame-tolerance+ 2.0f-4)
   (defconstant +torch-flame-maximum-flags+ #.(1- (ash 1 24)))
-  ;; The one exact 24-bit float lane is shared by both renderers.  Keeping the
-  ;; material and sampled light beside the realized frame makes flame and body
-  ;; publication one immutable transaction instead of two index-coupled
-  ;; sidecars.
-  (defconstant +torch-body-assembly-bit-count+ 12)
+  ;; The exact float lane carries sampled light beside the realized frame, so
+  ;; flame and body publication remain one immutable transaction.
   (defconstant +torch-body-light-bit-count+ 12)
   (defconstant +torch-body-vertex-row-count+ 2)
   (defconstant +torch-body-vertex-scalar-count+ 8)
@@ -203,26 +200,19 @@ it maps the canonical torch body's dimensionless coordinates into the world."
                    position (aref data position))))))
     data))
 
-(defun pack-torch-body-frame-flags (assembly-id packed-voxel-light)
-  "Pack a 12-bit material assembly and RGB4 voxel light into frame FLAGS."
-  (check-type assembly-id (unsigned-byte 12))
+(defun pack-torch-body-frame-flags (packed-voxel-light)
+  "Pack RGB4 voxel light into a torch frame's FLAGS lane."
   (check-type packed-voxel-light (unsigned-byte 12))
-  (logior assembly-id
-          (ash packed-voxel-light +torch-body-assembly-bit-count+)))
+  packed-voxel-light)
 
 (defun unpack-torch-body-frame-flags (flags)
-  "Return the assembly id and packed RGB4 voxel light encoded by FLAGS."
+  "Return the packed RGB4 voxel light encoded by FLAGS."
   (unless (and (realp flags)
                (= flags (floor flags))
                (<= 0 flags +torch-flame-maximum-flags+))
     (error "Torch body flags are not an exact 24-bit nonnegative integer: ~S."
            flags))
-  (let ((flags (floor flags)))
-    (values
-     (ldb (byte +torch-body-assembly-bit-count+ 0) flags)
-     (ldb (byte +torch-body-light-bit-count+
-                +torch-body-assembly-bit-count+)
-          flags))))
+  (ldb (byte +torch-body-light-bit-count+ 0) (floor flags)))
 
 (defun validate-torch-flame-frame (data &optional (offset 0))
   "Validate one three-Vec4 torch frame in DATA starting at OFFSET.
@@ -525,9 +515,9 @@ integral and callers can compare full, partial, and fully occluded rays."
 ;;; Canonical torch body
 ;;;
 ;;; This is deliberately an expanded triangle stream rather than another
-;;; semantic mesh.  Each vertex is two Vec4 rows: local position plus its
-;;; barycentric selector, then the flat local normal plus a boundary-edge mask.
-;;; The attachment frame is the only world-space placement representation.
+;;; semantic mesh.  Each vertex is two Vec4 rows containing local position and
+;;; flat local normal; W is padding.  The attachment frame is the only
+;;; world-space placement representation.
 
 (defun %torch-body-point (radius angle height)
   (vector (coerce (* radius (cos angle)) 'single-float)
@@ -564,17 +554,13 @@ integral and callers can compare full, partial, and fully occluded rays."
             normal-y (/ normal-y normal-length)
             normal-z (/ normal-z normal-length))
       (loop for point in (list point-a point-b point-c)
-            for barycentric-index from 0
             do (vector-push-extend (aref point 0) data)
                (vector-push-extend (aref point 1) data)
                (vector-push-extend (aref point 2) data)
-               (vector-push-extend
-                (coerce barycentric-index 'single-float) data)
+               (vector-push-extend 0.0f0 data)
                (vector-push-extend (coerce normal-x 'single-float) data)
                (vector-push-extend (coerce normal-y 'single-float) data)
                (vector-push-extend (coerce normal-z 'single-float) data)
-               ;; Faceting comes from the actual face normals.  Internal
-               ;; triangle diagonals are not semantic construction edges.
                (vector-push-extend 0.0f0 data)))))
 
 (defun %make-torch-body-vertex-data ()
@@ -648,8 +634,8 @@ integral and callers can compare full, partial, and fully occluded rays."
 (defun torch-body-reference-vertex (frame vertex-index)
   "Transform one canonical body vertex through arbitrary realized FRAME.
 
-Return world position, normalized world normal, barycentric selector, and
-boundary-edge mask.  This is the scalar oracle for both body vertex shaders."
+Return world position and normalized world normal.  This is the scalar oracle
+for both body vertex shaders."
   (validate-torch-flame-frame frame)
   (check-type vertex-index (integer 0 *))
   (unless (< vertex-index (torch-body-vertex-count))
@@ -659,13 +645,9 @@ boundary-edge mask.  This is the scalar oracle for both body vertex shaders."
          (local-x (aref *torch-body-vertex-data* offset))
          (local-y (aref *torch-body-vertex-data* (+ offset 1)))
          (local-z (aref *torch-body-vertex-data* (+ offset 2)))
-         (barycentric-index
-           (round (aref *torch-body-vertex-data* (+ offset 3))))
          (local-normal-x (aref *torch-body-vertex-data* (+ offset 4)))
          (local-normal-y (aref *torch-body-vertex-data* (+ offset 5)))
          (local-normal-z (aref *torch-body-vertex-data* (+ offset 6)))
-         (boundary-edge-mask
-           (round (aref *torch-body-vertex-data* (+ offset 7))))
          (origin-x (aref frame 0))
          (origin-y (aref frame 1))
          (origin-z (aref frame 2))
@@ -717,8 +699,7 @@ boundary-edge mask.  This is the scalar oracle for both body vertex shaders."
     (values world-x world-y world-z
             (/ world-normal-x world-normal-length)
             (/ world-normal-y world-normal-length)
-            (/ world-normal-z world-normal-length)
-            barycentric-index boundary-edge-mask)))
+            (/ world-normal-z world-normal-length))))
 
 (in-package #:luft.render.shaders)
 
@@ -763,8 +744,6 @@ boundary-edge mask.  This is the scalar oracle for both body vertex shaders."
     (:stage :vertex
      :inputs ((vertex-index :uint :built-in :vertex-index)
               (instance-index :uint :built-in :instance-index))
-     ;; This interface intentionally matches MESH-FRAGMENT-SPECIFICATION
-     ;; exactly, including interpolation qualifiers.
      :outputs ((clip-position :vec4 :built-in :position)
                (world-position-output :vec3 :location 0
                                       :quantity quantities:world-position
@@ -772,17 +751,11 @@ boundary-edge mask.  This is the scalar oracle for both body vertex shaders."
                (mesh-normal-output :vec3 :location 1 :interpolation :flat
                                    :quantity quantities:world-orientation
                                    :unit :one)
-               (assembly-output :float :location 2 :interpolation :flat)
-               (barycentric-output :vec3 :location 3)
                (current-clip-output :vec4 :location 4)
                (previous-clip-output :vec4 :location 5)
                (shadow-sample-output :vec3 :location 6
                                      :quantity quantities:shadow-coordinate
                                      :unit :one)
-               (boundary-edge-mask-output :uint :location 7
-                                          :interpolation :flat)
-               (ambient-occlusion-output :float :location 8
-                                         :interpolation :flat)
                (voxel-light-output :vec3 :location 9))
      :resources
      ((torch-frames :storage-buffer :binding 0 :element :vec4)
@@ -815,13 +788,8 @@ boundary-edge mask.  This is the scalar oracle for both body vertex shaders."
                             :quantity quantities:spatial-scale
                             :unit quantities:cell))
          (frame-flags (uint (swizzle frame-normal-row :w)))
-         (assembly-id
-           (float
-            (ldb (byte #.luft.render::+torch-body-assembly-bit-count+ 0)
-                 frame-flags)))
          (packed-light
-           (ldb (byte #.luft.render::+torch-body-light-bit-count+
-                      #.luft.render::+torch-body-assembly-bit-count+)
+           (ldb (byte #.luft.render::+torch-body-light-bit-count+ 0)
                 frame-flags))
          (voxel-light
            (/ (vec3 (float (ldb (byte 4 0) packed-light))
@@ -851,14 +819,6 @@ boundary-edge mask.  This is the scalar oracle for both body vertex shaders."
             (representation
              (torch-frame-world-normal local-normal normal tangent))
             :quantity quantities:world-orientation :unit :one))
-         (barycentric-index (uint (swizzle local-position-row :w)))
-         (boundary-edge-mask (uint (swizzle local-normal-row :w)))
-         (barycentric
-           (if (= barycentric-index (uint 0.0))
-               (vec3 1.0 0.0 0.0)
-               (if (= barycentric-index (uint 1.0))
-                   (vec3 0.0 1.0 0.0)
-                   (vec3 0.0 0.0 1.0))))
          (current-clip
            (mesh-view-clip world-position camera-position camera-right
                            camera-up camera-forward camera-projection
@@ -883,8 +843,6 @@ boundary-edge mask.  This is the scalar oracle for both body vertex shaders."
                       (swizzle current-clip :w)))
     (set-output world-position-output world-position)
     (set-output mesh-normal-output world-normal)
-    (set-output assembly-output assembly-id)
-    (set-output barycentric-output barycentric)
     (set-output current-clip-output current-clip)
     (set-output previous-clip-output previous-clip)
     (set-output shadow-sample-output
@@ -893,8 +851,6 @@ boundary-edge mask.  This is the scalar oracle for both body vertex shaders."
                        (+ (* (swizzle light-clip :y) 0.5) 0.5)
                        (swizzle light-clip :z))
                  :quantity quantities:shadow-coordinate :unit :one))
-    (set-output boundary-edge-mask-output boundary-edge-mask)
-    (set-output ambient-occlusion-output 0.0)
     (set-output voxel-light-output voxel-light)))
 
 (define-live-shader torch-body-shadow-vertex-specification
@@ -1319,7 +1275,7 @@ boundary-edge mask.  This is the scalar oracle for both body vertex shaders."
 
 (defparameter *production-shader-specifications*
   '(mesh-vertex-specification
-    mesh-fragment-specification
+    star-fragment-specification
     shadow-vertex-specification
     player-sdf-vertex-specification
     player-sdf-fragment-specification
@@ -1332,6 +1288,7 @@ boundary-edge mask.  This is the scalar oracle for both body vertex shaders."
     exposure-probe-fragment-specification
     temporal-resolve-fragment-specification
     torch-body-vertex-specification
+    torch-body-fragment-specification
     torch-body-shadow-vertex-specification
     torch-flame-vertex-specification
     torch-flame-fragment-specification

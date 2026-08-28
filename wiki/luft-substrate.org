@@ -93,16 +93,10 @@ Reading Luft's code with luvcraft's glossary open is striking.
   =visits= / =pushes= / =stale-pops= counters that mirror luvcraft's frontier
   execution evidence almost line for line.  Compare its =admit= /
   =drain-neighbor= locals with the emitted drain of #PJY6E1.
-- The mesher's instance, template, and light streams are hand-rolled
-  columnar buffers: parallel adjustable =(unsigned-byte 32)= vectors with
-  shared logical length, appended in lockstep, borrowed raw by the GPU
-  upload.  That is #Y0TPND's storage contract minus the checked row meaning
-  and minus the generated growth/retention discipline.
-- The render population already uses =luv.domains= identity vocabularies:
-  =*surface-assembly-vocabulary*= supplies members, offsets, and a revision
-  that the population snapshots at its ownership boundary.  The stocks are
-  a vocabulary domain in production today — the palette-domain
-  materialization of #1RF48O is one step away.
+- The terrain renderer's population is now the narrow fixed-star stream:
+  one =(X Y Z STAR)= record per occupied site selecting the immutable
+  256-star atlas.  It has no terrain descriptor vocabulary or material
+  publication sidecar.
 - [[lisp:luft.render::pack-torch-flame-frame]] and its validator are a
   hand-written represented-value product: fixed lanes, finite-float checks,
   pack/unpack pairs — what a declared quantity product (#F8U2LA) generates
@@ -215,15 +209,12 @@ law? — lands harder in Luft, where the mesh-point sampler interpolates in
 level space and rounds.  The first field experiment should force that
 decision and record it.
 
-The material side: =solve-voxel-light= currently takes a hash table from
+The cell-material side: =solve-voxel-light= currently takes a hash table from
 cell sites to material indices plus an opacity vector — a row-shaped probe
-inside the hottest loop, the #J7A2KD smell.  The named shape exists and is
-half-adopted already: =*surface-assembly-vocabulary*= is an identity
-vocabulary domain, and #1RF48O's palette-domain materialization — u8
-opacity and emission lanes over the vocabulary, CLOS dispatch once per
-member, dense lookup in the loop — is exactly what the solver's
-=opacity-table= wants to grow into, with the difference that Luft's would
-be checked against the vocabulary's revision.  Occupancy and material
+inside the hottest loop, the #J7A2KD smell.  The retained compact material
+placement vocabulary provides the u8 opacity and packed emission lanes which
+the solver needs; it is intentionally not a terrain-surface vocabulary.
+Occupancy and material
 should eventually be sibling materializations over the same cell domain
 (#A6X2RT, #HAUW7L), which is also what a future absorbing-media
 integration (#UYECJA) will want to sample.

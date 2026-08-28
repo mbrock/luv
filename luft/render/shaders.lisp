@@ -6,13 +6,9 @@
 ;;; shader realizes the renderer-global triangle and quad populations.
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (defvar *stock-tooth* 0.055)
-  (defvar *paper-variation* 0.11)
-  (defvar *local-ambient-occlusion-strength* 0.28)
   (defvar *screen-ambient-occlusion-strength* 0.38)
   (defvar *screen-ambient-occlusion-radius* 0.95)
   (defvar *ambient-pigment-strength* 0.82)
-  (defvar *earth-set-stone-strength* 0.72)
   ;; Match Luvcraft's scene-linear lens defaults.  LUFT uses the same bright
   ;; signal and gain while retaining its compact presentation gather.
   (defvar *highlight-glow-threshold* 1.5)
@@ -44,184 +40,6 @@
          (far-high (mix (paper-hash (+ lattice (vec3 0.0 1.0 1.0)))
                         (paper-hash (+ lattice (vec3 1.0 1.0 1.0))) u)))
     (mix (mix near-low near-high v) (mix far-low far-high v) w)))
-
-(define-shader-function paper-space (point)
-  ;; Rotate the material field away from the voxel axes.  Because this is a
-  ;; single world-space transform, adjacent facets still meet without seams.
-  (let* ((x (swizzle point :x))
-         (y (swizzle point :y))
-         (z (swizzle point :z)))
-    (vec3 (+ (* x 0.36) (* y 0.48) (* z -0.80))
-          (+ (* x -0.80) (* y 0.60))
-          (+ (* x 0.48) (* y 0.64) (* z 0.60)))))
-
-(define-shader-function stock-tooth (point)
-  (let* ((paper-point (paper-space point))
-         (coarse
-           (paper-noise
-            (+ (vec3 (* (swizzle paper-point :x) 7.7)
-                     (* (swizzle paper-point :y) 11.3)
-                     (* (swizzle paper-point :z) 9.1))
-               (vec3 13.7 3.1 21.9))))
-         (fine
-           (paper-noise
-            (+ (vec3 (* (swizzle paper-point :z) 27.1)
-                     (* (swizzle paper-point :x) 33.7)
-                     (* (swizzle paper-point :y) 23.9))
-               (vec3 4.3 29.1 11.7)))))
-    (+ 1.0
-       (* #.*stock-tooth* (- (+ (* 0.55 coarse) (* 0.45 fine)) 0.5)))))
-
-(define-shader-function earth-set-stone-tone
-    (point normal ambient-occlusion contact-variant
-     stone-tone soil-tone subsoil-tone)
-  "Weather one stone chamfer from its packed incident-substrate reading."
-  (let* ((turf-set-p
-           (if (< (abs contact-variant) 0.5) 1.0 0.0))
-         (soil-set-p
-           (if (< (abs (- contact-variant 1.0)) 0.5) 1.0 0.0))
-         (deep-set-p
-           (if (< (abs (- contact-variant 2.0)) 0.5) 1.0 0.0))
-         (clump
-           (paper-noise (+ (* point (vec3 1.25 1.25 4.5))
-                           (vec3 7.1 19.3 3.7))))
-         (grit (paper-noise (+ (* point 9.0) (vec3 31.7 5.9 13.1))))
-         (break
-           (paper-noise (+ (* point (vec3 3.1 3.1 7.7))
-                           (vec3 2.9 41.3 17.1))))
-         (coverage (+ (* turf-set-p 0.50)
-                      (* soil-set-p 0.67)
-                      (* deep-set-p 0.82)))
-         (breakup
-           (smoothstep
-            0.43 0.61
-            (+ (* 0.52 clump) (* 0.20 grit) (* 0.24 break)
-               (* 0.24 ambient-occlusion)
-               (* -0.13 (max 0.0 (swizzle normal :z)))
-               #.*earth-set-stone-strength* -0.60)))
-         (earth-weight
-           (clamp (+ coverage (* 0.30 (- breakup 0.5))) 0.0 1.0))
-         (earth-pigment
-           (mix
-            (mix soil-tone subsoil-tone
-                 (+ (* 0.18 grit) (* 0.34 break) (* 0.22 soil-set-p)))
-            subsoil-tone
-            (* deep-set-p (+ 0.45 (* 0.25 grit)))))
-         (weathered-stone
-           (mix stone-tone soil-tone (+ 0.16 (* 0.10 grit)))))
-    (* (mix weathered-stone earth-pigment earth-weight)
-       (- 1.0 (* 0.20 (* earth-weight clump))))))
-
-(define-shader-function turf-edge-tone
-    (point normal grass-tone soil-tone)
-  "Roll a grassy top into soil with a world-stable broken fringe."
-  (let* ((fray (paper-noise (+ (* point 4.2) (vec3 11.7 3.1 29.3))))
-         (turf-weight
-           (smoothstep 0.42 0.78
-                       (+ (max 0.0 (swizzle normal :z))
-                          (* 0.24 (- fray 0.5))))))
-    (mix soil-tone grass-tone turf-weight)))
-
-(define-shader-function foundation-stone-tone
-    (point stone-tone soil-tone subsoil-tone)
-  "Let terrain climb an irregular fraction of its lowest exposed stone course."
-  (let* ((weather
-           (paper-noise (+ (* point (vec3 1.9 1.9 3.7))
-                           (vec3 23.3 8.7 5.1))))
-         (clump
-           (paper-noise (+ (* point (vec3 0.63 0.63 1.15))
-                           (vec3 3.7 27.1 14.3))))
-         (grit (paper-noise (+ (* point 8.0) (vec3 5.7 17.9 37.1))))
-         (height (fract (swizzle point :z)))
-         (earth
-           (- 1.0
-              (smoothstep 0.07 0.61
-                          (+ height (* 0.32 (- weather 0.5))
-                             (* 0.20 (- clump 0.5))))))
-         (weathered-stone
-           (mix stone-tone soil-tone (+ 0.16 (* 0.10 grit))))
-         (earth-pigment
-           (mix soil-tone subsoil-tone (+ 0.25 (* 0.45 grit)))))
-    (* (mix weathered-stone earth-pigment earth)
-       (- 1.0 (* 0.12 earth)))))
-
-(define-shader-function material-frame-point
-    (point origin x-axis y-axis z-axis)
-  "Express POINT in the authored material placement's coordinate frame."
-  (let* ((relative (- point origin)))
-    (vec3 (dot relative x-axis)
-          (dot relative y-axis)
-          (dot relative z-axis))))
-
-(define-shader-function material-relief (point profile)
-  "One continuous height field used for pigment, normal, and roughness."
-  (let* ((granular
-           (+ (* 0.62
-                 (paper-noise (+ (* point 2.7) (vec3 11.3 5.7 23.9))))
-              (* 0.38
-                 (paper-noise (+ (* point 9.1) (vec3 3.1 29.7 7.3))))))
-         (stone-grain
-           (paper-noise (+ (* point 3.8) (vec3 31.1 7.9 13.7))))
-         (stone-pit
-           (paper-noise
-            (+ (* (swizzle point :zxy) 10.7) (vec3 5.3 19.1 37.7))))
-         (weathered-stone
-           (+ (* 0.72 stone-grain) (* 0.28 stone-pit)))
-         ;; Forged metal has broad hammer undulation, directional working
-         ;; marks, and restrained fine tooth.  It is not weathered masonry
-         ;; with a bronze pigment laid over it.
-         (forge-hammer
-           (paper-noise
-            (+ (* point (vec3 2.9 2.9 1.7)) (vec3 13.7 31.3 5.9))))
-         (forge-flow
-           (paper-noise
-            (+ (vec3 (* (swizzle point :x) 1.3)
-                     (* (swizzle point :y) 8.7)
-                     (* (swizzle point :z) 3.7))
-               (vec3 37.1 7.3 19.7))))
-         (forge-tooth
-           (paper-noise
-            (+ (* (swizzle point :yzx) 15.1) (vec3 3.7 23.9 41.3))))
-         (forged-metal
-           (+ (* 0.66 forge-hammer)
-              (* 0.24 forge-flow)
-              (* 0.10 forge-tooth))))
-    (- (if (< profile 1.5)
-           granular
-           (if (< profile 3.5) weathered-stone forged-metal))
-       0.5)))
-
-(define-shader-function stone-macro-relief (point)
-  "Broad material-space undulation for dressed and weathered stone normals."
-  (let* ((mass
-           (paper-noise
-            (+ (* point 0.28) (vec3 17.3 5.1 29.7))))
-         (weather
-           (paper-noise
-            (+ (* (paper-space point) 0.83) (vec3 3.7 31.1 11.9)))))
-    (- (+ (* mass 0.78) (* weather 0.22)) 0.5)))
-
-(define-shader-function natural-earth-tone
-    (point normal earth-tone depth)
-  "Break exposed earth into continuous strata, clumps, and damp recesses."
-  (let* ((broad
-           (paper-noise (+ (* point (vec3 0.38 0.38 0.72))
-                           (vec3 7.3 19.1 2.7))))
-         (clump
-           (paper-noise (+ (* point (vec3 2.3 2.3 3.7))
-                           (vec3 31.7 5.1 13.9))))
-         (stratum
-           (paper-noise
-            (vec3 (* (swizzle point :x) 0.18)
-                  (* (swizzle point :y) 0.18)
-                  (+ (* (swizzle point :z) 1.65) (* broad 0.75)))))
-         (side-weight
-           (- 1.0 (smoothstep 0.48 0.86 (abs (swizzle normal :z)))))
-         (value
-           (+ 0.84 (* broad 0.18) (* clump 0.10)
-              (* side-weight (- stratum 0.5) 0.22)
-              (* depth -0.06))))
-    (* earth-tone value)))
 
 (define-shader-function scene-relative-luminance (radiance)
   "Reduce checked linear RGB radiance to its named relative luminance."
@@ -290,157 +108,6 @@
             (quantity 1.55 :quantity quantities:scene-luminance :unit :one)
             luminance)))
     (* color gate)))
-
-(define-shader-function material-environment-radiance
-    (direction sun sun-color sky ground)
-  "A cheap continuous environment for material reflection and transmission."
-  (let* ((hemisphere
-           (mix ground sky
-                (smoothstep -0.25 0.65 (swizzle direction :z))))
-         (sun-glint
-           (expt (max 0.0 (dot direction sun)) 72.0)))
-    (+ hemisphere (* sun-color (* sun-glint 1.65)))))
-
-(define-shader-function material-f0 (base metalness)
-  "Mix dielectric and colored metallic normal-incidence reflectance."
-  (mix (vec3 0.04 0.04 0.04)
-       (clamp base (vec3 0.0 0.0 0.0) (vec3 1.0 1.0 1.0))
-       metalness))
-
-(define-shader-function material-schlick-fresnel (f0 cosine)
-  "Return vector Schlick Fresnel for normal-incidence reflectance F0."
-  (mix f0 (vec3 1.0 1.0 1.0)
-       (expt (- 1.0 (clamp cosine 0.0 1.0)) 5.0)))
-
-(define-shader-function metal-environment-reflection
-    (f0 roughness metalness normal view indirect sun sun-color sky ground)
-  "Return a restrained rough-metal reflection of the continuous environment."
-  (let* ((reflection-direction
-           (normalize (- (* normal (* 2.0 (dot normal view))) view)))
-         (reflected-environment
-           (material-environment-radiance
-            reflection-direction sun sun-color sky ground))
-         (rough-environment
-           (mix reflected-environment indirect (* roughness 0.65)))
-         (environment-fresnel
-           (material-schlick-fresnel f0 (max 0.0 (dot normal view)))))
-    (* rough-environment
-       (* environment-fresnel (* metalness 0.18)))))
-
-(define-shader-function drafted-material-radiance
-    (radiance sky fog construction-ink construction-wire blueprint reticle)
-  "Apply LUFT's paper, construction, and reticle treatment to scene radiance."
-  (mix
-   (mix (mix (* radiance 1.08) sky fog)
-        construction-ink construction-wire)
-   blueprint reticle))
-
-(define-shader-function gemstone-refracted-direction (view normal ior)
-  "The air-to-crystal Snell direction, without requiring a REFRACT intrinsic."
-  (let* ((incident (* view -1.0))
-         (eta (/ 1.0 ior))
-         (cosine (- 0.0 (dot normal incident)))
-         (radicand
-           (- 1.0 (* (* eta eta) (- 1.0 (* cosine cosine))))))
-    (normalize
-     (+ (* incident eta)
-        (* normal
-           (- (* eta cosine) (sqrt (max 0.0 radicand))))))))
-
-(define-shader-function gemstone-radiance
-    (ordinary primary-tone optics figures material-point normal view
-     half-vector frame-axis frame-up sun sun-color sky ground n-dot-v n-dot-l
-     boundary-edge-pixels)
-  "A raster-friendly dielectric gem: dispersion, inclusions, moon-glow, arrises."
-  (let* ((ior (swizzle optics :x))
-         (dispersion (swizzle optics :y))
-         ;; Match KHR_materials_dispersion's artist-facing 20/Abbe-number
-         ;; convention. HALF-SPREAD is the actual IOR distance from green to
-         ;; red or blue under the linear visible-spectrum approximation.
-         (half-spread (* (* (- ior 1.0) 0.025) dispersion))
-         (internal-scatter (swizzle optics :z))
-         (chatoyancy-gain (swizzle optics :w))
-         (anisotropic-sharpness (swizzle figures :x))
-         (adularescence-gain (swizzle figures :y))
-         (arris-gain (swizzle figures :z))
-         (ratio (/ (- ior 1.0) (+ ior 1.0)))
-         (f0 (* ratio ratio))
-         (fresnel
-           (+ f0 (* (- 1.0 f0) (expt (- 1.0 n-dot-v) 5.0))))
-         (reflection-direction
-           (normalize (- (* normal (* 2.0 (dot normal view))) view)))
-         (reflection
-           (material-environment-radiance
-            reflection-direction sun sun-color sky ground))
-         (red-direction
-           (gemstone-refracted-direction
-            view normal (max 1.01 (- ior half-spread))))
-         (green-direction
-           (gemstone-refracted-direction view normal ior))
-         (blue-direction
-           (gemstone-refracted-direction
-            view normal (+ ior half-spread)))
-         (red-transmission
-           (material-environment-radiance
-            red-direction sun sun-color sky ground))
-         (green-transmission
-           (material-environment-radiance
-            green-direction sun sun-color sky ground))
-         (blue-transmission
-           (material-environment-radiance
-            blue-direction sun sun-color sky ground))
-         (dispersed-transmission
-           (vec3 (swizzle red-transmission :x)
-                 (swizzle green-transmission :y)
-                 (swizzle blue-transmission :z)))
-         (absorption-tone
-           (mix (vec3 1.0 1.0 1.0) primary-tone internal-scatter))
-         (transmission (* dispersed-transmission absorption-tone))
-         (projected-axis (- frame-axis (* normal (dot frame-axis normal))))
-         (axis-length
-           (sqrt (max 0.000001 (dot projected-axis projected-axis))))
-         (inclusion-axis (/ projected-axis axis-length))
-         ;; Oriented needle inclusions scatter a line perpendicular to their
-         ;; axis.  One restrained band reads as chatoyancy; adding rotated axes
-         ;; later naturally extends this to asterism.
-         (inclusion-alignment
-           (abs (dot half-vector inclusion-axis)))
-         (chatoyant-band
-           (expt (max 0.0 (- 1.0 inclusion-alignment))
-                 anisotropic-sharpness))
-         (chatoyant-visibility
-           (* (smoothstep 0.02 0.72 n-dot-l)
-              (+ 0.28 (* 0.72 n-dot-v))))
-         (cloud-a
-           (paper-noise
-            (+ (* material-point (vec3 0.42 0.42 0.13))
-               (vec3 7.3 19.1 3.7))))
-         (cloud-b
-           (paper-noise
-            (+ (* (swizzle material-point :yzx) (vec3 0.19 0.63 0.31))
-               (vec3 23.7 5.1 11.9))))
-         (interior-cloud (mix cloud-a cloud-b 0.38))
-         (adular-lobe
-           (* (* (- 1.0 fresnel)
-                 (+ 0.38 (* 0.62 (abs (dot view frame-up)))))
-              (smoothstep 0.34 0.78 interior-cloud)))
-         (arris
-           (- 1.0 (smoothstep 0.38 1.42 boundary-edge-pixels)))
-         (body (* ordinary (+ 0.24 (* 0.30 (- 1.0 fresnel)))))
-         (reflected (* reflection (+ 0.10 (* fresnel 1.20))))
-         (transmitted (* transmission (* (- 1.0 fresnel) 0.52)))
-         (chatoyant
-           (* (vec3 0.76 1.02 1.18)
-              (* chatoyancy-gain
-                 (* chatoyant-band chatoyant-visibility))))
-         (adularescent
-           (* (vec3 0.25 0.62 1.08)
-              (* adularescence-gain adular-lobe)))
-         (edge-light
-           (* (mix sun-color (vec3 0.62 0.94 1.16) 0.42)
-              (* arris-gain
-                 (* arris (+ 0.24 (* 0.76 fresnel)))))))
-    (+ body reflected transmitted chatoyant adularescent edge-light)))
 
 (define-shader-function mesh-view-clip
     (point position right up forward projection divisor)
@@ -1885,385 +1552,52 @@ that he is standing on something."
     (set-output motion-output
                 (mesh-temporal-motion previous-clip current-clip))))
 
-(define-live-shader mesh-fragment-specification
+(define-live-shader torch-body-fragment-specification
     (:stage :fragment
      :inputs ((world-position :vec3 :location 0
                               :quantity quantities:world-position
                               :unit quantities:cell)
               (mesh-normal :vec3 :location 1 :interpolation :flat
                            :quantity quantities:world-orientation :unit :one)
-              (assembly-id :float :location 2 :interpolation :flat)
-              (barycentric :vec3 :location 3)
               (current-clip :vec4 :location 4)
               (previous-clip :vec4 :location 5)
               (shadow-sample :vec3 :location 6
                              :quantity quantities:shadow-coordinate :unit :one)
-              (boundary-edge-mask :uint :location 7 :interpolation :flat)
-              (ambient-occlusion :float :location 8 :interpolation :flat)
-              (voxel-light :vec3 :location 9)
-              (primitive-kind :uint :location 10 :interpolation :flat))
+              (voxel-light :vec3 :location 9))
      :outputs ((color-output :vec4 :location 0)
                (motion-output :vec2 :location 1))
      :resources ((camera-state :uniform-block :binding 2
                   :members #.(scene-uniform-prefix 23))
-                 (material-descriptors :storage-buffer :binding 3
-                  :element :vec4)
                  (shadow-map :depth-texture-2d :binding 4)
                  (shadow-sampler :sampler :binding 5)))
-  (let* ((world-point world-position)
-         ;; Procedural material derivatives and hashes intentionally consume
-         ;; lattice representation; checked spatial arithmetic resumes at
-         ;; the camera and projective boundaries below.
-         (world-position (representation world-point))
-         (dx (derivative-x world-position))
-         (dy (derivative-y world-position))
-         (geometric-normal
-           (normalize
-            (vec3 (- (* (swizzle dx :y) (swizzle dy :z))
-                     (* (swizzle dx :z) (swizzle dy :y)))
-                  (- (* (swizzle dx :z) (swizzle dy :x))
-                     (* (swizzle dx :x) (swizzle dy :z)))
-                  (- (* (swizzle dx :x) (swizzle dy :y))
-                     (* (swizzle dx :y) (swizzle dy :x))))))
-         (normal (if (< (dot geometric-normal (representation mesh-normal)) 0.0)
-                     (* geometric-normal -1.0)
-                     geometric-normal))
-         (descriptor-row (uint (* assembly-id 8.0)))
-         (primary
-           (buffer-element material-descriptors descriptor-row))
-         (secondary
-           (buffer-element material-descriptors
-                           (+ descriptor-row (uint 1.0))))
-         (tertiary
-           (buffer-element material-descriptors
-                           (+ descriptor-row (uint 2.0))))
-         (physical
-           (buffer-element material-descriptors
-                           (+ descriptor-row (uint 3.0))))
-         (frame-origin
-           (buffer-element material-descriptors
-                           (+ descriptor-row (uint 4.0))))
-         (frame-x
-           (buffer-element material-descriptors
-                           (+ descriptor-row (uint 5.0))))
-         (frame-y
-           (buffer-element material-descriptors
-                           (+ descriptor-row (uint 6.0))))
-         (frame-z
-           (buffer-element material-descriptors
-                           (+ descriptor-row (uint 7.0))))
-         (opacity (swizzle frame-y :w))
-         (surface-emission (swizzle frame-z :w))
-         (metalness (clamp (swizzle physical :x) 0.0 1.0))
-         (material-point
-           (material-frame-point
-            world-position (swizzle frame-origin :xyz)
-            (swizzle frame-x :xyz) (swizzle frame-y :xyz)
-            (swizzle frame-z :xyz)))
-         (relief-profile (swizzle frame-origin :w))
-         (relief-height (material-relief material-point relief-profile))
-         (stone-macro-height (stone-macro-relief material-point))
-         (relief-amplitude (swizzle frame-x :w))
-         (relief-dx (derivative-x stone-macro-height))
-         (relief-dy (derivative-y stone-macro-height))
-         (relief-tangent-x
-           (+ dx (* normal (* 6.0 (* relief-amplitude relief-dx)))))
-         (relief-tangent-y
-           (+ dy (* normal (* 6.0 (* relief-amplitude relief-dy)))))
-         (relief-normal
-           (normalize
-            (vec3
-             (- (* (swizzle relief-tangent-x :y)
-                   (swizzle relief-tangent-y :z))
-                (* (swizzle relief-tangent-x :z)
-                   (swizzle relief-tangent-y :y)))
-             (- (* (swizzle relief-tangent-x :z)
-                   (swizzle relief-tangent-y :x))
-                (* (swizzle relief-tangent-x :x)
-                   (swizzle relief-tangent-y :z)))
-             (- (* (swizzle relief-tangent-x :x)
-                   (swizzle relief-tangent-y :y))
-                (* (swizzle relief-tangent-x :y)
-                   (swizzle relief-tangent-y :x))))))
-         (relief-normal
-           (if (< (dot relief-normal normal) 0.0)
-               (* relief-normal -1.0)
-               relief-normal))
-         (stone-relief-p
-           (if (< (abs (- relief-profile 2.0)) 0.5) 1.0 0.0))
-         (band-p
-           (if (= primitive-kind (uint 1.0)) 1.0 0.0))
-         (stone-band-p (* stone-relief-p band-p))
-         (view-direction
-           (normalize
-            (representation
-             (- (swizzle camera-position :xyz) world-point))))
-         (sun-direction (swizzle sun-vector :xyz))
-         (sun (representation sun-direction))
-         (shading-normal
-           (normalize (mix normal relief-normal stone-relief-p)))
-         (roughness
-           (clamp (+ (swizzle tertiary :w)
-                     (* 0.06 (abs relief-height)))
-                  0.16 0.99))
-         (paper-point (paper-space material-point))
-         (primary-tone (swizzle primary :xyz))
-         (secondary-tone (swizzle secondary :xyz))
-         (tertiary-tone (swizzle tertiary :xyz))
-         ;; `kernel` is a Metal address-space keyword, so keep the closed
-         ;; material-kernel discriminator explicit in generated MSL.
-         (kernel-code (swizzle primary :w))
-         (contact-variant (swizzle secondary :w))
-         (earth-set-p
-           (if (< (abs (- kernel-code 1.0)) 0.5) 1.0 0.0))
-         (tone
-           (if (< kernel-code 0.5)
-               primary-tone
-               (if (< kernel-code 1.5)
-                   (earth-set-stone-tone
-                    material-point normal ambient-occlusion contact-variant
-                    primary-tone secondary-tone tertiary-tone)
-                   (if (< kernel-code 2.5)
-                       (turf-edge-tone material-point normal
-                                       primary-tone secondary-tone)
-                       (if (< kernel-code 3.5)
-                           (foundation-stone-tone
-                            material-point primary-tone secondary-tone
-                            tertiary-tone)
-                           (if (< kernel-code 4.5)
-                               primary-tone
-                               (if (< kernel-code 5.5)
-                                   (natural-earth-tone
-                                    material-point normal primary-tone 0.0)
-                                   (if (< kernel-code 6.5)
-                                       (natural-earth-tone
-                                        material-point normal primary-tone 1.0)
-                                       (if (< kernel-code 7.5)
-                                           (natural-earth-tone
-                                            material-point normal primary-tone
-                                            -0.5)
-                                           primary-tone)))))))))
-         (bloom
-           (paper-noise (+ (* paper-point 0.17) (vec3 2.7 17.1 8.3))))
-         (mottle
-           (paper-noise
-            (+ (* (swizzle paper-point :yzx) 0.61)
-               (vec3 19.7 7.3 3.1))))
-         (fiber
-           (paper-noise
-            (+ (vec3 (* (swizzle paper-point :x) 2.3)
-                     (* (swizzle paper-point :y) 5.1)
-                     (* (swizzle paper-point :z) 3.7))
-               (vec3 5.9 23.3 14.1))))
-         (value (+ 1.0 (* #.*paper-variation*
-                           (+ (* 0.90 (- bloom 0.5))
-                              (* 0.55 (- mottle 0.5))
-                              (* 0.25 (- fiber 0.5))))))
-         (warmth (mix (vec3 0.965 0.99 1.04) (vec3 1.04 1.01 0.96)
-                      (smoothstep 0.18 0.82 mottle)))
-         (base (* tone (* warmth (* value (+ 1.0 (* relief-height 0.028))))))
-         (sun-color
-           (representation (swizzle sun-color-vector :xyz)))
+  (let* ((normal (normalize (representation mesh-normal)))
+         (sun (representation (swizzle sun-vector :xyz)))
+         (sun-color (representation (swizzle sun-color-vector :xyz)))
          (sky (representation (swizzle sky-color-vector :xyz)))
          (ground (representation (swizzle ground-color-vector :xyz)))
-         (facing (dot shading-normal sun))
-         (direct-shape (smoothstep 0.0 0.72 (max 0.0 facing)))
-         ;; Limestone is an aggregate of grains and pores, not one polished
-         ;; mathematical plane.  Its unresolved microfacets spread direct
-         ;; energy beyond the geometric normal and keep a chamfer from acting
-         ;; like a one-direction signal flare.
-         (stone-direct-shape
-           (mix
-            (mix direct-shape
-                 (* 0.58 (smoothstep -0.12 0.85 facing))
-                 stone-relief-p)
-            (* 0.38 (smoothstep -0.18 0.90 facing))
-            stone-band-p))
-         (sampled-shadow
-           (soft-shadow-visibility
-            shadow-map shadow-sampler shadow-sample shading-normal sun
-            (representation shadow-control)))
-         (direct-visibility
-           (mix 1.0 sampled-shadow
-                (smoothstep 0.03 0.18 (max 0.0 facing))))
-         (upness (swizzle shading-normal :z))
-         (sky-weight (+ 0.5 (* 0.5 upness)))
-         (ground-weight (- 0.5 (* 0.5 upness)))
-         (indirect-light
-           ;; Sky and earth are illumination, not gray absence-of-sun.  The
-           ;; constant terms keep vertical and turned-away planes chromatic;
-           ;; the hemispheric terms still tell us which environment they see.
-           (+ (* sky (+ 0.15 (* 0.54 sky-weight)))
-              (* ground (+ 0.05 (* 0.34 ground-weight)))))
-         (ambient-accessibility
-           (- 1.0 (* #.*local-ambient-occlusion-strength*
-                     ambient-occlusion)))
-         ;; A sun-facing receiver inside a cast shadow still sees warm light
-         ;; returned by the illuminated world around it.  This little wash is
-         ;; deliberately conditional on occlusion: it animates sun patches
-         ;; without turning north-facing planes orange.
-         (warm-return
-           (* sun-color
-              (* 0.085 stone-direct-shape (- 1.0 direct-visibility))))
-         ;; RGB4 is deliberately exposed as raw normalized light.  The square
-         ;; response keeps the old luvcraft falloff character, while the gain
-         ;; leaves headroom for overlapping warm and cyan sources instead of
-         ;; turning their frontier shells into clipped color bands.
-         (local-light (* 0.45 (* voxel-light voxel-light)))
-         (light (+ (* sun-color (* stone-direct-shape direct-visibility))
-                   (* indirect-light ambient-accessibility)
-                   warm-return local-light
-                   (* sun-color (* stone-relief-p 0.055))))
-         (half-vector (normalize (+ view-direction sun)))
-         (n-dot-v (max 0.0 (dot shading-normal view-direction)))
-         (n-dot-h (max 0.0 (dot shading-normal half-vector)))
-         (n-dot-l (max facing 0.0))
-         (v-dot-h (max 0.0 (dot view-direction half-vector)))
-         ;; The physical row is material-generic: dielectric F0 remains 0.04,
-         ;; while metals take their colored normal-incidence reflectance from
-         ;; the same procedural base colour which would otherwise be diffuse.
-         (f0 (material-f0 base metalness))
-         (alpha (* roughness roughness))
-         (alpha-squared (* alpha alpha))
-         (distribution-denominator
-           (+ (* (* n-dot-h n-dot-h) (- alpha-squared 1.0)) 1.0))
-         (distribution
-           (/ alpha-squared
-              (max 0.0001
-                   (* 3.14159265
-                      (* distribution-denominator distribution-denominator)))))
-         (visibility-light
-           (* n-dot-v
-              (sqrt (+ (* (* n-dot-l n-dot-l) (- 1.0 alpha-squared))
-                       alpha-squared))))
-         (visibility-view
-           (* n-dot-l
-              (sqrt (+ (* (* n-dot-v n-dot-v) (- 1.0 alpha-squared))
-                       alpha-squared))))
+         (facing (max 0.0 (dot normal sun)))
          (visibility
-           (/ 0.5 (max 0.0001 (+ visibility-light visibility-view))))
-         (fresnel (material-schlick-fresnel f0 v-dot-h))
-         (specular
-           (* sun-color
-              (* (* (mix 0.34 0.16 stone-relief-p) direct-visibility)
-                 (* distribution
-                    (* visibility (* fresnel n-dot-l))))))
-         (diffuse
-           (* base
-              (* (* light (stock-tooth material-point))
-                 (- 1.0 metalness))))
-         (lit (+ diffuse specular
-                 (* primary-tone surface-emission)))
-         ;; Keep scene radiance linear and HDR here.  The universal
-         ;; presentation pass blooms, tone maps, and grades it exactly once.
-         (mapped-paper (* lit 1.08))
+           (soft-shadow-visibility
+            shadow-map shadow-sampler shadow-sample normal sun
+            (representation shadow-control)))
+         (upness (swizzle normal :z))
+         (sky-weight (+ 0.5 (* 0.5 upness)))
+         (ambient (+ (* ground (- 1.0 sky-weight)) (* sky sky-weight)))
+         (bronze (vec3 0.47 0.17 0.04))
+         (local-light (* 0.45 (* voxel-light voxel-light)))
+         (radiance
+           (* bronze
+              (+ (* ambient 0.72)
+                 (* sun-color (* visibility facing))
+                 local-light)))
          (camera-delta
            (representation
-            (- world-point (swizzle camera-position :xyz))))
+            (- world-position (swizzle camera-position :xyz))))
          (distance (sqrt (dot camera-delta camera-delta)))
-         (fog (smoothstep 165.0 300.0 distance))
-         (paper (mix mapped-paper sky fog))
-         (barycentric-dx (derivative-x barycentric))
-         (barycentric-dy (derivative-y barycentric))
-         (barycentric-width (+ (abs barycentric-dx) (abs barycentric-dy)))
-         ;; A realized mixed-bevel primitive may span locally varied site
-         ;; widths, so the renderer-global authored width is not its feature
-         ;; scale.  The inverse barycentric gradients are the three actual
-         ;; projected triangle altitudes; their minimum is the conservative
-         ;; screen-space width available to temporal coverage policy.
-         (barycentric-gradient
-           (sqrt (+ (* barycentric-dx barycentric-dx)
-                    (* barycentric-dy barycentric-dy))))
-         (primitive-feature-pixels
-           (min
-            (min (/ 1.0 (max 0.000001 (swizzle barycentric-gradient :x)))
-                 (/ 1.0 (max 0.000001 (swizzle barycentric-gradient :y))))
-            (/ 1.0 (max 0.000001 (swizzle barycentric-gradient :z)))))
-         (edge-x (/ (swizzle barycentric :x)
-                    (max (swizzle barycentric-width :x) 0.000001)))
-         (edge-y (/ (swizzle barycentric :y)
-                    (max (swizzle barycentric-width :y) 0.000001)))
-         (edge-z (/ (swizzle barycentric :z)
-                    (max (swizzle barycentric-width :z) 0.000001)))
-         (edge-pixels (min (min edge-x edge-y) edge-z))
-         (boundary-edge-pixels
-           (min (min (if (= (ldb (byte 1 0) boundary-edge-mask) (uint 1.0))
-                         edge-x 10000.0)
-                     (if (= (ldb (byte 1 1) boundary-edge-mask) (uint 1.0))
-                         edge-y 10000.0))
-                (if (= (ldb (byte 1 2) boundary-edge-mask) (uint 1.0))
-                    edge-z 10000.0)))
-         (all-wire (- 1.0 (smoothstep 0.45 1.15 edge-pixels)))
-         (boundary-wire
-           (- 1.0 (smoothstep 0.45 1.15 boundary-edge-pixels)))
-         (construction-wire
-           (* (representation (swizzle render-parameters :y))
-              (min 1.0 (+ (* all-wire 0.18) (* boundary-wire 0.82)))))
-         (fragment-uv (mesh-clip-uv current-clip))
-         (pointer-delta
-           (representation
-            (/ (- fragment-uv (swizzle inspection-parameters :xy))
-               (max
-                (swizzle inspection-parameters :zw)
-                (assume-quantity
-                 (vec2 0.000001 0.000001)
-                 :quantity quantities:texel-extent :unit :one)))))
-         (pointer-pixels (sqrt (dot pointer-delta pointer-delta)))
-         (pointer-enabled
-           (representation (swizzle render-parameters :w)))
-         (ring (* pointer-enabled
-                  (- 1.0
-                     (smoothstep 0.35 1.25
-                                 (abs (- pointer-pixels 11.0))))))
-         (center (* pointer-enabled
-                    (- 1.0 (smoothstep 0.7 1.8 pointer-pixels))))
-         (reticle (max center ring))
-         (construction-ink (vec3 0.055 0.16 0.22))
-         (blueprint (vec3 0.30 0.90 0.94))
-         (drafted (mix paper construction-ink construction-wire))
-         (radiance (mix drafted blueprint reticle)))
-    (set-output color-output
-                (vec4 (* radiance opacity) opacity))
+         (fog (smoothstep 165.0 300.0 distance)))
+    (set-output color-output (vec4 (mix radiance sky fog) 1.0))
     (set-output motion-output
-                (mesh-temporal-motion previous-clip current-clip))
-    ;; Only a physically metallic material pays for the extra environment
-    ;; sample.  Dispatch is on the generic descriptor property, never on the
-    ;; torch kernel code.
-    (when (> metalness 0.0)
-      (set-output
-       color-output
-       (vec4
-        (*
-         (drafted-material-radiance
-          (+ lit
-             (metal-environment-reflection
-              f0 roughness metalness shading-normal view-direction
-              indirect-light sun sun-color sky ground))
-          sky fog construction-ink construction-wire blueprint reticle)
-         opacity)
-        opacity)))
-    ;; Shader WHEN lowers to real structured control flow.  Keeping the
-    ;; dielectric work behind it means soil, stone, and attachments do not pay
-    ;; for three Snell evaluations and the inclusion field.
-    (when (< (abs (- kernel-code 8.0)) 0.5)
-      (set-output
-       color-output
-       (vec4
-        (*
-         (mix
-          (mix
-           (mix
-            (gemstone-radiance
-             mapped-paper primary-tone secondary tertiary material-point
-             shading-normal view-direction half-vector
-             (swizzle frame-x :xyz) (swizzle frame-z :xyz)
-             sun sun-color sky ground n-dot-v n-dot-l
-             boundary-edge-pixels)
-            sky fog)
-           construction-ink construction-wire)
-          blueprint reticle)
-         opacity)
-        opacity)))))
+                (mesh-temporal-motion previous-clip current-clip))))
 
 (define-live-shader shadow-vertex-specification
     (:stage :mesh

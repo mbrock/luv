@@ -1059,12 +1059,12 @@ whether or not authoring mode is active.
 /Evidence./ [[lisp:luft.render:edit-streaming-scene-cell]] validates one signed
 cell transition, rejects occupied/empty mismatches and cells reserved by torch
 attachments, then constructs the successor solid, chunk, copy-on-write
-material field, scene-closed material program, and authored light generation
+material field, and authored light generation
 before replacing any scene value.  The viewer separately prevents placement
 through its player.  A monotonically increasing
 content revision enters each mesh request stamp.  Every worker request borrows
-an immutable scene input containing the old chains, material table and program,
-and light generation; after an edit that old request remains executable but
+an immutable scene input containing the old chains, material table, and light
+generation; after an edit that old request remains executable but
 cannot be published as current.  The canvas schedules the resident canonical
 owners as one cohort, so the GPU sees the old world or the complete new world,
 never a seam assembled from both.
@@ -1078,8 +1078,8 @@ result.  The playable sanctuary now starts as a streaming scene so this path
 is the ordinary application rather than a diagnostic fixture.
 
 /Done when./ Done for the preliminary path: model tests cover reversible
-occupancy/material/light state, stale snapshot isolation, material-program
-expansion, protected attachments, player overlap, and busy cohort publication;
+occupancy/material/light state, stale snapshot isolation, protected
+attachments, player overlap, and busy cohort publication;
 the viewer exposes the mode and both camera turns.  Rapid coalesced painting,
 a visible material speedbar, and a geometric target outline remain separate UI
 and scaling experiments.  Until incremental light solving exists, one edit

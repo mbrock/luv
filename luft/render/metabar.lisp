@@ -158,13 +158,11 @@
   enabled-p)
 
 (defun set-viewer-metabar-bevel-width (viewer bevel-width)
-  (unless (and (= bevel-width (viewer-bevel-width viewer))
-               (null (viewer-bevel-profile viewer)))
+  (unless (= bevel-width (viewer-bevel-width viewer))
     ;; This remains the viewer renderer's own coherent replacement boundary.
     ;; The metabar only schedules it there and never remeshes in pointer input.
     (refresh-viewer-renderer
-     viewer :solid (viewer-source viewer) :bevel-width bevel-width
-            :bevel-profile nil)
+     viewer :solid (viewer-source viewer) :bevel-width bevel-width)
     (refresh-viewer-inspector viewer))
   bevel-width)
 

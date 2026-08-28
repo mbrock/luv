@@ -44,7 +44,7 @@
 
 (defun capture-luft-material-contact
     (pathname position isometric-height title
-     &key (yaw 2.2455373) (pitch -0.5165006) player-p bevel-profile solid
+     &key (yaw 2.2455373) (pitch -0.5165006) player-p solid
        surface-mesh surface-generation
        (bevel-width luft:+mesh-bevel-width+) (wireframe 0.0)
        inspection-ink-p (width 1100) (height 800)
@@ -76,7 +76,6 @@
                       (luft.render:make-mountain-sanctuary-scene
                        :player-p player-p))
                   :bevel-width bevel-width
-                  :bevel-profile bevel-profile
                   :surface-mesh surface-mesh
                   :surface-generation surface-generation
                   :camera
@@ -154,11 +153,7 @@
            (capture-luft-material-contact
             pathname position isometric-height title
             :yaw yaw :pitch pitch
-            :solid (make-luft-voxel-light-capture-scene propagation-p)
-            :bevel-profile
-            (luft.render:make-material-bevel-profile
-             :terrain-width 2 :architecture-width 2
-             :crystal-width 4 :contact-width 2)))
+            :solid (make-luft-voxel-light-capture-scene propagation-p)))
       (setf luft.render:*light* old-light))))
 
 (luv:define-capture luft-voxel-light-shrine-context
@@ -269,11 +264,7 @@
                  luft.render:*flame-time* flame-time)
            (capture-luft-material-contact
             pathname position isometric-height title :yaw yaw :pitch pitch
-            :solid (make-luft-gemstone-gallery-scene)
-            :bevel-profile
-            (luft.render:make-material-bevel-profile
-             :terrain-width 2 :architecture-width 2
-             :crystal-width 4 :contact-width contact-width)))
+            :solid (make-luft-gemstone-gallery-scene)))
       (setf luft.render:*light* old-light
             luft.render:*flame-time* old-flame-time))))
 
@@ -366,10 +357,6 @@
                  (luft.render:start-viewer
                   :solid (make-luft-gemstone-gallery-scene)
                   :bevel-width luft:+mesh-bevel-width+
-                  :bevel-profile
-                  (luft.render:make-material-bevel-profile
-                   :terrain-width 2 :architecture-width 2
-                   :crystal-width 4 :contact-width 2)
                   :camera
                   (luft.render:make-fly-camera
                    :position
@@ -450,54 +437,6 @@
    10.0 "LUFT ridge beacon material frame"
    :yaw 2.2455373 :pitch -0.5165006))
 
-(luv:define-capture luft-material-bevel-policy-high-country
-    (:figure W1D4TH :kind :image :extension "png" :layout :landscape
-     :description
-     "A material bevel experiment: broad terrain at width four and crisp sanctuary stone at width one.")
-  (pathname)
-  (capture-luft-material-contact
-   pathname
-   (luv.arithmetic.lisp.vec3:make-vec3 117.0 59.0 50.0)
-   14.0 "LUFT material bevel policy - high country"
-   :yaw 2.3561945 :pitch -0.545
-   :bevel-profile (luft.render:make-material-bevel-profile)))
-
-(luv:define-capture luft-material-bevel-policy-mountain
-    (:figure M1XWTH :kind :image :extension "png" :layout :landscape
-     :description
-     "The authored mountain under terrain-four, architecture-one, and mixed-contact-two bevel cohorts.")
-  (pathname)
-  (capture-luft-material-contact
-   pathname
-   (luv.arithmetic.lisp.vec3:make-vec3 102.0 6.0 50.0)
-   32.0 "LUFT material bevel policy - mountain"
-   :bevel-profile (luft.render:make-material-bevel-profile)))
-
-(luv:define-capture luft-material-bevel-policy-contact
-    (:figure J01NTS :kind :image :extension "png" :layout :landscape
-     :description
-     "The sanctuary's authored low wall protecting width-one stairs from the terrain-four field.")
-  (pathname)
-  (capture-luft-material-contact
-   pathname
-   (luv.arithmetic.lisp.vec3:make-vec3 80.0 43.0 32.0)
-   7.0 "LUFT material bevel policy - contact"
-   :bevel-profile (luft.render:make-material-bevel-profile)))
-
-(luv:define-capture luft-material-bevel-policy-contact-construction
-    (:figure WSEK3C :kind :image :extension "png" :layout :landscape
-     :description
-     "The unprotected material-width contact with triangle construction ink enabled.")
-  (pathname)
-  (capture-luft-material-contact
-   pathname
-   (luv.arithmetic.lisp.vec3:make-vec3 80.0 43.0 32.0)
-   7.0 "LUFT material bevel policy - contact construction"
-   :solid (luft.render:make-mountain-sanctuary-scene
-           :stair-boundary :open)
-   :bevel-profile (luft.render:make-material-bevel-profile)
-   :wireframe 1.0))
-
 (macrolet ((define-uniform-contact-capture (name width)
              `(luv:define-capture ,name
                   (:figure WSEK3C :kind :image :extension "png"
@@ -551,65 +490,6 @@
   (capture-luft-sanctuary-tower
    pathname 4 "LUFT sanctuary tower - bevel 1/2"))
 
-(defun capture-luft-material-bevel-stair-boundary
-    (pathname boundary wireframe title)
-  (capture-luft-material-contact
-   pathname
-   (luv.arithmetic.lisp.vec3:make-vec3 62.0 42.0 33.0)
-   9.0 title :yaw 1.5707964 :pitch -0.588
-   :solid (luft.render:make-mountain-sanctuary-scene
-           :stair-boundary boundary)
-   :bevel-profile (luft.render:make-material-bevel-profile)
-   :wireframe wireframe))
-
-(luv:define-capture luft-material-bevel-stair-open
-    (:figure WSEK3C :kind :image :extension "png" :layout :landscape
-     :description
-     "The unprotected production stair, centered as the baseline for authored support geometry.")
-  (pathname)
-  (capture-luft-material-bevel-stair-boundary
-   pathname :open 0.0 "LUFT material bevel - open stair"))
-
-(luv:define-capture luft-material-bevel-stair-open-construction
-    (:figure WSEK3C :kind :image :extension "png" :layout :landscape
-     :description
-     "The unprotected stair baseline with triangle construction ink enabled.")
-  (pathname)
-  (capture-luft-material-bevel-stair-boundary
-   pathname :open 1.0 "LUFT material bevel - open stair construction"))
-
-(luv:define-capture luft-material-bevel-stair-border
-    (:figure WSEK3C :kind :image :extension "png" :layout :landscape
-     :description
-     "The production stair with an authored one-cell stone border level with every tread.")
-  (pathname)
-  (capture-luft-material-bevel-stair-boundary
-   pathname :border 0.0 "LUFT material bevel - stair border"))
-
-(luv:define-capture luft-material-bevel-stair-border-construction
-    (:figure WSEK3C :kind :image :extension "png" :layout :landscape
-     :description
-     "The one-cell stair border with triangle construction ink enabled.")
-  (pathname)
-  (capture-luft-material-bevel-stair-boundary
-   pathname :border 1.0 "LUFT material bevel - stair border construction"))
-
-(luv:define-capture luft-material-bevel-stair-low-wall
-    (:figure WSEK3C :kind :image :extension "png" :layout :landscape
-     :description
-     "The production stair protected by a one-course ascending masonry wall.")
-  (pathname)
-  (capture-luft-material-bevel-stair-boundary
-   pathname :low-wall 0.0 "LUFT material bevel - stair low wall"))
-
-(luv:define-capture luft-material-bevel-stair-low-wall-construction
-    (:figure WSEK3C :kind :image :extension "png" :layout :landscape
-     :description
-     "The authored low-wall stair with triangle construction ink enabled.")
-  (pathname)
-  (capture-luft-material-bevel-stair-boundary
-   pathname :low-wall 1.0 "LUFT material bevel - stair low wall construction"))
-
 (defun capture-luft-bevel-limit-cell (pathname width title)
   (let ((scene (luft.render:make-bevel-limit-study-scene)))
     (multiple-value-bind (mesh generation)
@@ -650,86 +530,6 @@
   (pathname)
   (capture-luft-bevel-limit-cell
    pathname 4 "LUFT one-cell medial bevel width four"))
-
-(defun capture-luft-material-bevel-transition
-    (pathname wireframe title
-     &key (contract-t-junctions-p t)
-       (position (luv.arithmetic.lisp.vec3:make-vec3 9.5 -0.5 6.5))
-       (isometric-height 2.5) split-neighborhood-p)
-  (let* ((scene (luft.render:make-material-bevel-transition-study-scene))
-         (profile (luft.render:make-material-bevel-profile)))
-    (multiple-value-bind (mesh width-census diagnostics generation)
-        (if contract-t-junctions-p
-            (luft.render:make-material-bevel-mesh scene profile)
-            (luft.render:make-uncontracted-material-bevel-diagnostic-mesh
-             scene profile))
-      (declare (ignore width-census))
-      (let* ((source-mesh
-               (if split-neighborhood-p
-                   (luft:surface-mesh-split-neighborhood
-                    mesh (first (getf diagnostics :candidate-splits)))
-                   mesh))
-             (display-mesh
-               (if (plusp wireframe)
-                   (luft:surface-mesh-with-triangle-ink source-mesh)
-                   source-mesh)))
-        (multiple-value-bind (display-mesh display-generation)
-            (if (eq display-mesh mesh)
-                (values display-mesh generation)
-                (luft.render::decorate-scene-mesh display-mesh scene))
-          (capture-luft-material-contact
-           pathname
-           position isometric-height title :yaw 2.0899425 :pitch -0.36
-           :solid scene
-           :surface-mesh display-mesh
-           :surface-generation display-generation
-           :wireframe wireframe))))))
-
-(luv:define-capture luft-material-bevel-transition-uncontracted-construction
-    (:figure WSEK3C :kind :image :extension "png" :layout :landscape
-     :description
-     "The isolated five-cell mixed-width surface with collapsed triangles omitted but its medial T-junction deliberately unrepaired.")
-  (pathname)
-  (capture-luft-material-bevel-transition
-   pathname 1.0 "LUFT uncontracted medial T-junction"
-   :contract-t-junctions-p nil))
-
-(luv:define-capture luft-material-bevel-transition-clean
-    (:figure WSEK3C :kind :image :extension "png" :layout :landscape
-     :description
-     "The isolated five-cell 1/2/4 transition after exact T-junction contraction.")
-  (pathname)
-  (capture-luft-material-bevel-transition
-   pathname 0.0 "LUFT isolated material bevel transition"))
-
-(luv:define-capture luft-material-bevel-transition-construction
-    (:figure WSEK3C :kind :image :extension "png" :layout :landscape
-     :description
-     "The isolated five-cell 1/2/4 transition with triangle construction ink.")
-  (pathname)
-  (capture-luft-material-bevel-transition
-   pathname 1.0 "LUFT isolated material bevel transition construction"))
-
-(luv:define-capture luft-material-bevel-t-junction-uncontracted-closeup
-    (:figure WSEK3C :kind :image :extension "png" :layout :landscape
-     :description
-     "A topology-ink closeup of the long edge meeting two short edges after a medial triangle collapses.")
-  (pathname)
-  (capture-luft-material-bevel-transition
-   pathname 1.0 "LUFT uncontracted medial T-junction closeup"
-   :contract-t-junctions-p nil
-   :position (luv.arithmetic.lisp.vec3:make-vec3 8.77 -0.35 5.75)
-   :isometric-height 1.35 :split-neighborhood-p t))
-
-(luv:define-capture luft-material-bevel-t-junction-contracted-closeup
-    (:figure WSEK3C :kind :image :extension "png" :layout :landscape
-     :description
-     "The same topology-ink closeup after the long neighbouring edge is split at the collapsed triangle's middle vertex.")
-  (pathname)
-  (capture-luft-material-bevel-transition
-   pathname 1.0 "LUFT contracted medial T-junction closeup"
-   :position (luv.arithmetic.lisp.vec3:make-vec3 8.77 -0.35 5.75)
-   :isometric-height 1.35 :split-neighborhood-p t))
 
 (defun capture-luft-manifold-spikes (pathname wireframe title)
   (let ((scene (luft.render:make-manifold-spike-scene)))
@@ -976,7 +776,6 @@
                  (luft.render:start-viewer
                   :solid (luft.render:make-mountain-sanctuary-scene)
                   :bevel-width luft:+mesh-bevel-width+
-                  :bevel-profile (luft.render:make-material-bevel-profile)
                   :camera camera :title "LUFT wizard bridge walk"
                   :width 1280 :height 720))
            (setf (luft.render:viewer-player viewer)
@@ -1195,26 +994,8 @@
    :shadow-base-bias 0.00075
    :shadow-filter-radius 4.0))
 
-(defun make-luft-crystal-contact-evidence-profile (variant)
-  "Return a profile whose non-crystal relations do not vary across VARIANT."
-  (let ((crystal-contact
-          (ecase variant
-            (:width-1 1)
-            (:width-2 2)
-            (:width-4 4)
-            (:mixed nil))))
-    (luft.render:make-material-bevel-profile
-     :terrain-width 2
-     :architecture-width 2
-     :crystal-width 4
-     :contact-width 2
-     :terrain-architecture-width 2
-     :terrain-crystal-width (or crystal-contact 1)
-     :architecture-crystal-width (or crystal-contact 4)
-     :three-way-width (or crystal-contact 2))))
-
 (defun capture-luft-native-evidence
-    (pathname scene profile position isometric-height title
+    (pathname scene position isometric-height title
      &key (yaw 2.18) (pitch -0.30) construction-p
        surface-mesh surface-generation
        (bevel-width 2) (flame-time 0.375) after-start
@@ -1229,7 +1010,6 @@
            (capture-luft-material-contact
             pathname position isometric-height title
             :yaw yaw :pitch pitch :solid scene
-            :bevel-profile (and (null surface-mesh) profile)
             :surface-mesh surface-mesh
             :surface-generation surface-generation
             :bevel-width bevel-width
@@ -1244,187 +1024,10 @@
       (setf luft.render:*light* old-light
             luft.render:*flame-time* old-flame-time))))
 
-(defun make-luft-isolated-crystal-collars-evidence-scene ()
-  "Place equal crystals on adjacent earth and stone plinths."
-  (let ((builder (luft.render::make-scene-builder :horizontal-bits 5)))
-    ;; The straight material seam between the two plinths is intentional: it
-    ;; must remain unchanged throughout the crystal-contact width series.
-    (luft.render::scene-builder-box builder 4 8 5 9 2 3)
-    (luft.render::scene-builder-box
-     builder 9 13 5 9 2 3 :architecture-p t)
-    (luft.render::scene-builder-cell
-     builder 6 7 4 :material luft.render::*crystal-material-placement*)
-    (luft.render::scene-builder-cell
-     builder 11 7 4 :material luft.render::*crystal-material-placement*)
-    (luft.render::finish-scene-builder builder)))
-
-(defun make-luft-planar-crystal-evidence-scene (support)
-  "Place a row, an L, and a reflex U on one planar SUPPORT material."
-  (let* ((builder (luft.render::make-scene-builder :horizontal-bits 5))
-         (material
-           (ecase support
-             (:terrain luft.render::*terrain-material-placement*)
-             (:architecture luft.render::*sanctuary-material-placement*))))
-    (luft.render::scene-builder-box
-     builder 4 16 4 16 2 3 :material material)
-    ;; One composed row.
-    (loop for x from 5 to 8
-          do (luft.render::scene-builder-cell
-              builder x 6 4
-              :material luft.render::*crystal-material-placement*))
-    ;; An L makes its inner reflex turn visible without a pathological star.
-    (dolist (cell '((5 10) (6 10) (7 10) (7 11) (7 12) (7 13)))
-      (destructuring-bind (x y) cell
-        (luft.render::scene-builder-cell
-         builder x y 4 :material luft.render::*crystal-material-placement*)))
-    ;; A broad U supplies two separated concave joins in the same plane.
-    (dolist (cell '((11 10) (12 10) (13 10)
-                    (11 11) (13 11) (11 12) (13 12) (11 13) (13 13)))
-      (destructuring-bind (x y) cell
-        (luft.render::scene-builder-cell
-         builder x y 4 :material luft.render::*crystal-material-placement*)))
-    (luft.render::finish-scene-builder builder)))
-
-(defun make-luft-rotated-crystal-evidence-scene (support)
-  "Rotate the same row/L contact vocabulary onto a wall and ceiling."
-  (let* ((builder (luft.render::make-scene-builder :horizontal-bits 5))
-         (material
-           (ecase support
-             (:terrain luft.render::*terrain-material-placement*)
-             (:architecture luft.render::*sanctuary-material-placement*))))
-    (luft.render::scene-builder-box
-     builder 4 16 15 16 3 13 :material material)
-    (luft.render::scene-builder-box
-     builder 4 16 5 10 14 14 :material material)
-    ;; Low-Y wall: a horizontal row and an L in the X/Z face chart.
-    (loop for x from 5 to 8
-          do (luft.render::scene-builder-cell
-              builder x 14 7
-              :material luft.render::*crystal-material-placement*))
-    (dolist (cell '((11 7) (12 7) (13 7) (13 8) (13 9) (13 10)))
-      (destructuring-bind (x z) cell
-        (luft.render::scene-builder-cell
-         builder x 14 z :material luft.render::*crystal-material-placement*)))
-    ;; Downward ceiling: the identical motifs in the X/Y face chart.
-    (loop for x from 5 to 8
-          do (luft.render::scene-builder-cell
-              builder x 7 13
-              :material luft.render::*crystal-material-placement*))
-    (dolist (cell '((11 7) (12 7) (13 7) (13 8) (13 9)))
-      (destructuring-bind (x y) cell
-        (luft.render::scene-builder-cell
-         builder x y 13 :material luft.render::*crystal-material-placement*)))
-    (luft.render::finish-scene-builder builder)))
-
-(macrolet
-    ((define-native-evidence-pair
-         (clean-name construction-name figure scene variant
-          position isometric-height yaw pitch title description)
-       (destructuring-bind (x y z) position
-         `(progn
-            (luv:define-capture ,clean-name
-                (:figure ,figure :kind :image :extension "png"
-                 :layout :landscape
-                 :description ,(format nil "~A Clean production surface." description))
-              (pathname)
-              (capture-luft-native-evidence
-               pathname ,scene
-               (make-luft-crystal-contact-evidence-profile ,variant)
-               (luv.arithmetic.lisp.vec3:make-vec3 ,x ,y ,z)
-               ,isometric-height ,(format nil "~A - clean" title)
-               :yaw ,yaw :pitch ,pitch))
-            (luv:define-capture ,construction-name
-                (:figure ,figure :kind :image :extension "png"
-                 :layout :landscape
-                 :description
-                 ,(format nil "~A Identical camera with triangle construction ink." description))
-              (pathname)
-              (capture-luft-native-evidence
-               pathname ,scene
-               (make-luft-crystal-contact-evidence-profile ,variant)
-               (luv.arithmetic.lisp.vec3:make-vec3 ,x ,y ,z)
-               ,isometric-height ,(format nil "~A - construction" title)
-               :yaw ,yaw :pitch ,pitch :construction-p t))))))
-  ;; The two collars occupy most of the native frame; only their semantic host
-  ;; and requested crystal-contact width differ.
-  (define-native-evidence-pair
-      luft-native-crystal-collars-width-one
-      luft-native-crystal-collars-width-one-construction BZLCLS
-      (make-luft-isolated-crystal-collars-evidence-scene) :width-1
-      (15.5 -3.0 8.3) 5.4 2.18 -0.34
-      "Native crystal collars - contact width one"
-    "Matched grass and stone crystal collars at one tick.")
-  (define-native-evidence-pair
-      luft-native-crystal-collars-width-two
-      luft-native-crystal-collars-width-two-construction BZLCLS
-      (make-luft-isolated-crystal-collars-evidence-scene) :width-2
-      (15.5 -3.0 8.3) 5.4 2.18 -0.34
-      "Native crystal collars - contact width two"
-    "Matched grass and stone crystal collars at two ticks.")
-  (define-native-evidence-pair
-      luft-native-crystal-collars-width-four
-      luft-native-crystal-collars-width-four-construction BZLCLS
-      (make-luft-isolated-crystal-collars-evidence-scene) :width-4
-      (15.5 -3.0 8.3) 5.4 2.18 -0.34
-      "Native crystal collars - contact width four"
-    "Matched grass and stone crystal collars at the medial four-tick limit.")
-  (define-native-evidence-pair
-      luft-native-crystal-collars-mixed
-      luft-native-crystal-collars-mixed-construction BZLCLS
-      (make-luft-isolated-crystal-collars-evidence-scene) :mixed
-      (15.5 -3.0 8.3) 5.4 2.18 -0.34
-      "Native crystal collars - relation profile"
-    "Terrain/crystal is one tick and stone/crystal four; their intervening terrain/stone seam stays two.")
-
-  (define-native-evidence-pair
-      luft-native-grass-crystal-planar
-      luft-native-grass-crystal-planar-construction BZLREL
-      (make-luft-planar-crystal-evidence-scene :terrain) :mixed
-      (20.0 -4.0 11.0) 10.0 2.18 -0.38
-      "Native grass/crystal rows and turns"
-    "Grass-hosted row, L, and U-shaped concave crystal contacts.")
-  (define-native-evidence-pair
-      luft-native-stone-crystal-planar
-      luft-native-stone-crystal-planar-construction BZLREL
-      (make-luft-planar-crystal-evidence-scene :architecture) :mixed
-      (20.0 -4.0 11.0) 10.0 2.18 -0.38
-      "Native stone/crystal rows and turns"
-    "Stone-hosted row, L, and U-shaped concave crystal contacts.")
-
-  (define-native-evidence-pair
-      luft-native-earth-crystal-wall
-      luft-native-earth-crystal-wall-construction BZLROT
-      (make-luft-rotated-crystal-evidence-scene :terrain) :mixed
-      (21.0 -1.0 10.0) 8.0 2.18 -0.08
-      "Native earth/crystal wall contacts"
-    "The planar row/L contact law rotated onto an earth wall.")
-  (define-native-evidence-pair
-      luft-native-stone-crystal-wall
-      luft-native-stone-crystal-wall-construction BZLROT
-      (make-luft-rotated-crystal-evidence-scene :architecture) :mixed
-      (21.0 -1.0 10.0) 8.0 2.18 -0.08
-      "Native stone/crystal wall contacts"
-    "The planar row/L contact law rotated onto a stone wall.")
-  (define-native-evidence-pair
-      luft-native-earth-crystal-ceiling
-      luft-native-earth-crystal-ceiling-construction BZLROT
-      (make-luft-rotated-crystal-evidence-scene :terrain) :mixed
-      (17.0 -1.0 10.8) 7.5 2.18 0.18
-      "Native earth/crystal ceiling contacts"
-    "The planar row/L contact law viewed on the underside of an earth ceiling.")
-  (define-native-evidence-pair
-      luft-native-stone-crystal-ceiling
-      luft-native-stone-crystal-ceiling-construction BZLROT
-      (make-luft-rotated-crystal-evidence-scene :architecture) :mixed
-      (17.0 -1.0 10.8) 7.5 2.18 0.18
-      "Native stone/crystal ceiling contacts"
-    "The planar row/L contact law viewed on the underside of a stone ceiling."))
-
 (defun make-luft-torch-frame-evidence-scene ()
   "Build one fixture spanning planar, band, convex, wall, and ceiling frames."
   (let ((builder (luft.render::make-scene-builder :horizontal-bits 5)))
-    ;; A fixed earth/stone floor retains an unrelated material contact while
-    ;; the controlled bevel profiles change.
+    ;; A fixed earth/stone floor gives the attachment fixture scene context.
     (luft.render::scene-builder-box builder 3 9 4 11 2 4)
     (luft.render::scene-builder-box
      builder 10 17 4 11 2 4 :architecture-p t)
@@ -1458,10 +1061,6 @@
      builder 16 10 14 :z :low :u 1.0 :v -1.0)
     (luft.render::finish-scene-builder builder)))
 
-(defun make-luft-torch-frame-evidence-profile ()
-  "Return the production mixed profile exercised by the torch plates."
-  (luft.render:make-material-bevel-profile))
-
 (defun make-luft-concave-step-torch-evidence-scene ()
   "Build the ordinary reentrant step from the attachment regression."
   (let ((builder (luft.render::make-scene-builder :horizontal-bits 5)))
@@ -1475,69 +1074,6 @@
     (luft.render::scene-builder-torch
      builder 6 7 4 :z :high :u 0.6 :v 0.0)
     (luft.render::finish-scene-builder builder)))
-
-(macrolet
-    ((define-native-torch-pair
-         (clean-name construction-name variant title description)
-       (let ((bevel-width
-               (ecase variant
-                 (:width-1 1)
-                 (:width-2 2)
-                 (:width-3 3)
-                 (:width-4 4)
-                 (:mixed 2)))
-             (profile
-               (and (eq variant :mixed)
-                    '(make-luft-torch-frame-evidence-profile))))
-         `(progn
-          (luv:define-capture ,clean-name
-              (:figure TRCHFR :kind :image :extension "png"
-               :layout :landscape :description ,description)
-            (pathname)
-            (capture-luft-native-evidence
-             pathname (make-luft-torch-frame-evidence-scene)
-             ,profile
-             (luv.arithmetic.lisp.vec3:make-vec3 20.5 -4.0 12.0)
-             11.0 ,(format nil "~A - clean" title)
-             :yaw 2.18 :pitch -0.22 :bevel-width ,bevel-width))
-          (luv:define-capture ,construction-name
-              (:figure TRCHFR :kind :image :extension "png"
-               :layout :landscape
-               :description
-               ,(format nil "~A The identical camera exposes realized support triangles." description))
-            (pathname)
-            (capture-luft-native-evidence
-             pathname (make-luft-torch-frame-evidence-scene)
-             ,profile
-             (luv.arithmetic.lisp.vec3:make-vec3 20.5 -4.0 12.0)
-             11.0 ,(format nil "~A - construction" title)
-             :yaw 2.18 :pitch -0.22 :bevel-width ,bevel-width
-             :construction-p t))))))
-  (define-native-torch-pair
-      luft-native-torch-frames-width-one
-      luft-native-torch-frames-width-one-construction :width-1
-      "Native torch frames - uniform bevel width one"
-    "All five semantic attachments under the uniform one-tick mesher mode.")
-  (define-native-torch-pair
-      luft-native-torch-frames-width-two
-      luft-native-torch-frames-width-two-construction :width-2
-      "Native torch frames - uniform bevel width two"
-    "All five semantic attachments under the uniform two-tick mesher mode.")
-  (define-native-torch-pair
-      luft-native-torch-frames-width-three
-      luft-native-torch-frames-width-three-construction :width-3
-      "Native torch frames - uniform bevel width three"
-    "All five semantic attachments under the uniform three-tick mesher mode.")
-  (define-native-torch-pair
-      luft-native-torch-frames-width-four
-      luft-native-torch-frames-width-four-construction :width-4
-      "Native torch frames - uniform bevel width four"
-    "All five semantic attachments under the medial four-tick mesher mode.")
-  (define-native-torch-pair
-      luft-native-torch-frames-mixed
-      luft-native-torch-frames-mixed-construction :mixed
-      "Native torch frames - relation profile"
-    "Flat-center, near-band, corner-chart, wall, and ceiling torches under the production relation profile."))
 
 (defconstant +luft-native-torch-close-isometric-height+ 2.0)
 
@@ -1579,7 +1115,6 @@
     (capture-luft-native-evidence
      pathname
      (make-luft-realized-light-direction-evidence-scene propagation-p)
-     nil
      (luft-native-torch-close-camera-position
       7.75 8.125 4.5 yaw pitch)
      2.0 title
@@ -1630,7 +1165,7 @@
     ;; pixels, the complete body is 244 by 438, and the foreground bevel band
     ;; is 211 pixels wide.  Its X=7 silhouette crosses both proxy and body.
     (capture-luft-native-evidence
-     pathname (make-luft-opaque-bevel-occlusion-evidence-scene) nil
+     pathname (make-luft-opaque-bevel-occlusion-evidence-scene)
      (luft-native-torch-close-camera-position
       7.0 8.0 3.5 yaw pitch)
      1.9 title
@@ -1664,7 +1199,6 @@
               (pathname)
               (capture-luft-native-evidence
                pathname (make-luft-torch-frame-evidence-scene)
-               nil
                (luft-native-torch-close-camera-position
                 ,x ,y ,z ,yaw ,pitch)
                +luft-native-torch-close-isometric-height+
@@ -1678,7 +1212,6 @@
               (pathname)
               (capture-luft-native-evidence
                pathname (make-luft-torch-frame-evidence-scene)
-               nil
                (luft-native-torch-close-camera-position
                 ,x ,y ,z ,yaw ,pitch)
                +luft-native-torch-close-isometric-height+
@@ -1722,7 +1255,7 @@
   (pathname)
   (let ((yaw 1.5707963) (pitch -0.50))
     (capture-luft-native-evidence
-     pathname (make-luft-concave-step-torch-evidence-scene) nil
+     pathname (make-luft-concave-step-torch-evidence-scene)
      (luft-native-torch-close-camera-position
       6.75 7.5 5.0 yaw pitch)
      +luft-native-torch-close-isometric-height+
@@ -1736,30 +1269,12 @@
   (pathname)
   (let ((yaw 1.5707963) (pitch -0.50))
     (capture-luft-native-evidence
-     pathname (make-luft-concave-step-torch-evidence-scene) nil
+     pathname (make-luft-concave-step-torch-evidence-scene)
      (luft-native-torch-close-camera-position
       6.75 7.5 5.0 yaw pitch)
      +luft-native-torch-close-isometric-height+
      "Native torch concave step - construction"
      :yaw yaw :pitch pitch :bevel-width 2 :construction-p t)))
-
-(macrolet ((define-native-torch-phase (name time description)
-             `(luv:define-capture ,name
-                  (:figure TRCHMV :kind :image :extension "png"
-                   :layout :landscape :description ,description)
-                (pathname)
-                (capture-luft-native-evidence
-                 pathname (make-luft-torch-frame-evidence-scene)
-                 (make-luft-torch-frame-evidence-profile)
-                 (luv.arithmetic.lisp.vec3:make-vec3 20.5 -4.0 12.0)
-                 11.0 "Native deterministic torch phase"
-                 :yaw 2.18 :pitch -0.22 :flame-time ,time))))
-  (define-native-torch-phase
-      luft-native-torch-phase-a 0.0
-    "The complete fixed torch fixture at exact flame time zero.")
-  (define-native-torch-phase
-      luft-native-torch-phase-b 0.625
-    "The identical native camera and geometry at exact flame time 0.625 seconds."))
 
 (defun film-luft-native-torch-frames
     (pathname &key (seconds 3) (frame-rate 24))
@@ -1787,8 +1302,6 @@
                  (luft.render:start-viewer
                   :solid (make-luft-torch-frame-evidence-scene)
                   :bevel-width 2
-                  :bevel-profile
-                  (make-luft-torch-frame-evidence-profile)
                   :camera
                   (luft.render:make-fly-camera
                    :position
@@ -1820,141 +1333,6 @@
      "The native fixed-camera torch fixture with deterministic 24 Hz flame time and temporal reconstruction disabled.")
   (pathname)
   (film-luft-native-torch-frames pathname))
-
-(defun make-luft-chunk-seam-evidence-scene ()
-  "Build an ordinary mixed-material bezel crossing the X=64 chunk seam."
-  (let ((builder (luft.render::make-scene-builder :horizontal-bits 7)))
-    (luft.render::scene-builder-box builder 59 63 8 14 2 3)
-    (luft.render::scene-builder-box
-     builder 64 68 8 14 2 3 :architecture-p t)
-    ;; The composed row itself crosses the owner boundary; the two outer
-    ;; crystals also expose each host material away from that boundary.
-    (loop for x from 61 to 66
-          do (luft.render::scene-builder-cell
-              builder x 11 4
-              :material luft.render::*crystal-material-placement*))
-    (luft.render::finish-scene-builder builder)))
-
-(defun luft-owner-meshes-as-tree (owners &optional preferred-owner-keys)
-  "Borrow owner MESHES as one recursively rendered capture tree.
-
-Prefer a nonempty authored owner named by PREFERRED-OWNER-KEYS.  Canonical
-publication can also return virtual empty owners, so numeric owner order is
-not a meaningful choice of visible root.  Fall back to any nonempty owner,
-then to a preferred or first empty owner only when the whole result is empty."
-  (let* ((nonempty-p
-           (lambda (entry)
-             (plusp (luft:surface-mesh-triangle-count (cdr entry)))))
-         (preferred-p
-           (lambda (entry)
-             (member (car entry) preferred-owner-keys :test #'eql)))
-         (root-entry
-           (or (find-if (lambda (entry)
-                          (and (funcall nonempty-p entry)
-                               (funcall preferred-p entry)))
-                        owners)
-               (find-if nonempty-p owners)
-               (find-if preferred-p owners)
-               (first owners)))
-         (root (cdr root-entry)))
-    (when root
-      (setf (luft:surface-mesh-companions root)
-            (append
-             (luft:surface-mesh-companions root)
-             (mapcar #'cdr (remove root-entry owners :test #'eq)))))
-    root))
-
-(defun make-luft-streaming-snapshot-evidence-mesh (scene profile)
-  "Return the streaming scene, mesh tree, and exact synchronous generation."
-  (let* ((streaming (luft.render:make-streaming-scene scene))
-         (source-keys
-           (sort
-            (loop for key being the hash-keys of
-                  (luft.render::streaming-scene-store streaming)
-                  collect key)
-            #'<))
-         (owner-keys
-           (luft.render::streaming-scene-canonical-owner-closure
-            streaming source-keys)))
-    (dolist (key source-keys)
-      (setf (gethash key (luft.render::streaming-scene-loaded streaming)) 1))
-    (multiple-value-bind (owners census diagnostics generation)
-        (luft.render::mesh-streaming-snapshot
-         (luft.render::make-streaming-region-snapshot
-          streaming owner-keys 1 profile))
-      (declare (ignore census diagnostics))
-      (let ((root (luft-owner-meshes-as-tree owners source-keys)))
-        ;; The synchronous evidence API aggregates keyed regional owners into
-        ;; one companion tree.  Its publication proof must therefore be
-        ;; rebuilt after aggregation as one explicitly unkeyed exact output;
-        ;; the worker's N-entry keyed manifest no longer names this tree.
-        (values
-         streaming root
-         (luft.render::make-scene-mesh-generation-value
-          streaming
-          (luft.render::scene-mesh-generation-request-stamp generation)
-          (luft.render::scene-mesh-generation-light-generation generation)
-          :mesh-entries
-          (list
-           (cons luft.render::+unkeyed-scene-mesh-output+ root))
-          :unkeyed-mesh-p t))))))
-
-(defun capture-luft-chunk-seam-evidence
-    (pathname compiler construction-p title)
-  "Capture the seam fixture through STATIC or STREAMING-SNAPSHOT COMPILER."
-  (let* ((scene (make-luft-chunk-seam-evidence-scene))
-         (profile (make-luft-crystal-contact-evidence-profile :mixed)))
-    (multiple-value-bind (solid mesh generation)
-        (ecase compiler
-          (:static
-           (multiple-value-bind (mesh census diagnostics generation)
-               (luft.render:make-material-bevel-mesh scene profile)
-             (declare (ignore census diagnostics))
-             (values scene mesh generation)))
-          (:streaming-snapshot
-           (make-luft-streaming-snapshot-evidence-mesh scene profile)))
-      (capture-luft-native-evidence
-       pathname solid profile
-       (luv.arithmetic.lisp.vec3:make-vec3 72.5 -1.0 9.2)
-       6.5 title :yaw 2.18 :pitch -0.34
-       :construction-p construction-p
-       :surface-mesh mesh
-       :surface-generation generation))))
-
-(defun capture-luft-chunk-seam-async-evidence
-    (pathname construction-p title)
-  "Capture the seam through the viewer's actual async owner publication."
-  (let* ((scene (make-luft-chunk-seam-evidence-scene))
-         (profile (make-luft-crystal-contact-evidence-profile :mixed))
-         (streaming
-           (luft.render:make-streaming-scene
-            scene :frames-per-load 1 :residency-radius 1)))
-    (capture-luft-native-evidence
-     pathname streaming profile
-     (luv.arithmetic.lisp.vec3:make-vec3 72.5 -1.0 9.2)
-     6.5 title :yaw 2.18 :pitch -0.34
-     :construction-p construction-p
-     :after-start #'wait-for-luft-landscape-residency)))
-
-(macrolet ((define-seam-capture (name compiler construction-p description)
-             `(luv:define-capture ,name
-                  (:figure STRMSM :kind :image :extension "png"
-                   :layout :landscape :description ,description)
-                (pathname)
-                (capture-luft-chunk-seam-evidence
-                 pathname ,compiler ,construction-p ,description))))
-  (define-seam-capture
-      luft-native-chunk-seam-static :static nil
-    "The mixed crystal row crossing X=64 through the fully resident static entry point.")
-  (define-seam-capture
-      luft-native-chunk-seam-static-construction :static t
-    "The identical static seam camera with regional owner triangles exposed.")
-  (define-seam-capture
-      luft-native-chunk-seam-streaming :streaming-snapshot nil
-    "The same row compiled synchronously through the production streaming cohort snapshot.")
-  (define-seam-capture
-      luft-native-chunk-seam-streaming-construction :streaming-snapshot t
-    "The identical streaming-snapshot seam camera with regional owner triangles exposed."))
 
 (luv:define-capture luft-native-chunk-seam-streaming-async
     (:figure STRMSM :kind :image :extension "png" :layout :landscape

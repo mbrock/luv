@@ -158,9 +158,6 @@ at the atelier boundary where a person has selected one site."))
 (defmethod inspection-face-stock ((source t) face)
   (default-face-stock face))
 
-(defmethod inspection-face-stock ((source scene) face)
-  (scene-face-stock source face))
-
 (defun ray-axis-crossings (position direction)
   "Return grid STEP, first crossing distance, and crossing interval."
   (cond ((plusp direction)
@@ -542,8 +539,7 @@ the selector is the whole of the difference."
            (edit-streaming-scene-cell scene cell placement)
          (when edit
            (schedule-streaming-scene-edit
-            scene production-system key (viewer-bevel-width viewer)
-            (viewer-bevel-profile viewer))
+            scene production-system key (viewer-bevel-width viewer))
            (setf (viewer-inspection viewer) nil))
          (setf (viewer-last-edit-status viewer) status)
          (values edit status))))))
@@ -743,9 +739,7 @@ before the operation boundary, or it would encode through resources which the
             (/ luft:+mesh-cell-size+ divisor))))
 
 (defun viewer-bevel-label (viewer)
-  (if (viewer-bevel-profile viewer)
-      "mixed"
-      (bevel-width-label (viewer-bevel-width viewer))))
+  (bevel-width-label (viewer-bevel-width viewer)))
 
 (defun next-bevel-width (bevel-width)
   (declare (ignore bevel-width))
@@ -861,8 +855,6 @@ before the operation boundary, or it would encode through resources which the
                       :accessor viewer-production-system)
    (bevel-width :initarg :bevel-width :initform 1
                 :accessor viewer-bevel-width)
-   (bevel-profile :initarg :bevel-profile :initform nil
-                  :accessor viewer-bevel-profile)
    (fixed-exposure :initarg :fixed-exposure :initform nil
                    :reader viewer-fixed-exposure)
    (camera :initarg :camera :initform (make-fly-camera) :reader viewer-camera)
@@ -1029,8 +1021,7 @@ before the operation boundary, or it would encode through resources which the
           (let ((position (camera-position (viewer-camera viewer))))
             (retarget-streaming-scene
              source production-system (viewer-bevel-width viewer)
-             (vec3:vec3-x position) (vec3:vec3-y position)
-             (viewer-bevel-profile viewer))))))))
+             (vec3:vec3-x position) (vec3:vec3-y position))))))))
 
 (defun render-viewer-frame (viewer timestamp)
   (when (viewer-running-p viewer)
@@ -1112,8 +1103,7 @@ before the operation boundary, or it would encode through resources which the
          (bevel-width (viewer-bevel-width viewer)))
     (declare (ignore bevel-width))
     (refresh-viewer-renderer
-     viewer :solid (viewer-source viewer) :bevel-width 1
-            :bevel-profile nil)
+     viewer :solid (viewer-source viewer) :bevel-width 1)
     (refresh-viewer-inspector viewer)))
 
 (clim:define-command (com-release-pointer :command-table luft-window
@@ -1419,7 +1409,6 @@ before the operation boundary, or it would encode through resources which the
                          (make-streaming-scene
                           (make-mountain-sanctuary-scene) :frames-per-load 1))
                        (bevel-width 1)
-                       bevel-profile
                        surface-mesh
                        surface-generation
                        fixed-exposure
@@ -1431,11 +1420,10 @@ before the operation boundary, or it would encode through resources which the
                        (inspector-p nil)
                        (frames-per-second 60)
                        (provider *gpu-provider*))
-  "Open the indexed-instanced LUFT renderer as a McCLIM atelier.
+  "Open the fixed-star LUFT renderer as a McCLIM atelier.
 
-BEVEL-PROFILE enables one compiled material-selected site policy in static and
-streaming scenes. BEVEL-WIDTH remains the camera/inspection reference and the
-uniform fallback. SURFACE-MESH supplies an already constructed diagnostic mesh
+BEVEL-WIDTH remains a compatibility input for inspection. SURFACE-MESH
+supplies an already constructed diagnostic mesh
 while retaining SOLID as the semantic inspection source. SURFACE-GENERATION,
 when supplied with that mesh, preserves its exact immutable realized-light
 cohort. FIXED-EXPOSURE disables temporal adaptation for reproducible evidence."
@@ -1444,9 +1432,7 @@ cohort. FIXED-EXPOSURE disables temporal adaptation for reproducible evidence."
   (when (and surface-generation (null surface-mesh))
     (error "SURFACE-GENERATION is only meaningful with SURFACE-MESH."))
   (when surface-mesh
-    (check-type surface-mesh luft:surface-mesh)
-    (when bevel-profile
-      (error "Specify either SURFACE-MESH or BEVEL-PROFILE, not both.")))
+    (check-type surface-mesh luft:surface-mesh))
   (when surface-generation
     (check-type surface-generation scene-mesh-generation)
     (unless (eq solid (scene-mesh-generation-scene surface-generation))
@@ -1519,7 +1505,6 @@ cohort. FIXED-EXPOSURE disables temporal adaptation for reproducible evidence."
                                                 (scene-player-p solid)
                                                 (make-walking-player))
                                    :bevel-width bevel-width
-                                   :bevel-profile bevel-profile
                                    :fixed-exposure fixed-exposure
                                    :inspector-p inspector-p)))))
            (cond
@@ -1536,11 +1521,6 @@ cohort. FIXED-EXPOSURE disables temporal adaptation for reproducible evidence."
                       (scene-mesh-generation-light-generation
                        surface-generation))))
              ((typep solid 'streaming-scene))
-             (bevel-profile
-              (multiple-value-bind (meshes generation)
-                  (make-material-bevel-meshes solid bevel-profile)
-                (renderer-set-meshes
-                 renderer* meshes :scene-generation generation)))
              (t
               (multiple-value-bind (mesh generation)
                   (make-render-mesh solid :bevel-width bevel-width)
@@ -2217,11 +2197,8 @@ it makes no claim about which earlier render pass caused a discontinuity."
                                 &key (solid (make-mountain-sanctuary-scene))
                                      (bevel-width
                                        (and viewer
-                                            (viewer-bevel-width viewer)))
-                                     (bevel-profile
-                                       (and viewer
-                                            (viewer-bevel-profile viewer))))
-  "Rebuild VIEWER at BEVEL-WIDTH or its material BEVEL-PROFILE."
+                                            (viewer-bevel-width viewer))))
+  "Rebuild VIEWER's fixed-star renderer."
   (when viewer
     (luv::call-on-sdl-canvas-thread
      (viewer-canvas viewer)
@@ -2258,11 +2235,6 @@ it makes no claim about which earlier render pass caused a discontinuity."
                        (setf production-system
                              (production:make-single-worker-production-system
                               :name "LUFT mesh producer")))
-                      (bevel-profile
-                       (multiple-value-bind (meshes generation)
-                           (make-material-bevel-meshes solid bevel-profile)
-                         (renderer-set-meshes
-                          renderer meshes :scene-generation generation)))
                       (t
                        (multiple-value-bind (mesh generation)
                            (make-render-mesh solid :bevel-width bevel-width)
@@ -2278,7 +2250,6 @@ it makes no claim about which earlier render pass caused a discontinuity."
                                (or (viewer-player viewer)
                                    (make-walking-player)))
                           (viewer-bevel-width viewer) bevel-width
-                          (viewer-bevel-profile viewer) bevel-profile
                           (viewer-inspection viewer) nil
                           candidate-renderer nil)
                     (note-viewer-renderer-replacement
