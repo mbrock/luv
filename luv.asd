@@ -415,6 +415,7 @@ offsets and of headers."
                              (:file "mirror")
                              (:file "gpu")
                              (:file "command-menu")
+                             (:file "source-update")
                              (:file "metabar")
                              (:file "application-status-bar")
                              (:file "widget-lab")
@@ -429,6 +430,7 @@ offsets and of headers."
   :serial t
   :components ((:file "mcclim/tests")
                (:file "mcclim/command-menu-tests")
+               (:file "mcclim/source-update-tests")
                (:file "mcclim/metabar-tests")
                (:file "mcclim/status-bar-tests"))
   :perform (test-op (operation component)

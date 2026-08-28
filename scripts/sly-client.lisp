@@ -2238,13 +2238,10 @@ shows them.~%" failure-count))))))
        (unless arguments
          (error "load requires at least one system name"))
        (ensure-server)
-       ;; The frame loop is held while the world is redefined: a class
-       ;; whose reader is called mid-redefinition kills the frame that
-       ;; called it, and a redefinition is nothing a frame should run
-       ;; through.  The fence after it says whether the next frame lived.
+       ;; The shared image-side operation serializes live loads, holds every
+       ;; frame while the world is redefined, and fences the next frame.
        (evaluate
-        (format nil "(luv:with-canvas-frames-held () ~{(asdf:load-system ~S)~^ ~})"
-                arguments)
+        (format nil "(luv:load-systems-live '~S)" arguments)
         "CL-USER"))
       ((string= command "failures")
        (when arguments

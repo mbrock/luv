@@ -921,6 +921,28 @@ the next frame made of the change."
             (cons canvas (fence-canvas canvas :frames frames :timeout timeout)))
           (open-canvases)))
 
+(defvar *live-system-load-lock*
+  (sb-thread:make-mutex :name "live ASDF system load"))
+
+(defun load-systems-live (systems &key (frames 1) (timeout 5.0))
+  "Load ASDF SYSTEMS while open canvases cannot observe partial redefinition.
+
+Live loads are serialized image-wide.  Return an alist from each canvas held
+for the operation to its first post-load fence outcome.  ASDF errors propagate
+after the unwind-protected frame hold has been released."
+  (let ((systems (if (listp systems) systems (list systems))))
+    (sb-thread:with-mutex (*live-system-load-lock*)
+      (let ((canvases (open-canvases)))
+        (call-with-canvas-frames-held
+         (lambda ()
+           (dolist (system systems)
+             (asdf:load-system system)))
+         canvases)
+        (mapcar (lambda (canvas)
+                  (cons canvas
+                        (fence-canvas canvas :frames frames :timeout timeout)))
+                canvases)))))
+
 (defun sdl-canvas-window-event-p (canvas event)
   (= (sdl3:%window-id event)
      (sdl3:get-window-id (sdl-canvas-window canvas))))

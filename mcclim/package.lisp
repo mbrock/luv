@@ -75,6 +75,29 @@
            #:execute-command-menu-command
            #:make-embedded-command-menu
            #:destroy-command-menu
+           ;; Shared reviewed Git fast-forward and live ASDF load panel.
+           #:source-update
+           #:source-update-snapshot
+           #:source-update-snapshot-state
+           #:source-update-snapshot-heading
+           #:source-update-snapshot-lines
+           #:source-update-snapshot-footer
+           #:source-update-frame-session
+           #:make-source-update-session
+           #:current-source-update-snapshot
+           #:request-source-update-fetch
+           #:request-source-update-apply
+           #:source-update-busy-p
+           #:wait-source-update-session
+           #:refresh-source-update
+           #:prepare-source-update
+           #:source-update-mirror
+           #:source-update-screen-state
+           #:source-update-local-coordinate
+           #:handle-source-update-key-event
+           #:handle-source-update-pointer-press
+           #:make-embedded-source-update
+           #:destroy-source-update
            ;; Shared retained-GPU metabar instrument and its open semantic
            ;; application protocol.
            #:metabar

@@ -703,6 +703,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))))
            #:with-canvas-frames-held
            #:fence-canvas
            #:fence-canvases
+           #:load-systems-live
            #:*canvas-events-held-p*
            #:*canvas-event-wait-slice*
            #:*canvas-watchdog-interval*

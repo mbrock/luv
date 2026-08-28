@@ -92,6 +92,7 @@
                (:file "luft/render/instruments")
                (:file "luft/render/tracy-capture")
                (:file "luft/render/command-menu")
+               (:file "luft/render/source-update")
                (:file "luft/render/metabar")
                (:file "luft/render/lobby")
                (:file "luft/render/status-bar")
