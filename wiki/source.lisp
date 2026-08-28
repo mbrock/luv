@@ -231,34 +231,14 @@ files beside it on wide screens."
                 (:a :href (concatenate 'string (site-source-url *site*) title)
                     (file-namestring (source-file-pathname file))))))))
 
-(defvar *file-cards* nil
-  "While the source index renders: files whose definitions get a card.")
-
-(defun file-card-id (file)
-  (format nil "file-~A" (substitute-if #\- (lambda (c) (member c '(#\/ #\.)))
-                                       (source-file-relative-path file))))
-
 (defun render-file-entry (file)
-  "A file's relative path linking to its page, the file name emphasized,
-and a count button that shows the definitions in a popover."
-  (progn
-    (push file *file-cards*)
-    (spinneret:with-html
-      (:span.file-entry
-       (:a.path :href (source-page-name file)
-                (render-file-path (source-file-relative-path file)))
-       (:button.count :type "button" :data-card (file-card-id file)
-                      :title "definitions"
-                      (format nil "~D" (length (source-file-definitions file))))))))
-
-(defun render-file-cards ()
-  "Hidden cards holding each listed file's definitions, for the popover."
+  "A file's relative path and definition count, both linking to its page."
   (spinneret:with-html
-    (:div.figure-cards :hidden t
-      (dolist (file (reverse *file-cards*))
-        (:div.figure-card.file-card :id (file-card-id file)
-          (:a.card-title :href (source-page-name file) (source-file-relative-path file))
-          (render-source-toc file :prefix (source-page-name file)))))))
+    (:span.file-entry
+     (:a.path :href (source-page-name file)
+              (render-file-path (source-file-relative-path file)))
+     (:a.count :href (source-page-name file) :title "definitions"
+               (format nil "~D" (length (source-file-definitions file)))))))
 
 (defun graph-systems (site)
   "The systems worth drawing: not test systems and not the aggregate root
@@ -358,59 +338,88 @@ fundamentals at the top."
                         (> (cdr a) (cdr b)))))))
       (subseq ranked 0 (min limit (length ranked))))))
 
-(defun render-recent-activity (site)
+(defun render-commit-row (commit)
+  "One compact commit disclosure whose body is its changed paths."
+  (multiple-value-bind (additions deletions) (commit-totals commit)
+    (spinneret:with-html
+      (:li.commit
+       (:details.commit-files
+        (:summary
+         (:span.commit-heading
+          (:span.commit-subject (repository-commit-subject commit)))
+         (:span.commit-meta
+          (:time :datetime (repository-commit-date commit)
+                 (subseq (repository-commit-date commit) 11 16))
+          " · " (repository-commit-author commit)
+          (:span.commit-diffstat
+           (format nil " · +~D −~D · ~D"
+                   additions deletions
+                   (length (repository-commit-changes commit))))
+          " · "
+          (:a.commit-id :href (commit-github-url commit)
+                        (repository-commit-short-id commit))))
+        (:ul
+         (dolist (change (repository-commit-changes commit))
+           (:li (render-change-path change)
+                (when (commit-change-additions change)
+                  (:span.change-stat
+                   (format nil "+~D −~D"
+                           (commit-change-additions change)
+                           (commit-change-deletions change))))))))))))
+
+(defun render-commit-feed (commits)
+  "COMMITS grouped by day, newest first."
+  (spinneret:with-html
+    (:ol.commit-feed
+     (loop with previous-date = nil
+           for commit in commits
+           for date = (subseq (repository-commit-date commit) 0 10)
+           do (unless (equal date previous-date)
+                (:li.activity-day (:time :datetime date date))
+                (setf previous-date date))
+              (render-commit-row commit)))))
+
+(defun render-recent-activity (site &key limit hot-paths-p all-link-p)
   "Recent repository work, with local links where the wiki can browse a path."
-  (let ((commits (site-commits site)))
+  (let* ((all-commits (site-commits site))
+         (commits (if limit
+                      (subseq all-commits 0 (min limit (length all-commits)))
+                      all-commits)))
     (when commits
       (spinneret:with-html
         (:div.activity :id "activity"
          (:p.activity-range
-          (format nil "~D changes · ~A–~A"
-                  (length commits)
-                  (subseq (repository-commit-date (car (last commits))) 0 10)
-                  (subseq (repository-commit-date (first commits)) 0 10)))
-         (:div.hot-paths
-          (:span.hot-label "Most touched")
-          (:ol
-           (dolist (entry (hot-commit-paths commits))
-             (let ((change (make-instance 'commit-change :path (car entry)
-                                          :additions nil :deletions nil)))
-               (:li (render-change-path change)
-                    (:span (format nil "~D×" (cdr entry))))))))
-         (:ol.commit-feed
-          (loop with previous-date = nil
-                for commit in commits
-                for date = (subseq (repository-commit-date commit) 0 10)
-                do (unless (equal date previous-date)
-                     (:li.activity-day (:time :datetime date date))
-                     (setf previous-date date))
-                   (multiple-value-bind (additions deletions) (commit-totals commit)
-                     (:li.commit
-                      (:details.commit-files
-                       (:summary
-                        (:span.commit-heading
-                         (:a.commit-subject
-                          :href (concatenate 'string *page-prefix* (commit-page-name commit))
-                          (repository-commit-subject commit)))
-                        (:span.commit-meta
-                         (:time :datetime (repository-commit-date commit)
-                                (subseq (repository-commit-date commit) 11 16))
-                         " · " (repository-commit-author commit)
-                         (:span.commit-diffstat
-                          (format nil " · +~D −~D · ~D"
-                                  additions deletions
-                                  (length (repository-commit-changes commit))))
-                         " · "
-                         (:a.commit-id :href (commit-github-url commit)
-                                       (repository-commit-short-id commit)))
-                       (:ul
-                        (dolist (change (repository-commit-changes commit))
-                          (:li (render-change-path change)
-                               (when (commit-change-additions change)
-                                 (:span.change-stat
-                                  (format nil "+~D −~D"
-                                          (commit-change-additions change)
-                                          (commit-change-deletions change))))))))))))))))))
+          (if (< (length commits) (length all-commits))
+              (format nil "~D recent · ~D total" (length commits) (length all-commits))
+              (format nil "~D changes · ~A–~A"
+                      (length commits)
+                      (subseq (repository-commit-date (car (last commits))) 0 10)
+                      (subseq (repository-commit-date (first commits)) 0 10))))
+         (when hot-paths-p
+           (:div.hot-paths
+            (:span.hot-label "Most touched")
+            (:ol
+             (dolist (entry (hot-commit-paths commits))
+               (let ((change (make-instance 'commit-change :path (car entry)
+                                            :additions nil :deletions nil)))
+                 (:li (render-change-path change)
+                      (:span (format nil "~D×" (cdr entry)))))))))
+         (render-commit-feed commits)
+         (when all-link-p
+           (:a.activity-more :href "activity.html"
+                             (format nil "All ~D changes →" (length all-commits)))))))))
+
+(defun render-activity-index (site)
+  "Emit activity.html: the complete recent history available to this checkout."
+  (let ((*page-prefix* "")
+        (*page-kind* "source")
+        (*rendering-document* nil))
+    (render-page-frame
+     "Activity"
+     (lambda ()
+       (render-recent-activity site :hot-paths-p t))
+     :body-class "wide activity-page"
+     :crumbs (list (cons "Source" "source.html") (cons "Activity" nil)))))
 
 (defun render-commit-page (commit site)
   "A commit's metadata everywhere, and its patch when rendered by live Clack."
@@ -484,27 +493,33 @@ fundamentals at the top."
   "Emit source.html: recent work and the browsed ASDF systems."
   (let ((*page-prefix* "")
         (*page-kind* "source")
-        (*rendering-document* nil)
-        (*file-cards* '()))
+        (*rendering-document* nil))
     (render-page-frame
      "Source"
      (lambda ()
        (spinneret:with-html
-         (render-recent-activity site)
-         (:div.source-catalogue :id "catalogue"
-          (:p.catalogue-summary
-           (format nil "~D files · ~D systems · prerequisites first"
-                   (length (site-source-files site)) (length (site-systems site))))
-          (:p.scope-note "Common Lisp components registered under the luv, luvcraft,
+         (:nav.source-modes :aria-label "Source views"
+          (:a.selected :href "#catalogue"
+                       (format nil "~D files" (length (site-source-files site))))
+          (:a :href "activity.html"
+              (format nil "~D changes" (length (site-commits site))))
+          (:a :href "#dependency-diagnostic" "Dependencies"))
+         (:div.source-workspace
+          (:section.source-catalogue :id "catalogue"
+           (:p.catalogue-summary
+            (format nil "~D files · ~D systems · prerequisites first"
+                    (length (site-source-files site)) (length (site-systems site))))
+           (:p.scope-note "Common Lisp components registered under the luv, luvcraft,
 mcluv, luft, luv-wiki, and luv-wiki-site families. Test systems appear beside the rest;
 scripts, Nix/deployment files, assets, native sources, and other systems do not.")
-          (:div.system-cards
-           (dolist (entry (site-systems site))
-             (render-system-card entry site))))
-         (:details.dependency-diagnostic
-          (:summary "Dependency diagnostic")
-          (:p.graph-note "Essential ASDF edges only. Test systems and the aggregate luv root
+           (:div.system-cards
+            (dolist (entry (site-systems site))
+              (render-system-card entry site)))
+           (:details.dependency-diagnostic :id "dependency-diagnostic"
+            (:summary "Dependency diagnostic")
+            (:p.graph-note "Essential ASDF edges only. Test systems and the aggregate luv root
 are omitted; labels drop the luv/ prefix.")
-          (render-system-graph site))
-         (render-file-cards)))
+            (render-system-graph site)))
+          (:aside.activity-rail :aria-label "Recent activity"
+           (render-recent-activity site :limit 10 :all-link-p t)))))
      :body-class "wide source-index")))

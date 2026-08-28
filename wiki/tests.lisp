@@ -128,6 +128,8 @@ Nothing here refers to anything.
          (html (wiki:render-document-string doc site)))
     (true (search "<title>A test page</title>" html))
     (true (search "<a class=\"door selected\" href=index.html><span class=door-title>Design</span>" html))
+    (true (search "</header><div class=status>" html))
+    (true (search "</main><footer class=site-footer>" html))
     (true (search "<section class=figure id=XYZ123>" html))
     (true (search "<section class=\"figure work-mark\" id=UVW456>" html))
     (true (search "<span class=\"mark mark-next\">NEXT</span>" html))
@@ -144,6 +146,22 @@ Nothing here refers to anything.
     (true (search "Mentioned in: <a href=#UVW456>A work mark</a>" html))
     (true (search "mention <a class=mention href=#XYZ123 title=\"First figure\">#XYZ123</a> with" html))
     (true (search "<h3><span class=\"mark mark-next\">" html))))
+
+(define-test commit-disclosure-separates-summary-and-body
+  (let* ((change (make-instance 'wiki::commit-change
+                                :path "wiki/source.lisp" :additions 4 :deletions 2))
+         (commit (make-instance 'wiki::repository-commit
+                                :id "abcdef0123456789" :short-id "abcdef0"
+                                :date "2026-08-28T12:34:56Z" :author "Amp"
+                                :subject "Repair disclosure" :changes (list change)))
+         (site (wiki:make-site '() :commits (list commit)))
+         (html (let ((wiki:*site* site)
+                     (wiki::*page-prefix* ""))
+                 (wiki::html-resource-string
+                  (lambda () (wiki::render-recent-activity site))))))
+    (true (search "<details class=commit-files><summary>" html))
+    (true (search "</summary><ul>" html))
+    (true (search "<span class=commit-subject>Repair disclosure</span>" html))))
 
 (define-test git-history-output-is-a-commit-model
   (let* ((record-separator (code-char 30))

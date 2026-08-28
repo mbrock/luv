@@ -76,7 +76,8 @@ Redefining NAME replaces its provider without disturbing provider order."
        #'luv.css:stylesheet-text))
      (when (site-source-files site)
        (append
-        (list (html "/source.html" "source.html" (lambda () (render-source-index site))))
+        (list (html "/source.html" "source.html" (lambda () (render-source-index site)))
+              (html "/activity.html" "activity.html" (lambda () (render-activity-index site))))
         (loop for file in (site-source-files site)
               for output = (source-page-name file)
               collect (let ((file file))

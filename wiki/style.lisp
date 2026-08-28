@@ -842,7 +842,7 @@ table: each pair a subgrid row of its two-column box."
    :overflow-wrap anywhere))
 
 (define-style systems-table
-  "Systems table: file entries and their popover buttons; the systems graph."
+  "Systems table: file entries and their definition counts; the systems graph."
   (".file-entry"
    :display flex
    :align-items baseline
@@ -850,15 +850,14 @@ table: each pair a subgrid row of its two-column box."
    :line-height 1.5
    (".directory" :color --muted)
    (".file" :color --accent :font-weight 600))
-  ("button.count"
+  (".file-entry .count"
    :font (display-font 600 0.72rem/1.4)
    :color --muted
    :background none
    :border (hairline)
    :border-radius 999px
    :padding 0 0.5em
-   :cursor pointer
-   ("&:hover" :border-color --accent :color --accent))
+   ("&:hover" :border-color --accent :color --accent :text-decoration none))
   (".figure-popover nav.definitions"
    :margin 0
    :padding 0.5rem 0.85rem 0.7rem
@@ -876,14 +875,35 @@ table: each pair a subgrid row of its two-column box."
 
 (define-style source-activity
   "Recent commits, system cards, and live commit patches."
+  (".source-modes"
+   :display flex
+   :gap 1rem
+   :margin 0 0 1rem
+   :font-size 0.82rem
+   :font-weight 650
+   ("a" :color --muted)
+   ("a.selected" :color --ink))
+  (".source-workspace"
+   :display grid
+   :grid-template-columns (minmax 0 1fr) (minmax 19rem 26rem)
+   :gap (clamp 1.5rem 3vw 3rem)
+   :align-items start)
+  (".activity-rail"
+   :position sticky
+   :top 2.6rem
+   :max-height (calc (list 100vh (quote -) 3.5rem))
+   :overflow-y auto
+   :scrollbar-width thin)
   (".activity"
    :margin 0 0 2rem
    :scroll-margin-top 3rem)
   (".source-catalogue"
-   :margin 2.2rem 0 1rem
-   :padding-top 1.2rem
-   :border-top (hairline)
+   :min-width 0
+   :margin 0 0 1rem
    :scroll-margin-top 3rem)
+  ("body.activity-page main"
+   :max-width 84rem
+   :margin 0 auto)
   (("p.activity-range" "p.catalogue-summary")
    :margin 0 0 0.7rem
    :color (color-mix --ink 65% --muted)
@@ -893,8 +913,7 @@ table: each pair a subgrid row of its two-column box."
    :grid-template-columns max-content (minmax 0 1fr)
    :gap 0.4rem 1rem
    :margin 0 0 1rem
-   :padding-bottom 0.8rem
-   :border-bottom (hairline)
+   :padding-bottom 0.4rem
    (".hot-label" :color (color-mix --ink 65% --muted)
                  :font-size 0.78rem :font-weight 650)
    ("ol" :display grid :grid-template-columns (repeat 'auto-fit (minmax 14rem 1fr))
@@ -904,44 +923,51 @@ table: each pair a subgrid row of its two-column box."
    ("li a" :display block :max-width 100% :overflow-wrap anywhere)
    ("li span" :color --muted :white-space nowrap))
   ("ol.commit-feed"
+   :display grid
+   :gap 0.12rem
    :margin 0
    :padding 0
    :list-style none)
   ("li.activity-day"
-   :margin 0.9rem 0 0.15rem
-   :padding-bottom 0.2rem
-   :border-bottom (hairline)
+   :margin 0.75rem 0 0.1rem
    :color (color-mix --ink 65% --muted)
    :font-size 0.75rem
    :font-weight 650)
   ("li.commit"
-   :margin 0
-   :border-bottom (hairline))
+   :margin 0)
   (".commit-heading"
    :display block)
   (".commit-subject" :color --ink :font-weight 650 :overflow-wrap anywhere)
   (".commit-id" :font (display-font 600 0.76rem/1.4) :white-space nowrap)
   (".commit-meta"
-   :display block
-   :margin 0.1rem 0 0
    :color --muted
    :font-size 0.8rem)
   ("details.commit-files"
    :font-size 0.8rem
    ("& > summary"
     :position relative
-    :padding 0.45rem 0 0.45rem 1rem
+    :display grid
+    :grid-template-columns (minmax 0 1fr) max-content
+    :align-items baseline
+    :gap 0.75rem
+    :padding 0.3rem 0 0.3rem 1rem
     :cursor pointer
     :list-style none
     ("&::-webkit-details-marker" :display none)
-    ("&::before" :content (quoted "›") :position absolute :left 0 :top 0.3rem
+    ("&::before" :content (quoted "›") :position absolute :left 0 :top 0.15rem
                   :color --accent :font-size 1.15rem :font-weight 700))
    ("&[open] > summary::before" :transform (rotate 90deg))
-   ("ul" :margin 0 0 0.5rem 1rem :padding 0 0 0 0.7rem
-         :border-left (hairline) :list-style none)
+   ("ul" :margin 0 0 0.45rem 1rem :padding 0 :list-style none)
    ("li" :display flex :justify-content space-between :gap 1rem
          :padding 0.1rem 0 :font-family --display-font)
    ("li > :first-child" :min-width 0 :overflow-wrap anywhere))
+  (".activity-rail details.commit-files > summary"
+   :grid-template-columns (minmax 0 1fr))
+  (".activity-more"
+   :display inline-block
+   :margin-top 0.65rem
+   :font-size 0.82rem
+   :font-weight 650)
   (".change-stat" :color --muted :white-space nowrap)
   (".scope-note"
    :max-width 68rem
@@ -963,7 +989,8 @@ table: each pair a subgrid row of its two-column box."
    ("h3" :margin 0 :font-size 1rem :overflow-wrap anywhere))
   ((".system-description" ".system-relations")
    :margin 0.4rem 0
-   :font-size 0.84rem)
+   :font-size 0.84rem
+   :text-align start)
   (".system-relations" :color --muted)
   ("details.system-file-list"
    :margin-top 0.55rem
@@ -1012,8 +1039,13 @@ table: each pair a subgrid row of its two-column box."
    (".commit-diffstat" :display none)
    (".commit-heading" :display block)
    (".commit-id" :display inline-block :margin-top 0.2rem)
+   (".activity-rail" :display none)
    (("details.commit-files li" ".commit-page-files li") :display block)
    (".change-stat" :display block :margin-top 0.1rem))
+  (:media "screen and (max-width: 72rem)"
+   (".source-workspace" :grid-template-columns (minmax 0 1fr))
+   (".activity-rail" :position static :max-height none :overflow visible)
+   ("details.commit-files > summary" :grid-template-columns (minmax 0 1fr)))
   (:media "screen and (max-width: 90ch)"
    (".mobile-source-nav" :display block)))
 

@@ -462,7 +462,7 @@ the last one the current page, its href ignored."
                    (:span.crumb.current :aria-current "page" (car crumb)))))))
 
 (defun render-page-frame (title body &key body-class (kind *page-kind*)
-                                          (crumbs (list (cons title nil))) (right kind))
+                                          (crumbs (list (cons title nil))) right)
   "Emit a whole HTML page with the site chrome around the output of BODY:
 the library band with the site's three doors, a status bar with the page's
 breadcrumb trail on the left and RIGHT (a string, or a function emitting
@@ -504,21 +504,22 @@ markup) on the right, the main column, and a footer."
            (dolist (resource (website-navigation *site*))
              (:a :class (if (equal kind (resource-kind resource)) "door selected" "door")
                  :href (resource-path resource)
-                 (:span.door-title (resource-label resource)))))
+                 (:span.door-title (resource-label resource))))))
          (:div.status
           (:span.status-left (render-crumbs crumbs))
-          (:span.status-right
-           (cond (*rendering-document*
-                  (:a :href (concatenate 'string (site-source-url *site*) "wiki/"
-                                         (document-name *rendering-document*) ".org")
-                      (concatenate 'string (document-name *rendering-document*) ".org")))
-                 ((functionp right) (funcall right))
-                 (t right)))
+          (when (or *rendering-document* right)
+            (:span.status-right
+             (cond (*rendering-document*
+                    (:a :href (concatenate 'string (site-source-url *site*) "wiki/"
+                                           (document-name *rendering-document*) ".org")
+                        (concatenate 'string (document-name *rendering-document*) ".org")))
+                   ((functionp right) (funcall right))
+                   (t right))))
           (when *dynamic-server-p* (render-deployment-button)))
          (:main (funcall body))
          (:footer.site-footer
           "Rendered from Org and Lisp by luv.wiki.")
-         (when *dynamic-server-p* (render-deployment-dialog))))))))
+         (when *dynamic-server-p* (render-deployment-dialog)))))))
 
 (defvar *page-definition-cards* nil
   "While a page renders: a hash table from DEFINITION to its card id, filled
