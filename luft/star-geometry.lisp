@@ -238,6 +238,41 @@ the full cube group; COMPLEMENT also identifies occupied and empty cells."
     (%transformed-stars star (%star-orbit-transformations reflections))
     complement)))
 
+(defun star-canonical-form (star &key reflections)
+  "Return STAR's canonical representative and the transformation onto STAR.
+
+The representative is the smallest occupancy mask in STAR's orbit, so equal
+representatives identify equivalent stars.  The second value is a signed-axis
+transformation carrying the representative back onto STAR:
+
+  (TRANSFORM-STAR transformation representative) = STAR
+
+By default only proper rotations act; REFLECTIONS canonicalizes under the
+full cube group.  Among the transformations reaching the representative the
+first proper rotation wins, so the answer is deterministic and a reversing
+transformation appears only when STAR is a reflected chiral form."
+  (%check-star star)
+  (values-list
+   (svref (svref *star-canonical-forms* (if reflections 1 0)) star)))
+
+(defun %star-canonical-form (star reflections)
+  (loop with representative = nil
+        with witness = nil
+        for transformation in (%star-orbit-transformations reflections)
+        for image = (transform-star transformation star)
+        when (or (null representative) (< image representative))
+          do (setf representative image
+                   witness transformation)
+        finally
+           (return
+             (list representative
+                   (%inverse-star-transformation witness)))))
+
+(defun %star-canonical-form-table (reflections)
+  (let ((table (make-array 256)))
+    (dotimes (star 256 table)
+      (setf (svref table star) (%star-canonical-form star reflections)))))
+
 (defun %transform-star-sample (transformation sample)
   (%star-direction-index
    (%transform-star-point transformation (%star-sample-direction sample))))
@@ -413,3 +448,10 @@ the full cube group; COMPLEMENT also identifies occupied and empty cells."
     (list (- (aref words word) +mesh-template-coordinate-bias+)
           (- (aref words (+ word 1)) +mesh-template-coordinate-bias+)
           (- (aref words (+ word 2)) +mesh-template-coordinate-bias+))))
+
+;;; Built once at load time, after every operation above is available.
+
+(defparameter *star-canonical-forms*
+  (vector (%star-canonical-form-table nil)
+          (%star-canonical-form-table t))
+  "Canonical forms of all 256 stars, without and then with reflections.")

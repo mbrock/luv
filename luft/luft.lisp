@@ -48,7 +48,7 @@
    #:star-band-triangles #:star-junction-triangles
    #:star-local-surface-triangles
    #:star-rotations #:star-reflections #:transform-star
-   #:transform-star-triangles #:star-orbit
+   #:transform-star-triangles #:star-orbit #:star-canonical-form
    ;; Face topology.
    #:local-edge #:local-corner
    #:face-tangent-axes #:face-oriented-normal #:orient-face-outward

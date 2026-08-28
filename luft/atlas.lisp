@@ -1,14 +1,14 @@
 (in-package #:luft.atlas)
 
-(defun star-rotation-classes ()
-  "Partition all stars into proper-rotation orbits, paired by complement."
-  (%complement-paired-classes (%all-star-rotation-classes)))
+(defun star-symmetry-classes ()
+  "Partition all stars into full-symmetry orbits, paired by complement."
+  (%complement-paired-classes (%all-star-symmetry-classes)))
 
-(defun %all-star-rotation-classes ()
+(defun %all-star-symmetry-classes ()
   (sort
    (loop with unseen = (loop for mask below 256 collect mask)
          while unseen
-         for class = (luft:star-orbit (first unseen))
+         for class = (luft:star-orbit (first unseen) :reflections t)
          do (setf unseen (set-difference unseen class))
          collect class)
    #'<
@@ -18,16 +18,17 @@
   (loop with remaining = classes
         while remaining
         for class = (first remaining)
-        for complement = (%complementary-rotation-class class remaining)
+        for complement = (%complementary-symmetry-class class remaining)
         do (setf remaining
                  (remove complement (rest remaining) :test #'eq))
         append (if (eq class complement)
                    (list class)
                    (list class complement))))
 
-(defun %complementary-rotation-class (class classes)
+(defun %complementary-symmetry-class (class classes)
   (let ((representative
-          (first (luft:star-orbit (logxor #xff (first class))))))
+          (luft:star-canonical-form (logxor #xff (first class))
+                                    :reflections t)))
     (find representative classes :key #'first)))
 
 (defun render-occupancy-layer (samples label)
@@ -50,7 +51,7 @@
     (spinneret:with-html
       (:article.star-family :data-representative representative
                             :aria-label
-                            (format nil "Rotation family #x~2,'0X"
+                            (format nil "Symmetry family #x~2,'0X"
                                     representative)
         (:button.star-choice.star-card :type "button"
                                        :data-mask representative
@@ -63,7 +64,7 @@
           (:span.card-caption
             (:span.card-mask (format nil "#x~2,'0X" representative))
             (:span.card-orbit
-              (format nil "~D rotation~:P" (length class)))))
+              (format nil "~D orientation~:P" (length class)))))
         (:details.family-orbit
           (:summary "Choose orientation")
           (:div.family-members
@@ -82,7 +83,7 @@
        (spinneret:with-html
         (:h1 "The stars, by symmetry")
         (:p.lede
-          "The 256 arrangements of eight cells become 23 families under proper cubical rotation. Each family shows the complete local surface; choose an orientation to see which triangles that lattice point actually owns.")
+          "The 256 arrangements of eight cells become 22 families under the full cubical symmetry group, reflections included. Each family shows the complete local surface; choose an orientation to see which triangles that lattice point actually owns.")
         (:div#luft-star-atlas.atlas-layout
           (:section.detail :aria-label "Selected star"
             (:div.detail-heading
@@ -123,11 +124,11 @@
               (:div.stepper
                 (:button#previous-star :type "button" "Previous")
                 (:button#next-star :type "button" "Next"))))
-          (:section.atlas-grid :aria-label "23 proper-rotation families"
-            (dolist (class (star-rotation-classes))
+          (:section.atlas-grid :aria-label "22 symmetry families"
+            (dolist (class (star-symmetry-classes))
               (render-star-family class))))
         (:p.atlas-note
-          "Drag the large view to orbit; scroll over it to approach. Family meshes are the rotational ownership closure from "
+          "Drag the large view to orbit; scroll over it to approach. Family meshes are the symmetry ownership closure from "
           (:code "LUFT:STAR-LOCAL-SURFACE-TRIANGLES")
           "; orientation buttons reveal the corresponding production packet from "
           (:code "LUFT:STAR-TRIANGLES") ".")
@@ -147,7 +148,7 @@
         (luv.wiki::call-with-html-output
          stream (lambda () (render-star-atlas site)))))
     :label "Stars"
-    :description "23 rotation families of 256 stars"
+    :description "22 symmetry families of 256 stars"
     :kind "atlas")
    (luv.wiki:make-generated-resource
     "/luft-star-atlas.js" "luft-star-atlas.js"

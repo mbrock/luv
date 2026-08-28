@@ -246,11 +246,12 @@ the warm aggregate from 11.556 to 6.445 ms/chunk at the same 2.110 MiB and
 
 [[file:luft-star-atlas.html][The symmetry atlas]] is a built-in wiki view, like Work.  It evaluates
 [[lisp:luft:star-triangles]] while the site is built, then presents those actual
-face, band, and junction triangles through the 23 proper-rotation families.
+face, band, and junction triangles through the 22 full-symmetry families.
 Each family gets one isometric canvas and an expandable list of its orientations,
 so every one of the 256 production rows remains directly selectable without
 becoming 256 competing pictures.  Complementary families sit together;
-reflections remain separate so the =1b=/=1d= chiral pair stays visible.
+reflections fold the =1b=/=1d= chiral pair into one family, so the grid
+shows only genuinely different configurations (#XQBDOT names them).
 
 The wiki owns the page frame and stylesheet, Spinneret writes the special body,
 and ParenScript writes the browser interaction; there is no second mesher,
@@ -275,9 +276,9 @@ The plain lists of [[lisp:luft:star-triangles]] also make the symmetry question
 small enough to ask directly.  A signed axis transformation is just a 3×3
 list matrix acting on the same three-integer point lists.  The executable
 vocabulary now supplies [[lisp:luft:star-rotations]],
-[[lisp:luft:star-reflections]], [[lisp:luft:transform-star]], and
-[[lisp:luft:star-orbit]] rather than importing the transformation table from
-the Blender oracle.
+[[lisp:luft:star-reflections]], [[lisp:luft:transform-star]],
+[[lisp:luft:star-orbit]], and [[lisp:luft:star-canonical-form]] rather than
+importing the transformation table from the Blender oracle.
 
 The 256 occupancy masks form 23 classes under the 24 proper rotations.  The
 two classes represented by =1b= and =1d= are a chiral pair, so admitting the
@@ -294,6 +295,52 @@ remain explicit.  For example, =06= is fixed by swapping X and Y while its
 owned band is not.  The ownership pieces must be placed before asking about
 complete-mesh symmetry; one CSR row must not masquerade as the complete
 geometry of its vertex star.
+
+* DONE Any star names its family and the move that got it there
+:PROPERTIES:
+:ID: XQBDOT
+:END:
+
+[[lisp:luft:star-canonical-form]] closes the symmetry vocabulary of #0EEQM7
+into a lookup: any of the 256 occupancy masks returns its class
+representative — the smallest mask in its orbit — together with a signed-axis
+transformation carrying that representative back onto the queried star.  A
+256-entry table built at load time answers both questions at once; ties
+prefer proper rotations, so the witness reverses orientation only for the
+reflected chiral forms, and =(transform-star transformation representative)=
+is the star again, executably.
+
+Without reflections there are 23 representatives; under the full cube group,
+22.  The atlas of #APG013 now keys its family grid on the latter, so a star
+seen in the world can be taken straight to its family card and the exhibited
+geometry read back through the returned transformation — remembering the
+caveat of #0EEQM7 that a transformation moves query-row ownership between
+neighbors even as it fixes the family.
+
+* The junction boundary lives on a sphere around its site
+:PROPERTIES:
+:ID: SAMH68
+:END:
+
+Every vertex a width-one junction can border is an offset point at distance
+$\sqrt2\,m$ from its lattice point: face-patch corners are $(m,m,0)$-type
+offsets and band short-edge endpoints $(0,m,m)$-type, all with squared
+distance $2m^2$.  The whole boundary cycle of any junction therefore lies on
+one sphere centered on the site, and the site satisfies every isosceles
+perpendicular-bisector constraint a fan apex must obey — each band's short
+edge taken as a triangle base, coplanar width-two subdivisions merged first.
+
+The consequence is a dichotomy.  When the boundary cycle is non-planar — the
+saddle stars such as =06=, =1b=, =1d=, =1e= — the bisector planes meet in one
+point, and since the site always qualifies, that forced apex /is/ the lattice
+point.  When the cycle is planar — the long concave crease of =3f=, the
+convex corner cap — the constraints leave a whole perpendicular line, the
+in-plane circumcenter is off-lattice at half-tick coordinates, and no
+interior vertex is needed at all: any triangulation of the planar polygon is
+the same surface, and the corner cap is exactly the merged three-tile
+isosceles fan.  Apexes are forced only where they are integers, so the packed
+integer tick grid of #IQC0Y4 never limits junction correctness — an
+off-lattice circumcenter fan buys triangulation symmetry, not geometry.
 
 * The contracts which optimization must not hide
 :PROPERTIES:

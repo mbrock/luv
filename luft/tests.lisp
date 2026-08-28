@@ -2700,6 +2700,38 @@
       ;; #x1b and #x1d are the one chiral pair of proper-rotation classes.
       (%check (not (member #x1d (star-orbit #x1b))))
       (%check (member #x1d (star-orbit #x1b :reflections t)))
+      ;; Canonical forms name each orbit by its smallest member and witness
+      ;; the naming with a transformation from representative to star.
+      (flet ((determinant (transformation)
+               (destructuring-bind ((a b c) (d e f) (g h i)) transformation
+                 (- (+ (* a e i) (* b f g) (* c d h))
+                    (+ (* c e g) (* b d i) (* a f h))))))
+        (let ((rotation-representatives '())
+              (full-representatives '()))
+          (dotimes (star 256)
+            (multiple-value-bind (representative transformation)
+                (star-canonical-form star)
+              (pushnew representative rotation-representatives)
+              (%check (= representative (first (star-orbit star))))
+              (%check (= star (transform-star transformation representative))))
+            (multiple-value-bind (representative transformation)
+                (star-canonical-form star :reflections t)
+              (pushnew representative full-representatives)
+              (%check (= representative
+                         (first (star-orbit star :reflections t))))
+              (%check (= star (transform-star transformation representative)))
+              ;; The witness is a proper rotation exactly when one reaches
+              ;; the representative; only reflected chiral stars reverse.
+              (%check (eq (plusp (determinant transformation))
+                          (and (member star (star-orbit representative))
+                               t)))))
+          (%check (= 23 (length rotation-representatives)))
+          (%check (= 22 (length full-representatives))))
+        (%check (= #x1d (star-canonical-form #x1d)))
+        (multiple-value-bind (representative transformation)
+            (star-canonical-form #x1d :reflections t)
+          (%check (= #x1b representative))
+          (%check (= -1 (determinant transformation)))))
       ;; Axis names do not affect the row census, although row ownership and
       ;; template triangulation mean that the coordinate lists themselves are
       ;; deliberately not a representation of a complete symmetric star.
