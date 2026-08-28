@@ -30,16 +30,35 @@
     (true (= 22 (length classes)))
     (true (= 256 (length stars)))
     (true (= 256 (length (remove-duplicates stars))))
-    (true (every (lambda (class) (equal class (sort (copy-list class) #'<)))
+    (true (every (lambda (class)
+                   (equal class (atlas::gray-star-orbit (first class))))
                  classes))
-    (true (equal '(#x00 #xff #x01 #x7f #x03 #x3f #x06 #x6f
-                   #x07 #x1f #x0f #x16 #x6b #x17 #x18 #x7e
-                   #x19 #x3d #x1b #x1e #x3c #x69)
+    (true (equal '(#x00 #xff #x01 #x7f #x03 #x3f #x06 #x6f #x18 #x7e
+                   #x07 #x1f #x16 #x6b #x19 #x3d
+                   #x0f #x17 #x1b #x1e #x3c #x69)
                  (mapcar #'first classes)))
     ;; Reflections fold the sole chiral pair into one family.
     (true (find #x1b classes :key #'first))
     (false (find #x1d classes :key #'first))
     (true (member #x1d (find #x1b classes :key #'first)))))
+
+(define-test atlas-orientations-take-simple-group-steps
+  (let ((mirror '((-1 0 0) (0 1 0) (0 0 1))))
+    (dolist (class (atlas::star-symmetry-classes))
+      (let ((mirror-count 0))
+        (loop for current on (atlas::star-orientation-walk (first class))
+              while (rest current)
+              for current-transformation = (rest (first current))
+              for next-transformation = (rest (second current))
+              for relative =
+                (atlas::matrix-product
+                 next-transformation
+                 (apply #'mapcar #'list current-transformation))
+              do (if (equal relative mirror)
+                     (incf mirror-count)
+                     (true (member relative (atlas::quarter-turns)
+                                   :test #'equal))))
+        (true (<= mirror-count 1))))))
 
 (define-test atlas-normalizes-each-orientation-into-its-family-frame
   (loop for mask below 256

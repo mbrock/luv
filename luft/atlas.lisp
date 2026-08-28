@@ -1,14 +1,16 @@
 (in-package #:luft.atlas)
 
 (defun star-symmetry-classes ()
-  "Partition all stars into full-symmetry orbits, paired by complement."
-  (%complement-paired-classes (%all-star-symmetry-classes)))
+  "Order full-symmetry orbits by population, with complements kept together."
+  (mapcan #'copy-list
+          (sort (%complement-paired-classes (%all-star-symmetry-classes))
+                #'family-pair<)))
 
 (defun %all-star-symmetry-classes ()
   (sort
    (loop with unseen = (loop for mask below 256 collect mask)
          while unseen
-         for class = (luft:star-orbit (first unseen) :reflections t)
+         for class = (gray-star-orbit (reduce #'min unseen))
          do (setf unseen (set-difference unseen class))
          collect class)
    #'<
@@ -21,9 +23,16 @@
         for complement = (%complementary-symmetry-class class remaining)
         do (setf remaining
                  (remove complement (rest remaining) :test #'eq))
-        append (if (eq class complement)
-                   (list class)
-                   (list class complement))))
+        collect (if (eq class complement)
+                    (list class)
+                    (list class complement))))
+
+(defun family-pair< (left right)
+  (let ((left-count (logcount (first (first left))))
+        (right-count (logcount (first (first right)))))
+    (if (= left-count right-count)
+        (< (first (first left)) (first (first right)))
+        (< left-count right-count))))
 
 (defun %complementary-symmetry-class (class classes)
   (let ((representative

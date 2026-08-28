@@ -12,6 +12,91 @@
                        item))
                  items)))
 
+(defun matrix-product (left right)
+  (loop for row in left
+        collect
+        (loop for column below 3
+              collect
+              (loop for index below 3
+                    sum (* (nth index row)
+                           (nth column (nth index right)))))))
+
+(defun quarter-turns ()
+  '(((1 0 0) (0 0 -1) (0 1 0))
+    ((1 0 0) (0 0 1) (0 -1 0))
+    ((0 0 1) (0 1 0) (-1 0 0))
+    ((0 0 -1) (0 1 0) (1 0 0))
+    ((0 -1 0) (1 0 0) (0 0 1))
+    ((0 1 0) (-1 0 0) (0 0 1))))
+
+(defun star-orientation-phase (representative start-transformation target-stars)
+  (labels
+      ((entry-after-turn (entry turn)
+         (let ((transformation (matrix-product turn (rest entry))))
+           (cons (luft:transform-star transformation representative)
+                 transformation)))
+       (candidates (entry seen)
+         (remove-if
+          (lambda (candidate)
+            (or (member (first candidate) seen)
+                (not (member (first candidate) target-stars))))
+          (mapcar (lambda (turn) (entry-after-turn entry turn))
+                  (quarter-turns))))
+       (onward-count (entry seen)
+         (length
+          (remove-duplicates (candidates entry seen)
+                             :key #'first)))
+       (visit (path seen)
+         (if (= (length seen) (length target-stars))
+             (reverse path)
+             (let ((next (remove-duplicates
+                          (candidates (first path) seen)
+                          :key #'first)))
+               (setf next
+                     (stable-sort next #'<
+                                  :key (lambda (candidate)
+                                         (onward-count candidate seen))))
+               (loop for candidate in next
+                     for result =
+                       (visit (cons candidate path)
+                              (cons (first candidate) seen))
+                     when result return result)))))
+    (let ((start
+            (cons (luft:transform-star start-transformation representative)
+                  start-transformation)))
+      (or (visit (list start) (list (first start)))
+          (error "No quarter-turn walk through star family #x~2,'0X"
+                 representative)))))
+
+(defparameter *star-orientation-walks* (make-hash-table))
+
+(defun star-orientation-walk (representative)
+  "Return (STAR . TRANSFORMATION) entries joined by simple cube-group moves."
+  (or (gethash representative *star-orientation-walks*)
+      (setf (gethash representative *star-orientation-walks*)
+            (let* ((identity '((1 0 0) (0 1 0) (0 0 1)))
+                   (mirror '((-1 0 0) (0 1 0) (0 0 1)))
+                   (proper-stars (luft:star-orbit representative))
+                   (full-stars
+                     (luft:star-orbit representative :reflections t))
+                   (proper
+                     (star-orientation-phase
+                      representative identity proper-stars)))
+              (if (= (length proper-stars) (length full-stars))
+                  proper
+                  (let* ((last-transformation (rest (car (last proper))))
+                         (reflected-start
+                           (matrix-product mirror last-transformation))
+                         (reflected-stars
+                           (set-difference full-stars proper-stars)))
+                    (append proper
+                            (star-orientation-phase
+                             representative reflected-start
+                             reflected-stars))))))))
+
+(defun gray-star-orbit (representative)
+  (mapcar #'first (star-orientation-walk representative)))
+
 (defun star-atlas-data-form ()
   "A ParenScript array literal containing display-normalized geometry of 256 stars."
   `(array
@@ -34,12 +119,12 @@
 
 (defun star-display-frame (mask)
   "Return MASK's representative and the transform carrying MASK onto it."
-  (multiple-value-bind (representative transformation)
-      (luft:star-canonical-form mask :reflections t)
-    (values representative
-            (if (= mask representative)
-                '((1 0 0) (0 1 0) (0 0 1))
-                (apply #'mapcar #'list transformation)))))
+  (let* ((representative
+           (luft:star-canonical-form mask :reflections t))
+         (transformation
+           (rest (find mask (star-orientation-walk representative)
+                       :key #'first))))
+    (values representative (apply #'mapcar #'list transformation))))
 
 (defun transform-star-geometry (transformation geometry)
   (loop for kind in '(:faces :bands :junctions)

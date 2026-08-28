@@ -271,6 +271,10 @@ orientations rather than walking the unrelated numeric order of all 256 masks.
 Each production packet is transformed back into the representative's fixed
 screen-space frame, so stepping changes only the ownership selection and an XYZ
 triad that records the selected row's axes; the occupancy and camera stay put.
+The family grid proceeds by occupied-cell count with complementary families
+adjacent.  Within a family, orientations follow a cube-group Gray walk: one
+quarter-turn per step through the proper rotations, one mirror step, then
+quarter-turns through the reflected half, with duplicate occupancies omitted.
 
 * DONE Separate cube symmetry from query-row ownership
 :PROPERTIES:
