@@ -218,10 +218,13 @@
            #:refresh-viewer-instrument
            #:encode-viewer-instrument
            #:handle-viewer-instrument-event
+           #:quiesce-viewer-instrument
            #:release-viewer-instrument
            #:open-viewer-command-menu
            #:close-viewer-command-menu
            #:toggle-viewer-command-menu
+           #:open-viewer-source-update
+           #:close-viewer-source-update
            #:open-viewer-metabar
            #:close-viewer-metabar
            #:toggle-viewer-metabar

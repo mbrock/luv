@@ -100,3 +100,39 @@
                     (first (mcluv:source-update-snapshot-lines snapshot))))))
       (uiop:delete-directory-tree
        root :validate t :if-does-not-exist :ignore))))
+
+(define-test source-update-can-start-after-its-host-attaches
+  (multiple-value-bind (root seed work)
+      (make-source-update-test-repositories)
+    (declare (ignore seed))
+    (unwind-protect
+         (let ((session
+                 (mcluv:make-source-update-session
+                  work '("luft/render") :start-p nil
+                  :loader (lambda (systems) (declare (ignore systems))))))
+           (true (eq :idle
+                     (mcluv:source-update-snapshot-state
+                      (mcluv:current-source-update-snapshot session))))
+           (mcluv:request-source-update-fetch session)
+           (true (eq :review
+                     (mcluv:source-update-snapshot-state
+                      (mcluv:wait-source-update-session session)))))
+      (uiop:delete-directory-tree
+       root :validate t :if-does-not-exist :ignore))))
+
+(define-test quiesced-source-update-refuses-new-work
+  (multiple-value-bind (root seed work)
+      (make-source-update-test-repositories)
+    (declare (ignore seed))
+    (unwind-protect
+         (let ((session
+                 (mcluv:make-source-update-session
+                  work '("luft/render") :start-p nil
+                  :loader (lambda (systems) (declare (ignore systems))))))
+           (mcluv:quiesce-source-update-session session)
+           (mcluv:request-source-update-fetch session)
+           (true (eq :idle
+                     (mcluv:source-update-snapshot-state
+                      (mcluv:current-source-update-snapshot session)))))
+      (uiop:delete-directory-tree
+       root :validate t :if-does-not-exist :ignore))))

@@ -2321,6 +2321,9 @@ it makes no claim about which earlier render pass caused a discontinuity."
   ;; for the active capture to encode and evict its surface view before any
   ;; renderer, canvas, or device release can begin.
   (quiesce-application-captures viewer)
+  ;; Source tools may be waiting to submit a live-load fence to this canvas.
+  ;; Stop that work before the terminal frame-boundary request below.
+  (quiesce-viewer-instruments viewer)
   (setf (viewer-running-p viewer) nil)
   (when (viewer-frame-recorder viewer)
     (stop-viewer-frame-recording viewer))

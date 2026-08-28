@@ -486,6 +486,7 @@
            #:populate-little-world-chunk
            #:print-luvcraft-frame-benchmark
            #:read-luvcraft-save
+           #:quiesce-luvcraft-overlay
            #:release-luvcraft-overlay
            #:reconcile-lighting
            #:refresh-luvcraft-overlay

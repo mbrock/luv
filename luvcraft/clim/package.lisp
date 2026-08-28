@@ -51,6 +51,7 @@
            #:com-jump
            #:com-show-keymap
            #:com-execute-command
+           #:com-review-source-update
            ;; The keymap legend, gathered from the tables rather than written.
            #:luvcraft-legend
            #:luvcraft-legend-overlay

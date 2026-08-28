@@ -83,12 +83,17 @@
            #:source-update-snapshot-lines
            #:source-update-snapshot-footer
            #:source-update-frame-session
+           #:source-update-root-for
+           #:source-update-systems-for
+           #:source-update-title-for
            #:make-source-update-session
+           #:start-source-update
            #:current-source-update-snapshot
            #:request-source-update-fetch
            #:request-source-update-apply
            #:source-update-busy-p
            #:wait-source-update-session
+           #:quiesce-source-update-session
            #:refresh-source-update
            #:prepare-source-update
            #:source-update-mirror
@@ -98,6 +103,10 @@
            #:handle-source-update-pointer-press
            #:make-embedded-source-update
            #:destroy-source-update
+           #:luvcraft-source-update-overlay
+           #:find-luvcraft-source-update
+           #:open-luvcraft-source-update
+           #:close-luvcraft-source-update
            ;; Shared retained-GPU metabar instrument and its open semantic
            ;; application protocol.
            #:metabar

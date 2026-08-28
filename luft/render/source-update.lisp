@@ -8,6 +8,14 @@
   ((frame :initarg :frame :reader viewer-source-update-frame)
    (compositor :initarg :compositor :reader viewer-source-update-compositor)))
 
+(defmethod mcluv:source-update-systems-for ((viewer viewer))
+  (declare (ignore viewer))
+  '("luft/render"))
+
+(defmethod mcluv:source-update-title-for ((viewer viewer))
+  (declare (ignore viewer))
+  "LUFT source update")
+
 (defun viewer-source-update-attachment (viewer)
   (find-if (lambda (instrument)
              (typep instrument 'viewer-source-update-instrument))
@@ -43,14 +51,12 @@
   (declare (ignore viewer))
   (mcluv:destroy-source-update (viewer-source-update-frame instrument)))
 
-(defun luft-source-update-root ()
-  "Return the checkout owned by this managed image."
-  (uiop:ensure-directory-pathname
-   (truename
-    (or (and (boundp 'cl-user::*luv-project-root*)
-             cl-user::*luv-project-root*)
-        (uiop:pathname-directory-pathname
-         (asdf:system-source-file :luft))))))
+(defmethod quiesce-viewer-instrument
+    ((instrument viewer-source-update-instrument) viewer)
+  (declare (ignore viewer))
+  (mcluv:quiesce-source-update-session
+   (mcluv:source-update-frame-session
+    (viewer-source-update-frame instrument))))
 
 (defun open-viewer-source-update (viewer)
   "Attach LUFT's reviewed origin/main updater and begin fetching."
@@ -70,10 +76,7 @@
                       viewer
                       (viewer-canvas viewer)
                       (viewer-context viewer)
-                      (viewer-device viewer)
-                      (luft-source-update-root)
-                      '("luft/render")
-                      :title "LUFT source update"))
+                      (viewer-device viewer)))
                (let* ((mirror (mcluv:source-update-mirror frame))
                       (compositor
                         (make-instance 'mcluv:direct-gpu-mirror-compositor
@@ -85,6 +88,7 @@
                  (setf (mcluv:mirror-compositor mirror) compositor)
                  (setf transferred-p t)
                  (add-viewer-instrument viewer instrument)
+                 (mcluv:start-source-update frame)
                  (setf completed-p t)
                  instrument))
           (unless completed-p

@@ -34,6 +34,7 @@
 (define-test modal-hud-panes-use-the-direct-presentation-compositor
   (dolist (class '(luvcraft.clim::luvcraft-legend-overlay
                    luvcraft.clim::luvcraft-command-menu-overlay
+                   mcluv:luvcraft-source-update-overlay
                    luvcraft.clim::luvcraft-tape-prompt-overlay))
     (true (subtypep class 'mcluv:luvcraft-hud-widget-overlay))))
 
@@ -90,6 +91,7 @@
     (true (assoc "Open Last Tracy Capture" entries :test #'string=))
     (true (assoc "Reveal Last Tracy Capture" entries :test #'string=))
     (true (assoc "Export Presentation Timing" entries :test #'string=))
+    (true (assoc "Review Source Update" entries :test #'string=))
     ;; Commands needing arguments will join M-x when it can ask for them;
     ;; presenting them as executable before then would make a dishonest menu.
     (true (null (assoc "Select Quickbar Slot" entries :test #'string=)))
@@ -102,6 +104,13 @@
                  (mapcar #'car
                          (luvcraft.clim::matching-command-menu-entries
                           entries "pointer toggle"))))))
+
+(define-test source-update-policy-belongs-to-the-luvcraft-application
+  (let ((session (make-instance 'luvcraft:luvcraft-session)))
+    (true (equal '("luvcraft")
+                 (mcluv:source-update-systems-for session)))
+    (true (string= "Luvcraft source update"
+                   (mcluv:source-update-title-for session)))))
 
 (define-test a-digit-carries-its-slot-as-a-command-argument
   (let ((session (make-instance 'luvcraft:luvcraft-session)))

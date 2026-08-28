@@ -2621,6 +2621,10 @@ non-NIL value selects display-paced animation because FIFO scanout, rather
   ;; thread.  Leave that thread alive until the capture transaction has encoded
   ;; and evicted its target-keyed frame state.
   (quiesce-application-captures session)
+  ;; A live source load can itself be waiting for a canvas fence.  Stop every
+  ;; overlay's off-canvas work before this owner requests the terminal fence.
+  (dolist (overlay (copy-list (luvcraft-session-overlays session)))
+    (quiesce-luvcraft-overlay overlay))
   (setf (luvcraft-session-running-p session) nil)
   (with-release-report
     (let ((canvas (luvcraft-session-canvas session)))

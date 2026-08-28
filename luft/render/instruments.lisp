@@ -73,6 +73,13 @@
     (declare (ignore instrument viewer))
     nil))
 
+(defgeneric quiesce-viewer-instrument (instrument viewer)
+  (:documentation
+   "Stop off-canvas work before VIEWER crosses its final frame boundary.")
+  (:method (instrument viewer)
+    (declare (ignore instrument viewer))
+    nil))
+
 (defun viewer-instruments (viewer)
   "Return a priority-descending snapshot of VIEWER's instruments."
   (sb-thread:with-mutex (*viewer-instruments-lock*)
@@ -253,6 +260,12 @@ therefore cannot overlap a native frame which still borrows the instrument."
              (mapcar #'car (reverse errors))
              (cdar errors))))
   nil)
+
+(defun quiesce-viewer-instruments (viewer)
+  "Stop asynchronous work owned by VIEWER's current instruments."
+  (dolist (instrument (viewer-instruments viewer))
+    (quiesce-viewer-instrument instrument viewer))
+  viewer)
 
 (defun release-viewer-instruments (viewer)
   "Atomically detach then release every instrument at a frame boundary."

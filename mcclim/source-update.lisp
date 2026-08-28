@@ -41,6 +41,24 @@
   base
   target)
 
+(defgeneric source-update-root-for (owner)
+  (:documentation "Return OWNER's managed source checkout directory."))
+
+(defmethod source-update-root-for ((owner t))
+  (declare (ignore owner))
+  (or (and (boundp 'cl-user::*luv-project-root*)
+           cl-user::*luv-project-root*)
+      (asdf:system-source-directory "luv")))
+
+(defgeneric source-update-systems-for (owner)
+  (:documentation "Return the ASDF systems assimilated after updating OWNER."))
+
+(defgeneric source-update-title-for (owner)
+  (:documentation "Return OWNER's short source-update panel title."))
+
+(defmethod source-update-title-for ((owner t))
+  (format nil "~(~A~) source update" (type-of owner)))
+
 (defclass source-update-session ()
   ((root :initarg :root :reader source-update-root)
    (systems :initarg :systems :reader source-update-systems)
@@ -54,7 +72,9 @@
                :lines '("Preparing source update…")
                :footer "Please wait.")
     :accessor source-update-session-snapshot)
-   (worker :initform nil :accessor source-update-worker)))
+   (worker :initform nil :accessor source-update-worker)
+   (process :initform nil :accessor source-update-process)
+   (accepting-p :initform t :accessor source-update-accepting-p)))
 
 (define-condition source-update-git-error (error)
   ((arguments :initarg :arguments :reader source-update-git-arguments)
@@ -92,27 +112,63 @@
   (let ((text (source-update-clean-text text limit)))
     (substitute #\Space #\Tab text)))
 
-(defun source-update-git (session arguments &key (accepted-statuses '(0)))
+(defun source-update-command (arguments)
+  (append '("env" "GIT_TERMINAL_PROMPT=0"
+            "GIT_SSH_COMMAND=ssh -oBatchMode=yes" "git")
+          arguments))
+
+(defun source-update-finish-git
+    (arguments output error-output status accepted-statuses)
+  (let ((combined
+          (string-trim '(#\Space #\Tab #\Newline #\Return)
+                       (format nil "~A~@[~%~A~]" output
+                               (and error-output
+                                    (plusp (length error-output))
+                                    error-output)))))
+    (unless (member status accepted-statuses)
+      (error 'source-update-git-error
+             :arguments arguments :status status
+             :output (source-update-clean-text combined 600)))
+    (values (string-trim '(#\Space #\Tab #\Newline #\Return) output)
+            combined status)))
+
+(defun source-update-cancellable-git
+    (session arguments accepted-statuses)
+  "Run Git while allowing session quiescence to terminate the process."
+  (let ((process
+          (uiop:launch-program
+           (source-update-command arguments)
+           :directory (source-update-root session)
+           :input nil :output :stream :error-output :output)))
+    (unwind-protect
+         (progn
+           (sb-thread:with-mutex ((source-update-lock session))
+             (if (source-update-accepting-p session)
+                 (setf (source-update-process session) process)
+                 (uiop:terminate-process process)))
+           (let ((output
+                   (uiop:slurp-stream-string
+                    (uiop:process-info-output process)))
+                 (status (uiop:wait-process process)))
+             (source-update-finish-git
+              arguments output nil status accepted-statuses)))
+      (sb-thread:with-mutex ((source-update-lock session))
+        (when (eq process (source-update-process session))
+          (setf (source-update-process session) nil))))))
+
+(defun source-update-git
+    (session arguments &key (accepted-statuses '(0)) cancellable-p)
   "Run Git without a shell or interactive credential prompts."
-  (multiple-value-bind (output error-output status)
-      (uiop:run-program
-       (append '("env" "GIT_TERMINAL_PROMPT=0"
-                 "GIT_SSH_COMMAND=ssh -oBatchMode=yes" "git")
-               arguments)
-       :directory (source-update-root session)
-       :input nil :output :string :error-output :string
-       :ignore-error-status t)
-    (let ((combined
-            (string-trim '(#\Space #\Tab #\Newline #\Return)
-                         (format nil "~A~@[~%~A~]" output
-                                 (and (plusp (length error-output))
-                                      error-output)))))
-      (unless (member status accepted-statuses)
-        (error 'source-update-git-error
-               :arguments arguments :status status
-               :output (source-update-clean-text combined 600)))
-      (values (string-trim '(#\Space #\Tab #\Newline #\Return) output)
-              combined status))))
+  (if cancellable-p
+      (source-update-cancellable-git session arguments accepted-statuses)
+      (multiple-value-bind (output error-output status)
+          (uiop:run-program
+           (source-update-command arguments)
+           :directory (source-update-root session)
+           :input nil :output :string :error-output :string
+           :ignore-error-status t)
+        (source-update-finish-git
+         arguments output error-output status accepted-statuses))))
 
 (defun source-update-git-path-present-p (session name)
   (multiple-value-bind (path) (source-update-git session (list "rev-parse" "--git-path" name))
@@ -183,7 +239,9 @@
 (defun run-source-update-fetch (session)
   (handler-case
       (let ((base (source-update-preflight session)))
-        (source-update-git session '("fetch" "--no-tags" "origin" "main"))
+        (source-update-git
+         session '("fetch" "--no-tags" "origin" "main")
+         :cancellable-p t)
         ;; FETCH_HEAD is the exact object fetched by this operation, independent
         ;; of later remote-tracking-ref movement.
         (let ((target (source-update-git session '("rev-parse" "FETCH_HEAD"))))
@@ -328,38 +386,37 @@
           :base base :target target))))))
 
 (defun source-update-start-worker (session function name)
+  "Install a worker while SESSION's lock is held, before it can publish."
   (let ((thread (sb-thread:make-thread function :name name)))
-    (sb-thread:with-mutex ((source-update-lock session))
-      (setf (source-update-worker session) thread))
+    (setf (source-update-worker session) thread)
     thread))
 
 (defun request-source-update-fetch (session)
   "Start a non-mutating fetch and review unless SESSION is already busy."
-  (let ((start-p nil))
-    (sb-thread:with-mutex ((source-update-lock session))
-      (unless (member (source-update-snapshot-state
-                       (source-update-session-snapshot session))
-                      '(:fetching :applying :loading))
-        (%publish-source-update
-         session
-         (make-source-update-snapshot
-          :state :fetching :heading "Fetching origin/main"
-          :lines '("Checking the worktree and contacting origin…")
-          :footer "Rendering remains live while Git works."))
-        (setf start-p t)))
-    (when start-p
+  (sb-thread:with-mutex ((source-update-lock session))
+    (when (and (source-update-accepting-p session)
+               (not
+                (member (source-update-snapshot-state
+                         (source-update-session-snapshot session))
+                        '(:fetching :applying :loading))))
+      (%publish-source-update
+       session
+       (make-source-update-snapshot
+        :state :fetching :heading "Fetching origin/main"
+        :lines '("Checking the worktree and contacting origin…")
+        :footer "Rendering remains live while Git works."))
       (source-update-start-worker
        session (lambda () (run-source-update-fetch session))
        "source update fetch"))))
 
 (defun request-source-update-apply (session)
   "Apply the exact commit in SESSION's current review snapshot."
-  (let ((base nil) (target nil))
-    (sb-thread:with-mutex ((source-update-lock session))
-      (let ((snapshot (source-update-session-snapshot session)))
-        (when (eq :review (source-update-snapshot-state snapshot))
-          (setf base (source-update-snapshot-base snapshot)
-                target (source-update-snapshot-target snapshot))
+  (sb-thread:with-mutex ((source-update-lock session))
+    (let ((snapshot (source-update-session-snapshot session)))
+      (when (and (source-update-accepting-p session)
+                 (eq :review (source-update-snapshot-state snapshot)))
+        (let ((base (source-update-snapshot-base snapshot))
+              (target (source-update-snapshot-target snapshot)))
           (%publish-source-update
            session
            (make-source-update-snapshot
@@ -370,22 +427,27 @@
                      (source-update-abbreviated-oid base)
                      (source-update-abbreviated-oid target)))
             :footer "Git and ASDF work cannot be cancelled"
-            :base base :target target)))))
-    (when target
-      (source-update-start-worker
-       session (lambda () (run-source-update-apply session base target))
-       "source update apply"))))
+            :base base :target target))
+          (source-update-start-worker
+           session (lambda () (run-source-update-apply session base target))
+           "source update apply"))))))
 
-(defun make-source-update-session (root systems &key (loader #'luv:load-systems-live))
-  "Create a source update session and immediately fetch its origin/main."
+(defun make-source-update-session
+    (root systems &key (loader #'luv:load-systems-live) (start-p t))
+  "Create a source update session, optionally starting its first fetch."
   (let ((session
           (make-instance
            'source-update-session
            :root (uiop:ensure-directory-pathname (truename root))
            :systems (mapcar #'string systems)
            :loader loader)))
-    (request-source-update-fetch session)
+    (when start-p (request-source-update-fetch session))
     session))
+
+(defun start-source-update (frame)
+  "Begin FRAME's first fetch after its host has successfully attached it."
+  (request-source-update-fetch (source-update-frame-session frame))
+  frame)
 
 (defun source-update-busy-p (session)
   (multiple-value-bind (snapshot) (current-source-update-snapshot session)
@@ -400,6 +462,21 @@
     (when (and worker (not (eq worker sb-thread:*current-thread*)))
       (sb-thread:join-thread worker)))
   (current-source-update-snapshot session))
+
+(defun quiesce-source-update-session (session)
+  "Close operation admission, cancel an active fetch, and join the worker.
+
+Merge and ASDF assimilation are never interrupted; callers wait for them."
+  (multiple-value-bind (worker process)
+      (sb-thread:with-mutex ((source-update-lock session))
+        (setf (source-update-accepting-p session) nil)
+        (values (source-update-worker session)
+                (source-update-process session)))
+    (when process
+      (ignore-errors (uiop:terminate-process process)))
+    (when (and worker (not (eq worker sb-thread:*current-thread*)))
+      (sb-thread:join-thread worker)))
+  session)
 
 ;;; ---------------------------------------------------------------------
 ;;; Retained direct-GPU panel.
@@ -623,12 +700,21 @@
   :continue)
 
 (defun make-embedded-source-update
-    (owner canvas context device root systems &key (title "source update") loader)
-  "Create a direct-GPU source update panel and begin its first fetch."
+    (owner canvas context device &key root systems title loader)
+  "Create OWNER's direct-GPU source update panel without starting I/O.
+
+The application attaches the returned frame to its host before calling
+START-SOURCE-UPDATE, so a failed attachment never leaves a Git worker behind."
   (let* ((session
            (if loader
-               (make-source-update-session root systems :loader loader)
-               (make-source-update-session root systems)))
+               (make-source-update-session
+                (or root (source-update-root-for owner))
+                (or systems (source-update-systems-for owner))
+                :loader loader :start-p nil)
+               (make-source-update-session
+                (or root (source-update-root-for owner))
+                (or systems (source-update-systems-for owner))
+                :start-p nil)))
          (port (find-port :server-path '(:luv-gpu)))
          (manager (or (first (climi::frame-managers port))
                       (make-instance 'luv-frame-manager :port port)))
@@ -639,23 +725,23 @@
              (make-application-frame
               'source-update :frame-manager manager :enable t
               :session session))))
-    (declare (ignore owner))
-    (setf (frame-pretty-name frame) title)
+    (setf (frame-pretty-name frame)
+          (or title (source-update-title-for owner)))
     (make-gpu-frame-background-transparent frame)
     (handler-case
         (progn
           (repaint-source-update frame)
           frame)
       (error (condition)
-        (wait-source-update-session session)
+        (quiesce-source-update-session session)
         (unless (eq :disowned (frame-state frame))
           (destroy-frame frame))
         (error condition)))))
 
 (defun destroy-source-update (frame)
-  "Wait for source work, then release FRAME and its retained resources."
+  "Quiesce source work, then release FRAME and its retained resources."
   (check-type frame source-update)
-  (wait-source-update-session (source-update-frame-session frame))
+  (quiesce-source-update-session (source-update-frame-session frame))
   (unless (eq :disowned (frame-state frame))
     (destroy-frame frame))
   nil)

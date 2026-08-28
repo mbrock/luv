@@ -453,6 +453,14 @@ among its own; none by default.")
   (declare (ignore overlay session seconds))
   nil)
 
+(defgeneric quiesce-luvcraft-overlay (overlay)
+  (:documentation
+   "Stop off-canvas work before the session's final frame boundary."))
+
+(defmethod quiesce-luvcraft-overlay (overlay)
+  (declare (ignore overlay))
+  nil)
+
 (defgeneric release-luvcraft-overlay (overlay)
   (:documentation "Release resources owned by an object attached to luvcraft."))
 

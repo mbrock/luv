@@ -161,6 +161,7 @@
   :serial t
   :components ((:file "mcclim/surveyor")
                (:file "mcclim/luvcraft")
+               (:file "mcclim/luvcraft-source-update")
                (:file "mcclim/terminal-film-browser")
                (:file "mcclim/block-icon")
                (:file "mcclim/hotbar")
@@ -231,6 +232,7 @@
                              (:file "commands")
                              (:file "legend")
                              (:file "command-menu")
+                             (:file "source-update")
                              (:file "tape")
                              (:file "input"))))
   :in-order-to ((test-op (test-op "luvcraft/core/test")
