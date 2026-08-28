@@ -11,7 +11,7 @@
                (:file "luft/mesh")
                (:file "luft/mesh-query")
                (:file "luft/star-geometry")
-               (:static-file "luft/star-atlas.sexp")
+               (:file "luft/star-atlas")
                (:file "luft/star-table")
                (:file "luft/mesh-realization")
                (:file "luft/mesh-variation-policy")

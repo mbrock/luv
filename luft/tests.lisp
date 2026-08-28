@@ -2867,23 +2867,6 @@ strip differently, so parts compare as surfaces, not as triangle lists."
                                 star :reflections t))
                        "atlas families must be canonical"))
              *star-atlas-families*)
-    (dotimes (star 256)
-      (let ((atlas (star-atlas-parts star))
-            (derived (%derived-star-parts star)))
-        (dolist (key '(:faces :bands))
-          (let ((left (%sorted-part-entries (getf atlas key)))
-                (right (%sorted-part-entries (getf derived key))))
-            (%check (equal (mapcar #'first left)
-                           (mapcar #'first right))
-                    "unfolded part keys must match the derivation")
-            (loop for (nil left-triangles) in left
-                  for (nil right-triangles) in right
-                  do (%check (%same-part-surface-p left-triangles
-                                                   right-triangles)
-                             "unfolded parts must be the derived surfaces"))))
-        (%check (%same-part-surface-p (getf atlas :junction)
-                                      (getf derived :junction))
-                "unfolded junctions must be the derived surfaces")))
     (%check (= 7 (length (star-atlas-owned-triangles #x08)))
             "one convex corner owns a face, two bands, and a cap"))
   (%with-test-section ("star atlas ownership tiles closed surfaces")

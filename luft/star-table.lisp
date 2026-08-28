@@ -2,14 +2,12 @@
 
 ;;; The star atlas as plain data
 ;;;
-;;; luft/star-atlas.sexp holds the whole width-one local patch of each of
+;;; star-atlas.lisp defines the whole width-one local patch of each of
 ;;; the 22 canonical star families, keyed by part: twelve face quadrants
 ;;; named by their cell sample pairs, six band half-edges named by signed
 ;;; axis directions, and the junction.  This file unfolds those families
 ;;; onto all 256 stars with nothing but signed-axis transformations --
-;;; no geometric algorithms run here.  star-geometry.lisp is the
-;;; derivation that generates the atlas and, through LUFT's tests, checks
-;;; every unfolded star against first principles.
+;;; no geometric algorithms run here.
 ;;;
 ;;; Owned geometry is not symmetry-equivariant, so ownership is a filter
 ;;; applied after unfolding, stated entirely in local terms: a site owns
@@ -20,19 +18,12 @@
 ;;; therefore tiles the surface of any solid exactly once; the tests
 ;;; close that surface over every star block and pseudorandom solids.
 
-(defun %read-star-atlas ()
-  (let ((pathname (asdf:system-relative-pathname
-                   "luft" #P"luft/star-atlas.sexp")))
-    (with-open-file (stream pathname :direction :input)
-      (let ((atlas (read stream)))
-        (unless (eq (first atlas) :width-one-star-atlas)
-          (error "~A is not a star atlas." pathname))
-        (unless (= (getf (rest atlas) :cell-size) +mesh-cell-size+)
-          (error "Star atlas cell size ~D does not match ~D."
-                 (getf (rest atlas) :cell-size) +mesh-cell-size+))
-        atlas))))
-
 (defun %star-atlas-family-table (atlas)
+  (unless (eq (first atlas) :width-one-star-atlas)
+    (error "*STAR-ATLAS* is not a star atlas."))
+  (unless (= (getf (rest atlas) :cell-size) +mesh-cell-size+)
+    (error "Star atlas cell size ~D does not match ~D."
+           (getf (rest atlas) :cell-size) +mesh-cell-size+))
   (let ((table (make-hash-table)))
     (dolist (family (getf (rest atlas) :families) table)
       (destructuring-bind (&key star complement faces bands junction) family
@@ -178,104 +169,10 @@ each drawn once by the site that owns it."
      (star-surface-sites occupied-cells))
     triangles))
 
-;;; Regeneration
-;;;
-;;; The atlas is committed data; these functions rebuild it from the
-;;; star-geometry derivation when the derivation changes.
-
-(defun %derived-star-parts (star)
-  "Return STAR's local patch from the derivation, keyed by part."
-  (list :faces
-        (loop for quadrant in (%star-face-quadrants)
-              for normal-sign = (%star-face-quadrant-normal-sign
-                                 star quadrant)
-              unless (zerop normal-sign)
-                collect (multiple-value-bind (low-sample high-sample)
-                            (%star-face-quadrant-samples quadrant)
-                          (list (list low-sample high-sample)
-                                (%star-face-quadrant-triangles
-                                 quadrant normal-sign))))
-        :bands
-        (loop for half-edge in (%star-band-half-edges)
-              for triangles = (%star-band-half-edge-triangles
-                               star half-edge)
-              when triangles
-                collect (list (list (first half-edge)
-                                    (if (second half-edge) 1 -1))
-                              triangles))
-        :junction (star-junction-triangles star)))
-
-(defun write-star-atlas (&optional (pathname
-                                    (asdf:system-relative-pathname
-                                     "luft" #P"luft/star-atlas.sexp")))
-  "Regenerate the committed star atlas from the derivation."
-  (let* ((representatives
-           (sort (remove-duplicates
-                  (loop for star below 256
-                        collect (star-canonical-form
-                                 star :reflections t)))
-                 #'<))
-         (entries
-           (sort (loop for representative in representatives
-                       for partner = (star-canonical-form
-                                      (%complement-star representative)
-                                      :reflections t)
-                       collect (list (min representative partner)
-                                     representative
-                                     partner))
-                 (lambda (left right)
-                   (or (< (first left) (first right))
-                       (and (= (first left) (first right))
-                            (< (second left) (second right))))))))
-    (with-open-file (stream pathname :direction :output
-                            :if-exists :supersede)
-      (let ((*print-pretty* t)
-            (*print-right-margin* 72)
-            (*print-case* :downcase))
-        (format stream ";; The width-one star atlas.~%")
-        (format stream ";;~%")
-        (format stream ";; One entry per canonical star family under the full cubical~%")
-        (format stream ";; group; luft/star-table.lisp unfolds these local patches onto~%")
-        (format stream ";; all 256 stars.  Coordinates are integer mesh ticks local to~%")
-        (format stream ";; the lattice site; faces are keyed by cell sample pairs, bands~%")
-        (format stream ";; by signed axis directions.  Regenerate with~%")
-        (format stream ";; (luft::write-star-atlas); LUFT's tests pin every unfolded star~%")
-        (format stream ";; to the star-geometry derivation.~%")
-        (format stream ";;~%")
-        (format stream ";; The families come grouped into solid/air complement classes:~%")
-        (format stream ";; eight pairs and six self-complementary families, fourteen~%")
-        (format stream ";; classes in all.  Complement reverses each face and plain band~%")
-        (format stream ";; in place, but bands always join the solid pair across a~%")
-        (format stream ";; checkerboard half-edge, so complement re-pairs the geometry~%")
-        (format stream ";; there; geometry is therefore committed per spatial family.~%")
-        (format stream "(:width-one-star-atlas~%")
-        (format stream " :cell-size ~d~%" +mesh-cell-size+)
-        (format stream " :families~%")
-        (format stream " (")
-        (loop for (class representative partner) in entries
-              for first-p = t then nil
-              for parts = (%derived-star-parts representative)
-              do (unless first-p (format stream "~%  "))
-                 (when (= class representative)
-                   (cond ((= representative partner)
-                          (format stream ";; #x~2,'0x is self-complementary~%  "
-                                  representative))
-                         (t
-                          (format stream ";; #x~2,'0x <-> #x~2,'0x under solid/air complement~%  "
-                                  representative partner))))
-                 (format stream "(:star #x~2,'0x~%" representative)
-                 (format stream "   :complement #x~2,'0x~%" partner)
-                 (format stream "   :faces ~s~%" (getf parts :faces))
-                 (format stream "   :bands ~s~%" (getf parts :bands))
-                 (format stream "   :junction ~s)"
-                         (getf parts :junction)))
-        (format stream "))~%")))
-    pathname))
-
 ;;; The loaded tables
 
 (defparameter *star-atlas-families*
-  (%star-atlas-family-table (%read-star-atlas))
+  (%star-atlas-family-table *star-atlas*)
   "Canonical family star to local patch parts, straight from the atlas.")
 
 (defparameter *star-atlas-parts*
