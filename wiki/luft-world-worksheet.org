@@ -210,7 +210,7 @@ cardinally exposed highland rock, and limestone architecture under its existing
 sun and shadows.  Material repainting changes only appearance bytes and keeps
 the complete geometry stream and triangle count exact.  #H1ASQU is next.
 
-** TODO Materialize a demand-streamed authored world
+** DONE Materialize a demand-streamed authored world
 :PROPERTIES:
 :ID: H1ASQU
 :END:
@@ -231,6 +231,31 @@ materialization, meshing, publication, and opposite-edge eviction; resident
 CPU and GPU state remain bounded; stale worker results are rejected; the
 authored route and destination survive chunk-independent generation; and the
 completion note names #JDB26Y.
+
+/Result./ Complete at implementation revision
+=79e26810bb142a2bc10e5b14c778cc735d31b3a5=.  Ordinary Luft play now opens a
+2048 by 2048 deterministic authored source without eagerly constructing any
+chunk.  Absolute-coordinate rules compose a pale masonry road, a carved
+north-south river, an eastern ridge pass, and a crenellated citadel across
+64-cell seams; bounded noise only roughens the terrain between those authored
+facts.  One immutable resident value owns each chunk chain, incarnation, and
+material field.  Sparse edits remain source-owned, including explicit air.
+Camera demand schedules isolated worker materialization; exact demand tokens,
+tickets, and incarnations reject stale results before installation.  Only the
+complete mesh capture guard becomes resident, while gameplay views and GPU
+owners remain smaller derived products and old values are evicted.
+
+Focused executable claims prove source determinism, independently generated
+road and river seam continuity, the cross-seam citadel, sparse edit replay,
+stale-install rejection, explicit open-sky/closed-boundary/unknown-nonresident
+states, and bounded eviction.  A live Vulkan traversal moved from focus =(1 .
+0)= to the citadel at =(23 . 10)=: source incarnation advanced from 20 to 56,
+the final store contained exactly its 36 desired guard chunks, one visible
+source owner and four canonical GPU owners published, and no canvas failures
+were retained.  The inspected destination frame shows the road entering the
+masonry landmark, though the deliberately tight first visible window leaves
+its outer boundary apparent when zoomed far out.  #JDB26Y is next; no regional
+voxel-light propagation began here.
 
 ** TODO Publish stable regional sky and RGB4 light
 :PROPERTIES:
@@ -341,6 +366,23 @@ product until the content required to settle its bounded sky and RGB4 light is
 known.  Provisional fields may aid inspection but are not presented as final
 geography.
 
+** 2026-08-28 — Stream exact source guards, not an eager world or square cache
+
+The first source is one 2048-square, absolute-coordinate description plus a
+sparse semantic overlay.  Resident chunks are immutable chain/material values
+with monotonically fresh incarnations.  Camera demand materializes exactly the
+canonical owner closure's two probe guards, not the whole world and not a
+conservative radius larger than meshing can read.  Gameplay sees only visible
+resident source keys; workers receive immutable references to the complete
+guard.  Unknown nonresidency raises during capture, outside-domain meshing is
+explicit open sky, and physical finite boundaries remain closed.
+
+Keep the current one-worker source/load boundary and complete regional mesh
+publication.  Demand tokens reject obsolete load intent; chunk incarnation is
+part of every mesh stamp.  Eviction removes resident CPU values before the new
+cohort and renderer publication atomically retires opposite-edge GPU owners.
+Do not persist resident chunks or infer authored air from their absence.
+
 * Experiment notes
 :PROPERTIES:
 :ID: FQ5007
@@ -350,6 +392,48 @@ Record each experiment with date, execution thread, exact revision, question,
 commands or live actions, observed result, interpretation, and resulting
 decision.  Failed experiments belong here when they eliminate an architectural
 path.  Do not paste complete test transcripts.
+
+** 2026-08-28 — Authored source demand, far traversal, and bounded publication
+
+- /Thread./ =T-01a04a83-76d7-7051-b9aa-d76affd10edf=.
+- /Revision./ Implementation commits =4d1e8c6=, =db0d03f=, =ac84785=, and
+  =79e2681= on =stage/h1asqu-demand-world=, based exactly on integrated
+  =02ff5efbaeeb13f9e474c186ba4a5de8b118ba94=.
+- /Question./ Can ordinary Luft play expose one authored, genuinely large
+  world through immutable source chunks and bounded asynchronous demand while
+  retaining the fixed atlas, active-site words, and appearance sidecar?
+- /Commands and live actions./ Ran =make= before editing; strict Parinfer on
+  every changed Lisp file; =asdf:test-system "luft/render/test"=; =make test=;
+  and =scripts/wiki dangling=.  Opened Luft in the live image on Vulkan, used
+  bounded state predicates rather than fixed waits to require resident equals
+  desired, zero load/mesh outstanding work, no active cohort/removals, and
+  published GPU slots.  Moved the live player/camera from the western road to
+  =(1500.5,650.5,24)= at the citadel, checked canvas status/failures, captured
+  =build/h1asqu-citadel.png=, and inspected the frame directly.
+- /Observation./ Renderer tests pass 364 claims and both shader backends still
+  compile; the broader suite passes 21 available systems with two unavailable
+  Ghostty suites skipped.  Source focus changed from =(1 . 0)= to =(23 . 10)=,
+  incarnation advanced 20 to 56, the destination settled with 36 resident of
+  36 desired guard chunks, one visible source owner, four GPU owners, and no
+  outstanding production.  The canvas was healthy with no retained failures.
+  The frame shows a pale stepped road approaching a substantial purple masonry
+  citadel over varied green highland.  A wide diagnostic zoom also reveals the
+  intentionally withheld edge of the small visible publication window.
+  Initial conservative guard materialization exposed stop-the-world allocation
+  pressure in the live orb; exact guard derivation, direct chain assembly, and
+  excluding guard materials from owner gameplay views reduced one chunk from
+  0.180 seconds/107.5 MB allocated to 0.076 seconds/22.2 MB and made both the
+  initial and far publications settle under bounded readiness checks.
+- /Interpretation./ Source content, resident CPU content, and visible GPU
+  products now have separate ownership and bounds.  Absolute-coordinate route,
+  watershed, pass, and destination rules survive arbitrary chunk order; local
+  noise is detail rather than the world plan.  The tight first visible radius
+  is adequate to prove streaming and navigation, while larger views should be
+  earned by later measurement rather than by widening this gate.
+- /Decision./ Keep the source protocol concrete to Luft, retain exact guard
+  residency and incarnation-stamped publication, and close #H1ASQU.  Begin no
+  persistence or regional voxel light here; #JDB26Y owns the next guard-stable
+  appearance product.
 
 ** 2026-08-28 — Palette-coded active-star appearance and sanctuary proof
 
@@ -451,6 +535,19 @@ path.  Do not paste complete test transcripts.
 :ID: 3OE183
 :END:
 
+** 2026-08-28 — Luft gained one authored world larger than its resident memory
+
+- Ordinary play now starts from a 2048-square source description and no eager
+  terrain chunks.  A road crosses a carved river and ridge pass before reaching
+  a substantial crenellated citadel; all survive independent seam generation.
+- Immutable full-height resident chunks, sparse explicit-air-capable edits,
+  demand tokens, incarnations, exact mesh guards, and bounded owner eviction
+  separate canonical content from CPU, mesh, and GPU caches.
+- Focused source/seam/edit/stale-result/eviction tests, both shader compilers,
+  the complete available suite, and a far live Vulkan traversal are green.
+  Geometry remains exactly four u32 words per active star and appearance remains
+  exactly eight u8 samples beside it.  #JDB26Y is next and has not begun.
+
 ** 2026-08-28 — The sanctuary regained terrain identity without material geometry
 
 - #FTZ8FD adds one one-for-one eight-u8 appearance sidecar while preserving
@@ -495,15 +592,14 @@ path.  Do not paste complete test transcripts.
 :ID: MTAAPI
 :END:
 
-The architectural parent reviews #FTZ8FD at implementation revision
-=2948176327086d6177b4ac6109ec6585078a6493=: the eight-u8 sidecar, full-group
-sample-set proof, commutative reduction, geometry-preserving repaint fixture,
-geometry-only shadow path, both shader backends, broader tests, and inspected
-sanctuary frame.  If accepted, begin #H1ASQU in a fresh execution thread from
-the integrated parent revision: materialize the first deterministic authored
-demand world with immutable resident chunks, sparse overlay, camera demand,
-incarnation validation, and bounded eviction.
+The architectural parent reviews #H1ASQU at implementation revision
+=79e26810bb142a2bc10e5b14c778cc735d31b3a5=: the deterministic authored
+source, immutable resident chunk values, sparse overlay, exact asynchronous
+demand guard, token/incarnation validation, bounded CPU/GPU eviction, seam
+tests, far live traversal, and inspected citadel frame.  If accepted, begin
+#JDB26Y in a fresh execution thread from the integrated parent revision:
+publish stable regional sky and RGB4 block light from known immutable guard
+content without changing geometry or triangle ownership.
 
-Do not begin regional voxel light, persistence, transparency, LoD, or vertical
-streaming during #H1ASQU, and do not replace the appearance sidecar with face
-stocks or material-dependent geometry.
+Do not begin persistence, transparency, LoD, vertical streaming, or the later
+journey-content stage while reviewing or integrating #H1ASQU.
