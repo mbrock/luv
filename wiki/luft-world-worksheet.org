@@ -173,7 +173,7 @@ exact four-word one-cell active-site stream.  The next stage is #FTZ8FD, which
 must use symmetry-stable sample sets and a commutative junction policy rather
 than pretending that one distinguished voxel exists.
 
-** TODO Add the palette-coded terrain appearance product
+** DONE Add the palette-coded terrain appearance product
 :PROPERTIES:
 :ID: FTZ8FD
 :END:
@@ -194,6 +194,21 @@ with one explicit commutative material/light reduction policy where needed;
 tests prove that policy equivariant over all 48 cubical transformations and
 show repainting changes no geometry bytes or triangle counts; the shadow pass
 does not bind appearance; and the completion note names #H1ASQU.
+
+/Result./ Complete at implementation revision
+=2948176327086d6177b4ac6109ec6585078a6493=.  Every active star now has an
+eight-u8 appearance sidecar parallel to the unchanged =(X Y Z STAR)= stream.
+Ordinary faces read their unique occupied sample; bands read all occupied
+cells incident to their half-edge; junctions read all occupied star cells.
+Material tones use an equal-weight arithmetic mean and the paired empty-cell
+light policy is componentwise maximum.  Exhaustive tests prove the sample sets
+and both componentwise reductions equivariant under all 48 cubical
+transformations.  The scene shader consumes a compact u8 palette and RGB8
+top/side/bottom descriptor table; the shadow shader and bind group remain
+geometry-only.  The finite sanctuary renders grass-capped soil, simple
+cardinally exposed highland rock, and limestone architecture under its existing
+sun and shadows.  Material repainting changes only appearance bytes and keeps
+the complete geometry stream and triangle count exact.  #H1ASQU is next.
 
 ** TODO Materialize a demand-streamed authored world
 :PROPERTIES:
@@ -263,6 +278,23 @@ assuming transparency, LoD, vertical streaming, or simulation.
 :ID: 3UTRKA
 :END:
 
+** 2026-08-28 — Reduce symmetry-stable appearance sets commutatively
+
+An ordinary face uses its unique occupied member of the solid/air pair.  A
+band uses the occupied subset of the four cells incident to its lattice
+half-edge, and a junction uses the occupied subset of all eight star cells.
+Terrain material tone is the equal-weight arithmetic mean over that set.  The
+paired illumination rule for the corresponding empty set is componentwise
+maximum.  Set images commute with every signed-axis permutation, arithmetic
+mean is permutation-invariant, and componentwise maximum is associative,
+commutative, and idempotent; exhaustive execution checks each emitted part
+under all 48 cubical transformations.
+
+Keep the eight semantic u8 material codes in a parallel active-star sidecar.
+Pack only at the GPU upload boundary, and place the two sample masks in static
+atlas metadata.  Do not select a canonical sample, move material into geometry,
+or bind appearance in the shadow pass.
+
 ** 2026-08-28 — Reject distinguished triangle selectors at symmetric junctions
 
 A single occupied-material and outward-empty-light sample per atlas triangle
@@ -318,6 +350,44 @@ Record each experiment with date, execution thread, exact revision, question,
 commands or live actions, observed result, interpretation, and resulting
 decision.  Failed experiments belong here when they eliminate an architectural
 path.  Do not paste complete test transcripts.
+
+** 2026-08-28 — Palette-coded active-star appearance and sanctuary proof
+
+- /Thread./ =T-01a04a69-0d4d-713e-a458-e344d25880f8=.
+- /Revision./ Implementation commit
+  =2948176327086d6177b4ac6109ec6585078a6493= on branch
+  =stage/luft-terrain-appearance=, based exactly on reviewed =origin/main=
+  revision =897bb5d05423d5aa77de466f5f77076eb678cf0a=.
+- /Question./ Can the fixed width-one atlas shade the existing finite
+  sanctuary's terrain, exposed stone, and limestone without changing geometry
+  or inventing an asymmetric material selector at bands and junctions?
+- /Commands and live actions./ Ran =make=; strict Parinfer checks on every
+  changed Lisp file; =asdf:test-system "luft/test"=;
+  =asdf:test-system "luft/render/test"=; and =make test=.  The renderer test
+  compiled the terrain mesh, fragment, and geometry-only shadow shaders through
+  both =luv.msl:compile-msl= and =luv.spir-v:compile-shader-specification=.
+  Started the durable image with =./sly start=, opened Luft with
+  =./sly play luft=, checked =./sly status= and =./sly failures=, captured
+  =./sly screenshot build/ftz8fd-sanctuary.png=, and inspected the 1100x800
+  BGRA8 frame directly.
+- /Observation./ The complete model proof reports 608,971 checks and preserves
+  the 4,200-triangle atlas census.  Focused renderer tests pass 347 claims.
+  Repainting a two-material fixture replaces its eight-u8 sidecars while the
+  =(X Y Z STAR)= bytes and triangle count remain equal; its emitted mixed
+  sample set exercises a band or junction.  The main shader binds sidecar and
+  descriptor buffers, while the shadow shader exposes only site, atlas, and
+  camera resources.  The live Vulkan canvas remained healthy with no retained
+  failures.  The inspected frame clearly separates green living-earth caps,
+  narrow brown soil edges, dark exposed cliff rock, and pale limestone; sun
+  shadows, beveled bands, and terrain/architecture junctions remain coherent.
+- /Interpretation./ One dense eight-byte record per active star is sufficient
+  for the first opaque proof.  Static sample sets plus commutative reduction
+  solve the #33UIQ6 obstruction without a material mesher, face stocks, or an
+  arbitrary canonical frame.  A tiny scene palette is enough to restore place
+  identity while keeping geometry and shadow ownership unchanged.
+- /Decision./ Keep this appearance ABI and policy for #H1ASQU.  Defer voxel
+  light population of the already-defined empty-cell reduction, palette
+  compression, and all demand-world work to their ordered stages.
 
 ** 2026-08-28 — Complete-atlas selector stabilizer proof
 
@@ -381,6 +451,21 @@ path.  Do not paste complete test transcripts.
 :ID: 3OE183
 :END:
 
+** 2026-08-28 — The sanctuary regained terrain identity without material geometry
+
+- #FTZ8FD adds one one-for-one eight-u8 appearance sidecar while preserving
+  the width-one 256-star atlas and exact four-u32 active-site stream.
+- Faces use their direct solid sample.  Bands and junctions use stable incident
+  sets reduced by arithmetic mean for material and componentwise maximum for
+  light; exhaustive tests close equivariance over the full cubical group.
+- Earth supplies green top, soil side, and darker underside tones; a single
+  cardinal exposure rule reveals existing highland rock below the living cap;
+  authored sanctuary cells remain pale limestone.
+- Both shader backends compile, the shadow path binds no appearance, repainting
+  preserves geometry bytes and triangle counts, the relevant broader suite is
+  green, and the inspected live frame retains coherent sun, shadows, bands,
+  and junctions.  #H1ASQU is next and has not begun.
+
 ** 2026-08-28 — The static selector hypothesis failed constructively
 
 - #33UIQ6 now closes with an exhaustive executable stabilizer proof rather
@@ -410,13 +495,15 @@ path.  Do not paste complete test transcripts.
 :ID: MTAAPI
 :END:
 
-The architectural parent thread reviews #33UIQ6's counterexample, exhaustive
-stabilizer check, and revised sample-set recommendation.  If accepted, create
-one fresh execution thread for #FTZ8FD: define the smallest eight-cell
-appearance sidecar and prove symmetry-stable face, band, and junction sample
-sets with one explicit commutative reduction policy before connecting basic
-opaque materials to the terrain shader.
+The architectural parent reviews #FTZ8FD at implementation revision
+=2948176327086d6177b4ac6109ec6585078a6493=: the eight-u8 sidecar, full-group
+sample-set proof, commutative reduction, geometry-preserving repaint fixture,
+geometry-only shadow path, both shader backends, broader tests, and inspected
+sanctuary frame.  If accepted, begin #H1ASQU in a fresh execution thread from
+the integrated parent revision: materialize the first deterministic authored
+demand world with immutable resident chunks, sparse overlay, camera demand,
+incarnation validation, and bounded eviction.
 
-Do not reopen single-selector metadata through canonical-frame tie breaking,
-and do not begin demand-world, regional-light, or persistence work merely
-because their eventual appearance inputs are now visible.
+Do not begin regional voxel light, persistence, transparency, LoD, or vertical
+streaming during #H1ASQU, and do not replace the appearance sidecar with face
+stocks or material-dependent geometry.
