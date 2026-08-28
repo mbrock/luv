@@ -122,13 +122,13 @@
                 (:span#band-count.fact "0" (:small "bands"))
                 (:span#junction-count.fact "0" (:small "junctions")))
               (:div.stepper
-                (:button#previous-star :type "button" "Previous")
-                (:button#next-star :type "button" "Next"))))
+                (:button#previous-star :type "button" "Previous orientation")
+                (:button#next-star :type "button" "Next orientation"))))
           (:section.atlas-grid :aria-label "22 symmetry families"
             (dolist (class (star-symmetry-classes))
               (render-star-family class))))
         (:p.atlas-note
-          "Drag the large view to orbit; scroll over it to approach. Family meshes are the symmetry ownership closure from "
+          "Drag the large view to orbit; scroll over it to approach. Previous and next step through the selected symmetry family. Family meshes are the symmetry ownership closure from "
           (:code "LUFT:STAR-LOCAL-SURFACE-TRIANGLES")
           "; orientation buttons reveal the corresponding production packet from "
           (:code "LUFT:STAR-TRIANGLES") ".")

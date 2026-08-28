@@ -47,6 +47,9 @@
     (true (search "document.getElementById" javascript))
     (true (search "star.surface" javascript))
     (true (search "star.owned" javascript))
+    (true (search "var families" javascript))
+    (true (search "stepOrientation(-1)" javascript))
+    (true (search "stepOrientation(1)" javascript))
     (false (search "JSON.parse" javascript))
     (false (search "luft-star-data" javascript))))
 
@@ -80,6 +83,8 @@
     (true (search "<details class=family-orbit>" html))
     (true (search "name=mesh-view" html))
     (true (search "data-view=owned" html))
+    (true (search ">Previous orientation</button>" html))
+    (true (search ">Next orientation</button>" html))
     (true (search "<footer class=site-footer>" html))
     (false (search "<style" html))
     (false (search "application/json" html))))

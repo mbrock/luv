@@ -266,6 +266,8 @@ diagonals of some band quads.  The junction already belongs wholly to the
 central lattice point.  Choosing a family orientation switches the detail to
 its actual [[lisp:luft:star-triangles]] packet while leaving the whole patch
 faintly visible, making the otherwise invisible ownership assignment legible.
+The detail stepper stays within that family and cycles through its distinct
+orientations rather than walking the unrelated numeric order of all 256 masks.
 
 * DONE Separate cube symmetry from query-row ownership
 :PROPERTIES:

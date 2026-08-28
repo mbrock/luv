@@ -31,6 +31,7 @@
   (ps:ps*
    `(progn
     (defvar stars ,(star-atlas-data-form))
+    (defvar families ,(parenscript-array-form (star-symmetry-classes)))
     (defvar selected-mask 8)
     (defvar yaw -0.72)
     (defvar pitch 0.48)
@@ -322,6 +323,20 @@
                             "view-surface")) checked) true)
       (render-selected))
 
+    (defun selected-family ()
+      (let ((selected nil))
+        (dolist (family families)
+          (when (/= -1 ((@ family index-of) selected-mask))
+            (setf selected family)))
+        selected))
+
+    (defun step-orientation (offset)
+      (let* ((family (selected-family))
+             (index ((@ family index-of) selected-mask))
+             (count (@ family length)))
+        (select-star (aref family (mod (+ index offset count) count))
+                     view-mode)))
+
     (defun mask-from-hash ()
       (let* ((text ((@ (@ window location hash) replace) "#" ""))
              (plain ((@ text replace) "x" ""))
@@ -418,9 +433,9 @@
     (install-layer-toggle "show-junctions" "junctions")
     (install-view-mode-events)
     ((@ (element "previous-star") add-event-listener)
-     "click" (lambda () (select-star (1- selected-mask) view-mode)))
+     "click" (lambda () (step-orientation -1)))
     ((@ (element "next-star") add-event-listener)
-     "click" (lambda () (select-star (1+ selected-mask) view-mode)))
+     "click" (lambda () (step-orientation 1)))
     (install-detail-events)
     ((@ window add-event-listener)
      "resize"
