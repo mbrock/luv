@@ -108,6 +108,10 @@
    ;; Tests.
    #:run-luft-tests))
 
+#+x86-64
+(defpackage #:luft.avx512
+  (:use #:cl))
+
 (in-package #:luft)
 
 (declaim (optimize (speed 2) (safety 3) (debug 2)))

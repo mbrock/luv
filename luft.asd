@@ -13,6 +13,7 @@
                (:file "luft/star-atlas")
                (:file "luft/star-table")
                (:file "luft/star-selection")
+               #+x86-64 (:file "luft/star-selection-avx512")
                (:file "luft/star-selection-simd")
                (:file "luft/mesh-query"))
   :in-order-to ((test-op (test-op "luft/test"))))

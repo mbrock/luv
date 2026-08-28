@@ -68,23 +68,46 @@
                                    (aref words (+ offset 1))
                                    (aref words (+ offset 2)))
             do (%check (= (aref words (+ offset 3))
-                          (gethash coordinate expected 0)))))))
+                          (gethash coordinate expected 0))))
+      #+x86-64
+      (when (luft.avx512::available-p)
+        (let* ((*star-selection-instruction-set-override* :avx512)
+               (avx512-mesh
+                 (mesh-star-chunk chain 0 :outside-domain-policy :air)))
+          (%check
+           (equalp words
+                   (surface-mesh-star-site-words avx512-mesh))))))))
 
 (defun %test-star-selection-instruction-kernel ()
   "Keep machine-specific spelling subordinate to the scalar Boolean law."
-  (let ((below (make-array 16 :element-type '(unsigned-byte 64)))
-        (above (make-array 16 :element-type '(unsigned-byte 64)))
+  (let ((below (make-array 20 :element-type '(unsigned-byte 64)))
+        (above (make-array 20 :element-type '(unsigned-byte 64)))
         (scalar (make-array 4 :element-type '(unsigned-byte 64)))
-        (native (make-array 4 :element-type '(unsigned-byte 64)))
+        (second (make-array 4 :element-type '(unsigned-byte 64)))
+        (native (make-array 8 :element-type '(unsigned-byte 64)))
         (state #x9e3779b97f4a7c15))
-    (dotimes (index 16)
+    (dotimes (index 20)
       (setf state (ldb (byte 64 0) (+ (* state 6364136223846793005) 1))
             (aref below index) state
             state (ldb (byte 64 0) (+ (* state 6364136223846793005) 1))
             (aref above index) state))
-    (%star-active-words-scalar below above 0 4 8 12 scalar)
-    (funcall (%star-active-kernel) below above 0 4 8 12 native)
-    (%check (equalp scalar native))))
+    (%star-active-words-scalar below above 0 4 8 12 scalar 0)
+    (%star-active-words-scalar below above 4 8 12 16 second 0)
+    (if (eq (star-selection-instruction-set) :avx512)
+        (progn
+          (%star-active-words-avx512 below above 0 4 8 12 native 0)
+          (%check (equalp scalar (subseq native 0 4)))
+          (%check (equalp second (subseq native 4 8))))
+        (progn
+          (funcall (%star-active-kernel)
+                   below above 0 4 8 12 native 0)
+          (%check (equalp scalar (subseq native 0 4)))))
+    #+x86-64
+    (when (luft.avx512::available-p)
+      (fill native 0)
+      (%star-active-words-avx512 below above 0 4 8 12 native 0)
+      (%check (equalp scalar (subseq native 0 4)))
+      (%check (equalp second (subseq native 4 8))))))
 
 (defun %test-atlas ()
   (%check (= 256 (length *star-atlas-owned-triangles*)))

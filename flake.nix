@@ -58,18 +58,13 @@
           libghosttyVtLibrary =
             "${libghosttyVt}/lib/libghostty-vt${pkgs.stdenv.hostPlatform.extensions.sharedLibrary}";
           sbclVersion = "2.6.7";
-          needsSimdSbcl = system == "aarch64-linux" || system == "aarch64-darwin";
-          sbclUnwrapped =
-            if needsSimdSbcl then
-              pkgs.sbcl.overrideAttrs (_finalAttrs: _previousAttrs: {
-                version = sbclVersion;
-                src = pkgs.fetchurl {
-                  url = "mirror://sourceforge/project/sbcl/sbcl/${sbclVersion}/sbcl-${sbclVersion}-source.tar.bz2";
-                  hash = "sha256-Hr3DXJ3I4nG4zRrESWXgC/JV+cAiFlD8t38Ps0wtOt4=";
-                };
-              })
-            else
-              pkgs.sbcl;
+          sbclUnwrapped = pkgs.sbcl.overrideAttrs (_finalAttrs: _previousAttrs: {
+            version = sbclVersion;
+            src = pkgs.fetchurl {
+              url = "mirror://sourceforge/project/sbcl/sbcl/${sbclVersion}/sbcl-${sbclVersion}-source.tar.bz2";
+              hash = "sha256-Hr3DXJ3I4nG4zRrESWXgC/JV+cAiFlD8t38Ps0wtOt4=";
+            };
+          });
           sbcl = pkgs.wrapLisp {
             pkg = sbclUnwrapped;
             faslExt = "fasl";

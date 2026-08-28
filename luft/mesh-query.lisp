@@ -60,35 +60,97 @@
   (let* ((window (%materialize-star-selection-window chains x0 x1 y0 y1))
          (below (star-selection-window-below window))
          (above (star-selection-window-above window))
-         (active (make-array +star-fiber-word-count+
-                             :element-type '(unsigned-byte 64)))
          (records (make-array 4096 :element-type '(unsigned-byte 32)
                                    :adjustable t :fill-pointer 0))
-         (kernel (%star-active-kernel)))
-    ;; Y/X/Z order is the numeric order of the former global lattice key and
-    ;; therefore keeps uploads and tests deterministic without a sort.
-    (loop for y fixnum from y0 to y1 do
-      (loop for x fixnum from x0 to x1 do
-        (let ((southwest (%star-window-fiber-base window (1- x) (1- y)))
-              (southeast (%star-window-fiber-base window x (1- y)))
-              (northwest (%star-window-fiber-base window (1- x) y))
-              (northeast (%star-window-fiber-base window x y)))
-          (funcall kernel below above
-                   southwest southeast northwest northeast active)
-          (dotimes (word +star-fiber-word-count+)
-            (let ((bits (aref active word)))
-              (loop while (plusp bits) do
-                (let* ((lowest (logand bits (- bits)))
-                       (bit (1- (integer-length lowest)))
-                       (z (+ (* word 64) bit))
-                       (mask (%star-mask-from-window
-                              below above
-                              southwest southeast northwest northeast
-                              word bit)))
-                  (vector-push-extend
-                   (%pack-star-site (- x x0) (- y y0) z mask)
-                   records)
-                  (setf bits (logand bits (1- bits))))))))))
+         (instruction-set (star-selection-instruction-set)))
+    ;; These local macros name the semantic operations without turning them
+    ;; into calls in the dense loop.  Machine instruction choice remains in
+    ;; STAR-SELECTION-INSTRUCTION-SET and the kernel definitions.
+    (macrolet
+        ((with-fiber-bases
+             ((southwest southeast northwest northeast) x y &body body)
+           `(let ((,southwest
+                    (%star-window-fiber-base window (1- ,x) (1- ,y)))
+                  (,southeast
+                    (%star-window-fiber-base window ,x (1- ,y)))
+                  (,northwest
+                    (%star-window-fiber-base window (1- ,x) ,y))
+                  (,northeast
+                    (%star-window-fiber-base window ,x ,y)))
+              ,@body))
+         (gather (active active-start x y southwest southeast
+                  northwest northeast)
+           `(dotimes (word +star-fiber-word-count+)
+              (let ((bits (aref ,active (+ ,active-start word))))
+                (loop while (plusp bits) do
+                  (let* ((lowest (logand bits (- bits)))
+                         (bit (1- (integer-length lowest)))
+                         (z (+ (* word 64) bit))
+                         (mask (%star-mask-from-window
+                                below above ,southwest ,southeast
+                                ,northwest ,northeast word bit)))
+                    (vector-push-extend
+                     (%pack-star-site (- ,x x0) (- ,y y0) z mask)
+                     records)
+                    (setf bits (logand bits (1- bits)))))))))
+      ;; Y/X/Z order is the numeric order of the former global lattice key and
+      ;; therefore keeps uploads and tests deterministic without a sort.
+      #+x86-64
+      (if (eq instruction-set :avx512)
+          ;; One ZMM covers two adjacent four-word Y fibers.  Classify a pair
+          ;; of complete rows first, then gather each row in the established
+          ;; order.  The odd final row uses the scalar kernel rather than an
+          ;; out-of-window upper-half load.
+          (let ((active
+                  (make-array (* 2 (1+ (- x1 x0))
+                                 +star-fiber-word-count+)
+                              :element-type '(unsigned-byte 64))))
+            (loop for y fixnum from y0 to y1 by 2 do
+              (let ((paired-p (< y y1)))
+                (loop for x fixnum from x0 to x1
+                      for active-start fixnum from 0
+                        by (* 2 +star-fiber-word-count+)
+                      do (with-fiber-bases
+                             (southwest southeast northwest northeast) x y
+                           (funcall
+                            (if paired-p #'%star-active-words-avx512
+                                #'%star-active-words-scalar)
+                            below above southwest southeast northwest northeast
+                            active active-start)))
+                (dotimes (row (if paired-p 2 1))
+                  (loop for x fixnum from x0 to x1
+                        for active-start fixnum
+                          from (* row +star-fiber-word-count+)
+                          by (* 2 +star-fiber-word-count+)
+                        do (with-fiber-bases
+                               (southwest southeast northwest northeast)
+                               x (+ y row)
+                             (gather active active-start x (+ y row)
+                                     southwest southeast northwest
+                                     northeast)))))))
+          (let ((active (make-array +star-fiber-word-count+
+                                    :element-type '(unsigned-byte 64)))
+                (kernel (%star-active-kernel)))
+            (loop for y fixnum from y0 to y1 do
+              (loop for x fixnum from x0 to x1 do
+                (with-fiber-bases
+                    (southwest southeast northwest northeast) x y
+                  (funcall kernel below above southwest southeast
+                           northwest northeast active 0)
+                  (gather active 0 x y southwest southeast
+                          northwest northeast))))))
+      #-x86-64
+      (let ((active (make-array +star-fiber-word-count+
+                                :element-type '(unsigned-byte 64)))
+            (kernel (%star-active-kernel)))
+        (loop for y fixnum from y0 to y1 do
+          (loop for x fixnum from x0 to x1 do
+            (with-fiber-bases
+                (southwest southeast northwest northeast) x y
+              (funcall kernel below above southwest southeast
+                       northwest northeast active 0)
+              (gather active 0 x y southwest southeast
+                      northwest northeast))))))
     records))
 
 (defun %star-site-words (records x0 y0)
