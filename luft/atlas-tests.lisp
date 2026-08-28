@@ -41,12 +41,25 @@
     (false (find #x1d classes :key #'first))
     (true (member #x1d (find #x1b classes :key #'first)))))
 
+(define-test atlas-normalizes-each-orientation-into-its-family-frame
+  (loop for mask below 256
+        do (multiple-value-bind (representative display-transformation)
+               (atlas::star-display-frame mask)
+             (true (= representative
+                      (luft:transform-star display-transformation mask)))))
+  (multiple-value-bind (representative display-transformation)
+      (atlas::star-display-frame #x01)
+    (true (= #x01 representative))
+    (true (equal '((1 0 0) (0 1 0) (0 0 1)) display-transformation))))
+
 (define-test atlas-browser-program-is-parenscript
   (let ((javascript (atlas:star-atlas-javascript)))
     (true (plusp (length javascript)))
     (true (search "document.getElementById" javascript))
     (true (search "star.surface" javascript))
     (true (search "star.owned" javascript))
+    (true (search "star.representative" javascript))
+    (true (search "drawOrientationAxes" javascript))
     (true (search "var families" javascript))
     (true (search "stepOrientation(-1)" javascript))
     (true (search "stepOrientation(1)" javascript))

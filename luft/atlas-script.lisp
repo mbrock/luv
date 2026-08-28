@@ -13,14 +13,40 @@
                  items)))
 
 (defun star-atlas-data-form ()
-  "A ParenScript array literal containing owned and local geometry of 256 stars."
+  "A ParenScript array literal containing display-normalized geometry of 256 stars."
   `(array
     ,@(loop for mask below 256
-            for owned = (luft:star-triangles mask)
-            for surface = (luft:star-local-surface-triangles mask)
-            collect `(create :mask ,mask
-                             :owned ,(star-geometry-data-form owned)
-                             :surface ,(star-geometry-data-form surface)))))
+            collect
+            (multiple-value-bind (representative display-transformation)
+                (star-display-frame mask)
+              `(create
+                :mask ,mask
+                :representative ,representative
+                :orientation
+                ,(parenscript-array-form display-transformation)
+                :owned
+                ,(star-geometry-data-form
+                  (transform-star-geometry
+                   display-transformation (luft:star-triangles mask)))
+                :surface
+                ,(star-geometry-data-form
+                  (luft:star-local-surface-triangles representative)))))))
+
+(defun star-display-frame (mask)
+  "Return MASK's representative and the transform carrying MASK onto it."
+  (multiple-value-bind (representative transformation)
+      (luft:star-canonical-form mask :reflections t)
+    (values representative
+            (if (= mask representative)
+                '((1 0 0) (0 1 0) (0 0 1))
+                (apply #'mapcar #'list transformation)))))
+
+(defun transform-star-geometry (transformation geometry)
+  (loop for kind in '(:faces :bands :junctions)
+        append
+        (list kind
+              (luft:transform-star-triangles
+               transformation (getf geometry kind)))))
 
 (defun star-geometry-data-form (geometry)
   `(create :faces ,(parenscript-array-form (getf geometry :faces))
@@ -116,7 +142,7 @@
     (defun occupancy-polygons (star width height scale)
       (let ((polygons (array)))
         (dotimes (sample 8)
-          (when (occupied-p (@ star mask) sample)
+          (when (occupied-p (@ star representative) sample)
             (dolist (face (cube-faces sample))
               ((@ polygons push)
                (projected-polygon face width height scale
@@ -194,6 +220,50 @@
                      (aref corners (aref edge 1))
                      width height scale "#8d9894" (array 4 4)))))
 
+    (defun transform-direction (transformation direction)
+      (let ((result (array)))
+        (dolist (row transformation)
+          ((@ result push)
+           (+ (* (aref row 0) (aref direction 0))
+              (* (aref row 1) (aref direction 1))
+              (* (aref row 2) (aref direction 2)))))
+        result))
+
+    (defun draw-orientation-axes (context width height transformation)
+      (let ((axes
+              (array
+               (array (array 1 0 0) "X" "#c24f4a")
+               (array (array 0 1 0) "Y" "#4c8b57")
+               (array (array 0 0 1) "Z" "#477fba")))
+            (anchor-x 38)
+            (anchor-y (- height 38))
+            (projected-origin (project-point (array 0 0 0) width height 22)))
+        (dolist (axis axes)
+          (let* ((direction
+                   (transform-direction transformation (aref axis 0)))
+                 (projected
+                   (project-point direction width height 22))
+                 (end-x (+ anchor-x (- (aref projected 0)
+                                       (aref projected-origin 0))))
+                 (end-y (+ anchor-y (- (aref projected 1)
+                                       (aref projected-origin 1))))
+                 (color (aref axis 2)))
+            ((@ context begin-path))
+            ((@ context move-to) anchor-x anchor-y)
+            ((@ context line-to) end-x end-y)
+            (setf (@ context global-alpha) 0.9
+                  (@ context stroke-style) color
+                  (@ context line-width) 2)
+            ((@ context stroke))
+            (setf (@ context fill-style) color
+                  (@ context font) "700 11px ui-monospace, monospace")
+            ((@ context fill-text) (aref axis 1) (+ end-x 3) (+ end-y 3))))
+        ((@ context begin-path))
+        ((@ context arc) anchor-x anchor-y 2.5 0 (* 2 pi))
+        (setf (@ context global-alpha) 1
+              (@ context fill-style) "#17201e")
+        ((@ context fill))))
+
     (defun canvas-context (canvas)
       (let* ((ratio (min 2 (or (@ window device-pixel-ratio) 1)))
              (width (@ canvas client-width))
@@ -235,7 +305,9 @@
                            (if detailed-p 3.2 1.8) 0 (* 2 pi))
           (setf (@ context global-alpha) 1
                 (@ context fill-style) "#17201e")
-          ((@ context fill)))))
+          ((@ context fill)))
+        (when detailed-p
+          (draw-orientation-axes context width height (@ star orientation)))))
 
     (defun star-at (mask)
       (aref stars mask))
@@ -269,23 +341,24 @@
 
     (defun render-selected ()
       (let* ((star (star-at selected-mask))
+             (display-mask (@ star representative))
              (geometry (if (= view-mode "owned")
                            (@ star owned)
                            (@ star surface))))
-        (set-text "selected-mask" (hexadecimal-label selected-mask))
-        (set-text "selected-bits" (bit-label selected-mask))
+        (set-text "selected-mask" (hexadecimal-label display-mask))
+        (set-text "selected-bits" (bit-label display-mask))
         (set-text "selected-view"
                   (if (= view-mode "owned")
                       "Owned orientation"
                       "Whole local patch"))
         (set-text "view-explanation"
                   (if (= view-mode "owned")
-                      "Bright triangles belong to this orientation; the whole patch remains faintly visible."
+                      "Bright triangles belong to this orientation in the fixed family frame; XYZ shows how its axes map into that frame."
                       "Every face and band touching the center, with ownership forgotten."))
         (set-text "face-count" (@ (@ geometry faces) length))
         (set-text "band-count" (@ (@ geometry bands) length))
         (set-text "junction-count" (@ (@ geometry junctions) length))
-        (render-occupancy selected-mask)
+        (render-occupancy display-mask)
         (render-selected-family)
         (draw-star (element "selected-canvas") star geometry true)))
 

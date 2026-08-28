@@ -92,7 +92,7 @@
                 (:span#selected-view.view-label "Whole local patch"))
               (:span#selected-bits.bits "00001000"))
             (:canvas#selected-canvas
-              :aria-label "Rotatable triangle geometry of the selected star")
+              :aria-label "Rotatable fixed-frame geometry and orientation axes of the selected star")
             (:div.detail-controls
               (:fieldset.view-modes
                 (:legend "Mesh view")
@@ -128,7 +128,7 @@
             (dolist (class (star-symmetry-classes))
               (render-star-family class))))
         (:p.atlas-note
-          "Drag the large view to orbit; scroll over it to approach. Previous and next step through the selected symmetry family. Family meshes are the symmetry ownership closure from "
+          "Drag the large view to orbit; scroll over it to approach. Previous and next step through the selected symmetry family while its occupancy stays in a fixed frame; the XYZ triad carries the changing orientation. Family meshes are the symmetry ownership closure from "
           (:code "LUFT:STAR-LOCAL-SURFACE-TRIANGLES")
           "; orientation buttons reveal the corresponding production packet from "
           (:code "LUFT:STAR-TRIANGLES") ".")
