@@ -49,3 +49,29 @@
       (true (= 8 (luft.render::render-population-mesh-workgroup-count
                   population)))
       (true (= 32 (length (luft:surface-mesh-star-site-words mesh)))))))
+
+(define-test camera-yaw-follows-intent-smoothly
+  (let ((camera (luft.render:make-fly-camera :yaw 0.0)))
+    (luft.render::target-camera-yaw camera (/ pi 2))
+    (true (zerop (luft.render:camera-yaw camera))
+          "requesting a pose does not move the rendered camera immediately")
+    (luft.render::advance-camera-response camera 0.1)
+    (true (< 0.0 (luft.render:camera-yaw camera) (/ pi 2))
+          "a frame advances only partway toward the requested pose")
+    (let ((one-step (luft.render:camera-yaw camera)))
+      (setf (luft.render:camera-yaw camera) 0.0)
+      (luft.render::target-camera-yaw camera (/ pi 2))
+      (luft.render::advance-camera-response camera 0.05)
+      (luft.render::advance-camera-response camera 0.05)
+      (true (< (abs (- one-step (luft.render:camera-yaw camera))) 1.0e-6)
+            "the response is independent of frame subdivision"))))
+
+(define-test camera-yaw-target-takes-the-shortest-turn
+  (let ((camera (luft.render:make-fly-camera :yaw (- pi 0.1))))
+    (luft.render::target-camera-yaw camera (+ (- pi) 0.1))
+    (luft.render::advance-camera-response camera 0.05)
+    (true (> (luft.render:camera-yaw camera) (- pi 0.1))
+          "crossing the angle seam continues through the nearby orientation")
+    (setf (luft.render:camera-yaw camera) 0.25)
+    (true (= 0.25 (luft.render::camera-target-yaw camera))
+          "an explicit pose assignment remains an immediate settled cut")))

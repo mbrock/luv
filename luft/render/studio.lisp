@@ -27,13 +27,55 @@ predict.")
 
 (defconstant +orthographic-near+ -4096.0)
 (defconstant +orthographic-far+ 4096.0)
+(defconstant +camera-yaw-response-rate+ 8.0)
 
 (defclass fly-camera ()
   ((position :initarg :position :accessor camera-position)
    (yaw :initarg :yaw :initform 0.0 :accessor camera-yaw)
+   (target-yaw :initarg :target-yaw :initform nil :accessor camera-target-yaw)
    (pitch :initarg :pitch :initform 0.0 :accessor camera-pitch)
    (field-of-view :initarg :field-of-view :initform (* 70.0 (/ pi 180))
                   :accessor camera-field-of-view)))
+
+(defmethod initialize-instance :after ((camera fly-camera) &key)
+  (unless (camera-target-yaw camera)
+    (setf (camera-target-yaw camera) (camera-yaw camera))))
+
+(defmethod update-instance-for-redefined-class :after
+    ((camera fly-camera) added-slots discarded-slots property-list
+     &rest initargs)
+  (declare (ignore added-slots discarded-slots property-list initargs))
+  (unless (camera-target-yaw camera)
+    (setf (camera-target-yaw camera) (camera-yaw camera))))
+
+(defmethod (setf camera-yaw) :after (yaw (camera fly-camera))
+  "Keep an explicit camera pose assignment an immediate, settled cut."
+  (setf (camera-target-yaw camera) yaw))
+
+(defun shortest-angle-difference (target current)
+  (- (mod (+ (- target current) pi) (* 2 pi)) pi))
+
+(defun target-camera-yaw (camera yaw)
+  "Ask CAMERA to turn toward YAW without discontinuously changing its pose."
+  (setf (camera-target-yaw camera) (mod yaw (* 2 pi)))
+  camera)
+
+(defun advance-camera-response (camera seconds)
+  "Advance CAMERA's rendered pose toward its requested pose.
+
+The exact exponential response is independent of frame rate.  Pose setters
+remain cuts; camera behaviors use targets when motion should be visible."
+  (let* ((current (camera-yaw camera))
+         (difference
+           (shortest-angle-difference (camera-target-yaw camera) current)))
+    (setf (slot-value camera 'yaw)
+          (if (< (abs difference) 1.0e-5)
+              (camera-target-yaw camera)
+              (+ current
+                 (* difference
+                    (- 1.0
+                       (exp (- (* +camera-yaw-response-rate+ seconds)))))))))
+  camera)
 
 (defclass viewer-mode () ())
 
@@ -121,15 +163,9 @@ at the atelier boundary where a person has selected one site."))
   "Orbit VIEWER's following isometric camera by one signed eighth-turn."
   (check-type direction (member -1 1))
   (when (typep (viewer-mode viewer) 'isometric-walk-mode)
-    (let ((camera (viewer-camera viewer))
-          (player (viewer-player viewer)))
-      (setf (camera-yaw camera)
-            (mod (+ (camera-yaw camera) (* direction (/ pi 4))) (* 2 pi)))
-      (when player
-        (follow-walking-player camera player)
-        (constrain-viewer-follow-camera viewer))
-      (when (viewer-renderer viewer)
-        (setf (renderer-history-valid-p (viewer-renderer viewer)) nil))))
+    (let ((camera (viewer-camera viewer)))
+      (target-camera-yaw
+       camera (+ (camera-target-yaw camera) (* direction (/ pi 4))))))
   viewer)
 
 (defun camera-basis (camera)
@@ -969,6 +1005,7 @@ before the operation boundary, or it would encode through resources which the
          (camera (viewer-camera viewer))
          (step (* dt (viewer-speed viewer))))
     (setf (viewer-last-timestamp viewer) timestamp)
+    (advance-camera-response camera dt)
     (if (viewer-player viewer)
         (let ((forward (- (if (viewer-control-active-p viewer :forward) 1 0)
                           (if (viewer-control-active-p viewer :backward) 1 0)))
@@ -1368,8 +1405,11 @@ before the operation boundary, or it would encode through resources which the
              (viewer-pointer-captured-p viewer))
     (let ((camera (viewer-camera viewer))
           (sensitivity (viewer-sensitivity viewer)))
-      (decf (camera-yaw camera)
-            (* (canvas-pointer-event-delta-x event) sensitivity))
+      ;; Relative mouse look is direct manipulation rather than a requested
+      ;; cinematic pose, so this assignment also settles the yaw target.
+      (setf (camera-yaw camera)
+            (- (camera-yaw camera)
+               (* (canvas-pointer-event-delta-x event) sensitivity)))
       (setf (camera-pitch camera)
             (max -1.5 (min 1.5
                            (- (camera-pitch camera)
