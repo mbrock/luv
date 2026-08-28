@@ -108,26 +108,6 @@
      (surface-mesh-band-triangle-count mesh)
      (surface-mesh-fan-triangle-count mesh)))
 
-(defun %read-arc-junction-table ()
-  (let ((table (make-array 256 :initial-element nil))
-        (pathname
-          (asdf:system-relative-pathname
-           "luft" #P"luft/blender-arc-stars.sexp")))
-    (with-open-file (stream pathname :direction :input)
-      (let ((corpus (read stream nil nil)))
-        (unless corpus
-          (error "The Blender Arc corpus is empty: ~A" pathname))
-        (dolist (case (getf corpus :cases))
-          (let ((mask (getf case :mask)))
-            (setf (aref table mask)
-                  (list :regular-star (getf (getf case :input) :regular-star)
-                        :faces (getf (getf case :junction) :faces)))))))
-    (unless (every #'identity table)
-      (error "The Blender Arc corpus does not contain all 256 stars."))
-    table))
-
-(defparameter *arc-junction-table* (%read-arc-junction-table))
-
 (defun %sample-direction-component (sample axis-number)
   (if (logbitp axis-number sample) 1 -1))
 
@@ -180,9 +160,9 @@ each occupied quadrant, producing two independent surface sheets.
 This diagnostic decomposition deliberately KEEPS the occupied-side pairing
 even though production bands now pair checkerboards around empty quadrants
 (%EDGE-RUN-TRANSITION-GROUPS): its purpose is to split a singular star into
-the regular occupied-side sheets the Blender Arc corpus covers, and a cycle
-joining diagonal solids has no such regular mask.  Reconciling the two views
-needs the multi-boundary junction algorithm first."
+regular occupied-side sheets summarized by ordinary eight-bit masks, and a
+cycle joining diagonal solids has no such regular mask.  Reconciling the two
+views needs the multi-boundary junction algorithm first."
   (let* ((samples (%radial-samples axis-number sign))
          (transitions
            (loop for index below 4
@@ -275,17 +255,17 @@ needs the multi-boundary junction algorithm first."
     mask))
 
 (defun decompose-star-mask (mask)
-  "Resolve MASK into the regular occupied-side masks supported by this spike.
+  "Resolve MASK into the regular occupied-side mask of each boundary sheet.
 
 The returned list has one regular mask per simple boundary-link cycle.  Empty
-and full stars have no boundary and therefore return NIL.  A cycle which needs
-duplicated radial vertices cannot yet be represented by the Blender regular
-star corpus; signal that boundary explicitly instead of silently welding it."
+and full stars have no boundary and therefore return NIL.  A cycle whose
+occupied side is itself a singular star cannot be summarized by an ordinary
+eight-bit mask; signal that boundary explicitly instead of silently welding
+it."
   (check-type mask (integer 0 255))
   (mapcar (lambda (cycle)
             (let ((virtual-mask (%cycle-virtual-mask mask cycle)))
-              (unless (getf (aref *arc-junction-table* virtual-mask)
-                            :regular-star)
+              (when (star-singular-p virtual-mask)
                 (error "Sheet cycle from ~2,'0X needs a covered junction; its ordinary mask is ~2,'0X."
                        mask virtual-mask))
               virtual-mask))

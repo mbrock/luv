@@ -8,7 +8,6 @@
   :serial t
   :components ((:file "luft/luft")
                (:file "luft/voxel-light")
-               (:static-file "luft/blender-arc-stars.sexp")
                (:file "luft/mesh")
                (:file "luft/mesh-query")
                (:file "luft/star-geometry")

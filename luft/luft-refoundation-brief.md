@@ -17,9 +17,9 @@ around each occupied quadrant, duplicating the radial direction when two solid
 sheets only touch there. Walking those pairs produces the boundary-link cycles
 owned by one vertex star.
 
-The regular junction geometry for each resulting sheet comes from
-`blender-arc-stars.sexp`. That corpus is an exact integer oracle for regular
-stars only.
+The regular junction geometry is now derived from first principles in
+`star-geometry.lisp`, which serves as the source of truth; the retired
+Blender Arc corpus was an earlier exact integer oracle for regular stars.
 
 ## Integer geometry
 

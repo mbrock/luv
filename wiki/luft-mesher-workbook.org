@@ -392,6 +392,32 @@ The diagnostic sheet decomposition ([[lisp:luft::%radial-transition-groups]],
 masks would silently weld the merged checkerboard cycles, and reconciling
 that awaits the multi-boundary junction treatment.
 
+* DONE Star geometry is derived, and the derivation is the source of truth
+:PROPERTIES:
+:ID: IWUIXJ
+:END:
+
+=luft/star-geometry.lisp= no longer reads the width-one tables back; it
+derives the whole local patch of a star from first principles, in the order
+a reader would want the argument.  Faces are cell faces inset one tick.
+Each lattice half-edge pairs its occupancy transitions (#ZJ7CSO); a pair
+with distinct face normals owns one bevel band between rails offset one
+tick into the occupied quadrants, and a flat pair owns the two one-tick
+collars its coplanar faces did not inset.  The junction then closes what
+those triangles leave open: directed-edge parity over the local faces and
+bands yields the boundary records within one tick of the site, tracing
+them left-to-right yields cycles on the $\sqrt2$-sphere of #SAMH68, and the
+dichotomy finishes — three records cap, planar-through-site or non-planar
+cycles fan from the lattice point, planar-missing-site cycles strip.
+
+The relationship to production inverted.  The compiled tables keep their
+fast path, but the exhaustive differential in LUFT's tests now pins every
+band descriptor and fan template to the derivation, triangle for triangle
+and in order, for all 256 stars.  The Blender Arc corpus that previously
+certified junctions is deleted (#Z0X3YQ).  Only the owned-orientation slice
+of =star-triangles= still reads the vocabulary, because row ownership is a
+production division of labor, not a geometric fact.
+
 * The contracts which optimization must not hide
 :PROPERTIES:
 :ID: L38W75

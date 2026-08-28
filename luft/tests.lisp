@@ -2636,6 +2636,45 @@
                                 (logbitp (logxor sample (ash 1 axis))
                                          star))))))
 
+(defun %production-star-band-triangles (star half-edge)
+  "Read HALF-EDGE's band triangles from the compiled production tables.
+
+This is the production side of the star-geometry differential: the tables
+are compiled independently for speed, and this probe translates one edge
+pattern's descriptors into the same local coordinates the derivation uses."
+  (destructuring-bind (axis-number positive-p) half-edge
+    (let* ((state (%star-half-edge-state star half-edge))
+           (pattern (svref *width-one-edge-pattern-table* state))
+           (descriptors
+             (svref (width-one-edge-pattern-descriptors pattern)
+                    axis-number))
+           (translation (if positive-p 0 (- +mesh-cell-size+))))
+      (loop for descriptor across descriptors
+            append (%production-descriptor-triangles
+                    descriptor axis-number translation)))))
+
+(defun %production-descriptor-triangles
+    (descriptor translated-axis translation)
+  (let ((vertices (width-one-template-descriptor-vertices descriptor)))
+    (unless (zerop (mod (length vertices) 3))
+      (error "Star descriptor has ~D vertices, not a triangle list."
+             (length vertices)))
+    (loop for vertex from 0 below (length vertices) by 3
+          collect
+          (loop for corner below 3
+                for packed = (aref vertices (+ vertex corner))
+                collect
+                (loop for axis-number below 3
+                      for coordinate =
+                        (%packed-template-coordinate packed axis-number)
+                      collect (if (= axis-number translated-axis)
+                                  (+ coordinate translation)
+                                  coordinate))))))
+
+(defun %production-star-junction-triangles (star)
+  "Read STAR's junction triangles from the compiled production vocabulary."
+  (%triangles-of-templates (%star-junction-templates star)))
+
 (defun %test-star-geometry ()
   (%with-test-section ("plain width-one star triangle geometry")
     (dotimes (star 256)
@@ -2659,7 +2698,15 @@
         (%check (equal junctions local-junctions))
         ;; Every solid/air cell adjacency contributes one inset quadrilateral.
         (%check (= (length local-faces)
-                   (* 2 (%star-face-corner-count star))))))
+                   (* 2 (%star-face-corner-count star))))
+        ;; The derivation is the source of truth; the compiled production
+        ;; tables must reproduce it triangle for triangle, in order.
+        (%check (equal junctions (%production-star-junction-triangles star))
+                "compiled junction templates diverge from the derivation")
+        (dolist (half-edge (%star-band-half-edges))
+          (%check (equal (%star-band-half-edge-triangles star half-edge)
+                         (%production-star-band-triangles star half-edge))
+                  "compiled band descriptors diverge from the derivation"))))
     (%check (equal '(:faces nil :bands nil :junctions nil)
                    (star-triangles #x00)))
     (%check (equal '(:faces nil :bands nil :junctions nil)

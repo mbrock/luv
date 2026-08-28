@@ -24,7 +24,7 @@ TRACY_MCCLIM_PAINT_TRACE ?= build/mcclim-paints.tracy
 
 FASL_CACHE := $(HOME)/.cache/common-lisp
 
-.PHONY: all sly-client sly-dependency-core luvcraft luft luft-core luft-test run test test-suite capture showcase-bootstrap showcase-render showcase-deploy showcase-publish showcase-status clean-fasls parinfer-check sly-build-lock-check shader-validate luft-shader-validate msl-validate smoke vulkan-smoke metal-smoke metal-text-closeup metal-benchmark metal-streaming-benchmark metal-retina-benchmark luft-mesher-profile luft-mesher-cohort luft-z-fiber-benchmark luft-blender-oracle luft-blender-oracle-check tracy-streaming tracy-mcclim-roundrect tracy-mcclim-paints readme-screenshots mcclim-gallery wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw roundrect-proof slug-proof slug-text-proof clean
+.PHONY: all sly-client sly-dependency-core luvcraft luft luft-core luft-test run test test-suite capture showcase-bootstrap showcase-render showcase-deploy showcase-publish showcase-status clean-fasls parinfer-check sly-build-lock-check shader-validate luft-shader-validate msl-validate smoke vulkan-smoke metal-smoke metal-text-closeup metal-benchmark metal-streaming-benchmark metal-retina-benchmark luft-mesher-profile luft-mesher-cohort luft-z-fiber-benchmark tracy-streaming tracy-mcclim-roundrect tracy-mcclim-paints readme-screenshots mcclim-gallery wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw roundrect-proof slug-proof slug-text-proof clean
 
 ifeq ($(LUV_SLY_SYSTEM),luft)
 all: sly-client luft-core sly-dependency-core
@@ -233,12 +233,6 @@ luft-z-fiber-benchmark:
 		$(LUFT_Z_FIBER_BENCHMARK_PATTERNS) \
 		$(LUFT_Z_FIBER_BENCHMARK_SAMPLES) \
 		$(LUFT_Z_FIBER_BENCHMARK_WARMUPS)
-
-luft-blender-oracle:
-	./scripts/luft-blender-star-oracle
-
-luft-blender-oracle-check:
-	./scripts/luft-blender-star-oracle --check
 
 tracy-streaming: luvcraft
 	./scripts/trace-luvcraft-streaming $(TRACY_STREAMING_TRACE)

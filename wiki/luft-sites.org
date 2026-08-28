@@ -179,17 +179,14 @@ agree category by category, which is the independent geometric oracle that
 :END:
 
 The improvised scene established the attractive cases, but did not establish
-the domain on which Blender is a specification.  The repository now contains
-a headless [[file:../scripts/luft-blender-star-oracle.py][generator]] and its
-[[file:../luft/blender-arc-stars.sexp][canonical mapping]].  It constructs the
-welded cubical boundary for every one of the 256 vertex stars, applies the
-recorded one-segment Arc modifier, extracts the central junction, and checks
-integer coordinates, the 26-normal alphabet, all 24 proper rotations, and
-occupancy complement.  The corpus is regenerated and compared with:
-
-#+begin_example
-make luft-blender-oracle-check
-#+end_example
+the domain on which Blender is a specification.  The repository carried a
+headless generator, =scripts/luft-blender-star-oracle.py=, and its canonical
+mapping, =luft/blender-arc-stars.sexp= (both retired by #Z0X3YQ).  It
+constructed the welded cubical boundary for every one of the 256 vertex
+stars, applied the recorded one-segment Arc modifier, extracted the central
+junction, and checked integer coordinates, the 26-normal alphabet, all 24
+proper rotations, and occupancy complement.  The corpus was regenerated and
+compared with =make luft-blender-oracle-check=.
 
 The exhaustive result splits exactly in half.  All 128 /regular/ stars — 12
 proper-rotation classes whose boundary is edge-manifold and whose vertex link
@@ -207,6 +204,24 @@ cubical boundary stars, not a policy for singular chains.  LUFT must either
 exclude those local occupancies from a terrain materialization, split their
 surface sheets before beveling, or state a separate singular-junction rule.
 The table of #WJRRK7 cannot silently assign Blender's arbitrary answer to them.
+
+* DONE The Arc oracle is retired; the derivation replaced it
+:PROPERTIES:
+:ID: Z0X3YQ
+:END:
+
+The corpus of #TQ8FUN did its job and is gone.  Once the width-one geometry
+was understood well enough to derive from first principles — inset faces,
+transition-paired bands and collars, and the junction dichotomy of #SAMH68 —
+the executable oracle became =luft/star-geometry.lisp= itself, a readable
+in-repo derivation checked against the compiled production tables for all
+256 stars by the exhaustive differential in LUFT's tests.  The generator
+script, the =blender-arc-stars.sexp= mapping, and the =make= targets are
+deleted.  The one fact production code still drew from the corpus — which
+sheet masks are /regular/ — proved to be exactly the complement of
+[[lisp:luft::star-singular-p]] over all 256 masks, so =decompose-star-mask=
+now asks that predicate directly.  What Blender contributed survives as the
+census language of this page and the regular/singular split it certified.
 
 * Faces, bands, and fans: three instance streams
 :PROPERTIES:

@@ -2,11 +2,21 @@
 
 ;;; Resolved geometry of one width-one occupancy star
 ;;;
-;;; This is a deliberately plain view of the production query vocabulary.
-;;; A caller supplies one of the 256 eight-cell occupancy stars and receives
-;;; ordinary lists of local integer triangle positions.  Materials, ambient
-;;; occlusion, ownership witnesses, normals, and packed renderer attributes do
-;;; not enter this view.
+;;; This file is the source of truth for width-one star geometry.  A caller
+;;; supplies one of the 256 eight-cell occupancy stars and receives ordinary
+;;; lists of local integer triangle positions, derived here from first
+;;; principles: exposed faces inset one tick from their creases, bevel bands
+;;; pairing occupancy transitions around each lattice edge, and junction
+;;; cycles closed by the cap/strip/fan dichotomy at each lattice point.
+;;; Materials, ambient occlusion, ownership witnesses, normals, and packed
+;;; renderer attributes do not enter this view.
+;;;
+;;; The production mesher compiles its width-one tables independently for
+;;; speed; the exhaustive differential in LUFT's tests pins those tables to
+;;; the derivation below, star by star.  Only the owned-orientation slice at
+;;; the end of this file still reads the production vocabulary, because row
+;;; ownership -- which site emits which patch -- is a production concept
+;;; rather than a geometric one.
 ;;;
 ;;; The code is written as a top-down description in the ubiquitous language
 ;;; of stars, faces, bands, junctions, triangles, and cubical transformations.
@@ -42,17 +52,21 @@ local mesh ticks around the star at the origin; one voxel is
   (%triangles-of-templates (%star-band-templates star)))
 
 (defun star-junction-triangles (star)
-  "Resolve the central junctions of width-one occupancy STAR."
+  "Derive the central junction triangles of width-one occupancy STAR.
+
+The junction is wholly owned by its lattice point, so the owned and local
+views coincide, and both are the first-principles derivation."
   (%check-star star)
-  (%triangles-of-templates (%star-junction-templates star)))
+  (loop for cycle in (%star-junction-cycles star)
+        append (%star-junction-cycle-triangles cycle)))
 
 (defun star-local-surface-triangles (star)
-  "Resolve the complete local surface patch implied by occupancy STAR.
+  "Derive the complete local surface patch implied by occupancy STAR.
 
 Unlike STAR-TRIANGLES, this includes the face quadrants and band half-edges
-owned by neighboring lattice points.  It enumerates those twelve face
-quadrants and six half-edges directly, selecting each production template
-once.  The central junction is already wholly owned at this point."
+owned by neighboring lattice points.  It enumerates the twelve face
+quadrants and six band half-edges directly.  The central junction is
+already wholly owned at this point."
   (%check-star star)
   (list :faces (%star-local-face-triangles star)
         :bands (%star-local-band-triangles star)
@@ -68,6 +82,14 @@ once.  The central junction is already wholly owned at this point."
   (loop for half-edge in (%star-band-half-edges)
         append (%star-band-half-edge-triangles star half-edge)))
 
+;;; Face patches
+;;;
+;;; Each of the twelve face quadrants names one neighboring cell pair across
+;;; one axis.  When exactly one of the two cells is occupied the pair exposes
+;;; a face, and its width-one patch is the cell face inset one tick on every
+;;; side.  The insets that a flat continuation would reclaim are band-kind
+;;; collars and belong to the half-edges below.
+
 (defun %star-face-quadrants ()
   "Name each face quadrant as (NORMAL-AXIS U-POSITIVE-P V-POSITIVE-P)."
   (loop for axis-number below 3
@@ -77,12 +99,6 @@ once.  The central junction is already wholly owned at this point."
               (loop for v-positive-p in '(nil t)
                     collect (list axis-number
                                   u-positive-p v-positive-p)))))
-
-(defun %star-band-half-edges ()
-  "Name each band half-edge as (AXIS POSITIVE-P)."
-  (loop for axis-number below 3
-        append (list (list axis-number nil)
-                     (list axis-number t))))
 
 (defun %star-face-quadrant-normal-sign (star quadrant)
   "Return QUADRANT's outward normal sign, or zero when it is not exposed."
@@ -139,20 +155,173 @@ once.  The central junction is already wholly owned at this point."
         (list a b c)
         (list a c b))))
 
-(defun %star-band-half-edge-triangles (star half-edge)
-  (destructuring-bind (axis-number positive-p) half-edge
-    (loop for descriptor across
-          (%star-band-half-edge-descriptors star half-edge)
-          append
-          (%star-translated-descriptor-triangles
-           descriptor axis-number
-           (if positive-p 0 (- +mesh-cell-size+))))))
+;;; Bevel bands
+;;;
+;;; Each of the six half-edges names the lattice edge leaving the site in one
+;;; signed axis direction.  The four cells around that edge form a cyclic
+;;; quadrant run; each occupancy transition in the run is one exposed face
+;;; meeting the edge.  Paired transitions with distinct face normals bound a
+;;; crease and own one bevel band between their rails.  A flat pair --
+;;; coplanar faces continuing across the edge -- owns the two one-tick
+;;; collars that restore the insets its faces did not need.
 
-(defun %star-band-half-edge-descriptors (star half-edge)
-  (let* ((axis-number (first half-edge))
-         (state (%star-half-edge-state star half-edge))
-         (pattern (svref *width-one-edge-pattern-table* state)))
-    (svref (width-one-edge-pattern-descriptors pattern) axis-number)))
+(defun %star-band-half-edges ()
+  "Name each band half-edge as (AXIS POSITIVE-P)."
+  (loop for axis-number below 3
+        append (list (list axis-number nil)
+                     (list axis-number t))))
+
+(defun %star-band-half-edge-triangles (star half-edge)
+  (let ((state (%star-half-edge-state star half-edge)))
+    (loop for group in (%star-paired-transitions state)
+          append (%star-transition-pair-triangles half-edge state group))))
+
+(defun %star-paired-transitions (state)
+  "Pair the transition indices of one four-bit quadrant occupancy run.
+
+The ordinary two transitions are one pair.  A checkerboard has four
+transitions and forces a manifold pairing choice; bands pair around each
+EMPTY quadrant, so two diagonally-touching solids meet in concave fillets
+joined across their shared lattice edge rather than separating into two
+convex chamfer sheets."
+  (let ((transitions
+          (loop for index below 4
+                unless (eq (logbitp index state)
+                           (logbitp (mod (1+ index) 4) state))
+                  collect index)))
+    (ecase (length transitions)
+      (0 nil)
+      (2 (list transitions))
+      (4 (loop for index below 4
+               unless (logbitp index state)
+                 collect (list (mod (+ index 3) 4) index))))))
+
+(defun %star-transition-pair-triangles (half-edge state group)
+  (let ((left (%star-half-edge-transition half-edge state (first group)))
+        (right (%star-half-edge-transition half-edge state (second group))))
+    (if (= (getf left :normal-axis) (getf right :normal-axis))
+        ;; Equal normals are one flat face continued across the lattice
+        ;; edge; the pair owns its two collars instead of a bevel band,
+        ;; listed in the scan order of the cells whose faces they extend.
+        (loop for transition in (%star-scan-ordered-transitions
+                                 half-edge (list left right))
+              append (%star-flat-collar-triangles half-edge transition))
+        (%star-crease-band-triangles half-edge left right))))
+
+(defun %star-scan-ordered-transitions (half-edge transitions)
+  (sort (copy-list transitions) #'<
+        :key (lambda (transition)
+               (%star-half-edge-sample
+                half-edge (getf transition :occupied-quadrant)))))
+
+(defun %star-half-edge-transition (half-edge state transition-index)
+  "Resolve one occupancy transition into its face and rail directions.
+
+STATE is the four-bit quadrant occupancy run of HALF-EDGE.  The face normal
+points from the occupied quadrant toward the empty one; the rail offset
+points from the lattice edge into the occupied quadrant along the face
+plane."
+  (destructuring-bind (axis-number positive-p) half-edge
+    (declare (ignore positive-p))
+    (let* ((u (svref +axis-u+ axis-number))
+           (v (svref +axis-v+ axis-number))
+           (next-index (mod (1+ transition-index) 4))
+           (occupied-p (logbitp transition-index state))
+           (occupied-index (if occupied-p transition-index next-index))
+           (empty-index (if occupied-p next-index transition-index))
+           (qu-occupied (svref +quadrant-u+ occupied-index))
+           (qv-occupied (svref +quadrant-v+ occupied-index))
+           (qu-empty (svref +quadrant-u+ empty-index))
+           (qv-empty (svref +quadrant-v+ empty-index))
+           (normal-axis (if (/= qu-occupied qu-empty) u v))
+           (other-axis (if (= normal-axis u) v u)))
+      (list :normal-axis normal-axis
+            :normal-sign (if (= normal-axis u) qu-empty qv-empty)
+            :other-axis other-axis
+            :other-sign (if (= other-axis u) qu-occupied qv-occupied)
+            :occupied-quadrant occupied-index))))
+
+(defun %star-crease-band-triangles (half-edge left right)
+  "One bevel band between the rails of two paired crease transitions."
+  (destructuring-bind (axis-number positive-p) half-edge
+    (let* ((low (+ (%star-half-edge-base positive-p) 1))
+           (high (+ (%star-half-edge-base positive-p)
+                    (1- +mesh-cell-size+)))
+           (normal (%star-transition-pair-normal left right))
+           (left-rail (%star-transition-rail left))
+           (right-rail (%star-transition-rail right))
+           (p0 (%star-rail-point left-rail axis-number low))
+           (p1 (%star-rail-point right-rail axis-number low))
+           (p2 (%star-rail-point right-rail axis-number high))
+           (p3 (%star-rail-point left-rail axis-number high)))
+      (list (%star-oriented-space-triangle p0 p1 p2 normal)
+            (%star-oriented-space-triangle p0 p2 p3 normal)))))
+
+(defun %star-flat-collar-triangles (half-edge transition)
+  "One one-tick collar strip beside the lattice edge in a flat face plane.
+
+The quad is laid out in the face's own frame with ascending coordinates,
+exactly as face cells are, so its diagonal agrees with the face it extends."
+  (destructuring-bind (axis-number positive-p) half-edge
+    (let* ((low (+ (%star-half-edge-base positive-p) 1))
+           (high (+ (%star-half-edge-base positive-p)
+                    (1- +mesh-cell-size+)))
+           (normal-axis (getf transition :normal-axis))
+           (normal (%star-transition-normal transition))
+           (cross-sign (getf transition :other-sign))
+           (u (svref +axis-u+ normal-axis))
+           (v (svref +axis-v+ normal-axis)))
+      (flet ((span (axis)
+               (if (= axis axis-number)
+                   (list low high)
+                   (list (min 0 cross-sign) (max 0 cross-sign)))))
+        (destructuring-bind (u0 u1) (span u)
+          (destructuring-bind (v0 v1) (span v)
+            (let ((p0 (%star-plane-point u u0 v v0))
+                  (p1 (%star-plane-point u u1 v v0))
+                  (p2 (%star-plane-point u u1 v v1))
+                  (p3 (%star-plane-point u u0 v v1)))
+              (list (%star-oriented-space-triangle p0 p1 p2 normal)
+                    (%star-oriented-space-triangle p0 p2 p3 normal)))))))))
+
+(defun %star-plane-point (u-axis u-coordinate v-axis v-coordinate)
+  (let ((point (list 0 0 0)))
+    (setf (nth u-axis point) u-coordinate
+          (nth v-axis point) v-coordinate)
+    point))
+
+(defun %star-half-edge-base (positive-p)
+  (if positive-p 0 (- +mesh-cell-size+)))
+
+(defun %star-transition-rail (transition)
+  "The rail point one tick into the occupied quadrant, at edge coordinate 0."
+  (let ((rail (list 0 0 0)))
+    (setf (nth (getf transition :other-axis) rail)
+          (getf transition :other-sign))
+    rail))
+
+(defun %star-transition-normal (transition)
+  (let ((normal (list 0 0 0)))
+    (setf (nth (getf transition :normal-axis) normal)
+          (getf transition :normal-sign))
+    normal))
+
+(defun %star-transition-pair-normal (left right)
+  (mapcar #'+ (%star-transition-normal left)
+          (%star-transition-normal right)))
+
+(defun %star-rail-point (rail axis-number coordinate)
+  (let ((point (copy-list rail)))
+    (setf (nth axis-number point) coordinate)
+    point))
+
+(defun %star-oriented-space-triangle (a b c normal)
+  "Orient triangle A B C so its winding agrees with NORMAL."
+  (if (minusp (%dot-product (%cross-product (%point-difference b a)
+                                            (%point-difference c a))
+                            normal))
+      (list a c b)
+      (list a b c)))
 
 (defun %star-half-edge-state (star half-edge)
   (loop for quadrant below 4
@@ -168,23 +337,190 @@ once.  The central junction is already wholly owned at this point."
               (if (plusp (svref +quadrant-u+ quadrant)) (ash 1 u) 0)
               (if (plusp (svref +quadrant-v+ quadrant)) (ash 1 v) 0)))))
 
-(defun %star-translated-descriptor-triangles
-    (descriptor translated-axis translation)
-  (let ((vertices (width-one-template-descriptor-vertices descriptor)))
-    (unless (zerop (mod (length vertices) 3))
-      (error "Star descriptor has ~D vertices, not a triangle list."
-             (length vertices)))
-    (loop for vertex from 0 below (length vertices) by 3
-          collect
-          (loop for corner below 3
-                for packed = (aref vertices (+ vertex corner))
-                collect
-                (loop for axis-number below 3
-                      for coordinate =
-                        (%packed-template-coordinate packed axis-number)
-                      collect (if (= axis-number translated-axis)
-                                  (+ coordinate translation)
-                                  coordinate))))))
+;;; The junction
+;;;
+;;; After every face patch and band is present, the open boundary edges next
+;;; to the lattice point trace one or more cycles on the sphere of radius
+;;; sqrt(2) around it.  A three-record cycle closes with its triangular cap.
+;;; A planar cycle through the site fans flat from it, and a non-planar
+;;; saddle cycle forces an interior apex whose only equidistant choice is
+;;; the lattice point itself, so both fan from the site.  A planar cycle
+;;; that misses the site needs no interior vertex at all and closes as a
+;;; deterministic strip.
+
+(defun %star-junction-cycles (star)
+  "Trace the directed open boundary cycles around the central site."
+  (%star-traced-cycles (%star-junction-records star)))
+
+(defun %star-junction-cycle-triangles (cycle)
+  (let ((points (mapcar #'first cycle)))
+    (cond ((= 3 (length cycle))
+           (%star-boundary-cap-triangles points))
+          ((or (%points-plane-through-origin-p points)
+               (not (%points-single-plane-p points)))
+           (%star-centered-fan-triangles cycle))
+          (t
+           (%star-boundary-strip-triangles points)))))
+
+(defun %star-boundary-cap-triangles (points)
+  "Close a three-record cycle with its single triangle.
+
+The observed loop follows the existing surface winding, so the cap reverses
+it to pair every boundary edge with opposite winding."
+  (destructuring-bind (a b c) points
+    (list (list a c b))))
+
+(defun %star-centered-fan-triangles (cycle)
+  "Fan CYCLE from the lattice point at the origin."
+  (loop for (left right) in cycle
+        collect (list (list 0 0 0) right left)))
+
+(defun %star-boundary-strip-triangles (points)
+  "Triangulate a planar cycle without introducing interior geometry.
+
+Repeatedly remove the end of the point run whose replacement diagonal is
+shorter, so the remaining vertices stay a contiguous interval of the
+boundary and the result is a deterministic local strip rather than a long
+fan of spokes."
+  (let ((triangles nil))
+    (loop while (> (length points) 3) do
+      (let ((first (first points))
+            (second (second points))
+            (last (car (last points)))
+            (penultimate (car (last points 2))))
+        (if (<= (%squared-distance second last)
+                (%squared-distance first penultimate))
+            (progn
+              (push (list first last second) triangles)
+              (setf points (rest points)))
+            (progn
+              (push (list first last penultimate) triangles)
+              (setf points (butlast points))))))
+    (destructuring-bind (a b c) points
+      (push (list a c b) triangles))
+    (nreverse triangles)))
+
+(defun %star-junction-records (star)
+  "The directed open boundary edges incident to the central lattice point.
+
+Every face and band triangle edge is counted with its direction; an edge
+traversed exactly once is open, directed as its surface traversed it.  The
+central site owns the open edges whose endpoints stay within one tick of
+it; the rest belong to neighboring lattice points.  Records sort in
+descending point order so cycle tracing is deterministic."
+  (let ((records
+          (remove-if-not
+           #'%star-junction-record-p
+           (%once-traversed-edges
+            (append (%star-local-face-triangles star)
+                    (%star-local-band-triangles star))))))
+    (sort records #'%star-record> :key #'%star-record-undirected-name)))
+
+(defun %star-junction-record-p (record)
+  (flet ((nearby-p (point)
+           (every (lambda (coordinate) (<= -1 coordinate 1)) point)))
+    (and (nearby-p (first record)) (nearby-p (second record)))))
+
+(defun %once-traversed-edges (triangles)
+  "Directed edges traversed exactly once across all TRIANGLES."
+  (let ((net (make-hash-table :test #'equal)))
+    (dolist (triangle triangles)
+      (destructuring-bind (a b c) triangle
+        (dolist (edge (list (list a b) (list b c) (list c a)))
+          (destructuring-bind (from to) edge
+            (if (%star-point< from to)
+                (incf (gethash (list from to) net 0))
+                (decf (gethash (list to from) net 0)))))))
+    (let ((open nil))
+      (maphash (lambda (edge count)
+                 (destructuring-bind (low high) edge
+                   (case count
+                     (0)
+                     (1 (push (list low high) open))
+                     (-1 (push (list high low) open))
+                     (t (error "Edge ~S is traversed ~D net times."
+                               edge count)))))
+               net)
+      open)))
+
+(defun %star-traced-cycles (records)
+  "Order consistently directed RECORDS into loops, in record order."
+  (let ((remaining (copy-list records))
+        (cycles nil))
+    (loop while remaining do
+      (let* ((first-record (pop remaining))
+             (cycle (list first-record))
+             (stop (first first-record))
+             (next (second first-record)))
+        (loop until (equal next stop) do
+          (let ((next-record
+                  (find next remaining :key #'first :test #'equal)))
+            (unless next-record
+              (error "Open junction boundary stops at ~S." next))
+            (setf remaining (remove next-record remaining :test #'eq)
+                  cycle (cons next-record cycle)
+                  next (second next-record))))
+        (push (nreverse cycle) cycles)))
+    (nreverse cycles)))
+
+(defun %star-record-undirected-name (record)
+  (destructuring-bind (left right) record
+    (if (%star-point< left right)
+        (list left right)
+        (list right left))))
+
+(defun %star-record> (left-name right-name)
+  (loop for left-point in left-name
+        for right-point in right-name
+        unless (equal left-point right-point)
+          do (return (%star-point< right-point left-point))
+        finally (return nil)))
+
+;;; Points and planes
+
+(defun %points-plane-through-origin-p (points)
+  "Whether POINTS all lie in one plane containing the origin."
+  (let ((normal (%first-nonzero-cross points)))
+    (and normal
+         (every (lambda (point)
+                  (zerop (%dot-product normal point)))
+                points))))
+
+(defun %points-single-plane-p (points)
+  "Whether POINTS all lie in one (any) plane."
+  (or (<= (length points) 3)
+      (let* ((origin (first points))
+             (offsets (mapcar (lambda (point)
+                                (%point-difference point origin))
+                              (rest points)))
+             (normal (%first-nonzero-cross offsets)))
+        (or (null normal)
+            (every (lambda (offset)
+                     (zerop (%dot-product normal offset)))
+                   offsets)))))
+
+(defun %first-nonzero-cross (points)
+  (loop for (a . rest) on points
+        do (loop for b in rest
+                 for cross = (%cross-product a b)
+                 unless (every #'zerop cross)
+                   do (return-from %first-nonzero-cross cross)))
+  nil)
+
+(defun %cross-product (a b)
+  (destructuring-bind (ax ay az) a
+    (destructuring-bind (bx by bz) b
+      (list (- (* ay bz) (* az by))
+            (- (* az bx) (* ax bz))
+            (- (* ax by) (* ay bx))))))
+
+(defun %point-difference (a b)
+  (mapcar #'- a b))
+
+(defun %squared-distance (a b)
+  (loop for left in a
+        for right in b
+        sum (expt (- left right) 2)))
 
 (defun %unoriented-triangle-key (triangle)
   (sort (copy-list triangle) #'%star-point<))
@@ -385,6 +721,14 @@ transformation appears only when STAR is a reflected chiral form."
 (defun %check-star (star)
   (check-type star (unsigned-byte 8))
   star)
+
+;;; The production ownership slice
+;;;
+;;; Row ownership -- which lattice site's query row emits which face patch
+;;; and band -- is a production division of labor, not a geometric fact, so
+;;; the owned-orientation view reads the production vocabulary directly.
+;;; The geometry inside those templates is pinned to the derivation above by
+;;; the exhaustive differential in LUFT's tests.
 
 (defun %star-face-templates (star)
   (let ((dimension (%star-query-dimension)))
