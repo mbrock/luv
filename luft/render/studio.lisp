@@ -1445,9 +1445,7 @@ before the operation boundary, or it would encode through resources which the
       single)))
 
 (defun start-viewer (&key
-                       (solid
-                         (make-streaming-scene
-                          (make-mountain-sanctuary-scene) :frames-per-load 1))
+                       (solid (make-authored-world-streaming-scene))
                        (bevel-width 1)
                        surface-mesh
                        surface-generation
@@ -1543,7 +1541,16 @@ cohort. FIXED-EXPOSURE disables temporal adaptation for reproducible evidence."
                                    :camera camera :source solid
                                    :player (and (typep solid 'scene)
                                                 (scene-player-p solid)
-                                                (make-walking-player))
+                                                (if (and
+                                                     (typep solid
+                                                            'streaming-scene)
+                                                     (streaming-scene-source
+                                                      solid))
+                                                    (make-walking-player
+                                                     :position
+                                                     (vec3:make-vec3
+                                                      61.5 48.5 16.0))
+                                                    (make-walking-player)))
                                    :bevel-width bevel-width
                                    :fixed-exposure fixed-exposure
                                    :inspector-p inspector-p)))))
