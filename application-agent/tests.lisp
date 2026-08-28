@@ -232,14 +232,17 @@
 
 (define-test one-failing-observer-does-not-suppress-the-others
   (let ((application-agent (make-test-agent))
-        (events '()))
+        (events '())
+        (observer-finished (sb-thread:make-semaphore :count 0)))
     (unwind-protect
          (progn
            (agent:add-agent-observer
             application-agent
             (lambda (agent kind object)
               (declare (ignore agent object))
-              (push kind events)))
+              (push kind events)
+              (when (eq :turn-finished kind)
+                (sb-thread:signal-semaphore observer-finished))))
            (agent:add-agent-observer
             application-agent
             (lambda (agent kind object)
@@ -247,7 +250,9 @@
               (error "broken observer")))
            (handler-bind ((agent:agent-observer-failure #'muffle-warning))
              (let ((turn (agent:ask "observe" :agent application-agent)))
-               (true (not (eq :timeout (join-test-turn turn))))))
+               (true (not (eq :timeout (join-test-turn turn))))
+               (true (sb-thread:wait-on-semaphore observer-finished
+                                                  :timeout 1.0))))
            (true (member :turn-started events))
            (true (member :turn-finished events))
            (true (= 2 (length (agent:application-agent-observer-failures
