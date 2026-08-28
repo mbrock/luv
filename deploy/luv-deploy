@@ -19,7 +19,8 @@ build_as_mbrock()
     slot=$1
     shift
     runuser -u mbrock -- env HOME=/home/mbrock \
-        /bin/sh -c 'cd "$1"; shift; exec /nix/var/nix/profiles/default/bin/nix develop path:./nix --no-write-lock-file -c "$@"' \
+        PATH=/nix/var/nix/profiles/default/bin:/usr/bin:/bin \
+        /bin/sh -c 'cd "$1"; shift; exec ./env "$@"' \
         luv-build "$slot" "$@"
 }
 
