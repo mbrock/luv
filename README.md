@@ -27,7 +27,7 @@ Development happens in a durable SBCL image supervised by
 ./sly stop-playing                  # close the window; keep the Lisp
 ```
 
-For remote or non-terminal work, `nix develop .#slim` (or
+For remote or non-terminal work, `nix develop path:./nix#slim` (or
 `./scripts/install-dev-profile --slim`) provides just SBCL, Sly/Swash, Python,
 and Bash. Its managed image loads the `luft` mesher rather than the graphical
 workbench; use the full profile for rendering and game features.

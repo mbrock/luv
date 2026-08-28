@@ -12,7 +12,7 @@ on:
       - "wiki/**"
       - "Makefile"
       - "scripts/wiki"
-      - "flake.*"
+      - "nix/**"
       - ".github/workflows/wiki.yml"
   workflow_dispatch:
 
@@ -35,7 +35,7 @@ jobs:
       - name: Render the wiki
         # Scripts refuse to run outside the dev shell, so CI enters one for
         # the whole build rather than each script arranging its own.
-        run: nix develop -c make wiki
+        run: nix develop path:./nix -c make wiki
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

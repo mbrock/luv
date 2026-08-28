@@ -113,7 +113,7 @@ if [ ! -d "$media_checkout/.git" ]; then
   fi
 fi
 echo "showcase: resolving the pinned git-annex"
-annex_bin=$(nix develop --verbose -L "$source_checkout#annex" --no-write-lock-file \
+annex_bin=$(nix develop --verbose -L "path:$source_checkout/nix#annex" --no-write-lock-file \
   -c sh -c 'dirname "$(command -v git-annex)"')
 PATH=$annex_bin:$PATH
 export PATH
@@ -167,7 +167,7 @@ if [ ! -d "$media_checkout/.git" ]; then
     "$repository" "$media_checkout"
 fi
 echo "showcase: resolving the pinned git-annex"
-annex_bin=$(nix develop --verbose -L "$source_checkout#annex" --no-write-lock-file \
+annex_bin=$(nix develop --verbose -L "path:$source_checkout/nix#annex" --no-write-lock-file \
   -c sh -c 'dirname "$(command -v git-annex)"')
 PATH=$annex_bin:$PATH
 export PATH
@@ -215,7 +215,7 @@ git -C "$source_checkout" switch main
 git -C "$source_checkout" merge --ff-only origin/main
 
 echo "showcase: resolving the pinned git-annex"
-annex_bin=$(nix develop --verbose -L "$source_checkout#annex" --no-write-lock-file \
+annex_bin=$(nix develop --verbose -L "path:$source_checkout/nix#annex" --no-write-lock-file \
   -c sh -c 'dirname "$(command -v git-annex)"')
 PATH=$annex_bin:$PATH
 export PATH
@@ -244,7 +244,7 @@ test -r "$vulkan_icd" || {
 echo "showcase: verifying RX 6600 XT RADV rendering through $vulkan_icd"
 vulkan_summary=$(
   VK_DRIVER_FILES="$vulkan_icd" \
-    nix develop --verbose -L "$source_checkout" --no-write-lock-file -c \
+    nix develop --verbose -L "path:$source_checkout/nix" --no-write-lock-file -c \
       vulkaninfo --summary
 )
 printf '%s\n' "$vulkan_summary"
@@ -305,7 +305,7 @@ mkdir -p "$rendered_media"
 echo "showcase: rendering source $revision on chapel into $rendered_media"
 VK_DRIVER_FILES="$vulkan_icd" \
   LUV_CAPTURE_OUTPUT_DIRECTORY="$rendered_media" \
-  nix develop --verbose -L "$source_checkout" --no-write-lock-file -c \
+  nix develop --verbose -L "path:$source_checkout/nix" --no-write-lock-file -c \
     make -C "$source_checkout" capture
 
 echo "showcase: replacing the published media tree"
@@ -356,7 +356,7 @@ git -C "$source_checkout" switch main
 git -C "$source_checkout" merge --ff-only origin/main
 
 echo "showcase: resolving the pinned git-annex"
-annex_bin=$(nix develop --verbose -L "$source_checkout#annex" --no-write-lock-file \
+annex_bin=$(nix develop --verbose -L "path:$source_checkout/nix#annex" --no-write-lock-file \
   -c sh -c 'dirname "$(command -v git-annex)"')
 PATH=$annex_bin:$PATH
 export PATH
@@ -385,7 +385,7 @@ test -z "$missing" || {
 }
 
 echo "showcase: warming the web application"
-nix develop --verbose -L "$source_checkout" --no-write-lock-file -c \
+nix develop --verbose -L "path:$source_checkout/nix" --no-write-lock-file -c \
   "$source_checkout/scripts/luv" help
 echo "showcase: restarting $web_service"
 sudo systemctl restart "$web_service"

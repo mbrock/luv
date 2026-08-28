@@ -36,7 +36,7 @@ are not trustworthy (`command -v sbcl` must resolve into ~/.nix-profile or
 
 Scripts and the repository .envrc activate it by sourcing the profile's
 env.sh; nothing on the edit/test path evaluates Nix.  CI may still use
-`nix develop -c COMMAND` as a from-scratch check.
+`nix develop path:./nix -c COMMAND` as a from-scratch check.
 USAGE
   exit 1
 fi

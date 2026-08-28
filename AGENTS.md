@@ -127,7 +127,7 @@ The dependencies live in a durable Nix profile. Install or refresh it with
 `./scripts/dev --status` explains the active environment, and
 `./scripts/dev COMMAND` is the fallback when activation was missed.
 
-Remote agents can use `nix develop .#slim` or
+Remote agents can use `nix develop path:./nix#slim` or
 `./scripts/install-dev-profile --slim`. It contains the complete Common Lisp
 dependency closure and ordinary build tools, but omits libghostty-vt, its
 large Zig closure, and unrelated workstation tools. The Ghostty binding

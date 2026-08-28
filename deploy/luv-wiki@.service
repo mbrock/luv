@@ -13,7 +13,7 @@ Environment=LUV_SHOWCASE_MEDIA_DIRECTORY=/var/www/luv/showcase/media
 Environment=LUV_SHOWCASE_MEDIA_PATH=/video/showcase/media
 EnvironmentFile=-/run/luv/%i.env
 ExecStartPre=-/usr/bin/unlink /run/luv/%i.sock
-ExecStart=/nix/var/nix/profiles/default/bin/nix develop --no-write-lock-file -c ./scripts/wiki serve --socket /run/luv/%i.sock
+ExecStart=/nix/var/nix/profiles/default/bin/nix develop path:./nix --no-write-lock-file -c ./scripts/wiki serve --socket /run/luv/%i.sock
 Restart=always
 RestartSec=3
 KillSignal=SIGINT

@@ -22,9 +22,9 @@ case "${1:-}" in
     ;;
 esac
 
-printf 'Building the luv development profile from %s\n' "$project_root"
+printf 'Building the luv development profile from %s\n' "$project_root/nix"
 store_path=$(nix build -L --no-link --print-out-paths \
-  "path:$project_root#$output" < /dev/null)
+  "path:$project_root/nix#$output" < /dev/null)
 
 case "$store_path" in
   /nix/store/*-"$profile_name") ;;

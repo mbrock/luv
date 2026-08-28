@@ -1,6 +1,6 @@
 ;; ((nil . ((eval .
 ;;           (let* ((root (expand-file-name
-;;                         (locate-dominating-file default-directory "flake.nix")))
+;;                         (locate-dominating-file default-directory "luv.asd")))
 ;;                  (bootstrap (expand-file-name "sly-init.lisp" root))
 ;;                  (dev (expand-file-name "scripts/dev" root))
 ;;                  (port-script (expand-file-name "scripts/worktree-port" root))

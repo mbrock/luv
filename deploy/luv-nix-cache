@@ -41,8 +41,8 @@ mv -f "$public_key_tmp" "$cache_directory/luv-cache.pub"
 
 roots=$("$nix" build -L --no-link --print-out-paths \
     --no-write-lock-file \
-    "path:$project_root#dev" \
-    "path:$project_root#slim-dev")
+    "path:$project_root/nix#dev" \
+    "path:$project_root/nix#slim-dev")
 
 # The file-store secret-key setting signs each narinfo as it is written.  Keep
 # old objects: Nix copy is incremental, and store hashes make them safe to

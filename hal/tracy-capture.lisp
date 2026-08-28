@@ -102,7 +102,7 @@ than another graceful request would."))
   (let ((configured (uiop:getenv variable)))
     (unless (and configured (plusp (length configured)))
       (error "No Tracy ~A is configured in ~A. Enter the luv Tracy ~
-              environment (nix develop .#tracy) or configure that variable ~
+              environment (nix develop path:./nix#tracy) or configure that variable ~
               with one exact executable path."
              description variable))
     (let ((pathname (pathname configured)))

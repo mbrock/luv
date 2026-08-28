@@ -15,7 +15,7 @@
 (defun required-directory (name)
   (let ((value (uiop:getenv name)))
     (unless value
-      (error "~A is not set. Enter `nix develop` so the luv shell can provide it."
+      (error "~A is not set. Enter `nix develop path:./nix` so the luv shell can provide it."
              name))
     (uiop:ensure-directory-pathname value)))
 

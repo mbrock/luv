@@ -53,6 +53,14 @@
       environmentFor = system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
+          clSdlPatch = builtins.path {
+            path = ./cl-sdl3-no-mixer.patch;
+            name = "cl-sdl3-no-mixer.patch";
+          };
+          tracyContext = builtins.path {
+            path = ./tracy-context.cpp;
+            name = "luv-tracy-context.cpp";
+          };
           libghosttyVt =
             ghostty.packages.${system}.libghostty-vt-releasesafe;
           libghosttyVtLibrary =
@@ -116,7 +124,7 @@
                   -DTRACY_NO_SYSTEM_TRACING \
                   -Ipublic \
                   public/TracyClient.cpp \
-                  ${./hal/tracy-context.cpp} \
+                  ${tracyContext} \
                   ${nixpkgs.lib.optionalString pkgs.stdenv.isDarwin
                       "-install_name $out/lib/libTracyClient${extension}"} \
                   ${nixpkgs.lib.optionalString pkgs.stdenv.isLinux
@@ -306,7 +314,7 @@
           clSdl3WithoutMixer = pkgs.applyPatches {
             name = "cl-sdl3-without-mixer";
             src = cl-sdl3;
-            patches = [ ./nix/cl-sdl3-no-mixer.patch ];
+            patches = [ clSdlPatch ];
           };
           slyRoot =
             "${pkgs.emacsPackages.sly}/share/emacs/site-lisp/elpa/${pkgs.emacsPackages.sly.pname}-${pkgs.emacsPackages.sly.version}";
@@ -531,22 +539,11 @@
       packages = forAllSystems (system:
         let
           env = environmentFor system;
-          luv-lobby = env.pkgs.buildGoModule {
-            pname = "luv-lobby";
-            version = "0.1.0";
-            src = ./.;
-            modRoot = "lobby";
-            vendorHash = "sha256-v9VmV3bJCrHl9wg2K8R3BxwLmF6Rux01DIIWwEdaPRU=";
-            postInstall = ''
-              mv "$out/bin/lobby" "$out/bin/luv-lobby"
-            '';
-          };
         in {
           sbcl = env.sbcl;
           lisp = env.lisp;
           dev = env.dev;
           slim-dev = env.slimDev;
-          inherit luv-lobby;
           ffmpeg = env.ffmpeg;
           libghostty-vt = env.libghosttyVt;
           tracy-client = env.tracyClient;
@@ -554,7 +551,7 @@
           swash = env.swashPackage;
           default = env.lisp;
         } // nixpkgs.lib.optionalAttrs env.pkgs.stdenv.isLinux {
-          # Reachable only by name, `nix build .#wpewebkit` on Linux: not in
+          # Reachable only by name, `nix build path:./nix#wpewebkit` on Linux: not in
           # `default`, not in the dev shell, not in any library path.
           wpewebkit = env.wpePkgs.wpewebkit;
         });
@@ -581,14 +578,14 @@
           # Showcase publication alone needs git-annex.  It brings GHC and
           # its closure, so keep ordinary Lisp and capture development lean.
           # `scripts/showcase` enters this shell on Chapel and SWA itself.
-          # Enter with `nix develop .#annex` for direct annex work.
+          # Enter with `nix develop path:./nix#annex` for direct annex work.
           annex = env.pkgs.mkShell (shellEnvironment // {
             packages = shellEnvironment.packages ++ [ env.pkgs.git-annex ];
           });
           # SDL_mixer is not used by luvcraft's audio path, and its Darwin
           # build need not hold up the ordinary development shell.  Keep it
           # available for experiments without making it a default dependency.
-          # Enter with `nix develop .#mixer` (or `direnv shell .#mixer`).
+          # Enter with `nix develop path:./nix#mixer`.
           mixer = env.pkgs.mkShell (shellEnvironment // {
             packages = shellEnvironment.packages ++ [ env.pkgs.sdl3-mixer ];
             LUV_NATIVE_LIBRARY_PATH =
@@ -598,7 +595,7 @@
           });
           # Tracy is intentionally opt-in: its viewer is a large C++ build
           # that should not hold up the ordinary Lisp development shell.
-          # Enter with `nix develop .#tracy` (or `direnv shell .#tracy`).
+          # Enter with `nix develop path:./nix#tracy`.
           tracy = env.pkgs.mkShell (shellEnvironment // {
             packages = shellEnvironment.packages ++ [
               env.tracyClient
