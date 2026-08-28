@@ -147,7 +147,7 @@ rebased onto =897bb5d05423d5aa77de466f5f77076eb678cf0a=.  The live proof and
 focused tests established every required backend fact; see #WTODNV.  #5H9AKZ
 is the next candidate gate, not work begun by this stage.
 
-** TODO Build =luv/workbench= as the shell substrate
+** DONE Build =luv/workbench= as the shell substrate
 :PROPERTIES:
 :ID: 5H9AKZ
 :END:
@@ -164,6 +164,15 @@ if that keeps behavior stable while establishing one owner.
 semantic hooks, input suspension, and stop/lifecycle boundaries; shell tests
 cover routing and teardown; no application-specific tool migration is hidden
 inside this stage.
+
+/Result./ Complete from exact base
+=34a4c545454150e17ac773495b9c26c10a836cc8=.  =luv/workbench= owns one
+textureless full-viewport frame, fixed semantic layers, shell-first routing,
+input suspension, direct replay, atomic admission, quiescence, and release.
+The attempted portable postlude was rejected by executable Vulkan evidence;
+the smallest safe seam refreshes before presentation and replays in the
+application's existing final pass.  No tool migrated.  #TEFU1T is the next
+candidate gate.
 
 ** TODO Make Luft conform with status only
 :PROPERTIES:
@@ -293,6 +302,56 @@ postlude remains the preferred shell boundary.  Whether that postlude opens a
 load-op pass or shares an application's final pass belongs to #5H9AKZ, not to
 this backend proof.
 
+** 2026-08-28 — The shell fallback shares the application's final pass
+
+The preferred portable postlude was attempted against the concrete Vulkan
+transaction.  Preserving the completed application attachment requires a
+=:load= render pass, which the portable Vulkan validator rejects as
+=:UNSUPPORTED-RENDER-PASS=.  Do not weaken that validator or copy the frame.
+The production seam is therefore the smallest proven alternative: the
+application refreshes the shell before opening its renderer pass and supplies
+only its already-open final presentation pass and surface texture for retained
+direct replay.  The shell still owns the frame, layer geometry, event policy,
+semantic stream, compositor, and resources.
+
+** 2026-08-28 — Interactive shell state suspends application input once
+
+Passive state never takes focus or suspends application input.  Modeless,
+transient, and modal state share one opaque application suspension token.
+Opening the first interactive layer clears held application input, releases
+relative capture through the application protocol, and records matching key
+and button releases for shell-side suppression.  McCLIM focus and descendant
+geometry decide modeless hits and transient outside dismissal; modal state
+captures all keyboard and pointer input.  Closing the final interactive layer
+returns the token without synthesizing pointer recapture.
+
+** 2026-08-28 — Transparent roots are routing structure, never authored hits
+
+McCLIM's concrete =BASIC-PORT= routing already computes the innermost pointer
+target and publishes it as =POINTER-SHEET=.  Shell policy reads that result
+after embedded dispatch and accepts only a proper descendant of the semantic
+layer root.  The full-viewport root itself is transparent background: modeless
+presses pass through, transient presses dismiss, and neither retains the root
+as keyboard focus.  A neutral common layout sheet holds focus until an authored
+descendant acquires it through ordinary McCLIM routing; per-layer authored
+focus is remembered and restored across higher semantic layers.
+
+Every shell-consumed key or button press also starts a shell-held cohort tied
+to the consuming semantic layer.  Its release remains shell-owned while that
+layer is visible and is swallowed without mirror delivery if the layer closed
+while handling the press.  Thus an action may synchronously close the final
+interactive layer without leaking an orphan release downstream.
+
+** 2026-08-28 — Shell admission and teardown use existing lifecycle gates
+
+One weak application-to-shell ownership map is not an extension registry.
+Construction and publication cross the native frame boundary under the
+application stop controller.  A losing constructor releases its private frame;
+stop first quiesces shell work, then detaches and crosses a terminal owner
+request before destroying the frame and direct compositor while the device is
+live.  Luft's terminal order releases the shell before instruments, renderer,
+canvas, and device.
+
 * Experiment notes
 :PROPERTIES:
 :ID: WTODNV
@@ -361,6 +420,94 @@ path.  Do not paste complete test transcripts.
   into the destination pass.  The evidence opens review of #5H9AKZ but does
   not select its final pass/postlude mechanics or begin shell construction.
 
+** 2026-08-28 — 5H9AKZ production shell substrate
+
+- /Execution thread and revision./ =T-01a04a7a-d5a8-7299-82d2-fef07db98d40=,
+  exact =origin/main= and worktree base
+  =34a4c545454150e17ac773495b9c26c10a836cc8=; all changes remained local and
+  unpushed.
+- /Questions./ What is the smallest application protocol which lets Luv own
+  one shell, can the portable transaction safely append presentation after
+  application encoding, and can routing, suspension, admission, quiescence,
+  and terminal release remain executable without reproducing Luft's numeric
+  instrument registry?
+- /Commands and live actions./ Read #M9MI6Y and this worksheet in full and
+  inspected the BY51K0 fixture, mirror dispatch, descendant composition,
+  direct compositor, portable/SDL presentation, stop controller, Luft input,
+  instrument, render, and teardown paths.  Ran strict Parinfer on every changed
+  Lisp file; focused =luv/workbench= and =luft/render= tests; and a live durable
+  Luft session.  In the live session attached the empty generic shell, inspected
+  mirror texture and event ownership, attempted the portable =:load= postlude,
+  retained its exact failure, replaced it with final-pass replay, resumed the
+  canvas, attached again, exercised modal suspension/clear-held-input, sent a
+  synthetic =900x700= resize through the shell router, captured
+  =build/workbench-shell.png=, detached, and inspected restored viewer event
+  ownership and canvas health.  Finally ran
+  =LUV_DEV_SHELL=default ./env sh -c 'test -r "$LUV_GHOSTTY_LIBRARY" && make
+  test'=, =scripts/wiki dangling=, =scripts/wiki build=, and
+  =git diff --check=.
+- /Observed result./ The first live postlude frame parked with
+  =:UNSUPPORTED-RENDER-PASS= at Vulkan =BEGIN-RENDER-PASS=; the window remained
+  pumped and resize dispatch remained live.  With the fallback, the empty shell
+  retained =NIL= mirror texture, became the sole outer event handler, replayed
+  in Luft's existing final pass, and ran with a healthy canvas.  Modal opening
+  changed a held-control count from one to zero, suspension was true only while
+  open, relative capture was false, and close resumed the token.  Synthetic
+  resize made the top sheet exactly =(0 0 900 700)=.  Detach removed shell
+  publication and restored the =VIEWER= handler.  The full environment found
+  the Ghostty library readable and passed all 24 suites (28 parallel tasks) in
+  9.2 seconds, including =luv/ghostty/test=, =luv/terminal/test=, the new
+  =luv/workbench/test=, and both =luft/render/test= tasks.  Strict Parinfer,
+  wiki build, and diff checks passed.  Wiki dangling retained only the existing
+  unrelated =TR4VLR= and =H1GHLD= code mentions.
+- /Interpretation./ The portable postlude preference is not safe in the
+  current HAL, but no parallel compositor is necessary.  One application call
+  before presentation and one direct replay call in its final pass preserve
+  every textureless backend invariant with less machinery than broadening the
+  render-pass contract.
+- /Resulting decisions./ Keep the fixed passive/modeless/transient/modal layer
+  owner and shell-first wrapper; use opaque input suspension with release
+  suppression; use stop-controller publication, explicit quiescence, terminal
+  fence, and device-live release; use final-pass replay; migrate no tool here.
+  Evidence opens #TEFU1T (Luft status only) and nothing later.
+
+** 2026-08-28 — 5H9AKZ routing review corrections
+
+- /Execution thread and revision./ Same =5H9AKZ= thread and exact base
+  =34a4c545454150e17ac773495b9c26c10a836cc8=; changes remained uncommitted and
+  unpushed.
+- /Questions./ Does McCLIM route empty full-screen layer background to the
+  layer root, and can a shell-consumed press leak its release when its handler
+  closes the final interactive layer?
+- /Commands and live actions./ Read McCLIM's concrete =BASIC-PORT=
+  =DISTRIBUTE-EVENT=, =SYNTHESIZE-BOUNDARY-EVENTS=, and
+  =COMPUTE-POINTER-EVENT-SHEET= paths.  Added focused strict-descendant and
+  synchronous-close/release tests.  In fresh durable image =LAV976= attached
+  the empty Luft shell, sent real embedded pointer presses at =(20,20)= through
+  modeless and transient states, then sent a modal Escape press, closed the
+  layer, and sent its release.  Ran focused =luv/workbench= and =luft/render=
+  tests, strict Parinfer, and the full Ghostty-enabled =make test= command.
+- /Observed result./ Before correction, =SHOW-WORKBENCH-LAYER= focused the
+  full-viewport root and inclusive ancestry treated that root as inside; no
+  state tracked shell-consumed presses.  Corrected live modeless routing
+  reported =:POINTER-TARGET-IS-ROOT T= but =:CONSUMED NIL= and
+  =:FOCUS-IS-NEUTRAL T=.  Corrected transient routing reported =:CONSUMED T=,
+  =:TRANSIENT-VISIBLE NIL=, and neutral focus.  Modal Escape reported one
+  shell-held press, then =:RELEASE-CONSUMED T= and zero held entries after
+  closure; the canvas remained healthy at 181 rendered frames.  Focused suites
+  passed 27 =luv/workbench= checks and 274 =luft/render= checks.  The full run
+  found Ghostty readable and passed 24 suites / 28 tasks in 9.6 seconds,
+  including Ghostty, terminal, workbench, and both Luft render tasks.
+- /Interpretation./ Both review concerns were real.  Reading McCLIM's routed
+  pointer target avoids a second coordinate/hit-test implementation.  Pairing
+  consumed presses with releases in the substrate closes the race even when
+  authored handling changes layer state synchronously.
+- /Resulting decisions./ Layer roots are transparent routing/layout only;
+  only proper authored descendants count as modeless/transient hits.  Keep
+  authored focus per layer and use a neutral common sheet otherwise.  Track
+  shell-consumed press/release cohorts centrally.  No tool or application
+  protocol was added; #TEFU1T remains unopened work.
+
 * Completed prose updates
 :PROPERTIES:
 :ID: QF07KG
@@ -388,13 +535,27 @@ path.  Do not paste complete test transcripts.
 - No production shell or tool migration was started.  #5H9AKZ is the next
   candidate gate for architectural review.
 
+** 2026-08-28 — Luv workbench shell substrate completed
+
+- =luv/workbench= now owns one transparent full-viewport McCLIM frame, four
+  fixed semantic layers, shell-first event routing and focus, application-input
+  suspension, retained direct replay, and coordinated lifecycle.
+- Focused checks cover semantic state/routing, transient dismissal, held-release
+  suppression, atomic stop admission, and quiesce/fence/release order.  A live
+  empty Luft attachment proved generic ownership without migrating status or
+  any other instrument.
+- Concrete Vulkan evidence rejected a separate portable =:load= postlude.  Luft
+  therefore supplies only its existing final pass to the shell; no renderer,
+  drawable acquisition, submission, texture, or arbitrary pane registry moved
+  into Luv.
+- #TEFU1T, Luft status only, is the next candidate.  It was not begun.
+
 * Exact next action
 :PROPERTIES:
 :ID: 53WN6F
 :END:
 
-The architectural parent thread should review the committed #BY51K0 result and
-decide whether its evidence opens #5H9AKZ, “Build =luv/workbench= as the shell
-substrate.”  That stage is the exact next candidate.  Do not begin it in the
-backend-proof thread and do not accumulate later tool migrations merely
-because their dependencies are now visible.
+Review the local #5H9AKZ shell substrate and its final-pass fallback evidence.
+If accepted, #TEFU1T, “Make Luft conform with status only,” is the exact next
+candidate.  Do not begin M-x, source update, metabar, lobby, service migration,
+Luvcraft migration, or instrument deletion with that status-only cutover.

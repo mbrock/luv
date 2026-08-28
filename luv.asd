@@ -439,6 +439,25 @@ offsets and of headers."
              (uiop:symbol-call '#:luv.test-support '#:test-package
                                '#:mcluv.tests)))
 
+(defsystem "luv/workbench"
+  :description "The Luv-owned screen-space application shell substrate."
+  :version "0.0.1"
+  :depends-on ("luv/mcclim")
+  :serial t
+  :components ((:file "mcclim/workbench-package")
+               (:file "mcclim/workbench"))
+  :in-order-to ((test-op (test-op "luv/workbench/test"))))
+
+(defsystem "luv/workbench/test"
+  :description "Executable workbench layer, routing, and lifecycle claims."
+  :version "0.0.1"
+  :depends-on ("luv/workbench" "luv/test-support")
+  :components ((:file "mcclim/workbench-tests"))
+  :perform (test-op (operation component)
+             (declare (ignore operation component))
+             (uiop:symbol-call '#:luv.test-support '#:test-package
+                               '#:luv.workbench.tests)))
+
 (defsystem "luv/application-agent"
   :description "Application-neutral asynchronous language-agent harness."
   :version "0.0.1"

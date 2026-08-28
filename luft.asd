@@ -82,7 +82,8 @@
   ;; The atelier shares Luv's McCLIM backend directly.  Luvcraft remains only
   ;; for the small physics vocabulary used by RENDER/GAME; LUFT no longer
   ;; loads another game's widget adapters to obtain the common compositor.
-  :depends-on ("luft/renderer" "luv/mcclim" "luv/lobby/mcclim"
+  :depends-on ("luft/renderer" "luv/mcclim" "luv/workbench"
+               "luv/lobby/mcclim"
                "luv/tracy-capture" "luv/application-agent"
                "luvcraft/core")
   :serial t
@@ -91,6 +92,7 @@
                (:file "luft/render/live-artifact")
                (:file "luft/render/instruments")
                (:file "luft/render/workbench-proof")
+               (:file "luft/render/workbench")
                (:file "luft/render/tracy-capture")
                (:file "luft/render/command-menu")
                (:file "luft/render/source-update")

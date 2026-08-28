@@ -729,7 +729,8 @@ before the operation boundary, or it would encode through resources which the
                           (not (typep (viewer-source viewer)
                                       'streaming-scene)))
      :overlay-encoder
-     (and (or inspector-p (viewer-instruments-present-p viewer))
+     (and (or inspector-p (viewer-instruments-present-p viewer)
+              (luv.workbench:application-workbench viewer))
           (lambda (pass)
             (when inspector-p
               (mcluv:encode-direct-gpu-mirror
@@ -737,7 +738,13 @@ before the operation boundary, or it would encode through resources which the
                (viewer-inspector-state viewer extent)))
             ;; Instruments are ordered low-to-high so modal tools render last.
             (encode-viewer-instruments
-             viewer pass surface-texture extent))))))
+             viewer pass surface-texture extent)
+            ;; The application supplies only its open final pass; the shell
+            ;; remains the owner of layout, retained media, and replay state.
+            (alexandria:when-let
+                ((workbench (luv.workbench:application-workbench viewer)))
+              (luv.workbench:encode-workbench
+               workbench pass surface-texture)))))))
 
 (clim:define-command-table luft-window)
 (clim:define-command-table luft-window-release)
@@ -1066,6 +1073,9 @@ before the operation boundary, or it would encode through resources which the
     ;; cohort publication happen here, before this frame borrows the renderer.
     (refresh-application-live-artifacts viewer)
     (advance-viewer-streaming viewer)
+    (alexandria:when-let
+        ((workbench (luv.workbench:application-workbench viewer)))
+      (luv.workbench:refresh-workbench workbench))
     (present-canvas-frame
      (viewer-context viewer)
      (lambda (surface-texture encoder presentation-time)
@@ -2345,6 +2355,13 @@ it makes no claim about which earlier render pass caused a discontinuity."
                canvas (lambda (timestamp) (declare (ignore timestamp))))))
           (releasing :event-handler
             (setf (canvas-event-handler canvas) nil))
+          ;; The Luv shell owns retained compositor resources. It must detach
+          ;; after the terminal frame fence but before application renderer
+          ;; resources and the device are destroyed.
+          (alexandria:when-let
+              ((workbench (luv.workbench:application-workbench viewer)))
+            (releasing :workbench
+              (luv.workbench:stop-workbench workbench)))
           (releasing :instruments (release-viewer-instruments viewer))
           (when (viewer-production-system viewer)
             (releasing :production-system
