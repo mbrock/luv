@@ -419,6 +419,7 @@ offsets and of headers."
                              (:file "metabar")
                              (:file "application-status-bar")
                              (:file "widget-lab")
+                             (:file "workbench-backend-proof")
                              (:file "compositor")
                              (:file "direct-compositor"))))
   :in-order-to ((test-op (test-op "luv/mcclim/test"))))

@@ -376,6 +376,17 @@ on is still playing the game, so they contribute nothing rather than fail."
                       :sheet sheet
                       :timestamp (luv:canvas-event-timestamp event))))))
 
+(defun dispatch-embedded-mirror-event (mirror event)
+  "Enter portable canvas EVENT through embedded MIRROR's normal sheet routing.
+
+The application remains the canvas's sole native handler.  It offers selected
+portable events here; pointer hit testing, keyboard focus, resize layout, and
+event delivery then remain McCLIM backend concerns."
+  (check-type mirror luv-mirror)
+  (unless (mirror-embedded-p mirror)
+    (error "~S is not an embedded McCLIM mirror." mirror))
+  (luv:handle-canvas-event mirror (mirror-target mirror) event))
+
 (defun raster-mirror-image-size (mirror)
   (let ((image (mcclim-render:image-mirror-image mirror)))
     (list (pattern-width image) (pattern-height image))))

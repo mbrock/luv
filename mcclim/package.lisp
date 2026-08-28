@@ -42,6 +42,7 @@
            #:present-mirror
            #:repaint-gpu-mirror
            #:prepare-gpu-mirror-compositor
+           #:dispatch-embedded-mirror-event
            #:present-gpu-mirror-sheet
            #:call-with-gpu-mirror-sheet-repaint
            #:transparent-gpu-application-pane
@@ -216,6 +217,11 @@
            #:widget-lab-toggle-value
            #:open-widget-lab
            #:close-widget-lab
+           #:workbench-backend-proof
+           #:workbench-backend-proof-mirror
+           #:workbench-backend-proof-log
+           #:make-embedded-workbench-backend-proof
+           #:destroy-workbench-backend-proof
            #:shader-lab
            #:shader-lab-lowering
            #:shader-lab-selection

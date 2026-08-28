@@ -30,6 +30,43 @@
   (true (string= "Ctrl-Q" (mcluv:format-gesture '(#\q :control))))
   (true (string= "↑" (mcluv:format-gesture '(:up)))))
 
+(defclass embedded-event-probe-mirror (mcluv:luv-mirror)
+  ((deliveries :initform nil :accessor embedded-event-probe-deliveries)))
+
+(defmethod luv:handle-canvas-event
+    ((mirror embedded-event-probe-mirror) canvas event)
+  (push (list canvas event) (embedded-event-probe-deliveries mirror))
+  :delivered)
+
+(define-test embedded-mirror-events-have-a-public-composable-entry
+  (let* ((event (make-instance 'luv:canvas-key-press-event
+                               :timestamp 7 :key-name :space))
+         (mirror (make-instance 'embedded-event-probe-mirror
+                                :sheet nil :target :shared-canvas
+                                :embedded-p t)))
+    (true (eq :delivered
+              (mcluv:dispatch-embedded-mirror-event mirror event)))
+    (true (equal (list (list :shared-canvas event))
+                 (embedded-event-probe-deliveries mirror)))
+    (fail
+     (mcluv:dispatch-embedded-mirror-event
+      (make-instance 'embedded-event-probe-mirror
+                     :sheet nil :target :standalone)
+      event)
+     'error)))
+
+(define-test workbench-proof-layout-is-full-viewport-and-overlapping
+  (flet ((bounds (role width height)
+           (multiple-value-list
+            (clim:bounding-rectangle*
+             (mcluv::workbench-backend-proof-pane-region
+              role width height)))))
+    (true (equal '(72 70 612 504) (bounds :back 900 700)))
+    (true (equal '(324 210 828 602) (bounds :front 900 700)))
+    (true (clim:region-intersects-region-p
+           (mcluv::workbench-backend-proof-pane-region :back 900 700)
+           (mcluv::workbench-backend-proof-pane-region :front 900 700)))))
+
 (defun fresh-gpu-medium ()
   (make-instance 'mcluv:luv-gpu-medium))
 

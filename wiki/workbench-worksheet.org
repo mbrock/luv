@@ -122,7 +122,7 @@ thread owns one stage, records discoveries and decisions here, leaves
 reviewable unpushed changes, writes a prose completion update, and identifies
 rather than begins the next stage.
 
-** NEXT Prove the embedded workbench backend
+** DONE Prove the embedded workbench backend
 :PROPERTIES:
 :ID: BY51K0
 :END:
@@ -140,6 +140,12 @@ No production shell or migrated tool is needed to answer those questions.
 the required behavior, backend changes are reviewable and unpushed, findings
 and decisions are recorded below, and the completion note names #5H9AKZ
 without beginning it.
+
+/Result./ Complete from exact experiment base
+=21ba05d101e986ac6a0f60a512d62468c3eeca6a=, subsequently committed and
+rebased onto =897bb5d05423d5aa77de466f5f77076eb678cf0a=.  The live proof and
+focused tests established every required backend fact; see #WTODNV.  #5H9AKZ
+is the next candidate gate, not work begun by this stage.
 
 ** TODO Build =luv/workbench= as the shell substrate
 :PROPERTIES:
@@ -259,6 +265,34 @@ hit testing.  One shell postlude in the portable presentation transaction is
 more substrate-like than an application renderer callback.  Both remain
 hypotheses until #BY51K0 proves backend behavior.
 
+** 2026-08-28 — Embedded mirrors admit selected portable events explicitly
+
+The application remains the canvas's sole native event handler and offers
+selected portable events to =DISPATCH-EMBEDDED-MIRROR-EVENT=.  The mirror's
+existing distributor then owns child hit testing, pressed-sheet behavior,
+keyboard focus, and ordinary sheet delivery.  Do not install an embedded
+mirror as the canvas handler and do not reproduce McCLIM hit testing in an
+application adapter.
+
+** 2026-08-28 — Logical resize is an event, not a parallel layout protocol
+
+Forwarding =CANVAS-WINDOW-RESIZED-EVENT= through the same embedded entry emits
+McCLIM's ordinary window-configuration event.  Top-level geometry change then
+runs the layout protocol and moves/resizes overlapping children before the
+retained repaint.  #5H9AKZ should use that operation rather than expose a
+second mirror-resize API.
+
+** 2026-08-28 — One textureless frame is the proven workbench render shape
+
+One transparent full-viewport embedded mirror composes descendant media in
+back-to-front sheet order, retains each child's logical clip, and replays the
+result directly into the application's native-density destination pass.  The
+proof mirror acquired no texture.  The backend therefore does not require a
+pane raster, per-pane compositor, or renderer-owned workbench; a portable
+postlude remains the preferred shell boundary.  Whether that postlude opens a
+load-op pass or shares an application's final pass belongs to #5H9AKZ, not to
+this backend proof.
+
 * Experiment notes
 :PROPERTIES:
 :ID: WTODNV
@@ -269,7 +303,63 @@ commands or live actions, observed result, interpretation, and resulting
 decision.  Failed experiments belong here when they eliminate an architectural
 path.  Do not paste complete test transcripts.
 
-No backend experiment has yet been run.
+** 2026-08-28 — BY51K0 embedded backend proof
+
+- /Execution thread and revision./ =T-01a04a50-c51f-76ec-850a-faf38ac4942e=,
+  exact base =21ba05d101e986ac6a0f60a512d62468c3eeca6a=; experiment code and
+  this record were first verified as uncommitted, unpushed worktree changes on
+  that revision, then committed and rebased onto
+  =897bb5d05423d5aa77de466f5f77076eb678cf0a= after review.
+- /Question./ Can one transparent full-viewport embedded direct-GPU frame with
+  two overlapping ordinary child panes use McCLIM itself for logical resize,
+  child layout, clipping, painter order, hit testing, focus, and dispatch from
+  portable canvas events while retaining native-density final-pass drawing?
+- /Commands and live actions./ Ran =make=; =./sly parinfer --strict --check
+  FILE= for each changed Lisp file; =./env --slim sbcl --noinform
+  --disable-debugger --eval '(require :asdf)' --eval '(asdf:test-system
+  :luv/mcclim/test)' --quit=; and =make test=.  Started the durable image with
+  =./sly start=; loaded =luv/mcclim= and =luft/render=; opened Luft with
+  =./sly play luft=; mounted
+  =LUFT.RENDER::OPEN-VIEWER-WORKBENCH-BACKEND-PROOF=; captured
+  =build/workbench-proof.png= and =build/workbench-proof-focused.png=; sent a
+  portable left-button press/release at logical =(500, 300)= in the overlap
+  followed by a portable =K= press; forwarded a synthetic logical resize from
+  =1100x800= to =900x700=, inspected top-level and child geometry plus every
+  prepared command clip, then restored =1100x800=.  Reloaded =luft/render=,
+  unmounted the proof, stopped Luft, ran =scripts/wiki dangling= and
+  =scripts/wiki build=, and ran =git diff --check=.  Finally entered the full
+  cached environment with =LUV_DEV_SHELL=default ./env sh -c 'test -r
+  "$LUV_GHOSTTY_LIBRARY"'= and ran =LUV_DEV_SHELL=default make test=.
+- /Observed result./ The focused backend system reported 407 passed, zero
+  failed, zero skipped.  Nix fetched =libghostty-vt= from the Luv binary cache,
+  the configured shared library existed, and the full run passed all 23 suites
+  in 9.1 seconds with 8 workers, including =luv/ghostty/test= and
+  =luv/terminal/test=.  The live canvas remained healthy.  The transparent
+  overlay left Luft visible; blue back and orange front panes overlapped, the
+  front pane painted last, and deliberately oversized rectangle draws stopped
+  at sharp child bounds.  Text was crisp and readable.  At =900x700= the top
+  sheet became exactly =900x700=; back moved to =(72,70)= at =540x434= and
+  front to =(324,210)= at =504x392=.
+  Prepared commands were ordered back geometry/text before front geometry/text
+  and carried clips =(72 70 612 504)= and =(324 210 828 602)= respectively.
+  The mirror texture remained =NIL=.  The overlap click logged
+  =(:FOCUS :FRONT)= then =(:POINTER :FRONT (104 60))=; the following key
+  logged =(:KEY :FRONT :K)= and the port's keyboard focus was the front pane.
+  The focused screenshot visibly showed “Front pane · keyboard focus” and
+  “last event: KEY / FRONT / K”.  Wiki build and diff checks succeeded; wiki
+  validation still reports the unrelated existing =TR4VLR= and =H1GHLD=
+  mentions in =captures/luft-portraits.lisp=.
+- /Interpretation./ Existing descendant stream composition, command-grain
+  clips, and direct replay were sufficient.  The only backend seam missing
+  from the desired boundary was a small public entry which forwards an event
+  to an embedded mirror without giving it native canvas ownership.  McCLIM's
+  existing configuration and distribution paths then supply layout, hit
+  testing, and focus without application coordinate inversion.
+- /Resulting decisions./ Keep one full-viewport textureless mirror; forward
+  selected portable events through =DISPATCH-EMBEDDED-MIRROR-EVENT=; represent
+  logical resize with the existing portable resize event; retain direct replay
+  into the destination pass.  The evidence opens review of #5H9AKZ but does
+  not select its final pass/postlude mechanics or begin shell construction.
 
 * Completed prose updates
 :PROPERTIES:
@@ -286,19 +376,25 @@ No backend experiment has yet been run.
   mechanisms were successfully moved below both games, but the adapters it
   accepted are now the migration source rather than the destination.
 
+** 2026-08-28 — Embedded workbench backend proved
+
+- #BY51K0 established a transparent full-viewport embedded frame with two
+  overlapping child panes in a live Luft destination.
+- Ordinary McCLIM resize/layout, retained clips and painter order, sheet hit
+  testing, keyboard focus, and selected portable canvas-event dispatch all
+  worked through one textureless direct-GPU mirror.
+- Focused backend tests passed 407 checks; inspected live geometry, retained
+  commands, event logs, focus state, and screenshots agreed with the claims.
+- No production shell or tool migration was started.  #5H9AKZ is the next
+  candidate gate for architectural review.
+
 * Exact next action
 :PROPERTIES:
 :ID: 53WN6F
 :END:
 
-After review of this worksheet, create one fresh execution thread for
-#BY51K0.  Its complete scope is the backend proof: read #M9MI6Y and this page;
-inspect embedded mirror layout, descendant direct composition, and event
-translation; implement and verify the smallest two-overlapping-pane proof;
-record findings and decisions in #WTODNV and #3LH9F7; update #BY51K0 and
-#QF07KG; leave reviewable unpushed changes; and identify #5H9AKZ without
-starting it.
-
-The architectural parent thread should review that result and decide whether
-the proof warrants the shell stage.  It should not accumulate implementation
-from later stages merely because their dependencies are now visible.
+The architectural parent thread should review the committed #BY51K0 result and
+decide whether its evidence opens #5H9AKZ, “Build =luv/workbench= as the shell
+substrate.”  That stage is the exact next candidate.  Do not begin it in the
+backend-proof thread and do not accumulate later tool migrations merely
+because their dependencies are now visible.
