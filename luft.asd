@@ -4,6 +4,7 @@
   :description "Canonical cubical topology and integer manifold-sheet meshing."
   :version "0.0.1"
   :author "Mikael Brockman"
+  :depends-on ("sb-simd")
   :serial t
   :components ((:file "luft/luft")
                (:file "luft/voxel-light")
@@ -11,6 +12,8 @@
                (:file "luft/star-geometry")
                (:file "luft/star-atlas")
                (:file "luft/star-table")
+               (:file "luft/star-selection")
+               (:file "luft/star-selection-simd")
                (:file "luft/mesh-query"))
   :in-order-to ((test-op (test-op "luft/test"))))
 

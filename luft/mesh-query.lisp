@@ -1,8 +1,9 @@
 (in-package #:luft)
 
 ;;; A chunk becomes a list of active lattice stars.  This is deliberately the
-;;; entire CPU mesher: chunk residency supplies neighboring cells, the cells
-;;; vote into their eight corners, and the mesh shader reads the atlas.
+;;; entire CPU mesher: chunk residency supplies dense vertical occupancy
+;;; fibers, mixed eight-cell stars are selected a word at a time, and the mesh
+;;; shader reads the atlas.
 
 (defun %mesh-neighbor-chunk (domain key)
   "Resolve KEY once through the streaming boundary protocol."
@@ -36,63 +37,70 @@
                                    (%mesh-neighbor-chunk domain key))
                 when neighbor collect neighbor))))
 
-(defun %star-site-key (x y z)
-  "A sortable integer key for one in-domain lattice point."
-  (logior z (ash x 8) (ash y 27)))
+(defconstant +packed-star-x-shift+ 8)
+(defconstant +packed-star-y-shift+ 15)
+(defconstant +packed-star-z-shift+ 22)
 
-(defun %star-site-key-x (key)
-  (ldb (byte 19 8) key))
+(declaim (inline %pack-star-site %packed-star-x %packed-star-y
+                 %packed-star-z %packed-star-mask))
+(defun %pack-star-site (local-x local-y z mask)
+  "Pack one chunk-local 65x65x256 lattice record into thirty bits."
+  (logior mask
+          (ash local-x +packed-star-x-shift+)
+          (ash local-y +packed-star-y-shift+)
+          (ash z +packed-star-z-shift+)))
 
-(defun %star-site-key-y (key)
-  (ldb (byte 19 27) key))
+(defun %packed-star-x (record) (ldb (byte 7 +packed-star-x-shift+) record))
+(defun %packed-star-y (record) (ldb (byte 7 +packed-star-y-shift+) record))
+(defun %packed-star-z (record) (ldb (byte 8 +packed-star-z-shift+) record))
+(defun %packed-star-mask (record) (ldb (byte 8 0) record))
 
-(defun %star-site-key-z (key)
-  (ldb (byte 8 0) key))
+(defun %gather-star-sites (chains x0 x1 y0 y1)
+  "Return ordered packed records for every mixed occupancy star in the box."
+  (let* ((window (%materialize-star-selection-window chains x0 x1 y0 y1))
+         (below (star-selection-window-below window))
+         (above (star-selection-window-above window))
+         (active (make-array +star-fiber-word-count+
+                             :element-type '(unsigned-byte 64)))
+         (records (make-array 4096 :element-type '(unsigned-byte 32)
+                                   :adjustable t :fill-pointer 0))
+         (kernel (%star-active-kernel)))
+    ;; Y/X/Z order is the numeric order of the former global lattice key and
+    ;; therefore keeps uploads and tests deterministic without a sort.
+    (loop for y fixnum from y0 to y1 do
+      (loop for x fixnum from x0 to x1 do
+        (let ((southwest (%star-window-fiber-base window (1- x) (1- y)))
+              (southeast (%star-window-fiber-base window x (1- y)))
+              (northwest (%star-window-fiber-base window (1- x) y))
+              (northeast (%star-window-fiber-base window x y)))
+          (funcall kernel below above
+                   southwest southeast northwest northeast active)
+          (dotimes (word +star-fiber-word-count+)
+            (let ((bits (aref active word)))
+              (loop while (plusp bits) do
+                (let* ((lowest (logand bits (- bits)))
+                       (bit (1- (integer-length lowest)))
+                       (z (+ (* word 64) bit))
+                       (mask (%star-mask-from-window
+                              below above
+                              southwest southeast northwest northeast
+                              word bit)))
+                  (vector-push-extend
+                   (%pack-star-site (- x x0) (- y y0) z mask)
+                   records)
+                  (setf bits (logand bits (1- bits))))))))))
+    records))
 
-(defun %accumulate-chunk-stars (stars chain x0 x1 y0 y1)
-  "Add CHAIN's positive cells to lattice STARS owned by the output box."
-  (map-chain
-   (lambda (cell)
-     (unless (and (= +cell-extent+ (site-extent cell))
-                  (site-positive-p cell))
-       (error "A star mesh needs positive cells, not ~S." cell))
-     (let ((cell-x (site-x cell))
-           (cell-y (site-y cell))
-           (cell-z (site-z cell)))
-       (dotimes (dx 2)
-         (let ((x (+ cell-x dx)))
-           (when (<= x0 x x1)
-             (dotimes (dy 2)
-               (let ((y (+ cell-y dy)))
-                 (when (<= y0 y y1)
-                   (dotimes (dz 2)
-                     (let* ((z (+ cell-z dz))
-                            (key (%star-site-key x y z))
-                            (sample (logior (if (zerop dx) 1 0)
-                                            (if (zerop dy) 2 0)
-                                            (if (zerop dz) 4 0))))
-                       (setf (gethash key stars)
-                             (logior (gethash key stars 0)
-                                     (ash 1 sample)))))))))))))
-   chain))
-
-(defun %star-site-words (stars)
-  "Pack deterministic (X Y Z STAR) records for every actual surface site."
-  (let* ((keys
-           (sort
-            (loop for key being the hash-keys of stars
-                  for star = (gethash key stars)
-                  unless (or (zerop star) (= star #xff)) collect key)
-            #'<))
-         (words
-           (make-array (* 4 (length keys))
-                       :element-type '(unsigned-byte 32))))
-    (loop for key in keys
-          for offset from 0 by 4
-          do (setf (aref words offset) (%star-site-key-x key)
-                   (aref words (+ offset 1)) (%star-site-key-y key)
-                   (aref words (+ offset 2)) (%star-site-key-z key)
-                   (aref words (+ offset 3)) (gethash key stars)))
+(defun %star-site-words (records x0 y0)
+  "Expand compact local records directly into the public four-word GPU ABI."
+  (let ((words (make-array (* 4 (length records))
+                           :element-type '(unsigned-byte 32))))
+    (loop for record across records
+          for offset fixnum from 0 by 4 do
+      (setf (aref words offset) (+ x0 (%packed-star-x record))
+            (aref words (+ offset 1)) (+ y0 (%packed-star-y record))
+            (aref words (+ offset 2)) (%packed-star-z record)
+            (aref words (+ offset 3)) (%packed-star-mask record)))
     words))
 
 (defun mesh-star-chunk (chunk chunk-key &key outside-domain-policy)
@@ -103,8 +111,7 @@
          (x0 (chunk-origin-x chunk-key))
          (y0 (chunk-origin-y chunk-key))
          (x1 (min (+ x0 +chunk-size+) (world-domain-x-limit domain)))
-         (y1 (min (+ y0 +chunk-size+) (world-domain-y-limit domain)))
-         (stars (make-hash-table :test #'eql)))
+         (y1 (min (+ y0 +chunk-size+) (world-domain-y-limit domain))))
     (handler-bind
         ((outside-domain
            (lambda (condition)
@@ -113,6 +120,7 @@
                ((nil) nil)
                (:air (invoke-restart 'treat-as-air))
                (:solid (invoke-restart 'treat-as-solid))))))
-      (dolist (neighbor (%mesh-star-neighborhood chunk chunk-key))
-        (%accumulate-chunk-stars stars neighbor x0 x1 y0 y1)))
-    (make-surface-mesh domain (%star-site-words stars))))
+      (let ((records
+              (%gather-star-sites
+               (%mesh-star-neighborhood chunk chunk-key) x0 x1 y0 y1)))
+        (make-surface-mesh domain (%star-site-words records x0 y0))))))

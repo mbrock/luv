@@ -31,6 +31,61 @@
              (%check (zerop (logand star (1- star)))))
     (%check (= 44 (surface-mesh-triangle-count mesh)))))
 
+(defun %test-word-parallel-star-selection ()
+  "Compare dense selection with the small atlas-oriented occupancy oracle."
+  (let* ((domain (make-world-domain :horizontal-bits 6))
+         (builder (make-chain-builder domain))
+         (occupied (make-hash-table :test #'equal)))
+    (flet ((occupy (x y z)
+             (let ((cell (list x y z)))
+               (unless (gethash cell occupied)
+                 (setf (gethash cell occupied) t)
+                 (chain-builder-add-site
+                  builder (make-site domain x y z +cell-extent+ 1))))))
+      ;; Exercise every horizontal edge, both vertical extremes, and enough
+      ;; deterministic interior configurations to cross all four fiber words.
+      (dolist (cell '((0 0 0) (63 0 1) (0 63 253) (63 63 254)
+                       (31 31 63) (31 31 64) (32 32 127) (32 32 128)))
+        (apply #'occupy cell))
+      (let ((state #x31415926))
+        (dotimes (i 800)
+          (declare (ignore i))
+          (setf state (ldb (byte 32 0) (+ (* state 1664525) 1013904223)))
+          (let ((x (ldb (byte 6 0) state))
+                (y (ldb (byte 6 6) state))
+                (z (mod (ash state -12) +top-z+)))
+            (occupy x y z)))))
+    (let* ((chain (finish-chain-builder builder))
+           (mesh (mesh-star-chunk chain 0 :outside-domain-policy :air))
+           (words (surface-mesh-star-site-words mesh))
+           (expected (star-surface-sites occupied))
+           (expected-count
+             (loop for star being the hash-values of expected
+                   count (and (plusp star) (/= star #xff)))))
+      (%check (= expected-count (/ (length words) 4)))
+      (loop for offset from 0 below (length words) by 4
+            for coordinate = (list (aref words offset)
+                                   (aref words (+ offset 1))
+                                   (aref words (+ offset 2)))
+            do (%check (= (aref words (+ offset 3))
+                          (gethash coordinate expected 0)))))))
+
+(defun %test-star-selection-instruction-kernel ()
+  "Keep machine-specific spelling subordinate to the scalar Boolean law."
+  (let ((below (make-array 16 :element-type '(unsigned-byte 64)))
+        (above (make-array 16 :element-type '(unsigned-byte 64)))
+        (scalar (make-array 4 :element-type '(unsigned-byte 64)))
+        (native (make-array 4 :element-type '(unsigned-byte 64)))
+        (state #x9e3779b97f4a7c15))
+    (dotimes (index 16)
+      (setf state (ldb (byte 64 0) (+ (* state 6364136223846793005) 1))
+            (aref below index) state
+            state (ldb (byte 64 0) (+ (* state 6364136223846793005) 1))
+            (aref above index) state))
+    (%star-active-words-scalar below above 0 4 8 12 scalar)
+    (funcall (%star-active-kernel) below above 0 4 8 12 native)
+    (%check (equalp scalar native))))
+
 (defun %test-atlas ()
   (%check (= 256 (length *star-atlas-owned-triangles*)))
   (dotimes (star 256)
@@ -49,6 +104,8 @@
 (defun run-luft-tests (&key (stream *standard-output*))
   (setf *luft-test-count* 0)
   (%test-one-cell-stars)
+  (%test-word-parallel-star-selection)
+  (%test-star-selection-instruction-kernel)
   (%test-atlas)
   (%test-cubical-addressing)
   (format stream "LUFT: ~D star checks passed.~%" *luft-test-count*)

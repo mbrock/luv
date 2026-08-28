@@ -173,12 +173,22 @@ outward triangle soup.  The largest star owns 25 triangles, within a fixed
 
 The renderer uploads the atlas once as 256 fixed blocks of 76 =uvec4= records:
 one triangle-count header and room for 75 biased local points.  Streaming
-chunks resolve their at-most-nine neighboring chains once, let every occupied
-cell vote into its eight lattice corners, and upload only four unsigned words
-per nonempty, nonfull star.  The sun-shadow pass consumes the same two buffers
-through a smaller mesh stage.  There is deliberately no task shader or runtime
-fallback; the direct dispatch is the foundation until a concrete device
-failure earns a different path.
+chunks cache each immutable chain as 64x64 columns of four 64-bit vertical
+occupancy words.  A query copies its one-cell halo, selects 64 Z positions at
+once with =OR(eight cells) AND NOT AND(eight cells)=, and visits only the set
+bits to form the exact star byte.  The scalar expression is the definition;
+AVX2, SSE2, and NEON implementations change only its load, Boolean, and store
+spellings, while instruction choice stays outside the query.  The CPU uploads
+only four unsigned words per nonempty, nonfull star.  The sun-shadow pass
+consumes the same two buffers through a smaller mesh stage.  There is
+deliberately no task shader or runtime fallback; the direct dispatch is the
+foundation until a concrete device failure earns a different path.
+
+On the 122,714-cell four-chunk sanctuary, seven warmed 200-pass samples measured
+a 1.975 ms median and 2.258 MiB allocated for the complete direct CPU selector;
+forcing all four chain facts to rebuild on every pass measured 3.48 ms and
+2.868 MiB.  Both produced 37,602 active stars and the same 600,570 atlas
+triangles.  These numbers exclude scene construction, GPU upload, and drawing.
 
 The first scene fragment ABI is similarly narrow: world point, flat triangle
 normal, current and previous clip positions, and shadow coordinate.  It uses
