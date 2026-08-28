@@ -62,7 +62,8 @@
       (true (eq :stale (sly-client::lisp-instance-state legacy))))))
 
 (define-test status-does-not-present-another-checkouts-lisp
-  (let* ((sly-client::*project-root* #P"/tmp/luv/")
+  (let* ((sly-client::*lisp-selector* nil)
+         (sly-client::*project-root* #P"/tmp/luv/")
          (other
            (sly-client::make-lisp-instance
             :id "OTHER1" :name "other" :root "/tmp/luv2/"
