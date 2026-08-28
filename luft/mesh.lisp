@@ -175,7 +175,14 @@
 
 The ordinary two transitions are one pair.  A checkerboard has four
 transitions; occupied-side topology pairs the two transitions surrounding
-each occupied quadrant, producing two independent surface sheets."
+each occupied quadrant, producing two independent surface sheets.
+
+This diagnostic decomposition deliberately KEEPS the occupied-side pairing
+even though production bands now pair checkerboards around empty quadrants
+(%EDGE-RUN-TRANSITION-GROUPS): its purpose is to split a singular star into
+the regular occupied-side sheets the Blender Arc corpus covers, and a cycle
+joining diagonal solids has no such regular mask.  Reconciling the two views
+needs the multi-boundary junction algorithm first."
   (let* ((samples (%radial-samples axis-number sign))
          (transitions
            (loop for index below 4
@@ -1685,7 +1692,13 @@ checked boundary-face site."
   (if (boundp '+quadrant-v+) (symbol-value '+quadrant-v+) #(-1 -1 1 1)))
 
 (defun %edge-run-transition-groups (states)
-  "Group the transition indices of one four-bit quadrant occupancy run."
+  "Group the transition indices of one four-bit quadrant occupancy run.
+
+The ordinary two transitions are one pair.  A checkerboard has four
+transitions and forces a manifold pairing choice; bands pair around each
+EMPTY quadrant, so two diagonally-touching solids meet in concave fillets
+joined across their shared lattice edge rather than separating into two
+convex chamfer sheets."
   (let ((transitions
           (loop for index below 4
                 unless (eq (logbitp index states)
@@ -1695,7 +1708,7 @@ checked boundary-face site."
       (0 nil)
       (2 (list transitions))
       (4 (loop for index below 4
-               when (logbitp index states)
+               unless (logbitp index states)
                  collect (list (mod (+ index 3) 4) index)))
       (t (error "Impossible edge transition count ~D." (length transitions))))))
 
@@ -3029,12 +3042,46 @@ every owned site's bevel domain, and DROP-NONLOCAL-P discards it."
                                   (* ny (svref ys index))
                                   (* nz (svref zs index)))))))))
 
+(defun %cycle-planar-p (cycle)
+  "Whether all left endpoints of CYCLE lie in one (any) plane."
+  (let ((points (mapcar #'%fan-record-left cycle)))
+    (or (<= (length points) 3)
+        (let* ((origin (first points))
+               (ox (%fan-point-x origin))
+               (oy (%fan-point-y origin))
+               (oz (%fan-point-z origin))
+               (rest (mapcar (lambda (point)
+                               (list (- (%fan-point-x point) ox)
+                                     (- (%fan-point-y point) oy)
+                                     (- (%fan-point-z point) oz)))
+                             (rest points)))
+               (nx 0) (ny 0) (nz 0))
+          (loop named search
+                for (ax ay az) in rest
+                do (loop for (bx by bz) in rest
+                         do (let ((cx (- (* ay bz) (* az by)))
+                                  (cy (- (* az bx) (* ax bz)))
+                                  (cz (- (* ax by) (* ay bx))))
+                              (unless (and (zerop cx) (zerop cy) (zerop cz))
+                                (setf nx cx ny cy nz cz)
+                                (return-from search)))))
+          (or (and (zerop nx) (zerop ny) (zerop nz))
+              (loop for (px py pz) in rest
+                    always (zerop (+ (* nx px) (* ny py) (* nz pz)))))))))
+
 (defun %vertex-fan-uses-center-p (cycle star-mask)
   (or (%cycle-planar-through-site-p cycle)
       ;; The ordinary five-cell concave corner and its upside-down three-cell
       ;; complement both pass through the site.  The six- and seven-cell
       ;; chamfer/fillet runs do not; coning those creates the ornaments.
-      (member (logcount star-mask) '(3 5))))
+      (member (logcount star-mask) '(3 5))
+      ;; Every junction boundary vertex sits at distance sqrt(2)*w from the
+      ;; site, so a non-planar (saddle) cycle forces an interior apex, and
+      ;; the only apex equidistant from the whole cycle is the lattice point
+      ;; itself.  Stripping a saddle instead lets two adjacent saddles pick
+      ;; coincident interior diagonals when the bevel reaches medial width,
+      ;; welding the checkerboard neck into doubled zero-thickness walls.
+      (not (%cycle-planar-p cycle))))
 
 (defun %emit-triangular-boundary-cap
     (builder site-x site-y site-z cycle stock star-mask)

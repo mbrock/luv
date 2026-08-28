@@ -342,6 +342,36 @@ isosceles fan.  Apexes are forced only where they are integers, so the packed
 integer tick grid of #IQC0Y4 never limits junction correctness — an
 off-lattice circumcenter fan buys triangulation symmetry, not geometry.
 
+* DONE Checkerboard edges pair through the air, saddles fan through the site
+:PROPERTIES:
+:ID: ZJ7CSO
+:END:
+
+A four-transition lattice edge — the checkerboard of two diagonal solids —
+used to pair its band transitions around the occupied quadrants, splitting
+the junction into two convex chamfer sheets that touch only combinatorially.
+[[lisp:luft::%edge-run-transition-groups]] now pairs around the /empty/
+quadrants instead: the diagonal solids join through a concave fillet neck,
+the 18-connectivity reading, and the two junction cycles at the edge's end
+sites merge into one skew hexagon each.
+
+Those hexagons are exactly the saddle cycles of #SAMH68, and the dichotomy
+there is now the implementation: [[lisp:luft::%vertex-fan-uses-center-p]]
+sends every non-planar boundary cycle through
+[[lisp:luft::%emit-centered-boundary-fan]], apex at the lattice point, while
+planar cycles keep their apex-free strips.  The medial width made this
+forced.  At $2m$ equal to the cell size the fillet neck has zero height, the
+two hexagons meet in an equatorial square, and independent strip
+triangulations picked the same interior diagonals — coincident
+opposite-oriented triangles, four uses per edge, a zero-thickness wall.
+Fanning each saddle from its own site leaves the shared square edges as the
+only contact, and all 256 stars close at every width through medial.
+
+The diagnostic sheet decomposition ([[lisp:luft::%radial-transition-groups]],
+=decompose-star-mask=) deliberately keeps occupied-side pairing: its virtual
+masks would silently weld the merged checkerboard cycles, and reconciling
+that awaits the multi-boundary junction treatment.
+
 * The contracts which optimization must not hide
 :PROPERTIES:
 :ID: L38W75
