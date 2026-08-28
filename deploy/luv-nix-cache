@@ -1,0 +1,55 @@
+#!/bin/sh
+# Publish the complete native development environments as a signed file cache.
+
+set -eu
+
+cache_directory=/var/www/luv/nix-cache
+state_directory=/var/lib/luv-nix-cache
+secret_key=$state_directory/secret-key
+public_key=$state_directory/public-key
+nix=/nix/var/nix/profiles/default/bin/nix
+nix_store=/nix/var/nix/profiles/default/bin/nix-store
+
+exec 9>/run/luv/nix-cache.lock
+flock 9
+
+live_target=$(readlink /run/luv/live.sock)
+case "$live_target" in
+    1.sock) project_root=/srv/luv-slots/1 ;;
+    2.sock) project_root=/srv/luv-slots/2 ;;
+    *)
+        printf 'Invalid live luv socket target: %s\n' "$live_target" >&2
+        exit 1
+        ;;
+esac
+
+mkdir -p "$cache_directory" "$state_directory"
+chmod 0700 "$state_directory"
+
+if [ ! -e "$secret_key" ] && [ ! -e "$public_key" ]; then
+    umask 077
+    "$nix_store" --generate-binary-cache-key \
+        luv.swa.sh-1 "$secret_key" "$public_key"
+elif [ ! -s "$secret_key" ] || [ ! -s "$public_key" ]; then
+    printf 'Incomplete Nix cache key pair in %s\n' "$state_directory" >&2
+    exit 1
+fi
+
+public_key_tmp=$cache_directory/.luv-cache.pub.tmp
+install -m 0644 "$public_key" "$public_key_tmp"
+mv -f "$public_key_tmp" "$cache_directory/luv-cache.pub"
+
+roots=$("$nix" build -L --no-link --print-out-paths \
+    --no-write-lock-file \
+    "path:$project_root#dev" \
+    "path:$project_root#slim-dev")
+
+# The file-store secret-key setting signs each narinfo as it is written.  Keep
+# old objects: Nix copy is incremental, and store hashes make them safe to
+# retain for checkouts whose lock files lag behind the live deployment.
+"$nix" copy \
+    --stdin \
+    --to "file://$cache_directory?compression=zstd&compression-level=6&parallel-compression=true&secret-key=$secret_key" \
+    <<EOF
+$roots
+EOF

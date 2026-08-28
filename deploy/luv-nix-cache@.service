@@ -1,0 +1,12 @@
+[Unit]
+Description=Publish the luv Nix development cache after deployment %i
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/luv-nix-cache
+TimeoutStartSec=2h
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

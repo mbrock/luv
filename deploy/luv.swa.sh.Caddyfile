@@ -1,4 +1,14 @@
 luv.swa.sh {
+	redir /nix-cache /nix-cache/
+	handle_path /nix-cache/* {
+		root * /var/www/luv/nix-cache
+		@public-key path /luv-cache.pub
+		header @public-key Cache-Control "no-cache"
+		@immutable not path /luv-cache.pub
+		header @immutable Cache-Control "public, max-age=31536000, immutable"
+		file_server
+	}
+
 	redir /video /video/
 	handle_path /video/dl/* {
 		root * /var/www/luv

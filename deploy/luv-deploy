@@ -95,6 +95,13 @@ deploy()
         return 1
     fi
     printf '\033[1;32mPublic verification passed. Slot %s remains warm for rollback.\033[0m\n' "$active"
+
+    # Publishing can compress several gigabytes on the first run.  It is not
+    # part of cutover correctness, so leave it to a separate oneshot while the
+    # newly verified slot serves traffic.
+    if ! systemctl start --no-block "luv-nix-cache@$id.service"; then
+        printf '\033[1;33mCould not queue Nix cache publication; the live site is unaffected.\033[0m\n'
+    fi
 }
 
 case "${1-}" in
