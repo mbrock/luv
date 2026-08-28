@@ -1,0 +1,360 @@
+#+title: A worksheet for the large Luft world
+#+startup: overview
+
+* Intent and non-goals
+:PROPERTIES:
+:ID: 59ZKO4
+:END:
+
+This is the living worksheet for turning Luft's small mountain sanctuary into
+a genuinely large, demand-streamed voxel world with authored geography,
+architecture, material variety, and regional voxel light.  The durable design
+records in [[file:luft.org][the Luft notebook]], [[file:domains-and-bundles.org][Domains, bundles, and materialized worlds]],
+[[file:frontier-traversals.org][Frontier traversals]], and [[file:block-world.org][the Luvcraft block-world notebook]] explain the
+representations and prior experiments.  This page sequences the new work,
+records what each experiment teaches, and names exactly one next action.
+Execution threads are replaceable working sessions; they read and update this
+worksheet rather than becoming the only place where a decision survives.
+
+The intended world should feel composed before it feels generated: a river and
+watershed, roads and passes, long sightlines, distinct regions, a substantial
+settlement or fortress, and sparse bridges, ruins, quarries, caves, shrines,
+and waystations make travel legible while still allowing wilderness, wrong
+turns, and getting lost.  Deterministic procedural fields supply local terrain
+and detail under that authored plan.  Walking must cause source materialization,
+light solving, meshing, publication, and eviction rather than selecting meshes
+from a world already held in memory.
+
+This work does /not/ restore the mesher deleted by commits =366ffe4= and
+=ae99b9d=, reintroduce mixed bevel widths or material-dependent topology,
+design transparent terrain, begin with level of detail or vertical streaming,
+or extract a universal voxel engine before Luft provides a second concrete
+client for Luvcraft's best substrate ideas.
+
+* Established invariants
+:PROPERTIES:
+:ID: 94AJDM
+:END:
+
+- Luft retains one width-one 256-star atlas.  Materials and light do not alter
+  star selection, triangle ownership, bevel geometry, or the four-word active
+  site stream.
+- Canonical authored content names a material at each cell; occupancy is the
+  projection =material != air=.  Geometry, light, meshes, and GPU resources are
+  derived products with independently checkable provenance.
+- World description, resident chunks, and rendered chunks are different
+  things.  The source plus sparse authored overlay can rematerialize an evicted
+  chunk; resident storage is not the save format.
+- An absent neighbor is explicitly open sky, closed world, or unknown because
+  it is nonresident.  Streaming state never silently becomes authored air,
+  darkness, or open sky.
+- The canvas/render owner remains the single writer of residency and GPU
+  state.  Workers receive immutable captures; incarnation and dependency
+  stamps make obsolete generation, light, and appearance results harmless.
+- Geometry and appearance are separate products even if an early worker
+  computes both.  Repainting or relighting may not change geometry bytes or
+  triangle counts.
+- Sun and shadow maps retain direct-light ownership.  Voxel sky light scales
+  ambient illumination; RGB4 block light contributes local radiance.
+- The first proof is opaque, uses one small global material vocabulary, and
+  accepts dense full-height chunk lanes until measurement earns compression.
+- Geography has authored macrostructure.  Noise may roughen a place but may
+  not be the only reason one place differs from another.
+
+* Current architecture and evidence
+:PROPERTIES:
+:ID: AMY4CI
+:END:
+
+The simplified implementation is the foundation, while deleted code is design
+evidence rather than a restoration source.
+
+- [[file:../luft/mesh.lisp][luft/mesh.lisp]] defines one =surface-mesh= as four unsigned words per
+  active star.  =+MESH-BEVEL-WIDTH+= is one and the renderer metadata does not
+  participate in geometry.
+- [[file:../luft/mesh-query.lisp][luft/mesh-query.lisp]] selects active lattice stars from dense 64x64
+  occupancy fibers and their one-cell neighborhood.
+- [[file:../luft/star-table.lisp][luft/star-table.lisp]] and [[file:../luft/atlas.lisp][luft/atlas.lisp]] own the fixed geometry and
+  its symmetry-derived 256 entries.  This is the place where a static
+  triangle-to-incident-cell appearance selector might be proved.
+- [[file:../luft/render/render.lisp][luft/render/render.lisp]] flattens only the active-site words into the
+  terrain population.  Its current =streaming-scene= eagerly partitions a
+  complete finite scene into an in-memory store, so only meshing and GPU
+  residency are streamed.
+- [[file:../luft/render/shaders.lisp][luft/render/shaders.lisp]] gives terrain fixed top, side, and bottom tones
+  under ambient sky/ground, direct sun, shadow-map visibility, and fog.  It
+  receives neither terrain material identity nor voxel light.
+- [[file:../luft/render/materials.lisp][luft/render/materials.lisp]] and [[file:../luft/voxel-light.lisp][luft/voxel-light.lisp]] retain useful semantic
+  material and RGB4 finite-solver evidence.  Current terrain does not consume
+  those fields; remaining use by scene and torch paths must not be mistaken
+  for a scalable regional design.
+- [[file:../luft/render/render.lisp][=MAKE-HIGHLAND-SANCTUARY-SCENE=]] already sketches a 512x512 landscape
+  with three sparse landmarks, but eagerly builds all sixty-four chunks and
+  derives most macrostructure from value noise.  It is a content experiment,
+  not the demand-world architecture.
+- [[file:../domains/domains.lisp][domains/domains.lisp]] and
+  [[file:../arithmetic/records/columnar.lisp][arithmetic/records/columnar.lisp]] already provide neutral finite domains,
+  vocabularies, and typed columnar materializations.
+- [[file:../luvcraft/world.lisp][luvcraft/world.lisp]], [[file:../luvcraft/terrain.lisp][luvcraft/terrain.lisp]], and
+  [[file:../luvcraft/streaming.lisp][luvcraft/streaming.lisp]] demonstrate palette-coded chunk content,
+  deterministic source materialization, sparse overlays, demand tokens,
+  incarnation validation, and bounded eviction.  Their 16-cubed block-world
+  classes and gameplay contracts remain Luvcraft-specific.
+- [[file:../luvcraft/light.lisp][luvcraft/light.lisp]] and [[file:../luvcraft/frontier-light.lisp][luvcraft/frontier-light.lisp]] demonstrate separately
+  revised columnar light fields, palette-projected propagation tables,
+  explicit absent-boundary semantics, coherent regional publication, and
+  compiled frontier propagation.
+
+* Open technical questions
+:PROPERTIES:
+:ID: M6MATV
+:END:
+
+1. Can every triangle in every star atlas entry select one incident occupied
+   cell for material and one outward empty cell for illumination by a stable,
+   symmetry-preserving rule?  Junction and checkerboard stars are the decisive
+   cases.
+2. Is one appearance record per active star the right first ABI, containing
+   the eight neighboring material codes and light values while leaving the
+   active-site stream byte-identical?  Measure alignment and upload cost before
+   compacting it.
+3. Should the first palette be one world-wide append-only =u8= vocabulary, or
+   do authored generation and editing already demonstrate a need for wider or
+   chunk-local codes?  Prefer the world vocabulary until evidence says no.
+4. What is the smallest immutable Luft resident-cell-chunk value that keeps
+   material content canonical while making occupancy fibers and chains cheap
+   derived views?
+5. Can a visible radius plus one complete guard chunk settle all 15-level sky
+   and RGB4 block light, including diagonal star appearance dependencies, or
+   does publication require a differently shaped capture?
+6. Which part of =luvcraft.world.fields= is sufficiently experiment-neutral to
+   move below both games now?  Frontier program semantics appear general, but
+   extraction of their execution lowering waits until Luft is a real second
+   client.
+7. How should authored roads, rivers, region masks, and structures compose at
+   chunk boundaries without requiring one giant scene builder or making local
+   noise the world plan?
+
+* Ordered stages
+:PROPERTIES:
+:ID: N3DRNE
+:END:
+
+The stages are gates, not a backlog to execute speculatively.  An execution
+thread owns one stage, reads this whole worksheet and the named design records,
+records experiments and decisions here, leaves reviewable unpushed changes,
+writes a prose completion update, and identifies rather than begins the next
+stage.  The architectural parent thread reviews the evidence before admitting
+the next gate.
+
+** NEXT Prove static atlas appearance selectors
+:PROPERTIES:
+:ID: 33UIQ6
+:END:
+
+/Intent./ Give every triangle in all 256 immutable star entries a purely static
+selector for the incident occupied cell that supplies material and the
+outward empty cell that supplies voxel illumination.  Keep generated geometry
+and the active-site ABI unchanged.
+
+/Evidence./ The new atlas already derives all geometry from eight-cell stars
+and symmetry transforms.  A selector stored in unused atlas metadata would let
+the shader interpret parallel cell fields without rebuilding faces, stocks,
+material junction policy, or mixed bevel machinery.  This attractive design
+must be proved over the complete atlas rather than assumed from ordinary faces.
+
+/Done when./ Executable tests cover all atlas triangles, validate occupied and
+empty selector semantics, validate transformation stability, and assert the
+existing triangle census and site stream are unchanged.  The implementation
+is reviewable and unpushed; findings update #FQ5007 and #3UTRKA; the completion
+note names #FTZ8FD without beginning it.
+
+** TODO Add the palette-coded terrain appearance product
+:PROPERTIES:
+:ID: FTZ8FD
+:END:
+
+/Intent./ Represent basic opaque materials as semantic vocabulary entries and
+dense cell codes, compile one parallel appearance record per active star, and
+shade grass, soil, exposed stone, and limestone through one small descriptor
+table and the unchanged atlas draw path.
+
+/Evidence./ Existing finite scenes provide enough authored material variation
+to prove the appearance ABI before demand generation changes residency.
+Material-only changes should rebuild and upload appearance while preserving
+geometry exactly.
+
+/Done when./ The sanctuary visibly distinguishes basic materials under current
+sun and shadows; faces, bands, and junctions obey the proved selectors; tests
+show repainting changes no geometry bytes or triangle counts; the shadow pass
+does not bind appearance; and the completion note names #H1ASQU.
+
+** TODO Materialize a demand-streamed authored world
+:PROPERTIES:
+:ID: H1ASQU
+:END:
+
+/Intent./ Replace the eager whole-scene store for ordinary play with one
+deterministic Luft source, immutable resident chunks, sparse authored overlay,
+camera demand, worker production, incarnation validation, and bounded
+eviction.  Compose an authored river, road, pass, and one masonry destination
+across chunk seams before adding broad procedural detail.
+
+/Evidence./ Luvcraft proves the ownership pattern, but Luft's full-height
+64x64 chunks, packed chains, star neighborhoods, and semantic architecture
+remain distinct.  A finite-scene adapter should preserve atelier fixtures
+without making them define the new source protocol.
+
+/Done when./ Walking across a boundary causes observable source generation,
+materialization, meshing, publication, and opposite-edge eviction; resident
+CPU and GPU state remain bounded; stale worker results are rejected; the
+authored route and destination survive chunk-independent generation; and the
+completion note names #JDB26Y.
+
+** TODO Publish stable regional sky and RGB4 light
+:PROPERTIES:
+:ID: JDB26Y
+:END:
+
+/Intent./ Add separately revised sky and block-light fields, palette-projected
+opacity/emission tables, explicit open/closed/unknown boundary semantics,
+immutable regional captures, frontier propagation, and appearance-only
+publication.
+
+/Evidence./ The current Luft finite RGB4 solver is a differential oracle;
+Luvcraft supplies proven field, frontier, boundary, and coherent-publication
+patterns.  The first implementation may specialize their laws to Luft rather
+than generalize the executor prematurely.
+
+/Done when./ Open ground, a roofed room, a skylight, and an RGB emitter render
+correctly; one source and receiver cross a chunk seam; entering visible chunks
+wait for stable guard data; relighting preserves geometry; differential tests
+agree with the finite oracle; and the completion note names #DLH49J.
+
+** TODO Make the first journey worth taking
+:PROPERTIES:
+:ID: DLH49J
+:END:
+
+/Intent./ Extend the proved source into a coherent first region with connected
+and branching routes, named destinations, wilderness between them, durable
+edits, and a resumable player position.  Tune generation and residency from
+measured walking rather than from fixture construction time.
+
+/Evidence./ Architectural composition is the product requirement that keeps a
+large generated domain from becoming an oscillating height-map no-place.
+Persistence should save source description, semantic edits, and resume state,
+not resident chunks, light, meshes, or GPU products.
+
+/Done when./ A player can leave the initial fortress, follow and lose a road,
+cross at least one distant authored structure, return by another route, edit a
+cell, restart, and find both edit and position preserved while residency stays
+bounded.  The worksheet then decides the next measured need rather than
+assuming transparency, LoD, vertical streaming, or simulation.
+
+* Decision log
+:PROPERTIES:
+:ID: 3UTRKA
+:END:
+
+** 2026-08-28 — Preserve geometry and add a parallel appearance product
+
+The simplified four-word star stream and fixed one-width atlas remain the
+entire terrain geometry contract.  Material identity and voxel light travel in
+a one-for-one active-star sidecar interpreted by static atlas selectors.  Do
+not restore face stocks, material-dependent topology, mixed widths, repair
+passes, or one draw/atlas per material.
+
+** 2026-08-28 — Reuse substrate laws, not Luvcraft world classes
+
+Finite domains, vocabularies, columnar materializations, immutable worker
+captures, demand tokens, sparse overlays, derived-field revisions, explicit
+boundary semantics, and coherent publication are valuable below either game.
+Luvcraft's coordinate axes, 16-cubed storage, =block-kind= semantics, and
+gameplay mutation contracts are not Luft's model.  Luft becomes the second
+client whose concrete needs can justify later frontier-executor extraction.
+
+** 2026-08-28 — Authored macrostructure precedes procedural detail
+
+The large world begins with routes, watersheds, regions, sightlines, and sparse
+destinations expressed in absolute world coordinates.  Deterministic noise and
+local rules fill and roughen that composition; they do not substitute for it.
+
+** 2026-08-28 — Stable visible light uses known guard content
+
+Nonresidency remains unknown.  The playable path retains or withholds a visible
+product until the content required to settle its bounded sky and RGB4 light is
+known.  Provisional fields may aid inspection but are not presented as final
+geography.
+
+* Experiment notes
+:PROPERTIES:
+:ID: FQ5007
+:END:
+
+Record each experiment with date, execution thread, exact revision, question,
+commands or live actions, observed result, interpretation, and resulting
+decision.  Failed experiments belong here when they eliminate an architectural
+path.  Do not paste complete test transcripts.
+
+** 2026-08-28 — Architecture survey and Oracle consultation
+
+- /Thread./ =T-01a04a2e-fab5-7206-90bd-94d965339cb9=
+- /Revision./ =a509168= after fast-forwarding the clean checkout to
+  =origin/main=; the initial survey was made at =efc94b1=, whose relevant Luft
+  and Luvcraft files are unchanged by that fast-forward.
+- /Question./ How can basic materials, voxel light, and actual demand streaming
+  return without rebuilding the system removed by =366ffe4= and =ae99b9d=, and
+  which Luvcraft concepts are genuinely substrate?
+- /Actions./ Read the current star selector, atlas, terrain shader, scene
+  streaming, material and voxel-light paths; read Luvcraft domains, palette
+  content, production, light regions, and frontier programs; inspect the two
+  deletion commits; ask the Oracle for an independent architecture and staged
+  proof.
+- /Observation./ Current geometry is one fixed atlas and one four-word record
+  per active star.  Terrain has only orientation tones plus sun, shadow, and
+  ambient light.  Scene material/light semantics partly survive but are
+  globally coupled.  Luvcraft already demonstrates the desired ownership laws
+  over a different chunk representation.
+- /Interpretation./ Material and light belong beside geometry as fields and
+  derived appearance, not inside topology.  Static triangle selectors are the
+  smallest plausible bridge, but their complete-atlas validity is the first
+  unresolved fact and therefore the first gate.
+- /Decision./ Adopt the invariants and stage order on this worksheet.  Begin no
+  production world or shader changes before #33UIQ6 is reviewed.
+
+* Completed prose updates
+:PROPERTIES:
+:ID: 3OE183
+:END:
+
+** 2026-08-28 — The large-world effort gained a durable execution spine
+
+- #59ZKO4 separates the intended authored journey from terrain noise and from
+  speculative engine generality.
+- #94AJDM records the geometry, content, residency, publication, and lighting
+  invariants inherited from the simplification and the Luvcraft substrate.
+- #N3DRNE sequences five review gates from atlas semantics through the first
+  durable journey.
+- #3UTRKA preserves the initial architectural choices; #FQ5007 records the
+  repository survey and Oracle consultation that motivated them.
+
+* Exact next action
+:PROPERTIES:
+:ID: MTAAPI
+:END:
+
+After review of this worksheet, create one fresh execution thread for #33UIQ6.
+Its complete scope is the static atlas appearance-selector proof: read this
+page and the current star-atlas derivation; identify a symmetry-stable occupied
+material cell and outward empty light cell for every emitted triangle; add the
+smallest metadata and exhaustive executable checks without changing triangle
+geometry, census, active-site records, renderer resources, or shaders; record
+the exact revision, commands, observations, and decision in #FQ5007 and
+#3UTRKA; update #33UIQ6 and #3OE183; leave reviewable unpushed changes; and name
+#FTZ8FD without beginning it.
+
+The architectural parent thread reviews that result and decides whether the
+selector proof warrants the appearance-product stage.  It does not accumulate
+later world, shader, or lighting implementation merely because those
+dependencies are visible.

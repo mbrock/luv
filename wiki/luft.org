@@ -15,6 +15,9 @@ The first fireball has also opened a narrower visual study:
 The relation to luvcraft's semantic substrate — quantities, columnar
 records, finite domains, and frontier programs — is read in
 [[file:luft-substrate.org][Luft meets the luvcraft substrate]].
+The next large-world experiments are sequenced in
+[[file:luft-world-worksheet.org][A worksheet for the large Luft world]], so their stage evidence and decisions
+survive the execution threads which carry them out.
 
 * A site is a lattice anchor, an extent mask, and a polarity
 :PROPERTIES:

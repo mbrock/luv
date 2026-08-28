@@ -199,6 +199,10 @@ The following are starting paths rather than a table of settled doctrine.
   plan provisional and measurable: immutable chains key reusable occupancy and
   material facts, neighborhoods remain query inputs, static stars compile to
   static rows, and cold, warm, and one-edit cohorts test whether reuse is real.
+- [[file:luft-world-worksheet.org][A worksheet for the large Luft world]] coordinates the demand-streamed,
+  authored-world work: preserve the fixed star geometry, add palette and light
+  as parallel fields, materialize chunks from a durable source, and make the
+  first long journey a sequence of measured, reviewable gates.
 - [[file:temporal-antialiasing.org][Temporal reconstruction in the Luft atelier]] follows a frozen jittered
   view through Vulkan colour and motion attachments, ping-pong history,
   YCoCg rejection, and lens presentation.  It records the resource-ownership
