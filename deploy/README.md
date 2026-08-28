@@ -37,8 +37,8 @@ extra-trusted-public-keys = luv.swa.sh-1:PpD45iCBkJ38ZkvlyZcLiGdIz6yVehXn3fm1JvG
 The flake contains the same public cache hint.  Nix installations that permit
 flake-supplied configuration therefore use it without global configuration.
 
-The cache contains the complete native closures of `path:./nix#dev` and
-`path:./nix#slim-dev`,
+The cache contains the complete native closures of `path:./nix#environment`
+and `path:./nix#slim-environment`,
 including the pinned McCLIM source, patched cl-sdl3 source, custom SBCL/Tracy/
 Swash derivations where applicable, and their nixpkgs dependencies.  It is
 append-only; old store objects remain available for older locked checkouts and

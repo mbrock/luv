@@ -1,3 +1,23 @@
+LUV_DEV_SHELL ?= default
+
+ifneq ($(LUV_DEV_ENVIRONMENT_MODE),nix-develop)
+
+.DEFAULT_GOAL := luv-development-environment
+
+.PHONY: luv-development-environment $(MAKECMDGOALS)
+
+luv-development-environment:
+	+@LUV_PROJECT_ROOT="$(CURDIR)" exec nix develop --accept-flake-config \
+		--no-write-lock-file "path:$(CURDIR)/nix#$(LUV_DEV_SHELL)" \
+		-c $(MAKE) $(MAKECMDGOALS)
+
+ifneq ($(strip $(MAKECMDGOALS)),)
+$(MAKECMDGOALS): luv-development-environment
+	@:
+endif
+
+else
+
 .DEFAULT_GOAL := all
 
 LUVCRAFT_BENCHMARK_FRAMES ?= 120
@@ -39,13 +59,13 @@ sly-client:
 
 sly-dependency-core: sly-client
 	@./scripts/build-sly-dependency-core
-	@./scripts/dev sbcl --core build/sly-dependencies.core --noinform \
+	@sbcl --core build/sly-dependencies.core --noinform \
 		--script scripts/warm-sly-system.lisp
 
 luvcraft:
 	@status=build/.luvcraft-build-policy; \
 		rm -f "$$status"; \
-		LUV_BUILD_POLICY_STATUS="$$status" ./scripts/dev sbcl --script luvcraft/build.lisp; result=$$?; \
+		LUV_BUILD_POLICY_STATUS="$$status" sbcl --script luvcraft/build.lisp; result=$$?; \
 		if [ "$$result" -eq 0 ] && [ -e "$$status" ]; then result=1; fi; \
 		rm -f "$$status"; \
 		exit "$$result"
@@ -53,7 +73,7 @@ luvcraft:
 luft:
 	@status=build/.luft-build-policy; \
 		rm -f "$$status"; \
-		LUV_BUILD_POLICY_STATUS="$$status" ./scripts/dev sbcl --script luft/build.lisp; result=$$?; \
+		LUV_BUILD_POLICY_STATUS="$$status" sbcl --script luft/build.lisp; result=$$?; \
 		if [ "$$result" -eq 0 ] && [ -e "$$status" ]; then result=1; fi; \
 		rm -f "$$status"; \
 		exit "$$result"
@@ -61,13 +81,13 @@ luft:
 luft-core:
 	@status=build/.luft-core-build-policy; \
 		rm -f "$$status"; \
-		LUV_BUILD_POLICY_STATUS="$$status" ./scripts/dev sbcl --script luft/build-core.lisp; result=$$?; \
+		LUV_BUILD_POLICY_STATUS="$$status" sbcl --script luft/build-core.lisp; result=$$?; \
 		if [ "$$result" -eq 0 ] && [ -e "$$status" ]; then result=1; fi; \
 		rm -f "$$status"; \
 		exit "$$result"
 
 run: luvcraft
-	./scripts/dev ./build/luvcraft
+	./build/luvcraft
 
 ifeq ($(LUV_SLY_SYSTEM),luft)
 test: sly-client
@@ -78,12 +98,12 @@ test: sly-client
 
 test-suite:
 	@./scripts/build-sly-dependency-core
-	@./scripts/dev sbcl --core build/sly-dependencies.core --noinform \
+	@sbcl --core build/sly-dependencies.core --noinform \
 		--script scripts/test.lisp --jobs $(TEST_JOBS)
 endif
 
 luft-test:
-	@./scripts/dev sbcl --script scripts/test-luft.lisp
+	@sbcl --script scripts/test-luft.lisp
 
 capture:
 	./scripts/captures render
@@ -104,13 +124,13 @@ showcase-status:
 	./scripts/showcase status
 
 parinfer-check:
-	@./scripts/dev sh -c 'tmp=$$(mktemp); trap "rm -f $$tmp" EXIT; if ! ./sly parinfer --batch --strict --check $$(rg --files -g"*.lisp") >"$$tmp" 2>&1; then cat "$$tmp"; exit 1; fi; echo "parinfer: strict check passed."'
+	@sh -c 'tmp=$$(mktemp); trap "rm -f $$tmp" EXIT; if ! ./sly parinfer --batch --strict --check $$(rg --files -g"*.lisp") >"$$tmp" 2>&1; then cat "$$tmp"; exit 1; fi; echo "parinfer: strict check passed."'
 
 sly-build-lock-check:
-	@./scripts/dev python3 scripts/with-build-lock-tests.py
+	@python3 scripts/with-build-lock-tests.py
 
 shader-validate:
-	@./scripts/dev sbcl --noinform --non-interactive \
+	@sbcl --noinform --non-interactive \
 		--eval '(require :asdf)' \
 		--eval '(handler-bind ((warning (function muffle-warning))) (progn (asdf:load-asd (truename "luv.asd")) (asdf:load-asd (truename "openai.asd")) (asdf:load-asd (truename "telegram.asd")) (asdf:load-asd (truename "mqtt.asd")) (asdf:load-asd (truename "luvcraft.asd")) (asdf:load-system :luvcraft/agent)))' \
 		--load scripts/shader-validation.lisp \
@@ -119,17 +139,17 @@ shader-validate:
 luft-shader-validate:
 	@mkdir -p build
 	@rm -f build/luft-*.spv
-	@./scripts/dev sbcl --noinform --non-interactive \
+	@sbcl --noinform --non-interactive \
 		--eval '(require :asdf)' \
 		--eval '(handler-bind ((warning (function muffle-warning))) (progn (asdf:load-asd (truename "luv.asd")) (asdf:load-asd (truename "luft.asd")) (asdf:load-system :luft/renderer)))' \
 		--eval '(handler-bind ((warning (function muffle-warning))) (luft.render.shaders:write-production-spir-v #p"build/"))'
-	@./scripts/dev sh -c 'status=0; for f in build/luft-*.spv; do spirv-val --target-env vulkan1.0 "$$f" || status=1; done; exit $$status'
-	@./scripts/dev sh -c 'sha256sum build/luft-*.spv'
+	@sh -c 'status=0; for f in build/luft-*.spv; do spirv-val --target-env vulkan1.0 "$$f" || status=1; done; exit $$status'
+	@sh -c 'sha256sum build/luft-*.spv'
 	@echo "luft-shader-validate: all LUFT SPIR-V modules valid."
 
 msl-validate:
 	mkdir -p build
-	./scripts/dev sbcl --non-interactive \
+	sbcl --non-interactive \
 		--eval '(require :asdf)' \
 		--eval '(asdf:load-asd (truename "luv.asd"))' \
 		--eval '(asdf:load-asd (truename "luvcraft.asd"))' \
@@ -187,23 +207,23 @@ msl-validate:
 
 smoke: luvcraft
 	mkdir -p build
-	./scripts/dev ./build/luvcraft --smoke-test build/luvcraft-smoke.png
+	./build/luvcraft --smoke-test build/luvcraft-smoke.png
 
 vulkan-smoke: luvcraft
 	mkdir -p build
-	./scripts/dev ./build/luvcraft --vulkan-smoke-test build/luvcraft-vulkan-smoke.png
+	./build/luvcraft --vulkan-smoke-test build/luvcraft-vulkan-smoke.png
 
 metal-smoke: luvcraft
 	mkdir -p build
-	MTL_DEBUG_LAYER=1 ./scripts/dev ./build/luvcraft --metal-smoke-test build/luvcraft-metal-smoke.png
+	MTL_DEBUG_LAYER=1 ./build/luvcraft --metal-smoke-test build/luvcraft-metal-smoke.png
 
 metal-text-closeup: luvcraft
 	mkdir -p build
-	MTL_DEBUG_LAYER=1 ./scripts/dev ./build/luvcraft --metal-text-closeup build/luvcraft-metal-text-closeup.png
+	MTL_DEBUG_LAYER=1 ./build/luvcraft --metal-text-closeup build/luvcraft-metal-text-closeup.png
 
 metal-benchmark: luvcraft
 	mkdir -p build
-	./scripts/dev ./build/luvcraft --metal-benchmark $(LUVCRAFT_BENCHMARK_FRAMES) $(LUVCRAFT_BENCHMARK_CSV) $(LUVCRAFT_BENCHMARK_SCENARIO) $(LUVCRAFT_BENCHMARK_DENSITY)
+	./build/luvcraft --metal-benchmark $(LUVCRAFT_BENCHMARK_FRAMES) $(LUVCRAFT_BENCHMARK_CSV) $(LUVCRAFT_BENCHMARK_SCENARIO) $(LUVCRAFT_BENCHMARK_DENSITY)
 
 metal-streaming-benchmark:
 	$(MAKE) metal-benchmark LUVCRAFT_BENCHMARK_SCENARIO=streaming LUVCRAFT_BENCHMARK_CSV=$(LUVCRAFT_STREAMING_BENCHMARK_CSV)
@@ -213,7 +233,7 @@ metal-retina-benchmark:
 
 luft-mesher-profile:
 	mkdir -p $(LUFT_MESHER_PROFILE_DIRECTORY)
-	./scripts/dev sbcl --script scripts/luft-mesher-profile.lisp \
+	sbcl --script scripts/luft-mesher-profile.lisp \
 		$(LUFT_MESHER_PROFILE_DIRECTORY) \
 		$(LUFT_MESHER_PROFILE_SECONDS) \
 		$(LUFT_MESHER_PROFILE_INTERVAL) \
@@ -221,13 +241,13 @@ luft-mesher-profile:
 
 luft-mesher-cohort:
 	mkdir -p build
-	./scripts/dev sbcl --script scripts/luft-mesher-cohort.lisp \
+	sbcl --script scripts/luft-mesher-cohort.lisp \
 		$(LUFT_MESHER_COHORT_OUTPUT) \
 		$(LUFT_MESHER_COHORT_WARM_ITERATIONS)
 
 luft-z-fiber-benchmark:
 	mkdir -p build
-	./scripts/dev sbcl --script scripts/luft-z-fiber-benchmark.lisp \
+	sbcl --script scripts/luft-z-fiber-benchmark.lisp \
 		$(LUFT_Z_FIBER_BENCHMARK_CSV) \
 		$(LUFT_Z_FIBER_BENCHMARK_WIDTHS) \
 		$(LUFT_Z_FIBER_BENCHMARK_PATTERNS) \
@@ -244,44 +264,44 @@ tracy-mcclim-paints:
 	./scripts/trace-mcclim-paints $(TRACY_MCCLIM_PAINT_TRACE)
 
 readme-screenshots:
-	./scripts/dev sbcl --script scripts/readme-screenshots.lisp screenshots
+	sbcl --script scripts/readme-screenshots.lisp screenshots
 
 mcclim-gallery:
-	./scripts/dev sbcl --script scripts/mcclim-gallery.lisp build/mcclim-gallery
+	sbcl --script scripts/mcclim-gallery.lisp build/mcclim-gallery
 
 wiki-cli:
-	./scripts/dev sbcl --script wiki/build.lisp
+	sbcl --script wiki/build.lisp
 
 wiki:
 	./scripts/wiki build
 
 objective-c-probe:
-	./scripts/dev sbcl --non-interactive \
+	sbcl --non-interactive \
 		--eval '(require :asdf)' \
 		--eval '(asdf:load-asd (truename "luv.asd"))' \
 		--eval '(asdf:load-system :luv)' \
 		--eval '(format t "~S~%" (luv.metal:probe-system-default-device))'
 
 metal-clear:
-	./scripts/dev sbcl --script hal/metal/probes/clear.lisp
+	sbcl --script hal/metal/probes/clear.lisp
 
 metal-shader:
-	./scripts/dev sbcl --script hal/metal/probes/shader.lisp
+	sbcl --script hal/metal/probes/shader.lisp
 
 metal-pipeline:
-	./scripts/dev sbcl --script hal/metal/probes/pipeline.lisp
+	sbcl --script hal/metal/probes/pipeline.lisp
 
 metal-draw:
-	./scripts/dev sbcl --script hal/metal/probes/draw.lisp
+	sbcl --script hal/metal/probes/draw.lisp
 
 roundrect-proof:
-	./scripts/dev sbcl --script hal/metal/probes/analytic-roundrect.lisp build/analytic-roundrect-proof.png
+	sbcl --script hal/metal/probes/analytic-roundrect.lisp build/analytic-roundrect-proof.png
 
 slug-proof:
-	./scripts/dev sbcl --script hal/metal/probes/slug-bezier.lisp build/slug-bezier-proof.png
+	sbcl --script hal/metal/probes/slug-bezier.lisp build/slug-bezier-proof.png
 
 slug-text-proof:
-	./scripts/dev sbcl --script hal/metal/probes/slug-text.lisp build/slug-text-proof.png
+	sbcl --script hal/metal/probes/slug-text.lisp build/slug-text-proof.png
 
 clean-fasls:
 	@for dir in $(FASL_CACHE)/*$(CURDIR); do \
@@ -306,3 +326,5 @@ clean:
 	rm -f ./build/slug-text-proof.png
 	rm -f ./build/objective-c-exception-bridge-*.dylib
 	rm -rf ./build/wiki ./build/wiki-cli
+
+endif

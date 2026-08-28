@@ -22,7 +22,7 @@ It is deliberately separate from `luv`; nothing here depends on it, and
 ## Running it
 
 ```sh
-./scripts/dev sbcl --non-interactive \
+./env sbcl --non-interactive \
   --eval '(asdf:test-system "telegram")'
 ```
 

@@ -2,7 +2,7 @@
 ;;           (let* ((root (expand-file-name
 ;;                         (locate-dominating-file default-directory "luv.asd")))
 ;;                  (bootstrap (expand-file-name "sly-init.lisp" root))
-;;                  (dev (expand-file-name "scripts/dev" root))
+;;                  (wrapper (expand-file-name "env" root))
 ;;                  (port-script (expand-file-name "scripts/worktree-port" root))
 ;;                  (port-buffer (generate-new-buffer " *luv worktree port*"))
 ;;                  port-status
@@ -22,7 +22,7 @@
 ;;             (setq-local
 ;;              sly-lisp-implementations
 ;;              `((luv ("env" ,(format "LUV_SLYNK_PORT=%s" port)
-;;                      ,dev "sbcl"
+;;                      ,wrapper "sbcl"
 ;;                      "--dynamic-space-size" "6144"
 ;;                      "--noinform"
 ;;                      "--eval" "(proclaim '(optimize (debug 3)))"

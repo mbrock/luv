@@ -20,17 +20,17 @@ Development happens in a durable SBCL image supervised by
 [Swash](https://github.com/lessrest/swash):
 
 ```sh
-./scripts/install-dev-profile       # first setup, or after dependency changes
 ./sly play luft                     # start the image and open the Luft atelier
 ./sly status                        # identify the image, target, and canvas health
 ./sly screenshot build/frame.png    # capture the next rendered frame
 ./sly stop-playing                  # close the window; keep the Lisp
 ```
 
-For remote or non-terminal work, `nix develop path:./nix#slim` (or
-`./scripts/install-dev-profile --slim`) provides just SBCL, Sly/Swash, Python,
-and Bash. Its managed image loads the `luft` mesher rather than the graphical
-workbench; use the full profile for rendering and game features.
+`./sly` and `make` enter the checkout's Nix environment automatically. For an
+arbitrary command, use `./env COMMAND`; `./env --slim COMMAND` provides just
+SBCL, Sly/Swash, Python, and Bash. The slim managed image loads the `luft`
+mesher rather than the graphical workbench; use the full environment for
+rendering and game features.
 
 `./sly play` without a target opens Luvcraft. The same command also provides
 `eval`, `inspect`, `describe`, `apropos`, `edit`, and `xref` against the live

@@ -11,7 +11,7 @@ wrapper and run the focused test:
 
 ```sh
 cd /path/to/luv
-./scripts/dev sbcl --non-interactive \
+./env sbcl --non-interactive \
   --eval '(require :asdf)' \
   --eval '(asdf:load-asd (truename "luv.asd"))' \
   --eval '(asdf:test-system :luv/ghostty)'

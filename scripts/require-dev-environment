@@ -1,60 +1,31 @@
-# Sourced by luv scripts that need SBCL or native development dependencies.
+# Sourced by Luv launchers that need the checkout's Nix dependencies.
 #
-# Activation is owned by the profile's env.sh: it puts the profile's bin
-# first on PATH and exports the registry and pinned library variables without
-# changing the ambient process loader.  A replaced
-# user-profile generation keeps the same SBCL pathname while its registry and
-# native-library paths change, so profile-backed commands always source the
-# current env.sh.  A `nix develop` shell resolves SBCL directly in /nix/store
-# and keeps the environment supplied by that shell.
+# A launcher invoked outside the current development shell re-executes itself
+# once through the small nix/ flake.  Re-execution preserves its arguments and
+# any variables the launcher deliberately exported before reaching this file.
 
-luv_sbcl_trustworthy() {
-  case "$(command -v sbcl 2>/dev/null)" in
-    "$HOME/.nix-profile/"*|/nix/store/*) return 0 ;;
-    *) return 1 ;;
+if [ "${LUV_DEV_ENVIRONMENT_MODE:-}" != nix-develop ]; then
+  if ! command -v nix >/dev/null 2>&1; then
+    printf 'luv: Nix is required; install it or run this checkout in its dev shell.\n' >&2
+    exit 1
+  fi
+  case "${LUV_DEV_SHELL:-default}" in
+    default|slim) ;;
+    *) printf 'luv: invalid LUV_DEV_SHELL: %s\n' "$LUV_DEV_SHELL" >&2; exit 2 ;;
   esac
-}
+  export LUV_PROJECT_ROOT=$project_root
+  exec nix develop --accept-flake-config --no-write-lock-file \
+    "path:$project_root/nix#${LUV_DEV_SHELL:-default}" \
+    -c "$0" "$@"
+fi
 
-profile_environment="$HOME/.nix-profile/share/luv/env.sh"
-case "$(command -v sbcl 2>/dev/null)" in
-  "$HOME/.nix-profile/"*)
-    [ ! -r "$profile_environment" ] || . "$profile_environment"
-    ;;
-  /nix/store/*) ;;
-  *)
-    [ ! -r "$profile_environment" ] || . "$profile_environment"
-    ;;
+case ":${CL_SOURCE_REGISTRY:-}:" in
+  *:"$project_root/":*) ;;
+  *) export CL_SOURCE_REGISTRY="$project_root/:${CL_SOURCE_REGISTRY:-}" ;;
 esac
 
-if [ "${LUV_DEV_ENVIRONMENT:-}" != 1 ] || ! luv_sbcl_trustworthy; then
-  cat >&2 <<'USAGE'
-luv: the development profile is not active, so SBCL and native library paths
-are not trustworthy (`command -v sbcl` must resolve into ~/.nix-profile or
-/nix/store).  Install or refresh the profile once:
-
-  ./scripts/install-dev-profile
-
-Scripts and the repository .envrc activate it by sourcing the profile's
-env.sh; nothing on the edit/test path evaluates Nix.  CI may still use
-`nix develop path:./nix -c COMMAND` as a from-scratch check.
-USAGE
-  exit 1
-fi
-
 if [ -z "${LUV_NATIVE_LIBRARY_PATH:-}" ] \
-  || { [ "${LUV_NATIVE_ENVIRONMENT_ACTIVE:-}" != 1 ] \
-       && ! command -v luv_activate_native_environment >/dev/null 2>&1; }; then
-  cat >&2 <<'USAGE'
-luv: the installed development profile predates scoped native-library
-activation.  Refresh it once:
-
-  ./scripts/install-dev-profile
-USAGE
+  || [ "${LUV_NATIVE_ENVIRONMENT_ACTIVE:-}" != 1 ]; then
+  printf 'luv: the Nix development shell did not activate native libraries.\n' >&2
   exit 1
-fi
-
-# Only explicit Luv launchers source this file.  The repository .envrc sources
-# env.sh directly and therefore leaves host tools on their own loader path.
-if [ "${LUV_NATIVE_ENVIRONMENT_ACTIVE:-}" != 1 ]; then
-  luv_activate_native_environment
 fi

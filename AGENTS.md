@@ -13,11 +13,11 @@ atelier.
 
 ## Develop in the live image
 
-Run `make` first in a new checkout or after pulling substantial changes. It is
-profile-aware: the full profile builds both applications, while the slim agent
-profile builds the non-graphical `luft` system. Either path also builds the
-`./sly` client and warms the FASL cache. Compiler detail goes into
-`build/logs/`; the console stays small and names the slow files:
+Run `make` first in a new checkout or after pulling substantial changes. It
+enters the checkout's Nix environment automatically and builds both
+applications; slim agent setup builds the non-graphical `luft` system. Either
+path also builds the `./sly` client and warms the FASL cache. Compiler detail
+goes into `build/logs/`; the console stays small and names the slow files:
 
 ```text
 $ make
@@ -122,17 +122,17 @@ selected image.
 
 ## Environment and other tools
 
-The dependencies live in a durable Nix profile. Install or refresh it with
-`./scripts/install-dev-profile`; login shells and `.envrc` activate it.
-`./scripts/dev --status` explains the active environment, and
-`./scripts/dev COMMAND` is the fallback when activation was missed.
+The dependencies live in the small flake under `nix/`. `make`, `./sly`, and
+the other repository launchers enter it automatically when needed. Use
+`./env COMMAND` explicitly for an arbitrary command, or `./env` for an
+interactive shell; `.envrc` activates the same environment through direnv.
 
-Remote agents can use `nix develop path:./nix#slim` or
-`./scripts/install-dev-profile --slim`. It contains the complete Common Lisp
+Remote agents can use `./env --slim COMMAND` or
+`nix develop path:./nix#slim`. It contains the complete Common Lisp
 dependency closure and ordinary build tools, but omits libghostty-vt, its
 large Zig closure, and unrelated workstation tools. The Ghostty binding
 remains available for compilation and inspection; using it needs the full
-profile.
+environment.
 
 Use `./sly` for interactive development. Use `make`, `sbcl`, or
 `./scripts/luv COMMAND` for isolated builds, tests, and one-shot tools.

@@ -31,7 +31,7 @@
                (parse-integer listener-pid :junk-allowed t))
           *swash*
           (or (sb-ext:posix-getenv "LUV_SWASH")
-              (error "LUV_SWASH is not set; refresh the luv development profile"))
+              (error "LUV_SWASH is not set; enter the luv development environment"))
           *lisp-selector* (sb-ext:posix-getenv "LUV_LISP_SELECTOR")
           *managed-lisp* nil
           *current-command* nil)))

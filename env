@@ -1,0 +1,29 @@
+#!/bin/sh
+
+# Enter Luv's checkout-local Nix environment.  Ordinary launchers and make
+# enter it automatically; this is the explicit command and interactive-shell
+# front door.
+
+set -eu
+
+project_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+export LUV_PROJECT_ROOT=$project_root
+shell=${LUV_DEV_SHELL:-default}
+
+if [ "${1:-}" = "--slim" ]; then
+  shell=slim
+  shift
+fi
+
+case "$shell" in
+  default|slim) ;;
+  *) printf 'env: invalid LUV_DEV_SHELL: %s\n' "$shell" >&2; exit 2 ;;
+esac
+export LUV_DEV_SHELL=$shell
+
+flake="path:$project_root/nix#$shell"
+if [ "$#" -eq 0 ]; then
+  exec nix develop --accept-flake-config --no-write-lock-file "$flake"
+fi
+
+exec nix develop --accept-flake-config --no-write-lock-file "$flake" -c "$@"

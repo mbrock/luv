@@ -368,7 +368,7 @@
           # tools exercised by ordinary builds, but not optional workstation
           # programs or Ghostty's large Zig closure.  The Ghostty binding can
           # still be compiled and inspected; explicitly loading libghostty-vt
-          # requires the full profile.
+          # requires the full environment.
           slimDevelopmentPackages = [
             pkgs.bashInteractive
             lisp
@@ -440,6 +440,13 @@
           developmentEnvironmentHook = ''
             unset LUV_SLY_SYSTEM
 
+            if [ -n "''${LUV_PROJECT_ROOT:-}" ]; then
+              case ":''${CL_SOURCE_REGISTRY:-}:" in
+                *:"$LUV_PROJECT_ROOT/":*) ;;
+                *) export CL_SOURCE_REGISTRY="$LUV_PROJECT_ROOT/:''${CL_SOURCE_REGISTRY:-}" ;;
+              esac
+            fi
+
             luv_activate_native_environment() {
               if [ "''${LUV_USE_NIX_MESA:-}" = 1 ]; then
                 export LD_LIBRARY_PATH="$LUV_MESA_LIBRARY_PATH:$LUV_NATIVE_LIBRARY_PATH''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
@@ -485,48 +492,19 @@
             unset LUV_GHOSTTY_LIBRARY
             unset LUV_MUPDF_LIBDIR LUV_URBIT LUV_YT_DLP
           '';
-          makeProfileEnvironment = name: environment: hook: pkgs.writeTextFile {
-            inherit name;
-            destination = "/share/luv/env.sh";
-            text =
-              ''
-                # Activation owns PATH: the profile's tools must win name
-                # resolution, or the registry and library variables below
-                # describe an environment a Homebrew sbcl never sees.
-                # Idempotent -- once the profile bin is already first, a
-                # repeated source changes nothing.
-                case "$PATH" in
-                  "$HOME/.nix-profile/bin:"*) ;;
-                  *) export PATH="$HOME/.nix-profile/bin:$PATH" ;;
-                esac
-              ''
-              + nixpkgs.lib.concatStringsSep "\n"
-                (nixpkgs.lib.mapAttrsToList
-                  (name: value:
-                    "export ${name}=${nixpkgs.lib.escapeShellArg value}")
-                  environment)
-              + "\n"
-              + hook;
+          developmentClosure = pkgs.buildEnv {
+            name = "luv-development-closure";
+            paths = developmentPackages;
           };
-          profileEnvironment = makeProfileEnvironment
-            "luv-development-environment" developmentEnvironment
-            developmentEnvironmentHook;
-          slimProfileEnvironment = makeProfileEnvironment
-            "luv-slim-development-environment" slimDevelopmentEnvironment
-            slimDevelopmentEnvironmentHook;
-          dev = pkgs.buildEnv {
-            name = "luv-dev";
-            paths = developmentPackages ++ [ profileEnvironment ];
-          };
-          slimDev = pkgs.buildEnv {
-            name = "luv-slim-dev";
-            paths = slimDevelopmentPackages ++ [ slimProfileEnvironment ];
+          slimDevelopmentClosure = pkgs.buildEnv {
+            name = "luv-slim-development-closure";
+            paths = slimDevelopmentPackages;
           };
         in
         {
           inherit pkgs wpePkgs sbcl lisp clSdl3WithoutMixer;
-          inherit dev developmentPackages developmentEnvironment;
-          inherit slimDev slimDevelopmentPackages slimDevelopmentEnvironment;
+          inherit developmentClosure developmentPackages developmentEnvironment;
+          inherit slimDevelopmentClosure slimDevelopmentPackages slimDevelopmentEnvironment;
           inherit developmentEnvironmentHook slimDevelopmentEnvironmentHook;
           inherit nativeLibraryPath mesaLibraryPath;
           inherit slyRoot swashPackage;
@@ -542,8 +520,8 @@
         in {
           sbcl = env.sbcl;
           lisp = env.lisp;
-          dev = env.dev;
-          slim-dev = env.slimDev;
+          environment = env.developmentClosure;
+          slim-environment = env.slimDevelopmentClosure;
           ffmpeg = env.ffmpeg;
           libghostty-vt = env.libghosttyVt;
           tracy-client = env.tracyClient;
@@ -560,6 +538,8 @@
         let
           env = environmentFor system;
           shellEnvironment = env.developmentEnvironment // {
+            LUV_DEV_ENVIRONMENT_MODE = "nix-develop";
+            LUV_DEV_SHELL = "default";
             packages = env.developmentPackages;
             shellHook = env.developmentEnvironmentHook + ''
               luv_activate_native_environment
@@ -570,6 +550,8 @@
           # Remote and non-terminal work should not have to realize Ghostty's
           # Zig toolchain and generated application-wide dependency cache.
           slim = env.pkgs.mkShell (env.slimDevelopmentEnvironment // {
+            LUV_DEV_ENVIRONMENT_MODE = "nix-develop";
+            LUV_DEV_SHELL = "slim";
             packages = env.slimDevelopmentPackages;
             shellHook = env.slimDevelopmentEnvironmentHook + ''
               luv_activate_native_environment

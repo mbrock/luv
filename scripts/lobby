@@ -3,5 +3,6 @@
 set -euo pipefail
 
 project_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+. "$project_root/scripts/require-dev-environment"
 cd "$project_root/lobby"
-exec "$project_root/scripts/dev" go run . "$@"
+exec go run . "$@"

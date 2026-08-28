@@ -104,7 +104,8 @@ configure_luv_cache() {
 install_shell_environment() {
   local environment_dir="$HOME/.config/luv"
   local environment="$environment_dir/orb-env.sh"
-  local marker='# luv orb development profile v2'
+  local marker='# luv orb environment v3'
+  local old_marker='# luv orb development profile v2'
 
   mkdir -p "$environment_dir"
   {
@@ -113,31 +114,19 @@ install_shell_environment() {
 EOF
     printf 'export LUV_PROJECT_ROOT=%q\n' "$repo_root"
     cat <<'EOF'
+export LUV_DEV_SHELL=slim
 case ":$PATH:" in
   *:/nix/var/nix/profiles/default/bin:*) ;;
   *) export PATH="/nix/var/nix/profiles/default/bin:$PATH" ;;
 esac
 
-profile_environment="$HOME/.nix-profile/share/luv/env.sh"
-if [[ ! -r "$profile_environment" ]]; then
-  printf 'luv development profile is missing; run .agents/setup\n' >&2
-  return 1
-fi
-# shellcheck disable=SC1090
-source "$profile_environment"
-
-# The Nix profile owns dependencies; this mutable path owns the checkout's
-# root system definitions. Keep repeated BASH_ENV activation idempotent.
-case ":${CL_SOURCE_REGISTRY:-}:" in
-  *:"$LUV_PROJECT_ROOT/":*) ;;
-  *) export CL_SOURCE_REGISTRY="$LUV_PROJECT_ROOT/:${CL_SOURCE_REGISTRY:-}" ;;
-esac
 EOF
   } >"$environment"
   chmod 600 "$environment"
 
   touch "$HOME/.bash_profile"
-  if grep -Fqx "$marker" "$HOME/.bash_profile"; then
+  if grep -Fqx "$marker" "$HOME/.bash_profile" \
+    || grep -Fqx "$old_marker" "$HOME/.bash_profile"; then
     printf 'Orb shell environment is already installed.\n'
     return
   fi
@@ -154,8 +143,7 @@ step 'Check system packages' install_system_packages
 step 'Install Nix when needed' install_nix
 activate_nix
 step 'Trust the luv binary cache' configure_luv_cache
-step 'Build and install the locked slim development profile' \
-  ./scripts/install-dev-profile --slim
+step 'Warm the locked slim development environment' ./env --slim true
 step 'Configure the orb shell environment' install_shell_environment
 
 printf '\nOrb setup complete.\n'

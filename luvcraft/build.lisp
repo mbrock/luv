@@ -20,7 +20,7 @@
 
 (let ((slynk-root (uiop:getenv "LUV_SLYNK_DIR")))
   (unless slynk-root
-    (error "LUV_SLYNK_DIR is not set; build luvcraft through ./scripts/dev."))
+    (error "LUV_SLYNK_DIR is not set; build luvcraft through ./env."))
   (asdf:load-asd
    (merge-pathnames #P"slynk.asd"
                     (uiop:ensure-directory-pathname slynk-root))))

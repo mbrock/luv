@@ -11,20 +11,13 @@ fi
 # shellcheck disable=SC1090
 source "$orb_environment"
 
-if [[ -n ${LUV_SLY_SYSTEM:-} ]]; then
-  printf 'luv orb environment is using an obsolete restricted Sly root; run .agents/setup\n' >&2
+if ! command -v nix >/dev/null 2>&1; then
+  printf 'luv orb environment did not provide Nix.\n' >&2
   exit 1
 fi
 
-case "$(command -v sbcl 2>/dev/null)" in
-  "$HOME/.nix-profile/"*|/nix/store/*)
-    case ":${CL_SOURCE_REGISTRY:-}:" in
-      *:"$LUV_PROJECT_ROOT/":*) printf 'luv orb environment ready.\n' ;;
-      *) printf 'luv checkout is missing from ASDF discovery.\n' >&2; exit 1 ;;
-    esac
-    ;;
-  *)
-    printf 'luv development profile did not provide SBCL.\n' >&2
-    exit 1
-    ;;
-esac
+"$LUV_PROJECT_ROOT/env" --slim sh -c '
+  test "$LUV_DEV_ENVIRONMENT_MODE" = nix-develop
+  command -v sbcl >/dev/null
+'
+printf 'luv orb environment ready.\n'

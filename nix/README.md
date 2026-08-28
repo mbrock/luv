@@ -11,8 +11,8 @@ Git repository as the source:
 ```sh
 nix develop path:./nix
 nix develop path:./nix#slim
-nix build path:./nix#dev
+nix build path:./nix#environment
 ```
 
-The usual setup remains `./scripts/install-dev-profile`, which builds the same
-`dev` output and installs it as a durable user-profile generation.
+From the repository root, `./env COMMAND` is the short explicit wrapper.
+Ordinary launchers and `make` enter the environment automatically.
