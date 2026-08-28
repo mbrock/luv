@@ -4494,30 +4494,61 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                   (luft:world-domain-x-limit domain)))
          (y1 (min (+ y0 luft:+chunk-size+)
                   (luft:world-domain-y-limit domain)))
-         (builder (luft:make-chain-builder domain :initial-capacity 100000))
          (vocabulary (make-scene-material-vocabulary))
-         (materials (make-hash-table :test #'eql))
-         (captured (make-hash-table :test #'eql)))
-    (dolist (edit edits)
-      (setf (gethash (car edit) captured) (cdr edit)))
+         (terrain-offset
+           (domains:identity-vocabulary-offset
+            vocabulary *terrain-material-placement*))
+         (rock-offset
+           (domains:identity-vocabulary-offset
+            vocabulary *highland-rock-material-placement*))
+         (limestone-offset
+           (domains:identity-vocabulary-offset
+            vocabulary *sanctuary-material-placement*))
+         (materials (make-hash-table :test #'eql :size 100000)))
     (loop for x from x0 below x1 do
       (loop for y from y0 below y1 do
-        (let ((height (large-world-terrain-height source x y)))
-          (loop for z below (max height 48)
-              for cell = (luft:make-site
-                          domain x y z luft:+cell-extent+ 1)
-              do (multiple-value-bind (edited edited-p) (gethash cell captured)
-                   (let ((placement
-                           (if edited-p edited
-                               (large-world-base-placement
-                                source x y z :height height))))
-                     (when placement
-                       (luft:chain-builder-add-site builder cell)
-                       (setf (gethash cell materials)
-                             (domains:identity-vocabulary-offset
-                              vocabulary placement)))))))))
-    (%make-resident-cell-chunk
-     key incarnation (luft:finish-chain-builder builder) materials)))
+        (let* ((height (large-world-terrain-height source x y))
+               (top (1- height))
+               (road-p
+                 (<= (abs (- y (large-world-road-centre-y x))) 3.0d0))
+               (river-p
+                 (<= (abs (- x (large-world-river-centre-x y))) 8.0d0))
+               (rock-p
+                 (or (> height 31)
+                     (>= (abs (- height
+                                 (large-world-terrain-height source (1+ x) y)))
+                         2))))
+          (dotimes (z height)
+            (setf (gethash
+                   (luft:make-site domain x y z luft:+cell-extent+ 1)
+                   materials)
+                  (cond ((and (= z top) road-p) limestone-offset)
+                        ((and (= z top) river-p) rock-offset)
+                        ((and rock-p (>= z (- top 3))) rock-offset)
+                        (t terrain-offset))))
+          (when (and (<= (abs (- x 1500)) 45)
+                     (<= (abs (- y 650)) 45))
+            (loop for z from 24 to 47
+                  when (large-world-citadel-cell-p x y z)
+                    do (setf (gethash
+                              (luft:make-site
+                               domain x y z luft:+cell-extent+ 1)
+                              materials)
+                             limestone-offset))))))
+    (dolist (edit edits)
+      (if (cdr edit)
+          (setf (gethash (car edit) materials)
+                (domains:identity-vocabulary-offset vocabulary (cdr edit)))
+          (remhash (car edit) materials)))
+    (let ((builder
+            (luft:make-chain-builder
+             domain :initial-capacity (hash-table-count materials))))
+      (maphash (lambda (cell offset)
+                 (declare (ignore offset))
+                 (luft:chain-builder-add-site builder cell))
+               materials)
+      (%make-resident-cell-chunk
+       key incarnation (luft:finish-chain-builder builder) materials))))
 
 (defclass authored-chunk-load-request (production:production-request)
   ((scene :initarg :scene :reader authored-chunk-load-request-scene)
