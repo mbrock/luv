@@ -403,9 +403,13 @@ semantic repaint."
   bar)
 
 (defun status-bar-pane-for (bar)
-  (find-pane-named bar 'bar))
+  (or (find-pane-named bar 'bar)
+      (labels ((find-status-pane (sheet)
+                 (or (and (typep sheet 'status-bar-pane) sheet)
+                     (some #'find-status-pane (sheet-children sheet)))))
+        (find-status-pane (frame-top-level-sheet bar)))))
 
-(defun resize-status-bar (bar logical-width)
+(defun resize-status-bar (bar logical-width &key (resize-frame-p t))
   "Resize BAR to LOGICAL-WIDTH without changing glyph scale or pixel density."
   (let ((logical-width (max 1 (round logical-width))))
     (unless (= logical-width (status-bar-logical-width bar))
@@ -416,12 +420,14 @@ semantic repaint."
        :width logical-width :min-width logical-width :max-width logical-width
        :height +status-bar-height+
        :min-height +status-bar-height+ :max-height +status-bar-height+
-       :resize-frame t)))
+       :resize-frame resize-frame-p)))
   bar)
 
-(defun refresh-status-bar (bar logical-width &key (now (get-internal-real-time)))
+(defun refresh-status-bar
+    (bar logical-width
+     &key (now (get-internal-real-time)) (resize-frame-p t))
   "Count one presented frame and occasionally publish a bounded state sample."
-  (resize-status-bar bar logical-width)
+  (resize-status-bar bar logical-width :resize-frame-p resize-frame-p)
   (incf (status-bar-frames-since-sample bar))
   (let* ((before (status-bar-last-sample-ticks bar))
          (elapsed-ticks (- now before))

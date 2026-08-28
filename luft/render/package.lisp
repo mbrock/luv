@@ -233,8 +233,6 @@
            #:close-viewer-lobby
            #:toggle-viewer-lobby
            #:viewer-lobby-client
-           #:viewer-status-bar
-           #:open-viewer-status-bar
            #:start-viewer-tracy-capture
            #:stop-viewer-tracy-capture
            #:toggle-viewer-tracy-capture

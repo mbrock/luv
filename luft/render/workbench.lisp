@@ -1,7 +1,7 @@
 (in-package #:luft.render)
 
-;;; Minimal conformance fixture for 5H9AKZ. It attaches the generic empty shell
-;;; to a live viewer without moving any existing Luft instrument or tool.
+;;; Luft supplies application boundaries and semantic status values to the one
+;;; Luv-owned workbench. The shell itself is attached by ordinary startup.
 
 (defmethod luv.workbench:workbench-application-name ((viewer viewer))
   (declare (ignore viewer))
@@ -35,12 +35,3 @@
                (eq viewer (second token)))
     (error "~S is not ~S's workbench input token." token viewer))
   nil)
-
-(defun open-viewer-workbench-shell-proof (&optional (viewer *viewer*))
-  "Attach the empty production shell for a generic live-boundary proof."
-  (or (luv.workbench:application-workbench viewer)
-      (luv.workbench:start-workbench viewer)))
-
-(defun close-viewer-workbench-shell-proof (&optional (viewer *viewer*))
-  (alexandria:when-let ((shell (luv.workbench:application-workbench viewer)))
-    (luv.workbench:stop-workbench shell)))

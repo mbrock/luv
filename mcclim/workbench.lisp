@@ -1,8 +1,8 @@
 (in-package #:luv.workbench)
 
 ;;; The workbench is one fixed set of screen-space layers, not an extension
-;;; registry. Known shared tools will acquire authored children in later
-;;; stages; the empty layer panes here establish ownership and policy only.
+;;; registry. The shared status line is the fixed passive child; later known
+;;; tools acquire authored children in their corresponding semantic layers.
 
 (defclass workbench-application () ()
   (:documentation "Optional protocol base for an application hosted by Luv."))
@@ -19,13 +19,30 @@
   (:documentation "End the suspension denoted by TOKEN."))
 
 (defclass workbench-layer-pane
-    (clime:never-repaint-background-mixin clim:application-pane)
+    (clime:never-repaint-background-mixin
+     clim-internals::multiple-child-composite-pane)
   ((kind :initarg :kind :reader workbench-layer-pane-kind)))
 
-(defmethod clim:handle-repaint
-    ((pane workbench-layer-pane) region)
-  (declare (ignore pane region))
-  nil)
+(defmethod initialize-instance :after
+    ((pane workbench-layer-pane) &key contents)
+  (dolist (child contents)
+    (clim:sheet-adopt-child pane child)))
+
+(defmethod clim:compose-space
+    ((pane workbench-layer-pane) &key (width 640) (height 480))
+  (declare (ignore pane))
+  (clim:make-space-requirement
+   :width width :height height :min-width 1 :min-height 1
+   :max-width clim:+fill+ :max-height clim:+fill+))
+
+(defmethod clim:allocate-space ((pane workbench-layer-pane) width height)
+  (declare (ignore height))
+  ;; Status is fixed shell chrome. Its McCLIM parent, not an application
+  ;; placement affine, owns top-edge layout and the child's retained clip.
+  (dolist (child (clim:sheet-children pane))
+    (when (typep child 'mcluv::status-bar-pane)
+      (clim:move-and-resize-sheet
+       child 0 0 width mcluv::+status-bar-height+))))
 
 (defclass workbench-layout-pane
     (clime:never-repaint-background-mixin
@@ -51,18 +68,28 @@
   (dolist (child (clim:sheet-children pane))
     (clim:move-and-resize-sheet child 0 0 width height)))
 
-(clim:define-application-frame workbench-frame ()
+(clim:define-application-frame workbench-frame (mcluv:status-bar)
   ((application :initarg :application :reader frame-workbench-application))
   (:menu-bar nil)
   (:panes
    (passive (clim:make-pane 'workbench-layer-pane :kind :passive
-                            :scroll-bars nil))
+                            :contents
+                            (list
+                             (clim:make-pane
+                              'mcluv::status-bar-pane
+                              :background clim:+transparent-ink+
+                              :width mcluv::*status-bar-construction-width*
+                              :height mcluv::+status-bar-height+
+                              :min-width 1
+                              :min-height mcluv::+status-bar-height+
+                              :max-width clim:+fill+
+                              :max-height mcluv::+status-bar-height+))))
    (modeless (clim:make-pane 'workbench-layer-pane :kind :modeless
-                             :scroll-bars nil))
+                             :contents nil))
    (transient (clim:make-pane 'workbench-layer-pane :kind :transient
-                              :scroll-bars nil))
+                              :contents nil))
    (modal (clim:make-pane 'workbench-layer-pane :kind :modal
-                          :scroll-bars nil)))
+                          :contents nil)))
   (:layouts
    (default
     (clim:make-pane 'workbench-layout-pane
@@ -72,7 +99,8 @@
   ((kind :initarg :kind :reader workbench-layer-kind)
    (pane :initarg :pane :reader workbench-layer-pane)
    (focus :initform nil :accessor workbench-layer-focus)
-   (visible-p :initform nil :accessor workbench-layer-visible-p)))
+   (visible-p :initarg :visible-p :initform nil
+              :accessor workbench-layer-visible-p)))
 
 (defclass workbench (luv:canvas-event-handler)
   ((application :initarg :application :reader workbench-application)
@@ -348,7 +376,15 @@ every key and pointer event."
                 0.0 1.0 0.0 0.0)))
 
 (defun refresh-workbench (workbench)
-  (mcluv:prepare-gpu-mirror-compositor (workbench-mirror workbench))
+  (multiple-value-bind (width height)
+      (luv:canvas-logical-size
+       (workbench-application-canvas (workbench-application workbench)))
+    (declare (ignore height))
+    ;; Semantic sampling and sparse repaint remain shared status behavior;
+    ;; layout and prepared-stream ownership now belong to this one shell frame.
+    (mcluv:refresh-status-bar
+     (workbench-frame workbench) width :resize-frame-p nil)
+    (mcluv:prepare-status-bar (workbench-frame workbench)))
   workbench)
 
 (defun encode-workbench (workbench pass surface-texture)
@@ -372,9 +408,14 @@ pass and gives the shell neither renderer ownership nor queue submission."
          (mcluv:*embedded-mirror-target* canvas)
          (mcluv:*embedded-mirror-context* context)
          (mcluv:*embedded-mirror-device* device)
+         (mcluv::*status-bar-construction-width* width)
          (frame (clim:make-application-frame
                  'workbench-frame :application application
-                 :frame-manager manager :enable t))
+                 :frame-manager manager :enable t
+                 :owner application :logical-width width
+                 :worktree
+                 (mcluv::cached-status-bar-worktree
+                  (mcluv:status-bar-source-root application))))
          (mirror (clim:sheet-direct-mirror
                   (clim:frame-top-level-sheet frame))))
     (mcluv:make-gpu-frame-background-transparent frame)
@@ -412,6 +453,8 @@ pass and gives the shell neither renderer ownership nor queue submission."
 Construction, publication, and event ownership occur at the native frame
 boundary. A stop race consumes and releases the unpublished shell before
 signalling APPLICATION-ATTACHMENT-CLOSED."
+  (alexandria:when-let ((present (application-workbench application)))
+    (return-from start-workbench present))
   (let* ((canvas (workbench-application-canvas application))
          (controller (workbench-application-stop-controller application)))
     (luv:request-canvas-frame
@@ -435,9 +478,10 @@ signalling APPLICATION-ATTACHMENT-CLOSED."
                                   (:modeless 'modeless)
                                   (:transient 'transient)
                                   (:modal 'modal)))))
-                         (setf (clim:sheet-enabled-p pane) nil)
+                         (setf (clim:sheet-enabled-p pane) (eq kind :passive))
                          (make-instance 'workbench-layer
-                                        :kind kind :pane pane)))
+                                        :kind kind :pane pane
+                                        :visible-p (eq kind :passive))))
                      '(:passive :modeless :transient :modal)))
                   (workbench
                     (make-instance

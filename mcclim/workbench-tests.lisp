@@ -74,6 +74,39 @@
          (workbench:workbench-layer shell kind))
         visible-p))
 
+(define-test fixed-passive-layer-owns-status-layout
+  (let* ((application (make-instance 'test-application))
+         (mcluv::*status-bar-construction-width* 900)
+         (frame
+           (clim:make-application-frame
+            'workbench::workbench-frame
+            :application application :owner application
+            :logical-width 900 :worktree nil))
+         (bar (make-instance 'mcluv::status-bar-pane))
+         (passive
+           (make-instance 'workbench::workbench-layer-pane
+                          :kind :passive :contents (list bar)))
+         (layers
+           (list passive
+                 (make-instance 'workbench::workbench-layer-pane
+                                :kind :modeless)
+                 (make-instance 'workbench::workbench-layer-pane
+                                :kind :transient)
+                 (make-instance 'workbench::workbench-layer-pane
+                                :kind :modal)))
+         (layout (make-instance 'workbench::workbench-layout-pane
+                                :contents layers)))
+    (declare (ignore layout))
+    (true (typep frame 'mcluv:status-bar))
+    (is eq passive (clim:sheet-parent bar))
+    (true (equal '(:passive :modeless :transient :modal)
+                 (mapcar #'workbench::workbench-layer-pane-kind
+                         layers)))
+    (clim:allocate-space passive 900 600)
+    (multiple-value-bind (x1 y1 x2 y2)
+        (clim:bounding-rectangle* (clim:sheet-region bar))
+      (true (equal '(0 0 900 28) (list x1 y1 x2 y2))))))
+
 (define-test layer-state-is-semantic-not-numeric-priority
   (multiple-value-bind (shell application canvas events) (make-test-workbench)
     (declare (ignore application canvas events))
@@ -107,12 +140,13 @@
 
 (define-test shell-first-routing-obeys-layer-behavior
   (multiple-value-bind (shell application canvas events) (make-test-workbench)
-    (declare (ignore application))
     (let ((press (button-event 'luv:canvas-pointer-button-press-event :left)))
       ;; Passive never stops application input.
       (set-layer-visible shell :passive t)
       (luv:handle-canvas-event shell canvas press)
       (true (= 1 (length (funcall events))))
+      (false (workbench:workbench-input-suspended-p shell))
+      (false (test-suspensions application))
       ;; Modeless consumes only McCLIM hits in its own sheet tree.
       (set-layer-visible shell :modeless t)
       (setf (test-hit-kind shell) nil)
@@ -250,3 +284,22 @@
     (true (equal '(:quiesce :fence :release) (nreverse (car events))))
     (is eq :application (luv:canvas-event-handler canvas))
     (false (workbench:application-workbench application))))
+
+(define-test starting-an-attached-application-does-not-construct-a-second-shell
+  (let* ((events (list nil))
+         (canvas (make-instance 'lifecycle-canvas :events events))
+         (application (make-instance 'lifecycle-application :canvas canvas))
+         (shell
+           (make-instance
+            'lifecycle-workbench :application application :frame nil
+            :mirror nil :compositor nil :layers nil :downstream-handler
+            :application :events events)))
+    (unwind-protect
+         (progn
+           (sb-thread:with-mutex (workbench::*application-workbenches-lock*)
+             (setf (gethash application workbench::*application-workbenches*)
+                   shell))
+           (is eq shell (workbench:start-workbench application))
+           (false (car events)))
+      (sb-thread:with-mutex (workbench::*application-workbenches-lock*)
+        (remhash application workbench::*application-workbenches*)))))

@@ -662,7 +662,6 @@ the selector is the whole of the difference."
                 encode-viewer-instruments
                 release-viewer-instruments
                 attach-viewer-lobby
-                open-viewer-status-bar
                 make-tracked-renderer
                 attach-viewer-live-artifact
                 viewer-live-artifact
@@ -1617,7 +1616,9 @@ cohort. FIXED-EXPOSURE disables temporal adaptation for reproducible evidence."
            ;; its old detailed panel is hidden.  The compact shared status line
            ;; is the default visible representation.
            (attach-viewer-lobby viewer)
-           (open-viewer-status-bar viewer)
+           ;; One Luv-owned shell becomes the outer event handler and owns the
+           ;; passive status pane's layout, retained stream, and final replay.
+           (luv.workbench:start-workbench viewer)
            (request-canvas-frame
             canvas (lambda (timestamp) (render-viewer-frame viewer timestamp)))
            (show-canvas canvas)
@@ -1632,6 +1633,10 @@ cohort. FIXED-EXPOSURE disables temporal adaptation for reproducible evidence."
            viewer)
       (unless completed-p
         (when viewer-state
+          (alexandria:when-let
+              ((workbench (luv.workbench:application-workbench viewer-state)))
+            (releasing :workbench
+              (luv.workbench:stop-workbench workbench)))
           (releasing :instruments
             (release-viewer-instruments viewer-state)))
         (when production-system

@@ -4,6 +4,17 @@
 
 (in-package #:luft.render.tests)
 
+(define-test luft-status-is-semantic-only-with-no-instrument-adapter
+  (dolist (name '("VIEWER-STATUS-BAR"
+                  "VIEWER-STATUS-BAR-ATTACHMENT"
+                  "%OPEN-VIEWER-STATUS-BAR"
+                  "OPEN-VIEWER-STATUS-BAR"))
+    (true (null (find-symbol name '#:luft.render))))
+  (true (find-method #'mcluv:status-bar-application-name
+                     nil (list (find-class 'luft.render:viewer)) nil))
+  (true (find-method #'mcluv:status-bar-channels-for
+                     nil (list (find-class 'luft.render:viewer)) nil)))
+
 (define-test atlas-is-one-fixed-complete-table
   (let ((words (luft.render::star-meshlet-template-words)))
     (true (= (* 256 luft.render::+star-meshlet-record-count+ 4)

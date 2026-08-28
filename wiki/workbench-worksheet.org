@@ -174,7 +174,7 @@ the smallest safe seam refreshes before presentation and replays in the
 application's existing final pass.  No tool migrated.  #TEFU1T is the next
 candidate gate.
 
-** TODO Make Luft conform with status only
+** DONE Make Luft conform with status only
 :PROPERTIES:
 :ID: TEFU1T
 :END:
@@ -189,6 +189,16 @@ of resize, semantic sampling, render order, startup, and teardown.
 /Done when./ Luft supplies no status-specific frame, compositor, placement, or
 event adapter; live resize and shutdown remain healthy; and the old status
 instrument is deleted.
+
+/Result./ Complete from exact =origin/main= and worktree base
+=bfa9e503b5cf6f0bbc20f9fcf2e196e4dddf20d9=.  Luft startup now attaches one
+workbench whose fixed passive layer owns the shared status pane; the former
+status instrument, frame/compositor construction, affine placement, refresh,
+encode, release, and opening adapter are deleted.  Focused, full, and live
+evidence is recorded in #WTODNV.  Luvcraft retains its existing overlay
+compatibility path.  The reviewed change was subsequently rebased onto exact
+=origin/main= =17f47bb59249342474df830da8cb684c1f8b705f= and revalidated there.
+#ZNLZQU is the next candidate gate and was not begun.
 
 ** TODO Migrate M-x and source update
 :PROPERTIES:
@@ -352,6 +362,24 @@ request before destroying the frame and direct compositor while the device is
 live.  Luft's terminal order releases the shell before instruments, renderer,
 canvas, and device.
 
+** 2026-08-28 — Status is a fixed passive child of the workbench frame
+
+The workbench frame carries the shared status state and constructs the status
+pane inside its passive layer.  McCLIM sheet allocation fixes that pane at the
+logical top edge and gives it the retained clip and painter position.  Generic
+workbench refresh samples and prepares it; generic final-pass replay presents
+it.  Luft supplies only its existing semantic methods and the one application
+attachment at startup.  Do not add a status pane registry, compositor hook,
+screen-state affine, or per-application open/close adapter.
+
+** 2026-08-28 — Luvcraft status compatibility remains deliberately separate
+
+The shared status component still supports its standalone embedded frame,
+screen-state affine, and direct-widget overlay for Luvcraft.  Those mechanisms
+are compatibility for the deferred Luvcraft migration, not dependencies of a
+conforming Luft shell.  TEFU1T deletes only Luft's status adapter and does not
+pull Luvcraft into the workbench substrate.
+
 * Experiment notes
 :PROPERTIES:
 :ID: WTODNV
@@ -508,6 +536,87 @@ path.  Do not paste complete test transcripts.
   shell-consumed press/release cohorts centrally.  No tool or application
   protocol was added; #TEFU1T remains unopened work.
 
+** 2026-08-28 — TEFU1T Luft passive-status cutover
+
+- /Execution thread and revision./ =T-01a04aab-45e1-76ef-9ec3-9841ffc65082=,
+  exact =origin/main= and worktree base
+  =bfa9e503b5cf6f0bbc20f9fcf2e196e4dddf20d9=; all changes remained local and
+  unpushed.
+- /Questions./ Can the shared status frame also be the one workbench frame so
+  that the fixed passive McCLIM layer owns layout, clipping, painter order,
+  retained media, and hit transparency?  Can Luft then delete every status
+  instrument coordinate while preserving throttled semantics, resize,
+  native-density direct replay, shell-first event ownership, one startup
+  attachment, and device-live release?  Can Luvcraft remain on its current
+  overlay compatibility path unchanged?
+- /Commands and live actions./ Read #M9MI6Y and this worksheet in full and
+  inspected the shared status implementation/tests, workbench substrate/tests,
+  Luft instrument/start/render/input/stop paths, and Luvcraft status adapter
+  and tests.  Ran =LUV_DEV_SHELL=default make=; strict Parinfer on every
+  changed Lisp file; full-environment focused =luv/mcclim=, =luv/workbench=,
+  =luft/render=, =luvcraft/mcclim=, and =luvcraft= tests after confirming
+  =$LUV_GHOSTTY_LIBRARY= readable; and =LUV_DEV_SHELL=default make test=.
+  Started a fresh durable image and used ordinary =./sly play luft=, not a
+  proof function.  Inspected the shell, passive/status sheet geometry, mirror,
+  retained command types, semantic fields, input state, and instrument list;
+  captured the default =1100x800= frame; resized the native canvas to =900x700=
+  and captured it again; forwarded a pointer event while modeling established
+  relative capture; validated direct presentation and idempotent shell start;
+  restored =1100x800=; stopped through =./sly stop-playing=; and inspected
+  publication registries and retained failures.  Also ran =scripts/wiki
+  dangling=, =scripts/wiki build=, and =git diff --check=.
+- /Observed result./ The focused suites passed 407 McCLIM, 35 workbench, 353
+  Luft render, 139 Luvcraft/McCLIM, and 116 Luvcraft checks, with all failures
+  and skips zero.  The Ghostty-enabled full run passed all 24 suites / 27 tasks
+  in 12.1 seconds with 8 workers, including Ghostty, terminal, workbench, both
+  Luft render tasks, McCLIM, and Luvcraft compatibility.  The first live
+  construction exposed two discarded pane-construction shapes: referring to a
+  sibling pane lexically signalled unbound =BAR=, while declaring an unplaced
+  sibling left no pane to adopt.  Constructing the known status child directly
+  inside the passive pane fixed both without an application registry or
+  adapter.  The subsequent default startup was healthy.  Exactly one shell
+  was published as the canvas outer handler with the viewer downstream; its
+  passive layer was visible while active interactive layer and suspension were
+  =NIL=.  The shell mirror texture was =NIL= and retained only analytic and
+  prepared-text commands.  At =1100x800= the status region was exactly
+  =(0 0 1100 28)= and showed application, PID, FPS, heap, lobby, worktree,
+  bevel, view, and mode.  At =900x700= the top sheet became
+  =(0 0 900 700)=, status became =(0 0 900 28)=, logical text size remained
+  12, and the inspected image stayed crisp and top-aligned.  A pointer event
+  reached Luft and updated its position to =(123 234)= while modeled capture
+  stayed true, with no active shell layer or suspension.  The orb's SDL driver
+  rejected actual relative mode as unsupported, so native capture itself could
+  not be enabled there.  Direct-presentation validation succeeded, a second
+  =START-WORKBENCH= returned the same shell, and the only Luft instrument was
+  the deferred lobby adapter.  Clean stop left zero workbench publications,
+  zero instrument owners, no viewer, and no retained canvas failures.  Wiki
+  build and diff checks succeeded; dangling retained only the existing
+  unrelated =TR4VLR= and =H1GHLD= code mentions.
+- /Interpretation./ Frame inheritance preserves one shared semantic status
+  implementation while making the workbench the only Luft status frame and
+  compositor.  Fixed descendant construction and McCLIM allocation are enough
+  for top-edge layout, clipping, painter order, and resize; passive routing
+  forwards input without touching suspension or capture.  The existing generic
+  refresh, final-pass replay, admission, event wrapper, fence, and release path
+  need no status-specific hook.
+- /Resulting decisions./ Keep Luft's semantic status methods and delete its
+  status instrument class plus priority, construction, lookup, refresh, encode,
+  affine placement, release, and opening methods.  Attach one workbench after
+  lobby infrastructure during default startup and release it before instruments,
+  renderer, canvas, and device.  Preserve Luvcraft's current standalone status
+  overlay unchanged.  Evidence opens review of #ZNLZQU and nothing later.
+- /Reviewed rebase./ Parent review accepted the ownership and deletion cut.
+  Commit =04856a4= rebased without textual conflict onto exact =origin/main=
+  =17f47bb59249342474df830da8cb684c1f8b705f=.  Upstream's authored world
+  export, startup demand clock, and 123 new world tests remain intact;
+  the overlap resolution only removes the old status exports/adapter, adds the
+  semantic-only status test, and attaches/releases the workbench.  Strict
+  Parinfer remained clean.  Focused McCLIM, workbench, Luft render,
+  Luvcraft/McCLIM, and Luvcraft suites passed 407, 35, 370, 139, and 116 checks
+  respectively.  A readable-Ghostty full run passed all 24 suites / 27 tasks.
+  Wiki validation/build and final Git checks also passed.  The rebased stage
+  remains one local commit ahead of =origin/main= and unpushed.
+
 * Completed prose updates
 :PROPERTIES:
 :ID: QF07KG
@@ -550,12 +659,27 @@ path.  Do not paste complete test transcripts.
   into Luv.
 - #TEFU1T, Luft status only, is the next candidate.  It was not begun.
 
+** 2026-08-28 — Luft status conformance completed
+
+- Default Luft startup now attaches exactly one Luv workbench; its fixed
+  passive layer owns the shared status pane's geometry, clip, retained stream,
+  painter order, direct compositor, event transparency, and release.
+- Luft retains only semantic application name, lobby, channel, and value
+  methods.  Its old status instrument and every status-specific attachment,
+  placement, refresh, encode, and lifecycle coordinate are gone.
+- Live default startup, native resize, direct retained presentation, passive
+  input forwarding, modeled capture preservation, idempotent attachment, and
+  clean shutdown agreed with focused and full Ghostty-enabled checks.
+- Luvcraft remains green through its existing direct-widget overlay.  #ZNLZQU,
+  M-x plus source update, is the next candidate and was not begun.
+
 * Exact next action
 :PROPERTIES:
 :ID: 53WN6F
 :END:
 
-Review the local #5H9AKZ shell substrate and its final-pass fallback evidence.
-If accepted, #TEFU1T, “Make Luft conform with status only,” is the exact next
-candidate.  Do not begin M-x, source update, metabar, lobby, service migration,
-Luvcraft migration, or instrument deletion with that status-only cutover.
+Review the local #TEFU1T passive-status cutover and its default-startup,
+resize, input, direct-presentation, compatibility, and teardown evidence.  If
+accepted, #ZNLZQU, “Migrate M-x and source update,” is the exact next candidate.
+Do not begin metabar, lobby, service migration, Luvcraft migration, or general
+instrument-system deletion with that next cut.
