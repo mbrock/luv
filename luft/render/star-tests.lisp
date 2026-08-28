@@ -233,6 +233,23 @@
            scene request resident)
           "the exact token, ticket, key, and incarnation install once")))
 
+(define-test authored-world-settled-residency-does-not-rematerialize-gameplay
+  (let* ((scene (luft.render:make-authored-world-streaming-scene
+                 :horizontal-bits 8 :residency-radius 0))
+         (domain (luft:chain-domain (luft.render:scene-solid scene)))
+         (key (luft:chunk-key-at 64 64))
+         (resident
+           (luft.render::%make-resident-cell-chunk
+            key 1 (luft:make-chain domain) (make-hash-table :test #'eql)))
+         (revision (luft.render::scene-content-revision scene)))
+    (setf (luft.render::streaming-scene-focus scene) (cons 1 1)
+          (gethash key (luft.render::streaming-scene-desired scene)) 1
+          (gethash key (luft.render::streaming-scene-store scene)) resident
+          (gethash key (luft.render::streaming-scene-loaded scene)) 1)
+    (true (not (luft.render::retarget-authored-world scene nil 1 64 64)))
+    (true (= revision (luft.render::scene-content-revision scene))
+          "a settled frame does not rebuild immutable gameplay values")))
+
 (define-test authored-world-residency-is-bounded-and-absence-is-explicit
   (let* ((scene (luft.render:make-authored-world-streaming-scene
                  :horizontal-bits 8 :residency-radius 1))
@@ -256,6 +273,54 @@
               (luft.render::streaming-scene-cell-state scene 0 0 60)))
     (true (eq :closed-boundary
               (luft.render::streaming-scene-cell-state scene -1 0 60)))))
+
+(define-test authored-world-player-spawns-supported-with-a-traversable-window
+  (let* ((scene (luft.render:make-authored-world-streaming-scene))
+         (source (luft.render::streaming-scene-source scene))
+         (player (luft.render::make-scene-walking-player scene))
+         (position (luft.render:walking-player-position player))
+         (x (floor (luv.arithmetic.lisp.vec3:vec3-x position)))
+         (y (floor (luv.arithmetic.lisp.vec3:vec3-y position)))
+         (z (floor (luv.arithmetic.lisp.vec3:vec3-z position)))
+         (key (luft:chunk-key-at x y))
+         (resident
+           (luft.render::materialize-authored-world-chunk source key 1)))
+    (true (= 0 (luft.render::streaming-scene-residency-radius scene))
+          "ordinary play keeps the proved one-source render publication")
+    (true (= 1 luft.render::+authored-world-gameplay-radius+)
+          "collision reads a wider resident guard for seam crossing")
+    (true (= (luft.render::large-world-terrain-height source x y) z)
+          "the authored spawn derives its foot height from the source")
+    (setf (luft.render:scene-solid scene)
+          (luft.render::resident-cell-chunk-chain resident))
+    (true (luft.render::walking-player-standable-cell-p scene x y z)
+          "the player starts above rather than inside the road")
+    (true (luft.render::walking-player-standable-cell-p scene (1+ x) y
+                                                        (luft.render::large-world-terrain-height
+                                                         source (1+ x) y))
+          "the authored road has an immediately traversable neighboring cell")))
+
+(define-test authored-world-gameplay-collision-crosses-the-render-seam
+  (let* ((scene (luft.render:make-authored-world-streaming-scene
+                 :horizontal-bits 8))
+         (source (luft.render::streaming-scene-source scene))
+         (left-key (luft:chunk-key-at 0 0))
+         (right-key (luft:chunk-key-at 64 0))
+         (left
+           (luft.render::materialize-authored-world-chunk
+            source left-key 1))
+         (right
+           (luft.render::materialize-authored-world-chunk
+            source right-key 2)))
+    (setf (gethash left-key (luft.render::streaming-scene-store scene)) left
+          (gethash right-key (luft.render::streaming-scene-store scene)) right)
+    (luft.render::rebuild-authored-world-resident-values
+     scene (list left-key) (list left-key right-key))
+    (loop for x in '(63 64)
+          for y = (round (luft.render::large-world-road-centre-y x))
+          for z = (luft.render::large-world-terrain-height source x y)
+          do (true (luft.render::walking-player-standable-cell-p scene x y z)
+                   "collision stays supported across the one-source render seam"))))
 
 (define-test camera-yaw-follows-intent-smoothly
   (let ((camera (luft.render:make-fly-camera :yaw 0.0)))

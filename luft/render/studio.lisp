@@ -132,8 +132,21 @@ at the atelier boundary where a person has selected one site."))
   (make-instance 'fly-camera :position position :yaw yaw :pitch pitch
                              :field-of-view field-of-view))
 
+(defun make-scene-walking-player (scene)
+  "Make SCENE's player at a supported authored spawn."
+  (if (and (typep scene 'streaming-scene)
+           (streaming-scene-source scene))
+      (let* ((source (streaming-scene-source scene))
+             (x +large-world-spawn-x+)
+             (y (round (large-world-road-centre-y x)))
+             (z (large-world-terrain-height source x y)))
+        (make-walking-player
+         :position (vec3:make-vec3 (+ x 0.5) (+ y 0.5)
+                                   (coerce z 'single-float))))
+      (make-walking-player)))
+
 (defun reset-viewer-camera (&optional (viewer *viewer*))
-  "Return VIEWER to the sanctuary spawn and its following isometric view."
+  "Return VIEWER to its scene's spawn and following isometric view."
   (when viewer
     (let ((camera (viewer-camera viewer))
           (player (viewer-player viewer)))
@@ -146,7 +159,7 @@ at the atelier boundary where a person has selected one site."))
             ;; next turn of the route.
             *isometric-height* (if player 18.0 64.0))
       (if player
-          (let ((spawn (make-walking-player)))
+          (let ((spawn (make-scene-walking-player (viewer-source viewer))))
             (setf (viewer-player viewer) spawn)
             (follow-walking-player camera spawn)
             ;; Reset is also a camera move: do not briefly reveal the old
@@ -1048,7 +1061,7 @@ before the operation boundary, or it would encode through resources which the
             (when (viewer-control-active-p viewer :down) (move up (- step))))))))
 
 (defun advance-viewer-streaming (viewer)
-  "Drain completed meshes and admit the next mock residency change."
+  "Drain completed meshes and demand terrain around the gameplay focus."
   (let ((source (viewer-source viewer))
         (production-system (viewer-production-system viewer)))
     (when (and (typep source 'streaming-scene) production-system)
@@ -1062,7 +1075,13 @@ before the operation boundary, or it would encode through resources which the
         (when (>= (streaming-scene-frame-counter source)
                   (streaming-scene-frames-per-load source))
           (setf (streaming-scene-frame-counter source) 0)
-          (let ((position (camera-position (viewer-camera viewer))))
+          ;; A following camera can cross a chunk seam while its player remains
+          ;; on the other side. Collision residency belongs to the player; the
+          ;; authored world's radius-one window also contains the camera view.
+          (let ((position
+                  (if (viewer-player viewer)
+                      (walking-player-position (viewer-player viewer))
+                      (camera-position (viewer-camera viewer)))))
             (retarget-streaming-scene
              source production-system (viewer-bevel-width viewer)
              (vec3:vec3-x position) (vec3:vec3-y position))))))))
@@ -1551,19 +1570,16 @@ cohort. FIXED-EXPOSURE disables temporal adaptation for reproducible evidence."
                                    :camera camera :source solid
                                    :player (and (typep solid 'scene)
                                                 (scene-player-p solid)
-                                                (if (and
-                                                     (typep solid
-                                                            'streaming-scene)
-                                                     (streaming-scene-source
-                                                      solid))
-                                                    (make-walking-player
-                                                     :position
-                                                     (vec3:make-vec3
-                                                      61.5 48.5 16.0))
-                                                    (make-walking-player)))
+                                                (make-scene-walking-player
+                                                 solid))
                                    :bevel-width bevel-width
                                    :fixed-exposure fixed-exposure
                                    :inspector-p inspector-p)))))
+           ;; Establish the following pose before the first streaming tick;
+           ;; otherwise the legacy sanctuary camera demands the wrong chunks.
+           (when (viewer-player viewer)
+             (setf *isometric-height* 18.0)
+             (follow-walking-player camera (viewer-player viewer)))
            (cond
              (surface-mesh
               (renderer-set-mesh

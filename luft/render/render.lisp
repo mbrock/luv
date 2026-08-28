@@ -4355,6 +4355,8 @@ cohort untouched. No frame can interleave with the owner-thread publication."
 
 (defconstant +large-world-horizontal-bits+ 11)
 (defconstant +large-world-seed+ 121)
+(defconstant +authored-world-gameplay-radius+ 1)
+(defconstant +large-world-spawn-x+ 32)
 
 (defclass authored-world-source ()
   ((domain :initarg :domain :reader authored-world-source-domain)
@@ -4414,7 +4416,13 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                                      (- 1.0d0 (/ river-distance 18.0d0)))
                                 2))))
          (road-height (large-world-road-height x))
-         (road-blend (max 0.0d0 (- 1.0d0 (/ road-distance 7.0d0))))
+         ;; Keep the masonry road itself level enough to walk and feather its
+         ;; broad verge into natural terrain. The former seven-cell linear cut
+         ;; produced a narrow stepped trench which looked and played like a
+         ;; river gorge at the default spawn.
+         (road-blend
+           (smooth-landscape-reading
+            (max 0.0d0 (min 1.0d0 (/ (- 14.0d0 road-distance) 8.0d0)))))
          (routed (interpolate-landscape-reading
                   river-bed road-height road-blend))
          (citadel-distance
@@ -5111,8 +5119,9 @@ silently empty the desired residency window."
                                         (* y luft:+chunk-size+))))
      #'<)))
 
-(defun rebuild-authored-world-resident-values (scene source-keys)
-  "Publish gameplay views for visible SOURCE-KEYS from the resident store."
+(defun rebuild-authored-world-resident-values
+    (scene source-keys &optional (collision-keys source-keys))
+  "Publish visible materials and a possibly wider resident collision chain."
   (let* ((source (streaming-scene-source scene))
          (domain (authored-world-source-domain source))
          (cell-count
@@ -5120,12 +5129,20 @@ silently empty the desired residency window."
                  for resident = (gethash key (streaming-scene-store scene))
                  sum (hash-table-count
                       (resident-cell-chunk-material-cells resident))))
-         (builder (luft:make-chain-builder domain :initial-capacity cell-count))
+         (collision-cell-count
+           (loop for key in collision-keys
+                 for resident = (gethash key (streaming-scene-store scene))
+                 sum (luft:chain-count (resident-cell-chunk-chain resident))))
+         (builder
+           (luft:make-chain-builder domain
+                                    :initial-capacity collision-cell-count))
          (materials (make-hash-table :test #'eql :size cell-count)))
-    (dolist (key source-keys)
+    (dolist (key collision-keys)
       (let ((resident (gethash key (streaming-scene-store scene))))
         (luft:chain-builder-add-chain
-         builder (resident-cell-chunk-chain resident))
+         builder (resident-cell-chunk-chain resident))))
+    (dolist (key source-keys)
+      (let ((resident (gethash key (streaming-scene-store scene))))
         (maphash (lambda (cell offset)
                    (setf (gethash cell materials) offset))
                  (resident-cell-chunk-material-cells resident))))
@@ -5153,6 +5170,12 @@ silently empty the desired residency window."
 (defun authored-world-residency-ready-p (scene)
   (loop for key being the hash-keys of (streaming-scene-desired scene)
         always (nth-value 1 (gethash key (streaming-scene-store scene)))))
+
+(defun streaming-scene-loaded-source-keys (scene)
+  "Return the sorted gameplay source keys in SCENE's published mesh cohort."
+  (sort (loop for key being the hash-keys of (streaming-scene-loaded scene)
+              collect key)
+        #'<))
 
 (defun evict-undesired-authored-world-residents (scene)
   "Evict every derived CPU value outside SCENE's canonical desired set."
@@ -5190,6 +5213,9 @@ silently empty the desired residency window."
          (visible-keys
            (streaming-domain-keys-near
             scene focus-key (streaming-scene-residency-radius scene)))
+         (gameplay-keys
+           (streaming-domain-keys-near
+            scene focus-key +authored-world-gameplay-radius+))
          ;; Materialize exactly the complete occupancy capture which the
          ;; visible owner closure will need: owners, witness, then probe guard.
          ;; This is asymmetric at high seams and substantially smaller than a
@@ -5228,11 +5254,14 @@ silently empty the desired residency window."
       (setf (streaming-scene-focus scene) focus))
     (when (and (null (streaming-scene-cohort scene))
                (null (streaming-scene-removals scene))
-               (authored-world-residency-ready-p scene))
+               (authored-world-residency-ready-p scene)
+               (not (equal visible-keys
+                           (streaming-scene-loaded-source-keys scene))))
       ;; Let the established cohort path observe the old published LOADED set;
       ;; it computes exact owner removals before replacing it with this focus.
       (setf (streaming-scene-focus scene) nil)
-      (rebuild-authored-world-resident-values scene visible-keys)
+      (rebuild-authored-world-resident-values
+       scene visible-keys gameplay-keys)
       (%retarget-resident-streaming-scene
        scene production-system bevel-width world-x world-y))))
 
