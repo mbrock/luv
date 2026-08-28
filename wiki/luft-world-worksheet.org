@@ -257,6 +257,23 @@ masonry landmark, though the deliberately tight first visible window leaves
 its outer boundary apparent when zoomed far out.  #JDB26Y is next; no regional
 voxel-light propagation began here.
 
+/Playability correction./ Integrated revision =b628705= repairs failures found
+by ordinary keyboard play after the architectural proof.  The original spawn
+was one cell inside the generated road, the first demand used the legacy
+camera before it followed the player, collision saw only the single rendered
+source chunk, and settled immutable gameplay values were rebuilt every frame.
+The player now spawns at source-derived support on the road in the middle of
+the first chunk; demand follows the player; collision assembles a radius-one
+view from the already resident mesh guard while GPU publication remains one
+source; and unchanged loaded keys perform no gameplay rebuild.  The road has a
+flat core and gradual verge rather than a narrow stepped trench.  Live held
+input moved in all four camera-relative directions and the packed collision
+view reports continuous support across the x=63/64 seam.  The corrected start
+frame contains the visible player and road without white void or a nearby
+publication edge.  The orb still renders the four canonical owner meshes at
+about one frame per second; their roughly 736,000 triangles are a measured
+renderer-budget concern, not hidden as a lighting task.
+
 ** TODO Publish stable regional sky and RGB4 light
 :PROPERTIES:
 :ID: JDB26Y
@@ -383,6 +400,22 @@ part of every mesh stamp.  Eviction removes resident CPU values before the new
 cohort and renderer publication atomically retires opposite-edge GPU owners.
 Do not persist resident chunks or infer authored air from their absence.
 
+** 2026-08-28 — Player collision is wider than visible mesh ownership
+
+The following camera is not the gameplay demand authority: it may sit across a
+chunk seam from the player.  Demand follows the player.  Keep the proved
+one-source visible mesh publication, but assemble collision occupancy for the
+player's radius-one neighborhood from immutable chunks already retained by the
+larger exact mesh guard.  Visible material inspection remains one-source.  A
+settled focus whose loaded source keys are unchanged performs no chain or
+material rebuild.
+
+Spawn height and position are source-derived rather than copied from the old
+sanctuary.  Establish the following camera before the first demand.  The road
+owns a flat traversable core and a gradual authored verge; do not encode a
+narrow interpolation trench which is technically continuous but impassable and
+visually river-like.
+
 * Experiment notes
 :PROPERTIES:
 :ID: FQ5007
@@ -392,6 +425,40 @@ Record each experiment with date, execution thread, exact revision, question,
 commands or live actions, observed result, interpretation, and resulting
 decision.  Failed experiments belong here when they eliminate an architectural
 path.  Do not paste complete test transcripts.
+
+** 2026-08-28 — Reproduce and repair the default-play failure
+
+- /Thread./ =T-01a04a2e-fab5-7206-90bd-94d965339cb9=.
+- /Revision./ =b628705= on integrated =main=.
+- /Question./ Why does ordinary play begin in white nothingness or a
+  river-like cut, and why does walking work only in some directions?
+- /Commands and live actions./ Traced startup, follow-camera demand, player
+  support queries, and immutable activation; evaluated exact generated heights;
+  ran focused =luft/render/test= and =make test=; loaded =luft/render= into the
+  live image; restarted Luft; held all four camera-relative controls; queried
+  support along the x=63/64 road seam; inspected
+  =build/h1asqu-playability-fixed.png=; checked canvas health and retained
+  failures; and counted every published owner's stars and triangles.
+- /Observation./ The player was hard-coded at z=16 while authored occupancy at
+  its old position extended through z=16.  Its chunk was =(0 . 0)= while the
+  following camera demanded =(1 . 0)=; radius-zero gameplay then omitted the
+  player's support and treated the visible edge inconsistently.  Ready
+  residency also rebuilt gameplay values every frame.  The original narrow
+  road interpolation formed the stacked gorge seen as a river.  After repair,
+  focused tests pass 371 claims, the full 22 available suites pass, all four
+  held directions move, and support remains 15 across x=61..67.  The live
+  start is coherent and failure-free.  The orb nevertheless reports about one
+  FPS: four canonical owner meshes contain about 736,000 triangles in total.
+- /Interpretation./ The source/resident/mesh ownership proof was sound but its
+  playable adapter violated player support, focus, and idempotent activation.
+  A wider GPU radius concealed collision at unacceptable cost; the resident
+  guard is the correct collision substrate.  GPU owner cost remains separately
+  measurable after removing the accidental per-frame CPU rebuild.
+- /Decision./ Keep one-source GPU publication, player-centered demand, and a
+  radius-one collision view over guard residents.  Treat practical default
+  play as required evidence for later gates, not as an inference from far
+  teleport/state predicates.  Resume #JDB26Y only after this correction is
+  integrated.
 
 ** 2026-08-28 — Authored source demand, far traversal, and bounded publication
 
@@ -547,6 +614,10 @@ path.  Do not paste complete test transcripts.
   the complete available suite, and a far live Vulkan traversal are green.
   Geometry remains exactly four u32 words per active star and appearance remains
   exactly eight u8 samples beside it.  #JDB26Y is next and has not begun.
+- A post-integration ordinary-play correction moved spawn onto source-derived
+  road support, made demand player-centered, separated radius-one collision
+  occupancy from one-source rendering, stopped settled per-frame rebuilding,
+  and replaced the trench-like road cut with a traversable flat core.
 
 ** 2026-08-28 — The sanctuary regained terrain identity without material geometry
 
@@ -592,14 +663,14 @@ path.  Do not paste complete test transcripts.
 :ID: MTAAPI
 :END:
 
-The architectural parent reviews #H1ASQU at implementation revision
-=79e26810bb142a2bc10e5b14c778cc735d31b3a5=: the deterministic authored
-source, immutable resident chunk values, sparse overlay, exact asynchronous
-demand guard, token/incarnation validation, bounded CPU/GPU eviction, seam
-tests, far live traversal, and inspected citadel frame.  If accepted, begin
-#JDB26Y in a fresh execution thread from the integrated parent revision:
-publish stable regional sky and RGB4 block light from known immutable guard
-content without changing geometry or triangle ownership.
+The architectural parent reviews the #H1ASQU ordinary-play correction at
+=b628705=: source-derived supported spawn, pre-demand camera follow,
+player-centered demand, radius-one collision over immutable guard residents,
+idempotent settled activation, traversable road core, four-direction live
+movement, seam support, and the corrected inspected start frame.  If accepted,
+resume the paused #JDB26Y execution thread from the new integrated parent
+revision.  Keep the measured four-owner/~736k-triangle renderer cost explicit
+rather than folding an unproved optimization into voxel-light semantics.
 
 Do not begin persistence, transparency, LoD, vertical streaming, or the later
 journey-content stage while reviewing or integrating #H1ASQU.
