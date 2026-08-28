@@ -487,7 +487,7 @@ stair topology. #WSEK3C"
     (domains:identity-vocabulary-members
      (scene-builder-material-vocabulary builder))
     'list)
-   :limit #x10000))
+   :limit #xff))
 
 (defun finish-scene-builder
     (builder &key player-p (voxel-light-propagation-p t))
@@ -699,9 +699,23 @@ turrets, an arcaded hall and a remote ridge beacon."
           (mountain-sanctuary-terrain-x-bounds y)
         (when present-p
           (loop for x from west to east do
-            (loop for z below
-                  (max 1 (mountain-sanctuary-terrain-height x y)) do
-              (scene-builder-cell builder x y z))))))
+            (let* ((height
+                     (max 1 (mountain-sanctuary-terrain-height x y)))
+                   ;; Keep one living-earth cap.  Only cells actually exposed
+                   ;; above a lower cardinal neighbor become cliff rock; this
+                   ;; is authored cell material, never material topology.
+                   (exposed-base
+                     (min (mountain-sanctuary-terrain-height (1- x) y)
+                          (mountain-sanctuary-terrain-height (1+ x) y)
+                          (mountain-sanctuary-terrain-height x (1- y))
+                          (mountain-sanctuary-terrain-height x (1+ y)))))
+              (loop for z below height do
+                (scene-builder-cell
+                 builder x y z
+                 :material
+                 (if (and (< z (1- height)) (>= z exposed-base))
+                     *highland-rock-material-placement*
+                     *terrain-material-placement*))))))))
     (scene-builder-mountain-border-wall builder)
     ;; A diagonal, gently climbing processional way makes the bridge belong
     ;; to the low country instead of beginning at the edge of the model.
@@ -1141,12 +1155,17 @@ mesh light sidecars and packed body/flame frames finalized."
                          reusable-light-generation)))
                      (error "A non-realizing mesh request needs a reusable light generation.")))))
          (field (realized-light-generation-field light-generation)))
-    (labels ((initialize (surface)
-               (setf (luft:surface-mesh-voxel-light surface) field
-                     (luft:surface-mesh-attachments surface) nil)
-               (dolist (companion (luft:surface-mesh-companions surface))
-                 (initialize companion))))
-      (dolist (entry owners) (initialize (cdr entry))))
+    (let ((descriptors
+            (compile-terrain-material-descriptors
+             (scene-material-vocabulary scene))))
+      (labels ((initialize (surface)
+                 (compile-surface-mesh-appearance
+                  surface (scene-material-cells scene) descriptors)
+                 (setf (luft:surface-mesh-voxel-light surface) field
+                       (luft:surface-mesh-attachments surface) nil)
+                 (dolist (companion (luft:surface-mesh-companions surface))
+                   (initialize companion))))
+        (dolist (entry owners) (initialize (cdr entry)))))
     (dolist (frame frames)
       (push
        (pack-realized-torch-frame
@@ -1197,7 +1216,18 @@ mesh light sidecars and packed body/flame frames finalized."
                     (mapcar (lambda (entry)
                               (luft:surface-mesh-star-site-words (cdr entry)))
                             owners)))
+           (appearance
+             (apply #'concatenate '(simple-array (unsigned-byte 8) (*))
+                    (mapcar
+                     (lambda (entry)
+                       (luft:surface-mesh-appearance-codes (cdr entry)))
+                     owners)))
            (root (luft:make-surface-mesh domain words)))
+      (setf (luft:surface-mesh-appearance-codes root) appearance)
+      (when owners
+        (setf (luft:surface-mesh-appearance-descriptor-words root)
+              (luft:surface-mesh-appearance-descriptor-words
+               (cdar owners))))
       (values
        root census diagnostics
        (make-scene-mesh-generation-value
@@ -1354,6 +1384,7 @@ outward order.  Coordinates are biased only to keep this first ABI unsigned."
                       :initial-element 0)))
     (dotimes (star 256 words)
       (let* ((triangles (luft:star-atlas-owned-triangles star))
+             (appearance (luft:star-atlas-owned-appearance-masks star))
              (triangle-count (length triangles))
              (block (* star +star-meshlet-record-count+ 4)))
         (when (> triangle-count +star-meshlet-triangle-capacity+)
@@ -1361,6 +1392,7 @@ outward order.  Coordinates are biased only to keep this first ABI unsigned."
                  star triangle-count +star-meshlet-triangle-capacity+))
         (setf (aref words block) triangle-count)
         (loop for triangle in triangles
+              for (material-mask light-mask) in appearance
               for triangle-index from 0
               do (loop for point in triangle
                        for corner from 0
@@ -1372,26 +1404,53 @@ outward order.  Coordinates are biased only to keep this first ABI unsigned."
                                   (aref words (+ offset 1))
                                   (+ y +star-meshlet-coordinate-bias+)
                                   (aref words (+ offset 2))
-                                  (+ z +star-meshlet-coordinate-bias+)))))))))
+                                  (+ z +star-meshlet-coordinate-bias+)
+                                  (aref words (+ offset 3))
+                                  (if (zerop corner)
+                                      (logior material-mask
+                                              (ash light-mask 8))
+                                      0)))))))))
+
+(defun pack-terrain-appearance-codes (codes)
+  "Pack eight u8 sample codes per star into the GPU's parallel uvec2 lane."
+  (unless (zerop (mod (length codes) 8))
+    (error "Terrain appearance has ~D bytes, not eight per active star."
+           (length codes)))
+  (let ((words (make-array (/ (length codes) 4)
+                           :element-type '(unsigned-byte 32))))
+    (loop for offset from 0 below (length codes) by 4
+          for word from 0
+          do (setf (aref words word)
+                   (logior (aref codes offset)
+                           (ash (aref codes (+ offset 1)) 8)
+                           (ash (aref codes (+ offset 2)) 16)
+                           (ash (aref codes (+ offset 3)) 24))))
+    words))
 
 (defstruct (render-population
              (:constructor %make-render-population
-                 (instance-words mesh-workgroup-count))
+                 (instance-words appearance-words descriptor-words
+                  mesh-workgroup-count))
              (:copier nil))
-  "Active sites indexing the renderer's fixed 256-star atlas."
+  "Geometry sites plus a one-for-one, independently replaceable appearance."
   (instance-words #() :type (simple-array (unsigned-byte 32) (*)) :read-only t)
+  (appearance-words #() :type (simple-array (unsigned-byte 32) (*))
+                    :read-only t)
+  (descriptor-words #() :type (simple-array (unsigned-byte 32) (*))
+                    :read-only t)
   (mesh-workgroup-count 0 :type (integer 0 *) :read-only t))
 
 (defstruct (resident-population
              (:constructor %make-resident-population
-                 (population instance-buffer template-buffer light-buffer
-                  bind-group shadow-bind-group))
+                 (population instance-buffer template-buffer appearance-buffer
+                  descriptor-buffer bind-group shadow-bind-group))
              (:copier nil))
   "One chunk's CPU population and independently retained GPU realization."
   (population nil :type render-population :read-only t)
   (instance-buffer nil :read-only t)
   (template-buffer nil :read-only t)
-  (light-buffer nil :read-only t)
+  (appearance-buffer nil :read-only t)
+  (descriptor-buffer nil :read-only t)
   (bind-group nil :read-only t)
   (shadow-bind-group nil :read-only t))
 
@@ -1408,11 +1467,30 @@ outward order.  Coordinates are biased only to keep this first ABI unsigned."
   (%make-prepared-render-mesh mesh (make-render-population (list mesh))))
 
 (defun %make-star-render-population (meshes)
-  "Flatten active lattice sites; geometry and appearance policy stay static."
-  (let ((site-words
+  "Flatten geometry and its parallel active-star appearance independently."
+  (let* ((site-words
            (apply #'concatenate '(simple-array (unsigned-byte 32) (*))
-                  (mapcar #'luft:surface-mesh-star-site-words meshes))))
-    (%make-render-population site-words (/ (length site-words) 4))))
+                  (mapcar #'luft:surface-mesh-star-site-words meshes)))
+         (appearance-codes
+           (apply #'concatenate '(simple-array (unsigned-byte 8) (*))
+                  (mapcar #'luft:surface-mesh-appearance-codes meshes)))
+         (descriptor-words
+           (or (loop for mesh in meshes
+                     for words =
+                       (luft:surface-mesh-appearance-descriptor-words mesh)
+                     when (plusp (length words)) return words)
+               (compile-terrain-material-descriptors
+                (make-scene-material-vocabulary)))))
+    (unless (= (* 2 (length site-words)) (length appearance-codes))
+      (error "~D site words do not have a one-for-one eight-byte appearance (~D bytes)."
+             (length site-words) (length appearance-codes)))
+    (dolist (mesh meshes)
+      (let ((words (luft:surface-mesh-appearance-descriptor-words mesh)))
+        (unless (or (zerop (length words)) (equalp words descriptor-words))
+          (error "One terrain population contains incompatible material palettes."))))
+    (%make-render-population
+     site-words (pack-terrain-appearance-codes appearance-codes)
+     descriptor-words (/ (length site-words) 4))))
 
 (defun make-render-population (meshes)
   "Prepare the sole terrain ABI: active sites indexing the fixed star atlas."
@@ -1850,8 +1928,10 @@ ambiguously co-owned, or retired by a population rollback."
          `((:binding 0 :resource ,(resident-population-instance-buffer resident))
            (:binding 1 :resource ,(resident-population-template-buffer resident))
            (:binding 2 :resource ,camera)
+           (:binding 3 :resource ,(resident-population-appearance-buffer resident))
            (:binding 4 :resource ,(renderer-shadow-view renderer))
-           (:binding 5 :resource ,(renderer-shadow-sampler renderer)))))))
+           (:binding 5 :resource ,(renderer-shadow-sampler renderer))
+           (:binding 6 :resource ,(resident-population-descriptor-buffer resident)))))))
 
 (defun renderer-frame-torch-body-bind-group (renderer frame shadow-p)
   (let ((camera (renderer-frame-state-camera-buffer frame))
@@ -2699,7 +2779,8 @@ overlay data is deliberately absent until construction mode asks for it."
   (when resident
     (dolist (resource (list (resident-population-bind-group resident)
                             (resident-population-shadow-bind-group resident)
-                            (resident-population-light-buffer resident)
+                            (resident-population-descriptor-buffer resident)
+                            (resident-population-appearance-buffer resident)
                             (resident-population-instance-buffer resident)))
       (when resource (ignore-errors (destroy resource)))))
   (values))
@@ -2709,7 +2790,9 @@ overlay data is deliberately absent until construction mode asks for it."
   "Build and upload one candidate population without changing RENDERER."
   (let* ((device (renderer-device renderer))
          (instance-words (render-population-instance-words population))
-         instance-buffer template-buffer light-buffer bind-group
+         (appearance-words (render-population-appearance-words population))
+         (descriptor-words (render-population-descriptor-words population))
+         instance-buffer template-buffer appearance-buffer descriptor-buffer bind-group
          shadow-bind-group
          (completed-p nil))
     (flet ((stream-buffer (label words)
@@ -2728,8 +2811,12 @@ overlay data is deliberately absent until construction mode asks for it."
                    (stream-buffer "luft resident site instances" instance-words)
                    template-buffer
                    (renderer-star-template-buffer renderer)
-                   light-buffer
-                   nil
+                   appearance-buffer
+                   (stream-buffer "luft active-star appearance sidecars"
+                                  appearance-words)
+                   descriptor-buffer
+                   (stream-buffer "luft terrain material descriptors"
+                                  descriptor-words)
                    bind-group
                    (create device
                            (make-bind-group-descriptor
@@ -2740,10 +2827,12 @@ overlay data is deliberately absent until construction mode asks for it."
                               (:binding 1 :resource ,template-buffer)
                               (:binding 2
                                :resource ,(renderer-camera-buffer renderer))
+                              (:binding 3 :resource ,appearance-buffer)
                               (:binding 4
                                :resource ,(renderer-shadow-view renderer))
                               (:binding 5
-                               :resource ,(renderer-shadow-sampler renderer)))))
+                               :resource ,(renderer-shadow-sampler renderer))
+                              (:binding 6 :resource ,descriptor-buffer))))
                    shadow-bind-group
                    (create device
                            (make-bind-group-descriptor
@@ -2756,14 +2845,14 @@ overlay data is deliberately absent until construction mode asks for it."
                                :resource ,(renderer-camera-buffer renderer))))))
              (let ((resident
                      (%make-resident-population
-                      population instance-buffer template-buffer light-buffer
-                      bind-group shadow-bind-group)))
+                      population instance-buffer template-buffer appearance-buffer
+                      descriptor-buffer bind-group shadow-bind-group)))
                (setf completed-p t)
                resident))
         (unless completed-p
           (dolist (resource
-                    (list shadow-bind-group bind-group light-buffer
-                          instance-buffer))
+                    (list shadow-bind-group bind-group descriptor-buffer
+                          appearance-buffer instance-buffer))
             (when resource (ignore-errors (destroy resource)))))))))
 
 (defun renderer-set-mesh (renderer key mesh &key scene-generation)
@@ -3239,8 +3328,10 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                           :entries '((:binding 0 :type :storage-buffer)
                                      (:binding 1 :type :storage-buffer)
                                      (:binding 2 :type :uniform-buffer)
+                                     (:binding 3 :type :storage-buffer)
                                      (:binding 4 :type :texture)
-                                     (:binding 5 :type :sampler))))
+                                     (:binding 5 :type :sampler)
+                                     (:binding 6 :type :storage-buffer))))
                  shadow-layout
                  (create device
                          (make-bind-group-layout-descriptor

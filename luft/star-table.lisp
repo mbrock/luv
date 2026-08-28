@@ -100,6 +100,56 @@
                   append triangles)
           (getf parts :junction)))
 
+(defun %sample-list-mask (samples)
+  (loop for sample in samples sum (ash 1 sample)))
+
+(defun %face-appearance-sample-masks (star pair)
+  "The direct occupied/empty samples on one ordinary face."
+  (let ((pair-mask (%sample-list-mask pair)))
+    (values (logand star pair-mask)
+            (logand (logxor #xff star) pair-mask))))
+
+(defun %band-appearance-sample-masks (star key)
+  "The occupied/empty cells incident to the half-edge named by KEY."
+  (destructuring-bind (axis sign) key
+    (let ((incident
+            (loop for sample below 8
+                  when (eq (plusp sign) (logbitp axis sample))
+                    sum (ash 1 sample))))
+      (values (logand star incident)
+              (logand (logxor #xff star) incident)))))
+
+(defun %junction-appearance-sample-masks (star)
+  "All occupied and empty cells incident to the lattice junction."
+  (values star (logxor #xff star)))
+
+(defun %repeat-appearance-masks (triangles material-mask light-mask)
+  (loop repeat (length triangles)
+        collect (list material-mask light-mask)))
+
+(defun %star-owned-appearance-masks (star parts)
+  "Parallel material/light sample masks for STAR's owned atlas triangles.
+
+Faces retain their unique solid/air pair.  A band uses all four cells
+incident to its lattice half-edge, and a junction uses all eight cells.  The
+consumer reduces material tones by equal-weight arithmetic mean and light by
+componentwise maximum.  Both reductions are commutative, so these set-valued
+selectors contain no hidden canonical-frame tie breaker."
+  (append
+   (loop for (pair triangles) in (getf parts :faces)
+         when (= (second pair) #b111)
+           append (multiple-value-bind (material light)
+                      (%face-appearance-sample-masks star pair)
+                    (%repeat-appearance-masks triangles material light)))
+   (loop for (key triangles) in (getf parts :bands)
+         when (plusp (second key))
+           append (multiple-value-bind (material light)
+                      (%band-appearance-sample-masks star key)
+                    (%repeat-appearance-masks triangles material light)))
+   (multiple-value-bind (material light)
+       (%junction-appearance-sample-masks star)
+     (%repeat-appearance-masks (getf parts :junction) material light))))
+
 (defun star-atlas-parts (star)
   "Return STAR's whole local patch unfolded from the atlas.
 
@@ -117,6 +167,11 @@ positive half-edge bands, and the junction.  Instantiating this list at
 every lattice site tiles the width-one surface exactly once."
   (%check-star star)
   (svref *star-atlas-owned-triangles* star))
+
+(defun star-atlas-owned-appearance-masks (star)
+  "Return (MATERIAL-MASK LIGHT-MASK) parallel to STAR's owned triangles."
+  (%check-star star)
+  (svref *star-atlas-owned-appearance-masks* star))
 
 ;;; Meshing a solid
 ;;;
@@ -187,3 +242,11 @@ each drawn once by the site that owns it."
       (setf (svref table star)
             (%star-owned-part-triangles (svref *star-atlas-parts* star)))))
   "Every star's owned triangles: what one site instance draws.")
+
+(defparameter *star-atlas-owned-appearance-masks*
+  (let ((table (make-array 256)))
+    (dotimes (star 256 table)
+      (setf (svref table star)
+            (%star-owned-appearance-masks
+             star (svref *star-atlas-parts* star)))))
+  "Symmetry-stable material/light sample sets parallel to owned triangles.")

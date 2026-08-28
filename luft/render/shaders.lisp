@@ -14,6 +14,26 @@
   (defvar *highlight-glow-threshold* 1.5)
   (defvar *highlight-glow-strength* 0.22))
 
+(define-shader-function unpack-terrain-tone (packed)
+  "Decode one RGB8 terrain descriptor into scene-linear colour."
+  (vec3 (/ (float (ldb (byte 8 0) packed)) 255.0)
+        (/ (float (ldb (byte 8 8) packed)) 255.0)
+        (/ (float (ldb (byte 8 16) packed)) 255.0)))
+
+(define-shader-function terrain-material-sample
+    (code selected descriptor normal)
+  "Return one selected tone and its unit weight, or the additive identity."
+  (let* ((upness (swizzle (representation normal) :z))
+         (packed
+           (if (> upness 0.35) (swizzle descriptor :x)
+               (if (< upness -0.35) (swizzle descriptor :z)
+                   (swizzle descriptor :y)))))
+    (if (> selected (uint 0.0))
+        (if (> code (uint 0.0))
+            (vec4 (unpack-terrain-tone packed) 1.0)
+            (vec4 0.0 0.0 0.0 0.0))
+        (vec4 0.0 0.0 0.0 0.0))))
+
 (define-shader-function paper-hash (site)
   (let* ((scattered (fract (* site 0.1031)))
          (shift (dot scattered
@@ -1343,6 +1363,8 @@ that he is standing on something."
               (group :uvec3 :built-in :workgroup-id))
      :resources ((sites :storage-buffer :binding 0 :element :uvec4)
                  (star-templates :storage-buffer :binding 1 :element :uvec4)
+                 (terrain-appearances :storage-buffer :binding 3 :element :uvec2)
+                 (material-descriptors :storage-buffer :binding 6 :element :uvec4)
                  (camera-state :uniform-block :binding 2
                   :members #.(scene-uniform-prefix 23)))
      :mesh-output
@@ -1359,8 +1381,27 @@ that he is standing on something."
        (current-clip-output :vec4 :location 2)
        (previous-clip-output :vec4 :location 3)
        (shadow-sample-output :vec3 :location 4
-                             :quantity quantities:shadow-coordinate :unit :one))))
+                             :quantity quantities:shadow-coordinate :unit :one)
+       (material-tone-output :vec3 :location 5 :interpolation :flat))))
   (let* ((site (buffer-element sites (swizzle group :x)))
+         (appearance
+           (buffer-element terrain-appearances (swizzle group :x)))
+         (code-0 (ldb (byte 8 0) (swizzle appearance :x)))
+         (code-1 (ldb (byte 8 8) (swizzle appearance :x)))
+         (code-2 (ldb (byte 8 16) (swizzle appearance :x)))
+         (code-3 (ldb (byte 8 24) (swizzle appearance :x)))
+         (code-4 (ldb (byte 8 0) (swizzle appearance :y)))
+         (code-5 (ldb (byte 8 8) (swizzle appearance :y)))
+         (code-6 (ldb (byte 8 16) (swizzle appearance :y)))
+         (code-7 (ldb (byte 8 24) (swizzle appearance :y)))
+         (descriptor-0 (buffer-element material-descriptors code-0))
+         (descriptor-1 (buffer-element material-descriptors code-1))
+         (descriptor-2 (buffer-element material-descriptors code-2))
+         (descriptor-3 (buffer-element material-descriptors code-3))
+         (descriptor-4 (buffer-element material-descriptors code-4))
+         (descriptor-5 (buffer-element material-descriptors code-5))
+         (descriptor-6 (buffer-element material-descriptors code-6))
+         (descriptor-7 (buffer-element material-descriptors code-7))
          (block (* (swizzle site :w) (uint 76.0)))
          (triangle-count
            (swizzle (buffer-element star-templates block) :x))
@@ -1415,6 +1456,37 @@ that he is standing on something."
                    (- (* (swizzle edge-a :x) (swizzle edge-b :y))
                       (* (swizzle edge-a :y) (swizzle edge-b :x)))))
             :quantity quantities:world-orientation :unit :one))
+         (sample-mask (ldb (byte 8 0) (swizzle record-0 :w)))
+         (sample-0
+           (terrain-material-sample
+            code-0 (ldb (byte 1 0) sample-mask) descriptor-0 normal))
+         (sample-1
+           (terrain-material-sample
+            code-1 (ldb (byte 1 1) sample-mask) descriptor-1 normal))
+         (sample-2
+           (terrain-material-sample
+            code-2 (ldb (byte 1 2) sample-mask) descriptor-2 normal))
+         (sample-3
+           (terrain-material-sample
+            code-3 (ldb (byte 1 3) sample-mask) descriptor-3 normal))
+         (sample-4
+           (terrain-material-sample
+            code-4 (ldb (byte 1 4) sample-mask) descriptor-4 normal))
+         (sample-5
+           (terrain-material-sample
+            code-5 (ldb (byte 1 5) sample-mask) descriptor-5 normal))
+         (sample-6
+           (terrain-material-sample
+            code-6 (ldb (byte 1 6) sample-mask) descriptor-6 normal))
+         (sample-7
+           (terrain-material-sample
+            code-7 (ldb (byte 1 7) sample-mask) descriptor-7 normal))
+         (tone-total
+           (+ sample-0 sample-1 sample-2 sample-3
+              sample-4 sample-5 sample-6 sample-7))
+         (material-tone
+           (/ (swizzle tone-total :xyz)
+              (max (swizzle tone-total :w) 1.0)))
          (clip-0
            (mesh-view-clip world-0 camera-position camera-right camera-up
                            camera-forward camera-projection
@@ -1469,7 +1541,8 @@ that he is standing on something."
            (vec3 (+ (* (swizzle light-0 :x) 0.5) 0.5)
                  (+ (* (swizzle light-0 :y) 0.5) 0.5)
                  (swizzle light-0 :z))
-           :quantity quantities:shadow-coordinate :unit :one)))
+           :quantity quantities:shadow-coordinate :unit :one))
+         (material-tone-output material-tone))
         (set-mesh-vertex
          vertex-1
          (clip-position
@@ -1485,7 +1558,8 @@ that he is standing on something."
            (vec3 (+ (* (swizzle light-1 :x) 0.5) 0.5)
                  (+ (* (swizzle light-1 :y) 0.5) 0.5)
                  (swizzle light-1 :z))
-           :quantity quantities:shadow-coordinate :unit :one)))
+           :quantity quantities:shadow-coordinate :unit :one))
+         (material-tone-output material-tone))
         (set-mesh-vertex
          vertex-2
          (clip-position
@@ -1501,7 +1575,8 @@ that he is standing on something."
            (vec3 (+ (* (swizzle light-2 :x) 0.5) 0.5)
                  (+ (* (swizzle light-2 :y) 0.5) 0.5)
                  (swizzle light-2 :z))
-           :quantity quantities:shadow-coordinate :unit :one)))
+           :quantity quantities:shadow-coordinate :unit :one))
+         (material-tone-output material-tone))
         (set-mesh-primitive lane (uvec3 vertex-0 vertex-1 vertex-2)))))
 
 (define-live-shader star-fragment-specification
@@ -1514,7 +1589,8 @@ that he is standing on something."
               (current-clip :vec4 :location 2)
               (previous-clip :vec4 :location 3)
               (shadow-sample :vec3 :location 4
-                             :quantity quantities:shadow-coordinate :unit :one))
+                             :quantity quantities:shadow-coordinate :unit :one)
+              (material-tone :vec3 :location 5 :interpolation :flat))
      :outputs ((color-output :vec4 :location 0)
                (motion-output :vec2 :location 1))
      :resources ((camera-state :uniform-block :binding 2
@@ -1527,11 +1603,7 @@ that he is standing on something."
          (sky (representation (swizzle sky-color-vector :xyz)))
          (ground (representation (swizzle ground-color-vector :xyz)))
          (upness (swizzle normal :z))
-         (top (vec3 0.50 0.52 0.24))
-         (side (vec3 0.25 0.34 0.23))
-         (bottom (vec3 0.19 0.22 0.20))
-         (base (if (> upness 0.35) top
-                   (if (< upness -0.35) bottom side)))
+         (base material-tone)
          (facing (max 0.0 (dot normal sun)))
          (visibility
            (soft-shadow-visibility
