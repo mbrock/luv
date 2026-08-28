@@ -59,41 +59,72 @@ once.  The central junction is already wholly owned at this point."
         :junctions (star-junction-triangles star)))
 
 (defun %star-local-face-triangles (star)
+  (loop for quadrant in (%star-face-quadrants)
+        for normal-sign = (%star-face-quadrant-normal-sign star quadrant)
+        unless (zerop normal-sign)
+          append (%star-face-quadrant-triangles quadrant normal-sign)))
+
+(defun %star-local-band-triangles (star)
+  (loop for half-edge in (%star-band-half-edges)
+        append (%star-band-half-edge-triangles star half-edge)))
+
+(defun %star-face-quadrants ()
+  "Name each face quadrant as (NORMAL-AXIS U-POSITIVE-P V-POSITIVE-P)."
   (loop for axis-number below 3
         append
-        (let ((u (svref +axis-u+ axis-number))
-              (v (svref +axis-v+ axis-number)))
-          (loop for u-high-p in '(nil t)
-                append
-                (loop for v-high-p in '(nil t)
-                      for low-sample =
-                        (logior (if u-high-p (ash 1 u) 0)
-                                (if v-high-p (ash 1 v) 0))
-                      for high-sample =
-                        (logior low-sample (ash 1 axis-number))
-                      for low-occupied-p = (logbitp low-sample star)
-                      for high-occupied-p = (logbitp high-sample star)
-                      unless (eq low-occupied-p high-occupied-p)
-                        append
-                        (%star-face-quadrant-triangles
-                         axis-number u-high-p v-high-p
-                         (if low-occupied-p 1 -1)))))))
+        (loop for u-positive-p in '(nil t)
+              append
+              (loop for v-positive-p in '(nil t)
+                    collect (list axis-number
+                                  u-positive-p v-positive-p)))))
+
+(defun %star-band-half-edges ()
+  "Name each band half-edge as (AXIS POSITIVE-P)."
+  (loop for axis-number below 3
+        append (list (list axis-number nil)
+                     (list axis-number t))))
+
+(defun %star-face-quadrant-normal-sign (star quadrant)
+  "Return QUADRANT's outward normal sign, or zero when it is not exposed."
+  (multiple-value-bind (low-sample high-sample)
+      (%star-face-quadrant-samples quadrant)
+    (let ((low-occupied-p (logbitp low-sample star))
+          (high-occupied-p (logbitp high-sample star)))
+      (cond ((and low-occupied-p (not high-occupied-p)) 1)
+            ((and high-occupied-p (not low-occupied-p)) -1)
+            (t 0)))))
+
+(defun %star-face-quadrant-samples (quadrant)
+  (destructuring-bind (axis-number u-positive-p v-positive-p) quadrant
+    (let* ((u (svref +axis-u+ axis-number))
+           (v (svref +axis-v+ axis-number))
+           (low-sample
+             (logior (if u-positive-p (ash 1 u) 0)
+                     (if v-positive-p (ash 1 v) 0))))
+      (values low-sample (logior low-sample (ash 1 axis-number))))))
 
 (defun %star-face-quadrant-triangles
-    (axis-number u-high-p v-high-p normal-sign)
-  (let* ((u (svref +axis-u+ axis-number))
-         (v (svref +axis-v+ axis-number))
-         (u-base (if u-high-p 0 (- +mesh-cell-size+)))
-         (v-base (if v-high-p 0 (- +mesh-cell-size+)))
-         (far (1- +mesh-cell-size+))
-         (p0 (list 0 0 0)) (p1 (list 0 0 0))
-         (p2 (list 0 0 0)) (p3 (list 0 0 0)))
-    (setf (nth u p0) (+ u-base 1) (nth v p0) (+ v-base 1)
-          (nth u p1) (+ u-base far) (nth v p1) (+ v-base 1)
-          (nth u p2) (+ u-base far) (nth v p2) (+ v-base far)
-          (nth u p3) (+ u-base 1) (nth v p3) (+ v-base far))
-    (list (%star-oriented-triangle p0 p1 p2 axis-number normal-sign)
-          (%star-oriented-triangle p0 p2 p3 axis-number normal-sign))))
+    (quadrant normal-sign)
+  (let ((axis-number (first quadrant)))
+    (destructuring-bind (p0 p1 p2 p3)
+        (%star-face-quadrant-points quadrant)
+      (list (%star-oriented-triangle p0 p1 p2 axis-number normal-sign)
+            (%star-oriented-triangle p0 p2 p3 axis-number normal-sign)))))
+
+(defun %star-face-quadrant-points (quadrant)
+  (destructuring-bind (axis-number u-positive-p v-positive-p) quadrant
+    (let* ((u (svref +axis-u+ axis-number))
+           (v (svref +axis-v+ axis-number))
+           (u-base (if u-positive-p 0 (- +mesh-cell-size+)))
+           (v-base (if v-positive-p 0 (- +mesh-cell-size+)))
+           (far (1- +mesh-cell-size+))
+           (p0 (list 0 0 0)) (p1 (list 0 0 0))
+           (p2 (list 0 0 0)) (p3 (list 0 0 0)))
+      (setf (nth u p0) (+ u-base 1) (nth v p0) (+ v-base 1)
+            (nth u p1) (+ u-base far) (nth v p1) (+ v-base 1)
+            (nth u p2) (+ u-base far) (nth v p2) (+ v-base far)
+            (nth u p3) (+ u-base 1) (nth v p3) (+ v-base far))
+      (list p0 p1 p2 p3))))
 
 (defun %star-oriented-triangle (a b c normal-axis normal-sign)
   (let* ((u (svref +axis-u+ normal-axis))
@@ -108,34 +139,34 @@ once.  The central junction is already wholly owned at this point."
         (list a b c)
         (list a c b))))
 
-(defun %star-local-band-triangles (star)
-  (loop for axis-number below 3
-        append
-        (loop for high-p in '(nil t)
-              for state = (%star-half-edge-state star axis-number high-p)
-              for pattern = (svref *width-one-edge-pattern-table* state)
-              append
-              (loop for descriptor across
-                    (svref (width-one-edge-pattern-descriptors pattern)
-                           axis-number)
-                    append
-                    (%star-translated-descriptor-triangles
-                     descriptor axis-number
-                     (if high-p 0 (- +mesh-cell-size+)))))))
+(defun %star-band-half-edge-triangles (star half-edge)
+  (destructuring-bind (axis-number positive-p) half-edge
+    (loop for descriptor across
+          (%star-band-half-edge-descriptors star half-edge)
+          append
+          (%star-translated-descriptor-triangles
+           descriptor axis-number
+           (if positive-p 0 (- +mesh-cell-size+))))))
 
-(defun %star-half-edge-state (star axis-number high-p)
-  (let ((u (svref +axis-u+ axis-number))
-        (v (svref +axis-v+ axis-number))
-        (state 0))
-    (dotimes (quadrant 4 state)
-      (let ((sample
-              (logior (if high-p (ash 1 axis-number) 0)
-                      (if (plusp (svref +quadrant-u+ quadrant))
-                          (ash 1 u) 0)
-                      (if (plusp (svref +quadrant-v+ quadrant))
-                          (ash 1 v) 0))))
-        (when (logbitp sample star)
-          (setf state (logior state (ash 1 quadrant))))))))
+(defun %star-band-half-edge-descriptors (star half-edge)
+  (let* ((axis-number (first half-edge))
+         (state (%star-half-edge-state star half-edge))
+         (pattern (svref *width-one-edge-pattern-table* state)))
+    (svref (width-one-edge-pattern-descriptors pattern) axis-number)))
+
+(defun %star-half-edge-state (star half-edge)
+  (loop for quadrant below 4
+        for sample = (%star-half-edge-sample half-edge quadrant)
+        when (logbitp sample star)
+          sum (ash 1 quadrant)))
+
+(defun %star-half-edge-sample (half-edge quadrant)
+  (destructuring-bind (axis-number positive-p) half-edge
+    (let ((u (svref +axis-u+ axis-number))
+          (v (svref +axis-v+ axis-number)))
+      (logior (if positive-p (ash 1 axis-number) 0)
+              (if (plusp (svref +quadrant-u+ quadrant)) (ash 1 u) 0)
+              (if (plusp (svref +quadrant-v+ quadrant)) (ash 1 v) 0)))))
 
 (defun %star-translated-descriptor-triangles
     (descriptor translated-axis translation)
