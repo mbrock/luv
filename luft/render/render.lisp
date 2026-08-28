@@ -4355,7 +4355,6 @@ cohort untouched. No frame can interleave with the owner-thread publication."
 
 (defconstant +large-world-horizontal-bits+ 11)
 (defconstant +large-world-seed+ 121)
-(defconstant +streaming-source-guard-radius+ 3)
 
 (defclass authored-world-source ()
   ((domain :initarg :domain :reader authored-world-source-domain)
@@ -4680,7 +4679,7 @@ a future LoD must bring an explicit transition representation."
 
 (defun make-authored-world-streaming-scene
     (&key (horizontal-bits +large-world-horizontal-bits+)
-      (seed +large-world-seed+) (frames-per-load 1) (residency-radius 1))
+      (seed +large-world-seed+) (frames-per-load 1) (residency-radius 0))
   "Make the canonical large demand world without materializing any chunk."
   (let* ((domain (luft:make-world-domain
                   :x-bits horizontal-bits :y-bits horizontal-bits))
@@ -5099,16 +5098,22 @@ silently empty the desired residency window."
   "Publish the exact union/material views derived from SCENE's resident store."
   (let* ((source (streaming-scene-source scene))
          (domain (authored-world-source-domain source))
-         (solid (luft:make-chain domain))
-         (materials (make-hash-table :test #'eql)))
+         (cell-count
+           (loop for resident being the hash-values of
+                   (streaming-scene-store scene)
+                 sum (hash-table-count
+                      (resident-cell-chunk-material-cells resident))))
+         (builder (luft:make-chain-builder domain :initial-capacity cell-count))
+         (materials (make-hash-table :test #'eql :size cell-count)))
     (maphash
      (lambda (key resident)
        (declare (ignore key))
-       (setf solid (luft:chain+ solid (resident-cell-chunk-chain resident)))
+       (luft:chain-builder-add-chain
+        builder (resident-cell-chunk-chain resident))
        (maphash (lambda (cell offset) (setf (gethash cell materials) offset))
                 (resident-cell-chunk-material-cells resident)))
      (streaming-scene-store scene))
-    (setf (scene-solid scene) solid
+    (setf (scene-solid scene) (luft:finish-chain-builder builder)
           (scene-material-cells scene) materials
           (scene-content-revision scene) (1+ (scene-content-revision scene)))
     scene))
@@ -5166,9 +5171,19 @@ silently empty the desired residency window."
   (let* ((focus-key (streaming-scene-focus-key scene world-x world-y))
          (focus (cons (luft:chunk-key-x focus-key)
                       (luft:chunk-key-y focus-key)))
-         (radius (+ (streaming-scene-residency-radius scene)
-                    +streaming-source-guard-radius+))
-         (desired-keys (streaming-domain-keys-near scene focus-key radius))
+         (visible-keys
+           (streaming-domain-keys-near
+            scene focus-key (streaming-scene-residency-radius scene)))
+         ;; Materialize exactly the complete occupancy capture which the
+         ;; visible owner closure will need: owners, witness, then probe guard.
+         ;; This is asymmetric at high seams and substantially smaller than a
+         ;; conservative square radius.
+         (desired-keys
+           (streaming-scene-dependency-guard-keys
+            scene
+            (streaming-scene-dependency-guard-keys
+             scene
+             (streaming-scene-canonical-owner-closure scene visible-keys))))
          (desired (streaming-scene-desired scene)))
     (unless (equal focus (streaming-scene-focus scene))
       (let ((next (make-hash-table :test #'eql)))
