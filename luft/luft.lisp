@@ -49,6 +49,8 @@
    #:star-local-surface-triangles
    #:star-rotations #:star-reflections #:transform-star
    #:transform-star-triangles #:star-orbit #:star-canonical-form
+   #:star-atlas-parts #:star-atlas-owned-triangles
+   #:star-surface-sites #:star-surface-triangles #:write-star-atlas
    ;; Face topology.
    #:local-edge #:local-corner
    #:face-tangent-axes #:face-oriented-normal #:orient-face-outward

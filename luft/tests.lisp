@@ -2813,6 +2813,98 @@ pattern's descriptors into the same local coordinates the derivation uses."
                  (= (length (getf surface key))
                     (length (getf rotated-surface key))))))))))))
 
+(defun %sorted-triangle-points (triangles)
+  (sort (remove-duplicates (apply #'append (copy-list triangles))
+                           :test #'equal)
+        #'%star-point<))
+
+(defun %sorted-open-edges (triangles)
+  (sort (%once-traversed-edges triangles)
+        #'%star-point<
+        :key (lambda (edge) (append (first edge) (second edge)))))
+
+(defun %same-part-surface-p (left right)
+  "Same triangle count, vertex set, and oriented parity boundary.
+
+Unfolding a family may split a quad along the other diagonal or walk a
+strip differently, so parts compare as surfaces, not as triangle lists."
+  (and (= (length left) (length right))
+       (equal (%sorted-triangle-points left)
+              (%sorted-triangle-points right))
+       (equal (%sorted-open-edges left)
+              (%sorted-open-edges right))))
+
+(defun %sorted-part-entries (entries)
+  (sort (copy-list entries) #'%star-point< :key #'first))
+
+(defun %nondegenerate-triangle-p (triangle)
+  (destructuring-bind (a b c) triangle
+    (notevery #'zerop
+              (%cross-product (%point-difference b a)
+                              (%point-difference c a)))))
+
+(defun %star-block-cells (mask)
+  "The 2x2x2 cell block whose center site sees occupancy star MASK."
+  (let ((cells (make-hash-table :test #'equal)))
+    (dotimes (x 2)
+      (dotimes (y 2)
+        (dotimes (z 2)
+          (when (logbitp (+ x (* 2 y) (* 4 z)) mask)
+            (setf (gethash (list x y z) cells) t)))))
+    cells))
+
+(defun %closed-star-surface-p (cells)
+  (let ((triangles (star-surface-triangles cells)))
+    (and (every #'%nondegenerate-triangle-p triangles)
+         (null (%once-traversed-edges triangles)))))
+
+(defun %test-star-table ()
+  (%with-test-section ("star atlas data unfolds onto all 256 stars")
+    (%check (= 22 (hash-table-count *star-atlas-families*)))
+    (maphash (lambda (star parts)
+               (declare (ignore parts))
+               (%check (= star (star-canonical-form
+                                star :reflections t))
+                       "atlas families must be canonical"))
+             *star-atlas-families*)
+    (dotimes (star 256)
+      (let ((atlas (star-atlas-parts star))
+            (derived (%derived-star-parts star)))
+        (dolist (key '(:faces :bands))
+          (let ((left (%sorted-part-entries (getf atlas key)))
+                (right (%sorted-part-entries (getf derived key))))
+            (%check (equal (mapcar #'first left)
+                           (mapcar #'first right))
+                    "unfolded part keys must match the derivation")
+            (loop for (nil left-triangles) in left
+                  for (nil right-triangles) in right
+                  do (%check (%same-part-surface-p left-triangles
+                                                   right-triangles)
+                             "unfolded parts must be the derived surfaces"))))
+        (%check (%same-part-surface-p (getf atlas :junction)
+                                      (getf derived :junction))
+                "unfolded junctions must be the derived surfaces")))
+    (%check (= 7 (length (star-atlas-owned-triangles #x08)))
+            "one convex corner owns a face, two bands, and a cap"))
+  (%with-test-section ("star atlas ownership tiles closed surfaces")
+    (dotimes (mask 256)
+      (%check (%closed-star-surface-p (%star-block-cells mask))
+              "every star block must mesh closed"))
+    (let ((state 20260828))
+      (flet ((next-bit ()
+               (setf state (mod (+ (* 1103515245 state) 12345)
+                                (expt 2 31)))
+               (oddp (ash state -16))))
+        (dotimes (trial 10)
+          (let ((cells (make-hash-table :test #'equal)))
+            (dotimes (x 3)
+              (dotimes (y 3)
+                (dotimes (z 3)
+                  (when (next-bit)
+                    (setf (gethash (list x y z) cells) t)))))
+            (%check (%closed-star-surface-p cells)
+                    "pseudorandom solids must mesh closed")))))))
+
 (defun run-luft-tests (&key (stream *standard-output*))
   "Run the retained topology and replacement manifold-sheet mesh claims."
   (let ((*luft-test-count* 0)
@@ -2828,6 +2920,7 @@ pattern's descriptors into the same local coordinates the derivation uses."
     (%test-width-one-z-fibers)
     (%test-width-one-query-dimension)
     (%test-star-geometry)
+    (%test-star-table)
     (%test-width-one-local-kernel)
     (%test-width-one-material-lanes)
     (%test-chunked-meshing)

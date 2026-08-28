@@ -418,6 +418,31 @@ certified junctions is deleted (#Z0X3YQ).  Only the owned-orientation slice
 of =star-triangles= still reads the vocabulary, because row ownership is a
 production division of labor, not a geometric fact.
 
+* DONE The star atlas is data: 22 families unfold onto 256 stars
+:PROPERTIES:
+:ID: MRJQVI
+:END:
+
+=luft/star-atlas.sexp= commits the whole width-one local patch of each of
+the 22 canonical families under the full cubical group, keyed by part:
+face quadrants named by cell sample pairs, band half-edges by signed axis
+directions, and the junction.  =luft/star-table.lisp= unfolds it onto all
+256 stars using only the canonical-form witnesses of #IWUIXJ — transform
+points and part names, swap two vertices under a reversing witness — so no
+geometric algorithm runs at lookup time.
+
+Owned geometry is not symmetry-equivariant, so ownership is a filter
+stated after unfolding, in purely local terms: a site owns the faces
+whose cell pair contains the all-positive cell (it is that face's minimal
+corner), the bands on its positive half-edges, and its junction.  LUFT's
+tests pin every unfolded part to the derivation as a surface (unfolding
+may pick the other quad diagonal) and close the owned tiling over every
+2x2x2 star block and pseudorandom solids.
+
+=star-atlas-owned-triangles= is therefore the shape of the instanced GPU
+path: one template per star in a buffer, one instance per lattice site
+carrying its coordinates and star, no materials and no mixed widths.
+
 * The contracts which optimization must not hide
 :PROPERTIES:
 :ID: L38W75
