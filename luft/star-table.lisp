@@ -35,9 +35,14 @@
 (defun %star-atlas-family-table (atlas)
   (let ((table (make-hash-table)))
     (dolist (family (getf (rest atlas) :families) table)
-      (destructuring-bind (&key star faces bands junction) family
+      (destructuring-bind (&key star complement faces bands junction) family
         (unless (= star (star-canonical-form star :reflections t))
           (error "Star atlas family #x~2,'0X is not canonical." star))
+        (unless (= complement
+                   (star-canonical-form (%complement-star star)
+                                        :reflections t))
+          (error "Star atlas family #x~2,'0X names the wrong complement."
+                 star))
         (setf (gethash star table)
               (list :faces faces :bands bands :junction junction))))))
 
@@ -204,12 +209,24 @@ each drawn once by the site that owns it."
                                     (asdf:system-relative-pathname
                                      "luft" #P"luft/star-atlas.sexp")))
   "Regenerate the committed star atlas from the derivation."
-  (let ((representatives
-          (sort (remove-duplicates
-                 (loop for star below 256
-                       collect (star-canonical-form
-                                star :reflections t)))
-                #'<)))
+  (let* ((representatives
+           (sort (remove-duplicates
+                  (loop for star below 256
+                        collect (star-canonical-form
+                                 star :reflections t)))
+                 #'<))
+         (entries
+           (sort (loop for representative in representatives
+                       for partner = (star-canonical-form
+                                      (%complement-star representative)
+                                      :reflections t)
+                       collect (list (min representative partner)
+                                     representative
+                                     partner))
+                 (lambda (left right)
+                   (or (< (first left) (first right))
+                       (and (= (first left) (first right))
+                            (< (second left) (second right))))))))
     (with-open-file (stream pathname :direction :output
                             :if-exists :supersede)
       (let ((*print-pretty* t)
@@ -224,15 +241,30 @@ each drawn once by the site that owns it."
         (format stream ";; by signed axis directions.  Regenerate with~%")
         (format stream ";; (luft::write-star-atlas); LUFT's tests pin every unfolded star~%")
         (format stream ";; to the star-geometry derivation.~%")
+        (format stream ";;~%")
+        (format stream ";; The families come grouped into solid/air complement classes:~%")
+        (format stream ";; eight pairs and six self-complementary families, fourteen~%")
+        (format stream ";; classes in all.  Complement reverses each face and plain band~%")
+        (format stream ";; in place, but bands always join the solid pair across a~%")
+        (format stream ";; checkerboard half-edge, so complement re-pairs the geometry~%")
+        (format stream ";; there; geometry is therefore committed per spatial family.~%")
         (format stream "(:width-one-star-atlas~%")
         (format stream " :cell-size ~d~%" +mesh-cell-size+)
         (format stream " :families~%")
         (format stream " (")
-        (loop for representative in representatives
+        (loop for (class representative partner) in entries
               for first-p = t then nil
               for parts = (%derived-star-parts representative)
               do (unless first-p (format stream "~%  "))
+                 (when (= class representative)
+                   (cond ((= representative partner)
+                          (format stream ";; #x~2,'0x is self-complementary~%  "
+                                  representative))
+                         (t
+                          (format stream ";; #x~2,'0x <-> #x~2,'0x under solid/air complement~%  "
+                                  representative partner))))
                  (format stream "(:star #x~2,'0x~%" representative)
+                 (format stream "   :complement #x~2,'0x~%" partner)
                  (format stream "   :faces ~s~%" (getf parts :faces))
                  (format stream "   :bands ~s~%" (getf parts :bands))
                  (format stream "   :junction ~s)"

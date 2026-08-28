@@ -574,40 +574,63 @@ the full cube group; COMPLEMENT also identifies occupied and empty cells."
     (%transformed-stars star (%star-orbit-transformations reflections))
     complement)))
 
-(defun star-canonical-form (star &key reflections)
+(defun star-canonical-form (star &key reflections complement)
   "Return STAR's canonical representative and the transformation onto STAR.
 
 The representative is the smallest occupancy mask in STAR's orbit, so equal
 representatives identify equivalent stars.  The second value is a signed-axis
-transformation carrying the representative back onto STAR:
+transformation carrying the representative back onto STAR, and the third says
+whether solid/air complement is also needed:
 
   (TRANSFORM-STAR transformation representative) = STAR
+or, when the third value is true,
+  (%COMPLEMENT-STAR (TRANSFORM-STAR transformation representative)) = STAR
 
 By default only proper rotations act; REFLECTIONS canonicalizes under the
-full cube group.  Among the transformations reaching the representative the
-first proper rotation wins, so the answer is deterministic and a reversing
-transformation appears only when STAR is a reflected chiral form."
+full cube group, and COMPLEMENT also identifies each star with its solid/air
+complement.  Among the transformations reaching the representative the first
+uncomplemented proper rotation wins, so the answer is deterministic; a
+reversing or complementing witness appears only when nothing simpler reaches
+the representative."
   (%check-star star)
   (values-list
-   (svref (svref *star-canonical-forms* (if reflections 1 0)) star)))
+   (svref (svref *star-canonical-forms*
+                 (+ (if reflections 1 0) (if complement 2 0)))
+          star)))
 
-(defun %star-canonical-form (star reflections)
+(defun %star-canonical-form (star reflections complement)
   (loop with representative = nil
         with witness = nil
-        for transformation in (%star-orbit-transformations reflections)
-        for image = (transform-star transformation star)
+        with complemented = nil
+        for (transformation complement-p)
+          in (%star-canonical-candidates reflections complement)
+        for image = (transform-star transformation
+                                    (if complement-p
+                                        (%complement-star star)
+                                        star))
         when (or (null representative) (< image representative))
           do (setf representative image
-                   witness transformation)
+                   witness transformation
+                   complemented complement-p)
         finally
            (return
              (list representative
-                   (%inverse-star-transformation witness)))))
+                   (%inverse-star-transformation witness)
+                   complemented))))
 
-(defun %star-canonical-form-table (reflections)
+(defun %star-canonical-candidates (reflections complement)
+  (let ((transformations (%star-orbit-transformations reflections)))
+    (append (loop for transformation in transformations
+                  collect (list transformation nil))
+            (when complement
+              (loop for transformation in transformations
+                    collect (list transformation t))))))
+
+(defun %star-canonical-form-table (reflections complement)
   (let ((table (make-array 256)))
     (dotimes (star 256 table)
-      (setf (svref table star) (%star-canonical-form star reflections)))))
+      (setf (svref table star)
+            (%star-canonical-form star reflections complement)))))
 
 (defun %transform-star-sample (transformation sample)
   (%star-direction-index
@@ -796,6 +819,8 @@ transformation appears only when STAR is a reflected chiral form."
 ;;; Built once at load time, after every operation above is available.
 
 (defparameter *star-canonical-forms*
-  (vector (%star-canonical-form-table nil)
-          (%star-canonical-form-table t))
-  "Canonical forms of all 256 stars, without and then with reflections.")
+  (vector (%star-canonical-form-table nil nil)
+          (%star-canonical-form-table t nil)
+          (%star-canonical-form-table nil t)
+          (%star-canonical-form-table t t))
+  "Canonical forms of all 256 stars, indexed by reflections and complement.")

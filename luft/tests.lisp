@@ -2905,6 +2905,82 @@ strip differently, so parts compare as surfaces, not as triangle lists."
             (%check (%closed-star-surface-p cells)
                     "pseudorandom solids must mesh closed")))))))
 
+(defun %reversed-triangles (triangles)
+  (loop for (a b c) in triangles collect (list a c b)))
+
+(defun %star-checkerboard-band-keys (star)
+  "Band keys of STAR's half-edges with alternating occupancy."
+  (loop for half-edge in (%star-band-half-edges)
+        for state = (%star-half-edge-state star half-edge)
+        when (member state '(#b0101 #b1010))
+          collect (list (first half-edge)
+                        (if (second half-edge) 1 -1))))
+
+(defun %test-star-complement ()
+  (%with-test-section ("solid/air complement quotients the star families")
+    (let ((classes (sort (remove-duplicates
+                          (loop for star below 256
+                                collect (star-canonical-form
+                                         star :reflections t
+                                              :complement t)))
+                         #'<)))
+      (%check (equal classes
+                     (list #x00 #x01 #x03 #x06 #x07 #x0f #x16
+                           #x17 #x18 #x19 #x1b #x1e #x3c #x69))
+              "complement folds the 22 families into 14 classes"))
+    (dotimes (star 256)
+      (multiple-value-bind (representative witness complemented)
+          (star-canonical-form star :reflections t :complement t)
+        (let ((image (transform-star witness representative)))
+          (%check (= star (if complemented
+                              (%complement-star image)
+                              image))
+                  "the witness must carry the class back onto its star")))))
+  (%with-test-section ("complement duality fails only at checkerboards")
+    (dotimes (star 256)
+      (let ((parts (star-atlas-parts star))
+            (complement-parts (star-atlas-parts (%complement-star star)))
+            (checkerboards (%star-checkerboard-band-keys star)))
+        (let ((left (%sorted-part-entries (getf complement-parts :faces)))
+              (right (%sorted-part-entries (getf parts :faces))))
+          (%check (equal (mapcar #'first left) (mapcar #'first right))
+                  "complement exposes the same faces")
+          (loop for (nil left-triangles) in left
+                for (nil right-triangles) in right
+                do (%check (%same-part-surface-p
+                            left-triangles
+                            (%reversed-triangles right-triangles))
+                           "faces are always dual")))
+        (let ((left (%sorted-part-entries (getf complement-parts :bands)))
+              (right (%sorted-part-entries (getf parts :bands))))
+          (%check (equal (mapcar #'first left) (mapcar #'first right))
+                  "complement exposes the same band directions")
+          (loop for (key left-triangles) in left
+                for (nil right-triangles) in right
+                for dual = (%same-part-surface-p
+                            left-triangles
+                            (%reversed-triangles right-triangles))
+                do (%check (eq dual
+                               (not (member key checkerboards
+                                            :test #'equal)))
+                           "bands are dual except checkerboard pairs")))
+        (%check (eq (%same-part-surface-p
+                     (getf complement-parts :junction)
+                     (%reversed-triangles (getf parts :junction)))
+                    (null checkerboards))
+                "junctions are dual exactly without checkerboards")))
+    (let ((checkerboard-families
+            (sort (remove-duplicates
+                   (loop for star below 256
+                         when (%star-checkerboard-band-keys star)
+                           collect (star-canonical-form
+                                    star :reflections t)))
+                  #'<)))
+      (%check (equal checkerboard-families
+                     (list #x06 #x16 #x19 #x1e #x3c #x3d
+                           #x69 #x6b #x6f))
+              "checkerboards live in nine of the 22 families"))))
+
 (defun run-luft-tests (&key (stream *standard-output*))
   "Run the retained topology and replacement manifold-sheet mesh claims."
   (let ((*luft-test-count* 0)
@@ -2921,6 +2997,7 @@ strip differently, so parts compare as surfaces, not as triangle lists."
     (%test-width-one-query-dimension)
     (%test-star-geometry)
     (%test-star-table)
+    (%test-star-complement)
     (%test-width-one-local-kernel)
     (%test-width-one-material-lanes)
     (%test-chunked-meshing)

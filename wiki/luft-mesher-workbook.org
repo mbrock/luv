@@ -443,6 +443,35 @@ may pick the other quad diagonal) and close the owned tiling over every
 path: one template per star in a buffer, one instance per lattice site
 carrying its coordinates and star, no materials and no mixed widths.
 
+* DONE Solid/air complement pairs the families; checkerboards break duality
+:PROPERTIES:
+:ID: E08FGH
+:END:
+
+Complementing a star exposes the same faces and the same band directions,
+and =star-canonical-form= with =:complement= quotients the 22 families of
+#MRJQVI into fourteen classes: eight pairs — 00/FF, 01/7F, 03/3F, 06/6F,
+07/1F, 16/6B, 18/7E, 19/3D — and six self-complementary families — 0F,
+17, 1B, 1E, 3C, 69.  The atlas file groups its entries by these classes
+and names each family's partner, which is how the configurations want to
+be thought about: a convex chamfer and a concave fillet are the same quad
+between the same rails, wound the other way.
+
+The duality is exact except in one place, and the exception is a theorem
+LUFT's tests pin over all 256 stars: the local patch of a complement is
+the reversed local patch of the star if and only if the star has no
+checkerboard half-edge.  Bands pair around empty quadrants (#ZJ7CSO), so
+diagonal solids always join across the shared edge — and complement swaps
+which diagonal is solid, asking the joint to flip to the other pair of
+quadrants.  Solid always wins the pinch; solid and air are therefore not
+interchangeable exactly where the manifold choice bites.  The junction
+census makes it vivid: 06 closes with a six-triangle saddle fan while its
+partner 6F closes with two caps, and 19's nine-triangle saddle fan pairs
+with 3D's strip and cap.  Nine families contain checkerboard half-edges —
+the three broken pairs 06/6F, 16/6B, 19/3D and the self-complementary 1E,
+3C, 69 — so the atlas keeps its 22 committed geometries and the fourteen
+classes remain a fact about masks, not about triangles.
+
 * The contracts which optimization must not hide
 :PROPERTIES:
 :ID: L38W75
