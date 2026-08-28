@@ -168,7 +168,8 @@ URL subtree whose files are served by the deployment edge. #IVRWI8"))
                  (dolist (capture captures)
                    (showcase-card page capture)))
                (:p "No capture manifest has been published here yet."))))
-       :body-class "wide showcase-page"
+       :layout :workspace
+       :body-class "showcase-page"
        :kind "showcase"
        :crumbs '(("Showcase"))
        :right "capture catalog"))))

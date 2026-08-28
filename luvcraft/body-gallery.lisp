@@ -141,7 +141,8 @@
                (:button#reset :type "button" "Reset this creature")
                (:span "WGSL compiled by luv"))))
          (:script :type "module" :src "/bodies/gallery.js")))
-     :body-class "wide body-playground"
+     :layout :workspace
+     :body-class "body-playground"
      :kind "bodies"
      :crumbs '(("Agent bodies"))
      :right "SDF playground")))

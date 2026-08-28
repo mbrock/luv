@@ -65,6 +65,21 @@ and equivalent dynamic Clack hosting and static publication.")
    #:render-html
    #:render-page
    #:render-document-string
+   ;; Semantic web views
+   #:page-view
+   #:reading-page-view
+   #:workspace-page-view
+   #:sidebar-page-view
+   #:view-site
+   #:view-title
+   #:view-prefix
+   #:view-kind
+   #:view-crumbs
+   #:view-document
+   #:view-layout
+   #:render-view-content
+   #:render-view-tools
+   #:render-view
    #:write-site
    #:site-page-name
    ;; Lisp source

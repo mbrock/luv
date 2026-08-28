@@ -872,6 +872,29 @@ and a source file have no horizontal overflow at a 390-pixel viewport.  The
 renderer tests, full repository tests, dynamic route checks, and browser checks
 cover those claims.
 
+* DONE Give web pages semantic view objects
+:PROPERTIES:
+:ID: CZZJDQ
+:END:
+
+Intent: make the site shell and its broad layout policies inspectable Lisp
+objects rather than contracts reconstructed from callback nesting and body
+selectors.  Keep geometry in CSS: a view chooses reading, workspace, or
+sidebar semantics, while shared frames and a small token vocabulary establish
+alignment and rhythm.
+
+Evidence: =page-view= and its three layout subclasses own title, site,
+breadcrumbs, tools, context, and content.  =render-view= fixes the shell's
+header/status/main/footer ownership; generic content and tool methods let
+document, Source, and Activity views specialize it.  The old frame function is
+now a compatibility adapter for Showcase, Stars, and Bodies.  Shared
+=page-frame= regions and spacing, measure, gutter, rail, and workspace tokens
+give the resulting roles one geometric source of truth.
+
+Done when: reading and workspace views dispatch through classes, the three
+shell regions align at desktop width, contributed pages still render through
+the adapter, and tests assert both view policy and whole-page ownership.
+
 * DONE The site shows code references to figures
 :PROPERTIES:
 :ID: PF39II

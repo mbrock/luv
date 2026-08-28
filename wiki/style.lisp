@@ -36,7 +36,7 @@
 
 (defun gutter ()
   "The horizontal page gutter."
-  (clamp 1rem 4vw 3rem))
+  --gutter)
 
 (defun hairline ()
   "The one-pixel rule between things."
@@ -71,7 +71,17 @@
    (palette :light)
    :--display-font (font-stack "Public Sans" :helvetica :arial :sans-serif)
    :--body-font --display-font
-   :--mono-font (font-stack :ui-monospace "SF Mono" :menlo :consolas :monospace))
+   :--mono-font (font-stack :ui-monospace "SF Mono" :menlo :consolas :monospace)
+   :--space-1 0.25rem
+   :--space-2 0.5rem
+   :--space-3 0.75rem
+   :--space-4 1rem
+   :--space-6 1.5rem
+   :--space-8 2rem
+   :--gutter (clamp 1rem 4vw 3rem)
+   :--measure 66ch
+   :--workspace-max 100rem
+   :--rail 24rem)
   (:media "(prefers-color-scheme: dark)"
    (":root" (palette :dark))))
 
@@ -98,13 +108,15 @@
 (define-style library
   "The library band: eyebrow, site name, and the three doors."
   (".library"
-   :display grid
-   :grid-template-columns (minmax 10rem 0.5fr) (minmax 0 1.5fr)
-   :gap 1rem
-   :align-items center
-   :padding 0.6rem (gutter)
    :border-bottom (hairline)
    :background (color-mix --paper 94% --accent))
+  (".library-frame"
+   :display grid
+   :grid-template-columns (minmax 10rem 0.5fr) (minmax 0 1.5fr)
+   :gap --space-4
+   :align-items center
+   :padding-top --space-3
+   :padding-bottom --space-3)
   (".eyebrow"
    :margin 0 0 0.1rem
    :color --muted
@@ -149,10 +161,6 @@
 (define-style status-bar
   "The status bar, as a Glk grid window: black, monospace, bold."
   (".status"
-   :display flex
-   :justify-content space-between
-   :gap 1rem
-   :padding 0.3rem (gutter)
    :font 700 0.9rem/1.5 --mono-font
    :color --status-ink
    :background --status-bg
@@ -160,6 +168,19 @@
    :top 0
    :z-index 1
    ("a" :color inherit))
+  (".status-frame"
+   :display flex
+   :justify-content space-between
+   :align-items center
+   :gap --space-4
+   :padding-top 0.3rem
+   :padding-bottom 0.3rem)
+  (".status-tools"
+   :display flex
+   :align-items center
+   :justify-content flex-end
+   :gap --space-3
+   :min-width 0)
   ((".status-left" ".status-right")
    :min-width 0
    :overflow hidden
@@ -178,23 +199,33 @@
 (define-style main-column
   "The main column; wide pages fill the viewport but their prose keeps a
 readable measure."
-  ("main"
-   :max-width 66ch
-   :padding (clamp 1.5rem 4vw 3.25rem) (gutter) 2.75rem
+  (".page-frame"
+   :width 100%
+   :max-width --workspace-max
+   :margin-left auto
+   :margin-right auto
+   :padding-left (gutter)
+   :padding-right (gutter))
+  ("main.page-frame"
+   :padding-top (clamp 1.5rem 4vw 3.25rem)
+   :padding-bottom 2.75rem)
+  ("body.view-reading main"
+   :max-width --measure
    :margin 0 auto)
-  ("body.wide main"
-   :max-width none
-   :margin 0)
-  (("body.wide main > p" "body.wide main > h1"
-    "body.wide article.source-body > p" "body.wide article.source-body > h1")
-   :max-width 66ch)
+  (("body.view-workspace main > p" "body.view-workspace main > h1"
+    "body.view-workspace article.source-body > p"
+    "body.view-workspace article.source-body > h1"
+    "body.view-sidebar article.source-body > p"
+    "body.view-sidebar article.source-body > h1")
+   :max-width --measure)
   (".site-footer"
-   :max-width 66ch
-   :margin 0 auto
-   :padding 1rem (gutter) 3rem
    :border-top (hairline)
    :font (display-font 500 0.82rem/1.4)
-   :color --muted))
+   :color --muted)
+  (".footer-frame"
+   :max-width --measure
+   :padding-top --space-4
+   :padding-bottom 3rem))
 
 (define-style deployment-console
   "The dynamic site's blue/green deployment terminal."
@@ -454,7 +485,7 @@ forms is a grid of rows (see the stacked group)."
 (define-style source-sidebar
   "Source pages on wide screens: the sidebar of systems and files on the
 left, sticky under the status bar, the file itself as the main column."
-  ("body.source-page main"
+  ("body.view-sidebar main"
    :display grid
    :grid-template-columns 15rem (minmax 0 1fr)
    :column-gap (clamp 1.5rem 3vw 3rem)
@@ -754,11 +785,11 @@ table: each pair a subgrid row of its two-column box."
 (define-style narrow-screens
   "Narrow screens: one column, smaller title, ragged prose."
   (:media "screen and (max-width: 90ch)"
-   (".library" :grid-template-columns (minmax 0 1fr))
+   (".library-frame" :grid-template-columns (minmax 0 1fr))
    (".doors" :justify-content flex-start)
    ("h1" :font-size 1.65rem)
    ("p" :text-align start)
-   ("body.source-page main" :display block)
+   ("body.view-sidebar main" :display block)
    (".source-nav" :display none)
    (".mobile-source-nav" :display block)
    ;; The trail keeps its ends: the first crumb and the current page.
@@ -877,16 +908,16 @@ table: each pair a subgrid row of its two-column box."
   "Recent commits, system cards, and live commit patches."
   (".source-modes"
    :display flex
-   :gap 1rem
-   :margin 0 0 1rem
+   :gap --space-4
+   :margin 0 0 --space-4
    :font-size 0.82rem
    :font-weight 650
    ("a" :color --muted)
    ("a.selected" :color --ink))
   (".source-workspace"
    :display grid
-   :grid-template-columns (minmax 0 1fr) (minmax 19rem 26rem)
-   :gap (clamp 1.5rem 3vw 3rem)
+   :grid-template-columns (minmax 0 1fr) (minmax 19rem --rail)
+   :gap (clamp --space-6 3vw --space-8)
    :align-items start)
   (".activity-rail"
    :position sticky

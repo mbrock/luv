@@ -127,6 +127,8 @@ Nothing here refers to anything.
          (site (wiki:make-site (list doc)))
          (html (wiki:render-document-string doc site)))
     (true (search "<title>A test page</title>" html))
+    (true (search "<body class=\"view view-reading\">" html))
+    (true (search "<header class=library><div class=\"page-frame library-frame\">" html))
     (true (search "<a class=\"door selected\" href=index.html><span class=door-title>Design</span>" html))
     (true (search "</header><div class=status>" html))
     (true (search "</main><footer class=site-footer>" html))
@@ -146,6 +148,35 @@ Nothing here refers to anything.
     (true (search "Mentioned in: <a href=#UVW456>A work mark</a>" html))
     (true (search "mention <a class=mention href=#XYZ123 title=\"First figure\">#XYZ123</a> with" html))
     (true (search "<h3><span class=\"mark mark-next\">" html))))
+
+(define-test page-view-classes-select-semantic-layouts
+  (let ((site (wiki:make-site '())))
+    (true (eq :reading
+              (wiki:view-layout
+               (make-instance 'wiki:reading-page-view :site site :title "Read"
+                                                       :crumbs '(("Read"))))))
+    (true (eq :workspace
+              (wiki:view-layout
+               (make-instance 'wiki:workspace-page-view :site site :title "Work"
+                                                         :crumbs '(("Work"))))))
+    (true (eq :sidebar
+              (wiki:view-layout
+               (make-instance 'wiki:sidebar-page-view :site site :title "Browse"
+                                                       :crumbs '(("Browse"))))))))
+
+(define-test contributed-page-adapter-keeps-layout-and-component-roles
+  (let* ((site (wiki:make-site '()))
+         (html (let ((wiki:*site* site)
+                     (wiki::*page-prefix* "")
+                     (wiki::*rendering-document* nil))
+                 (wiki::html-resource-string
+                  (lambda ()
+                    (wiki::render-page-frame
+                     "Contributed" (lambda () (spinneret:with-html (:p "Body")))
+                     :layout :workspace :body-class "contributed-page"))))))
+    (true (search "<body class=\"view view-workspace contributed-page\">" html))
+    (true (search "</header><div class=status>" html))
+    (true (search "</main><footer class=site-footer>" html))))
 
 (define-test commit-disclosure-separates-summary-and-body
   (let* ((change (make-instance 'wiki::commit-change

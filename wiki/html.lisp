@@ -461,65 +461,149 @@ the last one the current page, its href ignored."
                    (:a.crumb :href (concatenate 'string *page-prefix* (cdr crumb)) (car crumb))
                    (:span.crumb.current :aria-current "page" (car crumb)))))))
 
-(defun render-page-frame (title body &key body-class (kind *page-kind*)
-                                          (crumbs (list (cons title nil))) right)
-  "Emit a whole HTML page with the site chrome around the output of BODY:
-the library band with the site's three doors, a status bar with the page's
-breadcrumb trail on the left and RIGHT (a string, or a function emitting
-markup) on the right, the main column, and a footer."
-  (flet ((href (name) (concatenate 'string *page-prefix* name)))
+(defclass page-view ()
+  ((site :initarg :site :initform *site* :reader view-site)
+   (title :initarg :title :reader view-title)
+   (prefix :initarg :prefix :initform *page-prefix* :reader view-prefix)
+   (kind :initarg :kind :initform *page-kind* :reader view-kind)
+   (crumbs :initarg :crumbs :reader view-crumbs)
+   (document :initarg :document :initform *rendering-document* :reader view-document)
+   (right :initarg :right :initform nil :reader view-right)
+   (content :initarg :content :initform nil :reader view-content)
+   (classes :initarg :classes :initform nil :reader view-classes))
+  (:documentation "An inspectable semantic page whose class chooses its layout policy."))
+
+(defclass reading-page-view (page-view) ()
+  (:documentation "A prose page constrained to a comfortable reading measure."))
+
+(defclass workspace-page-view (page-view) ()
+  (:documentation "A catalogue or tool page that uses the available desktop width."))
+
+(defclass sidebar-page-view (workspace-page-view) ()
+  (:documentation "A workspace with persistent navigation beside its primary content."))
+
+(defgeneric view-layout (view)
+  (:documentation "The semantic layout policy of VIEW, independent of CSS measurements."))
+
+(defmethod view-layout ((view reading-page-view))
+  (declare (ignore view))
+  :reading)
+
+(defmethod view-layout ((view workspace-page-view))
+  (declare (ignore view))
+  :workspace)
+
+(defmethod view-layout ((view sidebar-page-view))
+  (declare (ignore view))
+  :sidebar)
+
+(defgeneric render-view-content (view)
+  (:documentation "Emit VIEW's content inside the shared main region."))
+
+(defmethod render-view-content ((view page-view))
+  (when (view-content view)
+    (funcall (view-content view))))
+
+(defgeneric render-view-tools (view)
+  (:documentation "Emit VIEW-specific tools in the shared status strip."))
+
+(defmethod render-view-tools ((view page-view))
+  (cond ((view-document view)
+         (spinneret:with-html
+           (:a :href (concatenate 'string (site-source-url (view-site view)) "wiki/"
+                                  (document-name (view-document view)) ".org")
+               (concatenate 'string (document-name (view-document view)) ".org"))))
+        ((functionp (view-right view)) (funcall (view-right view)))
+        ((view-right view) (spinneret:html (view-right view)))))
+
+(defun view-body-class (view)
+  "Stable layout roles followed by VIEW's optional component-specific classes."
+  (format nil "view view-~(~A~)~@[ ~A~]" (view-layout view) (view-classes view)))
+
+(defun render-site-header (view)
+  "The shared library heading and top-level navigation for VIEW."
+  (flet ((href (name) (concatenate 'string (view-prefix view) name)))
     (spinneret:with-html
-      (:doctype)
-      (:html :lang "en"
-        (:head
-         (:meta :charset "utf-8")
-         (:meta :name "viewport" :content "width=device-width, initial-scale=1")
-         (:title title)
-         (:link :rel "preconnect" :href "https://fonts.googleapis.com")
-         (:link :rel "preconnect" :href "https://fonts.gstatic.com" :crossorigin "")
-         (:link :rel "stylesheet"
-                :href "https://fonts.googleapis.com/css2?family=Public+Sans:ital,wght@0,100..900;1,100..900&display=swap")
-         (:link :rel "stylesheet" :href (href "style.css"))
-         (:script :src (href "site.js") :defer t)
-         (when *dynamic-server-p*
-           (:link :rel "stylesheet"
-                  :href "https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css")
-           (:script :src "https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js" :defer t)
-           (:script :src "/admin/deploy.js" :defer t)))
-        (:body :class body-class
-         (:header.library
-          (:div.library-heading
-           (:p.eyebrow "luv")
-           (:h1 (:a :href (href "index.html") "Workshop wiki")))
-          (:nav.doors
-           (:a :class (if (member kind '("page" "pages" "design") :test #'equal) "door selected" "door")
-               :href (href "index.html")
-               (:span.door-title "Design"))
-           (:a :class (if (equal kind "work") "door selected" "door") :href (href "work.html")
-               (:span.door-title "Work"))
-           (when (site-source-files *site*)
-             (:a :class (if (member kind '("source" "source-file") :test #'equal) "door selected" "door")
-                 :href (href "source.html")
-                 (:span.door-title "Source")))
-           (dolist (resource (website-navigation *site*))
-             (:a :class (if (equal kind (resource-kind resource)) "door selected" "door")
-                 :href (resource-path resource)
-                 (:span.door-title (resource-label resource))))))
-         (:div.status
-          (:span.status-left (render-crumbs crumbs))
-          (when (or *rendering-document* right)
-            (:span.status-right
-             (cond (*rendering-document*
-                    (:a :href (concatenate 'string (site-source-url *site*) "wiki/"
-                                           (document-name *rendering-document*) ".org")
-                        (concatenate 'string (document-name *rendering-document*) ".org")))
-                   ((functionp right) (funcall right))
-                   (t right))))
-          (when *dynamic-server-p* (render-deployment-button)))
-         (:main (funcall body))
-         (:footer.site-footer
-          "Rendered from Org and Lisp by luv.wiki.")
-         (when *dynamic-server-p* (render-deployment-dialog)))))))
+      (:header.library
+       (:div.page-frame.library-frame
+        (:div.library-heading
+         (:p.eyebrow "luv")
+         (:h1 (:a :href (href "index.html") "Workshop wiki")))
+        (:nav.doors
+         (:a :class
+             (if (member (view-kind view) '("page" "pages" "design") :test #'equal)
+                 "door selected" "door")
+             :href (href "index.html") (:span.door-title "Design"))
+         (:a :class (if (equal (view-kind view) "work") "door selected" "door")
+             :href (href "work.html") (:span.door-title "Work"))
+         (when (site-source-files (view-site view))
+           (:a :class
+               (if (member (view-kind view) '("source" "source-file") :test #'equal)
+                   "door selected" "door")
+               :href (href "source.html") (:span.door-title "Source")))
+         (dolist (resource (website-navigation (view-site view)))
+           (:a :class
+               (if (equal (view-kind view) (resource-kind resource))
+                   "door selected" "door")
+               :href (resource-path resource)
+               (:span.door-title (resource-label resource))))))))))
+
+(defun render-view-status (view)
+  "VIEW's breadcrumb, contextual tools, and live deployment control."
+  (spinneret:with-html
+    (:div.status
+     (:div.page-frame.status-frame
+      (:span.status-left (render-crumbs (view-crumbs view)))
+      (:span.status-tools
+       (when (or (view-document view) (view-right view))
+         (:span.status-right (render-view-tools view)))
+       (when *dynamic-server-p* (render-deployment-button)))))))
+
+(defun render-view (view)
+  "Render VIEW in the one shared, structurally fixed website shell."
+  (let ((*site* (view-site view))
+        (*rendering-document* (view-document view))
+        (*page-prefix* (view-prefix view))
+        (*page-kind* (view-kind view)))
+    (flet ((href (name) (concatenate 'string (view-prefix view) name)))
+      (spinneret:with-html
+        (:doctype)
+        (:html :lang "en"
+         (:head
+          (:meta :charset "utf-8")
+          (:meta :name "viewport" :content "width=device-width, initial-scale=1")
+          (:title (view-title view))
+          (:link :rel "preconnect" :href "https://fonts.googleapis.com")
+          (:link :rel "preconnect" :href "https://fonts.gstatic.com" :crossorigin "")
+          (:link :rel "stylesheet"
+                 :href "https://fonts.googleapis.com/css2?family=Public+Sans:ital,wght@0,100..900;1,100..900&display=swap")
+          (:link :rel "stylesheet" :href (href "style.css"))
+          (:script :src (href "site.js") :defer t)
+          (when *dynamic-server-p*
+            (:link :rel "stylesheet"
+                   :href "https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css")
+            (:script :src "https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js" :defer t)
+            (:script :src "/admin/deploy.js" :defer t)))
+         (:body :class (view-body-class view)
+          (render-site-header view)
+          (render-view-status view)
+          (:main.page-frame (render-view-content view))
+          (:footer.site-footer
+           (:div.page-frame.footer-frame "Rendered from Org and Lisp by luv.wiki."))
+          (when *dynamic-server-p* (render-deployment-dialog))))))))
+
+(defun render-page-frame (title body &key body-class (kind *page-kind*)
+                                          (crumbs (list (cons title nil))) right layout)
+  "Compatibility entry point for contributed pages while they acquire view classes."
+  (let* ((layout (or layout :reading))
+         (class (ecase layout
+                  (:reading 'reading-page-view)
+                  (:workspace 'workspace-page-view)
+                  (:sidebar 'sidebar-page-view))))
+    (render-view
+     (make-instance class :site *site* :title title :prefix *page-prefix* :kind kind
+                          :crumbs crumbs :document *rendering-document* :right right
+                          :content body :classes body-class))))
 
 (defvar *page-definition-cards* nil
   "While a page renders: a hash table from DEFINITION to its card id, filled
@@ -642,34 +726,40 @@ popovers when a mention is hovered or tapped."
                 (let ((excerpt (figure-excerpt figure)))
                   (when excerpt (:p.card-excerpt excerpt)))))))))))
 
+(defclass document-page-view (reading-page-view) ()
+  (:documentation "An Org document presented as the site's reading view."))
+
+(defmethod render-view-content ((view document-page-view))
+  (let* ((document (view-document view))
+         (title (view-title view)))
+    (spinneret:with-html
+      (:h1 title)
+      (when (string= (document-name document) "index")
+        (:p.design-catalogue
+         (:a :href "pages.html" "Browse all pages and figures →")))
+      (dolist (child (element-children document))
+        (render-html child))
+      (render-definition-cards)
+      (render-figure-cards
+       (append (document-mentions document)
+               ;; Code references shown on this page mention figures too.
+               (loop for figure in (document-figures document)
+                     append (loop for definition in (gethash (heading-id figure)
+                                                             (site-code-references (view-site view)))
+                                  append (definition-mentions definition))))))))
+
 (defun render-page (document)
-  "Emit the whole HTML page for DOCUMENT."
-  (let ((*rendering-document* document)
-        (*page-prefix* "")
-        (*page-definition-cards* (make-hash-table :test 'eq))
-        (title (or (document-title document) (document-name document))))
-    (render-page-frame
-     title
-     (lambda ()
-       (spinneret:with-html
-         (:h1 title)
-         (when (string= (document-name document) "index")
-           (:p.design-catalogue
-            (:a :href "pages.html" "Browse all pages and figures →")))
-         (dolist (child (element-children document))
-           (render-html child))
-         (render-definition-cards)
-         (render-figure-cards
-          (append (document-mentions document)
-                  ;; Code references shown on this page mention figures too.
-                  (loop for figure in (document-figures document)
-                        append (loop for definition in (gethash (heading-id figure)
-                                                                (site-code-references *site*))
-                                     append (definition-mentions definition)))))))
-     :kind "design"
-     :crumbs (if (string= (document-name document) "index")
-                 (list (cons "Design" nil))
-                 (list (cons "Design" "index.html") (cons title nil))))))
+  "Emit DOCUMENT through its semantic reading view."
+  (let* ((*page-definition-cards* (make-hash-table :test 'eq))
+         (title (or (document-title document) (document-name document))))
+    (render-view
+     (make-instance
+      'document-page-view :site *site* :title title :document document
+                          :prefix "" :kind "design"
+                          :crumbs (if (string= (document-name document) "index")
+                                      (list (cons "Design" nil))
+                                      (list (cons "Design" "index.html")
+                                            (cons title nil)))))))
 
 (defun render-pages-page (site)
   "Emit pages.html: every wiki page with its headings, each a link to its
@@ -703,7 +793,7 @@ figure, work marks flagged; a dense table."
                                         (heading-level figure) (heading-keyword figure))
                          :href (figure-href (heading-id figure) :site site)
                          (render-heading-title figure))))))))))))
-     :body-class "wide"
+     :layout :workspace
      :crumbs (list (cons "Design" "index.html") (cons "All pages" nil)))))
 
 (defparameter *work-statuses*
@@ -754,7 +844,7 @@ figure, work marks flagged; a dense table."
                              (:p.work-intent excerpt " "
                               (:a.continue :href (figure-href (heading-id mark) :site site)
                                            "Continue →")))))))))))
-     :body-class "wide")))
+     :layout :workspace)))
 
 (defun call-with-html-output (stream thunk)
   "Call THUNK with Spinneret writing exact, compact HTML to STREAM.  The

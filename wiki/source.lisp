@@ -220,7 +220,8 @@ files beside it on wide screens."
           (render-figure-cards
            (loop for definition in (source-file-definitions file)
                  append (definition-mentions definition))))))
-     :body-class "wide source-page"
+     :layout :sidebar
+     :body-class "source-page"
      :crumbs (append (list (cons "Source" "source.html"))
                      (when system-name
                        (list (cons system-name
@@ -409,17 +410,19 @@ fundamentals at the top."
            (:a.activity-more :href "activity.html"
                              (format nil "All ~D changes →" (length all-commits)))))))))
 
+(defclass activity-page-view (workspace-page-view) ()
+  (:documentation "The complete recent repository history available to the wiki."))
+
+(defmethod render-view-content ((view activity-page-view))
+  (render-recent-activity (view-site view) :hot-paths-p t))
+
 (defun render-activity-index (site)
-  "Emit activity.html: the complete recent history available to this checkout."
-  (let ((*page-prefix* "")
-        (*page-kind* "source")
-        (*rendering-document* nil))
-    (render-page-frame
-     "Activity"
-     (lambda ()
-       (render-recent-activity site :hot-paths-p t))
-     :body-class "wide activity-page"
-     :crumbs (list (cons "Source" "source.html") (cons "Activity" nil)))))
+  "Emit activity.html through its semantic workspace view."
+  (render-view
+   (make-instance 'activity-page-view :site site :title "Activity" :prefix ""
+                                      :kind "source" :classes "activity-page"
+                                      :crumbs (list (cons "Source" "source.html")
+                                                    (cons "Activity" nil)))))
 
 (defun render-commit-page (commit site)
   "A commit's metadata everywhere, and its patch when rendered by live Clack."
@@ -451,7 +454,8 @@ fundamentals at the top."
                     (:pre.commit-patch (:code patch))
                     (:p.patch-note "This patch is unavailable or too large; use GitHub for the full diff.")))
               (:p.patch-note "The live wiki renders this patch from its checkout; this static build links to GitHub instead.")))))
-     :body-class "wide commit-view"
+     :layout :workspace
+     :body-class "commit-view"
      :crumbs (list (cons "Source" "source.html")
                    (cons "Recent activity" "source.html#activity")
                    (cons (repository-commit-short-id commit) nil)))))
@@ -489,37 +493,40 @@ fundamentals at the top."
            (dolist (file (system-entry-files entry))
              (render-file-entry file)))))))))
 
-(defun render-source-index (site)
-  "Emit source.html: recent work and the browsed ASDF systems."
-  (let ((*page-prefix* "")
-        (*page-kind* "source")
-        (*rendering-document* nil))
-    (render-page-frame
-     "Source"
-     (lambda ()
-       (spinneret:with-html
-         (:nav.source-modes :aria-label "Source views"
-          (:a.selected :href "#catalogue"
-                       (format nil "~D files" (length (site-source-files site))))
-          (:a :href "activity.html"
-              (format nil "~D changes" (length (site-commits site))))
-          (:a :href "#dependency-diagnostic" "Dependencies"))
-         (:div.source-workspace
-          (:section.source-catalogue :id "catalogue"
-           (:p.catalogue-summary
-            (format nil "~D files · ~D systems · prerequisites first"
-                    (length (site-source-files site)) (length (site-systems site))))
-           (:p.scope-note "Common Lisp components registered under the luv, luvcraft,
+(defclass source-index-page-view (workspace-page-view) ()
+  (:documentation "The browsable source catalogue with a bounded activity rail."))
+
+(defmethod render-view-content ((view source-index-page-view))
+  (let ((site (view-site view)))
+    (spinneret:with-html
+      (:nav.source-modes :aria-label "Source views"
+       (:a.selected :href "#catalogue"
+                    (format nil "~D files" (length (site-source-files site))))
+       (:a :href "activity.html"
+           (format nil "~D changes" (length (site-commits site))))
+       (:a :href "#dependency-diagnostic" "Dependencies"))
+      (:div.source-workspace
+       (:section.source-catalogue :id "catalogue"
+        (:p.catalogue-summary
+         (format nil "~D files · ~D systems · prerequisites first"
+                 (length (site-source-files site)) (length (site-systems site))))
+        (:p.scope-note "Common Lisp components registered under the luv, luvcraft,
 mcluv, luft, luv-wiki, and luv-wiki-site families. Test systems appear beside the rest;
 scripts, Nix/deployment files, assets, native sources, and other systems do not.")
-           (:div.system-cards
-            (dolist (entry (site-systems site))
-              (render-system-card entry site)))
-           (:details.dependency-diagnostic :id "dependency-diagnostic"
-            (:summary "Dependency diagnostic")
-            (:p.graph-note "Essential ASDF edges only. Test systems and the aggregate luv root
+        (:div.system-cards
+         (dolist (entry (site-systems site))
+           (render-system-card entry site)))
+        (:details.dependency-diagnostic :id "dependency-diagnostic"
+         (:summary "Dependency diagnostic")
+         (:p.graph-note "Essential ASDF edges only. Test systems and the aggregate luv root
 are omitted; labels drop the luv/ prefix.")
-            (render-system-graph site)))
-          (:aside.activity-rail :aria-label "Recent activity"
-           (render-recent-activity site :limit 10 :all-link-p t)))))
-     :body-class "wide source-index")))
+         (render-system-graph site)))
+       (:aside.activity-rail :aria-label "Recent activity"
+        (render-recent-activity site :limit 10 :all-link-p t))))))
+
+(defun render-source-index (site)
+  "Emit source.html through its semantic workspace view."
+  (render-view
+   (make-instance 'source-index-page-view :site site :title "Source" :prefix ""
+                                          :kind "source" :classes "source-index"
+                                          :crumbs (list (cons "Source" nil)))))

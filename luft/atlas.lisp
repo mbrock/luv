@@ -144,7 +144,8 @@
           "; orientation buttons reveal the corresponding production packet from "
           (:code "LUFT:STAR-TRIANGLES") ".")
         (:script :src "luft-star-atlas.js" :defer t)))
-     :body-class "wide atlas-page"
+     :layout :workspace
+     :body-class "atlas-page"
      :kind "atlas"
      :crumbs '(("Stars" . nil))
      :right "star atlas")))
