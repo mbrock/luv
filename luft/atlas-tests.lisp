@@ -89,6 +89,7 @@
     (true (search "drawOrientationAxes" javascript))
     (true (search "polygon.backface" javascript))
     (true (search "shadeColor" javascript))
+    (true (search "pointOccludedP" javascript))
     (false (search "drawStarFrame" javascript))
     (true (search "var families" javascript))
     (true (search "stepOrientation(-1)" javascript))

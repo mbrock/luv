@@ -369,29 +369,83 @@
            (round (* blue factor)) ")")))
 
     (defun draw-polygon (context polygon)
+      (unless (@ polygon backface)
+        (let ((points (@ polygon points))
+              (shade (@ polygon light)))
+          ((@ context begin-path))
+          ((@ context move-to) (aref (aref points 0) 0)
+                               (aref (aref points 0) 1))
+          (loop for index from 1 below (@ points length) do
+            ((@ context line-to) (aref (aref points index) 0)
+                                 (aref (aref points index) 1)))
+          ((@ context close-path))
+          (setf (@ context global-alpha) (@ polygon alpha)
+                (@ context fill-style)
+                (shade-color (@ polygon color) shade))
+          ((@ context fill))
+          (setf (@ context global-alpha)
+                (if (= (@ polygon alpha) 0)
+                    0.3
+                    (min 1 (+ (@ polygon alpha) 0.38)))
+                (@ context stroke-style)
+                (shade-color (@ polygon stroke) shade)
+                (@ context line-width) 0.85)
+          ((@ context stroke)))))
+
+    (defun triangle-depth-at (point a b c)
+      (let* ((px (aref point 0))
+             (py (aref point 1))
+             (denominator
+               (+ (* (- (aref b 1) (aref c 1))
+                     (- (aref a 0) (aref c 0)))
+                  (* (- (aref c 0) (aref b 0))
+                     (- (aref a 1) (aref c 1))))))
+        (if (< (abs denominator) 0.000001)
+            null
+            (let* ((px-from-c (- px (aref c 0)))
+                   (py-from-c (- py (aref c 1)))
+                   (wa
+                     (/
+                      (+
+                       (* (- (aref b 1) (aref c 1)) px-from-c)
+                       (* (- (aref c 0) (aref b 0)) py-from-c))
+                      denominator))
+                   (wb
+                     (/
+                      (+
+                       (* (- (aref c 1) (aref a 1)) px-from-c)
+                       (* (- (aref a 0) (aref c 0)) py-from-c))
+                      denominator))
+                   (wc (- 1 wa wb)))
+              (if (and (>= wa -0.0001) (>= wb -0.0001) (>= wc -0.0001))
+                  (+ (* wa (aref a 2))
+                     (* wb (aref b 2))
+                     (* wc (aref c 2)))
+                  null)))))
+
+    (defun polygon-depth-at (point polygon)
       (let ((points (@ polygon points))
-            (shade (if (@ polygon backface)
-                       0.48
-                       (@ polygon light))))
-        ((@ context begin-path))
-        ((@ context move-to) (aref (aref points 0) 0)
-                             (aref (aref points 0) 1))
-        (loop for index from 1 below (@ points length) do
-          ((@ context line-to) (aref (aref points index) 0)
-                               (aref (aref points index) 1)))
-        ((@ context close-path))
-        (setf (@ context global-alpha) (@ polygon alpha)
-              (@ context fill-style)
-              (shade-color (@ polygon color) shade))
-        ((@ context fill))
-        (setf (@ context global-alpha)
-              (if (= (@ polygon alpha) 0)
-                  0.3
-                  (min 1 (+ (@ polygon alpha) 0.38)))
-              (@ context stroke-style)
-              (shade-color (@ polygon stroke) shade)
-              (@ context line-width) 0.85)
-        ((@ context stroke))))
+            (depth null))
+        (loop for index from 1 below (1- (@ points length)) do
+          (let ((candidate
+                  (triangle-depth-at point
+                                     (aref points 0)
+                                     (aref points index)
+                                     (aref points (1+ index)))))
+            (when (/= candidate null)
+              (setf depth candidate))))
+        depth))
+
+    (defun point-occluded-p (point polygons)
+      (let ((occluded false))
+        (dolist (polygon polygons)
+          (when (and (not (@ polygon backface))
+                     (> (@ polygon alpha) 0))
+            (let ((depth (polygon-depth-at point polygon)))
+              (when (and (/= depth null)
+                         (> depth (+ (aref point 2) 0.015)))
+                (setf occluded true)))))
+        occluded))
 
     (defun transform-direction (transformation direction)
       (let ((result (array)))
@@ -471,12 +525,14 @@
         (dolist (polygon mesh)
           (draw-polygon context polygon))
         (let ((origin (project-point (array 0 0 0) width height scale)))
-          ((@ context begin-path))
-          ((@ context arc) (aref origin 0) (aref origin 1)
-                           (if detailed-p 3.2 1.8) 0 (* 2 pi))
-          (setf (@ context global-alpha) 1
-                (@ context fill-style) "#17201e")
-          ((@ context fill)))
+          (unless (or (point-occluded-p origin occupancy)
+                      (point-occluded-p origin mesh))
+            ((@ context begin-path))
+            ((@ context arc) (aref origin 0) (aref origin 1)
+                             (if detailed-p 3.2 1.8) 0 (* 2 pi))
+            (setf (@ context global-alpha) 1
+                  (@ context fill-style) "#17201e")
+            ((@ context fill))))
         (when detailed-p
           (draw-orientation-axes context width height (@ star orientation)))))
 
