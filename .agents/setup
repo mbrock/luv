@@ -71,10 +71,13 @@ activate_nix() {
 configure_luv_cache() {
   local cache_url='https://luv.swa.sh/nix-cache?priority=30'
   local public_key='luv.swa.sh-1:PpD45iCBkJ38ZkvlyZcLiGdIz6yVehXn3fm1JvG18Bw='
+  local nix_user
   local config=/etc/nix/nix.custom.conf
   local setting
   local changed=false
   local effective_config
+
+  nix_user=$(id -un)
 
   sudo install -d -m 0755 /etc/nix
   if ! sudo test -e "$config"; then
@@ -82,7 +85,8 @@ configure_luv_cache() {
   fi
   for setting in \
     "extra-substituters = $cache_url" \
-    "extra-trusted-public-keys = $public_key"; do
+    "extra-trusted-public-keys = $public_key" \
+    "extra-trusted-users = $nix_user"; do
     if ! sudo grep -Fqx "$setting" "$config"; then
       printf '%s\n' "$setting" | sudo tee -a "$config" >/dev/null
       changed=true
