@@ -173,17 +173,26 @@ outward triangle soup.  The largest star owns 25 triangles, within a fixed
 
 The renderer uploads the atlas once as 256 fixed blocks of 76 =uvec4= records:
 one triangle-count header and room for 75 biased local points.  Streaming
-chunks retain their fiber selector and upload only four unsigned words per
-active site.  The sun-shadow pass consumes the same two buffers through a
-smaller mesh stage.  There is deliberately no task shader or runtime fallback;
-the direct dispatch is the foundation until a concrete device failure earns a
-different path.
+chunks resolve their at-most-nine neighboring chains once, let every occupied
+cell vote into its eight lattice corners, and upload only four unsigned words
+per nonempty, nonfull star.  The sun-shadow pass consumes the same two buffers
+through a smaller mesh stage.  There is deliberately no task shader or runtime
+fallback; the direct dispatch is the foundation until a concrete device
+failure earns a different path.
 
 The first scene fragment ABI is similarly narrow: world point, flat triangle
 normal, current and previous clip positions, and shadow coordinate.  It uses
 one textureless top/side/bottom treatment.  Materials, colored voxel light,
 attachment frames, alpha cohorts, and variable bevel policy are outside this
 new terrain path rather than dormant branches inside its dense loop.
+
+The old general mesher is gone, not retained as an oracle.  Its packed
+template ABI, ambient-occlusion tables, compiled chamfer algebra, edge and fan
+planners, material-width variation and repair passes, compression pass, query
+profiler, SIMD fiber benchmark, and their historical test corpus can all be
+recovered from Git if they ever explain a real problem.  Until then the atlas,
+the small star selector, shader compilation, and inspected production frames
+are the whole geometry argument.
 
 The standalone atelier still permits semantic reduction.
 =LUFT_RENDER_MODE=clear= submits a clear and copy with no shader pipeline;

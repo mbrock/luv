@@ -4,21 +4,14 @@
   :description "Canonical cubical topology and integer manifold-sheet meshing."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("sb-simd")
   :serial t
   :components ((:file "luft/luft")
                (:file "luft/voxel-light")
                (:file "luft/mesh")
-               (:file "luft/mesh-query")
                (:file "luft/star-geometry")
                (:file "luft/star-atlas")
                (:file "luft/star-table")
-               (:file "luft/mesh-realization")
-               (:file "luft/mesh-variation-policy")
-               (:file "luft/mesh-variation-plan")
-               (:file "luft/mesh-variation-emit")
-               (:file "luft/mesh-variation")
-               (:file "luft/mesh-compression"))
+               (:file "luft/mesh-query"))
   :in-order-to ((test-op (test-op "luft/test"))))
 
 (defsystem "luft/test-support"
@@ -116,49 +109,12 @@
   :entry-point "luft.render:main")
 
 (defsystem "luft/render/test"
-  :description "Executable claims for the indexed integer-mesh renderer."
+  :description "Executable claims for the 256-star mesh renderer."
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on ("luft/render" "luft/test-support" "luv/test-support")
-  :serial t
-  :components ((:file "luft/render/tests")
-               (:file "luft/render/quantity-tests")
-               (:file "luft/render/frame-quantity-tests")
-               (:file "luft/render/flame-quantity-tests")
-               (:file "luft/render/instrument-tests")
-               (:file "luft/render/tracy-capture-tests")
-               (:file "luft/render/live-artifact-tests")
-               (:file "luft/render/metabar-tests")
-               (:file "luft/render/lobby-tests")
-               (:file "luft/render/status-bar-tests")
-               (:file "luft/render/application-agent-tests"))
+  :components ((:file "luft/render/star-tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
              (uiop:symbol-call '#:luv.test-support '#:test-package
                                '#:luft.render.tests)))
-
-(defsystem "luft/mesh-query-profile"
-  :description "Stage-isolated statistical profiles of the LUFT mesh query."
-  :version "0.0.1"
-  :author "Mikael Brockman"
-  :depends-on ("luft/renderer" "sb-sprof")
-  :components ((:file "luft/mesh-query-profile")))
-
-(defsystem "luft/z-fiber-benchmark"
-  :description "Scalar and native-SIMD experiments for full-height LUFT fibers."
-  :version "0.0.1"
-  :author "Mikael Brockman"
-  :depends-on ("luft" "luv" "sb-simd")
-  :components ((:file "luft/z-fiber-benchmark"))
-  :in-order-to ((test-op (test-op "luft/z-fiber-benchmark/test"))))
-
-(defsystem "luft/z-fiber-benchmark/test"
-  :description "Differential checks for LUFT Z-fiber benchmark kernels."
-  :version "0.0.1"
-  :author "Mikael Brockman"
-  :depends-on ("luft/z-fiber-benchmark" "luv/test-support")
-  :components ((:file "luft/z-fiber-benchmark-tests"))
-  :perform (test-op (operation component)
-             (declare (ignore operation component))
-             (uiop:symbol-call '#:luv.test-support '#:test-package
-                               '#:luft.z-fiber-benchmark.tests)))

@@ -1618,9 +1618,7 @@ all-members inspection/test convention."
        :assembly-summary-masks assembly-summary-masks
        :summary-stocks summary-stocks
        :summary-count summary-count
-       :chamfer-algebra
-       (luft:make-compiled-chamfer-algebra
-        assembly-summary-masks summary-stocks summary-count)))))
+       :chamfer-algebra nil))))
 
 (defun make-compiled-material-chamfer-stock-function (program)
   "Capture PROGRAM's dense lanes as one dispatch-free chamfer resolver."

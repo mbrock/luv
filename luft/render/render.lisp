@@ -1370,58 +1370,31 @@ mesh light sidecars and packed body/flame frames finalized."
         :mesh-entries (list (cons +unkeyed-scene-mesh-output+ root))
         :unkeyed-mesh-p t)))))
 
-(defun %make-scene-union-mesh
-    (scene solid bevel-width stock-function chamfer-stock-function)
-  "Build SCENE's one undecorated closed occupied-union boundary."
-  (luft:make-surface-mesh
-   solid
-   :stock-function (or stock-function (constantly 0))
-   :source-stock-function
-   (unless stock-function (make-scene-face-stock-function scene))
-   :chamfer-stock-function chamfer-stock-function
-   :bevel-width bevel-width))
-
 (declaim (ftype function make-scene-regional-meshes))
 
 (defun scene-regional-mesh-tree
     (scene bevel-width &optional bevel-profile
      &key reusable-light-generation)
-  "Return the common regional compiler's meshes as one borrow-only tree."
+  "Flatten the regional star streams into one static mesh."
+  (declare (ignore bevel-width bevel-profile))
   (multiple-value-bind (owners census diagnostics generation)
       (make-scene-regional-meshes
-       scene bevel-width bevel-profile
+       scene 1 nil
        :reusable-light-generation reusable-light-generation)
-    (if owners
-        (let* ((meshes (mapcar #'cdr owners))
-               (root
-                 (or (find-if
-                      (lambda (mesh)
-                        (plusp (luft:surface-mesh-triangle-count mesh)))
-                      meshes)
-                     (first meshes))))
-          (let ((companions (remove root meshes :test #'eq)))
-            (when companions
-              (setf (luft:surface-mesh-companions root)
-                    (append (luft:surface-mesh-companions root) companions))))
-          ;; ROOT has just acquired the other canonical owner trees as
-          ;; companions.  Rebuild its unkeyed manifest after that mutation;
-          ;; the worker's keyed owner manifest no longer describes this public
-          ;; single-tree product.
-          (values
-           root census diagnostics
-           (make-scene-mesh-generation-value
-            scene (scene-mesh-generation-request-stamp generation)
-            (scene-mesh-generation-light-generation generation)
-            :mesh-entries (list (cons +unkeyed-scene-mesh-output+ root))
-            :unkeyed-mesh-p t)))
-        (multiple-value-bind (root empty-generation)
-            (decorate-scene-mesh
-             (%make-scene-union-mesh
-              scene (scene-solid scene) bevel-width nil
-              (make-compiled-material-chamfer-stock-function
-               (scene-material-program scene)))
-             scene)
-          (values root census diagnostics empty-generation)))))
+    (let* ((domain (luft:chain-domain (scene-solid scene)))
+           (words
+             (apply #'concatenate '(simple-array (unsigned-byte 32) (*))
+                    (mapcar (lambda (entry)
+                              (luft:surface-mesh-star-site-words (cdr entry)))
+                            owners)))
+           (root (luft:make-surface-mesh domain words)))
+      (values
+       root census diagnostics
+       (make-scene-mesh-generation-value
+        scene (scene-mesh-generation-request-stamp generation)
+        (scene-mesh-generation-light-generation generation)
+        :mesh-entries (list (cons +unkeyed-scene-mesh-output+ root))
+        :unkeyed-mesh-p t)))))
 
 (defun make-render-mesh
     (source &key stock-function chamfer-stock-function
@@ -1452,70 +1425,6 @@ use MAKE-WHOLE-DOMAIN-DIAGNOSTIC-MESH explicitly."
            :reusable-light-generation reusable-light-generation)
         (declare (ignore census diagnostics))
         (values mesh generation)))))
-
-(defun make-whole-domain-diagnostic-mesh
-    (source &key stock-function chamfer-stock-function
-                 (bevel-width luft:+mesh-bevel-width+))
-  "Build the explicit whole-domain chain/scene oracle for diagnostics only."
-  (etypecase source
-    (scene
-     (let* ((chamfer
-              (or chamfer-stock-function
-                  (make-compiled-material-chamfer-stock-function
-                   (scene-material-program source))))
-            (mesh
-              (%make-scene-union-mesh
-               source (scene-solid source) bevel-width stock-function chamfer)))
-       (decorate-scene-mesh mesh source)))
-    (luft:chain
-     (luft:make-surface-mesh
-      source :stock-function (or stock-function #'default-face-stock)
-      :chamfer-stock-function
-      (or chamfer-stock-function (lambda (stocks) (first stocks)))
-      :bevel-width bevel-width))))
-
-(defun make-material-bevel-mesh (scene profile)
-  "Build one watertight mesh with a semantic material width at each site.
-
-The ordinary width-one mesher supplies one exact topology witness.  PROFILE is
-compiled after that build into a dense stock-to-material-mask lane.  Each
-canonical lattice vertex ORs the masks of all incident stocks: terrain-only,
-architecture-only, and mixed stars select the profile's terrain, architecture,
-and contact widths.  The unchanged witness triangles form the transitions.
-
-The second value is a five-entry vector counting sites at widths zero through
-four; the third is repair diagnostics; the fourth is the immutable realized
-SCENE-MESH-GENERATION.  Production always contracts T-junctions."
-  (check-type scene scene)
-  (check-type profile material-bevel-profile)
-  (scene-regional-mesh-tree scene 1 profile))
-
-(defun make-uncontracted-material-bevel-diagnostic-mesh (scene profile)
-  "Build the deliberately open whole-domain pre-contraction bevel oracle."
-  (check-type scene scene)
-  (check-type profile material-bevel-profile)
-  (let* ((solid (scene-solid scene))
-         (chamfer-stock-function
-           (make-compiled-material-chamfer-stock-function
-            (scene-material-program scene)))
-         (witness
-           (%make-scene-union-mesh
-            scene solid 1 nil chamfer-stock-function)))
-    (multiple-value-bind (stock-masks site-widths)
-        (compile-material-bevel-site-policy profile)
-      (multiple-value-bind (mesh census diagnostic)
-          (luft:vary-uncontracted-surface-mesh-bevel-widths-from-stock-masks-diagnostic
-           witness stock-masks site-widths)
-        (multiple-value-bind (decorated generation)
-            (decorate-scene-mesh mesh scene)
-          (values decorated census diagnostic generation))))))
-
-(defun make-material-bevel-meshes (scene profile)
-  "Return the single site-local material bevel mesh in renderer slot zero."
-  (multiple-value-bind (mesh census diagnostics generation)
-      (make-material-bevel-mesh scene profile)
-    (declare (ignore census diagnostics))
-    (values (list (cons 0 mesh)) generation)))
 
 (defparameter *gallery*
   ;; Each entry is one isolated complex, named by the star configuration it
@@ -1961,12 +1870,8 @@ same cached trilinear voxel-light sample across bevel primitives."
      0 0 0 0 vocabulary revision (length assemblies) descriptor-words)))
 
 (defun make-render-population (meshes)
-  "Prepare the star-site ABI, retaining the previous path as a diagnostic oracle."
-  (if (every (lambda (mesh)
-               (not (null (luft:surface-mesh-star-site-words mesh))))
-             meshes)
-      (%make-star-render-population meshes)
-      (%make-legacy-render-population meshes)))
+  "Prepare the sole terrain ABI: active sites indexing the fixed star atlas."
+  (%make-star-render-population meshes))
 
 (defstruct (renderer-slot-provenance
              (:constructor %make-renderer-slot-provenance
@@ -5603,59 +5508,58 @@ chunk is empty; excluding that owner drops real boundary triangles."
 The first value is an alist of output owner to final mesh.  Every guarded
 owner uses the same width-one star selector; context owners are retained only
 while scene decoration establishes cross-chunk light provenance."
-  (luft:with-surface-mesh-workspace ()
-    (let* ((owner-scene (streaming-mesh-snapshot-scene snapshot))
-           (scene (streaming-mesh-snapshot-input-scene snapshot))
-           (neighborhood (streaming-mesh-snapshot-union-neighborhood snapshot)))
-      (labels ((mesh-owner (key)
-                 (let ((chain (gethash key neighborhood)))
-                   (unless chain
-                     (error "Chunk ~D was not captured by this regional snapshot."
-                            key))
-                   (zone (:luft/rematerialize :value (luft:chain-count chain))
-                     (luft:mesh-star-chunk
-                      chain key :outside-domain-policy :air))))
-               (decorate-owners (owners &optional surface-context)
-                 (decorate-scene-meshes
-                  owners scene :surface-context surface-context
-                  :generation-scene owner-scene
-                  :attachment-source-owners
-                  (streaming-mesh-snapshot-resident-source-keys snapshot)
-                  :request-stamp (streaming-mesh-snapshot-stamp snapshot)
-                  :reusable-light-generation
-                  (streaming-mesh-snapshot-reusable-light-generation snapshot)
-                  :realize-torch-light-p
-                  (streaming-mesh-snapshot-realize-torch-light-p snapshot))))
-        (handler-bind
-            ((luft:missing-chunk
-               (lambda (condition)
-                 (multiple-value-bind (chain present-p)
-                     (gethash (luft:missing-chunk-key condition) neighborhood)
-                   (if present-p
-                       (invoke-restart 'luft:use-chunk chain)
-                       (invoke-restart 'luft:treat-as-air)))))
-             (luft:outside-domain
-               (lambda (condition)
-                 (declare (ignore condition))
-                 (invoke-restart 'luft:treat-as-air))))
-          (let* ((output-keys
-                   (streaming-mesh-snapshot-output-keys snapshot))
-                 (all-owners
-                   (mapcar (lambda (key) (cons key (mesh-owner key)))
-                           (streaming-mesh-snapshot-witness-keys snapshot)))
-                 (owners
-                   (remove-if-not
-                    (lambda (entry)
-                      (member (car entry) output-keys :test #'eql))
-                    all-owners))
-                 (surface-context
-                   (remove-if
-                    (lambda (entry)
-                      (member (car entry) output-keys :test #'eql))
-                    all-owners)))
-            (multiple-value-bind (decorated generation)
-                (decorate-owners owners surface-context)
-              (values decorated nil nil generation))))))))
+  (let* ((owner-scene (streaming-mesh-snapshot-scene snapshot))
+         (scene (streaming-mesh-snapshot-input-scene snapshot))
+         (neighborhood (streaming-mesh-snapshot-union-neighborhood snapshot)))
+    (labels ((mesh-owner (key)
+               (let ((chain (gethash key neighborhood)))
+                 (unless chain
+                   (error "Chunk ~D was not captured by this regional snapshot."
+                          key))
+                 (zone (:luft/rematerialize :value (luft:chain-count chain))
+                   (luft:mesh-star-chunk
+                    chain key :outside-domain-policy :air))))
+             (decorate-owners (owners &optional surface-context)
+               (decorate-scene-meshes
+                owners scene :surface-context surface-context
+                :generation-scene owner-scene
+                :attachment-source-owners
+                (streaming-mesh-snapshot-resident-source-keys snapshot)
+                :request-stamp (streaming-mesh-snapshot-stamp snapshot)
+                :reusable-light-generation
+                (streaming-mesh-snapshot-reusable-light-generation snapshot)
+                :realize-torch-light-p
+                (streaming-mesh-snapshot-realize-torch-light-p snapshot))))
+      (handler-bind
+          ((luft:missing-chunk
+             (lambda (condition)
+               (multiple-value-bind (chain present-p)
+                   (gethash (luft:missing-chunk-key condition) neighborhood)
+                 (if present-p
+                     (invoke-restart 'luft:use-chunk chain)
+                     (invoke-restart 'luft:treat-as-air)))))
+           (luft:outside-domain
+             (lambda (condition)
+               (declare (ignore condition))
+               (invoke-restart 'luft:treat-as-air))))
+        (let* ((output-keys
+                 (streaming-mesh-snapshot-output-keys snapshot))
+               (all-owners
+                 (mapcar (lambda (key) (cons key (mesh-owner key)))
+                         (streaming-mesh-snapshot-witness-keys snapshot)))
+               (owners
+                 (remove-if-not
+                  (lambda (entry)
+                    (member (car entry) output-keys :test #'eql))
+                  all-owners))
+               (surface-context
+                 (remove-if
+                  (lambda (entry)
+                    (member (car entry) output-keys :test #'eql))
+                  all-owners)))
+          (multiple-value-bind (decorated generation)
+              (decorate-owners owners surface-context)
+            (values decorated nil nil generation)))))))
 
 (defun make-scene-regional-meshes
     (scene bevel-width &optional bevel-profile
