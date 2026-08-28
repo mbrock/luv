@@ -78,6 +78,7 @@ configuration is used whenever it exists."
                 (wiki:make-site documents
                                 :source-files sources
                                 :systems (and code (wiki::code-systems sources))
+                                :commits (and code (wiki::read-git-history (root)))
                                 :source-directory (root)))))))
 
 ;;; Plain text

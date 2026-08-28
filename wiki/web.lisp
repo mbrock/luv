@@ -75,13 +75,18 @@ Redefining NAME replaces its provider without disturbing provider order."
        "/style.css" "style.css" "text/css; charset=utf-8"
        #'luv.css:stylesheet-text))
      (when (site-source-files site)
-       (cons
-        (html "/source.html" "source.html" (lambda () (render-source-index site)))
+       (append
+        (list (html "/source.html" "source.html" (lambda () (render-source-index site))))
         (loop for file in (site-source-files site)
               for output = (source-page-name file)
               collect (let ((file file))
                         (html (concatenate 'string "/" output) output
-                              (lambda () (render-source-page file)))))))
+                              (lambda () (render-source-page file)))))
+        (loop for commit in (site-commits site)
+              for output = (commit-page-name commit)
+              collect (let ((commit commit))
+                        (html (concatenate 'string "/" output) output
+                              (lambda () (render-commit-page commit site)))))))
      (let ((root (source-root)))
        (when root
          (append

@@ -846,6 +846,32 @@ Done when: every source file has a page reachable from the site header,
 definitions are anchored and linked from symbols, and code references open
 locally rather than on GitHub.  All hold.
 
+* DONE Make Source show the work, not only the inventory
+:PROPERTIES:
+:ID: I028OJ
+:END:
+
+Intent: make =Source= answer what has actually been changing before it offers
+the longer-lived ASDF catalogue.  Its scope and ordering should be explicit,
+its useful navigation should survive on a phone, and the generated dependency
+graph should not dominate a question it cannot answer.
+
+Evidence: [[file:history.lisp][wiki/history.lisp]] reads the recent history available to the rendering
+checkout into disposable commit and changed-path objects.  =source.html= now
+ranks paths by commits touching them, presents a compact commit feed with local
+links into browsed Lisp and Org files, and gives each commit a metadata page.
+The live Clack server reads a bounded patch from Git on demand; a static build
+states that it cannot and links to GitHub.  The source catalogue names its
+allowlisted ASDF families, uses responsive system cards with dependency links,
+and puts the old Mermaid graph in a diagnostic disclosure.  Source-file pages
+replace their hidden mobile sidebar with a current-system file disclosure.
+
+Done when: recent intense work is visible before fait-accompli source, the live
+site can inspect a commit without leaving the wiki, and Source, its catalogue,
+and a source file have no horizontal overflow at a 390-pixel viewport.  The
+renderer tests, full repository tests, dynamic route checks, and browser checks
+cover those claims.
+
 * DONE The site shows code references to figures
 :PROPERTIES:
 :ID: PF39II

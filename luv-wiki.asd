@@ -23,6 +23,7 @@ Spinneret, S-expression CSS and JavaScript, dynamic hosting, and publication."
                              (:file "lisp")
                              (:file "dexp")
                              (:file "style")
+                             (:file "history")
                              (:file "source")
                              (:file "web")
                              (:file "asdf"))))

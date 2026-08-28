@@ -40,6 +40,7 @@
                  (:file "voxel-fields-and-windows")
                  (:file "vocabularies")
                  (:file "luft")
+                 (:file "luft-substrate")
                  (:file "luft-spell-effects")
                  (:file "luft-miters")
                  (:file "luft-sites")

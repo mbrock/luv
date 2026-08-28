@@ -13,6 +13,8 @@
                  :documentation "SOURCE-FILEs of the systems the site browses.")
    (systems :initarg :systems :initform '() :accessor site-systems
             :documentation "SYSTEM-ENTRYs in dependency order, for the source index.")
+   (commits :initarg :commits :initform '() :accessor site-commits
+            :documentation "Recent commits available from the rendering checkout.")
    (definitions :initarg :definitions :initform '() :accessor site-definitions
                 :documentation "DEFINITIONs read from the source files, if any.")
    (definition-table :initform (make-hash-table :test 'equalp) :accessor site-definition-table
@@ -490,10 +492,10 @@ markup) on the right, the main column, and a footer."
            (:p.eyebrow "luv")
            (:h1 (:a :href (href "index.html") "Workshop wiki")))
           (:nav.doors
-           (:a :class (if (member kind '("page" "pages") :test #'equal) "door selected" "door")
-               :href (href "pages.html")
-               (:span.door-title "Pages")
-               (:span.door-meta (format nil "~D pages of design memory"
+           (:a :class (if (member kind '("page" "pages" "design") :test #'equal) "door selected" "door")
+               :href (href "index.html")
+               (:span.door-title "Design")
+               (:span.door-meta (format nil "~D pages of workshop memory"
                                         (length (site-documents *site*)))))
            (:a :class (if (equal kind "work") "door selected" "door") :href (href "work.html")
                (:span.door-title "Work")
@@ -657,6 +659,9 @@ popovers when a mention is hovered or tapped."
      (lambda ()
        (spinneret:with-html
          (:h1 title)
+         (when (string= (document-name document) "index")
+           (:p.design-catalogue
+            (:a :href "pages.html" "Browse all pages and figures →")))
          (dolist (child (element-children document))
            (render-html child))
          (render-definition-cards)
@@ -667,9 +672,10 @@ popovers when a mention is hovered or tapped."
                         append (loop for definition in (gethash (heading-id figure)
                                                                 (site-code-references *site*))
                                      append (definition-mentions definition)))))))
+     :kind "design"
      :crumbs (if (string= (document-name document) "index")
-                 (list (cons title nil))
-                 (list (cons "Pages" "pages.html") (cons title nil))))))
+                 (list (cons "Design" nil))
+                 (list (cons "Design" "index.html") (cons title nil))))))
 
 (defun render-pages-page (site)
   "Emit pages.html: every wiki page with its headings, each a link to its
@@ -681,23 +687,34 @@ figure, work marks flagged; a dense table."
      "Pages"
      (lambda ()
        (spinneret:with-html
-         (:h1 "Pages")
-         (:p.lede "Every page of the wiki with its headings.  Each heading is a figure with a
-stable ID; work marks carry their status.")
-         (:table.pages
-          (:tbody
-           (dolist (document (site-documents site))
-             (:tr
-              (:td.page-title
-               (:a :href (site-page-name document)
-                   (or (document-title document) (document-name document))))
-              (:td.page-headings
-               (dolist (figure (document-figures document))
-                 (:a :class (format nil "heading level-~D~@[ marked~]"
-                                    (heading-level figure) (heading-keyword figure))
-                     :href (figure-href (heading-id figure) :site site)
-                     (render-heading-title figure))))))))))
-     :body-class "wide")))
+         (:h1 "All pages")
+         (:p.lede "The complete catalogue of design memory. Open a page to see its figures;
+work marks remain flagged by status.")
+         (:div.pages
+          (dolist (document (site-documents site))
+            (let* ((figures (document-figures document))
+                   (active (count-if (lambda (figure)
+                                       (member (heading-keyword figure)
+                                               '("NEXT" "TODO" "WAIT" "IDEA")
+                                               :test #'string=))
+                                     figures)))
+              (:article.page-entry
+               (:h2 (:a :href (site-page-name document)
+                        (or (document-title document) (document-name document))))
+               (:p.page-meta
+                (format nil "~D figure~:P · ~D active work mark~:P"
+                        (length figures) active))
+               (when figures
+                 (:details.page-headings
+                  (:summary "Browse figures")
+                  (:div
+                   (dolist (figure figures)
+                     (:a :class (format nil "heading level-~D~@[ marked~]"
+                                        (heading-level figure) (heading-keyword figure))
+                         :href (figure-href (heading-id figure) :site site)
+                         (render-heading-title figure))))))))))))
+     :body-class "wide"
+     :crumbs (list (cons "Design" "index.html") (cons "All pages" nil)))))
 
 (defparameter *work-statuses*
   '(("NEXT" . "the current best small bets")
@@ -747,7 +764,10 @@ They live beside the design they move; this is only a view.")
                                (render-inlines (heading-title mark)))
                            (:span.work-page (document-name (heading-document mark))))
                          (let ((excerpt (figure-excerpt mark 260)))
-                           (when excerpt (:p.work-intent excerpt))))))))))
+                           (when excerpt
+                             (:p.work-intent excerpt " "
+                              (:a.continue :href (figure-href (heading-id mark) :site site)
+                                           "Continue →")))))))))))
      :body-class "wide")))
 
 (defun call-with-html-output (stream thunk)

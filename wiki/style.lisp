@@ -128,7 +128,7 @@
    ("&:hover" :color --accent :border-color --accent))
   (".doors"
    :display grid
-   :grid-template-columns (repeat 'auto-fit (minmax 10rem 1fr))
+   :grid-template-columns (repeat 'auto-fit (minmax 8rem 1fr))
    :gap 0.65rem)
   (".door"
    :display grid
@@ -763,15 +763,21 @@ table: each pair a subgrid row of its two-column box."
 (define-style narrow-screens
   "Narrow screens: one column, smaller title, ragged prose."
   (:media "screen and (max-width: 90ch)"
-   ((".library" ".doors") :grid-template-columns (minmax 0 1fr))
+   (".library" :grid-template-columns (minmax 0 1fr))
+   (".doors" :grid-template-columns (repeat 2 (minmax 0 1fr)))
    ("h1" :font-size 1.65rem)
    ("p" :text-align start)
    ("body.source-page main" :display block)
    (".source-nav" :display none)
+   (".mobile-source-nav" :display block)
    ;; The trail keeps its ends: the first crumb and the current page.
    (("a.crumb:not(:first-of-type)" "a.crumb:not(:first-of-type) + .crumb-sep")
     :display none)
-   (".status:has(.crumb-sep) .status-right" :display none)))
+   (".status:has(.crumb-sep) .status-right" :display none))
+  (:media "screen and (max-width: 34rem)"
+   (".doors" :display flex :overflow-x auto :scrollbar-width thin)
+   (".door" :flex 0 0 auto :min-width 5.5rem :padding 0.5rem 0.6rem)
+   (".door-meta" :display none)))
 
 (define-style figure-cards
   "Figure and definition cards shown beside mentions."
@@ -877,27 +883,168 @@ table: each pair a subgrid row of its two-column box."
    :font-size 0.85rem
    :margin-bottom 0.2rem))
 
+(define-style source-activity
+  "Recent commits, system cards, and live commit patches."
+  (("section.activity" "section.source-catalogue")
+   :margin 2.5rem 0
+   :scroll-margin-top 3rem)
+  (".section-heading"
+   :display flex
+   :align-items baseline
+   :justify-content space-between
+   :gap 1rem
+   :border-bottom (hairline)
+   :margin-bottom 1rem
+   ("h2" :margin 0 0 0.35rem)
+   ("p" :margin 0 :color --muted :font-size 0.85rem))
+  (".hot-paths"
+   :padding 0.8rem 1rem
+   :margin 0 0 1rem
+   :border (hairline)
+   :border-radius 8px
+   :background (color-mix --paper 96% --accent)
+   ("h3" :margin 0 0 0.5rem :font-size 0.85rem :text-transform uppercase
+         :letter-spacing 0.05em :color --muted)
+   ("ol" :display grid :grid-template-columns (repeat 'auto-fit (minmax 18rem 1fr))
+         :gap 0.25rem 1.5rem :margin 0 :padding 0 :list-style none)
+   ("li" :display flex :justify-content space-between :gap 0.7rem
+         :min-width 0 :font 500 0.82rem/1.4 --mono-font)
+   ("li a" :display block :max-width 100% :overflow-wrap anywhere)
+   ("li span" :color --muted :white-space nowrap))
+  ("ol.commit-feed"
+   :margin 0
+   :padding 0
+   :list-style none
+   :border-top (hairline))
+  ("li.commit"
+   :padding 0.7rem 0
+   :border-bottom (hairline))
+  (".commit-heading"
+   :display flex
+   :align-items baseline
+   :justify-content space-between
+   :gap 1rem)
+  (".commit-subject" :color --ink :font-weight 650 :overflow-wrap anywhere)
+  (".commit-id" :font 600 0.78rem/1.4 --mono-font :white-space nowrap)
+  (".commit-meta"
+   :margin 0.18rem 0 0
+   :color --muted
+   :font-size 0.8rem)
+  ("details.commit-files"
+   :margin-top 0.3rem
+   :font-size 0.8rem
+   ("summary" :color --muted :cursor pointer)
+   ("ul" :margin 0.35rem 0 0 :padding 0 :list-style none)
+   ("li" :display flex :justify-content space-between :gap 1rem
+         :padding 0.12rem 0 :font-family --mono-font)
+   ("li > :first-child" :min-width 0 :overflow-wrap anywhere))
+  (".change-stat" :color --muted :white-space nowrap :font-family --mono-font)
+  (".scope-note"
+   :max-width 68rem
+   :padding 0.75rem 1rem
+   :border-left 3px solid --accent
+   :background (color-mix --paper 96% --accent)
+   :font-size 0.88rem)
+  (".system-cards"
+   :display grid
+   :grid-template-columns (repeat 'auto-fit (minmax 22rem 1fr))
+   :gap 0.75rem)
+  (".system-card"
+   :min-width 0
+   :padding 0.8rem 1rem
+   :border (hairline)
+   :border-radius 8px
+   :scroll-margin-top 3rem
+   ("&:target" :border-color --accent :box-shadow inset 0 0 0 1px --accent))
+  (".system-heading"
+   :display flex :justify-content space-between :align-items baseline :gap 1rem
+   ("h3" :margin 0 :font-size 1rem :overflow-wrap anywhere)
+   ("span" :color --muted :font-size 0.78rem :white-space nowrap))
+  ((".system-description" ".system-relations")
+   :margin 0.4rem 0
+   :font-size 0.84rem)
+  (".system-relations" :color --muted)
+  ("details.system-file-list"
+   :margin-top 0.55rem
+   ("summary" :cursor pointer :color --accent :font-size 0.84rem)
+   ("& > div" :margin-top 0.4rem :padding-top 0.4rem :border-top (hairline)))
+  ("details.dependency-diagnostic"
+   :margin 1.5rem 0 2rem
+   :padding 0.7rem 1rem
+   :border (hairline)
+   :border-radius 8px
+   ("& > summary" :cursor pointer :font-weight 650))
+  (".mobile-source-nav"
+   :display none
+   :margin 0.8rem 0 1.2rem
+   :padding 0.55rem 0.75rem
+   :border (hairline)
+   :border-radius 8px
+   ("summary" :cursor pointer :font-size 0.85rem)
+   ("ul" :list-style none :padding 0.5rem 0 0 :margin 0)
+   ("li" :padding 0.15rem 0 :font 500 0.82rem/1.4 --mono-font)
+   ("li.current" :font-weight 700)
+   (".directory" :color --muted))
+  (".commit-page" :max-width 88rem)
+  (".commit-kicker" :margin-bottom 0 :color --muted :font-size 0.85rem)
+  (".commit-byline" :color --muted)
+  (".commit-page-files"
+   :padding-left 0 :list-style none
+   ("li" :display flex :justify-content space-between :gap 1rem
+         :padding 0.2rem 0 :font-family --mono-font))
+  ("pre.commit-patch"
+   :max-width 100%
+   :overflow auto
+   :padding 1rem
+   :border (hairline)
+   :border-radius 8px
+   :background --code-bg
+   :font-size 0.78rem
+   ("code" :background none :padding 0))
+  (".patch-note" :padding 0.7rem 1rem :border-left 3px solid --accent
+                 :background (color-mix --paper 96% --accent))
+  (:media "screen and (max-width: 52rem)"
+   (".section-heading" :display block)
+   (".hot-paths ol" :grid-template-columns (repeat 2 (minmax 0 1fr)))
+   (".hot-paths li" :display block)
+   (".hot-paths li a" :overflow hidden :text-overflow ellipsis :white-space nowrap)
+   (".hot-paths li span" :display block :margin-top 0.1rem)
+   (".system-cards" :grid-template-columns (minmax 0 1fr))
+   (".commit-diffstat" :display none)
+   (".commit-heading" :display block)
+   (".commit-id" :display inline-block :margin-top 0.2rem)
+   (("details.commit-files li" ".commit-page-files li") :display block)
+   (".change-stat" :display block :margin-top 0.1rem))
+  (:media "screen and (max-width: 90ch)"
+   (".mobile-source-nav" :display block)))
+
 (define-style pages-table
-  "The Pages table."
-  ("table.pages"
-   :width 100%
-   :margin 1rem 0 2rem
-   :font-size 0.9rem
-   ("td"
-    :padding 0.45rem 1rem 0.45rem 0
-    :border-bottom (hairline)
-    :vertical-align top))
-  ("td.page-title"
-   :width 18rem
-   :font-weight 700
-   ("a" :color --ink))
-  ("td.page-headings a.heading"
-   :display inline-block
-   :margin 0 0.9em 0.15em 0
-   :color --ink
-   ("&.level-2" :color --muted :font-size 0.92em)
-   ("&:hover" :color --accent :text-decoration none)
-   (".mark" :font-size 0.65em)))
+  "The progressively disclosed catalogue of design pages."
+  ("p.design-catalogue" :margin -0.5rem 0 1.5rem :font-size 0.9rem)
+  ("div.pages"
+   :display grid
+   :grid-template-columns (repeat 'auto-fit (minmax 22rem 1fr))
+   :gap 0.75rem
+   :margin 1rem 0 2rem)
+  ("article.page-entry"
+   :min-width 0
+   :padding 0.75rem 0.9rem
+   :border (hairline)
+   :border-radius 8px
+   ("h2" :margin 0 :font-size 1rem)
+   ("h2 a" :color --ink)
+   ("p.page-meta" :margin 0.25rem 0 :color --muted :font-size 0.8rem))
+  ("details.page-headings"
+   :margin-top 0.45rem
+   ("summary" :cursor pointer :color --accent :font-size 0.85rem)
+   ("& > div" :margin-top 0.45rem :padding-top 0.4rem :border-top (hairline))
+   ("a.heading" :display block :padding 0.16rem 0 :color --ink :font-size 0.88rem
+                 :overflow-wrap anywhere)
+   ("a.heading.level-2" :padding-left 0.8rem :color --muted :font-size 0.82rem)
+   ("a.heading:hover" :color --accent :text-decoration none)
+   (".mark" :font-size 0.65em))
+  (:media "screen and (max-width: 52rem)"
+   ("div.pages" :grid-template-columns (minmax 0 1fr))))
 
 (define-style work-table
   "The Work page: marks by status."

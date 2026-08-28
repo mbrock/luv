@@ -85,7 +85,7 @@
   (let ((luv.wiki::*site* site)
         (luv.wiki::*rendering-document* nil)
         (luv.wiki::*page-prefix* "")
-        (luv.wiki::*page-kind* "page"))
+        (luv.wiki::*page-kind* "atlas"))
     (luv.wiki::render-page-frame
      "The stars, by symmetry"
      (lambda ()
@@ -145,8 +145,8 @@
           (:code "LUFT:STAR-TRIANGLES") ".")
         (:script :src "luft-star-atlas.js" :defer t)))
      :body-class "wide atlas-page"
-     :kind "page"
-     :crumbs '(("Pages" . "pages.html") ("The stars, by symmetry"))
+     :kind "atlas"
+     :crumbs '(("Stars" . nil))
      :right "star atlas")))
 
 (defun star-atlas-resources (site)

@@ -127,6 +127,7 @@ Nothing here refers to anything.
          (site (wiki:make-site (list doc)))
          (html (wiki:render-document-string doc site)))
     (true (search "<title>A test page</title>" html))
+    (true (search "<a class=\"door selected\" href=index.html><span class=door-title>Design</span>" html))
     (true (search "<section class=figure id=XYZ123>" html))
     (true (search "<section class=\"figure work-mark\" id=UVW456>" html))
     (true (search "<span class=\"mark mark-next\">NEXT</span>" html))
@@ -143,6 +144,22 @@ Nothing here refers to anything.
     (true (search "Mentioned in: <a href=#UVW456>A work mark</a>" html))
     (true (search "mention <a class=mention href=#XYZ123 title=\"First figure\">#XYZ123</a> with" html))
     (true (search "<h3><span class=\"mark mark-next\">" html))))
+
+(define-test git-history-output-is-a-commit-model
+  (let* ((record-separator (code-char 30))
+         (field-separator (code-char 31))
+         (text (format nil "~Cabcdef0123456789~Cabcdef0~C2026-08-28T12:34:56Z~CAmp~CChange the workshop~%~%12~C3~Cwiki/source.lisp~%"
+                       record-separator field-separator field-separator
+                       field-separator field-separator #\Tab #\Tab))
+         (commits (wiki::parse-git-history text))
+         (commit (first commits))
+         (change (first (wiki::repository-commit-changes commit))))
+    (true (= 1 (length commits)))
+    (true (string= "abcdef0" (wiki::repository-commit-short-id commit)))
+    (true (string= "Change the workshop" (wiki::repository-commit-subject commit)))
+    (true (string= "wiki/source.lisp" (wiki::commit-change-path change)))
+    (true (= 12 (wiki::commit-change-additions change)))
+    (true (= 3 (wiki::commit-change-deletions change)))))
 
 (define-test capture-links-transclude-generated-images-and-videos
   (let* ((doc

@@ -174,6 +174,7 @@ is not read again within one image.")
       (make-site (system-documents system)
                  :source-files sources
                  :systems (code-systems sources)
+                 :commits (read-git-history root)
                  :source-directory root))))
 
 ;;; Rendering

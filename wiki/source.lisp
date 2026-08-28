@@ -165,6 +165,22 @@ DETAILS per system, the one holding CURRENT open and CURRENT marked."
                    (:a :href (concatenate 'string *page-prefix* (source-page-name file))
                        (render-file-path (source-file-relative-path file)))))))))))))
 
+(defun render-mobile-source-nav (current &optional (site *site*))
+  "A small in-flow file navigator where the complete sidebar does not fit."
+  (let ((entry (find (source-file-system-name current) (site-systems site)
+                     :key #'system-entry-name :test #'string=)))
+    (when entry
+      (spinneret:with-html
+        (:details.mobile-source-nav
+         (:summary
+          (:span "Browse ") (:strong (system-entry-name entry))
+          (:span (format nil " · ~D files" (length (system-entry-files entry)))))
+         (:ul
+          (dolist (file (system-entry-files entry))
+            (:li :class (if (eq file current) "current" nil)
+             (:a :href (concatenate 'string *page-prefix* (source-page-name file))
+                 (render-file-path (source-file-relative-path file)))))))))))
+
 (defun render-source-page (file)
   "Emit the page for FILE: its definitions table and every top-level form
 as dexp boxes, each anchored by its starting line, with the sidebar of all
@@ -192,6 +208,7 @@ files beside it on wide screens."
            (format nil "~D definition~:P · " (length (source-file-definitions file)))
            (:a :href (concatenate 'string (site-source-url *site*) (source-file-relative-path file))
                "on GitHub"))
+          (render-mobile-source-nav file)
           (render-source-toc file)
           (let ((*lisp-package* (source-file-package file)))
             (:div.lisp.source
@@ -298,10 +315,173 @@ fundamentals at the top."
            (loop for (from . to) in edges
                  do (format out "  ~A --> ~A~%" (node from) (node to)))))))))
 
+(defun change-local-href (change &optional (site *site*))
+  "A changed path's page in this site, when the browser covers it."
+  (let* ((path (commit-change-path change))
+         (source (find path (site-source-files site)
+                       :key #'source-file-relative-path :test #'string=)))
+    (cond (source (concatenate 'string *page-prefix* (source-page-name source)))
+          ((and (starts-with "wiki/" path)
+                (string= (or (pathname-type path) "") "org"))
+           (let ((document (find (pathname-name path) (site-documents site)
+                                 :key #'document-name :test #'string=)))
+             (and document
+                  (concatenate 'string *page-prefix* (site-page-name document))))))))
+
+(defun render-change-path (change)
+  (let ((href (change-local-href change)))
+    (if href
+        (spinneret:with-html (:a :href href :title (commit-change-path change)
+                                 (commit-change-path change)))
+        (spinneret:with-html (:span (commit-change-path change))))))
+
+(defun commit-totals (commit)
+  (values (loop for change in (repository-commit-changes commit)
+                sum (or (commit-change-additions change) 0))
+          (loop for change in (repository-commit-changes commit)
+                sum (or (commit-change-deletions change) 0))))
+
+(defun hot-commit-paths (commits &key (limit 10))
+  "Paths touched by the most of COMMITS, ranked by commit count."
+  (let ((counts (make-hash-table :test 'equal)))
+    (dolist (commit commits)
+      (dolist (path (remove-duplicates
+                     (mapcar #'commit-change-path (repository-commit-changes commit))
+                     :test #'string=))
+        (incf (gethash path counts 0))))
+    (let ((ranked
+            (sort (loop for path being the hash-keys of counts using (hash-value count)
+                        collect (cons path count))
+                  (lambda (a b)
+                    (if (= (cdr a) (cdr b))
+                        (string< (car a) (car b))
+                        (> (cdr a) (cdr b)))))))
+      (subseq ranked 0 (min limit (length ranked))))))
+
+(defun render-recent-activity (site)
+  "Recent repository work, with local links where the wiki can browse a path."
+  (let ((commits (site-commits site)))
+    (when commits
+      (spinneret:with-html
+        (:section.activity :id "activity"
+         (:div.section-heading
+          (:h2 "Recent activity")
+          (:p (format nil "~D commit~:P available in this checkout, ~A through ~A."
+                      (length commits)
+                      (subseq (repository-commit-date (car (last commits))) 0 10)
+                      (subseq (repository-commit-date (first commits)) 0 10))))
+         (:div.hot-paths
+          (:h3 "Most active paths")
+          (:ol
+           (dolist (entry (hot-commit-paths commits))
+             (let ((change (make-instance 'commit-change :path (car entry)
+                                          :additions nil :deletions nil)))
+               (:li (render-change-path change)
+                    (:span (format nil "~D commit~:P" (cdr entry))))))))
+         (:ol.commit-feed
+          (dolist (commit commits)
+            (multiple-value-bind (additions deletions) (commit-totals commit)
+              (:li.commit
+               (:div.commit-heading
+                (:a.commit-subject
+                 :href (concatenate 'string *page-prefix* (commit-page-name commit))
+                 (repository-commit-subject commit))
+                (:a.commit-id :href (commit-github-url commit)
+                              (repository-commit-short-id commit)))
+               (:p.commit-meta
+                (:time :datetime (repository-commit-date commit)
+                       (format nil "~A ~A"
+                               (subseq (repository-commit-date commit) 0 10)
+                               (subseq (repository-commit-date commit) 11 16)))
+                " · " (repository-commit-author commit)
+                (:span.commit-diffstat
+                 (format nil " · +~D −~D · ~D file~:P"
+                         additions deletions
+                         (length (repository-commit-changes commit)))))
+               (:details.commit-files
+                (:summary "Changed paths")
+                (:ul
+                 (dolist (change (repository-commit-changes commit))
+                   (:li (render-change-path change)
+                        (when (commit-change-additions change)
+                          (:span.change-stat
+                           (format nil "+~D −~D"
+                                   (commit-change-additions change)
+                                   (commit-change-deletions change)))))))))))))))))
+
+(defun render-commit-page (commit site)
+  "A commit's metadata everywhere, and its patch when rendered by live Clack."
+  (let ((*page-prefix* "../")
+        (*page-kind* "source")
+        (*rendering-document* nil))
+    (render-page-frame
+     (repository-commit-subject commit)
+     (lambda ()
+       (spinneret:with-html
+         (:article.commit-page
+          (:p.commit-kicker "Commit " (:code (repository-commit-short-id commit)))
+          (:h1 (repository-commit-subject commit))
+          (:p.commit-byline
+           (repository-commit-author commit) " · "
+           (:time :datetime (repository-commit-date commit)
+                  (repository-commit-date commit))
+           " · " (:a :href (commit-github-url commit) "on GitHub"))
+          (:h2 "Changed paths")
+          (:ul.commit-page-files
+           (dolist (change (repository-commit-changes commit))
+             (:li (render-change-path change)
+                  (when (commit-change-additions change)
+                    (:span.change-stat
+                     (format nil "+~D −~D"
+                             (commit-change-additions change)
+                             (commit-change-deletions change)))))))
+          (if *dynamic-server-p*
+              (let ((patch (commit-patch commit (site-source-directory site))))
+                (if patch
+                    (progn (:h2 "Patch") (:pre.commit-patch (:code patch)))
+                    (:p.patch-note "This patch is unavailable or too large; use GitHub for the full diff.")))
+              (:p.patch-note "The live wiki renders this patch from its checkout; this static build links to GitHub instead.")))))
+     :body-class "wide commit-view"
+     :crumbs (list (cons "Source" "source.html")
+                   (cons "Recent activity" "source.html#activity")
+                   (cons (repository-commit-short-id commit) nil)))))
+
+(defun render-system-card (entry site)
+  (let ((dependents
+          (remove-if-not (lambda (other)
+                           (member (system-entry-name entry)
+                                   (system-entry-depends-on other) :test #'string=))
+                         (site-systems site))))
+    (spinneret:with-html
+      (:article.system-card :id (system-anchor (system-entry-name entry))
+       (:div.system-heading
+        (:h3 (system-entry-name entry))
+        (:span (format nil "~D file~:P" (length (system-entry-files entry)))))
+       (when (system-entry-description entry)
+         (:p.system-description (system-entry-description entry)))
+       (when (system-entry-depends-on entry)
+         (:p.system-relations (:strong "Uses ")
+          (loop for name in (system-entry-depends-on entry)
+                for first = t then nil
+                do (unless first (spinneret:html ", "))
+                   (:a :href (format nil "#~A" (system-anchor name)) name))))
+       (when dependents
+         (:p.system-relations (:strong "Used by ")
+          (loop for dependent in dependents
+                for first = t then nil
+                do (unless first (spinneret:html ", "))
+                   (:a :href (format nil "#~A"
+                                           (system-anchor (system-entry-name dependent)))
+                       (system-entry-name dependent)))))
+       (when (system-entry-files entry)
+         (:details.system-file-list
+          (:summary "Browse files")
+          (:div
+           (dolist (file (system-entry-files entry))
+             (render-file-entry file)))))))))
+
 (defun render-source-index (site)
-  "Emit source.html: the dependency graph of the systems, then one dense
-table in dependency order — system, description, files — where a file's
-count opens its definitions in a popover."
+  "Emit source.html: recent work and the browsed ASDF systems."
   (let ((*page-prefix* "")
         (*page-kind* "source")
         (*rendering-document* nil)
@@ -311,22 +491,27 @@ count opens its definitions in a popover."
      (lambda ()
        (spinneret:with-html
          (:h1 "Source")
-         (:p.lede "The systems of luv and of the wiki that renders it, fundamentals
-first.  A file's count opens its definitions; symbols in the pages link to
-their definitions and " (:code "#ID") " mentions link to figures.")
-         (:p.graph-note "Dependencies between the systems, essential edges only (test
-systems and the aggregate " (:code "luv") " left out); names drop the "
-                        (:code "luv/") " prefix.")
-         (render-system-graph site)
-         (:table.systems
-          (:thead (:tr (:th "system") (:th "description") (:th "files")))
-          (:tbody
+         (:p.lede "Implementation evidence: what has changed recently, and the Lisp source
+that the wiki can read structurally rather than merely print.")
+         (render-recent-activity site)
+         (:section.source-catalogue :id "catalogue"
+          (:div.section-heading
+           (:h2 "Source catalogue")
+           (:p (format nil "~D files in ~D ASDF systems, ordered prerequisites first."
+                       (length (site-source-files site)) (length (site-systems site)))))
+          (:p.scope-note "Included: Common Lisp components registered under the "
+                         (:code "luv") ", " (:code "luvcraft") ", " (:code "mcluv") ", "
+                         (:code "luft") ", " (:code "luv-wiki") ", and "
+                         (:code "luv-wiki-site") " families. Test systems appear beside the
+rest; scripts, Nix/deployment files, assets, native sources, and other systems do not.")
+          (:div.system-cards
            (dolist (entry (site-systems site))
-             (:tr :id (system-anchor (system-entry-name entry))
-              (:td.system-name (system-entry-name entry))
-              (:td.system-description (or (system-entry-description entry) ""))
-              (:td.system-files
-               (dolist (file (system-entry-files entry))
-                 (render-file-entry file)))))))
+             (render-system-card entry site))))
+         (:details.dependency-diagnostic
+          (:summary "Dependency diagnostic")
+          (:p.graph-note "Essential ASDF edges only. Test systems and the aggregate "
+                         (:code "luv") " root are omitted; labels drop the "
+                         (:code "luv/") " prefix.")
+          (render-system-graph site))
          (render-file-cards)))
      :body-class "wide source-index")))
