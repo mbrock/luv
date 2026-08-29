@@ -305,8 +305,8 @@
          (key (luft:chunk-key-at x y))
          (resident
            (luft.render::materialize-authored-world-chunk source key 1)))
-    (true (= 0 (luft.render::streaming-scene-residency-radius scene))
-          "ordinary play keeps the proved one-source render publication")
+    (true (= 1 (luft.render::streaming-scene-residency-radius scene))
+          "ordinary play overlaps visible chunks across player seam crossings")
     (true (= 1 luft.render::+authored-world-gameplay-radius+)
           "collision reads a wider resident guard for seam crossing")
     (true (= (luft.render::large-world-terrain-height source x y) z)

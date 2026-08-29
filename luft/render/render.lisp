@@ -4687,7 +4687,7 @@ a future LoD must bring an explicit transition representation."
 
 (defun make-authored-world-streaming-scene
     (&key (horizontal-bits +large-world-horizontal-bits+)
-      (seed +large-world-seed+) (frames-per-load 1) (residency-radius 0))
+      (seed +large-world-seed+) (frames-per-load 1) (residency-radius 1))
   "Make the canonical large demand world without materializing any chunk."
   (let* ((domain (luft:make-world-domain
                   :x-bits horizontal-bits :y-bits horizontal-bits))
