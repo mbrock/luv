@@ -426,6 +426,40 @@ commands or live actions, observed result, interpretation, and resulting
 decision.  Failed experiments belong here when they eliminate an architectural
 path.  Do not paste complete test transcripts.
 
+** 2026-08-29 — Overlap visible publication across player seam crossings
+
+- /Thread./ =T-01a04a2e-fab5-7206-90bd-94d965339cb9=.
+- /Revision./ Diagnostics =aa44837= and publication correction =8f48d30= on
+  integrated =main=.
+- /Question./ Why does ordinary play still expose asymmetric white void and
+  appear to shift discontinuously at chunk boundaries despite correct support
+  and steady local frame rate?
+- /Commands and live actions./ Traced visible, guard, owner, eviction, camera,
+  and projection ownership; added live player/camera/chunk/focus and
+  visible/desired/resident/GPU/queue status; ran focused =luft/render/test= and
+  =make test=; restarted Vulkan play; inspected the settled spawn and an exact
+  x=63/64 road crossing; checked canvas failures and publication counts.
+- /Observation./ Ordinary play deliberately published one radius-zero source.
+  Its canonical owner closure extends only toward +X and +Y, and crossing a
+  seam therefore exchanged the entire visible 64-square tile.  Zoom exposed
+  neighbors which were resident for meshing and collision but intentionally
+  withheld from rendering.  No coordinate rebasing exists.  Radius-one play
+  settles at the domain-corner spawn with 4 visible, 25 desired/resident, and
+  9 GPU owners; after crossing x=64 it settles with 6 visible, 30
+  desired/resident, and 12 GPU owners.  Both queues are empty, the inspected
+  frames have continuous terrain around the player, and 383 focused claims
+  plus all 22 available suites pass.
+- /Interpretation./ The proof window was mistaken for a playable publication
+  policy.  Player-centered radius-one overlap preserves collision ownership
+  and canonical geometry while moving entering/departing rows beyond the
+  ordinary view.  The apparent coordinate jump was the picture changing under
+  a continuous camera, not a floating-origin or world-coordinate operation.
+- /Decision./ Make radius one the ordinary authored-world render default while
+  retaining exact guards, immutable cohorts, and the unchanged geometry and
+  appearance ABIs.  Keep #JDB26Y paused until local play confirms practical
+  continuity and acceptable GPU cost; use the new status fields to report any
+  remaining zoom-dependent edge rather than guessing a still wider square.
+
 ** 2026-08-28 — Reproduce and repair the default-play failure
 
 - /Thread./ =T-01a04a2e-fab5-7206-90bd-94d965339cb9=.
@@ -616,8 +650,11 @@ path.  Do not paste complete test transcripts.
   exactly eight u8 samples beside it.  #JDB26Y is next and has not begun.
 - A post-integration ordinary-play correction moved spawn onto source-derived
   road support, made demand player-centered, separated radius-one collision
-  occupancy from one-source rendering, stopped settled per-frame rebuilding,
-  and replaced the trench-like road cut with a traversable flat core.
+  occupancy from rendering, stopped settled per-frame rebuilding, and replaced
+  the trench-like road cut with a traversable flat core.  Subsequent local
+  feedback rejected the one-source proof window: ordinary rendering now uses
+  an overlapping radius-one source window and exposes its ownership counts in
+  the shared workbench status line.
 
 ** 2026-08-28 — The sanctuary regained terrain identity without material geometry
 
@@ -663,14 +700,12 @@ path.  Do not paste complete test transcripts.
 :ID: MTAAPI
 :END:
 
-The architectural parent reviews the #H1ASQU ordinary-play correction at
-=b628705=: source-derived supported spawn, pre-demand camera follow,
-player-centered demand, radius-one collision over immutable guard residents,
-idempotent settled activation, traversable road core, four-direction live
-movement, seam support, and the corrected inspected start frame.  If accepted,
-resume the paused #JDB26Y execution thread from the new integrated parent
-revision.  Keep the measured four-owner/~736k-triangle renderer cost explicit
-rather than folding an unproved optimization into voxel-light semantics.
+The user plays integrated =8f48d30= with the status diagnostics from =aa44837=:
+cross several x and y chunk seams, rotate in both directions, and test the
+usual zoom range.  Confirm that terrain remains continuous while =p=, =c=, and
+=f= chunk fields advance and stream queues settle, and report the =v/d/r/g/q=
+values at any remaining white edge.  If practical continuity and GPU cost are
+acceptable, resume paused #JDB26Y from the then-current integrated parent.
 
 Do not begin persistence, transparency, LoD, vertical streaming, or the later
-journey-content stage while reviewing or integrating #H1ASQU.
+journey-content stage while reviewing this streaming correction.
