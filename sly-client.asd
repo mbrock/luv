@@ -4,10 +4,10 @@
   :author "Mikael Brockman"
   :depends-on ((:require "sb-bsd-sockets")
                (:require "sb-posix")
+               "luv/parinfer"
                "cl-json")
   :serial t
-  :components ((:file "parinfer/implementation")
-               (:file "scripts/sly-client"))
+  :components ((:file "scripts/sly-client"))
   :build-operation "program-op"
   :build-pathname "build/sly-client"
   :entry-point "sly-client:entry-point")
