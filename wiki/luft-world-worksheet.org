@@ -431,6 +431,61 @@ commands or live actions, observed result, interpretation, and resulting
 decision.  Failed experiments belong here when they eliminate an architectural
 path.  Do not paste complete test transcripts.
 
+** 2026-08-29 — Attribute the chunk-crossing pause by phase
+:PROPERTIES:
+:ID: MOCU82
+:END:
+
+- /Thread./ =T-01a04a2e-fab5-7206-90bd-94d965339cb9=.
+- /Revision./ Coarse instrumentation commit =66db30d= on integrated =main=,
+  based exactly on =0dcd1b2=.
+- /Question./ Which source, activation, mesh, appearance, and publication
+  phases account for the perceptible pause when the authored world crosses a
+  chunk seam?
+- /Commands and live actions./ Added opt-in =zdefun=, =zdefmethod=, and nested
+  =zone= boundaries around the frame-to-worker streaming transaction, without
+  placing zones inside cell or mesh loops.  Reloaded the durable Luft image;
+  measured one active-scene rebuild, one authored chunk materialization, and
+  one complete resident regional mesh with =luv:with-cpu-trace=; sampled five
+  rebuilds with SB-SPROF; inspected SBCL's derived types and disassembly for
+  =%site-order<= and =%normalize-vector=; and attempted two Tracy captures of
+  live seam crossings.  Ran focused =luft/render/test=, =make test=, strict
+  Parinfer, =git diff --check=, =scripts/wiki dangling=, live status/failure
+  checks, and an empty ASDF load plan.
+- /Observation./ On this orb, rebuilding six visible material chunks and the
+  radius-one collision region took 416 ms and allocated 27.0 MiB.  Merely
+  appending normalized resident chains took 4 ms and copying visible materials
+  took 16 ms; globally sorting and normalizing the combined collision chain
+  took 388 ms.  SB-SPROF collected 205 samples over five rebuilds: Common Lisp
+  =sort= accounted for 79.5% inclusive, while =%site-order<=, boxed/generic
+  comparison, and hairy vector access dominated self samples.  SBCL derives
+  only =(FUNCTION (T T) BOOLEAN)= for the comparator and unconstrained inputs
+  for =%normalize-vector=.  One representative 93,396-cell source chunk took
+  92 ms and 25.5 MiB: 32 ms/18.2 MiB generated material cells, 4 ms assembled
+  the chain, and 56 ms/4.0 MiB normalized it.  Capturing and compiling the
+  settled 6-source/12-owner mesh region took 80 ms and 19.2 MiB; 52 ms was
+  appearance compilation, while all owner rematerializations together occupied
+  the remaining measured mesh time.  Live Tracy did expose the canvas phases,
+  but the orb compositor parked =canvas/present= for roughly 2.4 seconds per
+  captured frame and the captures did not retain the production-worker work;
+  they are not valid end-to-end crossing timings.
+- /Interpretation./ The blink is not an undifferentiated loading cost and is
+  not primarily the simplified mesher.  Source chunks are produced serially
+  but asynchronously, and regional meshing is asynchronous.  Once the complete
+  guard is ready, however, the canvas thread concatenates already-normalized
+  collision chunks and re-sorts their entire union before it can schedule the
+  mesh cohort.  That synchronous global normalization is the dominant measured
+  hitch and repeats work each resident chunk has already performed.  Absolute
+  orb timings do not predict the RX 6600 workstation, but phase attribution and
+  the algorithmic duplication do not depend on GPU speed.
+- /Decision./ Retain the semantic zone skeleton as permanently opt-in
+  instrumentation.  Keep #JDB26Y paused.  The next measured change should make
+  collision activation consume the already-normalized resident chains without
+  a global comparison sort—by a linear merge or an explicitly chunked collision
+  view—then repeat the same bounded trace and workstation seam-crossing check.
+  Do not optimize the comparator or mesh appearance first: either could improve
+  an isolated number while preserving the synchronous whole-region rebuild.
+
 ** 2026-08-29 — Overlap visible publication across player seam crossings
 
 - /Thread./ =T-01a04a2e-fab5-7206-90bd-94d965339cb9=.
@@ -705,12 +760,14 @@ path.  Do not paste complete test transcripts.
 :ID: MTAAPI
 :END:
 
-The user plays integrated =8f48d30= with the status diagnostics from =aa44837=:
-cross several x and y chunk seams, rotate in both directions, and test the
-usual zoom range.  Confirm that terrain remains continuous while =p=, =c=, and
-=f= chunk fields advance and stream queues settle, and report the =v/d/r/g/q=
-values at any remaining white edge.  If practical continuity and GPU cost are
-acceptable, resume paused #JDB26Y from the then-current integrated parent.
+Prototype collision activation over the immutable, already-normalized resident
+chunk chains without concatenating and comparison-sorting the whole gameplay
+region.  Preserve exact =chain= semantics and collision behavior, compare the
+candidate against the current builder result in focused tests, and repeat
+#MOCU82's bounded active-scene trace and SB-SPROF sample before changing source
+materialization, mesh appearance, or publication policy.  Confirm the resulting
+seam crossing on the user's workstation because the orb's blocked Vulkan
+presentation is not an end-to-end timing oracle.
 
-Do not begin persistence, transparency, LoD, vertical streaming, or the later
-journey-content stage while reviewing this streaming correction.
+Keep #JDB26Y paused.  Do not begin persistence, transparency, LoD, vertical
+streaming, or the later journey-content stage during this activation experiment.
