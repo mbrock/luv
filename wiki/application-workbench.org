@@ -192,6 +192,23 @@ and GPU creation currently occur at the owning application boundary; whether a
 later worker should prepare more of a candidate is a measurement question, not
 a property already claimed here.
 
+[[file:../luv/build/model.lisp][Build assimilation]] has its own retained
+whole-outcome model.  A =BUILD-RUN= owns ordered =BUILD-ACTION= instances,
+diagnostics, source locations, backtraces, logs, cancellation, and terminal
+state.  ASDF instrumentation is dynamically inert outside a current run, so
+the same executor can serve a console build or a live workbench without making
+process-global compiler hooks the source of truth.  A live run may retain its
+original condition for immediate inspection; snapshots copy the stable report,
+condition type, action identity, source location, and backtrace needed by a
+presenter or artifact.
+
+Test execution composes with this model but is not a kind of build.  Repository
+tests still prepare one combined ASDF load plan to a quiescent boundary before
+forking disposable workers.  A later retained test-run model may own suites,
+shards, scheduling, workers, and results while referring to its preparation
+build run; those test-domain policies do not belong on =BUILD-RUN= or
+=BUILD-ACTION=.
+
 [[file:../hal/application-lifecycle.lisp][Application lifecycle]] gives teardown
 the same whole-value shape.  Named release steps all receive an attempt while
 the original failure remains primary.  A stop controller grants teardown to

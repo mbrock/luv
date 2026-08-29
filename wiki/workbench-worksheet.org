@@ -380,6 +380,29 @@ are compatibility for the deferred Luvcraft migration, not dependencies of a
 conforming Luft shell.  TEFU1T deletes only Luft's status adapter and does not
 pull Luvcraft into the workbench substrate.
 
+** 2026-08-29 — Assimilation uses a retained build run, not a condition title
+
+The shared =luv/build= system owns CLOS runs, actions, diagnostics, immutable
+snapshots, cooperative cancellation, and an ASDF plan executor.  Compiler
+conditions are copied while their dynamic source context exists; a live image
+also retains the original condition, but no retained restart is advertised as
+a later UI action.  Guarded =ASDF:PERFORM= methods do nothing without a
+dynamically current run.
+
+The old =make= progress reporter is now one console presentation and
+disposable-process deadline policy over this model.  File-descriptor
+redirection and hard thread interruption stay there; they are not capabilities
+of the live executor.  #ZNLZQU should make source update own a child build run
+and present its action and diagnostic snapshots rather than reducing failure
+to one condition line.
+
+=make test= now uses the same executor only for its combined preparation load
+plan.  Forked test execution remains a separate domain and begins only after
+the console adapter has joined and the preparation run has reached its terminal
+state.  A future test-run model should compose a preparation =BUILD-RUN= rather
+than inherit from it; suites, shards, scheduling, workers, and results remain
+test-owned concepts.
+
 * Experiment notes
 :PROPERTIES:
 :ID: WTODNV
@@ -617,6 +640,46 @@ path.  Do not paste complete test transcripts.
   Wiki validation/build and final Git checks also passed.  The rebased stage
   remains one local commit ahead of =origin/main= and unpushed.
 
+** 2026-08-29 — Retained build model and test preparation executor
+
+- /Execution thread and revision./ Architectural parent thread, exact clean
+  =origin/main= base =b978d980e2eae566a6d22635027b8968069d2797=; changes remained
+  local and unpushed while recorded.
+- /Questions./ Can the useful explicit ASDF action plan, progress, deadlines,
+  and logs from the command-line builder become a retained CLOS model suitable
+  for McCLIM without importing process-global file-descriptor redirection or
+  hard thread interruption into a live image?  Can =make test= share that
+  executor without conflating build actions with suites, shards, workers, and
+  test results?
+- /Commands and actions./ Read the source-update, canvas live-load, build
+  progress, all build entry points, and test coordinator paths; consulted the
+  Oracle separately about the build boundary and test composition; added
+  =luv/build= and =luv/build/test=; moved the old console implementation behind
+  its existing compatibility bootstrap; changed test preparation to construct
+  one retained run and execute its existing combined plan; strengthened the
+  fork-worker compile guard.  Ran strict Parinfer on every changed Lisp file,
+  focused =asdf:test-system :luv/build=, a complete cold =make=, the
+  Ghostty-enabled full =make test= path, and =git diff --check=.
+- /Observed result./ The retained model tests passed 13 checks, including
+  action failure identity, rich backtrace retention, promotion of an already
+  observed action condition to terminal diagnostic, synchronous await,
+  executor success, and cooperative cancellation.  Cold =make= preserved the
+  existing progress/log presentation while compiling both programs and warming
+  Sly.  The full environment found Ghostty readable, strict Parinfer passed,
+  final cold preparation compiled 276 files through the new executor, and all 25 suites /
+  29 tasks passed with 8 forked workers.  The new =luv/build/test= ran as an
+  ordinary prepared worker task.  No worker performed a compile operation.
+- /Interpretation./ Build state, ASDF execution, and presentation are now
+  separable.  Dynamic instrumentation preserves exact action ownership without
+  affecting unrelated ASDF work.  Test preparation is genuinely a build run;
+  parallel test scheduling remains correctly outside that type hierarchy.
+- /Resulting decisions./ Keep raw conditions only in the live run and stable
+  reports/source/backtraces in snapshots; keep CLI-only hard deadline and FD
+  policy in the console adapter; preserve one combined preparation plan and the
+  post-preparation fork boundary.  #ZNLZQU remains incomplete: its next cut is
+  the McCLIM build-run presentation and source-update assimilation migration,
+  not a test scheduler rewrite.
+
 * Completed prose updates
 :PROPERTIES:
 :ID: QF07KG
@@ -673,13 +736,27 @@ path.  Do not paste complete test transcripts.
 - Luvcraft remains green through its existing direct-widget overlay.  #ZNLZQU,
   M-x plus source update, is the next candidate and was not begun.
 
+** 2026-08-29 — Build assimilation foundation completed
+
+- =luv/build= now provides retained CLOS run, action, diagnostic, artifact,
+  source-location, and snapshot objects plus a guarded ASDF executor.
+- The command-line builder remains behavior-compatible as a console/deadline/
+  log presentation over that model; its historical load path is a four-line
+  bootstrap rather than the implementation owner.
+- =make test= uses a retained build run for its single combined preparation
+  plan, then preserves the existing forked scheduler and worker protocol.
+- Focused model checks, cold =make=, and the complete Ghostty-enabled 25-suite
+  run pass.  #ZNLZQU still owns the unbegun UI consumption and migration cut.
+
 * Exact next action
 :PROPERTIES:
 :ID: 53WN6F
 :END:
 
-Review the local #TEFU1T passive-status cutover and its default-startup,
-resize, input, direct-presentation, compatibility, and teardown evidence.  If
-accepted, #ZNLZQU, “Migrate M-x and source update,” is the exact next candidate.
-Do not begin metabar, lobby, service migration, Luvcraft migration, or general
-instrument-system deletion with that next cut.
+Review the retained =luv/build= model, ASDF executor, console adapter, and
+=make test= preparation cut.  If accepted, continue #ZNLZQU by giving the
+source-update workflow a child build run and a McCLIM presentation of action
+progress plus inspectable diagnostics, then migrate M-x and source update into
+the workbench focus/layer regime.  Do not begin test scheduler refactoring,
+metabar, lobby, service migration, Luvcraft migration, or general
+instrument-system deletion with that cut.

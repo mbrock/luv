@@ -28,7 +28,7 @@
 
 (defmethod asdf:perform :around ((operation asdf:compile-op)
                                  (component asdf:component))
-  (if (and *worker-mode* (asdf:output-files operation component))
+  (if *worker-mode*
       (error "Parallel test worker attempted to compile ~A; preparation is incomplete."
              component)
       (call-next-method)))
@@ -85,19 +85,31 @@
     (let* ((operation (asdf:make-operation 'asdf:load-op))
            (plan (asdf/plan:make-plan 'asdf/plan:sequential-plan
                                       operation
-                                      (asdf:find-system (first suites)))))
+                                      (asdf:find-system (first suites))))
+           (run nil))
       (dolist (suite (rest suites))
         (asdf/plan:traverse-action plan operation (asdf:find-system suite) t))
+      (setf run
+            (uiop:symbol-call :luv-build :make-build-run
+                              *project-root* :system :test-suites
+                              :systems suites :operation 'asdf:load-op
+                              :plan plan))
       (uiop:symbol-call :luv-build :start *project-root*
+                        :run run
                         :system :test-suites
                         :plan plan
                         :invocation "make test prepares")
       (handler-case
           (progn
-            (asdf/plan:perform-plan plan)
+            (uiop:symbol-call
+             :luv-build :execute-run
+             (make-instance
+              (uiop:find-symbol* :asdf-build-executor :luv-build)
+              :finalize-p nil)
+             run)
             (if (uiop:symbol-call :luv-build :finish :done) 1 0))
         (error (condition)
-          (uiop:symbol-call :luv-build :failed (princ-to-string condition))
+          (uiop:symbol-call :luv-build :failed condition)
           (uiop:symbol-call :luv-build :finish :error)
           1)))))
 

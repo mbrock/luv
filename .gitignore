@@ -1,5 +1,5 @@
 .claude/worktrees
-build/
+/build/
 capture.png
 capture.ppm
 *.fasl

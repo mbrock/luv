@@ -1,5 +1,31 @@
 (in-package #:asdf-user)
 
+(defsystem "luv/build"
+  :description "Retained CLOS model and ASDF executor for Luv build operations."
+  :version "0.0.1"
+  :depends-on ("uiop")
+  :serial t
+  :components ((:file "luv/build/package")
+               (:file "luv/build/model")
+               (:file "luv/build/asdf"))
+  :in-order-to ((test-op (test-op "luv/build/test"))))
+
+(defsystem "luv/build/cli"
+  :description "Console presentation and disposable-process policy for Luv builds."
+  :version "0.0.1"
+  :depends-on ("luv/build" (:require "sb-concurrency") (:require "sb-posix"))
+  :components ((:file "luv/build/cli")))
+
+(defsystem "luv/build/test"
+  :description "Executable retained-model and ASDF-executor claims."
+  :version "0.0.1"
+  :depends-on ("luv/build" "luv/test-support")
+  :components ((:file "luv/build/tests"))
+  :perform (test-op (operation component)
+             (declare (ignore operation component))
+             (uiop:symbol-call '#:luv.test-support '#:test-package
+                               '#:luv.build.tests)))
+
 (defsystem "luv/test-support"
   :description "The repository's Parachute test runner."
   :version "0.0.1"
