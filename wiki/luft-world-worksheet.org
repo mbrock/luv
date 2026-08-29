@@ -16,6 +16,11 @@ records what each experiment teaches, and names exactly one next action.
 Execution threads are replaceable working sessions; they read and update this
 worksheet rather than becoming the only place where a decision survives.
 
+[[file:luft-world-model.org][The local voxel world: volume, margin, and generations]] now supplies the
+compact conceptual reference for the spatial hierarchy, local region,
+resident volume, mixed-star boundary precursor, derived products, and
+generation publication which the stages below exercise.
+
 The intended world should feel composed before it feels generated: a river and
 watershed, roads and passes, long sightlines, distinct regions, a substantial
 settlement or fortress, and sparse bridges, ruins, quarries, caves, shrines,

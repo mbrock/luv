@@ -1,0 +1,467 @@
+#+title: The local voxel world: volume, margin, and generations
+#+startup: overview
+
+* A common language for one large world
+:PROPERTIES:
+:ID: R9M0QA
+:END:
+
+This page is the conceptual map of Luft's voxel world.  It names the spaces
+in which the world exists, the finite region an interactive frame can know,
+the compact volumetric facts from which useful boundaries are derived, and
+the products which rendering, collision, navigation, material, and light
+make from those facts.  It is deliberately between mathematics and source:
+precise enough to guide implementations, but not a promise that every noun is
+already one class in =luft/render/render.lisp=.
+
+The organizing picture is:
+
+#+begin_example
+durable world description + sparse edits
+                    |
+                    v
+           resident chunk fields
+       (occupancy, material, other volume)
+                    |
+                    v
+      mixed-star active margin / boundary complex
+           /          |          \
+          v           v           v
+     geometry      contact     navigation ...
+          |                       light/material
+          v
+       prepared CPU render products
+                    |
+                    v
+       coherent GPU publication and frames
+#+end_example
+
+This is not a declaration that all world behavior is two-dimensional.  It is
+a disciplined order of questions: retain compact volumetric truth; cheaply
+identify where neighboring occupancy differs; spend detailed work at that
+active margin; and keep each derived product's ownership and provenance
+explicit.
+
+The nearby [[file:voxel-fields-and-windows.org][Voxel fields and chunk windows]] page develops the reusable domain,
+field, and cross-chunk access vocabulary.  [[file:luft.org][The Luft notebook]] develops packed
+cubical sites, chains, and the star atlas.  This page joins those views into
+one game-world model.
+
+* Two lattices name fine interaction and coarse locality
+:PROPERTIES:
+:ID: QGXMW0
+:END:
+
+The /primal lattice/ is the regular three-dimensional cubical lattice.  An
+integer triple addresses a cell; vertices, edges, and faces are its incident
+cubical sites.  Cell occupancy, block editing, material placement, voxel
+light, and ordinary locomotion all ultimately refer to this fine space.
+
+The /chunk lattice/ partitions the horizontal plane into computationally
+pleasant full-height columns.  Luft currently uses 64×64 XY chunks.  The
+vertical coordinate has eight bits: occupancy fibers reserve 256 bits, while
+ordinary cells lie below the top anchor at =z=255=.  A chunk is therefore one
+64×64 family of complete vertical fibers rather than a stack of independently
+streamed cubes.
+
+#+begin_example
+chunk lattice                           primal lattice inside one chunk
+
+       x                                             x
+       -->                                           -->
+    +-----+-----+-----+                       +---+---+---+---+---+
+  ^ |     |     |     |                     ^ | . | . | . | . | . |
+  | +-----+-----+-----+                     | +---+---+---+---+---+
+  y |     |  F  |     |                     y | . | . | | | . | . |
+    +-----+-----+-----+                       +---+---+|+---+---+
+    |     |     |     |                              | z fiber
+    +-----+-----+-----+                              v
+
+F = chunk containing the current focus
+#+end_example
+
+Chunking does not alter world coordinates.  It factors an XY address into a
+chunk coordinate and a bounded local coordinate, thereby choosing storage,
+work, invalidation, and publication grains.  The primal lattice is where a
+cell is; the chunk lattice is how a finite computation finds the cells near
+its focus.
+
+Luft's current world domain is finite but large.  The same local-region model
+would apply to a procedurally unbounded source: a source answers canonical
+world-coordinate questions, while only a bounded set of answers is resident.
+
+* The local region is a finite question, not a smaller world
+:PROPERTIES:
+:ID: WH0HW1
+:END:
+
+An interactive engine cannot materialize every fact about a potentially vast
+world.  It chooses a /focus/—normally derived from the player's position—and
+asks for a /local active region/ around the containing chunk.  Rendering,
+collision, navigation, lighting, and editing then work from bounded resident
+materializations rather than from the entire source.
+
+The current Luft window is an axis-aligned square in chunk coordinates, using
+Chebyshev distance.  A radius-one visible window is at most 3×3 source chunks.
+This shape is not metaphysically preferable to a circle.  It is useful because
+its bounds, iteration, overlap, and uniform halos are exact and cheap.  A
+future system may distinguish a rectangular publication window, a radial
+visual horizon, and task-specific retention policies without changing the
+spatial hierarchy.
+
+The visible region is not the complete region which must be known.  Local
+algorithms read across their output boundary, so they require /halos/ or
+/aprons/.  Different products need different neighborhoods: the star selector
+reads eight incident cells; light walks face relations; navigation may need
+clearance and support beyond a path endpoint.  A chunk window distinguishes
+resident air, resident solid, unknown nonresident data, and the actual world
+boundary.  Missing residency must never silently become authored air.
+
+#+begin_example
+           retention / dependency guard
+       +---+---+---+---+---+
+       |   |   |   |   |   |
+       +---+---+---+---+---+
+       |   +---+---+---+   |
+       +---| V | V | V |---+
+       |   | V | F | V |   |
+       +---| V | V | V |---+
+       |   +---+---+---+   |
+       +---+---+---+---+---+
+
+F = focus chunk       V = visible/gameplay source window
+outer cells = one schematic guard; actual guards are product-derived
+#+end_example
+
+Current demand can be larger than the picture: source chunks which affect
+half-open mesh outputs are closed under canonical output assignment, then
+expanded for witness and probe dependencies.  Near an interior focus the
+radius-one 3×3 visible set may consequently require as many as 8×8 resident
+source chunks.  Those are roughly 67 million /logical/ cell positions, which
+is precisely why dense per-cell objects and repeated full-volume algorithms
+are unacceptable even though the local region is bounded.
+
+* Volumetric fields are the resident truth
+:PROPERTIES:
+:ID: UJ8YVH
+:END:
+
+The world description is more durable than any resident representation.  It
+may combine absolute-coordinate authored rules, deterministic procedural
+fields, structures, and a sparse edit overlay.  Materializing a chunk answers
+that description over one finite domain.  Evicting the answer does not alter
+the world; loading it again should recover the same answer plus later edits.
+
+At minimum, a resident voxel world needs a canonical material or occupancy
+fact for every relevant cell.  Deeper volume cannot be discarded merely
+because it is not currently visible:
+
+- an edit may expose a formerly buried material;
+- inside/outside and solid clearance are volumetric questions;
+- opening a cave can change distant air connectivity;
+- transparent media and fluids occupy volume even when their interfaces are
+  especially interesting; and
+- voxel light propagates through a volume and is blocked by occupancy.
+
+The promising hot representation is /vertical occupancy fibers/: four =u64=
+words hold all 256 occupancy bits at one XY address, so one 64×64 chunk costs
+128 KiB for occupancy.  Materials can remain a parallel palette-coded or
+columnar field, perhaps with run compression when the evidence earns it.
+Occupancy, material, light, and other quantities may share a domain without
+sharing storage, producer, revision, or lifetime.
+
+This is the intended source of truth for runtime spatial kernels, not quite
+the current implementation.  Today an authored resident chunk owns an
+immutable normalized positive-cell =chain= plus a per-occupied-cell material
+hash table.  The mesher derives and weakly caches the 128 KiB occupancy-fiber
+view from that chain.  The chain is a valuable general cubical-algebra value
+and a useful finite projection for topology, tests, editing experiments, and
+inspection.  Rebuilding and globally searching chains need not remain the hot
+storage strategy for a voxel game.
+
+* The superficial principle concentrates work at change
+:PROPERTIES:
+:ID: PTSJ07
+:END:
+
+The productive optimization is the /superficial principle/: most expensive
+interactive consequences concentrate where neighboring cells disagree.
+Vision sees interfaces; a supported body contacts an interface; an ordinary
+block edit is selected at an interface; light and media cross interfaces; and
+the geometry sent to a rasterizer represents interfaces rather than buried
+solid interiors.
+
+Call this sparse locus the /active margin/.  In cubical language it is a
+boundary complex; in the current mesher its elementary record is an /active
+star/: a lattice vertex whose eight incident cell occupancies include both
+solid and air.  “Surface” may mean several related but nonidentical things:
+
+| Name | Meaning |
+|-
+| exposed cubical faces | oriented solid/air face incidences before beveling |
+| mixed-star active margin | sparse combinatorial neighborhoods where occupancy changes |
+| atlas realization | exact piecewise-linear patches selected for those stars |
+| gameplay terrain surface | the subset and interpretation relevant to walking or another rule |
+
+These distinctions prevent a slogan from becoming a bad representation.
+Causality is often superficial, but compact volumetric fields remain the
+truth from which the margin is derived.  The active margin is a shared sparse
+index into detailed work, not a replacement for all volume.
+
+The active margin should carry or address enough incident information for its
+clients: star position and eight-bit occupancy, nearby material and light
+samples, and provenance tying those readings to one resident generation.
+Products may then share classification without pretending that a render
+triangle, a collision contact, and a navigation node are the same object.
+
+* Bit fibers find mixed stars before geometry exists
+:PROPERTIES:
+:ID: HWSSON
+:END:
+
+For each lattice vertex, the star selector considers the four XY fibers around
+it and paired “above” and “below” Z views.  Across 64 Z positions at once, an
+active bit is:
+
+#+begin_example
+mixed = OR(the eight occupancy readings)
+        AND NOT AND(the eight occupancy readings)
+#+end_example
+
+Thus a star is active exactly when at least one incident cell is occupied and
+at least one is empty.  This is not an XOR of adjacent columns and it does not
+yet construct an oriented chain boundary.  It is the exact cheap predicate
+for whether the fixed star atlas has geometry at that lattice site.
+
+The scalar expression is the definition.  Current implementations preserve it
+through scalar, SSE2, AVX2, NEON, and an explicitly selectable AVX-512 kernel;
+instruction policy is chosen outside the query.  Set-bit iteration visits
+only active Z positions and emits packed =(X Y Z STAR)= records.  The resulting
+combinatorial precursor is already far smaller than a dense voxel traversal
+on ordinary terrain.
+
+#+begin_example
+resident occupancy fibers
+        |
+        | shifted neighborhood views + mixed predicate
+        v
+active stars: (world X, world Y, Z, 8-bit occupancy)
+        |
+        | fixed 256-entry atlas lookup
+        v
+piecewise-linear manifold-sheet patches
+#+end_example
+
+Making this precursor a first-class regional product would let meshing,
+contact, navigation, and appearance begin from the same occupancy evidence.
+It should not force every client through a triangle buffer, nor should it make
+the visual mesher the owner of world semantics.
+
+* The star atlas is canonical geometric interpretation
+:PROPERTIES:
+:ID: WBLCFD
+:END:
+
+Raw cubes can meet only at a vertex or edge.  Rendering their independent
+axis-aligned faces literally creates zero-area pinches, overlapping sheets,
+and ambiguous singular junctions.  Luft's width-one /star atlas/ assigns a
+fixed local triangle patch to each of the 256 possible eight-cell occupancy
+stars.  Bands and junction fans regularize those configurations into explicit,
+non-overlapping manifold sheets.
+
+#+begin_example
+raw occupancy incidence              atlas interpretation
+
+       +---+                                +---+
+       |   |                                |   |\
+       +---+---+                            +---+---+
+           |   |                              \ |   |
+           +---+                                +---+
+
+point/edge-only ambiguity             separated or joined by an explicit patch
+#+end_example
+
+The bevel is therefore more than decoration: it settles the geometric meaning
+of singular cubical incidence.  The result is an exact piecewise-linear
+surface composed from atlas patches.  “Canonical” means that occupancy and the
+atlas determine the patch without a material-dependent topology rule.  It
+does not mean every shading normal is globally smooth, nor that the triangles
+are the only useful form of the boundary.
+
+Material and voxel light remain parallel appearance fields.  Ordinary faces
+have direct adjacent samples; symmetry-tied bands and junctions use stable
+incident sample sets plus explicit commutative reduction policies.  Neither
+field changes the star byte or atlas geometry.
+
+* One margin supports several derived products
+:PROPERTIES:
+:ID: NQORQD
+:END:
+
+The active margin and its volumetric neighborhood can feed several products
+without collapsing their contracts:
+
+- /Rendering/ instantiates atlas patches, associates material and light
+  samples, prepares packed CPU arrays, and uploads immutable GPU resources.
+- /Collision broad phase/ uses occupancy fibers for support, clearance, and
+  swept-volume rejection.  A narrow phase can consult a star and its exact
+  atlas patch where contact with the beveled geometry matters.
+- /Navigation/ identifies supported, clear configurations and connects them
+  across the margin.  It need not iterate every buried solid cell or inherit
+  the player's exact stepping policy as its representation.
+- /Material interaction/ addresses canonical incident cells through the
+  margin while retaining buried material in the volume for later edits.
+- /Voxel light/ uses volumetric transparency and emission fields plus a sparse
+  frontier.  Boundary and active-star products identify shading sites and
+  cross-material relations, but propagation is not itself only a surface
+  operation.
+- /Inspection and algebra/ may project a finite region into Luft chains and
+  boundaries when their generality and executable laws are the point.
+
+Current Luft collision is intentionally simpler than this destination.  It
+binary-searches occupied positive cells in the active =scene-solid= chain and
+applies cubic stair/clearance rules; it does not collide against atlas
+triangles.  The visual manifold is the more exact geometric interpretation,
+while occupancy collision is presently a gameplay approximation.  Sharing
+the precursor makes visual-simulation parity possible without requiring it in
+every query.
+
+* Region generations make paging coherent
+:PROPERTIES:
+:ID: F0FUTI
+:END:
+
+Crossing a chunk boundary changes a mostly overlapping local question.  The
+engine should not destroy the old answer and then construct the new one inside
+a frame.  It should retain an immutable /active generation/ while workers
+prepare the entering fringe and affected products of a /candidate generation/.
+Unchanged chunks and products can be structurally shared.  Demand tokens,
+chunk incarnations, dependency revisions, and generation stamps reject work
+which became stale before completion.
+
+#+begin_example
+interactive threads                      production workers
+
+read active generation  ----------------> immutable captures
+render / collide / play                     |
+       |                                    | materialize entering chunks
+       |                                    | derive margin and products
+       |                                    v
+       |                              candidate generation ready
+       |                                    |
+       +------ between-frame publish <------+
+                      |
+                      v
+             retire departed CPU/GPU data
+             after its last permitted use
+#+end_example
+
+The architectural objective is coherent region publication, not necessarily
+one enormous copied “database” or one magic pointer.  Source chunks, semantic
+fields, CPU meshes, and GPU resources have different construction and
+retirement costs.  A practical transition can stage uploads incrementally
+over several frames, keep a prefetch and retention halo with hysteresis, and
+commit a small immutable publication record only when its declared products
+are mutually consistent.
+
+Current Luft implements important pieces but not this complete whole-region
+transaction.  Source chunk materialization and mesh preparation run on
+background production workers from immutable captures.  A canvas-owner thread
+validates tickets and incarnations, updates the active semantic scene, stages
+a complete affected mesh cohort, creates its GPU resources, and atomically
+replaces an immutable renderer publication.  Semantic collision/material
+state currently advances before the corresponding GPU cohort is published,
+and rebuilding the flattened regional chain can still cause the perceptible
+chunk-crossing hitch.  “Double buffered” is the destination, not an accurate
+name for every current transition.
+
+* Current implementation and the refactoring direction
+:PROPERTIES:
+:ID: A8Y4O2
+:END:
+
+The present large-world path can be read as these operations:
+
+1. =authored-world-source= plus sparse edits describes canonical content.
+2. Camera/player focus selects visible and gameplay source keys, then derives
+   the larger mesh dependency guard.
+3. Workers run =materialize-authored-world-chunk=, producing immutable
+   =resident-cell-chunk= values: one positive-cell chain, material hash, key,
+   and incarnation each.
+4. Once the complete guard is resident,
+   =rebuild-authored-world-resident-values= concatenates gameplay chunk chains
+   into the globally normalized =scene-solid= collision value and copies
+   visible material hashes into =scene-material-cells=.
+5. A =streaming-mesh-snapshot= freezes the relevant chains, fields, source
+   keys, output chunk keys, guards, and provenance for a worker.
+6. The star selector derives occupancy fibers and active stars; decoration
+   derives appearance, and render-population preparation produces the CPU
+   arrays from which the GPU instantiates atlas geometry.
+7. The canvas owner turns the prepared cohort into =mesh-slot= GPU resources
+   and swaps one immutable =renderer-publication= between frames.
+
+Here “mesh owner” in older source and discussion means only the chunk key to
+which an output mesh bucket is assigned.  It is not an object which owns
+source cells and it is unrelated to the canvas owner, which means the one
+thread authorized to mutate live renderer state.  Clearer names are
+=mesh-chunk-key=, =mesh-output=, and =canvas owner=.
+
+The main redundancy is between steps 3–6.  Authored rules first create a hash
+entry per occupied cell; the hash becomes a sorted chain; regional collision
+rebuilds another sorted chain; and meshing converts those chains back into
+dense occupancy fibers before discovering the active margin.  The refactoring
+direction is:
+
+#+begin_example
+source + edits
+    -> first-class chunk occupancy/material fields
+    -> first-class mixed-star active margin
+    -> collision/nav, mesh/appearance, and light products
+
+optional projections: chains, exact atlas contact patches, inspection views
+#+end_example
+
+This preserves the mesher's concise fixed-atlas core.  It moves its most
+generally useful precursor down beside resident world fields, where the rest
+of the voxel engine can consume it without depending on renderer machinery.
+It also gives =render.lisp= natural future boundaries: authored world and
+residency, scene products, streaming/generations, mesh decoration and CPU
+population, renderer resources/publication, and frame encoding.
+
+* Compact vocabulary
+:PROPERTIES:
+:ID: 32Y47D
+:END:
+
+| Noun | Crisp meaning |
+|-
+| world description | durable rules, seed, structures, and sparse edits |
+| primal lattice | fine cubical cell/site coordinate space |
+| chunk lattice | coarse XY partition used for local storage and work |
+| focus | world position from which demand is derived |
+| local active region | finite resident question around the focus |
+| halo / apron / guard | resident context read by a product outside its outputs |
+| chunk window | checked cross-chunk view distinguishing resident, absent, and boundary |
+| voxel field | one semantic value distributed over a finite domain |
+| occupancy fiber | 256 vertical occupancy bits at one XY address |
+| active margin | sparse sites where neighboring occupancy differs |
+| active star | one mixed eight-cell neighborhood at a lattice vertex |
+| star atlas | fixed map from star byte to exact local manifold-sheet patch |
+| chain | general immutable normalized collection of signed cubical sites |
+| derived product | margin, mesh, collision index, nav data, or light justified by inputs |
+| generation | mutually justified immutable regional state and provenance |
+| mesh chunk key | chunk coordinate to which one mesh output bucket is assigned |
+| canvas owner | sole thread permitted to publish and retire live GPU state |
+
+| Verb | Crisp meaning |
+|-
+| demand | derive required chunk/product keys from focus and policy |
+| materialize | answer a finite field question from source and edits |
+| capture | freeze exact inputs and provenance for asynchronous work |
+| classify | find mixed occupancy stars from fiber neighborhoods |
+| realize | map combinatorial stars through the geometric atlas |
+| derive | compute a replaceable product from canonical or resident inputs |
+| stage | retain a complete candidate which is not yet interactive truth |
+| publish | atomically make a validated generation or cohort active |
+| retire | release departed resources after their last valid use |
+| evict | discard a rematerializable resident cache value |

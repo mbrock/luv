@@ -18,6 +18,10 @@ records, finite domains, and frontier programs — is read in
 The next large-world experiments are sequenced in
 [[file:luft-world-worksheet.org][A worksheet for the large Luft world]], so their stage evidence and decisions
 survive the execution threads which carry them out.
+The spatial model beneath that work is introduced in
+[[file:luft-world-model.org][The local voxel world: volume, margin, and generations]]: primal and chunk
+lattices, resident fields, the mixed-star active margin, derived products, and
+coherent asynchronous region publication.
 
 * A site is a lattice anchor, an extent mask, and a polarity
 :PROPERTIES:

@@ -203,6 +203,10 @@ The following are starting paths rather than a table of settled doctrine.
   authored-world work: preserve the fixed star geometry, add palette and light
   as parallel fields, materialize chunks from a durable source, and make the
   first long journey a sequence of measured, reviewable gates.
+- [[file:luft-world-model.org][The local voxel world: volume, margin, and generations]] is the conceptual
+  reference for that world: two lattice scales, finite chunk windows, compact
+  volumetric fields, the mixed-star active margin, atlas realization, derived
+  simulation products, and coherent asynchronous region generations.
 - [[file:temporal-antialiasing.org][Temporal reconstruction in the Luft atelier]] follows a frozen jittered
   view through Vulkan colour and motion attachments, ping-pong history,
   YCoCg rejection, and lens presentation.  It records the resource-ownership
