@@ -14,6 +14,22 @@ as_mbrock()
     runuser -u mbrock -- env HOME=/home/mbrock "$@"
 }
 
+enable_git_annex()
+{
+    # All deployment slots share the control checkout's Git configuration.
+    # Once that checkout has been initialized by git-annex, ordinary checkout
+    # operations may invoke its filter even when they only update source files.
+    annex_bin=$(
+        as_mbrock env \
+            PATH=/nix/var/nix/profiles/default/bin:/usr/bin:/bin \
+            nix develop "path:$control_checkout/nix#annex" \
+                --accept-flake-config --no-write-lock-file -c sh -c \
+                'dirname "$(command -v git-annex)"'
+    )
+    PATH=$annex_bin:$PATH
+    export PATH
+}
+
 build_as_mbrock()
 {
     slot=$1
@@ -58,6 +74,9 @@ deploy()
     commit=$(as_mbrock git -C "$control_checkout" rev-parse origin/main)
     printf 'Target commit: %s\n' "$commit"
     printf 'Active slot: %s; building slot: %s\n' "$active" "$inactive"
+
+    printf '\n\033[1;36mResolving the pinned git-annex\033[0m\n'
+    enable_git_annex
 
     systemctl stop "luv-wiki@$inactive.service"
     if [ -n "$(as_mbrock git -C "$slot" status --porcelain --untracked-files=no)" ]; then
