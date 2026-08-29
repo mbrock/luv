@@ -5148,19 +5148,11 @@ silently empty the desired residency window."
                  for resident = (gethash key (streaming-scene-store scene))
                  sum (hash-table-count
                       (resident-cell-chunk-material-cells resident))))
-         (collision-cell-count
+         (collision-chains
            (loop for key in collision-keys
                  for resident = (gethash key (streaming-scene-store scene))
-                 sum (luft:chain-count (resident-cell-chunk-chain resident))))
-         (builder
-           (luft:make-chain-builder domain
-                                    :initial-capacity collision-cell-count))
+                 collect (resident-cell-chunk-chain resident)))
          (materials (make-hash-table :test #'eql :size cell-count)))
-    (zone :luft/assemble-collision-chunks
-      (dolist (key collision-keys)
-        (let ((resident (gethash key (streaming-scene-store scene))))
-          (luft:chain-builder-add-chain
-           builder (resident-cell-chunk-chain resident)))))
     (zone :luft/assemble-visible-materials
       (dolist (key source-keys)
         (let ((resident (gethash key (streaming-scene-store scene))))
@@ -5168,8 +5160,8 @@ silently empty the desired residency window."
                      (setf (gethash cell materials) offset))
                    (resident-cell-chunk-material-cells resident)))))
     (setf (scene-solid scene)
-          (zone :luft/normalize-collision-chain
-            (luft:finish-chain-builder builder))
+          (zone :luft/assemble-collision-chunks
+            (luft:concatenate-disjoint-chains domain collision-chains))
           (scene-material-cells scene) materials
           (scene-content-revision scene) (1+ (scene-content-revision scene)))
     scene))

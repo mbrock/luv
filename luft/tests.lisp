@@ -13,6 +13,33 @@
     (chain-builder-add-site builder (make-site domain 4 4 4 +cell-extent+ 1))
     (finish-chain-builder builder)))
 
+(defun %test-disjoint-chain-concatenation ()
+  (let* ((domain (make-world-domain :horizontal-bits 8))
+         (left-builder (make-chain-builder domain))
+         (right-builder (make-chain-builder domain)))
+    (dolist (cell '((2 3 4) (1 3 4)))
+      (destructuring-bind (x y z) cell
+        (chain-builder-add-site
+         left-builder (make-site domain x y z +cell-extent+ 1))))
+    (dolist (cell '((65 3 4) (64 3 4)))
+      (destructuring-bind (x y z) cell
+        (chain-builder-add-site
+         right-builder (make-site domain x y z +cell-extent+ 1))))
+    (let* ((left (finish-chain-builder left-builder))
+           (right (finish-chain-builder right-builder))
+           (empty (make-chain domain))
+           (combined
+             (concatenate-disjoint-chains
+              domain (list empty left empty right empty)))
+           (oracle-builder (make-chain-builder domain)))
+      (chain-builder-add-chain oracle-builder left)
+      (chain-builder-add-chain oracle-builder right)
+      (%check (chain= combined (finish-chain-builder oracle-builder)))
+      (%check
+       (handler-case
+           (progn (concatenate-disjoint-chains domain (list right left)) nil)
+         (error () t))))))
+
 (defun %test-one-cell-stars ()
   (let* ((chain (%one-cell-chain))
          (mesh
@@ -285,6 +312,7 @@ triangles and all 48 signed-axis symmetries."
 
 (defun run-luft-tests (&key (stream *standard-output*))
   (setf *luft-test-count* 0)
+  (%test-disjoint-chain-concatenation)
   (%test-one-cell-stars)
   (%test-word-parallel-star-selection)
   (%test-star-selection-instruction-kernel)

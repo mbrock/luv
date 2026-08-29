@@ -41,7 +41,8 @@
    #:chain-sites #:chain-site-count #:chain-site-p #:map-chain #:chain=
    #:chain-builder #:make-chain-builder #:chain-builder-add-site
    #:chain-builder-add-chain #:finish-chain-builder
-   #:chain+ #:boundary-chain #:surface-chain #:chain-cell-occupancy-bit
+   #:concatenate-disjoint-chains #:chain+
+   #:boundary-chain #:surface-chain #:chain-cell-occupancy-bit
    ;; Stars.
    #:cell-occupancy-bit #:site-star-occupancy-mask
    #:star-triangles #:star-face-triangles
@@ -515,6 +516,36 @@ axis cannot begin on that axis's far boundary."
          (sites (make-array (length buffer) :element-type '(unsigned-byte 64))))
     (replace sites buffer)
     (%normalize-vector (%builder-domain builder) sites)))
+
+(defun concatenate-disjoint-chains (domain chains)
+  "Concatenate already-normalized CHAINS whose ordered supports are disjoint.
+
+Each nonempty chain must begin strictly after the preceding chain ends.  The
+result is therefore normalized by construction and needs neither comparison
+sorting nor cancellation."
+  (check-type domain world-domain)
+  (check-type chains list)
+  (let ((count 0))
+    (dolist (chain chains)
+      (check-type chain chain)
+      (unless (world-domain= domain (chain-domain chain))
+        (error "Cannot concatenate chains over different domains."))
+      (incf count (chain-count chain)))
+    (let ((result (make-array count :element-type '(unsigned-byte 64)))
+          (write 0)
+          (previous nil))
+      (dolist (chain chains)
+        (let* ((sites (%chain-sites chain))
+               (site-count (length sites)))
+          (when (plusp site-count)
+            (let ((first (aref sites 0)))
+              (when (and previous (not (%site-order< previous first)))
+                (error "Chain support beginning at ~S does not follow ~S."
+                       first previous)))
+            (replace result sites :start1 write)
+            (incf write site-count)
+            (setf previous (aref sites (1- site-count))))))
+      (%make-chain domain result))))
 
 (defun %run-end (sites start)
   (let ((geometry (site-geometry (aref sites start)))
