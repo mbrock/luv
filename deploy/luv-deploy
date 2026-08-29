@@ -59,6 +59,9 @@ deploy()
     printf 'Target commit: %s\n' "$commit"
     printf 'Active slot: %s; building slot: %s\n' "$active" "$inactive"
 
+    printf '\n\033[1;36mMaterializing private gallery\033[0m\n'
+    /usr/local/libexec/luv-private-gallery
+
     systemctl stop "luv-wiki@$inactive.service"
     if [ -n "$(as_mbrock git -C "$slot" status --porcelain --untracked-files=no)" ]; then
         printf '\033[1;31mInactive slot %s has tracked changes; refusing to overwrite them.\033[0m\n' "$inactive"

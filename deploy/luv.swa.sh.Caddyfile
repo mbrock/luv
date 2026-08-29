@@ -1,4 +1,15 @@
 luv.swa.sh {
+	redir /private/knuth /private/knuth/
+	handle_path /private/knuth/* {
+		basic_auth {
+			mbrock {$LUV_PRIVATE_PASSWORD_HASH}
+		}
+		root * /srv/luv-private-gallery/current
+		header Cache-Control "private, no-store"
+		header X-Robots-Tag "noindex, nofollow, noarchive"
+		file_server
+	}
+
 	redir /nix-cache /nix-cache/
 	handle_path /nix-cache/* {
 		root * /var/www/luv/nix-cache

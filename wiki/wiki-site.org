@@ -179,6 +179,29 @@ restart became healthy on its sixth one-second connection attempt.
 /Done when./ The public showcase has been exercised end to end, including real
 image and video responses.
 
+* DONE Keep a private annex-backed reference cabinet
+:PROPERTIES:
+:ID: LPDP98
+:END:
+
+/Intent./ Keep licensed fonts and copyrighted visual-study rasterizations
+available to the SWA build and their owner without putting the bytes in ordinary
+Git or exposing them through the public wiki.
+
+/Evidence./ =private/knuth/= tracks twenty-five selected pages and two contact
+sheets as annex pointers alongside ordinary provenance manifests.  The
+=swa-private= directory remote lives outside every web root at
+=/srv/luv-private-annex=.  =deploy/luv-private-gallery= refuses missing content,
+resolves the pointers into an immutable Caddy-readable release, and atomically
+switches its =current= link; ordinary wiki deploys refresh the cabinet before
+building an application slot.  Caddy serves =/private/knuth/= behind a swa-only
+Basic Auth credential with private, no-store, and no-index headers.
+
+/Done when./ Anonymous requests receive an authentication challenge, an
+authenticated owner can load every reference image and its source notes,
+directory and annex traversal remain inaccessible, and the public wiki stays
+healthy.  The live deployment exercised all four conditions on 29 August 2026.
+
 * IDEA Give historical captures an annex retention policy
 :PROPERTIES:
 :ID: 9H2KVT
