@@ -13,7 +13,16 @@
   (true (find-method #'mcluv:status-bar-application-name
                      nil (list (find-class 'luft.render:viewer)) nil))
   (true (find-method #'mcluv:status-bar-channels-for
-                     nil (list (find-class 'luft.render:viewer)) nil)))
+                     nil (list (find-class 'luft.render:viewer)) nil))
+  (let ((viewer (allocate-instance (find-class 'luft.render:viewer))))
+    (true (= 12 (length (mcluv:status-bar-channels-for viewer))))
+    (true (equal '(:coordinates :chunks :stream :bevel :view :mode)
+                 (last (mcluv:status-bar-channels-for viewer) 6))))
+  (let ((position (luv.arithmetic.lisp.vec3:make-vec3 130.25 63.75 17.0)))
+    (true (string= "130.3,63.8,17.0"
+                   (luft.render::status-bar-position position)))
+    (true (string= "2,0"
+                   (luft.render::status-bar-position-chunk position)))))
 
 (define-test atlas-is-one-fixed-complete-table
   (let ((words (luft.render::star-meshlet-template-words)))
