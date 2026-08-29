@@ -26,6 +26,7 @@ Spinneret, S-expression CSS and JavaScript, dynamic hosting, and publication."
                              (:file "history")
                              (:file "source")
                              (:file "web")
+                             (:file "typst")
                              (:file "asdf"))))
   :in-order-to ((test-op (test-op "luv-wiki/test"))))
 

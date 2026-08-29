@@ -65,6 +65,8 @@ and equivalent dynamic Clack hosting and static publication.")
    #:render-html
    #:render-page
    #:render-document-string
+   #:render-typst-document
+   #:write-typst-pdf
    ;; Semantic web views
    #:page-view
    #:reading-page-view

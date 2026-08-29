@@ -345,6 +345,17 @@ readable measure."
    :overflow-x auto
    :line-height 1.4
    ("code" :padding 0 :background none))
+  ("figure.typst-diagram"
+   :margin 1.4rem 0
+   :padding 1rem
+   :background --code-bg
+   :overflow-x auto
+   :text-align center
+   ("img"
+    :display block
+    :max-width 100%
+    :height auto
+    :margin 0 auto))
   ("table"
    :border-collapse collapse
    :margin 1rem 0

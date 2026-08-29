@@ -234,7 +234,8 @@ plain text; each element and inline class contributes its own method."))
 
 (defmethod render-html ((block src-block))
   (let ((language (src-block-language block)))
-    (cond ((equal language "lisp") (render-lisp-source (block-text block)))
+    (cond ((equal language "typst-diagram") (render-typst-diagram-html block))
+          ((equal language "lisp") (render-lisp-source (block-text block)))
           ((equal language "mermaid")
            ;; Mermaid draws these at load time; the text remains readable.
            (spinneret:with-html (:pre.mermaid (block-text block))))

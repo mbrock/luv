@@ -358,6 +358,7 @@
             pkgs.sdl3
             pkgs.spirv-tools
             swashPackage
+            pkgs.typst
             pkgs.urbit
             pkgs.vulkan-headers
             pkgs.vulkan-tools
@@ -382,6 +383,7 @@
             pkgs.sdl3
             pkgs.spirv-tools
             swashPackage
+            pkgs.typst
             pkgs.vulkan-headers
             pkgs.vulkan-tools
             pkgs.vulkan-validation-layers

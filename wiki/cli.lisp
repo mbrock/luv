@@ -350,6 +350,20 @@ derived layouts.  Give system names to load others instead."
   (format t "~&~A~%"
           (wiki:site-output-directory (asdf:find-system :luv-wiki-site))))
 
+(define-command pdf (&rest names)
+  "Render named Org pages as PDFs in build/wiki/ using Typst."
+  (unless names (error "pdf requires at least one page name."))
+  (let ((site (site :code nil)))
+    (dolist (name names)
+      (let ((document (find name (wiki:site-documents site)
+                            :key #'wiki:document-name :test #'string=)))
+        (unless document (error "No page ~A." name))
+        (let ((output (merge-pathnames
+                       (make-pathname :name name :type "pdf")
+                       (merge-pathnames "build/wiki/" (root)))))
+          (wiki:write-typst-pdf document site output (root))
+          (format t "~&~A~%" output))))))
+
 (define-command serve (&rest arguments)
   "Dynamically host the site. Options: --host HOST --port PORT or --socket PATH."
   (let ((host "127.0.0.1")

@@ -16,25 +16,45 @@ already one class in =luft/render/render.lisp=.
 
 The organizing picture is:
 
-#+begin_example
-durable world description + sparse edits
-                    |
-                    v
-           resident chunk fields
-       (occupancy, material, other volume)
-                    |
-                    v
-      mixed-star active margin / boundary complex
-           /          |          \
-          v           v           v
-     geometry      contact     navigation ...
-          |                       light/material
-          v
-       prepared CPU render products
-                    |
-                    v
-       coherent GPU publication and frames
-#+end_example
+#+begin_src typst-diagram
+#import "@preview/fletcher:0.5.8" as fletcher: diagram, node, edge
+
+#let ink = rgb("#27313d")
+#let quiet = rgb("#e9edf2")
+#let active = rgb("#dce7f5")
+#let product = rgb("#eee9dc")
+
+#diagram(
+  cell-size: 15mm,
+  node-stroke: .7pt + ink,
+  node-corner-radius: 4pt,
+  edge-stroke: .8pt + ink,
+  mark-scale: 75%,
+
+  node((0, 0), align(center)[Durable world description \ + sparse edits],
+       width: 47mm, fill: quiet),
+  node((0, 1), align(center)[Resident chunk fields \ #text(size: 8pt)[occupancy · material · volume]],
+       width: 47mm, fill: quiet),
+  node((0, 2), align(center)[Mixed-star active margin \ #text(size: 8pt)[boundary complex]],
+       width: 47mm, fill: active),
+
+  node((-2, 3), [Geometry], width: 31mm, fill: product),
+  node((0, 3), [Contact], width: 31mm, fill: product),
+  node((2, 3), align(center)[Navigation \ light · material], width: 31mm, fill: product),
+
+  node((0, 4), align(center)[Prepared CPU \ render products], width: 43mm, fill: quiet),
+  node((0, 5), align(center)[Coherent GPU publication \ and frames], width: 47mm, fill: quiet),
+
+  edge((0, 0), (0, 1), "->"),
+  edge((0, 1), (0, 2), "->"),
+  edge((0, 2), (-2, 3), "->"),
+  edge((0, 2), (0, 3), "->"),
+  edge((0, 2), (2, 3), "->"),
+  edge((-2, 3), (0, 4), "->"),
+  edge((2, 3), (0, 4), "->"),
+  edge((0, 4), (0, 5), "->"),
+)
+#+end_src
 
 This is not a declaration that all world behavior is two-dimensional.  It is
 a disciplined order of questions: retain compact volumetric truth; cheaply
@@ -64,21 +84,50 @@ ordinary cells lie below the top anchor at =z=255=.  A chunk is therefore one
 64×64 family of complete vertical fibers rather than a stack of independently
 streamed cubes.
 
-#+begin_example
-chunk lattice                           primal lattice inside one chunk
+#+begin_src typst-diagram
+#import "@preview/cetz:0.5.2": canvas, draw
 
-       x                                             x
-       -->                                           -->
-    +-----+-----+-----+                       +---+---+---+---+---+
-  ^ |     |     |     |                     ^ | . | . | . | . | . |
-  | +-----+-----+-----+                     | +---+---+---+---+---+
-  y |     |  F  |     |                     y | . | . | | | . | . |
-    +-----+-----+-----+                       +---+---+|+---+---+
-    |     |     |     |                              | z fiber
-    +-----+-----+-----+                              v
+#canvas({
+  import draw: line, rect, content
+  let ink = rgb("#34404d")
+  let grid = .65pt + ink
+  let focus = rgb("#dce7f5")
+  let fiber = rgb("#d9eadf")
 
-F = chunk containing the current focus
-#+end_example
+  content((1.5, 3.45), text(weight: "bold")[Chunk lattice], anchor: "south")
+  rect((1, 1), (2, 2), fill: focus)
+  for i in range(4) {
+    line((i, 0), (i, 3), stroke: grid)
+    line((0, i), (3, i), stroke: grid)
+  }
+  content((1.5, 1.5), text(weight: "bold", fill: ink)[F])
+  content((1.5, -.28), text(size: 7.5pt, fill: ink)[F = focus chunk], anchor: "north")
+  line((0, 3.2), (1.0, 3.2), stroke: grid, mark: (end: "stealth", fill: ink))
+  content((1.1, 3.2), [$x$], anchor: "west")
+  line((-0.2, 3), (-0.2, 2), stroke: grid, mark: (end: "stealth", fill: ink))
+  content((-0.2, 1.85), [$y$], anchor: "north")
+
+  let ox = 5.1
+  let cell = .58
+  content((ox + 1.45, 3.45), text(weight: "bold")[Primal lattice inside F], anchor: "south")
+  rect((ox + 2 * cell, 0), (ox + 3 * cell, 3 * cell), fill: fiber)
+  for i in range(6) {
+    line((ox + i * cell, 0), (ox + i * cell, 3 * cell), stroke: grid)
+  }
+  for i in range(4) {
+    line((ox, i * cell), (ox + 5 * cell, i * cell), stroke: grid)
+  }
+  for x in range(5) {
+    for y in range(3) {
+      if x != 2 { content((ox + (x + .5) * cell, (y + .5) * cell), text(fill: ink)[·]) }
+    }
+  }
+  line((ox + 2.5 * cell, 0), (ox + 2.5 * cell, -.8),
+       stroke: grid, mark: (end: "stealth", fill: ink))
+  content((ox + 2.5 * cell, -.92), [vertical occupancy fiber], anchor: "north")
+
+})
+#+end_src
 
 Chunking does not alter world coordinates.  It factors an XY address into a
 chunk coordinate and a bounded local coordinate, thereby choosing storage,

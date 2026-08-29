@@ -149,6 +149,44 @@ Nothing here refers to anything.
     (true (search "mention <a class=mention href=#XYZ123 title=\"First figure\">#XYZ123</a> with" html))
     (true (search "<h3><span class=\"mark mark-next\">" html))))
 
+(define-test typst-diagrams-render-as-web-images
+  (let* ((doc (page "#+title: Diagram test
+* A figure
+:PROPERTIES:
+:ID: TYP123
+:END:
+
+#+begin_src typst-diagram
+#circle(radius: 1cm)
+#+end_src
+" "diagram-test"))
+         (site (wiki:make-site (list doc)))
+         (html (wiki:render-document-string doc site)))
+    (true (search "<figure class=typst-diagram><img src=\"diagrams/diagram-test-1.svg\""
+                  html))
+    (true (= 1 (length (wiki::typst-diagram-blocks doc))))
+    (true (= 1 (count-if (lambda (resource)
+                           (string= "/diagrams/diagram-test-1.svg"
+                                    (wiki:resource-path resource)))
+                         (wiki:website-resources site))))))
+
+(define-test typst-source-preserves-structure-and-escapes-text
+  (let* ((doc (page "#+title: A \"quoted\" title
+* Figure
+:PROPERTIES:
+:ID: TYP456
+:END:
+
+Text with *weight* and a backslash \\.
+" "typst-test"))
+         (source (with-output-to-string (stream)
+                   (wiki:render-typst-document doc stream))))
+    (true (search "title: \"A \\\"quoted\\\" title\"" source))
+    (true (search "#heading(level: 1)" source))
+    (true (search "<TYP456>" source))
+    (true (search "#strong[" source))
+    (true (search "backslash \\\\" source))))
+
 (define-test page-view-classes-select-semantic-layouts
   (let ((site (wiki:make-site '())))
     (true (eq :reading

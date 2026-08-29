@@ -207,7 +207,8 @@ paragraphs, bulleted and numbered lists with wrapped and blank-separated
 items, =example= and =src= blocks, simple tables with an optional header rule,
 TeX math as =$x^2$= or =\(...\)= inline and =\[...\]= or =$$...$$= on
 display (drawn by KaTeX, loaded only when a page has math), Mermaid
-diagrams in =#+begin_src mermaid= blocks (likewise), bracket links with
+diagrams in =#+begin_src mermaid= blocks (likewise), Typst-native diagrams in
+=#+begin_src typst-diagram= blocks, bracket links with
 =file:=, =https:=, =id:=, =lisp:=, =capture:= or no scheme, a bare
 =file:= link to an image in the wiki directory as an inline image (a
 paragraph of only that link becomes a figure, and a paragraph of only a
@@ -236,6 +237,28 @@ leaves section bodies as text and has no inline layer, links, lists, or HTML
 output, so it would have supplied perhaps a hundred lines and cost two
 dependencies and a second parser for the inside of sections.  Its layered
 raw-AST/dressed-object design is a good precedent for the shape used here.
+
+* DONE Give printable pages and web diagrams one Typst source
+:PROPERTIES:
+:ID: WORWO1
+:END:
+
+/Intent./ Keep Org as the wiki's durable semantic source while adding a
+high-quality paged output and a notation for diagrams which need not remain
+ASCII art.
+
+/Evidence./ =scripts/wiki pdf luft-world-model= renders the existing Org AST
+through a small Typst backend and checked-in page template, producing a tagged,
+ten-page PDF with headings as bookmarks and figure IDs as destinations.  The
+same page contains two =typst-diagram= source blocks: Fletcher expresses the
+world-product flow and CeTZ draws the chunk and primal lattices.  They remain
+native Typst content in the PDF and become tightly bounded SVG resources in
+the static or dynamic website.  The remaining example blocks still render as
+plain monospace text; migration is deliberate rather than automatic.
+
+/Done when./ One substantive page builds as PDF, both kinds of diagram render
+legibly in that PDF and the real web reading view, and the ordinary wiki tests
+cover source generation and diagram resource discovery.
 
 * Spinneret as the HTML layer
 :PROPERTIES:
