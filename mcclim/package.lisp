@@ -15,6 +15,7 @@
 (defpackage #:mcluv
   (:use #:clim-lisp #:clim #:clime #:climb)
   (:local-nicknames (#:luv #:luv)
+                    (#:build #:luv.build)
                     (#:shader #:luv.shader)
                     (#:spv #:luv.spir-v)
                     (#:vec #:luv.arithmetic.lisp.vec3))
@@ -87,11 +88,13 @@
            #:source-update-root-for
            #:source-update-systems-for
            #:source-update-title-for
+           #:source-update-build-run
            #:make-source-update-session
            #:start-source-update
            #:current-source-update-snapshot
            #:request-source-update-fetch
            #:request-source-update-apply
+           #:request-source-update-retry
            #:source-update-busy-p
            #:wait-source-update-session
            #:quiesce-source-update-session

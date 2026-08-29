@@ -98,6 +98,8 @@
                                 :contents layers)))
     (declare (ignore layout))
     (true (typep frame 'mcluv:status-bar))
+    (true (typep frame 'mcluv::command-menu-state))
+    (true (typep frame 'mcluv::source-update-state))
     (is eq passive (clim:sheet-parent bar))
     (true (equal '(:passive :modeless :transient :modal)
                  (mapcar #'workbench::workbench-layer-pane-kind
@@ -106,6 +108,27 @@
     (multiple-value-bind (x1 y1 x2 y2)
         (clim:bounding-rectangle* (clim:sheet-region bar))
       (true (equal '(0 0 900 28) (list x1 y1 x2 y2))))))
+
+(define-test fixed-modal-layer-owns-command-and-source-panes
+  (let* ((command (make-instance 'mcluv::mx-command-menu-pane))
+         (source (make-instance 'mcluv::source-update-pane))
+         (modal
+           (make-instance 'workbench::workbench-layer-pane
+                          :kind :modal :contents (list command source))))
+    (clim:allocate-space modal 900 700)
+    (is eq modal (clim:sheet-parent command))
+    (is eq modal (clim:sheet-parent source))
+    (multiple-value-bind (x1 y1 x2 y2)
+        (clim:bounding-rectangle* (clim:sheet-region command))
+      (true (equal '(0 0 620 420) (list x1 y1 x2 y2))))
+    (multiple-value-bind (x y)
+        (clim:transform-position
+         (clim:sheet-delta-transformation command modal) 0 0)
+      (true (equal '(140 140) (list x y))))
+    (multiple-value-bind (x y)
+        (clim:transform-position
+         (clim:sheet-delta-transformation source modal) 0 0)
+      (true (equal '(70 40) (list x y))))))
 
 (define-test layer-state-is-semantic-not-numeric-priority
   (multiple-value-bind (shell application canvas events) (make-test-workbench)

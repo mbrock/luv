@@ -70,11 +70,71 @@
              (true (eq :complete
                        (mcluv:source-update-snapshot-state complete)))
              (true (equal '(("luft/render")) loads))
+             (true (eq :succeeded
+                       (luv.build:run-snapshot-state
+                        (luv.build:run-snapshot
+                         (mcluv:source-update-build-run session)))))
              (true (string=
                     (mcluv::source-update-snapshot-target complete)
                     (string-trim '(#\Newline #\Return)
                                  (source-update-test-git
                                   work "rev-parse" "HEAD"))))))
+      (uiop:delete-directory-tree
+       root :validate t :if-does-not-exist :ignore))))
+
+(define-test failed-source-assimilation-retains-diagnostics-and-retries
+  (multiple-value-bind (root seed work)
+      (make-source-update-test-repositories)
+    (declare (ignore seed))
+    (unwind-protect
+         (let ((attempts 0)
+               (component
+                 (make-instance
+                  'asdf:cl-source-file :name "broken-source"
+                  :parent (make-instance 'asdf:system
+                                         :name "broken-system")))
+               (session nil))
+           (setf session
+                 (mcluv:make-source-update-session
+                  work '("luft/render")
+                  :loader
+                  (lambda (systems)
+                    (declare (ignore systems))
+                    (when (= 1 (incf attempts))
+                      (luv.build::call-with-build-action
+                       (luv.build:current-build-run) :compile component
+                       (lambda ()
+                         (error "Compiler exploded~%at useful detail")))))))
+           (mcluv:wait-source-update-session session)
+           (mcluv:request-source-update-apply session)
+           (let* ((failed (mcluv:wait-source-update-session session))
+                  (run (mcluv:source-update-build-run session))
+                  (build (luv.build:run-snapshot run))
+                  (diagnostic
+                    (luv.build:run-snapshot-terminal-diagnostic build)))
+             (true (eq :failed
+                       (mcluv:source-update-snapshot-state failed)))
+             (true (eq :failed (luv.build:run-snapshot-state build)))
+             (true (eq :failed
+                       (luv.build:build-action-snapshot-state
+                        (first (luv.build:run-snapshot-actions build)))))
+             (true (search "Compiler exploded"
+                           (luv.build:build-diagnostic-snapshot-report
+                            diagnostic)))
+             (true (search "useful detail"
+                           (luv.build:build-diagnostic-snapshot-report
+                            diagnostic)))
+             (true (search "assimilation"
+                           (mcluv::source-update-action-label failed))))
+           (mcluv:request-source-update-retry session)
+           (let ((complete (mcluv:wait-source-update-session session)))
+             (true (= 2 attempts))
+             (true (eq :complete
+                       (mcluv:source-update-snapshot-state complete)))
+             (true (eq :succeeded
+                       (luv.build:run-snapshot-state
+                        (luv.build:run-snapshot
+                         (mcluv:source-update-build-run session)))))))
       (uiop:delete-directory-tree
        root :validate t :if-does-not-exist :ignore))))
 

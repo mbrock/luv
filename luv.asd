@@ -430,7 +430,7 @@ offsets and of headers."
   :description "An experimental McCLIM backend presented through luv canvases."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luv" "luv/lobby" "mcclim-render" "cl-dejavu")
+  :depends-on ("luv" "luv/build" "luv/lobby" "mcclim-render" "cl-dejavu")
   :serial t
   :components ((:module "mcclim"
                 :serial t

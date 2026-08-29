@@ -36,13 +36,25 @@
    :max-width clim:+fill+ :max-height clim:+fill+))
 
 (defmethod clim:allocate-space ((pane workbench-layer-pane) width height)
-  (declare (ignore height))
   ;; Status is fixed shell chrome. Its McCLIM parent, not an application
   ;; placement affine, owns top-edge layout and the child's retained clip.
   (dolist (child (clim:sheet-children pane))
-    (when (typep child 'mcluv::status-bar-pane)
-      (clim:move-and-resize-sheet
-       child 0 0 width mcluv::+status-bar-height+))))
+    (cond
+      ((typep child 'mcluv::status-bar-pane)
+       (clim:move-and-resize-sheet
+        child 0 0 width mcluv::+status-bar-height+))
+      ((typep child 'mcluv::mx-command-menu-pane)
+       (clim:move-and-resize-sheet
+        child
+        (max 0 (floor (- width mcluv::+command-menu-width+) 2))
+        (max 0 (floor (- height mcluv::+command-menu-height+) 2))
+        mcluv::+command-menu-width+ mcluv::+command-menu-height+))
+      ((typep child 'mcluv::source-update-pane)
+       (clim:move-and-resize-sheet
+        child
+        (max 0 (floor (- width mcluv::+source-update-width+) 2))
+        (max 0 (floor (- height mcluv::+source-update-height+) 2))
+        mcluv::+source-update-width+ mcluv::+source-update-height+)))))
 
 (defclass workbench-layout-pane
     (clime:never-repaint-background-mixin
@@ -68,7 +80,8 @@
   (dolist (child (clim:sheet-children pane))
     (clim:move-and-resize-sheet child 0 0 width height)))
 
-(clim:define-application-frame workbench-frame (mcluv:status-bar)
+(clim:define-application-frame workbench-frame
+    (mcluv:status-bar mcluv::command-menu-state mcluv::source-update-state)
   ((application :initarg :application :reader frame-workbench-application))
   (:menu-bar nil)
   (:panes
@@ -88,8 +101,21 @@
                              :contents nil))
    (transient (clim:make-pane 'workbench-layer-pane :kind :transient
                               :contents nil))
-   (modal (clim:make-pane 'workbench-layer-pane :kind :modal
-                          :contents nil)))
+   (modal
+    (clim:make-pane
+     'workbench-layer-pane :kind :modal
+     :contents
+     (list
+      (clim:make-pane
+       'mcluv::mx-command-menu-pane
+       :background clim:+transparent-ink+
+       :width mcluv::+command-menu-width+
+       :height mcluv::+command-menu-height+)
+      (clim:make-pane
+       'mcluv::source-update-pane
+       :background clim:+transparent-ink+
+       :width mcluv::+source-update-width+
+       :height mcluv::+source-update-height+)))))
   (:layouts
    (default
     (clim:make-pane 'workbench-layout-pane
@@ -117,6 +143,7 @@
                      :reader workbench-shell-held-input)
    (swallowed-releases :initform (make-hash-table :test #'equal)
                        :reader workbench-swallowed-releases)
+   (active-tool :initform nil :accessor workbench-active-tool)
    (stopped-p :initform nil :accessor workbench-stopped-p)))
 
 (defvar *application-workbenches*
@@ -132,6 +159,103 @@
 (defun workbench-layer (workbench kind)
   (or (find kind (workbench-layers workbench) :key #'workbench-layer-kind)
       (error "Unknown workbench layer ~S." kind)))
+
+(defun workbench-tool-pane (workbench tool)
+  (find-if
+   (lambda (pane)
+     (ecase tool
+       (:command-menu (typep pane 'mcluv::mx-command-menu-pane))
+       (:source-update (typep pane 'mcluv::source-update-pane))))
+   (clim:sheet-children
+    (workbench-layer-pane (workbench-layer workbench :modal)))))
+
+(defun set-workbench-tool-pane (workbench tool)
+  (dolist (candidate '(:command-menu :source-update))
+    (setf (clim:sheet-enabled-p (workbench-tool-pane workbench candidate))
+          (eq candidate tool)))
+  (setf (workbench-active-tool workbench) tool)
+  (let ((layer (workbench-layer workbench :modal)))
+    (setf (workbench-layer-focus layer)
+          (and tool (workbench-tool-pane workbench tool)))
+    (when (workbench-layer-visible-p layer)
+      (focus-workbench-layer workbench layer)))
+  workbench)
+
+(defun call-with-workbench-frame-mutation (workbench function)
+  "Run FUNCTION at WORKBENCH's native frame boundary."
+  (luv:request-canvas-frame
+   (workbench-application-canvas (workbench-application workbench))
+   (lambda (timestamp)
+     (declare (ignore timestamp))
+     (funcall function)))
+  workbench)
+
+(defun %open-workbench-command-menu (workbench)
+  (let ((frame (workbench-frame workbench)))
+    (mcluv:refresh-command-menu-entries frame)
+    (set-workbench-tool-pane workbench :command-menu)
+    (show-workbench-layer workbench :modal)
+    (mcluv:repaint-command-menu frame))
+  workbench)
+
+(defun open-workbench-command-menu (workbench)
+  "Open the fixed M-x pane at WORKBENCH's frame boundary."
+  (call-with-workbench-frame-mutation
+   workbench (lambda () (%open-workbench-command-menu workbench))))
+
+(defun %close-workbench-command-menu (workbench)
+  (when (eq :command-menu (workbench-active-tool workbench))
+    (hide-workbench-layer workbench :modal)
+    (set-workbench-tool-pane workbench nil)
+    (mcluv:repaint-gpu-mirror (workbench-mirror workbench)))
+  nil)
+
+(defun close-workbench-command-menu (workbench)
+  (call-with-workbench-frame-mutation
+   workbench (lambda () (%close-workbench-command-menu workbench)))
+  nil)
+
+(defun toggle-workbench-command-menu (workbench)
+  (call-with-workbench-frame-mutation
+   workbench
+   (lambda ()
+     (if (eq :command-menu (workbench-active-tool workbench))
+         (%close-workbench-command-menu workbench)
+         (%open-workbench-command-menu workbench))))
+  t)
+
+(defun %open-workbench-source-update (workbench)
+  (set-workbench-tool-pane workbench :source-update)
+  (show-workbench-layer workbench :modal)
+  (mcluv::repaint-source-update (workbench-frame workbench))
+  (when (eq :idle
+            (mcluv:source-update-snapshot-state
+             (mcluv:current-source-update-snapshot
+              (mcluv:source-update-frame-session
+               (workbench-frame workbench)))))
+    (mcluv:start-source-update (workbench-frame workbench)))
+  workbench)
+
+(defun open-workbench-source-update (workbench)
+  "Open and start the fixed source-update pane at a frame boundary."
+  (call-with-workbench-frame-mutation
+   workbench (lambda () (%open-workbench-source-update workbench))))
+
+(defun %close-workbench-source-update (workbench)
+  (when (and (eq :source-update (workbench-active-tool workbench))
+             (not
+              (mcluv:source-update-busy-p
+               (mcluv:source-update-frame-session
+                (workbench-frame workbench)))))
+    (hide-workbench-layer workbench :modal)
+    (set-workbench-tool-pane workbench nil)
+    (mcluv:repaint-gpu-mirror (workbench-mirror workbench)))
+  nil)
+
+(defun close-workbench-source-update (workbench)
+  (call-with-workbench-frame-mutation
+   workbench (lambda () (%close-workbench-source-update workbench)))
+  nil)
 
 (defun workbench-active-layer (workbench)
   (find-if #'workbench-layer-visible-p
@@ -284,6 +408,56 @@
 (defun shell-input-event-p (event)
   (typep event '(or luv:canvas-key-event luv:canvas-pointer-event)))
 
+(defun workbench-pane-local-position (workbench pane event)
+  (clim:untransform-position
+   (clim:sheet-delta-transformation
+    pane (workbench-top-level-sheet workbench))
+   (luv:canvas-pointer-event-x event)
+   (luv:canvas-pointer-event-y event)))
+
+(defun handle-workbench-tool-event (workbench event)
+  "Apply fixed tool semantics after McCLIM has routed EVENT through its pane."
+  (let ((frame (workbench-frame workbench)))
+    (case (workbench-active-tool workbench)
+      (:command-menu
+       (cond
+         ((typep event 'luv:canvas-key-press-event)
+          (multiple-value-bind (action command)
+              (mcluv:handle-command-menu-key-event frame event)
+            (case action
+              (:dismiss (close-workbench-command-menu workbench))
+              (:execute
+               (mcluv:execute-command-menu-command
+                frame command
+                :before-execute
+                (lambda ()
+                  (%close-workbench-command-menu workbench)))))))
+         ((typep event 'luv:canvas-pointer-button-press-event)
+          (let ((pane (workbench-tool-pane workbench :command-menu)))
+            (multiple-value-bind (x y)
+                (workbench-pane-local-position workbench pane event)
+              (multiple-value-bind (action command)
+                  (mcluv:handle-command-menu-pointer-press
+                   frame x y (luv:canvas-pointer-event-button event))
+                (when (eq action :execute)
+                  (mcluv:execute-command-menu-command
+                   frame command
+                   :before-execute
+                   (lambda ()
+                     (%close-workbench-command-menu workbench))))))))))
+      (:source-update
+       (cond
+         ((typep event 'luv:canvas-key-press-event)
+          (when (eq :dismiss
+                    (mcluv:handle-source-update-key-event frame event))
+            (%close-workbench-source-update workbench)))
+         ((typep event 'luv:canvas-pointer-button-press-event)
+          (let ((pane (workbench-tool-pane workbench :source-update)))
+            (multiple-value-bind (x y)
+                (workbench-pane-local-position workbench pane event)
+              (mcluv:handle-source-update-pointer-press
+               frame x y (luv:canvas-pointer-event-button event))))))))))
+
 (defun dispatch-workbench-event (workbench event)
   "Offer EVENT shell-first and return true exactly when application input stops.
 
@@ -318,6 +492,7 @@ every key and pointer event."
        nil)
       (t
        (mcluv:dispatch-embedded-mirror-event (workbench-mirror workbench) event)
+       (handle-workbench-tool-event workbench event)
        (let* ((target
                 (if (typep event 'luv:canvas-pointer-event)
                     (workbench-pointer-target workbench)
@@ -384,7 +559,13 @@ every key and pointer event."
     ;; layout and prepared-stream ownership now belong to this one shell frame.
     (mcluv:refresh-status-bar
      (workbench-frame workbench) width :resize-frame-p nil)
-    (mcluv:prepare-status-bar (workbench-frame workbench)))
+    (mcluv:prepare-status-bar (workbench-frame workbench))
+    (case (workbench-active-tool workbench)
+      (:command-menu
+       (mcluv:prepare-command-menu (workbench-frame workbench)))
+      (:source-update
+       (mcluv:refresh-source-update (workbench-frame workbench))
+       (mcluv:prepare-source-update (workbench-frame workbench)))))
   workbench)
 
 (defun encode-workbench (workbench pass surface-texture)
@@ -409,9 +590,18 @@ pass and gives the shell neither renderer ownership nor queue submission."
          (mcluv:*embedded-mirror-context* context)
          (mcluv:*embedded-mirror-device* device)
          (mcluv::*status-bar-construction-width* width)
+         (source-session
+           (mcluv:make-source-update-session
+            (mcluv:source-update-root-for application)
+            (mcluv:source-update-systems-for application)
+            :start-p nil))
          (frame (clim:make-application-frame
                  'workbench-frame :application application
                  :frame-manager manager :enable t
+                 :owner-frame
+                 (workbench-application-command-frame application)
+                 :command-tables (mcluv:command-menu-tables-for application)
+                 :session source-session
                  :owner application :logical-width width
                  :worktree
                  (mcluv::cached-status-bar-worktree
@@ -419,6 +609,17 @@ pass and gives the shell neither renderer ownership nor queue submission."
          (mirror (clim:sheet-direct-mirror
                   (clim:frame-top-level-sheet frame))))
     (mcluv:make-gpu-frame-background-transparent frame)
+    (dolist (tool '(:command-menu :source-update))
+      (setf (clim:sheet-enabled-p
+             (find-if
+              (lambda (pane)
+                (ecase tool
+                  (:command-menu
+                   (typep pane 'mcluv::mx-command-menu-pane))
+                  (:source-update
+                   (typep pane 'mcluv::source-update-pane))))
+              (clim:sheet-children (clim:find-pane-named frame 'modal))))
+            nil))
     (mcluv:dispatch-embedded-mirror-event
      mirror
      (make-instance 'luv:canvas-window-resized-event
@@ -430,6 +631,9 @@ pass and gives the shell neither renderer ownership nor queue submission."
   (:documentation "Finish or cancel shell asynchronous work before its fence."))
 
 (defmethod quiesce-workbench ((workbench workbench))
+  (when (workbench-frame workbench)
+    (mcluv:quiesce-source-update-session
+     (mcluv:source-update-frame-session (workbench-frame workbench))))
   workbench)
 
 (defgeneric release-workbench-resources (workbench)

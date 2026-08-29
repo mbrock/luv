@@ -924,24 +924,47 @@ the next frame made of the change."
 (defvar *live-system-load-lock*
   (sb-thread:make-mutex :name "live ASDF system load"))
 
+(defun call-with-live-system-load (function &key (frames 1) (timeout 5.0))
+  "Call FUNCTION under the serialized live-load hold, then fence its canvases.
+
+Return FUNCTION's primary value and an alist of held canvases to their first
+post-load fence outcome.  If FUNCTION signals, release and fence first, then
+resignal the original condition.  Thus a failed live load cannot skip the
+terminal frame observation required by an updater or interactive presenter."
+  (sb-thread:with-mutex (*live-system-load-lock*)
+    (let ((canvases (open-canvases))
+          (result nil)
+          (failure nil)
+          (fences nil))
+      (handler-case
+          (setf result
+                (call-with-canvas-frames-held function canvases))
+        (error (condition)
+          (setf failure condition)))
+      (setf fences
+            (mapcar (lambda (canvas)
+                      (cons canvas
+                            (fence-canvas
+                             canvas :frames frames :timeout timeout)))
+                    canvases))
+      (when failure
+        (error failure))
+      (values result fences))))
+
 (defun load-systems-live (systems &key (frames 1) (timeout 5.0))
   "Load ASDF SYSTEMS while open canvases cannot observe partial redefinition.
 
 Live loads are serialized image-wide.  Return an alist from each canvas held
 for the operation to its first post-load fence outcome.  ASDF errors propagate
-after the unwind-protected frame hold has been released."
+only after the hold is released and those same canvases have been fenced."
   (let ((systems (if (listp systems) systems (list systems))))
-    (sb-thread:with-mutex (*live-system-load-lock*)
-      (let ((canvases (open-canvases)))
-        (call-with-canvas-frames-held
-         (lambda ()
-           (dolist (system systems)
-             (asdf:load-system system)))
-         canvases)
-        (mapcar (lambda (canvas)
-                  (cons canvas
-                        (fence-canvas canvas :frames frames :timeout timeout)))
-                canvases)))))
+    (nth-value
+     1
+     (call-with-live-system-load
+      (lambda ()
+        (dolist (system systems)
+          (asdf:load-system system)))
+      :frames frames :timeout timeout))))
 
 (defun sdl-canvas-window-event-p (canvas event)
   (= (sdl3:%window-id event)

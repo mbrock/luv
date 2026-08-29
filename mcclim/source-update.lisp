@@ -53,6 +53,10 @@
 (defgeneric source-update-systems-for (owner)
   (:documentation "Return the ASDF systems assimilated after updating OWNER."))
 
+(defmethod source-update-systems-for ((owner t))
+  (declare (ignore owner))
+  '("luv"))
+
 (defgeneric source-update-title-for (owner)
   (:documentation "Return OWNER's short source-update panel title."))
 
@@ -63,6 +67,7 @@
   ((root :initarg :root :reader source-update-root)
    (systems :initarg :systems :reader source-update-systems)
    (loader :initarg :loader :reader source-update-loader)
+   (build-run :initform nil :accessor source-update-build-run)
    (lock :initform (sb-thread:make-mutex :name "source update session")
          :reader source-update-lock)
    (revision :initform 0 :accessor source-update-revision)
@@ -313,6 +318,148 @@
              (format nil "Frame ~A: ~(~A~)" (luv:canvas-title canvas) outcome)))
       '("No open canvases required a frame fence.")))
 
+(defun source-update-build-diagnostic-lines (snapshot)
+  (let* ((diagnostic
+           (or (build:run-snapshot-terminal-diagnostic snapshot)
+               (first (last (build:run-snapshot-diagnostics snapshot)))))
+         (action
+           (and diagnostic
+                (find (build:build-diagnostic-snapshot-action-id diagnostic)
+                      (build:run-snapshot-actions snapshot)
+                      :key #'build:build-action-snapshot-id)))
+         (location
+           (and diagnostic
+                (build:build-diagnostic-snapshot-source-location diagnostic))))
+    (when diagnostic
+      (append
+       (when action
+         (list (format nil "Failed ~(~A~): ~A"
+                       (build:build-action-snapshot-kind action)
+                       (build:build-action-snapshot-label action))))
+       (when (and location
+                  (build:build-source-location-namestring location))
+         (list (format nil "At ~A~@[: form ~D~]"
+                       (build:build-source-location-namestring location)
+                       (build:build-source-location-form-number location))))
+       (source-update-lines
+        (build:build-diagnostic-snapshot-report diagnostic))))))
+
+(defun install-source-update-build-run (session run)
+  (sb-thread:with-mutex ((source-update-lock session))
+    (setf (source-update-build-run session) run)
+    (incf (source-update-revision session)))
+  run)
+
+(defun clear-source-update-build-run (session)
+  (sb-thread:with-mutex ((source-update-lock session))
+    (setf (source-update-build-run session) nil)
+    (incf (source-update-revision session)))
+  session)
+
+(defun execute-source-update-build (session run)
+  "Execute RUN through the injected test loader or the live ASDF executor."
+  (let ((loader (source-update-loader session)))
+    (if loader
+        (build:call-with-build-run
+         run
+         (lambda ()
+           (funcall loader (source-update-systems session))))
+        (multiple-value-bind (result fences)
+            (luv:call-with-live-system-load
+             (lambda ()
+               (build:execute-run
+                (make-instance 'build:asdf-build-executor
+                               :signal-errors-p nil)
+                run)))
+          (declare (ignore result))
+          fences))))
+
+(defun publish-source-update-assimilation-failure
+    (session base target run &optional condition)
+  (let* ((snapshot (build:run-snapshot run))
+         (diagnostic-lines (source-update-build-diagnostic-lines snapshot)))
+    (publish-source-update
+     session
+     (make-source-update-snapshot
+      :state :failed :heading "Checkout advanced; assimilation failed"
+      :lines
+      (append
+       (list
+        (format nil "main advanced to ~A; image may be partially redefined."
+                (source-update-abbreviated-oid target)))
+       diagnostic-lines
+       (when (and condition (null diagnostic-lines))
+         (source-update-lines (princ-to-string condition))))
+      :footer "A retries assimilation · R checks source · Esc closes"
+      :base base :target target))))
+
+(defun run-source-update-assimilation (session base target)
+  (let* ((run
+           (install-source-update-build-run
+            session
+            (build:make-build-run
+             (source-update-root session)
+             :systems (source-update-systems session))))
+         (shader-before (shader:shader-source-revision))
+         (fences nil)
+         (failure nil))
+    (handler-case
+        (setf fences (execute-source-update-build session run))
+      (error (condition)
+        (setf failure condition)))
+    (let ((run-snapshot (build:run-snapshot run)))
+      (if (eq :succeeded (build:run-snapshot-state run-snapshot))
+          (let ((shader-after (shader:shader-source-revision)))
+            (publish-source-update
+             session
+             (make-source-update-snapshot
+              :state :complete :heading "Source update assimilated"
+              :lines
+              (append
+               (list
+                (format nil "main now at ~A"
+                        (source-update-abbreviated-oid target))
+                (format nil "Loaded ~{~A~^, ~}"
+                        (source-update-systems session))
+                (if (= shader-before shader-after)
+                    (format nil "Shader source revision unchanged at ~D"
+                            shader-after)
+                    (format nil "Shader source revision ~D → ~D"
+                            shader-before shader-after)))
+               (source-update-fence-lines fences))
+              :footer "R checks for another update · Esc closes"
+              :base base :target target)))
+          (publish-source-update-assimilation-failure
+           session base target run failure)))))
+
+(defun publish-source-update-apply-failure
+    (session base target condition)
+  (let ((advanced-p
+          (ignore-errors
+           (string= target
+                    (source-update-git session '("rev-parse" "HEAD"))))))
+    (if (and advanced-p (source-update-build-run session))
+        (publish-source-update-assimilation-failure
+         session base target (source-update-build-run session) condition)
+        (publish-source-update
+         session
+         (make-source-update-snapshot
+          :state :failed
+          :heading (if advanced-p
+                       "Checkout advanced; assimilation did not start"
+                       "Source update failed before assimilation")
+          :lines
+          (append
+           (when advanced-p
+             (list
+              (format nil "main advanced to ~A; image may be partially redefined."
+                      (source-update-abbreviated-oid target))))
+           (source-update-lines (princ-to-string condition)))
+          :footer (if advanced-p
+                      "A retries assimilation · R checks source · Esc closes"
+                      "R retries review · Esc closes")
+          :base base :target target)))))
+
 (defun run-source-update-apply (session base target)
   (handler-case
       (progn
@@ -326,6 +473,7 @@
         (source-update-git
          session (list "merge-base" "--is-ancestor" base target))
         (source-update-git session (list "merge" "--ff-only" target))
+        (clear-source-update-build-run session)
         (publish-source-update
          session
          (make-source-update-snapshot
@@ -339,51 +487,10 @@
                    (source-update-systems session)))
           :footer "ASDF loading cannot be cancelled"
           :base base :target target))
-        (let* ((shader-before (shader:shader-source-revision))
-               (fences
-                 (funcall (source-update-loader session)
-                          (source-update-systems session)))
-               (shader-after (shader:shader-source-revision)))
-          (publish-source-update
-           session
-           (make-source-update-snapshot
-            :state :complete :heading "Source update assimilated"
-            :lines
-            (append
-             (list
-              (format nil "main now at ~A"
-                      (source-update-abbreviated-oid target))
-              (format nil "Loaded ~{~A~^, ~}"
-                      (source-update-systems session))
-              (if (= shader-before shader-after)
-                  (format nil "Shader source revision unchanged at ~D"
-                          shader-after)
-                  (format nil "Shader source revision ~D → ~D"
-                          shader-before shader-after)))
-             (source-update-fence-lines fences))
-            :footer "R checks for another update · Esc closes"
-            :base base :target target))))
+        (run-source-update-assimilation session base target))
     (error (condition)
-      (let ((advanced-p
-              (ignore-errors
-               (string= target
-                        (source-update-git session '("rev-parse" "HEAD"))))))
-        (publish-source-update
-         session
-         (make-source-update-snapshot
-          :state :failed
-          :heading (if advanced-p
-                       "Checkout advanced; assimilation failed"
-                       "Source update failed before assimilation")
-          :lines
-          (append
-           (when advanced-p
-             (list
-              (format nil "main advanced to ~A; image may be partially redefined."
-                      (source-update-abbreviated-oid target))))
-           (list (source-update-condition-text condition)))
-          :footer "Inspect the image; R checks source again · Esc closes"
-          :base base :target target))))))
+      (publish-source-update-apply-failure
+       session base target condition))))
 
 (defun source-update-start-worker (session function name)
   "Install a worker while SESSION's lock is held, before it can publish."
@@ -432,8 +539,46 @@
            session (lambda () (run-source-update-apply session base target))
            "source update apply"))))))
 
+(defun run-source-update-retry (session base target)
+  (handler-case
+      (let ((head (source-update-preflight session)))
+        (unless (string= head target)
+          (error "Retry requires main at ~A; found ~A"
+                 (source-update-abbreviated-oid target)
+                 (source-update-abbreviated-oid head)))
+        (run-source-update-assimilation session base target))
+    (error (condition)
+      (publish-source-update-apply-failure
+       session base target condition))))
+
+(defun request-source-update-retry (session)
+  "Retry assimilation when SESSION already advanced to its reviewed commit."
+  (sb-thread:with-mutex ((source-update-lock session))
+    (let ((snapshot (source-update-session-snapshot session)))
+      (when (and (source-update-accepting-p session)
+                 (eq :failed (source-update-snapshot-state snapshot))
+                 (source-update-snapshot-target snapshot)
+                 (source-update-build-run session))
+        (let ((base (source-update-snapshot-base snapshot))
+              (target (source-update-snapshot-target snapshot)))
+          (%publish-source-update
+           session
+           (make-source-update-snapshot
+            :state :loading :heading "Retrying Lisp assimilation"
+            :lines
+            (list
+             (format nil "main remains at ~A"
+                     (source-update-abbreviated-oid target))
+             (format nil "Loading ~{~A~^, ~} with canvas frames held…"
+                     (source-update-systems session)))
+            :footer "ASDF loading cannot be cancelled"
+            :base base :target target))
+          (source-update-start-worker
+           session (lambda () (run-source-update-retry session base target))
+           "source update assimilation retry"))))))
+
 (defun make-source-update-session
-    (root systems &key (loader #'luv:load-systems-live) (start-p t))
+    (root systems &key loader (start-p t))
   "Create a source update session, optionally starting its first fetch."
   (let ((session
           (make-instance
@@ -483,11 +628,20 @@ Merge and ASDF assimilation are never interrupted; callers wait for them."
 
 (defclass source-update-pane (transparent-gpu-application-pane) ())
 
-(define-application-frame source-update ()
-  ((session :initarg :session :reader source-update-frame-session)
+(defclass source-update-state ()
+  ((session :initarg :session :initform nil
+            :reader source-update-frame-session)
    (snapshot :initform nil :accessor source-update-frame-snapshot)
    (observed-revision :initform -1 :accessor source-update-observed-revision)
-   (dirty-p :initform t :accessor source-update-dirty-p))
+   (build-snapshot :initform nil :accessor source-update-frame-build-snapshot)
+   (observed-build-id :initform nil :accessor source-update-observed-build-id)
+   (observed-build-revision
+    :initform -1 :accessor source-update-observed-build-revision)
+   (dirty-p :initform t :accessor source-update-dirty-p)))
+
+(define-application-frame source-update
+    (standard-application-frame source-update-state)
+  ()
   (:menu-bar nil)
   (:panes
    (panel (make-pane 'source-update-pane
@@ -500,11 +654,12 @@ Merge and ASDF assimilation are never interrupted; callers wait for them."
                      :max-height +source-update-height+)))
   (:layouts (default panel)))
 
-(defmethod initialize-instance :after ((frame source-update) &key)
-  (multiple-value-bind (snapshot revision)
-      (current-source-update-snapshot (source-update-frame-session frame))
-    (setf (source-update-frame-snapshot frame) snapshot
-          (source-update-observed-revision frame) revision)))
+(defmethod initialize-instance :after ((frame source-update-state) &key)
+  (when (source-update-frame-session frame)
+    (multiple-value-bind (snapshot revision)
+        (current-source-update-snapshot (source-update-frame-session frame))
+      (setf (source-update-frame-snapshot frame) snapshot
+            (source-update-observed-revision frame) revision))))
 
 (defun source-update-state-label (state)
   (ecase state
@@ -521,11 +676,69 @@ Merge and ASDF assimilation are never interrupted; callers wait for them."
   (case (source-update-snapshot-state snapshot)
     (:review "Apply reviewed update")
     ((:fetching :applying :loading) "Working…")
+    (:failed
+     (if (source-update-snapshot-target snapshot)
+         "Retry assimilation"
+         "Fetch again"))
     (t "Fetch again")))
 
 (defun source-update-action-enabled-p (snapshot)
   (not (member (source-update-snapshot-state snapshot)
                '(:fetching :applying :loading))))
+
+(defun source-update-build-progress-lines (snapshot)
+  (when snapshot
+    (let* ((actions (build:run-snapshot-actions snapshot))
+           (completed
+             (count-if (lambda (action)
+                         (member (build:build-action-snapshot-state action)
+                                 '(:succeeded :failed)))
+                       actions))
+           (plan (build:run-snapshot-plan-summary snapshot))
+           (current (build:run-snapshot-current-action snapshot)))
+      (append
+       (list
+        (format nil "Build ~A · ~(~A~) · ~D action~:P finished"
+                (build:run-snapshot-id snapshot)
+                (build:run-snapshot-state snapshot)
+                completed))
+       (when plan
+         (list
+          (format nil "Plan: ~D system~:P · ~D compile~:P · ~D load~:P"
+                  (build:build-plan-summary-systems plan)
+                  (build:build-plan-summary-compiles plan)
+                  (build:build-plan-summary-loads plan))))
+       (when current
+         (list
+          (format nil "Now ~(~A~): ~A"
+                  (build:build-action-snapshot-kind current)
+                  (build:build-action-snapshot-label current))))))))
+
+(defun source-update-display-lines (frame snapshot)
+  (let ((build-snapshot (source-update-frame-build-snapshot frame)))
+    (case (source-update-snapshot-state snapshot)
+      (:loading
+       (append (source-update-snapshot-lines snapshot)
+               (source-update-build-progress-lines build-snapshot)))
+      (:failed
+       (if (and build-snapshot
+                (eq :failed (build:run-snapshot-state build-snapshot)))
+           (append
+            (subseq (source-update-snapshot-lines snapshot)
+                    0 (min 1 (length (source-update-snapshot-lines snapshot))))
+            (source-update-build-progress-lines build-snapshot)
+            (source-update-build-diagnostic-lines build-snapshot)
+            (alexandria:when-let
+                ((diagnostic
+                   (build:run-snapshot-terminal-diagnostic build-snapshot)))
+              (alexandria:when-let
+                  ((backtrace
+                     (build:build-diagnostic-snapshot-backtrace diagnostic)))
+                (cons "Backtrace"
+                      (source-update-bounded-lines
+                       (source-update-lines backtrace) 7)))))
+           (source-update-snapshot-lines snapshot)))
+      (otherwise (source-update-snapshot-lines snapshot)))))
 
 (defmethod handle-repaint ((pane source-update-pane) region)
   (declare (ignore region))
@@ -564,7 +777,7 @@ Merge and ASDF assimilation are never interrupted; callers wait for them."
          medium +source-update-margin+ 82
          (- +source-update-width+ +source-update-margin+) 532
          :radius 9 :ink *source-update-row-ink*)
-        (loop for line in (source-update-snapshot-lines snapshot)
+        (loop for line in (source-update-display-lines frame snapshot)
               for index from 0 below 19
               for y = (+ +source-update-content-top+
                          (* index +source-update-line-height+))
@@ -609,12 +822,26 @@ Merge and ASDF assimilation are never interrupted; callers wait for them."
 
 (defun refresh-source-update (frame)
   "Adopt SESSION's newest immutable snapshot outside repaint."
-  (multiple-value-bind (snapshot revision)
-      (current-source-update-snapshot (source-update-frame-session frame))
-    (unless (= revision (source-update-observed-revision frame))
-      (setf (source-update-frame-snapshot frame) snapshot
-            (source-update-observed-revision frame) revision
-            (source-update-dirty-p frame) t)))
+  (let ((session (source-update-frame-session frame)))
+    (multiple-value-bind (snapshot revision)
+        (current-source-update-snapshot session)
+      (unless (= revision (source-update-observed-revision frame))
+        (setf (source-update-frame-snapshot frame) snapshot
+              (source-update-observed-revision frame) revision
+              (source-update-dirty-p frame) t)))
+    (let* ((run (source-update-build-run session))
+           (build-snapshot (and run (build:run-snapshot run)))
+           (id (and build-snapshot (build:run-snapshot-id build-snapshot)))
+           (revision (and build-snapshot
+                          (build:run-snapshot-revision build-snapshot))))
+      (unless (and (equal id (source-update-observed-build-id frame))
+                   (eql revision
+                        (source-update-observed-build-revision frame)))
+        (setf (source-update-frame-build-snapshot frame) build-snapshot
+              (source-update-observed-build-id frame) id
+              (source-update-observed-build-revision frame)
+              (or revision -1)
+              (source-update-dirty-p frame) t))))
   frame)
 
 (defun prepare-source-update (frame)
@@ -667,6 +894,11 @@ Merge and ASDF assimilation are never interrupted; callers wait for them."
     (case (source-update-snapshot-state snapshot)
       (:review (request-source-update-apply session))
       ((:fetching :applying :loading) nil)
+      (:failed
+       (if (and (source-update-snapshot-target snapshot)
+                (source-update-build-run session))
+           (request-source-update-retry session)
+           (request-source-update-fetch session)))
       (t (request-source-update-fetch session))))
   frame)
 
@@ -681,9 +913,10 @@ Merge and ASDF assimilation are never interrupted; callers wait for them."
          :continue
          :dismiss))
     (:a
-     (when (eq :review
-               (source-update-snapshot-state
-                (source-update-frame-snapshot frame)))
+     (when (member
+            (source-update-snapshot-state
+             (source-update-frame-snapshot frame))
+            '(:review :failed))
        (invoke-source-update-action frame))
      :continue)
     (:r

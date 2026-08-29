@@ -200,7 +200,7 @@ compatibility path.  The reviewed change was subsequently rebased onto exact
 =origin/main= =17f47bb59249342474df830da8cb684c1f8b705f= and revalidated there.
 #ZNLZQU is the next candidate gate and was not begun.
 
-** TODO Migrate M-x and source update
+** DONE Migrate M-x and source update
 :PROPERTIES:
 :ID: ZNLZQU
 :END:
@@ -216,6 +216,13 @@ synchronous command execution and asynchronous modal work.
 /Done when./ Luft has no M-x or source-update instrument adapter, pointer and
 keyboard use the shell's sheet geometry and focus model, and teardown cannot
 deadlock against live-load canvas fences.
+
+/Outcome./ The workbench frame now owns both fixed modal panes and their state.
+Luft contributes only command tables, the assimilated ASDF system, and command
+entry points.  Source assimilation owns a retained =build-run=, presents plan,
+action, source, report, and backtrace snapshots, and can retry assimilation
+after the checkout has already advanced.  Failed live loads release and fence
+the originally held canvases before propagating their original condition.
 
 ** TODO Migrate metabar and lobby
 :PROPERTIES:
@@ -680,6 +687,43 @@ path.  Do not paste complete test transcripts.
   the McCLIM build-run presentation and source-update assimilation migration,
   not a test scheduler rewrite.
 
+** 2026-08-29 — M-x and source update entered the workbench
+
+- /Questions./ Can the formerly standalone retained frames become fixed panes
+  of the one workbench mirror without reintroducing per-application placement,
+  input, compositor, or lifecycle adapters?  Can failed assimilation preserve
+  compiler action identity and enough condition context to diagnose and retry
+  after Git has already advanced?
+- /Commands and actions./ Split the command-menu and source-update frame state
+  from their standalone frame classes; made those state mixins and fixed panes
+  part of =workbench-frame=; centralized modal selection, native-frame-boundary
+  mutation, focus, pointer inversion, key handling, command execution, source
+  quiescence, repaint, and release in =luv/workbench=.  Replaced Luft's two
+  instrument adapters with small semantic/command contributions.  Made each
+  assimilation own a retained =luv/build= run, added action/plan/diagnostic/
+  backtrace presentation and retry, and made the serialized live-load boundary
+  fence its original canvas cohort after both success and failure.
+- /Observed result./ Focused McCLIM tests retained a failing synthetic compile
+  action, multiline terminal diagnostic, and successful retry without another
+  fast-forward.  Workbench tests proved fixed modal pane ownership and centered
+  McCLIM geometry.  A fresh live Vulkan Luft showed centered, clipped M-x and
+  source-update panes in the same full-viewport retained stream as status.
+  Synthetic actual-path Meta-X opened modal state, a typed character changed
+  the query, Escape closed it, and application input suspension returned to
+  false.  Calling the public opener from Sly initially exposed concurrent
+  Slug-cache mutation; routing every public tool mutation through the native
+  frame boundary removed it in a fresh replay.
+- /Interpretation./ M-x and source update are now shell facilities rather than
+  application instruments.  The conservative full-frame assimilation hold
+  remains necessary because compile/load-time code can mutate the live image;
+  retained progress is therefore chiefly pre-attempt and post-attempt evidence,
+  while rich failure state remains inspectable after rendering resumes.
+- /Resulting decisions./ Keep standalone frame constructors for Luvcraft's
+  deferred compatibility path, but share their state and presentation logic
+  with the workbench.  Keep application contributions semantic.  Never retain
+  Lisp restarts for later UI invocation.  #C9US2D is the next candidate gate;
+  metabar and lobby were not migrated in this stage.
+
 * Completed prose updates
 :PROPERTIES:
 :ID: QF07KG
@@ -753,10 +797,8 @@ path.  Do not paste complete test transcripts.
 :ID: 53WN6F
 :END:
 
-Review the retained =luv/build= model, ASDF executor, console adapter, and
-=make test= preparation cut.  If accepted, continue #ZNLZQU by giving the
-source-update workflow a child build run and a McCLIM presentation of action
-progress plus inspectable diagnostics, then migrate M-x and source update into
-the workbench focus/layer regime.  Do not begin test scheduler refactoring,
-metabar, lobby, service migration, Luvcraft migration, or general
-instrument-system deletion with that cut.
+Review the completed #ZNLZQU workbench migration and retained source
+assimilation presentation.  If accepted, begin #C9US2D with the metabar and
+lobby only.  Keep the lobby service lifetime independent of pane visibility,
+and do not begin test scheduler refactoring, service migration, Luvcraft
+migration, or general instrument-system deletion with that cut.

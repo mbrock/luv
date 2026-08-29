@@ -26,6 +26,11 @@
    #:stop-workbench
    #:show-workbench-layer
    #:hide-workbench-layer
+   #:open-workbench-command-menu
+   #:close-workbench-command-menu
+   #:toggle-workbench-command-menu
+   #:open-workbench-source-update
+   #:close-workbench-source-update
    #:dispatch-workbench-event
    #:refresh-workbench
    #:encode-workbench))

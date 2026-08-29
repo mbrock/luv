@@ -80,6 +80,10 @@ their semantic layers should remain separately inspectable."))
 (defmethod command-menu-tables-for ((owner-frame standard-application-frame))
   (list (frame-command-table owner-frame)))
 
+(defmethod command-menu-tables-for ((owner-frame t))
+  (declare (ignore owner-frame))
+  nil)
+
 (defun command-menu-command-without-required-arguments-p (name)
   "Whether NAME is a command M-x can execute without prompting yet."
   (alexandria:when-let
@@ -134,8 +138,9 @@ until M-x has an argument-prompting interaction instead of becoming dead rows."
 
 (defclass mx-command-menu-pane (transparent-gpu-application-pane) ())
 
-(define-application-frame command-menu ()
-  ((owner-frame :initarg :owner-frame :reader command-menu-owner-frame)
+(defclass command-menu-state ()
+  ((owner-frame :initarg :owner-frame :initform nil
+                :reader command-menu-owner-frame)
    (command-tables :initarg :command-tables :initform nil
                    :accessor command-menu-command-tables)
    (inherited-p :initarg :inherited :initform nil
@@ -146,7 +151,11 @@ until M-x has an argument-prompting interaction instead of becoming dead rows."
    (results :initform nil :accessor command-menu-results)
    (query :initform "" :accessor command-menu-query)
    (selected :initform 0 :accessor command-menu-selected)
-   (dirty-p :initform t :accessor command-menu-dirty-p))
+   (dirty-p :initform t :accessor command-menu-dirty-p)))
+
+(define-application-frame command-menu
+    (standard-application-frame command-menu-state)
+  ()
   (:menu-bar nil)
   (:panes
    (sheet (make-pane 'mx-command-menu-pane
@@ -181,7 +190,7 @@ until M-x has an argument-prompting interaction instead of becoming dead rows."
         (command-menu-dirty-p frame) t)
   (update-command-menu-results frame :reset-selection-p t))
 
-(defmethod initialize-instance :after ((frame command-menu) &key)
+(defmethod initialize-instance :after ((frame command-menu-state) &key)
   (unless (command-menu-command-tables frame)
     (setf (command-menu-command-tables frame)
           (command-menu-tables-for (command-menu-owner-frame frame))
