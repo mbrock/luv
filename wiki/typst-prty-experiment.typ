@@ -66,7 +66,8 @@
   limit,
   stroke: side-stroke,
   radius: 0.55em,
-  inset: (x: 0.4em, y: 0.14em),
+  inset-x: 3.32pt,
+  inset-y: 1.162pt,
   plan: plan,
 )
 
@@ -169,9 +170,9 @@
   )
 }
 
-#title("A tiny non-greedy DEXP", "Typst · eager measured frontier · row or column")
+#title("A tiny non-greedy DEXP", "Typst · leaf-measured analytic frontier · row or column")
 
-#note([Every syntax token and nested list is proportional Typst content measured by `measure` and normalized to a top baseline. Calls offer exactly two argument arrangements: all in one row or all in one column. Pareto pruning retains narrower/taller and wider/shorter possibilities through nesting; the final choice minimizes physical height within the supplied width.])
+#note([Every proportional syntax token is measured once as a top-baseline leaf. Nested rows, columns, and frames trust their analytic bounding boxes and never call `measure`. Calls offer exactly two argument arrangements: all in one row or all in one column. Pareto pruning retains narrower/taller and wider/shorter possibilities through nesting; the final choice minimizes physical height within the supplied width.])
 
 #v(5mm)
 

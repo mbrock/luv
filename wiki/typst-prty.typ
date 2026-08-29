@@ -1,29 +1,24 @@
 // A tiny eager Pareto-frontier layout algebra for Typst, after Wisp's
 // core/sexp-prty.zig and Bernardy's "A Pretty But Not Greedy Printer".
 //
-// This version works with measured proportional Typst content.  A document is
-// an array of candidate rectangles; every candidate retains its concrete
-// content, as the Wisp implementation retains concrete lines.  Call these
-// functions from a `context` block so `measure` can see the active text style.
-// Every candidate gets a top baseline.  With that invariant, width, height,
-// and monotone cost are sufficient for dominance under the combinators below:
-// rows sum widths and take maximum height; columns do the converse; frames add
-// fixed extents.
+// This version measures only proportional leaf content.  Every composite
+// trusts the rectangle algebra: rows sum widths and take maximum height;
+// columns do the converse; frames add explicit insets.  A document is an array
+// of candidate rectangles retaining concrete content, as the Wisp
+// implementation retains concrete lines.  Call `leaf` from a `context` block
+// so `measure` can see the active text style.  Every body has a top baseline.
 
-#let layout(body, cost: 0, plan: ()) = {
+#let leaf(body, cost: 0, plan: ()) = {
+  let body = box(baseline: top, body)
   let size = measure(body)
-  (
+  ((
     body: body,
     width: size.width,
     height: size.height,
     cost: cost,
     plan: plan,
-  )
+  ),)
 }
-
-#let leaf(body, cost: 0, plan: ()) = (
-  layout(box(baseline: top, body), cost: cost, plan: plan),
-)
 
 #let dominates(a, b) = {
   (a.width <= b.width) and (a.height <= b.height) and (a.cost <= b.cost)
@@ -108,17 +103,25 @@
   parts: (candidate.body,),
 )
 
+#let empty-document = ((
+  body: box(baseline: top),
+  width: 0pt,
+  height: 0pt,
+  cost: 0,
+  plan: (),
+),)
+
 // ROW and COLUMN are intentionally all-or-nothing.  There is no fill-style
 // mixed line breaking in this experiment.  Each composition prunes its partial
 // frontier before adding the next child; materializing the full Cartesian
 // product makes ordinary binding lists exponentially large.  Partial states
-// carry rectangle arithmetic and flat child-body arrays; only the surviving
-// completed candidates become Typst boxes and call `measure`.  The retained
-// frontier is sampled at eight widths: bounded optimality in exchange for
-// predictable compilation rather than exponential memory.
-#let row(documents, limit, gap: 0.48em, cost: 0, plan: "row") = {
-  let gap-width = measure(box(width: gap)).width
-  let initial = if documents.len() == 0 { leaf(box(), plan: ()) } else { documents.first() }
+// carry rectangle arithmetic and flat child-body arrays.  Composite bodies
+// are never measured.  Gaps and frame insets must therefore be absolute
+// lengths already resolved for the active typography.  The retained frontier
+// is sampled at eight widths: bounded optimality in exchange for predictable
+// compilation rather than exponential memory.
+#let row(documents, limit, gap: 3.984pt, cost: 0, plan: "row") = {
+  let initial = if documents.len() == 0 { empty-document } else { documents.first() }
   let candidates = initial.map(composition-state)
   if documents.len() > 1 {
     for document in documents.slice(1) {
@@ -128,7 +131,7 @@
           let parts = left.parts + (right.body,)
           next.push((
             body: none,
-            width: left.width + gap-width + right.width,
+            width: left.width + gap + right.width,
             height: calc.max(left.height, right.height),
             cost: left.cost + right.cost,
             plan: left.plan + right.plan,
@@ -141,8 +144,10 @@
   }
   let result = ()
   for child in candidates {
-    result.push(layout(
-      box(baseline: top, child.parts.join(h(gap))),
+    result.push((
+      body: box(baseline: top, child.parts.join(h(gap))),
+      width: child.width,
+      height: child.height,
       cost: child.cost + cost,
       plan: own-plan(plan) + child.plan,
     ))
@@ -150,9 +155,8 @@
   pareto(within-limit(result, limit))
 }
 
-#let column(documents, limit, gap: 0.14em, cost: 0, plan: "column") = {
-  let gap-height = measure(box(height: gap)).height
-  let initial = if documents.len() == 0 { leaf(box(), plan: ()) } else { documents.first() }
+#let column(documents, limit, gap: 1.162pt, cost: 0, plan: "column") = {
+  let initial = if documents.len() == 0 { empty-document } else { documents.first() }
   let candidates = initial.map(composition-state)
   if documents.len() > 1 {
     for document in documents.slice(1) {
@@ -163,7 +167,7 @@
           next.push((
             body: none,
             width: calc.max(above.width, below.width),
-            height: above.height + gap-height + below.height,
+            height: above.height + gap + below.height,
             cost: above.cost + below.cost,
             plan: above.plan + below.plan,
             parts: parts,
@@ -175,8 +179,8 @@
   }
   let result = ()
   for child in candidates {
-    result.push(layout(
-      box(
+    result.push((
+      body: box(
         baseline: top,
         grid(
           columns: 1,
@@ -184,6 +188,8 @@
           ..child.parts,
         ),
       ),
+      width: child.width,
+      height: child.height,
       cost: child.cost + cost,
       plan: own-plan(plan) + child.plan,
     ))
@@ -196,7 +202,8 @@
   limit,
   stroke: none,
   radius: 0pt,
-  inset: 0pt,
+  inset-x: 0pt,
+  inset-y: 0pt,
   cost: 0,
   plan: (),
 ) = {
@@ -206,11 +213,13 @@
       baseline: top,
       stroke: stroke,
       radius: radius,
-      inset: inset,
+      inset: (x: inset-x, y: inset-y),
       child.body,
     )
-    let candidate = layout(
-      body,
+    let candidate = (
+      body: body,
+      width: child.width + 2 * inset-x,
+      height: child.height + 2 * inset-y,
       cost: child.cost + cost,
       plan: combined-plan(plan, (child,)),
     )

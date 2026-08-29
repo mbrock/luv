@@ -114,7 +114,8 @@
     limit,
     stroke: dexp-side-stroke,
     radius: 0.58em,
-    inset: (x: 0.4em, y: 0.14em),
+    inset-x: 3.32pt,
+    inset-y: 1.162pt,
     plan: (),
   )
 }
@@ -128,7 +129,7 @@
     row((
       dexp-token((style: "muted", text: node.prefix), limit),
       dexp-node(node.child, limit),
-    ), limit, gap: 0.05em, plan: ())
+    ), limit, gap: 0.415pt, plan: ())
   } else {
     dexp-token(node, limit)
   }

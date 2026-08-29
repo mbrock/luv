@@ -256,12 +256,13 @@ native Typst content in the PDF and become tightly bounded SVG resources in the
 static or dynamic website.  Ordinary prose collapses Org's editorial source
 wrapping rather than typesetting it as hard line breaks.  Lisp source blocks
 use the same Eclector tree, operator layouts, and child roles as the web dexp:
-Lisp emits semantic nodes, then a proportional Typst renderer measures complete
-row and column alternatives and retains their width/height Pareto frontier.
-There is deliberately no fill-style mixed wrapping.  Every candidate has a
-top baseline, so an operator sits beside its nested form's first row and the
-rectangle measures remain compositional.  Other example blocks remain plain
-monospace text.  Internal page names use small capitals.  The page template
+Lisp emits semantic nodes, then a proportional Typst renderer measures only
+token leaves, composes exact row, column, and frame bounds analytically, and
+retains their width/height Pareto frontier.  There is deliberately no fill-style
+mixed wrapping.  Every candidate has a top baseline, so an operator sits beside
+its nested form's first row and the rectangle measures remain compositional.
+Other example blocks remain plain monospace text.  Internal page names use
+small capitals.  The page template
 uses the private, annexed Equity family when its content is present and falls
 back to Libertinus in ordinary public checkouts.  [[file:luft-star-figures.org][One star in four views]]
 adds the first production-data plate: a =star-plate= CLOS value emits current
