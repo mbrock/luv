@@ -1059,7 +1059,8 @@ before the operation boundary, or it would encode through resources which the
             (when (viewer-control-active-p viewer :up) (move up step))
             (when (viewer-control-active-p viewer :down) (move up (- step))))))))
 
-(defun advance-viewer-streaming (viewer)
+(zdefun (advance-viewer-streaming :zone :luft/advance-streaming)
+    (viewer)
   "Drain completed meshes and demand terrain around the gameplay focus."
   (let ((source (viewer-source viewer))
         (production-system (viewer-production-system viewer)))
@@ -1085,7 +1086,8 @@ before the operation boundary, or it would encode through resources which the
              source production-system (viewer-bevel-width viewer)
              (vec3:vec3-x position) (vec3:vec3-y position))))))))
 
-(defun render-viewer-frame (viewer timestamp)
+(zdefun (render-viewer-frame :zone :luft/frame)
+    (viewer timestamp)
   (when (viewer-running-p viewer)
     ;; Source callbacks only advance revisions.  Compilation and complete
     ;; cohort publication happen here, before this frame borrows the renderer.

@@ -1105,7 +1105,8 @@ diagnostic owner NIL remains a single-mesh special form."
         (realized-light-generation-stamp
          (scene-mesh-generation-light-generation right)))))
 
-(defun decorate-scene-meshes
+(zdefun (decorate-scene-meshes :zone :luft/decorate-meshes
+                                :value (length owners))
     (owners scene
      &key surface-context
        (attachment-source-owners nil attachment-source-owners-p)
@@ -1131,41 +1132,44 @@ mesh light sidecars and packed body/flame frames finalized."
   (check-type owners list)
   (check-type surface-context list)
   (let* ((frames
-           (unless
-               (every (lambda (entry)
-                        (not (null (luft:surface-mesh-star-site-words
-                                    (cdr entry)))))
-                      owners)
-             (resolve-unlit-scene-torch-frames
-              owners scene surface-context attachment-source-owners
-              attachment-source-owners-p)))
+           (zone :luft/resolve-attachments
+             (unless
+                 (every (lambda (entry)
+                          (not (null (luft:surface-mesh-star-site-words
+                                      (cdr entry)))))
+                        owners)
+               (resolve-unlit-scene-torch-frames
+                owners scene surface-context attachment-source-owners
+                attachment-source-owners-p))))
          (light-generation
-           (if realize-torch-light-p
-               (scene-realized-light-generation
-                scene frames reusable-light-generation)
-               (progn
-                 (when frames
-                   (error "A reused light field cannot finalize ~D changed torch frames."
-                          (length frames)))
-                 (or (etypecase reusable-light-generation
-                       (null nil)
-                       (realized-light-generation reusable-light-generation)
-                       (scene-mesh-generation
-                        (scene-mesh-generation-light-generation
-                         reusable-light-generation)))
-                     (error "A non-realizing mesh request needs a reusable light generation.")))))
+           (zone :luft/realize-light
+             (if realize-torch-light-p
+                 (scene-realized-light-generation
+                  scene frames reusable-light-generation)
+                 (progn
+                   (when frames
+                     (error "A reused light field cannot finalize ~D changed torch frames."
+                            (length frames)))
+                   (or (etypecase reusable-light-generation
+                         (null nil)
+                         (realized-light-generation reusable-light-generation)
+                         (scene-mesh-generation
+                          (scene-mesh-generation-light-generation
+                           reusable-light-generation)))
+                       (error "A non-realizing mesh request needs a reusable light generation."))))))
          (field (realized-light-generation-field light-generation)))
-    (let ((descriptors
-            (compile-terrain-material-descriptors
-             (scene-material-vocabulary scene))))
-      (labels ((initialize (surface)
-                 (compile-surface-mesh-appearance
-                  surface (scene-material-cells scene) descriptors)
-                 (setf (luft:surface-mesh-voxel-light surface) field
-                       (luft:surface-mesh-attachments surface) nil)
-                 (dolist (companion (luft:surface-mesh-companions surface))
-                   (initialize companion))))
-        (dolist (entry owners) (initialize (cdr entry)))))
+    (zone :luft/compile-appearance
+      (let ((descriptors
+              (compile-terrain-material-descriptors
+               (scene-material-vocabulary scene))))
+        (labels ((initialize (surface)
+                   (compile-surface-mesh-appearance
+                    surface (scene-material-cells scene) descriptors)
+                   (setf (luft:surface-mesh-voxel-light surface) field
+                         (luft:surface-mesh-attachments surface) nil)
+                   (dolist (companion (luft:surface-mesh-companions surface))
+                     (initialize companion))))
+          (dolist (entry owners) (initialize (cdr entry))))))
     (dolist (frame frames)
       (push
        (pack-realized-torch-frame
@@ -1492,7 +1496,9 @@ outward order.  Coordinates are biased only to keep this first ABI unsigned."
      site-words (pack-terrain-appearance-codes appearance-codes)
      descriptor-words (/ (length site-words) 4))))
 
-(defun make-render-population (meshes)
+(zdefun (make-render-population :zone :luft/build-render-population
+                                :value (length meshes))
+    (meshes)
   "Prepare the sole terrain ABI: active sites indexing the fixed star atlas."
   (%make-star-render-population meshes))
 
@@ -4491,7 +4497,9 @@ cohort untouched. No frame can interleave with the owner-thread publication."
      (authored-world-source-edits source))
     edits))
 
-(defun materialize-authored-world-chunk (source key incarnation &key edits)
+(zdefun (materialize-authored-world-chunk :zone :luft/materialize-source-chunk
+                                          :value key)
+    (source key incarnation &key edits)
   "Build KEY bit-identically from SOURCE and an immutable sparse edit capture."
   (check-type source authored-world-source)
   (let* ((domain (authored-world-source-domain source))
@@ -4512,50 +4520,56 @@ cohort untouched. No frame can interleave with the owner-thread publication."
            (domains:identity-vocabulary-offset
             vocabulary *sanctuary-material-placement*))
          (materials (make-hash-table :test #'eql :size 100000)))
-    (loop for x from x0 below x1 do
-      (loop for y from y0 below y1 do
-        (let* ((height (large-world-terrain-height source x y))
-               (top (1- height))
-               (road-p
-                 (<= (abs (- y (large-world-road-centre-y x))) 3.0d0))
-               (river-p
-                 (<= (abs (- x (large-world-river-centre-x y))) 8.0d0))
-               (rock-p
-                 (or (> height 31)
-                     (>= (abs (- height
-                                 (large-world-terrain-height source (1+ x) y)))
-                         2))))
-          (dotimes (z height)
-            (setf (gethash
-                   (luft:make-site domain x y z luft:+cell-extent+ 1)
-                   materials)
-                  (cond ((and (= z top) road-p) limestone-offset)
-                        ((and (= z top) river-p) rock-offset)
-                        ((and rock-p (>= z (- top 3))) rock-offset)
-                        (t terrain-offset))))
-          (when (and (<= (abs (- x 1500)) 45)
-                     (<= (abs (- y 650)) 45))
-            (loop for z from 24 to 47
-                  when (large-world-citadel-cell-p x y z)
-                    do (setf (gethash
-                              (luft:make-site
-                               domain x y z luft:+cell-extent+ 1)
-                              materials)
-                             limestone-offset))))))
-    (dolist (edit edits)
-      (if (cdr edit)
-          (setf (gethash (car edit) materials)
-                (domains:identity-vocabulary-offset vocabulary (cdr edit)))
-          (remhash (car edit) materials)))
+    (zone :luft/generate-source-materials
+      (loop for x from x0 below x1 do
+        (loop for y from y0 below y1 do
+          (let* ((height (large-world-terrain-height source x y))
+                 (top (1- height))
+                 (road-p
+                   (<= (abs (- y (large-world-road-centre-y x))) 3.0d0))
+                 (river-p
+                   (<= (abs (- x (large-world-river-centre-x y))) 8.0d0))
+                 (rock-p
+                   (or (> height 31)
+                       (>= (abs (- height
+                                   (large-world-terrain-height source (1+ x) y)))
+                           2))))
+            (dotimes (z height)
+              (setf (gethash
+                     (luft:make-site domain x y z luft:+cell-extent+ 1)
+                     materials)
+                    (cond ((and (= z top) road-p) limestone-offset)
+                          ((and (= z top) river-p) rock-offset)
+                          ((and rock-p (>= z (- top 3))) rock-offset)
+                          (t terrain-offset))))
+            (when (and (<= (abs (- x 1500)) 45)
+                       (<= (abs (- y 650)) 45))
+              (loop for z from 24 to 47
+                    when (large-world-citadel-cell-p x y z)
+                      do (setf (gethash
+                                (luft:make-site
+                                 domain x y z luft:+cell-extent+ 1)
+                                materials)
+                               limestone-offset)))))))
+    (zone :luft/replay-source-edits
+      (dolist (edit edits)
+        (if (cdr edit)
+            (setf (gethash (car edit) materials)
+                  (domains:identity-vocabulary-offset vocabulary (cdr edit)))
+            (remhash (car edit) materials))))
     (let ((builder
             (luft:make-chain-builder
              domain :initial-capacity (hash-table-count materials))))
-      (maphash (lambda (cell offset)
-                 (declare (ignore offset))
-                 (luft:chain-builder-add-site builder cell))
-               materials)
+      (zone :luft/assemble-source-chain
+        (maphash (lambda (cell offset)
+                   (declare (ignore offset))
+                   (luft:chain-builder-add-site builder cell))
+                 materials))
       (%make-resident-cell-chunk
-       key incarnation (luft:finish-chain-builder builder) materials))))
+       key incarnation
+       (zone :luft/normalize-source-chain
+         (luft:finish-chain-builder builder))
+       materials))))
 
 (defclass authored-chunk-load-request (production:production-request)
   ((scene :initarg :scene :reader authored-chunk-load-request-scene)
@@ -4567,7 +4581,8 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                 :reader authored-chunk-load-request-incarnation)
    (edits :initarg :edits :reader authored-chunk-load-request-edits)))
 
-(defmethod production:perform-production-request
+(zdefmethod (production:perform-production-request
+             :zone :luft/produce-source-chunk)
     ((request authored-chunk-load-request))
   (materialize-authored-world-chunk
    (authored-chunk-load-request-source request)
@@ -4750,7 +4765,8 @@ a future LoD must bring an explicit transition representation."
               ((= 1 (luft:chain-cell-occupancy-bit chain x y z)) :solid)
               (t :open-sky)))))))
 
-(defun snapshot-streaming-scene-input (scene)
+(zdefun (snapshot-streaming-scene-input :zone :luft/capture-semantic-scene)
+    (scene)
   "Freeze SCENE's replace-only authored values for a worker request."
   (let* ((residents
            (and (streaming-scene-source scene)
@@ -4990,7 +5006,8 @@ published."
                   changes))
           support-keys)))
 
-(defun %retarget-resident-streaming-scene
+(zdefun (%retarget-resident-streaming-scene
+         :zone :luft/retarget-mesh-residency)
     (scene production-system bevel-width world-x world-y)
   "Batch SCENE's desired window around a camera position and mesh it once.
 
@@ -5119,7 +5136,9 @@ silently empty the desired residency window."
                                         (* y luft:+chunk-size+))))
      #'<)))
 
-(defun rebuild-authored-world-resident-values
+(zdefun (rebuild-authored-world-resident-values
+         :zone :luft/rebuild-active-scene
+         :value (length collision-keys))
     (scene source-keys &optional (collision-keys source-keys))
   "Publish visible materials and a possibly wider resident collision chain."
   (let* ((source (streaming-scene-source scene))
@@ -5137,16 +5156,20 @@ silently empty the desired residency window."
            (luft:make-chain-builder domain
                                     :initial-capacity collision-cell-count))
          (materials (make-hash-table :test #'eql :size cell-count)))
-    (dolist (key collision-keys)
-      (let ((resident (gethash key (streaming-scene-store scene))))
-        (luft:chain-builder-add-chain
-         builder (resident-cell-chunk-chain resident))))
-    (dolist (key source-keys)
-      (let ((resident (gethash key (streaming-scene-store scene))))
-        (maphash (lambda (cell offset)
-                   (setf (gethash cell materials) offset))
-                 (resident-cell-chunk-material-cells resident))))
-    (setf (scene-solid scene) (luft:finish-chain-builder builder)
+    (zone :luft/assemble-collision-chunks
+      (dolist (key collision-keys)
+        (let ((resident (gethash key (streaming-scene-store scene))))
+          (luft:chain-builder-add-chain
+           builder (resident-cell-chunk-chain resident)))))
+    (zone :luft/assemble-visible-materials
+      (dolist (key source-keys)
+        (let ((resident (gethash key (streaming-scene-store scene))))
+          (maphash (lambda (cell offset)
+                     (setf (gethash cell materials) offset))
+                   (resident-cell-chunk-material-cells resident)))))
+    (setf (scene-solid scene)
+          (zone :luft/normalize-collision-chain
+            (luft:finish-chain-builder builder))
           (scene-material-cells scene) materials
           (scene-content-revision scene) (1+ (scene-content-revision scene)))
     scene))
@@ -5177,7 +5200,9 @@ silently empty the desired residency window."
               collect key)
         #'<))
 
-(defun evict-undesired-authored-world-residents (scene)
+(zdefun (evict-undesired-authored-world-residents
+         :zone :luft/evict-source-chunks)
+    (scene)
   "Evict every derived CPU value outside SCENE's canonical desired set."
   (let ((departures nil)
         (desired (streaming-scene-desired scene)))
@@ -5204,7 +5229,7 @@ silently empty the desired residency window."
       (remhash key (streaming-scene-load-outstanding scene))
       t)))
 
-(defun retarget-authored-world
+(zdefun (retarget-authored-world :zone :luft/retarget-authored-world)
     (scene production-system bevel-width world-x world-y)
   "Demand, asynchronously materialize, and activate one bounded source window."
   (let* ((focus-key (streaming-scene-focus-key scene world-x world-y))
@@ -5265,7 +5290,7 @@ silently empty the desired residency window."
       (%retarget-resident-streaming-scene
        scene production-system bevel-width world-x world-y))))
 
-(defun retarget-streaming-scene
+(zdefun (retarget-streaming-scene :zone :luft/retarget-streaming)
     (scene production-system bevel-width world-x world-y)
   (if (streaming-scene-source scene)
       (retarget-authored-world
@@ -5367,7 +5392,8 @@ chunk is empty; excluding that owner drops real boundary triangles."
                               (gethash key (streaming-scene-loaded scene))
                               (streaming-store-incarnation scene key))))))
 
-(defun make-streaming-region-snapshot
+(zdefun (make-streaming-region-snapshot :zone :luft/capture-mesh-region
+                                        :value (length output-keys))
     (scene output-keys bevel-width &key (realize-torch-light-p t))
   "Capture one immutable union window and its width/repair guard ring."
   (check-type scene streaming-scene)
@@ -5419,7 +5445,11 @@ chunk is empty; excluding that owner drops real boundary triangles."
    scene (list key) bevel-width
    :realize-torch-light-p realize-torch-light-p))
 
-(defun mesh-streaming-snapshot (snapshot)
+(zdefun (mesh-streaming-snapshot :zone :luft/mesh-region
+                                 :value
+                                 (length
+                                  (streaming-mesh-snapshot-output-keys snapshot)))
+    (snapshot)
   "Mesh one worker-owned regional snapshot without reading owner state.
 
 The first value is an alist of output owner to final mesh.  Every guarded
@@ -5582,7 +5612,8 @@ generation before publication succeeds."
             :mesh-entries (list (cons +unkeyed-scene-mesh-output+ root))
             :unkeyed-mesh-p t)))))))
 
-(defmethod production:perform-production-request
+(zdefmethod (production:perform-production-request
+             :zone :luft/produce-mesh-region)
     ((request streaming-mesh-request))
   (multiple-value-bind (meshes census diagnostics generation)
       (mesh-streaming-snapshot (streaming-mesh-request-snapshot request))
@@ -5598,7 +5629,8 @@ generation before publication succeeds."
 (defvar *streaming-mesh-snapshot-observer* nil
   "Optional test instrumentation called with each snapshot before scheduling.")
 
-(defun schedule-streaming-scene-cohort
+(zdefun (schedule-streaming-scene-cohort :zone :luft/schedule-mesh-region
+                                         :value (length output-keys))
     (scene production-system output-keys bevel-width priority
      &key (realize-torch-light-p t))
   "Schedule one dependency-guarded regional compilation for OUTPUT-KEYS."
@@ -5719,7 +5751,8 @@ generation before publication succeeds."
          t)
         (values nil nil nil))))
 
-(defun publish-ready-streaming-scene (scene renderer)
+(zdefun (publish-ready-streaming-scene :zone :luft/publish-ready-region)
+    (scene renderer)
   "Install a complete current mesh cohort at the canvas-owner boundary."
   (multiple-value-bind (meshes generation ready-p)
       (ready-streaming-scene-meshes scene)
@@ -5741,7 +5774,7 @@ generation before publication succeeds."
             (streaming-scene-staged-generation scene) nil)
       (length meshes))))
 
-(defun drain-streaming-scene-production
+(zdefun (drain-streaming-scene-production :zone :luft/drain-production)
     (scene renderer production-system &key (limit 2))
   "Drain and publish bounded worker results on the canvas owner thread."
   (loop repeat limit
