@@ -23,8 +23,18 @@
 (defgeneric render-typst (element)
   (:documentation "Emit Typst markup for ELEMENT to *TYPST-STREAM*."))
 
+(defun typst-prose-text (string)
+  "Collapse Org source whitespace as browsers do for ordinary prose."
+  (let ((space-before nil))
+    (with-output-to-string (out)
+      (loop for character across string
+            for space = (member character '(#\Space #\Tab #\Newline #\Return))
+            unless (and space space-before)
+              do (write-char (if space #\Space character) out)
+            do (setf space-before space)))))
+
 (defmethod render-typst ((string string))
-  (format *typst-stream* "#text(~A)" (typst-string string)))
+  (format *typst-stream* "#text(~A)" (typst-string (typst-prose-text string))))
 
 (defun render-typst-inlines (inlines)
   (mapc #'render-typst inlines))

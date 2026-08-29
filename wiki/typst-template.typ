@@ -38,8 +38,8 @@
   show raw: set text(font: "Monaspace Neon", size: 7.7pt,
                      features: ("calt": 0, "liga": 0))
 
-  show heading.where(level: 1): it => block(above: 2.2em, below: 0.75em, sticky: true)[
-    #set text(font: "Iosevka Aile", size: 17pt, weight: "bold", fill: ink,
+  show heading.where(level: 1): it => block(above: 1.75em, below: 0.55em, sticky: true)[
+    #set text(font: "Iosevka Aile", size: 15pt, weight: "bold", fill: ink,
               hyphenate: false)
     #it.body
   ]

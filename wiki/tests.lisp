@@ -177,7 +177,8 @@ Nothing here refers to anything.
 :ID: TYP456
 :END:
 
-Text with *weight* and a backslash \\.
+Text with *weight* and a backslash \\ that  is
+soft-wrapped in the Org source.
 " "typst-test"))
          (source (with-output-to-string (stream)
                    (wiki:render-typst-document doc stream))))
@@ -185,7 +186,9 @@ Text with *weight* and a backslash \\.
     (true (search "#heading(level: 1)" source))
     (true (search "<TYP456>" source))
     (true (search "#strong[" source))
-    (true (search "backslash \\\\" source))))
+    (true (search "backslash \\\\ that is" source))
+    (false (search "that  is" source))
+    (false (search "\\nsoft-wrapped" source))))
 
 (define-test page-view-classes-select-semantic-layouts
   (let ((site (wiki:make-site '())))

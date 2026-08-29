@@ -1,7 +1,7 @@
 #+title: The local voxel world: volume, margin, and generations
 #+startup: overview
 
-* A common language for one large world
+* A language for the voxel world
 :PROPERTIES:
 :ID: R9M0QA
 :END:
@@ -17,43 +17,38 @@ already one class in =luft/render/render.lisp=.
 The organizing picture is:
 
 #+begin_src typst-diagram
-#import "@preview/fletcher:0.5.8" as fletcher: diagram, node, edge
+#import "@preview/cetz:0.5.2": canvas, draw
 
-#let ink = rgb("#27313d")
-#let quiet = rgb("#e9edf2")
-#let active = rgb("#dce7f5")
-#let product = rgb("#eee9dc")
+#canvas({
+  import draw: line, content
+  let ink = rgb("#34404d")
+  let accent = rgb("#456f9b")
+  let wire = .65pt + ink
+  let arrow = (end: "stealth", fill: ink)
+  let label(at, body, weight: "regular", fill: ink) = content(
+    at,
+    text(font: "Iosevka Aile", size: 9pt, weight: weight, fill: fill, body),
+  )
 
-#diagram(
-  cell-size: 15mm,
-  node-stroke: .7pt + ink,
-  node-corner-radius: 4pt,
-  edge-stroke: .8pt + ink,
-  mark-scale: 75%,
+  label((0, 2.6), [world + edits])
+  label((3.1, 2.6), [voxel fields])
+  label((6.2, 2.6), [active margin], weight: "bold", fill: accent)
+  line((1.25, 2.6), (2.15, 2.6), stroke: wire, mark: arrow)
+  line((4.15, 2.6), (5.15, 2.6), stroke: wire, mark: arrow)
 
-  node((0, 0), align(center)[Durable world description \ + sparse edits],
-       width: 47mm, fill: quiet),
-  node((0, 1), align(center)[Resident chunk fields \ #text(size: 8pt)[occupancy · material · volume]],
-       width: 47mm, fill: quiet),
-  node((0, 2), align(center)[Mixed-star active margin \ #text(size: 8pt)[boundary complex]],
-       width: 47mm, fill: active),
+  line((6.2, 2.35), (6.2, 1.65), stroke: wire, mark: arrow)
+  line((1.5, 1.65), (8.15, 1.65), stroke: wire)
+  for x in (1.5, 3.7, 5.9, 8.15) {
+    line((x, 1.65), (x, 1.05), stroke: wire, mark: arrow)
+  }
+  label((1.5, .75), [mesh])
+  label((3.7, .75), [contact])
+  label((5.9, .75), [paths])
+  label((8.15, .75), [lighting])
 
-  node((-2, 3), [Geometry], width: 31mm, fill: product),
-  node((0, 3), [Contact], width: 31mm, fill: product),
-  node((2, 3), align(center)[Navigation \ light · material], width: 31mm, fill: product),
-
-  node((0, 4), align(center)[Prepared CPU \ render products], width: 43mm, fill: quiet),
-  node((0, 5), align(center)[Coherent GPU publication \ and frames], width: 47mm, fill: quiet),
-
-  edge((0, 0), (0, 1), "->"),
-  edge((0, 1), (0, 2), "->"),
-  edge((0, 2), (-2, 3), "->"),
-  edge((0, 2), (0, 3), "->"),
-  edge((0, 2), (2, 3), "->"),
-  edge((-2, 3), (0, 4), "->"),
-  edge((2, 3), (0, 4), "->"),
-  edge((0, 4), (0, 5), "->"),
-)
+  line((1.5, .5), (1.5, -.1), stroke: wire, mark: arrow)
+  label((1.5, -.4), [GPU frames])
+})
 #+end_src
 
 This is not a declaration that all world behavior is two-dimensional.  It is
@@ -67,7 +62,7 @@ field, and cross-chunk access vocabulary.  [[file:luft.org][The Luft notebook]] 
 cubical sites, chains, and the star atlas.  This page joins those views into
 one game-world model.
 
-* Two lattices name fine interaction and coarse locality
+* Fine cells, coarse chunks
 :PROPERTIES:
 :ID: QGXMW0
 :END:
@@ -139,7 +134,7 @@ Luft's current world domain is finite but large.  The same local-region model
 would apply to a procedurally unbounded source: a source answers canonical
 world-coordinate questions, while only a bounded set of answers is resident.
 
-* The local region is a finite question, not a smaller world
+* The local region
 :PROPERTIES:
 :ID: WH0HW1
 :END:
@@ -190,7 +185,7 @@ source chunks.  Those are roughly 67 million /logical/ cell positions, which
 is precisely why dense per-cell objects and repeated full-volume algorithms
 are unacceptable even though the local region is bounded.
 
-* Volumetric fields are the resident truth
+* Volumetric truth
 :PROPERTIES:
 :ID: UJ8YVH
 :END:
@@ -228,7 +223,7 @@ and a useful finite projection for topology, tests, editing experiments, and
 inspection.  Rebuilding and globally searching chains need not remain the hot
 storage strategy for a voxel game.
 
-* The superficial principle concentrates work at change
+* Work concentrates at the margin
 :PROPERTIES:
 :ID: PTSJ07
 :END:
@@ -263,7 +258,7 @@ samples, and provenance tying those readings to one resident generation.
 Products may then share classification without pretending that a render
 triangle, a collision contact, and a navigation node are the same object.
 
-* Bit fibers find mixed stars before geometry exists
+* Finding the active margin
 :PROPERTIES:
 :ID: HWSSON
 :END:
@@ -306,7 +301,7 @@ contact, navigation, and appearance begin from the same occupancy evidence.
 It should not force every client through a triangle buffer, nor should it make
 the visual mesher the owner of world semantics.
 
-* The star atlas is canonical geometric interpretation
+* The star atlas
 :PROPERTIES:
 :ID: WBLCFD
 :END:
@@ -342,7 +337,7 @@ have direct adjacent samples; symmetry-tied bands and junctions use stable
 incident sample sets plus explicit commutative reduction policies.  Neither
 field changes the star byte or atlas geometry.
 
-* One margin supports several derived products
+* Products of the margin
 :PROPERTIES:
 :ID: NQORQD
 :END:
@@ -375,7 +370,7 @@ while occupancy collision is presently a gameplay approximation.  Sharing
 the precursor makes visual-simulation parity possible without requiring it in
 every query.
 
-* Region generations make paging coherent
+* Coherent region generations
 :PROPERTIES:
 :ID: F0FUTI
 :END:
@@ -424,7 +419,7 @@ and rebuilding the flattened regional chain can still cause the perceptible
 chunk-crossing hitch.  “Double buffered” is the destination, not an accurate
 name for every current transition.
 
-* Current implementation and the refactoring direction
+* Present machinery
 :PROPERTIES:
 :ID: A8Y4O2
 :END:
@@ -477,7 +472,7 @@ It also gives =render.lisp= natural future boundaries: authored world and
 residency, scene products, streaming/generations, mesh decoration and CPU
 population, renderer resources/publication, and frame encoding.
 
-* Compact vocabulary
+* Vocabulary
 :PROPERTIES:
 :ID: 32Y47D
 :END:
