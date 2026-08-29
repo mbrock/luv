@@ -486,6 +486,36 @@ path.  Do not paste complete test transcripts.
   Do not optimize the comparator or mesh appearance first: either could improve
   an isolated number while preserving the synchronous whole-region rebuild.
 
+** 2026-08-29 — Remove redundant global collision normalization
+:PROPERTIES:
+:ID: HZU65A
+:END:
+
+- /Thread./ =T-01a04a2e-fab5-7206-90bd-94d965339cb9=.
+- /Revision./ Commit =5de95c0= on integrated =main=, based exactly on
+  =fae3a88=.
+- /Question./ Can active collision publication preserve exact chain semantics
+  while replacing #MOCU82's comparison sort with one checked linear copy?
+- /Change./ Added =concatenate-disjoint-chains= for immutable normalized chains
+  in strictly increasing, disjoint support order.  It checks domains and each
+  nonempty boundary, allocates the result once, and copies each resident vector
+  once.  Authored-world publication supplies chains in the existing sorted
+  Morton chunk-key order.  A focused test compares the result with the former
+  builder-and-normalizer result and rejects reversed input.
+- /Observation./ In the same orb active-scene trace, the complete rebuild fell
+  from 416 ms and 27.0 MiB to 12 ms and 11.5 MiB.  Collision assembly fell from
+  388 ms to below the trace clock's 1 ms resolution while allocating 2.7 MiB for
+  the final vector.  Visible-material hash-table assembly was the remaining
+  measured child at 8 ms.  The orb still timed out waiting for a presented
+  frame, so this is a CPU-path comparison rather than an end-to-end visual
+  crossing measurement.
+- /Decision./ Keep the direct concatenation: resident chains and sorted Morton
+  chunk keys already establish exactly the order that global normalization was
+  rediscovering.  Do not begin another optimization until the user confirms a
+  real seam crossing on the RX 6600 workstation; if a perceptible blink remains,
+  profile that crossing and attribute the next phase rather than extrapolating
+  from the orb compositor.
+
 ** 2026-08-29 — Overlap visible publication across player seam crossings
 
 - /Thread./ =T-01a04a2e-fab5-7206-90bd-94d965339cb9=.
@@ -760,14 +790,11 @@ path.  Do not paste complete test transcripts.
 :ID: MTAAPI
 :END:
 
-Prototype collision activation over the immutable, already-normalized resident
-chunk chains without concatenating and comparison-sorting the whole gameplay
-region.  Preserve exact =chain= semantics and collision behavior, compare the
-candidate against the current builder result in focused tests, and repeat
-#MOCU82's bounded active-scene trace and SB-SPROF sample before changing source
-materialization, mesh appearance, or publication policy.  Confirm the resulting
-seam crossing on the user's workstation because the orb's blocked Vulkan
-presentation is not an end-to-end timing oracle.
+Confirm #HZU65A with a real seam crossing on the user's RX 6600 workstation.
+If a perceptible blink remains, capture and attribute that crossing before
+changing source materialization, mesh appearance, collision representation, or
+publication policy; the orb's blocked Vulkan presentation is not an end-to-end
+timing oracle.
 
 Keep #JDB26Y paused.  Do not begin persistence, transparency, LoD, vertical
 streaming, or the later journey-content stage during this activation experiment.
