@@ -1,5 +1,6 @@
 #+title: One star in four views
 #+startup: overview
+#+lisp-package: LUFT.ATLAS
 
 * An exact local patch
 :PROPERTIES:
@@ -12,11 +13,8 @@ projection or color vocabulary: occupied incident cells are rose, ordinary
 faces are blue, connecting bands are amber, and the triangles at the central
 junction are red.
 
-#+begin_src typst-diagram
-#import "/luft/star-x1b-data.typ": star-x1b
-#import "/luft/star-plate.typ": plate
-
-#plate(star-x1b)
+#+begin_src lisp-figure
+(star-plate #x1b)
 #+end_src
 
 The first view is the cubical input.  The second is the whole local atlas
@@ -29,3 +27,6 @@ This is deliberately not a pipeline diagram.  It is one mathematical object
 held under four lenses, so correspondences can be checked rather than merely
 asserted.  The polygon coordinates are generated from =star-triangles= and
 =star-atlas-owned-triangles=, the same definitions used by Luft itself.
+
+[[file:luft-region-figures.org][From occupancy to one owned mesh]] applies the same executable figure protocol
+to several cells and shows their per-site patches composing a complete mesh.

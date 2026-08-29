@@ -1,0 +1,28 @@
+#+title: From occupancy to one owned mesh
+#+startup: overview
+#+lisp-package: LUFT.ATLAS
+
+* Sixteen local views of three cells
+:PROPERTIES:
+:ID: G4HUOG
+:END:
+
+A small occupied region does not become geometry all at once.  This little
+L-shape touches sixteen lattice sites.  Each site sees its own eight-cell star
+and contributes only the triangles it owns.
+
+#+begin_src lisp-figure
+(region-plate '((0 0 0) (1 0 0) (0 1 0)))
+#+end_src
+
+The middle view explodes the sixteen contributions away from their lattice
+sites.  Color identifies ownership, not material.  Returning those pieces to
+their global coordinates produces the right-hand mesh without welding,
+deduplication, or a second geometric interpretation: it is the concatenation
+of the production =star-atlas-owned-triangles= lookups.
+
+The figure is itself the value of a Lisp expression in this Org page.  Its
+=region-plate= CLOS object retains the occupied cell coordinates; the Typst
+and web renderers ask the object for one deterministic Typst fragment.  Thus
+the PDF and SVG are two presentations of the same production-derived object,
+not separately maintained illustrations.

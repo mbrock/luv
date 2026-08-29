@@ -63,11 +63,17 @@
   (format *typst-stream* "#example(~A)~%~%" (typst-string (block-text block))))
 
 (defmethod render-typst ((block src-block))
-  (if (string= (src-block-language block) "typst-diagram")
-      (format *typst-stream* "#block(width: 100%)[~%~A~%]~%~%" (block-text block))
-      (format *typst-stream* "#raw(~A, block: true~@[, lang: ~A~])~%~%"
-              (typst-string (block-text block))
-              (and (src-block-language block) (typst-string (src-block-language block))))))
+  (cond ((string= (src-block-language block) "typst-diagram")
+         (format *typst-stream* "#block(width: 100%)[~%~A~%]~%~%" (block-text block)))
+        ((string= (src-block-language block) "lisp-figure")
+         (write-figure-typst
+          (site-lisp-figure block *typst-document* *site*) *typst-stream*)
+         (terpri *typst-stream*))
+        (t
+         (format *typst-stream* "#raw(~A, block: true~@[, lang: ~A~])~%~%"
+                 (typst-string (block-text block))
+                 (and (src-block-language block)
+                      (typst-string (src-block-language block)))))))
 
 (defmethod render-typst ((table table))
   (let ((columns (length (first (table-rows table)))))
@@ -190,6 +196,7 @@
 
 (defun write-typst-pdf (document site output root)
   "Render DOCUMENT through Typst to OUTPUT, retaining generated source nearby."
+  (prepare-site-figures site)
   (let* ((*site* site)
          (*typst-body-font*
            (and (typst-equity-available-p root) "Equity OT A"))
@@ -267,3 +274,73 @@
                                 (lambda () (render-typst-diagram-svg block site)))))))
 
 (register-resource-provider 'typst-diagrams #'typst-diagram-resources)
+
+;;; Lisp figures
+
+(defun lisp-figure-document (block site)
+  (or (find-if (lambda (document)
+                 (find block (lisp-figure-blocks document) :test #'eq))
+               (site-documents site))
+      (error "Lisp figure block does not belong to this site.")))
+
+(defun site-lisp-figure (block document site)
+  (or (gethash block (site-figure-values site))
+      (setf (gethash block (site-figure-values site))
+            (evaluate-lisp-figure block document))))
+
+(defun prepare-site-figures (site)
+  "Evaluate and validate every trusted lisp-figure block in SITE once."
+  (dolist (document (site-documents site) site)
+    (dolist (block (lisp-figure-blocks document))
+      (site-lisp-figure block document site))))
+
+(defun lisp-figure-name (block document)
+  (let ((position (position block (lisp-figure-blocks document) :test #'eq)))
+    (unless position (error "Lisp figure block is not in ~A." (document-name document)))
+    (format nil "~A-figure-~D.svg" (document-name document) (1+ position))))
+
+(defun render-lisp-figure-svg (block site)
+  (or (gethash block (site-figure-svgs site))
+      (let* ((document (lisp-figure-document block site))
+             (figure (site-lisp-figure block document site))
+             (root (site-source-directory site))
+             (name (lisp-figure-name block document))
+             (source (merge-pathnames (make-pathname :name (pathname-name name) :type "typ")
+                                      (merge-pathnames "build/typst/figures/" root)))
+             (output (merge-pathnames name (merge-pathnames "build/typst/figures/" root))))
+        (ensure-directories-exist source)
+        (with-open-file (stream source :direction :output :if-exists :supersede
+                                       :external-format :utf-8)
+          (format stream "#set page(width: auto, height: auto, margin: 7pt, fill: rgb(\"#f7f6f2\"))~%")
+          (format stream "#set text(font: ~A, size: 9pt)~%"
+                  (if (typst-equity-available-p root)
+                      "(\"Equity OT A\", \"Libertinus Serif\")"
+                      "\"Libertinus Serif\""))
+          (write-figure-typst figure stream))
+        (typst-command root (namestring source) (namestring output))
+        (setf (gethash block (site-figure-svgs site))
+              (uiop:read-file-string output)))))
+
+(defun render-lisp-figure-html (block)
+  (if *rendering-document*
+      (let* ((figure (site-lisp-figure block *rendering-document* *site*))
+             (name (lisp-figure-name block *rendering-document*)))
+        (spinneret:with-html
+          (:figure.lisp-figure
+           (:img :src (concatenate 'string *page-prefix* "figures/" name)
+                 :alt (figure-alt-text figure) :loading "lazy"))))
+      (spinneret:with-html
+        (:pre.src :data-language "lisp-figure" (:code (block-text block))))))
+
+(defun lisp-figure-resources (site)
+  (loop for document in (site-documents site)
+        append (loop for block in (lisp-figure-blocks document)
+                     for name = (lisp-figure-name block document)
+                     collect (let ((block block))
+                               (make-generated-resource
+                                (concatenate 'string "/figures/" name)
+                                (concatenate 'string "figures/" name)
+                                "image/svg+xml"
+                                (lambda () (render-lisp-figure-svg block site)))))))
+
+(register-resource-provider 'lisp-figures #'lisp-figure-resources)

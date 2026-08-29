@@ -29,6 +29,10 @@ and equivalent dynamic Clack hosting and static publication.")
    #:block-text
    #:src-block
    #:src-block-language
+   #:visual-figure
+   #:write-figure-typst
+   #:figure-alt-text
+   #:register-figure-source-file
    #:table
    #:table-rows
    #:table-header-p
@@ -67,6 +71,7 @@ and equivalent dynamic Clack hosting and static publication.")
    #:render-document-string
    #:render-typst-document
    #:write-typst-pdf
+   #:prepare-site-figures
    ;; Semantic web views
    #:page-view
    #:reading-page-view

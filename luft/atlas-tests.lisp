@@ -102,15 +102,37 @@
     (true (search "#let star-x1b" source))
     (true (search "bits: \"00011011\"" source))
     (true (search "occupied: (0, 1, 3, 4," source))
-    (true (string= source
-                   (uiop:read-file-string
-                    (asdf:system-relative-pathname :luft "luft/star-x1b-data.typ"))))
     (true (= 18 (length (atlas::occupancy-boundary-quads #x1b))))
     (true (= 6 (length (atlas::triangle-pairs-as-quads
                          (getf (luft:star-triangles #x1b) :faces)))))
     (true (= 1 (length (atlas::triangle-pairs-as-quads
                          (getf (atlas::star-owned-geometry #x1b) :faces)))))
     (true (= 8 (length (getf (atlas::star-owned-geometry #x1b) :junctions))))))
+
+(define-test star-plate-is-a-renderable-production-figure
+  (let ((figure (atlas:star-plate #x1b)))
+    (true (typep figure 'luv.wiki:visual-figure))
+    (true (search "#let star-x1b"
+                  (with-output-to-string (stream)
+                    (luv.wiki:write-figure-typst figure stream))))
+    (true (search "Star #x1B" (luv.wiki:figure-alt-text figure)))))
+
+(define-test region-plate-composes-the-production-owned-mesh
+  (let* ((cells '((0 0 0) (1 0 0) (0 1 0)))
+         (canonical (atlas::canonical-region-cells cells))
+         (records (atlas::region-site-records canonical))
+         (triangles (loop for record in records append (getf record :triangles)))
+         (production (luft:star-surface-triangles (atlas::coordinate-set cells)))
+         (source (atlas::typst-region-data-source canonical)))
+    (true (= 16 (length records)))
+    (true (= 136 (length triangles)))
+    (true (null (set-difference triangles production :test #'equal)))
+    (true (null (set-difference production triangles :test #'equal)))
+    (true (string= source
+                   (atlas::typst-region-data-source
+                    (atlas::canonical-region-cells (reverse cells)))))
+    (true (search "triangle-count: 136" source))
+    (true (typep (atlas:region-plate cells) 'luv.wiki:visual-figure))))
 
 (define-test atlas-stylesheet-is-a-luv-css-tree
   (let ((stylesheet

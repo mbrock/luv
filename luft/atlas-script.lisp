@@ -271,6 +271,123 @@
     (write-typst-star-geometry (star-owned-geometry star) stream)
     (format stream ",~%)~%")))
 
+(defclass star-plate-figure (luv.wiki:visual-figure)
+  ((star :initarg :star :reader star-plate-star)))
+
+(defun star-plate (star)
+  "A printable and web-native plate of one production atlas STAR."
+  (check-type star (unsigned-byte 8))
+  (make-instance 'star-plate-figure :star star))
+
+(defmethod luv.wiki:figure-alt-text ((figure star-plate-figure))
+  (format nil "Star #x~2,'0X: incident cells, atlas patch, polygons, and ownership"
+          (star-plate-star figure)))
+
+(defmethod luv.wiki:write-figure-typst ((figure star-plate-figure) stream)
+  (let* ((star (star-plate-star figure))
+         (name (string-downcase (format nil "star-x~2,'0X" star))))
+    (write-string (typst-star-data-source star) stream)
+    (format stream "#import \"/luft/star-plate.typ\": plate~%#plate(~A)~%" name)))
+
+(defun coordinate< (left right)
+  (loop for a in left
+        for b in right
+        when (/= a b) return (< a b)
+        finally (return nil)))
+
+(defun canonical-region-cells (cells)
+  (let ((answer
+          (remove-duplicates
+           (loop for cell in cells
+                 do (unless (and (listp cell) (= 3 (length cell))
+                                 (every #'integerp cell))
+                      (error "A region cell must be an integer (X Y Z), not ~S." cell))
+                 collect (copy-list cell))
+           :test #'equal)))
+    (unless answer (error "A region plate needs at least one occupied cell."))
+    (sort answer #'coordinate<)))
+
+(defun coordinate-set (coordinates)
+  (let ((set (make-hash-table :test #'equal)))
+    (dolist (coordinate coordinates set)
+      (setf (gethash coordinate set) t))))
+
+(defun translate-polygon (polygon offset)
+  (loop for point in polygon
+        collect (mapcar #'+ point offset)))
+
+(defun region-boundary-quads (cells)
+  (let ((occupied (coordinate-set cells))
+        (faces '(((0 3 2 1) (0 0 -1))
+                 ((4 5 6 7) (0 0 1))
+                 ((0 1 5 4) (0 -1 0))
+                 ((3 7 6 2) (0 1 0))
+                 ((0 4 7 3) (-1 0 0))
+                 ((1 2 6 5) (1 0 0)))))
+    (loop for cell in cells
+          for offset = (mapcar (lambda (value) (* 8 value)) cell)
+          for corners = (translate-polygon
+                         '((0 0 0) (8 0 0) (8 8 0) (0 8 0)
+                           (0 0 8) (8 0 8) (8 8 8) (0 8 8))
+                         offset)
+          append (loop for (indices neighbor-offset) in faces
+                       unless (gethash (mapcar #'+ cell neighbor-offset) occupied)
+                         collect (mapcar (lambda (index) (nth index corners)) indices)))))
+
+(defun region-site-records (cells)
+  (let ((sites (luft:star-surface-sites (coordinate-set cells))))
+    (sort
+     (loop for site being each hash-key of sites using (hash-value star)
+           for offset = (mapcar (lambda (value) (* 8 value)) site)
+           collect (list :site site :star star
+                         :triangles
+                         (loop for triangle in (luft:star-atlas-owned-triangles star)
+                               collect (translate-polygon triangle offset))))
+     #'coordinate< :key (lambda (record) (getf record :site)))))
+
+(defun typst-region-data-source (cells)
+  (let ((records (region-site-records cells)))
+    (with-output-to-string (stream)
+      (format stream "#let region = (~%  cells: (")
+      (dolist (cell cells)
+        (format stream "(~{~D~^, ~}), " cell))
+      (format stream "),~%  center: (~{~D~^, ~}),~%  occupancy: "
+              (loop for axis below 3
+                    for values = (mapcar (lambda (cell) (nth axis cell)) cells)
+                    collect (* 4 (+ (reduce #'min values) (reduce #'max values) 1))))
+      (write-typst-polygon-sequence (region-boundary-quads cells) stream 6)
+      (format stream ",~%  sites: (~%")
+      (loop for record in records
+            for index from 0
+            do (format stream "    (index: ~D, site: (~{~D~^, ~}), star: ~D, triangles: "
+                       index (getf record :site) (getf record :star))
+               (write-typst-polygon-sequence (getf record :triangles) stream 8)
+               (format stream "),~%"))
+      (format stream "  ),~%  triangle-count: ~D,~%)~%"
+              (loop for record in records sum (length (getf record :triangles)))))))
+
+(defclass region-plate-figure (luv.wiki:visual-figure)
+  ((cells :initarg :cells :reader region-plate-cells)))
+
+(defun region-plate (cells)
+  "A plate tracing occupied CELLS through per-site ownership to one mesh."
+  (make-instance 'region-plate-figure :cells (canonical-region-cells cells)))
+
+(defmethod luv.wiki:figure-alt-text ((figure region-plate-figure))
+  (let* ((cells (region-plate-cells figure))
+         (records (region-site-records cells)))
+    (format nil "~D occupied voxels resolved through ~D lattice sites into ~D triangles"
+            (length cells) (length records)
+            (loop for record in records sum (length (getf record :triangles))))))
+
+(defmethod luv.wiki:write-figure-typst ((figure region-plate-figure) stream)
+  (write-string (typst-region-data-source (region-plate-cells figure)) stream)
+  (format stream "#import \"/luft/region-plate.typ\": region-plate~%#region-plate(region)~%"))
+
+(dolist (name '("luft/star-plate.typ" "luft/region-plate.typ"))
+  (luv.wiki:register-figure-source-file
+   (asdf:system-relative-pathname :luft/atlas name)))
+
 (defun star-atlas-javascript ()
   (ps:ps*
    `(progn

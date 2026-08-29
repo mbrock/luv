@@ -9,6 +9,21 @@
 (in-package #:luv.wiki.tests)
 (named-readtables:in-readtable luv.css:syntax)
 
+(defvar *figure-evaluations* 0)
+
+(defclass test-figure (wiki:visual-figure)
+  ((label :initarg :label :reader test-figure-label)))
+
+(defun test-figure (label)
+  (incf *figure-evaluations*)
+  (make-instance 'test-figure :label label))
+
+(defmethod wiki:write-figure-typst ((figure test-figure) stream)
+  (format stream "#box[figure ~A]" (test-figure-label figure)))
+
+(defmethod wiki:figure-alt-text ((figure test-figure))
+  (format nil "Test figure ~A" (test-figure-label figure)))
+
 (defparameter *page*
   "#+title: A test page
 #+startup: overview
@@ -169,6 +184,39 @@ Nothing here refers to anything.
                            (string= "/diagrams/diagram-test-1.svg"
                                     (wiki:resource-path resource)))
                          (wiki:website-resources site))))))
+
+(define-test lisp-figures-evaluate-once-and-share-one-typst-fragment
+  (let* ((*figure-evaluations* 0)
+         (doc (page "#+title: Lisp figure test
+#+lisp-package: LUV.WIKI.TESTS
+* A figure
+:PROPERTIES:
+:ID: LSP123
+:END:
+
+#+begin_src lisp-figure
+(test-figure \"seven\")
+#+end_src
+" "lisp-figure-test"))
+         (site (wiki:make-site (list doc) :source-directory (uiop:getcwd))))
+    ;; Resource discovery is an ASDF planning operation and must not evaluate.
+    (true (= 1 (count-if (lambda (resource)
+                           (string= "/figures/lisp-figure-test-figure-1.svg"
+                                    (wiki:resource-path resource)))
+                         (wiki:website-resources site))))
+    (true (zerop *figure-evaluations*))
+    (wiki:prepare-site-figures site)
+    (wiki:prepare-site-figures site)
+    (true (= 1 *figure-evaluations*))
+    (let ((html (wiki:render-document-string doc site))
+          (source (let ((wiki:*site* site))
+                    (with-output-to-string (stream)
+                      (wiki:render-typst-document doc stream)))))
+      (true (search "<figure class=lisp-figure><img src=\"figures/lisp-figure-test-figure-1.svg\""
+                    html))
+      (true (search "alt=\"Test figure seven\"" html))
+      (true (search "#box[figure seven]" source))
+      (true (= 1 *figure-evaluations*)))))
 
 (define-test typst-source-preserves-structure-and-escapes-text
   (let* ((doc (page "#+title: A \"quoted\" title

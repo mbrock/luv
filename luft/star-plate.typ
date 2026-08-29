@@ -98,6 +98,7 @@
   set text(size: 9pt, fill: ink)
   block(
     width: width,
+    breakable: false,
     grid(
       columns: (1fr, 1.18fr),
       rows: auto,

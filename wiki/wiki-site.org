@@ -259,9 +259,21 @@ blocks still render as plain monospace text; migration is deliberate rather
 than automatic.  Internal page names use small capitals.  The page template
 uses the private, annexed Equity family when its content is present and falls
 back to Libertinus in ordinary public checkouts.  [[file:luft-star-figures.org][One star in four views]]
-adds the first production-data plate: Lisp emits one exact atlas patch, a
-checked Typst data file detects drift, and one CeTZ projection compares its
-occupancy, whole geometry, polygon structure, and ownership on paper and web.
+adds the first production-data plate: a =star-plate= CLOS value emits current
+atlas geometry directly, and one CeTZ projection compares its occupancy, whole
+geometry, polygon structure, and ownership on paper and web.
+The follow-up [[file:luft-region-figures.org][From occupancy to one owned mesh]] is authored as an executable
+=lisp-figure= block whose =region-plate= CLOS value traces three cells through
+sixteen per-site owned patches into their 136-triangle composition.
+
+The executable boundary is intentionally small.  A page declares one
+=#+lisp-package=; each trusted =lisp-figure= block contains exactly one form
+and must return a =visual-figure=.  =write-figure-typst= emits one deterministic
+fragment which the PDF embeds and the web compiler turns into SVG.  Ordinary
+=lisp= blocks remain inert source.  Resource discovery does not evaluate
+figures; site preparation evaluates each occurrence once and reports page and
+block context on failure.  Figure classes register non-Lisp renderer inputs so
+editing a =.typ= module invalidates the static site correctly.
 
 /Done when./ One substantive page builds as PDF, both kinds of diagram render
 legibly in that PDF and the real web reading view, and the ordinary wiki tests

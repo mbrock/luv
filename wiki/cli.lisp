@@ -353,6 +353,7 @@ derived layouts.  Give system names to load others instead."
 (define-command pdf (&rest names)
   "Render named Org pages as PDFs in build/wiki/ using Typst."
   (unless names (error "pdf requires at least one page name."))
+  (asdf:load-system :luv-wiki-site)
   (let ((site (site :code nil)))
     (dolist (name names)
       (let ((document (find name (wiki:site-documents site)

@@ -32,7 +32,11 @@
                      :documentation "The repository root that SOURCE-URL corresponds to.")
    (resources :initarg :resources :initform '() :accessor site-resources
               :documentation "The website resources, realized on first use.")
-   (resources-realized-p :initform nil :accessor site-resources-realized-p))
+   (resources-realized-p :initform nil :accessor site-resources-realized-p)
+   (figure-values :initform (make-hash-table :test 'eq) :accessor site-figure-values
+                  :documentation "Lisp figure block -> evaluated VISUAL-FIGURE.")
+   (figure-svgs :initform (make-hash-table :test 'eq) :accessor site-figure-svgs
+                 :documentation "Lisp figure block -> compiled SVG text."))
   (:documentation "The whole wiki corpus and its disposable derived indexes."))
 
 (defvar *site* nil
@@ -235,6 +239,7 @@ plain text; each element and inline class contributes its own method."))
 (defmethod render-html ((block src-block))
   (let ((language (src-block-language block)))
     (cond ((equal language "typst-diagram") (render-typst-diagram-html block))
+          ((equal language "lisp-figure") (render-lisp-figure-html block))
           ((equal language "lisp") (render-lisp-source (block-text block)))
           ((equal language "mermaid")
            ;; Mermaid draws these at load time; the text remains readable.
@@ -751,6 +756,7 @@ popovers when a mention is hovered or tapped."
 
 (defun render-page (document)
   "Emit DOCUMENT through its semantic reading view."
+  (prepare-site-figures *site*)
   (let* ((*page-definition-cards* (make-hash-table :test 'eq))
          (title (or (document-title document) (document-name document))))
     (render-view

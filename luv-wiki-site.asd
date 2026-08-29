@@ -48,6 +48,7 @@
                  (:file "luft-mesher-workbook")
                  (:file "luft-world-model")
                  (:file "luft-star-figures")
+                 (:file "luft-region-figures")
                  (:file "luft-world-worksheet")
                  (:file "temporal-antialiasing")
                  (:file "wiki-site")

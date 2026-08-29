@@ -160,6 +160,7 @@ Redefining NAME replaces its provider without disturbing provider order."
         (t (resource-response (find-resource path site)))))
 
 (defun wiki-clack-application (site)
+  (prepare-site-figures site)
   (lambda (environment)
     (let ((method (getf environment :request-method))
           (path (getf environment :path-info)))
@@ -190,6 +191,7 @@ Redefining NAME replaces its provider without disturbing provider order."
 
 (defun publish-site (site directory)
   "Write the same resources served dynamically into DIRECTORY."
+  (prepare-site-figures site)
   (let ((directory (uiop:ensure-directory-pathname directory)))
     (dolist (resource (website-resources site))
       (publish-resource resource directory))

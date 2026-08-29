@@ -190,6 +190,7 @@ can change the links and backlinks rendered here; so is every source file,
 whose definitions may reference this page's figures."
   (append (mapcar #'asdf:component-pathname (system-org-files (asdf:component-system c)))
           (code-source-files)
+          *figure-source-files*
           (arglists-file (asdf:component-system c))))
 
 (defmethod asdf:output-files ((o render-op) (c org-file))
@@ -234,6 +235,7 @@ re-renders the site."
 (defmethod asdf:input-files ((o render-op) (s asdf:system))
   (append (mapcar #'asdf:component-pathname (system-org-files s))
           (code-source-files)
+          *figure-source-files*
           (arglists-file s)
           (style-source-files)))
 
