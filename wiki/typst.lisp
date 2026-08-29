@@ -62,6 +62,91 @@
 (defmethod render-typst ((block example-block))
   (format *typst-stream* "#example(~A)~%~%" (typst-string (block-text block))))
 
+(defun typst-dexp-style (node role)
+  (cond ((role-p role "operator") "operator")
+        ((typep node 'lisp-comment) "comment")
+        ((typep node 'lisp-string) "string")
+        ((or (typep node 'lisp-number) (typep node 'lisp-character)) "number")
+        ((and (typep node 'lisp-symbol)
+              (equal (lisp-symbol-package node) "KEYWORD"))
+         "keyword")
+        ((or (typep node 'lisp-conditional) (typep node 'lisp-skipped)) "muted")
+        (t "symbol")))
+
+(defun write-typst-dexp-array (objects writer)
+  (write-char #\( *typst-stream*)
+  (dolist (object objects)
+    (funcall writer object)
+    (write-char #\, *typst-stream*))
+  (write-char #\) *typst-stream*))
+
+(defun write-typst-dexp-token (node role)
+  (format *typst-stream* "(kind: \"atom\", style: ~A, text: ~A)"
+          (typst-string (typst-dexp-style node role))
+          (typst-string (node-text node))))
+
+(defun write-typst-dexp-item (item)
+  (ecase (item-kind item)
+    (:comment (write-typst-dexp-node (item-node item)))
+    (:child (write-typst-dexp-node (item-node item) (item-role item)))
+    (:pair
+     (write-string "(kind: \"pair\", items: " *typst-stream*)
+     (write-typst-dexp-array
+      (append (list (item-node item)) (item-comments item) (list (item-value item)))
+      (lambda (node) (write-typst-dexp-node node)))
+     (write-char #\) *typst-stream*))))
+
+(defun write-typst-dexp-list (list role)
+  (let* ((operator (symbol-node-name (first (element-children list))))
+         (layout (list-layout list role))
+         (items (layout-items layout list))
+         (stacked-p (some #'item-body-p items))
+         (structure (cond (stacked-p "stacked")
+                          ((typep layout 'grid-layout) "column")
+                          (t "choice"))))
+    (format *typst-stream* "(kind: \"list\", structure: ~A, callee: ~A, "
+            (typst-string structure)
+            (if (and operator (layout-callee-p layout)) "true" "false"))
+    (if stacked-p
+        (multiple-value-bind (head rows) (split-head-items items)
+          (write-string "head: " *typst-stream*)
+          (write-typst-dexp-array head #'write-typst-dexp-item)
+          (write-string ", rows: " *typst-stream*)
+          (write-typst-dexp-array rows #'write-typst-dexp-item))
+        (progn
+          (write-string "items: " *typst-stream*)
+          (write-typst-dexp-array items #'write-typst-dexp-item)))
+    (write-char #\) *typst-stream*)))
+
+(defun write-typst-dexp-node (node &optional role)
+  (typecase node
+    (lisp-vector
+     (write-string "(kind: \"prefix\", prefix: \"#\", child: " *typst-stream*)
+     (write-typst-dexp-list node role)
+     (write-char #\) *typst-stream*))
+    (lisp-list (write-typst-dexp-list node role))
+    (lisp-prefix
+     (format *typst-stream* "(kind: \"prefix\", prefix: ~A, child: "
+             (typst-string (lisp-prefix-string node)))
+     (write-typst-dexp-node (lisp-prefix-child node))
+     (write-char #\) *typst-stream*))
+    (t (write-typst-dexp-token node role))))
+
+(defun render-typst-lisp-source (text)
+  "Read Lisp source and emit semantic DEXP data; fall back to raw text when
+the source has no readable nodes."
+  (let ((nodes (handler-case (read-lisp-string text)
+                 (error (condition)
+                   (warn "Rendering Lisp source as raw Typst: ~A" condition)
+                   nil))))
+    (if nodes
+        (progn
+          (write-string "#dexp-source(" *typst-stream*)
+          (write-typst-dexp-array nodes (lambda (node) (write-typst-dexp-node node)))
+          (format *typst-stream* ")~%~%"))
+        (format *typst-stream* "#raw(~A, block: true, lang: \"lisp\")~%~%"
+                (typst-string text)))))
+
 (defmethod render-typst ((block src-block))
   (cond ((string= (src-block-language block) "typst-diagram")
          (format *typst-stream* "#block(width: 100%)[~%~A~%]~%~%" (block-text block)))
@@ -69,6 +154,8 @@
          (write-figure-typst
           (site-lisp-figure block *typst-document* *site*) *typst-stream*)
          (terpri *typst-stream*))
+        ((string= (src-block-language block) "lisp")
+         (render-typst-lisp-source (block-text block)))
         (t
          (format *typst-stream* "#raw(~A, block: true~@[, lang: ~A~])~%~%"
                  (typst-string (block-text block))
@@ -174,7 +261,7 @@
   "Write a complete Typst source document for DOCUMENT to STREAM."
   (let ((*typst-document* document)
         (*typst-stream* stream))
-    (format stream "#import ~A: workshop, example, accent~%"
+    (format stream "#import ~A: workshop, example, dexp-source, accent~%"
             (typst-string "../../wiki/typst-template.typ"))
     (format stream "#show: workshop.with(title: ~A~@[, body-font: (~A, \"Libertinus Serif\")~])~%~%"
             (typst-string (or (document-title document) (document-name document)))

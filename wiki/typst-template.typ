@@ -1,8 +1,15 @@
+#import "typst-prty.typ": leaf, row, column, frame, choose, best
+
 #let ink = rgb("#202124")
 #let muted = rgb("#62666d")
 #let accent = rgb("#4b6488")
 #let panel = rgb("#f2f0ea")
 #let default-body-font = ("Libertinus Serif",)
+#let dexp-keyword = rgb("#755a7c")
+#let dexp-string = rgb("#50705f")
+#let dexp-number = rgb("#766a2e")
+#let dexp-paren = ink.transparentize(72%)
+#let dexp-side-stroke = (left: 0.7pt + dexp-paren, right: 0.7pt + dexp-paren)
 
 #let example(body) = block(
   width: 100%,
@@ -11,6 +18,142 @@
   radius: 3pt,
   breakable: false,
   raw(body, block: true),
+)
+
+#let dexp-token(node, limit) = {
+  let fill = if node.style == "operator" {
+    accent
+  } else if node.style == "keyword" {
+    dexp-keyword
+  } else if node.style == "string" {
+    dexp-string
+  } else if node.style == "number" {
+    dexp-number
+  } else if node.style == "comment" or node.style == "muted" {
+    muted
+  } else {
+    ink
+  }
+  let inline = leaf(
+    box(inset: (y: 0.045em), text(
+      fill: fill,
+      style: if node.style == "comment" { "italic" } else { "normal" },
+      node.text,
+    )),
+    plan: (),
+  )
+  if node.style == "comment" or node.style == "string" {
+    let available = calc.max(32pt, limit - 10pt)
+    let widths = (
+      available,
+      calc.max(32pt, available * 0.75),
+      calc.max(32pt, available * 0.5),
+      calc.max(32pt, available * 0.33),
+    )
+    choose((inline,) + widths.map(width => leaf(
+      block(
+        width: width,
+        text(
+          fill: fill,
+          style: if node.style == "comment" { "italic" } else { "normal" },
+          node.text,
+        ),
+      ),
+      plan: (),
+    )))
+  } else {
+    inline
+  }
+}
+
+#let dexp-list(node, limit, render) = {
+  let child-limit = limit
+  let documents(nodes) = nodes.map(child => render(child, child-limit))
+  let inner = if node.structure == "stacked" {
+    let rows = node.rows.map(child => render(child, child-limit))
+    let parts = if node.head.len() == 0 {
+      rows
+    } else {
+      let head-items = documents(node.head)
+      let head-row = row(head-items, child-limit, plan: ())
+      let head = if head-row.filter(candidate => candidate.width <= child-limit).len() > 0 {
+        head-row
+      } else {
+        column(head-items, child-limit, plan: ())
+      }
+      (head,) + rows
+    }
+    column(parts, child-limit, plan: ())
+  } else {
+    let items = documents(node.items)
+    if node.structure == "column" {
+      column(items, child-limit, plan: ())
+    } else if node.callee and items.len() > 1 {
+      let arguments = items.slice(1)
+      let arrangement = choose((
+        row(arguments, child-limit, plan: ()),
+        column(arguments, child-limit, plan: ()),
+      ))
+      let beside = row((items.first(), arrangement), child-limit, plan: ())
+      if beside.filter(candidate => candidate.width <= child-limit).len() > 0 {
+        beside
+      } else {
+        column(items, child-limit, plan: ())
+      }
+    } else if node.callee and items.len() == 1 {
+      items.first()
+    } else {
+      choose((
+        row(items, child-limit, plan: ()),
+        column(items, child-limit, plan: ()),
+      ))
+    }
+  }
+  frame(
+    inner,
+    limit,
+    stroke: dexp-side-stroke,
+    radius: 0.58em,
+    inset: (x: 0.4em, y: 0.14em),
+    plan: (),
+  )
+}
+
+#let dexp-node(node, limit) = {
+  if node.kind == "list" {
+    dexp-list(node, limit, dexp-node)
+  } else if node.kind == "pair" {
+    row(node.items.map(child => dexp-node(child, limit)), limit, plan: ())
+  } else if node.kind == "prefix" {
+    row((
+      dexp-token((style: "muted", text: node.prefix), limit),
+      dexp-node(node.child, limit),
+    ), limit, gap: 0.05em, plan: ())
+  } else {
+    dexp-token(node, limit)
+  }
+}
+
+#let dexp-source(nodes) = block(
+  width: 100%,
+  fill: panel,
+  inset: 10pt,
+  radius: 3pt,
+  breakable: true,
+  [
+    #set text(font: "Iosevka Aile", size: 8.3pt, fill: ink, hyphenate: false)
+    #set par(justify: false, leading: 0.56em)
+    #context {
+      layout(size => {
+        let documents = nodes.map(node => dexp-node(node, size.width))
+        grid(
+          columns: 1,
+          row-gutter: 0.72em,
+          ..documents.map(document => best(document, size.width).body),
+        )
+      })
+    }
+  ],
 )
 
 #let workshop(title: none, body-font: default-body-font, body) = {

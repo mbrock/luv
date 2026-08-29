@@ -3,13 +3,13 @@
 
 #import "typst-prty.typ": *
 
-#let paper = rgb("#fbfaf7")
-#let ink = rgb("#171b1d")
-#let muted = rgb("#687178")
-#let rule = rgb("#ddd8cf")
-#let accent = rgb("#a53b51")
-#let keyword-color = rgb("#645696")
-#let number-color = rgb("#8a791d")
+#let paper = rgb("#f7f6f2")
+#let ink = rgb("#202124")
+#let muted = rgb("#62666d")
+#let rule = rgb("#c9c7c0")
+#let accent = rgb("#4b6488")
+#let keyword-color = rgb("#755a7c")
+#let number-color = rgb("#766a2e")
 #let paren-color = ink.transparentize(72%)
 #let side-stroke = (left: 0.7pt + paren-color, right: 0.7pt + paren-color)
 
@@ -19,8 +19,8 @@
   margin: (x: 17mm, y: 13mm),
   fill: paper,
 )
-#set text(font: "DejaVu Sans", size: 9pt, fill: ink, hyphenate: false)
-#set par(justify: false, leading: 0.45em)
+#set text(font: "Iosevka Aile", size: 8.3pt, fill: ink, hyphenate: false)
+#set par(justify: false, leading: 0.56em)
 
 #let title(name, note) = [
   #text(size: 17pt, weight: 700, name)
@@ -66,7 +66,7 @@
   limit,
   stroke: side-stroke,
   radius: 0.55em,
-  inset: (x: 0.38em, y: 0.08em),
+  inset: (x: 0.4em, y: 0.14em),
   plan: plan,
 )
 
@@ -126,7 +126,7 @@
   let medium-best = best(medium, 95mm)
   let wide-best = best(wide, 145mm)
 
-  assert(narrow.len() == 1, message: "expected one narrow candidate")
+  assert(narrow.len() == 2, message: "expected two narrow candidates")
   assert(medium.len() == 4, message: "expected four medium candidates")
   assert(wide.len() == 7, message: "expected seven wide candidates")
   assert(not any(medium, candidate => candidate.width > 95mm))
@@ -171,7 +171,7 @@
 
 #title("A tiny non-greedy DEXP", "Typst · eager measured frontier · row or column")
 
-#note([Every syntax token and nested list is proportional Typst content measured by `measure` and normalized to a bottom baseline. Calls offer exactly two argument arrangements: all in one row or all in one column. Pareto pruning retains narrower/taller and wider/shorter possibilities through nesting; the final choice minimizes physical height within the supplied width.])
+#note([Every syntax token and nested list is proportional Typst content measured by `measure` and normalized to a top baseline. Calls offer exactly two argument arrangements: all in one row or all in one column. Pareto pruning retains narrower/taller and wider/shorter possibilities through nesting; the final choice minimizes physical height within the supplied width.])
 
 #v(5mm)
 

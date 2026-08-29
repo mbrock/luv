@@ -5,15 +5,15 @@
 // heads, bodies, bindings, clauses, and pairs; Typst is only the drawing
 // backend explored here.
 
-#let paper = rgb("#fbfaf7")
-#let ink = rgb("#171b1d")
-#let muted = rgb("#687178")
-#let rule = rgb("#ddd8cf")
-#let code-bg = rgb("#f4f1ea")
-#let accent = rgb("#a53b51")
-#let keyword-color = rgb("#645696")
-#let string-color = rgb("#557a55")
-#let number-color = rgb("#8a791d")
+#let paper = rgb("#f7f6f2")
+#let ink = rgb("#202124")
+#let muted = rgb("#62666d")
+#let rule = rgb("#c9c7c0")
+#let code-bg = rgb("#f2f0ea")
+#let accent = rgb("#4b6488")
+#let keyword-color = rgb("#755a7c")
+#let string-color = rgb("#50705f")
+#let number-color = rgb("#766a2e")
 #let paren-color = ink.transparentize(72%)
 
 #set page(
@@ -22,8 +22,8 @@
   margin: (x: 17mm, y: 13mm),
   fill: paper,
 )
-#set text(font: "DejaVu Sans", size: 9pt, fill: ink, hyphenate: false)
-#set par(justify: false, leading: 0.45em)
+#set text(font: "Iosevka Aile", size: 8.3pt, fill: ink, hyphenate: false)
+#set par(justify: false, leading: 0.56em)
 
 #let title(name, note) = [
   #text(size: 17pt, weight: 700, name)
@@ -68,7 +68,8 @@
 #let side-stroke = (left: 0.7pt + paren-color, right: 0.7pt + paren-color)
 
 #let inline-list(items) = box(
-  inset: (x: 0.38em, y: 0.02em),
+  baseline: top,
+  inset: (x: 0.4em, y: 0.14em),
   radius: 0.55em,
   stroke: side-stroke,
   flow(items),
@@ -78,7 +79,7 @@
 // wrapping flex row.  Real spaces between atomic children are its breakpoints.
 #let wrapping-list(width, items) = block(
   width: width,
-  inset: (x: 0.38em, y: 0.08em),
+  inset: (x: 0.4em, y: 0.14em),
   radius: 0.55em,
   stroke: side-stroke,
   flow(items),
@@ -96,13 +97,14 @@
 }
 
 #let stacked-list(head, rows, width: auto) = box(
+  baseline: top,
   width: width,
-  inset: (x: 0.38em, y: 0.08em),
+  inset: (x: 0.4em, y: 0.14em),
   radius: 0.55em,
   stroke: side-stroke,
   grid(
     columns: 1,
-    row-gutter: 0.08em,
+    row-gutter: 0.14em,
     flow(head),
     ..rows,
   ),
@@ -111,12 +113,12 @@
 #let breakable-stacked-list(width, head, rows) = block(
   width: width,
   breakable: true,
-  inset: (x: 0.38em, y: 0.08em),
+  inset: (x: 0.4em, y: 0.14em),
   radius: 0.55em,
   stroke: side-stroke,
   grid(
     columns: 1,
-    row-gutter: 0.08em,
+    row-gutter: 0.14em,
     flow(head),
     ..rows,
   ),
@@ -137,7 +139,8 @@
 ),))
 
 #let clause-table(head, rows) = box(
-  inset: (x: 0.38em, y: 0.08em),
+  baseline: top,
+  inset: (x: 0.4em, y: 0.14em),
   radius: 0.55em,
   stroke: side-stroke,
   grid(

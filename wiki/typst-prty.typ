@@ -5,13 +5,12 @@
 // an array of candidate rectangles; every candidate retains its concrete
 // content, as the Wisp implementation retains concrete lines.  Call these
 // functions from a `context` block so `measure` can see the active text style.
-// Every candidate gets a bottom baseline.  With that invariant, width, height,
+// Every candidate gets a top baseline.  With that invariant, width, height,
 // and monotone cost are sufficient for dominance under the combinators below:
 // rows sum widths and take maximum height; columns do the converse; frames add
 // fixed extents.
 
 #let layout(body, cost: 0, plan: ()) = {
-  let body = box(baseline: bottom, body)
   let size = measure(body)
   (
     body: body,
@@ -23,7 +22,7 @@
 }
 
 #let leaf(body, cost: 0, plan: ()) = (
-  layout(body, cost: cost, plan: plan),
+  layout(box(baseline: top, body), cost: cost, plan: plan),
 )
 
 #let dominates(a, b) = {
@@ -40,6 +39,19 @@
   found
 }
 
+#let max-frontier = 8
+
+#let bound-frontier(candidates) = {
+  if candidates.len() <= max-frontier {
+    candidates
+  } else {
+    let ordered = candidates.sorted(key: candidate => candidate.width)
+    range(max-frontier).map(index => ordered.at(calc.floor(
+      index * (ordered.len() - 1) / (max-frontier - 1),
+    )))
+  }
+}
+
 #let pareto(candidates) = {
   let kept = ()
   for candidate in candidates {
@@ -48,7 +60,12 @@
       kept.push(candidate)
     }
   }
-  kept
+  bound-frontier(kept)
+}
+
+#let within-limit(candidates, limit) = {
+  let fitting = candidates.filter(candidate => candidate.width <= limit)
+  if fitting.len() == 0 { candidates } else { fitting }
 }
 
 #let choose(documents) = {
@@ -57,28 +74,6 @@
     candidates += document
   }
   pareto(candidates)
-}
-
-#let combinations(documents) = {
-  let states = ((),)
-  for document in documents {
-    let next = ()
-    for state in states {
-      for candidate in document {
-        next.push(state + (candidate,))
-      }
-    }
-    states = next
-  }
-  states
-}
-
-#let total-cost(candidates) = {
-  let cost = 0
-  for candidate in candidates {
-    cost += candidate.cost
-  }
-  cost
 }
 
 #let child-plans(candidates) = {
@@ -104,42 +99,96 @@
   own-plan(plan) + child-plans(children)
 }
 
+#let composition-state(candidate) = (
+  body: candidate.body,
+  width: candidate.width,
+  height: candidate.height,
+  cost: candidate.cost,
+  plan: candidate.plan,
+  parts: (candidate.body,),
+)
+
 // ROW and COLUMN are intentionally all-or-nothing.  There is no fill-style
-// mixed line breaking in this experiment.
+// mixed line breaking in this experiment.  Each composition prunes its partial
+// frontier before adding the next child; materializing the full Cartesian
+// product makes ordinary binding lists exponentially large.  Partial states
+// carry rectangle arithmetic and flat child-body arrays; only the surviving
+// completed candidates become Typst boxes and call `measure`.  The retained
+// frontier is sampled at eight widths: bounded optimality in exchange for
+// predictable compilation rather than exponential memory.
 #let row(documents, limit, gap: 0.48em, cost: 0, plan: "row") = {
-  let candidates = ()
-  for children in combinations(documents) {
-    let body = box(children.map(child => child.body).join(h(gap)))
-    let candidate = layout(
-      body,
-      cost: total-cost(children) + cost,
-      plan: combined-plan(plan, children),
-    )
-    if candidate.width <= limit {
-      candidates.push(candidate)
+  let gap-width = measure(box(width: gap)).width
+  let initial = if documents.len() == 0 { leaf(box(), plan: ()) } else { documents.first() }
+  let candidates = initial.map(composition-state)
+  if documents.len() > 1 {
+    for document in documents.slice(1) {
+      let next = ()
+      for left in candidates {
+        for right in document {
+          let parts = left.parts + (right.body,)
+          next.push((
+            body: none,
+            width: left.width + gap-width + right.width,
+            height: calc.max(left.height, right.height),
+            cost: left.cost + right.cost,
+            plan: left.plan + right.plan,
+            parts: parts,
+          ))
+        }
+      }
+      candidates = pareto(within-limit(next, limit))
     }
   }
-  pareto(candidates)
+  let result = ()
+  for child in candidates {
+    result.push(layout(
+      box(baseline: top, child.parts.join(h(gap))),
+      cost: child.cost + cost,
+      plan: own-plan(plan) + child.plan,
+    ))
+  }
+  pareto(within-limit(result, limit))
 }
 
-#let column(documents, limit, gap: 0.08em, cost: 0, plan: "column") = {
-  let candidates = ()
-  for children in combinations(documents) {
-    let body = box(grid(
-      columns: 1,
-      row-gutter: gap,
-      ..children.map(child => child.body),
-    ))
-    let candidate = layout(
-      body,
-      cost: total-cost(children) + cost,
-      plan: combined-plan(plan, children),
-    )
-    if candidate.width <= limit {
-      candidates.push(candidate)
+#let column(documents, limit, gap: 0.14em, cost: 0, plan: "column") = {
+  let gap-height = measure(box(height: gap)).height
+  let initial = if documents.len() == 0 { leaf(box(), plan: ()) } else { documents.first() }
+  let candidates = initial.map(composition-state)
+  if documents.len() > 1 {
+    for document in documents.slice(1) {
+      let next = ()
+      for above in candidates {
+        for below in document {
+          let parts = above.parts + (below.body,)
+          next.push((
+            body: none,
+            width: calc.max(above.width, below.width),
+            height: above.height + gap-height + below.height,
+            cost: above.cost + below.cost,
+            plan: above.plan + below.plan,
+            parts: parts,
+          ))
+        }
+      }
+      candidates = pareto(within-limit(next, limit))
     }
   }
-  pareto(candidates)
+  let result = ()
+  for child in candidates {
+    result.push(layout(
+      box(
+        baseline: top,
+        grid(
+          columns: 1,
+          row-gutter: gap,
+          ..child.parts,
+        ),
+      ),
+      cost: child.cost + cost,
+      plan: own-plan(plan) + child.plan,
+    ))
+  }
+  pareto(within-limit(result, limit))
 }
 
 #let frame(
@@ -154,6 +203,7 @@
   let candidates = ()
   for child in document {
     let body = box(
+      baseline: top,
       stroke: stroke,
       radius: radius,
       inset: inset,
@@ -164,11 +214,9 @@
       cost: child.cost + cost,
       plan: combined-plan(plan, (child,)),
     )
-    if candidate.width <= limit {
-      candidates.push(candidate)
-    }
+    candidates.push(candidate)
   }
-  pareto(candidates)
+  pareto(within-limit(candidates, limit))
 }
 
 #let better(a, b) = {

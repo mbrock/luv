@@ -241,6 +241,29 @@ soft-wrapped in the Org source.  See [[file:other.org][Page Name]].
     (false (search "\\nsoft-wrapped" source))
     (true (search "#smallcaps[#text(\"Page Name\")]" source))))
 
+(define-test typst-lisp-source-is-semantic-dexp-data
+  (let* ((doc (page "#+title: DEXP PDF
+#+begin_src lisp
+(defun f (x) ;; retained comment
+  (let ((y 1))
+    (list x y :key)))
+#+end_src
+" "typst-dexp-test"))
+         (source (with-output-to-string (stream)
+                   (wiki:render-typst-document doc stream))))
+    (true (search "workshop, example, dexp-source, accent" source))
+    (true (search "#dexp-source((" source))
+    (true (search "structure: \"stacked\", callee: true" source))
+    (true (search "structure: \"column\", callee: false" source))
+    (true (search "style: \"operator\", text: \"defun\"" source))
+    (true (search "style: \"comment\", text: \";; retained comment\"" source))
+    (true (search "style: \"keyword\", text: \":key\"" source))
+    (false (search "#raw(\"(defun f" source)))
+    (let ((fallback (let ((wiki::*typst-stream* (make-string-output-stream)))
+                      (wiki::render-typst-lisp-source "")
+                      (get-output-stream-string wiki::*typst-stream*))))
+      (true (search "#raw(\"\", block: true, lang: \"lisp\")" fallback))))
+
 (define-test page-view-classes-select-semantic-layouts
   (let ((site (wiki:make-site '())))
     (true (eq :reading
