@@ -97,6 +97,21 @@
     (false (search "JSON.parse" javascript))
     (false (search "luft-star-data" javascript))))
 
+(define-test typst-star-data-comes-from-production-geometry
+  (let ((source (atlas::typst-star-data-source #x1b)))
+    (true (search "#let star-x1b" source))
+    (true (search "bits: \"00011011\"" source))
+    (true (search "occupied: (0, 1, 3, 4," source))
+    (true (string= source
+                   (uiop:read-file-string
+                    (asdf:system-relative-pathname :luft "luft/star-x1b-data.typ"))))
+    (true (= 18 (length (atlas::occupancy-boundary-quads #x1b))))
+    (true (= 6 (length (atlas::triangle-pairs-as-quads
+                         (getf (luft:star-triangles #x1b) :faces)))))
+    (true (= 1 (length (atlas::triangle-pairs-as-quads
+                         (getf (atlas::star-owned-geometry #x1b) :faces)))))
+    (true (= 8 (length (getf (atlas::star-owned-geometry #x1b) :junctions))))))
+
 (define-test atlas-stylesheet-is-a-luv-css-tree
   (let ((stylesheet
           (luv.css:css-text (luv.css:find-style 'luft.atlas::star-atlas))))

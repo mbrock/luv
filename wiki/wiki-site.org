@@ -258,7 +258,10 @@ wrapping rather than typesetting it as hard line breaks.  The remaining example
 blocks still render as plain monospace text; migration is deliberate rather
 than automatic.  Internal page names use small capitals.  The page template
 uses the private, annexed Equity family when its content is present and falls
-back to Libertinus in ordinary public checkouts.
+back to Libertinus in ordinary public checkouts.  [[file:luft-star-figures.org][One star in four views]]
+adds the first production-data plate: Lisp emits one exact atlas patch, a
+checked Typst data file detects drift, and one CeTZ projection compares its
+occupancy, whole geometry, polygon structure, and ownership on paper and web.
 
 /Done when./ One substantive page builds as PDF, both kinds of diagram render
 legibly in that PDF and the real web reading view, and the ordinary wiki tests

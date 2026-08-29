@@ -237,7 +237,10 @@
         (with-open-file (stream source :direction :output :if-exists :supersede
                                        :external-format :utf-8)
           (format stream "#set page(width: auto, height: auto, margin: 7pt, fill: rgb(\"#f7f6f2\"))~%")
-          (format stream "#set text(font: \"Iosevka Aile\", size: 9pt)~%~A~%"
+          (format stream "#set text(font: ~A, size: 9pt)~%~A~%"
+                  (if (typst-equity-available-p root)
+                      "(\"Equity OT A\", \"Libertinus Serif\")"
+                      "\"Libertinus Serif\"")
                   (block-text block)))
         (typst-command root (namestring source) (namestring output))
         (setf (gethash (block-text block) *typst-diagram-cache*)

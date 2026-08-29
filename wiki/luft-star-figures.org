@@ -1,0 +1,31 @@
+#+title: One star in four views
+#+startup: overview
+
+* An exact local patch
+:PROPERTIES:
+:ID: FPP2I0
+:END:
+
+A Luft star is both a neighborhood predicate and a small piece of geometry.
+The four views below follow the exact =#x1B= production star without changing
+projection or color vocabulary: occupied incident cells are rose, ordinary
+faces are blue, connecting bands are amber, and the triangles at the central
+junction are red.
+
+#+begin_src typst-diagram
+#import "/luft/star-x1b-data.typ": star-x1b
+#import "/luft/star-plate.typ": plate
+
+#plate(star-x1b)
+#+end_src
+
+The first view is the cubical input.  The second is the whole local atlas
+patch.  The third removes the color fields and exposes the quad and triangle
+structure, including the diagonals by which quads become GPU triangles.  The
+fourth keeps the whole patch as registration context but emphasizes only the
+polygons owned by this lattice vertex.
+
+This is deliberately not a pipeline diagram.  It is one mathematical object
+held under four lenses, so correspondences can be checked rather than merely
+asserted.  The polygon coordinates are generated from =star-triangles= and
+=star-atlas-owned-triangles=, the same definitions used by Luft itself.

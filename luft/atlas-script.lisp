@@ -188,6 +188,89 @@
              (triangle-pairs-as-quads (getf geometry :bands)))
            :junctions ,(parenscript-array-form (getf geometry :junctions))))
 
+(defun star-owned-geometry (star)
+  "STAR's owned triangles grouped like STAR-TRIANGLES for illustration."
+  (let ((owned (luft:star-atlas-owned-triangles star)))
+    (loop for kind in '(:faces :bands :junctions)
+          append (list kind
+                       (remove-if-not
+                        (lambda (triangle) (member triangle owned :test #'equal))
+                        (getf (luft:star-triangles star) kind))))))
+
+(defun occupancy-cube-corners (sample)
+  (flet ((bounds (axis)
+           (let ((low (if (logbitp axis sample) 0 -8)))
+             (list low (+ low 8)))))
+    (destructuring-bind ((x0 x1) (y0 y1) (z0 z1))
+        (loop for axis below 3 collect (bounds axis))
+      (list (list x0 y0 z0) (list x1 y0 z0)
+            (list x1 y1 z0) (list x0 y1 z0)
+            (list x0 y0 z1) (list x1 y0 z1)
+            (list x1 y1 z1) (list x0 y1 z1)))))
+
+(defun occupancy-boundary-quads (star)
+  "Visible cubical boundary quads of STAR's occupied incident cells."
+  (loop with face-axes = '(2 2 1 1 0 0)
+        for sample below 8
+        when (logbitp sample star)
+          append
+          (let* ((corners (occupancy-cube-corners sample))
+                 (faces (list (mapcar (lambda (i) (nth i corners)) '(0 3 2 1))
+                              (mapcar (lambda (i) (nth i corners)) '(4 5 6 7))
+                              (mapcar (lambda (i) (nth i corners)) '(0 1 5 4))
+                              (mapcar (lambda (i) (nth i corners)) '(3 7 6 2))
+                              (mapcar (lambda (i) (nth i corners)) '(0 4 7 3))
+                              (mapcar (lambda (i) (nth i corners)) '(1 2 6 5)))))
+            (loop for face in faces
+                  for face-number from 0
+                  for axis in face-axes
+                  for negative-face-p = (evenp face-number)
+                  for neighbor = (logxor sample (ash 1 axis))
+                  unless (and (eql negative-face-p (logbitp axis sample))
+                              (logbitp neighbor star))
+                    collect face))))
+
+(defun write-typst-polygon-sequence (polygons stream &optional (indent 6))
+  (format stream "(~%")
+  (dolist (polygon polygons)
+    (format stream "~V@T(" indent)
+    (loop for point in polygon
+          for first = t then nil
+          do (unless first (write-string ", " stream))
+             (format stream "(~D, ~D, ~D)" (first point) (second point)
+                     (third point)))
+    (format stream "),~%"))
+  (format stream "~V@T)" (- indent 2)))
+
+(defun write-typst-star-geometry (geometry stream)
+  (format stream "(~%    faces: ")
+  (write-typst-polygon-sequence
+   (triangle-pairs-as-quads (getf geometry :faces)) stream 8)
+  (format stream ",~%    bands: ")
+  (write-typst-polygon-sequence
+   (triangle-pairs-as-quads (getf geometry :bands)) stream 8)
+  (format stream ",~%    junctions: ")
+  (write-typst-polygon-sequence (getf geometry :junctions) stream 8)
+  (format stream ",~%  )"))
+
+(defun typst-star-data-source (star)
+  "Typst data for one exact production STAR illustration."
+  (with-output-to-string (stream)
+    (format stream "// Generated from LUFT's production star atlas; do not edit.~%")
+    (format stream "#let star-x~A = (~%  mask: ~D,~%  bits: ~S,~%  occupied: ("
+            (string-downcase (format nil "~2,'0X" star))
+            star (format nil "~8,'0B" star))
+    (loop for sample below 8
+          when (logbitp sample star)
+            do (format stream "~D, " sample))
+    (format stream "),~%  occupancy: ")
+    (write-typst-polygon-sequence (occupancy-boundary-quads star) stream 6)
+    (format stream ",~%  whole: ")
+    (write-typst-star-geometry (luft:star-triangles star) stream)
+    (format stream ",~%  owned: ")
+    (write-typst-star-geometry (star-owned-geometry star) stream)
+    (format stream ",~%)~%")))
+
 (defun star-atlas-javascript ()
   (ps:ps*
    `(progn
