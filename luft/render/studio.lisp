@@ -657,10 +657,8 @@ the selector is the whole of the difference."
 (declaim (ftype function viewer-surface-view
                 viewer-inspector-p
                 viewer-inspector-mirror
-                viewer-instruments-present-p
-                refresh-viewer-instruments
-                encode-viewer-instruments
-                release-viewer-instruments
+                refresh-viewer-tracy-capture
+                quiesce-viewer-services
                 attach-viewer-lobby
                 make-tracked-renderer
                 attach-viewer-live-artifact
@@ -674,13 +672,13 @@ the selector is the whole of the difference."
                 %perform-viewer-stop))
 
 (defun prepare-viewer-frame-renderer (viewer)
-  "Publish frame-boundary instruments, then borrow VIEWER's renderer.
+  "Publish frame-boundary service state, then borrow VIEWER's renderer.
 
-An instrument operation may transactionally replace the complete renderer
+An application operation may transactionally replace the complete renderer
 cohort and retire the previous one.  No frame may borrow that previous cohort
 before the operation boundary, or it would encode through resources which the
   same canvas thread has just retired."
-  (refresh-viewer-instruments viewer)
+  (refresh-viewer-tracy-capture viewer)
   ;; Inspector repaint is semantic and therefore sparse.  Shader definitions
   ;; are independently live, so the static retained stream still refreshes its
   ;; direct compositor here, before ENCODE-RENDERER-FRAME opens a pass.
@@ -721,8 +719,8 @@ before the operation boundary, or it would encode through resources which the
                (maintain-renderer-exposure renderer))))
     (unless (frame-views-continuous-p (renderer-previous-view renderer) view)
       (setf (renderer-history-valid-p renderer) nil))
-    ;; Instrument state is now immutable for this frame.  Encoding below only
-    ;; replays prepared GPU commands against the renderer borrowed afterward.
+    ;; Frame-boundary state is now published. Encoding below only replays
+    ;; prepared GPU commands against the renderer borrowed afterward.
     (encode-renderer-frame
      renderer frame encoder surface-view extent
      (camera-uniform-data
@@ -741,16 +739,12 @@ before the operation boundary, or it would encode through resources which the
                           (not (typep (viewer-source viewer)
                                       'streaming-scene)))
      :overlay-encoder
-     (and (or inspector-p (viewer-instruments-present-p viewer)
-              (luv.workbench:application-workbench viewer))
+     (and (or inspector-p (luv.workbench:application-workbench viewer))
           (lambda (pass)
             (when inspector-p
               (mcluv:encode-direct-gpu-mirror
                (viewer-inspector-compositor viewer) pass surface-texture
                (viewer-inspector-state viewer extent)))
-            ;; Instruments are ordered low-to-high so modal tools render last.
-            (encode-viewer-instruments
-             viewer pass surface-texture extent)
             ;; The application supplies only its open final pass; the shell
             ;; remains the owner of layout, retained media, and replay state.
             (alexandria:when-let
@@ -898,8 +892,20 @@ before the operation boundary, or it would encode through resources which the
                      half-width 0.0 0.0 0.0
                      0.0 half-height 0.0 0.0))))))
 
+(defclass viewer-service-state ()
+  ((service-lock
+    :initform (sb-thread:make-mutex :name "LUFT viewer services")
+    :reader viewer-service-lock)
+   (lobby-client :initform nil :accessor viewer-lobby-client)
+   (tracy-capture-controller
+    :initform nil :accessor viewer-tracy-capture-controller)
+   (tracy-canvas-thread-named-p
+    :initform nil :accessor viewer-tracy-canvas-thread-named-p)
+   (agent :initform nil :accessor viewer-agent-service)))
+
 (clim:define-application-frame viewer
-    (clim:standard-application-frame canvas-event-handler)
+    (clim:standard-application-frame canvas-event-handler
+     viewer-service-state)
   ((canvas :initarg :canvas :initform nil :reader viewer-canvas)
    (context :initarg :context :initform nil :reader viewer-context)
    (device :initarg :device :initform nil :reader viewer-device)
@@ -1635,12 +1641,12 @@ cohort. FIXED-EXPOSURE disables temporal adaptation for reproducible evidence."
            viewer)
       (unless completed-p
         (when viewer-state
+          (releasing :services
+            (quiesce-viewer-services viewer-state))
           (alexandria:when-let
               ((workbench (luv.workbench:application-workbench viewer-state)))
             (releasing :workbench
-              (luv.workbench:stop-workbench workbench)))
-          (releasing :instruments
-            (release-viewer-instruments viewer-state)))
+              (luv.workbench:stop-workbench workbench))))
         (when production-system
           (releasing :production-system
             (production:stop-production-system production-system)))
@@ -2362,8 +2368,13 @@ it makes no claim about which earlier render pass caused a discontinuity."
   ;; renderer, canvas, or device release can begin.
   (quiesce-application-captures viewer)
   ;; Source tools may be waiting to submit a live-load fence to this canvas.
-  ;; Stop that work before the terminal frame-boundary request below.
-  (quiesce-viewer-instruments viewer)
+  ;; Stop that work before any terminal frame-boundary request below.
+  (alexandria:when-let
+      ((workbench (luv.workbench:application-workbench viewer)))
+    (luv.workbench:quiesce-workbench workbench))
+  ;; Named nonvisual services quiesce while the canvas still accepts the final
+  ;; application calls of an active agent turn.
+  (quiesce-viewer-services viewer)
   (setf (viewer-running-p viewer) nil)
   (when (viewer-frame-recorder viewer)
     (stop-viewer-frame-recording viewer))
@@ -2392,7 +2403,6 @@ it makes no claim about which earlier render pass caused a discontinuity."
               ((workbench (luv.workbench:application-workbench viewer)))
             (releasing :workbench
               (luv.workbench:stop-workbench workbench)))
-          (releasing :instruments (release-viewer-instruments viewer))
           (when (viewer-production-system viewer)
             (releasing :production-system
               (production:stop-production-system

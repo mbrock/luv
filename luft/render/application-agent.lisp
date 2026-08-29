@@ -1,6 +1,6 @@
 (in-package #:luft.render)
 
-;;; LUFT's agent is an application instrument with no panel of its own.  The
+;;; LUFT's agent is a named application service with no panel of its own. The
 ;;; shared harness supplies turns, tools, transcript, and teardown; this file
 ;;; contributes a viewer report, a small atelier command vocabulary, and the
 ;;; canvas/frame relationship.  There is deliberately no gnome, cat, body, or
@@ -79,74 +79,52 @@ its developer presentation. Keep answers short and prefer acting through tools."
      (declare (ignore timestamp))
      (funcall function))))
 
-;;; An invisible instrument gives the agent the viewer's ordinary transactional
-;;; release path.  Registry mutation and provider close remain independently
-;;; idempotent when stop, REPL cleanup, and error recovery race.
-
-(defclass viewer-agent-instrument ()
-  ((agent :initarg :agent :reader viewer-agent-instrument-agent)))
-
-(defvar *viewer-agent-attachments*
-  (make-hash-table :test #'eq :weakness :key))
-
-(defvar *viewer-agent-attachments-lock*
-  (sb-thread:make-mutex :name "LUFT viewer agents"))
-
-(defmethod viewer-instrument-present-p
-    ((instrument viewer-agent-instrument) viewer)
-  (declare (ignore instrument viewer))
-  nil)
-
-(defmethod release-viewer-instrument
-    ((instrument viewer-agent-instrument) viewer)
-  (sb-thread:with-mutex (*viewer-agent-attachments-lock*)
-    (when (eq instrument (gethash viewer *viewer-agent-attachments*))
-      (remhash viewer *viewer-agent-attachments*)))
-  (luv.application-agent:release-application-agent
-   (viewer-agent-instrument-agent instrument)))
-
-(defun viewer-agent-attachment (viewer)
-  (sb-thread:with-mutex (*viewer-agent-attachments-lock*)
-    (gethash viewer *viewer-agent-attachments*)))
+;;; The viewer directly owns its environment-level agent. Provider work stays
+;;; on the shared harness threads; the service lock protects only publication.
 
 (defun viewer-agent (viewer)
   "Return VIEWER's live application agent, or NIL."
-  (alexandria:when-let ((attachment (viewer-agent-attachment viewer)))
-    (let ((agent (viewer-agent-instrument-agent attachment)))
-      (and (luv.application-agent:application-agent-open-p agent) agent))))
+  (sb-thread:with-mutex ((viewer-service-lock viewer))
+    (let ((agent (viewer-agent-service viewer)))
+      (and agent
+           (luv.application-agent:application-agent-open-p agent)
+           agent))))
 
 (defun attach-viewer-agent (viewer agent)
   "Attach already-open AGENT transactionally, releasing a concurrent loser."
-  (let ((attachment (make-instance 'viewer-agent-instrument :agent agent))
-        (installed-p nil)
-        (winner nil))
-    (sb-thread:with-mutex (*viewer-agent-attachments-lock*)
-      (let ((present (gethash viewer *viewer-agent-attachments*)))
-        (if present
-            (setf winner (viewer-agent-instrument-agent present))
-            (setf (gethash viewer *viewer-agent-attachments*) attachment
-                  winner agent
-                  installed-p t))))
-    (if installed-p
+  (let ((winner nil)
+        (transferred-p nil)
+        (released-p nil))
+    (unwind-protect-releasing
         (progn
-          (add-viewer-instrument viewer attachment)
-          ;; A concurrent RELEASE-VIEWER-AGENT may have detached and closed it
-          ;; between registry publication and instrument attachment.
-          (unless (luv.application-agent:application-agent-open-p agent)
-            (remove-viewer-instrument viewer attachment)
+          (setf winner
+                (call-with-running-stop-controller
+                 (viewer-stop-controller viewer)
+                 (lambda ()
+                   (sb-thread:with-mutex ((viewer-service-lock viewer))
+                     (or (viewer-agent-service viewer)
+                         (progn
+                           (setf transferred-p t
+                                 (viewer-agent-service viewer) agent)
+                           agent))))
+                 :attachment agent))
+          (unless transferred-p
+            (setf released-p t)
+            (luv.application-agent:release-application-agent agent))
+          ;; A concurrent RELEASE-VIEWER-AGENT may detach and close a newly
+          ;; published winner before this creator returns.
+          (unless (luv.application-agent:application-agent-open-p winner)
             (error 'luv.application-agent:application-agent-released
-                   :agent agent))
-          agent)
-        (progn
-          (luv.application-agent:release-application-agent agent)
-          winner))))
+                   :agent winner))
+          winner)
+      (unless (or transferred-p released-p)
+        (releasing :unpublished-agent
+          (luv.application-agent:release-application-agent agent))))))
 
 (defun viewer-openai-api-key (viewer)
   (or (openai:default-api-key)
-      (alexandria:when-let
-          ((attachment (viewer-lobby-attachment viewer)))
-        (luv.lobby:lobby-client-value
-         (viewer-lobby-client attachment) "OPENAI_API_KEY"))))
+      (alexandria:when-let ((client (viewer-lobby-client viewer)))
+        (luv.lobby:lobby-client-value client "OPENAI_API_KEY"))))
 
 (defun make-viewer-agent
     (viewer &key (model *viewer-agent-model*)
@@ -174,16 +152,36 @@ provider connection is application setup, while ASK itself returns at once."
    (or (viewer-agent viewer)
        (error "No LUFT agent is open; call MAKE-VIEWER-AGENT off-canvas."))))
 
-(defun release-viewer-agent (viewer)
-  "Detach and close VIEWER's application agent if one exists."
-  (let ((attachment nil))
-    (sb-thread:with-mutex (*viewer-agent-attachments-lock*)
-      (setf attachment (gethash viewer *viewer-agent-attachments*))
-      (when attachment
-        (remhash viewer *viewer-agent-attachments*)))
-    (when attachment
-      ;; If creation has published the registry but not attached the instrument
-      ;; yet, release it directly; the creator detects the terminal state.
-      (unless (remove-viewer-instrument viewer attachment)
-        (release-viewer-instrument attachment viewer))
+(defun release-viewer-agent (viewer &key wait)
+  "Detach and close VIEWER's application agent if one exists.
+
+With WAIT, require provider and worker quiescence before returning."
+  (let ((agent nil))
+    (sb-thread:with-mutex ((viewer-service-lock viewer))
+      (setf agent (viewer-agent-service viewer)
+            (viewer-agent-service viewer) nil))
+    (when agent
+      (luv.application-agent:release-application-agent agent)
+      (when (and wait
+                 (not (luv.application-agent:wait-for-application-agent-release
+                       agent :timeout 3)))
+        ;; This off-canvas teardown owner must not fence or destroy resources
+        ;; while an active turn can still submit an application call. Three
+        ;; seconds is a diagnostic threshold, not an unsafe teardown deadline.
+        (format *error-output*
+                "LUFT application agent is still quiescing after 3 seconds; ~
+                 waiting before the terminal canvas fence.~%")
+        (finish-output *error-output*)
+        (luv.application-agent:wait-for-application-agent-release agent))
       t)))
+
+(defun quiesce-viewer-services (viewer)
+  "Detach and quiesce every named nonvisual service before the terminal fence."
+  (with-release-report
+    (releasing :application-agent
+      (release-viewer-agent viewer :wait t))
+    (releasing :tracy-capture
+      (release-viewer-tracy-capture viewer))
+    (releasing :lobby-radio
+      (release-viewer-lobby viewer)))
+  viewer)

@@ -1,62 +1,28 @@
 (in-package #:luft.render)
 
-;;; Luft temporarily retains only the radio's service lifetime. The workbench
+;;; The viewer directly owns its radio service. The workbench independently
 ;;; owns the fixed modeless pane, layout, input, repaint, and GPU release.
 
-(defclass viewer-lobby-instrument ()
-  ((client :initarg :client :reader viewer-lobby-client)))
-
-(defmethod viewer-instrument-priority ((instrument viewer-lobby-instrument))
-  (declare (ignore instrument))
-  10)
-
-(defmethod viewer-instrument-present-p
-    ((instrument viewer-lobby-instrument) viewer)
-  (declare (ignore instrument viewer))
-  nil)
-
-(defmethod release-viewer-instrument
-    ((instrument viewer-lobby-instrument) viewer)
-  (declare (ignore viewer))
-  (luv.lobby:stop-lobby-client (viewer-lobby-client instrument))
-  nil)
-
-(defun viewer-lobby-attachment (viewer)
-  (find-if (lambda (instrument)
-             (typep instrument 'viewer-lobby-instrument))
-           (viewer-instruments viewer)))
-
 (defun %attach-viewer-lobby (viewer)
-  (or (viewer-lobby-attachment viewer)
-      (let ((client nil)
-            (instrument nil)
-            (transferred-p nil)
-            (completed-p nil))
-        (unwind-protect
-             (progn
-               ;; START only spawns the worker; broker discovery, connect,
-               ;; subscribe, and reads all remain on that worker.
-               (setf client
-                     (luv.lobby:start-lobby-client
-                      (luv.lobby:make-lobby-client
-                       :client-id-prefix "luft")))
-               (setf instrument
-                     (make-instance
-                      'viewer-lobby-instrument
-                      :client client))
-               (setf transferred-p t)
-               (add-viewer-instrument viewer instrument)
-               (setf completed-p t)
-               instrument)
-          (unless completed-p
-            (when (and instrument
-                       (member instrument (viewer-instruments viewer)
-                               :test #'eq))
-              (ignore-errors
-               (remove-viewer-instrument viewer instrument)))
-            (when (and client (not transferred-p))
-              (ignore-errors
-               (luv.lobby:stop-lobby-client client))))))))
+  (or (sb-thread:with-mutex ((viewer-service-lock viewer))
+        (viewer-lobby-client viewer))
+      (let ((candidate
+              (luv.lobby:start-lobby-client
+               (luv.lobby:make-lobby-client :client-id-prefix "luft")))
+            (winner nil))
+        (unwind-protect-releasing
+             (setf winner
+                   (call-with-running-stop-controller
+                    (viewer-stop-controller viewer)
+                    (lambda ()
+                      (sb-thread:with-mutex ((viewer-service-lock viewer))
+                        (or (viewer-lobby-client viewer)
+                            (setf (viewer-lobby-client viewer) candidate))))
+                    :attachment candidate))
+          (unless (eq winner candidate)
+            (releasing :unpublished-lobby-radio
+              (luv.lobby:stop-lobby-client candidate))))
+        winner)))
 
 (defun attach-viewer-lobby (viewer)
   "Start VIEWER's shared radio once at a frame boundary, without its panel."
@@ -65,6 +31,15 @@
    (lambda (timestamp)
      (declare (ignore timestamp))
      (%attach-viewer-lobby viewer))))
+
+(defun release-viewer-lobby (viewer)
+  "Detach and synchronously stop VIEWER's radio worker."
+  (let ((client nil))
+    (sb-thread:with-mutex ((viewer-service-lock viewer))
+      (setf client (viewer-lobby-client viewer)
+            (viewer-lobby-client viewer) nil))
+    (when client (luv.lobby:stop-lobby-client client)))
+  nil)
 
 (defun open-viewer-lobby (viewer)
   "Open the detailed panel at a frame boundary over the already-live radio."

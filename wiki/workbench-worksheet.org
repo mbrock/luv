@@ -250,7 +250,7 @@ Luft retains only metabar semantics, public commands, and the radio service;
 its pane-specific frames, compositors, animation, refresh, encode, and input
 adapters are deleted.  #RYHYDG is the next candidate gate and was not begun.
 
-** TODO Move services and delete the instrument system
+** DONE Move services and delete the instrument system
 :PROPERTIES:
 :ID: RYHYDG
 :END:
@@ -268,6 +268,17 @@ guarantees, not the registry shape.
 deleted, the shell owns global panes, services have named owners, full tests
 pass, and a running Luft application opens, uses, and closes every migrated
 surface cleanly.
+
+/Outcome./ =viewer-service-state= now directly owns the lobby client, Tracy
+controller, and application agent under one publication lock and the existing
+stop controller.  Workbench/source activity and all nonvisual services
+quiesce before the terminal canvas fence; a slow agent emits a diagnostic after
+three seconds but teardown waits honestly rather than destroying resources
+under a canvas-capable turn.  =luft/render/instruments.lisp=, its weak map,
+numeric priority, generic refresh/encode/event/release protocol, around-method,
+package exports, and the obsolete Luft backend-proof adapter are deleted.  The
+production overlay path now composes only the authored inspector and the
+Luv-owned workbench.
 
 * Decision log
 :PROPERTIES:
@@ -437,6 +448,22 @@ workbench is constructed but is neither started nor stopped by panel open and
 close.  Luft still owns that client as a named nonvisual instrument until
 #RYHYDG assigns explicit service lifecycles; this stage does not smuggle
 service migration into pane migration.
+
+** 2026-08-29 — Named services are application state, not invisible panes
+
+Luft's lobby radio, Tracy controller, and application agent are named slots on
+the viewer rather than entries in a weak heterogeneous registry.  Publication
+is atomic with the existing stop controller; losing or rejected constructors
+release their private service.  Tracy's only frame participation is an explicit
+canvas-thread naming handshake, not a fake visual-presence predicate.
+
+Stop first quiesces source-update work, then detaches and quiesces every named
+service while the canvas can still satisfy a final agent application call.
+Only afterward may the application cross its terminal frame fence and release
+workbench, renderer, canvas, and device resources.  Three seconds is an agent
+quiescence diagnostic threshold, not a teardown deadline: continuing would be
+unsafe, while throwing would publish an unretryable half-stop.  The off-canvas
+teardown owner therefore reports and continues waiting.
 
 * Experiment notes
 :PROPERTIES:
@@ -790,6 +817,45 @@ path.  Do not paste complete test transcripts.
   until the explicit service stage.  #RYHYDG is the next candidate gate;
   service migration and instrument-system deletion were not begun.
 
+** 2026-08-29 — RYHYDG explicit services and registry deletion
+
+- /Revision./ Begun after publishing #C9US2D as exact =origin/main=
+  =0cc0f96=.
+- /Questions./ Do any remaining visual surfaces require Luft's weak registry,
+  numeric priority, generic frame/event protocol, or around-method?  What
+  lifecycle coordinates do the lobby radio, Tracy controller, and application
+  agent actually require?
+- /Commands and live actions./ Traced every registry reference through startup,
+  frame refresh/encode, event dispatch, stop, and failed-start cleanup.  Moved
+  each nonvisual service into named viewer-owned state, reduced Tracy frame
+  work to one explicit handshake, removed the generic frame and event path,
+  and deleted both =instruments.lisp= and the obsolete backend-proof mount.
+  Ran strict Parinfer and focused =luft/render= tests.  In fresh durable image
+  =OWI175= started live Vulkan Luft, opened lobby, metabar, M-x, and source
+  update, inspected the composed frame and service identities, constructed the
+  lazy Tracy controller, closed every pane, stopped Luft, and inspected retained
+  viewer state after teardown.
+- /Observed result./ The canvas remained healthy through 95 rendered frames.
+  Status, metabar, lobby, and M-x composed in the one workbench mirror; source
+  update opened and retained its environmental fetch failure while rendering
+  continued.  The lobby worker remained running despite the orb's broker DNS
+  failure.  The viewer directly owned one lobby client and one lazily created
+  Tracy controller; no old registry symbol existed.  Clean stop left
+  =*viewer*=, lobby, Tracy, agent, and workbench ownership NIL and the canvas
+  =:closed=.  Focused Luft render tests passed 399 checks with no failures or
+  skips.  The final Ghostty-enabled =make test= found the library readable,
+  passed strict repository Parinfer, and passed all 25 suites / 29 tasks with
+  8 workers.
+- /Interpretation./ The registry had no remaining visual composition role.
+  Its three production occupants were lifecycle services with distinct APIs;
+  numeric ordering and generic presence/event methods obscured rather than
+  shared those contracts.
+- /Resulting decisions./ Keep named ownership in Luft, shared service mechanics
+  in their Luv systems, and all screen-space composition in =luv/workbench=.
+  Retain the backend proof only in Luv's focused backend test system, not as a
+  production Luft mount.  This completes the ordered migration; no successor
+  implementation stage is implied.
+
 * Completed prose updates
 :PROPERTIES:
 :ID: QF07KG
@@ -870,13 +936,26 @@ path.  Do not paste complete test transcripts.
   Luvcraft remains on compatible standalone frames backed by the same shared
   state.  #RYHYDG is next and was not begun.
 
+** 2026-08-29 — Luft instrument registry deleted
+
+- Lobby radio, Tracy capture, and application agent now have explicit named
+  viewer ownership and pre-fence quiescence; they no longer masquerade as
+  invisible panes.
+- The weak registry, numeric priority, generic visual/event/lifecycle protocol,
+  around-method interception, production backend-proof adapter, and generic
+  instrument frame path are gone.
+- Live Vulkan startup, every migrated workbench surface, retained failure
+  presentation, direct Tracy ownership, and clean terminal teardown agree with
+  focused checks and the complete Ghostty-enabled 25-suite run.  The ordered
+  worksheet migration is complete.
+
 * Exact next action
 :PROPERTIES:
 :ID: 53WN6F
 :END:
 
-Review the completed #C9US2D metabar and lobby cutover.  If accepted, begin
-#RYHYDG by assigning explicit lifecycles to the remaining nonvisual services,
-then delete Luft's weak instrument registry and generic numeric-priority
-protocol.  Preserve stop-controller and frame-boundary guarantees; do not
-begin Luvcraft migration or test scheduler refactoring with that cut.
+Review the completed #RYHYDG service cutover and deletion of Luft's instrument
+system and its final full-suite and live teardown evidence, then treat this
+ordered migration as closed.  Any Luvcraft migration, test-run UI, new workbench
+facility, or further application protocol should begin from a new explicit
+question rather than extending this worksheet speculatively.

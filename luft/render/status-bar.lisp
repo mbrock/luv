@@ -7,8 +7,7 @@
   "LUFT")
 
 (defmethod mcluv:status-bar-lobby-client ((viewer viewer))
-  (alexandria:when-let ((attachment (viewer-lobby-attachment viewer)))
-    (viewer-lobby-client attachment)))
+  (viewer-lobby-client viewer))
 
 (defmethod mcluv:status-bar-channels-for ((viewer viewer))
   (declare (ignore viewer))

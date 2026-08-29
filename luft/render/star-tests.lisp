@@ -4,7 +4,7 @@
 
 (in-package #:luft.render.tests)
 
-(define-test luft-status-is-semantic-only-with-no-instrument-adapter
+(define-test luft-status-is-semantic-only-with-no-pane-adapter
   (dolist (name '("VIEWER-STATUS-BAR"
                   "VIEWER-STATUS-BAR-ATTACHMENT"
                   "%OPEN-VIEWER-STATUS-BAR"
@@ -23,6 +23,35 @@
                    (luft.render::status-bar-position position)))
     (true (string= "2,0"
                    (luft.render::status-bar-position-chunk position)))))
+
+(define-test viewer-services-have-named-owners-with-no-instrument-protocol
+  (let ((state (make-instance 'luft.render::viewer-service-state)))
+    (true (null (luft.render:viewer-lobby-client state)))
+    (true (null (luft.render::viewer-tracy-capture-controller state)))
+    (true (null (luft.render::viewer-agent-service state)))
+    (true (typep (luft.render::viewer-service-lock state)
+                 'sb-thread:mutex)))
+  (dolist (name '("VIEWER-INSTRUMENTS"
+                  "ADD-VIEWER-INSTRUMENT"
+                  "REMOVE-VIEWER-INSTRUMENT"
+                  "VIEWER-INSTRUMENT-PRIORITY"
+                  "VIEWER-INSTRUMENT-PRESENT-P"
+                  "REFRESH-VIEWER-INSTRUMENT"
+                  "ENCODE-VIEWER-INSTRUMENT"
+                  "HANDLE-VIEWER-INSTRUMENT-EVENT"
+                  "QUIESCE-VIEWER-INSTRUMENT"
+                  "RELEASE-VIEWER-INSTRUMENT"))
+    (true (not (eq :external
+                   (nth-value 1 (find-symbol name '#:luft.render))))))
+  (let ((system (asdf:find-system "luft/render")))
+    (true (null (find "luft/render/instruments"
+                      (asdf:component-children system)
+                      :key #'asdf:component-name
+                      :test #'string=)))
+    (true (null (find "luft/render/workbench-proof"
+                      (asdf:component-children system)
+                      :key #'asdf:component-name
+                      :test #'string=)))))
 
 (define-test atlas-is-one-fixed-complete-table
   (let ((words (luft.render::star-meshlet-template-words)))

@@ -90,8 +90,6 @@
   :components ((:file "luft/render/game")
                (:file "luft/render/studio")
                (:file "luft/render/live-artifact")
-               (:file "luft/render/instruments")
-               (:file "luft/render/workbench-proof")
                (:file "luft/render/workbench")
                (:file "luft/render/tracy-capture")
                (:file "luft/render/command-menu")

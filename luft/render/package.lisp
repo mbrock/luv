@@ -208,19 +208,6 @@
            #:viewer-renderer
            #:viewer-shader-diagnostic
            #:viewer-running-p
-           ;; Ordered application instruments.  Each shared tool owns its UI
-           ;; implementation; LUFT supplies only attachment, frame-boundary,
-           ;; final-pass, input, and release policy through this protocol.
-           #:viewer-instruments
-           #:add-viewer-instrument
-           #:remove-viewer-instrument
-           #:viewer-instrument-priority
-           #:viewer-instrument-present-p
-           #:refresh-viewer-instrument
-           #:encode-viewer-instrument
-           #:handle-viewer-instrument-event
-           #:quiesce-viewer-instrument
-           #:release-viewer-instrument
            #:open-viewer-command-menu
            #:close-viewer-command-menu
            #:toggle-viewer-command-menu

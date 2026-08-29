@@ -1,4 +1,4 @@
-;;; LUFT adapter for the shared retained-GPU metabar instrument.
+;;; LUFT's semantic vocabulary for the workbench-owned metabar pane.
 
 (in-package #:luft.render)
 
