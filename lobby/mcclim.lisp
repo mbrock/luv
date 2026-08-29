@@ -25,13 +25,17 @@
 
 (defclass lobby-hud-pane (mcluv:transparent-gpu-application-pane) ())
 
-(define-application-frame lobby-hud ()
-  ((client :initarg :client :reader lobby-hud-client)
+(defclass lobby-hud-state ()
+  ((client :initarg :client :initform nil :reader lobby-hud-client)
    (visible-snapshot
-    :initarg :visible-snapshot
+    :initarg :visible-snapshot :initform nil
     :accessor lobby-hud-visible-snapshot)
-   (painted-revision :initform -1 :accessor lobby-hud-painted-revision)
-   (compositor :initform nil :accessor lobby-hud-compositor))
+   (painted-revision :initform nil :accessor lobby-hud-painted-revision)
+   (compositor :initform nil :accessor lobby-hud-compositor)))
+
+(define-application-frame lobby-hud
+    (standard-application-frame lobby-hud-state)
+  ()
   (:menu-bar nil)
   ;; The pane background is part of McCLIM's retained stream.  Leaving it at
   ;; the implementation default paints an opaque white rectangle behind the
@@ -66,9 +70,12 @@
   ;; This is deliberately the only state read by paint.  CLIENT's lock and
   ;; worker are outside the McCLIM repaint transaction.
   (let* ((snapshot (lobby-hud-visible-snapshot (pane-frame pane)))
-         (status (luv.lobby:lobby-snapshot-status snapshot))
-         (peers (luv.lobby:lobby-snapshot-peers snapshot))
-         (error (luv.lobby:lobby-snapshot-last-error snapshot)))
+         (status (if snapshot
+                     (luv.lobby:lobby-snapshot-status snapshot)
+                     :stopped))
+         (peers (and snapshot (luv.lobby:lobby-snapshot-peers snapshot)))
+         (error
+           (and snapshot (luv.lobby:lobby-snapshot-last-error snapshot))))
     (with-sheet-medium (medium pane)
       (mcluv:draw-analytic-rounded-rectangle*
        medium 4 5 (- +lobby-hud-width+ 2) (- +lobby-hud-height+ 1)
@@ -140,16 +147,21 @@
     (mcluv:repaint-gpu-mirror mirror)
     (validate-lobby-hud-direct-presentation frame)
     (setf (lobby-hud-painted-revision frame)
-          (luv.lobby:lobby-snapshot-revision
-           (lobby-hud-visible-snapshot frame))))
+          (let ((snapshot (lobby-hud-visible-snapshot frame)))
+            (if snapshot
+                (luv.lobby:lobby-snapshot-revision snapshot)
+                -1))))
   frame)
 
 (defun refresh-lobby-hud (frame)
   "Copy the current semantic snapshot and repaint only when its revision moved."
-  (let ((snapshot
-          (luv.lobby:lobby-client-snapshot (lobby-hud-client frame))))
-    (if (/= (luv.lobby:lobby-snapshot-revision snapshot)
-            (lobby-hud-painted-revision frame))
+  (let* ((client (lobby-hud-client frame))
+         (snapshot (and client (luv.lobby:lobby-client-snapshot client)))
+         (revision
+           (if snapshot (luv.lobby:lobby-snapshot-revision snapshot) -1)))
+    (if (or (not (eql revision (lobby-hud-painted-revision frame)))
+            (null (mcluv::gpu-mirror-prepared-commands
+                   (lobby-hud-mirror frame))))
         (progn
           ;; Publish the complete value before McCLIM begins its repaint.
           (setf (lobby-hud-visible-snapshot frame) snapshot)

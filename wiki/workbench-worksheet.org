@@ -224,7 +224,7 @@ action, source, report, and backtrace snapshots, and can retry assimilation
 after the checkout has already advanced.  Failed live loads release and fence
 the originally held canvases before propagating their original condition.
 
-** TODO Migrate metabar and lobby
+** DONE Migrate metabar and lobby
 :PROPERTIES:
 :ID: C9US2D
 :END:
@@ -240,6 +240,15 @@ with more than one view.
 /Done when./ Neither component has a Luft-specific frame/compositor/input
 adapter and the compact status summary remains independent of the detailed
 lobby pane.
+
+/Outcome./ The workbench frame now owns fixed transient metabar and modeless
+lobby panes.  Metabar transition state moves its ordinary McCLIM sheet, so
+painting, clipping, and pointer targeting use one geometry; closing immediately
+deactivates input and releases application suspension while the sheet finishes
+sliding out.  Lobby visibility no longer controls its Luft-owned radio client.
+Luft retains only metabar semantics, public commands, and the radio service;
+its pane-specific frames, compositors, animation, refresh, encode, and input
+adapters are deleted.  #RYHYDG is the next candidate gate and was not begun.
 
 ** TODO Move services and delete the instrument system
 :PROPERTIES:
@@ -409,6 +418,25 @@ the console adapter has joined and the preparation run has reached its terminal
 state.  A future test-run model should compose a preparation =BUILD-RUN= rather
 than inherit from it; suites, shards, scheduling, workers, and results remain
 test-owned concepts.
+
+** 2026-08-29 — Pane visibility and background-service lifetime are separate
+
+The workbench frame carries shared metabar and lobby state and owns their fixed
+transient and modeless sheets.  The metabar slide is workbench transition
+state expressed by moving the sheet itself, not a second compositor affine or
+application coordinate transform.  Visual presence and interactive activation
+are distinct: close deactivates the transient immediately, cancels unfinished
+drag/preview state, and releases application suspension while the pane remains
+visible only for its exit animation.  Shell-held matching releases remain
+owned by the shell.
+
+The detailed lobby pane is modeless: pointer hits on its descendants belong to
+the shell, keyboard input and pointer background pass to the application, and
+neutral focus remains outside the pane.  Its radio client is captured when the
+workbench is constructed but is neither started nor stopped by panel open and
+close.  Luft still owns that client as a named nonvisual instrument until
+#RYHYDG assigns explicit service lifecycles; this stage does not smuggle
+service migration into pane migration.
 
 * Experiment notes
 :PROPERTIES:
@@ -724,6 +752,44 @@ path.  Do not paste complete test transcripts.
   Lisp restarts for later UI invocation.  #C9US2D is the next candidate gate;
   metabar and lobby were not migrated in this stage.
 
+** 2026-08-29 — C9US2D metabar and lobby cutover
+
+- /Revision./ Begun as local, unpushed work on
+  =73a39515e72b3d7511ef118d02f4d8f877c36a63=.
+- /Questions./ Can one workbench mirror own the sliding transient drawer and
+  modeless lobby without reproducing Luft coordinate, compositor, event, or
+  lifecycle adapters?  Can panel visibility remain independent of radio
+  service lifetime and compact status sampling?
+- /Commands and live actions./ Extracted shared metabar and lobby state from
+  their standalone compatibility frames; installed fixed panes in
+  =workbench-frame=; moved animation to McCLIM sheet geometry; and reduced the
+  Luft files to semantic methods, commands, and radio ownership.  Ran strict
+  Parinfer on every changed Lisp file and focused =luv/mcclim=,
+  =luv/lobby/mcclim=, =luv/workbench=, =luft/render=, and
+  =luvcraft/mcclim= tests.  In fresh durable image =IIX325= opened both panes
+  in live Vulkan Luft, inspected screenshots, sent actual-path key and pointer
+  events, exercised metabar close animation and lobby hide/reopen semantics,
+  inspected suspension and service identity, then stopped cleanly.  Finally
+  ran the Ghostty-enabled full =make test= command.
+- /Observed result./ Metabar rendered as a legible left drawer over the world;
+  Down moved selection from zero to one.  Escape made the transient
+  noninteractive and released suspension immediately, while its sheet remained
+  visible until slide-out completed.  Lobby rendered in the lower left; keys
+  passed through, pointer hits inside were shell-owned, and outside presses
+  passed through.  Hiding it preserved the same running lobby client and the
+  compact status remained independent.  The canvas stayed healthy and stop
+  released cleanly.  Focused suites passed 421, 13, 52, 383, and 139 checks
+  respectively, with no failures or skips.  The full environment found
+  Ghostty readable and passed all 25 suites / 29 tasks with 8 workers.
+- /Interpretation./ Ordinary sheet geometry is the correct single source for
+  animated visual placement and McCLIM routing.  Panel lifecycle and service
+  lifecycle were previously coupled only by Luft's broad instrument shape,
+  not by the behavior itself.
+- /Resulting decisions./ Keep the standalone frame classes as deferred
+  Luvcraft compatibility over shared state.  Keep radio ownership in Luft
+  until the explicit service stage.  #RYHYDG is the next candidate gate;
+  service migration and instrument-system deletion were not begun.
+
 * Completed prose updates
 :PROPERTIES:
 :ID: QF07KG
@@ -792,13 +858,25 @@ path.  Do not paste complete test transcripts.
 - Focused model checks, cold =make=, and the complete Ghostty-enabled 25-suite
   run pass.  #ZNLZQU still owns the unbegun UI consumption and migration cut.
 
+** 2026-08-29 — Metabar and lobby entered the workbench
+
+- The one workbench frame now owns the shared transient metabar and modeless
+  lobby panes; Luft-specific visual frames, compositors, animation, retained
+  refresh/encode, coordinate inversion, and input adapters are gone.
+- Metabar animation moves its McCLIM sheet and separates visual exit from
+  immediate input deactivation.  Lobby visibility is independent of its
+  continuing radio client and of the compact passive status summary.
+- Focused, full Ghostty-enabled, and inspected live Vulkan evidence agree.
+  Luvcraft remains on compatible standalone frames backed by the same shared
+  state.  #RYHYDG is next and was not begun.
+
 * Exact next action
 :PROPERTIES:
 :ID: 53WN6F
 :END:
 
-Review the completed #ZNLZQU workbench migration and retained source
-assimilation presentation.  If accepted, begin #C9US2D with the metabar and
-lobby only.  Keep the lobby service lifetime independent of pane visibility,
-and do not begin test scheduler refactoring, service migration, Luvcraft
-migration, or general instrument-system deletion with that cut.
+Review the completed #C9US2D metabar and lobby cutover.  If accepted, begin
+#RYHYDG by assigning explicit lifecycles to the remaining nonvisual services,
+then delete Luft's weak instrument registry and generic numeric-priority
+protocol.  Preserve stop-controller and frame-boundary guarantees; do not
+begin Luvcraft migration or test scheduler refactoring with that cut.

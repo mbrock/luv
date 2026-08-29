@@ -263,133 +263,21 @@
   (declare (ignore action))
   (request-viewer-quit viewer))
 
-;;; ---------------------------------------------------------------------
-;;; Viewer instrument attachment.
-
-(defclass viewer-metabar-instrument ()
-  ((frame :initarg :frame :reader viewer-metabar-frame)
-   (compositor :initarg :compositor :reader viewer-metabar-compositor)
-   (slide :initform 0d0 :accessor viewer-metabar-slide)
-   (open-p :initform t :accessor viewer-metabar-open-p)
-   (last-time :initform
-              (/ (get-internal-real-time)
-                 (coerce internal-time-units-per-second 'double-float))
-              :accessor viewer-metabar-last-time)))
-
-(defun viewer-metabar-attachment (viewer)
-  (find-if (lambda (instrument)
-             (typep instrument 'viewer-metabar-instrument))
-           (viewer-instruments viewer)))
-
-(defmethod viewer-instrument-priority ((instrument viewer-metabar-instrument))
-  (declare (ignore instrument))
-  500)
-
-(defmethod viewer-instrument-present-p
-    ((instrument viewer-metabar-instrument) viewer)
-  (declare (ignore instrument viewer))
-  ;; The dispatcher refreshes only present attachments.  Keep a fully closed
-  ;; drawer present for its final refresh, which detaches and releases it;
-  ;; ENCODE and event methods below remain no-ops while it is closed.
-  t)
-
-(defmethod refresh-viewer-instrument
-    ((instrument viewer-metabar-instrument) viewer)
-  (let ((frame (viewer-metabar-frame instrument)))
-    (mcluv:drain-metabar-operations frame)
-    ;; McCLIM authors and publishes the retained semantic revision outside
-    ;; the game's render pass.  ENCODE below is replay-only.
-    (mcluv:prepare-metabar frame))
-  (let* ((now (/ (get-internal-real-time)
-                 (coerce internal-time-units-per-second 'double-float)))
-         (last (viewer-metabar-last-time instrument))
-         (seconds (min 0.1d0 (max 0d0 (- now last))))
-         (target (if (viewer-metabar-open-p instrument) 1d0 0d0))
-         (slide (viewer-metabar-slide instrument))
-         (step (* 6d0 seconds)))
-    (setf (viewer-metabar-last-time instrument) now
-          (viewer-metabar-slide instrument)
-          (cond ((> target slide) (min target (+ slide step)))
-                ((< target slide) (max target (- slide step)))
-                (t slide)))
-    (when (and (not (viewer-metabar-open-p instrument))
-               (zerop (viewer-metabar-slide instrument)))
-      (remove-viewer-instrument viewer instrument)))
-  instrument)
-
-(defmethod encode-viewer-instrument
-    ((instrument viewer-metabar-instrument)
-     viewer pass surface-texture physical-extent)
-  (declare (ignore physical-extent))
-  (when (plusp (viewer-metabar-slide instrument))
-    (let ((frame (viewer-metabar-frame instrument)))
-      (mcluv:encode-direct-gpu-mirror
-       (viewer-metabar-compositor instrument) pass surface-texture
-       (mcluv:metabar-screen-state
-        frame (viewer-logical-extent viewer)
-        (viewer-metabar-slide instrument)))))
-  instrument)
-
-(defmethod release-viewer-instrument
-    ((instrument viewer-metabar-instrument) viewer)
-  (declare (ignore viewer))
-  (mcluv:destroy-metabar (viewer-metabar-frame instrument)))
-
 (defun close-viewer-metabar (viewer)
-  "Begin sliding VIEWER's metabar away, if present."
-  (alexandria:when-let ((instrument (viewer-metabar-attachment viewer)))
-    (setf (viewer-metabar-open-p instrument) nil))
-  nil)
+  (alexandria:when-let
+      ((workbench (luv.workbench:application-workbench viewer)))
+    (luv.workbench:close-workbench-metabar workbench)))
 
 (defun open-viewer-metabar (viewer &key (title "LUFT metabar"))
-  "Attach VIEWER's shared metabar and release relative pointer capture."
-  (alexandria:if-let ((instrument (viewer-metabar-attachment viewer)))
-    (progn
-      ;; Lisp development may have extended the open CLOS vocabulary while
-      ;; this drawer was sliding out.  Reopening is its publication boundary.
-      (mcluv:refresh-metabar-vocabulary
-       (viewer-metabar-frame instrument))
-      (setf (viewer-metabar-open-p instrument) t)
-      instrument)
-    (let ((frame nil)
-          (transferred-p nil)
-          (completed-p nil))
-      (unwind-protect
-           (progn
-             (clear-viewer-controls viewer)
-             (when (viewer-pointer-captured-p viewer)
-               (set-canvas-relative-pointer-mode (viewer-canvas viewer) nil)
-               (setf (viewer-pointer-captured-p viewer) nil))
-             (setf frame
-                   (mcluv:make-embedded-metabar
-                    viewer
-                    (viewer-canvas viewer)
-                    (viewer-context viewer)
-                    (viewer-device viewer)
-                    :title title))
-             (let* ((mirror (mcluv:metabar-mirror frame))
-                    (compositor
-                      (make-instance 'mcluv:direct-gpu-mirror-compositor
-                                     :mirror mirror))
-                    (instrument
-                      (make-instance 'viewer-metabar-instrument
-                                     :frame frame :compositor compositor)))
-               (setf (mcluv:mirror-compositor mirror) compositor)
-               (setf transferred-p t)
-               (add-viewer-instrument viewer instrument)
-               (setf completed-p t)
-               instrument))
-        (unless completed-p
-          (when (and frame (not transferred-p))
-            (mcluv:destroy-metabar frame)))))))
+  (declare (ignore title))
+  (luv.workbench:open-workbench-metabar
+   (or (luv.workbench:application-workbench viewer)
+       (error "~S has no attached workbench." viewer))))
 
 (defun toggle-viewer-metabar (viewer)
-  (alexandria:if-let ((instrument (viewer-metabar-attachment viewer)))
-    (if (viewer-metabar-open-p instrument)
-        (close-viewer-metabar viewer)
-        (open-viewer-metabar viewer))
-    (open-viewer-metabar viewer))
-  t)
+  (luv.workbench:toggle-workbench-metabar
+   (or (luv.workbench:application-workbench viewer)
+       (error "~S has no attached workbench." viewer))))
 
 (clim:define-command (com-toggle-metabar
                       :command-table luft-atelier
@@ -397,53 +285,3 @@
                       :keystroke (:return))
     ()
   (toggle-viewer-metabar (viewer-command-viewer)))
-
-(defmethod handle-viewer-instrument-event
-    ((instrument viewer-metabar-instrument)
-     viewer canvas (event canvas-key-press-event))
-  (declare (ignore canvas))
-  (when (viewer-metabar-open-p instrument)
-    (when (eq :dismiss
-              (mcluv:handle-metabar-key-event
-               (viewer-metabar-frame instrument) event))
-      (close-viewer-metabar viewer))
-    t))
-
-(defmethod handle-viewer-instrument-event
-    ((instrument viewer-metabar-instrument)
-     viewer canvas (event canvas-key-release-event))
-  (declare (ignore viewer canvas event))
-  (and (viewer-metabar-open-p instrument) t))
-
-(defmethod handle-viewer-instrument-event
-    ((instrument viewer-metabar-instrument)
-     viewer canvas (event canvas-pointer-event))
-  (declare (ignore canvas))
-  (when (viewer-metabar-open-p instrument)
-    (let ((frame (viewer-metabar-frame instrument)))
-      (when (typep event 'canvas-pointer-motion-event)
-        (setf (viewer-pointer-x viewer) (canvas-pointer-event-x event)
-              (viewer-pointer-y viewer) (canvas-pointer-event-y event)))
-      (multiple-value-bind (x y)
-          (mcluv:metabar-local-coordinate
-           frame
-           (canvas-pointer-event-x event)
-           (canvas-pointer-event-y event)
-           (viewer-logical-extent viewer)
-           (viewer-metabar-slide instrument))
-        (when (typep event 'canvas-pointer-button-release-event)
-          (mcluv:handle-metabar-pointer-event frame event nil nil))
-        (cond
-          (x (mcluv:handle-metabar-pointer-event frame event x y))
-          ((typep event 'canvas-pointer-button-press-event)
-           (close-viewer-metabar viewer)))))
-    ;; Modal while open: an outside click dismisses without casting a spell or
-    ;; recapturing relative pointer mode in the same event.
-    t))
-
-(defmethod handle-viewer-instrument-event
-    ((instrument viewer-metabar-instrument)
-     viewer canvas (event canvas-window-focus-lost-event))
-  (declare (ignore instrument canvas event))
-  (close-viewer-metabar viewer)
-  nil)

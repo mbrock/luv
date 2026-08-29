@@ -468,7 +468,7 @@ offsets and of headers."
 (defsystem "luv/workbench"
   :description "The Luv-owned screen-space application shell substrate."
   :version "0.0.1"
-  :depends-on ("luv/mcclim")
+  :depends-on ("luv/mcclim" "luv/lobby/mcclim")
   :serial t
   :components ((:file "mcclim/workbench-package")
                (:file "mcclim/workbench"))

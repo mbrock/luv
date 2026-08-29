@@ -227,6 +227,20 @@
     (true (mcluv::metabar-dirty-p frame))
     (true (null (mcluv::metabar-preview-fraction frame :gain)))))
 
+(define-test closing-a-transient-metabar-discards-an-unfinished-drag
+  (let ((frame (make-metabar-test-frame)))
+    (setf (mcluv::metabar-dragging frame) :gain
+          (mcluv::metabar-preview-fraction frame :gain) 0.9
+          (mcluv::metabar-pending-operations frame)
+          (list (mcluv::make-metabar-operation
+                 :kind :set-fraction :subject :gain :argument 0.9))
+          (mcluv::metabar-dirty-p frame) nil)
+    (mcluv:cancel-metabar-interaction frame)
+    (true (null (mcluv::metabar-dragging frame)))
+    (true (null (mcluv::metabar-pending-operations frame)))
+    (true (null (mcluv::metabar-preview-fractions frame)))
+    (true (mcluv::metabar-dirty-p frame))))
+
 (define-test a-failed-commit-clears-its-optimistic-preview
   (let* ((owner (make-instance 'metabar-test-owner))
          (frame (make-metabar-test-frame owner)))

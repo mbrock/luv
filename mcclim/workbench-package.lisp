@@ -31,6 +31,12 @@
    #:toggle-workbench-command-menu
    #:open-workbench-source-update
    #:close-workbench-source-update
+   #:open-workbench-metabar
+   #:close-workbench-metabar
+   #:toggle-workbench-metabar
+   #:open-workbench-lobby
+   #:close-workbench-lobby
+   #:toggle-workbench-lobby
    #:dispatch-workbench-event
    #:refresh-workbench
    #:encode-workbench))

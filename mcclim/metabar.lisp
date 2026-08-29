@@ -54,6 +54,10 @@
    "Return OWNER's ordered group identities.  Group identities remain owned
 by the application; symbols are sufficient when they are the vocabulary."))
 
+(defmethod metabar-groups-for (owner)
+  (declare (ignore owner))
+  nil)
+
 (defgeneric metabar-group-label (owner group)
   (:documentation "Return GROUP's short label in OWNER's metabar."))
 
@@ -67,6 +71,10 @@ by the application; symbols are sufficient when they are the vocabulary."))
 
 (defgeneric metabar-controls-for (owner group)
   (:documentation "Return OWNER's ordered controls in GROUP."))
+
+(defmethod metabar-controls-for (owner group)
+  (declare (ignore owner group))
+  nil)
 
 (defgeneric metabar-actions-for (owner)
   (:documentation "Return OWNER's ordered metabar actions."))
@@ -203,10 +211,12 @@ derived work out of motion-event bursts."))
 (defvar *metabar-construction-height* 600
   "Logical height used while MAKE-EMBEDDED-METABAR realizes its layout.")
 
-(define-application-frame metabar ()
-  ((owner :initarg :owner :reader metabar-owner)
-   (vocabulary :initarg :vocabulary :accessor metabar-vocabulary)
-   (logical-height :initarg :logical-height :reader metabar-logical-height)
+(defclass metabar-state ()
+  ((owner :initarg :owner :initform nil :reader metabar-owner)
+   (vocabulary :initarg :vocabulary :initform nil
+               :accessor metabar-vocabulary)
+   (logical-height :initarg :logical-height :initform nil
+                   :accessor metabar-logical-height)
    (rows :initform nil :accessor metabar-rows)
    (selected :initform 0 :accessor metabar-selected)
    (open-group :initform nil :accessor metabar-open-group)
@@ -214,7 +224,11 @@ derived work out of motion-event bursts."))
    (preview-fractions :initform nil :accessor metabar-preview-fractions)
    (pending-operations :initform nil :accessor metabar-pending-operations)
    (diagnostic :initform nil :accessor metabar-diagnostic)
-   (dirty-p :initform t :accessor metabar-dirty-p))
+   (dirty-p :initform t :accessor metabar-dirty-p)))
+
+(define-application-frame metabar
+    (standard-application-frame metabar-state)
+  ()
   (:menu-bar nil)
   (:panes
    (bar (make-pane 'metabar-pane
@@ -278,7 +292,14 @@ derived work out of motion-event bursts."))
     (setf (metabar-dirty-p frame) t))
   frame)
 
-(defmethod initialize-instance :after ((frame metabar) &key)
+(defmethod initialize-instance :after ((frame metabar-state) &key)
+  (unless (metabar-vocabulary frame)
+    (setf (metabar-vocabulary frame)
+          (capture-metabar-vocabulary (metabar-owner frame))))
+  (unless (metabar-logical-height frame)
+    (setf (metabar-logical-height frame)
+          (metabar-natural-height-for
+           (metabar-owner frame) (metabar-vocabulary frame))))
   (unless (metabar-open-group frame)
     (setf (metabar-open-group frame)
           (first (metabar-vocabulary-groups
@@ -454,6 +475,17 @@ derived work out of motion-event bursts."))
       (setf (metabar-diagnostic frame) diagnostic)
       (invalidate-metabar frame))
     (refresh-metabar-state frame))
+  frame)
+
+(defun cancel-metabar-interaction (frame)
+  "Discard an unfinished drag when FRAME's transient presentation closes."
+  (when (or (metabar-dragging frame)
+            (metabar-pending-operations frame)
+            (metabar-preview-fractions frame))
+    (setf (metabar-dragging frame) nil
+          (metabar-pending-operations frame) nil
+          (metabar-preview-fractions frame) nil)
+    (invalidate-metabar frame))
   frame)
 
 ;;; ---------------------------------------------------------------------

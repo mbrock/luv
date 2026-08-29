@@ -100,6 +100,8 @@
     (true (typep frame 'mcluv:status-bar))
     (true (typep frame 'mcluv::command-menu-state))
     (true (typep frame 'mcluv::source-update-state))
+    (true (typep frame 'mcluv::metabar-state))
+    (true (typep frame 'luv.lobby.mcclim::lobby-hud-state))
     (is eq passive (clim:sheet-parent bar))
     (true (equal '(:passive :modeless :transient :modal)
                  (mapcar #'workbench::workbench-layer-pane-kind
@@ -129,6 +131,31 @@
         (clim:transform-position
          (clim:sheet-delta-transformation source modal) 0 0)
       (true (equal '(70 40) (list x y))))))
+
+(define-test fixed-modeless-and-transient-layers-own-lobby-and-metabar
+  (let* ((lobby (make-instance 'luv.lobby.mcclim::lobby-hud-pane))
+         (metabar
+           (make-instance
+            'mcluv::metabar-pane
+            :region (clim:make-bounding-rectangle 0 0 460 480)))
+         (modeless
+           (make-instance 'workbench::workbench-layer-pane
+                          :kind :modeless :contents (list lobby)))
+         (transient
+           (make-instance 'workbench::workbench-layer-pane
+                          :kind :transient :contents (list metabar))))
+    (clim:allocate-space modeless 900 700)
+    (clim:allocate-space transient 900 700)
+    (is eq modeless (clim:sheet-parent lobby))
+    (is eq transient (clim:sheet-parent metabar))
+    (multiple-value-bind (x y)
+        (clim:transform-position
+         (clim:sheet-delta-transformation lobby modeless) 0 0)
+      (true (equal '(16 544) (list x y))))
+    (multiple-value-bind (x y)
+        (clim:transform-position
+         (clim:sheet-delta-transformation metabar transient) 0 0)
+      (true (equal '(-460 110) (list x y))))))
 
 (define-test layer-state-is-semantic-not-numeric-priority
   (multiple-value-bind (shell application canvas events) (make-test-workbench)
@@ -240,6 +267,23 @@
     (false (funcall events))
     (true (zerop (hash-table-count
                   (workbench::workbench-shell-held-input shell))))))
+
+(define-test closing-transient-can-finish-visually-without-owning-input
+  (multiple-value-bind (shell application canvas events) (make-test-workbench)
+    (declare (ignore application))
+    (workbench:show-workbench-layer shell :transient)
+    (luv:handle-canvas-event
+     shell canvas (key-event 'luv:canvas-key-press-event :escape))
+    (setf (workbench::workbench-metabar-open-p shell) t
+          (workbench::workbench-metabar-slide shell) 0.5d0)
+    (workbench::%close-workbench-metabar shell)
+    (true (workbench:workbench-layer-visible-p
+           (workbench:workbench-layer shell :transient)))
+    (false (workbench:workbench-active-layer shell))
+    (false (workbench:workbench-input-suspended-p shell))
+    (luv:handle-canvas-event
+     shell canvas (key-event 'luv:canvas-key-release-event :escape))
+    (false (funcall events))))
 
 (define-test stop-controller-closes-workbench-admission-atomically
   (let ((controller (luv:make-stop-controller :name "workbench admission"))

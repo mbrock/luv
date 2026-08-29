@@ -136,6 +136,7 @@
            #:refresh-metabar-vocabulary
            #:refresh-metabar-state
            #:drain-metabar-operations
+           #:cancel-metabar-interaction
            #:prepare-metabar
            #:repaint-metabar
            #:metabar-mirror
