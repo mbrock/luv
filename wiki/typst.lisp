@@ -19,6 +19,7 @@
 
 (defvar *typst-document* nil)
 (defvar *typst-stream* nil)
+(defvar *typst-body-font* nil)
 
 (defgeneric render-typst (element)
   (:documentation "Emit Typst markup for ELEMENT to *TYPST-STREAM*."))
@@ -116,7 +117,8 @@
 
 (defmethod render-typst ((link link))
   (let ((description (or (element-children link) (list (link-path link))))
-        (id (and (string= (or (link-protocol link) "") "id") (link-path link))))
+        (id (and (string= (or (link-protocol link) "") "id") (link-path link)))
+        (page-link-p (string= (or (link-protocol link) "") "file")))
     (cond ((and id (find id (document-figures *typst-document*)
                          :key #'heading-id :test #'string=))
            (format *typst-stream* "#link(label(~A))[" (typst-string id))
@@ -124,7 +126,11 @@
            (write-char #\] *typst-stream*))
           ((typst-web-link link)
            (format *typst-stream* "#link(~A)[" (typst-string (typst-web-link link)))
+           (when page-link-p
+             (write-string "#smallcaps[" *typst-stream*))
            (render-typst-inlines description)
+           (when page-link-p
+             (write-char #\] *typst-stream*))
            (write-char #\] *typst-stream*))
           (t (render-typst-inlines description)))))
 
@@ -164,8 +170,9 @@
         (*typst-stream* stream))
     (format stream "#import ~A: workshop, example, accent~%"
             (typst-string "../../wiki/typst-template.typ"))
-    (format stream "#show: workshop.with(title: ~A)~%~%"
-            (typst-string (or (document-title document) (document-name document))))
+    (format stream "#show: workshop.with(title: ~A~@[, body-font: (~A, \"Libertinus Serif\")~])~%~%"
+            (typst-string (or (document-title document) (document-name document)))
+            (and *typst-body-font* (typst-string *typst-body-font*)))
     (mapc #'render-typst (element-children document))))
 
 (defun typst-command (root &rest arguments)
@@ -174,9 +181,18 @@
                             arguments)
                     :output *standard-output* :error-output *error-output*))
 
+(defun typst-equity-available-p (root)
+  (handler-case
+      (with-open-file (stream (merge-pathnames "fonts/equity/EquityOTA-Regular.otf" root)
+                              :element-type '(unsigned-byte 8))
+        (plusp (file-length stream)))
+    (file-error () nil)))
+
 (defun write-typst-pdf (document site output root)
   "Render DOCUMENT through Typst to OUTPUT, retaining generated source nearby."
   (let* ((*site* site)
+         (*typst-body-font*
+           (and (typst-equity-available-p root) "Equity OT A"))
          (source (merge-pathnames
                   (make-pathname :name (document-name document) :type "typ")
                   (merge-pathnames "build/typst/" root))))

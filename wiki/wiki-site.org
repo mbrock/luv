@@ -256,7 +256,9 @@ native Typst content in the PDF and become tightly bounded SVG resources in the
 static or dynamic website.  Ordinary prose collapses Org's editorial source
 wrapping rather than typesetting it as hard line breaks.  The remaining example
 blocks still render as plain monospace text; migration is deliberate rather
-than automatic.
+than automatic.  Internal page names use small capitals.  The page template
+uses the private, annexed Equity family when its content is present and falls
+back to Libertinus in ordinary public checkouts.
 
 /Done when./ One substantive page builds as PDF, both kinds of diagram render
 legibly in that PDF and the real web reading view, and the ordinary wiki tests

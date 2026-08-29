@@ -178,17 +178,20 @@ Nothing here refers to anything.
 :END:
 
 Text with *weight* and a backslash \\ that  is
-soft-wrapped in the Org source.
+soft-wrapped in the Org source.  See [[file:other.org][Page Name]].
 " "typst-test"))
-         (source (with-output-to-string (stream)
-                   (wiki:render-typst-document doc stream))))
+         (source (let ((wiki::*typst-body-font* "Equity OT A"))
+                   (with-output-to-string (stream)
+                     (wiki:render-typst-document doc stream)))))
     (true (search "title: \"A \\\"quoted\\\" title\"" source))
+    (true (search "body-font: (\"Equity OT A\", \"Libertinus Serif\")" source))
     (true (search "#heading(level: 1)" source))
     (true (search "<TYP456>" source))
     (true (search "#strong[" source))
     (true (search "backslash \\\\ that is" source))
     (false (search "that  is" source))
-    (false (search "\\nsoft-wrapped" source))))
+    (false (search "\\nsoft-wrapped" source))
+    (true (search "#smallcaps[#text(\"Page Name\")]" source))))
 
 (define-test page-view-classes-select-semantic-layouts
   (let ((site (wiki:make-site '())))

@@ -2,6 +2,7 @@
 #let muted = rgb("#62666d")
 #let accent = rgb("#4b6488")
 #let panel = rgb("#f2f0ea")
+#let default-body-font = ("Libertinus Serif",)
 
 #let example(body) = block(
   width: 100%,
@@ -12,7 +13,7 @@
   raw(body, block: true),
 )
 
-#let workshop(title: none, body) = {
+#let workshop(title: none, body-font: default-body-font, body) = {
   set page(
     paper: "a4",
     margin: (inside: 27mm, outside: 22mm, top: 24mm, bottom: 24mm),
@@ -30,7 +31,7 @@
       counter(page).display("1")
     },
   )
-  set text(font: "Libertinus Serif", size: 10.5pt, lang: "en", fill: ink)
+  set text(font: body-font, size: 10.5pt, lang: "en", fill: ink)
   set par(justify: true, leading: 0.68em)
   set list(indent: 1.2em, body-indent: 0.55em)
   set enum(indent: 1.2em, body-indent: 0.55em)
@@ -39,12 +40,12 @@
                      features: ("calt": 0, "liga": 0))
 
   show heading.where(level: 1): it => block(above: 1.75em, below: 0.55em, sticky: true)[
-    #set text(font: "Iosevka Aile", size: 15pt, weight: "bold", fill: ink,
+    #set text(font: body-font, size: 15pt, weight: "bold", fill: ink,
               hyphenate: false)
     #it.body
   ]
   show heading.where(level: 2): it => block(above: 1.7em, below: 0.6em, sticky: true)[
-    #set text(font: "Iosevka Aile", size: 13pt, weight: "bold", fill: ink,
+    #set text(font: body-font, size: 13pt, weight: "bold", fill: ink,
               hyphenate: false)
     #it.body
   ]
@@ -64,7 +65,7 @@
       #text(font: "Iosevka Aile", size: 8pt, weight: "bold", tracking: 0.12em,
             fill: accent)[LUV WORKSHOP / DESIGN NOTES]
       #v(13mm)
-      #text(font: "Iosevka Aile", size: 28pt, weight: "bold", fill: ink)[#title]
+      #text(font: body-font, size: 28pt, weight: "bold", fill: ink)[#title]
       #v(8mm)
       #line(length: 28mm, stroke: 1.2pt + accent)
       #v(1fr)
