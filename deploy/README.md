@@ -6,7 +6,6 @@ systemd configuration.  Install the Nix cache additions as root with:
 ```sh
 install -Dm755 deploy/luv-nix-cache /usr/local/libexec/luv-nix-cache
 install -Dm755 deploy/luv-deploy /usr/local/libexec/luv-deploy
-install -Dm755 deploy/luv-private-gallery /usr/local/libexec/luv-private-gallery
 install -Dm644 deploy/luv-nix-cache@.service \
   /etc/systemd/system/luv-nix-cache@.service
 install -Dm644 deploy/luv-tmpfiles.conf /etc/tmpfiles.d/luv.conf
@@ -20,16 +19,6 @@ blue-green deployment then starts cache publication from the newly live slot.
 The first run creates a persistent signing key under
 `/var/lib/luv-nix-cache`; that directory must remain root-only and should be
 backed up.
-
-The private Knuth gallery uses the existing authenticated owner account. Its
-bcrypt verifier is supplied to Caddy as `LUV_PRIVATE_PASSWORD_HASH` by a
-swa-only systemd environment file; neither the verifier nor the password
-belongs in Git. The `swa-private` git-annex directory remote at
-`/srv/luv-private-annex` is also swa-only and mode 0700. A deploy runs
-`luv-private-gallery`, which obtains every referenced raster from that remote,
-rejects missing content, and materializes a Caddy-readable release under
-`/srv/luv-private-gallery/current`. The annex store itself is never below a
-Caddy root.
 
 Once publication finishes, configure a client using the public key served by
 the cache:
