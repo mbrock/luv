@@ -81,6 +81,23 @@
               "3000"
             ];
           };
+          # Keep the development image on the proven release above while the
+          # next SBCL is built and cached independently.
+          sbcl268Unwrapped = pkgs.sbcl.overrideAttrs (_finalAttrs: _previousAttrs: {
+            version = "2.6.8";
+            src = pkgs.fetchurl {
+              url = "mirror://sourceforge/project/sbcl/sbcl/2.6.8/sbcl-2.6.8-source.tar.bz2";
+              hash = "sha256-rVEm39+6XbJ+53vMJYkwIP5SLQt2U9RbTEeVrePdwj0=";
+            };
+          });
+          sbcl268 = pkgs.wrapLisp {
+            pkg = sbcl268Unwrapped;
+            faslExt = "fasl";
+            flags = [
+              "--dynamic-space-size"
+              "3000"
+            ];
+          };
           parachutePackage = sbcl.buildASDFSystem {
             pname = "parachute";
             version = "1.5.0";
@@ -506,7 +523,7 @@
           };
         in
         {
-          inherit pkgs wpePkgs sbcl lisp clSdl3WithoutMixer;
+          inherit pkgs wpePkgs sbcl sbcl268 lisp clSdl3WithoutMixer;
           inherit developmentClosure developmentPackages developmentEnvironment;
           inherit slimDevelopmentClosure slimDevelopmentPackages slimDevelopmentEnvironment;
           inherit developmentEnvironmentHook slimDevelopmentEnvironmentHook;
@@ -523,6 +540,7 @@
           env = environmentFor system;
         in {
           sbcl = env.sbcl;
+          sbcl-2_6_8 = env.sbcl268;
           lisp = env.lisp;
           environment = env.developmentClosure;
           slim-environment = env.slimDevelopmentClosure;
