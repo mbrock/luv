@@ -44,7 +44,7 @@ TRACY_MCCLIM_PAINT_TRACE ?= build/mcclim-paints.tracy
 
 FASL_CACHE := $(HOME)/.cache/common-lisp
 
-.PHONY: all sly-client sly-dependency-core luvcraft luft luft-core luft-test run test test-suite capture showcase-bootstrap showcase-render showcase-deploy showcase-publish showcase-status clean-fasls parinfer-check sly-build-lock-check shader-validate luft-shader-validate msl-validate smoke vulkan-smoke metal-smoke metal-text-closeup metal-benchmark metal-streaming-benchmark metal-retina-benchmark luft-mesher-profile luft-mesher-cohort luft-z-fiber-benchmark tracy-streaming tracy-mcclim-roundrect tracy-mcclim-paints readme-screenshots mcclim-gallery wiki wiki-cli objective-c-probe metal-clear metal-shader metal-pipeline metal-draw roundrect-proof slug-proof slug-text-proof clean
+.PHONY: all sly-client sly-dependency-core luvcraft luft luft-core luft-test run test test-suite capture showcase-bootstrap showcase-render showcase-deploy showcase-publish showcase-status clean-fasls parinfer-check sly-build-lock-check shader-validate luft-shader-validate msl-validate smoke vulkan-smoke metal-smoke metal-text-closeup metal-benchmark metal-streaming-benchmark metal-retina-benchmark luft-mesher-profile luft-mesher-cohort luft-z-fiber-benchmark tracy-streaming tracy-mcclim-roundrect tracy-mcclim-paints readme-screenshots mcclim-gallery wiki wiki-cli typst-prty-plugin typst-prty-test objective-c-probe metal-clear metal-shader metal-pipeline metal-draw roundrect-proof slug-proof slug-text-proof clean
 
 ifeq ($(LUV_SLY_SYSTEM),luft)
 all: sly-client luft-core sly-dependency-core
@@ -91,10 +91,10 @@ run: luvcraft
 
 ifeq ($(LUV_SLY_SYSTEM),luft)
 test: sly-client
-	@$(MAKE) --no-print-directory -j3 parinfer-check sly-build-lock-check luft-test
+	@$(MAKE) --no-print-directory -j4 parinfer-check sly-build-lock-check typst-prty-test luft-test
 else
 test: sly-client
-	@$(MAKE) --no-print-directory -j3 parinfer-check sly-build-lock-check test-suite
+	@$(MAKE) --no-print-directory -j4 parinfer-check sly-build-lock-check typst-prty-test test-suite
 
 test-suite:
 	@./scripts/build-sly-dependency-core
@@ -271,6 +271,14 @@ mcclim-gallery:
 
 wiki-cli:
 	sbcl --script wiki/build.lisp
+
+typst-prty-plugin:
+	./scripts/build-typst-prty-plugin
+
+typst-prty-test:
+	@zig build --build-file wiki/typst-prty-zig/build.zig \
+		--cache-dir build/typst-prty-zig/cache \
+		--prefix build/typst-prty-zig test
 
 wiki:
 	./scripts/wiki build

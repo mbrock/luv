@@ -1,4 +1,4 @@
-#import "typst-prty.typ": leaf, row, column, frame, choose, best
+#let dexp-planner = plugin("../build/typst-prty-zig/bin/typst-prty.wasm")
 
 #let ink = rgb("#202124")
 #let muted = rgb("#62666d")
@@ -10,6 +10,11 @@
 #let dexp-number = rgb("#766a2e")
 #let dexp-paren = ink.transparentize(72%)
 #let dexp-side-stroke = (left: 0.7pt + dexp-paren, right: 0.7pt + dexp-paren)
+#let dexp-row-gap = 3.984pt
+#let dexp-column-gap = 1.162pt
+#let dexp-frame-inset-x = 3.32pt
+#let dexp-frame-inset-y = 1.162pt
+#let dexp-prefix-gap = 0.415pt
 
 #let example(body) = block(
   width: 100%,
@@ -20,7 +25,7 @@
   raw(body, block: true),
 )
 
-#let dexp-token(node, limit) = {
+#let dexp-token-variants(node, limit) = {
   let fill = if node.style == "operator" {
     accent
   } else if node.style == "keyword" {
@@ -34,13 +39,14 @@
   } else {
     ink
   }
-  let inline = leaf(
+  let inline = box(
+    baseline: top,
     box(inset: (y: 0.045em), text(
-      fill: fill,
-      style: if node.style == "comment" { "italic" } else { "normal" },
-      node.text,
-    )),
-    plan: (),
+        fill: fill,
+        style: if node.style == "comment" { "italic" } else { "normal" },
+        node.text,
+      ),
+    ),
   )
   if node.style == "comment" or node.style == "string" {
     let available = calc.max(32pt, limit - 10pt)
@@ -50,89 +56,163 @@
       calc.max(32pt, available * 0.5),
       calc.max(32pt, available * 0.33),
     )
-    choose((inline,) + widths.map(width => leaf(
+    (inline,) + widths.map(width => box(
+      baseline: top,
       block(
-        width: width,
-        text(
-          fill: fill,
-          style: if node.style == "comment" { "italic" } else { "normal" },
-          node.text,
+          width: width,
+          text(
+            fill: fill,
+            style: if node.style == "comment" { "italic" } else { "normal" },
+            node.text,
+          ),
         ),
-      ),
-      plan: (),
-    )))
+    ))
   } else {
-    inline
+    (inline,)
   }
 }
 
-#let dexp-list(node, limit, render) = {
-  let child-limit = limit
-  let documents(nodes) = nodes.map(child => render(child, child-limit))
+#let dexp-operation(kind, children, ..options) = {
+  let request = (kind: kind, children: children.map(child => child.request))
+  for (name, value) in options.named() {
+    request.insert(name, value / 1pt)
+  }
+  let leaves = ()
+  for child in children {
+    leaves += child.leaves
+  }
+  (request: request, leaves: leaves)
+}
+
+#let dexp-row(children, gap: dexp-row-gap) = dexp-operation(
+  "row",
+  children,
+  gap: gap,
+)
+
+#let dexp-column(children, gap: dexp-column-gap) = dexp-operation(
+  "column",
+  children,
+  gap: gap,
+)
+
+#let dexp-row-column(children) = dexp-operation(
+  "row_column",
+  children,
+  row_gap: dexp-row-gap,
+  column_gap: dexp-column-gap,
+)
+
+#let dexp-prefer-row(children) = dexp-operation(
+  "prefer_row",
+  children,
+  row_gap: dexp-row-gap,
+  column_gap: dexp-column-gap,
+)
+
+#let dexp-call(children) = dexp-operation(
+  "call",
+  children,
+  row_gap: dexp-row-gap,
+  column_gap: dexp-column-gap,
+)
+
+#let dexp-frame(child) = dexp-operation(
+  "frame",
+  (child,),
+  inset_x: dexp-frame-inset-x,
+  inset_y: dexp-frame-inset-y,
+)
+
+#let dexp-prepare-token(node, limit) = {
+  let variants = dexp-token-variants(node, limit)
+  let sizes = variants.map(body => {
+    let size = measure(body)
+    (width: size.width / 1pt, height: size.height / 1pt)
+  })
+  (
+    request: (kind: "leaf", variants: sizes),
+    leaves: (variants,),
+  )
+}
+
+#let dexp-prepare-list(node, limit, prepare) = {
+  let documents(nodes) = nodes.map(child => prepare(child, limit))
   let inner = if node.structure == "stacked" {
-    let rows = node.rows.map(child => render(child, child-limit))
+    let rows = node.rows.map(child => prepare(child, limit))
     let parts = if node.head.len() == 0 {
       rows
     } else {
       let head-items = documents(node.head)
-      let head-row = row(head-items, child-limit, plan: ())
-      let head = if head-row.filter(candidate => candidate.width <= child-limit).len() > 0 {
-        head-row
-      } else {
-        column(head-items, child-limit, plan: ())
-      }
-      (head,) + rows
+      (dexp-prefer-row(head-items),) + rows
     }
-    column(parts, child-limit, plan: ())
+    dexp-column(parts)
   } else {
     let items = documents(node.items)
     if node.structure == "column" {
-      column(items, child-limit, plan: ())
+      dexp-column(items)
     } else if node.callee and items.len() > 1 {
-      let arguments = items.slice(1)
-      let arrangement = choose((
-        row(arguments, child-limit, plan: ()),
-        column(arguments, child-limit, plan: ()),
-      ))
-      let beside = row((items.first(), arrangement), child-limit, plan: ())
-      if beside.filter(candidate => candidate.width <= child-limit).len() > 0 {
-        beside
-      } else {
-        column(items, child-limit, plan: ())
-      }
+      dexp-call(items)
     } else if node.callee and items.len() == 1 {
       items.first()
     } else {
-      choose((
-        row(items, child-limit, plan: ()),
-        column(items, child-limit, plan: ()),
-      ))
+      dexp-row-column(items)
     }
   }
-  frame(
-    inner,
-    limit,
-    stroke: dexp-side-stroke,
-    radius: 0.58em,
-    inset-x: 3.32pt,
-    inset-y: 1.162pt,
-    plan: (),
-  )
+  dexp-frame(inner)
 }
 
-#let dexp-node(node, limit) = {
+#let dexp-prepare-node(node, limit) = {
   if node.kind == "list" {
-    dexp-list(node, limit, dexp-node)
+    dexp-prepare-list(node, limit, dexp-prepare-node)
   } else if node.kind == "pair" {
-    row(node.items.map(child => dexp-node(child, limit)), limit, plan: ())
+    dexp-row(node.items.map(child => dexp-prepare-node(child, limit)))
   } else if node.kind == "prefix" {
-    row((
-      dexp-token((style: "muted", text: node.prefix), limit),
-      dexp-node(node.child, limit),
-    ), limit, gap: 0.415pt, plan: ())
+    dexp-row(
+      (
+        dexp-prepare-token((style: "muted", text: node.prefix), limit),
+        dexp-prepare-node(node.child, limit),
+      ),
+      gap: dexp-prefix-gap,
+    )
   } else {
-    dexp-token(node, limit)
+    dexp-prepare-token(node, limit)
   }
+}
+
+#let dexp-materialize(layout, leaves) = {
+  let render(layout) = {
+    if layout.kind == "empty" {
+      box(baseline: top)
+    } else if layout.kind == "leaf" {
+      leaves.at(layout.leaf).at(layout.variant)
+    } else if layout.kind == "row" {
+      box(
+        baseline: top,
+        layout.children.map(render).join(h(layout.gap * 1pt)),
+      )
+    } else if layout.kind == "column" {
+      box(
+        baseline: top,
+        grid(
+          columns: 1,
+          row-gutter: layout.gap * 1pt,
+          ..layout.children.map(render),
+        ),
+      )
+    } else if layout.kind == "frame" {
+      box(
+        baseline: top,
+        stroke: dexp-side-stroke,
+        radius: 0.58em,
+        inset: (x: dexp-frame-inset-x, y: dexp-frame-inset-y),
+        render(layout.child),
+      )
+    } else {
+      panic("unknown DEXP layout recipe " + layout.kind)
+    }
+  }
+  render(layout)
 }
 
 #let dexp-source(nodes) = block(
@@ -146,11 +226,20 @@
     #set par(justify: false, leading: 0.56em)
     #context {
       layout(size => {
-        let documents = nodes.map(node => dexp-node(node, size.width))
+        let documents = nodes.map(node => {
+          let prepared = dexp-prepare-node(node, size.width)
+          let request = (
+            limit: size.width / 1pt,
+            max_frontier: 8,
+            root: prepared.request,
+          )
+          let result = json(dexp-planner.layout(bytes(json.encode(request))))
+          dexp-materialize(result.layout, prepared.leaves)
+        })
         grid(
           columns: 1,
           row-gutter: 0.72em,
-          ..documents.map(document => best(document, size.width).body),
+          ..documents,
         )
       })
     }

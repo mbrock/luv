@@ -364,6 +364,7 @@
             pkgs.vulkan-tools
             pkgs.vulkan-validation-layers
             pkgs.yt-dlp
+            pkgs.zig
           ];
           # Remote agents need the complete Lisp closure and the native/build
           # tools exercised by ordinary builds, but not optional workstation
@@ -387,6 +388,7 @@
             pkgs.vulkan-headers
             pkgs.vulkan-tools
             pkgs.vulkan-validation-layers
+            pkgs.zig
           ];
           lavapipeIcd =
             if system == "x86_64-linux" then "lvp_icd.x86_64.json"

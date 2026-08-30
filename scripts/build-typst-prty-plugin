@@ -1,0 +1,22 @@
+#!/bin/sh
+# Build the rectangle planner used by Typst DEXP source blocks when stale.
+
+set -eu
+
+project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+
+. "$project_root/scripts/require-dev-environment"
+
+source_root="$project_root/wiki/typst-prty-zig"
+output="$project_root/build/typst-prty-zig/bin/typst-prty.wasm"
+stale=$(find "$source_root" -type f \
+  \( -name '*.zig' -o -name 'build.zig.zon' \) \
+  -newer "$output" 2>/dev/null || true)
+
+if [ ! -f "$output" ] || [ -n "$stale" ]; then
+  zig build \
+    --build-file "$source_root/build.zig" \
+    --cache-dir "$project_root/build/typst-prty-zig/cache" \
+    --prefix "$project_root/build/typst-prty-zig" \
+    -Doptimize=ReleaseSmall
+fi

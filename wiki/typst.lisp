@@ -274,6 +274,12 @@ the source has no readable nodes."
                             arguments)
                     :output *standard-output* :error-output *error-output*))
 
+(defun ensure-typst-prty-plugin (root)
+  "Build the Zig rectangle planner before compiling a document that imports it."
+  (uiop:run-program (list (namestring (merge-pathnames
+                                      "scripts/build-typst-prty-plugin" root)))
+                    :output *standard-output* :error-output *error-output*))
+
 (defun typst-equity-available-p (root)
   (handler-case
       (with-open-file (stream (merge-pathnames "fonts/equity/EquityOTA-Regular.otf" root)
@@ -295,6 +301,7 @@ the source has no readable nodes."
                                     :external-format :utf-8)
       (render-typst-document document stream))
     (ensure-directories-exist output)
+    (ensure-typst-prty-plugin root)
     (typst-command root (namestring source) (namestring output))
     output))
 
