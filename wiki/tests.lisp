@@ -253,6 +253,7 @@ soft-wrapped in the Org source.  See [[file:other.org][Page Name]].
                    (wiki:render-typst-document doc stream))))
     (true (search "workshop, example, dexp-source, accent" source))
     (true (search "#dexp-source((" source))
+    (true (search "kind: \"atom\", leaf: 0" source))
     (true (search "structure: \"stacked\", callee: true" source))
     (true (search "structure: \"column\", callee: false" source))
     (true (search "style: \"operator\", text: \"defun\"" source))

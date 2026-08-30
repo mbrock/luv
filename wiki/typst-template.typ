@@ -73,15 +73,11 @@
 }
 
 #let dexp-operation(kind, children, ..options) = {
-  let request = (kind: kind, children: children.map(child => child.request))
+  let request = (kind: kind, children: children)
   for (name, value) in options.named() {
     request.insert(name, value / 1pt)
   }
-  let leaves = ()
-  for child in children {
-    leaves += child.leaves
-  }
-  (request: request, leaves: leaves)
+  request
 }
 
 #let dexp-row(children, gap: dexp-row-gap) = dexp-operation(
@@ -124,22 +120,10 @@
   inset_y: dexp-frame-inset-y,
 )
 
-#let dexp-prepare-token(node, limit) = {
-  let variants = dexp-token-variants(node, limit)
-  let sizes = variants.map(body => {
-    let size = measure(body)
-    (width: size.width / 1pt, height: size.height / 1pt)
-  })
-  (
-    request: (kind: "leaf", variants: sizes),
-    leaves: (variants,),
-  )
-}
-
-#let dexp-prepare-list(node, limit, prepare) = {
-  let documents(nodes) = nodes.map(child => prepare(child, limit))
+#let dexp-prepare-list(node, prepare) = {
+  let documents(nodes) = nodes.map(prepare)
   let inner = if node.structure == "stacked" {
-    let rows = node.rows.map(child => prepare(child, limit))
+    let rows = node.rows.map(prepare)
     let parts = if node.head.len() == 0 {
       rows
     } else {
@@ -162,22 +146,25 @@
   dexp-frame(inner)
 }
 
-#let dexp-prepare-node(node, limit) = {
-  if node.kind == "list" {
-    dexp-prepare-list(node, limit, dexp-prepare-node)
-  } else if node.kind == "pair" {
-    dexp-row(node.items.map(child => dexp-prepare-node(child, limit)))
-  } else if node.kind == "prefix" {
-    dexp-row(
-      (
-        dexp-prepare-token((style: "muted", text: node.prefix), limit),
-        dexp-prepare-node(node.child, limit),
-      ),
-      gap: dexp-prefix-gap,
-    )
-  } else {
-    dexp-prepare-token(node, limit)
+#let dexp-prepare-node(node, measurements) = {
+  let prepare(node) = {
+    if node.kind == "list" {
+      dexp-prepare-list(node, prepare)
+    } else if node.kind == "pair" {
+      dexp-row(node.items.map(prepare))
+    } else if node.kind == "prefix" {
+      dexp-row(
+        (
+          (kind: "leaf", leaf: node.leaf, variants: measurements.at(node.leaf)),
+          prepare(node.child),
+        ),
+        gap: dexp-prefix-gap,
+      )
+    } else {
+      (kind: "leaf", leaf: node.leaf, variants: measurements.at(node.leaf))
+    }
   }
+  prepare(node)
 }
 
 #let dexp-materialize(layout, leaves) = {
@@ -194,9 +181,9 @@
     } else if layout.kind == "column" {
       box(
         baseline: top,
-        grid(
-          columns: 1,
-          row-gutter: layout.gap * 1pt,
+        stack(
+          dir: ttb,
+          spacing: layout.gap * 1pt,
           ..layout.children.map(render),
         ),
       )
@@ -215,7 +202,7 @@
   render(layout)
 }
 
-#let dexp-source(nodes) = block(
+#let dexp-source(nodes, tokens) = block(
   width: 100%,
   fill: panel,
   inset: 10pt,
@@ -226,15 +213,24 @@
     #set par(justify: false, leading: 0.56em)
     #context {
       layout(size => {
+        let measured = tokens.map(token => {
+          let variants = dexp-token-variants(token, size.width)
+          let sizes = variants.map(body => {
+            let size = measure(body)
+            (width: size.width / 1pt, height: size.height / 1pt)
+          })
+          (variants: variants, sizes: sizes)
+        })
+        let leaves = measured.map(token => token.variants)
+        let measurements = measured.map(token => token.sizes)
         let documents = nodes.map(node => {
-          let prepared = dexp-prepare-node(node, size.width)
           let request = (
             limit: size.width / 1pt,
             max_frontier: 8,
-            root: prepared.request,
+            root: dexp-prepare-node(node, measurements),
           )
           let result = json(dexp-planner.layout(bytes(json.encode(request))))
-          dexp-materialize(result.layout, prepared.leaves)
+          dexp-materialize(result.layout, leaves)
         })
         grid(
           columns: 1,

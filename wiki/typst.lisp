@@ -80,10 +80,22 @@
     (write-char #\, *typst-stream*))
   (write-char #\) *typst-stream*))
 
+(defvar *typst-dexp-tokens* nil)
+
+(defun record-typst-dexp-token (style text)
+  (let ((index (fill-pointer *typst-dexp-tokens*)))
+    (vector-push-extend (cons style text) *typst-dexp-tokens*)
+    index))
+
 (defun write-typst-dexp-token (node role)
-  (format *typst-stream* "(kind: \"atom\", style: ~A, text: ~A)"
-          (typst-string (typst-dexp-style node role))
-          (typst-string (node-text node))))
+  (format *typst-stream* "(kind: \"atom\", leaf: ~D)"
+          (record-typst-dexp-token (typst-dexp-style node role) (node-text node))))
+
+(defun write-typst-dexp-prefix (prefix writer)
+  (format *typst-stream* "(kind: \"prefix\", leaf: ~D, child: "
+          (record-typst-dexp-token "muted" prefix))
+  (funcall writer)
+  (write-char #\) *typst-stream*))
 
 (defun write-typst-dexp-item (item)
   (ecase (item-kind item)
@@ -121,16 +133,20 @@
 (defun write-typst-dexp-node (node &optional role)
   (typecase node
     (lisp-vector
-     (write-string "(kind: \"prefix\", prefix: \"#\", child: " *typst-stream*)
-     (write-typst-dexp-list node role)
-     (write-char #\) *typst-stream*))
+     (write-typst-dexp-prefix "#" (lambda () (write-typst-dexp-list node role))))
     (lisp-list (write-typst-dexp-list node role))
     (lisp-prefix
-     (format *typst-stream* "(kind: \"prefix\", prefix: ~A, child: "
-             (typst-string (lisp-prefix-string node)))
-     (write-typst-dexp-node (lisp-prefix-child node))
-     (write-char #\) *typst-stream*))
+     (write-typst-dexp-prefix
+      (lisp-prefix-string node)
+      (lambda () (write-typst-dexp-node (lisp-prefix-child node)))))
     (t (write-typst-dexp-token node role))))
+
+(defun write-typst-dexp-token-table ()
+  (write-typst-dexp-array
+   (coerce *typst-dexp-tokens* 'list)
+   (lambda (token)
+     (format *typst-stream* "(style: ~A, text: ~A)"
+             (typst-string (car token)) (typst-string (cdr token))))))
 
 (defun render-typst-lisp-source (text)
   "Read Lisp source and emit semantic DEXP data; fall back to raw text when
@@ -140,9 +156,11 @@ the source has no readable nodes."
                    (warn "Rendering Lisp source as raw Typst: ~A" condition)
                    nil))))
     (if nodes
-        (progn
+        (let ((*typst-dexp-tokens* (make-array 16 :adjustable t :fill-pointer 0)))
           (write-string "#dexp-source(" *typst-stream*)
           (write-typst-dexp-array nodes (lambda (node) (write-typst-dexp-node node)))
+          (write-string ", " *typst-stream*)
+          (write-typst-dexp-token-table)
           (format *typst-stream* ")~%~%"))
         (format *typst-stream* "#raw(~A, block: true, lang: \"lisp\")~%~%"
                 (typst-string text)))))

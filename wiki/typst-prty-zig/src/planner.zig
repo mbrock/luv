@@ -23,6 +23,7 @@ const Kind = enum {
 
 const Node = struct {
     kind: Kind,
+    leaf: u32 = 0,
     variants: []const Size = &.{},
     children: []const Node = &.{},
     gap: f64 = 0,
@@ -66,7 +67,6 @@ const Planner = struct {
     allocator: std.mem.Allocator,
     limit: f64,
     max_frontier: usize,
-    next_leaf: u32 = 0,
     plans: std.ArrayList(Plan) = .empty,
 
     fn addPlan(self: *Planner, plan: Plan) !u32 {
@@ -103,8 +103,6 @@ const Planner = struct {
 
     fn evalLeaf(self: *Planner, node: Node) ![]Candidate {
         if (node.variants.len == 0) return error.LeafHasNoVariants;
-        const leaf = self.next_leaf;
-        self.next_leaf += 1;
         var candidates: std.ArrayList(Candidate) = .empty;
         for (node.variants, 0..) |variant, index| {
             if (!std.math.isFinite(variant.width) or !std.math.isFinite(variant.height) or
@@ -115,7 +113,7 @@ const Planner = struct {
                 .height = variant.height,
                 .plan = try self.addPlan(.{
                     .tag = .leaf,
-                    .leaf = leaf,
+                    .leaf = node.leaf,
                     .variant = @intCast(index),
                 }),
             });
@@ -374,19 +372,20 @@ pub fn layout(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
 test "row-column chooses the shortest fitting rectangle" {
     const wide =
         \\{"limit":25,"root":{"kind":"row_column","row_gap":2,"column_gap":3,"children":[
-        \\  {"kind":"leaf","variants":[{"width":10,"height":5}]},
-        \\  {"kind":"leaf","variants":[{"width":10,"height":5}]}
+        \\  {"kind":"leaf","leaf":0,"variants":[{"width":10,"height":5}]},
+        \\  {"kind":"leaf","leaf":1,"variants":[{"width":10,"height":5}]}
         \\]}}
     ;
     const horizontal = try layout(std.testing.allocator, wide);
     defer std.testing.allocator.free(horizontal);
     try std.testing.expect(std.mem.indexOf(u8, horizontal, "\"layout\":{\"kind\":\"row\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, horizontal, "\"width\":22") != null);
+    try std.testing.expect(std.mem.indexOf(u8, horizontal, "\"leaf\":1") != null);
 
     const narrow =
         \\{"limit":20,"root":{"kind":"row_column","row_gap":2,"column_gap":3,"children":[
-        \\  {"kind":"leaf","variants":[{"width":10,"height":5}]},
-        \\  {"kind":"leaf","variants":[{"width":10,"height":5}]}
+        \\  {"kind":"leaf","leaf":0,"variants":[{"width":10,"height":5}]},
+        \\  {"kind":"leaf","leaf":1,"variants":[{"width":10,"height":5}]}
         \\]}}
     ;
     const vertical = try layout(std.testing.allocator, narrow);
@@ -398,7 +397,7 @@ test "row-column chooses the shortest fitting rectangle" {
 test "leaf alternatives and frames use analytic dimensions" {
     const input =
         \\{"limit":20,"root":{"kind":"frame","inset_x":2,"inset_y":1,"children":[
-        \\  {"kind":"leaf","variants":[
+        \\  {"kind":"leaf","leaf":0,"variants":[
         \\    {"width":18,"height":4},
         \\    {"width":12,"height":7}
         \\  ]}
