@@ -155,51 +155,47 @@
     } else if node.kind == "prefix" {
       dexp-row(
         (
-          (kind: "leaf", leaf: node.leaf, variants: measurements.at(node.leaf)),
+          (kind: "leaf", variants: measurements.at(node.leaf)),
           prepare(node.child),
         ),
         gap: dexp-prefix-gap,
       )
     } else {
-      (kind: "leaf", leaf: node.leaf, variants: measurements.at(node.leaf))
+      (kind: "leaf", variants: measurements.at(node.leaf))
     }
   }
   prepare(node)
 }
 
-#let dexp-materialize(layout, leaves) = {
-  let render(layout) = {
-    if layout.kind == "empty" {
-      box(baseline: top)
-    } else if layout.kind == "leaf" {
-      leaves.at(layout.leaf).at(layout.variant)
-    } else if layout.kind == "row" {
-      box(
-        baseline: top,
-        layout.children.map(render).join(h(layout.gap * 1pt)),
+// The plugin returns (width, height, frame-sizes, placements), where each
+// placement is the flat CBOR triple (x, y, drawable-id).
+#let dexp-materialize(display-list, leaves) = {
+  let width = display-list.at(0) * 1pt
+  let height = display-list.at(1) * 1pt
+  let drawables = leaves
+  for size in display-list.at(2) {
+    drawables.push(box(
+      baseline: top,
+      width: size.at(0) * 1pt,
+      height: size.at(1) * 1pt,
+      stroke: dexp-side-stroke,
+      radius: 0.58em,
+    ))
+  }
+  let positioned = {
+    for placement in display-list.at(3) {
+      place(
+        top + left,
+        dx: placement.at(0) * 1pt,
+        dy: placement.at(1) * 1pt,
+        drawables.at(placement.at(2)),
       )
-    } else if layout.kind == "column" {
-      box(
-        baseline: top,
-        stack(
-          dir: ttb,
-          spacing: layout.gap * 1pt,
-          ..layout.children.map(render),
-        ),
-      )
-    } else if layout.kind == "frame" {
-      box(
-        baseline: top,
-        stroke: dexp-side-stroke,
-        radius: 0.58em,
-        inset: (x: dexp-frame-inset-x, y: dexp-frame-inset-y),
-        render(layout.child),
-      )
-    } else {
-      panic("unknown DEXP layout recipe " + layout.kind)
     }
   }
-  render(layout)
+  box(
+    baseline: top,
+    block(width: width, height: height, breakable: false, positioned),
+  )
 }
 
 #let dexp-source(nodes, tokens) = block(
@@ -213,24 +209,31 @@
     #set par(justify: false, leading: 0.56em)
     #context {
       layout(size => {
-        let measured = tokens.map(token => {
+        let leaves = ()
+        let measurements = ()
+        for token in tokens {
           let variants = dexp-token-variants(token, size.width)
-          let sizes = variants.map(body => {
+          let sizes = ()
+          for body in variants {
             let size = measure(body)
-            (width: size.width / 1pt, height: size.height / 1pt)
-          })
-          (variants: variants, sizes: sizes)
-        })
-        let leaves = measured.map(token => token.variants)
-        let measurements = measured.map(token => token.sizes)
+            sizes.push((
+              width: size.width / 1pt,
+              height: size.height / 1pt,
+              id: leaves.len(),
+            ))
+            leaves.push(body)
+          }
+          measurements.push(sizes)
+        }
         let documents = nodes.map(node => {
           let request = (
             limit: size.width / 1pt,
             max_frontier: 8,
+            first_frame: leaves.len(),
             root: dexp-prepare-node(node, measurements),
           )
-          let result = json(dexp-planner.layout(bytes(json.encode(request))))
-          dexp-materialize(result.layout, leaves)
+          let display-list = cbor(dexp-planner.layout(cbor.encode(request)))
+          dexp-materialize(display-list, leaves)
         })
         grid(
           columns: 1,

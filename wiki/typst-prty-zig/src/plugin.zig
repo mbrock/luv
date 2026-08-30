@@ -11,7 +11,7 @@ export fn layout(input_len: usize) u32 {
     defer allocator.free(input);
     wasm_minimal_protocol_write_args_to_buffer(input.ptr);
 
-    const output = planner.layout(allocator, input) catch |err| {
+    const output = planner.layoutCbor(allocator, input) catch |err| {
         return fail(@errorName(err));
     };
     defer allocator.free(output);

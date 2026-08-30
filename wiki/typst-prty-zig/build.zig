@@ -13,6 +13,19 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run rectangle planner tests");
     test_step.dependOn(&b.addRunArtifact(tests).step);
 
+    const native_module = b.createModule(.{
+        .root_source_file = b.path("src/native.zig"),
+        .target = native_target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "planner", .module = planner }},
+    });
+    const native = b.addExecutable(.{
+        .name = "typst-prty-native",
+        .root_module = native_module,
+    });
+    const native_step = b.step("native", "Build the native profiling executable");
+    native_step.dependOn(&b.addInstallArtifact(native, .{}).step);
+
     const wasm_target = b.resolveTargetQuery(.{
         .cpu_arch = .wasm32,
         .os_tag = .freestanding,
