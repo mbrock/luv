@@ -16,3 +16,9 @@ nix build path:./nix#environment
 
 From the repository root, `./env COMMAND` is the short explicit wrapper.
 Ordinary launchers and `make` enter the environment automatically.
+
+The repository-root flake is a separate release interface. It has to live at
+the root for `nix run github:mbrock/luv` discovery, and packages the complete
+source plus its runtime resources. Keep using this directory's explicit path
+flake for development so entering a shell does not copy the full checkout to
+the Nix store.

@@ -65,24 +65,16 @@
             ghostty.packages.${system}.libghostty-vt-releasesafe;
           libghosttyVtLibrary =
             "${libghosttyVt}/lib/libghostty-vt${pkgs.stdenv.hostPlatform.extensions.sharedLibrary}";
-          sbclVersion = "2.6.7";
-          sbclUnwrapped = pkgs.sbcl.overrideAttrs (_finalAttrs: _previousAttrs: {
-            version = sbclVersion;
-            src = pkgs.fetchurl {
-              url = "mirror://sourceforge/project/sbcl/sbcl/${sbclVersion}/sbcl-${sbclVersion}-source.tar.bz2";
-              hash = "sha256-Hr3DXJ3I4nG4zRrESWXgC/JV+cAiFlD8t38Ps0wtOt4=";
-            };
-          });
           sbcl = pkgs.wrapLisp {
-            pkg = sbclUnwrapped;
+            pkg = pkgs.sbcl;
             faslExt = "fasl";
             flags = [
               "--dynamic-space-size"
               "3000"
             ];
           };
-          # Keep the development image on the proven release above while the
-          # next SBCL is built and cached independently.
+          # Keep the next SBCL built and cached independently from the
+          # nixpkgs release used by the development image.
           sbcl268Unwrapped = pkgs.sbcl.overrideAttrs (_finalAttrs: _previousAttrs: {
             version = "2.6.8";
             src = pkgs.fetchurl {
@@ -142,9 +134,9 @@
                   -Ipublic \
                   public/TracyClient.cpp \
                   ${tracyContext} \
-                  ${nixpkgs.lib.optionalString pkgs.stdenv.isDarwin
+                  ${nixpkgs.lib.optionalString pkgs.stdenv.hostPlatform.isDarwin
                       "-install_name $out/lib/libTracyClient${extension}"} \
-                  ${nixpkgs.lib.optionalString pkgs.stdenv.isLinux
+                  ${nixpkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux
                       "-pthread -ldl"} \
                   -o libTracyClient${extension}
                 runHook postBuild
@@ -252,7 +244,7 @@
               pkgs.sdl3-image
               pkgs.sdl3-ttf
               pkgs.vulkan-loader
-            ] ++ nixpkgs.lib.optionals pkgs.stdenv.isDarwin [
+            ] ++ nixpkgs.lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
               pkgs.moltenvk
             ];
           nativeLibraryPath = nixpkgs.lib.makeLibraryPath (
@@ -269,7 +261,7 @@
               pkgs.sdl3-image
               pkgs.sdl3-ttf
               pkgs.vulkan-loader
-            ] ++ nixpkgs.lib.optionals pkgs.stdenv.isDarwin [
+            ] ++ nixpkgs.lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
               pkgs.moltenvk
             ];
           slimNativeLibraryPath = nixpkgs.lib.makeLibraryPath slimNativeLibraryPackages;
@@ -319,7 +311,7 @@
               # agent; it does not need an event-loop framework.
               lispPackages.websocket-driver-client
             ] ++ mcclimDependencies
-              ++ nixpkgs.lib.optionals pkgs.stdenv.isDarwin [
+              ++ nixpkgs.lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
                 lispPackages.float-features
                 lispPackages.trivial-main-thread
               ]);
@@ -343,10 +335,10 @@
             subPackages = [ "cmd/swash" ];
             CGO_CFLAGS = "-I${swash}/cvendor";
             env.GOWORK = "off";
-            nativeBuildInputs = nixpkgs.lib.optionals pkgs.stdenv.isLinux [
+            nativeBuildInputs = nixpkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
               pkgs.makeWrapper
             ];
-            postFixup = nixpkgs.lib.optionalString pkgs.stdenv.isLinux ''
+            postFixup = nixpkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
               wrapProgram "$out/bin/swash" \
                 --prefix LD_LIBRARY_PATH : ${nixpkgs.lib.makeLibraryPath [ pkgs.systemd ]}
             '';
@@ -434,7 +426,7 @@
           } // nixpkgs.lib.optionalAttrs (lavapipeIcd != null) {
             LUV_LAVAPIPE_ICD =
               "${pkgs.mesa}/share/vulkan/icd.d/${lavapipeIcd}";
-          } // nixpkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
+          } // nixpkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
             VK_DRIVER_FILES =
               "${pkgs.moltenvk}/share/vulkan/icd.d/MoltenVK_icd.json";
           };
@@ -454,7 +446,7 @@
           } // nixpkgs.lib.optionalAttrs (lavapipeIcd != null) {
             LUV_LAVAPIPE_ICD =
               "${pkgs.mesa}/share/vulkan/icd.d/${lavapipeIcd}";
-          } // nixpkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
+          } // nixpkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
             VK_DRIVER_FILES =
               "${pkgs.moltenvk}/share/vulkan/icd.d/MoltenVK_icd.json";
           };
@@ -477,7 +469,7 @@
               export LUV_NATIVE_ENVIRONMENT_ACTIVE=1
             }
 
-            ${nixpkgs.lib.optionalString pkgs.stdenv.isLinux ''
+            ${nixpkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
               if [ -z "''${SDL_VIDEODRIVER:-}" ] \
                 && [ -z "''${DISPLAY:-}" ] \
                 && [ -z "''${WAYLAND_DISPLAY:-}" ]; then
@@ -535,6 +527,10 @@
         };
     in
     {
+      lib = {
+        inherit environmentFor;
+      };
+
       packages = forAllSystems (system:
         let
           env = environmentFor system;
@@ -550,7 +546,7 @@
           tracy = env.tracyTools;
           swash = env.swashPackage;
           default = env.lisp;
-        } // nixpkgs.lib.optionalAttrs env.pkgs.stdenv.isLinux {
+        } // nixpkgs.lib.optionalAttrs env.pkgs.stdenv.hostPlatform.isLinux {
           # Reachable only by name, `nix build path:./nix#wpewebkit` on Linux: not in
           # `default`, not in the dev shell, not in any library path.
           wpewebkit = env.wpePkgs.wpewebkit;

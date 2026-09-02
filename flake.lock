@@ -59,6 +59,7 @@
     "home-manager": {
       "inputs": {
         "nixpkgs": [
+          "toolchain",
           "ghostty",
           "nixpkgs"
         ]
@@ -176,14 +177,7 @@
     },
     "root": {
       "inputs": {
-        "cl-sdl3": "cl-sdl3",
-        "ghostty": "ghostty",
-        "mcclim": "mcclim",
-        "nix-wpe-webkit": "nix-wpe-webkit",
-        "nixpkgs": "nixpkgs_3",
-        "parachute": "parachute",
-        "swash": "swash",
-        "tracy": "tracy"
+        "toolchain": "toolchain"
       }
     },
     "swash": {
@@ -219,6 +213,27 @@
         "type": "github"
       }
     },
+    "toolchain": {
+      "inputs": {
+        "cl-sdl3": "cl-sdl3",
+        "ghostty": "ghostty",
+        "mcclim": "mcclim",
+        "nix-wpe-webkit": "nix-wpe-webkit",
+        "nixpkgs": "nixpkgs_3",
+        "parachute": "parachute",
+        "swash": "swash",
+        "tracy": "tracy"
+      },
+      "locked": {
+        "path": "./nix",
+        "type": "path"
+      },
+      "original": {
+        "path": "./nix",
+        "type": "path"
+      },
+      "parent": []
+    },
     "tracy": {
       "flake": false,
       "locked": {
@@ -239,14 +254,17 @@
     "zig": {
       "inputs": {
         "flake-compat": [
+          "toolchain",
           "ghostty",
           "flake-compat"
         ],
         "nixpkgs": [
+          "toolchain",
           "ghostty",
           "nixpkgs"
         ],
         "systems": [
+          "toolchain",
           "ghostty",
           "systems"
         ]
@@ -268,6 +286,7 @@
     "zon2nix": {
       "inputs": {
         "nixpkgs": [
+          "toolchain",
           "ghostty",
           "nixpkgs"
         ]

@@ -14,6 +14,20 @@ in-world tools. **Luft** is the current second-generation experiment: canonical
 cubical topology, packed integer manifold-sheet meshes, and a playable McCLIM
 atelier for developing the world from inside it.
 
+## Try it with Nix
+
+Run either game directly from GitHub, without cloning the repository:
+
+```sh
+nix run --accept-flake-config github:mbrock/luv          # Luvcraft
+nix run --accept-flake-config github:mbrock/luv#luft     # Luft
+```
+
+The flake supports x86-64 and ARM64 Linux and Apple Silicon macOS. The first
+run downloads or builds the game and its dependencies; later runs reuse the
+Nix store. Luvcraft keeps its world under `$XDG_DATA_HOME/luvcraft` (or
+`~/.local/share/luvcraft`) rather than inside the immutable package.
+
 ## Run the current experiment
 
 Development happens in a durable SBCL image supervised by

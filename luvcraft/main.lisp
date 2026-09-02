@@ -4,7 +4,10 @@
   (uiop:pathname-directory-pathname (truename sb-ext:*runtime-pathname*)))
 
 (defun slynk-endpoint-pathname ()
-  (merge-pathnames #P"luvcraft.slynk" (executable-directory)))
+  (let ((override (uiop:getenv "LUVCRAFT_SLYNK_ENDPOINT")))
+    (if override
+        (pathname override)
+        (merge-pathnames #P"luvcraft.slynk" (executable-directory)))))
 
 (defun requested-slynk-port ()
   (let ((value (uiop:getenv "LUVCRAFT_SLYNK_PORT")))
