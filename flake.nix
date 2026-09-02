@@ -89,9 +89,18 @@
             # starts. Shipping the build cache avoids recompiling them into a
             # new user's home while the first canvas is already starting.
             cp -R "$HOME/.cache/common-lisp/"*/. "$out/lib/fasl/"
-            # The dumped image contains the Lisp program. Keep only the fonts
+            ${lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
+              # SBCL reopens loaded shared objects by their original absolute
+              # path before MAIN runs. Preserve the generated Objective-C
+              # bridge and the source directory in its .../objective-c/../build
+              # pathname exactly as the dumped image loaded them.
+              find build -mindepth 1 -maxdepth 1 \
+                ! -name 'objective-c-exception-bridge-*.dylib' \
+                -exec rm -rf {} +
+            ''}
+            # The dumped image contains the Lisp program. Keep only the files
             # it opens at runtime, not a second copy of the whole repository.
-            find . -mindepth 1 -maxdepth 1 ! -name fonts -exec rm -rf {} +
+            find . -mindepth 1 -maxdepth 1 ! -name fonts ${lib.optionalString pkgs.stdenv.hostPlatform.isDarwin "! -name build ! -name objective-c"} -exec rm -rf {} +
             # These private wiki fonts are git-annex links, not game resources.
             rm -rf fonts/equity
 
