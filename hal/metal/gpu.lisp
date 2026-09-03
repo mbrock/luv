@@ -2180,48 +2180,48 @@ compiler boundary of #58IDSR."
                      (or (null depth)
                          (= sample-count
                             (gpu-texture-sample-count (first depth)))))
-          (reject-metal-gpu-request descriptor :mismatched-sample-count)))
-      (let ((native-encoder
-              (luv.metal:new-render-command-encoder
-               (metal-encoder-command-buffer encoder)
-               :color-attachments
-               (mapcar
-                (lambda (color)
-                  (list (metal-native-object (first color))
-                        (fourth color)
-                        (eq :clear (second color))
-                        (eq :store (third color))
-                        (and (fifth color)
-                             (metal-native-object (fifth color)))))
-                colors)
-               :depth-texture
-               (and depth (metal-native-object (first depth)))
-               :clear-depth (and depth (fourth depth))
-               :depth-clear-p (and depth (eq :clear (second depth)))
-               :depth-store-p (and depth (eq :store (third depth)))
-               :depth-resolve-texture
-               (and depth (fifth depth)
-                    (metal-native-object (fifth depth))))))
-        (unless native-encoder
-          (error 'metal-gpu-error :operation :begin-render-pass
-                 :reason :render-encoder-creation-failed))
-        (let ((barrier (metal-encoder-pending-consumer-barrier encoder)))
-          (when barrier
-            (destructuring-bind
-                (after-queue-stages before-stages visibility-options)
-                barrier
-              (luv.metal:barrier-after-queue-stages
-               native-encoder after-queue-stages before-stages
-               visibility-options))
-            (setf (metal-encoder-pending-consumer-barrier encoder) nil)))
-        (let ((pass
-                (make-instance
-                 'metal-render-pass-encoder
-                 :owner encoder :native-encoder native-encoder
-                 :sample-count sample-count
-                 :label (gpu-descriptor-label descriptor))))
-          (setf (metal-encoder-active-pass encoder) pass)
-          pass)))))
+          (reject-metal-gpu-request descriptor :mismatched-sample-count))
+        (let ((native-encoder
+                (luv.metal:new-render-command-encoder
+                 (metal-encoder-command-buffer encoder)
+                 :color-attachments
+                 (mapcar
+                  (lambda (color)
+                    (list (metal-native-object (first color))
+                          (fourth color)
+                          (eq :clear (second color))
+                          (eq :store (third color))
+                          (and (fifth color)
+                               (metal-native-object (fifth color)))))
+                  colors)
+                 :depth-texture
+                 (and depth (metal-native-object (first depth)))
+                 :clear-depth (and depth (fourth depth))
+                 :depth-clear-p (and depth (eq :clear (second depth)))
+                 :depth-store-p (and depth (eq :store (third depth)))
+                 :depth-resolve-texture
+                 (and depth (fifth depth)
+                      (metal-native-object (fifth depth))))))
+          (unless native-encoder
+            (error 'metal-gpu-error :operation :begin-render-pass
+                   :reason :render-encoder-creation-failed))
+          (let ((barrier (metal-encoder-pending-consumer-barrier encoder)))
+            (when barrier
+              (destructuring-bind
+                  (after-queue-stages before-stages visibility-options)
+                  barrier
+                (luv.metal:barrier-after-queue-stages
+                 native-encoder after-queue-stages before-stages
+                 visibility-options))
+              (setf (metal-encoder-pending-consumer-barrier encoder) nil)))
+          (let ((pass
+                  (make-instance
+                   'metal-render-pass-encoder
+                   :owner encoder :native-encoder native-encoder
+                   :sample-count sample-count
+                   :label (gpu-descriptor-label descriptor))))
+            (setf (metal-encoder-active-pass encoder) pass)
+            pass))))))
 
 (defmethod encode
     ((encoder metal-gpu-command-encoder)
