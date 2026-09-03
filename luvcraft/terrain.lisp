@@ -318,23 +318,92 @@ the plains.  The bottom two layers are never carved."
     (:meadow (little-world-meadow-surface-height source x z height))
     (:alpine (little-world-alpine-ground-height source x z height))))
 
+(defparameter *spawn-view-distance* 88
+  "How far from a spawn a summit may stand and still count as in view;
+a little less than the streamed radius so it is drawn on arrival.")
+
+(defun little-world-scenic-spawn (source x z height)
+  "A lowland X,Z near the given one with a snow summit in view, as two values.
+
+Mountain ranges are a few hundred cells apart, so the given X,Z may lie in
+a valley whose walls are beyond the streamed chunks.  Candidates on a
+sixteen-cell grid are tried in order of distance; the first standing on
+open lowland with a summit above the snow line within
+*SPAWN-VIEW-DISTANCE* wins.  The given X,Z is returned when no candidate
+within a few ranges qualifies, as in a meadow."
+  (flet ((level (x z)
+           (/ (little-world-surface-height source x z height)
+              (coerce height 'double-float)))
+         (open-lowland-p (x z)
+           (let ((surface (little-world-surface-height source x z height)))
+             (and (< (/ surface (coerce height 'double-float)) 0.30d0)
+                  (= surface (little-world-ground-height source x z height))
+                  (<= (little-world-surface-slope source x z surface height)
+                      1)))))
+    (let ((candidates
+            (sort (loop for dx from -320 to 320 by 16
+                        nconc (loop for dz from -320 to 320 by 16
+                                    collect (list (+ x dx) (+ z dz))))
+                  #'<
+                  :key (lambda (candidate)
+                         (+ (expt (- (first candidate) x) 2)
+                            (expt (- (second candidate) z) 2))))))
+      (loop for (cx cz) in candidates
+            when (and (open-lowland-p cx cz)
+                      (loop for sx from (- cx *spawn-view-distance*)
+                              to (+ cx *spawn-view-distance*) by 8
+                            thereis
+                            (loop for sz from (- cz *spawn-view-distance*)
+                                    to (+ cz *spawn-view-distance*) by 8
+                                  thereis (>= (level sx sz)
+                                              *alpine-snow-line*))))
+              do (return (values cx cz))
+            finally (return (values x z))))))
+
+(defun little-world-summit-yaw (source x z height)
+  "The camera yaw from X,Z toward the highest surface within view, or 0."
+  (let ((best-x x) (best-z z) (best 0))
+    (loop for sx from (- x *spawn-view-distance*)
+            to (+ x *spawn-view-distance*) by 8
+          do (loop for sz from (- z *spawn-view-distance*)
+                     to (+ z *spawn-view-distance*) by 8
+                   for surface = (little-world-surface-height
+                                  source sx sz height)
+                   when (> surface best)
+                     do (setf best surface best-x sx best-z sz)))
+    (if (and (= best-x x) (= best-z z))
+        0.0
+        ;; The camera looks along (sin yaw, 0, cos yaw).
+        (atan (- best-x x) (- best-z z)))))
+
 (defun little-world-spawn-player (world camera)
-  "A new player standing on the generated ground under CAMERA's X,Z.
+  "A new player standing on generated ground near CAMERA's X,Z.
 
 A fixed eye height suited the flat meadow; alpine ground under the same
-X,Z may be a peak or a ravine floor.  Return NIL when WORLD is not read
-from a little-world source."
+X,Z may be a peak, a ravine floor, or a valley walled off by ranges
+beyond the streamed chunks.  The alpine spawn moves to nearby lowland
+with a summit in view and turns CAMERA toward it.  Return NIL when WORLD
+is not read from a little-world source."
   (let ((source (block-world-source world)))
     (when (typep source 'little-world-source)
       (let* ((shape (voxel-space-chunk-shape (block-world-space world)))
-             (x (floor (camera-x camera)))
-             (z (floor (camera-z camera)))
-             (ground (little-world-ground-height
-                      source x z (chunk-shape-height shape))))
-        (make-instance 'block-world-player
-                       :position (make-vec3 (+ x 0.5d0)
-                                            (+ ground 1.1d0)
-                                            (+ z 0.5d0)))))))
+             (height (chunk-shape-height shape))
+             (alpine-p (eq (little-world-source-relief source) :alpine)))
+        (multiple-value-bind (x z)
+            (if alpine-p
+                (little-world-scenic-spawn
+                 source (floor (camera-x camera)) (floor (camera-z camera))
+                 height)
+                (values (floor (camera-x camera)) (floor (camera-z camera))))
+          (when alpine-p
+            (setf (camera-yaw camera)
+                  (little-world-summit-yaw source x z height)
+                  (camera-pitch camera) -0.05))
+          (let ((ground (little-world-ground-height source x z height)))
+            (make-instance 'block-world-player
+                           :position (make-vec3 (+ x 0.5d0)
+                                                (+ ground 1.1d0)
+                                                (+ z 0.5d0)))))))))
 
 (defgeneric materialize-block-world-chunk
     (source world chunk-x chunk-y chunk-z))

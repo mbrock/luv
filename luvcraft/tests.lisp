@@ -2402,21 +2402,44 @@
     (true (= unsupported 0))))
 
 (define-test little-world-spawn-player-stands-on-the-ground
-  (let* ((world (make-little-block-world :chunk-radius 1 :seed 121))
+  (let* ((world (make-empty-little-block-world :seed 121))
          (source (block-world-source world))
+         (height luvcraft::*little-world-height*)
          (camera (make-instance 'fly-camera
                                 :position (make-vec3 8.3d0 40.0d0 -5.7d0)))
          (player (little-world-spawn-player world camera))
-         (ground (little-world-ground-height
-                  source 8 -6 luvcraft::*little-world-height*)))
+         (x (floor (player-x player)))
+         (z (floor (player-z player)))
+         (ground (little-world-ground-height source x z height)))
     (true (typep player 'block-world-player))
+    (true (= (player-x player) (+ x 0.5d0)))
+    (true (= (player-z player) (+ z 0.5d0)))
+    (true (< ground (player-y player) (+ ground 2)))
+    ;; The alpine spawn is open lowland within a few ranges of the camera,
+    ;; with a snow summit in view and the camera turned toward it.
+    (true (<= (abs (- x 8)) 320))
+    (true (<= (abs (- z -6)) 320))
+    (true (< (/ ground height) 0.30d0))
+    (true (/= (camera-yaw camera) 0.0))
+    (true (loop for sx from (- x 88) to (+ x 88) by 8
+                thereis (loop for sz from (- z 88) to (+ z 88) by 8
+                              thereis (>= (/ (little-world-surface-height
+                                              source sx sz height)
+                                             height)
+                                          luvcraft::*alpine-snow-line*))))
+    (materialize-little-world-chunk source world (floor x 16) (floor z 16))
+    (true (world-block-at world x ground z))
+    (true (null (world-block-at world x (1+ ground) z)))
+    (true (null (little-world-spawn-player
+                 (make-block-world :source nil) camera))))
+  ;; A meadow spawn stays under the camera.
+  (let* ((world (make-empty-little-block-world :seed 121 :relief :meadow))
+         (camera (make-instance 'fly-camera
+                                :position (make-vec3 8.3d0 40.0d0 -5.7d0)))
+         (player (little-world-spawn-player world camera)))
     (true (= (player-x player) 8.5d0))
     (true (= (player-z player) -5.5d0))
-    (true (< ground (player-y player) (+ ground 2)))
-    (true (world-block-at world 8 ground -6))
-    (true (null (world-block-at world 8 (1+ ground) -6)))
-    (true (null (little-world-spawn-player
-                 (make-block-world :source nil) camera)))))
+    (true (= (camera-yaw camera) 0.0))))
 
 (define-test little-world-saves-keep-their-relief
   (let* ((alpine (make-empty-little-block-world :seed 5 :relief :alpine))
