@@ -21,9 +21,15 @@
 
 (defun surveyor-generated-surface (world source x z)
   (if (typep source 'luvcraft:little-world-source)
-      (let* ((height (luvcraft:little-world-surface-height source x z 16))
+      (let* ((world-height
+               (luvcraft.world:chunk-shape-height
+                (luvcraft.world:voxel-space-chunk-shape
+                 (luvcraft.world:block-world-space world))))
+             (height (luvcraft:little-world-surface-height
+                      source x z world-height))
              (generated
-               (luvcraft:little-world-surface-material source x z height 16)))
+               (luvcraft:little-world-surface-material
+                source x z height world-height)))
         (multiple-value-bind (resident status)
             (luvcraft:world-block-at world x height z)
           (values height

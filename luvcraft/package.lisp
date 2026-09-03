@@ -352,12 +352,16 @@
            #:lighting-state-last-latency-seconds
            #:lighting-state-publications
            #:lighting-state-world
+           #:little-world-ground-height
            #:little-world-source
            #:little-world-source-edits
+           #:little-world-source-relief
            #:little-world-source-seed
+           #:little-world-spawn-player
            #:little-world-surface-height
            #:little-world-surface-material
            #:little-world-value-noise
+           #:little-world-volume-noise
            #:luvcraft-chunk-product
            #:luvcraft-chunk-product-coordinate
            #:luvcraft-chunk-product-dependency-stamp

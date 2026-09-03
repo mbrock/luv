@@ -122,6 +122,8 @@ the session's outstanding-work and cancellation bookkeeping."))
 
 (defclass little-world-load-request (block-chunk-load-request)
   ((seed :initarg :seed :reader little-world-load-request-seed)
+   (relief :initarg :relief :initform :alpine
+           :reader little-world-load-request-relief)
    (width :initarg :width :reader little-world-load-request-width)
    (height :initarg :height :reader little-world-load-request-height)
    (depth :initarg :depth :reader little-world-load-request-depth)
@@ -150,6 +152,7 @@ the session's outstanding-work and cancellation bookkeeping."))
      :key (list :load key)
      :priority priority
      :seed (little-world-source-seed source)
+     :relief (little-world-source-relief source)
      :demand-token demand-token
      :width width :height height :depth depth
      :landmarks (little-world-landmarks-for-chunk source world key)
@@ -160,8 +163,10 @@ the session's outstanding-work and cancellation bookkeeping."))
   "Generate one isolated chunk and transfer only its dense content columns."
   (destructuring-bind (chunk-x chunk-y chunk-z)
       (second (production-request-key request))
-    (let* ((source (make-instance 'little-world-source
-                                  :seed (little-world-load-request-seed request)))
+    (let* ((source (make-instance
+                    'little-world-source
+                    :seed (little-world-load-request-seed request)
+                    :relief (little-world-load-request-relief request)))
            (world (make-block-world
                    :chunk-width (little-world-load-request-width request)
                    :chunk-height (little-world-load-request-height request)

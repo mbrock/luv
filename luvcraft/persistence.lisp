@@ -147,6 +147,7 @@ strict; in particular a selected or carried block cannot silently become air."
   (list :little-world
         :source-version +little-world-source-version+
         :seed (little-world-source-seed source)
+        :relief (little-world-source-relief source)
         :edits (block-edit-overlay-save-descriptions
                 (little-world-source-edits source))))
 
@@ -156,6 +157,10 @@ strict; in particular a selected or carried block cannot silently become air."
           (description-value description :source-version
                              "little-world source"))
         (seed (description-value description :seed "little-world source"))
+        ;; Saves written before reliefs existed were meadows; reading them as
+        ;; anything else would move the ground under their edits.
+        (relief (description-value description :relief "little-world source"
+                                   :optional t :default :meadow))
         (edits (description-value description :edits "little-world source")))
     (unless (eql version +little-world-source-version+)
       (invalid-luvcraft-save
@@ -164,8 +169,12 @@ strict; in particular a selected or carried block cannot silently become air."
     (unless (integerp seed)
       (invalid-luvcraft-save "A little-world seed must be an integer, not ~S."
                              seed))
+    (unless (member relief '(:meadow :alpine))
+      (invalid-luvcraft-save
+       "A little-world relief must be :MEADOW or :ALPINE, not ~S." relief))
     (make-instance 'little-world-source
                    :seed seed
+                   :relief relief
                    :edits (restore-block-edit-overlay edits))))
 
 (defmethod restore-world-source-save-description ((kind t) description)

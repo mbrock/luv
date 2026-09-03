@@ -49,6 +49,9 @@ game for later SLY evaluations.  STOP-PLAYING checkpoints and closes it."
     (multiple-value-bind (camera player selected-block carried)
         (restore-luvcraft-resume-save-description resume-description)
       (let ((writer (make-world-checkpoint-writer world-pathname))
+            ;; A first visit stands on the generated ground rather than at
+            ;; the camera's fixed height, which alpine terrain may bury.
+            (player (or player (little-world-spawn-player world camera)))
             (session nil))
         (unwind-protect
              (setf session

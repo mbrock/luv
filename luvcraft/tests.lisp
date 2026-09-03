@@ -2330,19 +2330,109 @@
       (setf luvcraft::*block-atlas-tile-capacity* old-capacity))))
 
 (define-test little-world-has-readable-biome-materials
-  (let ((source (make-instance 'little-world-source :seed 121))
-        (materials (make-hash-table :test #'eq)))
-    (loop for x from -96 to 96 by 4 do
-      (loop for z from -96 to 96 by 4
-            for surface = (little-world-surface-height source x z 16)
-            do (setf (gethash
+  ;; Mountain ranges are a few hundred blocks apart, so the sweep is wide
+  ;; enough to cross a valley, a range, and the snow above the tree line.
+  (let* ((source (make-instance 'little-world-source :seed 121))
+         (height luvcraft::*little-world-height*)
+         (materials (make-hash-table :test #'eq))
+         (lowest height)
+         (highest 0))
+    (loop for x from -320 to 320 by 8 do
+      (loop for z from -320 to 320 by 8
+            for surface = (little-world-surface-height source x z height)
+            do (setf lowest (min lowest surface)
+                     highest (max highest surface))
+               (setf (gethash
                       (little-world-surface-material
-                       source x z surface 16)
+                       source x z surface height)
                       materials)
                      t)))
     (true (gethash luvcraft::*grass-block* materials))
     (true (gethash luvcraft::*sand-block* materials))
-    (true (gethash luvcraft::*snow-block* materials))))
+    (true (gethash luvcraft::*stone-block* materials))
+    (true (gethash luvcraft::*snow-block* materials))
+    ;; Dramatic relief: the sweep spans more than half the world height.
+    (true (> (- highest lowest) (/ height 2)))))
+
+(define-test little-world-meadow-relief-is-the-original-terrain
+  ;; Old saves restore as :meadow; their ground must not move.
+  (let ((source (make-instance 'little-world-source :seed 121 :relief :meadow)))
+    (true (eq (little-world-source-relief source) :meadow))
+    (true
+       (loop for x from -40 to 40 by 3
+             always
+             (loop for z from -40 to 40 by 3
+                   for surface = (little-world-surface-height source x z 16)
+                   always
+                   (and (= surface
+                           (luvcraft::little-world-meadow-surface-height
+                            source x z 16))
+                        (= surface
+                           (little-world-ground-height source x z 16))
+                        (eq (little-world-surface-material
+                             source x z surface 16)
+                            (luvcraft::little-world-meadow-surface-material
+                             source x z surface 16))))))))
+
+(define-test little-world-alpine-terrain-has-caves-with-solid-floors
+  (let* ((world (make-little-block-world :chunk-radius 2 :seed 121))
+         (source (block-world-source world))
+         (height luvcraft::*little-world-height*)
+         (cave-cells 0)
+         (bad-grounds 0)
+         (unsupported 0))
+    (loop for x from -32 below 48 do
+      (loop for z from -32 below 48
+            for surface = (little-world-surface-height source x z height)
+            for ground = (little-world-ground-height source x z height)
+            ;; Landmarks may stand on the ground, so only the ground itself
+            ;; is checked.
+            do (unless (and (<= 2 ground surface)
+                            (world-block-at world x ground z))
+                 (incf bad-grounds))
+               ;; Caves are hollows under the surface, never bottomless.
+               (loop for y from 2 below surface
+                     unless (world-block-at world x y z)
+                       do (incf cave-cells)
+                          (unless (loop for below from (1- y) downto 0
+                                        thereis (world-block-at world x below z))
+                            (incf unsupported)))))
+    (true (> cave-cells 500))
+    (true (= bad-grounds 0))
+    (true (= unsupported 0))))
+
+(define-test little-world-spawn-player-stands-on-the-ground
+  (let* ((world (make-little-block-world :chunk-radius 1 :seed 121))
+         (source (block-world-source world))
+         (camera (make-instance 'fly-camera
+                                :position (make-vec3 8.3d0 40.0d0 -5.7d0)))
+         (player (little-world-spawn-player world camera))
+         (ground (little-world-ground-height
+                  source 8 -6 luvcraft::*little-world-height*)))
+    (true (typep player 'block-world-player))
+    (true (= (player-x player) 8.5d0))
+    (true (= (player-z player) -5.5d0))
+    (true (< ground (player-y player) (+ ground 2)))
+    (true (world-block-at world 8 ground -6))
+    (true (null (world-block-at world 8 (1+ ground) -6)))
+    (true (null (little-world-spawn-player
+                 (make-block-world :source nil) camera)))))
+
+(define-test little-world-saves-keep-their-relief
+  (let* ((alpine (make-empty-little-block-world :seed 5 :relief :alpine))
+         (description (make-luvcraft-save-description alpine))
+         (restored (restore-luvcraft-save-description description)))
+    (true (eq (little-world-source-relief (block-world-source restored))
+              :alpine)))
+  ;; A save written before reliefs existed has no :relief entry and is a
+  ;; meadow, so its edits stay on the ground they were made on.
+  (let ((restored
+          (restore-world-source-save-description
+           :little-world
+           (list :source-version luvcraft::+little-world-source-version+
+                 :seed 913
+                 :edits '()))))
+    (true (eq (little-world-source-relief restored) :meadow))))
 
 (define-test crosshair-and-numbered-materials-are-playable-state
   (let* ((vertices (luvcraft::make-block-world-crosshair-vertices 960 640))
