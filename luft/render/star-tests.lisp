@@ -521,3 +521,120 @@
       (true (nth-value 1 (luft.render::material-cell-at
                          (luft.render::scene-material-cells snapshot) cell)))
       (true (= 1 (luft.render::scene-cell-bit snapshot 64 0 0))))))
+
+(defun make-body-collision-fixture ()
+  (let* ((domain (luft:make-world-domain :x-bits 8 :y-bits 8))
+         (store (luft:make-fiber-store domain)))
+    (setf (luft:fiber-store-chunk store 0) (luft:make-chunk-fibers domain 0))
+    store))
+
+(defun make-test-walking-body (x y z)
+  (let ((player (luft.render::make-walking-player :position (luv.arithmetic.lisp.vec3:make-vec3 x y z))))
+    (setf (luft.render::walking-player-height player) 1.8)
+    player))
+
+(define-test walking-body-stops-at-wall-and-slides-without-climbing
+  (let* ((store (make-body-collision-fixture))
+         (player (make-test-walking-body 10.5 10.5 1.0))
+         (position (luft.render:walking-player-position player)))
+    (loop for y from 8 to 16 do
+      (loop for z from 1 to 5 do (luft:fiber-store-edit-cell store 12 y z 1)))
+    (luft.render::try-walking-player-axis player store :x 20.0)
+    (true (< (abs (- (luv.arithmetic.lisp.vec3:vec3-x position) 11.7)) 0.0001)
+          "a long sweep stops a body radius before the wall")
+    (true (= 1.0 (luv.arithmetic.lisp.vec3:vec3-z position)) "horizontal movement never changes height")
+    (luft.render::try-walking-player-axis player store :y 2.0)
+    (true (= 12.5 (luv.arithmetic.lisp.vec3:vec3-y position)) "the touching body slides along the wall")
+    (true (luft.render::walking-player-clear-at-p store 11.7 12.5 1.0 1.8))
+    (true (not (luft.render::walking-player-clear-at-p store 11.9 12.5 1.0 1.8))
+          "an empty centre column does not imply an empty body")
+    (let ((cell (luft:make-site (luft:fiber-store-domain store)
+                               11 12 1 luft:+cell-extent+ 1)))
+      (setf (luv.arithmetic.lisp.vec3:vec3-x position) 10.8)
+      (true (luft.render::walking-player-overlaps-cell-p player cell)
+            "placement rejects blocks overlapping only the body's edge"))))
+
+(define-test walking-body-sweeps-both-directions-on-every-axis
+  (dolist (axis '(:x :y :z))
+    (dolist (sign '(-1 1))
+      (let* ((store (make-body-collision-fixture))
+             (position (luv.arithmetic.lisp.vec3:make-vec3 10.5 10.5 10.0))
+             (x (if (eq axis :x) (if (plusp sign) 12 8) 10))
+             (y (if (eq axis :y) (if (plusp sign) 12 8) 10))
+             (z (if (eq axis :z) (if (plusp sign) 13 8) 10))
+             (expected (if (eq axis :z) (if (plusp sign) 1.2 -1.0)
+                           (* sign 1.2))))
+        (luft:fiber-store-edit-cell store x y z 1)
+        (multiple-value-bind (travel blocked-p)
+            (luft.render::sweep-walking-body-axis store position 1.8 0.3 axis (* sign 20.0))
+          (true blocked-p)
+          (true (< (abs (- travel expected)) 0.0001)))))))
+
+(define-test walking-off-a-ledge-falls-instead-of-snapping-down
+  (let* ((store (make-body-collision-fixture))
+         (player (make-test-walking-body 10.5 10.5 4.0))
+         (position (luft.render:walking-player-position player)))
+    (luft:fiber-store-edit-cell store 10 10 3 1)
+    (luft:fiber-store-edit-cell store 11 10 0 1)
+    (luft.render::try-walking-player-axis player store :x 0.6)
+    (luft.render::advance-walking-player-vertical player store 0.1)
+    (true (= 4.0 (luv.arithmetic.lisp.vec3:vec3-z position)) "the trailing edge still has support")
+    (luft.render::try-walking-player-axis player store :x 0.4)
+    (true (= 4.0 (luv.arithmetic.lisp.vec3:vec3-z position)) "crossing the edge preserves foot height")
+    (luft.render::advance-walking-player-vertical player store 0.1)
+    (true (< 3.8 (luv.arithmetic.lisp.vec3:vec3-z position) 4.0) "gravity begins a continuous fall")
+    (true (not (luft.render::walking-player-grounded-p player)))
+    (dotimes (i 60) (luft.render::advance-walking-player-vertical player store (/ 1.0 120)))
+    (true (= 1.0 (luv.arithmetic.lisp.vec3:vec3-z position)))
+    (true (luft.render::walking-player-grounded-p player))))
+
+(define-test walking-up-a-block-requires-a-physical-jump
+  (let* ((store (make-body-collision-fixture))
+         (player (make-test-walking-body 10.5 10.5 1.0))
+         (position (luft.render:walking-player-position player))
+         (camera (luft.render::make-fly-camera :yaw 0.0)))
+    (loop for x from 8 to 20 do
+      (luft:fiber-store-edit-cell store x 10 0 1)
+      (when (>= x 11) (luft:fiber-store-edit-cell store x 10 1 1)))
+    (dotimes (i 30) (luft.render::advance-walking-player player store camera 1.0 0.0 (/ 1.0 60)))
+    (true (< (abs (- (luv.arithmetic.lisp.vec3:vec3-x position) 10.7)) 0.0001))
+    (true (= 1.0 (luv.arithmetic.lisp.vec3:vec3-z position)))
+    (luft.render::request-walking-player-jump player)
+    (dotimes (i 50)
+      (luft.render::advance-walking-player player store camera 1.0 0.0 (/ 1.0 60))
+      (true (luft.render::walking-player-clear-at-p
+             store (luv.arithmetic.lisp.vec3:vec3-x position) (luv.arithmetic.lisp.vec3:vec3-y position) (luv.arithmetic.lisp.vec3:vec3-z position) 1.8)))
+    (true (> (luv.arithmetic.lisp.vec3:vec3-x position) 11.3))
+    (true (= 2.0 (luv.arithmetic.lisp.vec3:vec3-z position)))
+    (true (luft.render::walking-player-grounded-p player))))
+
+(define-test walking-gravity-agrees-across-render-frame-rates
+  (let* ((store (make-body-collision-fixture))
+         (camera (luft.render::make-fly-camera))
+         (heights
+           (loop for rate in '(30 60 144) collect
+             (let* ((player (make-test-walking-body 10.5 10.5 30.0))
+                    (position (luft.render:walking-player-position player)))
+               (dotimes (i rate)
+                 (luft.render::advance-walking-player player store camera 0.0 0.0 (/ 1.0 rate)))
+               (luv.arithmetic.lisp.vec3:vec3-z position)))))
+    (dolist (height heights)
+      (true (< (abs (- height 18.0)) 0.001) "one second falls half g times t squared"))))
+
+(define-test follow-camera-starts-inside-the-body-and-reserves-clearance
+  (let* ((store (make-body-collision-fixture))
+         (viewer (allocate-instance (find-class 'luft.render:viewer)))
+         (player (make-test-walking-body 10.5 10.5 1.0))
+         (camera (luft.render::make-fly-camera)))
+    (loop for y from 8 to 13 do
+      (loop for z from 0 to 6 do (luft:fiber-store-edit-cell store 11 y z 1)))
+    (setf (slot-value viewer 'luft.render::player) player
+          (slot-value viewer 'luft.render::camera) camera
+          (slot-value viewer 'luft.render::source) store
+          (luft.render::walking-player-heading-x player) 1.0
+          (luft.render::walking-player-heading-y player) 0.0
+          (luft.render::camera-position camera) (luv.arithmetic.lisp.vec3:make-vec3 14.0 10.5 2.45))
+    (luft.render::constrain-viewer-follow-camera viewer)
+    (true (< (luv.arithmetic.lisp.vec3:vec3-x (luft.render::camera-position camera)) 10.85)
+          "look-ahead beyond the wall cannot put the camera through it")
+    (true (> (luv.arithmetic.lisp.vec3:vec3-x (luft.render::camera-position camera)) 10.5))))

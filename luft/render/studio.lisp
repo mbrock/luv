@@ -316,49 +316,41 @@ boundary over the chunk fibers and dense face records."
             (remember :z step-z (vec3:vec3-z direction))))))))
 
 (defun constrain-viewer-follow-camera (viewer)
-  "Keep a following camera on the traveler's side of sanctuary geometry.
+  "Keep the following eye and its near plane on the player's side of walls.
 
-The player can pass through a gate while the preferred isometric perch is
-still outside the rampart.  Cast from the look-at point to the *actual*
-smoothed camera position, rather than the ideal perch: this preserves the
-soft follow but never lets a wall sit between the eye and the hermit."
+Start at the body, not the look-ahead target, which can itself be inside a
+wall. Corner rays reserve space for the near plane, even at grazing angles."
   (let ((player (viewer-player viewer)))
     (when player
-      (let* ((player-position (walking-player-position player))
-             (heading-x (walking-player-heading-x player))
-             (heading-y (walking-player-heading-y player))
-             ;; Match FOLLOW-WALKING-PLAYER's look-ahead exactly.  This is
-             ;; the point the player-owned frame promises to keep visible.
-             (aim-x (+ (vec3:vec3-x player-position) (* 2.4 heading-x)))
-             (aim-y (+ (vec3:vec3-y player-position) (* 2.4 heading-y)))
-             (aim-z (+ (vec3:vec3-z player-position) 1.45))
-             (aim (vec3:make-vec3 aim-x aim-y aim-z))
-             (camera-position (camera-position (viewer-camera viewer)))
-             (dx (- (vec3:vec3-x camera-position) aim-x))
-             (dy (- (vec3:vec3-y camera-position) aim-y))
-             (dz (- (vec3:vec3-z camera-position) aim-z))
-             (distance (sqrt (+ (* dx dx) (* dy dy) (* dz dz)))))
+      (let* ((position (walking-player-position player))
+             (aim (vec3:make-vec3 (vec3:vec3-x position)
+                                 (vec3:vec3-y position)
+                                 (+ (vec3:vec3-z position) 1.45)))
+             (eye (camera-position (viewer-camera viewer)))
+             (delta (vec3:make-vec3 (- (vec3:vec3-x eye) (vec3:vec3-x aim))
+                                   (- (vec3:vec3-y eye) (vec3:vec3-y aim))
+                                   (- (vec3:vec3-z eye) (vec3:vec3-z aim))))
+             (distance (vec3:vec3-length delta))
+             (safe-distance distance))
         (when (> distance 0.01)
-          (let ((inspection
-                  ;; The sanctuary is finite while the pleasant isometric
-                  ;; perch can look out across its edge.  An off-map ray is
-                  ;; simply no occluder, never a reason to park the frame.
-                  (handler-case
-                      (raycast-site (viewer-source viewer) aim
-                                    (vec3:make-vec3 dx dy dz)
-                                    :max-distance distance)
-                    (error () nil))))
-            (when inspection
-              ;; Leave enough room for the near plane and an over-the-
-              ;; shoulder silhouette.  The camera therefore tucks into the
-              ;; room smoothly instead of landing on the wall itself.
-              (let* ((safe-distance
-                       (max 0.75 (- (site-inspection-distance inspection)
-                                    0.40)))
-                     (scale (/ safe-distance distance)))
-                (setf (vec3:vec3-x camera-position) (+ aim-x (* dx scale))
-                      (vec3:vec3-y camera-position) (+ aim-y (* dy scale))
-                      (vec3:vec3-z camera-position) (+ aim-z (* dz scale))))))))))
+          (dolist (offset '((0 0 0)
+                            (-0.16 -0.16 -0.16) (-0.16 -0.16 0.16)
+                            (-0.16 0.16 -0.16) (-0.16 0.16 0.16)
+                            (0.16 -0.16 -0.16) (0.16 -0.16 0.16)
+                            (0.16 0.16 -0.16) (0.16 0.16 0.16)))
+            (let* ((origin (vec3:make-vec3
+                            (+ (vec3:vec3-x aim) (first offset))
+                            (+ (vec3:vec3-y aim) (second offset))
+                            (+ (vec3:vec3-z aim) (third offset))))
+                   (inspection (raycast-site (viewer-source viewer) origin delta
+                                             :max-distance distance)))
+              (when inspection
+                (setf safe-distance
+                      (min safe-distance
+                           (max 0.0 (- (site-inspection-distance inspection) 0.02)))))))
+          (when (< safe-distance distance)
+            (setf (camera-position (viewer-camera viewer))
+                  (add-scaled-directions aim delta (/ safe-distance distance))))))))
   viewer)
 
 (defun projection-lane (width height field-of-view near far)
@@ -579,12 +571,14 @@ the selector is the whole of the difference."
        (+ (luft:site-z cell) dz) luft:+cell-extent+ 1))))
 
 (defun walking-player-overlaps-cell-p (player cell)
-  "Whether PLAYER's point footprint and standing height intersect CELL."
+  "Whether CELL intersects the same full body used by movement collision."
   (let* ((position (walking-player-position player))
          (base-z (vec3:vec3-z position))
          (cell-z (luft:site-z cell)))
-    (and (= (floor (vec3:vec3-x position)) (luft:site-x cell))
-         (= (floor (vec3:vec3-y position)) (luft:site-y cell))
+    (and (< (- (vec3:vec3-x position) +walking-player-radius+) (1+ (luft:site-x cell)))
+         (> (+ (vec3:vec3-x position) +walking-player-radius+) (luft:site-x cell))
+         (< (- (vec3:vec3-y position) +walking-player-radius+) (1+ (luft:site-y cell)))
+         (> (+ (vec3:vec3-y position) +walking-player-radius+) (luft:site-y cell))
          (< cell-z (+ base-z (walking-player-height player)))
          (< base-z (1+ cell-z)))))
 

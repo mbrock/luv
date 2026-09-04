@@ -291,8 +291,11 @@ zero, guard materials, and light lookup equivalence across a chunk seam.
 Ordinary Luft play starts in first person over the same chunk world and
 walking player as the atelier. The existing camera supplies mouse look;
 the eye follows the player's feet at 1.62 cells, with a 1.8-cell collision
-height. Vertical movement sweeps floors and ceilings, including a floor
-removed by editing. The perspective presentation omits the miniature
+height and a 0.6-cell-wide box. Collision sweeps the full body to the first
+voxel contact and slides along walls. Walking never changes the foot height:
+a full block needs a jump, and leaving an edge falls under gravity. Movement
+is integrated in steps of at most 1/120 second. Vertical sweeps include
+ceilings and a floor removed by editing. The perspective presentation omits the miniature
 view's tilt-shift blur and shows a small central crosshair.
 
 Click to capture the pointer, use WASD to walk and Space to jump. Left click
@@ -304,9 +307,19 @@ all three inhabit the same world. The status line shows the selected material
 and edit result. Startup and mode changes preserve the existing McCLIM host,
 commands, streaming, and renderer.
 
+The point-footprint controller had let the eye approach a wall to within
+0.036 cells, exposing the surface underside through the near plane. Full-body
+collision now leaves the camera clearance. Following cameras also cast from
+the body, rather than a look-ahead point that may be inside a wall, and reserve
+space for the near plane. Placement uses the same body box.
+
 The live input probe placed and removed a limestone block, walked through
 the key-event handler, jumped and landed, selected a material, and cycled all
-three views. The dedicated renderer suite passed 603 checks and the core
+three views. A probe on the user's terrain fell from height 20 to 18 through
+continuous intermediate heights and landed without penetration. The dedicated
+renderer suite passed 687 checks, including both sweep directions on all axes,
+wall sliding, ledge departure, jumping onto a block, camera clearance, and
+matching gravity at 30, 60, and 144 frames per second. The core
 passed 611,001 star checks. The repository-wide run passed Luft but encountered
 macOS Objective-C initialization failures in forked test workers and a Tracy
 launcher timing assertion.

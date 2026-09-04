@@ -9,7 +9,8 @@
 (defconstant +walking-player-height+ 2.9)
 (defconstant +walking-player-step-height+ 1)
 (defconstant +walking-player-maximum-drop+ 2)
-(defconstant +walking-player-maximum-axis-substep+ 0.5)
+(defconstant +walking-player-radius+ 0.3)
+(defconstant +walking-collision-epsilon+ 1.0e-5)
 (defconstant +walking-player-half-step+ 0.75)
 (defconstant +walking-player-speed+ 7.0)
 (defconstant +walking-player-gravity+ -24.0)
@@ -157,12 +158,59 @@ authoritative while the player crosses between its cell-centre waypoints."))
   player)
 
 (defun walking-player-clear-at-p
-    (solid x y base-z &optional (height +walking-player-height+))
-  "Whether the point-footprint player fits above BASE-Z at X,Y."
+    (solid x y base-z &optional (height +walking-player-height+)
+                              (radius +walking-player-radius+))
+  "Whether the full body fits; touching a cell face is not penetration."
   (with-collision-boundary ()
-    (luft:fiber-store-column-clear-p
-     solid (floor x) (floor y)
-     (floor base-z) (ceiling (+ base-z height)))))
+    (loop for cell-x from (floor (+ (- x radius) +walking-collision-epsilon+))
+            below (ceiling (- (+ x radius) +walking-collision-epsilon+))
+          always
+          (loop for cell-y from (floor (+ (- y radius) +walking-collision-epsilon+))
+                  below (ceiling (- (+ y radius) +walking-collision-epsilon+))
+                always (luft:fiber-store-column-clear-p
+                        solid cell-x cell-y
+                        (floor (+ base-z +walking-collision-epsilon+))
+                        (ceiling (- (+ base-z height) +walking-collision-epsilon+)))))))
+
+(defun sweep-walking-body-axis (solid position height radius axis amount)
+  "Clip an axis displacement against every voxel crossed by the body's box.
+
+Return the allowed displacement and whether contact shortened it. Other axes
+retain their positions, so successive sweeps slide along walls and corners."
+  (let* ((low (vec3:make-vec3 (- (vec3:vec3-x position) radius)
+                              (- (vec3:vec3-y position) radius)
+                              (vec3:vec3-z position)))
+         (high (vec3:make-vec3 (+ (vec3:vec3-x position) radius)
+                               (+ (vec3:vec3-y position) radius)
+                               (+ (vec3:vec3-z position) height)))
+         (allowed amount))
+    (flet ((start (a)
+             (floor (+ (vec3:vec3-component low a)
+                       (if (eq a axis) (min 0 amount) 0)
+                       +walking-collision-epsilon+)))
+           (end (a)
+             (ceiling (- (+ (vec3:vec3-component high a)
+                            (if (eq a axis) (max 0 amount) 0))
+                         +walking-collision-epsilon+))))
+      (loop for x from (start :x) below (end :x) do
+        (loop for y from (start :y) below (end :y) do
+          (loop for z from (start :z) below (end :z)
+                when (= 1 (collision-cell-occupancy-bit solid x y z))
+                  do (let ((cell (ecase axis (:x x) (:y y) (:z z))))
+                       (cond
+                         ((and (plusp amount)
+                               (>= cell (- (vec3:vec3-component high axis)
+                                           +walking-collision-epsilon+)))
+                          (setf allowed
+                                (min allowed (max 0 (- cell
+                                                       (vec3:vec3-component high axis))))))
+                         ((and (minusp amount)
+                               (<= (1+ cell) (+ (vec3:vec3-component low axis)
+                                                +walking-collision-epsilon+)))
+                          (setf allowed
+                                (max allowed (min 0 (- (1+ cell)
+                                                       (vec3:vec3-component low axis))))))))))))
+    (values allowed (/= allowed amount))))
 
 (defun walking-player-support-height
     (source x y current-base-z &optional (height +walking-player-height+))
@@ -397,66 +445,26 @@ rather than silently becoming a straight-line collision attempt."
              (direction-x (/ dx (max distance 1.0e-6)))
              (direction-y (/ dy (max distance 1.0e-6)))
              (yaw (camera-yaw camera)))
+        ;; Routes express a desired step; the same jump/gravity controller
+        ;; must actually get there instead of snapping to the waypoint height.
+        (when (and (walking-player-grounded-p player)
+                   (> (luft:site-z cell) (+ (vec3:vec3-z position) 0.1)))
+          (request-walking-player-jump player))
         (values (+ (* (cos yaw) direction-x) (* (sin yaw) direction-y))
                 (- (* (sin yaw) direction-x) (* (cos yaw) direction-y))
                 distance)))))
 
 (defun try-walking-player-axis (player source axis amount)
-  "Sweep PLAYER along one horizontal AXIS, sliding at blocked boundaries."
-  (let* ((position (walking-player-position player))
-         ;; No substep spans a whole terrain cell, so an endpoint beyond a
-         ;; thin wall can never hide the occupied cell crossed to reach it.
-         (step-count
-           (max 1 (ceiling (/ (abs amount)
-                              +walking-player-maximum-axis-substep+))))
-         (step (/ amount step-count))
-         (x (vec3:vec3-x position))
-         (y (vec3:vec3-y position))
-         (z (vec3:vec3-z position))
-         (clear-p t))
-    ;; Validate the whole axis attempt before publishing it.  Axis separation
-    ;; therefore retains its atomic slide-at-a-wall behavior while every cell
-    ;; crossed by a long attempt still participates in collision.
-    (loop repeat step-count
-          while clear-p
-          do (incf x (if (eq axis :x) step 0.0))
-             (incf y (if (eq axis :y) step 0.0))
-             (let ((support (walking-player-support-height
-                             source x y z (walking-player-height player))))
-               (if support
-                   (setf z support)
-                   (unless (walking-player-clear-at-p
-                            (inspection-source-solid source) x y z
-                            (walking-player-height player))
-                     (setf clear-p nil)))))
-    (when clear-p
-      (setf (vec3:vec3-x position) x
-            (vec3:vec3-y position) y
-            (vec3:vec3-z position) z)
-      t)))
-
-(defun try-walking-player-air-axis (player source axis amount)
-  "Sweep one airborne horizontal axis while retaining solid wall collision."
-  (let* ((position (walking-player-position player))
-         (solid (inspection-source-solid source))
-         (step-count
-           (max 1 (ceiling (/ (abs amount)
-                              +walking-player-maximum-axis-substep+))))
-         (step (/ amount step-count))
-         (x (vec3:vec3-x position))
-         (y (vec3:vec3-y position))
-         (clear-p t))
-    (loop repeat step-count
-          while clear-p
-          do (incf x (if (eq axis :x) step 0.0))
-             (incf y (if (eq axis :y) step 0.0))
-             (unless (walking-player-clear-at-p
-                      solid x y (vec3:vec3-z position) (walking-player-height player))
-               (setf clear-p nil)))
-    (when clear-p
-      (setf (vec3:vec3-x position) x
-            (vec3:vec3-y position) y)
-      t)))
+  "Move up to horizontal contact without changing the player's foot height."
+  (let ((position (walking-player-position player)))
+    (multiple-value-bind (travel blocked-p)
+        (sweep-walking-body-axis
+         (inspection-source-solid source) position (walking-player-height player)
+         +walking-player-radius+ axis amount)
+      (ecase axis
+        (:x (incf (vec3:vec3-x position) travel))
+        (:y (incf (vec3:vec3-y position) travel)))
+      (not blocked-p))))
 
 (defun request-walking-player-jump (player)
   "Request one grounded jump on PLAYER's next simulation step."
@@ -557,44 +565,38 @@ future spell or weapon action vocabulary will look like."
   player)
 
 (defun advance-walking-player-vertical (player source seconds)
-  "Sweep the body vertically, including ceilings and newly removed floors."
+  "Integrate gravity and sweep the whole body to the first floor or ceiling."
   (let* ((position (walking-player-position player))
          (solid (inspection-source-solid source))
          (height (walking-player-height player))
-         (x (vec3:vec3-x position))
-         (y (vec3:vec3-y position))
-         (z (vec3:vec3-z position))
          (jump-p (walking-player-jump-requested-p player)))
     (setf (walking-player-jump-requested-p player) nil)
     (when (and (walking-player-grounded-p player)
-               (walking-player-clear-at-p solid x y (- z 0.01) height))
+               (walking-player-clear-at-p
+                solid (vec3:vec3-x position) (vec3:vec3-y position)
+                (- (vec3:vec3-z position) 0.0001) height))
       (setf (walking-player-grounded-p player) nil))
     (when (and jump-p (walking-player-grounded-p player))
       (setf (walking-player-vertical-velocity player) +walking-player-jump-speed+
             (walking-player-grounded-p player) nil))
     (unless (walking-player-grounded-p player)
-      (incf (walking-player-vertical-velocity player)
-            (* +walking-player-gravity+ seconds))
-      (let* ((distance (* (walking-player-vertical-velocity player) seconds))
-             (steps (max 1 (ceiling (/ (abs distance) 0.25))))
-             (step (/ distance steps)))
-        (loop repeat steps
-              for next = (+ z step)
-              do (if (walking-player-clear-at-p solid x y next height)
-                     (setf z next)
-                     (progn
-                       (setf z (if (minusp step) (floor z)
-                                   (- (ceiling (+ z height)) height))
-                             (walking-player-vertical-velocity player) 0.0
-                             (walking-player-grounded-p player) (minusp step))
-                       (return))))
-        (setf (vec3:vec3-z position) z))))
+      (let* ((velocity (walking-player-vertical-velocity player))
+             (distance (+ (* velocity seconds)
+                          (* 0.5 +walking-player-gravity+ seconds seconds))))
+        (incf (walking-player-vertical-velocity player)
+              (* +walking-player-gravity+ seconds))
+        (multiple-value-bind (travel blocked-p)
+            (sweep-walking-body-axis solid position height +walking-player-radius+
+                                     :z distance)
+          (incf (vec3:vec3-z position) travel)
+          (when blocked-p
+            (setf (walking-player-vertical-velocity player) 0.0
+                  (walking-player-grounded-p player) (minusp distance)))))))
   player)
 
-(defun advance-walking-player
+(defun step-walking-player
     (player source camera forward right seconds &key maximum-distance)
   "Advance PLAYER from camera-relative movement axes for SECONDS."
-  (begin-walking-player-frame player)
   (let ((length (sqrt (+ (* forward forward) (* right right)))))
     (if (plusp length)
         (let* ((forward (/ forward length))
@@ -607,15 +609,8 @@ future spell or weapon action vocabulary will look like."
                (position (walking-player-position player))
                (before-x (vec3:vec3-x position))
                (before-y (vec3:vec3-y position)))
-          (if (walking-player-grounded-p player)
-              (progn
-                (try-walking-player-axis player source :x (* direction-x distance))
-                (try-walking-player-axis player source :y (* direction-y distance)))
-              (progn
-                (try-walking-player-air-axis
-                 player source :x (* direction-x distance))
-                (try-walking-player-air-axis
-                 player source :y (* direction-y distance))))
+          (try-walking-player-axis player source :x (* direction-x distance))
+          (try-walking-player-axis player source :y (* direction-y distance))
           (let* ((dx (- (vec3:vec3-x position) before-x))
                  (dy (- (vec3:vec3-y position) before-y))
                  (travelled (sqrt (+ (* dx dx) (* dy dy)))))
@@ -637,6 +632,18 @@ future spell or weapon action vocabulary will look like."
                 (max (- maximum-change)
                      (min maximum-change difference))))))
   (advance-walking-player-vertical player source seconds)
+  player)
+
+(defun advance-walking-player
+    (player source camera forward right seconds &key maximum-distance)
+  "Integrate movement in at most 1/120-second steps, retaining one frame pose."
+  (begin-walking-player-frame player)
+  (let* ((steps (max 1 (ceiling (* seconds 120))))
+         (dt (/ seconds steps)))
+    (dotimes (i steps)
+      (step-walking-player player source camera forward right dt
+                           :maximum-distance (and maximum-distance
+                                                  (/ maximum-distance steps)))))
   (advance-walking-player-fireball player seconds)
   (setf (walking-player-spell-flash player)
         (max 0.0 (- (walking-player-spell-flash player) (* 2.4 seconds))))
