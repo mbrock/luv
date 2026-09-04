@@ -694,6 +694,15 @@ future spell or weapon action vocabulary will look like."
     (player source camera forward right seconds &key maximum-distance)
   "Integrate movement in at most 1/120-second steps, retaining one frame pose."
   (begin-walking-player-frame player)
+  ;; A demand world starts with no published collision window. Missing chunks
+  ;; normally mean air, but applying that policy before initial publication
+  ;; drops the player through the authored spawn while its road is loading.
+  ;; Do not accumulate this time or consume queued input. Static empty scenes
+  ;; still simulate normally, and resident empty chunks really do mean air.
+  (when (and (typep source 'streaming-scene)
+             (streaming-scene-source source)
+             (zerop (luft:fiber-store-count (scene-solid source))))
+    (return-from advance-walking-player player))
   (let* ((steps (max 1 (ceiling (* seconds 120))))
          (dt (/ seconds steps)))
     (dotimes (i steps)

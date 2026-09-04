@@ -310,6 +310,13 @@ milliseconds, and a point-valued result. This is a first checked boundary,
 not a claim that collision code or every player slot is quantity-checked;
 the numerical equation and stepping policy are unchanged.
 
+Demand-world startup holds the player at the authored spawn until the first
+collision window is published. Source chunks finishing on workers are not
+enough: gameplay reads the owner-published fiber store. Previously, the
+missing-chunk-as-air policy let gravity drop the player below the road before
+it arrived. The wait preserves pending jump input and frame history without
+accumulating simulation time; a published empty chunk still permits falling.
+
 Click to capture the pointer, use WASD to walk and Space to jump. Left click
 removes the targeted block; right click places the selected material beside
 its face, within six cells and outside the player's body. Middle click picks

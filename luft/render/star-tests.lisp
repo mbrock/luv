@@ -353,6 +353,42 @@
                                                          source (1+ x) y))
           "the authored road has an immediately traversable neighboring cell")))
 
+(define-test authored-world-player-waits-for-initial-collision-publication
+  (let* ((scene (luft.render:make-authored-world-streaming-scene))
+         (source (luft.render::streaming-scene-source scene))
+         (player (luft.render::make-scene-walking-player scene))
+         (position (luft.render:walking-player-position player))
+         (x (luv.arithmetic.lisp.vec3:vec3-x position))
+         (y (luv.arithmetic.lisp.vec3:vec3-y position))
+         (z (luv.arithmetic.lisp.vec3:vec3-z position))
+         (key (luft:chunk-key-at (floor x) (floor y)))
+         (camera (luft.render::make-fly-camera)))
+    ;; Demand completion is not collision publication. Even an accepted CPU
+    ;; chunk must not start physics before the owner publishes SCENE-SOLID.
+    (setf (gethash key (luft.render::streaming-scene-store scene))
+          (luft.render::materialize-authored-world-chunk source key 1))
+    (luft.render::request-walking-player-jump player)
+    (dotimes (i 10)
+      (luft.render::advance-walking-player player scene camera 1.0 0.0 0.1))
+    (true (= x (luv.arithmetic.lisp.vec3:vec3-x position)))
+    (true (= y (luv.arithmetic.lisp.vec3:vec3-y position)))
+    (true (= z (luv.arithmetic.lisp.vec3:vec3-z position)))
+    (true (zerop (luft.render::walking-player-vertical-velocity player)))
+    (true (luft.render::walking-player-jump-requested-p player))
+    (true (equalp position (luft.render::walking-player-previous-position player)))
+    (luft.render::rebuild-authored-world-resident-values scene (list key))
+    (luft.render::advance-walking-player player scene camera 0.0 0.0 0.1)
+    (true (< z (luv.arithmetic.lisp.vec3:vec3-z position) (+ z 1.0))
+          "publication releases the queued jump with only this frame's time")
+    (true (not (luft.render::walking-player-jump-requested-p player)))
+    (setf (luft:fiber-store-chunk (luft.render:scene-solid scene) key)
+          (luft:make-chunk-fibers (luft.render::scene-domain scene) key))
+    (let ((falling (luft.render::make-scene-walking-player scene)))
+      (luft.render::advance-walking-player falling scene camera 0.0 0.0 0.1)
+      (true (< (luv.arithmetic.lisp.vec3:vec3-z
+                (luft.render:walking-player-position falling)) z)
+            "published empty terrain is air, not a loading barrier"))))
+
 (define-test authored-world-gameplay-collision-crosses-the-render-seam
   (let* ((scene (luft.render:make-authored-world-streaming-scene
                  :horizontal-bits 8))
