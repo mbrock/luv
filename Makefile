@@ -143,7 +143,8 @@ luft-shader-validate:
 		--eval '(require :asdf)' \
 		--eval '(handler-bind ((warning (function muffle-warning))) (progn (asdf:load-asd (truename "luv.asd")) (asdf:load-asd (truename "luft.asd")) (asdf:load-system :luft/renderer)))' \
 		--eval '(handler-bind ((warning (function muffle-warning))) (luft.render.shaders:write-production-spir-v #p"build/"))'
-	@sh -c 'status=0; for f in build/luft-*.spv; do spirv-val --target-env vulkan1.0 "$$f" || status=1; done; exit $$status'
+	@# Mesh stages emit SPIR-V 1.4, supported by Vulkan 1.2 and later.
+	@sh -c 'status=0; for f in build/luft-*.spv; do spirv-val --target-env vulkan1.2 "$$f" || status=1; done; exit $$status'
 	@sh -c 'sha256sum build/luft-*.spv'
 	@echo "luft-shader-validate: all LUFT SPIR-V modules valid."
 
