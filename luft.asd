@@ -7,6 +7,7 @@
   :depends-on ("sb-simd")
   :serial t
   :components ((:file "luft/luft")
+               (:file "luft/fibers")
                (:file "luft/voxel-light")
                (:file "luft/mesh")
                (:file "luft/star-geometry")

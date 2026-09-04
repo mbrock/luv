@@ -5,15 +5,20 @@
 ;;; fibers, mixed eight-cell stars are selected a word at a time, and the mesh
 ;;; shader reads the atlas.
 
+(defun %chunk-domain (chunk)
+  (etypecase chunk
+    (chain (chain-domain chunk))
+    (chunk-fibers (chunk-fibers-domain chunk))))
+
 (defun %mesh-neighbor-chunk (domain key)
   "Resolve KEY once through the streaming boundary protocol."
   (restart-case (error 'missing-chunk :domain domain :key key)
-    (use-chunk (chain)
-      :report "Supply the resident chunk chain."
-      (check-type chain chain)
-      (unless (world-domain= domain (chain-domain chain))
+    (use-chunk (chunk)
+      :report "Supply the resident chunk as a chain or fibers."
+      (check-type chunk (or chain chunk-fibers))
+      (unless (world-domain= domain (%chunk-domain chunk))
         (error "Neighbor chunk belongs to another world domain."))
-      chain)
+      chunk)
     (treat-as-air ()
       :report "Treat this whole chunk as air."
       nil)
@@ -23,7 +28,7 @@
 
 (defun %mesh-star-neighborhood (chunk chunk-key)
   "Return the at-most-nine chains whose cells touch CHUNK-KEY's sites."
-  (let* ((domain (chain-domain chunk))
+  (let* ((domain (%chunk-domain chunk))
          (grid-x (chunk-key-x chunk-key))
          (grid-y (chunk-key-y chunk-key))
          (x-chunks (ceiling (world-domain-x-limit domain) +chunk-size+))
@@ -80,7 +85,7 @@
               ,@body))
          (gather (active active-start x y southwest southeast
                   northwest northeast)
-           `(dotimes (word +star-fiber-word-count+)
+           `(dotimes (word +fiber-word-count+)
               (let ((bits (aref ,active (+ ,active-start word))))
                 (loop while (plusp bits) do
                   (let* ((lowest (logand bits (- bits)))
@@ -103,13 +108,13 @@
           ;; out-of-window upper-half load.
           (let ((active
                   (make-array (* 2 (1+ (- x1 x0))
-                                 +star-fiber-word-count+)
+                                 +fiber-word-count+)
                               :element-type '(unsigned-byte 64))))
             (loop for y fixnum from y0 to y1 by 2 do
               (let ((paired-p (< y y1)))
                 (loop for x fixnum from x0 to x1
                       for active-start fixnum from 0
-                        by (* 2 +star-fiber-word-count+)
+                        by (* 2 +fiber-word-count+)
                       do (with-fiber-bases
                              (southwest southeast northwest northeast) x y
                            (funcall
@@ -120,15 +125,15 @@
                 (dotimes (row (if paired-p 2 1))
                   (loop for x fixnum from x0 to x1
                         for active-start fixnum
-                          from (* row +star-fiber-word-count+)
-                          by (* 2 +star-fiber-word-count+)
+                          from (* row +fiber-word-count+)
+                          by (* 2 +fiber-word-count+)
                         do (with-fiber-bases
                                (southwest southeast northwest northeast)
                                x (+ y row)
                              (gather active active-start x (+ y row)
                                      southwest southeast northwest
                                      northeast)))))))
-          (let ((active (make-array +star-fiber-word-count+
+          (let ((active (make-array +fiber-word-count+
                                     :element-type '(unsigned-byte 64)))
                 (kernel (%star-active-kernel)))
             (loop for y fixnum from y0 to y1 do
@@ -140,7 +145,7 @@
                   (gather active 0 x y southwest southeast
                           northwest northeast))))))
       #-x86-64
-      (let ((active (make-array +star-fiber-word-count+
+      (let ((active (make-array +fiber-word-count+
                                 :element-type '(unsigned-byte 64)))
             (kernel (%star-active-kernel)))
         (loop for y fixnum from y0 to y1 do
@@ -182,10 +187,11 @@ even a bare diagnostic mesh retains all eight neighboring occupancy values."
     codes))
 
 (defun mesh-star-chunk (chunk chunk-key &key outside-domain-policy)
-  "Turn one resident chunk neighborhood into the complete mesh-shader ABI."
-  (check-type chunk chain)
+  "Turn one resident chunk neighborhood into the complete mesh-shader ABI.
+CHUNK is the owner's chain or fibers; neighbors arrive by MISSING-CHUNK."
+  (check-type chunk (or chain chunk-fibers))
   (check-type outside-domain-policy (member nil :air :solid))
-  (let* ((domain (chain-domain chunk))
+  (let* ((domain (%chunk-domain chunk))
          (x0 (chunk-origin-x chunk-key))
          (y0 (chunk-origin-y chunk-key))
          (x1 (min (+ x0 +chunk-size+) (world-domain-x-limit domain)))

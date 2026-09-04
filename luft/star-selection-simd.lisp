@@ -9,9 +9,9 @@
 (defun %star-active-words-scalar
     (below above southwest southeast northwest northeast active active-start)
   (declare (optimize (speed 3) (safety 0))
-           (type star-fiber-vector below above active)
+           (type fiber-vector below above active)
            (type fixnum southwest southeast northwest northeast active-start))
-  (dotimes (word +star-fiber-word-count+ active)
+  (dotimes (word +fiber-word-count+ active)
     (setf (aref active (+ active-start word))
           (%mixed-occupancy-word
            (aref below (+ southwest word))
@@ -34,10 +34,10 @@
            (below above southwest southeast northwest northeast
             active active-start)
          (declare (optimize (speed 3) (safety 0))
-                  (type star-fiber-vector below above active)
+                  (type fiber-vector below above active)
                   (type fixnum southwest southeast northwest northeast
                        active-start))
-         (loop for word fixnum from 0 below +star-fiber-word-count+
+         (loop for word fixnum from 0 below +fiber-word-count+
                by ,lanes do
            (let ((below-southwest (,aref-wide below (+ southwest word)))
                  (below-southeast (,aref-wide below (+ southeast word)))
