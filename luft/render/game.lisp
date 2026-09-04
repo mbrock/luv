@@ -12,9 +12,18 @@
 (defconstant +walking-player-radius+ 0.3)
 (defconstant +walking-collision-epsilon+ 1.0e-5)
 (defconstant +walking-player-half-step+ 0.75)
-(defconstant +walking-player-speed+ 7.0)
-(defconstant +walking-player-gravity+ -24.0)
-(defconstant +walking-player-jump-speed+ 9.0)
+(luv.arithmetic:define-quantity-constant +walking-player-speed+ 7.0
+  :type real
+  :quantity (:quantity quantities:world-velocity
+             :unit ((quantities:cell 1) (:second -1))))
+(luv.arithmetic:define-quantity-constant +walking-player-gravity+ -24.0
+  :type real
+  :quantity (:quantity quantities:world-acceleration
+             :unit ((quantities:cell 1) (:second -2))))
+(luv.arithmetic:define-quantity-constant +walking-player-jump-speed+ 9.0
+  :type real
+  :quantity (:quantity quantities:world-velocity
+             :unit ((quantities:cell 1) (:second -1))))
 (defparameter *walking-path-horizontal-radius* 80
   "Farthest horizontal cell distance admitted by one click-to-walk route.")
 (defparameter *walking-path-vertical-radius* 16
@@ -72,9 +81,17 @@ box and fall through nothing they cannot see."
 
 (defclass walking-player ()
   ((height :initarg :height :initform +walking-player-height+
+           :type real
+           :quantity (:quantity quantities:world-distance :unit quantities:cell)
            :accessor walking-player-height)
-   (position :initarg :position :accessor walking-player-position)
+   (position :initarg :position :type vec3:vec3
+             :quantity (:quantity quantities:world-position
+                        :unit quantities:cell :tensor-order 1)
+             :accessor walking-player-position)
    (previous-position :initarg :position
+                      :type vec3:vec3
+                      :quantity (:quantity quantities:world-position
+                                 :unit quantities:cell :tensor-order 1)
                       :accessor walking-player-previous-position)
    (heading-x :initarg :heading-x :initform 0.0
               :accessor walking-player-heading-x)
@@ -87,8 +104,14 @@ box and fall through nothing they cannot see."
    (gait :initform 0.0 :accessor walking-player-gait)
    (previous-gait :initform 0.0 :accessor walking-player-previous-gait)
    (speed :initarg :speed :initform +walking-player-speed+
+          :type real
+          :quantity (:quantity quantities:world-velocity
+                     :unit ((quantities:cell 1) (:second -1)))
           :accessor walking-player-speed)
-   (vertical-velocity :initform 0.0 :accessor walking-player-vertical-velocity)
+   (vertical-velocity :initform 0.0 :type real
+                      :quantity (:quantity quantities:world-velocity
+                                 :unit ((quantities:cell 1) (:second -1)))
+                      :accessor walking-player-vertical-velocity)
    (grounded-p :initform t :accessor walking-player-grounded-p)
    (route :initform nil :accessor walking-player-route)
    (jump-requested-p :initform nil
@@ -102,11 +125,44 @@ box and fall through nothing they cannot see."
                       :accessor walking-player-fireball-velocity)
    (fireball-distance-remaining
     :initform 0.0 :accessor walking-player-fireball-distance-remaining))
+  (:metaclass luv.arithmetic.records:quantity-class)
   (:documentation
    "The continuous, player-owned state of LUFT's walking character.
 
 POSITION is the centre of the character's feet.  Heading and gait are
 semantic animation inputs; keys and shader clocks are deliberately absent."))
+
+(luv.arithmetic.lisp:define-lisp-arithmetic-function ballistic-displacement
+    ((velocity :quantity quantities:world-velocity
+               :unit ((quantities:cell 1) (:second -1)))
+     (acceleration :quantity quantities:world-acceleration
+                   :unit ((quantities:cell 1) (:second -2)))
+     (elapsed :quantity quantities:elapsed-time :unit :second))
+  ;; A signed displacement, not a nonnegative WORLD-DISTANCE or a point.
+  (luv.arithmetic.language:interpret
+   (+ (* velocity elapsed) (* 0.5 acceleration elapsed elapsed))
+   :quantity quantities:world-z-position :unit quantities:cell
+   :character :difference))
+
+(defparameter *walking-duration-declaration*
+  (luv.arithmetic:make-represented-value-declaration
+   :representation-type 'real
+   :quantity-specification
+   (luv.arithmetic:make-declared-quantity-specification
+    '(:quantity quantities:elapsed-time :unit :second))))
+
+(defparameter *walking-displacement-realization*
+  (luv.arithmetic.lisp:make-lisp-arithmetic-realization
+   'ballistic-displacement :parameter-representation-types '(real real real)
+   :result-representation-type 'real))
+
+(defparameter *walking-displacement-function*
+  (luv.arithmetic.lisp:bind-lisp-arithmetic-realization
+   *walking-displacement-realization*
+   (list (luv.arithmetic.records:record-slot-declaration
+          'walking-player 'vertical-velocity)
+         (luv.arithmetic:value-declaration-for '+walking-player-gravity+)
+         *walking-duration-declaration*)))
 
 (defclass walking-route ()
   ((start :initarg :start :reader walking-route-start)
@@ -581,8 +637,8 @@ future spell or weapon action vocabulary will look like."
             (walking-player-grounded-p player) nil))
     (unless (walking-player-grounded-p player)
       (let* ((velocity (walking-player-vertical-velocity player))
-             (distance (+ (* velocity seconds)
-                          (* 0.5 +walking-player-gravity+ seconds seconds))))
+             (distance (funcall *walking-displacement-function*
+                                velocity +walking-player-gravity+ seconds)))
         (incf (walking-player-vertical-velocity player)
               (* +walking-player-gravity+ seconds))
         (multiple-value-bind (travel blocked-p)

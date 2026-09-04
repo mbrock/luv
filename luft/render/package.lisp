@@ -16,6 +16,8 @@
            #:world-x-position
            #:world-y-position
            #:world-z-position
+           #:world-velocity
+           #:world-acceleration
            #:world-direction
            #:world-x-direction
            #:world-y-direction

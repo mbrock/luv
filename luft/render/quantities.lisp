@@ -21,6 +21,8 @@
 (defconstant world-x-position 'world-x-position)
 (defconstant world-y-position 'world-y-position)
 (defconstant world-z-position 'world-z-position)
+(defconstant world-velocity 'world-velocity)
+(defconstant world-acceleration 'world-acceleration)
 (defconstant world-direction 'world-direction)
 (defconstant world-x-direction 'world-x-direction)
 (defconstant world-y-direction 'world-y-direction)
@@ -91,6 +93,12 @@
 (define-quantity world-position :kind spatial-coordinate
   :character :point
   :components (world-x-position world-y-position world-z-position))
+;;; Rates are lattice rates, not SI speed/acceleration: a cell has no
+;;; implicit conversion to a metre. Keep these kinds private to Luft too.
+(define-quantity-kind 'spatial-velocity :dimension ((:duration -1)))
+(define-quantity-kind 'spatial-acceleration :dimension ((:duration -2)))
+(define-quantity world-velocity :kind 'spatial-velocity)
+(define-quantity world-acceleration :kind 'spatial-acceleration)
 (define-quantity world-direction :kind unit-direction
   :components (world-x-direction world-y-direction world-z-direction))
 (define-quantity world-orientation :kind orientation-vector

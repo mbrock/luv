@@ -298,6 +298,18 @@ is integrated in steps of at most 1/120 second. Vertical sweeps include
 ceilings and a floor removed by editing. The perspective presentation omits the miniature
 view's tilt-shift blur and shows a small central crosshair.
 
+The player now borrows Luvcraft's quantity-declared CLOS storage without
+wrapping its numbers or vectors. Current and previous positions are cell
+points; height is a cell distance; speed and vertical velocity are cells per
+second. Gravity is cells per second squared, not metres per second squared.
+The ballistic displacement equation is checked arithmetic, bound to the
+vertical-velocity slot, gravity constant, and elapsed-seconds declaration.
+Its result is a signed Z displacement rather than an absolute position or a
+nonnegative distance. Tests reject swapped velocity/acceleration, unconverted
+milliseconds, and a point-valued result. This is a first checked boundary,
+not a claim that collision code or every player slot is quantity-checked;
+the numerical equation and stepping policy are unchanged.
+
 Click to capture the pointer, use WASD to walk and Space to jump. Left click
 removes the targeted block; right click places the selected material beside
 its face, within six cells and outside the player's body. Middle click picks

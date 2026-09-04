@@ -608,6 +608,62 @@
     (true (= 2.0 (luv.arithmetic.lisp.vec3:vec3-z position)))
     (true (luft.render::walking-player-grounded-p player))))
 
+(define-test walking-ballistics-check-storage-without-wrapping-values
+  (luv.arithmetic:define-unit 'walking-millisecond
+    :reference :second :magnitude 1/1000 :quantity-kind :duration)
+  (let* ((position (luv.arithmetic.lisp.vec3:make-vec3 10.5 10.5 30.0))
+         (player (luft.render::make-walking-player :position position))
+         (velocity
+           (luv.arithmetic.records:record-slot-declaration
+            'luft.render::walking-player 'luft.render::vertical-velocity))
+         (gravity (luv.arithmetic:value-declaration-for
+                   'luft.render::+walking-player-gravity+))
+         (duration luft.render::*walking-duration-declaration*)
+         (realization luft.render::*walking-displacement-realization*)
+         (result (luv.arithmetic:declaration-quantity-specification
+                  (luv.arithmetic.lisp:lisp-arithmetic-realization-result-declaration
+                   realization))))
+    (true (eq position (luft.render:walking-player-position player)))
+    (true (not (eq position (luft.render::walking-player-previous-position player))))
+    (true (equalp position (luft.render::walking-player-previous-position player)))
+    (true (eq :difference (luv.arithmetic:quantity-specification-character result)))
+    (true (eq 'luft.render.quantities:world-z-position
+              (luv.arithmetic:quantity-specification-name result)))
+    (true (null (luv.arithmetic.records:record-slot-declaration
+                 'luft.render::walking-player 'luft.render::grounded-p)))
+    (true (compiled-function-p luft.render::*walking-displacement-function*))
+    ;; Signed motion and both float representations retain the old equation.
+    (dolist (v '(0.0 9.0 -7.0 9d0))
+      (dolist (dt '(0.0 0.125 0.5 1d0))
+        (true (= (+ (* v dt) (* 0.5 -24.0 dt dt))
+                 (funcall luft.render::*walking-displacement-function*
+                          v -24.0 dt)))))
+    (parachute:fail
+     (luv.arithmetic.lisp:bind-lisp-arithmetic-realization
+      realization (list gravity velocity duration))
+     'luv.arithmetic:declaration-compatibility-error)
+    (flet ((declaration (&rest options)
+             (luv.arithmetic:make-represented-value-declaration
+              :representation-type 'real
+              :quantity-specification
+              (luv.arithmetic:make-declared-quantity-specification options))))
+      ;; Milliseconds require an explicit conversion, not a relabelled number.
+      (parachute:fail
+       (luv.arithmetic.lisp:bind-lisp-arithmetic-realization
+        realization
+        (list velocity gravity
+              (declaration :quantity 'luft.render.quantities:elapsed-time
+                           :unit 'walking-millisecond)))
+       'luv.arithmetic:declaration-compatibility-error)
+      ;; The sweep consumes displacement, not an absolute foot height.
+      (parachute:fail
+       (luv.arithmetic.lisp:bind-lisp-arithmetic-realization
+        realization (list velocity gravity duration)
+        :actual-result-declaration
+        (declaration :quantity 'luft.render.quantities:world-z-position
+                     :unit 'luft.render.quantities:cell :character :point))
+       'luv.arithmetic:declaration-compatibility-error))))
+
 (define-test walking-gravity-agrees-across-render-frame-rates
   (let* ((store (make-body-collision-fixture))
          (camera (luft.render::make-fly-camera))
