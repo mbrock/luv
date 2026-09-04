@@ -77,13 +77,15 @@ outward order.  Coordinates are biased only to keep this first ABI unsigned."
 
 (defun pack-terrain-appearance-codes (codes)
   "Pack eight u8 sample codes per star into the GPU's parallel uvec2 lane."
+  (declare (type (simple-array (unsigned-byte 8) (*)) codes)
+           (optimize (speed 3) (safety 1)))
   (unless (zerop (mod (length codes) 8))
     (error "Terrain appearance has ~D bytes, not eight per active star."
            (length codes)))
   (let ((words (make-array (/ (length codes) 4)
                            :element-type '(unsigned-byte 32))))
-    (loop for offset from 0 below (length codes) by 4
-          for word from 0
+    (loop for offset fixnum from 0 below (length codes) by 4
+          for word fixnum from 0
           do (setf (aref words word)
                    (logior (aref codes offset)
                            (ash (aref codes (+ offset 1)) 8)

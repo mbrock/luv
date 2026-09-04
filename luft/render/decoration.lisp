@@ -219,7 +219,7 @@ diagnostic owner NIL remains a single-mesh special form."
 (zdefun (decorate-scene-meshes :zone :luft/decorate-meshes
                                 :value (length owners))
     (owners scene
-     &key surface-context
+     &key surface-context appearance-prepared-p
        (attachment-source-owners nil attachment-source-owners-p)
        request-stamp reusable-light-generation
        (realize-torch-light-p t)
@@ -239,7 +239,11 @@ which must never make a torch whose support source is absent look resident.
 
 The second value is an immutable SCENE-MESH-GENERATION.  Geometry is resolved
 before torch seeds; the field is solved or exactly reused next; only then are
-mesh light sidecars and packed body/flame frames finalized."
+mesh light sidecars and packed body/flame frames finalized.
+
+APPEARANCE-PREPARED-P is the regional compiler's promise that every surface
+already has appearance for this exact material snapshot. Light metadata is
+always initialized anew, including when immutable appearance arrays are reused."
   (check-type owners list)
   (check-type surface-context list)
   (let* ((frames
@@ -271,11 +275,13 @@ mesh light sidecars and packed body/flame frames finalized."
          (field (realized-light-generation-field light-generation)))
     (zone :luft/compile-appearance
       (let ((descriptors
-              (compile-terrain-material-descriptors
-               (scene-material-vocabulary scene))))
+              (unless appearance-prepared-p
+                (compile-terrain-material-descriptors
+                 (scene-material-vocabulary scene)))))
         (labels ((initialize (surface)
-                   (compile-surface-mesh-appearance
-                    surface (scene-material-cells scene) descriptors)
+                   (unless appearance-prepared-p
+                     (compile-surface-mesh-appearance
+                      surface (scene-material-cells scene) descriptors))
                    (setf (luft:surface-mesh-voxel-light surface) field
                          (luft:surface-mesh-attachments surface) nil)
                    (dolist (companion (luft:surface-mesh-companions surface))

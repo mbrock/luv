@@ -1342,3 +1342,64 @@ out of 255, with p99 at most two levels, excluding the status strip. Renderer
 checks passed (688), including Metal and Vulkan shader compilation and the
 atlas-bound regression. Captures and raw measurements are retained locally
 under =build/gpu-*-before.csv=, =build/gpu-*-final.csv=, and =build/perf-*.png=.
+
+* DONE Reuse unaffected star products after edits
+:PROPERTIES:
+:ID: WQCMA3
+:END:
+
+One authored cell edit previously selected stars for every output and guard
+owner, rebuilt every material sidecar, and repacked every GPU population.
+The live twelve-owner scene therefore performed 24 mesh selections per click.
+Star decoration consumes authored cells directly; meshed guard owners add no
+input. Only output owners now run selection.
+
+Each streaming cohort retains a bounded immutable CPU product cache. A product
+names its owner, domain, width, compiler functions, the exact fibers and
+material tables in its 3x3 guard, and the palette descriptor values. Arbitrary
+source, material, or compiler changes miss this cache. For a single-cell edit,
+valid products whose sampled XY box excludes the cell can advance to the
+successor chunk identities. Owners touching either side of a seam rebuild.
+This reduces an ordinary interior edit to one owner even though chunk tables
+are replaced as a whole.
+
+Borrowed geometry, appearance, and packed population arrays remain immutable.
+A fresh surface-mesh shell receives the new light field and generation
+witnesses. The complete cohort still passes the existing transactional renderer
+validation and uploads at the canvas boundary; GPU resource ownership and
+publication rules have not changed. Cache entries never retain prior snapshots
+or an unbounded edit history. The synchronous geometry-only compiler does not
+prepare unused GPU populations.
+
+** Measurements
+
+Paired probes in the foregrounded Metal window placed and removed a temporary
+limestone block near (152.08,50.51,26), preserving the user's material edits and
+undo history. Eight control edits used the previous full-region compiler with
+the current byte packer. After one cache-priming pair, eight optimized edits
+used the ordinary application edit path. These are CPU wall-clock medians:
+
+| Stage | Full rebuild control | Reuse |
+|-------+----------------------+-------|
+| Authored edit and scheduling | 3.92 ms | 3.49 ms |
+| Worker mesh and GPU-data preparation | 56.64 ms | 4.43 ms |
+| Canvas publication and upload | 1.93 ms | 2.46 ms |
+| Edit acceptance to updated-frame submission | 76.58 ms | 21.17 ms |
+
+Optimized submission latency ranged from 15.39 to 28.64 ms in that paired
+sample. This is not physical click-to-photon latency: the probe invokes the
+same edit function on the canvas owner, excludes OS input/picking, and observes
+CPU submission rather than display scanout. A separate foreground run recorded
+one GC-associated 107 ms submission outlier. Ordinary remeshing fits within a
+frame budget, but frame boundaries, GPU execution, and GC still affect visible
+latency. Foreground/background state materially changes the measurements.
+
+Raw local traces are =build/edit-foreground-control.txt= and
+=build/edit-foreground-optimized.txt=. Existing CPU zones now include
+=luft/edit-cell= in addition to region capture, mesh selection, appearance,
+packing, and publication. Cached products are compared byte-for-byte against
+cold compilation across interior, seam, emissive, and material-only edits;
+prior mesh/light witnesses remain intact. Renderer tests passed 1039 checks, including diagonal seam corners.
+
+This change reduces edit-time CPU preparation. It does not claim a reduction
+in steady-state GPU frame duration or a universal sub-frame editing guarantee.

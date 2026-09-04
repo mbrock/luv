@@ -34,6 +34,7 @@
            :reader streaming-scene-staged)
    (staged-generation :initform nil
                       :accessor streaming-scene-staged-generation)
+   (mesh-cache :initform nil :accessor streaming-scene-mesh-cache)
    (cohort :initform nil :accessor streaming-scene-cohort)
    (removals :initform nil :accessor streaming-scene-removals)
    (production-errors :initform nil
@@ -52,7 +53,8 @@
              (:constructor %make-streaming-mesh-snapshot
                  (scene input-scene output-keys witness-keys resident-source-keys
                   bevel-width union-neighborhood stamp
-                  realize-torch-light-p reusable-light-generation)))
+                  realize-torch-light-p reusable-light-generation
+                  &optional mesh-cache)))
   "Immutable CPU input for one dependency-closed regional mesh request."
   (scene nil :read-only t)
   ;; The owning streaming scene remains mutable on the canvas thread.  Workers
@@ -73,17 +75,31 @@
   (realize-torch-light-p t :type boolean :read-only t)
   (reusable-light-generation nil
                              :type (or null realized-light-generation)
-                             :read-only t))
+                             :read-only t)
+  (mesh-cache nil :type list :read-only t))
+
+(defstruct (streaming-star-product
+             (:constructor make-streaming-star-product
+                 (key signature descriptors prepared))
+             (:copier nil))
+  "Immutable CPU product; GPU residency and light publication are independent.
+#WQCMA3"
+  (key nil :read-only t)
+  (signature nil :read-only t)
+  (descriptors nil :read-only t)
+  (prepared nil :read-only t))
 
 (defclass streaming-mesh-request (production:production-request)
   ((snapshot :initarg :snapshot :reader streaming-mesh-request-snapshot)))
 
 (defstruct (streaming-mesh-result
-             (:constructor %make-streaming-mesh-result (meshes generation))
+             (:constructor %make-streaming-mesh-result
+                 (meshes generation &optional mesh-cache))
              (:copier nil))
   "One worker-complete prepared owner cohort and its exact light generation."
   (meshes nil :type list :read-only t)
-  (generation nil :type scene-mesh-generation :read-only t))
+  (generation nil :type scene-mesh-generation :read-only t)
+  (mesh-cache nil :type list :read-only t))
 
 (defun make-streaming-scene
     (scene &key (frames-per-load 15) (residency-radius 1))
@@ -236,7 +252,8 @@ a future LoD must bring an explicit transition representation."
         thereis (or (= cell (torch-attachment-support-cell attachment))
                     (= cell (torch-attachment-clearance-cell attachment)))))
 
-(defun edit-streaming-scene-cell (scene cell new-placement)
+(zdefun (edit-streaming-scene-cell :zone :luft/edit-cell)
+    (scene cell new-placement)
   "Publish one complete authored cell edit and return EDIT, status, and chunk.
 
 NEW-PLACEMENT fills an empty cell with an existing scene vocabulary member;
@@ -280,7 +297,9 @@ published."
         (when (and new-placement (null new-offset))
           (return-from edit-streaming-scene-cell
             (values nil :unknown-material nil)))
-        (let* ((material-cells (material-store-with-cell
+        (let* ((unchanged-products
+                 (streaming-products-outside-cell scene cell))
+               (material-cells (material-store-with-cell
                                 (scene-material-cells scene) cell new-offset))
                (bit (if new-placement 1 0))
                (key (luft:site-chunk-key cell))
@@ -321,7 +340,11 @@ published."
                     (and occupied-p
                          (domains:identity-vocabulary-member
                           (scene-material-vocabulary scene) old-offset))
-                    new-placement content-revision)))
+                    new-placement content-revision))
+                 (mesh-cache
+                   (rebase-streaming-star-products
+                    unchanged-products key new-chunk
+                    (gethash key (material-store-chunks material-cells)))))
             ;; These values are replace-only.  Existing worker snapshots retain
             ;; the old store, fibers, hash table, and light generation.
             (setf (scene-solid scene) new-solid
@@ -347,11 +370,14 @@ published."
                     (remhash key (streaming-scene-store scene))
                     (setf (gethash key (streaming-scene-store scene))
                           new-chunk)))
+            (setf (streaming-scene-mesh-cache scene)
+                  mesh-cache)
             (values edit :edited key)))))))
 
 (defun reset-streaming-scene-publication (scene)
   "Forget renderer publication while retaining source-owned resident values."
   (check-type scene streaming-scene)
+  (setf (streaming-scene-mesh-cache scene) nil)
   (dolist (table (list (streaming-scene-loaded scene)
                        (streaming-scene-outstanding scene)
                        (streaming-scene-staged scene)))
@@ -830,7 +856,71 @@ chunk is empty; excluding that owner drops real boundary triangles."
      (streaming-scene-mesh-stamp
       scene output-keys bevel-width)
      realize-torch-light-p
-     (streaming-scene-light-generation scene))))
+     (streaming-scene-light-generation scene)
+     (streaming-scene-mesh-cache scene))))
+
+(defun streaming-owner-input-signature (snapshot key)
+  "Identity of an owner's immutable geometry/material inputs and compiler.
+
+The conservative 3x3 guard includes both sides of every chunk seam. Mutable
+legacy material tables and callable fields deliberately bypass reuse."
+  (let* ((scene (streaming-mesh-snapshot-input-scene snapshot))
+         (materials (scene-material-cells scene)))
+    (when (typep materials 'material-store)
+      (list (scene-domain scene)
+            (streaming-mesh-snapshot-bevel-width snapshot)
+            (symbol-function 'luft:mesh-star-chunk)
+            (symbol-function 'compile-surface-mesh-appearance)
+            (symbol-function 'make-render-population)
+            (symbol-function 'pack-terrain-appearance-codes)
+            (loop for neighbor in
+                  (streaming-scene-dependency-guard-keys scene (list key))
+                  collect
+                  (list neighbor
+                        (gethash neighbor
+                                 (streaming-mesh-snapshot-union-neighborhood
+                                  snapshot))
+                        (gethash neighbor (material-store-chunks materials))))))))
+
+(defun streaming-products-outside-cell (scene cell)
+  "Retain valid products whose sampled cell box excludes this exact edit.
+
+Chunk identity changes on every edit, but only stars touching CELL can change
+geometry or appearance. Validate the old inputs before rebasing unaffected
+products; arbitrary source or compiler changes must still miss the cache."
+  (let* ((products (streaming-scene-mesh-cache scene))
+         (snapshot
+           (and products
+                (make-streaming-region-snapshot
+                 scene (mapcar #'streaming-star-product-key products)
+                 luft:+mesh-bevel-width+))))
+    (remove-if-not
+     (lambda (product)
+       (let* ((key (streaming-star-product-key product))
+              (x (* luft:+chunk-size+ (luft:chunk-key-x key)))
+              (y (* luft:+chunk-size+ (luft:chunk-key-y key))))
+         (and (not (and (<= (1- x) (luft:site-x cell) (+ x luft:+chunk-size+))
+                        (<= (1- y) (luft:site-y cell) (+ y luft:+chunk-size+))))
+              (equal (streaming-star-product-signature product)
+                     (streaming-owner-input-signature snapshot key)))))
+     products)))
+
+(defun rebase-streaming-star-products (products changed-key fibers materials)
+  "Advance only proven-unaffected products to the successor chunk identities."
+  (mapcar
+   (lambda (product)
+     (let ((signature (streaming-star-product-signature product)))
+       (make-streaming-star-product
+        (streaming-star-product-key product)
+        (append
+         (butlast signature)
+         (list (loop for input in (car (last signature))
+                     collect (if (eql changed-key (first input))
+                                 (list changed-key fibers materials)
+                                 input))))
+        (streaming-star-product-descriptors product)
+        (streaming-star-product-prepared product))))
+   products))
 
 (defun make-streaming-mesh-snapshot
     (scene key bevel-width &key (realize-torch-light-p t))
@@ -843,26 +933,56 @@ chunk is empty; excluding that owner drops real boundary triangles."
                                  :value
                                  (length
                                   (streaming-mesh-snapshot-output-keys snapshot)))
-    (snapshot)
+    (snapshot &key prepare-products-p)
   "Mesh one worker-owned regional snapshot without reading owner state.
 
-The first value is an alist of output owner to final mesh.  Every guarded
-owner uses the same width-one star selector; context owners are retained only
-while scene decoration establishes cross-chunk light provenance."
+The first value is an alist of output owner to final mesh. Every output uses
+the same width-one star selector against the captured guard fibers. Star
+appearance reads authored cells directly and needs no meshed context owners."
   (let* ((owner-scene (streaming-mesh-snapshot-scene snapshot))
          (scene (streaming-mesh-snapshot-input-scene snapshot))
-         (neighborhood (streaming-mesh-snapshot-union-neighborhood snapshot)))
+         (neighborhood (streaming-mesh-snapshot-union-neighborhood snapshot))
+         (descriptors
+           (compile-terrain-material-descriptors (scene-material-vocabulary scene)))
+         (products nil))
     (labels ((mesh-owner (key)
-               (let ((fibers (gethash key neighborhood)))
+               (let* ((fibers (gethash key neighborhood))
+                      (signature (streaming-owner-input-signature snapshot key))
+                      (cached
+                        (find key (streaming-mesh-snapshot-mesh-cache snapshot)
+                              :key #'streaming-star-product-key :test #'eql))
+                      (reusable
+                        (and signature cached
+                             (equal signature (streaming-star-product-signature cached))
+                             (equalp descriptors (streaming-star-product-descriptors cached))))
+                      (prepared (and reusable (streaming-star-product-prepared cached)))
+                      (old-mesh (and prepared (prepared-render-mesh-mesh prepared))))
                  (unless fibers
                    (error "Chunk ~D was not captured by this regional snapshot."
                           key))
-                 (zone :luft/mesh-owner
-                   (luft:mesh-star-chunk
-                    fibers key :outside-domain-policy :air))))
-             (decorate-owners (owners &optional surface-context)
+                 (let ((mesh
+                         (if old-mesh
+                             (luft:make-surface-mesh
+                              (scene-domain scene)
+                              (luft:surface-mesh-star-site-words old-mesh))
+                             (zone :luft/mesh-owner
+                               (luft:mesh-star-chunk
+                                fibers key :outside-domain-policy :air)))))
+                   ;; New metadata shell: never change an installed mesh's light
+                   ;; or attachment witnesses when borrowing immutable arrays.
+                   (if old-mesh
+                       (setf (luft:surface-mesh-appearance-codes mesh)
+                             (luft:surface-mesh-appearance-codes old-mesh)
+                             (luft:surface-mesh-appearance-descriptor-words mesh)
+                             descriptors)
+                       (zone :luft/compile-appearance
+                         (compile-surface-mesh-appearance
+                          mesh (scene-material-cells scene) descriptors)))
+                   (push (list key signature prepared) products)
+                   mesh)))
+             (decorate-owners (owners)
                (decorate-scene-meshes
-                owners scene :surface-context surface-context
+                owners scene :appearance-prepared-p t
                 :generation-scene owner-scene
                 :attachment-source-owners
                 (streaming-mesh-snapshot-resident-source-keys snapshot)
@@ -885,22 +1005,23 @@ while scene decoration establishes cross-chunk light provenance."
                (invoke-restart 'luft:treat-as-air))))
         (let* ((output-keys
                  (streaming-mesh-snapshot-output-keys snapshot))
-               (all-owners
-                 (mapcar (lambda (key) (cons key (mesh-owner key)))
-                         (streaming-mesh-snapshot-witness-keys snapshot)))
                (owners
-                 (remove-if-not
-                  (lambda (entry)
-                    (member (car entry) output-keys :test #'eql))
-                  all-owners))
-               (surface-context
-                 (remove-if
-                  (lambda (entry)
-                    (member (car entry) output-keys :test #'eql))
-                  all-owners)))
+                 (mapcar (lambda (key) (cons key (mesh-owner key)))
+                         output-keys)))
           (multiple-value-bind (decorated generation)
-              (decorate-owners owners surface-context)
-            (values decorated nil nil generation)))))))
+              (decorate-owners owners)
+            (values
+             decorated nil nil generation
+             (when prepare-products-p
+               (loop for (key signature previous) in (nreverse products)
+                     for mesh = (cdr (assoc key decorated :test #'eql))
+                     collect
+                     (make-streaming-star-product
+                      key signature descriptors
+                      (if previous
+                          (%make-prepared-render-mesh
+                           mesh (prepared-render-mesh-population previous))
+                          (prepare-render-mesh mesh))))))))))))
 
 (defun make-scene-regional-meshes
     (scene bevel-width &key reusable-light-generation)
@@ -1009,14 +1130,16 @@ generation before publication succeeds."
 (zdefmethod (production:perform-production-request
              :zone :luft/produce-mesh-region)
     ((request streaming-mesh-request))
-  (multiple-value-bind (meshes census diagnostics generation)
-      (mesh-streaming-snapshot (streaming-mesh-request-snapshot request))
-    (declare (ignore census diagnostics))
+  (multiple-value-bind (meshes census diagnostics generation products)
+      (mesh-streaming-snapshot (streaming-mesh-request-snapshot request)
+                               :prepare-products-p t)
+    (declare (ignore meshes census diagnostics))
     (%make-streaming-mesh-result
-     (mapcar (lambda (entry)
-               (cons (car entry) (prepare-render-mesh (cdr entry))))
-             meshes)
-     generation)))
+     (mapcar (lambda (product)
+               (cons (streaming-star-product-key product)
+                     (streaming-star-product-prepared product)))
+             products)
+     generation products)))
 
 (defconstant +streaming-cohort-production-key+ :luft-streaming-cohort)
 
@@ -1124,6 +1247,8 @@ generation before publication succeeds."
         (setf (gethash (car entry) (streaming-scene-staged scene))
               (cons request (cdr entry))))
       (setf (streaming-scene-staged-generation scene) generation)
+      (setf (streaming-scene-mesh-cache scene)
+            (streaming-mesh-result-mesh-cache result))
       t)))
 
 (defun ready-streaming-scene-meshes (scene)

@@ -192,13 +192,14 @@
 Code zero is authored air; occupied samples carry one plus their stable scene
 vocabulary offset.  The active (X Y Z STAR) words are only read and therefore
 remain byte-identical under repainting."
+  (declare (optimize (speed 3) (safety 1)))
   (let* ((domain (luft:surface-mesh-domain mesh))
          (sites (luft:surface-mesh-star-site-words mesh))
          (codes (make-array (* 2 (length sites))
                             :element-type '(unsigned-byte 8)
                             :initial-element 0)))
-    (loop for site-offset from 0 below (length sites) by 4
-          for appearance-offset from 0 by 8
+    (loop for site-offset fixnum from 0 below (length sites) by 4
+          for appearance-offset fixnum from 0 by 8
           for x = (aref sites site-offset)
           for y = (aref sites (+ site-offset 1))
           for z = (aref sites (+ site-offset 2))

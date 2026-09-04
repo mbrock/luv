@@ -650,3 +650,93 @@
                 (max largest-square (reduce #'+ point :key (lambda (x) (* x x))))))))
     (true (< largest-square (* 4 luft:+mesh-cell-size+ luft:+mesh-cell-size+))
           "every atlas vertex is strictly inside the shader's culling sphere")))
+
+(define-test streaming-star-reuse-matches-cold-compilation
+  (let ((builder (luft.render::make-scene-builder :horizontal-bits 8)))
+    (dolist (xy '((10 10) (63 10) (64 10) (63 63) (64 64) (200 200)))
+      (luft.render::scene-builder-cell builder (first xy) (second xy) 2))
+    (let* ((scene (luft.render::make-streaming-scene
+                   (luft.render::finish-scene-builder builder)))
+           (domain (luft.render::scene-domain scene))
+           (keys (mapcar (lambda (xy) (luft:chunk-key-at (first xy) (second xy)))
+                         '((0 0) (64 0) (0 64) (64 64) (192 192)))))
+      ;; Stable, explicitly resident empty guards exercise the same immutable
+      ;; chunk identity contract as the authored-world loader.
+      (dotimes (x 4)
+        (dotimes (y 4)
+          (let ((key (luft:chunk-key-at (* 64 x) (* 64 y))))
+            (unless (gethash key (luft.render::streaming-scene-store scene))
+              (setf (gethash key (luft.render::streaming-scene-store scene))
+                    (luft:make-chunk-fibers domain key))))))
+      (dolist (key keys)
+        (setf (gethash key (luft.render::streaming-scene-loaded scene)) 1))
+      (labels ((compile-current ()
+                 (luv.production:perform-production-request
+                  (make-instance
+                   'luft.render::streaming-mesh-request :key :test :priority 0
+                   :snapshot (luft.render::make-streaming-region-snapshot
+                              scene keys 1))))
+               (remember (result)
+                 (setf (luft.render::streaming-scene-mesh-cache scene)
+                       (luft.render::streaming-mesh-result-mesh-cache result)))
+               (check-cold (warm)
+                 (let ((saved (luft.render::streaming-scene-mesh-cache scene)))
+                   (unwind-protect
+                        (progn
+                          (setf (luft.render::streaming-scene-mesh-cache scene) nil)
+                          (let ((cold (compile-current)))
+                            (loop for a in (luft.render::streaming-mesh-result-meshes warm)
+                                  for b in (luft.render::streaming-mesh-result-meshes cold)
+                                  for am = (luft.render::prepared-render-mesh-mesh (cdr a))
+                                  for bm = (luft.render::prepared-render-mesh-mesh (cdr b))
+                                  for ap = (luft.render::prepared-render-mesh-population (cdr a))
+                                  for bp = (luft.render::prepared-render-mesh-population (cdr b))
+                                  do (true (eql (car a) (car b)))
+                                     (true (equalp (luft:surface-mesh-star-site-words am)
+                                                  (luft:surface-mesh-star-site-words bm)))
+                                     (true (equalp (luft:surface-mesh-appearance-codes am)
+                                                  (luft:surface-mesh-appearance-codes bm)))
+                                     (true (equalp (luft.render::render-population-instance-words ap)
+                                                  (luft.render::render-population-instance-words bp)))
+                                     (true (equalp (luft.render::render-population-appearance-words ap)
+                                                  (luft.render::render-population-appearance-words bp))))))
+                     (setf (luft.render::streaming-scene-mesh-cache scene) saved)))))
+        (let* ((first (compile-current))
+               (far (cdr (assoc (car (last keys))
+                                (luft.render::streaming-mesh-result-meshes first))))
+               (old-mesh (luft.render::prepared-render-mesh-mesh far))
+               (old-field (luft:surface-mesh-voxel-light old-mesh)))
+          (remember first)
+          ;; Interior, both sides of a seam, and an emissive edit must agree
+          ;; byte-for-byte with a cold compile while distant products survive.
+          (dolist (xy '((10 10) (63 10) (64 10) (63 63) (64 64)))
+            (let* ((cell (luft:make-site domain (first xy) (second xy) 2
+                                         luft:+cell-extent+ 1))
+                   (material (luft.render::scene-material-placement-at scene cell)))
+              (dolist (placement (list nil material))
+                (true (luft.render::edit-streaming-scene-cell scene cell placement))
+                (let* ((result (compile-current))
+                       (new-far (cdr (assoc (car (last keys))
+                                           (luft.render::streaming-mesh-result-meshes result)))))
+                  (true (eq (luft.render::prepared-render-mesh-population far)
+                            (luft.render::prepared-render-mesh-population new-far)))
+                  (true (not (eq old-mesh (luft.render::prepared-render-mesh-mesh new-far))))
+                  (true (eq old-field (luft:surface-mesh-voxel-light old-mesh)))
+                  (true (not (eq old-field
+                                 (luft:surface-mesh-voxel-light
+                                  (luft.render::prepared-render-mesh-mesh new-far)))))
+                  (check-cold result)
+                  (remember result)))))
+          (let ((cell (luft:make-site domain 11 10 2 luft:+cell-extent+ 1)))
+            (true (luft.render::edit-streaming-scene-cell
+                   scene cell luft.render::*crystal-material-placement*))
+            (let ((result (compile-current)))
+              (check-cold result)
+              (remember result)))
+          ;; Repainting can replace a material chunk without changing fibers.
+          ;; It must invalidate the old appearance even with identical geometry.
+          (setf (luft.render::scene-material-cells scene)
+                (luft.render::material-store-with-cell
+                 (luft.render::scene-material-cells scene)
+                 (luft:make-site domain 10 10 2 luft:+cell-extent+ 1) 2))
+          (check-cold (compile-current)))))))
