@@ -74,7 +74,12 @@
                              (:file "lighting")
                              (:file "shaders")
                              (:file "flame-shaders")
-                             (:file "render")))))
+                             (:file "scene")
+                             (:file "decoration")
+                             (:file "render")
+                             (:file "world")
+                             (:file "streaming")
+                             (:file "fixtures")))))
 
 (defsystem "luft/render"
   :description "The McCLIM LUFT atelier over the packed-site renderer."
