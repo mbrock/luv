@@ -1,8 +1,10 @@
 #+title: Luminous spell effects in the Luft atelier
 #+startup: overview
 
-The first fireball makes spellcasting playable, but a moving analytic ball is
-not yet the visual proposition.  The reference below suggests something more
+The first fireball was a playable experiment, now retired; this page preserves
+its visual study and proposals for future spell effects, not an active spell
+system. Torch flames and the wizard, staff, and orb appearance remain. A moving
+analytic ball was not yet the visual proposition. The reference below suggests something more
 specific: a spell is a short-lived luminous event which has a readable shape,
 an animated hot medium, flying debris, and a visible effect on the world around
 it.  This page separates those jobs and asks how Luft can prove them with the
@@ -219,9 +221,10 @@ trade visible.
 
 A promising split is:
 
-1. Draw the analytic core with the player/fireball scene pass, exact current
-   and previous endpoints, and motion output.  Temporal reconstruction can
-   then stabilize its subpixel edge.
+1. Add a future analytic core to the motion-bearing scene pass alongside the
+   player, with exact current and previous endpoints and motion output. There
+   is no longer a fireball shader path to reuse. Temporal reconstruction can
+   then stabilize the core's subpixel edge.
 2. Composite the noisy sheath, ribbons, and sparks after temporal resolution,
    depth-clipped like the torch.  Their rapidly changing detail cannot poison
    history, and their stable proxy can use analytic coverage or modest spatial

@@ -85,15 +85,12 @@
   :description "The McCLIM LUFT atelier over the packed-site renderer."
   :version "0.0.1"
   :author "Mikael Brockman"
-  ;; The atelier shares Luv's McCLIM backend directly.  Luvcraft remains only
-  ;; for the small physics vocabulary used by RENDER/GAME; LUFT no longer
-  ;; loads another game's widget adapters to obtain the common compositor.
+  ;; Share Luv's substrate and compositor, not another game's runtime.
   :depends-on ("luft/renderer" "luv/mcclim" "luv/workbench"
                "luv/lobby/mcclim"
-               "luv/tracy-capture" "luv/application-agent"
-               "luvcraft/core")
+               "luv/tracy-capture" "luv/application-agent")
   :serial t
-  :components ((:file "luft/render/game")
+  :components ((:file "luft/render/player")
                (:file "luft/render/studio")
                (:file "luft/render/live-artifact")
                (:file "luft/render/workbench")

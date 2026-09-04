@@ -10,7 +10,7 @@ GPU buffer by vertex pulling.  This page records the vocabulary, the algebra
 that makes the surface fall out, the shader-language extensions the GPU path
 needed, and the shape of the atelier.  Its temporal frame graph now has a page
 of its own: [[file:temporal-antialiasing.org][Temporal reconstruction in the Luft atelier]].
-The first fireball has also opened a narrower visual study:
+The now-retired first fireball opened a visual study preserved for future work:
 [[file:luft-spell-effects.org][Luminous spell effects in the Luft atelier]].
 The relation to luvcraft's semantic substrate — quantities, columnar
 records, finite domains, and frontier programs — is read in
@@ -297,6 +297,14 @@ a full block needs a jump, and leaving an edge falls under gravity. Movement
 is integrated in steps of at most 1/120 second. Vertical sweeps include
 ceilings and a floor removed by editing. The perspective presentation omits the miniature
 view's tilt-shift blur and shows a small central crosshair.
+
+Ownership stays small: =luft/render/player.lisp= (formerly =game.lisp=)
+owns the player's continuous motion and optional =walking-route=; the scene
+owns terrain; the viewer owns input, camera, and services. Physics and route
+directions use world XY; only the viewer converts camera-relative input.
+There is no new session or game abstraction. The obsolete fireball CPU state,
+input handlers, shader branches, and two uniform =vec4= members are retired;
+torch flames and the wizard, staff, and orb appearance remain.
 
 The player now borrows Luvcraft's quantity-declared CLOS storage without
 wrapping its numbers or vectors. Current and previous positions are cell

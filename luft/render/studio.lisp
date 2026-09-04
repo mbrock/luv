@@ -2,6 +2,63 @@
 
 (defvar *viewer* nil)
 
+(defun soft-follow-step (current target seconds quiet-radius)
+  "Move CURRENT toward TARGET outside a quiet zone, catching up with distance."
+  (let* ((difference (- target current))
+         (distance (abs difference))
+         (excess (max 0.0 (- distance quiet-radius))))
+    (if (zerop excess)
+        current
+        (let* ((rate (+ 1.8 (* 0.9 excess)))
+               (blend (- 1.0 (exp (- (* rate seconds))))))
+          (+ current (* (signum difference) excess blend))))))
+
+(defun follow-walking-player (camera player &key (distance 18.0) seconds)
+  "Follow PLAYER through a quiet zone with distance-sensitive catch-up."
+  (multiple-value-bind (right up forward) (camera-basis camera)
+    (declare (ignore right up))
+    (let* ((player-position (walking-player-position player))
+           (heading-x (walking-player-heading-x player))
+           (heading-y (walking-player-heading-y player))
+           ;; Showing more of where the traveler is going makes movement legible.
+           (aim-x (+ (vec3-x player-position) (* 2.4 heading-x)))
+           (aim-y (+ (vec3-y player-position) (* 2.4 heading-y)))
+           (aim-z (+ (vec3-z player-position) 1.45))
+           (target-x (- aim-x (* distance (vec3-x forward))))
+           (target-y (- aim-y (* distance (vec3-y forward))))
+           (target-z (- aim-z (* distance (vec3-z forward))))
+           (camera-position (camera-position camera)))
+      (if (null seconds)
+          (setf (vec3-x camera-position) target-x
+                (vec3-y camera-position) target-y
+                (vec3-z camera-position) target-z)
+          (setf (vec3-x camera-position)
+                (soft-follow-step (vec3-x camera-position)
+                                  target-x seconds 0.28)
+                (vec3-y camera-position)
+                (soft-follow-step (vec3-y camera-position)
+                                  target-y seconds 0.28)
+                ;; Let a whole stair tread pass without bobbing the frame.
+                (vec3-z camera-position)
+                (soft-follow-step (vec3-z camera-position)
+                                  target-z seconds 0.85)))))
+  camera)
+
+(defun walking-player-render-lanes (player)
+  "Return current, previous, and heading vec4 lanes for the GPU boundary."
+  (flet ((position-lane (position gait)
+           (list (vec3-x position) (vec3-y position)
+                 (+ (vec3-z position) 1.48) gait)))
+    (values
+     (position-lane (walking-player-position player)
+                    (walking-player-gait player))
+     (position-lane (walking-player-previous-position player)
+                    (walking-player-previous-gait player))
+     (list (walking-player-heading-x player)
+           (walking-player-heading-y player)
+           (walking-player-previous-heading-x player)
+           (walking-player-previous-heading-y player)))))
+
 (defparameter *inspection-ink-p* t
   "Whether a ray hit gets a blueprint reticle and local triangle-edge lens.")
 
@@ -444,13 +501,11 @@ the selector is the whole of the difference."
   (flet ((lane (vector fourth)
            (list (vec3-x vector) (vec3-y vector)
                  (vec3-z vector) fourth)))
-    (multiple-value-bind (character previous-character character-direction
-                          fireball previous-fireball)
+    (multiple-value-bind (character previous-character character-direction)
         (if player
             (walking-player-render-lanes player)
             (values '(0.0 0.0 0.0 0.0) '(0.0 0.0 0.0 0.0)
-                    '(0.0 1.0 0.0 1.0)
-                    '(0.0 0.0 0.0 0.0) '(0.0 0.0 0.0 0.0)))
+                    '(0.0 1.0 0.0 1.0)))
       (make-array
        (shaders::scene-uniform-scalar-count) :element-type 'single-float
        :initial-contents
@@ -480,8 +535,7 @@ the selector is the whole of the difference."
                 (coerce inspection-parameters 'list)
                 character
                 (light-uniform-data *light* (frame-view-position view) exposure)
-                previous-character character-direction
-                fireball previous-fireball))))))
+                previous-character character-direction))))))
 
 (defun viewer-logical-extent (viewer)
   (let ((canvas (viewer-canvas viewer)))
@@ -529,34 +583,6 @@ the selector is the whole of the difference."
               (frame-view-right view) right-scale
               (frame-view-up view) up-scale)
              (frame-view-forward view)))))))
-
-(defun viewer-fireball-target (viewer origin direction)
-  "Resolve VIEWER's pointer ray into a useful world-space spell target."
-  (let ((inspection
-          (handler-case
-              (raycast-site (viewer-source viewer) origin direction)
-            (luft:outside-domain () nil))))
-    (if inspection
-        (site-inspection-point inspection)
-        ;; Empty sky still has a stable click direction.  Intersect the ray
-        ;; with a plane through the wizard's chest when possible; otherwise
-        ;; choose a distant point along it.
-        (let* ((player (viewer-player viewer))
-               (player-position (walking-player-position player))
-               (plane-z (+ (vec3-z player-position) 1.5))
-               (direction-z (vec3-z direction))
-               (distance (if (> (abs direction-z) 1.0e-5)
-                             (/ (- plane-z (vec3-z origin)) direction-z)
-                             -1.0)))
-          (add-scaled-directions origin direction
-                                 (if (> distance 0.0) distance 32.0))))))
-
-(defun cast-viewer-fireball (viewer)
-  "Cast the demo fireball through VIEWER's current pointer position."
-  (multiple-value-bind (origin direction) (viewer-pointer-ray viewer)
-    (cast-walking-player-fireball
-     (viewer-player viewer)
-     (viewer-fireball-target viewer origin direction))))
 
 (defun site-inspection-adjacent-cell (inspection)
   "Return the empty-side cell immediately outside INSPECTION's face."
@@ -1040,6 +1066,12 @@ before the operation boundary, or it would encode through resources which the
   (clrhash (viewer-controls viewer))
   viewer)
 
+(defun camera-walking-direction (camera forward right)
+  "Translate horizontal input to world X/Y; pitch never tilts walking."
+  (let ((yaw (camera-yaw camera)))
+    (values (+ (* (cos yaw) forward) (* (sin yaw) right))
+            (- (* (sin yaw) forward) (* (cos yaw) right)))))
+
 (defun advance-viewer-camera (viewer timestamp)
   (let* ((last (viewer-last-timestamp viewer))
          (dt (if last (min 0.1 (max 0.0 (- timestamp last))) 0.0))
@@ -1053,13 +1085,15 @@ before the operation boundary, or it would encode through resources which the
               (right (- (if (viewer-control-active-p viewer :right) 1 0)
                         (if (viewer-control-active-p viewer :left) 1 0)))
               (maximum-distance nil))
-          (when (and (zerop forward) (zerop right))
-            (multiple-value-setq (forward right maximum-distance)
-              (walking-player-route-control (viewer-player viewer) camera)))
-          (advance-walking-player (viewer-player viewer)
-                                  (viewer-source viewer) camera
-                                  (or forward 0.0) (or right 0.0) dt
-                                  :maximum-distance maximum-distance)
+          (multiple-value-bind (direction-x direction-y)
+              (camera-walking-direction camera forward right)
+            (when (and (zerop forward) (zerop right))
+              (multiple-value-setq (direction-x direction-y maximum-distance)
+                (walking-player-route-control (viewer-player viewer))))
+            (advance-walking-player (viewer-player viewer)
+                                    (viewer-source viewer)
+                                    (or direction-x 0.0) (or direction-y 0.0) dt
+                                    :maximum-distance maximum-distance))
           (trim-walking-player-route (viewer-player viewer))
           ;; The first timestamp establishes the follow pose immediately.
           ;; Subsequent zero-duration samples preserve it; in Common Lisp a
@@ -1477,9 +1511,7 @@ before the operation boundary, or it would encode through resources which the
                  (start-walking-player-route
                   player (viewer-source viewer)
                   (luft:site-x cell) (luft:site-y cell)
-                  (1+ (luft:site-z cell))))))))
-        (:right
-         (cast-viewer-fireball viewer))))))
+                  (1+ (luft:site-z cell))))))))))))
 
 (defmethod handle-viewer-mode-pointer-press
     ((mode first-person-mode) viewer canvas event)
@@ -1493,13 +1525,10 @@ before the operation boundary, or it would encode through resources which the
 
 (defmethod handle-viewer-mode-pointer-press
     ((mode orbit-mode) viewer canvas event)
-  (declare (ignore mode))
+  (declare (ignore mode event))
   (unless (viewer-pointer-captured-p viewer)
     (set-canvas-relative-pointer-mode canvas t)
-    (setf (viewer-pointer-captured-p viewer) t))
-  (when (and (viewer-player viewer)
-             (eq :right (canvas-pointer-event-button event)))
-    (cast-viewer-fireball viewer)))
+    (setf (viewer-pointer-captured-p viewer) t)))
 
 (defmethod handle-canvas-event
     ((viewer viewer) canvas (event canvas-pointer-wheel-event))

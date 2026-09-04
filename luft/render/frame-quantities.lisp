@@ -90,22 +90,12 @@
        ((:xyz :quantity quantities:world-position
          :unit quantities:cell)
         (:w :quantity quantities:gait-phase :unit :radian)))
-      ;; XY is the current two-dimensional heading, Z is the previous X
-      ;; heading retained for history, and W is the spell-flash proportion.
+      ;; Current and previous two-dimensional headings share one row.
       (character-direction :vec4
        :components
        ((:xy :quantity quantities:horizontal-direction :unit :one)
-        (:z :quantity quantities:horizontal-x-direction :unit :one)
-        (:w :quantity quantities:spell-flash :unit :one)))
-      (fireball-parameters :vec4
-       :components
-       ((:xyz :quantity quantities:world-position :unit quantities:cell)
-        (:w :quantity quantities:world-distance :unit quantities:cell)))
-      (previous-fireball-parameters :vec4
-       :components
-       ((:xyz :quantity quantities:world-position :unit quantities:cell)
-        (:w :quantity quantities:world-distance :unit quantities:cell))))
-    "The quantity-declared 108-float scene environment shared by all stages.")
+        (:zw :quantity quantities:horizontal-direction :unit :one))))
+    "The quantity-declared 100-float scene environment shared by all stages.")
 
   (defun scene-uniform-prefix (count)
     "The first COUNT members of the canonical scene uniform ledger."
@@ -147,18 +137,18 @@
                       (math:make-quantity-projection
                        positions specification)
                       projections))))))
-    (math:make-quantity-layout 108 (nreverse projections))))
+    (math:make-quantity-layout 100 (nreverse projections))))
 
 (defmethod math:value-declaration-for
     ((name (eql 'luft.render::camera-uniform-data)))
   (declare (ignore name))
   (load-time-value
    (math:make-represented-value-declaration
-    :representation-type '(simple-array single-float (108))
+    :representation-type '(simple-array single-float (100))
     :quantity-layout (scene-uniform-product-layout)
     :source-form
     '(luft.render::camera-uniform-data
-      :type (simple-array single-float (108))
+      :type (simple-array single-float (100))
       :product *scene-uniform-members*))))
 
 (defun shader-uniform-product-layout (block)

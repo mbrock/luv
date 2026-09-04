@@ -37,7 +37,6 @@
 (defconstant world-distance 'world-distance)
 (defconstant spatial-scale 'spatial-scale)
 (defconstant gait-phase 'gait-phase)
-(defconstant spell-flash 'spell-flash)
 
 (defconstant texture-coordinate 'texture-coordinate)
 (defconstant texture-u-coordinate 'texture-u-coordinate)
@@ -111,8 +110,6 @@
 (define-quantity spatial-scale :kind spatial-coordinate
   :non-negative-p t)
 (define-quantity gait-phase :kind :angular-measure)
-(define-quantity spell-flash :kind :proportion
-  :non-negative-p t)
 
 ;;; Texture coordinates are points.  Jitter is a signed displacement and a
 ;;; texel extent is a non-negative displacement, even though all three use the

@@ -32,7 +32,6 @@
            #:world-distance
            #:spatial-scale
            #:gait-phase
-           #:spell-flash
            #:texture-coordinate
            #:texture-u-coordinate
            #:texture-v-coordinate

@@ -763,11 +763,7 @@
                    :position
                    (luv.arithmetic.lisp.vec3:make-vec3
                     (+ origin-x 52.0) (- start-y 12.0) 23.5)
-                   :field-of-view (* 46.0 (/ pi 180.0))))
-                ;; Movement remains camera-relative in play.  Keep its authored
-                ;; +Y bridge direction independent of the filming camera.
-                (walking-camera
-                  (luft.render:make-fly-camera :yaw (/ pi 2.0) :pitch 0.0)))
+                   :field-of-view (* 46.0 (/ pi 180.0)))))
            (setf luft.render:*projection* :perspective
                  luft.render:*wireframe* 0.0
                  luft.render:*inspection-ink-p* nil
@@ -798,7 +794,7 @@
                      (camera-position (luft.render:camera-position camera)))
                 (luft.render::advance-walking-player
                  player (luft.render::viewer-source viewer)
-                 walking-camera 1.0 0.0 dt)
+                 0.0 1.0 dt)
                 ;; A parallel dolly keeps the wizard readable while successive
                 ;; arches, piers, and finally the gate move through the frame.
                 (setf (luv.arithmetic.lisp.vec3:vec3-y camera-position)

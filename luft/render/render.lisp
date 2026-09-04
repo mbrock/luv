@@ -2744,7 +2744,7 @@ cohort untouched. No frame can interleave with the owner-thread publication."
     (when player-p
       (set-pipeline pass (renderer-player-sdf-pipeline renderer))
       (set-bind-group pass 0 (renderer-frame-player-bind-group renderer frame))
-      (draw pass 6 2))
+      (draw pass 6 1))
     (when construction-p
       ;; Populate at most one diagnostic slot per frame. The overlay is a
       ;; debugging view, so progressive readiness is preferable to freezing

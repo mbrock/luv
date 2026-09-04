@@ -13,6 +13,48 @@
 
 (in-package #:luft.render.tests)
 
+(define-test player-shaders-compile-for-both-backends
+  (dolist (specification (list (shaders:player-sdf-vertex-specification)
+                               (shaders:player-sdf-fragment-specification)))
+    (true (luv.msl:compile-msl specification))
+    (true (luv.spir-v:compile-shader-specification specification))))
+
+(define-test player-frame-lanes-retain-both-headings
+  (let* ((player (render:make-walking-player
+                  :position (make-vec3 2.0 3.0 4.0)
+                  :heading-x 0.6 :heading-y 0.8))
+         (camera (render:make-fly-camera))
+         (view (render::capture-frame-view camera 640 480 #(0.0 0.0))))
+    (render::begin-walking-player-frame player)
+    (setf (vec3-x (render:walking-player-position player)) 5.0
+          (render::walking-player-heading-x player) -1.0
+          (render::walking-player-heading-y player) 0.0
+          (render::walking-player-gait player) 2.0)
+    (let ((lanes (multiple-value-list (render::walking-player-render-lanes player))))
+      (true (= 3 (length lanes)))
+      (true (equalp '(5.0 3.0 5.48 2.0) (first lanes)))
+      (true (equalp '(2.0 3.0 5.48 0.0) (second lanes)))
+      (true (equalp '(-1.0 0.0 0.6 0.8) (third lanes))))
+    (dolist (body (list nil player))
+      (let ((uniform (render::camera-uniform-data
+                      view view '(0.0 0.0 0.0 0.0) 0.0 body)))
+        (true (= 100 (length uniform)))
+        (true (equalp (if body #(-1.0 0.0 0.6 0.8) #(0.0 1.0 0.0 1.0))
+                      (subseq uniform 96)))))
+    (true (= 25 (length shaders::*scene-uniform-members*)))))
+
+(define-test camera-input-is-translated-only-at-the-viewer-boundary
+  (dolist (case '((0.0 1.0 0.0 1.0 0.0)
+                  (0.0 0.0 1.0 0.0 -1.0)
+                  (1.5707963 1.0 0.0 0.0 1.0)
+                  (1.5707963 0.0 1.0 1.0 0.0)))
+    (destructuring-bind (yaw forward right expected-x expected-y) case
+      (multiple-value-bind (x y)
+          (render::camera-walking-direction
+           (render:make-fly-camera :yaw yaw :pitch 0.7) forward right)
+        (true (< (abs (- x expected-x)) 0.00001))
+        (true (< (abs (- y expected-y)) 0.00001))))))
+
 (define-test luft-status-is-semantic-only-with-no-pane-adapter
   (dolist (name '("VIEWER-STATUS-BAR"
                   "VIEWER-STATUS-BAR-ATTACHMENT"
@@ -364,15 +406,14 @@
          (x (vec3-x position))
          (y (vec3-y position))
          (z (vec3-z position))
-         (key (luft:chunk-key-at (floor x) (floor y)))
-         (camera (render::make-fly-camera)))
+         (key (luft:chunk-key-at (floor x) (floor y))))
     ;; Demand completion is not collision publication. Even an accepted CPU
     ;; chunk must not start physics before the owner publishes SCENE-SOLID.
     (setf (gethash key (render::streaming-scene-store scene))
           (render::materialize-authored-world-chunk source key 1))
     (render::request-walking-player-jump player)
     (dotimes (i 10)
-      (render::advance-walking-player player scene camera 1.0 0.0 0.1))
+      (render::advance-walking-player player scene 1.0 0.0 0.1))
     (true (= x (vec3-x position)))
     (true (= y (vec3-y position)))
     (true (= z (vec3-z position)))
@@ -380,14 +421,14 @@
     (true (render::walking-player-jump-requested-p player))
     (true (equalp position (render::walking-player-previous-position player)))
     (render::rebuild-authored-world-resident-values scene (list key))
-    (render::advance-walking-player player scene camera 0.0 0.0 0.1)
+    (render::advance-walking-player player scene 0.0 0.0 0.1)
     (true (< z (vec3-z position) (+ z 1.0))
           "publication releases the queued jump with only this frame's time")
     (true (not (render::walking-player-jump-requested-p player)))
     (setf (luft:fiber-store-chunk (render:scene-solid scene) key)
           (luft:make-chunk-fibers (render::scene-domain scene) key))
     (let ((falling (render::make-scene-walking-player scene)))
-      (render::advance-walking-player falling scene camera 0.0 0.0 0.1)
+      (render::advance-walking-player falling scene 0.0 0.0 0.1)
       (true (< (vec3-z (render:walking-player-position falling)) z)
             "published empty terrain is air, not a loading barrier"))))
 
@@ -564,6 +605,25 @@
     (setf (render::walking-player-height player) 1.8)
     player))
 
+(define-test walking-route-drives-world-direction-without-a-camera
+  (let* ((store (make-body-collision-fixture))
+         (player (make-test-walking-body 10.5 10.5 1.0)))
+    (loop for y from 10 to 13 do
+      (luft:fiber-store-edit-cell store 10 y 0 1))
+    (render::start-walking-player-route player store 10 12 1)
+    (multiple-value-bind (x y distance) (render::walking-player-route-control player)
+      (true (= 0.0 x))
+      (true (= 1.0 y))
+      (true (= 1.0 distance))
+      (render::advance-walking-player player store x y 0.1
+                                      :maximum-distance distance))
+    (let ((position (render:walking-player-position player))
+          (previous (render::walking-player-previous-position player)))
+      (true (= 10.5 (vec3-x position)))
+      (true (< (abs (- (vec3-y position) 11.2)) 0.0001))
+      (true (= 10.5 (vec3-y previous)))
+      (true (= 1.0 (vec3-z position))))))
+
 (define-test walking-body-stops-at-wall-and-slides-without-climbing
   (let* ((store (make-body-collision-fixture))
          (player (make-test-walking-body 10.5 10.5 1.0))
@@ -622,17 +682,16 @@
 (define-test walking-up-a-block-requires-a-physical-jump
   (let* ((store (make-body-collision-fixture))
          (player (make-test-walking-body 10.5 10.5 1.0))
-         (position (render:walking-player-position player))
-         (camera (render::make-fly-camera :yaw 0.0)))
+         (position (render:walking-player-position player)))
     (loop for x from 8 to 20 do
       (luft:fiber-store-edit-cell store x 10 0 1)
       (when (>= x 11) (luft:fiber-store-edit-cell store x 10 1 1)))
-    (dotimes (i 30) (render::advance-walking-player player store camera 1.0 0.0 (/ 1.0 60)))
+    (dotimes (i 30) (render::advance-walking-player player store 1.0 0.0 (/ 1.0 60)))
     (true (< (abs (- (vec3-x position) 10.7)) 0.0001))
     (true (= 1.0 (vec3-z position)))
     (render::request-walking-player-jump player)
     (dotimes (i 50)
-      (render::advance-walking-player player store camera 1.0 0.0 (/ 1.0 60))
+      (render::advance-walking-player player store 1.0 0.0 (/ 1.0 60))
       (true (render::walking-player-clear-at-p
              store (vec3-x position) (vec3-y position) (vec3-z position) 1.8)))
     (true (> (vec3-x position) 11.3))
@@ -697,13 +756,12 @@
 
 (define-test walking-gravity-agrees-across-render-frame-rates
   (let* ((store (make-body-collision-fixture))
-         (camera (render::make-fly-camera))
          (heights
            (loop for rate in '(30 60 144) collect
              (let* ((player (make-test-walking-body 10.5 10.5 30.0))
                     (position (render:walking-player-position player)))
                (dotimes (i rate)
-                 (render::advance-walking-player player store camera 0.0 0.0 (/ 1.0 rate)))
+                 (render::advance-walking-player player store 0.0 0.0 (/ 1.0 rate)))
                (vec3-z position)))))
     (dolist (height heights)
       (true (< (abs (- height 18.0)) 0.001) "one second falls half g times t squared"))))

@@ -157,18 +157,20 @@ mesh invalidation and any gameplay reachability/aftermath propagation — the
 
 Luvcraft's #P6DF7B recorded the motivating condition for quantity layouts: a
 frame uniform whose vec4 lanes carried direction, proportion, radiance,
-exposure, and biases distinguished only by comments.  Luft has rebuilt that
-condition at larger scale.  Its scene uniform is twenty-seven anonymous
+exposure, and biases distinguished only by comments. Luft initially rebuilt
+that condition at larger scale. Its scene uniform had twenty-seven anonymous
 =vec4= members — =render-parameters=, =temporal-parameters=,
 =character-parameters=, =fireball-parameters=, and their previous-frame
 twins — and when this page was first written the member list was repeated
 textually /fourteen times/ across =luft/render/shaders.lisp= and
 =luft/render/flame-shaders.lisp=, with no shared declaration site at all.
 It is now the one =*scene-uniform-members*= ledger, spliced at read time,
-with every shorter stage declaring an exact prefix; the lanes remain
-anonymous, which is precisely what the mark below removes.  Meanwhile the fragment ladder runs genuine radiometry: HDR
+with every shorter stage declaring an exact prefix. The migration below
+named the lanes; retiring the two fireball rows then reduced the historical
+27 =vec4= / 108 floats to the current 25 =vec4= / 100 floats.
+Meanwhile the fragment ladder runs genuine radiometry: HDR
 radiance, Rec. 709 luminance, log-luminance exposure metering, tone mapping,
-paper grading — every lane of #T1GYOH's table, every one a bare float.
+paper grading — every lane of #T1GYOH's table, originally a bare float.
 
 This is the adoption with the highest immediate value and the lowest risk,
 because luvcraft has already proven the migration property that matters:
@@ -360,7 +362,8 @@ is recorded on this page as the analogue of luvcraft's audit findings.
 
 /Outcome./  =luft.render.quantities= now owns Luft's collision-safe semantic
 vocabulary.  [[lisp:luft.render.shaders::*scene-uniform-members*]] is the one
-108-float scene declaration for both the host represented value and every
+scene declaration (then 108 floats, now 100 floats in 25 =vec4= members after
+fireball retirement) for both the host represented value and every
 shader prefix; tests compare the flattened quantity layout of all fourteen
 compiled uniform blocks, including raw member names and offsets, with that host
 declaration.  The same declarations own both upload-buffer sizes.  The torch's
@@ -384,17 +387,20 @@ pre-migration SHA-256 hash of all eighteen production modules exactly.
 - Several lanes are categorical or historical controls rather than spare
   geometry: camera history validity and weight and the projection selector
   remain raw.  Bevel, construction, and inspection strengths are proportions;
-  gait is an angular phase; and the heterogeneous character-direction row now
-  declares its horizontal heading, copied component, and spell-flash
-  proportion separately rather than pretending they form one quantity.
+  gait is an angular phase. The original character-direction audit separated
+  heading, a copied component, and spell-flash proportion. With the flash
+  retired, =character-direction= now holds current world-XY heading in XY
+  and previous world-XY heading in ZW; there is no flash lane.
 - The four shadow rows are one dense projective representation, not sixteen
   independent world or shadow coordinates.  Shadow sample varyings and the
   texel extent, bias, and filter-radius controls do have stable meanings and
   are declared; comparison sampling is their explicit representation seam.
-- Fireball radius is a nonnegative cell distance when present, but zero also
-  serves as the absence sentinel; the previous radius is transported even
-  though no current shader reads it.  Position and radius can still be named
-  without pretending the sentinel is a separate physical value.
+- In the retired fireball experiment, radius was a nonnegative cell distance
+  when present, with zero also serving as the absence sentinel; the previous
+  radius was transported although no shader read it. That audit showed how
+  to name position and radius without treating the sentinel as a separate
+  physical value. Both fireball uniform rows and their shader consumers are
+  now removed.
 - Torch seed and packed flags are categorical and remain raw.  Origin, surface
   frame, cell scale, elapsed seconds, and HDR radiance are the declared lanes.
   A declaration supplies representation shape, not numerical integrity, so

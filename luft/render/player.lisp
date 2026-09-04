@@ -1,10 +1,10 @@
 (in-package #:luft.render)
 
-;;; The small semantic game layer over LUFT's packed terrain.
+;;; Walking bodies and their discrete navigation intentions.
 ;;;
-;;; A player is an inspectable object at the application boundary.  Terrain
-;;; queries read chunk fibers, and rendering consumes two dense
-;;; vec4 lanes made from this state once per frame.
+;;; The player owns motion and an optional route, not a camera or input state.
+;;; Terrain queries read the scene's published chunk fibers. The viewer owns
+;;; input, camera presentation, and the translation to GPU frame data.
 
 (defconstant +walking-player-height+ 2.9)
 (defconstant +walking-player-step-height+ 1)
@@ -32,9 +32,6 @@
   "Maximum standable cells considered by one click-to-walk search.")
 (defparameter *walking-route-arrival-radius* 0.09
   "Horizontal distance from a cell centre which completes one waypoint.")
-(defconstant +fireball-speed+ 23.0)
-(defconstant +fireball-radius+ 0.38)
-(defconstant +fireball-cast-angle+ 0.68)
 
 (defgeneric inspection-source-solid (source)
   (:documentation "Return SOURCE's fiber store for occupancy queries."))
@@ -115,16 +112,7 @@ box and fall through nothing they cannot see."
    (grounded-p :initform t :accessor walking-player-grounded-p)
    (route :initform nil :accessor walking-player-route)
    (jump-requested-p :initform nil
-                     :accessor walking-player-jump-requested-p)
-   (spell-flash :initform 0.0 :accessor walking-player-spell-flash)
-   (fireball-position :initform nil
-                      :accessor walking-player-fireball-position)
-   (previous-fireball-position
-    :initform nil :accessor walking-player-previous-fireball-position)
-   (fireball-velocity :initform nil
-                      :accessor walking-player-fireball-velocity)
-   (fireball-distance-remaining
-    :initform 0.0 :accessor walking-player-fireball-distance-remaining))
+                     :accessor walking-player-jump-requested-p))
   (:metaclass quantity-class)
   (:documentation
    "The continuous, player-owned state of LUFT's walking character.
@@ -485,8 +473,8 @@ rather than silently becoming a straight-line collision attempt."
               (walking-route-detail route) "destination reached"))))
   player)
 
-(defun walking-player-route-control (player camera)
-  "Return camera-relative axes and remaining distance for PLAYER's route."
+(defun walking-player-route-control (player)
+  "Return world-space X/Y direction and remaining distance for PLAYER's route."
   (trim-walking-player-route player)
   (let ((route (walking-player-route player)))
     (when (and route (eq :running (walking-route-status route)))
@@ -496,16 +484,13 @@ rather than silently becoming a straight-line collision attempt."
              (dy (- (+ (luft:site-y cell) 0.5) (vec3-y position)))
              (distance (sqrt (+ (* dx dx) (* dy dy))))
              (direction-x (/ dx (max distance 1.0e-6)))
-             (direction-y (/ dy (max distance 1.0e-6)))
-             (yaw (camera-yaw camera)))
+             (direction-y (/ dy (max distance 1.0e-6))))
         ;; Routes express a desired step; the same jump/gravity controller
         ;; must actually get there instead of snapping to the waypoint height.
         (when (and (walking-player-grounded-p player)
                    (> (luft:site-z cell) (+ (vec3-z position) 0.1)))
           (request-walking-player-jump player))
-        (values (+ (* (cos yaw) direction-x) (* (sin yaw) direction-y))
-                (- (* (sin yaw) direction-x) (* (cos yaw) direction-y))
-                distance)))))
+        (values direction-x direction-y distance)))))
 
 (defun try-walking-player-axis (player source axis amount)
   "Move up to horizontal contact without changing the player's foot height."
@@ -522,97 +507,6 @@ rather than silently becoming a straight-line collision attempt."
 (defun request-walking-player-jump (player)
   "Request one grounded jump on PLAYER's next simulation step."
   (setf (walking-player-jump-requested-p player) t)
-  player)
-
-(defun walking-player-staff-head-position (player)
-  "Return the world-space head of PLAYER's staff in its full casting pose."
-  (let* ((player-position (walking-player-position player))
-         (heading-x (walking-player-heading-x player))
-         (heading-y (walking-player-heading-y player))
-         (right-x heading-y)
-         (right-y (- heading-x))
-         ;; The shader pivots the staff around the gripping hand.  Mirror its
-         ;; authored head here so the fireball belongs to that visible cast.
-         (head-height (- 3.34 1.505))
-         (forward (+ 0.195 (* (sin +fireball-cast-angle+) head-height)))
-         (height (+ 1.505 (* (cos +fireball-cast-angle+) head-height))))
-    (make-vec3
-     (+ (vec3-x player-position)
-        (* right-x 0.640) (* heading-x forward))
-     (+ (vec3-y player-position)
-        (* right-y 0.640) (* heading-y forward))
-     (+ (vec3-z player-position) height))))
-
-(defun launch-walking-player-fireball
-    (player origin direction &key (distance 64.0))
-  "Launch (or replace) PLAYER's fireball from ORIGIN along DIRECTION."
-  (let ((position (add-scaled-directions origin direction 0.48)))
-    (setf (walking-player-fireball-position player) position
-          (walking-player-previous-fireball-position player)
-          (make-vec3 (vec3-x position) (vec3-y position) (vec3-z position))
-          (walking-player-fireball-velocity player)
-          (vec3-scale direction +fireball-speed+)
-          (walking-player-fireball-distance-remaining player)
-          (max 0.0 (- distance 0.48))
-          (walking-player-spell-flash player) 1.0))
-  player)
-
-(defun cast-walking-player-fireball (player target)
-  "Turn PLAYER toward TARGET and launch a fireball from the pivoted staff.
-
-This is intentionally the small semantic boundary for the tech demo.  Input,
-rendering, and the temporary kinematic transport do not need to know what a
-future spell or weapon action vocabulary will look like."
-  (let* ((position (walking-player-position player))
-         (dx (- (vec3-x target) (vec3-x position)))
-         (dy (- (vec3-y target) (vec3-y position)))
-         (horizontal-distance (sqrt (+ (* dx dx) (* dy dy)))))
-    (when (> horizontal-distance 1.0e-4)
-      (setf (walking-player-heading-x player) (/ dx horizontal-distance)
-            (walking-player-heading-y player) (/ dy horizontal-distance)))
-    (cancel-walking-player-route player "casting a fireball")
-    (let* ((origin (walking-player-staff-head-position player))
-           (direction
-             (make-vec3 (- (vec3-x target) (vec3-x origin))
-                        (- (vec3-y target) (vec3-y origin))
-                        (- (vec3-z target) (vec3-z origin))))
-           (length (vec3-length direction)))
-      ;; A click directly on the staff is still a cast, aimed along the new
-      ;; facing instead of asking VEC3-NORMALIZE to invent a direction.
-      (when (< length 1.0e-4)
-        (setf direction
-              (make-vec3 (walking-player-heading-x player)
-                         (walking-player-heading-y player) 0.0)
-              length 32.0))
-      (launch-walking-player-fireball
-       player origin (vec3-normalize direction) :distance length))))
-
-(defun clear-walking-player-fireball (player)
-  (setf (walking-player-fireball-position player) nil
-        (walking-player-previous-fireball-position player) nil
-        (walking-player-fireball-velocity player) nil
-        (walking-player-fireball-distance-remaining player) 0.0)
-  player)
-
-(defun advance-walking-player-fireball (player seconds)
-  "Advance PLAYER's fireball in a straight line, stopping at its cast target."
-  (let ((position (walking-player-fireball-position player)))
-    (when position
-      (let ((previous (walking-player-previous-fireball-position player)))
-        (setf (vec3-x previous) (vec3-x position)
-              (vec3-y previous) (vec3-y position)
-              (vec3-z previous) (vec3-z position)))
-      (let* ((velocity (walking-player-fireball-velocity player))
-             (remaining
-               (walking-player-fireball-distance-remaining player))
-             (travel (min remaining (* +fireball-speed+ seconds)))
-             (time (/ travel +fireball-speed+)))
-        (incf (vec3-x position) (* (vec3-x velocity) time))
-        (incf (vec3-y position) (* (vec3-y velocity) time))
-        (incf (vec3-z position) (* (vec3-z velocity) time))
-        (decf (walking-player-fireball-distance-remaining player) travel)
-        (when (<= (walking-player-fireball-distance-remaining player) 0.0)
-          (clear-walking-player-fireball player)))))
   player)
 
 (defun advance-walking-player-vertical (player source seconds)
@@ -646,15 +540,13 @@ future spell or weapon action vocabulary will look like."
   player)
 
 (defun step-walking-player
-    (player source camera forward right seconds &key maximum-distance)
-  "Advance PLAYER from camera-relative movement axes for SECONDS."
-  (let ((length (sqrt (+ (* forward forward) (* right right)))))
+    (player source direction-x direction-y seconds &key maximum-distance)
+  "Advance PLAYER along a world-space horizontal direction for SECONDS."
+  (let ((length (sqrt (+ (* direction-x direction-x)
+                         (* direction-y direction-y)))))
     (if (plusp length)
-        (let* ((forward (/ forward length))
-               (right (/ right length))
-               (yaw (camera-yaw camera))
-               (direction-x (+ (* (cos yaw) forward) (* (sin yaw) right)))
-               (direction-y (+ (* (sin yaw) forward) (* (- (cos yaw)) right)))
+        (let* ((direction-x (/ direction-x length))
+               (direction-y (/ direction-y length))
                (distance (min (* seconds (walking-player-speed player))
                               (or maximum-distance most-positive-single-float)))
                (position (walking-player-position player))
@@ -686,7 +578,7 @@ future spell or weapon action vocabulary will look like."
   player)
 
 (defun advance-walking-player
-    (player source camera forward right seconds &key maximum-distance)
+    (player source direction-x direction-y seconds &key maximum-distance)
   "Integrate movement in at most 1/120-second steps, retaining one frame pose."
   (begin-walking-player-frame player)
   ;; A demand world starts with no published collision window. Missing chunks
@@ -701,84 +593,7 @@ future spell or weapon action vocabulary will look like."
   (let* ((steps (max 1 (ceiling (* seconds 120))))
          (dt (/ seconds steps)))
     (dotimes (i steps)
-      (step-walking-player player source camera forward right dt
+      (step-walking-player player source direction-x direction-y dt
                            :maximum-distance (and maximum-distance
                                                   (/ maximum-distance steps)))))
-  (advance-walking-player-fireball player seconds)
-  (setf (walking-player-spell-flash player)
-        (max 0.0 (- (walking-player-spell-flash player) (* 2.4 seconds))))
   player)
-
-(defun soft-follow-step (current target seconds quiet-radius)
-  "Move CURRENT calmly toward TARGET, catching up harder as separation grows.
-
-QUIET-RADIUS is a soft camera zone: motion inside it is treated as local
-character movement rather than a reason to reframe.  Outside it, an exact
-exponential response makes the result independent of frame rate, while its
-rate rises with distance so large discontinuities do not leave the player
-behind."
-  (let* ((difference (- target current))
-         (distance (abs difference))
-         (excess (max 0.0 (- distance quiet-radius))))
-    (if (zerop excess)
-        current
-        (let* ((rate (+ 1.8 (* 0.9 excess)))
-               (blend (- 1.0 (exp (- (* rate seconds))))))
-          (+ current (* (signum difference) excess blend))))))
-
-(defun follow-walking-player (camera player &key (distance 18.0) seconds)
-  "Follow PLAYER through a quiet zone with distance-sensitive catch-up."
-  (multiple-value-bind (right up forward) (camera-basis camera)
-    (declare (ignore right up))
-    (let* ((player-position (walking-player-position player))
-           (heading-x (walking-player-heading-x player))
-           (heading-y (walking-player-heading-y player))
-           ;; Showing more of where the traveler is going makes movement legible.
-           (aim-x (+ (vec3-x player-position) (* 2.4 heading-x)))
-           (aim-y (+ (vec3-y player-position) (* 2.4 heading-y)))
-           (aim-z (+ (vec3-z player-position) 1.45))
-           (target-x (- aim-x (* distance (vec3-x forward))))
-           (target-y (- aim-y (* distance (vec3-y forward))))
-           (target-z (- aim-z (* distance (vec3-z forward))))
-           (camera-position (camera-position camera)))
-      (if (null seconds)
-          (setf (vec3-x camera-position) target-x
-                (vec3-y camera-position) target-y
-                (vec3-z camera-position) target-z)
-          (setf (vec3-x camera-position)
-                (soft-follow-step (vec3-x camera-position)
-                                  target-x seconds 0.28)
-                (vec3-y camera-position)
-                (soft-follow-step (vec3-y camera-position)
-                                  target-y seconds 0.28)
-                ;; Terrain relief is much less important than lateral travel:
-                ;; let a whole stair tread pass without bobbing the frame.
-                (vec3-z camera-position)
-                (soft-follow-step (vec3-z camera-position)
-                                  target-z seconds 0.85)))))
-  camera)
-
-(defun walking-player-render-lanes (player)
-  "Return current, previous, and heading vec4 lanes for the GPU boundary."
-  (labels ((position-lane (position gait)
-             (list (vec3-x position) (vec3-y position)
-                   (+ (vec3-z position) 1.48) gait)))
-    (values
-     (position-lane (walking-player-position player)
-                    (walking-player-gait player))
-     (position-lane (walking-player-previous-position player)
-                    (walking-player-previous-gait player))
-     (list (walking-player-heading-x player)
-           (walking-player-heading-y player)
-           (walking-player-previous-heading-x player)
-           (walking-player-spell-flash player))
-     (let ((position (walking-player-fireball-position player)))
-       (if position
-           (list (vec3-x position) (vec3-y position)
-                 (vec3-z position) +fireball-radius+)
-           '(0.0 0.0 0.0 0.0)))
-     (let ((position (walking-player-previous-fireball-position player)))
-       (if position
-           (list (vec3-x position) (vec3-y position)
-                 (vec3-z position) +fireball-radius+)
-           '(0.0 0.0 0.0 0.0))))))
