@@ -137,6 +137,66 @@
       (when color (destroy color))
       (destroy device))))
 
+(define-test metal-multisample-color-resolve-publishes-pixels
+  (let* ((device
+           (request-gpu-device (make-instance 'metal-gpu-provider)))
+         (multisample nil)
+         (resolved nil)
+         (readback nil)
+         (encoder nil)
+         (command-buffer nil))
+    (unwind-protect
+         (progn
+           (setf multisample
+                 (create
+                  device
+                  (make-texture-descriptor
+                   :label "multisample resolve source"
+                   :size '(32 32) :dimensions :2d :format :rgba8-unorm
+                   :sample-count 4 :usage '(:render-attachment)))
+                 resolved
+                 (create
+                  device
+                  (make-texture-descriptor
+                   :label "multisample resolve destination"
+                   :size '(32 32) :dimensions :2d :format :rgba8-unorm
+                   :usage '(:render-attachment :copy-src)))
+                 readback
+                 (create
+                  device
+                  (make-buffer-descriptor
+                   :size (* 32 32 4) :usage '(:copy-dst)))
+                 encoder
+                 (create device (make-command-encoder-descriptor)))
+           ;; A clear needs no shaders: this isolates the native attachment
+           ;; wiring and verifies the single-sample texture consumers read.
+           (end-pass
+            (begin-render-pass
+             encoder
+             (make-render-pass-descriptor
+              :color-attachments
+              `((:view ,multisample :resolve-view ,resolved
+                 :load-op :clear :store-op :store
+                 :clear-value #(0.0 1.0 0.0 1.0))))))
+           (encode
+            encoder
+            (make-gpu-copy-texture-to-buffer-command
+             :source resolved :destination readback))
+           (setf command-buffer (finish encoder))
+           (submit (device-queue device) command-buffer)
+           (let ((pixels (read-buffer readback)))
+             (true (loop for index below (length pixels) by 4
+                         always (and (zerop (aref pixels index))
+                                     (= 255 (aref pixels (+ index 1)))
+                                     (zerop (aref pixels (+ index 2)))
+                                     (= 255 (aref pixels (+ index 3))))))))
+      (when command-buffer (destroy command-buffer))
+      (when encoder (destroy encoder))
+      (when readback (destroy readback))
+      (when resolved (destroy resolved))
+      (when multisample (destroy multisample))
+      (destroy device))))
+
 (define-test metal-chained-blits-observe-the-prior-blit-write
   (let* ((width 641)
          (height 359)

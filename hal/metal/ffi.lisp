@@ -1396,8 +1396,7 @@ rejection.  Source and names cross only as in-memory NSString objects."
         (%new-render-pass-descriptor
          (objc:find-objective-c-class "MTL4RenderPassDescriptor")))
     (if color-attachments
-        (loop for (texture attachment-color clear-p store-p
-                           &optional resolve-texture)
+        (loop for (texture attachment-color clear-p store-p resolve-texture)
                 in color-attachments
               for index from 0
               do (configure-metal-pass-color-attachment
