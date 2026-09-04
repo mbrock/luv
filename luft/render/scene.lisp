@@ -37,13 +37,27 @@
   (:documentation
    "One authored solid and its cell-material field.
 
-The solid remains LUFT's topological truth. The sparse authored field stores
+The solid is a LUFT fiber store: dense per-chunk column occupancy, the same
+words the mesher reads, replaced as a whole on every edit so worker
+snapshots keep the value they captured. The sparse authored field stores
 only dense vocabulary offsets; semantic material objects remain at the scene
 boundary rather than being allocated per cell.  Its authored light generation
 contains material sources only when its immutable propagation policy is true;
 the diagnostic false policy owns the exact empty propagated generation.
 Realized torch light is view/profile-dependent and therefore belongs to an
 immutable SCENE-MESH-GENERATION, never this scene."))
+
+(defun scene-domain (scene)
+  "The world domain of SCENE's solid."
+  (luft:fiber-store-domain (scene-solid scene)))
+
+(defun scene-cell-bit (scene x y z)
+  "SCENE's occupancy at world cell (X, Y, Z); absent chunks read as air."
+  (handler-bind ((luft:missing-chunk
+                   (lambda (condition)
+                     (declare (ignore condition))
+                     (invoke-restart 'luft:treat-as-air))))
+    (luft:fiber-store-cell-bit (scene-solid scene) x y z)))
 
 (defun scene-authored-voxel-light (scene)
   "Return SCENE's immutable authored-policy base light field.
@@ -492,7 +506,8 @@ stair topology. #WSEK3C"
        (scene-builder-torches builder))
       (setf torches
             (coerce (sort torches #'< :key #'torch-attachment-face) 'vector))
-      (let* ((solid (luft:finish-chain-builder chain-builder))
+      (let* ((solid (luft:make-fiber-store-from-chain
+                     (luft:finish-chain-builder chain-builder)))
              (sources
                (coerce
                 (sort

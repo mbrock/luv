@@ -70,6 +70,11 @@ KEY is the chunk key.  WORDS is X-major: column (X, Y) begins at
     (%make-chunk-fibers (chunk-fibers-domain fibers)
                         (chunk-fibers-key fibers) words)))
 
+(defun fibers= (a b)
+  "Whether A and B hold the same chunk with identical occupancy."
+  (and (= (chunk-fibers-key a) (chunk-fibers-key b))
+       (equalp (chunk-fibers-words a) (chunk-fibers-words b))))
+
 (defun fibers-contain-column-p (fibers x y)
   "Whether world column (X, Y) lies inside FIBERS' chunk."
   (= (chunk-key-at x y) (chunk-fibers-key fibers)))
@@ -286,6 +291,14 @@ Cells are emitted directly in site order, so no sort is needed."
       (setf (gethash key (fiber-store-table store)) fibers)
       (remhash key (fiber-store-table store)))
   fibers)
+
+(defun copy-fiber-store (store)
+  "A store holding the same immutable chunk values as STORE.
+Scenes replace their store on edit so worker snapshots keep the old one."
+  (let ((copy (make-fiber-store (fiber-store-domain store))))
+    (maphash (lambda (key fibers) (setf (gethash key (fiber-store-table copy)) fibers))
+             (fiber-store-table store))
+    copy))
 
 (defun fiber-store-keys (store)
   (loop for key being the hash-keys of (fiber-store-table store) collect key))

@@ -219,7 +219,7 @@ at the atelier boundary where a person has selected one site."))
 
 (defun ray-entry-face (solid cell-x cell-y cell-z axis step)
   "Return the outward face through which a ray entered CELL along AXIS."
-  (let* ((domain (luft:chain-domain solid))
+  (let* ((domain (luft:fiber-store-domain solid))
          (anchor-x (+ cell-x (if (and (eq axis :x) (minusp step)) 1 0)))
          (anchor-y (+ cell-y (if (and (eq axis :y) (minusp step)) 1 0)))
          (anchor-z (+ cell-z (if (and (eq axis :z) (minusp step)) 1 0)))
@@ -228,15 +228,13 @@ at the atelier boundary where a person has selected one site."))
                    (:y luft:+xz-face-extent+)
                    (:z luft:+xy-face-extent+)))
          (geometry (luft:make-site domain anchor-x anchor-y anchor-z extent 1))
-         (occupancy (lambda (x y z)
-                      (luft:chain-cell-occupancy-bit solid x y z))))
+         (occupancy (lambda (x y z) (inspection-cell-bit solid x y z))))
     (luft:orient-face-outward domain geometry occupancy)))
 
 (defun make-site-inspection (source face cell-x cell-y cell-z point distance)
   (let* ((solid (inspection-source-solid source))
-         (domain (luft:chain-domain solid))
-         (occupancy (lambda (x y z)
-                      (luft:chain-cell-occupancy-bit solid x y z)))
+         (domain (luft:fiber-store-domain solid))
+         (occupancy (lambda (x y z) (inspection-cell-bit solid x y z)))
          (cell (luft:make-site domain cell-x cell-y cell-z
                                luft:+cell-extent+ 1)))
     (make-instance
@@ -255,7 +253,7 @@ at the atelier boundary where a person has selected one site."))
 
 Tied edge and corner crossings advance together, so a ray never reports a
 cell it merely touches.  The returned SITE-INSPECTION is the one sparse object
-boundary over the packed chain and dense face records."
+boundary over the chunk fibers and dense face records."
   (let* ((solid (inspection-source-solid source))
          (direction (vec3:vec3-normalize direction))
          (x (floor (vec3:vec3-x origin)))
@@ -274,7 +272,7 @@ boundary over the packed chain and dense face records."
     (multiple-value-setq (step-z next-z delta-z)
       (ray-axis-crossings (vec3:vec3-z origin) (vec3:vec3-z direction)))
     (loop
-      (when (= 1 (luft:chain-cell-occupancy-bit solid x y z))
+      (when (= 1 (inspection-cell-bit solid x y z))
         (when entry-axis
           (let* ((face (ray-entry-face solid x y z entry-axis entry-step))
                  (point (add-scaled-directions origin direction distance)))
@@ -553,7 +551,7 @@ the selector is the whole of the difference."
 (defun site-inspection-adjacent-cell (inspection)
   "Return the empty-side cell immediately outside INSPECTION's face."
   (let* ((source (site-inspection-source inspection))
-         (domain (luft:chain-domain (inspection-source-solid source)))
+         (domain (luft:fiber-store-domain (inspection-source-solid source)))
          (cell (site-inspection-cell inspection)))
     (multiple-value-bind (dx dy dz)
         (luft:face-oriented-normal (site-inspection-site inspection))

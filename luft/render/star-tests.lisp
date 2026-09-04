@@ -203,9 +203,9 @@
          (right
            (luft.render::materialize-authored-world-chunk
             source right-key 3)))
-    (true (luft:chain=
-           (luft.render::resident-cell-chunk-chain left-a)
-           (luft.render::resident-cell-chunk-chain left-b))
+    (true (luft:fibers=
+           (luft.render::resident-cell-chunk-fibers left-a)
+           (luft.render::resident-cell-chunk-fibers left-b))
           "incarnation does not enter deterministic source content")
     (true (same-material-cell-table-p
            (luft.render::resident-cell-chunk-material-cells left-a)
@@ -217,8 +217,8 @@
           for y = (round (luft.render::large-world-road-centre-y x))
           for z = (1- (luft.render::large-world-terrain-height source x y))
           for cell = (luft:make-site domain x y z luft:+cell-extent+ 1)
-          do (true (= 1 (luft:chain-cell-occupancy-bit
-                         (luft.render::resident-cell-chunk-chain resident)
+          do (true (= 1 (luft:fibers-cell-bit
+                         (luft.render::resident-cell-chunk-fibers resident)
                          x y z)))
              (true (= 2 (gethash
                          cell
@@ -247,8 +247,8 @@
              source key 1
              :edits (luft.render::capture-authored-world-chunk-edits
                      source key))))
-      (true (zerop (luft:chain-cell-occupancy-bit
-                    (luft.render::resident-cell-chunk-chain resident) x y z))
+      (true (zerop (luft:fibers-cell-bit
+                    (luft.render::resident-cell-chunk-fibers resident) x y z))
             "an explicit-air edit overrides regenerated road content")
       (true (not (nth-value
                   1 (gethash
@@ -268,8 +268,7 @@
             :chunk-key key :demand-token 7 :incarnation 12 :edits nil))
          (resident
            (luft.render::%make-resident-cell-chunk
-            key 12 (luft:make-chain (luft:chain-domain
-                                     (luft.render:scene-solid scene)))
+            key 12 (luft:make-chunk-fibers (luft.render::scene-domain scene) key)
             (make-hash-table :test #'eql))))
     (setf (luv.production:production-request-ticket request) 3
           (gethash key (luft.render::streaming-scene-load-outstanding scene)) 3
@@ -285,11 +284,12 @@
 (define-test authored-world-settled-residency-does-not-rematerialize-gameplay
   (let* ((scene (luft.render:make-authored-world-streaming-scene
                  :horizontal-bits 8 :residency-radius 0))
-         (domain (luft:chain-domain (luft.render:scene-solid scene)))
+         (domain (luft.render::scene-domain scene))
          (key (luft:chunk-key-at 64 64))
          (resident
            (luft.render::%make-resident-cell-chunk
-            key 1 (luft:make-chain domain) (make-hash-table :test #'eql)))
+            key 1 (luft:make-chunk-fibers domain key)
+            (make-hash-table :test #'eql)))
          (revision (luft.render::scene-content-revision scene)))
     (setf (luft.render::streaming-scene-focus scene) (cons 1 1)
           (gethash key (luft.render::streaming-scene-desired scene)) 1
@@ -302,16 +302,17 @@
 (define-test authored-world-residency-is-bounded-and-absence-is-explicit
   (let* ((scene (luft.render:make-authored-world-streaming-scene
                  :horizontal-bits 8 :residency-radius 1))
-         (domain (luft:chain-domain (luft.render:scene-solid scene)))
-         (empty (luft:make-chain domain))
+         (domain (luft.render::scene-domain scene))
          (materials (make-hash-table :test #'eql))
          (keep (luft:chunk-key-at 64 64))
          (evict (luft:chunk-key-at 192 192)))
     (setf (gethash keep (luft.render::streaming-scene-desired scene)) 1
           (gethash keep (luft.render::streaming-scene-store scene))
-          (luft.render::%make-resident-cell-chunk keep 1 empty materials)
+          (luft.render::%make-resident-cell-chunk
+           keep 1 (luft:make-chunk-fibers domain keep) materials)
           (gethash evict (luft.render::streaming-scene-store scene))
-          (luft.render::%make-resident-cell-chunk evict 2 empty materials))
+          (luft.render::%make-resident-cell-chunk
+           evict 2 (luft:make-chunk-fibers domain evict) materials))
     (true (equal (list evict)
                  (luft.render::evict-undesired-authored-world-residents scene)))
     (true (= 1 (hash-table-count
@@ -340,8 +341,10 @@
           "collision reads a wider resident guard for seam crossing")
     (true (= (luft.render::large-world-terrain-height source x y) z)
           "the authored spawn derives its foot height from the source")
-    (setf (luft.render:scene-solid scene)
-          (luft.render::resident-cell-chunk-chain resident))
+    (let ((store (luft:make-fiber-store (luft.render::scene-domain scene))))
+      (setf (luft:fiber-store-chunk store key)
+            (luft.render::resident-cell-chunk-fibers resident)
+            (luft.render:scene-solid scene) store))
     (true (luft.render::walking-player-standable-cell-p scene x y z)
           "the player starts above rather than inside the road")
     (true (luft.render::walking-player-standable-cell-p scene (1+ x) y

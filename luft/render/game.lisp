@@ -27,23 +27,47 @@
 (defconstant +fireball-cast-angle+ 0.68)
 
 (defgeneric inspection-source-solid (source)
-  (:documentation "Return SOURCE's packed solid chain for sparse queries."))
+  (:documentation "Return SOURCE's fiber store for occupancy queries."))
 
 (defmethod inspection-source-solid ((source t)) source)
 
 (defmethod inspection-source-solid ((source scene)) (scene-solid source))
 
-(defun collision-cell-occupancy-bit (solid x y z)
-  "Read SOLID for gameplay, treating its finite horizontal boundary as wall.
+(defmacro with-collision-boundary (() &body body)
+  "Run BODY with gameplay boundary policy: the finite horizontal box is a
+wall, and a chunk that is not resident is air.
 
 Meshing and other world clients retain explicit OUTSIDE-DOMAIN semantics.
-Only physical occupants choose this restart, so walkers slide along the box."
+Only physical occupants choose these restarts, so walkers slide along the
+box and fall through nothing they cannot see."
+  `(handler-bind
+       ((luft:outside-domain
+          (lambda (condition)
+            (declare (ignore condition))
+            (invoke-restart 'luft:treat-as-solid)))
+        (luft:missing-chunk
+          (lambda (condition)
+            (declare (ignore condition))
+            (invoke-restart 'luft:treat-as-air))))
+     ,@body))
+
+(defun collision-cell-occupancy-bit (solid x y z)
+  "Read SOLID for gameplay under WITH-COLLISION-BOUNDARY."
+  (with-collision-boundary ()
+    (luft:fiber-store-cell-bit solid x y z)))
+
+(defun inspection-cell-bit (solid x y z)
+  "Read SOLID for picking and inspection: everything unknown is air."
   (handler-bind
       ((luft:outside-domain
          (lambda (condition)
            (declare (ignore condition))
-           (invoke-restart 'luft:treat-as-solid))))
-    (luft:chain-cell-occupancy-bit solid x y z)))
+           (invoke-restart 'luft:treat-as-air)))
+       (luft:missing-chunk
+         (lambda (condition)
+           (declare (ignore condition))
+           (invoke-restart 'luft:treat-as-air))))
+    (luft:fiber-store-cell-bit solid x y z)))
 
 (defclass walking-player ()
   ((position :initarg :position :accessor walking-player-position)
@@ -132,12 +156,10 @@ authoritative while the player crosses between its cell-centre waypoints."))
 
 (defun walking-player-clear-at-p (solid x y base-z)
   "Whether the point-footprint player fits above BASE-Z at X,Y."
-  (let ((cell-x (floor x))
-        (cell-y (floor y)))
-    (loop for z from (floor base-z)
-          below (ceiling (+ base-z +walking-player-height+))
-          always (zerop (collision-cell-occupancy-bit
-                         solid cell-x cell-y z)))))
+  (with-collision-boundary ()
+    (luft:fiber-store-column-clear-p
+     solid (floor x) (floor y)
+     (floor base-z) (ceiling (+ base-z +walking-player-height+)))))
 
 (defun walking-player-support-height (source x y current-base-z)
   "Return a nearby supported base height for a step to X,Y, or NIL.
@@ -173,7 +195,7 @@ for a remote roof, so a wall cannot teleport the player onto its top."
 (defun map-walking-cell-neighbors (function source cell start)
   "Call FUNCTION with each nearby eight-connected neighbor and step cost."
   (let* ((solid (inspection-source-solid source))
-         (domain (luft:chain-domain solid))
+         (domain (luft:fiber-store-domain solid))
          (x (luft:site-x cell))
          (y (luft:site-y cell))
          (z (luft:site-z cell)))
@@ -254,7 +276,7 @@ DESTINATION is a packed LUFT foot cell.  A returned failed route retains the
 reason and search count, so a click that cannot be honored is inspectable
 rather than silently becoming a straight-line collision attempt."
   (let* ((solid (inspection-source-solid source))
-         (domain (luft:chain-domain solid))
+         (domain (luft:fiber-store-domain solid))
          (position (walking-player-position player))
          (start
            (luft:make-site
@@ -316,7 +338,7 @@ rather than silently becoming a straight-line collision attempt."
 
 (defun start-walking-player-route (player source x y z)
   "Replace PLAYER's current intention with a route to foot cell X,Y,Z."
-  (let* ((domain (luft:chain-domain (inspection-source-solid source)))
+  (let* ((domain (luft:fiber-store-domain (inspection-source-solid source)))
          (destination
            (handler-case
                (luft:make-site domain x y z luft:+cell-extent+ 1)

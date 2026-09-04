@@ -131,12 +131,12 @@ upland instead of repeating one periodic profile."
 
 (defstruct (resident-cell-chunk
              (:constructor %make-resident-cell-chunk
-                 (key incarnation chain material-cells))
+                 (key incarnation fibers material-cells))
              (:copier nil))
   "One immutable, evictable materialization of an authored source chunk."
   (key 0 :type luft:chunk-key :read-only t)
   (incarnation 0 :type (integer 1 *) :read-only t)
-  (chain nil :type luft:chain :read-only t)
+  (fibers nil :type luft:chunk-fibers :read-only t)
   (material-cells nil :type hash-table :read-only t))
 
 (defun large-world-road-centre-y (x)
@@ -311,19 +311,16 @@ upland instead of repeating one periodic profile."
             (setf (gethash (car edit) materials)
                   (domains:identity-vocabulary-offset vocabulary (cdr edit)))
             (remhash (car edit) materials))))
-    (let ((builder
-            (luft:make-chain-builder
-             domain :initial-capacity (hash-table-count materials))))
-      (zone :luft/assemble-source-chain
+    (let ((fibers (luft:make-chunk-fibers domain key)))
+      (zone :luft/assemble-source-fibers
         (maphash (lambda (cell offset)
                    (declare (ignore offset))
-                   (luft:chain-builder-add-site builder cell))
+                   (setf (luft:fibers-cell-bit
+                          fibers (luft:site-x cell) (luft:site-y cell)
+                          (luft:site-z cell))
+                         1))
                  materials))
-      (%make-resident-cell-chunk
-       key incarnation
-       (zone :luft/normalize-source-chain
-         (luft:finish-chain-builder builder))
-       materials))))
+      (%make-resident-cell-chunk key incarnation fibers materials))))
 
 (defclass authored-chunk-load-request (production:production-request)
   ((scene :initarg :scene :reader authored-chunk-load-request-scene)

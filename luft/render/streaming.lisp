@@ -7,7 +7,7 @@
 ;;; immutable resident values are produced on the worker and may be discarded.
 ;;; A bounded square window follows the camera. Each focus change installs the
 ;;; final desired residency first, then remeshes exactly the chunks whose 3 by 3
-;;; dependency neighborhoods changed. MESH-CHUNK's probes into non-resident
+;;; dependency neighborhoods changed. MESH-STAR-CHUNK's probes into non-resident
 ;;; neighbors signal MISSING-CHUNK. Demand worlds capture a complete guard and
 ;;; reject an unknown probe rather than silently turning nonresidency into air.
 ;;; The canvas owner publishes replacements and departures as one complete
@@ -57,7 +57,7 @@
   (scene nil :read-only t)
   ;; The owning streaming scene remains mutable on the canvas thread.  Workers
   ;; borrow this frozen scene value so a later edit cannot mix new materials or
-  ;; light with the snapshot's old occupancy chains.
+  ;; light with the snapshot's old occupancy fibers.
   (input-scene nil :type scene :read-only t)
   (output-keys nil :type list :read-only t)
   (witness-keys nil :type list :read-only t)
@@ -118,9 +118,9 @@ a future LoD must bring an explicit transition representation."
                     :player-p (scene-player-p scene)
                     :frames-per-load frames-per-load
                     :residency-radius residency-radius)))
-    (luft:map-chain-chunks
-     (lambda (key chain)
-       (setf (gethash key (streaming-scene-store streaming)) chain))
+    (luft:map-fiber-store
+     (lambda (key fibers)
+       (setf (gethash key (streaming-scene-store streaming)) fibers))
      (scene-solid scene))
     streaming))
 
@@ -139,7 +139,7 @@ a future LoD must bring an explicit transition representation."
     (make-instance
      'streaming-scene
      :source source
-     :solid (luft:make-chain domain)
+     :solid (luft:make-fiber-store domain)
      :material-vocabulary (scene-material-vocabulary empty)
      :material-cells (make-hash-table :test #'eql)
      :authored-light-sources #()
@@ -157,15 +157,15 @@ a future LoD must bring an explicit transition representation."
      :frames-per-load frames-per-load
      :residency-radius residency-radius)))
 
-(defun streaming-store-chain (scene key &optional default)
-  "Return KEY's chain from either a finite fixture or resident source value."
+(defun streaming-store-fibers (scene key &optional default)
+  "Return KEY's fibers from either a finite fixture or resident source value."
   (multiple-value-bind (value present-p)
       (gethash key (streaming-scene-store scene))
     (values
      (if present-p
          (etypecase value
-           (luft:chain value)
-           (resident-cell-chunk (resident-cell-chunk-chain value)))
+           (luft:chunk-fibers value)
+           (resident-cell-chunk (resident-cell-chunk-fibers value)))
          default)
      present-p)))
 
@@ -176,17 +176,17 @@ a future LoD must bring an explicit transition representation."
 
 (defun streaming-scene-cell-state (scene x y z)
   "Classify a cell without conflating sky, finite boundary, and nonresidency."
-  (let ((domain (luft:chain-domain (scene-solid scene))))
+  (let ((domain (scene-domain scene)))
     (if (or (< x 0) (>= x (luft:world-domain-x-limit domain))
             (< y 0) (>= y (luft:world-domain-y-limit domain))
             (< z 0) (> z 254))
         :closed-boundary
         (let ((key (luft:chunk-key-at x y)))
-          (multiple-value-bind (chain resident-p)
-              (streaming-store-chain scene key)
+          (multiple-value-bind (fibers resident-p)
+              (streaming-store-fibers scene key)
             (cond
               ((not resident-p) :unknown-nonresident)
-              ((= 1 (luft:chain-cell-occupancy-bit chain x y z)) :solid)
+              ((= 1 (luft:fibers-cell-bit fibers x y z)) :solid)
               (t :open-sky)))))))
 
 (zdefun (snapshot-streaming-scene-input :zone :luft/capture-semantic-scene)
@@ -250,18 +250,13 @@ a future LoD must bring an explicit transition representation."
         thereis (or (= cell (torch-attachment-support-cell attachment))
                     (= cell (torch-attachment-clearance-cell attachment)))))
 
-(defun make-cell-chain-delta (domain cell polarity)
-  (let ((builder (luft:make-chain-builder domain :initial-capacity 1)))
-    (luft:chain-builder-add-site
-     builder (luft:site-with-polarity cell polarity))
-    (luft:finish-chain-builder builder)))
-
 (defun edit-streaming-scene-cell (scene cell new-placement)
   "Publish one complete authored cell edit and return EDIT, status, and chunk.
 
 NEW-PLACEMENT fills an empty cell with an existing scene vocabulary member;
-NIL removes an occupied cell.  All successor chains, material state, and light
-are constructed before the canvas-owned scene is changed.  Active production
+NIL removes an occupied cell.  The successor store, chunk fibers, material
+state, and light are constructed before the canvas-owned scene is changed;
+the old values stay intact for any worker snapshot that captured them.  Active production
 is deliberately rejected; the caller may retry after its current cohort has
 published."
   (check-type scene streaming-scene)
@@ -271,7 +266,7 @@ published."
             (streaming-scene-removals scene))
     (return-from edit-streaming-scene-cell (values nil :busy nil)))
   (let* ((solid (scene-solid scene))
-         (domain (luft:chain-domain solid)))
+         (domain (luft:fiber-store-domain solid)))
     (luft:checked-site domain cell)
     (unless (and (= (luft:site-extent cell) luft:+cell-extent+)
                  (luft:site-positive-p cell))
@@ -281,10 +276,10 @@ published."
       (return-from edit-streaming-scene-cell (values nil :attachment nil)))
     (multiple-value-bind (old-offset occupied-p)
         (gethash cell (scene-material-cells scene))
-      (unless (eql occupied-p
-                   (= 1 (luft:chain-cell-occupancy-bit
-                         solid (luft:site-x cell) (luft:site-y cell)
-                         (luft:site-z cell))))
+      (unless (eql occupied-p (= 1 (scene-cell-bit scene
+                                                 (luft:site-x cell)
+                                                 (luft:site-y cell)
+                                                 (luft:site-z cell))))
         (error "Scene occupancy and material state disagree at ~S." cell))
       (cond ((and new-placement occupied-p)
              (return-from edit-streaming-scene-cell
@@ -300,14 +295,16 @@ published."
           (return-from edit-streaming-scene-cell
             (values nil :unknown-material nil)))
         (let* ((material-cells (copy-scene-material-cells scene))
-               (polarity (if new-placement 1 -1))
-               (delta (make-cell-chain-delta domain cell polarity))
-               (new-solid (luft:chain+ solid delta))
+               (bit (if new-placement 1 0))
                (key (luft:site-chunk-key cell))
-               (empty (luft:make-chain domain))
-               (old-chunk (streaming-store-chain scene key empty))
-               (new-chunk (luft:chain+ old-chunk delta))
+               (old-chunk (streaming-store-fibers
+                           scene key (luft:make-chunk-fibers domain key)))
+               (new-chunk (luft:fibers-with-cell
+                           old-chunk (luft:site-x cell) (luft:site-y cell)
+                           (luft:site-z cell) bit))
+               (new-solid (luft:copy-fiber-store solid))
                (light-revision (1+ (scene-authored-light-revision scene))))
+          (setf (luft:fiber-store-chunk new-solid key) new-chunk)
           (if new-placement
               (setf (gethash cell material-cells) new-offset)
               (remhash cell material-cells))
@@ -335,7 +332,7 @@ published."
                           (scene-material-vocabulary scene) old-offset))
                     new-placement content-revision)))
             ;; These values are replace-only.  Existing worker snapshots retain
-            ;; the old chains, hash table, and light generation without copying.
+            ;; the old store, fibers, hash table, and light generation.
             (setf (scene-solid scene) new-solid
                   (scene-material-cells scene) material-cells
                   (scene-authored-light-sources scene) sources
@@ -359,7 +356,7 @@ published."
                          key
                          (incf (streaming-scene-next-incarnation scene))
                          new-chunk local-materials)))
-                (if (luft:chain-empty-p new-chunk)
+                (if (luft:fibers-empty-p new-chunk)
                     (remhash key (streaming-scene-store scene))
                     (setf (gethash key (streaming-scene-store scene))
                           new-chunk)))
@@ -442,7 +439,7 @@ silently empty the desired residency window."
   (when (or (streaming-scene-cohort scene)
             (streaming-scene-removals scene))
     (return-from %retarget-resident-streaming-scene nil))
-  (let* ((domain (luft:chain-domain (scene-solid scene)))
+  (let* ((domain (scene-domain scene))
          (focus-key
            (luft:chunk-key-at
             (max 0 (min (1- (luft:world-domain-x-limit domain))
@@ -537,14 +534,14 @@ silently empty the desired residency window."
             t))))))
 
 (defun streaming-scene-focus-key (scene world-x world-y)
-  (let ((domain (luft:chain-domain (scene-solid scene))))
+  (let ((domain (scene-domain scene)))
     (luft:chunk-key-at
      (max 0 (min (1- (luft:world-domain-x-limit domain)) (floor world-x)))
      (max 0 (min (1- (luft:world-domain-y-limit domain)) (floor world-y))))))
 
 (defun streaming-domain-keys-near (scene focus radius)
   "Return every in-domain key in the square RADIUS around FOCUS."
-  (let* ((domain (luft:chain-domain (scene-solid scene)))
+  (let* ((domain (scene-domain scene))
          (maximum-x
            (1- (ceiling (luft:world-domain-x-limit domain) luft:+chunk-size+)))
          (maximum-y
@@ -564,7 +561,7 @@ silently empty the desired residency window."
          :zone :luft/rebuild-active-scene
          :value (length collision-keys))
     (scene source-keys &optional (collision-keys source-keys))
-  "Publish visible materials and a possibly wider resident collision chain."
+  "Publish visible materials and a possibly wider resident collision store."
   (let* ((source (streaming-scene-source scene))
          (domain (authored-world-source-domain source))
          (cell-count
@@ -572,20 +569,19 @@ silently empty the desired residency window."
                  for resident = (gethash key (streaming-scene-store scene))
                  sum (hash-table-count
                       (resident-cell-chunk-material-cells resident))))
-         (collision-chains
-           (loop for key in collision-keys
-                 for resident = (gethash key (streaming-scene-store scene))
-                 collect (resident-cell-chunk-chain resident)))
+         (collision (luft:make-fiber-store domain))
          (materials (make-hash-table :test #'eql :size cell-count)))
+    (dolist (key collision-keys)
+      (setf (luft:fiber-store-chunk collision key)
+            (resident-cell-chunk-fibers
+             (gethash key (streaming-scene-store scene)))))
     (zone :luft/assemble-visible-materials
       (dolist (key source-keys)
         (let ((resident (gethash key (streaming-scene-store scene))))
           (maphash (lambda (cell offset)
                      (setf (gethash cell materials) offset))
                    (resident-cell-chunk-material-cells resident)))))
-    (setf (scene-solid scene)
-          (zone :luft/assemble-collision-chunks
-            (luft:concatenate-disjoint-chains domain collision-chains))
+    (setf (scene-solid scene) collision
           (scene-material-cells scene) materials
           (scene-content-revision scene) (1+ (scene-content-revision scene)))
     scene))
@@ -723,7 +719,7 @@ A source column can emit primitives to its own owner and to the +X, +Y, or
 +X+Y owner at high seam anchors.  Low anchors remain source-owned.  The
 directional closure publishes every real primitive without inventing five
 unneeded low-side empty slots around a sparse source."
-  (let* ((domain (luft:chain-domain (scene-solid scene)))
+  (let* ((domain (scene-domain scene))
          (maximum-x
            (1- (ceiling (luft:world-domain-x-limit domain)
                         luft:+chunk-size+)))
@@ -751,7 +747,7 @@ The result deliberately includes virtual empty owners.  Canonical face, band,
 and fan ownership can cross a chunk seam even when the neighboring occupancy
 chunk is empty; excluding that owner drops real boundary triangles."
   (check-type radius (integer 0 *))
-  (let* ((domain (luft:chain-domain (scene-solid scene)))
+  (let* ((domain (scene-domain scene))
          (maximum-x
            (1- (ceiling (luft:world-domain-x-limit domain)
                         luft:+chunk-size+)))
@@ -828,23 +824,24 @@ chunk is empty; excluding that owner drops real boundary triangles."
          (loaded (streaming-scene-loaded scene))
          (resident-source-keys
            (sort (loop for key being the hash-keys of loaded collect key) #'<))
-         (empty (luft:make-chain (luft:chain-domain (scene-solid scene)))))
+         (domain (scene-domain scene)))
     (unless (every (lambda (key) (member key witness-keys :test #'eql))
                    output-keys)
       (error "Streaming outputs ~S are not all resident in witness set ~S."
              output-keys witness-keys))
     (dolist (key captured-keys)
-      ;; Presence records residency.  An empty union chain is still a captured
-      ;; answer and must not be confused with an unknown/out-of-window chunk.
-      (multiple-value-bind (chain present-p)
-          (streaming-store-chain scene key empty)
+      ;; Presence records residency.  Empty fibers are still a captured answer
+      ;; and must not be confused with an unknown/out-of-window chunk.
+      (multiple-value-bind (fibers present-p)
+          (streaming-store-fibers scene key)
         (cond
           (present-p
-           (setf (gethash key union-neighborhood) chain))
+           (setf (gethash key union-neighborhood) fibers))
           ((streaming-scene-source scene)
            (error "Demand snapshot crossed unknown nonresident chunk ~D." key))
           (t
-           (setf (gethash key union-neighborhood) empty)))))
+           (setf (gethash key union-neighborhood)
+                 (luft:make-chunk-fibers domain key))))))
     (%make-streaming-mesh-snapshot
      scene (snapshot-streaming-scene-input scene)
      output-keys witness-keys resident-source-keys
@@ -875,13 +872,13 @@ while scene decoration establishes cross-chunk light provenance."
          (scene (streaming-mesh-snapshot-input-scene snapshot))
          (neighborhood (streaming-mesh-snapshot-union-neighborhood snapshot)))
     (labels ((mesh-owner (key)
-               (let ((chain (gethash key neighborhood)))
-                 (unless chain
+               (let ((fibers (gethash key neighborhood)))
+                 (unless fibers
                    (error "Chunk ~D was not captured by this regional snapshot."
                           key))
-                 (zone (:luft/rematerialize :value (luft:chain-count chain))
+                 (zone :luft/mesh-owner
                    (luft:mesh-star-chunk
-                    chain key :outside-domain-policy :air))))
+                    fibers key :outside-domain-policy :air))))
              (decorate-owners (owners &optional surface-context)
                (decorate-scene-meshes
                 owners scene :surface-context surface-context
@@ -896,10 +893,10 @@ while scene decoration establishes cross-chunk light provenance."
       (handler-bind
           ((luft:missing-chunk
              (lambda (condition)
-               (multiple-value-bind (chain present-p)
+               (multiple-value-bind (fibers present-p)
                    (gethash (luft:missing-chunk-key condition) neighborhood)
                  (if present-p
-                     (invoke-restart 'luft:use-chunk chain)
+                     (invoke-restart 'luft:use-chunk fibers)
                      (invoke-restart 'luft:treat-as-air)))))
            (luft:outside-domain
              (lambda (condition)

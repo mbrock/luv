@@ -6,7 +6,7 @@
 
 (defun face-solid-cell (solid face)
   "Return the occupied cell incident to boundary FACE and which side it is on."
-  (let* ((domain (luft:chain-domain solid))
+  (let* ((domain (luft:fiber-store-domain solid))
          (extent (luft:site-extent face))
          (axis (cond ((= extent luft:+xy-face-extent+) :z)
                      ((= extent luft:+xz-face-extent+) :y)
@@ -17,7 +17,11 @@
          (back-x (if (eq axis :x) (1- x) x))
          (back-y (if (eq axis :y) (1- y) y))
          (back-z (if (eq axis :z) (1- z) z)))
-    (if (= 1 (luft:chain-cell-occupancy-bit solid x y z))
+    (if (= 1 (handler-bind ((luft:missing-chunk
+                              (lambda (condition)
+                                (declare (ignore condition))
+                                (invoke-restart 'luft:treat-as-air))))
+               (luft:fiber-store-cell-bit solid x y z)))
         (values (luft:make-site domain x y z luft:+cell-extent+ 1)
                 axis :forward)
         (values (luft:make-site domain back-x back-y back-z
@@ -115,7 +119,7 @@ diagnostic owner NIL remains a single-mesh special form."
 
 (defun unlit-torch-frame-seeds (scene frame)
   (realized-torch-light-seeds
-   (luft:chain-domain (scene-solid scene))
+   (scene-domain scene)
    (lambda (cell) (scene-authored-cell-occupied-p scene cell))
    (unlit-torch-frame-wick-point frame)
    (scene-torch-light-emission scene)))
@@ -160,7 +164,7 @@ diagnostic owner NIL remains a single-mesh special form."
        (scene-authored-light-generation scene))
       (t
        (solve-realized-light-generation
-        (luft:chain-domain (scene-solid scene))
+        (scene-domain scene)
         (scene-material-cells scene)
         (scene-authored-light-opacity-table scene)
         (if (scene-voxel-light-propagation-p scene)
@@ -321,7 +325,7 @@ mesh light sidecars and packed body/flame frames finalized."
       (make-scene-regional-meshes
        scene 1
        :reusable-light-generation reusable-light-generation)
-    (let* ((domain (luft:chain-domain (scene-solid scene)))
+    (let* ((domain (scene-domain scene))
            (words
              (apply #'concatenate '(simple-array (unsigned-byte 32) (*))
                     (mapcar (lambda (entry)
@@ -361,7 +365,7 @@ use MAKE-WHOLE-DOMAIN-DIAGNOSTIC-MESH explicitly."
   (let* ((scene source)
          (solid (scene-solid scene))
          (custom-stock-policy-p (or stock-function chamfer-stock-function)))
-    (check-type solid luft:chain)
+    (check-type solid luft:fiber-store)
     (when custom-stock-policy-p
       (error "Scene stock callbacks bypass the production regional compiler; use MAKE-WHOLE-DOMAIN-DIAGNOSTIC-MESH explicitly."))
     (when reusable-light-generation
@@ -369,7 +373,7 @@ use MAKE-WHOLE-DOMAIN-DIAGNOSTIC-MESH explicitly."
       (unless
           (eq scene (scene-mesh-generation-scene reusable-light-generation))
         (error "A reusable generation belongs to a different authored scene input.")))
-    (zone (:luft/rematerialize :value (luft:chain-count solid))
+    (zone (:luft/rematerialize :value (luft:fiber-store-count solid))
       (multiple-value-bind (mesh census diagnostics generation)
           (scene-regional-mesh-tree
            scene bevel-width

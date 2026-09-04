@@ -47,13 +47,13 @@
    #:+fiber-word-count+ #:fiber-vector #:chunk-fibers #:chunk-fibers-p
    #:chunk-fibers-domain #:chunk-fibers-key #:chunk-fibers-words
    #:fiber-base #:make-chunk-fibers #:copy-chunk-fibers
-   #:fibers-contain-column-p #:fibers-cell-bit #:fibers-column-word
+   #:fibers= #:fibers-contain-column-p #:fibers-cell-bit #:fibers-column-word
    #:fibers-cell-count #:fibers-empty-p #:map-fibers-cells
    #:fibers-column-clear-p #:fibers-highest-cell-below
    #:fibers-lowest-cell-above #:fibers-with-cell #:fibers-with-chain
    #:chain-fibers #:fibers-chain
    #:fiber-store #:make-fiber-store #:fiber-store-p #:fiber-store-domain
-   #:fiber-store-chunk #:fiber-store-keys #:map-fiber-store
+   #:copy-fiber-store #:fiber-store-chunk #:fiber-store-keys #:map-fiber-store
    #:fiber-store-count #:make-fiber-store-from-chain #:fiber-store-chain
    #:fiber-store-resolve #:fiber-store-cell-bit
    #:fiber-store-column-clear-p #:fiber-store-highest-cell-below

@@ -226,6 +226,50 @@ graph of #DOEDL3.  Thus a driver failure can be localized by increasing one
 semantic layer at a time rather than constructing the entire atelier before
 the first frame.
 
+* DONE Chunk fibers are the resident form of a chunk
+:PROPERTIES:
+:ID: BIPUVB
+:END:
+
+The star selector of #0UAD9N was fast because it never touched the chain.  It
+asked for a chunk's fibers, 64x64 columns of four 64-bit occupancy words, and
+did everything as word-parallel bit logic.  Everything else in the pipeline
+treated the chain as the runtime representation: collision built a site and
+binary searched a sorted vector for every probe, and streaming concatenated
+every resident chunk into one world chain that a single block edit rebuilt
+with a linear merge over every site.
+
+On 2026-09-04 the fibers became a public Luft value, =chunk-fibers=, with the
+probes the rest of the world wants: one cell is a =logbitp=, a height range
+is a masked word, support and vertical rays are bit scans, and an edit is a
+copied chunk with one bit flipped.  A =fiber-store= maps chunk keys to fibers
+and answers world probes through the same =outside-domain= and
+=missing-chunk= restarts as meshing, so callers still own the boundary
+policy.  A scene's solid is such a store, replaced whole on each edit so a
+worker snapshot keeps the value it captured.  The chain remains the authored,
+persistent, algebraic form, derived from fibers on demand in site order
+without a sort.
+
+Measured on one 64x64 chunk of rolling terrain with 166k cells and 100k
+random probes: the chain binary search took 20.7 ms and the fiber probe
+0.54 ms; adding one cell to the nine-chunk world chain took 23.7 ms and
+now costs one 128 KiB copy.  A source chunk materializes straight into
+fibers, skipping the 69 ms normalizing sort.  In the highland scene a block
+edit still takes about 54 ms, of which 42 ms copies the 1.2 million entry
+cell-material hash table and the light solve is negligible.
+
+** NEXT Put material cells beside the fibers
+:PROPERTIES:
+:ID: LBDJNJ
+:END:
+
+/Intent./ The whole-scene material hash table is now the edit bottleneck, for
+the same reason the world chain was: it is one value over every resident
+chunk, copied whole per edit.  Give each resident chunk its own small
+material table, or a dense per-column stock array next to its fibers, and let
+an edit replace one chunk's table.  The light solver already takes materials
+as an argument, so it can read a per-chunk view through the same store.
+
 * The retired vertex-pulling path drew every terrain style
 :PROPERTIES:
 :ID: NV25VM
