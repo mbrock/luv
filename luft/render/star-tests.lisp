@@ -638,3 +638,15 @@
     (true (< (luv.arithmetic.lisp.vec3:vec3-x (luft.render::camera-position camera)) 10.85)
           "look-ahead beyond the wall cannot put the camera through it")
     (true (> (luv.arithmetic.lisp.vec3:vec3-x (luft.render::camera-position camera)) 10.5))))
+
+(define-test star-culling-sphere-encloses-the-complete-atlas
+  ;; Culling assumes every possible emitted vertex lies within radius two
+  ;; cells of its site, including concave and singular star templates.
+  (let ((largest-square 0))
+    (dotimes (star 256)
+      (dolist (triangle (luft:star-atlas-owned-triangles star))
+        (dolist (point triangle)
+          (setf largest-square
+                (max largest-square (reduce #'+ point :key (lambda (x) (* x x))))))))
+    (true (< largest-square (* 4 luft:+mesh-cell-size+ luft:+mesh-cell-size+))
+          "every atlas vertex is strictly inside the shader's culling sphere")))

@@ -147,6 +147,25 @@
              (swizzle projection :w))
           (mix 1.0 view-z divisor))))
 
+(define-shader-function star-view-rejection (clip projection divisor jitter)
+  "Conservatively reject a star's radius-two cell sphere in homogeneous clip.
+
+Every atlas vertex lies within one cell on each axis of its owning site.
+The wider sphere includes that cube; jitter expands the side planes too.
+#FIZQQ6"
+  (let* ((extent (* (abs projection) 2.0))
+         (w-extent (* divisor 2.0))
+         (w-max (+ (swizzle clip :w) w-extent))
+         (jitter-w (+ (abs (swizzle clip :w)) w-extent)))
+    (max
+     (if (> (abs (swizzle clip :x))
+            (+ w-max (swizzle extent :x) (* (abs (swizzle jitter :x)) jitter-w))) 1.0 0.0)
+     (max
+      (if (> (abs (swizzle clip :y))
+             (+ w-max (swizzle extent :y) (* (abs (swizzle jitter :y)) jitter-w))) 1.0 0.0)
+      (max (if (< (+ (swizzle clip :z) (swizzle extent :z)) 0.0) 1.0 0.0)
+           (if (> (- (swizzle clip :z) (swizzle extent :z)) w-max) 1.0 0.0))))))
+
 (define-shader-function mesh-clip-uv (clip)
   (assume-quantity
    (+ (* (/ (swizzle clip :xy) (swizzle clip :w)) 0.5)
@@ -1384,6 +1403,14 @@ that he is standing on something."
                              :quantity quantities:shadow-coordinate :unit :one)
        (material-tone-output :vec3 :location 5 :interpolation :flat))))
   (let* ((site (buffer-element sites (swizzle group :x)))
+         (centre
+           (assume-quantity
+            (vec3 (float (swizzle site :x)) (float (swizzle site :y))
+                  (float (swizzle site :z)))
+            :quantity quantities:world-position :unit quantities:cell))
+         (divisor (swizzle (representation render-parameters) :z))
+         (centre-clip (mesh-view-clip centre camera-position camera-right camera-up
+                                      camera-forward camera-projection divisor))
          (appearance
            (buffer-element terrain-appearances (swizzle group :x)))
          (code-0 (ldb (byte 8 0) (swizzle appearance :x)))
@@ -1404,7 +1431,10 @@ that he is standing on something."
          (descriptor-7 (buffer-element material-descriptors code-7))
          (block (* (swizzle site :w) (uint 76.0)))
          (triangle-count
-           (swizzle (buffer-element star-templates block) :x))
+           (if (> (star-view-rejection centre-clip camera-projection divisor
+                                       (representation (swizzle temporal-parameters :xy))) 0.5)
+               (uint 0.0)
+               (swizzle (buffer-element star-templates block) :x)))
          (vertex-count (* triangle-count (uint 3.0)))
          (safe-lane (if (< lane (uint 25.0)) lane (uint 24.0)))
          (first-record (+ block (uint 1.0) (* safe-lane (uint 3.0))))
@@ -1684,9 +1714,24 @@ that he is standing on something."
      (:topology :triangles :max-vertices 75 :max-primitives 25
       :vertex ((clip-position :vec4 :built-in :position))))
   (let* ((site (buffer-element sites (swizzle group :x)))
+         (centre
+           (assume-quantity
+            (vec3 (float (swizzle site :x)) (float (swizzle site :y))
+                  (float (swizzle site :z)))
+            :quantity quantities:world-position :unit quantities:cell))
+         (centre-clip (light-clip-position centre shadow-row-x shadow-row-y
+                                          shadow-row-z shadow-row-w))
+         ;; The shadow transform is orthographic. Row norms convert the same
+         ;; conservative world sphere into independent clip-space radii.
+         (projection
+           (vec4 (sqrt (dot (swizzle shadow-row-x :xyz) (swizzle shadow-row-x :xyz)))
+                 (sqrt (dot (swizzle shadow-row-y :xyz) (swizzle shadow-row-y :xyz)))
+                 (sqrt (dot (swizzle shadow-row-z :xyz) (swizzle shadow-row-z :xyz))) 0.0))
          (block (* (swizzle site :w) (uint 76.0)))
          (triangle-count
-           (swizzle (buffer-element star-templates block) :x))
+           (if (> (star-view-rejection centre-clip projection 0.0 (vec2 0.0 0.0)) 0.5)
+               (uint 0.0)
+               (swizzle (buffer-element star-templates block) :x)))
          (safe-lane (if (< lane (uint 25.0)) lane (uint 24.0)))
          (first-record (+ block (uint 1.0) (* safe-lane (uint 3.0))))
          (record-0 (buffer-element star-templates first-record))

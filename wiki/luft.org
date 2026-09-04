@@ -1296,3 +1296,49 @@ cut looks intentional.
 the castle with the interior readable, the reveal stable under small camera
 and player motion (no shimmering aperture edge), and the record naming the
 mechanism, its parameters, and its per-frame cost.
+
+* DONE Cull stars before mesh emission
+:PROPERTIES:
+:ID: FIZQQ6
+:END:
+
+The eye-level frame submitted every resident star to both mesh stages. A
+conservative radius-two-cell sphere now rejects stars wholly outside the
+camera frustum before triangle emission. The shadow stage tests its own
+orthographic light volume, retaining off-screen casters. Side-plane bounds
+include temporal jitter; the complete atlas fits strictly inside the sphere.
+This changes neither residency, mesh data, render resolution, nor sampling.
+
+At 2200 by 1600 output, 0.75 internal scale and four raster samples, 120-frame
+Metal 4 timestamp captures measured the following GPU milliseconds on the
+live authored world. The two fixed views were feet at (81.3,30.7,24), near the
+user's build, and (70.5077,42.4,18), inside the gorge; both used yaw 0.35 and
+pitch -0.12. World edits remained intact.
+
+| View | Before mean | After mean | After p95 |
+|------+-------------+------------+-----------|
+| Build | 20.64 | 15.14 | 15.92 |
+| Gorge | 20.69 | 15.27 | 16.03 |
+| Turning at build | — | 14.97 | 16.06 |
+
+The terrain pass fell from about 10.9 to 6.0--6.4 ms. Light-volume rejection
+reduced the shadow pass from about 3.8 to 3.0--3.2 ms. The remaining MetalFX
+section takes about 4.1 ms; post-processing and presentation take the rest.
+Native command-buffer timestamps bracket each render pass; gaps include the
+intervening work and synchronization, so these are instrumented pass timings,
+not isolated shader costs. Counter heaps are read after the shared-event
+submission frontier completes, using the device's =queryTimestampFrequency=
+(24 MHz here), rather than the legacy =sampleTimestamps= clock scale.
+
+A separate six-second CPU-zone capture at the build measured 360 frames,
+16.67 ms mean intervals, and 17.66 ms p95 intervals. CPU encoding averaged
+1.10 ms. Window foreground/background state affects pacing, and drawable
+acquisition waits are not GPU duration. The loaded Tracy library lacked Luv's
+native zone-context shim, so the bounded CPU recorder collected the existing
+zones instead.
+
+Paired production images differed by less than 0.11 RGB levels on average
+out of 255, with p99 at most two levels, excluding the status strip. Renderer
+checks passed (688), including Metal and Vulkan shader compilation and the
+atlas-bound regression. Captures and raw measurements are retained locally
+under =build/gpu-*-before.csv=, =build/gpu-*-final.csv=, and =build/perf-*.png=.
