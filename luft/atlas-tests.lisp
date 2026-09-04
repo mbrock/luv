@@ -136,7 +136,7 @@
 
 (define-test atlas-stylesheet-is-a-luv-css-tree
   (let ((stylesheet
-          (luv.css:css-text (luv.css:find-style 'luft.atlas::star-atlas))))
+          (luv.css:css-text (luv.css:find-style 'atlas::star-atlas))))
     (true (search ".atlas-layout {" stylesheet))
     (true (search "grid-template-columns: minmax(20rem, 31rem) minmax(0, 1fr);"
                   stylesheet))

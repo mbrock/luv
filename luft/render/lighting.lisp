@@ -30,7 +30,7 @@
       (ensure-semantic-instance
        *light* 'light
        :name :dusk
-       :sun-direction (vec3:vec3-normalize (vec3:make-vec3 -0.72 0.43 0.22))
+       :sun-direction (vec3-normalize (make-vec3 -0.72 0.43 0.22))
        :sun-color #(1.85 0.82 0.38 0.92)
        :sky-color #(0.065 0.095 0.23 1.0)
        :ground-color #(0.23 0.115 0.16 1.0)
@@ -47,24 +47,24 @@ the signed light depth around CENTER to [0,1].  CENTER is snapped in the light
 plane so camera translation cannot slide a shadow edge by a fraction of a
 texel."
   (let* ((sun (light-sun-direction light))
-         (forward (vec3:vec3-scale sun -1.0))
-         (world-up (vec3:make-vec3 0.0 0.0 1.0))
-         (right (vec3:vec3-normalize (vec3:vec3-cross world-up forward)))
-         (up (vec3:vec3-cross forward right))
+         (forward (vec3-scale sun -1.0))
+         (world-up (make-vec3 0.0 0.0 1.0))
+         (right (vec3-normalize (vec3-cross world-up forward)))
+         (up (vec3-cross forward right))
          (extent (light-shadow-half-extent light))
          (depth-radius (light-shadow-depth-radius light))
          (world-units-per-texel (/ (* 2.0 extent) +shadow-map-size+))
          (center-right
-           (* (round (/ (vec3:vec3-dot center right) world-units-per-texel))
+           (* (round (/ (vec3-dot center right) world-units-per-texel))
               world-units-per-texel))
          (center-up
-           (* (round (/ (vec3:vec3-dot center up) world-units-per-texel))
+           (* (round (/ (vec3-dot center up) world-units-per-texel))
               world-units-per-texel))
-         (center-forward (vec3:vec3-dot center forward)))
+         (center-forward (vec3-dot center forward)))
     (flet ((row (axis scale offset)
-             (list (* (vec3:vec3-x axis) scale)
-                   (* (vec3:vec3-y axis) scale)
-                   (* (vec3:vec3-z axis) scale)
+             (list (* (vec3-x axis) scale)
+                   (* (vec3-y axis) scale)
+                   (* (vec3-z axis) scale)
                    offset)))
       (append
        (row right (/ extent) (- (/ center-right extent)))
@@ -76,8 +76,8 @@ texel."
 (defun light-uniform-data (light center &optional (exposure 1.0f0))
   "Return LIGHT's nine vec4 lanes for the frame uniform ABI."
   (flet ((vec3-lane (value fourth)
-           (list (vec3:vec3-x value) (vec3:vec3-y value)
-                 (vec3:vec3-z value) fourth)))
+           (list (vec3-x value) (vec3-y value)
+                 (vec3-z value) fourth)))
     (append
      (vec3-lane (light-sun-direction light) 0.0)
      (coerce (light-sun-color light) 'list)

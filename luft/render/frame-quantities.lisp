@@ -138,22 +138,22 @@
                                       (+ (* member-index 4) position))
                                     local-positions))
                           (specification
-                            (luv.arithmetic:make-declared-quantity-specification
+                            (math:make-declared-quantity-specification
                              (append quantity-options
                                      (list :tensor-order
                                            (if (= (length positions) 1)
                                                0 1))))))
                      (push
-                      (luv.arithmetic:make-quantity-projection
+                      (math:make-quantity-projection
                        positions specification)
                       projections))))))
-    (luv.arithmetic:make-quantity-layout 108 (nreverse projections))))
+    (math:make-quantity-layout 108 (nreverse projections))))
 
-(defmethod luv.arithmetic:value-declaration-for
+(defmethod math:value-declaration-for
     ((name (eql 'luft.render::camera-uniform-data)))
   (declare (ignore name))
   (load-time-value
-   (luv.arithmetic:make-represented-value-declaration
+   (math:make-represented-value-declaration
     :representation-type '(simple-array single-float (108))
     :quantity-layout (scene-uniform-product-layout)
     :source-form
@@ -172,43 +172,43 @@
       (let* ((byte-offset (shader-uniform-member-offset member))
              (width
                (shader-type-component-count
-                (luv.arithmetic:declaration-representation-type member)))
+                (math:declaration-representation-type member)))
              (whole
-               (luv.arithmetic:declaration-quantity-specification member))
+               (math:declaration-quantity-specification member))
              (layout
-               (luv.arithmetic:declaration-quantity-layout member)))
+               (math:declaration-quantity-layout member)))
         (unless (and width (zerop (mod byte-offset 4)))
           (error "Scene shader member ~S is not a 32-bit scalar-lane value."
                  (shader-object-name member)))
         (let ((base (/ byte-offset 4)))
           (when whole
             (push
-             (luv.arithmetic:make-quantity-projection
+             (math:make-quantity-projection
               (loop for position below width collect (+ base position))
               whole)
              projections))
           (when layout
-            (unless (= width (luv.arithmetic:quantity-layout-extent layout))
+            (unless (= width (math:quantity-layout-extent layout))
               (error "Scene shader member ~S has width ~D but layout ~D."
                      (shader-object-name member) width
-                     (luv.arithmetic:quantity-layout-extent layout)))
+                     (math:quantity-layout-extent layout)))
             (dolist (projection
-                     (luv.arithmetic:quantity-layout-projections layout))
+                     (math:quantity-layout-projections layout))
               (push
-               (luv.arithmetic:make-quantity-projection
+               (math:make-quantity-projection
                 (mapcar
                  (lambda (position) (+ base position))
-                 (luv.arithmetic:quantity-projection-positions projection))
-                (luv.arithmetic:quantity-projection-specification projection))
+                 (math:quantity-projection-positions projection))
+                (math:quantity-projection-specification projection))
                projections))))))
-    (luv.arithmetic:make-quantity-layout
+    (math:make-quantity-layout
      (/ bytes 4) (nreverse projections))))
 
 (defun scene-uniform-scalar-count ()
   "Return the scalar extent of the fixed host scene-uniform declaration."
-  (luv.arithmetic:quantity-layout-extent
-   (luv.arithmetic:declaration-quantity-layout
-    (luv.arithmetic:value-declaration-for
+  (math:quantity-layout-extent
+   (math:declaration-quantity-layout
+    (math:value-declaration-for
      'luft.render::camera-uniform-data))))
 
 (defun scene-uniform-byte-size ()

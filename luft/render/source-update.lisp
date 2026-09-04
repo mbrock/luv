@@ -18,7 +18,7 @@
        (error "~S has no attached workbench." viewer))))
 
 (defun close-viewer-source-update (viewer)
-  (alexandria:when-let
+  (when-let
       ((workbench (luv.workbench:application-workbench viewer)))
     (luv.workbench:close-workbench-source-update workbench)))
 

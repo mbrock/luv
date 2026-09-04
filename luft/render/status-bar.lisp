@@ -17,14 +17,14 @@
 
 (defun status-bar-position (position)
   (format nil "~,1F,~,1F,~,1F"
-          (vec3:vec3-x position)
-          (vec3:vec3-y position)
-          (vec3:vec3-z position)))
+          (vec3-x position)
+          (vec3-y position)
+          (vec3-z position)))
 
 (defun status-bar-position-chunk (position)
   (format nil "~D,~D"
-          (floor (vec3:vec3-x position) luft:+chunk-size+)
-          (floor (vec3:vec3-y position) luft:+chunk-size+)))
+          (floor (vec3-x position) luft:+chunk-size+)
+          (floor (vec3-y position) luft:+chunk-size+)))
 
 (defmethod mcluv:status-bar-channel-label
     ((channel (eql :coordinates)) (viewer viewer))

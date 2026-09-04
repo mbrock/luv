@@ -50,7 +50,7 @@
 
 (defun close-viewer-lobby (viewer)
   "Hide the detailed panel at a frame boundary, preserving its radio client."
-  (alexandria:when-let
+  (when-let
       ((workbench (luv.workbench:application-workbench viewer)))
     (luv.workbench:close-workbench-lobby workbench)))
 

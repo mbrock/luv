@@ -12,15 +12,15 @@
 (defconstant +walking-player-radius+ 0.3)
 (defconstant +walking-collision-epsilon+ 1.0e-5)
 (defconstant +walking-player-half-step+ 0.75)
-(luv.arithmetic:define-quantity-constant +walking-player-speed+ 7.0
+(define-quantity-constant +walking-player-speed+ 7.0
   :type real
   :quantity (:quantity quantities:world-velocity
              :unit ((quantities:cell 1) (:second -1))))
-(luv.arithmetic:define-quantity-constant +walking-player-gravity+ -24.0
+(define-quantity-constant +walking-player-gravity+ -24.0
   :type real
   :quantity (:quantity quantities:world-acceleration
              :unit ((quantities:cell 1) (:second -2))))
-(luv.arithmetic:define-quantity-constant +walking-player-jump-speed+ 9.0
+(define-quantity-constant +walking-player-jump-speed+ 9.0
   :type real
   :quantity (:quantity quantities:world-velocity
              :unit ((quantities:cell 1) (:second -1))))
@@ -84,12 +84,12 @@ box and fall through nothing they cannot see."
            :type real
            :quantity (:quantity quantities:world-distance :unit quantities:cell)
            :accessor walking-player-height)
-   (position :initarg :position :type vec3:vec3
+   (position :initarg :position :type vec3
              :quantity (:quantity quantities:world-position
                         :unit quantities:cell :tensor-order 1)
              :accessor walking-player-position)
    (previous-position :initarg :position
-                      :type vec3:vec3
+                      :type vec3
                       :quantity (:quantity quantities:world-position
                                  :unit quantities:cell :tensor-order 1)
                       :accessor walking-player-previous-position)
@@ -125,43 +125,42 @@ box and fall through nothing they cannot see."
                       :accessor walking-player-fireball-velocity)
    (fireball-distance-remaining
     :initform 0.0 :accessor walking-player-fireball-distance-remaining))
-  (:metaclass luv.arithmetic.records:quantity-class)
+  (:metaclass quantity-class)
   (:documentation
    "The continuous, player-owned state of LUFT's walking character.
 
 POSITION is the centre of the character's feet.  Heading and gait are
 semantic animation inputs; keys and shader clocks are deliberately absent."))
 
-(luv.arithmetic.lisp:define-lisp-arithmetic-function ballistic-displacement
+(define-lisp-arithmetic-function ballistic-displacement
     ((velocity :quantity quantities:world-velocity
                :unit ((quantities:cell 1) (:second -1)))
      (acceleration :quantity quantities:world-acceleration
                    :unit ((quantities:cell 1) (:second -2)))
      (elapsed :quantity quantities:elapsed-time :unit :second))
   ;; A signed displacement, not a nonnegative WORLD-DISTANCE or a point.
-  (luv.arithmetic.language:interpret
+  (interpret
    (+ (* velocity elapsed) (* 0.5 acceleration elapsed elapsed))
    :quantity quantities:world-z-position :unit quantities:cell
    :character :difference))
 
 (defparameter *walking-duration-declaration*
-  (luv.arithmetic:make-represented-value-declaration
+  (math:make-represented-value-declaration
    :representation-type 'real
    :quantity-specification
-   (luv.arithmetic:make-declared-quantity-specification
+   (math:make-declared-quantity-specification
     '(:quantity quantities:elapsed-time :unit :second))))
 
 (defparameter *walking-displacement-realization*
-  (luv.arithmetic.lisp:make-lisp-arithmetic-realization
+  (make-lisp-arithmetic-realization
    'ballistic-displacement :parameter-representation-types '(real real real)
    :result-representation-type 'real))
 
 (defparameter *walking-displacement-function*
-  (luv.arithmetic.lisp:bind-lisp-arithmetic-realization
+  (bind-lisp-arithmetic-realization
    *walking-displacement-realization*
-   (list (luv.arithmetic.records:record-slot-declaration
-          'walking-player 'vertical-velocity)
-         (luv.arithmetic:value-declaration-for '+walking-player-gravity+)
+   (list (record-slot-declaration 'walking-player 'vertical-velocity)
+         (math:value-declaration-for '+walking-player-gravity+)
          *walking-duration-declaration*)))
 
 (defclass walking-route ()
@@ -184,15 +183,13 @@ authoritative while the player crosses between its cell-centre waypoints."))
   ;; must own a distinct vector before either side is mutated.
   (let ((position (walking-player-position player)))
     (setf (walking-player-previous-position player)
-          (vec3:make-vec3 (vec3:vec3-x position)
-                          (vec3:vec3-y position)
-                          (vec3:vec3-z position)))))
+          (make-vec3 (vec3-x position) (vec3-y position) (vec3-z position)))))
 
 (defun make-walking-player
     (&key
        (position
-         (vec3:make-vec3 (+ +sanctuary-origin-x+ 29.5)
-                         (+ +sanctuary-origin-y+ 24.5) 14.0))
+         (make-vec3 (+ +sanctuary-origin-x+ 29.5)
+                    (+ +sanctuary-origin-y+ 24.5) 14.0))
        (heading-x 0.0) (heading-y 1.0) (speed +walking-player-speed+))
   "Make the sanctuary player at the bridge's authored starting point."
   (make-instance 'walking-player :position position
@@ -203,9 +200,9 @@ authoritative while the player crosses between its cell-centre waypoints."))
   "Retain PLAYER's exact pre-step pose for temporal rendering."
   (let ((position (walking-player-position player))
         (previous (walking-player-previous-position player)))
-    (setf (vec3:vec3-x previous) (vec3:vec3-x position)
-          (vec3:vec3-y previous) (vec3:vec3-y position)
-          (vec3:vec3-z previous) (vec3:vec3-z position)
+    (setf (vec3-x previous) (vec3-x position)
+          (vec3-y previous) (vec3-y position)
+          (vec3-z previous) (vec3-z position)
           (walking-player-previous-heading-x player)
           (walking-player-heading-x player)
           (walking-player-previous-heading-y player)
@@ -233,19 +230,19 @@ authoritative while the player crosses between its cell-centre waypoints."))
 
 Return the allowed displacement and whether contact shortened it. Other axes
 retain their positions, so successive sweeps slide along walls and corners."
-  (let* ((low (vec3:make-vec3 (- (vec3:vec3-x position) radius)
-                              (- (vec3:vec3-y position) radius)
-                              (vec3:vec3-z position)))
-         (high (vec3:make-vec3 (+ (vec3:vec3-x position) radius)
-                               (+ (vec3:vec3-y position) radius)
-                               (+ (vec3:vec3-z position) height)))
+  (let* ((low (make-vec3 (- (vec3-x position) radius)
+                         (- (vec3-y position) radius)
+                         (vec3-z position)))
+         (high (make-vec3 (+ (vec3-x position) radius)
+                          (+ (vec3-y position) radius)
+                          (+ (vec3-z position) height)))
          (allowed amount))
     (flet ((start (a)
-             (floor (+ (vec3:vec3-component low a)
+             (floor (+ (vec3-component low a)
                        (if (eq a axis) (min 0 amount) 0)
                        +walking-collision-epsilon+)))
            (end (a)
-             (ceiling (- (+ (vec3:vec3-component high a)
+             (ceiling (- (+ (vec3-component high a)
                             (if (eq a axis) (max 0 amount) 0))
                          +walking-collision-epsilon+))))
       (loop for x from (start :x) below (end :x) do
@@ -255,17 +252,17 @@ retain their positions, so successive sweeps slide along walls and corners."
                   do (let ((cell (ecase axis (:x x) (:y y) (:z z))))
                        (cond
                          ((and (plusp amount)
-                               (>= cell (- (vec3:vec3-component high axis)
+                               (>= cell (- (vec3-component high axis)
                                            +walking-collision-epsilon+)))
                           (setf allowed
                                 (min allowed (max 0 (- cell
-                                                       (vec3:vec3-component high axis))))))
+                                                       (vec3-component high axis))))))
                          ((and (minusp amount)
-                               (<= (1+ cell) (+ (vec3:vec3-component low axis)
+                               (<= (1+ cell) (+ (vec3-component low axis)
                                                 +walking-collision-epsilon+)))
                           (setf allowed
                                 (max allowed (min 0 (- (1+ cell)
-                                                       (vec3:vec3-component low axis))))))))))))
+                                                       (vec3-component low axis))))))))))))
     (values allowed (/= allowed amount))))
 
 (defun walking-player-support-height
@@ -388,9 +385,9 @@ rather than silently becoming a straight-line collision attempt."
          (position (walking-player-position player))
          (start
            (luft:make-site
-            domain (floor (vec3:vec3-x position))
-            (floor (vec3:vec3-y position))
-            (floor (vec3:vec3-z position)) luft:+cell-extent+ 1)))
+            domain (floor (vec3-x position))
+            (floor (vec3-y position))
+            (floor (vec3-z position)) luft:+cell-extent+ 1)))
     (labels ((route (cells status detail visits)
                (make-instance 'walking-route
                               :start start :destination destination
@@ -470,11 +467,11 @@ rather than silently becoming a straight-line collision attempt."
 
 (defun walking-player-reached-route-cell-p (player cell)
   (let* ((position (walking-player-position player))
-         (dx (- (+ (luft:site-x cell) 0.5) (vec3:vec3-x position)))
-         (dy (- (+ (luft:site-y cell) 0.5) (vec3:vec3-y position)))
+         (dx (- (+ (luft:site-x cell) 0.5) (vec3-x position)))
+         (dy (- (+ (luft:site-y cell) 0.5) (vec3-y position)))
          (horizontal-distance (sqrt (+ (* dx dx) (* dy dy)))))
     (and (< horizontal-distance *walking-route-arrival-radius*)
-         (< (abs (- (luft:site-z cell) (vec3:vec3-z position))) 0.16))))
+         (< (abs (- (luft:site-z cell) (vec3-z position))) 0.16))))
 
 (defun trim-walking-player-route (player)
   (let ((route (walking-player-route player)))
@@ -495,8 +492,8 @@ rather than silently becoming a straight-line collision attempt."
     (when (and route (eq :running (walking-route-status route)))
       (let* ((cell (first (walking-route-cells route)))
              (position (walking-player-position player))
-             (dx (- (+ (luft:site-x cell) 0.5) (vec3:vec3-x position)))
-             (dy (- (+ (luft:site-y cell) 0.5) (vec3:vec3-y position)))
+             (dx (- (+ (luft:site-x cell) 0.5) (vec3-x position)))
+             (dy (- (+ (luft:site-y cell) 0.5) (vec3-y position)))
              (distance (sqrt (+ (* dx dx) (* dy dy))))
              (direction-x (/ dx (max distance 1.0e-6)))
              (direction-y (/ dy (max distance 1.0e-6)))
@@ -504,7 +501,7 @@ rather than silently becoming a straight-line collision attempt."
         ;; Routes express a desired step; the same jump/gravity controller
         ;; must actually get there instead of snapping to the waypoint height.
         (when (and (walking-player-grounded-p player)
-                   (> (luft:site-z cell) (+ (vec3:vec3-z position) 0.1)))
+                   (> (luft:site-z cell) (+ (vec3-z position) 0.1)))
           (request-walking-player-jump player))
         (values (+ (* (cos yaw) direction-x) (* (sin yaw) direction-y))
                 (- (* (sin yaw) direction-x) (* (cos yaw) direction-y))
@@ -518,8 +515,8 @@ rather than silently becoming a straight-line collision attempt."
          (inspection-source-solid source) position (walking-player-height player)
          +walking-player-radius+ axis amount)
       (ecase axis
-        (:x (incf (vec3:vec3-x position) travel))
-        (:y (incf (vec3:vec3-y position) travel)))
+        (:x (incf (vec3-x position) travel))
+        (:y (incf (vec3-y position) travel)))
       (not blocked-p))))
 
 (defun request-walking-player-jump (player)
@@ -539,12 +536,12 @@ rather than silently becoming a straight-line collision attempt."
          (head-height (- 3.34 1.505))
          (forward (+ 0.195 (* (sin +fireball-cast-angle+) head-height)))
          (height (+ 1.505 (* (cos +fireball-cast-angle+) head-height))))
-    (vec3:make-vec3
-     (+ (vec3:vec3-x player-position)
+    (make-vec3
+     (+ (vec3-x player-position)
         (* right-x 0.640) (* heading-x forward))
-     (+ (vec3:vec3-y player-position)
+     (+ (vec3-y player-position)
         (* right-y 0.640) (* heading-y forward))
-     (+ (vec3:vec3-z player-position) height))))
+     (+ (vec3-z player-position) height))))
 
 (defun launch-walking-player-fireball
     (player origin direction &key (distance 64.0))
@@ -552,10 +549,9 @@ rather than silently becoming a straight-line collision attempt."
   (let ((position (add-scaled-directions origin direction 0.48)))
     (setf (walking-player-fireball-position player) position
           (walking-player-previous-fireball-position player)
-          (vec3:make-vec3 (vec3:vec3-x position) (vec3:vec3-y position)
-                          (vec3:vec3-z position))
+          (make-vec3 (vec3-x position) (vec3-y position) (vec3-z position))
           (walking-player-fireball-velocity player)
-          (vec3:vec3-scale direction +fireball-speed+)
+          (vec3-scale direction +fireball-speed+)
           (walking-player-fireball-distance-remaining player)
           (max 0.0 (- distance 0.48))
           (walking-player-spell-flash player) 1.0))
@@ -568,8 +564,8 @@ This is intentionally the small semantic boundary for the tech demo.  Input,
 rendering, and the temporary kinematic transport do not need to know what a
 future spell or weapon action vocabulary will look like."
   (let* ((position (walking-player-position player))
-         (dx (- (vec3:vec3-x target) (vec3:vec3-x position)))
-         (dy (- (vec3:vec3-y target) (vec3:vec3-y position)))
+         (dx (- (vec3-x target) (vec3-x position)))
+         (dy (- (vec3-y target) (vec3-y position)))
          (horizontal-distance (sqrt (+ (* dx dx) (* dy dy)))))
     (when (> horizontal-distance 1.0e-4)
       (setf (walking-player-heading-x player) (/ dx horizontal-distance)
@@ -577,20 +573,19 @@ future spell or weapon action vocabulary will look like."
     (cancel-walking-player-route player "casting a fireball")
     (let* ((origin (walking-player-staff-head-position player))
            (direction
-             (vec3:make-vec3 (- (vec3:vec3-x target) (vec3:vec3-x origin))
-                             (- (vec3:vec3-y target) (vec3:vec3-y origin))
-                             (- (vec3:vec3-z target)
-                                (vec3:vec3-z origin))))
-           (length (vec3:vec3-length direction)))
+             (make-vec3 (- (vec3-x target) (vec3-x origin))
+                        (- (vec3-y target) (vec3-y origin))
+                        (- (vec3-z target) (vec3-z origin))))
+           (length (vec3-length direction)))
       ;; A click directly on the staff is still a cast, aimed along the new
       ;; facing instead of asking VEC3-NORMALIZE to invent a direction.
       (when (< length 1.0e-4)
         (setf direction
-              (vec3:make-vec3 (walking-player-heading-x player)
-                              (walking-player-heading-y player) 0.0)
+              (make-vec3 (walking-player-heading-x player)
+                         (walking-player-heading-y player) 0.0)
               length 32.0))
       (launch-walking-player-fireball
-       player origin (vec3:vec3-normalize direction) :distance length))))
+       player origin (vec3-normalize direction) :distance length))))
 
 (defun clear-walking-player-fireball (player)
   (setf (walking-player-fireball-position player) nil
@@ -604,17 +599,17 @@ future spell or weapon action vocabulary will look like."
   (let ((position (walking-player-fireball-position player)))
     (when position
       (let ((previous (walking-player-previous-fireball-position player)))
-        (setf (vec3:vec3-x previous) (vec3:vec3-x position)
-              (vec3:vec3-y previous) (vec3:vec3-y position)
-              (vec3:vec3-z previous) (vec3:vec3-z position)))
+        (setf (vec3-x previous) (vec3-x position)
+              (vec3-y previous) (vec3-y position)
+              (vec3-z previous) (vec3-z position)))
       (let* ((velocity (walking-player-fireball-velocity player))
              (remaining
                (walking-player-fireball-distance-remaining player))
              (travel (min remaining (* +fireball-speed+ seconds)))
              (time (/ travel +fireball-speed+)))
-        (incf (vec3:vec3-x position) (* (vec3:vec3-x velocity) time))
-        (incf (vec3:vec3-y position) (* (vec3:vec3-y velocity) time))
-        (incf (vec3:vec3-z position) (* (vec3:vec3-z velocity) time))
+        (incf (vec3-x position) (* (vec3-x velocity) time))
+        (incf (vec3-y position) (* (vec3-y velocity) time))
+        (incf (vec3-z position) (* (vec3-z velocity) time))
         (decf (walking-player-fireball-distance-remaining player) travel)
         (when (<= (walking-player-fireball-distance-remaining player) 0.0)
           (clear-walking-player-fireball player)))))
@@ -629,8 +624,8 @@ future spell or weapon action vocabulary will look like."
     (setf (walking-player-jump-requested-p player) nil)
     (when (and (walking-player-grounded-p player)
                (walking-player-clear-at-p
-                solid (vec3:vec3-x position) (vec3:vec3-y position)
-                (- (vec3:vec3-z position) 0.0001) height))
+                solid (vec3-x position) (vec3-y position)
+                (- (vec3-z position) 0.0001) height))
       (setf (walking-player-grounded-p player) nil))
     (when (and jump-p (walking-player-grounded-p player))
       (setf (walking-player-vertical-velocity player) +walking-player-jump-speed+
@@ -644,7 +639,7 @@ future spell or weapon action vocabulary will look like."
         (multiple-value-bind (travel blocked-p)
             (sweep-walking-body-axis solid position height +walking-player-radius+
                                      :z distance)
-          (incf (vec3:vec3-z position) travel)
+          (incf (vec3-z position) travel)
           (when blocked-p
             (setf (walking-player-vertical-velocity player) 0.0
                   (walking-player-grounded-p player) (minusp distance)))))))
@@ -663,12 +658,12 @@ future spell or weapon action vocabulary will look like."
                (distance (min (* seconds (walking-player-speed player))
                               (or maximum-distance most-positive-single-float)))
                (position (walking-player-position player))
-               (before-x (vec3:vec3-x position))
-               (before-y (vec3:vec3-y position)))
+               (before-x (vec3-x position))
+               (before-y (vec3-y position)))
           (try-walking-player-axis player source :x (* direction-x distance))
           (try-walking-player-axis player source :y (* direction-y distance))
-          (let* ((dx (- (vec3:vec3-x position) before-x))
-                 (dy (- (vec3:vec3-y position) before-y))
+          (let* ((dx (- (vec3-x position) before-x))
+                 (dy (- (vec3-y position) before-y))
                  (travelled (sqrt (+ (* dx dx) (* dy dy)))))
             (when (plusp travelled)
               (setf (walking-player-heading-x player) (/ dx travelled)
@@ -739,35 +734,35 @@ behind."
            (heading-x (walking-player-heading-x player))
            (heading-y (walking-player-heading-y player))
            ;; Showing more of where the traveler is going makes movement legible.
-           (aim-x (+ (vec3:vec3-x player-position) (* 2.4 heading-x)))
-           (aim-y (+ (vec3:vec3-y player-position) (* 2.4 heading-y)))
-           (aim-z (+ (vec3:vec3-z player-position) 1.45))
-           (target-x (- aim-x (* distance (vec3:vec3-x forward))))
-           (target-y (- aim-y (* distance (vec3:vec3-y forward))))
-           (target-z (- aim-z (* distance (vec3:vec3-z forward))))
+           (aim-x (+ (vec3-x player-position) (* 2.4 heading-x)))
+           (aim-y (+ (vec3-y player-position) (* 2.4 heading-y)))
+           (aim-z (+ (vec3-z player-position) 1.45))
+           (target-x (- aim-x (* distance (vec3-x forward))))
+           (target-y (- aim-y (* distance (vec3-y forward))))
+           (target-z (- aim-z (* distance (vec3-z forward))))
            (camera-position (camera-position camera)))
       (if (null seconds)
-          (setf (vec3:vec3-x camera-position) target-x
-                (vec3:vec3-y camera-position) target-y
-                (vec3:vec3-z camera-position) target-z)
-          (setf (vec3:vec3-x camera-position)
-                (soft-follow-step (vec3:vec3-x camera-position)
+          (setf (vec3-x camera-position) target-x
+                (vec3-y camera-position) target-y
+                (vec3-z camera-position) target-z)
+          (setf (vec3-x camera-position)
+                (soft-follow-step (vec3-x camera-position)
                                   target-x seconds 0.28)
-                (vec3:vec3-y camera-position)
-                (soft-follow-step (vec3:vec3-y camera-position)
+                (vec3-y camera-position)
+                (soft-follow-step (vec3-y camera-position)
                                   target-y seconds 0.28)
                 ;; Terrain relief is much less important than lateral travel:
                 ;; let a whole stair tread pass without bobbing the frame.
-                (vec3:vec3-z camera-position)
-                (soft-follow-step (vec3:vec3-z camera-position)
+                (vec3-z camera-position)
+                (soft-follow-step (vec3-z camera-position)
                                   target-z seconds 0.85)))))
   camera)
 
 (defun walking-player-render-lanes (player)
   "Return current, previous, and heading vec4 lanes for the GPU boundary."
   (labels ((position-lane (position gait)
-             (list (vec3:vec3-x position) (vec3:vec3-y position)
-                   (+ (vec3:vec3-z position) 1.48) gait)))
+             (list (vec3-x position) (vec3-y position)
+                   (+ (vec3-z position) 1.48) gait)))
     (values
      (position-lane (walking-player-position player)
                     (walking-player-gait player))
@@ -779,11 +774,11 @@ behind."
            (walking-player-spell-flash player))
      (let ((position (walking-player-fireball-position player)))
        (if position
-           (list (vec3:vec3-x position) (vec3:vec3-y position)
-                 (vec3:vec3-z position) +fireball-radius+)
+           (list (vec3-x position) (vec3-y position)
+                 (vec3-z position) +fireball-radius+)
            '(0.0 0.0 0.0 0.0)))
      (let ((position (walking-player-previous-fireball-position player)))
        (if position
-           (list (vec3:vec3-x position) (vec3:vec3-y position)
-                 (vec3:vec3-z position) +fireball-radius+)
+           (list (vec3-x position) (vec3-y position)
+                 (vec3-z position) +fireball-radius+)
            '(0.0 0.0 0.0 0.0))))))

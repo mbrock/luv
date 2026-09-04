@@ -86,38 +86,38 @@ SEED at lane 3 and packed FLAGS at lane 7 are categorical representations,
 not quantities.  SCALE is a non-negative spatial amount measured in cells;
 it maps the canonical torch body's dimensionless coordinates into the world."
   (let ((members (torch-flame-frame-product-members)))
-    (luv.arithmetic:make-quantity-layout
+    (math:make-quantity-layout
      (%torch-flame-product-extent-from-members members)
      (loop for member in members
            for positions = (second member)
            for options = (third member)
            when options
              collect
-             (luv.arithmetic:make-quantity-projection
+             (math:make-quantity-projection
               positions
-              (luv.arithmetic:make-declared-quantity-specification options))))))
+              (math:make-declared-quantity-specification options))))))
 
 (defun make-torch-flame-effect-product-layout ()
   "Describe elapsed seconds and relative scene-linear HDR RGB in one Vec4."
   (let ((members (torch-flame-effect-product-members)))
-    (luv.arithmetic:make-quantity-layout
+    (math:make-quantity-layout
      (%torch-flame-product-extent-from-members members)
      (loop for member in members
            for positions = (second member)
            for options = (third member)
            collect
-           (luv.arithmetic:make-quantity-projection
+           (math:make-quantity-projection
             positions
-            (luv.arithmetic:make-declared-quantity-specification options))))))
+            (math:make-declared-quantity-specification options))))))
 
-(defmethod luv.arithmetic:value-declaration-for
+(defmethod math:value-declaration-for
     ((name (eql 'torch-flame-frame-data)))
   (declare (ignore name))
   (load-time-value
    (let ((representation-type
            `(simple-array single-float
                           (,+torch-flame-instance-scalar-count+))))
-     (luv.arithmetic:make-represented-value-declaration
+     (math:make-represented-value-declaration
       :representation-type representation-type
       :quantity-layout (make-torch-flame-frame-product-layout)
       :source-form
@@ -125,14 +125,14 @@ it maps the canonical torch body's dimensionless coordinates into the world."
         :type ,representation-type
         :product ,(torch-flame-frame-product-members))))))
 
-(defmethod luv.arithmetic:value-declaration-for
+(defmethod math:value-declaration-for
     ((name (eql 'torch-flame-effect-uniform-data)))
   (declare (ignore name))
   (load-time-value
    (let ((representation-type
            `(simple-array single-float
                           (,+torch-flame-effect-scalar-count+))))
-     (luv.arithmetic:make-represented-value-declaration
+     (math:make-represented-value-declaration
       :representation-type representation-type
       :quantity-layout (make-torch-flame-effect-product-layout)
       :source-form
@@ -141,22 +141,22 @@ it maps the canonical torch body's dimensionless coordinates into the world."
         :product ,(torch-flame-effect-product-members))))))
 
 (defun torch-flame-frame-declaration ()
-  (or (luv.arithmetic:value-declaration-for 'torch-flame-frame-data)
+  (or (math:value-declaration-for 'torch-flame-frame-data)
       (error "The torch-flame frame has no represented-value declaration.")))
 
 (defun torch-flame-effect-declaration ()
-  (or (luv.arithmetic:value-declaration-for
+  (or (math:value-declaration-for
        'torch-flame-effect-uniform-data)
       (error "The torch-flame effect has no represented-value declaration.")))
 
 (defun torch-flame-frame-product-extent ()
-  (luv.arithmetic:quantity-layout-extent
-   (luv.arithmetic:declaration-quantity-layout
+  (math:quantity-layout-extent
+   (math:declaration-quantity-layout
     (torch-flame-frame-declaration))))
 
 (defun torch-flame-effect-product-extent ()
-  (luv.arithmetic:quantity-layout-extent
-   (luv.arithmetic:declaration-quantity-layout
+  (math:quantity-layout-extent
+   (math:declaration-quantity-layout
     (torch-flame-effect-declaration))))
 
 (defun torch-flame-effect-byte-size ()
@@ -172,14 +172,14 @@ it maps the canonical torch body's dimensionless coordinates into the world."
 (defun ensure-torch-flame-effect-representation (data)
   "Require DATA to realize the declared, finite torch-effect product."
   (let* ((declaration (torch-flame-effect-declaration))
-         (layout (luv.arithmetic:declaration-quantity-layout declaration))
-         (extent (luv.arithmetic:quantity-layout-extent layout)))
+         (layout (math:declaration-quantity-layout declaration))
+         (extent (math:quantity-layout-extent layout)))
     (unless (typep data
-                   (luv.arithmetic:declaration-representation-type
+                   (math:declaration-representation-type
                     declaration))
       (error "Torch effect data ~S does not satisfy represented type ~S."
              (type-of data)
-             (luv.arithmetic:declaration-representation-type declaration)))
+             (math:declaration-representation-type declaration)))
     (unless (= (length data) extent)
       (error "Torch effect data has ~D lanes, not its declared product extent."
              (length data)))
@@ -190,11 +190,11 @@ it maps the canonical torch body's dimensionless coordinates into the world."
                       index value))
     ;; Non-negativity is semantic declaration data, not another handwritten
     ;; copy of the elapsed-time and scene-radiance lane map.
-    (dolist (projection (luv.arithmetic:quantity-layout-projections layout))
-      (when (luv.arithmetic:quantity-specification-non-negative-p
-             (luv.arithmetic:quantity-projection-specification projection))
+    (dolist (projection (math:quantity-layout-projections layout))
+      (when (math:quantity-specification-non-negative-p
+             (math:quantity-projection-specification projection))
         (dolist (position
-                 (luv.arithmetic:quantity-projection-positions projection))
+                 (math:quantity-projection-positions projection))
           (when (minusp (aref data position))
             (error "Torch effect quantity at lane ~D is negative: ~S."
                    position (aref data position))))))
@@ -232,11 +232,11 @@ row's W lane, SEED is in [0,1), and SCALE is strictly positive.  Return DATA."
     (when (and (zerop offset) (= (length data) extent))
       (let ((declaration (torch-flame-frame-declaration)))
         (unless (typep data
-                       (luv.arithmetic:declaration-representation-type
+                       (math:declaration-representation-type
                         declaration))
           (error "Torch frame data ~S does not satisfy represented type ~S."
                  (type-of data)
-                 (luv.arithmetic:declaration-representation-type
+                 (math:declaration-representation-type
                   declaration)))))
     (loop for index from offset below (+ offset extent)
           for value = (aref data index)

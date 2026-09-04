@@ -77,7 +77,7 @@
 
 (defun report-renderer-live-diagnostic (artifact diagnostic)
   "Best-effort observer update outside ARTIFACT's ownership outcome."
-  (alexandria:when-let
+  (when-let
       ((viewer (renderer-live-artifact-viewer artifact)))
     ;; A diagnostic surface is secondary to publication.  Its failure must
     ;; never turn an already-installed cohort into an apparent failed build.
@@ -89,7 +89,7 @@
     (gethash viewer *viewer-live-artifacts*)))
 
 (defmethod application-live-artifacts ((viewer viewer))
-  (alexandria:when-let ((artifact (viewer-live-artifact viewer)))
+  (when-let ((artifact (viewer-live-artifact viewer)))
     (list artifact)))
 
 (defun call-with-renderer-source-values (function)
@@ -185,8 +185,7 @@ revisions immediately before and after the call."
 (defmethod release-renderer-live-candidate
     ((artifact renderer-live-artifact) candidate)
   (declare (ignore artifact))
-  (alexandria:when-let ((renderer
-                         (renderer-live-candidate-renderer candidate)))
+  (when-let ((renderer (renderer-live-candidate-renderer candidate)))
     (destroy-renderer renderer)
     (setf (renderer-live-candidate-renderer candidate) nil))
   nil)
@@ -265,7 +264,7 @@ revisions immediately before and after the call."
 
 (defun force-viewer-live-artifact-refresh (viewer)
   "Request and synchronously perform one complete renderer-cohort rebuild."
-  (alexandria:when-let ((artifact (viewer-live-artifact viewer)))
+  (when-let ((artifact (viewer-live-artifact viewer)))
     (sb-thread:with-mutex ((renderer-live-artifact-lock artifact))
       (setf (renderer-live-artifact-force-p artifact) t))
     (refresh-live-artifact artifact)))
@@ -273,7 +272,7 @@ revisions immediately before and after the call."
 (defun note-viewer-renderer-replacement
     (viewer source-values source-revision)
   "Adopt a complete renderer installed by an explicit scene rebuild."
-  (alexandria:when-let ((artifact (viewer-live-artifact viewer)))
+  (when-let ((artifact (viewer-live-artifact viewer)))
     (sb-thread:with-mutex ((renderer-live-artifact-lock artifact))
       (setf (renderer-live-artifact-status artifact) :installed
             (renderer-live-artifact-diagnostic artifact) nil
@@ -293,8 +292,8 @@ revisions immediately before and after the call."
 
 (defmethod release-renderer-live-resources
     ((artifact renderer-live-artifact))
-  (alexandria:when-let ((viewer (renderer-live-artifact-viewer artifact)))
-    (alexandria:when-let ((renderer (viewer-renderer viewer)))
+  (when-let ((viewer (renderer-live-artifact-viewer artifact)))
+    (when-let ((renderer (viewer-renderer viewer)))
       ;; Relinquish the application-visible borrow before native retirement.
       ;; Backends retain custody of a failed native destruction, while leaving
       ;; the renderer installed here would invite a later frame or release to
@@ -312,7 +311,7 @@ revisions immediately before and after the call."
         ;; Release is terminal even when native retirement reports a failure:
         ;; the backend owns that failed retirement and the application must not
         ;; resurrect or double-destroy the detached cohort.
-        (alexandria:when-let
+        (when-let
             ((viewer (renderer-live-artifact-viewer artifact)))
           (sb-thread:with-mutex (*viewer-live-artifacts-lock*)
             (when (eq artifact (gethash viewer *viewer-live-artifacts*))
@@ -322,6 +321,6 @@ revisions immediately before and after the call."
   nil)
 
 (defun release-viewer-live-artifact (viewer)
-  (alexandria:when-let ((artifact (viewer-live-artifact viewer)))
+  (when-let ((artifact (viewer-live-artifact viewer)))
     (release-live-artifact artifact))
   nil)

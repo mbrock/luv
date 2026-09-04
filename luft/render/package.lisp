@@ -68,7 +68,8 @@
 (defpackage #:luft.render.shaders
   (:use #:cl #:luv.shader)
   (:shadowing-import-from #:luv.shader #:step)
-  (:local-nicknames (#:quantities #:luft.render.quantities))
+  (:local-nicknames (#:quantities #:luft.render.quantities)
+                    (#:math #:luv.arithmetic))
   (:export #:write-production-spir-v
            #:*production-shader-specifications*
            #:lattice-point-fragment-specification
@@ -92,11 +93,26 @@
 
 (defpackage #:luft.render
   (:use #:cl #:luv)
+  ;; Import the everyday vocabulary; keep prefixes for semantic quantities
+  ;; and neighboring subsystems. These are the original symbols, not wrappers.
+  (:import-from #:luv.arithmetic.lisp.vec3
+                #:vec3 #:make-vec3
+                #:vec3-x #:vec3-y #:vec3-z #:vec3-component
+                #:vec3-cross #:vec3-dot #:vec3-length
+                #:vec3-normalize #:vec3-scale)
+  (:import-from #:alexandria #:when-let)
+  (:import-from #:luv.arithmetic #:define-quantity-constant)
+  (:import-from #:luv.arithmetic.lisp
+                #:define-lisp-arithmetic-function
+                #:make-lisp-arithmetic-realization
+                #:bind-lisp-arithmetic-realization)
+  (:import-from #:luv.arithmetic.language #:interpret)
+  (:import-from #:luv.arithmetic.records #:quantity-class #:record-slot-declaration)
   (:local-nicknames (#:domains #:luv.domains)
                     (#:shaders #:luft.render.shaders)
                     (#:production #:luv.production)
                     (#:quantities #:luft.render.quantities)
-                    (#:vec3 #:luv.arithmetic.lisp.vec3))
+                    (#:math #:luv.arithmetic))
   (:export #:scene
            #:scene-solid
            #:scene-authored-voxel-light

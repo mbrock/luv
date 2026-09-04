@@ -264,7 +264,7 @@
   (request-viewer-quit viewer))
 
 (defun close-viewer-metabar (viewer)
-  (alexandria:when-let
+  (when-let
       ((workbench (luv.workbench:application-workbench viewer)))
     (luv.workbench:close-workbench-metabar workbench)))
 

@@ -70,7 +70,7 @@
 
 (defun stop-viewer-tracy-capture (viewer)
   "Request VIEWER's graceful capture stop without waiting for finalization."
-  (alexandria:when-let ((controller (viewer-tracy-capture viewer)))
+  (when-let ((controller (viewer-tracy-capture viewer)))
     (luv.tracy.capture:stop-tracy-capture controller)))
 
 (defun toggle-viewer-tracy-capture (viewer)
@@ -86,12 +86,12 @@
 
 (defun open-viewer-tracy-capture (viewer &optional pathname)
   "Open PATHNAME or VIEWER's last trace without waiting for the Tracy GUI."
-  (alexandria:when-let ((controller (viewer-tracy-capture viewer)))
+  (when-let ((controller (viewer-tracy-capture viewer)))
     (luv.tracy.capture:open-tracy-capture controller pathname)))
 
 (defun reveal-viewer-tracy-capture (viewer &optional pathname)
   "Reveal PATHNAME or VIEWER's last trace without waiting for Finder."
-  (alexandria:when-let ((controller (viewer-tracy-capture viewer)))
+  (when-let ((controller (viewer-tracy-capture viewer)))
     (luv.tracy.capture:reveal-tracy-capture controller pathname)))
 
 (clim:define-command (com-toggle-tracy-capture

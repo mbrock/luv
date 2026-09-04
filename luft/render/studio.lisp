@@ -132,8 +132,8 @@ at the atelier boundary where a person has selected one site."))
 
 (defun make-fly-camera
     (&key (position
-            (vec3:make-vec3 (+ 70.0 +sanctuary-origin-x+)
-                            (+ -18.0 +sanctuary-origin-y+) 50.0))
+            (make-vec3 (+ 70.0 +sanctuary-origin-x+)
+                       (+ -18.0 +sanctuary-origin-y+) 50.0))
           (yaw 2.2455373) (pitch -0.5165006)
           (field-of-view 0.9599311))
   (make-instance 'fly-camera :position position :yaw yaw :pitch pitch
@@ -148,8 +148,7 @@ at the atelier boundary where a person has selected one site."))
              (y (round (large-world-road-centre-y x)))
              (z (large-world-terrain-height source x y)))
         (make-walking-player
-         :position (vec3:make-vec3 (+ x 0.5) (+ y 0.5)
-                                   (coerce z 'single-float))))
+         :position (make-vec3 (+ x 0.5) (+ y 0.5) (coerce z 'single-float))))
       (make-walking-player)))
 
 (defun reset-viewer-camera (&optional (viewer *viewer*))
@@ -178,8 +177,8 @@ at the atelier boundary where a person has selected one site."))
                   (place-viewer-at-player-eyes viewer))
                 (constrain-viewer-follow-camera viewer)))
           (setf (camera-position camera)
-                (vec3:make-vec3 (+ 70.0 +sanctuary-origin-x+)
-                                (+ -18.0 +sanctuary-origin-y+) 50.0)))
+                (make-vec3 (+ 70.0 +sanctuary-origin-x+)
+                           (+ -18.0 +sanctuary-origin-y+) 50.0)))
       (when (viewer-renderer viewer)
         (setf (renderer-history-valid-p (viewer-renderer viewer)) nil))))
   viewer)
@@ -196,22 +195,22 @@ at the atelier boundary where a person has selected one site."))
 (defun camera-basis (camera)
   (let* ((yaw (camera-yaw camera))
          (pitch (camera-pitch camera))
-         (forward (vec3:make-vec3 (* (cos yaw) (cos pitch))
-                                  (* (sin yaw) (cos pitch))
-                                  (sin pitch)))
-         (right (vec3:make-vec3 (sin yaw) (- (cos yaw)) 0.0))
-         (up (vec3:vec3-cross right forward)))
+         (forward (make-vec3 (* (cos yaw) (cos pitch))
+                             (* (sin yaw) (cos pitch))
+                             (sin pitch)))
+         (right (make-vec3 (sin yaw) (- (cos yaw)) 0.0))
+         (up (vec3-cross right forward)))
     (values right up forward)))
 
 (defun add-scaled-directions (origin &rest direction-scales)
-  (let ((x (vec3:vec3-x origin))
-        (y (vec3:vec3-y origin))
-        (z (vec3:vec3-z origin)))
+  (let ((x (vec3-x origin))
+        (y (vec3-y origin))
+        (z (vec3-z origin)))
     (loop for (direction scale) on direction-scales by #'cddr
-          do (incf x (* (vec3:vec3-x direction) scale))
-             (incf y (* (vec3:vec3-y direction) scale))
-             (incf z (* (vec3:vec3-z direction) scale)))
-    (vec3:make-vec3 x y z)))
+          do (incf x (* (vec3-x direction) scale))
+             (incf y (* (vec3-y direction) scale))
+             (incf z (* (vec3-z direction) scale)))
+    (make-vec3 x y z)))
 
 (defgeneric inspection-face-stock (source face)
   (:documentation "Return the atelier stock at FACE in SOURCE."))
@@ -267,10 +266,10 @@ Tied edge and corner crossings advance together, so a ray never reports a
 cell it merely touches.  The returned SITE-INSPECTION is the one sparse object
 boundary over the chunk fibers and dense face records."
   (let* ((solid (inspection-source-solid source))
-         (direction (vec3:vec3-normalize direction))
-         (x (floor (vec3:vec3-x origin)))
-         (y (floor (vec3:vec3-y origin)))
-         (z (floor (vec3:vec3-z origin)))
+         (direction (vec3-normalize direction))
+         (x (floor (vec3-x origin)))
+         (y (floor (vec3-y origin)))
+         (z (floor (vec3-z origin)))
          step-x step-y step-z
          next-x next-y next-z
          delta-x delta-y delta-z
@@ -278,11 +277,11 @@ boundary over the chunk fibers and dense face records."
          (entry-axis nil)
          (entry-step 0))
     (multiple-value-setq (step-x next-x delta-x)
-      (ray-axis-crossings (vec3:vec3-x origin) (vec3:vec3-x direction)))
+      (ray-axis-crossings (vec3-x origin) (vec3-x direction)))
     (multiple-value-setq (step-y next-y delta-y)
-      (ray-axis-crossings (vec3:vec3-y origin) (vec3:vec3-y direction)))
+      (ray-axis-crossings (vec3-y origin) (vec3-y direction)))
     (multiple-value-setq (step-z next-z delta-z)
-      (ray-axis-crossings (vec3:vec3-z origin) (vec3:vec3-z direction)))
+      (ray-axis-crossings (vec3-z origin) (vec3-z direction)))
     (loop
       (when (= 1 (inspection-cell-bit solid x y z))
         (when entry-axis
@@ -300,20 +299,20 @@ boundary over the chunk fibers and dense face records."
         (flet ((remember (axis step component)
                  (when (or (null entry-axis)
                            (> (abs component)
-                              (abs (vec3:vec3-component direction entry-axis))))
+                              (abs (vec3-component direction entry-axis))))
                    (setf entry-axis axis entry-step step))))
           (when (<= next-x (+ next 1.0e-6))
             (incf x step-x)
             (incf next-x delta-x)
-            (remember :x step-x (vec3:vec3-x direction)))
+            (remember :x step-x (vec3-x direction)))
           (when (<= next-y (+ next 1.0e-6))
             (incf y step-y)
             (incf next-y delta-y)
-            (remember :y step-y (vec3:vec3-y direction)))
+            (remember :y step-y (vec3-y direction)))
           (when (<= next-z (+ next 1.0e-6))
             (incf z step-z)
             (incf next-z delta-z)
-            (remember :z step-z (vec3:vec3-z direction))))))))
+            (remember :z step-z (vec3-z direction))))))))
 
 (defun constrain-viewer-follow-camera (viewer)
   "Keep the following eye and its near plane on the player's side of walls.
@@ -323,14 +322,14 @@ wall. Corner rays reserve space for the near plane, even at grazing angles."
   (let ((player (viewer-player viewer)))
     (when player
       (let* ((position (walking-player-position player))
-             (aim (vec3:make-vec3 (vec3:vec3-x position)
-                                 (vec3:vec3-y position)
-                                 (+ (vec3:vec3-z position) 1.45)))
+             (aim (make-vec3 (vec3-x position)
+                            (vec3-y position)
+                            (+ (vec3-z position) 1.45)))
              (eye (camera-position (viewer-camera viewer)))
-             (delta (vec3:make-vec3 (- (vec3:vec3-x eye) (vec3:vec3-x aim))
-                                   (- (vec3:vec3-y eye) (vec3:vec3-y aim))
-                                   (- (vec3:vec3-z eye) (vec3:vec3-z aim))))
-             (distance (vec3:vec3-length delta))
+             (delta (make-vec3 (- (vec3-x eye) (vec3-x aim))
+                              (- (vec3-y eye) (vec3-y aim))
+                              (- (vec3-z eye) (vec3-z aim))))
+             (distance (vec3-length delta))
              (safe-distance distance))
         (when (> distance 0.01)
           (dolist (offset '((0 0 0)
@@ -338,10 +337,10 @@ wall. Corner rays reserve space for the near plane, even at grazing angles."
                             (-0.16 0.16 -0.16) (-0.16 0.16 0.16)
                             (0.16 -0.16 -0.16) (0.16 -0.16 0.16)
                             (0.16 0.16 -0.16) (0.16 0.16 0.16)))
-            (let* ((origin (vec3:make-vec3
-                            (+ (vec3:vec3-x aim) (first offset))
-                            (+ (vec3:vec3-y aim) (second offset))
-                            (+ (vec3:vec3-z aim) (third offset))))
+            (let* ((origin (make-vec3
+                            (+ (vec3-x aim) (first offset))
+                            (+ (vec3-y aim) (second offset))
+                            (+ (vec3-z aim) (third offset))))
                    (inspection (raycast-site (viewer-source viewer) origin delta
                                              :max-distance distance)))
               (when inspection
@@ -409,9 +408,9 @@ the selector is the whole of the difference."
                            near far)
         (%make-frame-view
          :position (let ((position (camera-position camera)))
-                     (vec3:make-vec3 (vec3:vec3-x position)
-                                     (vec3:vec3-y position)
-                                     (vec3:vec3-z position)))
+                     (make-vec3 (vec3-x position)
+                                (vec3-y position)
+                                (vec3-z position)))
          :right right :up up :forward forward
          :projection (vector px py pz pw)
          :divisor divisor :jitter jitter)))))
@@ -421,16 +420,16 @@ the selector is the whole of the difference."
   (and previous
        (let* ((new-position (frame-view-position current))
               (old-position (frame-view-position previous))
-              (delta (vec3:make-vec3
-                      (- (vec3:vec3-x new-position)
-                         (vec3:vec3-x old-position))
-                      (- (vec3:vec3-y new-position)
-                         (vec3:vec3-y old-position))
-                      (- (vec3:vec3-z new-position)
-                         (vec3:vec3-z old-position))))
-              (distance-squared (vec3:vec3-dot delta delta))
-              (facing (vec3:vec3-dot (frame-view-forward previous)
-                                     (frame-view-forward current)))
+              (delta (make-vec3
+                      (- (vec3-x new-position)
+                         (vec3-x old-position))
+                      (- (vec3-y new-position)
+                         (vec3-y old-position))
+                      (- (vec3-z new-position)
+                         (vec3-z old-position))))
+              (distance-squared (vec3-dot delta delta))
+              (facing (vec3-dot (frame-view-forward previous)
+                                (frame-view-forward current)))
               (old-projection (frame-view-projection previous))
               (new-projection (frame-view-projection current)))
          (and (< distance-squared 64.0)
@@ -443,8 +442,8 @@ the selector is the whole of the difference."
     (view previous inspection-parameters ink-strength player
      &optional (bevel-width luft:+mesh-bevel-width+) (exposure 1.0f0) first-person-p)
   (flet ((lane (vector fourth)
-           (list (vec3:vec3-x vector) (vec3:vec3-y vector)
-                 (vec3:vec3-z vector) fourth)))
+           (list (vec3-x vector) (vec3-y vector)
+                 (vec3-z vector) fourth)))
     (multiple-value-bind (character previous-character character-direction
                           fireball previous-fireball)
         (if player
@@ -519,7 +518,7 @@ the selector is the whole of the difference."
         (if (eq *projection* :perspective)
             (values
              (camera-position camera)
-             (vec3:vec3-normalize
+             (vec3-normalize
               (add-scaled-directions
                (frame-view-forward view)
                (frame-view-right view) right-scale
@@ -544,10 +543,10 @@ the selector is the whole of the difference."
         ;; choose a distant point along it.
         (let* ((player (viewer-player viewer))
                (player-position (walking-player-position player))
-               (plane-z (+ (vec3:vec3-z player-position) 1.5))
-               (direction-z (vec3:vec3-z direction))
+               (plane-z (+ (vec3-z player-position) 1.5))
+               (direction-z (vec3-z direction))
                (distance (if (> (abs direction-z) 1.0e-5)
-                             (/ (- plane-z (vec3:vec3-z origin)) direction-z)
+                             (/ (- plane-z (vec3-z origin)) direction-z)
                              -1.0)))
           (add-scaled-directions origin direction
                                  (if (> distance 0.0) distance 32.0))))))
@@ -573,12 +572,12 @@ the selector is the whole of the difference."
 (defun walking-player-overlaps-cell-p (player cell)
   "Whether CELL intersects the same full body used by movement collision."
   (let* ((position (walking-player-position player))
-         (base-z (vec3:vec3-z position))
+         (base-z (vec3-z position))
          (cell-z (luft:site-z cell)))
-    (and (< (- (vec3:vec3-x position) +walking-player-radius+) (1+ (luft:site-x cell)))
-         (> (+ (vec3:vec3-x position) +walking-player-radius+) (luft:site-x cell))
-         (< (- (vec3:vec3-y position) +walking-player-radius+) (1+ (luft:site-y cell)))
-         (> (+ (vec3:vec3-y position) +walking-player-radius+) (luft:site-y cell))
+    (and (< (- (vec3-x position) +walking-player-radius+) (1+ (luft:site-x cell)))
+         (> (+ (vec3-x position) +walking-player-radius+) (luft:site-x cell))
+         (< (- (vec3-y position) +walking-player-radius+) (1+ (luft:site-y cell)))
+         (> (+ (vec3-y position) +walking-player-radius+) (luft:site-y cell))
          (< cell-z (+ base-z (walking-player-height player)))
          (< base-z (1+ cell-z)))))
 
@@ -764,7 +763,7 @@ before the operation boundary, or it would encode through resources which the
                (viewer-inspector-state viewer extent)))
             ;; The application supplies only its open final pass; the shell
             ;; remains the owner of layout, retained media, and replay state.
-            (alexandria:when-let
+            (when-let
                 ((workbench (luv.workbench:application-workbench viewer)))
               (luv.workbench:encode-workbench
                workbench pass surface-texture)))))))
@@ -857,8 +856,8 @@ before the operation boundary, or it would encode through resources which the
                                  (site-inspection-distance inspection)))
           (inspector-row stream 172 "world hit"
                          (format nil "~,2F  ~,2F  ~,2F"
-                                 (vec3:vec3-x point) (vec3:vec3-y point)
-                                 (vec3:vec3-z point)))
+                                 (vec3-x point) (vec3-y point)
+                                 (vec3-z point)))
           (inspector-row stream 195 "stock"
                          (format nil "~D" (site-inspection-stock inspection)))
           (inspector-row stream 218 "cell-corner star"
@@ -1110,7 +1109,7 @@ before the operation boundary, or it would encode through resources which the
                       (camera-position (viewer-camera viewer)))))
             (retarget-streaming-scene
              source production-system (viewer-bevel-width viewer)
-             (vec3:vec3-x position) (vec3:vec3-y position))))))))
+             (vec3-x position) (vec3-y position))))))))
 
 (zdefun (render-viewer-frame :zone :luft/frame)
     (viewer timestamp)
@@ -1119,7 +1118,7 @@ before the operation boundary, or it would encode through resources which the
     ;; cohort publication happen here, before this frame borrows the renderer.
     (refresh-application-live-artifacts viewer)
     (advance-viewer-streaming viewer)
-    (alexandria:when-let
+    (when-let
         ((workbench (luv.workbench:application-workbench viewer)))
       (luv.workbench:refresh-workbench workbench))
     (present-canvas-frame
@@ -1265,9 +1264,8 @@ before the operation boundary, or it would encode through resources which the
   (when (viewer-player viewer)
     (let ((position (walking-player-position (viewer-player viewer))))
       (setf (camera-position (viewer-camera viewer))
-            (vec3:make-vec3 (vec3:vec3-x position) (vec3:vec3-y position)
-                            (+ (vec3:vec3-z position)
-                               +first-person-eye-height+))))))
+            (make-vec3 (vec3-x position) (vec3-y position)
+                       (+ (vec3-z position) +first-person-eye-height+))))))
 
 (defun set-viewer-mode (viewer mode)
   "Install MODE, its projection, and its pointer ownership together."
@@ -1736,7 +1734,7 @@ cohort. FIXED-EXPOSURE disables temporal adaptation for reproducible evidence."
         (when viewer-state
           (releasing :services
             (quiesce-viewer-services viewer-state))
-          (alexandria:when-let
+          (when-let
               ((workbench (luv.workbench:application-workbench viewer-state)))
             (releasing :workbench
               (luv.workbench:stop-workbench workbench))))
@@ -1891,7 +1889,7 @@ production gets the same opportunity to publish as it does in the window."
 (defun encode-viewer-frame-recording
     (viewer encoder surface-texture extent timestamp)
   "Append the exact presented frame to VIEWER's active two-second ring."
-  (alexandria:when-let ((recorder (viewer-frame-recorder viewer)))
+  (when-let ((recorder (viewer-frame-recorder viewer)))
     (unless (equal extent (viewer-frame-recorder-state-extent recorder))
       (format t "~&LUFT frame ring stopping at resize from ~S to ~S.~%"
               (viewer-frame-recorder-state-extent recorder) extent)
@@ -1926,7 +1924,7 @@ production gets the same opportunity to publish as it does in the window."
   (let ((entries nil)
         (latest-time nil))
     (dotimes (slot (viewer-frame-recorder-state-capacity recorder))
-      (alexandria:when-let
+      (when-let
           ((frame
              (aref (viewer-frame-recorder-state-frame-numbers recorder)
                    slot)))
@@ -2032,7 +2030,7 @@ production gets the same opportunity to publish as it does in the window."
 
 (defun %stop-viewer-frame-recording (&optional (viewer *viewer*))
   "Stop VIEWER's live frame ring and write its retained PNG frames."
-  (alexandria:when-let ((recorder (viewer-frame-recorder viewer)))
+  (when-let ((recorder (viewer-frame-recorder viewer)))
     ;; Detach first: the stopping click cannot enqueue another copy while the
     ;; staging resources are being drained and retired.
     (setf (viewer-frame-recorder viewer) nil)
@@ -2462,7 +2460,7 @@ it makes no claim about which earlier render pass caused a discontinuity."
   (quiesce-application-captures viewer)
   ;; Source tools may be waiting to submit a live-load fence to this canvas.
   ;; Stop that work before any terminal frame-boundary request below.
-  (alexandria:when-let
+  (when-let
       ((workbench (luv.workbench:application-workbench viewer)))
     (luv.workbench:quiesce-workbench workbench))
   ;; Named nonvisual services quiesce while the canvas still accepts the final
@@ -2492,7 +2490,7 @@ it makes no claim about which earlier render pass caused a discontinuity."
           ;; The Luv shell owns retained compositor resources. It must detach
           ;; after the terminal frame fence but before application renderer
           ;; resources and the device are destroyed.
-          (alexandria:when-let
+          (when-let
               ((workbench (luv.workbench:application-workbench viewer)))
             (releasing :workbench
               (luv.workbench:stop-workbench workbench)))

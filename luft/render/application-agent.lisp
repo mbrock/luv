@@ -23,9 +23,9 @@
     (format stream
             "LUFT uses ~(~A~) projection; camera ~,2F, ~,2F, ~,2F; bevel ~A; construction lines ~:[off~;on~]~:[.~;, inspecting a boundary site.~]"
             (viewer-report-projection object)
-            (vec3:vec3-x position)
-            (vec3:vec3-y position)
-            (vec3:vec3-z position)
+            (vec3-x position)
+            (vec3-y position)
+            (vec3-z position)
             (bevel-width-label (viewer-report-bevel-width object))
             (viewer-report-construction-lines-p object)
             (viewer-report-inspection object))))
@@ -123,7 +123,7 @@ its developer presentation. Keep answers short and prefer acting through tools."
 
 (defun viewer-openai-api-key (viewer)
   (or (openai:default-api-key)
-      (alexandria:when-let ((client (viewer-lobby-client viewer)))
+      (when-let ((client (viewer-lobby-client viewer)))
         (luv.lobby:lobby-client-value client "OPENAI_API_KEY"))))
 
 (defun make-viewer-agent
