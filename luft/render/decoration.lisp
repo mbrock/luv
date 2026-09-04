@@ -35,7 +35,7 @@
 
 (defun scene-authored-cell-occupied-p (scene cell)
   "Whether CELL is authored solid in SCENE's semantic material field."
-  (nth-value 1 (gethash cell (scene-material-cells scene))))
+  (nth-value 1 (material-cell-at (scene-material-cells scene) cell)))
 
 (defun torch-support-surface-meshes (owners surface-context support-cell)
   "Return the at-most-four realized owners that can carry SUPPORT-CELL.

@@ -16,8 +16,9 @@
                      nil (list (find-class 'luft.render:viewer)) nil))
   (let ((viewer (allocate-instance (find-class 'luft.render:viewer))))
     (true (= 12 (length (mcluv:status-bar-channels-for viewer))))
-    (true (equal '(:coordinates :chunks :stream :bevel :view :mode)
-                 (last (mcluv:status-bar-channels-for viewer) 6))))
+    (true (eq :mode (second (mcluv:status-bar-channels-for viewer))))
+    (true (equal '(:coordinates :chunks :stream :bevel :view)
+                 (last (mcluv:status-bar-channels-for viewer) 5))))
   (let ((position (luv.arithmetic.lisp.vec3:make-vec3 130.25 63.75 17.0)))
     (true (string= "130.3,63.8,17.0"
                    (luft.render::status-bar-position position)))
@@ -399,3 +400,124 @@
     (setf (luft.render:camera-yaw camera) 0.25)
     (true (= 0.25 (luft.render::camera-target-yaw camera))
           "an explicit pose assignment remains an immediate settled cut")))
+
+(define-test material-edits-share-other-chunks-and-freeze-worker-input
+  (let* ((scene (luft.render:make-authored-world-streaming-scene
+                 :horizontal-bits 8 :seed 121))
+         (source (luft.render::streaming-scene-source scene))
+         (keys (list (luft:chunk-key-at 0 0) (luft:chunk-key-at 64 0))))
+    (loop for key in keys for incarnation from 1
+          do (setf (gethash key (luft.render::streaming-scene-store scene))
+                   (luft.render::materialize-authored-world-chunk
+                    source key incarnation)))
+    (luft.render::rebuild-authored-world-resident-values scene keys)
+    (let* ((snapshot (luft.render::snapshot-streaming-scene-input scene))
+           (before (luft.render::scene-material-cells snapshot))
+           (other (gethash (second keys) (luft.render::material-store-chunks before)))
+           (domain (luft.render::scene-domain scene))
+           (cell (luft:make-site domain 20 20 0 luft:+cell-extent+ 1)))
+      (true (nth-value 1 (luft.render::material-cell-at before cell)))
+      (multiple-value-bind (edit status key)
+          (luft.render::edit-streaming-scene-cell scene cell nil)
+        (true edit)
+        (true (eq :edited status))
+        (true (= key (first keys)))
+        (let ((after (luft.render::scene-material-cells scene)))
+          (true (not (nth-value 1 (luft.render::material-cell-at after cell))))
+          (true (nth-value 1 (luft.render::material-cell-at before cell)))
+          (true (eq other (gethash (second keys)
+                                   (luft.render::material-store-chunks after))))
+          (true (= 1 (luft.render::scene-cell-bit snapshot 20 20 0)))
+          (true (zerop (luft.render::scene-cell-bit scene 20 20 0)))))
+      (luft.render::edit-streaming-scene-cell
+       scene cell luft.render::*terrain-material-placement*)
+      (multiple-value-bind (offset present-p)
+          (luft.render::material-cell-at (luft.render::scene-material-cells scene) cell)
+        (true present-p)
+        (true (zerop offset) "offset zero is a real placement, not air")))))
+
+(define-test walking-body-sweeps-ceilings-and-falls-after-floor-removal
+  (let* ((domain (luft:make-world-domain :x-bits 8 :y-bits 8))
+         (store (luft:make-fiber-store domain))
+         (fibers (luft:make-chunk-fibers domain 0))
+         (player (luft.render::make-walking-player
+                  :position (luv.arithmetic.lisp.vec3:make-vec3 10.5 10.5 1.0))))
+    (setf (luft:fiber-store-chunk store 0) fibers
+          (luft:fibers-cell-bit fibers 10 10 0) 1
+          (luft:fibers-cell-bit fibers 10 10 3) 1
+          (luft.render::walking-player-height player) 1.8
+          (luft.render::walking-player-grounded-p player) t)
+    (luft.render::request-walking-player-jump player)
+    (dotimes (i 30)
+      (luft.render::advance-walking-player-vertical player store 0.016)
+      (true (<= (+ (luv.arithmetic.lisp.vec3:vec3-z
+                    (luft.render:walking-player-position player)) 1.8)
+                3.0001)))
+    (true (luft.render::walking-player-grounded-p player))
+    (true (= 1.0 (luv.arithmetic.lisp.vec3:vec3-z
+                  (luft.render:walking-player-position player))))
+    (luft:fiber-store-edit-cell store 10 10 0 0)
+    (luft.render::advance-walking-player-vertical player store 0.016)
+    (true (not (luft.render::walking-player-grounded-p player)))
+    (true (< (luv.arithmetic.lisp.vec3:vec3-z
+              (luft.render:walking-player-position player)) 1.0))))
+
+(define-test first-person-camera-uses-the-body-and-centre-ray
+  (let* ((viewer (allocate-instance (find-class 'luft.render:viewer)))
+         (player (luft.render::make-walking-player
+                  :position (luv.arithmetic.lisp.vec3:make-vec3 12.5 19.5 8.0)))
+         (camera (luft.render::make-fly-camera :yaw 0.0 :pitch 0.0))
+         (canvas (luv:make-sdl-canvas :width 800 :height 600))
+         (luft.render::*projection* :perspective))
+    (setf (slot-value viewer 'luft.render::player) player
+          (slot-value viewer 'luft.render::camera) camera
+          (slot-value viewer 'luft.render::canvas) canvas
+          (slot-value viewer 'luft.render::mode)
+          (make-instance 'luft.render::first-person-mode)
+          (slot-value viewer 'luft.render::pointer-captured-p) nil)
+    (luft.render::place-viewer-at-player-eyes viewer)
+    (multiple-value-bind (origin direction) (luft.render::viewer-pointer-ray viewer)
+      (true (= 12.5 (luv.arithmetic.lisp.vec3:vec3-x origin)))
+      (true (< (abs (- (luv.arithmetic.lisp.vec3:vec3-z origin) 9.62)) 0.0001))
+      (true (= 1.0 (luv.arithmetic.lisp.vec3:vec3-x direction)))
+      (true (zerop (luv.arithmetic.lisp.vec3:vec3-y direction)))
+      (true (zerop (luv.arithmetic.lisp.vec3:vec3-z direction))))))
+
+(define-test chunk-material-lookups-preserve-light-propagation
+  (let* ((domain (luft:make-world-domain :x-bits 8 :y-bits 8))
+         (cells (make-hash-table :test #'eql))
+         (opacity (make-array 1 :element-type '(unsigned-byte 8)
+                               :initial-element 15))
+         (cell (luft:make-site domain 64 12 5 luft:+cell-extent+ 1))
+         (source (luft:make-site domain 63 12 5 luft:+cell-extent+ 1))
+         (sources (vector (luft:make-voxel-light-source
+                           source (luft:pack-voxel-light 8 4 2)))))
+    (setf (gethash cell cells) 0)
+    (let* ((store (luft.render::material-store-from-table cells))
+           (a (luft:solve-voxel-light domain cells opacity sources))
+           (b (luft:solve-voxel-light
+               domain (luft.render::material-cell-reader store) opacity sources)))
+      (loop for x from 61 to 66
+            do (loop for y from 10 to 14
+                     do (loop for z from 3 to 7
+                              do (true (= (luft:voxel-light-at a x y z)
+                                          (luft:voxel-light-at b x y z)))))))))
+
+(define-test mesh-snapshots-retain-guard-chunk-materials
+  (let* ((scene (luft.render:make-authored-world-streaming-scene
+                 :horizontal-bits 8 :seed 121))
+         (source (luft.render::streaming-scene-source scene))
+         (keys (list (luft:chunk-key-at 0 0) (luft:chunk-key-at 64 0))))
+    (loop for key in keys for incarnation from 1
+          do (setf (gethash key (luft.render::streaming-scene-store scene))
+                   (luft.render::materialize-authored-world-chunk
+                    source key incarnation)))
+    (luft.render::rebuild-authored-world-resident-values scene (list (first keys)) keys)
+    (let* ((cell (luft:make-site (luft.render::scene-domain scene)
+                                64 0 0 luft:+cell-extent+ 1))
+           (snapshot (luft.render::snapshot-streaming-scene-input scene)))
+      (true (not (nth-value 1 (luft.render::material-cell-at
+                              (luft.render::scene-material-cells scene) cell))))
+      (true (nth-value 1 (luft.render::material-cell-at
+                         (luft.render::scene-material-cells snapshot) cell)))
+      (true (= 1 (luft.render::scene-cell-bit snapshot 64 0 0))))))

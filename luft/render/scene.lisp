@@ -39,8 +39,8 @@
 
 The solid is a LUFT fiber store: dense per-chunk column occupancy, the same
 words the mesher reads, replaced as a whole on every edit so worker
-snapshots keep the value they captured. The sparse authored field stores
-only dense vocabulary offsets; semantic material objects remain at the scene
+snapshots keep the value they captured. The material store shares immutable
+per-chunk tables of dense vocabulary offsets; semantic material objects remain at the scene
 boundary rather than being allocated per cell.  Its authored light generation
 contains material sources only when its immutable propagation policy is true;
 the diagnostic false policy owns the exact empty propagated generation.
@@ -533,7 +533,7 @@ stair topology. #WSEK3C"
          :solid solid
          :player-p player-p
          :material-vocabulary material-vocabulary
-         :material-cells material-cells
+         :material-cells (material-store-from-table material-cells)
          :torches torches
          :authored-light-sources sources
          :authored-light-opacity-table opacity-table
@@ -542,3 +542,10 @@ stair topology. #WSEK3C"
          :authored-light-generation base-generation
          :torch-light-emission torch-light-emission
          :voxel-light-propagation-p voxel-light-propagation-p)))))
+
+(defun scene-material-placement-at (scene cell)
+  (multiple-value-bind (offset present-p)
+      (material-cell-at (scene-material-cells scene) cell)
+    (when present-p
+      (domains:identity-vocabulary-member (scene-material-vocabulary scene)
+                                          offset))))

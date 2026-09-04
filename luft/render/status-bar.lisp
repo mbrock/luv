@@ -11,8 +11,9 @@
 
 (defmethod mcluv:status-bar-channels-for ((viewer viewer))
   (declare (ignore viewer))
-  (append (call-next-method)
-          '(:coordinates :chunks :stream :bevel :view :mode)))
+  (let ((base (call-next-method)))
+    (append (list (first base) :mode) (rest base)
+            '(:coordinates :chunks :stream :bevel :view))))
 
 (defun status-bar-position (position)
   (format nil "~,1F,~,1F,~,1F"
@@ -81,13 +82,14 @@
 (defmethod mcluv:status-bar-channel-value
     ((channel (eql :view)) (viewer viewer) bar)
   (declare (ignore channel viewer bar))
-  (string-downcase (symbol-name *projection*)))
+  (string-downcase (symbol-name (viewer-projection viewer))))
 
 (defmethod mcluv:status-bar-channel-value
     ((channel (eql :mode)) (viewer viewer) bar)
   (declare (ignore channel bar))
-  (if (typep (viewer-mode viewer) 'world-edit-mode)
-      (format nil "edit · ~A · ~A"
+  (if (typep (viewer-mode viewer) '(or world-edit-mode first-person-mode))
+      (format nil "~A · ~A · ~A"
+              (if (typep (viewer-mode viewer) 'first-person-mode) "1P" "edit")
               (string-downcase
                (symbol-name
                 (material-placement-name (viewer-edit-material viewer))))

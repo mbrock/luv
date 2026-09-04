@@ -258,17 +258,58 @@ fibers, skipping the 69 ms normalizing sort.  In the highland scene a block
 edit still takes about 54 ms, of which 42 ms copies the 1.2 million entry
 cell-material hash table and the light solve is negligible.
 
-** NEXT Put material cells beside the fibers
+** DONE Put material cells beside the fibers
 :PROPERTIES:
 :ID: LBDJNJ
 :END:
 
-/Intent./ The whole-scene material hash table is now the edit bottleneck, for
-the same reason the world chain was: it is one value over every resident
-chunk, copied whole per edit.  Give each resident chunk its own small
-material table, or a dense per-column stock array next to its fibers, and let
-an edit replace one chunk's table.  The light solver already takes materials
-as an argument, so it can read a per-chunk view through the same store.
+The published material field now indexes immutable per-chunk tables. Source
+residency shares those tables instead of flattening every cell into one
+world hash; an edit copies the affected table and the small chunk index.
+Occupancy, materials, and light are published together, so worker snapshots
+retain the old values. Mesh snapshots include the surrounding resident guard:
+an output owner's boundary stars can read material cells outside the visible
+source window.
+
+Appearance, picking, and the light solver read the same material lookup.
+An edit updates the sparse emissive-source vector directly instead of scanning
+all material cells. Propagated lighting still solves its complete field when
+active; this change does not claim incremental light propagation or remeshing.
+
+A fresh live measurement on 2026-09-04, over 351,745 resident material cells
+in four visible chunks, averaged 2.16 ms per semantic edit across twenty
+remove/place operations. This excludes worker remeshing and GPU publication;
+it is also a different population from the earlier highland measurement.
+Regression tests cover unchanged-chunk sharing, old worker snapshots, offset
+zero, guard materials, and light lookup equivalence across a chunk seam.
+
+* DONE Walk and build at eye level
+:PROPERTIES:
+:ID: 8E110Y
+:END:
+
+Ordinary Luft play starts in first person over the same chunk world and
+walking player as the atelier. The existing camera supplies mouse look;
+the eye follows the player's feet at 1.62 cells, with a 1.8-cell collision
+height. Vertical movement sweeps floors and ceilings, including a floor
+removed by editing. The perspective presentation omits the miniature
+view's tilt-shift blur and shows a small central crosshair.
+
+Click to capture the pointer, use WASD to walk and Space to jump. Left click
+removes the targeted block; right click places the selected material beside
+its face, within six cells and outside the player's body. Middle click picks
+a material; 1--4 or the wheel selects the scene vocabulary. Escape releases
+the pointer. F5 cycles first person, third person/orbit, and isometric views;
+all three inhabit the same world. The status line shows the selected material
+and edit result. Startup and mode changes preserve the existing McCLIM host,
+commands, streaming, and renderer.
+
+The live input probe placed and removed a limestone block, walked through
+the key-event handler, jumped and landed, selected a material, and cycled all
+three views. The dedicated renderer suite passed 603 checks and the core
+passed 611,001 star checks. The repository-wide run passed Luft but encountered
+macOS Objective-C initialization failures in forked test workers and a Tracy
+launcher timing assertion.
 
 * The retired vertex-pulling path drew every terrain style
 :PROPERTIES:

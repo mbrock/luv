@@ -254,7 +254,10 @@ many mesh points in one derived render population."
                       (lane (voxel-light-blue light)))))
 
 (defun %material-opacity (material-cells opacity-table cell)
-  (multiple-value-bind (material present-p) (gethash cell material-cells)
+  (multiple-value-bind (material present-p)
+      (etypecase material-cells
+        (hash-table (gethash cell material-cells))
+        (function (funcall material-cells cell)))
     (if present-p
         (if (< material (length opacity-table))
             (aref opacity-table material)
@@ -265,13 +268,14 @@ many mesh points in one derived render population."
     (domain material-cells opacity-table sources &key (revision 0))
   "Compute immutable colored local light with a packed brightest-first frontier.
 
-MATERIAL-CELLS maps positive cell sites to dense material indices.
+MATERIAL-CELLS is a hash table or a lookup function returning a dense material
+index and presence flag for a positive cell site.
 OPACITY-TABLE maps those indices to entered-cell loss in 0..15.  Every ordinary
 step additionally costs one level.  SOURCES are values from
 MAKE-VOXEL-LIGHT-SOURCE; a source illuminates its own cell regardless of that
 cell's opacity.  Concurrent colors and sources meet by componentwise maximum."
   (check-type domain world-domain)
-  (check-type material-cells hash-table)
+  (check-type material-cells (or hash-table function))
   (check-type opacity-table (vector (unsigned-byte 8)))
   (check-type revision (integer 0 *))
   (multiple-value-bind (pages direct-p x-pages y-pages)

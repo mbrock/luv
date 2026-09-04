@@ -9,7 +9,8 @@
 ;;; raw where one fixed quantity would be dishonest.
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defparameter *scene-uniform-members*
-    '((camera-position :vec4
+    '(;; CAMERA-POSITION.W is the categorical first-person HUD selector.
+      (camera-position :vec4
        :components
        ((:xyz :quantity quantities:world-position
          :unit quantities:cell)))

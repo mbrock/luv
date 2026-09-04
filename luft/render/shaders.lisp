@@ -2347,7 +2347,7 @@ that he is standing on something."
                 (assume-quantity blurred
                                  :quantity quantities:scene-radiance
                                  :unit :one)
-                (assume-quantity (* tilt 0.52) :unit :one)))
+                (assume-quantity (if (< divisor 0.5) (* tilt 0.52) 0.0) :unit :one)))
          ;; MetalFX has already reconstructed GLowing at this point.  Grade
          ;; it once, with a little exposure headroom for the sunlit grass and
          ;; the wizard's HDR spell rather than clipping both into parchment.
@@ -2363,6 +2363,17 @@ that he is standing on something."
            (interpret (* radiance auto-exposure)
                       :quantity quantities:scene-radiance :unit :one))
          (presented
-           (paper-grade (paper-tonemap exposed-radiance))))
+           (paper-grade (paper-tonemap exposed-radiance)))
+         (cross-pixel (abs (/ (* ndc 0.5) texel)))
+         (cross-long (max (swizzle cross-pixel :x) (swizzle cross-pixel :y)))
+         (cross-short (min (swizzle cross-pixel :x) (swizzle cross-pixel :y)))
+         (crosshair (if (> (swizzle (representation camera-position) :w) 0.5)
+                        (if (< cross-long 7.0)
+                            (if (< cross-short 1.6) 1.0 0.0) 0.0) 0.0))
+         (cross-color (if (< cross-long 6.0)
+                          (if (< cross-short 0.7) (vec3 0.95 0.95 0.95)
+                              (vec3 0.08 0.08 0.08))
+                          (vec3 0.08 0.08 0.08))))
     (set-output color-output
-                (vec4 (representation presented) 1.0))))
+                (vec4 (mix (representation presented) cross-color crosshair)
+                      1.0))))

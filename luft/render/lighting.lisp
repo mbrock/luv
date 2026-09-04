@@ -522,7 +522,7 @@ staleness decisions must compare the generation's exact stamp."
          (sources (%realized-light-voxel-sources authored-sources stamp))
          (field
            (luft:solve-voxel-light
-            domain material-cells opacity-table sources
+            domain (material-cell-reader material-cells) opacity-table sources
             :revision field-revision)))
     (%make-realized-light-generation stamp field)))
 

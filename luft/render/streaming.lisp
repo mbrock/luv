@@ -141,7 +141,7 @@ a future LoD must bring an explicit transition representation."
      :source source
      :solid (luft:make-fiber-store domain)
      :material-vocabulary (scene-material-vocabulary empty)
-     :material-cells (make-hash-table :test #'eql)
+     :material-cells (make-material-store)
      :authored-light-sources #()
      :authored-light-opacity-table
      (scene-authored-light-opacity-table empty)
@@ -192,36 +192,31 @@ a future LoD must bring an explicit transition representation."
 (zdefun (snapshot-streaming-scene-input :zone :luft/capture-semantic-scene)
     (scene)
   "Freeze SCENE's replace-only authored values for a worker request."
-  (let* ((residents
-           (and (streaming-scene-source scene)
-                (loop for resident being the hash-values of
-                        (streaming-scene-store scene)
-                      collect resident)))
-         (material-cells
-           (if residents
-               (lambda (cell)
-                 (let* ((key (luft:site-chunk-key cell))
-                        (resident
-                          (find key residents
-                                :key #'resident-cell-chunk-key :test #'eql)))
-                   (if resident
-                       (gethash
-                        cell (resident-cell-chunk-material-cells resident))
-                       (values nil nil))))
-               (scene-material-cells scene))))
+  (let ((material-cells
+          (if (streaming-scene-source scene)
+              (let ((store (make-material-store)))
+                ;; Appearance at an owner boundary also reads the resident
+                ;; guard. Capture every chunk table without flattening cells.
+                (maphash
+                 (lambda (key resident)
+                   (setf (gethash key (material-store-chunks store))
+                         (resident-cell-chunk-material-cells resident)))
+                 (streaming-scene-store scene))
+                store)
+              (scene-material-cells scene))))
     (make-instance
      'scene
      :solid (scene-solid scene)
      :material-vocabulary (scene-material-vocabulary scene)
      :material-cells material-cells
-   :authored-light-sources (scene-authored-light-sources scene)
-   :authored-light-opacity-table (scene-authored-light-opacity-table scene)
-   :authored-light-revision (scene-authored-light-revision scene)
-   :authored-light-provenance (scene-authored-light-provenance scene)
-   :authored-light-generation (scene-authored-light-generation scene)
-   :content-revision (scene-content-revision scene)
-   :torch-light-emission (scene-torch-light-emission scene)
-   :voxel-light-propagation-p (scene-voxel-light-propagation-p scene)
+     :authored-light-sources (scene-authored-light-sources scene)
+     :authored-light-opacity-table (scene-authored-light-opacity-table scene)
+     :authored-light-revision (scene-authored-light-revision scene)
+     :authored-light-provenance (scene-authored-light-provenance scene)
+     :authored-light-generation (scene-authored-light-generation scene)
+     :content-revision (scene-content-revision scene)
+     :torch-light-emission (scene-torch-light-emission scene)
+     :voxel-light-propagation-p (scene-voxel-light-propagation-p scene)
      :torches (scene-torches scene)
      :player-p (scene-player-p scene))))
 
@@ -234,15 +229,6 @@ a future LoD must bring an explicit transition representation."
   (old-placement nil :type (or null material-placement) :read-only t)
   (new-placement nil :type (or null material-placement) :read-only t)
   (content-revision 0 :type (integer 0 *) :read-only t))
-
-(defun copy-scene-material-cells (scene)
-  "Copy SCENE's replace-only cell-to-placement-offset field."
-  (let ((copy (make-hash-table
-               :test #'eql :size (hash-table-count
-                                   (scene-material-cells scene)))))
-    (maphash (lambda (cell offset) (setf (gethash cell copy) offset))
-             (scene-material-cells scene))
-    copy))
 
 (defun scene-edit-torch-conflict-p (scene cell)
   "Whether changing CELL would invalidate a retained torch attachment."
@@ -275,7 +261,7 @@ published."
     (when (scene-edit-torch-conflict-p scene cell)
       (return-from edit-streaming-scene-cell (values nil :attachment nil)))
     (multiple-value-bind (old-offset occupied-p)
-        (gethash cell (scene-material-cells scene))
+        (material-cell-at (scene-material-cells scene) cell)
       (unless (eql occupied-p (= 1 (scene-cell-bit scene
                                                  (luft:site-x cell)
                                                  (luft:site-y cell)
@@ -294,7 +280,8 @@ published."
         (when (and new-placement (null new-offset))
           (return-from edit-streaming-scene-cell
             (values nil :unknown-material nil)))
-        (let* ((material-cells (copy-scene-material-cells scene))
+        (let* ((material-cells (material-store-with-cell
+                                (scene-material-cells scene) cell new-offset))
                (bit (if new-placement 1 0))
                (key (luft:site-chunk-key cell))
                (old-chunk (streaming-store-fibers
@@ -305,16 +292,20 @@ published."
                (new-solid (luft:copy-fiber-store solid))
                (light-revision (1+ (scene-authored-light-revision scene))))
           (setf (luft:fiber-store-chunk new-solid key) new-chunk)
-          (if new-placement
-              (setf (gethash cell material-cells) new-offset)
-              (remhash cell material-cells))
           (let* ((sources
-                   (coerce
-                    (sort
-                     (compile-material-light-sources
-                      material-cells (scene-material-vocabulary scene))
-                     #'<)
-                    '(simple-array (unsigned-byte 64) (*))))
+                   (let ((sources
+                           (remove cell (copy-seq (scene-authored-light-sources scene))
+                                   :key #'luft::%voxel-light-source-cell)))
+                     (when new-placement
+                       (let ((emission (material-kind-packed-light-emission
+                                        (material-placement-kind new-placement))))
+                         (unless (zerop emission)
+                           (setf sources
+                                 (concatenate 'vector sources
+                                              (vector (luft:make-voxel-light-source
+                                                       cell emission)))))))
+                     (coerce (sort sources #'<)
+                             '(simple-array (unsigned-byte 64) (*)))))
                  (base-generation
                    (solve-realized-light-generation
                     domain material-cells
@@ -341,12 +332,8 @@ published."
                   (scene-content-revision scene) content-revision
                   (streaming-scene-light-generation scene) base-generation)
             (if (streaming-scene-source scene)
-                (let ((local-materials (make-hash-table :test #'eql)))
-                  (maphash
-                   (lambda (material-cell offset)
-                     (when (= key (luft:site-chunk-key material-cell))
-                       (setf (gethash material-cell local-materials) offset)))
-                   material-cells)
+                (let ((local-materials
+                        (gethash key (material-store-chunks material-cells))))
                   (setf (gethash cell
                                  (authored-world-source-edits
                                   (streaming-scene-source scene)))
@@ -564,13 +551,8 @@ silently empty the desired residency window."
   "Publish visible materials and a possibly wider resident collision store."
   (let* ((source (streaming-scene-source scene))
          (domain (authored-world-source-domain source))
-         (cell-count
-           (loop for key in source-keys
-                 for resident = (gethash key (streaming-scene-store scene))
-                 sum (hash-table-count
-                      (resident-cell-chunk-material-cells resident))))
          (collision (luft:make-fiber-store domain))
-         (materials (make-hash-table :test #'eql :size cell-count)))
+         (materials (make-material-store)))
     (dolist (key collision-keys)
       (setf (luft:fiber-store-chunk collision key)
             (resident-cell-chunk-fibers
@@ -578,9 +560,8 @@ silently empty the desired residency window."
     (zone :luft/assemble-visible-materials
       (dolist (key source-keys)
         (let ((resident (gethash key (streaming-scene-store scene))))
-          (maphash (lambda (cell offset)
-                     (setf (gethash cell materials) offset))
-                   (resident-cell-chunk-material-cells resident)))))
+          (setf (gethash key (material-store-chunks materials))
+                (resident-cell-chunk-material-cells resident)))))
     (setf (scene-solid scene) collision
           (scene-material-cells scene) materials
           (scene-content-revision scene) (1+ (scene-content-revision scene)))

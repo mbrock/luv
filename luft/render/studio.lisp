@@ -87,6 +87,12 @@ remain cuts; camera behaviors use targets when motion should be visible."
   (:documentation
    "Absolute-pointer authoring: inspect terrain and edit its occupied cells."))
 
+(defclass first-person-mode (viewer-mode) ()
+  (:documentation "Eye-level walking, mouse look, and short-reach block editing."))
+
+(defconstant +first-person-eye-height+ 1.62)
+(defconstant +first-person-reach+ 6.0)
+
 (defclass orbit-mode (viewer-mode) ()
   (:documentation
    "The original relative-pointer atelier orbit and direct keyboard mode."))
@@ -95,6 +101,7 @@ remain cuts; camera behaviors use targets when motion should be visible."
   (:documentation "Whether MODE continuously points into LUFT terrain."))
 
 (defmethod viewer-mode-inspection-p ((mode viewer-mode)) nil)
+(defmethod viewer-mode-inspection-p ((mode first-person-mode)) t)
 (defmethod viewer-mode-inspection-p ((mode isometric-walk-mode)) t)
 
 (defgeneric viewer-mode-allows-atelier-keys-p (mode))
@@ -164,7 +171,12 @@ at the atelier boundary where a person has selected one site."))
             (follow-walking-player camera spawn)
             ;; Reset is also a camera move: do not briefly reveal the old
             ;; outside perch when the spawn happens to be indoors.
-            (constrain-viewer-follow-camera viewer))
+            (if (typep (viewer-mode viewer) 'first-person-mode)
+                (progn
+                  (setf (walking-player-height spawn) 1.8
+                        *projection* :perspective)
+                  (place-viewer-at-player-eyes viewer))
+                (constrain-viewer-follow-camera viewer)))
           (setf (camera-position camera)
                 (vec3:make-vec3 (+ 70.0 +sanctuary-origin-x+)
                                 (+ -18.0 +sanctuary-origin-y+) 50.0)))
@@ -437,7 +449,7 @@ the selector is the whole of the difference."
 
 (defun camera-uniform-data
     (view previous inspection-parameters ink-strength player
-     &optional (bevel-width luft:+mesh-bevel-width+) (exposure 1.0f0))
+     &optional (bevel-width luft:+mesh-bevel-width+) (exposure 1.0f0) first-person-p)
   (flet ((lane (vector fourth)
            (list (vec3:vec3-x vector) (vec3:vec3-y vector)
                  (vec3:vec3-z vector) fourth)))
@@ -453,7 +465,7 @@ the selector is the whole of the difference."
        :initial-contents
        (mapcar
         (lambda (value) (coerce value 'single-float))
-        (append (lane (frame-view-position view) 0.0)
+        (append (lane (frame-view-position view) (if first-person-p 1.0 0.0))
                 (lane (frame-view-right view) 0.0)
                 (lane (frame-view-up view) 0.0)
                 (lane (frame-view-forward view) 0.0)
@@ -484,16 +496,23 @@ the selector is the whole of the difference."
   (let ((canvas (viewer-canvas viewer)))
     (list (canvas-width canvas) (canvas-height canvas))))
 
+(defun viewer-projection (viewer)
+  "The active camera mode owns its projection, including across live reloads."
+  (if (typep (viewer-mode viewer) 'isometric-walk-mode)
+      :isometric :perspective))
+
 (defun viewer-pointer-position (viewer)
   (let ((extent (viewer-logical-extent viewer)))
-    (if (viewer-pointer-captured-p viewer)
+    (if (or (viewer-pointer-captured-p viewer)
+            (typep (viewer-mode viewer) 'first-person-mode))
         (values (/ (first extent) 2.0) (/ (second extent) 2.0))
         (values (or (viewer-pointer-x viewer) (/ (first extent) 2.0))
                 (or (viewer-pointer-y viewer) (/ (second extent) 2.0))))))
 
 (defun viewer-pointer-ray (viewer)
   "Return the world-space origin and direction through VIEWER's pointer."
-  (let* ((extent (viewer-logical-extent viewer))
+  (let* ((*projection* (viewer-projection viewer))
+         (extent (viewer-logical-extent viewer))
          (camera (viewer-camera viewer))
          (width (first extent))
          (height (second extent))
@@ -566,7 +585,7 @@ the selector is the whole of the difference."
          (cell-z (luft:site-z cell)))
     (and (= (floor (vec3:vec3-x position)) (luft:site-x cell))
          (= (floor (vec3:vec3-y position)) (luft:site-y cell))
-         (< cell-z (+ base-z +walking-player-height+))
+         (< cell-z (+ base-z (walking-player-height player)))
          (< base-z (1+ cell-z)))))
 
 (defun apply-viewer-world-edit (viewer cell placement)
@@ -632,7 +651,10 @@ the selector is the whole of the difference."
   (multiple-value-bind (origin direction) (viewer-pointer-ray viewer)
     (let* ((inspection
              (handler-case
-                 (raycast-site (viewer-source viewer) origin direction)
+                 (raycast-site (viewer-source viewer) origin direction
+                               :max-distance
+                               (if (typep (viewer-mode viewer) 'first-person-mode)
+                                   +first-person-reach+ *inspection-reach*))
                (luft:outside-domain () nil)))
            (changed-p
              (not (same-inspected-site-p
@@ -690,7 +712,8 @@ before the operation boundary, or it would encode through resources which the
 (defun encode-viewer-frame
     (viewer encoder surface-texture extent
      &key (inspector-p (viewer-inspector-p viewer)))
-  (let* ((renderer (prepare-viewer-frame-renderer viewer))
+  (let* ((*projection* (viewer-projection viewer))
+         (renderer (prepare-viewer-frame-renderer viewer))
          (frame
            (renderer-frame-state-for
             renderer (viewer-context viewer) surface-texture))
@@ -710,7 +733,9 @@ before the operation boundary, or it would encode through resources which the
                     (viewer-mode-inspection-p (viewer-mode viewer)))
                 (update-viewer-inspection viewer)))
          (player (viewer-player viewer))
-         (player-p (and player (typep (viewer-source viewer) 'scene)
+         (player-p (and player
+                        (not (typep (viewer-mode viewer) 'first-person-mode))
+                        (typep (viewer-source viewer) 'scene)
                         (scene-player-p (viewer-source viewer))))
          (exposure
            (or (viewer-fixed-exposure viewer)
@@ -726,7 +751,7 @@ before the operation boundary, or it would encode through resources which the
       (if (and inspection *inspection-ink-p*) 1.0 0.0)
       (and player-p player)
       (viewer-bevel-width viewer)
-      exposure)
+      exposure (typep (viewer-mode viewer) 'first-person-mode))
      :jitter jitter :view view
      :player-p player-p
      :effect-time (or *flame-time* (viewer-last-timestamp viewer) 0.0)
@@ -919,7 +944,7 @@ before the operation boundary, or it would encode through resources which the
    (camera :initarg :camera :initform (make-fly-camera) :reader viewer-camera)
    (player :initarg :player :initform (make-walking-player)
            :accessor viewer-player)
-   (mode :initarg :mode :initform (make-instance 'isometric-walk-mode)
+   (mode :initarg :mode :initform (make-instance 'first-person-mode)
          :accessor viewer-mode)
    (surface-views :initform (make-hash-table :test #'eql)
                   :reader viewer-surface-views)
@@ -1046,9 +1071,12 @@ before the operation boundary, or it would encode through resources which the
           ;; The first timestamp establishes the follow pose immediately.
           ;; Subsequent zero-duration samples preserve it; in Common Lisp a
           ;; numeric zero is true, so DT alone cannot express that distinction.
-          (follow-walking-player camera (viewer-player viewer)
-                                 :seconds (and last dt))
-          (constrain-viewer-follow-camera viewer))
+          (if (typep (viewer-mode viewer) 'first-person-mode)
+              (place-viewer-at-player-eyes viewer)
+              (progn
+                (follow-walking-player camera (viewer-player viewer)
+                                       :seconds (and last dt))
+                (constrain-viewer-follow-camera viewer))))
         (multiple-value-bind (right up forward) (camera-basis camera)
           (flet ((move (direction amount)
                    (let ((position (camera-position camera)))
@@ -1239,15 +1267,70 @@ before the operation boundary, or it would encode through resources which the
     ()
   (redo-viewer-world-edit (viewer-command-viewer)))
 
+(defun place-viewer-at-player-eyes (viewer)
+  (when (viewer-player viewer)
+    (let ((position (walking-player-position (viewer-player viewer))))
+      (setf (camera-position (viewer-camera viewer))
+            (vec3:make-vec3 (vec3:vec3-x position) (vec3:vec3-y position)
+                            (+ (vec3:vec3-z position)
+                               +first-person-eye-height+))))))
+
 (defun set-viewer-mode (viewer mode)
-  "Install MODE and make its pointer ownership immediately true on screen."
+  "Install MODE, its projection, and its pointer ownership together."
   (check-type mode viewer-mode)
   (clear-viewer-controls viewer)
+  (when (viewer-player viewer)
+    (cancel-walking-player-route (viewer-player viewer)))
   (when (viewer-pointer-captured-p viewer)
     (set-canvas-relative-pointer-mode (viewer-canvas viewer) nil)
     (setf (viewer-pointer-captured-p viewer) nil))
-  (setf (viewer-mode viewer) mode)
+  (setf (viewer-mode viewer) mode
+        *projection* (if (typep mode 'isometric-walk-mode)
+                         :isometric :perspective))
+  (when (and (viewer-player viewer) (typep mode 'first-person-mode))
+    ;; Changing the view afterward must not grow the body into a low ceiling.
+    (setf (walking-player-height (viewer-player viewer)) 1.8))
+  (if (typep mode 'first-person-mode)
+      (progn
+        (setf (camera-pitch (viewer-camera viewer)) -0.12
+              (camera-field-of-view (viewer-camera viewer)) 1.2217305)
+        (place-viewer-at-player-eyes viewer))
+      (when (viewer-player viewer)
+        (setf (camera-pitch (viewer-camera viewer)) -0.5165006)
+        (follow-walking-player (viewer-camera viewer) (viewer-player viewer))))
+  (when (viewer-renderer viewer)
+    (setf (renderer-history-valid-p (viewer-renderer viewer)) nil))
   viewer)
+
+(clim:define-command (com-cycle-camera :command-table luft-window
+                                      :name "Cycle Camera" :keystroke (:f5))
+    ()
+  (let ((viewer (viewer-command-viewer)))
+    (set-viewer-mode
+     viewer (make-instance
+             (typecase (viewer-mode viewer)
+               (first-person-mode 'orbit-mode)
+               (orbit-mode 'isometric-walk-mode)
+               (t 'first-person-mode))))))
+
+(defun select-viewer-material (viewer index)
+  (let ((members (domains:identity-vocabulary-members
+                  (scene-material-vocabulary (viewer-source viewer)))))
+    (setf (viewer-edit-material viewer) (aref members (mod index (length members)))
+          (viewer-last-edit-status viewer) :selected)))
+
+(clim:define-command (com-select-material :command-table luft-atelier
+                                         :name "Select Material")
+    ((index 'integer))
+  (select-viewer-material (viewer-command-viewer) index))
+
+(loop for key in '(:1 :2 :3 :4) for index from 0
+      do (let ((index index))
+           (clim:add-keystroke-to-command-table
+            'luft-atelier (list key) :function
+            (lambda (gesture numeric-argument)
+              (declare (ignore gesture numeric-argument))
+              (list 'com-select-material index)) :errorp nil)))
 
 (clim:define-command (com-toggle-viewer-mode :command-table luft-window
                                              :name "Toggle Interaction Mode"
@@ -1407,6 +1490,16 @@ before the operation boundary, or it would encode through resources which the
          (cast-viewer-fireball viewer))))))
 
 (defmethod handle-viewer-mode-pointer-press
+    ((mode first-person-mode) viewer canvas event)
+  (declare (ignore mode))
+  (if (not (viewer-pointer-captured-p viewer))
+      (progn
+        (set-canvas-relative-pointer-mode canvas t)
+        (setf (viewer-pointer-captured-p viewer) t))
+      (handle-viewer-mode-pointer-press
+       (make-instance 'world-edit-mode) viewer canvas event)))
+
+(defmethod handle-viewer-mode-pointer-press
     ((mode orbit-mode) viewer canvas event)
   (declare (ignore mode))
   (unless (viewer-pointer-captured-p viewer)
@@ -1419,8 +1512,16 @@ before the operation boundary, or it would encode through resources which the
 (defmethod handle-canvas-event
     ((viewer viewer) canvas (event canvas-pointer-wheel-event))
   (declare (ignore canvas))
+  (when (typep (viewer-mode viewer) 'first-person-mode)
+    (when (viewer-pointer-captured-p viewer)
+      (let* ((vocabulary (scene-material-vocabulary (viewer-source viewer)))
+             (index (domains:identity-vocabulary-offset
+                     vocabulary (viewer-edit-material viewer))))
+        (select-viewer-material
+         viewer (- index (signum (round (canvas-pointer-event-scroll-y event)))))))
+    (return-from handle-canvas-event nil))
   (let ((factor (expt 1.10 (- (canvas-pointer-event-scroll-y event)))))
-    (if (eq *projection* :isometric)
+    (if (eq (viewer-projection viewer) :isometric)
         (setf *isometric-height*
               (max 6.0 (min 96.0 (* *isometric-height* factor))))
         (let ((camera (viewer-camera viewer)))
@@ -1435,7 +1536,7 @@ before the operation boundary, or it would encode through resources which the
   (declare (ignore canvas))
   (setf (viewer-pointer-x viewer) (canvas-pointer-event-x event)
         (viewer-pointer-y viewer) (canvas-pointer-event-y event))
-  (when (and (typep (viewer-mode viewer) 'orbit-mode)
+  (when (and (typep (viewer-mode viewer) '(or orbit-mode first-person-mode))
              (viewer-pointer-captured-p viewer))
     (let ((camera (viewer-camera viewer))
           (sensitivity (viewer-sensitivity viewer)))
@@ -1484,9 +1585,9 @@ before the operation boundary, or it would encode through resources which the
                        surface-mesh
                        surface-generation
                        fixed-exposure
-                       (camera (make-fly-camera))
+                       (camera (make-fly-camera :yaw 0.35))
                        (title
-                         "LUFT — click walk · Tab rotate · scroll zoom · M orbit · M-x edit")
+                         "LUFT — click to play · WASD move · Space jump · L/R edit · 1–4 material · F5 camera · Esc release")
                        (width 1100) (height 800)
                        fullscreen-p
                        (inspector-p nil)
@@ -1584,7 +1685,7 @@ cohort. FIXED-EXPOSURE disables temporal adaptation for reproducible evidence."
            ;; otherwise the legacy sanctuary camera demands the wrong chunks.
            (when (viewer-player viewer)
              (setf *isometric-height* 18.0)
-             (follow-walking-player camera (viewer-player viewer)))
+             (set-viewer-mode viewer (viewer-mode viewer)))
            (cond
              (surface-mesh
               (renderer-set-mesh

@@ -3,7 +3,7 @@
 ;;; The small semantic game layer over LUFT's packed terrain.
 ;;;
 ;;; A player is an inspectable object at the application boundary.  Terrain
-;;; queries stay direct packed-chain reads, and rendering consumes two dense
+;;; queries read chunk fibers, and rendering consumes two dense
 ;;; vec4 lanes made from this state once per frame.
 
 (defconstant +walking-player-height+ 2.9)
@@ -70,7 +70,9 @@ box and fall through nothing they cannot see."
     (luft:fiber-store-cell-bit solid x y z)))
 
 (defclass walking-player ()
-  ((position :initarg :position :accessor walking-player-position)
+  ((height :initarg :height :initform +walking-player-height+
+           :accessor walking-player-height)
+   (position :initarg :position :accessor walking-player-position)
    (previous-position :initarg :position
                       :accessor walking-player-previous-position)
    (heading-x :initarg :heading-x :initform 0.0
@@ -154,14 +156,16 @@ authoritative while the player crosses between its cell-centre waypoints."))
           (walking-player-previous-gait player) (walking-player-gait player)))
   player)
 
-(defun walking-player-clear-at-p (solid x y base-z)
+(defun walking-player-clear-at-p
+    (solid x y base-z &optional (height +walking-player-height+))
   "Whether the point-footprint player fits above BASE-Z at X,Y."
   (with-collision-boundary ()
     (luft:fiber-store-column-clear-p
      solid (floor x) (floor y)
-     (floor base-z) (ceiling (+ base-z +walking-player-height+)))))
+     (floor base-z) (ceiling (+ base-z height)))))
 
-(defun walking-player-support-height (source x y current-base-z)
+(defun walking-player-support-height
+    (source x y current-base-z &optional (height +walking-player-height+))
   "Return a nearby supported base height for a step to X,Y, or NIL.
 
 The controller can climb one cubical step and descend two.  It does not scan
@@ -176,7 +180,7 @@ for a remote roof, so a wall cannot teleport the player onto its top."
           when (and (= 1 (collision-cell-occupancy-bit
                           solid cell-x cell-y support-z))
                     (walking-player-clear-at-p
-                     solid x y candidate-base))
+                     solid x y candidate-base height))
             return (coerce candidate-base 'single-float))))
 
 (defun walking-player-standable-cell-p (source x y z)
@@ -417,10 +421,14 @@ rather than silently becoming a straight-line collision attempt."
           while clear-p
           do (incf x (if (eq axis :x) step 0.0))
              (incf y (if (eq axis :y) step 0.0))
-             (let ((support (walking-player-support-height source x y z)))
+             (let ((support (walking-player-support-height
+                             source x y z (walking-player-height player))))
                (if support
                    (setf z support)
-                   (setf clear-p nil))))
+                   (unless (walking-player-clear-at-p
+                            (inspection-source-solid source) x y z
+                            (walking-player-height player))
+                     (setf clear-p nil)))))
     (when clear-p
       (setf (vec3:vec3-x position) x
             (vec3:vec3-y position) y
@@ -443,7 +451,7 @@ rather than silently becoming a straight-line collision attempt."
           do (incf x (if (eq axis :x) step 0.0))
              (incf y (if (eq axis :y) step 0.0))
              (unless (walking-player-clear-at-p
-                      solid x y (vec3:vec3-z position))
+                      solid x y (vec3:vec3-z position) (walking-player-height player))
                (setf clear-p nil)))
     (when clear-p
       (setf (vec3:vec3-x position) x
@@ -549,28 +557,38 @@ future spell or weapon action vocabulary will look like."
   player)
 
 (defun advance-walking-player-vertical (player source seconds)
-  "Apply Luvcraft-strength gravity to LUFT's Z-up walking controller."
+  "Sweep the body vertically, including ceilings and newly removed floors."
   (let* ((position (walking-player-position player))
+         (solid (inspection-source-solid source))
+         (height (walking-player-height player))
+         (x (vec3:vec3-x position))
+         (y (vec3:vec3-y position))
+         (z (vec3:vec3-z position))
          (jump-p (walking-player-jump-requested-p player)))
     (setf (walking-player-jump-requested-p player) nil)
+    (when (and (walking-player-grounded-p player)
+               (walking-player-clear-at-p solid x y (- z 0.01) height))
+      (setf (walking-player-grounded-p player) nil))
     (when (and jump-p (walking-player-grounded-p player))
-      (setf (walking-player-vertical-velocity player)
-            +walking-player-jump-speed+
+      (setf (walking-player-vertical-velocity player) +walking-player-jump-speed+
             (walking-player-grounded-p player) nil))
     (unless (walking-player-grounded-p player)
       (incf (walking-player-vertical-velocity player)
             (* +walking-player-gravity+ seconds))
-      (incf (vec3:vec3-z position)
-            (* (walking-player-vertical-velocity player) seconds)))
-    (let ((support (walking-player-support-height
-                    source (vec3:vec3-x position) (vec3:vec3-y position)
-                    (vec3:vec3-z position))))
-      (when (and support
-                 (<= (walking-player-vertical-velocity player) 0.0)
-                 (<= (vec3:vec3-z position) support))
-        (setf (vec3:vec3-z position) support
-              (walking-player-vertical-velocity player) 0.0
-              (walking-player-grounded-p player) t))))
+      (let* ((distance (* (walking-player-vertical-velocity player) seconds))
+             (steps (max 1 (ceiling (/ (abs distance) 0.25))))
+             (step (/ distance steps)))
+        (loop repeat steps
+              for next = (+ z step)
+              do (if (walking-player-clear-at-p solid x y next height)
+                     (setf z next)
+                     (progn
+                       (setf z (if (minusp step) (floor z)
+                                   (- (ceiling (+ z height)) height))
+                             (walking-player-vertical-velocity player) 0.0
+                             (walking-player-grounded-p player) (minusp step))
+                       (return))))
+        (setf (vec3:vec3-z position) z))))
   player)
 
 (defun advance-walking-player

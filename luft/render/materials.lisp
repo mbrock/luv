@@ -132,6 +132,60 @@
                        (aref words (+ row 2)) (pack-terrain-tone bottom)))))
     words))
 
+;;; Published material fields share immutable per-chunk tables. Construction
+;;; may fill a local table; an edit copies only that table and the chunk index.
+(defstruct (material-store (:constructor make-material-store ()))
+  (chunks (make-hash-table :test #'eql) :type hash-table :read-only t))
+
+(defun material-cell-at (field cell)
+  "Return the placement offset and presence of CELL in FIELD."
+  (etypecase field
+    (hash-table (gethash cell field))
+    (function (funcall field cell))
+    (material-store
+     (let ((chunk (gethash (luft:site-chunk-key cell)
+                           (material-store-chunks field))))
+       (if chunk (gethash cell chunk) (values nil nil))))))
+
+(defun map-material-cells (function field)
+  (etypecase field
+    (hash-table (maphash function field))
+    (material-store
+     (maphash (lambda (key chunk)
+                (declare (ignore key))
+                (maphash function chunk))
+              (material-store-chunks field)))))
+
+(defun material-store-from-table (table)
+  (let ((store (make-material-store)))
+    (maphash
+     (lambda (cell offset)
+       (let* ((key (luft:site-chunk-key cell))
+              (chunk (or (gethash key (material-store-chunks store))
+                         (setf (gethash key (material-store-chunks store))
+                               (make-hash-table :test #'eql)))))
+         (setf (gethash cell chunk) offset)))
+     table)
+    store))
+
+(defun material-store-with-cell (store cell offset)
+  "A new field with CELL changed; NIL removes it. Offset zero is occupied."
+  (let* ((copy (make-material-store))
+         (key (luft:site-chunk-key cell))
+         (old (gethash key (material-store-chunks store)))
+         (chunk (if old (alexandria:copy-hash-table old)
+                    (make-hash-table :test #'eql))))
+    (maphash (lambda (key value)
+               (setf (gethash key (material-store-chunks copy)) value))
+             (material-store-chunks store))
+    (if offset (setf (gethash cell chunk) offset) (remhash cell chunk))
+    (setf (gethash key (material-store-chunks copy)) chunk)
+    copy))
+
+(defun material-cell-reader (field)
+  "A read-only lookup that retains this exact material snapshot."
+  (lambda (cell) (material-cell-at field cell)))
+
 (defun compile-surface-mesh-appearance (mesh material-cells descriptors)
   "Compile one eight-u8 material record per active star in MESH.
 
@@ -157,9 +211,7 @@ remain byte-identical under repainting."
                         (cell (luft:make-site domain cell-x cell-y cell-z
                                               luft:+cell-extent+ 1)))
                    (multiple-value-bind (offset present-p)
-                       (etypecase material-cells
-                         (hash-table (gethash cell material-cells))
-                         (function (funcall material-cells cell)))
+                       (material-cell-at material-cells cell)
                      (unless present-p
                        (error "Occupied star sample ~D at (~D ~D ~D) has no material."
                               sample x y z))
@@ -197,7 +249,7 @@ remain byte-identical under repainting."
   (let ((placements
           (domains:identity-vocabulary-members placement-vocabulary))
         (sources nil))
-    (maphash
+    (map-material-cells
      (lambda (cell placement-offset)
        (let* ((placement (aref placements placement-offset))
               (emission
