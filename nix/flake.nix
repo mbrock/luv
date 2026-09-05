@@ -419,6 +419,10 @@
             LUV_MUPDF_LIBDIR = mupdfLibraryDirectory;
             LUV_YT_DLP = "${pkgs.yt-dlp}/bin/yt-dlp";
             CL_SOURCE_REGISTRY = "${mcclim}//:${clSdl3WithoutMixer}//";
+            # ASDF normally keys outputs by Lisp implementation and source
+            # path, but CFFI grovel outputs also depend on native headers.
+            # Keep each dependency closure's compiled ABI and FASLs together.
+            LUV_ASDF_CACHE_KEY = builtins.baseNameOf developmentClosure;
             PKG_CONFIG_PATH = "${ffmpeg.dev}/lib/pkgconfig";
             CPATH = "${pkgs.vulkan-headers}/include";
             VK_LAYER_PATH =
@@ -439,6 +443,7 @@
             LUV_SWASH = "${swashPackage}/bin/swash";
             LUV_FFMPEG_LIBDIR = ffmpegLibraryDirectory;
             CL_SOURCE_REGISTRY = "${mcclim}//:${clSdl3WithoutMixer}//";
+            LUV_ASDF_CACHE_KEY = builtins.baseNameOf slimDevelopmentClosure;
             PKG_CONFIG_PATH = "${ffmpeg.dev}/lib/pkgconfig";
             CPATH = "${pkgs.vulkan-headers}/include";
             VK_LAYER_PATH =
@@ -452,6 +457,11 @@
           };
           developmentEnvironmentHook = ''
             unset LUV_SLY_SYSTEM
+
+            # Nix's SBCL wrapper prepends colon-separated mappings for its
+            # precompiled packages, so use that syntax here too. The closure
+            # includes the Lisp compiler; source paths remain distinct below it.
+            export ASDF_OUTPUT_TRANSLATIONS="/:''${XDG_CACHE_HOME:-$HOME/.cache}/common-lisp/luv/$LUV_ASDF_CACHE_KEY/:"
 
             if [ -n "''${LUV_PROJECT_ROOT:-}" ]; then
               case ":''${CL_SOURCE_REGISTRY:-}:" in

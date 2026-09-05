@@ -1,5 +1,32 @@
 # swa.sh deployment files
 
+## Live wiki and deploy button
+
+On `swa`, `/etc/caddy/Caddyfile` terminates HTTPS for `luv.swa.sh` and
+proxies the wiki to `/run/luv/live.sock`, a symlink to `1.sock` or `2.sock`.
+Upstream keepalive is disabled so new requests follow a slot switch.
+`luv-wiki@1.service` and `luv-wiki@2.service` run as `mbrock:www-data` in
+`/srv/luv-slots/1` and `/srv/luv-slots/2`, using
+`./env ./scripts/wiki serve --socket /run/luv/N.sock`. These are detached
+worktrees of `/srv/luv`, separate from the development checkout.
+
+The button posts to `/admin/deployments`, protected by Caddy Basic Auth.
+The wiki writes `/run/luv/deploy.request`; `luv-deploy.path` notices the
+change and starts `luv-deploy.service`, which runs
+`/usr/local/libexec/luv-deploy`. It fetches `origin/main` in `/srv/luv`,
+checks out that commit in the inactive slot, runs `make` and `make test`,
+starts the slot, and checks `/healthz` and `/version`. Only then does it
+atomically switch `live.sock`. It verifies the public version and retains
+the previous slot for rollback. Failures before the switch leave traffic
+on the existing slot. The browser streams terminal output from
+`/run/luv/deployments/ID.log`; `ID.done` contains the exit status.
+
+Caddy serves `/video/*` directly from `/var/www/luv` and `/nix-cache/*`
+from `/var/www/luv/nix-cache`. Successful deployments queue the separate
+`luv-nix-cache@ID.service` to publish the newly live Nix closure.
+
+## Installing host configuration
+
 The files in this directory are the source copies of swa.sh's Caddy and
 systemd configuration.  Install the Nix cache additions as root with:
 

@@ -22,6 +22,7 @@ dependency_environment() {
     "slynk=${LUV_SLYNK_DIR:-}" \
     "system=${LUV_SLY_SYSTEM:-luv-workbench}" \
     "source-registry=${CL_SOURCE_REGISTRY:-}" \
+    "output-translations=${ASDF_OUTPUT_TRANSLATIONS:-}" \
     "libraries=${LUV_NATIVE_LIBRARY_PATH:-}"
 }
 
