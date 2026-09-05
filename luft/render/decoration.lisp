@@ -323,39 +323,55 @@ always initialized anew, including when immutable appearance arrays are reused."
 
 (declaim (ftype function make-scene-regional-meshes))
 
-(defun scene-regional-mesh-tree
+(defun compile-static-scene-mesh
     (scene bevel-width &key reusable-light-generation)
-  "Flatten the regional star streams into one static mesh."
+  "Combine regional output into a single static mesh with its publication proof."
   (declare (ignore bevel-width))
   (multiple-value-bind (owners census diagnostics generation)
       (make-scene-regional-meshes
-       scene 1
+       scene luft:+mesh-bevel-width+
        :reusable-light-generation reusable-light-generation)
-    (let* ((domain (scene-domain scene))
-           (words
-             (apply #'concatenate '(simple-array (unsigned-byte 32) (*))
-                    (mapcar (lambda (entry)
-                              (luft:surface-mesh-star-site-words (cdr entry)))
-                            owners)))
-           (appearance
-             (apply #'concatenate '(simple-array (unsigned-byte 8) (*))
-                    (mapcar
-                     (lambda (entry)
-                       (luft:surface-mesh-appearance-codes (cdr entry)))
-                     owners)))
-           (root (luft:make-surface-mesh domain words)))
-      (setf (luft:surface-mesh-appearance-codes root) appearance)
-      (when owners
-        (setf (luft:surface-mesh-appearance-descriptor-words root)
-              (luft:surface-mesh-appearance-descriptor-words
-               (cdar owners))))
+    (let* ((light (scene-mesh-generation-light-generation generation))
+           (root (combine-scene-owner-meshes scene owners light)))
       (values
        root census diagnostics
        (make-scene-mesh-generation-value
-        scene (scene-mesh-generation-request-stamp generation)
-        (scene-mesh-generation-light-generation generation)
+        scene (scene-mesh-generation-request-stamp generation) light
         :mesh-entries (list (cons +unkeyed-scene-mesh-output+ root))
         :unkeyed-mesh-p t)))))
+
+(defun combine-scene-owner-meshes (scene owners light-generation)
+  "Join star/appearance streams while retaining their light and attachment data.
+
+A static root changes the grouping, not the meaning of the regional products.
+All owners must share the claimed field and palette. Even an empty scene needs
+its exact empty light field so normal publication validation still applies."
+  (let* ((meshes (mapcar #'cdr owners))
+         (field (realized-light-generation-field light-generation))
+         (descriptors (if meshes
+                          (luft:surface-mesh-appearance-descriptor-words (first meshes))
+                          (compile-terrain-material-descriptors
+                           (scene-material-vocabulary scene)))))
+    (dolist (mesh meshes)
+      (unless (and (eq field (luft:surface-mesh-voxel-light mesh))
+                   (equalp descriptors
+                           (luft:surface-mesh-appearance-descriptor-words mesh)))
+        (error "Static mesh owners do not share the claimed light field and palette.")))
+    (let ((root
+            (luft:make-surface-mesh
+             (scene-domain scene)
+             (apply #'concatenate '(simple-array (unsigned-byte 32) (*))
+                    (mapcar #'luft:surface-mesh-star-site-words meshes)))))
+      (setf (luft:surface-mesh-appearance-codes root)
+            (apply #'concatenate '(simple-array (unsigned-byte 8) (*))
+                   (mapcar #'luft:surface-mesh-appearance-codes meshes))
+            (luft:surface-mesh-appearance-descriptor-words root) descriptors
+            (luft:surface-mesh-voxel-light root) field
+            (luft:surface-mesh-attachments root)
+            (mapcan (lambda (mesh) (copy-list (luft:surface-mesh-attachments mesh))) meshes)
+            (luft:surface-mesh-companions root)
+            (mapcan (lambda (mesh) (copy-list (luft:surface-mesh-companions mesh))) meshes))
+      root)))
 
 (defun make-render-mesh
     (source &key stock-function chamfer-stock-function
@@ -381,7 +397,7 @@ use MAKE-WHOLE-DOMAIN-DIAGNOSTIC-MESH explicitly."
         (error "A reusable generation belongs to a different authored scene input.")))
     (zone (:luft/rematerialize :value (luft:fiber-store-count solid))
       (multiple-value-bind (mesh census diagnostics generation)
-          (scene-regional-mesh-tree
+          (compile-static-scene-mesh
            scene bevel-width
            :reusable-light-generation reusable-light-generation)
         (declare (ignore census diagnostics))

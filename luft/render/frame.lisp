@@ -101,9 +101,9 @@
     ;; The atmosphere is scene-linear world radiance: geometry overwrites it,
     ;; the selected temporal implementation reconstructs it, and the exposure
     ;; probe meters the same pixels presentation will grade.
-    (set-pipeline pass (renderer-sky-pipeline renderer))
-    (set-bind-group pass 0 (renderer-frame-sky-bind-group renderer frame))
-    (draw pass 3)
+    (encode-scene-drawing
+     (renderer-sky renderer) pass
+     (renderer-frame-drawing-binding renderer frame (renderer-sky renderer)))
     (set-pipeline pass (renderer-pipeline renderer))
     (dolist (key (renderer-slot-order renderer))
       (let ((resident
@@ -119,9 +119,9 @@
       (draw pass (torch-body-vertex-count)
             (renderer-flame-instance-count renderer)))
     (when player-p
-      (set-pipeline pass (renderer-player-sdf-pipeline renderer))
-      (set-bind-group pass 0 (renderer-frame-player-bind-group renderer frame))
-      (draw pass 6 1))
+      (encode-scene-drawing
+       (renderer-player renderer) pass
+       (renderer-frame-drawing-binding renderer frame (renderer-player renderer))))
     (when construction-p
       ;; Populate at most one diagnostic slot per frame. The overlay is a
       ;; debugging view, so progressive readiness is preferable to freezing

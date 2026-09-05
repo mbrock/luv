@@ -420,16 +420,6 @@ ambiguously co-owned, or retired by a population rollback."
                          :accessor renderer-shadow-vertex-module)
    (shadow-pipeline :initarg :shadow-pipeline
                     :accessor renderer-shadow-pipeline)
-   (player-sdf-layout :initarg :player-sdf-layout
-                      :accessor renderer-player-sdf-layout)
-   (player-sdf-bind-group :initarg :player-sdf-bind-group
-                          :accessor renderer-player-sdf-bind-group)
-   (player-sdf-vertex-module :initarg :player-sdf-vertex-module
-                             :accessor renderer-player-sdf-vertex-module)
-   (player-sdf-fragment-module :initarg :player-sdf-fragment-module
-                               :accessor renderer-player-sdf-fragment-module)
-   (player-sdf-pipeline :initarg :player-sdf-pipeline
-                        :accessor renderer-player-sdf-pipeline)
    (lattice-point-layout :initarg :lattice-point-layout
                          :accessor renderer-lattice-point-layout)
    (lattice-point-vertex-module :initarg :lattice-point-vertex-module
@@ -438,10 +428,10 @@ ambiguously co-owned, or retired by a population rollback."
                                   :accessor renderer-lattice-point-fragment-module)
    (lattice-point-pipeline :initarg :lattice-point-pipeline
                            :accessor renderer-lattice-point-pipeline)
-   (sky-layout :initform nil :accessor renderer-sky-layout)
-   (sky-bind-group :initform nil :accessor renderer-sky-bind-group)
-   (sky-fragment-module :initform nil :accessor renderer-sky-fragment-module)
-   (sky-pipeline :initform nil :accessor renderer-sky-pipeline)
+   (sky :initarg :sky :reader renderer-sky)
+   (player :initarg :player :reader renderer-player)
+   (sky-factory :initarg :sky-factory :reader renderer-sky-factory)
+   (player-factory :initarg :player-factory :reader renderer-player-factory)
    (color-format :initarg :color-format :reader renderer-color-format)
    (temporal-p :initarg :temporal-p :reader renderer-temporal-p)
    (temporal-resolve-kind :initarg :temporal-resolve-kind :initform nil
@@ -513,7 +503,7 @@ ambiguously co-owned, or retired by a population rollback."
     (maphash
      (lambda (key group)
        (declare (ignore key))
-       (releasing :frame-bind-group (destroy group)))
+       (when group (releasing :frame-bind-group (destroy group))))
      (renderer-frame-state-bind-groups state))
     (clrhash (renderer-frame-state-bind-groups state))
     (releasing :frame-flame-effect-buffer
@@ -532,7 +522,8 @@ ambiguously co-owned, or retired by a population rollback."
          (dolist (binding-key
                    (loop for key being the hash-keys of groups collect key))
            (releasing (list :frame-bind-group binding-key)
-             (destroy (gethash binding-key groups))
+             (when (gethash binding-key groups)
+               (destroy (gethash binding-key groups)))
              (remhash binding-key groups))))))
    (renderer-frame-resources renderer))
   renderer)
@@ -602,20 +593,20 @@ ambiguously co-owned, or retired by a population rollback."
            (:binding 4 :resource ,(renderer-shadow-view renderer))
            (:binding 5 :resource ,(renderer-shadow-sampler renderer)))))))
 
-(defun renderer-frame-sky-bind-group (renderer frame)
-  (renderer-frame-bind-group
-   renderer frame '(:sky) "luft frame-local HDR sky"
-   (renderer-sky-layout renderer)
-   `((:binding 0 :resource ,(renderer-frame-state-camera-buffer frame)))))
-
-(defun renderer-frame-player-bind-group (renderer frame)
-  (renderer-frame-bind-group
-   renderer frame (list :player (renderer-shadow-view renderer))
-   "luft frame-local walking player SDF"
-   (renderer-player-sdf-layout renderer)
-   `((:binding 0 :resource ,(renderer-frame-state-camera-buffer frame))
-     (:binding 1 :resource ,(renderer-shadow-view renderer))
-     (:binding 2 :resource ,(renderer-shadow-sampler renderer)))))
+(defun renderer-frame-drawing-binding (renderer frame drawing)
+  "The frame owns borrowed camera/shadow bindings; DRAWING owns its program."
+  (when drawing
+    (let* ((groups (renderer-frame-state-bind-groups frame))
+           (key (list :scene-drawing drawing (renderer-shadow-view renderer))))
+      (multiple-value-bind (binding present-p) (gethash key groups)
+        (if present-p
+            binding
+            (setf (gethash key groups)
+                  (make-scene-drawing-binding
+                   drawing (renderer-device renderer)
+                   (renderer-frame-state-camera-buffer frame)
+                   (renderer-shadow-view renderer)
+                   (renderer-shadow-sampler renderer))))))))
 
 (defun renderer-frame-lattice-bind-group (renderer frame slot)
   (renderer-frame-bind-group
@@ -1877,8 +1868,14 @@ cohort untouched. No frame can interleave with the owner-thread publication."
   (values))
 
 (defun make-renderer (device color-format extent
-                      &key (exposure-factory 'make-automatic-exposure))
-  "Compose the GPU renderer, including a separately owned exposure control.
+                      &key (exposure-factory 'make-automatic-exposure)
+                        (sky-factory 'make-sky-drawing)
+                        (player-factory 'make-player-drawing))
+  "Compose independently owned exposure, sky, and player drawing components.
+
+SKY-FACTORY and PLAYER-FACTORY receive DEVICE, scene target formats, and
+sample count. Each returns a fresh SCENE-DRAWING. NIL omits that component.
+The renderer releases drawings after their frame-owned bindings.
 
 EXPOSURE-FACTORY is a function designator receiving DEVICE and returning a
 fresh EXPOSURE-CONTROL. Its default names a function so live redefinition is
@@ -1896,8 +1893,6 @@ Meshes arrive separately through RENDERER-SET-MESH."
          vertex-module fragment-module pipeline
          shadow-texture shadow-view shadow-sampler shadow-layout
          shadow-vertex-module shadow-pipeline
-         player-sdf-layout player-sdf-bind-group player-sdf-vertex-module
-         player-sdf-fragment-module player-sdf-pipeline
          flame-layout flame-instance-buffer flame-effect-buffer
          flame-vertex-module flame-fragment-module flame-pipeline
          flame-depth-sampler composite-layout composite-fragment-module
@@ -1912,7 +1907,7 @@ Meshes arrive separately through RENDERER-SET-MESH."
          present-layout present-bind-group present-vertex-module
          present-fragment-module present-pipeline sampler
          temporal-layout temporal-fragment-module temporal-pipeline
-         sky-layout sky-bind-group sky-fragment-module sky-pipeline
+         sky player
          exposure-control
          renderer
          (completed-p nil))
@@ -2103,53 +2098,6 @@ Meshes arrive separately through RENDERER-SET-MESH."
                           `((:binding 0 :resource ,flame-instance-buffer)
                             (:binding 1 :resource ,torch-body-vertex-buffer)
                             (:binding 2 :resource ,camera-buffer)))))
-           (setf player-sdf-layout
-                 (create device
-                         (make-bind-group-layout-descriptor
-                          :label "luft player sdf layout"
-                          :entries '((:binding 0 :type :uniform-buffer)
-                                     (:binding 1 :type :texture)
-                                     (:binding 2 :type :sampler))))
-                 player-sdf-vertex-module
-                 (create device
-                         (make-shader-module-descriptor
-                          :label "luft player sdf vertex"
-                          :language :mathematical
-                          :code (shaders:player-sdf-vertex-specification)))
-                 player-sdf-fragment-module
-                 (create device
-                         (make-shader-module-descriptor
-                          :label "luft player sdf fragment"
-                          :language :mathematical
-                          :code (shaders:player-sdf-fragment-specification)))
-                 player-sdf-pipeline
-                 (create device
-                         (make-render-pipeline-descriptor
-                          :label "luft walking player sdf pipeline"
-                          :layout player-sdf-layout
-                          :vertex `(:module ,player-sdf-vertex-module)
-                          :fragment
-                          `(:module ,player-sdf-fragment-module
-                            :targets
-                            ,(loop for format in target-formats
-                                   for first = t then nil
-                                   collect `(:format ,format
-                                             ,@(when first
-                                                 '(:blend :premultiplied-alpha)))))
-                          :primitive '(:topology :triangle-list)
-                          :sample-count *scene-sample-count*
-                          :depth-stencil
-                          '(:format :depth32-float :depth-write-enabled nil
-                            :depth-compare :less)))
-                 player-sdf-bind-group
-                 (create device
-                         (make-bind-group-descriptor
-                          :label "luft walking player sdf"
-                          :layout player-sdf-layout
-                          :entries
-                          `((:binding 0 :resource ,camera-buffer)
-                            (:binding 1 :resource ,shadow-view)
-                            (:binding 2 :resource ,shadow-sampler)))))
            (setf flame-layout
                  (create device
                          (make-bind-group-layout-descriptor
@@ -2232,18 +2180,7 @@ Meshes arrive separately through RENDERER-SET-MESH."
                          (make-bind-group-layout-descriptor
                           :label "luft HDR composite source layout"
                           :entries '((:binding 0 :type :texture)
-                                     (:binding 1 :type :sampler))))
-                 sky-layout
-                 (create device
-                         (make-bind-group-layout-descriptor
-                          :label "luft HDR sky layout"
-                          :entries '((:binding 0 :type :uniform-buffer))))
-                 sky-bind-group
-                 (create device
-                         (make-bind-group-descriptor
-                          :label "luft HDR sky"
-                          :layout sky-layout
-                          :entries `((:binding 0 :resource ,camera-buffer)))))
+                                     (:binding 1 :type :sampler)))))
            (setf present-layout
                  (create device
                          (make-bind-group-layout-descriptor
@@ -2288,35 +2225,7 @@ Meshes arrive separately through RENDERER-SET-MESH."
                           :vertex `(:module ,present-vertex-module)
                           :fragment `(:module ,composite-fragment-module
                                       :targets ((:format :rgba16-float)))
-                          :primitive '(:topology :triangle-list)))
-                 sky-fragment-module
-                 (create device
-                         (make-shader-module-descriptor
-                          :label "luft HDR sky fragment"
-                          :language :mathematical
-                          :code (if temporal-p
-                                    (shaders:sky-temporal-fragment-specification)
-                                    (shaders:sky-fragment-specification))))
-                 sky-pipeline
-                 (create device
-                         (make-render-pipeline-descriptor
-                          :label "luft HDR sky pipeline"
-                          :layout sky-layout
-                          :vertex `(:module ,present-vertex-module)
-                          :fragment `(:module ,sky-fragment-module
-                                      :targets
-                                      ,(mapcar (lambda (format)
-                                                 `(:format ,format))
-                                               target-formats))
-                          :primitive '(:topology :triangle-list)
-                          :sample-count *scene-sample-count*
-                          ;; The sky is drawn inside the scene pass, whose
-                          ;; depth attachment geometry subsequently owns.
-                          ;; Match that pass without touching its depth.
-                          :depth-stencil
-                          '(:format :depth32-float
-                            :depth-write-enabled nil
-                            :depth-compare :always))))
+                          :primitive '(:topology :triangle-list))))
            (when (eq temporal-kind :shader)
              (setf temporal-layout
                    (create
@@ -2345,10 +2254,16 @@ Meshes arrive separately through RENDERER-SET-MESH."
                      :fragment `(:module ,temporal-fragment-module
                                  :targets ((:format :rgba16-float)))
                      :primitive '(:topology :triangle-list)))))
+           (setf sky (make-scene-drawing sky-factory device target-formats
+                                         *scene-sample-count*)
+                 player (make-scene-drawing player-factory device target-formats
+                                            *scene-sample-count*))
            (setf exposure-control (funcall exposure-factory device))
            (check-type exposure-control exposure-control)
            (setf renderer
                  (make-instance 'renderer
+                                :sky sky :sky-factory sky-factory
+                                :player player :player-factory player-factory
                                 :exposure-control exposure-control
                                 :exposure-factory exposure-factory
                                 :device device
@@ -2395,12 +2310,6 @@ Meshes arrive separately through RENDERER-SET-MESH."
                                 :shadow-layout shadow-layout
                                 :shadow-vertex-module shadow-vertex-module
                                 :shadow-pipeline shadow-pipeline
-                                :player-sdf-layout player-sdf-layout
-                                :player-sdf-bind-group player-sdf-bind-group
-                                :player-sdf-vertex-module player-sdf-vertex-module
-                                :player-sdf-fragment-module
-                                player-sdf-fragment-module
-                                :player-sdf-pipeline player-sdf-pipeline
                                 :lattice-point-layout lattice-point-layout
                                 :lattice-point-vertex-module
                                 lattice-point-vertex-module
@@ -2418,10 +2327,6 @@ Meshes arrive separately through RENDERER-SET-MESH."
                  (renderer-temporal-fragment-module renderer)
                  temporal-fragment-module
                  (renderer-temporal-pipeline renderer) temporal-pipeline)
-           (setf (renderer-sky-layout renderer) sky-layout
-                 (renderer-sky-bind-group renderer) sky-bind-group
-                 (renderer-sky-fragment-module renderer) sky-fragment-module
-                 (renderer-sky-pipeline renderer) sky-pipeline)
            (create-frame-targets renderer extent)
            (setf completed-p t)
            renderer)
@@ -2429,6 +2334,9 @@ Meshes arrive separately through RENDERER-SET-MESH."
         (if renderer
             (destroy-renderer renderer)
             (progn
+              (with-release-warnings
+                (releasing :sky (release-scene-drawing sky))
+                (releasing :player (release-scene-drawing player)))
               (when exposure-control
                 (with-release-warnings
                   (releasing :exposure (release-exposure exposure-control))))
@@ -2440,16 +2348,11 @@ Meshes arrive separately through RENDERER-SET-MESH."
                                         composite-fragment-module
                                         present-vertex-module sampler
                                         flame-depth-sampler composite-layout
-                                        present-bind-group sky-pipeline
-                                        sky-fragment-module sky-bind-group
-                                        sky-layout
+                                        present-bind-group
                                         present-layout lattice-point-pipeline
                                         lattice-point-fragment-module
                                         lattice-point-vertex-module
                                         lattice-point-layout
-                                        player-sdf-bind-group player-sdf-pipeline
-                                        player-sdf-fragment-module
-                                        player-sdf-vertex-module player-sdf-layout
                                         torch-body-shadow-bind-group
                                         torch-body-bind-group
                                         torch-body-shadow-pipeline
@@ -2485,17 +2388,15 @@ Meshes arrive separately through RENDERER-SET-MESH."
     (destroy-canvas-frame-resource-cache
      (renderer-frame-resources renderer) #'destroy-renderer-frame-state)
     (destroy-renderer-targets renderer)
+    (releasing :sky (release-scene-drawing (renderer-sky renderer)))
+    (releasing :player (release-scene-drawing (renderer-player renderer)))
     (releasing :exposure
       (release-exposure (renderer-exposure-control renderer)))
     (loop for slot being the hash-values of (renderer-mesh-slots renderer)
           do (%destroy-mesh-slot slot))
     (destroy-renderer-publication-resources (renderer-publication renderer))
     (dolist (resource
-              (list (renderer-sky-pipeline renderer)
-                    (renderer-sky-fragment-module renderer)
-                    (renderer-sky-bind-group renderer)
-                    (renderer-sky-layout renderer)
-                    (renderer-present-pipeline renderer)
+              (list (renderer-present-pipeline renderer)
                     (renderer-present-fragment-module renderer)
                     (renderer-temporal-pipeline renderer)
                     (renderer-temporal-fragment-module renderer)
@@ -2523,11 +2424,6 @@ Meshes arrive separately through RENDERER-SET-MESH."
                     (renderer-flame-vertex-module renderer)
                     (renderer-flame-layout renderer)
                     (renderer-flame-effect-buffer renderer)
-                    (renderer-player-sdf-bind-group renderer)
-                    (renderer-player-sdf-pipeline renderer)
-                    (renderer-player-sdf-fragment-module renderer)
-                    (renderer-player-sdf-vertex-module renderer)
-                    (renderer-player-sdf-layout renderer)
                     (renderer-shadow-pipeline renderer)
                     (renderer-shadow-vertex-module renderer)
                     (renderer-shadow-layout renderer)
@@ -2542,10 +2438,6 @@ Meshes arrive separately through RENDERER-SET-MESH."
                          (renderer-camera-buffer renderer))))
       (when resource (ignore-errors (destroy resource))))
     (setf (renderer-present-pipeline renderer) nil
-          (renderer-sky-pipeline renderer) nil
-          (renderer-sky-fragment-module renderer) nil
-          (renderer-sky-bind-group renderer) nil
-          (renderer-sky-layout renderer) nil
           (renderer-present-fragment-module renderer) nil
           (renderer-temporal-pipeline renderer) nil
           (renderer-temporal-fragment-module renderer) nil
@@ -2574,11 +2466,6 @@ Meshes arrive separately through RENDERER-SET-MESH."
           (renderer-flame-vertex-module renderer) nil
           (renderer-flame-layout renderer) nil
           (renderer-flame-effect-buffer renderer) nil
-          (renderer-player-sdf-bind-group renderer) nil
-          (renderer-player-sdf-pipeline renderer) nil
-          (renderer-player-sdf-fragment-module renderer) nil
-          (renderer-player-sdf-vertex-module renderer) nil
-          (renderer-player-sdf-layout renderer) nil
           (renderer-shadow-pipeline renderer) nil
           (renderer-shadow-vertex-module renderer) nil
           (renderer-shadow-layout renderer) nil

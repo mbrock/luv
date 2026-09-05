@@ -72,7 +72,7 @@
                   (length (renderer-slot-order (viewer-renderer viewer)))
                   0)
               (hash-table-count (streaming-scene-load-outstanding scene))
-              (hash-table-count (streaming-scene-outstanding scene))))))
+              (streaming-scene-pending-mesh-count scene)))))
 
 (defmethod mcluv:status-bar-channel-value
     ((channel (eql :bevel)) (viewer viewer) bar)

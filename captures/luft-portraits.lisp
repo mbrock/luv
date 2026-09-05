@@ -834,10 +834,9 @@
                  (luft.render::render-viewer-frame viewer timestamp)))
               (hash-table-count
                (luft.render::streaming-scene-loaded scene)))
-          for outstanding = (hash-table-count
-                             (luft.render::streaming-scene-outstanding scene))
+          for outstanding = (luft.render::streaming-scene-pending-mesh-count scene)
           when (and (plusp loaded) (zerop outstanding)
-                    (null (luft.render::streaming-scene-cohort scene)))
+                    (null (luft.render::streaming-scene-replacement scene)))
             do (format t
                        "capture LUFT highlands: ready with ~D source chunks and ~D canonical owner slots~%"
                        loaded

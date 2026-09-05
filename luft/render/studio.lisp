@@ -1140,8 +1140,7 @@ before the operation boundary, or it would encode through resources which the
        source (viewer-renderer viewer) production-system)
       ;; One complete neighborhood cohort crosses the owner boundary before
       ;; another residency change can invalidate it.
-      (when (and (null (streaming-scene-cohort source))
-                 (null (streaming-scene-removals source)))
+      (when (null (streaming-scene-replacement source))
         (incf (streaming-scene-frame-counter source))
         (when (>= (streaming-scene-frame-counter source)
                   (streaming-scene-frames-per-load source))
@@ -1604,6 +1603,8 @@ before the operation boundary, or it would encode through resources which the
                        surface-generation
                        fixed-exposure
                        (exposure-factory 'make-automatic-exposure)
+                       (sky-factory 'make-sky-drawing)
+                       (player-factory 'make-player-drawing)
                        (camera (make-fly-camera :yaw 0.35))
                        (title
                          "LUFT — click to play · WASD move · Space jump · L/R edit · 1–4 material · F5 camera · Esc release")
@@ -1613,6 +1614,9 @@ before the operation boundary, or it would encode through resources which the
                        (frames-per-second 60)
                        (provider *gpu-provider*))
   "Open the fixed-star LUFT renderer as a McCLIM atelier.
+
+SKY-FACTORY and PLAYER-FACTORY select independently owned scene drawings;
+NIL omits either program. Their choices survive renderer and shader refresh.
 
 BEVEL-WIDTH remains a compatibility input for inspection. SURFACE-MESH
 supplies an already constructed diagnostic mesh
@@ -1669,7 +1673,9 @@ measurement entirely for reproducible evidence."
                            (lambda (device)
                              (declare (ignore device))
                              (make-fixed-exposure fixed-exposure))
-                           exposure-factory))
+                           exposure-factory)
+                       :sky-factory sky-factory
+                       :player-factory player-factory)
                     ;; If source moved during construction, BEFORE deliberately
                     ;; remains the installed attempt: the first frame sees the
                     ;; newer AFTER revision and transactionally rebuilds.
@@ -2435,7 +2441,9 @@ it makes no claim about which earlier render pass caused a discontinuity."
                                (viewer-device viewer)
                                (canvas-format context)
                                (canvas-extent context)
-                               :exposure-factory (renderer-exposure-factory old))
+                               :exposure-factory (renderer-exposure-factory old)
+                               :sky-factory (renderer-sky-factory old)
+                               :player-factory (renderer-player-factory old))
                             (unless (= before after)
                               (when created (destroy-renderer created))
                               (error 'renderer-source-changed-during-build

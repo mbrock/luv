@@ -128,20 +128,21 @@ must not obscure those relationships.
 
 The remaining work is:
 
-- Extract the other renderer owners: shadows, terrain, player, attachments,
+- Extract the other renderer owners: shadows, terrain, attachments,
   temporal reconstruction, and presentation. Keep the frame sequence explicit.
-- Separate source residency from pending mesh replacement and authored edits.
-  Explain source chunks, geometry owners, neighboring inputs, request identity,
-  and atomic replacement with a concrete chunk-boundary example.
+- Further separate source loading, residency policy, and authored edits.
+  Explain source chunks, geometry owners, and neighboring inputs with a concrete
+  chunk-boundary example. The pending replacement is now a separate transaction
+  (#YQODD5).
 - Give attachment realization and its lighting a clear interface. Audit old
   torch, variable-width, and face/band/fan paths against the current star mesh
-  before preserving or generalizing their vocabulary. The static sanctuary
-  path currently rejects its mesh/light generation during renderer publication;
-  include that mismatch in the audit rather than bypassing the check.
+  before preserving or generalizing their vocabulary. The static join now
+  preserves the metadata required by publication (#5WML7P).
 - Separate scene authoring from mesh-publication evidence, and studio controls
   from recording and frame analysis.
 - Use the shader language's existing source abstractions for repeated sampling
-  patterns and material lanes. Give the procedural player its own source home.
+  patterns and material lanes. The procedural player now has its own source
+  home (#9J3QI1), but its internal explanation still needs work.
 
 *** DONE Compose exposure and read the frame in execution order
 :PROPERTIES:
@@ -178,6 +179,56 @@ The full test suite and production SPIR-V validation pass. On Vulkan, a
 640x480 streaming scene at fixed exposure with temporal reconstruction disabled
 produced byte-identical PNGs through the original and extracted frame functions.
 Live renderer and shader refresh also retained fixed exposure without a probe.
+
+*** DONE Give sky and player drawing independent programs
+:PROPERTIES:
+:ID: 9J3QI1
+:END:
+
+[[file:../luft/render/scene-drawing.lisp][The scene drawing interface]] separates the program from its frame-owned
+camera and shadow bindings. The renderer composes a sky before geometry and a
+player afterward; each factory can be replaced or omitted with =nil=, and
+renderer/shader refresh retains that choice. Their constructors, bindings,
+and shaders now live in [[file:../luft/render/sky.lisp][sky.lisp]] and [[file:../luft/render/player.lisp][player.lisp]]. The common shader file
+loses about 1,200 lines of feature-specific definitions.
+
+[[file:../luft/render/gpu-resources.lisp][The small GPU resource owner]] records allocations once and releases them in
+reverse order, retaining failed handles for retry. Exposure and the two current
+drawings share this construction mechanism. The renderer no longer enumerates
+the drawings' shader modules or layouts during construction or teardown.
+Replacement, omission, allocation failure, frame-binding reuse, and ordering
+have backend-independent tests. The default composition was also captured and
+inspected in the Vulkan viewer.
+
+*** DONE Make a pending streaming replacement one transaction
+:PROPERTIES:
+:ID: YQODD5
+:END:
+
+A region is submitted as one request and returned as one complete result. It
+now remains one =streaming-replacement= throughout that handoff: output owners,
+departures, request, result, and any worker failure. The scene no longer repeats
+a ticket per owner or a request beside every staged mesh. Reset detaches the
+transaction, so an old result cannot rejoin a new request with identical inputs.
+
+[[file:../luft/render/streaming-publication.lisp][Publication]] reads in execution order: schedule, accept, test readiness,
+publish, drain. GPU staging must succeed before reusable light, CPU cache, and
+the pending pointer advance. Failed staging retains the complete result for
+retry; departures alone need no worker. [[file:../luft/render/streaming.lisp][Residency]], [[file:../luft/render/streaming-mesh.lisp][CPU compilation]], and
+[[file:../luft/render/streaming-state.lisp][retained versus frozen state]] have separate homes. Tests use a real worker
+and inject a GPU allocation failure at publication.
+
+*** DONE Preserve metadata when combining static scene owners
+:PROPERTIES:
+:ID: 5WML7P
+:END:
+
+The static path concatenated regional geometry and appearance but dropped the
+exact light field and attachment metadata. Normal renderer validation then
+rejected the combined root. [[lisp:luft.render::combine-scene-owner-meshes][The static join]] now checks the owners' common
+palette and light field, carries their metadata into the root, and constructs
+its publication manifest afterward. Empty, single-chunk, and seam-crossing
+scenes are tested through the real renderer publication boundary.
 
 * 2. McCLIM implements one open command vocabulary four times
 :PROPERTIES:

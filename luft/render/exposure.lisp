@@ -80,16 +80,13 @@ The caller must release source bindings first and stop using CONTROL."))
   buffer
   (frame nil :type (or null (integer 0 *))))
 
-(defclass automatic-exposure (exposure-control)
+(defclass automatic-exposure (exposure-control gpu-resource-owner)
   ((value :initform 1.0f0 :accessor exposure-value)
    (layout :initform nil :accessor exposure-layout)
    (texture :initform nil :accessor exposure-texture)
    (view :initform nil :accessor exposure-view)
    (pipeline :initform nil :accessor exposure-pipeline)
-   (readbacks :initform #() :accessor exposure-readbacks)
-   ;; This is the sole release inventory, populated at allocation time. Named
-   ;; fields above are the operational view; no caller enumerates either.
-   (resources :initform nil :accessor exposure-resources)))
+   (readbacks :initform #() :accessor exposure-readbacks)))
 
 (defmethod advance-exposure ((control automatic-exposure))
   (let ((oldest nil))
@@ -146,76 +143,54 @@ The caller must release source bindings first and stop using CONTROL."))
       (setf (exposure-readback-frame entry) frame-index))))
 
 (defmethod release-exposure ((control automatic-exposure))
-  (with-release-report
-    (let ((retained nil))
-      (dolist (resource (exposure-resources control))
-        (let ((released-p nil))
-          (releasing :exposure-resource
-            (destroy resource)
-            (setf released-p t))
-          (unless released-p (push resource retained))))
-      (setf (exposure-resources control) (nreverse retained))))
-  (values))
-
-;;; Construction records each allocation immediately, including each buffer
-;;; in the queue. The same release operation handles partial construction.
+  (release-owned-gpu-resources control))
 
 (defun make-automatic-exposure (device)
   "Make a complete automatic meter, rolling back every partial allocation."
-  (let ((control (make-instance 'automatic-exposure))
-        (completed-p nil))
-    (flet ((own (descriptor)
-             (let ((resource (create device descriptor)))
-               (push resource (exposure-resources control))
-               resource)))
-      (unwind-protect
-           (progn
-             (setf (exposure-layout control)
-                   (own (make-bind-group-layout-descriptor
-                         :label "luft exposure probe layout"
-                         :entries '((:binding 0 :type :texture)
-                                    (:binding 1 :type :sampler))))
-                   (exposure-texture control)
-                   (own (make-texture-descriptor
-                         :label "luft exposure log luminance"
-                         :size (list +exposure-probe-width+ +exposure-probe-height+)
-                         :dimensions :2d :format :rgba8-unorm
-                         :usage '(:render-attachment :copy-src)))
-                   (exposure-view control)
-                   (own (make-texture-view-descriptor
-                         :texture (exposure-texture control)))
-                   (exposure-readbacks control)
-                   (coerce
-                    (loop repeat +exposure-probe-buffer-count+
-                          collect
-                          (make-exposure-readback
-                           :buffer (own (make-buffer-descriptor
-                                         :label "luft exposure readback"
-                                         :size +exposure-probe-byte-count+
-                                         :usage '(:copy-dst)))))
-                    'vector))
-             (let ((vertex
-                     (own (make-shader-module-descriptor
-                           :label "luft exposure vertex"
-                           :language :mathematical
-                           :code (shaders:present-vertex-specification))))
-                   (fragment
-                     (own (make-shader-module-descriptor
-                           :label "luft exposure probe fragment"
-                           :language :mathematical
-                           :code (shaders:exposure-probe-fragment-specification)))))
-               (setf (exposure-pipeline control)
-                     (own (make-render-pipeline-descriptor
-                           :label "luft exposure probe pipeline"
-                           :layout (exposure-layout control)
-                           :vertex `(:module ,vertex)
-                           :fragment `(:module ,fragment :targets ((:format :rgba8-unorm)))
-                           :primitive '(:topology :triangle-list)))))
-             (setf completed-p t)
-             control)
-        (unless completed-p
-          (with-release-warnings
-            (releasing :exposure-construction (release-exposure control))))))))
+  (let ((control (make-instance 'automatic-exposure)))
+    (with-gpu-construction (control)
+      (flet ((own (descriptor) (own-gpu-resource control device descriptor)))
+        (setf (exposure-layout control)
+              (own (make-bind-group-layout-descriptor
+                    :label "luft exposure probe layout"
+                    :entries '((:binding 0 :type :texture)
+                               (:binding 1 :type :sampler))))
+              (exposure-texture control)
+              (own (make-texture-descriptor
+                    :label "luft exposure log luminance"
+                    :size (list +exposure-probe-width+ +exposure-probe-height+)
+                    :dimensions :2d :format :rgba8-unorm
+                    :usage '(:render-attachment :copy-src)))
+              (exposure-view control)
+              (own (make-texture-view-descriptor
+                    :texture (exposure-texture control)))
+              (exposure-readbacks control)
+              (coerce
+               (loop repeat +exposure-probe-buffer-count+
+                     collect
+                     (make-exposure-readback
+                      :buffer (own (make-buffer-descriptor
+                                    :label "luft exposure readback"
+                                    :size +exposure-probe-byte-count+
+                                    :usage '(:copy-dst)))))
+               'vector))
+        (let ((vertex
+                (own (make-shader-module-descriptor
+                      :label "luft exposure vertex"
+                      :language :mathematical
+                      :code (shaders:present-vertex-specification))))
+              (fragment
+                (own (make-shader-module-descriptor
+                      :label "luft exposure probe fragment"
+                      :language :mathematical
+                      :code (shaders:exposure-probe-fragment-specification)))))
+          (setf (exposure-pipeline control)
+                (own (make-render-pipeline-descriptor
+                      :label "luft exposure probe pipeline"
+                      :layout (exposure-layout control)
+                      :vertex `(:module ,vertex)
+                      :fragment `(:module ,fragment :targets ((:format :rgba8-unorm)))
+                      :primitive '(:topology :triangle-list)))))))))
 
 ;;; The probe stores log luminance, so averaging bytes approximates a
 ;;; geometric mean. Adaptation is intentionally slower toward a brighter

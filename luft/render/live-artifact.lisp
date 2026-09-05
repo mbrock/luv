@@ -105,11 +105,15 @@ revisions immediately before and after the call."
                 (luv.shader:shader-source-revision))))))
 
 (defun make-tracked-renderer (device color-format extent
-                              &key (exposure-factory 'make-automatic-exposure))
+                              &key (exposure-factory 'make-automatic-exposure)
+                                (sky-factory 'make-sky-drawing)
+                                (player-factory 'make-player-drawing))
   "MAKE-RENDERER with live source values and revision boundaries."
   (call-with-renderer-source-values
    (lambda () (make-renderer device color-format extent
-                             :exposure-factory exposure-factory))))
+                             :exposure-factory exposure-factory
+                             :sky-factory sky-factory
+                             :player-factory player-factory))))
 
 (defun attach-viewer-live-artifact
     (viewer source-values source-revision)
@@ -142,7 +146,9 @@ revisions immediately before and after the call."
                   (viewer-device viewer)
                   (canvas-format (viewer-context viewer))
                   (canvas-extent (viewer-context viewer))
-                  :exposure-factory (renderer-exposure-factory old)))
+                  :exposure-factory (renderer-exposure-factory old)
+                  :sky-factory (renderer-sky-factory old)
+                  :player-factory (renderer-player-factory old)))
            ;; Realized torch frames are mesh-owned derived data.  Reinstall the
            ;; entire immutable slot cohort in one transaction and explicitly
            ;; retain the exact generation which justified those fields.  A

@@ -73,6 +73,10 @@
                              (:file "materials")
                              (:file "lighting")
                              (:file "shaders")
+                             (:file "gpu-resources")
+                             (:file "scene-drawing")
+                             (:file "player")
+                             (:file "sky")
                              (:file "exposure")
                              (:file "flame-shaders")
                              (:file "scene")
@@ -80,7 +84,10 @@
                              (:file "render")
                              (:file "frame")
                              (:file "world")
+                             (:file "streaming-state")
                              (:file "streaming")
+                             (:file "streaming-mesh")
+                             (:file "streaming-publication")
                              (:file "fixtures")))))
 
 (defsystem "luft/simulation"
@@ -132,7 +139,11 @@
   :depends-on ("luft/render" "luft/test-support" "luv/test-support")
   :serial t
   :components ((:file "luft/render/star-tests")
-               (:file "luft/render/exposure-tests"))
+               (:file "luft/render/gpu-test-support")
+               (:file "luft/render/exposure-tests")
+               (:file "luft/render/scene-drawing-tests")
+               (:file "luft/render/streaming-publication-tests")
+               (:file "luft/render/static-scene-tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
              (uiop:symbol-call '#:luv.test-support '#:test-package
