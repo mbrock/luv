@@ -774,8 +774,10 @@
                   :bevel-width luft:+mesh-bevel-width+
                   :camera camera :title "LUFT wizard bridge walk"
                   :width 1280 :height 720))
+           (luft.render:remove-simulation-character
+            (luft.render:viewer-simulation viewer) (luft.render:viewer-player viewer))
            (setf (luft.render:viewer-player viewer)
-                 (luft.render:make-walking-player
+                 (luft.render:make-walking-character
                   :position
                   (luv.arithmetic.lisp.vec3:make-vec3
                    (+ origin-x 29.5) start-y 14.0)
@@ -788,13 +790,13 @@
               (let* ((player (luft.render:viewer-player viewer))
                      (dt (/ 1.0 frame-rate))
                      (player-position
-                       (luft.render:walking-player-position player))
+                       (luft.render:body-position (luft.render:character-body player)))
                      (player-y
                        (luv.arithmetic.lisp.vec3:vec3-y player-position))
                      (camera-position (luft.render:camera-position camera)))
-                (luft.render::advance-walking-player
-                 player (luft.render::viewer-source viewer)
-                 0.0 1.0 dt)
+                (luft.render:set-character-movement player 0.0 1.0)
+                (luft.render:advance-world-simulation
+                 (luft.render:viewer-simulation viewer) dt)
                 ;; A parallel dolly keeps the wizard readable while successive
                 ;; arches, piers, and finally the gate move through the frame.
                 (setf (luv.arithmetic.lisp.vec3:vec3-y camera-position)

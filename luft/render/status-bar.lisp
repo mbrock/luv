@@ -38,7 +38,7 @@
     (if (viewer-player viewer)
         (format nil "p~A c~A"
                 (status-bar-position
-                 (walking-player-position (viewer-player viewer)))
+                 (body-position (character-body (viewer-player viewer))))
                 (status-bar-position camera))
         (format nil "c~A" (status-bar-position camera)))))
 
@@ -51,7 +51,7 @@
         (format nil "p~A c~A f~A"
                 (if (viewer-player viewer)
                     (status-bar-position-chunk
-                     (walking-player-position (viewer-player viewer)))
+                     (body-position (character-body (viewer-player viewer))))
                     "--")
                 (status-bar-position-chunk
                  (camera-position (viewer-camera viewer)))

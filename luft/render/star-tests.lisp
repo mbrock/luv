@@ -20,17 +20,16 @@
     (true (luv.spir-v:compile-shader-specification specification))))
 
 (define-test player-frame-lanes-retain-both-headings
-  (let* ((player (render:make-walking-player
+  (let* ((player (render::make-walking-character
                   :position (make-vec3 2.0 3.0 4.0)
                   :heading-x 0.6 :heading-y 0.8))
          (camera (render:make-fly-camera))
          (view (render::capture-frame-view camera 640 480 #(0.0 0.0))))
-    (render::begin-walking-player-frame player)
-    (setf (vec3-x (render:walking-player-position player)) 5.0
-          (render::walking-player-heading-x player) -1.0
-          (render::walking-player-heading-y player) 0.0
-          (render::walking-player-gait player) 2.0)
-    (let ((lanes (multiple-value-list (render::walking-player-render-lanes player))))
+    (setf (vec3-x (render::body-position (render::character-body player))) 5.0
+          (render::character-heading-x player) -1.0
+          (render::character-heading-y player) 0.0
+          (render::character-gait player) 2.0)
+    (let ((lanes (multiple-value-list (render::character-render-lanes player))))
       (true (= 3 (length lanes)))
       (true (equalp '(5.0 3.0 5.48 2.0) (first lanes)))
       (true (equalp '(2.0 3.0 5.48 0.0) (second lanes)))
@@ -373,8 +372,8 @@
 (define-test authored-world-player-spawns-supported-with-a-traversable-window
   (let* ((scene (render:make-authored-world-streaming-scene))
          (source (render::streaming-scene-source scene))
-         (player (render::make-scene-walking-player scene))
-         (position (render:walking-player-position player))
+         (player (render::make-scene-walking-character scene))
+         (position (render::body-position (render::character-body player)))
          (x (floor (vec3-x position)))
          (y (floor (vec3-y position)))
          (z (floor (vec3-z position)))
@@ -391,18 +390,20 @@
       (setf (luft:fiber-store-chunk store key)
             (render::resident-cell-chunk-fibers resident)
             (render:scene-solid scene) store))
-    (true (render::walking-player-standable-cell-p scene x y z)
+    (true (render::body-standable-cell-p (render::character-body player) scene x y z)
           "the player starts above rather than inside the road")
-    (true (render::walking-player-standable-cell-p
-           scene (1+ x) y
+    (true (render::body-standable-cell-p
+           (render::character-body player) scene (1+ x) y
            (render::large-world-terrain-height source (1+ x) y))
           "the authored road has an immediately traversable neighboring cell")))
 
 (define-test authored-world-player-waits-for-initial-collision-publication
   (let* ((scene (render:make-authored-world-streaming-scene))
          (source (render::streaming-scene-source scene))
-         (player (render::make-scene-walking-player scene))
-         (position (render:walking-player-position player))
+         (player (render::make-scene-walking-character scene))
+         (simulation (render::make-world-simulation scene))
+         (body (render::character-body player))
+         (position (render::body-position body))
          (x (vec3-x position))
          (y (vec3-y position))
          (z (vec3-z position))
@@ -411,25 +412,30 @@
     ;; chunk must not start physics before the owner publishes SCENE-SOLID.
     (setf (gethash key (render::streaming-scene-store scene))
           (render::materialize-authored-world-chunk source key 1))
-    (render::request-walking-player-jump player)
+    (render::add-simulation-character simulation player)
+    (render::set-character-movement player 1.0 0.0)
+    (render::request-character-jump player)
     (dotimes (i 10)
-      (render::advance-walking-player player scene 1.0 0.0 0.1))
+      (render::advance-world-simulation simulation 0.1))
     (true (= x (vec3-x position)))
     (true (= y (vec3-y position)))
     (true (= z (vec3-z position)))
-    (true (zerop (render::walking-player-vertical-velocity player)))
-    (true (render::walking-player-jump-requested-p player))
-    (true (equalp position (render::walking-player-previous-position player)))
+    (true (zerop (vec3-z (render::body-velocity body))))
+    (true (render::intent-jump-requested-p (render::character-controller player)))
+    (true (equalp position (render::body-previous-position body)))
+    (true (zerop (render::simulation-clock simulation)))
     (render::rebuild-authored-world-resident-values scene (list key))
-    (render::advance-walking-player player scene 0.0 0.0 0.1)
+    (render::set-character-movement player 0.0 0.0)
+    (render::advance-world-simulation simulation 0.1)
     (true (< z (vec3-z position) (+ z 1.0))
           "publication releases the queued jump with only this frame's time")
-    (true (not (render::walking-player-jump-requested-p player)))
+    (true (not (render::intent-jump-requested-p (render::character-controller player))))
     (setf (luft:fiber-store-chunk (render:scene-solid scene) key)
           (luft:make-chunk-fibers (render::scene-domain scene) key))
-    (let ((falling (render::make-scene-walking-player scene)))
-      (render::advance-walking-player falling scene 0.0 0.0 0.1)
-      (true (< (vec3-z (render:walking-player-position falling)) z)
+    (let ((falling (render::make-scene-walking-character scene)))
+      (render::add-simulation-character simulation falling)
+      (render::advance-world-simulation simulation 0.1)
+      (true (< (vec3-z (render::body-position (render::character-body falling))) z)
             "published empty terrain is air, not a loading barrier"))))
 
 (define-test authored-world-gameplay-collision-crosses-the-render-seam
@@ -447,7 +453,8 @@
     (loop for x in '(63 64)
           for y = (round (render::large-world-road-centre-y x))
           for z = (render::large-world-terrain-height source x y)
-          do (true (render::walking-player-standable-cell-p scene x y z)
+          do (true (render::body-standable-cell-p
+                    (make-instance 'render::physical-body) scene x y z)
                    "collision stays supported across the one-source render seam"))))
 
 (define-test camera-yaw-follows-intent-smoothly
@@ -515,28 +522,30 @@
   (let* ((domain (luft:make-world-domain :x-bits 8 :y-bits 8))
          (store (luft:make-fiber-store domain))
          (fibers (luft:make-chunk-fibers domain 0))
-         (player (render::make-walking-player
-                  :position (make-vec3 10.5 10.5 1.0))))
+         (player (render::make-walking-character
+                  :position (make-vec3 10.5 10.5 1.0)))
+         (body (render::character-body player))
+         (simulation (render::make-world-simulation store)))
     (setf (luft:fiber-store-chunk store 0) fibers
           (luft:fibers-cell-bit fibers 10 10 0) 1
           (luft:fibers-cell-bit fibers 10 10 3) 1
-          (render::walking-player-height player) 1.8
-          (render::walking-player-grounded-p player) t)
-    (render::request-walking-player-jump player)
+          (render::body-height body) 1.8)
+    (render::add-simulation-character simulation player)
+    (render::request-character-jump player)
     (dotimes (i 30)
-      (render::advance-walking-player-vertical player store 0.016)
-      (true (<= (+ (vec3-z (render:walking-player-position player)) 1.8)
+      (render::advance-world-simulation simulation 0.016)
+      (true (<= (+ (vec3-z (render::body-position body)) 1.8)
                 3.0001)))
-    (true (render::walking-player-grounded-p player))
-    (true (= 1.0 (vec3-z (render:walking-player-position player))))
+    (true (render::body-grounded-p body))
+    (true (= 1.0 (vec3-z (render::body-position body))))
     (luft:fiber-store-edit-cell store 10 10 0 0)
-    (render::advance-walking-player-vertical player store 0.016)
-    (true (not (render::walking-player-grounded-p player)))
-    (true (< (vec3-z (render:walking-player-position player)) 1.0))))
+    (render::advance-world-simulation simulation 0.016)
+    (true (not (render::body-grounded-p body)))
+    (true (< (vec3-z (render::body-position body)) 1.0))))
 
 (define-test first-person-camera-uses-the-body-and-centre-ray
   (let* ((viewer (allocate-instance (find-class 'render:viewer)))
-         (player (render::make-walking-player
+         (player (render::make-walking-character
                   :position (make-vec3 12.5 19.5 8.0)))
          (camera (render::make-fly-camera :yaw 0.0 :pitch 0.0))
          (canvas (luv:make-sdl-canvas :width 800 :height 600))
@@ -601,49 +610,267 @@
     store))
 
 (defun make-test-walking-body (x y z)
-  (let ((player (render::make-walking-player :position (make-vec3 x y z))))
-    (setf (render::walking-player-height player) 1.8)
-    player))
+  (render::make-walking-character :position (make-vec3 x y z)))
+
+(define-test viewer-control-does-not-own-the-world-population
+  (let* ((store (make-body-collision-fixture))
+         (simulation (render:make-world-simulation store))
+         (viewer (allocate-instance (find-class 'render:viewer)))
+         (a (make-test-walking-body 10.5 10.5 20.0))
+         (b (make-test-walking-body 20.5 10.5 20.0)))
+    (setf (slot-value viewer 'render::simulation) simulation
+          (slot-value viewer 'render::player) nil
+          (slot-value viewer 'render::controls) (make-hash-table :test #'eq)
+          (slot-value viewer 'render::camera) (render:make-fly-camera :yaw 0.0)
+          (slot-value viewer 'render::speed) 7.0
+          (slot-value viewer 'render::last-timestamp) nil)
+    (setf (render:viewer-player viewer) a)
+    (render::set-viewer-control viewer :forward t)
+    (render::advance-viewer-world viewer 0d0)
+    (render::advance-viewer-world viewer 0.1d0)
+    (true (plusp (vec3-x (render:body-velocity (render:character-body a)))))
+    (setf (render:viewer-player viewer) b)
+    (true (= 2 (length (render:simulation-bodies simulation))))
+    (true (zerop (render::intent-direction-x (render:character-controller a))))
+    (render::advance-viewer-world viewer 0.2d0)
+    (true (< (vec3-z (render:body-position (render:character-body a))) 20.0))
+    (true (< (vec3-z (render:body-position (render:character-body b))) 20.0))
+    ;; An unattached viewer still advances all registered bodies. Observing
+    ;; a character with a camera must never constitute another physics step.
+    (setf (render:viewer-player viewer) nil)
+    (render::advance-viewer-world viewer 0.3d0)
+    (render::advance-viewer-camera viewer 1/60 nil)
+    (true (= 3/10 (render:simulation-clock simulation)))
+    (true (= 2 (length (render:simulation-characters simulation))))))
+
+(define-test world-simulation-steps-independent-bodies-once
+  (let* ((store (make-body-collision-fixture))
+         (simulation (render::make-world-simulation store))
+         (a (make-instance 'render::physical-body
+                           :position (make-vec3 10.0 10.0 30.0)
+                           :velocity (make-vec3 2.0 3.0 4.0) :gravity -12.0))
+         (b (make-instance 'render::physical-body
+                           :position (make-vec3 20.0 20.0 30.0)
+                           :velocity (make-vec3 -3.0 1.0 -2.0) :gravity 6.0))
+         (character (render::make-walking-character :body b :controller nil)))
+    (render::add-simulation-body simulation a)
+    (render::add-simulation-body simulation b)
+    (render::add-simulation-character simulation character)
+    (render::add-simulation-character simulation character)
+    (render::add-simulation-body simulation a)
+    (true (= 2 (length (render::simulation-bodies simulation))))
+    (render::advance-world-simulation simulation 1)
+    (loop for body in (list a b)
+          for expected in '((12.0 13.0 28.0) (17.0 21.0 31.0))
+          do (let ((p (render::body-position body)))
+               (true (< (abs (- (vec3-x p) (first expected))) 1.0e-5))
+               (true (< (abs (- (vec3-y p) (second expected))) 1.0e-5))
+               (true (< (abs (- (vec3-z p) (third expected))) 1.0e-5))))
+    (true (< (abs (+ 8.0 (vec3-z (render::body-velocity a)))) 1.0e-5))
+    (true (< (abs (- 4.0 (vec3-z (render::body-velocity b)))) 1.0e-5))
+    (true (not (eq (render::body-velocity a) (render::body-velocity b))))
+    (render::remove-simulation-character simulation character)
+    (true (equal (list a) (render::simulation-bodies simulation)))
+    (true (null (render::simulation-characters simulation)))))
+
+(define-test world-simulation-history-and-queued-jump
+  (let* ((store (make-body-collision-fixture))
+         (simulation (render::make-world-simulation store))
+         (character (make-test-walking-body 10.5 10.5 1.0))
+         (body (render::character-body character)))
+    (loop for x from 9 to 20 do (luft:fiber-store-edit-cell store x 10 0 1))
+    (render::add-simulation-character simulation character)
+    (render::request-character-jump character)
+    (render::advance-world-simulation simulation 0)
+    (render::advance-world-simulation simulation 1/240)
+    (true (render::intent-jump-requested-p (render::character-controller character)))
+    (true (= 1.0 (vec3-z (render::body-position body))))
+    (render::set-character-movement character 1.0 0.0)
+    (render::advance-world-simulation simulation 1/240)
+    (true (not (render::intent-jump-requested-p (render::character-controller character))))
+    (true (> (vec3-z (render::body-position body)) 1.0))
+    (let ((x (vec3-x (render::body-position body)))
+          (z (vec3-z (render::body-position body)))
+          (gait (render::character-gait character))
+          (heading (render::character-heading-x character)))
+      (render::advance-world-simulation simulation 1/10)
+      (true (= x (vec3-x (render::body-previous-position body))))
+      (true (= z (vec3-z (render::body-previous-position body))))
+      (true (= gait (render::character-previous-gait character)))
+      (true (= heading (render::character-previous-heading-x character)))
+      (true (> (render::character-gait character) gait)))
+    ;; Airborne input is buffered until the next supported tick.
+    (render::request-character-jump character)
+    (render::advance-world-simulation simulation 1/120)
+    (true (render::intent-jump-requested-p (render::character-controller character)))))
+
+(define-test world-simulation-fixed-clock-is-frame-partition-independent
+  (let* ((store (make-body-collision-fixture))
+         (a (render::make-world-simulation store))
+         (b (render::make-world-simulation store))
+         (ca (make-test-walking-body 10.0 10.0 30.0))
+         (cb (make-test-walking-body 10.0 10.0 30.0)))
+    (render::add-simulation-character a ca)
+    (render::add-simulation-character b cb)
+    (render::set-character-movement ca 1.0 1.0)
+    (render::set-character-movement cb 1.0 1.0)
+    (render::advance-world-simulation a 1)
+    (dotimes (i 144) (render::advance-world-simulation b (/ 1d0 144)))
+    (true (= 1 (render::simulation-clock a) (render::simulation-clock b)))
+    (true (zerop (render::simulation-accumulator b)))
+    (true (equalp (render::body-position (render::character-body ca))
+                  (render::body-position (render::character-body cb))))
+    (true (equalp (render::body-velocity (render::character-body ca))
+                  (render::body-velocity (render::character-body cb))))
+    (true (= (render::character-gait ca) (render::character-gait cb)))))
+
+(define-test character-controller-replacement-and-idle-physics
+  (let* ((store (make-body-collision-fixture))
+         (simulation (render::make-world-simulation store))
+         (character (make-test-walking-body 10.5 10.5 1.0))
+         (body (render::character-body character)))
+    (loop for x from 10 to 12 do (luft:fiber-store-edit-cell store x 10 0 1))
+    (render::add-simulation-character simulation character)
+    (let ((route (render::start-character-route character store 12 10 1)))
+      (true (typep route 'render::movement-controller))
+      (render::set-character-movement character 0.0 1.0)
+      (true (eq :cancelled (render::walking-route-status route)))
+      (true (typep (render::character-controller character) 'render::movement-intent)))
+    (let ((route (render::start-character-route character store 12 10 1)))
+      (render::request-character-jump character)
+      (true (eq :cancelled (render::walking-route-status route))))
+    ;; Exercise every inactive controller state without any viewer action.
+    (dolist (state '(nil :cancelled :arrived :failed))
+      (setf (render::body-position body) (make-vec3 10.5 10.5 1.0)
+            (render::body-velocity body) (make-vec3 0.0 0.0 0.0)
+            (render::character-controller character)
+            (when state (make-instance 'render::walking-route :status state)))
+      (luft:fiber-store-edit-cell store 10 10 0 1)
+      (render::advance-world-simulation simulation 1/120)
+      (true (render::body-grounded-p body))
+      (luft:fiber-store-edit-cell store 10 10 0 0)
+      (render::advance-world-simulation simulation 1/120)
+      (true (< (vec3-z (render::body-position body)) 1.0))
+      (true (not (render::body-grounded-p body))))))
+
+(define-test walking-route-clearance-belongs-to-each-body
+  (let* ((store (make-body-collision-fixture))
+         (short (make-test-walking-body 10.5 10.5 1.0))
+         (tall (render::make-walking-character
+                :body (make-instance 'render::physical-body :height 2.9
+                                     :position (make-vec3 10.5 10.5 1.0))))
+         (wide (render::make-walking-character
+                :body (make-instance 'render::physical-body :radius 0.6
+                                     :position (make-vec3 10.5 10.5 1.0)))))
+    (loop for x from 10 to 12 do
+      (luft:fiber-store-edit-cell store x 10 0 1)
+      (luft:fiber-store-edit-cell store x 10 3 1))
+    (true (eq :running (render::walking-route-status
+                       (render::start-character-route short store 12 10 1))))
+    (true (eq :failed (render::walking-route-status
+                      (render::start-character-route tall store 12 10 1))))
+    (luft:fiber-store-edit-cell store 12 11 1 1)
+    (true (eq :running (render::walking-route-status
+                       (render::start-character-route short store 12 10 1))))
+    (true (eq :failed (render::walking-route-status
+                      (render::start-character-route wide store 12 10 1))))))
 
 (define-test walking-route-drives-world-direction-without-a-camera
   (let* ((store (make-body-collision-fixture))
-         (player (make-test-walking-body 10.5 10.5 1.0)))
+         (player (make-test-walking-body 10.5 10.5 1.0))
+         (body (render::character-body player))
+         (simulation (render::make-world-simulation store)))
     (loop for y from 10 to 13 do
       (luft:fiber-store-edit-cell store 10 y 0 1))
-    (render::start-walking-player-route player store 10 12 1)
-    (multiple-value-bind (x y distance) (render::walking-player-route-control player)
-      (true (= 0.0 x))
-      (true (= 1.0 y))
-      (true (= 1.0 distance))
-      (render::advance-walking-player player store x y 0.1
-                                      :maximum-distance distance))
-    (let ((position (render:walking-player-position player))
-          (previous (render::walking-player-previous-position player)))
+    (render::add-simulation-character simulation player)
+    (render::start-character-route player store 10 12 1)
+    (render::advance-world-simulation simulation 0.1)
+    (let ((position (render::body-position body))
+          (previous (render::body-previous-position body)))
       (true (= 10.5 (vec3-x position)))
-      (true (< (abs (- (vec3-y position) 11.2)) 0.0001))
+      (true (< 10.5 (vec3-y position) 11.2))
       (true (= 10.5 (vec3-y previous)))
-      (true (= 1.0 (vec3-z position))))))
+      (true (= 1.0 (vec3-z position))))
+    (dotimes (i 180) (render::advance-world-simulation simulation 1/60))
+    (true (eq :arrived (render::walking-route-status
+                       (render::character-controller player))))
+    (true (< (abs (- (vec3-y (render::body-position body)) 12.5)) 0.1))
+    (true (zerop (vec3-y (render::body-velocity body))))))
 
 (define-test walking-body-stops-at-wall-and-slides-without-climbing
   (let* ((store (make-body-collision-fixture))
          (player (make-test-walking-body 10.5 10.5 1.0))
-         (position (render:walking-player-position player)))
+         (body (render::character-body player))
+         (position (render::body-position body))
+         (simulation (render::make-world-simulation store)))
     (loop for y from 8 to 16 do
       (loop for z from 1 to 5 do (luft:fiber-store-edit-cell store 12 y z 1)))
-    (render::try-walking-player-axis player store :x 20.0)
+    (setf (render::body-gravity body) 0.0
+          (render::body-velocity body) (make-vec3 200.0 0.0 0.0))
+    (render::add-simulation-body simulation body)
+    (render::advance-world-simulation simulation 0.1)
     (true (< (abs (- (vec3-x position) 11.7)) 0.0001)
           "a long sweep stops a body radius before the wall")
     (true (= 1.0 (vec3-z position)) "horizontal movement never changes height")
-    (render::try-walking-player-axis player store :y 2.0)
-    (true (= 12.5 (vec3-y position)) "the touching body slides along the wall")
-    (true (render::walking-player-clear-at-p store 11.7 12.5 1.0 1.8))
-    (true (not (render::walking-player-clear-at-p store 11.9 12.5 1.0 1.8))
-          "an empty centre column does not imply an empty body")
-    (let ((cell (luft:make-site (luft:fiber-store-domain store)
+    (true (zerop (vec3-x (render::body-velocity body))))
+    (setf (vec3-y (render::body-velocity body)) 20.0)
+    (render::advance-world-simulation simulation 0.1)
+    (true (< (abs (- 12.5 (vec3-y position))) 0.0001)
+          "the touching body slides along the wall")
+    (true (= 20.0 (vec3-y (render::body-velocity body))))
+    (true (render::body-clear-at-p store 11.7 12.5 1.0 1.8))
+    (true (not (render::body-clear-at-p store 11.9 12.5 1.0 1.8))
+          "an empty centre column does not imply an empty body")))
+
+(define-test character-placement-respects-body-edge
+  (let* ((store (make-body-collision-fixture))
+         (character (make-test-walking-body 10.8 12.5 1.0))
+         (cell (luft:make-site (luft:fiber-store-domain store)
                                11 12 1 luft:+cell-extent+ 1)))
-      (setf (vec3-x position) 10.8)
-      (true (render::walking-player-overlaps-cell-p player cell)
-            "placement rejects blocks overlapping only the body's edge"))))
+    (true (render::body-overlaps-cell-p (render:character-body character) cell)
+          "placement rejects blocks overlapping only the body's edge")))
+
+(define-test block-placement-protects-uncontrolled-bodies
+  (let* ((scene (render:make-authored-world-streaming-scene))
+         (simulation (render:make-world-simulation scene))
+         (viewer (allocate-instance (find-class 'render:viewer)))
+         (body (make-instance 'render:physical-body
+                             :position (make-vec3 10.8 12.5 20.0)))
+         (cell (luft:make-site (render::scene-domain scene)
+                               11 12 20 luft:+cell-extent+ 1)))
+    (setf (slot-value viewer 'render::simulation) simulation
+          (slot-value viewer 'render::player) nil
+          ;; Rejection happens before production is asked to schedule work.
+          (slot-value viewer 'render::production-system) :unused)
+    (render:add-simulation-body simulation body)
+    (multiple-value-bind (edit status) (render::apply-viewer-world-edit viewer cell t)
+      (true (null edit))
+      (true (eq :occupied status)))))
+
+(define-test free-body-collision-preserves-tangential-velocity
+  (let* ((store (make-body-collision-fixture))
+         (simulation (render::make-world-simulation store))
+         (body (make-instance 'render::physical-body
+                             :position (make-vec3 10.5 10.5 1.0)
+                             :velocity (make-vec3 1.0 0.0 200.0) :gravity 0.0)))
+    (loop for x from 9 to 13 do (luft:fiber-store-edit-cell store x 10 4 1))
+    (render::add-simulation-body simulation body)
+    (render::advance-world-simulation simulation 1/10)
+    (true (< (abs (- (vec3-z (render::body-position body)) 2.2)) 1.0e-5))
+    (true (zerop (vec3-z (render::body-velocity body))))
+    (true (= 1.0 (vec3-x (render::body-velocity body))))
+    (true (not (render::body-grounded-p body)))
+    (true (< (abs (- (vec3-x (render::body-position body)) 10.6)) 1.0e-5))))
+
+(define-test body-boundary-policy-keeps-missing-chunks-air
+  (let ((store (make-body-collision-fixture)))
+    (true (render::body-clear-at-p store 100.5 100.5 20.0))
+    (true (not (render::body-clear-at-p store -0.1 10.5 20.0)))
+    (multiple-value-bind (distance blocked)
+        (render::sweep-body-axis store (make-vec3 0.5 10.5 20.0)
+                                 1.8 0.3 :x -2.0)
+      (true blocked)
+      (true (< (abs (+ distance 0.2)) 1.0e-5)))))
 
 (define-test walking-body-sweeps-both-directions-on-every-axis
   (dolist (axis '(:x :y :z))
@@ -657,70 +884,83 @@
                            (* sign 1.2))))
         (luft:fiber-store-edit-cell store x y z 1)
         (multiple-value-bind (travel blocked-p)
-            (render::sweep-walking-body-axis store position 1.8 0.3 axis (* sign 20.0))
+            (render::sweep-body-axis store position 1.8 0.3 axis (* sign 20.0))
           (true blocked-p)
           (true (< (abs (- travel expected)) 0.0001)))))))
 
 (define-test walking-off-a-ledge-falls-instead-of-snapping-down
   (let* ((store (make-body-collision-fixture))
          (player (make-test-walking-body 10.5 10.5 4.0))
-         (position (render:walking-player-position player)))
+         (body (render::character-body player))
+         (position (render::body-position body))
+         (simulation (render::make-world-simulation store)))
     (luft:fiber-store-edit-cell store 10 10 3 1)
     (luft:fiber-store-edit-cell store 11 10 0 1)
-    (render::try-walking-player-axis player store :x 0.6)
-    (render::advance-walking-player-vertical player store 0.1)
+    (render::add-simulation-body simulation body)
+    (setf (vec3-x (render::body-velocity body)) 6.0)
+    (render::advance-world-simulation simulation 0.1)
     (true (= 4.0 (vec3-z position)) "the trailing edge still has support")
-    (render::try-walking-player-axis player store :x 0.4)
-    (true (= 4.0 (vec3-z position)) "crossing the edge preserves foot height")
-    (render::advance-walking-player-vertical player store 0.1)
+    (setf (vec3-x (render::body-velocity body)) 4.0)
+    (render::advance-world-simulation simulation 0.1)
+    (setf (vec3-x (render::body-velocity body)) 0.0)
     (true (< 3.8 (vec3-z position) 4.0) "gravity begins a continuous fall")
-    (true (not (render::walking-player-grounded-p player)))
-    (dotimes (i 60) (render::advance-walking-player-vertical player store (/ 1.0 120)))
+    (true (not (render::body-grounded-p body)))
+    (dotimes (i 60) (render::advance-world-simulation simulation 1/120))
     (true (= 1.0 (vec3-z position)))
-    (true (render::walking-player-grounded-p player))))
+    (true (render::body-grounded-p body))))
 
 (define-test walking-up-a-block-requires-a-physical-jump
   (let* ((store (make-body-collision-fixture))
          (player (make-test-walking-body 10.5 10.5 1.0))
-         (position (render:walking-player-position player)))
+         (body (render::character-body player))
+         (position (render::body-position body))
+         (simulation (render::make-world-simulation store)))
     (loop for x from 8 to 20 do
       (luft:fiber-store-edit-cell store x 10 0 1)
       (when (>= x 11) (luft:fiber-store-edit-cell store x 10 1 1)))
-    (dotimes (i 30) (render::advance-walking-player player store 1.0 0.0 (/ 1.0 60)))
+    (render::add-simulation-character simulation player)
+    (render::set-character-movement player 1.0 0.0)
+    (dotimes (i 30) (render::advance-world-simulation simulation 1/60))
     (true (< (abs (- (vec3-x position) 10.7)) 0.0001))
     (true (= 1.0 (vec3-z position)))
-    (render::request-walking-player-jump player)
+    (render::request-character-jump player)
     (dotimes (i 50)
-      (render::advance-walking-player player store 1.0 0.0 (/ 1.0 60))
-      (true (render::walking-player-clear-at-p
+      (render::advance-world-simulation simulation 1/60)
+      (true (render::body-clear-at-p
              store (vec3-x position) (vec3-y position) (vec3-z position) 1.8)))
     (true (> (vec3-x position) 11.3))
     (true (= 2.0 (vec3-z position)))
-    (true (render::walking-player-grounded-p player))))
+    (true (render::body-grounded-p body))))
 
 (define-test walking-ballistics-check-storage-without-wrapping-values
   (math:define-unit 'walking-millisecond
     :reference :second :magnitude 1/1000 :quantity-kind :duration)
   (let* ((position (make-vec3 10.5 10.5 30.0))
-         (player (render::make-walking-player :position position))
-         (velocity
-           (records:record-slot-declaration
-            'render::walking-player 'render::vertical-velocity))
-         (gravity (math:value-declaration-for
-                   'render::+walking-player-gravity+))
+         (body (make-instance 'render::physical-body :position position))
+         (velocity render::*body-vertical-velocity-declaration*)
+         (vector-velocity (records:record-slot-declaration
+                           'render::physical-body 'render::velocity))
+         (gravity (records:record-slot-declaration
+                   'render::physical-body 'render::gravity))
          (duration render::*walking-duration-declaration*)
          (realization render::*walking-displacement-realization*)
          (result (math:declaration-quantity-specification
                   (arithmetic:lisp-arithmetic-realization-result-declaration
                    realization))))
-    (true (eq position (render:walking-player-position player)))
-    (true (not (eq position (render::walking-player-previous-position player))))
-    (true (equalp position (render::walking-player-previous-position player)))
+    (true (eq position (render::body-position body)))
+    (true (not (eq position (render::body-previous-position body))))
+    (true (equalp position (render::body-previous-position body)))
+    (true (= 1 (math:quantity-specification-tensor-order
+                (math:declaration-quantity-specification vector-velocity))))
+    (fail
+     (arithmetic:bind-lisp-arithmetic-realization
+      realization (list vector-velocity gravity duration))
+     'math:declaration-compatibility-error)
     (true (eq :difference (math:quantity-specification-character result)))
     (true (eq 'quantities:world-z-position
               (math:quantity-specification-name result)))
     (true (null (records:record-slot-declaration
-                 'render::walking-player 'render::grounded-p)))
+                 'render::physical-body 'render::grounded-p)))
     (true (compiled-function-p render::*walking-displacement-function*))
     ;; Signed motion and both float representations retain the old equation.
     (dolist (v '(0.0 9.0 -7.0 9d0))
@@ -759,9 +999,11 @@
          (heights
            (loop for rate in '(30 60 144) collect
              (let* ((player (make-test-walking-body 10.5 10.5 30.0))
-                    (position (render:walking-player-position player)))
+                    (position (render::body-position (render::character-body player)))
+                    (simulation (render::make-world-simulation store)))
+               (render::add-simulation-character simulation player)
                (dotimes (i rate)
-                 (render::advance-walking-player player store 0.0 0.0 (/ 1.0 rate)))
+                 (render::advance-world-simulation simulation (/ 1.0 rate)))
                (vec3-z position)))))
     (dolist (height heights)
       (true (< (abs (- height 18.0)) 0.001) "one second falls half g times t squared"))))
@@ -775,9 +1017,9 @@
       (loop for z from 0 to 6 do (luft:fiber-store-edit-cell store 11 y z 1)))
     (setf (slot-value viewer 'render::player) player
           (slot-value viewer 'render::camera) camera
-          (slot-value viewer 'render::source) store
-          (render::walking-player-heading-x player) 1.0
-          (render::walking-player-heading-y player) 0.0
+          (slot-value viewer 'render::simulation) (render:make-world-simulation store)
+          (render::character-heading-x player) 1.0
+          (render::character-heading-y player) 0.0
           (render::camera-position camera) (make-vec3 14.0 10.5 2.45))
     (render::constrain-viewer-follow-camera viewer)
     (true (< (vec3-x (render::camera-position camera)) 10.85)

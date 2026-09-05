@@ -13,13 +13,13 @@
                (blend (- 1.0 (exp (- (* rate seconds))))))
           (+ current (* (signum difference) excess blend))))))
 
-(defun follow-walking-player (camera player &key (distance 18.0) seconds)
+(defun follow-character (camera player &key (distance 18.0) seconds)
   "Follow PLAYER through a quiet zone with distance-sensitive catch-up."
   (multiple-value-bind (right up forward) (camera-basis camera)
     (declare (ignore right up))
-    (let* ((player-position (walking-player-position player))
-           (heading-x (walking-player-heading-x player))
-           (heading-y (walking-player-heading-y player))
+    (let* ((player-position (body-position (character-body player)))
+           (heading-x (character-heading-x player))
+           (heading-y (character-heading-y player))
            ;; Showing more of where the traveler is going makes movement legible.
            (aim-x (+ (vec3-x player-position) (* 2.4 heading-x)))
            (aim-y (+ (vec3-y player-position) (* 2.4 heading-y)))
@@ -44,20 +44,20 @@
                                   target-z seconds 0.85)))))
   camera)
 
-(defun walking-player-render-lanes (player)
+(defun character-render-lanes (player)
   "Return current, previous, and heading vec4 lanes for the GPU boundary."
   (flet ((position-lane (position gait)
            (list (vec3-x position) (vec3-y position)
                  (+ (vec3-z position) 1.48) gait)))
     (values
-     (position-lane (walking-player-position player)
-                    (walking-player-gait player))
-     (position-lane (walking-player-previous-position player)
-                    (walking-player-previous-gait player))
-     (list (walking-player-heading-x player)
-           (walking-player-heading-y player)
-           (walking-player-previous-heading-x player)
-           (walking-player-previous-heading-y player)))))
+     (position-lane (body-position (character-body player))
+                    (character-gait player))
+     (position-lane (body-previous-position (character-body player))
+                    (character-previous-gait player))
+     (list (character-heading-x player)
+           (character-heading-y player)
+           (character-previous-heading-x player)
+           (character-previous-heading-y player)))))
 
 (defparameter *inspection-ink-p* t
   "Whether a ray hit gets a blueprint reticle and local triangle-edge lens.")
@@ -196,7 +196,7 @@ at the atelier boundary where a person has selected one site."))
   (make-instance 'fly-camera :position position :yaw yaw :pitch pitch
                              :field-of-view field-of-view))
 
-(defun make-scene-walking-player (scene)
+(defun make-scene-walking-character (scene)
   "Make SCENE's player at a supported authored spawn."
   (if (and (typep scene 'streaming-scene)
            (streaming-scene-source scene))
@@ -204,9 +204,11 @@ at the atelier boundary where a person has selected one site."))
              (x +large-world-spawn-x+)
              (y (round (large-world-road-centre-y x)))
              (z (large-world-terrain-height source x y)))
-        (make-walking-player
+        (make-walking-character
          :position (make-vec3 (+ x 0.5) (+ y 0.5) (coerce z 'single-float))))
-      (make-walking-player)))
+      (make-walking-character
+       :position (make-vec3 (+ +sanctuary-origin-x+ 29.5)
+                            (+ +sanctuary-origin-y+ 24.5) 14.0))))
 
 (defun reset-viewer-camera (&optional (viewer *viewer*))
   "Return VIEWER to its scene's spawn and following isometric view."
@@ -222,15 +224,15 @@ at the atelier boundary where a person has selected one site."))
             ;; next turn of the route.
             *isometric-height* (if player 18.0 64.0))
       (if player
-          (let ((spawn (make-scene-walking-player (viewer-source viewer))))
+          (let ((spawn (make-scene-walking-character (viewer-source viewer))))
+            (remove-simulation-character (viewer-simulation viewer) player)
             (setf (viewer-player viewer) spawn)
-            (follow-walking-player camera spawn)
+            (follow-character camera spawn)
             ;; Reset is also a camera move: do not briefly reveal the old
             ;; outside perch when the spawn happens to be indoors.
             (if (typep (viewer-mode viewer) 'first-person-mode)
                 (progn
-                  (setf (walking-player-height spawn) 1.8
-                        *projection* :perspective)
+                  (setf *projection* :perspective)
                   (place-viewer-at-player-eyes viewer))
                 (constrain-viewer-follow-camera viewer)))
           (setf (camera-position camera)
@@ -378,7 +380,7 @@ Start at the body, not the look-ahead target, which can itself be inside a
 wall. Corner rays reserve space for the near plane, even at grazing angles."
   (let ((player (viewer-player viewer)))
     (when player
-      (let* ((position (walking-player-position player))
+      (let* ((position (body-position (character-body player)))
              (aim (make-vec3 (vec3-x position)
                             (vec3-y position)
                             (+ (vec3-z position) 1.45)))
@@ -503,7 +505,7 @@ the selector is the whole of the difference."
                  (vec3-z vector) fourth)))
     (multiple-value-bind (character previous-character character-direction)
         (if player
-            (walking-player-render-lanes player)
+            (character-render-lanes player)
             (values '(0.0 0.0 0.0 0.0) '(0.0 0.0 0.0 0.0)
                     '(0.0 1.0 0.0 1.0)))
       (make-array
@@ -595,18 +597,6 @@ the selector is the whole of the difference."
        domain (+ (luft:site-x cell) dx) (+ (luft:site-y cell) dy)
        (+ (luft:site-z cell) dz) luft:+cell-extent+ 1))))
 
-(defun walking-player-overlaps-cell-p (player cell)
-  "Whether CELL intersects the same full body used by movement collision."
-  (let* ((position (walking-player-position player))
-         (base-z (vec3-z position))
-         (cell-z (luft:site-z cell)))
-    (and (< (- (vec3-x position) +walking-player-radius+) (1+ (luft:site-x cell)))
-         (> (+ (vec3-x position) +walking-player-radius+) (luft:site-x cell))
-         (< (- (vec3-y position) +walking-player-radius+) (1+ (luft:site-y cell)))
-         (> (+ (vec3-y position) +walking-player-radius+) (luft:site-y cell))
-         (< cell-z (+ base-z (walking-player-height player)))
-         (< base-z (1+ cell-z)))))
-
 (defun apply-viewer-world-edit (viewer cell placement)
   "Apply and schedule one edit, returning its record and status."
   (let ((scene (viewer-source viewer))
@@ -615,10 +605,11 @@ the selector is the whole of the difference."
       ((or (not (typep scene 'streaming-scene)) (null production-system))
        (setf (viewer-last-edit-status viewer) :not-editable)
        (values nil :not-editable))
-      ((and placement (viewer-player viewer)
-            (walking-player-overlaps-cell-p (viewer-player viewer) cell))
-       (setf (viewer-last-edit-status viewer) :player)
-       (values nil :player))
+      ((and placement
+            (some (lambda (body) (body-overlaps-cell-p body cell))
+                  (simulation-bodies (viewer-simulation viewer))))
+       (setf (viewer-last-edit-status viewer) :occupied)
+       (values nil :occupied))
       (t
        (multiple-value-bind (edit status key)
            (edit-streaming-scene-cell scene cell placement)
@@ -951,8 +942,7 @@ before the operation boundary, or it would encode through resources which the
   ((canvas :initarg :canvas :initform nil :reader viewer-canvas)
    (context :initarg :context :initform nil :reader viewer-context)
    (device :initarg :device :initform nil :reader viewer-device)
-   (source :initarg :source :initform (make-mountain-sanctuary-scene)
-           :accessor viewer-source)
+   (simulation :initarg :simulation :accessor viewer-simulation)
    (renderer :initarg :renderer :initform nil :accessor viewer-renderer)
    (production-system :initarg :production-system :initform nil
                       :accessor viewer-production-system)
@@ -961,8 +951,8 @@ before the operation boundary, or it would encode through resources which the
    (fixed-exposure :initarg :fixed-exposure :initform nil
                    :reader viewer-fixed-exposure)
    (camera :initarg :camera :initform (make-fly-camera) :reader viewer-camera)
-   (player :initarg :player :initform (make-walking-player)
-           :accessor viewer-player)
+   (player :initarg :player :initform nil :accessor viewer-player
+           :documentation "The locally controlled character, not the world population.")
    (mode :initarg :mode :initform (make-instance 'first-person-mode)
          :accessor viewer-mode)
    (surface-views :initform (make-hash-table :test #'eql)
@@ -1014,6 +1004,24 @@ before the operation boundary, or it would encode through resources which the
       inspector)))
   (:menu-bar nil))
 
+(defmethod initialize-instance :after ((viewer viewer) &key source)
+  (unless (slot-boundp viewer 'simulation)
+    (setf (viewer-simulation viewer)
+          (make-world-simulation (or source (make-mountain-sanctuary-scene)))))
+  (when (viewer-player viewer)
+    (add-simulation-character (viewer-simulation viewer) (viewer-player viewer))))
+
+(defun viewer-source (viewer)
+  (simulation-source (viewer-simulation viewer)))
+
+(defmethod (setf viewer-player) :before (player (viewer viewer))
+  (declare (ignore player))
+  (clear-viewer-controls viewer))
+
+(defmethod (setf viewer-player) :after (player (viewer viewer))
+  ;; Selecting another character does not remove the old one from the world.
+  (when player (add-simulation-character (viewer-simulation viewer) player)))
+
 (defun viewer-surface-view (viewer surface)
   "Return VIEWER's texture view for the current presentation slot."
   (let* ((context (viewer-context viewer))
@@ -1057,13 +1065,19 @@ before the operation boundary, or it would encode through resources which the
   (if active-p
       (progn
         (when (viewer-player viewer)
-          (cancel-walking-player-route (viewer-player viewer)))
+          (set-character-movement (viewer-player viewer) 0.0 0.0))
         (setf (gethash direction (viewer-controls viewer)) t))
       (remhash direction (viewer-controls viewer)))
   viewer)
 
 (defun clear-viewer-controls (viewer)
   (clrhash (viewer-controls viewer))
+  (when-let ((player (viewer-player viewer)))
+    (let ((controller (character-controller player)))
+      (when (typep controller 'movement-intent)
+        (setf (intent-direction-x controller) 0.0
+              (intent-direction-y controller) 0.0
+              (intent-jump-requested-p controller) nil))))
   viewer)
 
 (defun camera-walking-direction (camera forward right)
@@ -1072,38 +1086,36 @@ before the operation boundary, or it would encode through resources which the
     (values (+ (* (cos yaw) forward) (* (sin yaw) right))
             (- (* (sin yaw) forward) (* (cos yaw) right)))))
 
-(defun advance-viewer-camera (viewer timestamp)
+(defun advance-viewer-world (viewer timestamp)
+  "Submit local input, then advance the whole world, even without a player."
   (let* ((last (viewer-last-timestamp viewer))
          (dt (if last (min 0.1 (max 0.0 (- timestamp last))) 0.0))
-         (camera (viewer-camera viewer))
-         (step (* dt (viewer-speed viewer))))
+         (camera (viewer-camera viewer)))
     (setf (viewer-last-timestamp viewer) timestamp)
     (advance-camera-response camera dt)
-    (if (viewer-player viewer)
+    (when-let ((player (viewer-player viewer)))
+      (when (typep (character-controller player) 'movement-intent)
         (let ((forward (- (if (viewer-control-active-p viewer :forward) 1 0)
                           (if (viewer-control-active-p viewer :backward) 1 0)))
               (right (- (if (viewer-control-active-p viewer :right) 1 0)
-                        (if (viewer-control-active-p viewer :left) 1 0)))
-              (maximum-distance nil))
+                        (if (viewer-control-active-p viewer :left) 1 0))))
           (multiple-value-bind (direction-x direction-y)
               (camera-walking-direction camera forward right)
-            (when (and (zerop forward) (zerop right))
-              (multiple-value-setq (direction-x direction-y maximum-distance)
-                (walking-player-route-control (viewer-player viewer))))
-            (advance-walking-player (viewer-player viewer)
-                                    (viewer-source viewer)
-                                    (or direction-x 0.0) (or direction-y 0.0) dt
-                                    :maximum-distance maximum-distance))
-          (trim-walking-player-route (viewer-player viewer))
-          ;; The first timestamp establishes the follow pose immediately.
-          ;; Subsequent zero-duration samples preserve it; in Common Lisp a
-          ;; numeric zero is true, so DT alone cannot express that distinction.
-          (if (typep (viewer-mode viewer) 'first-person-mode)
-              (place-viewer-at-player-eyes viewer)
-              (progn
-                (follow-walking-player camera (viewer-player viewer)
-                                       :seconds (and last dt))
-                (constrain-viewer-follow-camera viewer))))
+            (set-character-movement player direction-x direction-y)))))
+    (advance-world-simulation (viewer-simulation viewer) dt)
+    (values dt (null last))))
+
+(defun advance-viewer-camera (viewer dt first-frame-p)
+  "Observe the simulated character, or move a free inspection camera."
+  (let ((camera (viewer-camera viewer))
+        (step (* dt (viewer-speed viewer))))
+    (if (viewer-player viewer)
+        (if (typep (viewer-mode viewer) 'first-person-mode)
+            (place-viewer-at-player-eyes viewer)
+            (progn
+              (follow-character camera (viewer-player viewer)
+                                :seconds (unless first-frame-p dt))
+              (constrain-viewer-follow-camera viewer)))
         (multiple-value-bind (right up forward) (camera-basis camera)
           (flet ((move (direction amount)
                    (let ((position (camera-position camera)))
@@ -1139,7 +1151,7 @@ before the operation boundary, or it would encode through resources which the
           ;; authored world's radius-one window also contains the camera view.
           (let ((position
                   (if (viewer-player viewer)
-                      (walking-player-position (viewer-player viewer))
+                      (body-position (character-body (viewer-player viewer)))
                       (camera-position (viewer-camera viewer)))))
             (retarget-streaming-scene
              source production-system (viewer-bevel-width viewer)
@@ -1158,7 +1170,9 @@ before the operation boundary, or it would encode through resources which the
     (present-canvas-frame
      (viewer-context viewer)
      (lambda (surface-texture encoder presentation-time)
-       (advance-viewer-camera viewer presentation-time)
+       (multiple-value-bind (dt first-frame-p)
+           (advance-viewer-world viewer presentation-time)
+         (advance-viewer-camera viewer dt first-frame-p))
        (let ((extent (canvas-extent (viewer-context viewer))))
          (encode-viewer-frame viewer encoder surface-texture extent)
          (encode-viewer-frame-recording
@@ -1205,7 +1219,7 @@ before the operation boundary, or it would encode through resources which the
                                 :keystroke (:space))
     ()
   (let ((player (viewer-player (viewer-command-viewer))))
-    (when player (request-walking-player-jump player))))
+    (when player (request-character-jump player))))
 
 (clim:define-command (com-toggle-construction-lines
                       :command-table luft-atelier
@@ -1296,7 +1310,7 @@ before the operation boundary, or it would encode through resources which the
 
 (defun place-viewer-at-player-eyes (viewer)
   (when (viewer-player viewer)
-    (let ((position (walking-player-position (viewer-player viewer))))
+    (let ((position (body-position (character-body (viewer-player viewer)))))
       (setf (camera-position (viewer-camera viewer))
             (make-vec3 (vec3-x position) (vec3-y position)
                        (+ (vec3-z position) +first-person-eye-height+))))))
@@ -1306,16 +1320,13 @@ before the operation boundary, or it would encode through resources which the
   (check-type mode viewer-mode)
   (clear-viewer-controls viewer)
   (when (viewer-player viewer)
-    (cancel-walking-player-route (viewer-player viewer)))
+    (cancel-character-route (viewer-player viewer)))
   (when (viewer-pointer-captured-p viewer)
     (set-canvas-relative-pointer-mode (viewer-canvas viewer) nil)
     (setf (viewer-pointer-captured-p viewer) nil))
   (setf (viewer-mode viewer) mode
         *projection* (if (typep mode 'isometric-walk-mode)
                          :isometric :perspective))
-  (when (and (viewer-player viewer) (typep mode 'first-person-mode))
-    ;; Changing the view afterward must not grow the body into a low ceiling.
-    (setf (walking-player-height (viewer-player viewer)) 1.8))
   (if (typep mode 'first-person-mode)
       (progn
         (setf (camera-pitch (viewer-camera viewer)) -0.12
@@ -1323,7 +1334,7 @@ before the operation boundary, or it would encode through resources which the
         (place-viewer-at-player-eyes viewer))
       (when (viewer-player viewer)
         (setf (camera-pitch (viewer-camera viewer)) -0.5165006)
-        (follow-walking-player (viewer-camera viewer) (viewer-player viewer))))
+        (follow-character (viewer-camera viewer) (viewer-player viewer))))
   (when (viewer-renderer viewer)
     (setf (renderer-history-valid-p (viewer-renderer viewer)) nil))
   viewer)
@@ -1508,7 +1519,7 @@ before the operation boundary, or it would encode through resources which the
                ;; not turn into surprising roof teleports.
                (when (and (= luft:+xy-face-extent+ (luft:site-extent site))
                           (luft:site-positive-p site))
-                 (start-walking-player-route
+                 (start-character-route
                   player (viewer-source viewer)
                   (luft:site-x cell) (luft:site-y cell)
                   (1+ (luft:site-z cell))))))))))))
@@ -1697,7 +1708,7 @@ cohort. FIXED-EXPOSURE disables temporal adaptation for reproducible evidence."
                                    :camera camera :source solid
                                    :player (and (typep solid 'scene)
                                                 (scene-player-p solid)
-                                                (make-scene-walking-player
+                                                (make-scene-walking-character
                                                  solid))
                                    :bevel-width bevel-width
                                    :fixed-exposure fixed-exposure
@@ -2448,13 +2459,16 @@ it makes no claim about which earlier render pass caused a discontinuity."
                           renderer 0 mesh :scene-generation generation))))
                     (when (typep solid 'streaming-scene)
                       (reset-streaming-scene-publication solid))
+                    ;; Rebuilding graphics leaves the world alone. Replacing
+                    ;; terrain starts a new simulation, not a second authority.
+                    (unless (eq solid (viewer-source viewer))
+                      (setf (viewer-simulation viewer) (make-world-simulation solid)
+                            (viewer-player viewer)
+                            (and (typep solid 'scene) (scene-player-p solid)
+                                 (make-scene-walking-character solid))
+                            (viewer-last-timestamp viewer) nil))
                     (setf (viewer-renderer viewer) renderer
                           (viewer-production-system viewer) production-system
-                          (viewer-source viewer) solid
-                          (viewer-player viewer)
-                          (and (typep solid 'scene) (scene-player-p solid)
-                               (or (viewer-player viewer)
-                                   (make-walking-player)))
                           (viewer-bevel-width viewer) bevel-width
                           (viewer-inspection viewer) nil
                           candidate-renderer nil)

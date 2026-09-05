@@ -294,29 +294,49 @@ the eye follows the player's feet at 1.62 cells, with a 1.8-cell collision
 height and a 0.6-cell-wide box. Collision sweeps the full body to the first
 voxel contact and slides along walls. Walking never changes the foot height:
 a full block needs a jump, and leaving an edge falls under gravity. Movement
-is integrated in steps of at most 1/120 second. Vertical sweeps include
+is integrated on a fixed 1/120-second world clock. Vertical sweeps include
 ceilings and a floor removed by editing. The perspective presentation omits the miniature
 view's tilt-shift blur and shows a small central crosshair.
 
-Ownership stays small: =luft/render/player.lisp= (formerly =game.lisp=)
-owns the player's continuous motion and optional =walking-route=; the scene
-owns terrain; the viewer owns input, camera, and services. Physics and route
-directions use world XY; only the viewer converts camera-relative input.
-There is no new session or game abstraction. The obsolete fireball CPU state,
-input handlers, shader branches, and two uniform =vec4= members are retired;
-torch flames and the wizard, staff, and orb appearance remain.
+[[lisp:luft.render:world-simulation]] now owns the terrain source, bodies,
+characters, and simulation clock. =luft/render/simulation.lisp= replaces the
+player-specific physical model. These are ordinary CLOS objects, not an ECS:
 
-The player now borrows Luvcraft's quantity-declared CLOS storage without
-wrapping its numbers or vectors. Current and previous positions are cell
-points; height is a cell distance; speed and vertical velocity are cells per
-second. Gravity is cells per second squared, not metres per second squared.
-The ballistic displacement equation is checked arithmetic, bound to the
-vertical-velocity slot, gravity constant, and elapsed-seconds declaration.
-Its result is a signed Z displacement rather than an absolute position or a
-nonnegative distance. Tests reject swapped velocity/acceleration, unconverted
-milliseconds, and a point-valued result. This is a first checked boundary,
-not a claim that collision code or every player slot is quantity-checked;
-the numerical equation and stepping policy are unchanged.
+- A =physical-body= owns position, full velocity, its box dimensions, signed
+  gravity, contact state, and previous-frame position. Even a body with no
+  controller or character is simulated; removing its floor makes it fall.
+- A =walking-character= composes a body with a controller, locomotion tuning,
+  facing, and gait. Ground and air acceleration approach desired horizontal
+  velocity rather than immediately setting walking speed. Gait follows actual
+  collision-limited travel.
+- =movement-intent= and =walking-route= are controllers. They supply desired
+  velocity and jump requests, not physical position updates. Routes use the
+  actual body's clearance and slow down toward waypoints. The cancelled or
+  completed action stops asking for movement, not gravity.
+- The viewer selects a locally controlled character and owns cameras, input,
+  and presentation services. Selecting another character leaves the previous
+  one in the world. Camera modes no longer change collision dimensions.
+
+The tick order is support, controller steering, integration of every body,
+then character pose updates. Fractional time remains in the world's
+accumulator; previous-frame poses are retained once per displayed advance,
+not overwritten at each physics substep. Rendering is still the local wizard
+pass and streaming demand still follows the local focus: multiplayer transport,
+distant-actor residency, and population rendering are subsequent work, not
+claims made by this simulation boundary.
+
+Bodies and characters borrow Luvcraft's quantity-declared CLOS storage without
+wrapping numbers or vectors. Positions are cell points; dimensions are cell
+distances; velocity is cells per second; gravity and steering acceleration are
+cells per second squared. The checked ballistic equation binds a scalar
+component declaration derived from the body's vector velocity, the body's
+gravity slot, and elapsed seconds. Tests reject binding the whole vector to
+the scalar equation, swapped units, unconverted milliseconds, and point-valued
+displacement. Special variables remain useful for path policy and live tuning;
+they are not the identity or mutable motion state of a sole player.
+
+The obsolete fireball state, input handlers, shader branches, and two uniform
+=vec4= members are retired; torch flames and the wizard's staff/orb remain.
 
 Demand-world startup holds the player at the authored spawn until the first
 collision window is published. Source chunks finishing on workers are not
@@ -327,7 +347,7 @@ accumulating simulation time; a published empty chunk still permits falling.
 
 Click to capture the pointer, use WASD to walk and Space to jump. Left click
 removes the targeted block; right click places the selected material beside
-its face, within six cells and outside the player's body. Middle click picks
+its face, within six cells and outside every simulated body. Middle click picks
 a material; 1--4 or the wheel selects the scene vocabulary. Escape releases
 the pointer. F5 cycles first person, third person/orbit, and isometric views;
 all three inhabit the same world. The status line shows the selected material
@@ -1267,7 +1287,7 @@ without a gap.
 :ID: 75OOSW
 :END:
 
-The follow camera of [[lisp:luft.render::follow-walking-player]] frames the
+The follow camera of [[lisp:luft.render::follow-character]] frames the
 wizard from an isometric yaw family and tracks softly outside a quiet radius.
 [[lisp:luft.render::constrain-viewer-follow-camera]] already ray-casts from its
 look-at point toward the smoothed eye and shortens that eye ray before sanctuary

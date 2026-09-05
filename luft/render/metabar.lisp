@@ -72,7 +72,7 @@
 
 (defun viewer-metabar-movement-speed (viewer)
   (if (viewer-player viewer)
-      (walking-player-speed (viewer-player viewer))
+      (character-speed (viewer-player viewer))
       (viewer-speed viewer)))
 
 (defmethod mcluv:metabar-control-value
@@ -173,7 +173,7 @@
                        (round clamped +viewer-metabar-speed-step+))))
     (setf (viewer-speed viewer) quantized)
     (when (viewer-player viewer)
-      (setf (walking-player-speed (viewer-player viewer)) quantized))
+      (setf (character-speed (viewer-player viewer)) quantized))
     quantized))
 
 (defun set-viewer-metabar-sensitivity (viewer value)

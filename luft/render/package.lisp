@@ -173,10 +173,37 @@
            #:fly-camera
            #:make-fly-camera
            #:camera-position
-           #:walking-player
-           #:make-walking-player
-           #:walking-player-position
-           #:walking-player-route
+           #:physical-body
+           #:body-position
+           #:body-previous-position
+           #:body-velocity
+           #:body-height
+           #:body-radius
+           #:body-gravity
+           #:body-grounded-p
+           #:walking-character
+           #:make-walking-character
+           #:character-body
+           #:character-controller
+           #:character-speed
+           #:character-ground-acceleration
+           #:character-air-acceleration
+           #:character-jump-speed
+           #:movement-controller
+           #:movement-intent
+           #:controller-desire
+           #:set-character-movement
+           #:request-character-jump
+           #:world-simulation
+           #:make-world-simulation
+           #:simulation-source
+           #:simulation-bodies
+           #:simulation-characters
+           #:simulation-clock
+           #:add-simulation-body
+           #:add-simulation-character
+           #:remove-simulation-character
+           #:advance-world-simulation
            #:walking-route
            #:walking-route-start
            #:walking-route-destination
@@ -184,8 +211,10 @@
            #:walking-route-status
            #:walking-route-detail
            #:walking-route-visits
-           #:start-walking-player-route
+           #:start-character-route
+           #:cancel-character-route
            #:viewer-player
+           #:viewer-simulation
            ;; Retained across the live refoundation package reload.
            #:inspection-camera
            #:camera-x

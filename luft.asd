@@ -81,17 +81,23 @@
                              (:file "streaming")
                              (:file "fixtures")))))
 
+(defsystem "luft/simulation"
+  :description "Bodies, character controllers, and the LUFT world clock without an atelier."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luft/renderer")
+  :components ((:file "luft/render/simulation")))
+
 (defsystem "luft/render"
   :description "The McCLIM LUFT atelier over the packed-site renderer."
   :version "0.0.1"
   :author "Mikael Brockman"
   ;; Share Luv's substrate and compositor, not another game's runtime.
-  :depends-on ("luft/renderer" "luv/mcclim" "luv/workbench"
+  :depends-on ("luft/simulation" "luv/mcclim" "luv/workbench"
                "luv/lobby/mcclim"
                "luv/tracy-capture" "luv/application-agent")
   :serial t
-  :components ((:file "luft/render/player")
-               (:file "luft/render/studio")
+  :components ((:file "luft/render/studio")
                (:file "luft/render/live-artifact")
                (:file "luft/render/workbench")
                (:file "luft/render/tracy-capture")
