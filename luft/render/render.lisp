@@ -374,44 +374,15 @@ ambiguously co-owned, or retired by a population rollback."
    (layout :initarg :layout :accessor renderer-layout)
    (vertex-module :initarg :vertex-module :accessor renderer-vertex-module)
    (fragment-module :initarg :fragment-module :accessor renderer-fragment-module)
-   (torch-body-fragment-module
-    :initarg :torch-body-fragment-module
-    :initform nil
-    :accessor renderer-torch-body-fragment-module)
    (pipeline :initarg :pipeline :accessor renderer-pipeline)
-   (flame-effect-buffer :initarg :flame-effect-buffer
-                        :accessor renderer-flame-effect-buffer)
-   (flame-layout :initarg :flame-layout :accessor renderer-flame-layout)
-   (flame-vertex-module :initarg :flame-vertex-module
-                        :accessor renderer-flame-vertex-module)
-   (flame-fragment-module :initarg :flame-fragment-module
-                          :accessor renderer-flame-fragment-module)
-   (flame-pipeline :initarg :flame-pipeline
-                   :accessor renderer-flame-pipeline)
-   (flame-depth-sampler :initarg :flame-depth-sampler
-                        :accessor renderer-flame-depth-sampler)
    (composite-layout :initarg :composite-layout
                      :accessor renderer-composite-layout)
    (composite-fragment-module :initarg :composite-fragment-module
                               :accessor renderer-composite-fragment-module)
    (composite-pipeline :initarg :composite-pipeline
                        :accessor renderer-composite-pipeline)
-   ;; The opaque socket/shaft and animated flame consume the exact same
-   ;; realized three-row frame population.  Only the immutable canonical body
-   ;; vertices and their render pipelines differ.
-   (torch-body-vertex-buffer :initarg :torch-body-vertex-buffer
-                             :accessor renderer-torch-body-vertex-buffer)
-   (torch-body-layout :initarg :torch-body-layout
-                      :accessor renderer-torch-body-layout)
-   (torch-body-vertex-module :initarg :torch-body-vertex-module
-                             :accessor renderer-torch-body-vertex-module)
-   (torch-body-shadow-vertex-module
-    :initarg :torch-body-shadow-vertex-module
-    :accessor renderer-torch-body-shadow-vertex-module)
-   (torch-body-pipeline :initarg :torch-body-pipeline
-                        :accessor renderer-torch-body-pipeline)
-   (torch-body-shadow-pipeline :initarg :torch-body-shadow-pipeline
-                               :accessor renderer-torch-body-shadow-pipeline)
+   (torches :initarg :torches :reader renderer-torches)
+   (torch-factory :initarg :torch-factory :reader renderer-torch-factory)
    (shadow-texture :initarg :shadow-texture :accessor renderer-shadow-texture)
    (shadow-view :initarg :shadow-view :accessor renderer-shadow-view)
    (shadow-sampler :initarg :shadow-sampler :accessor renderer-shadow-sampler)
@@ -461,6 +432,13 @@ ambiguously co-owned, or retired by a population rollback."
    (history-valid-p :initform nil :accessor renderer-history-valid-p)
    (history-used-p :initform nil :accessor renderer-history-used-p)))
 
+(defun renderer-component-options (renderer)
+  "Preserve the composition choices when rebuilding a renderer."
+  (list :exposure-factory (renderer-exposure-factory renderer)
+        :sky-factory (renderer-sky-factory renderer)
+        :player-factory (renderer-player-factory renderer)
+        :torch-factory (renderer-torch-factory renderer)))
+
 (defstruct (renderer-frame-state
              (:constructor %make-renderer-frame-state
                  (&key camera-buffer flame-effect-buffer)))
@@ -483,13 +461,8 @@ ambiguously co-owned, or retired by a population rollback."
                    :label "luft presentation-slot camera state"
                    :size (shaders::scene-uniform-byte-size)
                    :usage '(:uniform :copy-dst)))
-                 effect
-                 (create
-                  (renderer-device renderer)
-                  (make-buffer-descriptor
-                   :label "luft presentation-slot flame effect"
-                   :size (torch-flame-effect-byte-size)
-                   :usage '(:uniform :copy-dst))))
+                 effect (make-torch-frame-buffer
+                         (renderer-torches renderer) (renderer-device renderer)))
            (setf completed-p t)
            (%make-renderer-frame-state
             :camera-buffer camera :flame-effect-buffer effect))
@@ -506,8 +479,9 @@ ambiguously co-owned, or retired by a population rollback."
        (when group (releasing :frame-bind-group (destroy group))))
      (renderer-frame-state-bind-groups state))
     (clrhash (renderer-frame-state-bind-groups state))
-    (releasing :frame-flame-effect-buffer
-      (destroy (renderer-frame-state-flame-effect-buffer state)))
+    (when (renderer-frame-state-flame-effect-buffer state)
+      (releasing :frame-flame-effect-buffer
+        (destroy (renderer-frame-state-flame-effect-buffer state))))
     (releasing :frame-camera-buffer
       (destroy (renderer-frame-state-camera-buffer state))))
   (values))
@@ -571,42 +545,34 @@ ambiguously co-owned, or retired by a population rollback."
            (:binding 5 :resource ,(renderer-shadow-sampler renderer))
            (:binding 6 :resource ,(resident-population-descriptor-buffer resident)))))))
 
+(defun renderer-frame-component-binding (frame key make-binding)
+  "Cache even a component's NIL binding; the presentation slot owns the result."
+  (let ((groups (renderer-frame-state-bind-groups frame)))
+    (multiple-value-bind (binding present-p) (gethash key groups)
+      (if present-p binding
+          (setf (gethash key groups) (funcall make-binding))))))
+
 (defun renderer-frame-torch-body-bind-group (renderer frame shadow-p)
-  (let ((camera (renderer-frame-state-camera-buffer frame))
-        (instances (renderer-flame-instance-buffer renderer)))
-    (if shadow-p
-        (renderer-frame-bind-group
-         renderer frame (list :torch-shadow instances)
-         "luft frame-local torch-body shadows"
-         (renderer-shadow-layout renderer)
-         `((:binding 0 :resource ,instances)
-           (:binding 1 :resource ,(renderer-torch-body-vertex-buffer renderer))
-           (:binding 2 :resource ,camera)))
-        (renderer-frame-bind-group
-         renderer frame (list :torch-scene instances
-                              (renderer-shadow-view renderer))
-         "luft frame-local torch bodies"
-         (renderer-torch-body-layout renderer)
-         `((:binding 0 :resource ,instances)
-           (:binding 1 :resource ,(renderer-torch-body-vertex-buffer renderer))
-           (:binding 2 :resource ,camera)
-           (:binding 4 :resource ,(renderer-shadow-view renderer))
-           (:binding 5 :resource ,(renderer-shadow-sampler renderer)))))))
+  (renderer-frame-component-binding
+   frame (list :torch-body shadow-p (renderer-flame-instance-buffer renderer))
+   (lambda ()
+     (make-torch-body-binding
+      (renderer-torches renderer) (renderer-device renderer)
+      (renderer-flame-instance-buffer renderer)
+      (renderer-frame-state-camera-buffer frame)
+      (renderer-shadow-view renderer) (renderer-shadow-sampler renderer)
+      :shadow-p shadow-p))))
 
 (defun renderer-frame-drawing-binding (renderer frame drawing)
   "The frame owns borrowed camera/shadow bindings; DRAWING owns its program."
   (when drawing
-    (let* ((groups (renderer-frame-state-bind-groups frame))
-           (key (list :scene-drawing drawing (renderer-shadow-view renderer))))
-      (multiple-value-bind (binding present-p) (gethash key groups)
-        (if present-p
-            binding
-            (setf (gethash key groups)
-                  (make-scene-drawing-binding
-                   drawing (renderer-device renderer)
-                   (renderer-frame-state-camera-buffer frame)
-                   (renderer-shadow-view renderer)
-                   (renderer-shadow-sampler renderer))))))))
+    (renderer-frame-component-binding
+     frame (list :scene-drawing drawing (renderer-shadow-view renderer))
+     (lambda ()
+       (make-scene-drawing-binding
+        drawing (renderer-device renderer)
+        (renderer-frame-state-camera-buffer frame)
+        (renderer-shadow-view renderer) (renderer-shadow-sampler renderer))))))
 
 (defun renderer-frame-lattice-bind-group (renderer frame slot)
   (renderer-frame-bind-group
@@ -630,17 +596,16 @@ ambiguously co-owned, or retired by a population rollback."
      (:binding 4 :resource ,(renderer-frame-state-camera-buffer frame)))))
 
 (defun renderer-frame-flame-bind-group (renderer frame)
-  (renderer-frame-bind-group
-   renderer frame
-   (list :flame (renderer-flame-instance-buffer renderer)
-         (renderer-depth-view renderer))
-   "luft frame-local post-temporal torch flames"
-   (renderer-flame-layout renderer)
-   `((:binding 0 :resource ,(renderer-flame-instance-buffer renderer))
-     (:binding 1 :resource ,(renderer-frame-state-camera-buffer frame))
-     (:binding 2 :resource ,(renderer-frame-state-flame-effect-buffer frame))
-     (:binding 3 :resource ,(renderer-depth-view renderer))
-     (:binding 4 :resource ,(renderer-flame-depth-sampler renderer)))))
+  (renderer-frame-component-binding
+   frame (list :flame (renderer-flame-instance-buffer renderer)
+               (renderer-depth-view renderer))
+   (lambda ()
+     (make-torch-flame-binding
+      (renderer-torches renderer) (renderer-device renderer)
+      (renderer-flame-instance-buffer renderer)
+      (renderer-frame-state-camera-buffer frame)
+      (renderer-frame-state-flame-effect-buffer frame)
+      (renderer-depth-view renderer)))))
 
 (defun renderer-frame-present-bind-group (renderer frame)
   (renderer-frame-bind-group
@@ -795,33 +760,16 @@ ambiguously co-owned, or retired by a population rollback."
            (when (plusp (length data))
              (write-buffer buffer data))
            (setf body-bind-group
-                 (create device
-                         (make-bind-group-descriptor
-                          :label "luft realized torch bodies"
-                          :layout (renderer-torch-body-layout renderer)
-                          :entries
-                          `((:binding 0 :resource ,buffer)
-                            (:binding 1
-                             :resource
-                             ,(renderer-torch-body-vertex-buffer renderer))
-                            (:binding 2
-                             :resource ,(renderer-camera-buffer renderer))
-                            (:binding 4
-                             :resource ,(renderer-shadow-view renderer))
-                            (:binding 5
-                             :resource ,(renderer-shadow-sampler renderer))))))
-           (setf body-shadow-bind-group
-                 (create device
-                         (make-bind-group-descriptor
-                          :label "luft realized torch-body shadows"
-                          :layout (renderer-shadow-layout renderer)
-                          :entries
-                          `((:binding 0 :resource ,buffer)
-                            (:binding 1
-                             :resource
-                             ,(renderer-torch-body-vertex-buffer renderer))
-                            (:binding 2
-                             :resource ,(renderer-camera-buffer renderer))))))
+                 (make-torch-body-binding
+                  (renderer-torches renderer) device buffer
+                  (renderer-camera-buffer renderer)
+                  (renderer-shadow-view renderer) (renderer-shadow-sampler renderer))
+                 body-shadow-bind-group
+                 (make-torch-body-binding
+                  (renderer-torches renderer) device buffer
+                  (renderer-camera-buffer renderer)
+                  (renderer-shadow-view renderer) (renderer-shadow-sampler renderer)
+                  :shadow-p t))
            (setf completed-p t)
            (values data count buffer body-bind-group body-shadow-bind-group))
       (unless completed-p
@@ -844,30 +792,14 @@ ambiguously co-owned, or retired by a population rollback."
 (defun renderer-shader-temporal-p (renderer)
   (eq :shader (renderer-temporal-resolve-kind renderer)))
 
-(defun make-renderer-flame-depth-sampler (device)
-  "Create the renderer-lifetime nearest sampler used only for opaque depth."
-  (create device
-          (make-sampler-descriptor
-           :label "luft torch flame opaque-depth sampler"
-           :mag-filter :nearest :min-filter :nearest
-           :mipmap-filter :nearest)))
-
 (defun make-renderer-target-flame-bind-group
     (renderer flame-instance-buffer depth-view)
   "Join one immutable flame population to one immutable depth target."
   (unless (and flame-instance-buffer depth-view)
     (error "A flame composite binding needs both frame storage and opaque depth."))
-  (create
-   (renderer-device renderer)
-   (make-bind-group-descriptor
-    :label "luft post-temporal torch flames"
-    :layout (renderer-flame-layout renderer)
-    :entries
-    `((:binding 0 :resource ,flame-instance-buffer)
-      (:binding 1 :resource ,(renderer-camera-buffer renderer))
-      (:binding 2 :resource ,(renderer-flame-effect-buffer renderer))
-      (:binding 3 :resource ,depth-view)
-      (:binding 4 :resource ,(renderer-flame-depth-sampler renderer))))))
+  (make-torch-flame-binding
+   (renderer-torches renderer) (renderer-device renderer)
+   flame-instance-buffer (renderer-camera-buffer renderer) nil depth-view))
 
 (defun make-retargeted-renderer-target-generation
     (renderer flame-instance-buffer)
@@ -1870,12 +1802,15 @@ cohort untouched. No frame can interleave with the owner-thread publication."
 (defun make-renderer (device color-format extent
                       &key (exposure-factory 'make-automatic-exposure)
                         (sky-factory 'make-sky-drawing)
-                        (player-factory 'make-player-drawing))
+                        (player-factory 'make-player-drawing)
+                        (torch-factory 'make-framed-torch-drawing))
   "Compose independently owned exposure, sky, and player drawing components.
 
 SKY-FACTORY and PLAYER-FACTORY receive DEVICE, scene target formats, and
 sample count. Each returns a fresh SCENE-DRAWING. NIL omits that component.
-The renderer releases drawings after their frame-owned bindings.
+TORCH-FACTORY has the same arguments and returns a fresh TORCH-DRAWING,
+or NIL omits torch rendering. The renderer releases drawings after their
+frame-owned, publication-owned, and target-owned bindings.
 
 EXPOSURE-FACTORY is a function designator receiving DEVICE and returning a
 fresh EXPOSURE-CONTROL. Its default names a function so live redefinition is
@@ -1893,15 +1828,9 @@ Meshes arrive separately through RENDERER-SET-MESH."
          vertex-module fragment-module pipeline
          shadow-texture shadow-view shadow-sampler shadow-layout
          shadow-vertex-module shadow-pipeline
-         flame-layout flame-instance-buffer flame-effect-buffer
-         flame-vertex-module flame-fragment-module flame-pipeline
-         flame-depth-sampler composite-layout composite-fragment-module
-         composite-pipeline
-         torch-body-layout torch-body-vertex-buffer torch-body-bind-group
-         torch-body-shadow-bind-group torch-body-vertex-module
-         torch-body-shadow-vertex-module torch-body-fragment-module
-         torch-body-pipeline
-         torch-body-shadow-pipeline
+         flame-instance-buffer torches
+         composite-layout composite-fragment-module composite-pipeline
+         torch-body-bind-group torch-body-shadow-bind-group
          lattice-point-layout lattice-point-vertex-module
          lattice-point-fragment-module lattice-point-pipeline
          present-layout present-bind-group present-vertex-module
@@ -1918,17 +1847,7 @@ Meshes arrive separately through RENDERER-SET-MESH."
                          (make-buffer-descriptor
                           :label "luft frame state"
                           :size (shaders::scene-uniform-byte-size)
-                          :usage '(:uniform :copy-dst)))
-                 flame-effect-buffer
-                 (create device
-                         (make-buffer-descriptor
-                          :label "luft torch flame effect"
-                          :size (torch-flame-effect-byte-size)
                           :usage '(:uniform :copy-dst))))
-           ;; Publish ownership to the constructor unwind list before the
-           ;; first fallible upload touches this resource.
-           (write-buffer flame-effect-buffer
-                         (torch-flame-effect-uniform-data 0.0))
            (setf flame-instance-buffer
                  (create device
                          (make-buffer-descriptor
@@ -1957,14 +1876,6 @@ Meshes arrive separately through RENDERER-SET-MESH."
                           :mag-filter :linear :min-filter :linear
                           :mipmap-filter :nearest :compare :less-or-equal)))
            (write-buffer star-template-buffer (star-meshlet-template-words))
-           (let ((body-vertices (torch-body-vertex-data)))
-             (setf torch-body-vertex-buffer
-                   (create device
-                           (make-buffer-descriptor
-                            :label "luft canonical framed torch body"
-                            :size (* 4 (length body-vertices))
-                            :usage '(:storage :copy-dst))))
-             (write-buffer torch-body-vertex-buffer body-vertices))
            (setf layout
                  (create device
                          (make-bind-group-layout-descriptor
@@ -2023,114 +1934,17 @@ Meshes arrive separately through RENDERER-SET-MESH."
                           :depth-stencil
                           '(:format :depth32-float :depth-write-enabled t
                             :depth-compare :less))))
-           (setf torch-body-layout
-                 (create device
-                         (make-bind-group-layout-descriptor
-                          :label "luft framed torch-body layout"
-                          :entries '((:binding 0 :type :storage-buffer)
-                                     (:binding 1 :type :storage-buffer)
-                                     (:binding 2 :type :uniform-buffer)
-                                     (:binding 4 :type :texture)
-                                     (:binding 5 :type :sampler))))
-                 torch-body-vertex-module
-                 (create device
-                         (make-shader-module-descriptor
-                          :label "luft framed torch-body vertex"
-                          :language :mathematical
-                          :code
-                          (shaders:torch-body-vertex-specification)))
-                 torch-body-shadow-vertex-module
-                 (create device
-                         (make-shader-module-descriptor
-                          :label "luft framed torch-body shadow vertex"
-                          :language :mathematical
-                          :code
-                          (shaders:torch-body-shadow-vertex-specification)))
-                 torch-body-fragment-module
-                 (create device
-                         (make-shader-module-descriptor
-                          :label "luft framed torch-body fragment"
-                          :language :mathematical
-                          :code (shaders:torch-body-fragment-specification)))
-                 torch-body-pipeline
-                 (create device
-                         (make-render-pipeline-descriptor
-                          :label "luft framed opaque torch bodies"
-                          :layout torch-body-layout
-                          :vertex `(:module ,torch-body-vertex-module)
-                          :fragment
-                          `(:module ,torch-body-fragment-module
-                            :targets
-                            ,(mapcar (lambda (format) `(:format ,format))
-                                     target-formats))
-                          :primitive '(:topology :triangle-list)
-                          :sample-count *scene-sample-count*
-                          :depth-stencil
-                          '(:format :depth32-float :depth-write-enabled t
-                            :depth-compare :less)))
-                 torch-body-shadow-pipeline
-                 (create device
-                         (make-render-pipeline-descriptor
-                          :label "luft framed torch-body shadows"
-                          :layout shadow-layout
-                          :vertex `(:module ,torch-body-shadow-vertex-module)
-                          :primitive '(:topology :triangle-list)
-                          :depth-stencil
-                          '(:format :depth32-float :depth-write-enabled t
-                            :depth-compare :less)))
-                 torch-body-bind-group
-                 (create device
-                         (make-bind-group-descriptor
-                          :label "luft empty framed torch bodies"
-                          :layout torch-body-layout
-                          :entries
-                          `((:binding 0 :resource ,flame-instance-buffer)
-                            (:binding 1 :resource ,torch-body-vertex-buffer)
-                            (:binding 2 :resource ,camera-buffer)
-                            (:binding 4 :resource ,shadow-view)
-                            (:binding 5 :resource ,shadow-sampler))))
+           (when torch-factory
+             (setf torches (funcall torch-factory device target-formats
+                                    *scene-sample-count*))
+             (check-type torches torch-drawing))
+           (setf torch-body-bind-group
+                 (make-torch-body-binding
+                  torches device flame-instance-buffer camera-buffer shadow-view shadow-sampler)
                  torch-body-shadow-bind-group
-                 (create device
-                         (make-bind-group-descriptor
-                          :label "luft empty framed torch-body shadows"
-                          :layout shadow-layout
-                          :entries
-                          `((:binding 0 :resource ,flame-instance-buffer)
-                            (:binding 1 :resource ,torch-body-vertex-buffer)
-                            (:binding 2 :resource ,camera-buffer)))))
-           (setf flame-layout
-                 (create device
-                         (make-bind-group-layout-descriptor
-                          :label "luft torch flame layout"
-                          :entries '((:binding 0 :type :storage-buffer)
-                                     (:binding 1 :type :uniform-buffer)
-                                     (:binding 2 :type :uniform-buffer)
-                                     (:binding 3 :type :texture)
-                                     (:binding 4 :type :sampler))))
-                 flame-vertex-module
-                 (create device
-                         (make-shader-module-descriptor
-                          :label "luft torch flame vertex"
-                          :language :mathematical
-                          :code (shaders:torch-flame-vertex-specification)))
-                 flame-fragment-module
-                 (create device
-                         (make-shader-module-descriptor
-                          :label "luft torch flame fragment"
-                          :language :mathematical
-                          :code (shaders:torch-flame-fragment-specification)))
-                 flame-pipeline
-                 (create device
-                         (make-render-pipeline-descriptor
-                          :label "luft volumetric torch flame pipeline"
-                          :layout flame-layout
-                          :vertex `(:module ,flame-vertex-module)
-                          :fragment
-                          `(:module ,flame-fragment-module
-                            :targets
-                            ((:format :rgba16-float
-                              :blend :premultiplied-alpha)))
-                          :primitive '(:topology :triangle-list))))
+                 (make-torch-body-binding
+                  torches device flame-instance-buffer camera-buffer shadow-view shadow-sampler
+                  :shadow-p t))
            (setf lattice-point-layout
                  (create device
                          (make-bind-group-layout-descriptor
@@ -2173,8 +1987,6 @@ Meshes arrive separately through RENDERER-SET-MESH."
                          (make-sampler-descriptor
                           :label "luft presentation sampler"
                           :mag-filter :linear :min-filter :linear))
-                 flame-depth-sampler
-                 (make-renderer-flame-depth-sampler device)
                  composite-layout
                  (create device
                          (make-bind-group-layout-descriptor
@@ -2262,6 +2074,7 @@ Meshes arrive separately through RENDERER-SET-MESH."
            (check-type exposure-control exposure-control)
            (setf renderer
                  (make-instance 'renderer
+                                :torches torches :torch-factory torch-factory
                                 :sky sky :sky-factory sky-factory
                                 :player player :player-factory player-factory
                                 :exposure-control exposure-control
@@ -2282,28 +2095,10 @@ Meshes arrive separately through RENDERER-SET-MESH."
                                 :vertex-module vertex-module
                                 :fragment-module fragment-module
                                 :pipeline pipeline
-                                :flame-effect-buffer flame-effect-buffer
-                                :flame-layout flame-layout
-                                :flame-vertex-module flame-vertex-module
-                                :flame-fragment-module flame-fragment-module
-                                :flame-pipeline flame-pipeline
-                                :flame-depth-sampler flame-depth-sampler
                                 :composite-layout composite-layout
                                 :composite-fragment-module
                                 composite-fragment-module
                                 :composite-pipeline composite-pipeline
-                                :torch-body-vertex-buffer
-                                torch-body-vertex-buffer
-                                :torch-body-layout torch-body-layout
-                                :torch-body-vertex-module
-                                torch-body-vertex-module
-                                :torch-body-shadow-vertex-module
-                                torch-body-shadow-vertex-module
-                                :torch-body-fragment-module
-                                torch-body-fragment-module
-                                :torch-body-pipeline torch-body-pipeline
-                                :torch-body-shadow-pipeline
-                                torch-body-shadow-pipeline
                                 :shadow-texture shadow-texture
                                 :shadow-view shadow-view
                                 :shadow-sampler shadow-sampler
@@ -2335,6 +2130,11 @@ Meshes arrive separately through RENDERER-SET-MESH."
             (destroy-renderer renderer)
             (progn
               (with-release-warnings
+                (releasing :torch-body-binding
+                  (when torch-body-bind-group (destroy torch-body-bind-group)))
+                (releasing :torch-shadow-binding
+                  (when torch-body-shadow-bind-group (destroy torch-body-shadow-bind-group)))
+                (releasing :torches (release-torch-drawing torches))
                 (releasing :sky (release-scene-drawing sky))
                 (releasing :player (release-scene-drawing player)))
               (when exposure-control
@@ -2347,24 +2147,12 @@ Meshes arrive separately through RENDERER-SET-MESH."
                                         composite-pipeline
                                         composite-fragment-module
                                         present-vertex-module sampler
-                                        flame-depth-sampler composite-layout
+                                        composite-layout
                                         present-bind-group
                                         present-layout lattice-point-pipeline
                                         lattice-point-fragment-module
                                         lattice-point-vertex-module
                                         lattice-point-layout
-                                        torch-body-shadow-bind-group
-                                        torch-body-bind-group
-                                        torch-body-shadow-pipeline
-                                        torch-body-pipeline
-                                        torch-body-fragment-module
-                                        torch-body-shadow-vertex-module
-                                        torch-body-vertex-module
-                                        torch-body-layout
-                                        torch-body-vertex-buffer
-                                        flame-pipeline
-                                        flame-fragment-module flame-vertex-module
-                                        flame-layout flame-effect-buffer
                                         flame-instance-buffer
                                         shadow-pipeline shadow-vertex-module
                                         shadow-layout shadow-sampler shadow-view
@@ -2395,6 +2183,7 @@ Meshes arrive separately through RENDERER-SET-MESH."
     (loop for slot being the hash-values of (renderer-mesh-slots renderer)
           do (%destroy-mesh-slot slot))
     (destroy-renderer-publication-resources (renderer-publication renderer))
+    (releasing :torches (release-torch-drawing (renderer-torches renderer)))
     (dolist (resource
               (list (renderer-present-pipeline renderer)
                     (renderer-present-fragment-module renderer)
@@ -2405,25 +2194,12 @@ Meshes arrive separately through RENDERER-SET-MESH."
                     (renderer-composite-fragment-module renderer)
                     (renderer-present-vertex-module renderer)
                     (renderer-sampler renderer)
-                    (renderer-flame-depth-sampler renderer)
                     (renderer-composite-layout renderer)
                     (renderer-present-layout renderer)
                     (renderer-lattice-point-pipeline renderer)
                     (renderer-lattice-point-fragment-module renderer)
                     (renderer-lattice-point-vertex-module renderer)
                     (renderer-lattice-point-layout renderer)
-                    (renderer-torch-body-shadow-pipeline renderer)
-                    (renderer-torch-body-pipeline renderer)
-                    (renderer-torch-body-fragment-module renderer)
-                    (renderer-torch-body-shadow-vertex-module renderer)
-                    (renderer-torch-body-vertex-module renderer)
-                    (renderer-torch-body-layout renderer)
-                    (renderer-torch-body-vertex-buffer renderer)
-                    (renderer-flame-pipeline renderer)
-                    (renderer-flame-fragment-module renderer)
-                    (renderer-flame-vertex-module renderer)
-                    (renderer-flame-layout renderer)
-                    (renderer-flame-effect-buffer renderer)
                     (renderer-shadow-pipeline renderer)
                     (renderer-shadow-vertex-module renderer)
                     (renderer-shadow-layout renderer)
@@ -2446,7 +2222,6 @@ Meshes arrive separately through RENDERER-SET-MESH."
           (renderer-composite-fragment-module renderer) nil
           (renderer-present-vertex-module renderer) nil
           (renderer-sampler renderer) nil
-          (renderer-flame-depth-sampler renderer) nil
           (renderer-composite-layout renderer) nil
           (renderer-present-layout renderer) nil
           (renderer-lattice-point-pipeline renderer) nil
@@ -2454,18 +2229,6 @@ Meshes arrive separately through RENDERER-SET-MESH."
           (renderer-lattice-point-vertex-module renderer) nil
           (renderer-lattice-point-layout renderer) nil
           (renderer-publication renderer) (%make-empty-renderer-publication)
-          (renderer-torch-body-shadow-pipeline renderer) nil
-          (renderer-torch-body-pipeline renderer) nil
-          (renderer-torch-body-fragment-module renderer) nil
-          (renderer-torch-body-shadow-vertex-module renderer) nil
-          (renderer-torch-body-vertex-module renderer) nil
-          (renderer-torch-body-layout renderer) nil
-          (renderer-torch-body-vertex-buffer renderer) nil
-          (renderer-flame-pipeline renderer) nil
-          (renderer-flame-fragment-module renderer) nil
-          (renderer-flame-vertex-module renderer) nil
-          (renderer-flame-layout renderer) nil
-          (renderer-flame-effect-buffer renderer) nil
           (renderer-shadow-pipeline renderer) nil
           (renderer-shadow-vertex-module renderer) nil
           (renderer-shadow-layout renderer) nil

@@ -1605,6 +1605,7 @@ before the operation boundary, or it would encode through resources which the
                        (exposure-factory 'make-automatic-exposure)
                        (sky-factory 'make-sky-drawing)
                        (player-factory 'make-player-drawing)
+                       (torch-factory 'make-framed-torch-drawing)
                        (camera (make-fly-camera :yaw 0.35))
                        (title
                          "LUFT — click to play · WASD move · Space jump · L/R edit · 1–4 material · F5 camera · Esc release")
@@ -1616,7 +1617,8 @@ before the operation boundary, or it would encode through resources which the
   "Open the fixed-star LUFT renderer as a McCLIM atelier.
 
 SKY-FACTORY and PLAYER-FACTORY select independently owned scene drawings;
-NIL omits either program. Their choices survive renderer and shader refresh.
+NIL omits either program. TORCH-FACTORY similarly selects or omits torch
+drawing. These choices survive renderer and shader refresh.
 
 BEVEL-WIDTH remains a compatibility input for inspection. SURFACE-MESH
 supplies an already constructed diagnostic mesh
@@ -1675,7 +1677,8 @@ measurement entirely for reproducible evidence."
                              (make-fixed-exposure fixed-exposure))
                            exposure-factory)
                        :sky-factory sky-factory
-                       :player-factory player-factory)
+                       :player-factory player-factory
+                       :torch-factory torch-factory)
                     ;; If source moved during construction, BEFORE deliberately
                     ;; remains the installed attempt: the first frame sees the
                     ;; newer AFTER revision and transactionally rebuilds.
@@ -2437,13 +2440,11 @@ it makes no claim about which earlier render pass caused a discontinuity."
                   (let ((renderer
                           (multiple-value-bind
                               (created source-values before after)
-                              (make-tracked-renderer
+                              (apply #'make-tracked-renderer
                                (viewer-device viewer)
                                (canvas-format context)
                                (canvas-extent context)
-                               :exposure-factory (renderer-exposure-factory old)
-                               :sky-factory (renderer-sky-factory old)
-                               :player-factory (renderer-player-factory old))
+                               (renderer-component-options old))
                             (unless (= before after)
                               (when created (destroy-renderer created))
                               (error 'renderer-source-changed-during-build

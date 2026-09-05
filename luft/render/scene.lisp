@@ -252,16 +252,6 @@ inspectable cohort."
   (mesh-manifest #() :type simple-vector :read-only t)
   (slot-provenances #() :type simple-vector :read-only t))
 
-(defstruct (unlit-torch-frame
-             (:constructor %make-unlit-torch-frame
-                 (target attachment surface-frame wick-point))
-             (:copier nil))
-  "One final-surface attachment frame before the light field is solved."
-  (target nil :type luft:surface-mesh :read-only t)
-  (attachment nil :type torch-attachment :read-only t)
-  (surface-frame nil :type luft:surface-attachment-frame :read-only t)
-  (wick-point #() :type (simple-array single-float (3)) :read-only t))
-
 (defclass scene-builder ()
   ((domain :initarg :domain :reader scene-builder-domain)
    (origin-x :initarg :origin-x :initform 0 :reader scene-builder-origin-x)
@@ -306,15 +296,13 @@ inspectable cohort."
   builder)
 
 (defun scene-builder-torch (builder x y z axis side &key (u 0.0) (v 0.0))
-  "Attach a torch to SUPPORT cell X/Y/Z's outward AXIS/SIDE face.
+  "Record a torch attachment on support cell X/Y/Z's outward AXIS/SIDE face.
 
-The attachment is not voxel occupancy.  The adjacent outward cell is clearance
-only; its light source is the wick derived from the final realized frame.  U
-and V are stable normalized coordinates in the oriented face chart; zero is
-the face centre, edge values resolve onto bevel bands, and the logical square's
-corners compact continuously onto the junction domain rather than missing a
-chamfered corner.  Geometry and flame frames are resolved from the final
-surface, so the same identity survives every width."
+The attachment is not voxel occupancy. The adjacent cell is reserved clearance;
+U and V retain normalized coordinates in the oriented face chart. The current
+star mesher does not yet realize these requests into body/flame frames or wick
+light sources. Keeping authoring separate lets a future surface query supply
+those frames to the independent torch drawing."
   (check-type axis luft:axis)
   (check-type side luft:side)
   (unless (and (realp u) (<= -1 u 1) (realp v) (<= -1 v 1))

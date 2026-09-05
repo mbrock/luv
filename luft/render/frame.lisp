@@ -32,10 +32,8 @@
           (if (renderer-history-valid-p renderer) 1.0f0 0.0f0)
           (aref camera-uniform-data 31) *vulkan-temporal-history-weight*))
   (write-buffer (renderer-frame-state-camera-buffer frame) camera-uniform-data)
-  (check-type effect-time real)
-  (write-buffer
-   (renderer-frame-state-flame-effect-buffer frame)
-   (torch-flame-effect-uniform-data (coerce effect-time 'single-float))))
+  (upload-torch-frame (renderer-torches renderer)
+                      (renderer-frame-state-flame-effect-buffer frame) effect-time))
 
 (defun encode-renderer-shadows (renderer frame encoder)
   (let ((shadow-pass
@@ -58,13 +56,10 @@
          (renderer-frame-resident-bind-group
           renderer frame resident t))))
     (when (plusp (renderer-flame-instance-count renderer))
-      (set-pipeline shadow-pass
-                    (renderer-torch-body-shadow-pipeline renderer))
-      (set-bind-group shadow-pass 0
-                      (renderer-frame-torch-body-bind-group
-                       renderer frame t))
-      (draw shadow-pass (torch-body-vertex-count)
-            (renderer-flame-instance-count renderer)))
+      (encode-torch-bodies
+       (renderer-torches renderer) shadow-pass
+       (renderer-frame-torch-body-bind-group renderer frame t)
+       (renderer-flame-instance-count renderer) :shadow-p t))
     (end-pass shadow-pass))
   (prepare-texture encoder (renderer-shadow-texture renderer)
                    :texture-binding))
@@ -113,11 +108,10 @@
          pass resident
          (renderer-frame-resident-bind-group renderer frame resident nil))))
     (when (plusp (renderer-flame-instance-count renderer))
-      (set-pipeline pass (renderer-torch-body-pipeline renderer))
-      (set-bind-group pass 0
-                      (renderer-frame-torch-body-bind-group renderer frame nil))
-      (draw pass (torch-body-vertex-count)
-            (renderer-flame-instance-count renderer)))
+      (encode-torch-bodies
+       (renderer-torches renderer) pass
+       (renderer-frame-torch-body-bind-group renderer frame nil)
+       (renderer-flame-instance-count renderer)))
     (when player-p
       (encode-scene-drawing
        (renderer-player renderer) pass
@@ -233,10 +227,10 @@
                     (renderer-composite-source-bind-group renderer))
     (draw composite-pass 3)
     (when (plusp (renderer-flame-instance-count renderer))
-      (set-pipeline composite-pass (renderer-flame-pipeline renderer))
-      (set-bind-group composite-pass 0
-                      (renderer-frame-flame-bind-group renderer frame))
-      (draw composite-pass 6 (renderer-flame-instance-count renderer)))
+      (encode-torch-flames
+       (renderer-torches renderer) composite-pass
+       (renderer-frame-flame-bind-group renderer frame)
+       (renderer-flame-instance-count renderer)))
     (end-pass composite-pass))
   (prepare-texture encoder (renderer-composite-texture renderer)
                    :texture-binding))

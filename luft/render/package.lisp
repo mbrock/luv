@@ -163,6 +163,10 @@
            #:scene-drawing #:make-sky-drawing #:make-player-drawing
            #:make-scene-drawing-binding #:encode-scene-drawing
            #:release-scene-drawing
+           #:torch-drawing #:make-framed-torch-drawing
+           #:make-torch-frame-buffer #:upload-torch-frame
+           #:make-torch-body-binding #:make-torch-flame-binding
+           #:encode-torch-bodies #:encode-torch-flames #:release-torch-drawing
            #:renderer #:make-renderer #:destroy-renderer
            #:renderer-set-mesh #:renderer-set-meshes
            #:renderer-remove-mesh #:renderer-clear-meshes

@@ -271,8 +271,6 @@ appearance reads authored cells directly and needs no meshed context owners."
                (decorate-scene-meshes
                 owners scene :appearance-prepared-p t
                 :generation-scene owner-scene
-                :attachment-source-owners
-                (streaming-mesh-snapshot-resident-source-keys snapshot)
                 :request-stamp (streaming-mesh-snapshot-stamp snapshot)
                 :reusable-light-generation
                 (streaming-mesh-snapshot-reusable-light-generation snapshot)

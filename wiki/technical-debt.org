@@ -128,8 +128,9 @@ must not obscure those relationships.
 
 The remaining work is:
 
-- Extract the other renderer owners: shadows, terrain, attachments,
+- Extract the other renderer owners: shadows and terrain,
   temporal reconstruction, and presentation. Keep the frame sequence explicit.
+  Torch drawing now has an independent owner (#J98GAW).
 - Further separate source loading, residency policy, and authored edits.
   Explain source chunks, geometry owners, and neighboring inputs with a concrete
   chunk-boundary example. The pending replacement is now a separate transaction
@@ -229,6 +230,47 @@ rejected the combined root. [[lisp:luft.render::combine-scene-owner-meshes][The 
 palette and light field, carries their metadata into the root, and constructs
 its publication manifest afterward. Empty, single-chunk, and seam-crossing
 scenes are tested through the real renderer publication boundary.
+
+*** DONE Compose torch drawing across its three frame passes
+:PROPERTIES:
+:ID: J98GAW
+:END:
+
+[[file:../luft/render/torch-drawing.lisp][Torch drawing]] owns the canonical body geometry, body/shadow/flame programs,
+layouts, and depth sampler. Publications still own the shared instance data;
+presentation slots own effect uploads; target generations own their depth
+bindings. The renderer invokes three operations in frame order and releases
+the component after those borrowed bindings. Its slots fell from 57 to 46.
+
+=make-renderer= and =start-viewer= accept a replaceable =:torch-factory=;
+=nil= omits the program and effect uploads. Refresh obtains the composition
+choices from one =renderer-component-options= operation instead of enumerating
+every factory at each rebuild call site.
+
+The former 1,310-line flame file is now [[file:../luft/render/torch-frame.lisp][frame/effect ABI]], [[file:../luft/render/torch-body.lisp][body geometry]],
+[[file:../luft/render/torch-reference.lisp][CPU numerical references]], and [[file:../luft/render/torch-shaders.lisp][shaders]]. The renderer-wide shader manifest
+has [[file:../luft/render/shader-manifest.lisp][its own home]]. No shader arithmetic changed: all 19 production SPIR-V
+outputs match the previous build byte for byte. Allocation-prefix rollback,
+release retry, omission, three-pass drawing, and resize binding tests cover the
+component. A Vulkan capture uses explicit upright and wall-mounted frames.
+
+*** DONE State the missing star-surface attachment capability directly
+:PROPERTIES:
+:ID: 5G9KEN
+:END:
+
+The old decoration path tested whether star word arrays were non-nil, which
+was always true for the current mesh type, and skipped torch realization.
+Behind the skipped branch was a call to an exported but nonexistent surface
+attachment resolver. That dead path, its intermediate frame record, and the
+undefined export are removed. Mesh finalization and the authoring docstring
+now say exactly what happens: torch requests remain authored data, but star
+meshes do not yet turn them into positioned bodies, flames, or wick light.
+
+The working GPU drawing (#J98GAW) consumes already-positioned frames. Restoring
+world torches still needs a real star-surface query and coherent attachment/light
+publication; this refactoring does not supply that missing geometry operation.
+A regression check keeps the current authoring/finalization behavior explicit.
 
 * 2. McCLIM implements one open command vocabulary four times
 :PROPERTIES:

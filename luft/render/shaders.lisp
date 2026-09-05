@@ -511,53 +511,6 @@ for completely static geometry."
     (set-output motion-output
                 (mesh-temporal-motion previous-clip current-clip))))
 
-(define-live-shader torch-body-fragment-specification
-    (:stage :fragment
-     :inputs ((world-position :vec3 :location 0
-                              :quantity quantities:world-position
-                              :unit quantities:cell)
-              (mesh-normal :vec3 :location 1 :interpolation :flat
-                           :quantity quantities:world-orientation :unit :one)
-              (current-clip :vec4 :location 4)
-              (previous-clip :vec4 :location 5)
-              (shadow-sample :vec3 :location 6
-                             :quantity quantities:shadow-coordinate :unit :one)
-              (voxel-light :vec3 :location 9))
-     :outputs ((color-output :vec4 :location 0)
-               (motion-output :vec2 :location 1))
-     :resources ((camera-state :uniform-block :binding 2
-                  :members #.(scene-uniform-prefix 23))
-                 (shadow-map :depth-texture-2d :binding 4)
-                 (shadow-sampler :sampler :binding 5)))
-  (let* ((normal (normalize (representation mesh-normal)))
-         (sun (representation (swizzle sun-vector :xyz)))
-         (sun-color (representation (swizzle sun-color-vector :xyz)))
-         (sky (representation (swizzle sky-color-vector :xyz)))
-         (ground (representation (swizzle ground-color-vector :xyz)))
-         (facing (max 0.0 (dot normal sun)))
-         (visibility
-           (soft-shadow-visibility
-            shadow-map shadow-sampler shadow-sample normal sun
-            (representation shadow-control)))
-         (upness (swizzle normal :z))
-         (sky-weight (+ 0.5 (* 0.5 upness)))
-         (ambient (+ (* ground (- 1.0 sky-weight)) (* sky sky-weight)))
-         (bronze (vec3 0.47 0.17 0.04))
-         (local-light (* 0.45 (* voxel-light voxel-light)))
-         (radiance
-           (* bronze
-              (+ (* ambient 0.72)
-                 (* sun-color (* visibility facing))
-                 local-light)))
-         (camera-delta
-           (representation
-            (- world-position (swizzle camera-position :xyz))))
-         (distance (sqrt (dot camera-delta camera-delta)))
-         (fog (smoothstep 165.0 300.0 distance)))
-    (set-output color-output (vec4 (mix radiance sky fog) 1.0))
-    (set-output motion-output
-                (mesh-temporal-motion previous-clip current-clip))))
-
 (define-live-shader shadow-vertex-specification
     (:stage :mesh
      :workgroup-size (32 1 1)
@@ -1103,3 +1056,12 @@ for completely static geometry."
     (set-output color-output
                 (vec4 (mix (representation presented) cross-color crosshair)
                       1.0))))
+
+(define-live-shader torch-flame-composite-copy-fragment-specification
+    (:stage :fragment
+     :inputs ((ndc :vec2 :location 0))
+     :outputs ((color-output :vec4 :location 0))
+     :resources ((scene :texture-2d :binding 0 :sample-transfer :identity)
+                 (scene-sampler :sampler :binding 1)))
+  (let* ((uv (+ (* ndc 0.5) (vec2 0.5 0.5))))
+    (set-output color-output (sample scene scene-sampler uv))))
