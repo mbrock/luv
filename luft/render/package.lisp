@@ -156,7 +156,11 @@
            #:make-render-mesh
            #:make-whole-domain-diagnostic-mesh
            #:scene-builder-torch
-           #:renderer
+           #:exposure-control
+           #:make-fixed-exposure #:make-automatic-exposure
+           #:exposure-value #:advance-exposure
+           #:make-exposure-binding #:encode-exposure #:release-exposure
+           #:renderer #:make-renderer #:destroy-renderer
            #:renderer-set-mesh #:renderer-set-meshes
            #:renderer-remove-mesh #:renderer-clear-meshes
            #:streaming-scene #:make-streaming-scene

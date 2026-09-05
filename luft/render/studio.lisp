@@ -749,7 +749,7 @@ before the operation boundary, or it would encode through resources which the
                         (scene-player-p (viewer-source viewer))))
          (exposure
            (or (viewer-fixed-exposure viewer)
-               (maintain-renderer-exposure renderer))))
+               (advance-exposure (renderer-exposure-control renderer)))))
     (unless (frame-views-continuous-p (renderer-previous-view renderer) view)
       (setf (renderer-history-valid-p renderer) nil))
     ;; Frame-boundary state is now published. Encoding below only replays
@@ -1597,26 +1597,13 @@ before the operation boundary, or it would encode through resources which the
   (declare (ignore viewer canvas event))
   nil)
 
-(defun normalized-viewer-fixed-exposure (value)
-  "Return VALUE as a positive finite single float, or NIL for adaptation."
-  (when value
-    (unless (realp value)
-      (error "A fixed viewer exposure must be a positive finite real, not ~S."
-             value))
-    (let ((single (coerce value 'single-float)))
-      (unless (and (> single 0.0f0)
-                   (= single single)
-                   (<= single most-positive-single-float))
-        (error "A fixed viewer exposure must be positive and finite, not ~S."
-               value))
-      single)))
-
 (defun start-viewer (&key
                        (solid (make-authored-world-streaming-scene))
                        (bevel-width 1)
                        surface-mesh
                        surface-generation
                        fixed-exposure
+                       (exposure-factory 'make-automatic-exposure)
                        (camera (make-fly-camera :yaw 0.35))
                        (title
                          "LUFT — click to play · WASD move · Space jump · L/R edit · 1–4 material · F5 camera · Esc release")
@@ -1631,9 +1618,12 @@ BEVEL-WIDTH remains a compatibility input for inspection. SURFACE-MESH
 supplies an already constructed diagnostic mesh
 while retaining SOLID as the semantic inspection source. SURFACE-GENERATION,
 when supplied with that mesh, preserves its exact immutable realized-light
-cohort. FIXED-EXPOSURE disables temporal adaptation for reproducible evidence."
+cohort. EXPOSURE-FACTORY receives the device and constructs a fresh exposure
+control. FIXED-EXPOSURE selects a constant control instead, omitting GPU
+measurement entirely for reproducible evidence."
   (check-type solid scene)
-  (setf fixed-exposure (normalized-viewer-fixed-exposure fixed-exposure))
+  (when fixed-exposure
+    (setf fixed-exposure (checked-exposure-value fixed-exposure)))
   (when (and surface-generation (null surface-mesh))
     (error "SURFACE-GENERATION is only meaningful with SURFACE-MESH."))
   (when surface-mesh
@@ -1673,7 +1663,13 @@ cohort. FIXED-EXPOSURE disables temporal adaptation for reproducible evidence."
                   (multiple-value-bind
                       (created source-values before after)
                       (make-tracked-renderer
-                       device* (canvas-format context) (canvas-extent context))
+                       device* (canvas-format context) (canvas-extent context)
+                       :exposure-factory
+                       (if fixed-exposure
+                           (lambda (device)
+                             (declare (ignore device))
+                             (make-fixed-exposure fixed-exposure))
+                           exposure-factory))
                     ;; If source moved during construction, BEFORE deliberately
                     ;; remains the installed attempt: the first frame sees the
                     ;; newer AFTER revision and transactionally rebuilds.
@@ -2438,7 +2434,8 @@ it makes no claim about which earlier render pass caused a discontinuity."
                               (make-tracked-renderer
                                (viewer-device viewer)
                                (canvas-format context)
-                               (canvas-extent context))
+                               (canvas-extent context)
+                               :exposure-factory (renderer-exposure-factory old))
                             (unless (= before after)
                               (when created (destroy-renderer created))
                               (error 'renderer-source-changed-during-build

@@ -21,12 +21,6 @@
 NIL lets the live viewer pass its monotonic presentation clock.  Captures may
 dynamically bind a real value to reproduce the exact same flame field.")
 
-(defconstant +exposure-probe-width+ 32)
-(defconstant +exposure-probe-height+ 16)
-(defconstant +exposure-probe-buffer-count+ 3)
-(defconstant +exposure-probe-byte-count+
-  (* 4 +exposure-probe-width+ +exposure-probe-height+))
-
 (defconstant +render-template-vertex-count+ 6)
 
 (defconstant +star-meshlet-triangle-capacity+ 25)
@@ -224,7 +218,7 @@ attachment resource describe exactly this table."
                   resolved-texture resolved-view history-texture history-view
                   temporal-bind-group composite-texture composite-view
                   composite-source-bind-group present-bind-group
-                  exposure-probe-bind-group))
+                  exposure-binding))
              (:copier nil))
   "One immutable output-size-dependent texture/view/resource cohort."
   (extent nil :type list :read-only t)
@@ -251,7 +245,7 @@ attachment resource describe exactly this table."
   (composite-view nil :read-only t)
   (composite-source-bind-group nil :read-only t)
   (present-bind-group nil :read-only t)
-  (exposure-probe-bind-group nil :read-only t))
+  (exposure-binding nil :read-only t))
 
 (defstruct (renderer-flame-target-join
              (:constructor %make-renderer-flame-target-join (bind-group))
@@ -308,7 +302,7 @@ ambiguously co-owned, or retired by a population rollback."
 (define-renderer-target-resource-reader composite-view)
 (define-renderer-target-resource-reader composite-source-bind-group)
 (define-renderer-target-resource-reader present-bind-group)
-(define-renderer-target-resource-reader exposure-probe-bind-group)
+(define-renderer-target-resource-reader exposure-binding)
 
 (defun renderer-target-generation-flame-bind-group (generation)
   (renderer-flame-target-join-bind-group
@@ -469,23 +463,8 @@ ambiguously co-owned, or retired by a population rollback."
    (present-fragment-module :initform nil
                             :accessor renderer-present-fragment-module)
    (present-pipeline :initform nil :accessor renderer-present-pipeline)
-   (exposure-probe-layout :initform nil
-                          :accessor renderer-exposure-probe-layout)
-   (exposure-probe-texture :initform nil
-                           :accessor renderer-exposure-probe-texture)
-   (exposure-probe-view :initform nil
-                        :accessor renderer-exposure-probe-view)
-   (exposure-probe-fragment-module
-    :initform nil :accessor renderer-exposure-probe-fragment-module)
-   (exposure-probe-pipeline :initform nil
-                            :accessor renderer-exposure-probe-pipeline)
-   (exposure-probe-buffers :initform #()
-                           :accessor renderer-exposure-probe-buffers)
-   (exposure-probe-submitted :initform (make-array 0 :element-type 'bit)
-                             :accessor renderer-exposure-probe-submitted)
-   (exposure-probe-frames :initform #()
-                          :accessor renderer-exposure-probe-frames)
-   (exposure :initform 1.0f0 :accessor renderer-exposure)
+   (exposure-control :initarg :exposure-control :reader renderer-exposure-control)
+   (exposure-factory :initarg :exposure-factory :reader renderer-exposure-factory)
    (sampler :initform nil :accessor renderer-sampler)
    (frame-index :initform 0 :accessor renderer-frame-index)
    (previous-view :initform nil :accessor renderer-previous-view)
@@ -768,8 +747,11 @@ ambiguously co-owned, or retired by a population rollback."
   (renderer-target-generation-present-bind-group
    (renderer-target-generation renderer)))
 
-(defun renderer-exposure-probe-bind-group (renderer)
-  (renderer-target-generation-exposure-probe-bind-group
+(defun renderer-exposure (renderer)
+  (exposure-value (renderer-exposure-control renderer)))
+
+(defun renderer-exposure-binding (renderer)
+  (renderer-target-generation-exposure-binding
    (renderer-target-generation renderer)))
 
 (defun renderer-mesh-slots (renderer)
@@ -939,7 +921,7 @@ on rollback.  No target texture is duplicated for an ordinary residency edit."
   (dolist (resource
             (list
              (renderer-target-resources-present-bind-group resources)
-             (renderer-target-resources-exposure-probe-bind-group resources)
+             (renderer-target-resources-exposure-binding resources)
              (renderer-target-resources-composite-source-bind-group resources)
              (renderer-target-resources-temporal-bind-group resources)
              (renderer-target-resources-temporal-scaler resources)
@@ -1011,14 +993,14 @@ subpixel samples but does not claim a stable reconstruction-upscaling filter."
          motion-msaa motion-msaa-view motion motion-view
          resolved resolved-view history history-view temporal-group
          composite composite-view
-         composite-source-group flame-group present-group exposure-probe-group
+         composite-source-group flame-group present-group exposure-group
          resource-cohort flame-join generation
          (completed-p nil))
     (labels ((usage (base extra)
                (remove-duplicates (append base extra)))
              (cleanup-locals ()
                (dolist (resource
-                         (list present-group exposure-probe-group flame-group
+                         (list present-group exposure-group flame-group
                                composite-source-group temporal-group scaler
                                composite-view history-view resolved-view
                                motion-view motion-msaa-view
@@ -1190,16 +1172,10 @@ subpixel samples but does not claim a stable reconstruction-upscaling filter."
                          (:binding 2 :resource ,depth-view)
                          (:binding 3
                           :resource ,(renderer-camera-buffer renderer)))))
-                     exposure-probe-group
-                     (create
-                      device
-                      (make-bind-group-descriptor
-                       :label "luft exposure probe source"
-                       :layout (renderer-exposure-probe-layout renderer)
-                       :entries
-                       `((:binding 0 :resource ,composite-view)
-                         (:binding 1
-                          :resource ,(renderer-sampler renderer)))))))
+                     exposure-group
+                     (make-exposure-binding
+                      (renderer-exposure-control renderer)
+                      device composite-view (renderer-sampler renderer))))
              (setf resource-cohort
                    (%make-renderer-target-resources
                     :extent extent :render-extent render-extent
@@ -1219,7 +1195,7 @@ subpixel samples but does not claim a stable reconstruction-upscaling filter."
                     :composite-texture composite :composite-view composite-view
                     :composite-source-bind-group composite-source-group
                     :present-bind-group present-group
-                    :exposure-probe-bind-group exposure-probe-group)
+                    :exposure-binding exposure-group)
                    flame-join
                    (%make-renderer-flame-target-join flame-group)
                    generation
@@ -1900,8 +1876,16 @@ cohort untouched. No frame can interleave with the owner-thread publication."
   (renderer-update-meshes renderer nil (copy-list (renderer-slot-order renderer)))
   (values))
 
-(defun make-renderer (device color-format extent)
-  "Create the shared LUFT pipeline state; meshes arrive via RENDERER-SET-MESH."
+(defun make-renderer (device color-format extent
+                      &key (exposure-factory 'make-automatic-exposure))
+  "Compose the GPU renderer, including a separately owned exposure control.
+
+EXPOSURE-FACTORY is a function designator receiving DEVICE and returning a
+fresh EXPOSURE-CONTROL. Its default names a function so live redefinition is
+observed by the next rebuild. The renderer owns that value and calls its
+interface; target generations own only the bindings to their HDR images.
+Shader refresh preserves the factory.
+Meshes arrive separately through RENDERER-SET-MESH."
   (let* ((temporal-kind (temporal-resolve-kind device))
          (temporal-p (not (null temporal-kind)))
          (target-formats (if temporal-p
@@ -1929,10 +1913,7 @@ cohort untouched. No frame can interleave with the owner-thread publication."
          present-fragment-module present-pipeline sampler
          temporal-layout temporal-fragment-module temporal-pipeline
          sky-layout sky-bind-group sky-fragment-module sky-pipeline
-         exposure-probe-layout exposure-probe-bind-group
-         exposure-probe-texture exposure-probe-view
-         exposure-probe-fragment-module exposure-probe-pipeline
-         exposure-probe-buffers
+         exposure-control
          renderer
          (completed-p nil))
     (unwind-protect
@@ -2262,35 +2243,7 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                          (make-bind-group-descriptor
                           :label "luft HDR sky"
                           :layout sky-layout
-                          :entries `((:binding 0 :resource ,camera-buffer))))
-                 exposure-probe-layout
-                 (create device
-                         (make-bind-group-layout-descriptor
-                          :label "luft exposure probe layout"
-                          :entries '((:binding 0 :type :texture)
-                                     (:binding 1 :type :sampler))))
-                 exposure-probe-texture
-                 (create device
-                         (make-texture-descriptor
-                          :label "luft exposure log luminance"
-                          :size (list +exposure-probe-width+
-                                      +exposure-probe-height+)
-                          :dimensions :2d :format :rgba8-unorm
-                          :usage '(:render-attachment :copy-src)))
-                 exposure-probe-view
-                 (create device
-                         (make-texture-view-descriptor
-                          :texture exposure-probe-texture))
-                 exposure-probe-buffers
-                 (coerce
-                  (loop repeat +exposure-probe-buffer-count+
-                        collect
-                        (create device
-                                (make-buffer-descriptor
-                                 :label "luft exposure readback"
-                                 :size +exposure-probe-byte-count+
-                                 :usage '(:copy-dst))))
-                  'vector))
+                          :entries `((:binding 0 :resource ,camera-buffer)))))
            (setf present-layout
                  (create device
                          (make-bind-group-layout-descriptor
@@ -2363,23 +2316,7 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                           :depth-stencil
                           '(:format :depth32-float
                             :depth-write-enabled nil
-                            :depth-compare :always)))
-                 exposure-probe-fragment-module
-                 (create device
-                         (make-shader-module-descriptor
-                          :label "luft exposure probe fragment"
-                          :language :mathematical
-                          :code
-                          (shaders:exposure-probe-fragment-specification)))
-                 exposure-probe-pipeline
-                 (create device
-                         (make-render-pipeline-descriptor
-                          :label "luft exposure probe pipeline"
-                          :layout exposure-probe-layout
-                          :vertex `(:module ,present-vertex-module)
-                          :fragment `(:module ,exposure-probe-fragment-module
-                                      :targets ((:format :rgba8-unorm)))
-                          :primitive '(:topology :triangle-list))))
+                            :depth-compare :always))))
            (when (eq temporal-kind :shader)
              (setf temporal-layout
                    (create
@@ -2408,8 +2345,12 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                      :fragment `(:module ,temporal-fragment-module
                                  :targets ((:format :rgba16-float)))
                      :primitive '(:topology :triangle-list)))))
+           (setf exposure-control (funcall exposure-factory device))
+           (check-type exposure-control exposure-control)
            (setf renderer
                  (make-instance 'renderer
+                                :exposure-control exposure-control
+                                :exposure-factory exposure-factory
                                 :device device
                                 :color-format color-format
                                 :temporal-p temporal-p
@@ -2480,35 +2421,18 @@ cohort untouched. No frame can interleave with the owner-thread publication."
            (setf (renderer-sky-layout renderer) sky-layout
                  (renderer-sky-bind-group renderer) sky-bind-group
                  (renderer-sky-fragment-module renderer) sky-fragment-module
-                 (renderer-sky-pipeline renderer) sky-pipeline
-                 (renderer-exposure-probe-layout renderer)
-                 exposure-probe-layout
-                 (renderer-exposure-probe-texture renderer)
-                 exposure-probe-texture
-                 (renderer-exposure-probe-view renderer) exposure-probe-view
-                 (renderer-exposure-probe-fragment-module renderer)
-                 exposure-probe-fragment-module
-                 (renderer-exposure-probe-pipeline renderer)
-                 exposure-probe-pipeline
-                 (renderer-exposure-probe-buffers renderer)
-                 exposure-probe-buffers
-                 (renderer-exposure-probe-submitted renderer)
-                 (make-array +exposure-probe-buffer-count+
-                             :element-type 'bit :initial-element 0)
-                 (renderer-exposure-probe-frames renderer)
-                 (make-array +exposure-probe-buffer-count+
-                             :element-type '(unsigned-byte 64)
-                             :initial-element 0))
+                 (renderer-sky-pipeline renderer) sky-pipeline)
            (create-frame-targets renderer extent)
            (setf completed-p t)
            renderer)
       (unless completed-p
         (if renderer
             (destroy-renderer renderer)
-            (dolist (resource
-                      (append
-                       (and exposure-probe-buffers
-                            (coerce exposure-probe-buffers 'list))
+            (progn
+              (when exposure-control
+                (with-release-warnings
+                  (releasing :exposure (release-exposure exposure-control))))
+              (dolist (resource
                        (list temporal-pipeline temporal-fragment-module
                                         temporal-layout
                                         present-pipeline present-fragment-module
@@ -2518,11 +2442,7 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                                         flame-depth-sampler composite-layout
                                         present-bind-group sky-pipeline
                                         sky-fragment-module sky-bind-group
-                                        sky-layout exposure-probe-bind-group
-                                        exposure-probe-pipeline
-                                        exposure-probe-fragment-module
-                                        exposure-probe-view exposure-probe-texture
-                                        exposure-probe-layout
+                                        sky-layout
                                         present-layout lattice-point-pipeline
                                         lattice-point-fragment-module
                                         lattice-point-vertex-module
@@ -2548,8 +2468,8 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                                         shadow-texture
                                         pipeline fragment-module
                                         vertex-module layout star-template-buffer
-                                        camera-buffer)))
-              (when resource (ignore-errors (destroy resource)))))))))
+                                        camera-buffer))
+                (when resource (ignore-errors (destroy resource))))))))))
 
 (defun draw-resident-opaque-population (pass resident bind-group)
   "Dispatch one direct mesh workgroup per active lattice site."
@@ -2560,449 +2480,115 @@ cohort untouched. No frame can interleave with the owner-thread publication."
       (set-bind-group pass 0 bind-group)
       (draw-mesh-workgroups pass workgroup-count))))
 
-(defun exposure-probe-average-luminance (bytes)
-  "Decode the geometric-mean luminance encoded by the 32x16 GPU probe."
-  (unless (= (length bytes) +exposure-probe-byte-count+)
-    (error "LUFT exposure probe returned ~D bytes, expected ~D."
-           (length bytes) +exposure-probe-byte-count+))
-  (let ((sum 0d0))
-    (loop for index from 0 below (length bytes) by 4
-          do (incf sum (aref bytes index)))
-    (let* ((count (* +exposure-probe-width+ +exposure-probe-height+))
-           (encoded (/ sum (* count 255d0)))
-           (average-log (- (* encoded 11.98293d0) 9.21034d0)))
-      (exp average-log))))
-
-(defun adapted-exposure (current average-luminance)
-  "Take one Moppe-style asymmetric eye-adaptation step."
-  (let* ((target (max 0.55f0
-                      (min 1.9f0
-                           (/ 0.16f0 (coerce average-luminance
-                                            'single-float)))))
-         (rate (if (< target current) 0.10f0 0.04f0)))
-    (+ current (* (- target current) rate))))
-
-(defun maintain-renderer-exposure (renderer)
-  "Consume the oldest completed probe without waiting for newer GPU work."
-  (let ((buffers (renderer-exposure-probe-buffers renderer))
-        (submitted (renderer-exposure-probe-submitted renderer))
-        (frames (renderer-exposure-probe-frames renderer))
-        (oldest nil))
-    ;; A live DEFCLASS update can add this chronology lane to an existing
-    ;; renderer between frames. Preserve its in-flight bits and give those
-    ;; older probes one common age until the next transactional refresh.
-    (unless (= (length frames) (length buffers))
-      (setf frames
-            (make-array (length buffers) :element-type '(unsigned-byte 64)
-                                         :initial-element
-                                         (renderer-frame-index renderer))
-            (renderer-exposure-probe-frames renderer) frames))
-    (dotimes (index (length buffers))
-      (when (and (= 1 (aref submitted index))
-                 (or (null oldest)
-                     (< (aref frames index) (aref frames oldest))))
-        (setf oldest index)))
-    (when oldest
-      (multiple-value-bind (bytes ready-p)
-          (read-buffer-if-ready (aref buffers oldest))
-        (when ready-p
-          ;; One adaptation step per rendered frame keeps a CPU pause from
-          ;; collapsing several delayed measurements into one visible jump.
-          (setf (aref submitted oldest) 0
-                (renderer-exposure renderer)
-                (adapted-exposure
-                 (renderer-exposure renderer)
-                 (exposure-probe-average-luminance bytes)))))))
-  (renderer-exposure renderer))
-
-(defun encode-exposure-probe (renderer encoder)
-  "Reduce committed post-temporal HDR radiance and queue one readback."
-  (let* ((index (mod (renderer-frame-index renderer)
-                     +exposure-probe-buffer-count+))
-         (submitted (renderer-exposure-probe-submitted renderer)))
-    ;; If the GPU is more than three frames behind, keep rendering and retain
-    ;; the last exposure instead of overwriting an in-flight measurement.
-    (when (zerop (aref submitted index))
-      (let ((pass
-              (begin-render-pass
-               encoder
-               (make-render-pass-descriptor
-                :label "luft exposure probe"
-                :color-attachments
-                `((:view ,(renderer-exposure-probe-view renderer)
-                   :load-op :clear :store-op :store
-                   :clear-value #(0.0 0.0 0.0 1.0)))))))
-        (set-pipeline pass (renderer-exposure-probe-pipeline renderer))
-        (set-bind-group pass 0
-                        (renderer-exposure-probe-bind-group renderer))
-        (draw pass 3)
-        (end-pass pass))
-      (encode encoder
-              (make-gpu-copy-texture-to-buffer-command
-               :source (renderer-exposure-probe-texture renderer)
-               :destination
-               (aref (renderer-exposure-probe-buffers renderer) index)))
-      (setf (aref submitted index) 1
-            (aref (renderer-exposure-probe-frames renderer) index)
-            (renderer-frame-index renderer)))))
-
-(defun encode-renderer-frame
-    (renderer frame encoder surface-texture extent camera-uniform-data
-     &key jitter view player-p construction-p overlay-encoder
-       (effect-time
-         (or *flame-time* (/ (renderer-frame-index renderer) 60.0))))
-  (ensure-renderer-extent renderer extent)
-  (when (renderer-shader-temporal-p renderer)
-    ;; These W components are padding to every geometry consumer.  The Vulkan
-    ;; resolve reads them as its per-frame validity and accumulation weight.
-    (setf (aref camera-uniform-data 27)
-          (if (renderer-history-valid-p renderer) 1.0f0 0.0f0)
-          (aref camera-uniform-data 31) *vulkan-temporal-history-weight*))
-  (write-buffer (renderer-frame-state-camera-buffer frame) camera-uniform-data)
-  (check-type effect-time real)
-  (write-buffer
-   (renderer-frame-state-flame-effect-buffer frame)
-   (torch-flame-effect-uniform-data (coerce effect-time 'single-float)))
-  (let ((shadow-pass
-            (begin-render-pass
-             encoder
-             (make-render-pass-descriptor
-              :label "luft sun shadow"
-              :color-attachments nil
-              :depth-stencil-attachment
-              `(:view ,(renderer-shadow-view renderer)
-                :depth-load-op :clear :depth-store-op :store
-                :depth-clear-value 1.0)))))
-      (set-pipeline shadow-pass (renderer-shadow-pipeline renderer))
-      (dolist (key (renderer-slot-order renderer))
-        (let ((resident
-                (mesh-slot-resident
-                 (gethash key (renderer-mesh-slots renderer)))))
-          (draw-resident-opaque-population
-           shadow-pass resident
-           (renderer-frame-resident-bind-group
-            renderer frame resident t))))
-      (when (plusp (renderer-flame-instance-count renderer))
-        (set-pipeline shadow-pass
-                      (renderer-torch-body-shadow-pipeline renderer))
-        (set-bind-group shadow-pass 0
-                        (renderer-frame-torch-body-bind-group
-                         renderer frame t))
-        (draw shadow-pass (torch-body-vertex-count)
-              (renderer-flame-instance-count renderer)))
-      (end-pass shadow-pass))
-  (prepare-texture encoder (renderer-shadow-texture renderer)
-                   :texture-binding)
-  (let* ((temporal-p (renderer-temporal-p renderer))
-         (color-view (renderer-scene-msaa-view renderer))
-         (color-attachments
-           (if temporal-p
-               `((:view ,color-view
-                  :resolve-view ,(renderer-scene-view renderer)
-                  :load-op :clear :store-op :store
-                  :clear-value #(0.0 0.0 0.0 1.0))
-                 (:view ,(renderer-motion-msaa-view renderer)
-                  :resolve-view ,(renderer-motion-view renderer)
-                  :load-op :clear :store-op :store
-                  :clear-value #(0.0 0.0 0.0 0.0)))
-               `((:view ,color-view
-                  :resolve-view ,(renderer-scene-view renderer)
-                  :load-op :clear :store-op :store
-                  :clear-value #(0.0 0.0 0.0 1.0)))))
-         (pass
-           (begin-render-pass
-            encoder
-            (make-render-pass-descriptor
-             :label "luft site streams"
-             :color-attachments color-attachments
-             :depth-stencil-attachment
-             `(:view ,(renderer-depth-msaa-view renderer)
-               :resolve-view ,(renderer-depth-view renderer)
-               :depth-load-op :clear
-               :depth-store-op :store
-               :depth-clear-value 1.0)))))
-    ;; The atmosphere is scene-linear world radiance: geometry overwrites it,
-    ;; the selected temporal implementation reconstructs it, and the exposure
-    ;; probe meters the same pixels presentation will grade.
-    (set-pipeline pass (renderer-sky-pipeline renderer))
-    (set-bind-group pass 0 (renderer-frame-sky-bind-group renderer frame))
-    (draw pass 3)
-    (set-pipeline pass (renderer-pipeline renderer))
-    (dolist (key (renderer-slot-order renderer))
-      (let ((resident
-              (mesh-slot-resident
-               (gethash key (renderer-mesh-slots renderer)))))
-        (draw-resident-opaque-population
-         pass resident
-         (renderer-frame-resident-bind-group renderer frame resident nil))))
-    (when (plusp (renderer-flame-instance-count renderer))
-      (set-pipeline pass (renderer-torch-body-pipeline renderer))
-      (set-bind-group pass 0
-                      (renderer-frame-torch-body-bind-group renderer frame nil))
-      (draw pass (torch-body-vertex-count)
-            (renderer-flame-instance-count renderer)))
-    (when player-p
-      (set-pipeline pass (renderer-player-sdf-pipeline renderer))
-      (set-bind-group pass 0 (renderer-frame-player-bind-group renderer frame))
-      (draw pass 6 1))
-    (when construction-p
-      ;; Populate at most one diagnostic slot per frame. The overlay is a
-      ;; debugging view, so progressive readiness is preferable to freezing
-      ;; one frame while every resident chunk is scanned.
-      (loop for key in (renderer-slot-order renderer)
-            for slot = (gethash key (renderer-mesh-slots renderer))
-            unless (mesh-slot-lattice-point-buffer slot)
-              do (ensure-mesh-slot-lattice-points renderer slot)
-                 (return))
-      (set-pipeline pass (renderer-lattice-point-pipeline renderer))
-      (dolist (key (renderer-slot-order renderer))
-        (let ((slot (gethash key (renderer-mesh-slots renderer))))
-          (when (plusp (mesh-slot-lattice-point-count slot))
-            (set-bind-group pass 0
-                            (renderer-frame-lattice-bind-group
-                             renderer frame slot))
-            (draw pass 6 (mesh-slot-lattice-point-count slot))))))
-    (when (renderer-metalfx-temporal-p renderer)
-      (signal-temporal-scaler-inputs pass
-                                     (renderer-temporal-scaler renderer)))
-    (end-pass pass)
-    (when (renderer-metalfx-temporal-p renderer)
-      (let ((scaler (renderer-temporal-scaler renderer))
-            (history-valid-p (renderer-history-valid-p renderer))
-            (render-extent (renderer-render-extent renderer)))
-        (encode-temporal-scale
-         encoder scaler
-         (renderer-scene-texture renderer)
-         (renderer-depth-texture renderer)
-         (renderer-motion-texture renderer)
-         (renderer-resolved-texture renderer)
-         ;; JITTER is clip-space at the internal scene resolution.  MetalFX
-         ;; takes the same offset in input pixels—not output pixels—so using
-         ;; EXTENT here overstates it whenever temporal upscaling is active.
-         (vector (* 0.5 (first render-extent) (aref jitter 0))
-                 (* 0.5 (second render-extent) (aref jitter 1)))
-         (not history-valid-p))
-        (setf (renderer-previous-view renderer) view
-              (renderer-history-valid-p renderer) t
-              (renderer-history-used-p renderer) history-valid-p)))
-    (when (renderer-shader-temporal-p renderer)
-      (let ((history-valid-p (renderer-history-valid-p renderer)))
-        (prepare-texture encoder (renderer-scene-texture renderer)
-                         :texture-binding)
-        (prepare-texture encoder (renderer-motion-texture renderer)
-                         :texture-binding)
-        (unless history-valid-p
-          (encode encoder
-                  (make-gpu-clear-texture-command
-                   :texture (renderer-history-texture renderer)
-                   :color #(0.0 0.0 0.0 0.0))))
-        (prepare-texture encoder (renderer-history-texture renderer)
-                         :texture-binding)
-        (let ((resolve-pass
-                (begin-render-pass
-                 encoder
-                 (make-render-pass-descriptor
-                  :label "luft temporal resolve"
-                  :color-attachments
-                  `((:view ,(renderer-resolved-view renderer)
-                     :load-op :clear :store-op :store
-                     :clear-value #(0.0 0.0 0.0 1.0)))))))
-          (set-pipeline resolve-pass (renderer-temporal-pipeline renderer))
-          (set-bind-group resolve-pass 0
-                          (renderer-frame-temporal-bind-group renderer frame))
-          (draw resolve-pass 3)
-          (end-pass resolve-pass))
-        ;; One explicit full-resolution history keeps the extent cohort small:
-        ;; resolve never reads and writes the same image, and the completed
-        ;; result becomes next frame's input only after the render pass ends.
-        (encode encoder
-                (make-gpu-copy-texture-command
-                 :source (renderer-resolved-texture renderer)
-                 :destination (renderer-history-texture renderer)))
-        (prepare-texture encoder (renderer-resolved-texture renderer)
-                         :texture-binding)
-        (prepare-texture encoder (renderer-history-texture renderer)
-                         :texture-binding)
-        (setf (renderer-previous-view renderer) view
-              (renderer-history-valid-p renderer) t
-              (renderer-history-used-p renderer) history-valid-p)))
-    (unless temporal-p
-      (prepare-texture encoder (renderer-scene-texture renderer)
-                       :texture-binding))
-    ;; Depth is read only after both the scene pass and the temporal encoder
-    ;; have consumed it.  It is deliberately not attached to the following
-    ;; pass, so sampling it while writing the distinct HDR composite cannot
-    ;; form a Metal or Vulkan read/write texture hazard.
-    (prepare-texture encoder (renderer-depth-texture renderer)
-                     :texture-binding)
-    (let ((composite-pass
-            (begin-render-pass
-             encoder
-             (make-render-pass-descriptor
-              :label "luft post-temporal HDR flame composite"
-              :color-attachments
-              `((:view ,(renderer-composite-view renderer)
-                 :load-op :clear :store-op :store
-                 :clear-value #(0.0 0.0 0.0 1.0)))))))
-      (when (renderer-metalfx-temporal-p renderer)
-        (wait-temporal-scaler-output
-         composite-pass (renderer-temporal-scaler renderer)))
-      (set-pipeline composite-pass (renderer-composite-pipeline renderer))
-      (set-bind-group composite-pass 0
-                      (renderer-composite-source-bind-group renderer))
-      (draw composite-pass 3)
-      (when (plusp (renderer-flame-instance-count renderer))
-        (set-pipeline composite-pass (renderer-flame-pipeline renderer))
-        (set-bind-group composite-pass 0
-                        (renderer-frame-flame-bind-group renderer frame))
-        (draw composite-pass 6 (renderer-flame-instance-count renderer)))
-      (end-pass composite-pass))
-    (prepare-texture encoder (renderer-composite-texture renderer)
-                     :texture-binding)
-    (encode-exposure-probe renderer encoder)
-    (let ((present-pass
-            (begin-render-pass
-             encoder
-             (make-render-pass-descriptor
-              :label "luft HDR presentation"
-              :color-attachments
-              `((:view ,surface-texture :load-op :clear :store-op :store
-                 :clear-value #(0.0 0.0 0.0 1.0)))))))
-      (set-pipeline present-pass (renderer-present-pipeline renderer))
-      (set-bind-group present-pass 0
-                      (renderer-frame-present-bind-group renderer frame))
-      (draw present-pass 3)
-      ;; Both MetalFX and the direct HDR path publish here.  The atelier
-      ;; overlay remains later than tone mapping and glow in either case.
-      (when overlay-encoder
-        (funcall overlay-encoder present-pass))
-      (end-pass present-pass))
-    ;; Character motion is presentation time, not a MetalFX capability.
-    (incf (renderer-frame-index renderer)))
-  renderer)
-
 (defun destroy-renderer (renderer)
-  (destroy-canvas-frame-resource-cache
-   (renderer-frame-resources renderer) #'destroy-renderer-frame-state)
-  (destroy-renderer-targets renderer)
-  (loop for slot being the hash-values of (renderer-mesh-slots renderer)
-        do (%destroy-mesh-slot slot))
-  (destroy-renderer-publication-resources (renderer-publication renderer))
-  (dolist (resource
-            (append
-             (coerce (renderer-exposure-probe-buffers renderer) 'list)
-             (list (renderer-exposure-probe-pipeline renderer)
-                  (renderer-exposure-probe-fragment-module renderer)
-                  (renderer-exposure-probe-view renderer)
-                  (renderer-exposure-probe-texture renderer)
-                  (renderer-exposure-probe-layout renderer)
-                  (renderer-sky-pipeline renderer)
-                  (renderer-sky-fragment-module renderer)
-                  (renderer-sky-bind-group renderer)
-                  (renderer-sky-layout renderer)
-                  (renderer-present-pipeline renderer)
-                  (renderer-present-fragment-module renderer)
-                  (renderer-temporal-pipeline renderer)
-                  (renderer-temporal-fragment-module renderer)
-                  (renderer-temporal-layout renderer)
-                  (renderer-composite-pipeline renderer)
-                  (renderer-composite-fragment-module renderer)
-                  (renderer-present-vertex-module renderer)
-                  (renderer-sampler renderer)
-                  (renderer-flame-depth-sampler renderer)
-                  (renderer-composite-layout renderer)
-                  (renderer-present-layout renderer)
-                  (renderer-lattice-point-pipeline renderer)
-                  (renderer-lattice-point-fragment-module renderer)
-                  (renderer-lattice-point-vertex-module renderer)
-                  (renderer-lattice-point-layout renderer)
-                  (renderer-torch-body-shadow-pipeline renderer)
-                  (renderer-torch-body-pipeline renderer)
-                  (renderer-torch-body-fragment-module renderer)
-                  (renderer-torch-body-shadow-vertex-module renderer)
-                  (renderer-torch-body-vertex-module renderer)
-                  (renderer-torch-body-layout renderer)
-                  (renderer-torch-body-vertex-buffer renderer)
-                  (renderer-flame-pipeline renderer)
-                  (renderer-flame-fragment-module renderer)
-                  (renderer-flame-vertex-module renderer)
-                  (renderer-flame-layout renderer)
-                  (renderer-flame-effect-buffer renderer)
-                  (renderer-player-sdf-bind-group renderer)
-                  (renderer-player-sdf-pipeline renderer)
-                  (renderer-player-sdf-fragment-module renderer)
-                  (renderer-player-sdf-vertex-module renderer)
-                  (renderer-player-sdf-layout renderer)
-                  (renderer-shadow-pipeline renderer)
-                  (renderer-shadow-vertex-module renderer)
-                  (renderer-shadow-layout renderer)
-                  (renderer-shadow-sampler renderer)
-                  (renderer-shadow-view renderer)
-                  (renderer-shadow-texture renderer)
-                  (renderer-star-template-buffer renderer)
-                  (renderer-pipeline renderer) (renderer-fragment-module renderer)
-                  (renderer-vertex-module renderer)
-                  (renderer-layout renderer)
-                  (and (slot-boundp renderer 'camera-buffer)
-                       (renderer-camera-buffer renderer)))))
-    (when resource (ignore-errors (destroy resource))))
-  (setf (renderer-present-pipeline renderer) nil
-        (renderer-exposure-probe-pipeline renderer) nil
-        (renderer-exposure-probe-fragment-module renderer) nil
-        (renderer-exposure-probe-view renderer) nil
-        (renderer-exposure-probe-texture renderer) nil
-        (renderer-exposure-probe-layout renderer) nil
-        (renderer-exposure-probe-buffers renderer) #()
-        (renderer-exposure-probe-submitted renderer)
-        (make-array 0 :element-type 'bit)
-        (renderer-exposure-probe-frames renderer) #()
-        (renderer-sky-pipeline renderer) nil
-        (renderer-sky-fragment-module renderer) nil
-        (renderer-sky-bind-group renderer) nil
-        (renderer-sky-layout renderer) nil
-        (renderer-present-fragment-module renderer) nil
-        (renderer-temporal-pipeline renderer) nil
-        (renderer-temporal-fragment-module renderer) nil
-        (renderer-temporal-layout renderer) nil
-        (renderer-composite-pipeline renderer) nil
-        (renderer-composite-fragment-module renderer) nil
-        (renderer-present-vertex-module renderer) nil
-        (renderer-sampler renderer) nil
-        (renderer-flame-depth-sampler renderer) nil
-        (renderer-composite-layout renderer) nil
-        (renderer-present-layout renderer) nil
-        (renderer-lattice-point-pipeline renderer) nil
-        (renderer-lattice-point-fragment-module renderer) nil
-        (renderer-lattice-point-vertex-module renderer) nil
-        (renderer-lattice-point-layout renderer) nil
-        (renderer-publication renderer) (%make-empty-renderer-publication)
-        (renderer-torch-body-shadow-pipeline renderer) nil
-        (renderer-torch-body-pipeline renderer) nil
-        (renderer-torch-body-fragment-module renderer) nil
-        (renderer-torch-body-shadow-vertex-module renderer) nil
-        (renderer-torch-body-vertex-module renderer) nil
-        (renderer-torch-body-layout renderer) nil
-        (renderer-torch-body-vertex-buffer renderer) nil
-        (renderer-flame-pipeline renderer) nil
-        (renderer-flame-fragment-module renderer) nil
-        (renderer-flame-vertex-module renderer) nil
-        (renderer-flame-layout renderer) nil
-        (renderer-flame-effect-buffer renderer) nil
-        (renderer-player-sdf-bind-group renderer) nil
-        (renderer-player-sdf-pipeline renderer) nil
-        (renderer-player-sdf-fragment-module renderer) nil
-        (renderer-player-sdf-vertex-module renderer) nil
-        (renderer-player-sdf-layout renderer) nil
-        (renderer-shadow-pipeline renderer) nil
-        (renderer-shadow-vertex-module renderer) nil
-        (renderer-shadow-layout renderer) nil
-        (renderer-shadow-sampler renderer) nil
-        (renderer-shadow-view renderer) nil
-        (renderer-shadow-texture renderer) nil
-        (renderer-star-template-buffer renderer) nil
-        (renderer-pipeline renderer) nil
-        (renderer-fragment-module renderer) nil
-        (renderer-vertex-module renderer) nil
-        (renderer-layout renderer) nil
-        (renderer-camera-buffer renderer) nil)
-  (values))
+  (with-release-report
+    (destroy-canvas-frame-resource-cache
+     (renderer-frame-resources renderer) #'destroy-renderer-frame-state)
+    (destroy-renderer-targets renderer)
+    (releasing :exposure
+      (release-exposure (renderer-exposure-control renderer)))
+    (loop for slot being the hash-values of (renderer-mesh-slots renderer)
+          do (%destroy-mesh-slot slot))
+    (destroy-renderer-publication-resources (renderer-publication renderer))
+    (dolist (resource
+              (list (renderer-sky-pipeline renderer)
+                    (renderer-sky-fragment-module renderer)
+                    (renderer-sky-bind-group renderer)
+                    (renderer-sky-layout renderer)
+                    (renderer-present-pipeline renderer)
+                    (renderer-present-fragment-module renderer)
+                    (renderer-temporal-pipeline renderer)
+                    (renderer-temporal-fragment-module renderer)
+                    (renderer-temporal-layout renderer)
+                    (renderer-composite-pipeline renderer)
+                    (renderer-composite-fragment-module renderer)
+                    (renderer-present-vertex-module renderer)
+                    (renderer-sampler renderer)
+                    (renderer-flame-depth-sampler renderer)
+                    (renderer-composite-layout renderer)
+                    (renderer-present-layout renderer)
+                    (renderer-lattice-point-pipeline renderer)
+                    (renderer-lattice-point-fragment-module renderer)
+                    (renderer-lattice-point-vertex-module renderer)
+                    (renderer-lattice-point-layout renderer)
+                    (renderer-torch-body-shadow-pipeline renderer)
+                    (renderer-torch-body-pipeline renderer)
+                    (renderer-torch-body-fragment-module renderer)
+                    (renderer-torch-body-shadow-vertex-module renderer)
+                    (renderer-torch-body-vertex-module renderer)
+                    (renderer-torch-body-layout renderer)
+                    (renderer-torch-body-vertex-buffer renderer)
+                    (renderer-flame-pipeline renderer)
+                    (renderer-flame-fragment-module renderer)
+                    (renderer-flame-vertex-module renderer)
+                    (renderer-flame-layout renderer)
+                    (renderer-flame-effect-buffer renderer)
+                    (renderer-player-sdf-bind-group renderer)
+                    (renderer-player-sdf-pipeline renderer)
+                    (renderer-player-sdf-fragment-module renderer)
+                    (renderer-player-sdf-vertex-module renderer)
+                    (renderer-player-sdf-layout renderer)
+                    (renderer-shadow-pipeline renderer)
+                    (renderer-shadow-vertex-module renderer)
+                    (renderer-shadow-layout renderer)
+                    (renderer-shadow-sampler renderer)
+                    (renderer-shadow-view renderer)
+                    (renderer-shadow-texture renderer)
+                    (renderer-star-template-buffer renderer)
+                    (renderer-pipeline renderer) (renderer-fragment-module renderer)
+                    (renderer-vertex-module renderer)
+                    (renderer-layout renderer)
+                    (and (slot-boundp renderer 'camera-buffer)
+                         (renderer-camera-buffer renderer))))
+      (when resource (ignore-errors (destroy resource))))
+    (setf (renderer-present-pipeline renderer) nil
+          (renderer-sky-pipeline renderer) nil
+          (renderer-sky-fragment-module renderer) nil
+          (renderer-sky-bind-group renderer) nil
+          (renderer-sky-layout renderer) nil
+          (renderer-present-fragment-module renderer) nil
+          (renderer-temporal-pipeline renderer) nil
+          (renderer-temporal-fragment-module renderer) nil
+          (renderer-temporal-layout renderer) nil
+          (renderer-composite-pipeline renderer) nil
+          (renderer-composite-fragment-module renderer) nil
+          (renderer-present-vertex-module renderer) nil
+          (renderer-sampler renderer) nil
+          (renderer-flame-depth-sampler renderer) nil
+          (renderer-composite-layout renderer) nil
+          (renderer-present-layout renderer) nil
+          (renderer-lattice-point-pipeline renderer) nil
+          (renderer-lattice-point-fragment-module renderer) nil
+          (renderer-lattice-point-vertex-module renderer) nil
+          (renderer-lattice-point-layout renderer) nil
+          (renderer-publication renderer) (%make-empty-renderer-publication)
+          (renderer-torch-body-shadow-pipeline renderer) nil
+          (renderer-torch-body-pipeline renderer) nil
+          (renderer-torch-body-fragment-module renderer) nil
+          (renderer-torch-body-shadow-vertex-module renderer) nil
+          (renderer-torch-body-vertex-module renderer) nil
+          (renderer-torch-body-layout renderer) nil
+          (renderer-torch-body-vertex-buffer renderer) nil
+          (renderer-flame-pipeline renderer) nil
+          (renderer-flame-fragment-module renderer) nil
+          (renderer-flame-vertex-module renderer) nil
+          (renderer-flame-layout renderer) nil
+          (renderer-flame-effect-buffer renderer) nil
+          (renderer-player-sdf-bind-group renderer) nil
+          (renderer-player-sdf-pipeline renderer) nil
+          (renderer-player-sdf-fragment-module renderer) nil
+          (renderer-player-sdf-vertex-module renderer) nil
+          (renderer-player-sdf-layout renderer) nil
+          (renderer-shadow-pipeline renderer) nil
+          (renderer-shadow-vertex-module renderer) nil
+          (renderer-shadow-layout renderer) nil
+          (renderer-shadow-sampler renderer) nil
+          (renderer-shadow-view renderer) nil
+          (renderer-shadow-texture renderer) nil
+          (renderer-star-template-buffer renderer) nil
+          (renderer-pipeline renderer) nil
+          (renderer-fragment-module renderer) nil
+          (renderer-vertex-module renderer) nil
+          (renderer-layout renderer) nil
+          (renderer-camera-buffer renderer) nil)
+    (values)))

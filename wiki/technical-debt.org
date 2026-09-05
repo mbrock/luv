@@ -101,6 +101,84 @@ focused tests exercise partial construction, coherent publication, migration,
 retry, and idempotent release.  Backend-native retirement has separate durable
 HAL custody described in the cut below.
 
+** NEXT Compose Luft for a reader and for replacement
+:PROPERTIES:
+:ID: I4PRMD
+:END:
+
+The Luft source audit at =422560f= found a 69-slot renderer, a 650-line
+constructor, and repeated allocation, rollback, release, and slot-clearing
+inventories. Streaming combines source residency, authored edits, mesh
+requests, cached products, and publication state. The studio combines camera,
+editing, application lifetime, and recording. These are the next applications
+of #V9VH79, with a stronger requirement: the upper level must actually compose
+parts that can be replaced or omitted through their interfaces.
+
+Code is also an explanation. Definition order should introduce the subject,
+state the interface, show the composition, and then develop its mechanics.
+A name earns its place by giving the reader a useful concept. Moving fields
+to another record is incomplete until the operations and lifetime that make
+those fields meaningful have an owner. A useful test is whether replacing or
+disabling one implementation requires edits only at its point of composition.
+
+Preserve the existing distinct clocks: renderer configuration, window-sized
+targets, resident mesh publication, and per-frame uploads. Bindings that join
+two owners need an explicit lifetime; grouping everything by visual feature
+must not obscure those relationships.
+
+The remaining work is:
+
+- Extract the other renderer owners: shadows, terrain, player, attachments,
+  temporal reconstruction, and presentation. Keep the frame sequence explicit.
+- Separate source residency from pending mesh replacement and authored edits.
+  Explain source chunks, geometry owners, neighboring inputs, request identity,
+  and atomic replacement with a concrete chunk-boundary example.
+- Give attachment realization and its lighting a clear interface. Audit old
+  torch, variable-width, and face/band/fan paths against the current star mesh
+  before preserving or generalizing their vocabulary. The static sanctuary
+  path currently rejects its mesh/light generation during renderer publication;
+  include that mismatch in the audit rather than bypassing the check.
+- Separate scene authoring from mesh-publication evidence, and studio controls
+  from recording and frame analysis.
+- Use the shader language's existing source abstractions for repeated sampling
+  patterns and material lanes. Give the procedural player its own source home.
+
+*** DONE Compose exposure and read the frame in execution order
+:PROPERTIES:
+:ID: 5PWR2E
+:END:
+
+[[file:../luft/render/frame.lisp][=frame.lisp=]] starts with the frame composition: upload, shadows, scene,
+reconstruction, HDR composite, exposure measurement, and presentation. The
+implementations follow in that order. The existing GPU dependencies remain
+visible, including reconstruction before flames and grading before overlays.
+
+[[file:../luft/render/exposure.lisp][=exposure.lisp=]] owns the brightness policy, its implementation, and its
+measurement shader. The renderer supplies an HDR source binding and a frame
+number, consumes an exposure value, and releases the component. Automatic
+exposure owns its probe and bounded readback queue. Fixed exposure implements
+the same interface with no measurement resources or commands:
+
+#+begin_src lisp
+(luft.render:start-viewer :fixed-exposure 1.0)
+#+end_src
+
+=start-viewer= and =make-renderer= also accept =:exposure-factory=, a function
+designator from device to a fresh exposure control. Renderer refresh preserves
+that choice; the default symbol resolves the latest constructor definition.
+Window-sized target generations own the source bind groups and release them
+before the images they reference; resizing leaves the meter and
+its pending readbacks intact. The meter registers resources as it allocates
+them, uses that one inventory for rollback and release, and retains failed
+release handles for retry.
+
+Six focused tests cover omission, every partial construction prefix, failed
+release retry, readback chronology, and both exposure policies through resize.
+The full test suite and production SPIR-V validation pass. On Vulkan, a
+640x480 streaming scene at fixed exposure with temporal reconstruction disabled
+produced byte-identical PNGs through the original and extracted frame functions.
+Live renderer and shader refresh also retained fixed exposure without a probe.
+
 * 2. McCLIM implements one open command vocabulary four times
 :PROPERTIES:
 :ID: A0JOG7

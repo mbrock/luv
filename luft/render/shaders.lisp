@@ -1944,47 +1944,6 @@ that he is standing on something."
     (set-output motion-output
                 (mesh-temporal-motion previous-clip current-clip))))
 
-(define-live-shader exposure-probe-fragment-specification
-    (:stage :fragment
-     :inputs ((ndc :vec2 :location 0))
-     :outputs ((color-output :vec4 :location 0))
-     :resources ((scene :texture-2d :binding 0 :sample-transfer :identity
-                        :sample-components
-                        ((:xyz :quantity quantities:scene-radiance
-                          :unit :one)))
-                 (scene-sampler :sampler :binding 1)))
-  (let* ((uv (+ (* ndc 0.5) (vec2 0.5 0.5)))
-         ;; Match Moppe's broad five-tap probe footprint before the 32x16
-         ;; reduction. Encoding log luminance into UNORM makes the geometric
-         ;; mean portable through the HAL's compact RGBA8 readback contract.
-         (offset (vec2 0.008 0.014))
-         (average
-           (* (+ (swizzle (sample scene scene-sampler uv) :xyz)
-                 (swizzle (sample scene scene-sampler (+ uv offset)) :xyz)
-                 (swizzle (sample scene scene-sampler (- uv offset)) :xyz)
-                 (swizzle
-                  (sample scene scene-sampler
-                          (+ uv (vec2 (swizzle offset :x)
-                                      (- (swizzle offset :y))))) :xyz)
-                 (swizzle
-                  (sample scene scene-sampler
-                          (+ uv (vec2 (- (swizzle offset :x))
-                                      (swizzle offset :y)))) :xyz))
-              0.2))
-         (luminance
-           (max
-            (scene-relative-luminance average)
-            (quantity 0.0001 :quantity quantities:scene-luminance
-                             :unit :one)))
-         ;; SCENE-LUMINANCE is relative to reference white 1.0.  LOG is the
-         ;; explicit nonlinear encoding boundary, so only its normalized
-         ;; representation enters the portable UNORM reduction.
-         (encoded
-           (clamp (/ (+ (log (representation luminance)) 9.21034)
-                     11.98293)
-                  0.0 1.0)))
-    (set-output color-output (vec4 encoded encoded encoded 1.0))))
-
 (define-shader-function rgb-to-ycocg (rgb)
   "Put RGB into a luminance/chroma space whose box clips history usefully."
   (vec3 (+ (* (swizzle rgb :x) 0.25)

@@ -73,10 +73,12 @@
                              (:file "materials")
                              (:file "lighting")
                              (:file "shaders")
+                             (:file "exposure")
                              (:file "flame-shaders")
                              (:file "scene")
                              (:file "decoration")
                              (:file "render")
+                             (:file "frame")
                              (:file "world")
                              (:file "streaming")
                              (:file "fixtures")))))
@@ -128,7 +130,9 @@
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on ("luft/render" "luft/test-support" "luv/test-support")
-  :components ((:file "luft/render/star-tests"))
+  :serial t
+  :components ((:file "luft/render/star-tests")
+               (:file "luft/render/exposure-tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
              (uiop:symbol-call '#:luv.test-support '#:test-package
