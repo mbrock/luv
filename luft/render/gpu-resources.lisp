@@ -8,10 +8,13 @@
 (defclass gpu-resource-owner ()
   ((resources :initform nil :accessor owned-gpu-resources)))
 
+(defun own-gpu-object (owner object)
+  "Adopt OBJECT, including a composed program, for reverse-order destruction."
+  (push object (owned-gpu-resources owner))
+  object)
+
 (defun own-gpu-resource (owner device descriptor)
-  (let ((resource (create device descriptor)))
-    (push resource (owned-gpu-resources owner))
-    resource))
+  (own-gpu-object owner (create device descriptor)))
 
 (defun release-owned-gpu-resources (owner)
   "Release each resource, retaining failed handles for a later retry."

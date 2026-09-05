@@ -64,16 +64,13 @@ NIL EFFECT selects the drawing's immutable initial effect for staged bindings.")
 
 ;;; The current implementation shares one three-row attachment frame between
 ;;; a canonical bronze body mesh and a ray-integrated flame. Shader modules are
-;;; private resources; only the operational layouts/pipelines need named slots.
+;;; private resources; each pass has a program; geometry and sampling remain component-owned.
 
 (defclass framed-torch-drawing (torch-drawing gpu-resource-owner)
   ((vertices :accessor torch-drawing-vertices)
-   (body-layout :accessor torch-drawing-body-layout)
-   (shadow-layout :accessor torch-drawing-shadow-layout)
-   (body-pipeline :accessor torch-drawing-body-pipeline)
-   (shadow-pipeline :accessor torch-drawing-shadow-pipeline)
-   (flame-layout :accessor torch-drawing-flame-layout)
-   (flame-pipeline :accessor torch-drawing-flame-pipeline)
+   (body-program :accessor torch-drawing-body-program)
+   (shadow-program :accessor torch-drawing-shadow-program)
+   (flame-program :accessor torch-drawing-flame-program)
    (depth-sampler :accessor torch-drawing-depth-sampler)
    (initial-effect :accessor torch-drawing-initial-effect)))
 
@@ -92,45 +89,32 @@ NIL EFFECT selects the drawing's immutable initial effect for staged bindings.")
 (defmethod make-torch-body-binding
     ((drawing framed-torch-drawing) device instances camera shadow-view shadow-sampler
      &key shadow-p)
-  (create device
-          (make-bind-group-descriptor
-           :label (if shadow-p "luft torch-body shadows" "luft torch bodies")
-           :layout (if shadow-p (torch-drawing-shadow-layout drawing)
-                       (torch-drawing-body-layout drawing))
-           :entries
-           `((:binding 0 :resource ,instances)
-             (:binding 1 :resource ,(torch-drawing-vertices drawing))
-             (:binding 2 :resource ,camera)
-             ,@(unless shadow-p
-                 `((:binding 4 :resource ,shadow-view)
-                   (:binding 5 :resource ,shadow-sampler)))))))
+  (apply #'make-program-binding
+         (if shadow-p (torch-drawing-shadow-program drawing) (torch-drawing-body-program drawing))
+         device :torch-frames instances :torch-body-vertices (torch-drawing-vertices drawing)
+         :camera-state camera
+         (unless shadow-p (list :shadow-map shadow-view :shadow-sampler shadow-sampler))))
 
 (defmethod make-torch-flame-binding
     ((drawing framed-torch-drawing) device instances camera effect depth-view)
-  (create device
-          (make-bind-group-descriptor
-           :label "luft post-temporal torch flames"
-           :layout (torch-drawing-flame-layout drawing)
-           :entries
-           `((:binding 0 :resource ,instances)
-             (:binding 1 :resource ,camera)
-             (:binding 2 :resource ,(or effect (torch-drawing-initial-effect drawing)))
-             (:binding 3 :resource ,depth-view)
-             (:binding 4 :resource ,(torch-drawing-depth-sampler drawing))))))
+  (make-program-binding
+   (torch-drawing-flame-program drawing) device
+   :flame-instances instances :camera-state camera
+   :effect-state (or effect (torch-drawing-initial-effect drawing))
+   :opaque-depth depth-view :depth-sampler (torch-drawing-depth-sampler drawing)))
 
 (defmethod encode-torch-bodies
     ((drawing framed-torch-drawing) pass binding count &key shadow-p)
   (when (plusp count)
-    (set-pipeline pass (if shadow-p (torch-drawing-shadow-pipeline drawing)
-                          (torch-drawing-body-pipeline drawing)))
-    (set-bind-group pass 0 binding)
-    (draw pass (torch-body-vertex-count) count)))
+    (encode-program
+     (if shadow-p (torch-drawing-shadow-program drawing) (torch-drawing-body-program drawing))
+     pass binding (make-gpu-draw-command :vertex-count (torch-body-vertex-count)
+                                       :instance-count count))))
 
 (defmethod encode-torch-flames ((drawing framed-torch-drawing) pass binding count)
   (when (plusp count)
-    (set-pipeline pass (torch-drawing-flame-pipeline drawing))
-    (set-bind-group pass 0 binding)
-    (draw pass 6 count)))
+    (encode-program (torch-drawing-flame-program drawing) pass binding
+                    (make-gpu-draw-command :vertex-count 6 :instance-count count))))
 
 (defmethod release-torch-drawing ((drawing framed-torch-drawing))
   (release-owned-gpu-resources drawing))
@@ -140,9 +124,8 @@ NIL EFFECT selects the drawing's immutable initial effect for staged bindings.")
   (let ((drawing (make-instance 'framed-torch-drawing)))
     (with-gpu-construction (drawing)
       (labels ((own (descriptor) (own-gpu-resource drawing device descriptor))
-               (shader (label specification)
-                 (own (make-shader-module-descriptor
-                       :label label :language :mathematical :code specification))))
+               (program (&rest description)
+                 (own-gpu-object drawing (apply #'make-drawing-program device description))))
         (let ((vertices (torch-body-vertex-data)))
           (setf (torch-drawing-vertices drawing)
                 (own (make-buffer-descriptor
@@ -151,67 +134,25 @@ NIL EFFECT selects the drawing's immutable initial effect for staged bindings.")
           (write-buffer (torch-drawing-vertices drawing) vertices))
         (setf (torch-drawing-initial-effect drawing) (own (torch-frame-buffer-descriptor)))
         (upload-torch-frame drawing (torch-drawing-initial-effect drawing) 0.0)
-        (setf (torch-drawing-body-layout drawing)
-              (own (make-bind-group-layout-descriptor
-                    :label "luft framed torch-body layout"
-                    :entries '((:binding 0 :type :storage-buffer)
-                               (:binding 1 :type :storage-buffer)
-                               (:binding 2 :type :uniform-buffer)
-                               (:binding 4 :type :texture)
-                               (:binding 5 :type :sampler))))
-              (torch-drawing-shadow-layout drawing)
-              (own (make-bind-group-layout-descriptor
-                    :label "luft torch shadow layout"
-                    :entries '((:binding 0 :type :storage-buffer)
-                               (:binding 1 :type :storage-buffer)
-                               (:binding 2 :type :uniform-buffer))))
-              (torch-drawing-flame-layout drawing)
-              (own (make-bind-group-layout-descriptor
-                    :label "luft torch flame layout"
-                    :entries '((:binding 0 :type :storage-buffer)
-                               (:binding 1 :type :uniform-buffer)
-                               (:binding 2 :type :uniform-buffer)
-                               (:binding 3 :type :texture)
-                               (:binding 4 :type :sampler))))
-              (torch-drawing-depth-sampler drawing)
+        (setf (torch-drawing-depth-sampler drawing)
               (own (make-sampler-descriptor
                     :label "luft torch flame opaque-depth sampler"
-                    :mag-filter :nearest :min-filter :nearest :mipmap-filter :nearest)))
-        (let ((body-vertex (shader "luft torch-body vertex"
-                                   (shaders:torch-body-vertex-specification)))
-              (body-fragment (shader "luft torch-body fragment"
-                                     (shaders:torch-body-fragment-specification)))
-              (shadow-vertex (shader "luft torch shadow vertex"
-                                     (shaders:torch-body-shadow-vertex-specification)))
-              (flame-vertex (shader "luft torch flame vertex"
-                                    (shaders:torch-flame-vertex-specification)))
-              (flame-fragment (shader "luft torch flame fragment"
-                                      (shaders:torch-flame-fragment-specification))))
-          (setf (torch-drawing-body-pipeline drawing)
-                (own (make-render-pipeline-descriptor
-                      :label "luft framed opaque torch bodies"
-                      :layout (torch-drawing-body-layout drawing)
-                      :vertex `(:module ,body-vertex)
-                      :fragment `(:module ,body-fragment
-                                  :targets ,(mapcar (lambda (format) `(:format ,format))
-                                                    target-formats))
-                      :primitive '(:topology :triangle-list) :sample-count sample-count
-                      :depth-stencil '(:format :depth32-float :depth-write-enabled t
-                                       :depth-compare :less)))
-                (torch-drawing-shadow-pipeline drawing)
-                (own (make-render-pipeline-descriptor
-                      :label "luft framed torch-body shadows"
-                      :layout (torch-drawing-shadow-layout drawing)
-                      :vertex `(:module ,shadow-vertex)
-                      :primitive '(:topology :triangle-list)
-                      :depth-stencil '(:format :depth32-float :depth-write-enabled t
-                                       :depth-compare :less)))
-                (torch-drawing-flame-pipeline drawing)
-                (own (make-render-pipeline-descriptor
-                      :label "luft volumetric torch flame pipeline"
-                      :layout (torch-drawing-flame-layout drawing)
-                      :vertex `(:module ,flame-vertex)
-                      :fragment `(:module ,flame-fragment
-                                  :targets ((:format :rgba16-float
-                                             :blend :premultiplied-alpha)))
-                      :primitive '(:topology :triangle-list)))))))))
+                    :mag-filter :nearest :min-filter :nearest :mipmap-filter :nearest))
+              (torch-drawing-body-program drawing)
+              (program :label "luft framed opaque torch bodies"
+                       :vertex (shaders:torch-body-vertex-specification)
+                       :fragment (shaders:torch-body-fragment-specification)
+                       :targets (mapcar (lambda (format) `(:format ,format)) target-formats)
+                       :sample-count sample-count
+                       :depth-stencil '(:format :depth32-float :depth-write-enabled t
+                                        :depth-compare :less))
+              (torch-drawing-shadow-program drawing)
+              (program :label "luft framed torch-body shadows"
+                       :vertex (shaders:torch-body-shadow-vertex-specification)
+                       :depth-stencil '(:format :depth32-float :depth-write-enabled t
+                                        :depth-compare :less))
+              (torch-drawing-flame-program drawing)
+              (program :label "luft volumetric torch flame pipeline"
+                       :vertex (shaders:torch-flame-vertex-specification)
+                       :fragment (shaders:torch-flame-fragment-specification)
+                       :targets '((:format :rgba16-float :blend :premultiplied-alpha))))))))

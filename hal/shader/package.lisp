@@ -10,7 +10,11 @@
                     (#:lang #:luv.arithmetic.language))
   (:documentation
    "The backend-neutral typed shader language and lowering protocols.")
-  (:export #:shader-language-error
+  (:export #:link-shader-resources
+           #:bind-shader-resources
+           #:shader-resource-key
+           #:shader-resource-compatible-p
+           #:shader-language-error
            #:shader-language-error-form
            #:shader-language-error-reason
            #:shader-language-error-details

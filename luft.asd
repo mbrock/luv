@@ -74,6 +74,7 @@
                              (:file "lighting")
                              (:file "shaders")
                              (:file "gpu-resources")
+                             (:file "drawing-program")
                              (:file "scene-drawing")
                              (:file "player")
                              (:file "sky")
@@ -145,6 +146,7 @@
   :serial t
   :components ((:file "luft/render/star-tests")
                (:file "luft/render/gpu-test-support")
+               (:file "luft/render/drawing-program-tests")
                (:file "luft/render/exposure-tests")
                (:file "luft/render/scene-drawing-tests")
                (:file "luft/render/streaming-publication-tests")

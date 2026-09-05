@@ -112,7 +112,13 @@
                     (#:production #:luv.production)
                     (#:quantities #:luft.render.quantities)
                     (#:math #:luv.arithmetic))
-  (:export #:scene
+  (:export #:drawing-program
+           #:make-drawing-program
+           #:program-inputs
+           #:make-program-binding
+           #:encode-program
+           #:release-program
+           #:scene
            #:scene-solid
            #:scene-authored-voxel-light
            #:scene-voxel-light

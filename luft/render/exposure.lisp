@@ -82,10 +82,9 @@ The caller must release source bindings first and stop using CONTROL."))
 
 (defclass automatic-exposure (exposure-control gpu-resource-owner)
   ((value :initform 1.0f0 :accessor exposure-value)
-   (layout :initform nil :accessor exposure-layout)
+   (program :accessor exposure-program)
    (texture :initform nil :accessor exposure-texture)
    (view :initform nil :accessor exposure-view)
-   (pipeline :initform nil :accessor exposure-pipeline)
    (readbacks :initform #() :accessor exposure-readbacks)))
 
 (defmethod advance-exposure ((control automatic-exposure))
@@ -109,12 +108,8 @@ The caller must release source bindings first and stop using CONTROL."))
 
 (defmethod make-exposure-binding
     ((control automatic-exposure) device source-view sampler)
-  (create device
-          (make-bind-group-descriptor
-           :label "luft exposure probe source"
-           :layout (exposure-layout control)
-           :entries `((:binding 0 :resource ,source-view)
-                      (:binding 1 :resource ,sampler)))))
+  (make-program-binding (exposure-program control) device
+                        :scene source-view :scene-sampler sampler))
 
 (defmethod encode-exposure
     ((control automatic-exposure) encoder binding frame-index)
@@ -132,9 +127,8 @@ The caller must release source bindings first and stop using CONTROL."))
                 `((:view ,(exposure-view control)
                    :load-op :clear :store-op :store
                    :clear-value #(0.0 0.0 0.0 1.0)))))))
-        (set-pipeline pass (exposure-pipeline control))
-        (set-bind-group pass 0 binding)
-        (draw pass 3)
+        (encode-program (exposure-program control) pass binding
+                        (make-gpu-draw-command :vertex-count 3))
         (end-pass pass))
       (encode encoder
               (make-gpu-copy-texture-to-buffer-command
@@ -150,12 +144,7 @@ The caller must release source bindings first and stop using CONTROL."))
   (let ((control (make-instance 'automatic-exposure)))
     (with-gpu-construction (control)
       (flet ((own (descriptor) (own-gpu-resource control device descriptor)))
-        (setf (exposure-layout control)
-              (own (make-bind-group-layout-descriptor
-                    :label "luft exposure probe layout"
-                    :entries '((:binding 0 :type :texture)
-                               (:binding 1 :type :sampler))))
-              (exposure-texture control)
+        (setf (exposure-texture control)
               (own (make-texture-descriptor
                     :label "luft exposure log luminance"
                     :size (list +exposure-probe-width+ +exposure-probe-height+)
@@ -174,23 +163,14 @@ The caller must release source bindings first and stop using CONTROL."))
                                     :size +exposure-probe-byte-count+
                                     :usage '(:copy-dst)))))
                'vector))
-        (let ((vertex
-                (own (make-shader-module-descriptor
-                      :label "luft exposure vertex"
-                      :language :mathematical
-                      :code (shaders:present-vertex-specification))))
-              (fragment
-                (own (make-shader-module-descriptor
-                      :label "luft exposure probe fragment"
-                      :language :mathematical
-                      :code (shaders:exposure-probe-fragment-specification)))))
-          (setf (exposure-pipeline control)
-                (own (make-render-pipeline-descriptor
-                      :label "luft exposure probe pipeline"
-                      :layout (exposure-layout control)
-                      :vertex `(:module ,vertex)
-                      :fragment `(:module ,fragment :targets ((:format :rgba8-unorm)))
-                      :primitive '(:topology :triangle-list)))))))))
+        (setf (exposure-program control)
+              (own-gpu-object
+               control
+               (make-drawing-program
+                device :label "luft exposure probe"
+                :vertex (shaders:present-vertex-specification)
+                :fragment (shaders:exposure-probe-fragment-specification)
+                :targets '((:format :rgba8-unorm)))))))))
 
 ;;; The probe stores log luminance, so averaging bytes approximates a
 ;;; geometric mean. Adaptation is intentionally slower toward a brighter

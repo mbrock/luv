@@ -98,7 +98,8 @@
   :depends-on ("closer-mop" "luv/arithmetic")
   :serial t
   :components ((:file "hal/shader/package")
-               (:file "hal/shader/language")))
+               (:file "hal/shader/language")
+               (:file "hal/shader/resources")))
 
 (defsystem "luv/spir-v"
   :description "Literal SPIR-V modules and lowering for luv's shader language."

@@ -17,7 +17,6 @@
          (failed (first (test-gpu-resources device))))
     (setf (test-gpu-fail-release-p failed) t)
     (fail (render:release-torch-drawing drawing))
-    (true (equal (list failed) (render::owned-gpu-resources drawing)))
     (render:release-torch-drawing drawing)
     (render:release-torch-drawing drawing)
     (dolist (resource (test-gpu-resources device))

@@ -44,42 +44,25 @@ The frame owns the result and releases it before its inputs or DRAWING."))
 ;;; representation or forcing the renderer to know their layouts or shaders.
 
 (defclass pipeline-scene-drawing (scene-drawing gpu-resource-owner)
-  ((layout :accessor scene-drawing-layout)
-   (pipeline :accessor scene-drawing-pipeline)
+  ((program :accessor scene-drawing-program)
    (vertex-count :initarg :vertex-count :reader scene-drawing-vertex-count)))
 
 (defmethod encode-scene-drawing ((drawing pipeline-scene-drawing) pass binding)
-  (set-pipeline pass (scene-drawing-pipeline drawing))
-  (set-bind-group pass 0 binding)
-  (draw pass (scene-drawing-vertex-count drawing) 1))
+  (encode-program (scene-drawing-program drawing) pass binding
+                  (make-gpu-draw-command :vertex-count (scene-drawing-vertex-count drawing))))
 
 (defmethod release-scene-drawing ((drawing pipeline-scene-drawing))
   (release-owned-gpu-resources drawing))
 
 (defun make-pipeline-scene-drawing
-    (class device &key label entries vertex fragment targets sample-count
-                       depth-compare vertex-count)
+    (class device &key label vertex fragment targets sample-count depth-compare vertex-count)
   (let ((drawing (make-instance class :vertex-count vertex-count)))
     (with-gpu-construction (drawing)
-      (flet ((own (descriptor) (own-gpu-resource drawing device descriptor)))
-        (setf (scene-drawing-layout drawing)
-              (own (make-bind-group-layout-descriptor
-                    :label label :entries entries)))
-        (let ((vertex
-                (own (make-shader-module-descriptor
-                      :label (concatenate 'string label " vertex")
-                      :language :mathematical :code vertex)))
-              (fragment
-                (own (make-shader-module-descriptor
-                      :label (concatenate 'string label " fragment")
-                      :language :mathematical :code fragment))))
-          (setf (scene-drawing-pipeline drawing)
-                (own (make-render-pipeline-descriptor
-                      :label label :layout (scene-drawing-layout drawing)
-                      :vertex `(:module ,vertex)
-                      :fragment `(:module ,fragment :targets ,targets)
-                      :primitive '(:topology :triangle-list)
-                      :sample-count sample-count
-                      :depth-stencil
-                      `(:format :depth32-float :depth-write-enabled nil
-                        :depth-compare ,depth-compare)))))))))
+      (setf (scene-drawing-program drawing)
+            (own-gpu-object
+             drawing
+             (make-drawing-program
+              device :label label :vertex vertex :fragment fragment
+              :targets targets :sample-count sample-count
+              :depth-stencil `(:format :depth32-float :depth-write-enabled nil
+                               :depth-compare ,depth-compare)))))))

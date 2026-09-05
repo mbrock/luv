@@ -8,8 +8,6 @@
 (defun make-sky-drawing (device target-formats sample-count)
   (make-pipeline-scene-drawing
    'sky-drawing device :label "luft HDR sky"
-   :entries
-   '((:binding 0 :type :uniform-buffer))
    :vertex (shaders:present-vertex-specification)
    :fragment (if (rest target-formats)
                  (shaders:sky-temporal-fragment-specification)
@@ -20,11 +18,8 @@
 (defmethod make-scene-drawing-binding
     ((drawing sky-drawing) device camera-buffer shadow-view shadow-sampler)
   (declare (ignore shadow-view shadow-sampler))
-  (create device
-          (make-bind-group-descriptor
-           :label "luft frame-local HDR sky"
-           :layout (scene-drawing-layout drawing)
-           :entries `((:binding 0 :resource ,camera-buffer)))))
+  (make-program-binding (scene-drawing-program drawing) device
+                        :camera-state camera-buffer))
 
 (in-package #:luft.render.shaders)
 

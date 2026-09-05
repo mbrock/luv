@@ -130,7 +130,8 @@ The remaining work is:
 
 - Extract the other renderer owners: shadows and terrain,
   temporal reconstruction, and presentation. Keep the frame sequence explicit.
-  Torch drawing now has an independent owner (#J98GAW).
+  Torch drawing now has an independent owner (#J98GAW). Sky, player, torch,
+  and exposure programs share a checked shader input interface (#L9Z4PE).
 - Further separate source loading, residency policy, and authored edits.
   Explain source chunks, geometry owners, and neighboring inputs with a concrete
   chunk-boundary example. The pending replacement is now a separate transaction
@@ -253,6 +254,44 @@ has [[file:../luft/render/shader-manifest.lisp][its own home]]. No shader arithm
 outputs match the previous build byte for byte. Allocation-prefix rollback,
 release retry, omission, three-pass drawing, and resize binding tests cover the
 component. A Vulkan capture uses explicit upright and wall-mounted frames.
+
+*** DONE Derive named program inputs from shader declarations
+:PROPERTIES:
+:ID: L9Z4PE
+:END:
+
+[[file:../hal/shader/resources.lisp][The shader resource linker]] combines stage declarations by semantic name and
+set/binding location. It rejects conflicting names, locations, types, and
+sampling semantics. Uniform blocks may expose compatible prefixes; the linked
+interface retains the longest view and checks the overlapping members' names,
+offsets, types, and quantity semantics. Linking leaves the stage graphs intact.
+The API lives in =luv.shader= and is available to both game experiments.
+
+[[file:../luft/render/drawing-program.lisp][A drawing program]] owns its layout, modules, and pipeline. Sky, player,
+automatic exposure, and the three torch passes now construct these programs
+from shader specifications and pipeline state. They supply changing resources
+by the names already declared in the shader:
+
+#+begin_src lisp
+(make-program-binding
+ (torch-drawing-flame-program drawing) device
+ :flame-instances instances :camera-state camera
+ :effect-state effect :opaque-depth depth-view :depth-sampler sampler)
+#+end_src
+
+The host no longer repeats binding numbers or layout entries for those six
+programs. Missing, unknown, repeated, and nil inputs fail before allocation.
+The DSL treats host values as opaque handles; native handle compatibility
+remains the HAL/backend's responsibility. The first drawing implementation
+supports vertex draws and descriptor set zero, checked before allocation;
+terrain mesh programs and the remaining renderer owners are the next clients.
+
+=encode-program= and =release-program= are generic operations. Components own
+whole programs alongside their domain resources; frame, publication, and
+target owners retain the bindings that borrow their inputs. Failed child
+releases remain reachable for retry through the containing owner. Tests cover
+shader renumbering with unchanged host code, conflicting declarations,
+construction rollback, omission, resize, and release retry.
 
 *** DONE State the missing star-surface attachment capability directly
 :PROPERTIES:

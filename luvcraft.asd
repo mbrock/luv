@@ -323,6 +323,7 @@
                "luvcraft/web" "cl-dejavu" "luv/test-support")
   :serial t
   :components ((:file "hal/shader/tests")
+               (:file "hal/shader/resource-tests")
                (:file "luvcraft/world-tests")
                (:file "luvcraft/tests")
                (:file "luvcraft/renderer-tests")

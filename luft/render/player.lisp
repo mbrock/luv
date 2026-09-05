@@ -10,10 +10,6 @@
 (defun make-player-drawing (device target-formats sample-count)
   (make-pipeline-scene-drawing
    'player-drawing device :label "luft player sdf"
-   :entries
-   '((:binding 0 :type :uniform-buffer)
-     (:binding 1 :type :texture)
-     (:binding 2 :type :sampler))
    :vertex (shaders:player-sdf-vertex-specification)
    :fragment (shaders:player-sdf-fragment-specification)
    :targets (loop for format in target-formats
@@ -24,13 +20,9 @@
 
 (defmethod make-scene-drawing-binding
     ((drawing player-drawing) device camera-buffer shadow-view shadow-sampler)
-  (create device
-          (make-bind-group-descriptor
-           :label "luft frame-local walking player SDF"
-           :layout (scene-drawing-layout drawing)
-           :entries `((:binding 0 :resource ,camera-buffer)
-                      (:binding 1 :resource ,shadow-view)
-                      (:binding 2 :resource ,shadow-sampler)))))
+  (make-program-binding (scene-drawing-program drawing) device
+                        :camera-state camera-buffer
+                        :shadow-map shadow-view :shadow-sampler shadow-sampler))
 
 (in-package #:luft.render.shaders)
 

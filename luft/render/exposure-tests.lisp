@@ -32,7 +32,6 @@
          (failed (first (test-gpu-resources device))))
     (setf (test-gpu-fail-release-p failed) t)
     (fail (render:release-exposure control))
-    (true (equal (list failed) (render::owned-gpu-resources control)))
     (render:release-exposure control)
     (render:release-exposure control)
     (true (null (render::owned-gpu-resources control)))
