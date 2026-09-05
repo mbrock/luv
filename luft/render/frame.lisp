@@ -46,15 +46,14 @@
             `(:view ,(renderer-shadow-view renderer)
               :depth-load-op :clear :depth-store-op :store
               :depth-clear-value 1.0)))))
-    (set-pipeline shadow-pass (renderer-shadow-pipeline renderer))
     (dolist (key (renderer-slot-order renderer))
       (let ((resident
               (mesh-slot-resident
                (gethash key (renderer-mesh-slots renderer)))))
         (draw-resident-opaque-population
-         shadow-pass resident
+         (renderer-terrain renderer) shadow-pass resident
          (renderer-frame-resident-bind-group
-          renderer frame resident t))))
+          renderer frame resident t) :shadow-p t)))
     (when (plusp (renderer-flame-instance-count renderer))
       (encode-torch-bodies
        (renderer-torches renderer) shadow-pass
@@ -99,13 +98,12 @@
     (encode-scene-drawing
      (renderer-sky renderer) pass
      (renderer-frame-drawing-binding renderer frame (renderer-sky renderer)))
-    (set-pipeline pass (renderer-pipeline renderer))
     (dolist (key (renderer-slot-order renderer))
       (let ((resident
               (mesh-slot-resident
                (gethash key (renderer-mesh-slots renderer)))))
         (draw-resident-opaque-population
-         pass resident
+         (renderer-terrain renderer) pass resident
          (renderer-frame-resident-bind-group renderer frame resident nil))))
     (when (plusp (renderer-flame-instance-count renderer))
       (encode-torch-bodies
@@ -116,7 +114,7 @@
       (encode-scene-drawing
        (renderer-player renderer) pass
        (renderer-frame-drawing-binding renderer frame (renderer-player renderer))))
-    (when construction-p
+    (when (and construction-p (renderer-lattice renderer))
       ;; Populate at most one diagnostic slot per frame. The overlay is a
       ;; debugging view, so progressive readiness is preferable to freezing
       ;; one frame while every resident chunk is scanned.
@@ -125,14 +123,13 @@
             unless (mesh-slot-lattice-point-buffer slot)
               do (ensure-mesh-slot-lattice-points renderer slot)
                  (return))
-      (set-pipeline pass (renderer-lattice-point-pipeline renderer))
       (dolist (key (renderer-slot-order renderer))
         (let ((slot (gethash key (renderer-mesh-slots renderer))))
           (when (plusp (mesh-slot-lattice-point-count slot))
-            (set-bind-group pass 0
-                            (renderer-frame-lattice-bind-group
-                             renderer frame slot))
-            (draw pass 6 (mesh-slot-lattice-point-count slot))))))
+            (encode-program (renderer-lattice renderer) pass
+                            (renderer-frame-lattice-bind-group renderer frame slot)
+                            (make-gpu-draw-command :vertex-count 6
+                                                   :instance-count (mesh-slot-lattice-point-count slot)))))))
     (when (renderer-metalfx-temporal-p renderer)
       (signal-temporal-scaler-inputs pass
                                      (renderer-temporal-scaler renderer)))
@@ -180,10 +177,9 @@
                 `((:view ,(renderer-resolved-view renderer)
                    :load-op :clear :store-op :store
                    :clear-value #(0.0 0.0 0.0 1.0)))))))
-        (set-pipeline resolve-pass (renderer-temporal-pipeline renderer))
-        (set-bind-group resolve-pass 0
-                        (renderer-frame-temporal-bind-group renderer frame))
-        (draw resolve-pass 3)
+        (encode-reconstruction-resolve
+         (renderer-reconstruction renderer) resolve-pass
+         (renderer-frame-temporal-bind-group renderer frame))
         (end-pass resolve-pass))
       ;; One explicit full-resolution history keeps the extent cohort small:
       ;; resolve never reads and writes the same image, and the completed
@@ -222,10 +218,8 @@
     (when (renderer-metalfx-temporal-p renderer)
       (wait-temporal-scaler-output
        composite-pass (renderer-temporal-scaler renderer)))
-    (set-pipeline composite-pass (renderer-composite-pipeline renderer))
-    (set-bind-group composite-pass 0
-                    (renderer-composite-source-bind-group renderer))
-    (draw composite-pass 3)
+    (encode-composite (renderer-finishing renderer) composite-pass
+                      (renderer-composite-source-bind-group renderer))
     (when (plusp (renderer-flame-instance-count renderer))
       (encode-torch-flames
        (renderer-torches renderer) composite-pass
@@ -245,10 +239,8 @@
             :color-attachments
             `((:view ,surface-texture :load-op :clear :store-op :store
                :clear-value #(0.0 0.0 0.0 1.0)))))))
-    (set-pipeline present-pass (renderer-present-pipeline renderer))
-    (set-bind-group present-pass 0
-                    (renderer-frame-present-bind-group renderer frame))
-    (draw present-pass 3)
+    (encode-presentation (renderer-finishing renderer) present-pass
+                         (renderer-frame-present-bind-group renderer frame))
     ;; Both MetalFX and the direct HDR path publish here.  The atelier
     ;; overlay remains later than tone mapping and glow in either case.
     (when overlay-encoder

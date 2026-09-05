@@ -48,3 +48,11 @@
 (defmethod luv:end-pass ((encoder gpu-test-encoder))
   (push :end (test-gpu-commands encoder)))
 
+
+(defclass gpu-test-context (luv:canvas-context) ())
+
+(defmethod luv:canvas-frame-resource-key ((context gpu-test-context) surface-texture)
+  surface-texture)
+
+(defun test-renderer-frame (renderer)
+  (render::renderer-frame-state-for renderer (make-instance 'gpu-test-context) :slot))

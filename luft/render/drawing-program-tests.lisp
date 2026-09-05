@@ -39,3 +39,20 @@
            device :vertex (luft.render.shaders:present-vertex-specification)
            :fragment (program-binding-probe 0 1)))
     (true (zerop (test-gpu-attempts device)))))
+
+(define-test mesh-programs-check-command-kind-before-encoding
+  (let* ((device (make-instance 'gpu-test-device))
+         (program (render:make-drawing-program
+                   device :mesh (luft.render.shaders:terrain-shadow-mesh-specification)))
+         (pass (make-instance 'gpu-test-encoder)))
+    (unwind-protect
+         (progn
+           (true (typep (test-gpu-descriptor (render::program-pipeline program))
+                        'luv::mesh-render-pipeline-descriptor))
+           (fail (render:encode-program program pass :binding
+                                        (luv:make-gpu-draw-command :vertex-count 3)))
+           (true (null (test-gpu-commands pass)))
+           (let ((command (luv:make-gpu-draw-mesh-command :x 17)))
+             (render:encode-program program pass :binding command)
+             (true (eq command (first (test-gpu-commands pass))))))
+      (render:release-program program))))

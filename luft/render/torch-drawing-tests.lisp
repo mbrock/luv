@@ -31,7 +31,6 @@
          (progn
            (true (null (render::renderer-torches renderer)))
            (true (null (render::renderer-frame-state-flame-effect-buffer frame)))
-           (true (null (render::renderer-flame-bind-group renderer)))
            (true (null (render::renderer-frame-torch-body-bind-group renderer frame t)))
            (true (null (render::renderer-frame-flame-bind-group renderer frame)))
            (render:upload-torch-frame nil nil 1.0)
@@ -88,12 +87,13 @@
   (let* ((device (make-instance 'gpu-test-device))
          (renderer (render:make-renderer device :bgra8-unorm '(640 480)))
          (drawing (render::renderer-torches renderer))
-         (old-binding (render::renderer-flame-bind-group renderer)))
+         (frame (test-renderer-frame renderer))
+         (old-binding (render::renderer-frame-flame-bind-group renderer frame)))
     (unwind-protect
          (progn
            (render::replace-renderer-target-generation renderer '(800 600))
            (true (eq drawing (render::renderer-torches renderer)))
-           (true (not (eq old-binding (render::renderer-flame-bind-group renderer))))
+           (true (not (eq old-binding (render::renderer-frame-flame-bind-group renderer frame))))
            (true (= 1 (test-gpu-release-attempts old-binding))))
       (render:destroy-renderer renderer))))
 

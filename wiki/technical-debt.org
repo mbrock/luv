@@ -126,12 +126,10 @@ targets, resident mesh publication, and per-frame uploads. Bindings that join
 two owners need an explicit lifetime; grouping everything by visual feature
 must not obscure those relationships.
 
-The remaining work is:
+Renderer composition and program migration are complete (#DXT5XG). A second
+review removed obsolete bindings and clarified lifetime ownership (#PIPJUL).
+The remaining work below concerns the wider Luft system.
 
-- Extract the other renderer owners: shadows and terrain,
-  temporal reconstruction, and presentation. Keep the frame sequence explicit.
-  Torch drawing now has an independent owner (#J98GAW). Sky, player, torch,
-  and exposure programs share a checked shader input interface (#L9Z4PE).
 - Further separate source loading, residency policy, and authored edits.
   Explain source chunks, geometry owners, and neighboring inputs with a concrete
   chunk-boundary example. The pending replacement is now a separate transaction
@@ -238,9 +236,9 @@ scenes are tested through the real renderer publication boundary.
 :END:
 
 [[file:../luft/render/torch-drawing.lisp][Torch drawing]] owns the canonical body geometry, body/shadow/flame programs,
-layouts, and depth sampler. Publications still own the shared instance data;
-presentation slots own effect uploads; target generations own their depth
-bindings. The renderer invokes three operations in frame order and releases
+and depth sampler. Publications still own the shared instance data;
+presentation slots own effect uploads and bindings that borrow population,
+camera, and depth inputs (#PIPJUL). The renderer invokes three operations in frame order and releases
 the component after those borrowed bindings. Its slots fell from 57 to 46.
 
 =make-renderer= and =start-viewer= accept a replaceable =:torch-factory=;
@@ -282,9 +280,9 @@ by the names already declared in the shader:
 The host no longer repeats binding numbers or layout entries for those six
 programs. Missing, unknown, repeated, and nil inputs fail before allocation.
 The DSL treats host values as opaque handles; native handle compatibility
-remains the HAL/backend's responsibility. The first drawing implementation
-supports vertex draws and descriptor set zero, checked before allocation;
-terrain mesh programs and the remaining renderer owners are the next clients.
+remains the HAL/backend's responsibility. The drawing implementation supports
+vertex and direct mesh draws with descriptor set zero. All applicable renderer
+programs now use it (#DXT5XG).
 
 =encode-program= and =release-program= are generic operations. Components own
 whole programs alongside their domain resources; frame, publication, and
@@ -292,6 +290,82 @@ target owners retain the bindings that borrow their inputs. Failed child
 releases remain reachable for retry through the containing owner. Tests cover
 shader renumbering with unchanged host code, conflicting declarations,
 construction rollback, omission, resize, and release retry.
+
+*** DONE Compose every applicable renderer program
+:PROPERTIES:
+:ID: DXT5XG
+:END:
+
+[[file:../luft/render/render.lisp][Start with renderer composition]], then read [[file:../luft/render/frame.lisp][the frame's execution order]].
+The renderer now has 15 direct fields: nine component owners, publication,
+resized targets, presentation slots, device, composition choices, and frame
+number. Its source is 160 lines, down from 2,244 before this iteration.
+
+All twelve drawing programs use =make-drawing-program=, shader-declared named
+inputs, and generic drawing/release operations. CLOS distinguishes vertex draws
+from direct mesh workgroups and checks the command kind before encoding.
+Terrain's shader names now say =terrain-mesh= and =terrain-shadow-mesh=;
+the shared HDR copy no longer carries a torch-specific name.
+
+| Owner | What it owns or decides |
+|-------+------------------------|
+| [[file:../luft/render/terrain-drawing.lisp][Terrain]] | Star atlas and scene/shadow mesh programs |
+| [[file:../luft/render/sun-shadow.lisp][Sun shadow]] | Shared depth image, view, and comparison sampler |
+| [[file:../luft/render/lattice-drawing.lisp][Lattice drawing]] | Optional construction marker program |
+| [[file:../luft/render/sky.lisp][Sky]], [[file:../luft/render/player.lisp][player]], [[file:../luft/render/torch-drawing.lisp][torches]] | Their independently replaceable drawing implementations |
+| [[file:../luft/render/reconstruction.lisp][Reconstruction]] | Direct/shader/native choice and temporal history state |
+| [[file:../luft/render/image-finishing.lisp][Image finishing]] | HDR copy, presentation, and image filtering sampler |
+| [[file:../luft/render/exposure.lisp][Exposure]] | Brightness policy and optional measurement program |
+
+=make-renderer= and =start-viewer= expose factories for each owner. Factories
+survive refresh through one composition record. Lattice, sky, player, and
+torches may be omitted. A replacement terrain test supplies neither the built-in
+atlas nor its programs and still participates in scene and shadow composition.
+MetalFX remains a native HAL scaler owned with resized targets; it is not
+forced into a shader-program interface.
+
+All 25 test suites pass. All 19 production SPIR-V binaries match the prior
+iteration after accounting for the semantic filename changes. Inspected Vulkan
+captures cover terrain and torches, construction markers, resizing, refresh,
+and direct rendering with optional components omitted.
+
+*** DONE Remove unused bindings and make lifetime owners explicit
+:PROPERTIES:
+:ID: PIPJUL
+:END:
+
+The second review found bindings built against an initial camera buffer that
+no draw consumed. [[file:../luft/render/renderer-frames.lisp][Presentation slots]] already owned the real camera/effect uploads
+and their cached bindings. Removing the unused groups also removed the initial
+camera/effect buffers and the target-generation flame/depth wrapper.
+
+[[file:../luft/render/renderer-residency.lisp][Residency]] now publishes only one pointer. Its exact semantic manifest checks
+remain; a frame joins the current population and current targets when binding.
+A residency change retires cached bindings without rebuilding target identity.
+[[file:../luft/render/renderer-targets.lisp][Targets]] are one transactional owner. A small image constructor states the
+shared texture/view relation; one custody ledger replaces the independent
+allocation, rollback, and destruction lists. Resident buffers, mesh slots, and
+global torch buffers use the same ownership mechanism.
+
+Construction records ownership before uploads, so failed writes cannot strand
+buffers. Failed frame, program, resident, and target releases retain custody
+for retry. Tests cover allocation prefixes in direct and temporal modes,
+publication atomicity, replacements, omissions, resize, upload failure, and
+nested release retry. A HAL test preserves native temporal usage requirements
+and signal/scale/wait ordering; native Metal execution still needs a Mac.
+
+*** DONE Draw construction markers from the current star atlas
+:PROPERTIES:
+:ID: Q4P7W7
+:END:
+
+The lattice diagnostic still read the removed face/band/fan template API.
+It now visits active star sites and the exact atlas triangle vertices used by
+terrain, including companion meshes. Equal points merge, with active sites
+retaining their distinct marker kind. Data stays lazy: construction mode
+uploads at most one resident overlay per frame, and an omitted lattice factory
+performs no scan or drawing. The independent surface-attachment gap remains
+explicit in #5G9KEN.
 
 *** DONE State the missing star-surface attachment capability directly
 :PROPERTIES:

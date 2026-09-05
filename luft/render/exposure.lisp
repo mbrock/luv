@@ -34,6 +34,9 @@ FRAME-INDEX increases each frame. This operation must never wait for readback.")
    "Release owned resources; repeated calls retry failures and otherwise do nothing.
 The caller must release source bindings first and stop using CONTROL."))
 
+(defmethod destroy ((component exposure-control))
+  (release-exposure component))
+
 ;;; A fixed policy is also the way to omit the entire measurement subsystem.
 
 (defclass fixed-exposure (exposure-control)

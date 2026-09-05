@@ -81,8 +81,8 @@
            #:torch-body-shadow-vertex-specification
            #:torch-body-fragment-specification
            #:star-fragment-specification
-           #:mesh-vertex-specification
-           #:shadow-vertex-specification
+           #:terrain-mesh-specification
+           #:terrain-shadow-mesh-specification
            #:sky-fragment-specification
            #:sky-temporal-fragment-specification
            #:temporal-resolve-fragment-specification
@@ -118,6 +118,13 @@
            #:make-program-binding
            #:encode-program
            #:release-program
+           #:terrain-drawing #:make-terrain-drawing #:make-terrain-binding #:encode-terrain
+           #:sun-shadow #:make-sun-shadow #:sun-shadow-texture #:sun-shadow-view #:sun-shadow-sampler
+           #:make-lattice-drawing
+           #:image-finishing #:make-image-finishing #:finishing-sampler
+           #:make-composite-binding #:make-presentation-binding #:encode-composite #:encode-presentation
+           #:reconstruction #:make-reconstruction #:reconstruction-kind
+           #:make-reconstruction-binding #:encode-reconstruction-resolve
            #:scene
            #:scene-solid
            #:scene-authored-voxel-light

@@ -10,7 +10,7 @@
 
 (defun own-gpu-object (owner object)
   "Adopt OBJECT, including a composed program, for reverse-order destruction."
-  (push object (owned-gpu-resources owner))
+  (when object (push object (owned-gpu-resources owner)))
   object)
 
 (defun own-gpu-resource (owner device descriptor)
@@ -41,3 +41,17 @@
            (with-release-warnings
              (releasing :gpu-construction
                (release-owned-gpu-resources ,value))))))))
+
+(defmethod destroy ((owner gpu-resource-owner))
+  (release-owned-gpu-resources owner))
+
+(defun retire-gpu-object (custodian object)
+  "Retire an unpublished owner, retaining it with CUSTODIAN if release fails."
+  (own-gpu-object custodian object)
+  (release-owned-gpu-object custodian object))
+
+(defun release-owned-gpu-object (owner object)
+  "Release one registered resource; retain its custody when destruction fails."
+  (destroy object)
+  (setf (owned-gpu-resources owner) (remove object (owned-gpu-resources owner)))
+  (values))

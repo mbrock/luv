@@ -232,7 +232,7 @@ for completely static geometry."
 ;;; conservative raster bound; every visible contour below comes from this
 ;;; analytic field.  LUFT is Z-up, unlike luvcraft's first-person figures.
 
-(define-live-shader mesh-vertex-specification
+(define-live-shader terrain-mesh-specification
     (:stage :mesh
      :workgroup-size (32 1 1)
      :inputs ((lane :uint :built-in :local-invocation-index)
@@ -511,7 +511,7 @@ for completely static geometry."
     (set-output motion-output
                 (mesh-temporal-motion previous-clip current-clip))))
 
-(define-live-shader shadow-vertex-specification
+(define-live-shader terrain-shadow-mesh-specification
     (:stage :mesh
      :workgroup-size (32 1 1)
      :inputs ((lane :uint :built-in :local-invocation-index)
@@ -1057,7 +1057,7 @@ for completely static geometry."
                 (vec4 (mix (representation presented) cross-color crosshair)
                       1.0))))
 
-(define-live-shader torch-flame-composite-copy-fragment-specification
+(define-live-shader hdr-copy-fragment-specification
     (:stage :fragment
      :inputs ((ndc :vec2 :location 0))
      :outputs ((color-output :vec4 :location 0))

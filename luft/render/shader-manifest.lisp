@@ -3,9 +3,9 @@
 ;;; Production module manifest ----------------------------------------------
 
 (defparameter *production-shader-specifications*
-  '(mesh-vertex-specification
+  '(terrain-mesh-specification
     star-fragment-specification
-    shadow-vertex-specification
+    terrain-shadow-mesh-specification
     player-sdf-vertex-specification
     player-sdf-fragment-specification
     lattice-point-vertex-specification
@@ -21,7 +21,7 @@
     torch-body-shadow-vertex-specification
     torch-flame-vertex-specification
     torch-flame-fragment-specification
-    torch-flame-composite-copy-fragment-specification)
+    hdr-copy-fragment-specification)
   "Every production LUFT shader specification, in stable emission order.")
 
 (defun write-production-spir-v (&optional (directory #p"build/"))

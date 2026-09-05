@@ -39,6 +39,9 @@ The frame owns the result and releases it before its inputs or DRAWING."))
 (defmethod release-scene-drawing ((drawing null))
   (values))
 
+(defmethod destroy ((component scene-drawing))
+  (release-scene-drawing component))
+
 ;;; Both current drawings use one triangle-list pipeline. This implementation
 ;;; shares allocation and draw mechanics without prescribing other drawings'
 ;;; representation or forcing the renderer to know their layouts or shaders.

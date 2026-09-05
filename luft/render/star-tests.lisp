@@ -114,8 +114,8 @@
                  (aref words block)))))))
 
 (define-test terrain-shaders-are-direct-mesh-stages
-  (let* ((mesh (shaders:mesh-vertex-specification))
-         (shadow (shaders:shadow-vertex-specification))
+  (let* ((mesh (shaders:terrain-mesh-specification))
+         (shadow (shaders:terrain-shadow-mesh-specification))
          (fragment (shaders:star-fragment-specification))
          (output (luv.shader:shader-specification-mesh-output mesh)))
     (true (eq :mesh (luv.shader:shader-specification-stage mesh)))

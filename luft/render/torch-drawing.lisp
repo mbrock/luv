@@ -23,13 +23,15 @@
 
 (defgeneric make-torch-flame-binding (drawing device instances camera effect depth-view)
   (:documentation
-   "Return a fresh caller-owned binding borrowing opaque depth and frame inputs.
-NIL EFFECT selects the drawing's immutable initial effect for staged bindings."))
+   "Return a fresh caller-owned binding borrowing opaque depth and frame inputs."))
 
 (defgeneric encode-torch-bodies (drawing pass binding count &key shadow-p))
 (defgeneric encode-torch-flames (drawing pass binding count))
 (defgeneric release-torch-drawing (drawing)
   (:documentation "Release program resources, retaining failed handles for retry."))
+
+(defmethod destroy ((component torch-drawing))
+  (release-torch-drawing component))
 
 ;;; NIL omits GPU drawing without changing the authored attachment/light data.
 
@@ -71,8 +73,7 @@ NIL EFFECT selects the drawing's immutable initial effect for staged bindings.")
    (body-program :accessor torch-drawing-body-program)
    (shadow-program :accessor torch-drawing-shadow-program)
    (flame-program :accessor torch-drawing-flame-program)
-   (depth-sampler :accessor torch-drawing-depth-sampler)
-   (initial-effect :accessor torch-drawing-initial-effect)))
+   (depth-sampler :accessor torch-drawing-depth-sampler)))
 
 (defun torch-frame-buffer-descriptor ()
   (make-buffer-descriptor
@@ -100,7 +101,7 @@ NIL EFFECT selects the drawing's immutable initial effect for staged bindings.")
   (make-program-binding
    (torch-drawing-flame-program drawing) device
    :flame-instances instances :camera-state camera
-   :effect-state (or effect (torch-drawing-initial-effect drawing))
+   :effect-state effect
    :opaque-depth depth-view :depth-sampler (torch-drawing-depth-sampler drawing)))
 
 (defmethod encode-torch-bodies
@@ -132,8 +133,6 @@ NIL EFFECT selects the drawing's immutable initial effect for staged bindings.")
                       :label "luft canonical framed torch body"
                       :size (* 4 (length vertices)) :usage '(:storage :copy-dst))))
           (write-buffer (torch-drawing-vertices drawing) vertices))
-        (setf (torch-drawing-initial-effect drawing) (own (torch-frame-buffer-descriptor)))
-        (upload-torch-frame drawing (torch-drawing-initial-effect drawing) 0.0)
         (setf (torch-drawing-depth-sampler drawing)
               (own (make-sampler-descriptor
                     :label "luft torch flame opaque-depth sampler"
