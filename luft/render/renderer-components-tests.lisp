@@ -102,6 +102,62 @@
     (dolist (resource (test-gpu-resources device))
       (true (= (if (eq resource binding) 2 1) (test-gpu-release-attempts resource))))))
 
+(define-test superseded-bindings-leave-every-frame-cache-even-when-release-fails
+  (dolist (replacement '(:targets :publication))
+    (let* ((device (make-instance 'gpu-test-device))
+           (renderer (render:make-renderer device :bgra8-unorm '(640 480)))
+           (context (make-instance 'gpu-test-context))
+           (frames (loop for slot in '(:slot-a :slot-b)
+                         collect (render::renderer-frame-state-for renderer context slot)))
+           (drawing (render::renderer-sky renderer))
+           ;; The sky's cache key is unchanged by either replacement.
+           (bindings (loop for frame in frames
+                           collect (render::renderer-frame-drawing-binding renderer frame drawing))))
+      (unwind-protect
+           (progn
+             (dolist (binding bindings)
+               (setf (test-gpu-fail-release-p binding) t))
+             (handler-bind ((luv:release-warning #'muffle-warning))
+               (ecase replacement
+                 (:targets (render::replace-renderer-target-generation renderer '(800 600)))
+                 (:publication
+                  (let ((builder (render::make-scene-builder)))
+                    (render::scene-builder-cell builder 10 10 2)
+                    (multiple-value-bind (mesh generation)
+                        (render::make-render-mesh (render::finish-scene-builder builder))
+                      (render::renderer-update-meshes renderer (list (cons 0 mesh)) nil
+                                                      :scene-generation generation))))))
+             (loop for frame in frames for binding in bindings do
+               (true (= 1 (test-gpu-release-attempts binding)))
+               (true (zerop (hash-table-count (render::renderer-frame-state-bind-groups frame))))
+               (true (not (eq binding (render::renderer-frame-drawing-binding renderer frame drawing)))))
+             ;; Another invalidation must neither resurrect nor forget the
+             ;; failed handles; final teardown retries only their release.
+             (render::clear-renderer-frame-bind-groups renderer))
+        (render:destroy-renderer renderer))
+      (render:destroy-renderer renderer)
+      (dolist (resource (test-gpu-resources device))
+        (true (= (if (member resource bindings) 2 1) (test-gpu-release-attempts resource)))))))
+
+(define-test frame-construction-rolls-back-every-allocation-prefix
+  (let* ((device (make-instance 'gpu-test-device))
+         (renderer (render:make-renderer device :bgra8-unorm '(640 480)))
+         (before (test-gpu-attempts device))
+         (frame (render::make-renderer-frame-state renderer))
+         (allocations (- (test-gpu-attempts device) before)))
+    (render::destroy-renderer-frame-state frame)
+    (render:destroy-renderer renderer)
+    (loop for failure from 1 to allocations do
+      (let* ((device (make-instance 'gpu-test-device :fail-at (+ before failure)))
+             (renderer (render:make-renderer device :bgra8-unorm '(640 480))))
+        (unwind-protect
+             (progn
+               (fail (test-renderer-frame renderer))
+               (true (zerop (luv:canvas-frame-resource-count (render::renderer-frame-resources renderer)))))
+          (render:destroy-renderer renderer))
+        (dolist (resource (test-gpu-resources device))
+          (true (= 1 (test-gpu-release-attempts resource))))))))
+
 (define-test retired-target-failure-keeps-the-new-target-and-retains-retry-custody
   (let* ((device (make-instance 'gpu-test-device))
          (renderer (render:make-renderer device :bgra8-unorm '(640 480)))

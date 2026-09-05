@@ -128,6 +128,8 @@ must not obscure those relationships.
 
 Renderer composition and program migration are complete (#DXT5XG). A second
 review removed obsolete bindings and clarified lifetime ownership (#PIPJUL).
+Presentation slots now separate drawable bindings from release-retry custody
+(#RBNWIZ), using the same ownership mechanism as programs and targets.
 The remaining work below concerns the wider Luft system.
 
 - Further separate source loading, residency policy, and authored edits.
@@ -353,6 +355,32 @@ for retry. Tests cover allocation prefixes in direct and temporal modes,
 publication atomicity, replacements, omissions, resize, upload failure, and
 nested release retry. A HAL test preserves native temporal usage requirements
 and signal/scale/wait ordering; native Metal execution still needs a Mac.
+
+*** DONE Separate binding invalidation from release-retry custody
+:PROPERTIES:
+:ID: RBNWIZ
+:END:
+
+The presentation-slot binding cache answers “what may the next draw use?”
+The GPU custody ledger answers “what must this owner still release?” Those
+are different questions after a release failure. Previously, invalidation
+destroyed a binding before removing its cache entry. A failed destruction
+left it drawable, and the per-slot error report skipped later slots entirely.
+Even an unchanged sky binding key could therefore return a retired handle
+after a resize or residency publication.
+
+[[file:../luft/render/renderer-frames.lisp][Presentation slots]] now use the existing =gpu-resource-owner= ledger for
+uploads and bindings. Invalidation clears each slot's lookup before attempting
+release, and one report collects failures across all slots. Failed handles
+remain owned for teardown retry but cannot be returned by the binding cache.
+Construction rollback and reverse-order teardown use the same mechanism as
+the renderer's other owners; there is no second manual release inventory.
+
+Regression tests inject failures in two presentation slots during both target
+replacement and residency publication. They require fresh bindings under the
+same keys, complete invalidation, and eventual release without double-release.
+Frame allocation-prefix tests also require failed construction to leave the
+presentation cache empty and release every acquired upload.
 
 *** DONE Draw construction markers from the current star atlas
 :PROPERTIES:

@@ -3,69 +3,50 @@
 ;;; Presentation-slot uploads and bindings: reuse only after the canvas fence.
 ;;; Each binding borrows current component, residency, and target inputs.
 
-(defstruct (renderer-frame-state
-             (:constructor %make-renderer-frame-state
-                 (&key camera-buffer flame-effect-buffer)))
-  "Mutable uploads and dependent bindings local to one presentation slot."
-  camera-buffer
-  flame-effect-buffer
-  (bind-groups (make-hash-table :test #'equal)))
+(defclass renderer-frame-state (gpu-resource-owner)
+  ((camera-buffer :initform nil :accessor renderer-frame-state-camera-buffer)
+   (flame-effect-buffer :initform nil :accessor renderer-frame-state-flame-effect-buffer)
+   (bind-groups :initform (make-hash-table :test #'equal) :reader renderer-frame-state-bind-groups))
+  (:documentation "Uploads and bindings local to one presentation slot.
+The cache serves only current bindings. The custody ledger also retains failed
+releases for retry, but those retired bindings must never be served again. #RBNWIZ"))
 
 (defun make-renderer-frame-state (renderer)
   "Allocate one complete mutable upload cohort for RENDERER."
-  (let ((camera nil)
-        (effect nil)
-        (completed-p nil))
-    (unwind-protect
-         (progn
-           (setf camera
-                 (create
-                  (renderer-device renderer)
-                  (make-buffer-descriptor
-                   :label "luft presentation-slot camera state"
-                   :size (shaders::scene-uniform-byte-size)
-                   :usage '(:uniform :copy-dst)))
-                 effect (make-torch-frame-buffer
-                         (renderer-torches renderer) (renderer-device renderer)))
-           (setf completed-p t)
-           (%make-renderer-frame-state
-            :camera-buffer camera :flame-effect-buffer effect))
-      (unless completed-p
-        (when effect (ignore-errors (destroy effect)))
-        (when camera (ignore-errors (destroy camera)))))))
+  (let ((state (make-instance 'renderer-frame-state))
+        (device (renderer-device renderer)))
+    (with-gpu-construction (state)
+      (setf (renderer-frame-state-camera-buffer state)
+            (own-gpu-resource
+             state device
+             (make-buffer-descriptor
+              :label "luft presentation-slot camera state"
+              :size (shaders::scene-uniform-byte-size)
+              :usage '(:uniform :copy-dst)))
+            (renderer-frame-state-flame-effect-buffer state)
+            (own-gpu-object state (make-torch-frame-buffer (renderer-torches renderer) device))))))
 
 (defun destroy-renderer-frame-state (state)
   "Retain failed releases in STATE so its presentation cache can retry them."
-  (with-release-report
-    (let ((groups (renderer-frame-state-bind-groups state)))
-      (dolist (key (loop for key being the hash-keys of groups collect key))
-        (releasing :frame-bind-group
-          (when (gethash key groups) (destroy (gethash key groups)))
-          (remhash key groups))))
-    (when (renderer-frame-state-flame-effect-buffer state)
-      (releasing :frame-flame-effect-buffer
-        (destroy (renderer-frame-state-flame-effect-buffer state))
-        (setf (renderer-frame-state-flame-effect-buffer state) nil)))
-    (when (renderer-frame-state-camera-buffer state)
-      (releasing :frame-camera-buffer
-        (destroy (renderer-frame-state-camera-buffer state))
-        (setf (renderer-frame-state-camera-buffer state) nil))))
-  (values))
+  (clrhash (renderer-frame-state-bind-groups state))
+  ;; Bindings were acquired after uploads and therefore retire first.
+  (release-owned-gpu-resources state))
 
 (defun clear-renderer-frame-bind-groups (renderer)
-  "Drop bindings derived from a superseded target or scene generation."
-  (map-canvas-frame-resources
-   (lambda (state key)
-     (declare (ignore key))
-     (let ((groups (renderer-frame-state-bind-groups state)))
-       (with-release-report
-         (dolist (binding-key
-                   (loop for key being the hash-keys of groups collect key))
-           (releasing (list :frame-bind-group binding-key)
-             (when (gethash binding-key groups)
-               (destroy (gethash binding-key groups)))
-             (remhash binding-key groups))))))
-   (renderer-frame-resources renderer))
+  "Invalidate every slot's bindings, retaining failed releases only in custody."
+  (with-release-report
+    (map-canvas-frame-resources
+     (lambda (state slot-key)
+       (let* ((groups (renderer-frame-state-bind-groups state))
+              (entries (loop for key being the hash-keys of groups using (hash-value binding)
+                             collect (cons key binding))))
+         ;; Invalidation is unconditional, including keys unchanged by resize
+         ;; or publication. Release failures must not keep them drawable.
+         (clrhash groups)
+         (dolist (entry entries)
+           (releasing (list :frame-bind-group slot-key (car entry))
+             (when (cdr entry) (release-owned-gpu-object state (cdr entry)))))))
+     (renderer-frame-resources renderer)))
   renderer)
 
 (defun renderer-frame-program-binding (renderer frame key program &rest inputs)
@@ -98,7 +79,7 @@
   (let ((groups (renderer-frame-state-bind-groups frame)))
     (multiple-value-bind (binding present-p) (gethash key groups)
       (if present-p binding
-          (setf (gethash key groups) (funcall make-binding))))))
+          (setf (gethash key groups) (own-gpu-object frame (funcall make-binding)))))))
 
 (defun renderer-frame-torch-body-bind-group (renderer frame shadow-p)
   (renderer-frame-component-binding
