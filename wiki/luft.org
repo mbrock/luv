@@ -283,6 +283,37 @@ it is also a different population from the earlier highland measurement.
 Regression tests cover unchanged-chunk sharing, old worker snapshots, offset
 zero, guard materials, and light lookup equivalence across a chunk seam.
 
+* DONE The same stars in a browser
+:PROPERTIES:
+:ID: KXKSPG
+:END:
+
+[[file:luft-demo.html][Play Luft]] is a finite editable highland built with ParenScript and
+Three.js, served and published through the existing wiki resource model.
+It starts with a draggable overview; mouse and keyboard visitors can walk,
+jump, remove blocks, and place five materials. Touch visitors can orbit and
+pinch. Edits belong to the page and disappear on reset or reload.
+
+The shared boundary is the atlas itself.
+[[lisp:luft:star-atlas-owned-triangles]] supplies each star's oriented patch;
+[[lisp:luft:star-atlas-owned-appearance-masks]] supplies the same set-valued
+material selectors used by the native renderer. The browser retains native
+Z-up coordinates and divides mesh ticks by eight. Each occupied pattern gets
+one Three.js =InstancedMesh=; its sites supply translation and eight material
+IDs. No second bevel mesher or rounded-box approximation is involved.
+
+The first scene contains 12,303 cells and 7,651 drawable stars in 72 instance
+batches. Three.js owns standard material lighting, shadows, bloom, and tone
+mapping. The finite demo rebuilds its batches on edits and disposes the old
+GPU resources; native streaming, voxel-light propagation, and native shaders
+remain separate experiments. This is the browser counterpart to [[8E110Y]].
+
+The compiled browser selector agrees with native Lisp on all 256 translated
+2x2x2 occupancy fixtures. Chrome checks exercise walking, jumping, remove/place,
+wireframe, resize, and static publication under a URL prefix. Repeated rebuilds
+return to the same geometry and texture counts after rendering. Desktop and
+touch-emulated browser checks are not measurements of a physical phone.
+
 * DONE Walk and build at eye level
 :PROPERTIES:
 :ID: 8E110Y

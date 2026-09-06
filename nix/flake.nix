@@ -362,6 +362,7 @@
             pkgs.harfbuzz
             pkgs.mesa
             pkgs.python3
+            pkgs.nodejs # Execute ParenScript browser parity tests.
             pkgs.pkg-config
             pkgs.qrencode
             pkgs.sdl3
@@ -389,6 +390,7 @@
             pkgs.harfbuzz
             pkgs.mesa
             pkgs.python3
+            pkgs.nodejs # Execute ParenScript browser parity tests.
             pkgs.pkg-config
             pkgs.sdl3
             pkgs.spirv-tools

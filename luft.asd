@@ -166,3 +166,22 @@
              (declare (ignore operation component))
              (uiop:symbol-call '#:luv.test-support '#:test-package
                                '#:luft.render.tests)))
+
+(defsystem "luft/web"
+  :description "Playable ParenScript/Three.js demo using the native star atlas."
+  :depends-on ("luft" "luv-wiki")
+  :serial t
+  :components ((:file "luft/web/package")
+               (:file "luft/web/data")
+               (:file "luft/web/core")
+               (:file "luft/web/client")
+               (:file "luft/web/page"))
+  :in-order-to ((test-op (test-op "luft/web/test"))))
+
+(defsystem "luft/web/test"
+  :depends-on ("luft/web" "luv/test-support")
+  :components ((:file "luft/web/tests"))
+  :perform (test-op (operation component)
+             (declare (ignore operation component))
+             (uiop:symbol-call '#:luv.test-support '#:test-package
+                               '#:luft.web.tests)))

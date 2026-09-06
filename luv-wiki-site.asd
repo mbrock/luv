@@ -5,7 +5,7 @@
   :version "0.0.1"
   :author "Mikael Brockman"
   :defsystem-depends-on ("luv-wiki")
-  :depends-on ("luv-wiki" "luft/atlas" "luvcraft/web")
+  :depends-on ("luv-wiki" "luft/atlas" "luft/web" "luvcraft/web")
   :build-operation "luv.wiki:render-op"
   :components
   ((:module "wiki"
