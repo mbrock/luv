@@ -31,7 +31,7 @@ luftTone /= max(count, 1.0);
 (defun client-form ()
   `(progn
     (defvar renderer) (defvar scene) (defvar camera)
-    (defvar composer) (defvar bloom) (defvar material) (defvar world)
+    (defvar composer) (defvar bloom) (defvar occlusion) (defvar material) (defvar world)
     (defvar outline) (defvar sun) (defvar meshes (array))
     (defvar keys (new (|Set|)))
     (defvar yaw 0) (defvar pitch 0)
@@ -326,6 +326,7 @@ luftTone /= max(count, 1.0);
          (setf |THREE| (browser:await (import "three")))
          (let* ((effects (browser:await (import "three/addons/postprocessing/EffectComposer.js")))
                 (renders (browser:await (import "three/addons/postprocessing/RenderPass.js")))
+                (occlusions (browser:await (import "three/addons/postprocessing/SSAOPass.js")))
                 (blooms (browser:await (import "three/addons/postprocessing/UnrealBloomPass.js")))
                 (outputs (browser:await (import "three/addons/postprocessing/OutputPass.js"))))
            (setf renderer (new ((@ |THREE| |WebGLRenderer|)
@@ -334,31 +335,46 @@ luftTone /= max(count, 1.0);
                  camera (new ((@ |THREE| |PerspectiveCamera|) 58 1 0.08 220))
                  world (new ((@ |THREE| |Group|))))
            ((@ camera up set) 0 0 1)
-           ((@ renderer set-pixel-ratio) (min (if coarse-pointer 1 2) (or (@ window device-pixel-ratio) 1)))
+           ((@ renderer set-pixel-ratio) (min (if coarse-pointer 1.5 2) (or (@ window device-pixel-ratio) 1)))
            (setf (@ renderer tone-mapping) (@ |THREE| |ACESFilmicToneMapping|)
-                 (@ renderer tone-mapping-exposure) 1.2
+                 (@ renderer tone-mapping-exposure) 1.35
                  (@ renderer shadow-map enabled) true
                  (@ renderer shadow-map type) (@ |THREE| |PCFSoftShadowMap|)
-                 (@ scene background) (new ((@ |THREE| |Color|) "#b9d5db"))
-                 (@ scene fog) (new ((@ |THREE| |Fog|) "#b9d5db" 65 155)))
+                 (@ scene background) (new ((@ |THREE| |Color|) "#777f9e"))
+                 (@ scene fog) (new ((@ |THREE| |Fog|) "#777f9e" 65 155)))
            ((@ scene add) world)
-           (let ((sky (new ((@ |THREE| |HemisphereLight|) "#d3efff" "#645039" 2.0))))
+           ;; Native dusk radiance (lighting.lisp), in linear RGB, not CSS sRGB.
+           ;; Three's diffuse BRDF divides irradiance by pi; compensate here.
+           (let ((sky (new ((@ |THREE| |HemisphereLight|)
+                            (new ((@ |THREE| |Color|) 0.065 0.095 0.23))
+                            (new ((@ |THREE| |Color|) 0.23 0.115 0.16))
+                            (* 0.72 3.14159265)))))
              ((@ sky position set) 0 0 1)
              ((@ scene add) sky))
-           (setf sun (new ((@ |THREE| |DirectionalLight|) "#fff0d5" 3.1)))
-           ((@ sun position set) -15 -5 65)
+           (setf sun (new ((@ |THREE| |DirectionalLight|)
+                           (new ((@ |THREE| |Color|) 1.85 0.82 0.38))
+                           3.14159265)))
+           ((@ sun position set) -48 67 22)
            ((@ sun target position set) 24 24 0)
            (setf (@ sun cast-shadow) true
-                 (@ sun shadow map-size width) (if coarse-pointer 1024 2048)
-                 (@ sun shadow map-size height) (if coarse-pointer 1024 2048)
+                 (@ sun shadow map-size width) 2048
+                 (@ sun shadow map-size height) 2048
                  (@ sun shadow camera left) -44 (@ sun shadow camera right) 44
                  (@ sun shadow camera top) 44 (@ sun shadow camera bottom) -44
                  (@ sun shadow camera near) 1 (@ sun shadow camera far) 130
-                 (@ sun shadow normal-bias) 0.025 (@ sun shadow bias) -0.0001
+                 ;; Front-face depths need enough bias for the PCF footprint
+                 ;; at this low sun angle. Depth bias is normalized by the
+                 ;; 129-cell shadow range; -0.0015 is about 0.19 cells.
+                 (@ sun shadow normal-bias) 0.04 (@ sun shadow bias) -0.0015
                  (@ sun shadow auto-update) false (@ sun shadow needs-update) true)
            ((@ scene add) sun (@ sun target))
+           ;; Three defaults to BACK faces for shadow casting. Those are exit
+           ;; depths, not the nearest blockers: at a concave bevel they expose
+           ;; a false strip of sunlight which PCF spreads into a bright fringe.
+           ;; Use the same outward-facing surface for visibility and shadows.
            (setf material (new ((@ |THREE| |MeshStandardMaterial|)
-                                (create :roughness 0.82 :metalness 0.0))))
+                                (create :roughness 0.82 :metalness 0.0)))
+                 (@ material shadow-side) (@ |THREE| |FrontSide|))
            (setf (@ material on-before-compile)
                  (lambda (shader)
                    (setf (@ shader vertex-shader)
@@ -384,6 +400,13 @@ luftTone /= max(count, 1.0);
                                (create :type (@ |THREE| |HalfFloatType|) :samples 4)))))
              (setf composer (new ((@ effects |EffectComposer|) renderer target))))
            ((@ composer add-pass) (new ((@ renders |RenderPass|) scene camera)))
+           ;; World-scale contact shading, before bloom and the single output
+           ;; transform. SSAOPass multiplies the existing linear HDR buffer.
+           (setf occlusion (new ((@ occlusions |SSAOPass|) scene camera 1 1 16))
+                 (@ occlusion kernel-radius) 0.65
+                 (@ occlusion min-distance) 0.0002
+                 (@ occlusion max-distance) 0.012)
+           ((@ composer add-pass) occlusion)
            (setf bloom (new ((@ blooms |UnrealBloomPass|)
                              (new ((@ |THREE| |Vector2|) 1 1)) 0.12 0.5 1.15)))
            (setf (@ bloom enabled) (not coarse-pointer))
@@ -392,6 +415,7 @@ luftTone /= max(count, 1.0);
            (setf (@ window luft-demo)
                  (create :ready false :cells cells :atlas atlas :trace trace-cells
                          :surface-sites surface-sites :rebuild rebuild
+                         :composer composer :occlusion occlusion :sun sun
                          :camera camera :renderer renderer :meshes (lambda () meshes)))
            (reset-cells) (rebuild) (resize) (spawn-player)
            ((@ window add-event-listener) "resize" resize)

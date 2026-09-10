@@ -230,6 +230,34 @@ console.log('pointer and walking claims passed');
       (unless (zerop code) (error "Input claims failed:~%~A" errors))
       (true (search "claims passed" output)))))
 
+(define-test linear-hdr-lighting-pipeline
+  (let* ((javascript (web:demo-javascript))
+         (ao (search "composer.addPass(occlusion)" javascript))
+         (bloom (search "composer.addPass(bloom)" javascript))
+         (output (search "composer.addPass(new outputs.OutputPass" javascript)))
+    (true (and ao bloom output (< ao bloom output)))
+    ;; ParenScript downcases an all-uppercase property symbol such as |PI|.
+    ;; Undefined light intensity poisons the HDR bloom buffer with NaNs.
+    (true (not (search "Math.pi" javascript)))
+    (true (search "new three.Color(1.85, 0.82, 0.38)" javascript))
+    (true (search "new three.Color(0.065, 0.095, 0.23)" javascript))))
+
+(define-test shadow-caster-configuration
+  ;; The GPU/contact regression is shadow-check.js. Guard the generated
+  ;; property spelling too: a CREATE :SHADOW-SIDE option emits a hyphenated
+  ;; key that Three silently ignores, restoring the leaking default.
+  (let ((javascript (web:demo-javascript)))
+    (true (search "material.shadowSide = three.FrontSide" javascript))
+    (true (not (search "'shadow-side'" javascript))))
+  (let ((path (asdf:system-relative-pathname "luft/web" "luft/web/shadow-check.js")))
+    (multiple-value-bind (output errors code)
+        (uiop:run-program (list "node" "--check" (namestring path))
+                          :output :string :error-output :string
+                          :ignore-error-status t)
+      (declare (ignore output))
+      (unless (zerop code) (error "Shadow regression syntax failed:~%~A" errors))
+      (true (zerop code)))))
+
 (define-test complete-demo-is-valid-javascript-module
   (uiop:with-temporary-file (:pathname path :stream stream :type "mjs")
     (write-string (web:demo-javascript) stream)
