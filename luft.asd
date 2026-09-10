@@ -174,14 +174,23 @@
   :components ((:file "luft/web/package")
                (:file "luft/web/data")
                (:file "luft/web/core")
+               (:file "luft/web/streaming")
+               (:file "luft/web/meshing")
+               (:file "luft/web/worker")
                (:file "luft/web/client")
                (:file "luft/web/page"))
   :in-order-to ((test-op (test-op "luft/web/test"))))
 
 (defsystem "luft/web/test"
   :depends-on ("luft/web" "luv/test-support")
-  :components ((:file "luft/web/tests"))
+  :components ((:file "luft/web/tests")
+               (:file "luft/web/streaming-tests")
+               (:file "luft/web/worker-tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
              (uiop:symbol-call '#:luv.test-support '#:test-package
-                               '#:luft.web.tests)))
+                               '#:luft.web.tests)
+             (uiop:symbol-call '#:luv.test-support '#:test-package
+                               '#:luft.web.streaming-tests)
+             (uiop:symbol-call '#:luv.test-support '#:test-package
+                               '#:luft.web.worker-tests)))

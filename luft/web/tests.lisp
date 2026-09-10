@@ -69,7 +69,7 @@
 
 (define-test demo-publishes-without-a-native-gpu
   (let ((resources (web:demo-resources nil)))
-    (true (= 3 (length resources)))
+    (true (= 4 (length resources)))
     (true (search "importmap" (web::demo-html)))
     (true (search "luft-demo.js" (web::demo-html)))
     (true (> (length (web::demo-cells)) 10000))))
@@ -116,6 +116,7 @@ function fire(node, type, id, extra = {}) {
 }
 " stream)
     (write-string (parenscript:ps* `(progn ,(web::core-form)
+                                         ,(web::streaming-form)
                                          ,@(butlast (cdr (web::client-form))))) stream)
     (write-string
      "
@@ -137,7 +138,7 @@ assert.ok(stickX>0 && stickX<1 && stickY<0 && stickY>-1, 'analog diagonal');
 fire(pad, 'pointermove', 11, {clientX:48,clientY:48});
 assert.ok(stickX>0, 'other finger cannot steal stick');
 fire(pad, 'pointermove', 10, {clientX:48,clientY:-100});
-assert.equal(stickY,-1, 'clamp full deflection');
+assert.ok(Math.abs(stickY + 1) < 1e-12, 'clamp full deflection');
 fire(pad, 'lostpointercapture', 10);
 assert.equal(stickY,0);
 assert.equal(camera.position.x, 23);
@@ -220,6 +221,36 @@ target.cell = [2,0,1];
 assert.equal(editCell(false),true);
 assert.equal(cells.size,0);
 assert.equal(rebuilds,2);
+target.previous = [-160,512,32];
+assert.equal(editCell(true),true,'no finite XY edit fence');
+assert.equal(cells.get('-160,512,32'),selected);
+target.previous = [-160,512,64];
+assert.equal(editCell(true),false,'height bound');
+
+// Run real collision and vertical integration, not just the jump predicate.
+function stepFixture(wallHeight, ceiling) {
+  cells.clear(); clearInput(); yaw = 0; pitch = 0; velocity = 0; grounded = true;
+  camera.position.set(.5,.5,2.62);
+  for (let x=-2;x<3;x++) for(let y=-2;y<9;y++) {
+    cells.set(cellKey(x,y,0),1);
+    if(y>=2) for(let z=1;z<=wallHeight;z++) cells.set(cellKey(x,y,z),1);
+    if(ceiling) cells.set(cellKey(x,y,3),1);
+  }
+  keys.add('KeyW');
+  let peak = camera.position.z;
+  for(let i=0;i<300;i++) {movePlayer(1/240); peak=Math.max(peak,camera.position.z);}
+  return peak;
+}
+assert.ok(stepFixture(1,false)>3.62, 'autojump actually clears one block');
+assert.ok(camera.position.y>3 && Math.abs(camera.position.z-3.62)<.03, 'lands on raised terrain');
+assert.ok(stepFixture(2,false)<2.63, 'no autojump against tall wall');
+assert.ok(camera.position.y<1.73, 'tall wall stops forward movement');
+assert.ok(stepFixture(1,true)<2.63, 'no autojump under low ceiling');
+let fullscreenRequests = 0;
+document.fullscreenEnabled = true;
+document.documentElement = {requestFullscreen() {fullscreenRequests++; return Promise.resolve();}};
+toggleFullscreen();
+assert.equal(fullscreenRequests,1,'fullscreen requests entire UI, not only canvas');
 console.log('pointer and walking claims passed');
 " stream)
     (finish-output stream)
@@ -239,8 +270,8 @@ console.log('pointer and walking claims passed');
     ;; ParenScript downcases an all-uppercase property symbol such as |PI|.
     ;; Undefined light intensity poisons the HDR bloom buffer with NaNs.
     (true (not (search "Math.pi" javascript)))
-    (true (search "new three.Color(1.85, 0.82, 0.38)" javascript))
-    (true (search "new three.Color(0.065, 0.095, 0.23)" javascript))))
+    (true (search "new three.Color(1.05, 0.98, 0.85)" javascript))
+    (true (search "new three.Color(0.3, 0.36, 0.46)" javascript))))
 
 (define-test shadow-caster-configuration
   ;; The GPU/contact regression is shadow-check.js. Guard the generated

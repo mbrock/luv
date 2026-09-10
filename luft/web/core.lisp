@@ -5,8 +5,11 @@
     ;; ParenScript clears this register on returns; ES modules are strict.
     (defvar ps::|__ps_mv_reg| (array))
     (defvar cells (new (|Map|)))
+    (defvar cell-source null)
     (defun cell-key (x y z) (+ x "," y "," z))
-    (defun cell-at (x y z) (or ((@ cells get) (cell-key x y z)) 0))
+    (defun cell-at (x y z)
+      (if cell-source (cell-source x y z)
+          (or ((@ cells get) (cell-key x y z)) 0)))
     (defun sample-cell (x y z sample)
       (cell-at (+ x (if (logand sample 1) 0 -1))
                (+ y (if (logand sample 2) 0 -1))

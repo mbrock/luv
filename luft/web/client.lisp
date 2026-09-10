@@ -1,38 +1,10 @@
 (in-package #:luft.web)
 
-(defparameter *material-vertex-header*
-  "attribute float materialMask;
-attribute vec4 kindsA;
-attribute vec4 kindsB;
-varying vec3 luftTone;
-vec3 cellTone(float kind, float up) {
-  if (kind < 1.5) return mix(vec3(.42,.32,.21), vec3(.18,.31,.105), up);
-  if (kind < 2.5) return vec3(.53,.49,.39);
-  if (kind < 3.5) return vec3(.23,.13,.065);
-  if (kind < 4.5) return vec3(.16,.68,.94);
-  return mix(vec3(.085,.19,.045),vec3(.22,.37,.085),up);
-}
-")
-
-(defparameter *material-vertex-color*
-  "#include <color_vertex>
-luftTone = vec3(0.0);
-float count = 0.0;
-for (int i=0; i<8; i++) {
-  if (mod(floor(materialMask / exp2(float(i))), 2.0) > .5) {
-    float kind = i < 4 ? kindsA[i] : kindsB[i-4];
-    luftTone += cellTone(kind, max(normal.z, 0.0));
-    count += 1.0;
-  }
-}
-luftTone /= max(count, 1.0);
-")
-
 (defun client-form ()
   `(progn
     (defvar renderer) (defvar scene) (defvar camera)
     (defvar composer) (defvar bloom) (defvar occlusion) (defvar material) (defvar world)
-    (defvar outline) (defvar sun) (defvar meshes (array))
+    (defvar outline) (defvar sky) (defvar sun) (defvar meshes (array))
     (defvar keys (new (|Set|)))
     (defvar yaw 0) (defvar pitch 0)
     (defvar velocity 0) (defvar grounded false) (defvar selected 2)
@@ -48,64 +20,38 @@ luftTone /= max(count, 1.0);
     (defun element (id) (chain document (get-element-by-id id)))
     (defun set-status (message) (setf (@ status text-content) message))
     (defun vector (x y z) (new ((@ |THREE| |Vector3|) x y z)))
-    (defun rebuild ()
-      (let ((groups (new (|Map|))) (count 0))
-        ((@ (surface-sites) for-each)
-         (lambda (site)
-           (let* ((star (aref site 3)) (entry (aref atlas star)))
-             (when (> (@ (aref entry 0) length) 0)
-               (unless ((@ groups has) star) ((@ groups set) star (array)))
-               ((@ ((@ groups get) star) push) site)
-               (incf count)))))
-        ((@ meshes for-each)
-         (lambda (mesh)
-           ((@ world remove) mesh)
-           ((@ mesh geometry dispose))
-           ((@ mesh dispose))))
-        (setf meshes (array))
-        ((@ groups for-each)
-         (lambda (sites star)
-           (let* ((entry (aref atlas star)) (positions (array)) (masks (array))
-                  (kinds-a (array)) (kinds-b (array))
-                  (geometry (new ((@ |THREE| |BufferGeometry|)))))
-             ((@ (aref entry 0) for-each)
-              (lambda (triangle index)
-                ((@ triangle for-each)
-                 (lambda (point)
-                   ((@ positions push) (/ (aref point 0) 8)
-                                       (/ (aref point 1) 8)
-                                       (/ (aref point 2) 8))
-                   ((@ masks push) (aref (aref (aref entry 1) index) 0))))))
-             ((@ geometry set-attribute) "position"
-              (new ((@ |THREE| |Float32BufferAttribute|) positions 3)))
-             ((@ geometry set-attribute) "materialMask"
-              (new ((@ |THREE| |Float32BufferAttribute|) masks 1)))
-             ((@ geometry compute-vertex-normals))
-             ((@ sites for-each)
-              (lambda (site)
-                (dotimes (sample 8)
-                  ((@ (if (< sample 4) kinds-a kinds-b) push)
-                   (sample-cell (aref site 0) (aref site 1) (aref site 2) sample)))))
-             ((@ geometry set-attribute) "kindsA"
-              (new ((@ |THREE| |InstancedBufferAttribute|)
-                    (new (|Float32Array| kinds-a)) 4)))
-             ((@ geometry set-attribute) "kindsB"
-              (new ((@ |THREE| |InstancedBufferAttribute|)
-                    (new (|Float32Array| kinds-b)) 4)))
-             (let ((mesh (new ((@ |THREE| |InstancedMesh|)
-                               geometry material (@ sites length))))
-                   (matrix (new ((@ |THREE| |Matrix4|)))))
-               ((@ sites for-each)
-                (lambda (site index)
-                  ((@ matrix make-translation) (aref site 0) (aref site 1) (aref site 2))
-                  ((@ mesh set-matrix-at) index matrix)))
-               (setf (@ mesh cast-shadow) true (@ mesh receive-shadow) true)
-               ((@ mesh compute-bounding-sphere))
-               ((@ world add) mesh)
-               ((@ meshes push) mesh)))))
-        (setf (@ window luft-demo sites) count
-              (@ window luft-demo batches) (@ meshes length)
+    (defun remove-mesh (mesh)
+      (when mesh
+        ((@ world remove) mesh)
+        ((@ mesh geometry dispose))
+        (setf meshes ((@ meshes filter) (lambda (other) (not (= other mesh))))
               (@ sun shadow needs-update) true)))
+    (defun add-mesh (data)
+      (let ((geometry (new ((@ |THREE| |BufferGeometry|)))))
+        ((@ geometry set-attribute) "position"
+         (new ((@ |THREE| |BufferAttribute|) (@ data positions) 3)))
+        ((@ geometry set-attribute) "normal"
+         (new ((@ |THREE| |BufferAttribute|) (@ data normals) 3 true)))
+        ((@ geometry set-attribute) "color"
+         (new ((@ |THREE| |BufferAttribute|) (@ data colors) 3 true)))
+        ((@ geometry compute-bounding-sphere))
+        (let ((mesh (new ((@ |THREE| |Mesh|) geometry material))))
+          (setf (@ mesh cast-shadow) true (@ mesh receive-shadow) true)
+          ((@ world add) mesh)
+          ((@ meshes push) mesh)
+          (setf (@ sun shadow needs-update) true)
+          mesh)))
+    (defun realize-chunk (chunk)
+      (let ((mesh (add-mesh (@ chunk product))))
+        (remove-mesh (@ chunk mesh))
+        (setf (@ chunk mesh) mesh)
+        (delete (@ chunk product))))
+    (defun rebuild ()
+      ;; Explicit finite-fixture mode used by GPU regressions and inspection.
+      ;; Production edits only remesh the touched resident chunks.
+      (stop-streaming)
+      ((@ ((@ meshes slice)) for-each) remove-mesh)
+      (add-mesh (mesh-data ((@ |Array| from) ((@ (surface-sites) values))) cell-at)))
     (defun look ()
       ((@ camera look-at)
        (+ (@ camera position x) (* (sin yaw) (cos pitch)))
@@ -139,13 +85,13 @@ luftTone /= max(count, 1.0);
       ((@ (element "movement") style set-property) "--stick-y" "0px"))
     (defun update-stick (event)
       (let* ((pad (element "movement")) (rect ((@ pad get-bounding-client-rect)))
-             (x (/ (- (@ event client-x) (@ rect left) (/ (@ rect width) 2)) 32))
-             (y (/ (- (@ event client-y) (@ rect top) (/ (@ rect height) 2)) 32))
+             (x (/ (- (@ event client-x) (@ rect left) (/ (@ rect width) 2)) 40))
+             (y (/ (- (@ event client-y) (@ rect top) (/ (@ rect height) 2)) 40))
              (length ((@ |Math| hypot) x y))
              (scale (/ (max 0 (- (min 1 length) 0.15)) 0.85 (max length 0.001))))
         (setf stick-x (* x scale) stick-y (* y scale))
-        ((@ pad style set-property) "--stick-x" (+ (* stick-x 28) "px"))
-        ((@ pad style set-property) "--stick-y" (+ (* stick-y 28) "px"))))
+        ((@ pad style set-property) "--stick-x" (+ (* stick-x 34) "px"))
+        ((@ pad style set-property) "--stick-y" (+ (* stick-y 34) "px"))))
     (defun stop-edit ()
       (setf edit-pointer null)
       ((@ (element "crosshair") class-list remove) "editing")
@@ -168,6 +114,44 @@ luftTone /= max(count, 1.0);
             (lambda () (set-status "Mouse capture unavailable. Drag to look around instead.")))))
        (:catch (error)
          (set-status "Mouse capture unavailable. Drag to look around instead."))))
+    (defun fullscreen-supported ()
+      (and (@ document fullscreen-enabled) (@ document document-element request-fullscreen)))
+    (defun update-fullscreen-affordance ()
+      (let ((button (element "fullscreen")))
+        (when button
+          (if (fullscreen-supported)
+              (progn
+                ((@ button remove-attribute) "disabled")
+                (setf (@ button aria-label)
+                      (if (@ document fullscreen-element) "Leave full screen" "Full screen")
+                      (@ button title) "Full screen"))
+              (progn
+                (setf (@ button aria-label)
+                      "Full screen is unavailable in this browser"
+                      (@ button title) "Safari: use Share → Add to Home Screen"))))))
+    (defun toggle-fullscreen ()
+      (if (fullscreen-supported)
+          (if (@ document fullscreen-element)
+              ((@ document exit-fullscreen))
+              (let ((request ((@ document document-element request-fullscreen))))
+                (when (and request (@ request catch))
+                  ((@ request catch)
+                   (lambda () (set-status "Full screen was blocked by this browser."))))))
+          ;; Capability detection, not an iOS version assumption. Installed
+          ;; web apps can fill the display without the Fullscreen API.
+          (set-status "Full screen is unavailable here. In Safari, Share → Add to Home Screen opens Luft without browser chrome."))
+      (update-fullscreen-affordance))
+    (defun suppress-gesture-zoom ()
+      ;; Safari's proprietary gesture events cover pinch zoom; the touchmove
+      ;; guard handles multi-touch on browsers that do not expose them.
+      (dolist (name (array "gesturestart" "gesturechange" "gestureend"))
+        ((@ document add-event-listener) name (lambda (event) ((@ event prevent-default)))
+         (create :passive false)))
+      ((@ document add-event-listener) "touchmove"
+       (lambda (event)
+         (when (> (@ event touches length) 1) ((@ event prevent-default))))
+       (create :passive false))
+      ((@ canvas add-event-listener) "dblclick" (lambda (event) ((@ event prevent-default)))))
     (defun bind-pointer-controls ()
       (let ((pad (element "movement")))
         ((@ pad add-event-listener) "pointerdown"
@@ -247,7 +231,19 @@ luftTone /= max(count, 1.0);
       (dolist (name (array "pointerup" "pointercancel"))
         ((@ document add-event-listener) name
          (lambda (event)
-           (when (= edit-pointer (@ event pointer-id)) (stop-edit))))))
+           (when (= edit-pointer (@ event pointer-id)) (stop-edit)))))
+      (let ((fullscreen (element "fullscreen")))
+        (when fullscreen
+          ((@ fullscreen add-event-listener) "click"
+           (lambda (event) ((@ event prevent-default)) (toggle-fullscreen))))))
+    (defun autojump-clear-p (x y feet)
+      ;; A one-cell rise needs a blocker to land on, headroom at the landing,
+      ;; and a clear arc above the present body.  This avoids hopping at walls
+      ;; and into low ceilings while retaining the light touch of autojump.
+      (and grounded
+           (collides x y feet)
+           (not (collides x y (+ feet 1)))
+           (not (collides (@ camera position x) (@ camera position y) (+ feet 1)))))
     (defun move-player (dt)
       (let* ((forward (- (if (or (pressed "KeyW") (pressed "ArrowUp")) 1 0)
                          (if (or (pressed "KeyS") (pressed "ArrowDown")) 1 0) stick-y))
@@ -258,6 +254,10 @@ luftTone /= max(count, 1.0);
              (dx (* speed (+ (* forward (sin yaw)) (* side (cos yaw)))))
              (dy (* speed (- (* forward (cos yaw)) (* side (sin yaw)))))
              (feet (- (@ camera position z) 1.62)))
+        (when (and (> (+ (abs dx) (abs dy)) 0.0001)
+                   (autojump-clear-p (+ (@ camera position x) dx)
+                                     (+ (@ camera position y) dy) feet))
+          (setf velocity 7.5 grounded false))
         (unless (collides (+ (@ camera position x) dx) (@ camera position y) feet)
           (incf (@ camera position x) dx))
         (unless (collides (@ camera position x) (+ (@ camera position y) dy) feet)
@@ -277,28 +277,63 @@ luftTone /= max(count, 1.0);
         ((@ camera get-world-direction) direction)
         (setf target (trace-cells ((@ camera position to-array))
                                   ((@ direction to-array)) 7)
-              (@ outline visible) (not (= target null)))
-        (when target
-          ((@ outline position set) (+ 0.5 (aref (@ target cell) 0))
-                                    (+ 0.5 (aref (@ target cell) 1))
-                                    (+ 0.5 (aref (@ target cell) 2))))))
+              (@ outline visible) (not (null (and target (@ target previous)))))
+        (when (@ outline visible)
+          (let* ((cell (@ target cell)) (previous (@ target previous))
+                 (normal (vector (- (aref previous 0) (aref cell 0))
+                                 (- (aref previous 1) (aref cell 1))
+                                 (- (aref previous 2) (aref cell 2)))))
+            ((@ outline position set) (+ 0.5 (aref cell 0))
+                                      (+ 0.5 (aref cell 1))
+                                      (+ 0.5 (aref cell 2)))
+            ((@ outline position add-scaled-vector) normal .502)
+            ((@ outline quaternion set-from-unit-vectors) (vector 0 0 1) normal)))))
     (defun edit-cell (place)
       (when target
         (let ((point (if place (@ target previous) (@ target cell))))
-          (when (and point (>= (aref point 2) 0) (< (aref point 2) 40)
-                     (>= (aref point 0) 0) (< (aref point 0) 48)
-                     (>= (aref point 1) 0) (< (aref point 1) 48))
-            (let* ((key (cell-key (aref point 0) (aref point 1) (aref point 2)))
-                   (old ((@ cells get) key)))
-              (if place ((@ cells set) key selected) ((@ cells delete) key))
-              (when (and place (collides (@ camera position x) (@ camera position y)
-                                         (- (@ camera position z) 1.62)))
-                (if old ((@ cells set) key old) ((@ cells delete) key))
+          (when (and point (>= (aref point 2) 0) (< (aref point 2) world-height))
+            (let ((x (aref point 0)) (y (aref point 1)) (z (aref point 2))
+                  (feet (- (@ camera position z) 1.62)))
+              (when (and place
+                         (<= x (floor (+ (@ camera position x) .28)))
+                         (>= x (floor (- (@ camera position x) .28)))
+                         (<= y (floor (+ (@ camera position y) .28)))
+                         (>= y (floor (- (@ camera position y) .28)))
+                         (<= z (floor (+ feet 1.7))) (>= z (floor (+ feet .001))))
                 (return-from edit-cell false))
-              (rebuild)
+              (if streaming-enabled
+                  (edit-world-cell x y z (if place selected 0))
+                  (progn
+                    (if place ((@ cells set) (cell-key x y z) selected)
+                        ((@ cells delete) (cell-key x y z)))
+                    (rebuild)))
               (aim)
               (return-from edit-cell true)))))
       false)
+    (defun update-environment ()
+      ((@ sky position copy) (@ camera position))
+      (when streaming-enabled
+        ;; Fog ends before the nearest not-yet-resident ring, including during
+        ;; startup. The ready radius grows as time-sliced chunks arrive.
+        (let ((radius (stream-ready-radius (@ camera position x) (@ camera position y))))
+          (setf (@ scene fog far) (max 12 (min 76 (- (* radius chunk-size) 2)))
+                (@ scene fog near) (* .55 (@ scene fog far))))
+        ;; Snap in the light's own plane, not world XY. Whole shadow-texel
+        ;; shifts preserve the sampling grid and the fixed concave-contact fix.
+        (let* ((direction ((@ (vector -0.72 0.43 0.22) normalize)))
+               (right ((@ ((@ (vector 0 0 1) cross) direction) normalize)))
+               (up ((@ ((@ direction clone)) cross) right))
+               (center ((@ camera position clone)))
+               (step (/ 128 2048)))
+          (dolist (axis (array right up direction))
+            (let* ((grid (if (= axis direction) 4 (* step 8)))
+                   (distance ((@ center dot) axis)))
+              ((@ center add-scaled-vector) axis (- (* (round (/ distance grid)) grid) distance))))
+          (when (> ((@ center distance-to-squared) (@ sun target position)) 0.00001)
+            ((@ sun target position copy) center)
+            ((@ sun position copy) center)
+            ((@ sun position add-scaled-vector) direction 114)
+            (setf (@ sun shadow needs-update) true)))))
     (defun resize ()
       (let ((width (@ canvas client-width)) (height (@ canvas client-height)))
         (setf (@ camera aspect) (/ width height))
@@ -311,6 +346,8 @@ luftTone /= max(count, 1.0);
         (unless (@ document hidden)
           ;; Small fixed upper bound prevents tunnelling on slow frames.
           (dotimes (step 4) (move-player (/ dt 4)))
+          (update-streaming (@ camera position x) (@ camera position y))
+          (update-environment)
           (aim)
           (repeat-edit time)
           ((@ composer render))
@@ -337,64 +374,99 @@ luftTone /= max(count, 1.0);
            ((@ camera up set) 0 0 1)
            ((@ renderer set-pixel-ratio) (min (if coarse-pointer 1.5 2) (or (@ window device-pixel-ratio) 1)))
            (setf (@ renderer tone-mapping) (@ |THREE| |ACESFilmicToneMapping|)
-                 (@ renderer tone-mapping-exposure) 1.35
+                 (@ renderer tone-mapping-exposure) 1.1
                  (@ renderer shadow-map enabled) true
                  (@ renderer shadow-map type) (@ |THREE| |PCFSoftShadowMap|)
-                 (@ scene background) (new ((@ |THREE| |Color|) "#777f9e"))
-                 (@ scene fog) (new ((@ |THREE| |Fog|) "#777f9e" 65 155)))
+                 (@ scene fog) (new ((@ |THREE| |Fog|)
+                                     (new ((@ |THREE| |Color|) .48 .59 .68)) 42 76)))
            ((@ scene add) world)
-           ;; Native dusk radiance (lighting.lisp), in linear RGB, not CSS sRGB.
+           ;; A small shader sky gives the far fog a luminous horizon instead
+           ;; of exposing a flat clear color between the highland's ridges.
+           (let ((atmosphere (new ((@ |THREE| |ShaderMaterial|)))))
+             (setf (@ atmosphere side) (@ |THREE| |BackSide|)
+                   (@ atmosphere allow-override) false
+                   (@ atmosphere depth-write) false
+                   (@ atmosphere vertex-shader)
+                   "varying vec3 direction; void main() { direction = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }"
+                   (@ atmosphere fragment-shader)
+                   "varying vec3 direction;
+void main() {
+  vec3 d = normalize(direction);
+  float h = smoothstep(0.0, .9, d.z);
+  vec3 color = mix(vec3(.48, .59, .68), vec3(.08, .20, .40), h);
+  float sun = pow(max(dot(d, normalize(vec3(-.72, .43, .22))), 0.0), 22.0);
+  float wisps = smoothstep(.58, .92, sin(d.x * 17.0 + d.y * 9.0 + sin(d.y * 19.0) * .5));
+  wisps *= smoothstep(.08, .3, d.z) * (1.0 - smoothstep(.35, .7, d.z));
+  color += vec3(.19, .14, .08) * sun + vec3(.035, .03, .025) * wisps;
+  gl_FragColor = vec4(color, 1.0);
+}")
+             (setf sky (new ((@ |THREE| |Mesh|)
+                             (new ((@ |THREE| |SphereGeometry|) 180 24 16)) atmosphere))
+                   (@ sky frustum-culled) false)
+             ((@ scene add) sky))
+           ;; Open, friendly daylight: brighter diffuse fill lifts shaded
+           ;; faces without blowing out the sunlit stone or erasing contacts.
            ;; Three's diffuse BRDF divides irradiance by pi; compensate here.
            (let ((sky (new ((@ |THREE| |HemisphereLight|)
-                            (new ((@ |THREE| |Color|) 0.065 0.095 0.23))
-                            (new ((@ |THREE| |Color|) 0.23 0.115 0.16))
-                            (* 0.72 3.14159265)))))
+                            (new ((@ |THREE| |Color|) 0.30 0.36 0.46))
+                            (new ((@ |THREE| |Color|) 0.34 0.29 0.25))
+                            3.14159265))))
              ((@ sky position set) 0 0 1)
              ((@ scene add) sky))
            (setf sun (new ((@ |THREE| |DirectionalLight|)
-                           (new ((@ |THREE| |Color|) 1.85 0.82 0.38))
+                           (new ((@ |THREE| |Color|) 1.05 0.98 0.85))
                            3.14159265)))
            ((@ sun position set) -48 67 22)
            ((@ sun target position set) 24 24 0)
            (setf (@ sun cast-shadow) true
                  (@ sun shadow map-size width) 2048
                  (@ sun shadow map-size height) 2048
-                 (@ sun shadow camera left) -44 (@ sun shadow camera right) 44
-                 (@ sun shadow camera top) 44 (@ sun shadow camera bottom) -44
-                 (@ sun shadow camera near) 1 (@ sun shadow camera far) 130
+                 (@ sun shadow camera left) -64 (@ sun shadow camera right) 64
+                 (@ sun shadow camera top) 64 (@ sun shadow camera bottom) -64
+                 (@ sun shadow camera near) 1 (@ sun shadow camera far) 230
                  ;; Front-face depths need enough bias for the PCF footprint
                  ;; at this low sun angle. Depth bias is normalized by the
-                 ;; 129-cell shadow range; -0.0015 is about 0.19 cells.
+                 ;; 229-cell shadow range; -0.0015 is about 0.34 cells.
                  (@ sun shadow normal-bias) 0.04 (@ sun shadow bias) -0.0015
                  (@ sun shadow auto-update) false (@ sun shadow needs-update) true)
            ((@ scene add) sun (@ sun target))
+           ((@ sun shadow camera up set) 0 0 1)
            ;; Three defaults to BACK faces for shadow casting. Those are exit
            ;; depths, not the nearest blockers: at a concave bevel they expose
            ;; a false strip of sunlight which PCF spreads into a bright fringe.
            ;; Use the same outward-facing surface for visibility and shadows.
            (setf material (new ((@ |THREE| |MeshStandardMaterial|)
                                 (create :roughness 0.82 :metalness 0.0)))
-                 (@ material shadow-side) (@ |THREE| |FrontSide|))
-           (setf (@ material on-before-compile)
-                 (lambda (shader)
-                   (setf (@ shader vertex-shader)
-                         (+ ,*material-vertex-header* (@ shader vertex-shader))
-                         (@ shader vertex-shader)
-                         ((@ shader vertex-shader replace) "#include <color_vertex>"
-                          ,*material-vertex-color*)
-                         (@ shader fragment-shader)
-                         (+ "varying vec3 luftTone;
-" (@ shader fragment-shader))
-                         (@ shader fragment-shader)
-                         ((@ shader fragment-shader replace) "#include <color_fragment>"
-                          "#include <color_fragment>
- diffuseColor.rgb *= luftTone;"))))
-           (let ((geometry (new ((@ |THREE| |EdgesGeometry|)
-                                 (new ((@ |THREE| |BoxGeometry|) 1.006 1.006 1.006)))))
-                 (ink (new ((@ |THREE| |LineBasicMaterial|)
-                            (create :color "#fff5c9")))))
-             (setf outline (new ((@ |THREE| |LineSegments|) geometry ink))
-                   (@ outline visible) false)
+                 (@ material shadow-side) (@ |THREE| |FrontSide|)
+                 (@ material vertex-colors) true)
+           ;; Inset on the pointed-at face, leaving bevels uncovered. The
+           ;; derivative-smoothed rim is stable at oblique angles and retina
+           ;; resolutions, unlike one-device-pixel WebGL lines.
+           (let ((geometry (new ((@ |THREE| |PlaneGeometry|) .78 .78)))
+                 (ink (new ((@ |THREE| |ShaderMaterial|)))))
+             (setf (@ ink transparent) true (@ ink depth-write) false
+                   (@ ink allow-override) false
+                   (@ ink uniforms) (create "normalPass" (create :value false))
+                   (@ ink vertex-shader)
+                   "varying vec2 point; void main() { point = uv - .5; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }"
+                   (@ ink fragment-shader)
+                   "varying vec2 point;
+uniform bool normalPass;
+void main() {
+  if (normalPass) discard;
+  vec2 q = abs(point) - vec2(.42);
+  float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - .05;
+  float aa = max(fwidth(d), .001);
+  float fill = 1.0 - smoothstep(-aa, aa, d);
+  float rim = 1.0 - smoothstep(.006, .006 + aa, abs(d));
+  gl_FragColor = vec4(.85, .72, .46, fill * .055 + rim * .42);
+}")
+             (setf outline (new ((@ |THREE| |Mesh|) geometry ink))
+                   (@ outline visible) false (@ outline render-order) 2
+                   (@ outline on-before-render)
+                   (lambda ()
+                     (setf (@ ink uniforms normal-pass value)
+                           (not (null (@ scene override-material))))))
              ((@ scene add) outline))
            (let ((target (new ((@ |THREE| |WebGLRenderTarget|) 1 1
                                (create :type (@ |THREE| |HalfFloatType|) :samples 4)))))
@@ -406,6 +478,30 @@ luftTone /= max(count, 1.0);
                  (@ occlusion kernel-radius) 0.65
                  (@ occlusion min-distance) 0.0002
                  (@ occlusion max-distance) 0.012)
+           ;; SSAO normally multiplies AFTER fog and makes hidden distant
+           ;; bevels reappear as dark ghost terrain. Fade the final multiplier
+           ;; to white using the same view-depth fog law as MeshStandardMaterial.
+           (let* ((copy (@ occlusion copy-material)) (uniforms (@ copy uniforms)))
+             (setf (@ uniforms t-depth) (create :value (@ occlusion normal-render-target depth-texture))
+                   (@ uniforms camera-near) (create :value (@ camera near))
+                   (@ uniforms camera-far) (create :value (@ camera far))
+                   (@ uniforms fog-near) (create :value 42)
+                   (@ uniforms fog-far) (create :value 76)
+                   (@ copy on-before-render)
+                   (lambda ()
+                     (setf (@ uniforms fog-near value) (if (@ scene fog) (@ scene fog near) 100000)
+                           (@ uniforms fog-far value) (if (@ scene fog) (@ scene fog far) 100001)))
+                   (@ copy fragment-shader)
+                   "#include <packing>
+varying vec2 vUv;
+uniform sampler2D tDiffuse, tDepth;
+uniform float cameraNear, cameraFar, fogNear, fogFar;
+void main() {
+  float depth = texture2D(tDepth, vUv).x;
+  float distance = -perspectiveDepthToViewZ(depth, cameraNear, cameraFar);
+  float fog = smoothstep(fogNear, fogFar, distance);
+  gl_FragColor = vec4(mix(texture2D(tDiffuse, vUv).rgb, vec3(1.0), fog), 1.0);
+}"))
            ((@ composer add-pass) occlusion)
            (setf bloom (new ((@ blooms |UnrealBloomPass|)
                              (new ((@ |THREE| |Vector2|) 1 1)) 0.12 0.5 1.15)))
@@ -414,11 +510,29 @@ luftTone /= max(count, 1.0);
            ((@ composer add-pass) (new ((@ outputs |OutputPass|))))
            (setf (@ window luft-demo)
                  (create :ready false :cells cells :atlas atlas :trace trace-cells
+                         :selection outline :aim aim
                          :surface-sites surface-sites :rebuild rebuild
                          :composer composer :occlusion occlusion :sun sun
+                         :chunks chunks :edits world-edits :source source-cell-at
+                         "workerState" worker-state
+                         "startStreaming" (lambda (x y)
+                                            (stop-streaming)
+                                            ((@ ((@ meshes slice)) for-each) remove-mesh)
+                                            (start-streaming x y))
+                         "stopStreaming" stop-streaming
+                         "updateStreaming" update-streaming "editWorldCell" edit-world-cell
+                         "updateEnvironment" update-environment
                          :camera camera :renderer renderer :meshes (lambda () meshes)))
-           (reset-cells) (rebuild) (resize) (spawn-player)
+           (setf chunk-added realize-chunk
+                 chunk-removed (lambda (chunk) (remove-mesh (@ chunk mesh))))
+           (install-worker-generation)
+           (reset-cells) (start-streaming 23 20) (resize)
+           (browser:await (await-startup-chunks 23 20))
+           (spawn-player)
            ((@ window add-event-listener) "resize" resize)
+           ;; Dynamic viewport units follow Safari's moving toolbar. Observe
+           ;; actual canvas size, including changes without a window resize.
+           ((@ (new (|ResizeObserver| resize)) observe) canvas)
            ((@ window add-event-listener) "blur" clear-input)
            ((@ document add-event-listener) "visibilitychange"
             (lambda ()
@@ -434,6 +548,7 @@ luftTone /= max(count, 1.0);
             (lambda ()
               (clear-input)
               (set-status "")))
+           ((@ document add-event-listener) "fullscreenchange" update-fullscreen-affordance)
            ((@ document add-event-listener) "pointerlockerror"
             (lambda () (set-status "Mouse capture unavailable. Drag to look around instead.")))
            ((@ document add-event-listener) "mousemove"
@@ -442,6 +557,8 @@ luftTone /= max(count, 1.0);
                 (turn-player (@ event movement-x) (@ event movement-y)))))
            ((@ canvas add-event-listener) "contextmenu" (lambda (event) ((@ event prevent-default))))
            (bind-pointer-controls)
+           (suppress-gesture-zoom)
+           (update-fullscreen-affordance)
            ((@ document add-event-listener) "keydown"
             (lambda (event)
               (unless (and (= (@ event code) "Space")
@@ -473,4 +590,7 @@ luftTone /= max(count, 1.0);
              (defvar atlas ,(array-form (atlas-data)))
              (defvar initial-cells ,(array-form (demo-cells)))
              ,(core-form)
+             ,(streaming-form)
+             ,(meshing-form)
+             ,(worker-transport-form)
              ,(client-form))))

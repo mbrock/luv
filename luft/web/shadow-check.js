@@ -9,6 +9,8 @@
   await new Promise(resolve => frame(() => frame(resolve)));
   d.occlusion.enabled = false;
   d.composer.passes[2].enabled = false;
+  // Startup fog tracks residency and can otherwise mask the whole fixture.
+  d.composer.passes[0].scene.fog = null;
   d.cells.clear();
   for (let x = 18; x < 32; x++) {
     for (let y = 18; y < 32; y++) {
@@ -67,7 +69,9 @@
       results[name] = {maxContactLightRatio: Math.max(...contactRatios),
         minLitSurfaceRatio: Math.min(...topRatios)};
     }
-    if (!(results.old.maxContactLightRatio > 1.5))
+    // Brighter diffuse fill reduces the old leak's relative contrast. Still
+    // require a clear positive control, four times the fixed 5% tolerance.
+    if (!(results.old.maxContactLightRatio > 1.2))
       throw new Error(`Fixture failed to reproduce the old light leak: ${JSON.stringify(results)}`);
     if (!(results.fixed.maxContactLightRatio < 1.05))
       throw new Error(`Contact light leak: ${JSON.stringify(results)}`);
