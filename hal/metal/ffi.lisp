@@ -1009,8 +1009,8 @@ rejection.  Source and names cross only as in-memory NSString objects."
 (defun compile-metal-4-mesh-render-pipeline
     (compiler object-library object-name object-workgroup-size
      mesh-library mesh-name mesh-workgroup-size
-     fragment-library fragment-name color-format max-mesh-workgroups
-     &key blend (sample-count 1) label)
+     fragment-library fragment-name color-formats max-mesh-workgroups
+     &key blends (sample-count 1) label)
   "Synchronously link object, mesh, and fragment libraries into Metal 4."
   (objc:with-autorelease-pool ()
     (let ((object-function nil)
@@ -1061,25 +1061,27 @@ rejection.  Source and names cross only as in-memory NSString objects."
                (%set-pipeline-raster-sample-count descriptor sample-count)
                (when fragment-function
                  (%set-fragment-function-descriptor descriptor fragment-function))
-               (when color-format
-                 (let ((attachment
+               (loop for color-format in color-formats
+                     for blend in blends
+                     for index from 0
+                     for attachment =
                          (%render-pipeline-color-attachment-at
-                          (%render-pipeline-color-attachments descriptor) 0)))
-                   (%set-render-pipeline-pixel-format attachment color-format)
-                   (when blend
-                     (%set-render-pipeline-blending-state
-                      attachment +blend-state-enabled+)
-                     (%set-source-rgb-blend-factor
-                      attachment +blend-factor-one+)
-                     (%set-destination-rgb-blend-factor
-                      attachment +blend-factor-one-minus-source-alpha+)
-                     (%set-rgb-blend-operation attachment +blend-operation-add+)
-                     (%set-source-alpha-blend-factor
-                      attachment +blend-factor-one+)
-                     (%set-destination-alpha-blend-factor
-                      attachment +blend-factor-one-minus-source-alpha+)
-                     (%set-alpha-blend-operation
-                      attachment +blend-operation-add+))))
+                          (%render-pipeline-color-attachments descriptor) index)
+                     do (%set-render-pipeline-pixel-format attachment color-format)
+                        (when blend
+                          (%set-render-pipeline-blending-state
+                           attachment +blend-state-enabled+)
+                          (%set-source-rgb-blend-factor
+                           attachment +blend-factor-one+)
+                          (%set-destination-rgb-blend-factor
+                           attachment +blend-factor-one-minus-source-alpha+)
+                          (%set-rgb-blend-operation attachment +blend-operation-add+)
+                          (%set-source-alpha-blend-factor
+                           attachment +blend-factor-one+)
+                          (%set-destination-alpha-blend-factor
+                           attachment +blend-factor-one-minus-source-alpha+)
+                          (%set-alpha-blend-operation
+                           attachment +blend-operation-add+)))
                (cffi:with-foreign-object (error :pointer)
                  (setf (cffi:mem-ref error :pointer) (cffi:null-pointer))
                  (let ((pipeline

@@ -570,7 +570,7 @@
       (when vertex-module (destroy vertex-module))
       (destroy device))))
 
-(define-test task-mesh-pipeline-carries-uint64-and-draws-on-metal-4
+(defun check-task-mesh-pipeline-on-metal-4 (depth-only-p &optional multiple-targets-p)
   (let ((device
           (request-gpu-device (make-instance 'metal-gpu-provider)))
         (task-module nil)
@@ -578,6 +578,7 @@
         (fragment-module nil)
         (pipeline nil)
         (target nil)
+        (first-target nil)
         (readback nil)
         (encoder nil)
         (command-buffer nil))
@@ -601,7 +602,16 @@
                   (make-shader-module-descriptor
                    :label "mesh fragment Metal library"
                    :language :mathematical :code
-                   (msl-mesh-fragment-probe)))
+                   (if multiple-targets-p
+                       (shader:parse-shader-specification
+                        'metal-mesh-two-target-probe
+                        '(:stage :fragment
+                          :outputs ((color :vec4 :location 0)
+                                    (auxiliary :vec4 :location 1)))
+                        '((let* ()
+                            (shader:set-output color (shader:vec4 0.25 0.5 0.75 1.0))
+                            (shader:set-output auxiliary (shader:vec4 0.75 0.5 0.25 1.0)))))
+                       (msl-mesh-fragment-probe))))
                  pipeline
                  (create
                   device
@@ -611,16 +621,30 @@
                    :task `(:module ,task-module)
                    :mesh `(:module ,mesh-module)
                    :fragment
-                   `(:module ,fragment-module
-                     :targets ((:format :rgba8-unorm)))
+                   (unless depth-only-p
+                     `(:module ,fragment-module
+                       :targets ,(if multiple-targets-p
+                                     '((:format :bgra8-unorm) (:format :rgba8-unorm))
+                                     '((:format :rgba8-unorm)))))
+                   :depth-stencil
+                   (when depth-only-p
+                     '(:format :depth32-float :depth-write-enabled t
+                       :depth-compare :less))
                    :max-mesh-workgroups 1))
                  target
                  (create
                   device
                   (make-texture-descriptor
                    :label "task mesh proof target"
-                   :size '(32 32) :dimensions :2d :format :rgba8-unorm
+                   :size '(32 32) :dimensions :2d
+                   :format (if depth-only-p :depth32-float :rgba8-unorm)
                    :usage '(:render-attachment :copy-src)))
+                 first-target
+                 (when multiple-targets-p
+                   (create device
+                           (make-texture-descriptor
+                            :size '(32 32) :dimensions :2d :format :bgra8-unorm
+                            :usage '(:render-attachment))))
                  readback
                  (create
                   device
@@ -642,8 +666,14 @@
                     encoder
                     (make-render-pass-descriptor
                      :color-attachments
-                     `((:view ,target :load-op :clear :store-op :store
-                        :clear-value #(0.0 0.0 0.0 1.0)))))))
+                     (unless depth-only-p
+                       (loop for view in (remove nil (list first-target target))
+                             collect `(:view ,view :load-op :clear :store-op :store
+                                       :clear-value #(0.0 0.0 0.0 1.0))))
+                     :depth-stencil-attachment
+                     (when depth-only-p
+                       `(:view ,target :depth-load-op :clear
+                         :depth-store-op :store :depth-clear-value 1.0))))))
              (set-pipeline pass pipeline)
              (draw-mesh-workgroups pass 1)
              (end-pass pass))
@@ -654,17 +684,40 @@
            (setf command-buffer (finish encoder))
            (submit (device-queue device) command-buffer)
            (let ((pixels (read-buffer readback)))
-             (true (loop for index below (length pixels) by 4
-                         thereis (plusp (aref pixels index))))))
+             (if depth-only-p
+                 (progn
+                   ;; The triangle writes depth zero at the center; the corner
+                   ;; retains the clear value 1.0 (#x3f800000, little endian).
+                   (true (equalp #(0 0 0 0)
+                                 (subseq pixels (* 4 (+ 16 (* 16 32)))
+                                         (* 4 (+ 17 (* 16 32))))))
+                   (true (equalp #(0 0 128 63) (subseq pixels 0 4))))
+                 (if multiple-targets-p
+                     (let ((center (* 4 (+ 16 (* 16 32)))))
+                       (true (<= 190 (aref pixels center) 192))
+                       (true (<= 127 (aref pixels (+ center 1)) 129))
+                       (true (<= 63 (aref pixels (+ center 2)) 65)))
+                     (true (loop for index below (length pixels) by 4
+                                 thereis (plusp (aref pixels index))))))))
       (when command-buffer (destroy command-buffer))
       (when encoder (destroy encoder))
       (when readback (destroy readback))
       (when target (destroy target))
+      (when first-target (destroy first-target))
       (when pipeline (destroy pipeline))
       (when fragment-module (destroy fragment-module))
       (when mesh-module (destroy mesh-module))
       (when task-module (destroy task-module))
       (destroy device))))
+
+(define-test task-mesh-pipeline-carries-uint64-and-draws-on-metal-4
+  (check-task-mesh-pipeline-on-metal-4 nil))
+
+(define-test depth-only-mesh-pipeline-writes-depth-on-metal-4
+  (check-task-mesh-pipeline-on-metal-4 t))
+
+(define-test mesh-pipeline-writes-multiple-color-targets-on-metal-4
+  (check-task-mesh-pipeline-on-metal-4 nil t))
 
 (define-test failed-metal-library-keeps-the-device-compiler-usable
   (let* ((device

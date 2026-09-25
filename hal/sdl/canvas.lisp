@@ -191,17 +191,21 @@ SDL's to take.  SDL_Quit and the process's own exit still restore the keyboard."
   nil)
 
 (defun select-sdl-video-driver ()
-  "Choose KMSDRM on a real console, otherwise a safe headless SDL backend.
+  "On Linux, choose KMSDRM on a real console or a safe headless SDL backend.
 
 An explicit SDL_VIDEODRIVER, DISPLAY, or WAYLAND_DISPLAY always wins.  This
 must run before SDL video initialization: it covers standalone executables as
-well as processes started through the Nix development shell."
+well as processes started through the Nix development shell. Other platforms
+keep SDL's native driver selection."
+  #+linux
   (when (and (null (uiop:getenv "SDL_VIDEODRIVER"))
              (null (uiop:getenv "DISPLAY"))
              (null (uiop:getenv "WAYLAND_DISPLAY")))
     (sb-posix:setenv "SDL_VIDEODRIVER"
                      (if (linux-console-tty-p) "kmsdrm" "offscreen")
-                     1)))
+                     1))
+  #-linux
+  nil)
 
 (defun call-with-sdl-main-thread (function)
   "Call FUNCTION where synchronous SDL canvas work can use the native main thread.

@@ -1793,9 +1793,12 @@ compiler boundary of #58IDSR."
                 (or (getf fragment :entry-point)
                     (metal-shader-module-entry-point fragment-module))))
          (targets (getf fragment :targets))
-         (format (and (= (length targets) 1)
-                      (getf (first targets) :format)))
-         (blend (getf (first targets) :blend))
+         (formats
+           (mapcar (lambda (target)
+                     (metal-render-pipeline-pixel-format
+                      (getf target :format) descriptor))
+                   targets))
+         (blends (mapcar (lambda (target) (getf target :blend)) targets))
          (max-mesh-workgroups
            (mesh-render-pipeline-descriptor-max-mesh-workgroups descriptor))
          (depth-stencil
@@ -1825,13 +1828,17 @@ compiler boundary of #58IDSR."
                     luv.metal:+function-type-mesh+)
                  (string= mesh-entry-point
                           (metal-shader-module-entry-point mesh-module))
-                 (typep fragment-module 'metal-gpu-shader-module)
-                 (= (metal-shader-module-function-type fragment-module)
-                    luv.metal:+function-type-fragment+)
-                 (string= fragment-entry-point
-                          (metal-shader-module-entry-point fragment-module))
-                 format
-                 (member blend '(nil :premultiplied-alpha))
+                 (or (and (typep fragment-module 'metal-gpu-shader-module)
+                          (= (metal-shader-module-function-type fragment-module)
+                             luv.metal:+function-type-fragment+)
+                          (string= fragment-entry-point
+                                   (metal-shader-module-entry-point fragment-module))
+                          (<= 1 (length formats) 8)
+                          (every #'identity formats)
+                          (every (lambda (blend)
+                                   (member blend '(nil :premultiplied-alpha)))
+                                 blends))
+                     (and (null fragment-module) (null targets) depth-stencil))
                  (typep max-mesh-workgroups '(integer 1 #.most-positive-fixnum))
                  (or (null depth-stencil)
                      (and (eq depth-format :depth32-float)
@@ -1869,10 +1876,11 @@ compiler boundary of #58IDSR."
                   task-entry-point task-workgroup-size
                   (metal-native-object mesh-module) mesh-entry-point
                   mesh-workgroup-size
-                  (metal-native-object fragment-module) fragment-entry-point
-                  (metal-render-pipeline-pixel-format format descriptor)
+                  (and fragment-module (metal-native-object fragment-module))
+                  fragment-entry-point
+                  formats
                   max-mesh-workgroups
-                  :blend blend :sample-count sample-count
+                  :blends blends :sample-count sample-count
                   :label (gpu-descriptor-label descriptor))
                (unless pipeline
                  (error 'metal-gpu-error
@@ -1899,7 +1907,8 @@ compiler boundary of #58IDSR."
                       :label (gpu-descriptor-label descriptor)
                       :native-object pipeline-state :device device :layout layout
                       :vertex-buffers nil :primitive-topology :triangle-list
-                      :fragment-p t :depth-format depth-format
+                      :fragment-p (not (null fragment-module))
+                      :depth-format depth-format
                       :sample-count sample-count
                       :depth-stencil-state depth-state
                       :task-workgroup-size task-workgroup-size
@@ -2833,7 +2842,7 @@ compiler boundary of #58IDSR."
                  (member :copy-dst (gpu-buffer-usage destination))
                  (member (gpu-texture-format source)
                          '(:rgba8-unorm :rgba8-unorm-srgb
-                           :bgra8-unorm :bgra8-unorm-srgb))
+                           :bgra8-unorm :bgra8-unorm-srgb :depth32-float))
                  (<= (* bytes-per-row (second size))
                      (gpu-buffer-size destination)))
       (reject-metal-gpu-request command :unsupported-texture-readback))
