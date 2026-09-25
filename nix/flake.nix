@@ -331,7 +331,8 @@
             pname = "swash";
             version = "0-unstable-2026-09-04";
             src = swash;
-            vendorHash = "sha256-q1YZecpbrLChbvaHfPzzCeMIuepuF+v+z7dAv1a89gM=";
+            vendorHash = "sha256-4l7ASCxpMCM92DwSuhi4hphdwnoPNbBLDXxQRdOEKDo=";
+            proxyVendor = true;
             subPackages = [ "cmd/swash" ];
             CGO_CFLAGS = "-I${swash}/cvendor";
             env.GOWORK = "off";
