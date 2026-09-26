@@ -59,6 +59,11 @@ make
 ./build/luvcraft                    # original block world
 ```
 
+`make help` lists the build workflows. `make LUV_DEV_SHELL=slim` builds only
+non-graphical Luft; add `test` to run its checks. Specialized targets live in
+`make/graphics.mk`, `make/benchmarks.mk`, and `make/publishing.mk` and are
+invoked from the checkout root as usual.
+
 Metal 4 is used natively on macOS; Vulkan is used elsewhere and remains
 available on macOS for comparison.
 

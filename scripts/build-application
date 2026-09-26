@@ -1,0 +1,21 @@
+#!/bin/sh
+
+# Image dumping can exit successfully after a build-policy failure. Preserve
+# the reporter's status marker as well as SBCL's process exit status.
+set -eu
+project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+. "$project_root/scripts/require-dev-environment"
+cd "$project_root"
+mkdir -p build
+status=$(mktemp build/.build-policy.XXXXXX)
+rm -f "$status"
+trap 'rm -f "$status"' EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+result=0
+LUV_BUILD_POLICY_STATUS="$status" sbcl --script "$@" || result=$?
+if [ "$result" -eq 0 ] && [ -e "$status" ]; then
+  result=1
+fi
+exit "$result"
