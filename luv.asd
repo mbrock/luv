@@ -444,6 +444,8 @@ offsets and of headers."
                              (:file "command-menu")
                              (:file "source-update")
                              (:file "metabar")
+                             (:file "palette")
+                             (:file "keymap-legend")
                              (:file "application-status-bar")
                              (:file "widget-lab")
                              (:file "workbench-backend-proof")

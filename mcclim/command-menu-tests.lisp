@@ -168,3 +168,39 @@
                        (lambda (command)
                          (typep command 'mcluv::gpu-prepared-image-command))
                        prepared))))))))
+
+(clim:define-command-table keymap-legend-test-keys)
+
+(clim:define-command (com-keymap-legend-step
+                      :command-table keymap-legend-test-keys
+                      :name "Step")
+    ((direction 'keyword))
+  direction)
+
+(dolist (binding '((:w :north) (:up :north) (:s :south)))
+  (destructuring-bind (key direction) binding
+    (clim:add-keystroke-to-command-table
+     'keymap-legend-test-keys (list key) :function
+     (let ((direction direction))
+       (lambda (gesture numeric-argument)
+         (declare (ignore gesture numeric-argument))
+         (list 'com-keymap-legend-step direction)))
+     :errorp nil)))
+
+(define-test keymap-legend-reads-and-merges-a-table
+  (let ((rows (mcluv::keymap-legend-table-rows
+               nil 'keymap-legend-test-keys)))
+    ;; Without an owner label method, one command is one row and its keys
+    ;; merge, whatever arguments each keystroke supplies.
+    (true (equal '(("step" "W" "↑" "S")) rows))))
+
+(define-test keymap-legend-balances-two-columns
+  (let* ((long (cons "Long" (loop repeat 10 collect (list "row" "K"))))
+         (short (cons "Short" (list (list "row" "K"))))
+         (other (cons "Other" (loop repeat 8 collect (list "row" "K"))))
+         (columns (mcluv::keymap-legend-columns (list long short other))))
+    (true (= 2 (length columns)))
+    (true (equal '("Long") (mapcar #'car (first columns))))
+    (true (equal '("Short" "Other") (mapcar #'car (second columns))))
+    (true (equal (list (list long))
+                 (mcluv::keymap-legend-columns (list long))))))

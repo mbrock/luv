@@ -149,6 +149,25 @@
            #:validate-metabar-direct-presentation
            #:metabar-requires-direct-gpu
            #:metabar-direct-presentation-violation
+           ;; The passive palette of things a player holds, and the keymap
+           ;; legend read off an application's own command tables.
+           #:palette-items-for
+           #:palette-visible-p
+           #:palette-selected-item
+           #:palette-item-label
+           #:palette-item-tones
+           #:palette-item-luminous-p
+           #:palette-item-key
+           #:palette-hint
+           #:palette-snapshot
+           #:refresh-palette
+           #:palette-dirty-p
+           #:keymap-legend-sections-for
+           #:keymap-legend-command-label
+           #:keymap-legend-sections
+           #:keymap-legend-visible-sections
+           #:refresh-keymap-legend
+           #:handle-keymap-legend-key-event
            ;; The always-available application status line.  Base channels
            ;; are shared while applications extend the ordered vocabulary by
            ;; specializing the ordinary CLOS protocol below.

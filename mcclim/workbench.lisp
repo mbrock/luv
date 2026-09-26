@@ -43,6 +43,15 @@
       ((typep child 'mcluv::status-bar-pane)
        (clim:move-and-resize-sheet
         child 0 0 width mcluv::+status-bar-height+))
+      ((typep child 'mcluv::palette-pane)
+       (multiple-value-bind (left top pane-width pane-height)
+           (mcluv::palette-placement (clim:pane-frame child) width height)
+         (clim:move-and-resize-sheet child left top pane-width pane-height)))
+      ((typep child 'mcluv::keymap-legend-pane)
+       (multiple-value-bind (left top pane-width pane-height)
+           (mcluv::keymap-legend-placement (clim:pane-frame child)
+                                           width height)
+         (clim:move-and-resize-sheet child left top pane-width pane-height)))
       ((typep child 'mcluv::mx-command-menu-pane)
        (clim:move-and-resize-sheet
         child
@@ -99,6 +108,8 @@
      mcluv::command-menu-state
      mcluv::source-update-state
      mcluv::metabar-state
+     mcluv::palette-state
+     mcluv::keymap-legend-state
      luv.lobby.mcclim::lobby-hud-state)
   ((application :initarg :application :reader frame-workbench-application))
   (:menu-bar nil)
@@ -114,7 +125,13 @@
                               :min-width 1
                               :min-height mcluv::+status-bar-height+
                               :max-width clim:+fill+
-                              :max-height mcluv::+status-bar-height+))))
+                              :max-height mcluv::+status-bar-height+)
+                             ;; Painted empty until its owner has a palette.
+                             (clim:make-pane
+                              'mcluv::palette-pane
+                              :background clim:+transparent-ink+
+                              :width mcluv::+palette-caption-width+
+                              :height mcluv::+palette-height+))))
    (modeless
     (clim:make-pane
      'workbench-layer-pane :kind :modeless
@@ -149,7 +166,12 @@
        'mcluv::source-update-pane
        :background clim:+transparent-ink+
        :width mcluv::+source-update-width+
-       :height mcluv::+source-update-height+)))))
+       :height mcluv::+source-update-height+)
+      (clim:make-pane
+       'mcluv::keymap-legend-pane
+       :background clim:+transparent-ink+
+       :width mcluv::+keymap-legend-width+
+       :height mcluv::*keymap-legend-construction-height*)))))
   (:layouts
    (default
     (clim:make-pane 'workbench-layout-pane
@@ -206,11 +228,14 @@
           (ecase tool
             (:command-menu 'mcluv::mx-command-menu-pane)
             (:source-update 'mcluv::source-update-pane)
+            (:keymap 'mcluv::keymap-legend-pane)
+            (:palette 'mcluv::palette-pane)
             (:metabar 'mcluv::metabar-pane)
             (:lobby 'luv.lobby.mcclim::lobby-hud-pane)))
         (kind
           (ecase tool
-            ((:command-menu :source-update) :modal)
+            ((:command-menu :source-update :keymap) :modal)
+            (:palette :passive)
             (:metabar :transient)
             (:lobby :modeless))))
     (find-if
@@ -219,7 +244,7 @@
       (workbench-layer-pane (workbench-layer workbench kind))))))
 
 (defun set-workbench-tool-pane (workbench tool)
-  (dolist (candidate '(:command-menu :source-update))
+  (dolist (candidate '(:command-menu :source-update :keymap))
     (setf (clim:sheet-enabled-p (workbench-tool-pane workbench candidate))
           (eq candidate tool)))
   (setf (workbench-active-tool workbench) tool)
@@ -391,6 +416,62 @@
          (%close-workbench-lobby workbench)
          (%open-workbench-lobby workbench))))
   t)
+
+(defun %open-workbench-keymap (workbench)
+  (let ((frame (workbench-frame workbench))
+        (pane (workbench-tool-pane workbench :keymap)))
+    (mcluv:refresh-keymap-legend frame)
+    ;; The legend's height is its rows; place it now rather than waiting for
+    ;; a layout pass that only a resize would bring.
+    (multiple-value-bind (width height)
+        (luv:canvas-logical-size
+         (workbench-application-canvas (workbench-application workbench)))
+      (multiple-value-bind (left top pane-width pane-height)
+          (mcluv::keymap-legend-placement frame width height)
+        (clim:move-and-resize-sheet pane left top pane-width pane-height)))
+    (set-workbench-tool-pane workbench :keymap)
+    (show-workbench-layer workbench :modal)
+    (mcluv:repaint-gpu-mirror (workbench-mirror workbench)))
+  workbench)
+
+(defun open-workbench-keymap (workbench)
+  "Open the keymap legend at WORKBENCH's frame boundary."
+  (call-with-workbench-frame-mutation
+   workbench (lambda () (%open-workbench-keymap workbench))))
+
+(defun %close-workbench-keymap (workbench)
+  (when (eq :keymap (workbench-active-tool workbench))
+    (hide-workbench-layer workbench :modal)
+    (set-workbench-tool-pane workbench nil)
+    (mcluv:repaint-gpu-mirror (workbench-mirror workbench)))
+  nil)
+
+(defun close-workbench-keymap (workbench)
+  (call-with-workbench-frame-mutation
+   workbench (lambda () (%close-workbench-keymap workbench)))
+  nil)
+
+(defun toggle-workbench-keymap (workbench)
+  (call-with-workbench-frame-mutation
+   workbench
+   (lambda ()
+     (if (eq :keymap (workbench-active-tool workbench))
+         (%close-workbench-keymap workbench)
+         (%open-workbench-keymap workbench))))
+  t)
+
+(defun refresh-workbench-palette (workbench width height)
+  "Sample the application's palette and republish only when it changed."
+  (let ((frame (workbench-frame workbench))
+        (pane (workbench-tool-pane workbench :palette)))
+    (mcluv:refresh-palette frame)
+    (when (mcluv:palette-dirty-p frame)
+      (multiple-value-bind (left top pane-width pane-height)
+          (mcluv::palette-placement frame width height)
+        (clim:move-and-resize-sheet pane left top pane-width pane-height))
+      (mcluv:repaint-gpu-mirror (workbench-mirror workbench))
+      (setf (mcluv:palette-dirty-p frame) nil)))
+  workbench)
 
 (defun workbench-active-layer (workbench)
   (find-if (lambda (layer)
@@ -598,6 +679,13 @@
                       :before-execute
                       (lambda ()
                         (%close-workbench-command-menu workbench))))))))))
+         (:keymap
+          (when (or (and (typep event 'luv:canvas-key-press-event)
+                         (eq :dismiss
+                             (mcluv:handle-keymap-legend-key-event
+                              frame event)))
+                    (typep event 'luv:canvas-pointer-button-press-event))
+            (%close-workbench-keymap workbench)))
          (:source-update
           (cond
             ((typep event 'luv:canvas-key-press-event)
@@ -766,6 +854,9 @@ every key and pointer event."
     ;; layout and prepared-stream ownership now belong to this one shell frame.
     (mcluv:refresh-status-bar
      (workbench-frame workbench) width :resize-frame-p nil)
+    ;; The palette may republish the shared mirror, so it samples before the
+    ;; status line prepares the stream this frame will actually replay.
+    (refresh-workbench-palette workbench width height)
     (mcluv:prepare-status-bar (workbench-frame workbench))
     (refresh-workbench-metabar workbench width height)
     (when (workbench-layer-visible-p
@@ -833,7 +924,7 @@ pass and gives the shell neither renderer ownership nor queue submission."
          (mirror (clim:sheet-direct-mirror
                   (clim:frame-top-level-sheet frame))))
     (mcluv:make-gpu-frame-background-transparent frame)
-    (dolist (tool '(:command-menu :source-update :metabar :lobby))
+    (dolist (tool '(:command-menu :source-update :keymap :metabar :lobby))
       (setf (clim:sheet-enabled-p
              (find-if
               (lambda (pane)
@@ -842,6 +933,7 @@ pass and gives the shell neither renderer ownership nor queue submission."
                    (typep pane 'mcluv::mx-command-menu-pane))
                   (:source-update
                    (typep pane 'mcluv::source-update-pane))
+                  (:keymap (typep pane 'mcluv::keymap-legend-pane))
                   (:metabar (typep pane 'mcluv::metabar-pane))
                   (:lobby
                    (typep pane 'luv.lobby.mcclim::lobby-hud-pane))))
@@ -849,7 +941,7 @@ pass and gives the shell neither renderer ownership nor queue submission."
                (clim:find-pane-named
                 frame
                 (ecase tool
-                  ((:command-menu :source-update) 'modal)
+                  ((:command-menu :source-update :keymap) 'modal)
                   (:metabar 'transient)
                   (:lobby 'modeless))))))
             nil))

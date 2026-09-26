@@ -130,6 +130,7 @@
                (:file "luft/render/metabar")
                (:file "luft/render/lobby")
                (:file "luft/render/status-bar")
+               (:file "luft/render/hud")
                (:file "luft/render/application-agent"))
   :in-order-to ((test-op (test-op "luft/render/test"))))
 

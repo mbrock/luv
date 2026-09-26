@@ -37,6 +37,9 @@
    #:open-workbench-lobby
    #:close-workbench-lobby
    #:toggle-workbench-lobby
+   #:open-workbench-keymap
+   #:close-workbench-keymap
+   #:toggle-workbench-keymap
    #:dispatch-workbench-event
    #:refresh-workbench
    #:encode-workbench))
