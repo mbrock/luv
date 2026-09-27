@@ -39,6 +39,9 @@
   (or (luvcraft-portal-server session)
       (let* ((path (luvcraft-portal-socket-path))
              (socket (make-instance 'sb-bsd-sockets:local-socket :type :stream)))
+        ;; A managed image outlives the nix develop shell that started it,
+        ;; and that shell deletes the TMPDIR it handed down.
+        (ensure-directories-exist path)
         (when (probe-file path) (delete-file path))
         (sb-bsd-sockets:socket-bind socket path)
         (sb-bsd-sockets:socket-listen socket 8)

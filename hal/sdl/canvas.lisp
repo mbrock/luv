@@ -1277,7 +1277,11 @@ that context.  Every other handler retains the ordinary native close policy."
               (cffi:foreign-enum-value 'sdl3::event-type
                                        :window-focus-gained)
               (cffi:foreign-enum-value 'sdl3::event-type
-                                       :window-focus-lost)))
+                                       :window-focus-lost)
+              (cffi:foreign-enum-value 'sdl3::event-type
+                                       :window-enter-fullscreen)
+              (cffi:foreign-enum-value 'sdl3::event-type
+                                       :window-leave-fullscreen)))
      (let ((window-event
              (cffi:mem-ref event '(:struct sdl3:window-event))))
        (when (sdl-canvas-window-event-p canvas window-event)
@@ -1313,6 +1317,17 @@ that context.  Every other handler retains the ordinary native close policy."
                                         :window-mouse-leave))
             (dispatch-sdl-pointer-boundary
              canvas window-event 'canvas-pointer-exit-event))
+           ((= event-type
+               (cffi:foreign-enum-value 'sdl3::event-type
+                                        :window-enter-fullscreen))
+            ;; The window manager can change fullscreen without us: the macOS
+            ;; green button and Control-Command-F.  Record what happened so the
+            ;; next toggle asks for the opposite of the real state.
+            (setf (canvas-fullscreen-p canvas) t))
+           ((= event-type
+               (cffi:foreign-enum-value 'sdl3::event-type
+                                        :window-leave-fullscreen))
+            (setf (canvas-fullscreen-p canvas) nil))
            ((= event-type
                (cffi:foreign-enum-value 'sdl3::event-type
                                         :window-focus-gained))
