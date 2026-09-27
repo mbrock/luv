@@ -26,6 +26,7 @@
           output = builtins.placeholder "out";
           runtimeEnvironment = lib.filterAttrs
             (variable: _value: builtins.elem variable [
+              "LUV_ASDF_CACHE_KEY"
               "LUV_BASH"
               "LUV_FFMPEG_LIBDIR"
               "LUV_GHOSTTY_LIBRARY"
@@ -88,7 +89,7 @@
             # CFFI restores foreign libraries from FASLs when a dumped image
             # starts. Shipping the build cache avoids recompiling them into a
             # new user's home while the first canvas is already starting.
-            cp -R "$HOME/.cache/common-lisp/"*/. "$out/lib/fasl/"
+            cp -R "$HOME/.cache/common-lisp/luv/$LUV_ASDF_CACHE_KEY/." "$out/lib/fasl/"
             ${lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
               # SBCL reopens loaded shared objects by their original absolute
               # path before MAIN runs. Preserve the generated Objective-C
@@ -111,11 +112,13 @@
             ${exportRuntimeEnvironment}
             export LUV_PROJECT_ROOT=${lib.escapeShellArg "${output}/share/luv"}
             export PATH=${lib.escapeShellArg runtimePath}:"''${PATH:-}"
-            if [ -z "''${ASDF_OUTPUT_TRANSLATIONS:-}" ]; then
-              export ASDF_OUTPUT_TRANSLATIONS=${lib.escapeShellArg "/:${output}/lib/fasl//"}
-            fi
+            asdf_output_translations="''${ASDF_OUTPUT_TRANSLATIONS:-}"
             ${environment.developmentEnvironmentHook}
             luv_activate_native_environment
+            # The hook points ASDF at the developer cache. A launched program
+            # reads the FASLs shipped beside it unless the caller says otherwise.
+            export ASDF_OUTPUT_TRANSLATIONS="''${asdf_output_translations:-${lib.escapeShellArg "/:${output}/lib/fasl//"}}"
+            unset asdf_output_translations
 
             ${lib.optionalString (name == "luvcraft") ''
               if [ -z "''${LUVCRAFT_SLYNK_ENDPOINT:-}" ]; then
