@@ -344,8 +344,7 @@ a Telegram console left running behind a film is a connection nobody closes."
            (overlay
              (make-instance
               'terminal-film-browser-overlay
-              :session session :frame frame :mirror mirror :display display
-              :height-scale 0.0)))
+              :session session :frame frame :mirror mirror :display display)))
       (place-widget-overlay-on-surface overlay display session)
       (setf (mirror-compositor mirror) overlay
             (luvcraft:terminal-display-mode-overlay display) overlay)

@@ -1492,10 +1492,7 @@ panel; the phone gets the tall one.  A new kind of surface adds a method.")
            (overlay
              (make-instance
               'luvcraft-communicator-overlay
-              :session session :frame frame :mirror mirror :display display
-              ;; A little relief, so the buttons and the bezel actually
-              ;; stand off the surface instead of being painted on it.
-              :height-scale 0.35)))
+              :session session :frame frame :mirror mirror :display display)))
       (place-widget-overlay-on-surface overlay display session)
       (setf (mirror-compositor mirror) overlay
             (luvcraft:terminal-display-mode-overlay display) overlay)

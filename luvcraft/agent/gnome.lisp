@@ -1217,7 +1217,7 @@ candidate that loses to release or another publication is detached and closed."
          (mirror (sheet-direct-mirror (frame-top-level-sheet frame)))
          (overlay (make-instance 'gnome-bubble-overlay
                                  :session session :frame frame :mirror mirror
-                                 :gnome gnome :height-scale 0.35)))
+                                 :gnome gnome)))
     (setf (frame-pretty-name frame) "gnome bubble"
           (mcluv:mirror-compositor mirror) overlay
           (bubble-lift overlay) (- *bubble-lift* 0.3)
