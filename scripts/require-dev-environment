@@ -1,7 +1,7 @@
 # Sourced by Luv launchers that need the checkout's Nix dependencies.
 #
 # A launcher invoked outside the current development shell re-executes itself
-# once through the small nix/ flake.  Re-execution preserves its arguments and
+# once through the checkout's flake.  Re-execution preserves its arguments and
 # any variables the launcher deliberately exported before reaching this file.
 
 if [ "${LUV_DEV_ENVIRONMENT_MODE:-}" != nix-develop ]; then
@@ -15,7 +15,7 @@ if [ "${LUV_DEV_ENVIRONMENT_MODE:-}" != nix-develop ]; then
   esac
   export LUV_PROJECT_ROOT=$project_root
   exec nix develop --accept-flake-config --no-write-lock-file \
-    "path:$project_root/nix#${LUV_DEV_SHELL:-default}" \
+    "$project_root#${LUV_DEV_SHELL:-default}" \
     -c "$0" "$@"
 fi
 

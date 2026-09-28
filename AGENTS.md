@@ -122,13 +122,13 @@ selected image.
 
 ## Environment and other tools
 
-The dependencies live in the small flake under `nix/`. `make`, `./sly`, and
+The dependencies live in the repository's `flake.nix`. `make`, `./sly`, and
 the other repository launchers enter it automatically when needed. Use
 `./env COMMAND` explicitly for an arbitrary command, or `./env` for an
 interactive shell; `.envrc` activates the same environment through direnv.
 
 Remote agents can use `./env --slim COMMAND` or
-`nix develop path:./nix#slim`. It contains the complete Common Lisp
+`nix develop .#slim`. It contains the complete Common Lisp
 dependency closure and ordinary build tools, but omits libghostty-vt, its
 large Zig closure, and unrelated workstation tools. The Ghostty binding
 remains available for compilation and inspection; using it needs the full

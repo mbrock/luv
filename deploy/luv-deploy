@@ -22,7 +22,7 @@ enable_git_annex()
     annex_bin=$(
         as_mbrock env \
             PATH=/nix/var/nix/profiles/default/bin:/usr/bin:/bin \
-            nix develop "path:$control_checkout/nix#annex" \
+            nix develop "$control_checkout#annex" \
                 --accept-flake-config --no-write-lock-file -c sh -c \
                 'dirname "$(command -v git-annex)"'
     )

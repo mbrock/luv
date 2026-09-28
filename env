@@ -21,7 +21,7 @@ case "$shell" in
 esac
 export LUV_DEV_SHELL=$shell
 
-flake="path:$project_root/nix#$shell"
+flake="$project_root#$shell"
 if [ "$#" -eq 0 ]; then
   exec nix develop --accept-flake-config --no-write-lock-file "$flake"
 fi

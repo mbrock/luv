@@ -17,7 +17,7 @@ cd /path/to/luv
   --eval '(asdf:test-system :luv/ghostty)'
 ```
 
-The package is also available as `path:./nix#libghostty-vt`. The environment
+The package is also available as `.#libghostty-vt`. The environment
 exports `LUV_GHOSTTY_LIBRARY` as its exact shared-library store path, while ordinary
 installed soname lookup remains available outside Nix.  A saved luvcraft
 executable also retains the pinned path visible when its image was built, so

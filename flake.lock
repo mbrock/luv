@@ -59,7 +59,6 @@
     "home-manager": {
       "inputs": {
         "nixpkgs": [
-          "toolchain",
           "ghostty",
           "nixpkgs"
         ]
@@ -177,23 +176,30 @@
     },
     "root": {
       "inputs": {
-        "toolchain": "toolchain"
+        "cl-sdl3": "cl-sdl3",
+        "ghostty": "ghostty",
+        "mcclim": "mcclim",
+        "nix-wpe-webkit": "nix-wpe-webkit",
+        "nixpkgs": "nixpkgs_3",
+        "parachute": "parachute",
+        "swash": "swash",
+        "tracy": "tracy"
       }
     },
     "swash": {
       "flake": false,
       "locked": {
-        "lastModified": 1787697769,
-        "narHash": "sha256-ozBKKYvx1A38cS1LGX9gTHkzkvh/x0V6GxKg1GpO5vg=",
+        "lastModified": 1788542412,
+        "narHash": "sha256-3WXEhZerxo8Exea9ORi/iNS91sOJYSg7nsBitIFg5ZY=",
         "owner": "lessrest",
         "repo": "swash",
-        "rev": "37355e2ab4009e047e14eac21bfbbd22b9931151",
+        "rev": "43ba48386191947c3b1bbcc647db2df0ad376594",
         "type": "github"
       },
       "original": {
         "owner": "lessrest",
         "repo": "swash",
-        "rev": "37355e2ab4009e047e14eac21bfbbd22b9931151",
+        "rev": "43ba48386191947c3b1bbcc647db2df0ad376594",
         "type": "github"
       }
     },
@@ -212,27 +218,6 @@
         "repo": "default",
         "type": "github"
       }
-    },
-    "toolchain": {
-      "inputs": {
-        "cl-sdl3": "cl-sdl3",
-        "ghostty": "ghostty",
-        "mcclim": "mcclim",
-        "nix-wpe-webkit": "nix-wpe-webkit",
-        "nixpkgs": "nixpkgs_3",
-        "parachute": "parachute",
-        "swash": "swash",
-        "tracy": "tracy"
-      },
-      "locked": {
-        "path": "./nix",
-        "type": "path"
-      },
-      "original": {
-        "path": "./nix",
-        "type": "path"
-      },
-      "parent": []
     },
     "tracy": {
       "flake": false,
@@ -254,17 +239,14 @@
     "zig": {
       "inputs": {
         "flake-compat": [
-          "toolchain",
           "ghostty",
           "flake-compat"
         ],
         "nixpkgs": [
-          "toolchain",
           "ghostty",
           "nixpkgs"
         ],
         "systems": [
-          "toolchain",
           "ghostty",
           "systems"
         ]
@@ -286,7 +268,6 @@
     "zon2nix": {
       "inputs": {
         "nixpkgs": [
-          "toolchain",
           "ghostty",
           "nixpkgs"
         ]
