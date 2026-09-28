@@ -37,15 +37,15 @@ written by hand into method specializers and into each material's face list.
 :END:
 
 In August 2026 two checkouts of luvcraft added a material at the same time.
-One added the urbit block and took the next free atlas tile, 30.  The other
-added a film reel and took the next free atlas tile, 30.  Each was locally
-correct; neither could see the other.
+One added a new display material and took the next free atlas tile, 30.
+The other added a film reel and took the next free atlas tile, 30.  Each was
+locally correct; neither could see the other.
 
 Git merged them without a conflict, because the two definitions occupy
 different regions of [[file:../luvcraft/blocks.lisp][blocks.lisp]] and never
 overlap textually.  CLOS then accepted both =(defmethod paint-block-atlas-tile
 ((tile (eql 30)) x y))= definitions and let the later one win, as it should.
-No error was signalled at any layer.  The urbit block would simply have been
+No error was signalled at any layer.  The new material would simply have been
 painted as a film reel, and the defect would have been found by looking at a
 wall.
 
@@ -227,7 +227,7 @@ qualifier.  The vertex probably shrinks.
 :END:
 
 luvcraft's saves are symbolic throughout: a block is written as
-=(:block :name :urbit)= and restored through =block-kind-named=.  This is why
+=(:block :name :terminal)= and restored through =block-kind-named=.  This is why
 renumbering an atlas tile cannot damage an existing world, and it is a good
 property to have arrived at.
 
@@ -259,7 +259,7 @@ version, and write only the newest, so files heal as they are saved.
 
 *Intent.* Replace the hand-allocated atlas tile integers with keywords, and
 make the tile vocabulary a finite domain object that assigns offsets.
-Specializers become =(eql :urbit)= rather than =(eql 36)=; a material's
+Specializers become =(eql :lava)= rather than =(eql 35)=; a material's
 face list names tiles rather than positions; the atlas materializes over the
 domain, appending offsets and never moving one.
 

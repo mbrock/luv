@@ -30,16 +30,10 @@
               "LUV_BASH"
               "LUV_FFMPEG_LIBDIR"
               "LUV_GHOSTTY_LIBRARY"
-              "LUV_LAVAPIPE_ICD"
-              "LUV_MESA_LIBRARY_PATH"
-              "LUV_MUPDF_LIBDIR"
               "LUV_NATIVE_LIBRARY_PATH"
-              "LUV_URBIT"
-              "LUV_YT_DLP"
               "VK_DRIVER_FILES"
-              "VK_LAYER_PATH"
             ])
-            environment.developmentEnvironment;
+            environment.applicationEnvironment;
           exportRuntimeEnvironment = lib.concatStringsSep "\n"
             (lib.mapAttrsToList
               (variable: value:
@@ -49,16 +43,14 @@
             pkgs.bashInteractive
             pkgs.coreutils
             environment.ffmpeg
-            pkgs.urbit
-            pkgs.yt-dlp
           ];
         in
-        pkgs.stdenv.mkDerivation (environment.developmentEnvironment // {
+        pkgs.stdenv.mkDerivation (environment.applicationEnvironment // {
           pname = name;
           version = "0-unstable";
           src = self;
 
-          nativeBuildInputs = environment.developmentPackages;
+          nativeBuildInputs = environment.applicationPackages;
           dontConfigure = true;
           dontPatchELF = true;
           dontStrip = true;
@@ -90,6 +82,11 @@
             # starts. Shipping the build cache avoids recompiling them into a
             # new user's home while the first canvas is already starting.
             cp -R "$HOME/.cache/common-lisp/luv/$LUV_ASDF_CACHE_KEY/." "$out/lib/fasl/"
+            # CFFI's groveller leaves its C program, object, and executable
+            # beside the FASL.  None is loaded at runtime, and their debug
+            # information would keep the whole C toolchain and SDK alive.
+            find "$out/lib/fasl" -type f \( -name '*__grovel' \
+              -o -name '*__grovel.c' -o -name '*__grovel.o' \) -delete
             ${lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
               # SBCL reopens loaded shared objects by their original absolute
               # path before MAIN runs. Preserve the generated Objective-C

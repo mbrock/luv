@@ -29,3 +29,11 @@ the root for `nix run github:mbrock/luv` discovery, and packages the complete
 source plus its runtime resources. Keep using this directory's explicit path
 flake for development so entering a shell does not copy the full checkout to
 the Nix store.
+
+The released programs build from `applicationPackages` and
+`applicationEnvironment`, not from the development shell: only the Lisp
+closure, SDL, Vulkan, FFmpeg, HarfBuzz, and libghostty-vt. Workstation tools
+(Go, Zig, Node, Typst, MuPDF, yt-dlp, Mesa, validation layers) stay out of
+what `nix run` downloads. Check a change with `nix path-info -rSh .#luvcraft`
+after building it; none of those tools, nor Emacs or a C toolchain, should
+appear in the list.

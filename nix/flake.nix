@@ -265,12 +265,15 @@
               pkgs.moltenvk
             ];
           slimNativeLibraryPath = nixpkgs.lib.makeLibraryPath slimNativeLibraryPackages;
+          applicationNativeLibraryPath = nixpkgs.lib.makeLibraryPath (
+            slimNativeLibraryPackages ++ [ libghosttyVt ]
+          );
           mesaLibraryPath = nixpkgs.lib.makeLibraryPath [ pkgs.mesa ];
           # Keep the owned CFFI binding and development tools available to SBCL.
           # McCLIM itself comes from the pinned source above.  Pull only the
           # packaged McCLIM dependency closure into SBCL, since registering the
           # packaged McCLIM systems would make ASDF select them before our pin.
-          lisp = sbcl.withPackages (lispPackages:
+          lispLibrariesFor = lispPackages:
             let
               packageNode = package: {
                 key = package.outPath;
@@ -314,7 +317,31 @@
               ++ nixpkgs.lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
                 lispPackages.float-features
                 lispPackages.trivial-main-thread
-              ]);
+              ];
+          lisp = sbcl.withPackages lispLibrariesFor;
+          # The shipped programs record the source directory of every Lisp
+          # library they load.  nixpkgs' CFFI-LIBFFI keeps its groveller's
+          # object file, whose debug information names the C compiler and
+          # SDK.  ASDF counts the file as a grovel output, so it stays, but
+          # its store hashes are blanked: nothing ever links it again.
+          applicationSbcl = pkgs.wrapLisp {
+            pkg = pkgs.sbcl;
+            faslExt = "fasl";
+            flags = [
+              "--dynamic-space-size"
+              "3000"
+            ];
+            packageOverrides = _self: super: {
+              cffi-libffi = super.cffi-libffi.overrideLispAttrs (previous: {
+                postInstall = (previous.postInstall or "") + ''
+                  find "$out" -type f -name '*__grovel.o' -exec \
+                    env LC_ALL=C sed -i -E \
+                      's/[0-9a-df-np-sv-z]{32}-/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-/g' {} +
+                '';
+              });
+            };
+          };
+          applicationLisp = applicationSbcl.withPackages lispLibrariesFor;
           # Upstream's one ASDF system bundles otherwise independent SDL_image,
           # SDL_ttf, and SDL_mixer bindings.  Luv uses the first two but not the
           # mixer, so keep its eagerly loaded foreign library out of the normal
@@ -327,6 +354,16 @@
           };
           slyRoot =
             "${pkgs.emacsPackages.sly}/share/emacs/site-lisp/elpa/${pkgs.emacsPackages.sly.pname}-${pkgs.emacsPackages.sly.version}";
+          # The Lisp half of SLY without the Emacs package around it.  A
+          # program that embeds Slynk would otherwise keep Emacs, and with it
+          # a native-compilation toolchain, in its runtime closure.  Slynk
+          # loads its contribs from ../contrib, so keep that layout.
+          slynkSource = pkgs.runCommand
+            "slynk-${pkgs.emacsPackages.sly.version}" { } ''
+              mkdir -p "$out/contrib"
+              cp -R ${slyRoot}/slynk "$out/slynk"
+              cp ${slyRoot}/contrib/*.lisp "$out/contrib/"
+            '';
           swashPackage = pkgs.buildGoModule {
             pname = "swash";
             version = "0-unstable-2026-09-04";
@@ -370,7 +407,6 @@
             pkgs.spirv-tools
             swashPackage
             pkgs.typst
-            pkgs.urbit
             pkgs.vulkan-headers
             pkgs.vulkan-tools
             pkgs.vulkan-validation-layers
@@ -402,6 +438,22 @@
             pkgs.vulkan-validation-layers
             pkgs.zig
           ];
+          # The `nix run` programs build from what they actually load, not
+          # from the workstation shell: no Go, Zig, Node, Typst, MuPDF,
+          # yt-dlp, Mesa, or Vulkan tooling.  Ghostty's terminal library is
+          # the one heavy native dependency the game really opens.
+          applicationPackages = [
+            pkgs.bashInteractive
+            applicationLisp
+            ffmpeg
+            ffmpeg.dev
+            libghosttyVt
+            pkgs.libffi
+            pkgs.harfbuzz
+            pkgs.pkg-config
+            pkgs.sdl3
+            pkgs.vulkan-headers
+          ];
           lavapipeIcd =
             if system == "x86_64-linux" then "lvp_icd.x86_64.json"
             else if system == "aarch64-linux" then "lvp_icd.aarch64.json"
@@ -413,7 +465,6 @@
             # path to LD_LIBRARY_PATH only for their process trees.
             LUV_NATIVE_LIBRARY_PATH = nativeLibraryPath;
             LUV_MESA_LIBRARY_PATH = mesaLibraryPath;
-            LUV_URBIT = "${pkgs.urbit}/bin/urbit";
             LUV_GHOSTTY_LIBRARY = libghosttyVtLibrary;
             LUV_BASH = "${pkgs.bashInteractive}/bin/bash";
             LUV_SLYNK_DIR = "${slyRoot}/slynk";
@@ -454,6 +505,25 @@
           } // nixpkgs.lib.optionalAttrs (lavapipeIcd != null) {
             LUV_LAVAPIPE_ICD =
               "${pkgs.mesa}/share/vulkan/icd.d/${lavapipeIcd}";
+          } // nixpkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
+            VK_DRIVER_FILES =
+              "${pkgs.moltenvk}/share/vulkan/icd.d/MoltenVK_icd.json";
+          };
+          applicationEnvironment = {
+            LUV_DEV_ENVIRONMENT = "1";
+            LUV_NATIVE_LIBRARY_PATH = applicationNativeLibraryPath;
+            LUV_GHOSTTY_LIBRARY = libghosttyVtLibrary;
+            LUV_BASH = "${pkgs.bashInteractive}/bin/bash";
+            LUV_SLYNK_DIR = "${slynkSource}/slynk";
+            LUV_FFMPEG_LIBDIR = ffmpegLibraryDirectory;
+            CL_SOURCE_REGISTRY = "${mcclim}//:${clSdl3WithoutMixer}//";
+            # Only a name for the FASL cache: without the string context, the
+            # hash printed into the launcher does not make the build closure
+            # a runtime dependency of the installed program.
+            LUV_ASDF_CACHE_KEY = builtins.unsafeDiscardStringContext
+              (builtins.baseNameOf applicationClosure);
+            PKG_CONFIG_PATH = "${ffmpeg.dev}/lib/pkgconfig";
+            CPATH = "${pkgs.vulkan-headers}/include";
           } // nixpkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
             VK_DRIVER_FILES =
               "${pkgs.moltenvk}/share/vulkan/icd.d/MoltenVK_icd.json";
@@ -516,7 +586,7 @@
           '';
           slimDevelopmentEnvironmentHook = developmentEnvironmentHook + ''
             unset LUV_GHOSTTY_LIBRARY
-            unset LUV_MUPDF_LIBDIR LUV_URBIT LUV_YT_DLP
+            unset LUV_MUPDF_LIBDIR LUV_YT_DLP
           '';
           developmentClosure = pkgs.buildEnv {
             name = "luv-development-closure";
@@ -526,14 +596,19 @@
             name = "luv-slim-development-closure";
             paths = slimDevelopmentPackages;
           };
+          applicationClosure = pkgs.buildEnv {
+            name = "luv-application-closure";
+            paths = applicationPackages;
+          };
         in
         {
           inherit pkgs wpePkgs sbcl sbcl268 lisp clSdl3WithoutMixer;
           inherit developmentClosure developmentPackages developmentEnvironment;
           inherit slimDevelopmentClosure slimDevelopmentPackages slimDevelopmentEnvironment;
+          inherit applicationClosure applicationPackages applicationEnvironment;
           inherit developmentEnvironmentHook slimDevelopmentEnvironmentHook;
           inherit nativeLibraryPath mesaLibraryPath;
-          inherit slyRoot swashPackage;
+          inherit slyRoot slynkSource swashPackage;
           inherit ffmpeg ffmpegLibraryDirectory mupdf mupdfLibraryDirectory;
           inherit libghosttyVt libghosttyVtLibrary;
           inherit tracyClient tracyClientLibrary tracyTools;

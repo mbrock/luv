@@ -2300,7 +2300,7 @@
     (true (= (block-surface-emission *terminal-block*) 0.16))
     (true (equal (mapcar #'block-kind-name (placeable-block-kinds))
                  '(:grass :dirt :stone :wood :leaves :sand :snow :crystal
-                   :terminal :urbit :gravel :clay :mud :moss :cactus
+                   :terminal :gravel :clay :mud :moss :cactus
                    :cobblestone :stone-bricks :bricks :planks :sandstone
                    :slate :tape :fountain :lava-spring :flowers))))
   (let* ((world (make-block-world :chunk-width 2
@@ -2473,30 +2473,11 @@
     (true (eq (select-luvcraft-block session 9) *terminal-block*))
     (true (search "1–9,0 select" (canvas-title canvas)))
     (true (search "terminal" (canvas-title canvas)))
-    ;; The tenth slot is the urbit material, and its chip is the 0 key.
-    (true (eq (select-luvcraft-block session 10) luvcraft::*urbit-block*))
-    (true (search "[0] urbit" (canvas-title canvas)))
-    (true (eq (select-luvcraft-block session 11) luvcraft::*gravel-block*))
+    ;; The tenth slot is the gravel material, and its chip is the 0 key.
+    (true (eq (select-luvcraft-block session 10) luvcraft::*gravel-block*))
+    (true (search "[0] gravel" (canvas-title canvas)))
+    (true (eq (select-luvcraft-block session 11) luvcraft::*clay-block*))
     (true (search "[inventory]" (canvas-title canvas)))))
-
-(define-test urbit-wall-boots-a-comet-once-and-resumes-its-pier
-  ;; The pier lives under the checkout's build directory, named by the wall.
-  (let ((pier (urbit-pier-pathname)))
-    (true (search "build/urbit/comet" (namestring pier))))
-  ;; A pier vere has not made an .urb in boots as a comet; one it has,
-  ;; resumes.  The urbit itself is not run here: booting a comet is a
-  ;; networked, minutes-long affair that belongs on a wall, not in a test.
-  (let* ((pier (merge-pathnames
-                (make-pathname :directory '(:relative "luv-urbit-test-pier"))
-                (uiop:temporary-directory))))
-    (unwind-protect
-         (progn
-           (true (equal (list "-c" (namestring pier))
-                        (urbit-boot-arguments pier)))
-           (ensure-directories-exist (merge-pathnames #P".urb/" pier))
-           (true (equal (list (namestring pier))
-                        (urbit-boot-arguments pier))))
-      (uiop:delete-directory-tree pier :validate t :if-does-not-exist :ignore))))
 
 (define-test block-inventory-supports-creative-and-finite-stacks
   (let* ((creative

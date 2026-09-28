@@ -59,7 +59,6 @@
   (:documentation "The interactive block world built on luv.")
   (:export #:*crystal-block*
            #:*terminal-block*
-           #:*urbit-block*
            #:*voxel-light-solver*
            #:*session*
            #:play
@@ -459,13 +458,7 @@
            #:find-terminal-surface
            #:open-terminal-display
            #:attach-terminal-display-pty
-           #:attach-terminal-display-urbit
            #:activate-wall-material
-           #:urbit-executable
-           #:urbit-pier-pathname
-           #:urbit-boot-arguments
-           #:*urbit-default-pier*
-           #:*urbit-pier-root*
            #:place-terminal-block-rectangle
            #:materialize-block-world-chunk
            #:materialize-little-world-chunk

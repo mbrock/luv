@@ -90,7 +90,6 @@
                  (:file "portal" :if-feature :darwin)
                  (:file "portal-server" :if-feature :darwin)
                  (:file "terminal-wall")
-                 (:file "urbit")
                  (:file "phone")
                  (:file "tape")
                  (:file "capture")

@@ -227,13 +227,6 @@ definition."
    :face-tiles '(:all :terminal)
    :categories '(:building :luminous) :display-color '(0.13 0.31 0.34)
    :surface-emission 0.16)
-  (*urbit-block* :urbit
-   "The Martian computer: a white planet sigil on a near-black field,
-the tenth quickbar material, reached by the 0 key at the end of the
-number row."
-   :face-tiles '(:all :urbit)
-   :categories '(:building :luminous) :display-color '(0.07 0.07 0.09)
-   :surface-emission 0.22)
   (*gravel-block* :gravel
    :face-tiles '(:all :gravel)
    :categories '(:natural) :display-color '(0.46 0.44 0.40))
@@ -336,7 +329,7 @@ kinds through this vocabulary instead of printing CLOS object identities."
      :cactus-side :cactus-end :cobblestone :stone-bricks :bricks :planks
      :sandstone :slate :turtle-carapace :turtle-skin :turtle-plastron
      :player-skin :player-sleeve :phone-body :phone-screen
-     :tape-flange :reel-rim :film-flange :ball :water :lava :urbit
+     :tape-flange :reel-rim :film-flange :ball :water :lava
      :flowers-top))
   "The replaceable interpretation of atlas tile identities as dense offsets.
 
@@ -952,31 +945,6 @@ and a dock row at the bottom."
 (defmethod paint-block-atlas-relief ((tile (eql :phone-screen)) x y)
   "Phone screen: glass, flat but for the faintest bow across the pane."
   (+ 126 (floor (+ x y) 8)))
-
-;;; The urbit material arrived after the gadget and reel tiles, so its tile
-;;; offset sits past them: tile order is history, not palette order, and the
-;;; vocabulary domain alone decides which dense atlas lane a tile gets.
-
-(defun urbit-sigil-glyph-p (x y)
-  "Whether X,Y lies on the planet sigil: a ring crossed by its equator."
-  (let* ((dx (- x 7.5))
-         (dy (- y 7.5))
-         (radius (sqrt (+ (* dx dx) (* dy dy)))))
-    (or (<= 4.4 radius 5.9)
-        (and (<= 7 y 8) (< radius 5.9)))))
-
-(defmethod paint-block-atlas-tile ((tile (eql :urbit)) x y)
-  "Urbit: a white planet sigil on a near-black field."
-  (if (urbit-sigil-glyph-p x y)
-      (shaded-block-atlas-pixel 232 232 236)
-      (shaded-block-atlas-pixel
-       16 17 21 (round (block-atlas-variation x y tile) 6))))
-
-(defmethod paint-block-atlas-relief ((tile (eql :urbit)) x y)
-  "Urbit: the sigil stands proud of a matte face."
-  (block-atlas-byte
-   (+ (if (urbit-sigil-glyph-p x y) 168 118)
-      (* 0.08 (- (block-atlas-lattice-hash x y 301) 128)))))
 
 ;;; ---------------------------------------------------------------------
 ;;; The tape: a film reel, drawn flange-on and rim-on.
