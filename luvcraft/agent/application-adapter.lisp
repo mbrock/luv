@@ -23,7 +23,7 @@
 (defvar *agent* nil
   "The most recently made Luvcraft WORLD-AGENT for REPL convenience.")
 
-(defparameter *default-agent-model* "gpt-5.6")
+(defparameter *default-agent-model* "gpt-6-luna")
 
 (defparameter *default-agent-tools*
   '(com-where-am-i com-move-to com-block-at com-place-block-at
