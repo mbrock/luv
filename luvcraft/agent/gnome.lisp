@@ -8,8 +8,8 @@
 ;;; it is how you talk to it: the view leans in the way it does for a wall, the
 ;;; keys become a prompt line at the bottom of the screen, and RET asks.  The
 ;;; gnome then thinks, and its thinking shows above its head as a bubble: a
-;;; matte rounded cassette standing in the world, drawn through McCLIM the way
-;;; the Telegram panel is (a world widget, in the scene, with relief).  Each
+;;; matte rounded cassette standing in the world, drawn through McCLIM as a
+;;; world widget (in the scene, with relief).  Each
 ;;; tool call is the next cassette, and pushes the ones before it upward.
 ;;; When the gnome talks -- the SAY command, which is a tool like any other --
 ;;; it is not a cassette but a title at the bottom of the view, the way an NPC

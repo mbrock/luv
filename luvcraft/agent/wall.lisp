@@ -11,11 +11,10 @@
 ;;; once it has finished.  The terminal does the scrolling and the wrapping;
 ;;; we do the colours.
 ;;;
-;;; Two threads meet here and one thing crosses between them, the way the
-;;; Telegram wall already does it: the turn's thread formats text and posts it
-;;; to an outbox; the canvas thread drains the outbox into the terminal at the
-;;; frame boundary, where it also reads the terminal to draw it.  Nothing
-;;; writes the terminal from anywhere else.
+;;; Two threads meet here and one thing crosses between them: the turn's
+;;; thread formats text and posts it to an outbox; the canvas thread drains
+;;; the outbox into the terminal at the frame boundary, where it also reads
+;;; the terminal to draw it.  Nothing writes the terminal from anywhere else.
 
 (defclass agent-terminal-display (luvcraft::terminal-display)
   ((agent :initarg :agent :accessor agent-wall-agent)

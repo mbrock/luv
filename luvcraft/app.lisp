@@ -404,11 +404,12 @@ new renderer; owned resource and frame-state collections retain identity."
 
 (defgeneric luvcraft-overlay-stage (overlay)
   (:documentation
-   "Return where OVERLAY draws: :SCENE, :WORLD-PANEL, :VIEWMODEL, :HUD, or
-:NONE.
+   "Return where OVERLAY draws: :SCENE, :WORLD-PANEL, :VIEWMODEL,
+:HELD-DISPLAY, :HUD, or :NONE.
 
 Scene overlays inhabit world depth; viewmodels are first-person geometry above
-the world but below held items and the crosshair.  World panels retain world
+the world but below held items and the crosshair.  A held display is the live
+face of a held item, drawn over that item's own geometry.  World panels retain world
 projection and depth while drawing analytic application graphics at native
 presentation density.  HUD overlays follow scene postprocessing.  :NONE
 participates in no render pass."))
@@ -689,17 +690,6 @@ otherwise; repeated requests still defer native close to that same owner."
            (perform-luvcraft-stop session))))
    :thread-name "luvcraft session stop")
   t)
-
-(defgeneric luvcraft-key-hint (thing)
-  (:documentation
-   "Return a short string naming the keystroke that reaches THING, or NIL.
-
-A control which draws its own key hint would be inventing one: the keys are
-decided in the command layer above, so the drawing asks rather than guesses,
-and a rebound key changes the label on the button.")
-  (:method (thing)
-    (declare (ignore thing))
-    nil))
 
 (defun clear-luvcraft-player-input (session)
   (clear-movement-intent (luvcraft-session-movement-intent session))

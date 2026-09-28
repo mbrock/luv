@@ -293,8 +293,6 @@
            #:luvcraft-widget-overlay
            #:luvcraft-hotbar-overlay
            #:luvcraft-inventory-overlay
-           #:terminal-film-browser
-           #:open-terminal-film-browser
            #:open-luvcraft-hotbar
            #:close-luvcraft-hotbar
            #:open-luvcraft-inventory

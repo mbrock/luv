@@ -5,7 +5,7 @@
 ;;; the owning command frame belong to luv/mcclim's shared M-x instrument.
 
 (defparameter *command-menu-tables*
-  '(luvcraft-movement luvcraft-world luvcraft-terminal luvcraft-window)
+  '(luvcraft-movement luvcraft-world luvcraft-window)
   "The semantic input layers whose directly owned commands M-x offers.")
 
 (defun luvcraft-command-menu-entries ()

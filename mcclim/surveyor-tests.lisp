@@ -90,8 +90,6 @@
               (find-class 'mcluv:luvcraft-hotbar-overlay))))))
 
 (define-test mcclim-commands-replay-in-each-overlays-final-pass
-  (true (subtypep 'mcluv::terminal-film-browser-overlay
-                  'mcluv:luvcraft-world-widget-overlay))
   (true (not (subtypep 'mcluv:luvcraft-hotbar-overlay
                        'mcluv:luvcraft-world-widget-overlay)))
   (true (eq :world-panel
@@ -208,24 +206,3 @@
          :natural luvcraft::*grass-block*))
   (true (not (mcluv::inventory-category-block-p
               :natural luvcraft::*stone-block*))))
-
-(define-test terminal-film-browser-shows-directories-and-playable-files
-  (let* ((root (asdf:system-source-directory :luv))
-         (directory (merge-pathnames "libav/" root))
-         (entries (mcluv::terminal-film-browser-entries directory)))
-    (true (mcluv::terminal-film-pathname-p
-           (merge-pathnames "test-pattern.mp4" directory)))
-    (true (not (mcluv::terminal-film-pathname-p
-                (merge-pathnames "README.org" directory))))
-    (true (find "test-pattern.mp4" entries :test #'string=
-                :key (lambda (entry)
-                       (and (eq :film (mcluv::terminal-film-entry-kind entry))
-                            (file-namestring
-                             (mcluv::terminal-film-entry-pathname entry))))))))
-
-(define-test terminal-film-browser-shortens-long-directory-headings
-  (let ((label
-          (mcluv::terminal-film-browser-path-label
-           #P"/a/directory/name/that/is/long/enough/to/collide/with/the/browser/title/")))
-    (true (<= (length label) mcluv::+terminal-film-browser-path-limit+))
-    (true (string= "..." label :end2 3))))

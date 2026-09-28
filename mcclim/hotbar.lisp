@@ -30,31 +30,8 @@
    (make-rgb-color 0.78 0.82 0.80)
    (make-rgb-color 0.40 0.46 0.48)))
 
-(defun hotbar-terminal-display (frame)
-  (let ((focus
-          (luvcraft:luvcraft-session-modal-focus (hotbar-session frame))))
-    (and (typep focus 'luvcraft:terminal-display) focus)))
-
 (defun hotbar-visible-state-for (frame)
-  (alexandria:if-let ((display (hotbar-terminal-display frame)))
-    (list :terminal display (luvcraft:terminal-display-mode display))
-    (list :blocks
-          (luvcraft:luvcraft-session-selected-block (hotbar-session frame)))))
-
-(defparameter *terminal-display-modes* '(:shell :film)
-  "The wall modes the hotbar offers, in slot order.
-
-A presentation layer which teaches CHANGE-TERMINAL-DISPLAY-MODE a new mode
-appends it here and gets a numbered slot; nothing else has to change.")
-
-(defparameter *terminal-display-mode-colors*
-  '((:shell 0.12 0.44 0.30)
-    (:film 0.47 0.24 0.58)
-    (:telegram 0.16 0.42 0.62)))
-
-(defun terminal-display-mode-color (mode)
-  (or (cdr (assoc mode *terminal-display-mode-colors*))
-      '(0.35 0.35 0.35)))
+  (luvcraft:luvcraft-session-selected-block (hotbar-session frame)))
 
 ;;;; Geometry
 ;;;;
@@ -68,35 +45,20 @@ appends it here and gets a numbered slot; nothing else has to change.")
 (defconstant +hotbar-slot-height+ 60)
 (defconstant +hotbar-slot-top+ 10)
 
-(defconstant +hotbar-mode-slot-width+ 156
-  "How wide a named mode slot is, rather than a share of the whole bar.
-
-Nine identical wells want to divide the instrument between them.  Two or three
-named modes do not: a slot stretched to half the bar puts its word alone in a
-field of empty metal, which reads as a mistake rather than as a button.")
-
-(defun hotbar-slot-geometry (count index &key width)
-  "Left, top, right, and bottom of slot INDEX of COUNT.
-
-Without WIDTH the slots divide the bar between them.  With it they are exactly
-that wide and the row is centred in the bar instead."
+(defun hotbar-slot-geometry (count index)
+  "Left, top, right, and bottom of slot INDEX of COUNT, dividing the bar."
   (let* ((content (- +hotbar-width+ (* 2 +hotbar-pad+)))
          (slot-width
-           (or width
-               (/ (- content (* +hotbar-gap+ (1- count))) (float count))))
-         (total (+ (* count slot-width) (* +hotbar-gap+ (1- count))))
-         (origin (if width
-                     (/ (- +hotbar-width+ total) 2.0)
-                     +hotbar-pad+))
-         (left (+ origin (* index (+ slot-width +hotbar-gap+)))))
+           (/ (- content (* +hotbar-gap+ (1- count))) (float count)))
+         (left (+ +hotbar-pad+ (* index (+ slot-width +hotbar-gap+)))))
     (values left +hotbar-slot-top+ (+ left slot-width)
             (+ +hotbar-slot-top+ +hotbar-slot-height+))))
 
-(defun hotbar-slot-at (count u &key width)
+(defun hotbar-slot-at (count u)
   "The slot index at horizontal texture fraction U, or NIL between slots."
   (loop for index below count
         do (multiple-value-bind (left top right bottom)
-               (hotbar-slot-geometry count index :width width)
+               (hotbar-slot-geometry count index)
              (declare (ignore top bottom))
              (let ((x (* u +hotbar-width+)))
                (when (and (<= left x) (< x right))
@@ -164,63 +126,6 @@ that wide and the row is centred in the bar instead."
                 :align-x :center :align-y :center :text-size 12
                 :ink (apply #'make-rgb-color ink))))
 
-(defparameter *terminal-display-mode-glyphs*
-  '((:shell . "$") (:film . "▶") (:telegram . "@"))
-  "One mark per mode.  A chooser of three words all the same size makes the
-player read; a chooser of three shapes lets them recognize.
-
-Kept to marks the game's own font actually carries.  A missing glyph draws as
-nothing at all, which is worse than a plain one: the slot that has a mark and
-the slot that has none stop looking like the same kind of thing.")
-
-(defun paint-terminal-mode-hotbar (pane display)
-  "Paint the focused terminal's semantic modes into PANE."
-  (with-sheet-medium (medium pane)
-    (draw-hotbar-shell pane medium)
-    (let ((count (length *terminal-display-modes*))
-          (current (luvcraft:terminal-display-mode display)))
-      (loop for mode in *terminal-display-modes*
-            for index from 0
-            for selected-p = (eq mode current)
-            for accent = (terminal-display-mode-color mode)
-            do (multiple-value-bind (left top right bottom)
-                   (hotbar-slot-geometry count index
-                                         :width +hotbar-mode-slot-width+)
-                 (draw-hotbar-slot pane medium left top right bottom
-                                   :selected-p selected-p :accent accent)
-                 ;; A mode slot is wide and short, so the mark and the word sit
-                 ;; beside each other on one line rather than stacked into
-                 ;; each other's space.
-                 (let ((middle (/ (+ top bottom) 2.0)))
-                   (draw-text* pane
-                               (or (cdr (assoc mode
-                                               *terminal-display-mode-glyphs*))
-                                   "?")
-                               (+ left 32) middle
-                               :align-x :center :align-y :center :text-size 20
-                               :ink (hotbar-scaled-color
-                                     accent (if selected-p 2.2 1.5)))
-                   (draw-text* pane (string-capitalize (symbol-name mode))
-                               (+ left 54) middle
-                               :align-x :left :align-y :center :text-size 15
-                               :ink (if selected-p
-                                        (make-rgb-color 0.98 0.98 0.96)
-                                        (make-rgb-color 0.62 0.64 0.66)))
-                   ;; The badge is whatever key actually reaches this mode.  A
-                   ;; wall in shell mode hands every plain key to the PTY, so a
-                   ;; bare number here would be an instruction to type one.
-                   (alexandria:when-let
-                       ((hint (luvcraft:luvcraft-key-hint mode)))
-                     (draw-text* pane hint
-                                 (- right 9) (+ top 11)
-                                 :align-x :right :align-y :center :text-size 10
-                                 :ink (if selected-p
-                                          (make-rgb-color 0.80 0.82 0.86)
-                                          (make-rgb-color 0.46 0.48 0.52)))))))
-      (draw-hotbar-caption
-       pane medium
-       (format nil "~A wall" (string-capitalize (symbol-name current)))))))
-
 (defmethod handle-repaint ((pane hotbar-pane) region)
   (declare (ignore region))
   (let* ((frame (pane-frame pane))
@@ -229,9 +134,6 @@ the slot that has none stop looking like the same kind of thing.")
          (blocks
            (luvcraft:block-inventory-quickbar-blocks
             (luvcraft:luvcraft-session-inventory session))))
-    (alexandria:when-let ((display (hotbar-terminal-display frame)))
-      (paint-terminal-mode-hotbar pane display)
-      (return-from handle-repaint nil))
     (with-sheet-medium (medium pane)
       (draw-hotbar-shell pane medium)
       (let ((count (max 1 (length blocks))))
@@ -341,33 +243,14 @@ the slot that has none stop looking like the same kind of thing.")
     (when (and (typep event 'luv:canvas-pointer-button-press-event)
                (eq :left (luv:canvas-pointer-event-button event)))
       (let* ((frame (widget-overlay-frame overlay))
-             (display (hotbar-terminal-display frame)))
+             (count (length (luvcraft:block-inventory-quickbar-blocks
+                             (luvcraft:luvcraft-session-inventory session)))))
         ;; HOTBAR-SLOT-AT reads the same geometry the painter does, so a click
         ;; in the gap between two slots chooses neither rather than guessing.
-        (if display
-            (alexandria:when-let
-                ((slot (hotbar-slot-at (length *terminal-display-modes*)
-                                       (first uv)
-                                       :width +hotbar-mode-slot-width+)))
-              (luvcraft:change-terminal-display-mode
-               display session (nth slot *terminal-display-modes*)))
-            (let ((count (length (luvcraft:block-inventory-quickbar-blocks
-                                  (luvcraft:luvcraft-session-inventory
-                                   session)))))
-              (alexandria:when-let ((slot (hotbar-slot-at count (first uv))))
-                (luvcraft:select-luvcraft-block session (1+ slot)))))
+        (alexandria:when-let ((slot (hotbar-slot-at count (first uv))))
+          (luvcraft:select-luvcraft-block session (1+ slot)))
         (repaint-hotbar frame)))
     t))
-
-(defmethod luvcraft:handle-luvcraft-focus-control-event
-    ((display luvcraft:terminal-display) session canvas
-     (event luv:canvas-pointer-event))
-  (declare (ignore display))
-  (some (lambda (overlay)
-          (and (typep overlay 'luvcraft-hotbar-overlay)
-               (luvcraft:handle-luvcraft-overlay-event
-                overlay session canvas event)))
-        (luvcraft:luvcraft-session-overlays session)))
 
 (defmethod luvcraft:luvcraft-focus-score
     ((overlay luvcraft-hotbar-overlay) session)

@@ -181,28 +181,3 @@
            (true (not (luv.lobby:lobby-client-running-p client)))
            (true (plusp (luvcraft-lobby-test-closes transport))))
       (ignore-errors (luv.lobby:stop-lobby-client client)))))
-
-(define-test telegram-credentials-resolve-from-the-playing-session-cache
-  (let* ((client
-           (luv.lobby:make-lobby-client
-            :client-id-prefix "test"
-            :transport (make-instance 'luv.lobby:lobby-transport)))
-         (session (make-instance 'luvcraft:luvcraft-session))
-         (luvcraft:*session* session))
-    (setf (luvcraft:luvcraft-session-lobby-client session) client)
-    (luv.lobby:receive-lobby-publication
-     client "luv/store/TELEGRAM_API_ID" "12345")
-    (true (string= "12345"
-                   (luvcraft::lobby-telegram-credential "TELEGRAM_API_ID")))
-    (true (null (luvcraft::lobby-telegram-credential "SOMETHING_ELSE")))))
-
-(define-test telegram-console-recovers-when-radio-credentials-arrive-late
-  (let ((console (make-instance 'mcluv::telegram-console))
-        (telegram.client:*credential-files* nil)
-        (telegram.client:*credential-fallbacks*
-          (list (lambda (name)
-                  (cond ((string= name "TELEGRAM_API_ID") "12345")
-                        ((string= name "TELEGRAM_API_HASH") "deadbeef"))))))
-    (setf (mcluv::console-login-stage console) :api-id)
-    (true (mcluv::adopt-late-console-credentials console))
-    (true (null (mcluv::console-login-stage console)))))

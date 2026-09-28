@@ -161,7 +161,6 @@
   :components ((:file "mcclim/surveyor")
                (:file "mcclim/luvcraft")
                (:file "mcclim/luvcraft-source-update")
-               (:file "mcclim/terminal-film-browser")
                (:file "mcclim/block-icon")
                (:file "mcclim/hotbar")
                (:file "mcclim/inventory")
@@ -189,13 +188,6 @@
   :components ((:file "mcclim/lobby")
                (:file "mcclim/status-bar")))
 
-(defsystem "luvcraft/telegram"
-  :description "A Telegram terminal mounted on a luvcraft wall and phone."
-  :version "0.0.1"
-  :author "Mikael Brockman"
-  :depends-on ("luvcraft/mcclim" "telegram/chat" "luv/libav" "sb-concurrency")
-  :components ((:file "mcclim/telegram")))
-
 (defsystem "luvcraft/paper"
   :description "A sheet of PDF paper hung on a luvcraft wall."
   :version "0.0.1"
@@ -214,17 +206,12 @@
   :description "The complete interactive luvcraft game."
   :version "0.0.1"
   :author "Mikael Brockman"
-  ;; Telegram is part of the game: it is what the phone initially shows and
-  ;; the wall's third mode.  Load it before the command layer, whose keymap is
-  ;; assembled from the modes available at load time.
   :depends-on ("luvcraft/core"
                "luvcraft/mcclim"
-               "luvcraft/telegram"
                "luvcraft/lobby/mcclim"
                "alexandria")
   :serial t
-  :components ((:file "luvcraft/lobby-credentials")
-               (:module "luvcraft/clim"
+  :components ((:module "luvcraft/clim"
                 :serial t
                 :components ((:file "package")
                              (:file "frame")

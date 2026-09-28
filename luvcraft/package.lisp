@@ -72,7 +72,6 @@
            #:advance-sky-clock
            #:apply-block-world-source-edits
            #:attach-luvcraft-hud
-           #:luvcraft-key-hint
            #:toggle-luvcraft-inventory
            #:toggle-luvcraft-metabar
            #:knob
@@ -557,17 +556,15 @@
            #:clear-movement-intent
            #:stop-luvcraft
            #:terminal-display
-           #:change-terminal-display-mode
+           #:show-terminal-display-shell
            #:terminal-display-device
            #:terminal-display-film-screen
            #:terminal-display-mode
-           #:terminal-display-mode-overlay
            #:terminal-display-surface
            #:play-terminal-display-film
            #:terminal-surface
            #:terminal-surface-face
            #:terminal-surface-panel-frame
-           #:*phone-initial-mode*
            #:terminal-surface-height
            #:terminal-surface-origin
            #:terminal-surface-width

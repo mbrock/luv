@@ -182,9 +182,9 @@ In luv the scope is a CLOS object rather than a coroutine zone: a
 PTY owner, #NMAD2U), a sampler thread, and its observation, all presentable.
 A shell a tool starts should /become/ a terminal-material wall the agent
 stands beside and the player can walk up to.  The concurrency story is the
-one [[file:../mcclim/telegram.lisp][mcclim/telegram.lisp]] already states
-for the Telegram console: a mailbox one way, a published immutable snapshot
-the other, and no lock anywhere.  Swash's default applies too (#I0U0LI): a
+one [[file:../luvcraft/agent/wall.lisp][the agent's wall]] already states: a
+mailbox one way, a published immutable snapshot the other, and no lock
+anywhere.  Swash's default applies too (#I0U0LI): a
 shell tool returns within a few seconds with either the exit and a
 screenful, or a handle to the still-running session and the command to
 follow it.
@@ -447,7 +447,7 @@ retained McCLIM world widgets above that analytic body.
 What the gnome shows is the transcript in three registers:
 
 - /Bubbles./ Its thinking and each tool call are =gnome-bubble= frames --
-  McCLIM world widgets of the same family as the Telegram panel (direct
+  McCLIM world widgets of the same family as the paper sheet (direct
   replay into the scene pass, a =relief-design= slab), billboarded above the
   hat every frame, content-fitted, and stacked: a new bubble appears low and
   eases the older ones upward; past four they are taken down, and a finished

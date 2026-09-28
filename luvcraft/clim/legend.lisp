@@ -58,11 +58,6 @@ because nobody needs to be told about each of them separately.")
   (declare (ignore arguments table))
   "select block")
 
-(defmethod luvcraft-command-legend-label
-    ((name (eql 'com-set-terminal-mode)) arguments table)
-  (declare (ignore table))
-  (format nil "~(~A~) mode" (first arguments)))
-
 (defun command-table-legend-rows (table)
   "Return TABLE's keystrokes as (LABEL . KEYS) rows, one row per label.
 
@@ -88,7 +83,6 @@ say that the quickbar is 1-9 rather than saying `select block' nine times."
 (defparameter *legend-sections*
   '(("Moving" luvcraft-movement)
     ("In the world" luvcraft-world)
-    ("At a wall" luvcraft-terminal)
     ("Any time" luvcraft-window))
   "Which tables the legend shows, in the order a player meets them.
 

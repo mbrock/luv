@@ -345,6 +345,7 @@
     (true (not (luvcraft::video-screen-released-p screen)))
     (luvcraft::stop-terminal-display-film display session)
     (true (null (terminal-display-film-screen display)))
+    (true (eq :shell (luvcraft::terminal-display-mode display)))
     (true (null (luvcraft::luvcraft-session-video-screen session)))
     (true (luvcraft::video-screen-released-p screen))
     (true (equal '((:destroy :screen :bind-group 0)

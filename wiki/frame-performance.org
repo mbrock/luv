@@ -270,15 +270,10 @@ not where it denotes one command.
   [[file:../mcclim/hotbar.lisp][hotbar]],
   [[file:../mcclim/inventory.lisp][inventory]],
   [[file:../mcclim/metabar.lisp][metabar]],
-  [[file:../mcclim/terminal-film-browser.lisp][terminal film browser]],
   [[file:../luvcraft/clim/legend.lisp][legend]],
   [[file:../luvcraft/clim/command-menu.lisp][command menu]], and
   [[file:../luvcraft/clim/tape.lisp][tape]].  Their substantial paint helpers
-  belong beneath those methods, following the communicator example.
-- [[file:../mcclim/telegram.lisp][mcclim/telegram.lisp]] already covers key
-  input, refresh, repaint, painting regions, preparation, and upload.  Add
-  =console-transcript-lines= only if transcript reconstruction remains visible
-  outside the paint zones.
+  belong beneath those methods.
 
 ** GPU submission, resource construction, and compilation
 

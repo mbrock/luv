@@ -145,17 +145,12 @@
                                :canvas canvas))
          (second (make-instance 'capture-frame-key-eviction-probe
                                 :canvas canvas))
-         (terminal
-           (allocate-instance (find-class 'terminal-display)))
          (target (list :offscreen-texture))
          (capture (make-instance 'application-capture
                                  :application session :kind :screenshot)))
     (unwind-protect
          (progn
-           ;; The second direct presentation stands behind a terminal-display
-           ;; owner, like the Telegram and film-browser wall modes do.
-           (setf (terminal-display-mode-overlay terminal) second
-                 (luvcraft-session-overlays session) (list first terminal)
+           (setf (luvcraft-session-overlays session) (list first second)
                  (capture-target capture) target)
            (cleanup-capture session capture)
            (dolist (probe (list first second))
@@ -339,6 +334,11 @@
 (define-test player-body-renders-after-the-world-in-the-viewmodel-stage
   (true (eq :viewmodel
             (luvcraft-overlay-stage (make-instance 'player-body)))))
+
+(define-test a-phone-screen-draws-over-the-phone-it-is-on
+  (true (eq :held-display
+            (luvcraft-overlay-stage
+             (allocate-instance (find-class 'phone-terminal-display))))))
 
 (define-test modal-focus-suspends-player-input-and-owns-events
   (let ((session (make-instance 'luvcraft-session))
@@ -607,7 +607,7 @@
     (true (null (player-body-hand-item body)))
     (true (member item (luvcraft::player-body-pocket body)))))
 
-(define-test failed-phone-mode-is-neither-cached-nor-left-overlaid
+(define-test failed-phone-shell-is-neither-cached-nor-left-overlaid
   (let* ((phone (make-instance 'phone))
          (display (list :incomplete-phone-display))
          (removed nil)
@@ -615,7 +615,6 @@
                     luvcraft::phone-font-pathname
                     luvcraft::make-terminal-display
                     luvcraft::attach-terminal-display-shell
-                    luvcraft::change-terminal-display-mode
                     luvcraft::remove-luvcraft-overlay))
          (originals (mapcar #'symbol-function symbols)))
     (unwind-protect
@@ -635,19 +634,14 @@
                  (symbol-function (fourth symbols))
                  (lambda (made-display)
                    (declare (ignore made-display))
-                   t)
+                   (error "fixture shell startup failed"))
                  (symbol-function (fifth symbols))
-                 (lambda (&rest arguments)
-                   (declare (ignore arguments))
-                   (error "fixture Telegram startup failed"))
-                 (symbol-function (sixth symbols))
                  (lambda (session-display removed-display)
                    (declare (ignore session-display))
                    (setf removed removed-display)))
-           (let ((luvcraft::*phone-initial-mode* :telegram))
-             (fail (luvcraft::ensure-phone-display phone nil))
-             (true (null (phone-display phone)))
-             (true (eq display removed))))
+           (fail (luvcraft::ensure-phone-display phone nil))
+           (true (null (phone-display phone)))
+           (true (eq display removed)))
       (loop for symbol in symbols
             for function in originals
             do (setf (symbol-function symbol) function)))))
@@ -845,8 +839,7 @@
     (place-terminal-block-rectangle world 2 3 4 :back 3 2)
     (let* ((surface (find-terminal-surface world 2 3 4 :back))
            (display (make-instance 'terminal-display :surface surface)))
-      (change-terminal-display-mode display session :film)
-      (true (eq :film (terminal-display-mode display)))
+      (setf (terminal-display-mode display) :film)
       (multiple-value-bind (origin right up)
           (luvcraft::terminal-film-rectangle surface aspect)
         (declare (ignore origin))
@@ -856,7 +849,7 @@
           (true (<= width (luvcraft::terminal-surface-physical-width surface)))
           (true (<= height
                     (luvcraft::terminal-surface-physical-height surface)))))
-      (change-terminal-display-mode display session :shell)
+      (show-terminal-display-shell display session)
       (true (eq :shell (terminal-display-mode display))))))
 
 (define-test-with-libghostty terminal-display-pty-output-marks-a-frame-publication-dirty

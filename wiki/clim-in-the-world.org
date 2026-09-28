@@ -1,8 +1,8 @@
 #+title: McCLIM surfaces in the world
 
 Luvcraft has grown a family of McCLIM instruments that live inside the block
-world: the hotbar, the inventory, the film chooser, a Telegram terminal, a
-sheet of PDF paper. They began with one implementation path, and that path had
+world: the hotbar, the inventory, a sheet of PDF paper, the gnome's thought
+bubbles. They began with one implementation path, and that path had
 a property nobody chose deliberately and everybody could see: the text on
 them was soft, while the text on a terminal wall standing beside them was not.
 

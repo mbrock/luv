@@ -130,8 +130,6 @@ screenshot.
   no modal HUD.
 - =terminal-shell-closeup= — the same deterministic fixture from its ordinary
   off-axis focus pose, sharp enough to inspect bold and coloured cells.
-- =terminal-mode-hotbar= — focused wall plus the mode-aware hotbar showing
-  Shell, Film, and Telegram as the wall's own choices.
 - =phone-shell-in-hand= — first-person body and phone retained, terminal full
   of a short deterministic fixture rather than a machine-specific prompt.
 - =phone-focus-pull= — a short film of taking the phone out, glancing at it,
@@ -185,14 +183,6 @@ Some panes live on world surfaces rather than in the HUD.  Their showcase
 pair is an environmental view proving placement and a close view proving
 content.  Both keep the surface slightly off-axis.
 
-- =film-browser-on-wall= — the stone-cased file browser from
-  [[file:../mcclim/terminal-film-browser.lisp][terminal-film-browser.lisp]],
-  with directories, playable films, sizes, paging marks, and footer message
-  supplied by a temporary deterministic fixture tree.
-- =communicator-dialogs-on-wall= — a credential-free Telegram console snapshot
-  containing avatar colours, dialog rows, transcript text, photo/video
-  thumbnails, composer, and scrollbar.  A live private account must never be
-  a capture dependency.
 - =paper-sheet-on-wall= — the separate =luvcraft/paper= system showing a known
   repository PDF page with McCLIM text replayed as sharp world geometry.
 - =terminal-six-faces= — one compact reference scene exercising front, back,

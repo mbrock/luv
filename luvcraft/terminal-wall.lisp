@@ -240,11 +240,9 @@ than once at mounting.")
 (defclass terminal-display ()
   ((session :initarg :session :initform nil :reader terminal-display-session)
    (surface :initarg :surface :reader terminal-display-surface)
+   ;; :SHELL, or :FILM while a tape's film plays on the wall, or :PORTAL
+   ;; while a child luvcraft shows there.  The shell runs underneath all three.
    (mode :initform :shell :accessor terminal-display-mode)
-   ;; LUVCRAFT/MCCLIM presentations install their browser here.  The terminal
-   ;; remains the focus owner and delegates drawing and events to this child
-   ;; only while its mode calls for it.
-   (mode-overlay :initform nil :accessor terminal-display-mode-overlay)
    (film-screen :initform nil :accessor terminal-display-film-screen)
    ;; The wall's name, which its shell learns as LUVCRAFT_PARENT_SCREEN, and
    ;; the portal showing a child luvcraft that asked for that name.
@@ -284,19 +282,11 @@ than once at mounting.")
    (frame-bind-groups :initform (make-hash-table :test #'eq)
                       :reader terminal-display-frame-bind-groups)))
 
-(defgeneric change-terminal-display-mode (display session mode)
-  (:documentation
-   "Select DISPLAY's focused wall MODE.
-
-The built-in modes are the EQL-specialized symbols :SHELL and :FILM.
-LUVCRAFT/MCCLIM adds an :AFTER method which supplies the film browser, while
-the display continues to own focus and movie lifetime."))
-
-(defmethod change-terminal-display-mode
-    ((display terminal-display) (session luvcraft-session) (mode (eql :shell)))
+(defun show-terminal-display-shell (display session)
+  "Give DISPLAY's wall back to its shell: stop a film, close a portal."
   (stop-terminal-display-film display session)
   (close-terminal-display-portal display)
-  (setf (terminal-display-mode display) mode)
+  (setf (terminal-display-mode display) :shell)
   display)
 
 ;;; A child luvcraft on the wall.  The shell on this wall carries the portal
@@ -367,23 +357,6 @@ right edge, and up edge, then the picture rectangle in panel UV."
     (close-luvcraft-portal session portal)
     (setf (terminal-display-dirty-p display) t))
   display)
-
-(defmethod change-terminal-display-mode
-    ((display terminal-display) (session luvcraft-session) (mode (eql :film)))
-  ;; Selecting Film again while a movie is running returns to its browser.
-  (stop-terminal-display-film display session)
-  (setf (terminal-display-mode display) mode)
-  display)
-
-(defun terminal-display-delegate-overlay (display)
-  "DISPLAY's mode child, when the mode is one that presents through it.
-
-:SHELL drives a PTY and owns its own drawing and keys.  Every other mode
-installs a presentation overlay and works through it -- except while a film is
-actually playing, when the wall is a screen and not a control."
-  (unless (or (eq :shell (terminal-display-mode display))
-              (terminal-display-film-screen display))
-    (terminal-display-mode-overlay display)))
 
 (defun split-terminal-lines (text)
   (loop with start = 0
@@ -964,14 +937,16 @@ projection remain one last-known-good cohort."
     (values origin (vec3-scale right width) (vec3-scale up height))))
 
 (defun stop-terminal-display-film (display session)
-  "Stop and release DISPLAY's owned movie, if any."
+  "Stop and release DISPLAY's owned movie, if any, and give the wall back to
+its shell."
   (alexandria:when-let ((screen (terminal-display-film-screen display)))
     (with-release-report
       (release-video-screen screen))
     (when (video-screen-released-p screen)
       (when (eq screen (luvcraft-session-video-screen session))
         (setf (luvcraft-session-video-screen session) nil))
-      (setf (terminal-display-film-screen display) nil)))
+      (setf (terminal-display-film-screen display) nil
+            (terminal-display-mode display) :shell)))
   display)
 
 (defun play-terminal-display-film (display pathname &key (hardware :required))
@@ -1523,8 +1498,6 @@ two materials can share one placement stage without sharing a name."
 
 (zdefmethod (refresh-luvcraft-overlay :zone :terminal/refresh)
     ((display terminal-display) (session luvcraft-session))
-  (alexandria:when-let ((overlay (terminal-display-delegate-overlay display)))
-    (refresh-luvcraft-overlay overlay session))
   ;; The wall's shaders are as live as the block world's: a redefined
   ;; :terminal-screen or :terminal-cell method rebuilds here, at the frame
   ;; boundary, keeping the last good pipeline on failure.
@@ -1652,14 +1625,9 @@ supplies a uniform whose camera is expressed in that space instead."))
         (:portal
          ;; A child game's picture, under this wall's glass like the text.
          (alexandria:when-let ((portal (terminal-display-portal display)))
-           (encode-luvcraft-portal-picture portal session pass surface-texture)))
-        (t
-         ;; Film, Telegram, and other presentation-layer modes all draw
-         ;; through the mode's own overlay.
-         (alexandria:when-let
-             ((overlay (terminal-display-delegate-overlay display)))
-           (encode-luvcraft-overlay overlay session pass surface-texture))))
-      ;; The glass goes on last over shell, browser, or movie: raster,
+           (encode-luvcraft-portal-picture portal session pass surface-texture))))
+      ;; A film is the session's video screen, drawn with the scene.
+      ;; The glass goes on last over shell, portal, or movie: raster,
       ;; corners, and reflections belong in front of the finished picture.
       (when (and faceplate-run (plusp (terminal-cell-run-count faceplate-run)))
         (set-pipeline pass (live-shader-pipeline-native-pipeline
@@ -1679,9 +1647,6 @@ supplies a uniform whose camera is expressed in that space instead."))
     (close-terminal-display-portal display)
     #+darwin
     (unregister-luvcraft-portal-screen session (terminal-display-name display)))
-  (alexandria:when-let ((overlay (terminal-display-mode-overlay display)))
-    (setf (terminal-display-mode-overlay display) nil)
-    (release-luvcraft-overlay overlay))
   (when (terminal-display-device display)
     (termdev:close-pty-device (terminal-display-device display))
     (setf (terminal-display-device display) nil))
@@ -1701,35 +1666,19 @@ supplies a uniform whose camera is expressed in that space instead."))
   (ghostty:close-terminal (terminal-display-terminal display))
   display)
 
-(defmethod evict-luvcraft-overlay-frame-key
-    ((display terminal-display) frame-key)
-  ;; Presentation modes are child overlays rather than independent session
-  ;; attachments, so propagate capture-target eviction through this owner.
-  (alexandria:when-let
-      ((overlay (terminal-display-mode-overlay display)))
-    (evict-luvcraft-overlay-frame-key overlay frame-key))
-  display)
-
 (defmethod handle-luvcraft-focus-event
     ((display terminal-display) session canvas (event canvas-key-event))
+  (declare (ignore session canvas))
   ;; Keys still reach the shell under a portal: that is how the child gets
-  ;; its Ctrl-C.
-  (if (member (terminal-display-mode display) '(:shell :portal))
-      (let ((device (terminal-display-device display)))
-        (when device
-          (termdev:send-pty-device-canvas-key-event device event))
-        t)
-      (let ((overlay (terminal-display-delegate-overlay display)))
-        (if overlay
-            (handle-luvcraft-focus-event overlay session canvas event)
-            t))))
+  ;; its Ctrl-C.  A playing film is a screen, not a control, and takes none.
+  (when (member (terminal-display-mode display) '(:shell :portal))
+    (alexandria:when-let ((device (terminal-display-device display)))
+      (termdev:send-pty-device-canvas-key-event device event)))
+  t)
 
 (defmethod handle-luvcraft-focus-event
     ((display terminal-display) session canvas (event canvas-event))
-  (or (alexandria:when-let
-          ((overlay (terminal-display-delegate-overlay display)))
-        (handle-luvcraft-overlay-event overlay session canvas event))
-      (handle-luvcraft-focus-control-event display session canvas event)))
+  (handle-luvcraft-focus-control-event display session canvas event))
 
 (defmethod luvcraft-focus-score ((display terminal-display) session)
   (terminal-surface-focus-score (terminal-display-surface display) session))

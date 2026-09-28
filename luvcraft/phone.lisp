@@ -171,6 +171,10 @@ against a per-frame uniform whose camera is expressed in the grip frame."))
            (local right) (local up) (local forward)
            (camera-field-of-view camera) width height))))))
 
+(defmethod luvcraft-overlay-stage ((display phone-terminal-display))
+  (declare (ignore display))
+  :held-display)
+
 (defmethod encode-luvcraft-overlay :around
     ((display phone-terminal-display) session pass surface-texture)
   (let ((phone (phone-screen-surface-phone (terminal-display-surface display))))
@@ -280,14 +284,6 @@ toward the player.  Held in the right hand; TAB focuses its display."))
 (defun phone-in-hand-p (phone session)
   (eq phone (player-body-hand-item (luvcraft-session-body session))))
 
-(defvar *phone-initial-mode* :shell
-  "The mode a phone's display starts in when it is first taken out.
-
-The phone is a terminal like a wall is, so :SHELL is what it knows by
-itself.  The complete luvcraft system includes the Telegram presentation and
-sets this to :TELEGRAM when that part loads.  DEFVAR deliberately preserves
-that application-owned choice when LUVCRAFT/CORE is reloaded live.")
-
 (defun ensure-phone-display (phone session)
   "The phone's terminal display, made -- with a shell in it -- on first use."
   (or (phone-display phone)
@@ -310,13 +306,9 @@ that application-owned choice when LUVCRAFT/CORE is reloaded live.")
                       :screen-role :phone-screen
                       :faceplate-role :phone-glass))
                (attach-terminal-display-shell display)
-               (unless (eq *phone-initial-mode* :shell)
-                 (change-terminal-display-mode display session
-                                               *phone-initial-mode*))
-               ;; Publish only the complete display.  In particular, a
-               ;; Telegram startup failure must not leave a cached display in
-               ;; :TELEGRAM mode with no mode overlay -- a permanently black
-               ;; phone which ENSURE-PHONE-DISPLAY would otherwise never retry.
+               ;; Publish only the complete display: a shell that failed to
+               ;; start must not leave a cached, permanently black phone which
+               ;; ENSURE-PHONE-DISPLAY would never retry.
                (setf (phone-display phone) display
                      completed-p t)
                display)

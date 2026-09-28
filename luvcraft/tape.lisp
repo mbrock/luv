@@ -547,7 +547,7 @@ Return the display it plays on, or NIL."
         (when (member display (luvcraft-session-overlays session))
           (if opened-p
               (remove-luvcraft-overlay session display)
-              (change-terminal-display-mode display session :shell)))))))
+              (show-terminal-display-shell display session)))))))
 
 (defmethod luvcraft-block-placed ((film film-block-kind) session x y z)
   (show-film-beside session film x y z))

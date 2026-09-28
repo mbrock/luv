@@ -1492,6 +1492,13 @@ completes."
           (set-vertex-buffer
            pass 0 (luvcraft-frame-body-vertex-buffer frame))
           (draw pass body-vertex-count))
+        ;; A held item's live face goes on its slab, not under it: glass and
+        ;; text write no depth, so only drawing after the slab keeps them.
+        (when include-viewmodel-p
+          (dolist (overlay (reverse (luvcraft-session-overlays session)))
+            (when (eq :held-display (luvcraft-overlay-stage overlay))
+              (guarding-luvcraft-overlay (session overlay :overlay-encode)
+                (encode-luvcraft-overlay overlay session pass surface-texture)))))
         (unless (or (not include-viewmodel-p)
                     (luvcraft-session-modal-focus session)
                     (not *luvcraft-crosshair-p*))
@@ -2068,10 +2075,10 @@ non-NIL value selects display-paced animation because FIFO scanout, rather
          (world-text-run nil)
          (video-screen nil)
          (session nil) (production-system nil) (completed-p nil))
-    ;; FFmpeg has to be dlopened before the canvas exists.  Film is now a live
-    ;; terminal-wall mode, so waiting until the user opens its browser would
-    ;; attempt the first dlopen under Cocoa's running canvas and hang.  Preload
-    ;; the libraries here; no decoder or file is opened until Film is chosen.
+    ;; FFmpeg has to be dlopened before the canvas exists.  A tape's film plays
+    ;; on a wall at any moment, so waiting until the first one would attempt
+    ;; the first dlopen under Cocoa's running canvas and hang.  Preload the
+    ;; libraries here; no decoder or file is opened until a film plays.
     (libav:load-libav)
     (retry-decoded-video-picture-release-backlog)
     (retry-video-screen-release-backlog)

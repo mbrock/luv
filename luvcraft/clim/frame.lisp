@@ -29,11 +29,6 @@
   :inherit-from (luvcraft-movement)
   :inherit-menu t)
 
-;;; A focused wall's own layer.  It exists so that a shell, which is entitled
-;;; to every plain key, can still be told to become something else.
-
-(define-command-table luvcraft-terminal)
-
 (define-command-table luvcraft-world-release
   :inherit-from (luvcraft-movement-release)
   :inherit-menu t)
@@ -51,8 +46,7 @@
   ;; table inherits its parents' commands by default but not their accelerators.
   (:command-table (luvcraft-frame
                    :inherit-from (luvcraft-window luvcraft-window-release
-                                  luvcraft-world luvcraft-world-release
-                                  luvcraft-terminal)
+                                  luvcraft-world luvcraft-world-release)
                    :inherit-menu t))
   (:menu-bar nil))
 
