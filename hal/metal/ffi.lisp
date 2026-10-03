@@ -1011,7 +1011,11 @@ rejection.  Source and names cross only as in-memory NSString objects."
      mesh-library mesh-name mesh-workgroup-size
      fragment-library fragment-name color-formats max-mesh-workgroups
      &key blends (sample-count 1) label)
-  "Synchronously link object, mesh, and fragment libraries into Metal 4."
+  "Synchronously link object, mesh, and fragment libraries into Metal 4.
+
+FRAGMENT-LIBRARY may be NIL for a depth-only pipeline, in which case
+COLOR-FORMATS is empty.  COLOR-FORMATS and BLENDS run in parallel, one
+entry per color attachment, as for COMPILE-METAL-4-RENDER-PIPELINE."
   (objc:with-autorelease-pool ()
     (let ((object-function nil)
           (mesh-function nil)
@@ -1061,13 +1065,15 @@ rejection.  Source and names cross only as in-memory NSString objects."
                (%set-pipeline-raster-sample-count descriptor sample-count)
                (when fragment-function
                  (%set-fragment-function-descriptor descriptor fragment-function))
-               (loop for color-format in color-formats
+               (loop with attachments =
+                       (%render-pipeline-color-attachments descriptor)
+                     for color-format in color-formats
                      for blend in blends
                      for index from 0
                      for attachment =
-                         (%render-pipeline-color-attachment-at
-                          (%render-pipeline-color-attachments descriptor) index)
-                     do (%set-render-pipeline-pixel-format attachment color-format)
+                       (%render-pipeline-color-attachment-at attachments index)
+                     do (%set-render-pipeline-pixel-format
+                         attachment color-format)
                         (when blend
                           (%set-render-pipeline-blending-state
                            attachment +blend-state-enabled+)
@@ -1075,7 +1081,8 @@ rejection.  Source and names cross only as in-memory NSString objects."
                            attachment +blend-factor-one+)
                           (%set-destination-rgb-blend-factor
                            attachment +blend-factor-one-minus-source-alpha+)
-                          (%set-rgb-blend-operation attachment +blend-operation-add+)
+                          (%set-rgb-blend-operation
+                           attachment +blend-operation-add+)
                           (%set-source-alpha-blend-factor
                            attachment +blend-factor-one+)
                           (%set-destination-alpha-blend-factor

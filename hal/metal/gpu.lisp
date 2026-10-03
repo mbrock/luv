@@ -2732,7 +2732,9 @@ compiler boundary of #58IDSR."
               luv.metal:+render-stage-object+
               0)
           luv.metal:+render-stage-mesh+
-          luv.metal:+render-stage-fragment+)))
+          (if (metal-render-pipeline-fragment-p pipeline)
+              luv.metal:+render-stage-fragment+
+              0))))
       (luv.metal:draw-metal-mesh-threadgroups
        (metal-render-pass-native-encoder pass)
        (metal-size-value counts)
