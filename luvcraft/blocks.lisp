@@ -297,7 +297,49 @@ land; see luvcraft/balls.lisp."
    "Meadow grass in bloom: a grass block whose top carries small bright
 flowers.  The birthday meadow freckles its lawns with these."
    :face-tiles '(:top :flowers-top :side :grass-side :bottom :dirt)
-   :categories '(:natural) :display-color '(0.44 0.62 0.31)))
+   :categories '(:natural) :display-color '(0.44 0.62 0.31))
+  ;; Wool: one soft, saturated block per colour, for building things that
+  ;; are red because a four-year-old wanted them red.
+  (*red-wool-block* :red-wool
+   :face-tiles '(:all :wool-red)
+   :categories '(:colors :building)
+   :display-color '(0.69 0.18 0.15))
+  (*orange-wool-block* :orange-wool
+   :face-tiles '(:all :wool-orange)
+   :categories '(:colors :building)
+   :display-color '(0.93 0.49 0.12))
+  (*yellow-wool-block* :yellow-wool
+   :face-tiles '(:all :wool-yellow)
+   :categories '(:colors :building)
+   :display-color '(0.96 0.80 0.20))
+  (*lime-wool-block* :lime-wool
+   :face-tiles '(:all :wool-lime)
+   :categories '(:colors :building)
+   :display-color '(0.46 0.74 0.16))
+  (*light-blue-wool-block* :light-blue-wool
+   :face-tiles '(:all :wool-light-blue)
+   :categories '(:colors :building)
+   :display-color '(0.27 0.67 0.87))
+  (*blue-wool-block* :blue-wool
+   :face-tiles '(:all :wool-blue)
+   :categories '(:colors :building)
+   :display-color '(0.21 0.27 0.67))
+  (*purple-wool-block* :purple-wool
+   :face-tiles '(:all :wool-purple)
+   :categories '(:colors :building)
+   :display-color '(0.50 0.21 0.70))
+  (*pink-wool-block* :pink-wool
+   :face-tiles '(:all :wool-pink)
+   :categories '(:colors :building)
+   :display-color '(0.93 0.57 0.70))
+  (*white-wool-block* :white-wool
+   :face-tiles '(:all :wool-white)
+   :categories '(:colors :building)
+   :display-color '(0.91 0.92 0.91))
+  (*black-wool-block* :black-wool
+   :face-tiles '(:all :wool-black)
+   :categories '(:colors :building)
+   :display-color '(0.12 0.12 0.14)))
 
 (eval-when (:load-toplevel :execute)
   ;; ENSURE-BLOCK-KIND preserves identities across live redefinition, so
@@ -336,7 +378,9 @@ kinds through this vocabulary instead of printing CLOS object identities."
      :sandstone :slate :turtle-carapace :turtle-skin :turtle-plastron
      :player-skin :player-sleeve :phone-body :phone-screen
      :tape-flange :reel-rim :film-flange :ball :water :lava
-     :flowers-top))
+     :flowers-top
+     :wool-red :wool-orange :wool-yellow :wool-lime :wool-light-blue
+     :wool-blue :wool-purple :wool-pink :wool-white :wool-black))
   "The replaceable interpretation of atlas tile identities as dense offsets.
 
 Re-evaluating this definition constructs a new domain.  Existing offsets stay
@@ -1073,6 +1117,55 @@ centre, jittered inside its cell and coloured per cell."
    (+ (* 0.55 (block-atlas-clump x y 3 4))
       (* 0.33 (block-atlas-lattice-hash x y 11))
       (if (flowers-top-bloom x y) 40 0))))
+
+;;; Wool is one knit texture in ten colours.  The colour list is the data;
+;;; each tile is still its own EQL method, like every other material.
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defparameter *wool-colours*
+    '((:wool-red 176 46 38)
+      (:wool-orange 236 124 30)
+      (:wool-yellow 246 204 52)
+      (:wool-lime 118 188 40)
+      (:wool-light-blue 70 172 222)
+      (:wool-blue 54 70 170)
+      (:wool-purple 128 54 178)
+      (:wool-pink 238 146 178)
+      (:wool-white 232 234 232)
+      (:wool-black 30 30 36))
+    "Each wool tile and its base sRGB colour, 0..255."))
+
+(defun paint-wool-pixel (tile red green blue x y)
+  "Knit wool: rows of small V stitches with a soft fibre grain."
+  (let* ((stitch (if (= (mod (+ x (if (oddp (floor y 2)) 2 0)) 4) 0) -16 0))
+         (row (if (zerop (mod y 2)) 4 -4))
+         (fibre (round (- (block-atlas-lattice-hash x y
+                                                    (block-atlas-tile-offset
+                                                     tile))
+                          128)
+                       24)))
+    (shaded-block-atlas-pixel red green blue (+ stitch row fibre))))
+
+(defun wool-relief (x y)
+  "Wool: puffy rows of stitches between shallow furrows."
+  (block-atlas-byte
+   (+ 150
+      (if (= (mod (+ x (if (oddp (floor y 2)) 2 0)) 4) 0) -40 0)
+      (if (zerop (mod y 2)) 12 -12)
+      (* 0.12 (- (block-atlas-lattice-hash x y 207) 128)))))
+
+(macrolet ((define-wool-tiles ()
+             `(progn
+                ,@(loop for (tile red green blue) in *wool-colours*
+                        collect
+                        `(defmethod paint-block-atlas-tile
+                             ((tile (eql ,tile)) x y)
+                           (paint-wool-pixel tile ,red ,green ,blue x y))
+                        collect
+                        `(defmethod paint-block-atlas-relief
+                             ((tile (eql ,tile)) x y)
+                           (wool-relief x y))))))
+  (define-wool-tiles))
 
 (defun make-block-texture-atlas ()
   "Return the little world's horizontal RGBA8 atlas as packed pixel words.

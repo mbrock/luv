@@ -1879,14 +1879,26 @@ completes."
       ;; belongs to.
       (tracy-frame-mark))))
 
+(defvar *luvcraft-wheel-travel* 0.0
+  "Wheel travel not yet spent on turning the quickbar.")
+
 (defmethod handle-canvas-event
     ((session luvcraft-session) canvas (event canvas-pointer-wheel-event))
   "Offer a scroll to whatever owns focus, then to the overlays.
 
 The player's own view does not scroll -- the wheel is not a camera control
-here -- so an unconsumed wheel event is simply the end of the matter."
-  (unless (dispatch-luvcraft-focus-event session canvas event)
-    (dispatch-luvcraft-overlay-event session canvas event))
+here.  While the pointer is captured for play, an unconsumed wheel turns the
+quickbar instead, one slot per notch, the way every block game does."
+  (unless (or (dispatch-luvcraft-focus-event session canvas event)
+              (dispatch-luvcraft-overlay-event session canvas event))
+    (when (luvcraft-session-pointer-captured-p session)
+      ;; A trackpad reports fractions of a notch; a slot turns per whole one.
+      (incf *luvcraft-wheel-travel* (canvas-pointer-event-scroll-y event))
+      (let ((notches (truncate *luvcraft-wheel-travel*)))
+        (unless (zerop notches)
+          (decf *luvcraft-wheel-travel* notches)
+          ;; Wheel up moves left along the bar, as in Minecraft.
+          (cycle-luvcraft-block session (- notches))))))
   nil)
 
 (defun note-luvcraft-pointer-position (session event)

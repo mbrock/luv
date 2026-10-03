@@ -505,6 +505,9 @@
            #:restore-world-source-save-description
            #:sample-light-at
            #:select-luvcraft-block
+           #:cycle-luvcraft-block
+           #:put-luvcraft-block-on-quickbar
+           #:arrange-luvcraft-quickbar
            #:smash-block-particles
            #:sky-clock
            #:sky-clock-day-fraction

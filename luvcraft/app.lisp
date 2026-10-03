@@ -1092,6 +1092,65 @@ that path may run inside a frame whose command stream still borrows OVERLAY."
       (update-luvcraft-session-title session))
     block))
 
+(defun cycle-luvcraft-block (session steps)
+  "Move the selection STEPS quickbar slots along, wrapping at either end.
+
+The wheel's verb: a material off the bar steps onto its first slot."
+  (let* ((blocks (block-inventory-quickbar-blocks
+                  (luvcraft-session-inventory session)))
+         (count (length blocks))
+         (current (position (luvcraft-session-selected-block session)
+                            blocks :test #'eq)))
+    (when (plusp count)
+      (select-luvcraft-block
+       session
+       (1+ (if current (mod (+ current steps) count) 0))))))
+
+(defun put-luvcraft-block-on-quickbar (session block)
+  "Select BLOCK, first swapping it into the selected slot if it is off the bar.
+
+Choosing a material in the inventory is how a player says they want it at
+hand, so it takes the place of whatever the selected slot held, which moves
+to where BLOCK was.  Every other number key keeps its material."
+  (let* ((inventory (luvcraft-session-inventory session))
+         (entries (block-inventory-entries inventory))
+         (quickbar (block-inventory-quickbar-blocks inventory))
+         (index (position block entries
+                          :key #'block-inventory-entry-block :test #'eq))
+         (slot (or (position (luvcraft-session-selected-block session)
+                             quickbar :test #'eq)
+                   0)))
+    (when index
+      (when (and (>= index (length quickbar)) (< slot (length quickbar)))
+        (rotatef (nth index (block-inventory-entries inventory))
+                 (nth slot (block-inventory-entries inventory)))
+        (setf index slot))
+      (select-luvcraft-block session (1+ index)))))
+
+(defparameter *luvcraft-starting-quickbar*
+  '(:grass :dirt :planks :bricks :red-wool :yellow-wool :blue-wool
+    :crystal :flowers :terminal)
+  "The materials PLAY puts on the number row, in order: things to build a
+house with, some colours, a lamp, and the wall terminal.")
+
+(defun arrange-luvcraft-quickbar (session &optional
+                                            (names *luvcraft-starting-quickbar*))
+  "Move the materials NAMES to the front of SESSION's inventory, in order."
+  (let* ((inventory (luvcraft-session-inventory session))
+         (entries (block-inventory-entries inventory))
+         (front (loop for name in names
+                      for entry = (find name entries
+                                        :key (lambda (entry)
+                                               (block-kind-name
+                                                (block-inventory-entry-block
+                                                 entry))))
+                      when entry collect entry)))
+    (setf (block-inventory-entries inventory)
+          (append front
+                  (remove-if (lambda (entry) (member entry front))
+                             entries)))
+    (update-luvcraft-session-title session)))
+
 (defun refresh-luvcraft-inventory (session)
   "Give SESSION any newly defined placeable materials, in number-key order.
 

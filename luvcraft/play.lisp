@@ -85,6 +85,7 @@ game for later SLY evaluations.  STOP-PLAYING checkpoints and closes it."
                     :checkpoint-writer writer))
           (unless session
             (stop-world-checkpoint-writer writer)))
+        (arrange-luvcraft-quickbar session)
         ;; The films the player was carrying come back into the bag, and the
         ;; ones standing beside walls light them again.
         (dolist (block carried)

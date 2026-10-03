@@ -21,7 +21,8 @@
   '((:all "All blocks")
     (:natural "Natural")
     (:building "Building")
-    (:luminous "Luminous")))
+    (:luminous "Luminous")
+    (:colors "Colours")))
 
 (defparameter *inventory-panel-ink* (make-rgb-color 0.20 0.20 0.18))
 (defparameter *inventory-well-ink* (make-rgb-color 0.105 0.105 0.095))
@@ -154,7 +155,8 @@ every cell makes the word louder than the block it is about."
                               (:all (make-rgb-color 0.72 0.56 0.24))
                               (:natural (make-rgb-color 0.20 0.50 0.18))
                               (:building (make-rgb-color 0.49 0.47 0.42))
-                              (:luminous (make-rgb-color 0.18 0.72 0.74))))
+                              (:luminous (make-rgb-color 0.18 0.72 0.74))
+                              (:colors (make-rgb-color 0.86 0.30 0.52))))
       (draw-text* pane label 49 (+ top 17)
                   :align-y :center :text-size 14
                   :ink (if selected-p +white+ *inventory-text-ink*)))))
@@ -441,7 +443,8 @@ every cell makes the word louder than the block it is about."
 (defun inventory-category-at (u v)
   (let ((x (* u +inventory-view-width+))
         (y (* v +inventory-view-height+)))
-    (when (and (<= 16 x) (< x 150) (<= 50 y) (< y 206))
+    (when (and (<= 16 x) (< x 150) (<= 50 y)
+               (< y (+ 50 (* 39 (length *inventory-categories*)))))
       (let ((index (floor (- y 50) 39)))
         (first (nth index *inventory-categories*))))))
 
@@ -496,7 +499,6 @@ every cell makes the word louder than the block it is about."
                (eq :left (luv:canvas-pointer-event-button event)))
       (let* ((frame (widget-overlay-frame overlay))
              (inventory (luvcraft:luvcraft-session-inventory session))
-             (all-entries (luvcraft:block-inventory-entries inventory))
              (quickbar-entries
                (luvcraft:block-inventory-quickbar-entries inventory))
              (category (inventory-category-at (first uv) (second uv)))
@@ -525,10 +527,9 @@ every cell makes the word louder than the block it is about."
                         visible quickbar-entries))
                   (entry (and slot (nth slot entries))))
              (when entry
-               (let ((number
-                       (position entry all-entries :test #'eq)))
-                 (luvcraft:select-luvcraft-block session (1+ number))
-                 (repaint-inventory frame))))))))
+               (luvcraft:put-luvcraft-block-on-quickbar
+                session (luvcraft:block-inventory-entry-block entry))
+               (repaint-inventory frame)))))))
       t)))
 
 (defmethod luvcraft:handle-luvcraft-focus-event

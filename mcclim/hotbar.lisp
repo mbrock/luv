@@ -32,8 +32,12 @@
 
 (defun hotbar-visible-state-for (frame)
   (let ((session (hotbar-session frame)))
+    ;; The bar's own materials belong to its state: choosing a block in the
+    ;; inventory can swap a new one onto it without changing the selection.
     (list (luvcraft:luvcraft-session-selected-block session)
-          (luvcraft:luvcraft-session-creative-p session))))
+          (luvcraft:luvcraft-session-creative-p session)
+          (luvcraft:block-inventory-quickbar-blocks
+           (luvcraft:luvcraft-session-inventory session)))))
 
 ;;;; Geometry
 ;;;;

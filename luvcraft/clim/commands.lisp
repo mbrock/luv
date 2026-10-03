@@ -248,6 +248,26 @@
          direction)
         nil))
 
+(defparameter *double-tap-seconds* 0.3
+  "How close two Space presses must be to count as one double tap.")
+
+(defvar *last-space-press-time* nil
+  "INTERNAL-REAL-TIME of the previous Space press that was not itself the
+second half of a double tap.")
+
+(defun double-tapped-space-p ()
+  "Note a Space press and say whether it completes a double tap."
+  (let* ((now (get-internal-real-time))
+         (previous *last-space-press-time*)
+         (double-p (and previous
+                        (< (- now previous)
+                           (* *double-tap-seconds*
+                              internal-time-units-per-second)))))
+    ;; The second tap is spent: a third quick press starts a new pair rather
+    ;; than toggling straight back.
+    (setf *last-space-press-time* (if double-p nil now))
+    double-p))
+
 (define-command (com-jump :command-table luvcraft-movement
                           :name "Jump"
                           :keystroke (:space :any))
@@ -256,12 +276,18 @@
          (player (luvcraft:luvcraft-session-player session)))
     (when player
       (luvcraft:cancel-body-movement player "cancelled by manual player input"))
-    (when (luvcraft:luvcraft-session-creative-p session)
-      (setf (luvcraft:movement-urging-p
-             (luvcraft:luvcraft-session-movement-intent session) :up) t))
-    (setf (luvcraft:movement-intent-jump-requested-p
-           (luvcraft:luvcraft-session-movement-intent session))
-          t)))
+    (if (double-tapped-space-p)
+        ;; Two quick taps take off, and two more land: Minecraft's gesture,
+        ;; which a child finds long before they find F6.
+        (luvcraft:toggle-luvcraft-creative-mode session)
+        (progn
+          (when (luvcraft:luvcraft-session-creative-p session)
+            (setf (luvcraft:movement-urging-p
+                   (luvcraft:luvcraft-session-movement-intent session) :up)
+                  t))
+          (setf (luvcraft:movement-intent-jump-requested-p
+                 (luvcraft:luvcraft-session-movement-intent session))
+                t)))))
 
 (defun walk-keys-for-layout (layout)
   (append (if (eq layout :dvorak)

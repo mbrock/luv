@@ -2295,7 +2295,10 @@
                  '(:grass :dirt :stone :wood :leaves :sand :snow :crystal
                    :terminal :gravel :clay :mud :moss :cactus
                    :cobblestone :stone-bricks :bricks :planks :sandstone
-                   :slate :tape :fountain :lava-spring :flowers))))
+                   :slate :tape :fountain :lava-spring :flowers
+                   :red-wool :orange-wool :yellow-wool :lime-wool
+                   :light-blue-wool :blue-wool :purple-wool :pink-wool
+                   :white-wool :black-wool))))
   (let* ((world (make-block-world :chunk-width 2
                                   :chunk-height 2
                                   :chunk-depth 2))
@@ -2533,6 +2536,39 @@
     (true (eq extra (select-luvcraft-block session (1+ base-count))))
     (true (search "[inventory]" (canvas-title canvas)))
     (true (search "1–9,0 select" (canvas-title canvas)))))
+
+(define-test the-wheel-and-the-inventory-reach-the-quickbar
+  (let* ((canvas (make-instance 'title-canvas :title "quickbar test"))
+         (session
+           (make-instance 'luvcraft-session
+                          :canvas canvas
+                          :selected-block luvcraft::*grass-block*))
+         (inventory (luvcraft-session-inventory session)))
+    ;; The wheel wraps around the ten slots in either direction.
+    (true (eq luvcraft::*dirt-block* (cycle-luvcraft-block session 1)))
+    (true (eq luvcraft::*gravel-block* (cycle-luvcraft-block session -2)))
+    (true (eq luvcraft::*grass-block* (cycle-luvcraft-block session 1)))
+    ;; Choosing an off-bar block puts it in the selected slot, and the block
+    ;; it displaces takes its old place; the other slots keep their blocks.
+    (cycle-luvcraft-block session 2)
+    (true (eq luvcraft::*red-wool-block*
+              (put-luvcraft-block-on-quickbar
+               session luvcraft::*red-wool-block*)))
+    (true (eq luvcraft::*red-wool-block*
+              (third (block-inventory-quickbar-blocks inventory))))
+    (true (eq luvcraft::*dirt-block*
+              (second (block-inventory-quickbar-blocks inventory))))
+    (true (member luvcraft::*stone-block* (block-inventory-blocks inventory)))
+    ;; An on-bar block is only selected.
+    (put-luvcraft-block-on-quickbar session luvcraft::*grass-block*)
+    (true (eq luvcraft::*grass-block*
+              (first (block-inventory-quickbar-blocks inventory))))
+    (arrange-luvcraft-quickbar session '(:bricks :planks))
+    (true (equal '(:bricks :planks :grass)
+                 (mapcar #'block-kind-name
+                         (subseq (block-inventory-blocks inventory) 0 3))))
+    (true (= (length (placeable-block-kinds))
+             (length (block-inventory-blocks inventory))))))
 
 (define-test gazetteer-names-semantic-gameplay-views
   (let* ((views (luvcraft-gazetteer-views))
