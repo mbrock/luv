@@ -605,6 +605,14 @@ The first vertex-stage realization is the executable mechanism described by
     (maintain-metal-queue queue))
   (values))
 
+(defmethod queue-completion-watch ((queue metal-gpu-queue))
+  ;; The shared event's signalled value is a plain property read: no queue
+  ;; lock, no wait, safe from a timing thread.
+  (let ((value (metal-queue-submitted-value queue))
+        (event (metal-queue-completion-event queue)))
+    (lambda ()
+      (>= (luv.metal:metal-shared-event-signaled-value event) value))))
+
 (defun submit-metal-command-buffers
     (queue command-buffers &key after-commit)
   "Commit finished Metal work and retain its dependencies to QUEUE's frontier.

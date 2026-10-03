@@ -138,7 +138,10 @@ override it with a predicted presentation time without changing the source."))
   ((frames-per-second
     :initarg :frames-per-second
     :initform 60
-    :reader clock-frames-per-second)
+    :accessor clock-frames-per-second
+    :documentation "The cadence's rate.  An application may change it while
+running, as a frame pacer does when the GPU cannot keep up; the established
+phase carries over to the new interval at the next beat.")
    (next-frame-time
     :initform nil
     :accessor cadence-clock-next-frame-time))

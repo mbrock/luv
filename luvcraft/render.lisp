@@ -1242,6 +1242,29 @@ attachments the renderer actually holds."
             (releasing :frame-attachment-candidate (destroy resource)))))))
   renderer)
 
+(defparameter *luvcraft-scene-pixel-budget* 2000000
+  "The most pixels the scene renders, or NIL for one per logical point.
+
+The world is shaded once per logical point, then the post pass stretches it
+over the native-density presentation, where the HUD stays sharp.  On a large
+enough surface that shading is what cannot keep up: fullscreen on a
+32:9 \"5K2K\" display is 3840x1080 points, 4.1 million fragments, 22 ms of
+GPU time at full clock on an M2 Pro, where 1920x540 took 9.  Above this
+budget the scene keeps its aspect and renders at the largest size inside
+it.  Ordinary windows are well below it.  LUFT makes the same trade with a
+fixed *RENDER-SCALE* and MetalFX temporal reconstruction.")
+
+(defun luvcraft-scene-extent (canvas)
+  "Return the scene's render extent for CANVAS, within the pixel budget."
+  (multiple-value-bind (width height) (canvas-logical-size canvas)
+    (let ((budget *luvcraft-scene-pixel-budget*)
+          (pixels (* width height)))
+      (if (or (null budget) (<= pixels budget))
+          (list width height)
+          (let ((scale (sqrt (/ budget pixels))))
+            (list (max 1 (floor (* width scale)))
+                  (max 1 (floor (* height scale)))))))))
+
 (defun ensure-luvcraft-frame-extent (session)
   "Rebuild SESSION's frame-sized images when either frame extent changes.
 
@@ -1252,7 +1275,7 @@ backend has synchronized the drawable and inside the callback which owns GPU
 replacement.  The outgoing images stay alive until their last submission
 completes."
   (let* ((canvas (luvcraft-session-canvas session))
-         (render-extent (multiple-value-list (canvas-logical-size canvas)))
+         (render-extent (luvcraft-scene-extent canvas))
          (presentation-extent
            (canvas-extent (luvcraft-session-context session))))
     (unless (and (equal render-extent
@@ -1694,13 +1717,16 @@ completes."
           ;; Reacquisition makes this overwrite safe even when another slot is
           ;; still being read; writing every visit also brings an older slot to
           ;; the newest coalesced pointer position.
-          (write-buffer
-           (luvcraft-frame-cursor-vertex-buffer frame)
-           (make-luvcraft-cursor-vertices
-            (first extent) (second extent)
-            (or (luvcraft-session-pointer-x session) (/ (first extent) 2.0))
-            (or (luvcraft-session-pointer-y session)
-                (/ (second extent) 2.0))))
+          ;; The pointer speaks logical points, which the scene extent need
+          ;; not: a large display renders its scene below that size.
+          (multiple-value-bind (width height)
+              (canvas-logical-size (luvcraft-session-canvas session))
+            (write-buffer
+             (luvcraft-frame-cursor-vertex-buffer frame)
+             (make-luvcraft-cursor-vertices
+              width height
+              (or (luvcraft-session-pointer-x session) (/ width 2.0))
+              (or (luvcraft-session-pointer-y session) (/ height 2.0)))))
           (setf (luvcraft-session-pointer-dirty-p session) nil)
           (set-pipeline pass (luvcraft-session-cursor-native-pipeline session))
           (set-bind-group pass 0 (luvcraft-frame-scene-bind-group frame))
@@ -1822,6 +1848,136 @@ completes."
     (advance-luvcraft-focus-camera session seconds)
     (advance-player-body (luvcraft-session-body session) session seconds)))
 
+;;; Frame pacing.
+;;;
+;;; A cadence the GPU cannot finish inside is worse than a slower one it can.
+;;; At 60 Hz with 21 ms frames, the clock skips whichever beat a frame
+;;; overran, so frames reach a 120 Hz display alternately two and three
+;;; refreshes apart while the simulation still predicts one beat ahead: the
+;;; world visibly lurches, and fine motion (hands, a distant turtle) seems to
+;;; flicker between two places.  Measured on the real display, a steady turn
+;;; then moved the picture 56, 85, 140 or 170 pixels per new frame; at 40 Hz
+;;; it moved a steady 86.
+;;;
+;;; So the pacer keeps the cadence at a whole divisor of the display's
+;;; refresh, the fastest one the GPU demonstrably finishes with headroom.
+;;; About once a second it times one frame's submitted work; it slows down
+;;; once work overruns the beat and speeds up only after repeated evidence of
+;;; room.
+
+(defparameter *luvcraft-frame-pacing-p* t
+  "Whether a cadence-clocked session adapts its rate to measured GPU time.")
+
+(defparameter *luvcraft-maximum-frames-per-second* 60
+  "The fastest cadence the frame pacer will choose.")
+
+(defparameter *luvcraft-frame-pacing-headroom* 1.15
+  "How much longer than a measured frame a chosen beat must be.")
+
+(defparameter *luvcraft-frame-pacing-interval* 1d0
+  "Seconds between the pacer's GPU time samples.")
+
+;; The decision itself runs on the canvas thread; only the stopwatch runs
+;; beside it.
+(defstruct (luvcraft-cadence-pacer (:conc-name cadence-pacer-))
+  (next-sample-time 0d0 :type double-float)
+  (samples nil :type list)
+  (arrivals nil :type list)
+  (lock (sb-thread:make-mutex :name "luvcraft frame pacer"))
+  (faster-votes 0 :type fixnum))
+
+(defun luvcraft-frame-pacing-rates (canvas)
+  "Return the cadences CANVAS's display divides evenly, fastest first."
+  (let ((refresh (or (ignore-errors (luv::sdl-canvas-refresh-rate canvas))
+                     60d0)))
+    (loop for divisor from 1 to 8
+          for rate = (/ refresh divisor)
+          when (<= rate (+ *luvcraft-maximum-frames-per-second* 0.5d0))
+            collect rate)))
+
+(defun luvcraft-frame-pacing-rate-for (canvas gpu-seconds)
+  "The fastest even cadence whose beat holds GPU-SECONDS with headroom."
+  (let ((rates (luvcraft-frame-pacing-rates canvas))
+        (needed (* gpu-seconds *luvcraft-frame-pacing-headroom*)))
+    (or (find-if (lambda (rate) (>= (/ 1d0 rate) needed)) rates)
+        (car (last rates)))))
+
+(defun time-luvcraft-frame-gpu-work (pacer queue)
+  "Start a stopwatch on QUEUE's submitted work; its time arrives in PACER.
+
+A helper thread polls the queue's completion without its lock, so the
+canvas thread keeps its beat.  Waiting there instead made every sampled frame
+miss the next one: a hitch a second, caused by the instrument."
+  (let ((done-p (queue-completion-watch queue))
+        (start (get-internal-real-time)))
+    (when done-p
+      (sb-thread:make-thread
+       (lambda ()
+         (loop repeat 500
+               until (funcall done-p)
+               do (sleep 0.0005))
+         (when (funcall done-p)
+           (let ((seconds (/ (- (get-internal-real-time) start)
+                             (float internal-time-units-per-second 1d0))))
+             (sb-thread:with-mutex ((cadence-pacer-lock pacer))
+               (push seconds (cadence-pacer-arrivals pacer))))))
+       :name "luvcraft frame pacing stopwatch"))))
+
+(defun retune-luvcraft-cadence (session pacer clock)
+  "Choose CLOCK's rate from PACER's recent GPU times."
+  (let* ((canvas (luvcraft-session-canvas session))
+         (current (clock-frames-per-second clock))
+         (latest (first (cadence-pacer-samples pacer)))
+         ;; The median of recent samples, so one hitch is not a trend.
+         (typical (let ((sorted (sort (copy-list (cadence-pacer-samples pacer))
+                                      #'<)))
+                    (nth (floor (length sorted) 2) sorted)))
+         (wanted (luvcraft-frame-pacing-rate-for canvas typical)))
+    (flet ((retune (rate seconds)
+             (log-event :luvcraft
+                        "frame pacing: ~,1F ms of GPU work, ~,1F Hz -> ~,1F Hz"
+                        (* 1000 seconds) current rate)
+             (setf (clock-frames-per-second clock) rate)))
+      (cond
+        ;; Overrunning the beat is the judder itself: slow down as soon as it
+        ;; is typical, or at once when it is gross.  The headroom is only
+        ;; demanded of a faster beat, so a frame that fits its beat does not
+        ;; bounce between two rates.
+        ((or (> typical (/ 1d0 current))
+             (> latest (/ 1.3d0 current)))
+         (setf (cadence-pacer-faster-votes pacer) 0)
+         (let* ((seconds (max typical (min latest (/ 1.3d0 current))))
+                (slower (luvcraft-frame-pacing-rate-for canvas seconds)))
+           (when (< slower current)
+             (retune slower seconds))))
+        ((> wanted current)
+         (when (>= (incf (cadence-pacer-faster-votes pacer)) 3)
+           (setf (cadence-pacer-faster-votes pacer) 0)
+           (retune wanted typical)))
+        (t (setf (cadence-pacer-faster-votes pacer) 0))))))
+
+(defun pace-luvcraft-frames (session)
+  "Time this frame's GPU work now and then, and retune the cadence."
+  (let* ((canvas (luvcraft-session-canvas session))
+         (clock (canvas-clock canvas)))
+    (when (and *luvcraft-frame-pacing-p* (typep clock 'cadence-clock))
+      (let ((pacer (or (luvcraft-session-frame-pacer session)
+                       (setf (luvcraft-session-frame-pacer session)
+                             (make-luvcraft-cadence-pacer))))
+            (now (canvas-time-unadjusted canvas)))
+        (let ((arrivals (sb-thread:with-mutex ((cadence-pacer-lock pacer))
+                          (shiftf (cadence-pacer-arrivals pacer) nil))))
+          (when arrivals
+            (setf (cadence-pacer-samples pacer)
+                  (let ((samples (append arrivals (cadence-pacer-samples pacer))))
+                    (subseq samples 0 (min 5 (length samples)))))
+            (retune-luvcraft-cadence session pacer clock)))
+        (when (>= now (cadence-pacer-next-sample-time pacer))
+          (setf (cadence-pacer-next-sample-time pacer)
+                (+ now *luvcraft-frame-pacing-interval*))
+          (time-luvcraft-frame-gpu-work
+           pacer (device-queue (luvcraft-session-device session))))))))
+
 (defun render-luvcraft-frame (session timestamp &optional sample)
   (declare (ignore timestamp))
   (when (luvcraft-session-running-p session)
@@ -1857,6 +2013,7 @@ completes."
                (evict-luvcraft-products session))
              (encode-luvcraft-frame
               session surface-texture encoder :sample sample))))
+        (pace-luvcraft-frames session)
         ;; PRESENTATION encloses acquisition and submission now, so remove
         ;; the explicitly measured application phases nested inside it.  This
         ;; preserves the sample's old meaning while letting acquisition choose
@@ -2197,8 +2354,7 @@ non-NIL value selects display-paced animation because FIFO scanout, rather
                     (push resource resources)
                     resource))
              (let* ((lighting-state (attach-lighting-state world))
-                    (render-extent
-                      (multiple-value-list (canvas-logical-size canvas)))
+                    (render-extent (luvcraft-scene-extent canvas))
                     (presentation-extent (canvas-extent context))
                     ;; Both extent classes come from one constructor, which a
                     ;; live window or drawable resize calls again as one cohort.

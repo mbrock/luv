@@ -76,6 +76,7 @@
 SHADOW-FRAME-ROWS walks it after the camera in whole texels.")
    (player :initarg :player :initform nil :reader luvcraft-session-player)
    (creative-p :initform nil :accessor luvcraft-session-creative-p)
+   (frame-pacer :initform nil :accessor luvcraft-session-frame-pacer)
    (residency-radius :initarg :residency-radius :initform 6
                      :accessor luvcraft-session-residency-radius)
    (residency-center :initform nil

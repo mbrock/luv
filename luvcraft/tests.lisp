@@ -2570,6 +2570,43 @@
     (true (= (length (placeable-block-kinds))
              (length (block-inventory-blocks inventory))))))
 
+(defclass sized-test-canvas ()
+  ((width :initarg :width) (height :initarg :height)
+   (refresh :initarg :refresh :initform 120d0)))
+
+(defmethod canvas-logical-size ((canvas sized-test-canvas))
+  (values (slot-value canvas 'width) (slot-value canvas 'height)))
+
+(define-test the-scene-keeps-to-its-pixel-budget
+  (let ((luvcraft::*luvcraft-scene-pixel-budget* 2000000))
+    ;; An ordinary window renders one scene pixel per logical point.
+    (true (equal '(1280 800)
+                 (luvcraft::luvcraft-scene-extent
+                  (make-instance 'sized-test-canvas :width 1280 :height 800))))
+    ;; A 32:9 fullscreen keeps its aspect inside the budget.
+    (destructuring-bind (width height)
+        (luvcraft::luvcraft-scene-extent
+         (make-instance 'sized-test-canvas :width 3840 :height 1080))
+      (true (<= (* width height) 2000000))
+      (true (< 1999000 (* width height)))
+      (true (< (abs (- (/ width height) 32/9)) 0.01))))
+  (let ((luvcraft::*luvcraft-scene-pixel-budget* nil))
+    (true (equal '(3840 1080)
+                 (luvcraft::luvcraft-scene-extent
+                  (make-instance 'sized-test-canvas
+                                 :width 3840 :height 1080))))))
+
+(define-test frame-pacing-chooses-an-even-divisor-of-the-refresh
+  (let ((luvcraft::*luvcraft-maximum-frames-per-second* 60)
+        (luvcraft::*luvcraft-frame-pacing-headroom* 1.15))
+    (flet ((rate (seconds)
+             ;; A canvas SDL cannot describe paces against 60 Hz.
+             (luvcraft::luvcraft-frame-pacing-rate-for
+              (make-instance 'sized-test-canvas :width 1 :height 1) seconds)))
+      (true (= 60 (rate 0.010d0)))
+      (true (= 30 (rate 0.021d0)))
+      (true (= 20 (rate 0.040d0))))))
+
 (define-test gazetteer-names-semantic-gameplay-views
   (let* ((views (luvcraft-gazetteer-views))
          (names (mapcar #'luvcraft-gazetteer-view-name views)))

@@ -755,6 +755,17 @@ on until it completes.  Use SUBMITTED-WORK-DONE to wait."))
   (:documentation "Block until all work submitted to QUEUE so far has
 completed on the GPU."))
 
+(defgeneric queue-completion-watch (queue)
+  (:documentation "Return a predicate for the work submitted to QUEUE so far.
+
+The predicate takes no arguments and says whether that work has completed.
+It may be called from any thread and never waits or takes QUEUE's lock, so a
+helper thread can time the GPU without holding up the thread that renders.
+A backend that cannot answer so cheaply returns NIL.")
+  (:method (queue)
+    (declare (ignore queue))
+    nil))
+
 (defgeneric write-buffer (buffer data &key offset)
   (:documentation "Copy host DATA into BUFFER starting at byte OFFSET."))
 
